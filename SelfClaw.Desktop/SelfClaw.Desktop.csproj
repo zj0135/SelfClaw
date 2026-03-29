@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Reference Include="SelfClaw.Core">
+      <HintPath>..\SelfClaw.Core\bin\$(Configuration)\net10.0\SelfClaw.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SelfClaw.Infrastructure">
+      <HintPath>..\SelfClaw.Infrastructure\bin\$(Configuration)\net10.0-windows\SelfClaw.Infrastructure.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Markdig" />
+    <PackageReference Include="Microsoft.Agents.AI" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Web.WebView2" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+    <ResolveReferencesDependsOn>BuildManagedDependencies;$(ResolveReferencesDependsOn)</ResolveReferencesDependsOn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="Assets\Transcript\transcript.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Assets\Transcript\transcript.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <Target Name="BuildManagedDependencies">
+    <MSBuild Projects="..\SelfClaw.Core\SelfClaw.Core.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
+    <MSBuild Projects="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
+  </Target>
+
+  <Target Name="CopyProtectedDataAssembly" AfterTargets="Build"
+          Condition="Exists('$(PkgSystem_Security_Cryptography_ProtectedData)\lib\net10.0\System.Security.Cryptography.ProtectedData.dll')">
+    <Copy SourceFiles="$(PkgSystem_Security_Cryptography_ProtectedData)\lib\net10.0\System.Security.Cryptography.ProtectedData.dll"
+          DestinationFolder="$(OutputPath)"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>
