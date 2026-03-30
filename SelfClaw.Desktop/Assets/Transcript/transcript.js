@@ -535,11 +535,6 @@ function render() {
           </div>
         </div>
         <button class="sidebar-primary" data-action="new-conversation" type="button">+ 新建对话</button>
-        <div class="sidebar-menu">
-          <button class="ghost-link" type="button" disabled>项目档案</button>
-          <button class="ghost-link" type="button" disabled>聊天频道</button>
-          <button class="ghost-link" type="button" disabled>返回首页</button>
-        </div>
         <input id="conversation-search" class="search-box" type="text" placeholder="搜索会话..." value="${escapeHtml(conversationSearch)}" />
         <div class="section-title">最近会话</div>
         <div id="conversation-list" class="conversation-list">
@@ -578,7 +573,6 @@ function render() {
       <main class="main-column">
         <div class="panel topbar">
           <div class="chip-row">
-            <button class="mode-chip" type="button" disabled>澄清</button>
             <button class="mode-chip" type="button" disabled>协作</button>
             <button class="mode-chip active" type="button" disabled>编程</button>
           </div>

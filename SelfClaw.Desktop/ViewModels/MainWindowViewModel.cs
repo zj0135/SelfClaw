@@ -308,19 +308,15 @@ public sealed class MainWindowViewModel : ObservableObject
         return Task.CompletedTask;
     }
 
-    public async Task SetSelectedWorkspaceRootAsync(Guid? workspaceRootId)
+    public Task SetSelectedWorkspaceRootAsync(Guid? workspaceRootId)
     {
         SelectedWorkspaceRoot = workspaceRootId is Guid id
             ? WorkspaceRoots.FirstOrDefault(item => item.Id == id)
             : null;
 
-        if (SelectedConversation is not null)
-        {
-            await SaveConversationSelectionAsync(SelectedConversation);
-        }
-
         ApplyConversationFilter();
         PublishShell(false);
+        return Task.CompletedTask;
     }
 
     public async Task DeleteConversationAsync(Guid conversationId)
@@ -436,11 +432,6 @@ public sealed class MainWindowViewModel : ObservableObject
         await ReloadWorkspaceRootsAsync();
         SelectedWorkspaceRoot = WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRoot.Id);
         StatusText = $"Workspace set to '{workspaceRoot.Name}'.";
-
-        if (SelectedConversation is not null)
-        {
-            await SaveConversationSelectionAsync(SelectedConversation);
-        }
 
         ApplyConversationFilter();
     }
