@@ -171,6 +171,15 @@ public partial class MainWindow : Window
                     }
                     break;
                 }
+                case "delete-conversation":
+                {
+                    var conversationId = ParseGuid(document.RootElement, "conversationId");
+                    if (conversationId is Guid deleteId)
+                    {
+                        await _viewModel.DeleteConversationAsync(deleteId);
+                    }
+                    break;
+                }
                 case "send-prompt":
                 {
                     var prompt = document.RootElement.GetProperty("prompt").GetString() ?? string.Empty;

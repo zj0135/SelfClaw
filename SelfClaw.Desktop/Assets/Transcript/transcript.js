@@ -1,4 +1,4 @@
-const app = document.getElementById('app');
+﻿const app = document.getElementById('app');
 const settingsOverlay = document.getElementById('settings-overlay');
 const editorOverlay = document.getElementById('editor-overlay');
 
@@ -29,6 +29,7 @@ let pendingScrollToBottom = false;
 let settingsFeedback = null;
 let settingsPanelScrollTop = 0;
 let editorState = { open: false, kind: null, mode: 'create', draft: null, feedback: null };
+let openConversationMenuId = null;
 
 const openActivities = new Set();
 const openThoughts = new Set();
@@ -546,14 +547,22 @@ function render() {
 						conversations.length === 0
 							? '<div class="muted-placeholder">还没有会话，点击“新建对话”开始。</div>'
 							: conversations
-									.map(
-										(item) => `
-                <button class="conversation-card ${item.id === state.selectedConversationId ? 'selected' : ''}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">
-                  <div class="conversation-title">${escapeHtml(item.title)}</div>
-                  <div class="conversation-time">${escapeHtml(item.timestamp)}</div>
-                </button>
-              `
-									)
+									.map((item, index) => {
+										const menuOpen = openConversationMenuId === item.id;
+										const menuDirectionClass = index === conversations.length - 1 ? ' upward' : '';
+										return `
+                <div class="conversation-row">
+                  <button class="conversation-card ${item.id === state.selectedConversationId ? 'selected' : ''}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">
+                    <div class="conversation-title">${escapeHtml(item.title)}</div>
+                    <div class="conversation-time">${escapeHtml(item.timestamp)}</div>
+                  </button>
+                  <div class="conversation-menu-shell">
+                    <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="Conversation menu">...</button>
+                    ${menuOpen ? `<div class="conversation-menu${menuDirectionClass}"><button class="conversation-menu-item danger" data-action="delete-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">删除会话</button></div>` : ''}
+                  </div>
+                </div>
+              `;
+									})
 									.join('')
 					}
         </div>
@@ -763,41 +772,61 @@ document.addEventListener('click', (event) => {
 		const action = actionElement.getAttribute('data-action');
 		switch (action) {
 			case 'new-conversation':
+				openConversationMenuId = null;
 				post({ type: 'new-conversation' });
 				break;
 			case 'select-conversation':
+				openConversationMenuId = null;
 				post({ type: 'select-conversation', conversationId: actionElement.getAttribute('data-conversation-id') });
 				break;
+			case 'toggle-conversation-menu': {
+				const conversationId = actionElement.getAttribute('data-conversation-id');
+				openConversationMenuId = openConversationMenuId === conversationId ? null : conversationId;
+				render();
+				break;
+			}
+			case 'delete-conversation':
+				openConversationMenuId = null;
+				post({ type: 'delete-conversation', conversationId: actionElement.getAttribute('data-conversation-id') });
+				break;
 			case 'toggle-settings':
+				openConversationMenuId = null;
 				clearFeedback();
 				settingsOpen = true;
 				renderSettings();
 				break;
 			case 'close-settings':
+				openConversationMenuId = null;
 				settingsOpen = false;
 				closeEditor();
 				renderSettings();
 				break;
 			case 'open-edit-profile':
+				openConversationMenuId = null;
 				if (state.selectedProfileId) {
 					openEditor('profile', 'edit');
 				}
 				break;
 			case 'open-create-profile':
+				openConversationMenuId = null;
 				openEditor('profile', 'create');
 				break;
 			case 'open-edit-workspace':
+				openConversationMenuId = null;
 				if (state.selectedWorkspaceRootId) {
 					openEditor('workspace', 'edit');
 				}
 				break;
 			case 'open-create-workspace':
+				openConversationMenuId = null;
 				openEditor('workspace', 'create');
 				break;
 			case 'close-editor':
+				openConversationMenuId = null;
 				closeEditor();
 				break;
 			case 'pick-workspace-path':
+				openConversationMenuId = null;
 				post({ type: 'pick-workspace-path' });
 				break;
 			case 'save-editor': {
@@ -915,9 +944,16 @@ document.addEventListener('click', (event) => {
 	}
 
 	if (target === settingsOverlay) {
+		openConversationMenuId = null;
 		settingsOpen = false;
 		closeEditor();
 		renderSettings();
+		return;
+	}
+
+	if (openConversationMenuId) {
+		openConversationMenuId = null;
+		render();
 	}
 });
 

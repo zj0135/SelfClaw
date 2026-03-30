@@ -36,6 +36,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly DesktopSettingsStore _desktopSettingsStore;
     private readonly ILogger<MainWindowViewModel> _logger;
 
+    private readonly List<ConversationRecord> _allConversations = [];
     private readonly List<MessageRecord> _messages = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
     private CancellationTokenSource? _turnCancellationSource;
@@ -318,7 +319,28 @@ public sealed class MainWindowViewModel : ObservableObject
             await SaveConversationSelectionAsync(SelectedConversation);
         }
 
+        ApplyConversationFilter();
         PublishShell(false);
+    }
+
+    public async Task DeleteConversationAsync(Guid conversationId)
+    {
+        var conversation = _allConversations.FirstOrDefault(item => item.Id == conversationId);
+        if (conversation is null)
+        {
+            return;
+        }
+
+        await _conversationRepository.DeleteConversationAsync(conversationId);
+        _allConversations.RemoveAll(item => item.Id == conversationId);
+
+        if (SelectedConversation?.Id == conversationId)
+        {
+            SelectedConversation = null;
+        }
+
+        ApplyConversationFilter();
+        StatusText = $"Deleted conversation '{conversation.Title}'.";
     }
 
     public async Task SetToolPermissionModeAsync(string? permissionModeId)
@@ -419,6 +441,8 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             await SaveConversationSelectionAsync(SelectedConversation);
         }
+
+        ApplyConversationFilter();
     }
 
     public Task SelectConversationAsync(Guid conversationId)
@@ -532,9 +556,9 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         var selectedId = SelectedConversation?.Id;
         var conversations = await _conversationRepository.ListConversationsAsync();
-        ReplaceCollection(Conversations, conversations);
-        SelectedConversation = conversations.FirstOrDefault(conversation => conversation.Id == selectedId)
-            ?? conversations.FirstOrDefault();
+        _allConversations.Clear();
+        _allConversations.AddRange(conversations);
+        ApplyConversationFilter(selectedId);
     }
 
     private async Task CreateNewConversationAsync()
@@ -555,8 +579,8 @@ public sealed class MainWindowViewModel : ObservableObject
             now);
 
         await _conversationRepository.UpsertConversationAsync(conversation);
-        Conversations.Insert(0, conversation);
-        SelectedConversation = conversation;
+        UpsertConversation(conversation);
+        ApplyConversationFilter(conversation.Id);
         StatusText = "Started a new chat.";
         PublishShell(false);
     }
@@ -581,6 +605,7 @@ public sealed class MainWindowViewModel : ObservableObject
             ? WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
             : null;
         SelectedToolPermissionMode = conversation.ToolPermissionMode;
+        ApplyConversationFilter(conversation.Id);
 
         PublishAgentActivities();
         PublishShell(false);
@@ -823,13 +848,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void UpsertConversation(ConversationRecord conversation)
     {
-        var existing = Conversations.FirstOrDefault(item => item.Id == conversation.Id);
+        var existing = _allConversations.FirstOrDefault(item => item.Id == conversation.Id);
         if (existing is not null)
         {
-            Conversations.Remove(existing);
+            _allConversations.Remove(existing);
         }
 
-        Conversations.Insert(0, conversation);
+        _allConversations.Insert(0, conversation);
+        ApplyConversationFilter(conversation.Id);
     }
 
     private async Task SaveConversationSelectionAsync(ConversationRecord conversation)
@@ -856,6 +882,29 @@ public sealed class MainWindowViewModel : ObservableObject
             _messages.Add(message);
         }
     }
+
+    private void ApplyConversationFilter(Guid? preferredConversationId = null)
+    {
+        var filtered = GetFilteredConversations().ToArray();
+        ReplaceCollection(Conversations, filtered);
+
+        var targetConversation = filtered.FirstOrDefault(item => item.Id == preferredConversationId)
+            ?? filtered.FirstOrDefault(item => item.Id == SelectedConversation?.Id)
+            ?? filtered.FirstOrDefault();
+
+        if (SelectedConversation?.Id == targetConversation?.Id)
+        {
+            PublishShell(false);
+            return;
+        }
+
+        SelectedConversation = targetConversation;
+    }
+
+    private IEnumerable<ConversationRecord> GetFilteredConversations()
+        => SelectedWorkspaceRoot is null
+            ? _allConversations
+            : _allConversations.Where(item => item.WorkspaceRootId == SelectedWorkspaceRoot.Id);
 
     private void UpsertToolRun(ToolExecutionRecord record)
     {

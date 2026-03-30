@@ -263,13 +263,17 @@
 				padding-right: 4px;
 			}
 
+			.conversation-row {
+				position: relative;
+			}
+
 			.conversation-card {
 				width: 100%;
 				border: 1px solid var(--border);
 				background: var(--panel-muted);
 				color: inherit;
 				border-radius: 14px;
-				padding: 11px 12px;
+				padding: 11px 52px 11px 12px;
 				text-align: left;
 				position: relative;
 				transition:
@@ -289,6 +293,77 @@
 				border-color: #3c5cb3;
 				background: linear-gradient(180deg, rgba(26, 34, 48, 0.98), rgba(16, 23, 34, 0.98));
 				box-shadow: inset 0 0 0 1px rgba(111, 141, 255, 0.18);
+			}
+
+			.conversation-menu-shell {
+				position: absolute;
+				top: 8px;
+				right: 8px;
+				z-index: 4;
+			}
+
+			.conversation-menu-btn {
+				width: 30px;
+				height: 30px;
+				border-radius: 10px;
+				border: 1px solid rgba(255, 255, 255, 0.06);
+				background: rgba(255, 255, 255, 0.02);
+				color: var(--muted);
+				display: grid;
+				place-items: center;
+				font-size: 15px;
+				line-height: 1;
+				padding: 0;
+				transition:
+					transform 140ms ease,
+					background 140ms ease,
+					border-color 140ms ease,
+					color 140ms ease;
+			}
+
+			.conversation-menu-btn:hover {
+				transform: translateY(-1px);
+				background: var(--panel-elevated);
+				border-color: rgba(111, 141, 255, 0.22);
+				color: var(--text);
+			}
+
+			.conversation-menu {
+				position: absolute;
+				top: 42px;
+				right: 0;
+				z-index: 8;
+				min-width: 128px;
+				padding: 6px;
+				border: 1px solid var(--border);
+				border-radius: 14px;
+				background: var(--panel-elevated);
+				box-shadow: 0 18px 36px rgba(0, 0, 0, 0.24);
+			}
+
+			.conversation-menu.upward {
+				top: auto;
+				bottom: 38px;
+			}
+
+			.conversation-menu-item {
+				width: 100%;
+				border: 0;
+				border-radius: 10px;
+				background: transparent;
+				color: var(--text);
+				text-align: left;
+				padding: 9px 10px;
+				font-size: 12px;
+				font-weight: 650;
+			}
+
+			.conversation-menu-item:hover {
+				background: rgba(255, 255, 255, 0.04);
+			}
+
+			.conversation-menu-item.danger {
+				color: var(--danger);
 			}
 
 			.conversation-card.selected::before {
@@ -1083,17 +1158,21 @@
 
 			.activity-meta {
 				margin-top: 10px;
-				display: grid;
-				grid-template-columns: repeat(3, minmax(0, 1fr));
-				gap: 6px;
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
 				padding-left: 18px;
 			}
 
 			.activity-meta-item {
+				display: grid;
+				grid-template-columns: 48px minmax(0, 1fr);
+				align-items: start;
+				gap: 8px;
 				border: 1px solid var(--border);
 				background: var(--panel-soft);
 				border-radius: 10px;
-				padding: 9px 10px;
+				padding: 8px 10px;
 				min-width: 0;
 			}
 
@@ -1103,15 +1182,17 @@
 				font-weight: 700;
 				letter-spacing: 0.04em;
 				text-transform: uppercase;
+				line-height: 1.4;
 			}
 
 			.activity-meta-value {
-				margin-top: 4px;
 				font-size: 14px;
 				font-weight: 600;
-				white-space: nowrap;
-				overflow: hidden;
-				text-overflow: ellipsis;
+				line-height: 1.4;
+				white-space: normal;
+				overflow: visible;
+				text-overflow: clip;
+				word-break: break-word;
 			}
 
 			.activity-text {
