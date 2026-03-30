@@ -542,9 +542,8 @@ function render() {
 						conversations.length === 0
 							? '<div class="muted-placeholder">还没有会话，点击“新建对话”开始。</div>'
 							: conversations
-									.map((item, index) => {
+									.map((item) => {
 										const menuOpen = openConversationMenuId === item.id;
-										const menuDirectionClass = index === conversations.length - 1 ? ' upward' : '';
 										return `
                 <div class="conversation-row">
                   <button class="conversation-card ${item.id === state.selectedConversationId ? 'selected' : ''}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">
@@ -553,7 +552,7 @@ function render() {
                   </button>
                   <div class="conversation-menu-shell">
                     <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="Conversation menu">...</button>
-                    ${menuOpen ? `<div class="conversation-menu${menuDirectionClass}"><button class="conversation-menu-item danger" data-action="delete-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">删除会话</button></div>` : ''}
+                    ${menuOpen ? `<div class="conversation-menu"><button class="conversation-menu-item danger" data-action="delete-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">删除会话</button></div>` : ''}
                   </div>
                 </div>
               `;
@@ -624,7 +623,33 @@ function render() {
 	restoreScroll('conversation-list', conversationState);
 	restoreScroll('activity-list', activityState);
 	restoreScroll('transcript-scroll', transcriptState, state.autoScroll || pendingScrollToBottom || transcriptState?.nearBottom);
+	requestAnimationFrame(syncConversationMenuPlacement);
 	pendingScrollToBottom = false;
+}
+
+function syncConversationMenuPlacement() {
+	if (!openConversationMenuId) {
+		return;
+	}
+
+	const conversationList = document.getElementById('conversation-list');
+	const menu = conversationList?.querySelector('.conversation-menu');
+	const menuShell = menu?.parentElement;
+	if (!conversationList || !menu || !(menuShell instanceof HTMLElement)) {
+		return;
+	}
+
+	menu.classList.remove('upward');
+
+	const listRect = conversationList.getBoundingClientRect();
+	const shellRect = menuShell.getBoundingClientRect();
+	const menuHeight = menu.offsetHeight;
+	const spaceBelow = listRect.bottom - (shellRect.top + 42);
+	const spaceAbove = shellRect.bottom - 38 - listRect.top;
+
+	if (menuHeight > spaceBelow && spaceAbove > spaceBelow) {
+		menu.classList.add('upward');
+	}
 }
 
 window.chrome?.webview?.addEventListener('message', (event) => {
