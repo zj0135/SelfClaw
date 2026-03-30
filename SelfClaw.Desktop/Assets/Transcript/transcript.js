@@ -1,39 +1,924 @@
 const app = document.getElementById('app');
 const settingsOverlay = document.getElementById('settings-overlay');
 const editorOverlay = document.getElementById('editor-overlay');
-const state = { items: [], autoScroll: false, conversations: [], selectedConversationId: null, theme: 'dark', profiles: [], selectedProfileId: null, selectedProfileModel: null, workspaceRoots: [], selectedWorkspaceRootId: null, themeOptions: [], selectedThemeId: 'system', agentActivities: [], statusText: '', isBusy: false };
-let composerValue = '', conversationSearch = '', settingsOpen = false, pendingScrollToBottom = false, settingsFeedback = null, settingsPanelScrollTop = 0;
+
+const state = {
+	items: [],
+	autoScroll: false,
+	conversations: [],
+	selectedConversationId: null,
+	theme: 'dark',
+	profiles: [],
+	selectedProfileId: null,
+	selectedProfileModel: null,
+	workspaceRoots: [],
+	selectedWorkspaceRootId: null,
+	toolPermissionModes: [],
+	selectedToolPermissionModeId: 'requireApproval',
+	themeOptions: [],
+	selectedThemeId: 'system',
+	agentActivities: [],
+	statusText: '',
+	isBusy: false,
+};
+
+let composerValue = '';
+let conversationSearch = '';
+let settingsOpen = false;
+let pendingScrollToBottom = false;
+let settingsFeedback = null;
+let settingsPanelScrollTop = 0;
 let editorState = { open: false, kind: null, mode: 'create', draft: null, feedback: null };
-const openActivities = new Set(), openThoughts = new Set();
+
+const openActivities = new Set();
+const openThoughts = new Set();
+
 const emptyProfile = () => ({ profileId: null, name: '', endpoint: '', model: '', apiKey: '' });
 const emptyWorkspace = () => ({ workspaceRootId: null, name: '', rootPath: '' });
 const closeEditorState = () => ({ open: false, kind: null, mode: 'create', draft: null, feedback: null });
-const escapeHtml = v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
-const post = m => window.chrome?.webview?.postMessage(m);
-const setTheme = t => document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark';
-const filteredConversations = () => { const q = conversationSearch.trim().toLowerCase(); return q ? state.conversations.filter(i => i.title.toLowerCase().includes(q)) : state.conversations; };
-const renderOptions = (options, selectedId, placeholder) => `${placeholder ? `<option value="" ${!selectedId ? 'selected' : ''}>${escapeHtml(placeholder)}</option>` : ''}${options.map(o => `<option value="${escapeHtml(o.id)}" ${o.id === selectedId ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}`;
-const selectedProfile = () => state.profiles.find(i => i.id === state.selectedProfileId) || null;
-const selectedWorkspace = () => state.workspaceRoots.find(i => i.id === state.selectedWorkspaceRootId) || null;
-const profileDraft = () => { const p = selectedProfile(); return { profileId: p?.id || null, name: p?.label || '', endpoint: p?.description || '', model: state.selectedProfileModel || '', apiKey: '' }; };
-const workspaceDraft = () => { const w = selectedWorkspace(); return { workspaceRootId: w?.id || null, name: w?.label || '', rootPath: w?.description || '' }; };
-const clearFeedback = scope => { if (settingsFeedback && (!scope || !settingsFeedback.scope || settingsFeedback.scope === scope)) settingsFeedback = null; };
-const editorScope = () => editorState.kind === 'profile' || editorState.kind === 'workspace' ? editorState.kind : null;
-function openEditor(kind, mode) { editorState = { open: true, kind, mode, draft: kind === 'profile' ? (mode === 'edit' && state.selectedProfileId ? profileDraft() : emptyProfile()) : (mode === 'edit' && state.selectedWorkspaceRootId ? workspaceDraft() : emptyWorkspace()), feedback: null }; clearFeedback(kind); renderEditor(); }
-function closeEditor() { editorState = closeEditorState(); renderEditor(); }
-function setDraft(field, value) { if (editorState.open && editorState.draft) { editorState.draft[field] = value; editorState.feedback = null; } }
-function validateDraft() { if (!editorState.open || !editorState.draft) return '没有可保存的表单内容。'; if (editorState.kind === 'profile') { if (!editorState.draft.name.trim() || !editorState.draft.endpoint.trim() || !editorState.draft.model.trim()) return '请完整填写配置名称、Endpoint 和模型。'; if (editorState.mode === 'create' && !editorState.draft.apiKey.trim()) return '新增配置时必须提供 API Key。'; return null; } if (!editorState.draft.rootPath.trim()) return '请先选择工作区位置。'; return null; }
-const summaryCard = (label, value, empty) => `<div class="selected-summary-card"><div class="selected-summary-label">${escapeHtml(label)}</div><div class="selected-summary-value">${escapeHtml(value && String(value).trim() ? value : empty)}</div></div>`;
-const captureScroll = id => { const e = document.getElementById(id); return e ? { top: e.scrollTop, nearBottom: e.scrollHeight - e.scrollTop - e.clientHeight < 40 } : null; };
-const restoreScroll = (id, snap, toBottom = false) => { const e = document.getElementById(id); if (!e) return; if (toBottom) e.scrollTop = e.scrollHeight; else if (snap) e.scrollTop = snap.top; };
-function updateComposer() { const btn = document.getElementById('send-button'); if (btn) { btn.disabled = (!composerValue.trim() && !state.isBusy) || !state.selectedProfileId; btn.textContent = state.isBusy ? '停' : '发'; } }
-function renderThinking(item) { const has = Boolean(item.thinkingHtml), pending = item.role === 'assistant' && item.isThinking && !has && !item.html; if (!has && !pending) return ''; const label = item.isThinking ? '思考中...' : '思考过程'; if (!has) return `<div class="thinking-block pending"><div class="thinking-summary passive"><span class="thinking-label"><span class="thinking-dot live"></span><span>${label}</span></span></div></div>`; const open = openThoughts.has(item.id); return `<section class="thinking-block ${open ? 'open' : ''}" data-message-id="${escapeHtml(item.id)}"><button class="thinking-summary" type="button" data-action="toggle-thinking" data-message-id="${escapeHtml(item.id)}" aria-expanded="${open ? 'true' : 'false'}"><span class="thinking-label"><span class="thinking-dot ${item.isThinking ? 'live' : ''}"></span><span>${label}</span></span><span class="thinking-chevron">&#9662;</span></button><div class="thinking-content"><div class="thinking-markdown">${item.thinkingHtml}</div></div></section>`; }
-const renderBody = item => item.html ? `<div class="body">${item.html}</div>` : '';
-function renderMessages() { if (!state.items?.length) return '<div class="empty"><strong>准备开始</strong>描述你想构建的内容、修复 Bug，或让 SelfClaw 帮你分析工作区。</div>'; return state.items.map(item => { const avatar = item.role === 'user' ? '你' : item.role === 'assistant' ? 'SC' : 'SYS'; return `<div class="message-row ${escapeHtml(item.role)} ${escapeHtml(item.status)}"><div class="message-avatar">${escapeHtml(avatar)}</div><div class="message-main"><article class="item ${escapeHtml(item.kind)} ${escapeHtml(item.role)} ${escapeHtml(item.status)}"><div class="header"><span>${escapeHtml(item.title)}</span><span>${escapeHtml(item.timestamp)}</span></div>${renderThinking(item)}${renderBody(item)}</article></div></div>`; }).join(''); }
-function renderActivities() { if (!state.agentActivities?.length) return '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>'; return state.agentActivities.map(item => `<div class="activity-card ${escapeHtml(item.status)} ${openActivities.has(item.id) ? 'open' : ''}" data-activity-id="${escapeHtml(item.id)}"><div class="activity-summary" data-action="toggle-activity" data-activity-id="${escapeHtml(item.id)}"><div class="activity-top"><div class="activity-title">${escapeHtml(item.title)}</div><button class="activity-toggle" type="button" tabindex="-1">${openActivities.has(item.id) ? '收起' : '详情'}</button></div><div class="activity-meta"><div class="activity-meta-item"><div class="activity-meta-label">工具</div><div class="activity-meta-value">${escapeHtml(item.title)}</div></div><div class="activity-meta-item"><div class="activity-meta-label">状态</div><div class="activity-meta-value">${escapeHtml(item.statusLabel)}</div></div><div class="activity-meta-item"><div class="activity-meta-label">时间</div><div class="activity-meta-value">${escapeHtml(item.timestamp)}</div></div></div><div class="activity-text">${escapeHtml(item.summary)}</div></div><div class="activity-details">${item.details.map(d => `<div class="detail-block"><div class="detail-label">${escapeHtml(d.label)}</div><div class="detail-value ${d.isCode ? 'code' : ''}">${escapeHtml(d.value)}</div></div>`).join('')}</div></div>`).join(''); } function renderSettings() { const p = settingsOverlay.querySelector('.settings-panel'); if (p) settingsPanelScrollTop = p.scrollTop; settingsOverlay.className = settingsOpen ? 'settings-overlay open' : 'settings-overlay'; if (!settingsOpen) { settingsOverlay.innerHTML = ''; return; } const feedback = settingsFeedback ? `<div class="settings-feedback ${settingsFeedback.level === 'error' ? 'error' : 'success'}">${escapeHtml(settingsFeedback.message)}</div>` : ''; const profile = selectedProfile(), workspace = selectedWorkspace(); settingsOverlay.innerHTML = `<div class="settings-panel" role="dialog" aria-modal="true" aria-label="系统设置"><div class="settings-header"><div><div class="settings-title">系统设置</div><div class="settings-hint">这里负责展示和切换当前配置，编辑与新增会在中央弹窗中完成。</div></div><button class="close-btn" data-action="close-settings" type="button" aria-label="关闭">&times;</button></div>${feedback}<section class="settings-section"><div class="settings-section-header"><div class="settings-section-copy"><div class="field-label">Model Profile</div><div class="settings-section-title">模型配置</div></div><div class="settings-badge">${profile ? '已选择' : '未选择'}</div></div><div class="field-group"><div class="field-label">当前配置</div><div class="settings-select-row"><select id="profile-select" class="field-select">${renderOptions(state.profiles, state.selectedProfileId, '未选择配置')}</select><button class="ghost-btn compact-btn" data-action="open-edit-profile" type="button" ${profile ? '' : 'disabled'}>编辑</button><button class="icon-add-btn" data-action="open-create-profile" type="button" aria-label="新增模型配置">+</button></div></div><div class="selected-summary-grid">${summaryCard('名称', profile?.label, '未选择配置')}${summaryCard('模型', state.selectedProfileModel, '未选择配置')}${summaryCard('Endpoint', profile?.description, '未设置 Endpoint')}</div><div class="field-help">通过下拉切换当前模型配置；点击“编辑”修改当前项，点击圆形加号新增配置。</div></section><section class="settings-section"><div class="settings-section-header"><div class="settings-section-copy"><div class="field-label">Workspace</div><div class="settings-section-title">工作区</div></div><div class="settings-badge">${workspace ? '已选择' : '未绑定'}</div></div><div class="field-group"><div class="field-label">当前工作区</div><div class="settings-select-row"><select id="workspace-select" class="field-select">${renderOptions(state.workspaceRoots, state.selectedWorkspaceRootId, '未绑定工作区')}</select><button class="ghost-btn compact-btn" data-action="open-edit-workspace" type="button" ${workspace ? '' : 'disabled'}>编辑</button><button class="icon-add-btn" data-action="open-create-workspace" type="button" aria-label="新增工作区">+</button></div></div><div class="selected-summary-grid">${summaryCard('名称', workspace?.label, '未绑定工作区')}${summaryCard('路径', workspace?.description, '未设置工作区路径')}</div><div class="field-help">设置页只负责展示与切换当前工作区，新增和编辑会在中央弹窗里完成。</div></section><section class="settings-section"><div class="settings-section-header"><div class="settings-section-copy"><div class="field-label">Appearance</div><div class="settings-section-title">主题</div></div><div class="settings-badge">${escapeHtml(state.selectedThemeId || 'system')}</div></div><div class="field-group"><div class="field-label">界面主题</div><select id="theme-select" class="field-select">${renderOptions(state.themeOptions, state.selectedThemeId)}</select></div><div class="field-help">跟随系统时，聊天区和外层窗口会同步使用当前 Windows 主题。</div></section><div class="settings-footer"><button class="ghost-btn" data-action="close-settings" type="button">完成</button></div></div>`; const panel = settingsOverlay.querySelector('.settings-panel'); if (panel) panel.scrollTop = settingsPanelScrollTop; }
-function renderEditor() { editorOverlay.className = editorState.open ? 'editor-overlay open' : 'editor-overlay'; if (!editorState.open || !editorState.draft) { editorOverlay.innerHTML = ''; return; } const profileEditor = editorState.kind === 'profile'; const title = profileEditor ? (editorState.mode === 'create' ? '新增模型配置' : '编辑模型配置') : (editorState.mode === 'create' ? '新增工作区' : '编辑工作区'); const hint = profileEditor ? (editorState.mode === 'create' ? '填写名称、Endpoint、模型和 API Key 后保存，新配置会自动加入下拉列表并切换到当前选择。' : '你可以更新当前模型配置；如果不需要替换密钥，API Key 留空即可。') : (editorState.mode === 'create' ? '填写名称并选择本机目录后保存，新工作区会自动加入下拉列表并设为当前选择。' : '在这里调整当前工作区的显示名称或重新选择目录，然后保存变更。'); const feedback = editorState.feedback ? `<div class="settings-feedback ${editorState.feedback.level === 'error' ? 'error' : 'success'}">${escapeHtml(editorState.feedback.message)}</div>` : ''; editorOverlay.innerHTML = `<div class="editor-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}"><div class="editor-header"><div><div class="editor-title">${escapeHtml(title)}</div><div class="settings-hint">${escapeHtml(hint)}</div></div><button class="close-btn" data-action="close-editor" type="button" aria-label="关闭">&times;</button></div>${feedback}<div class="editor-body">${profileEditor ? `<div class="field-inline"><div><div class="field-label">配置名称</div><input id="editor-profile-name" class="field-input" type="text" placeholder="例如：OpenAI / 本地代理" value="${escapeHtml(editorState.draft.name)}" /></div><div><div class="field-label">模型</div><input id="editor-profile-model" class="field-input" type="text" placeholder="例如：gpt-4.1-mini" value="${escapeHtml(editorState.draft.model)}" /></div></div><div><div class="field-label">Endpoint</div><input id="editor-profile-endpoint" class="field-input" type="text" placeholder="https://api.openai.com/v1" value="${escapeHtml(editorState.draft.endpoint)}" /></div><div><div class="field-label">API Key</div><input id="editor-profile-api-key" class="field-input" type="password" placeholder="${editorState.mode === 'create' ? '新增配置时必填' : '留空则保留现有密钥'}" value="${escapeHtml(editorState.draft.apiKey)}" /></div>` : `<div><div class="field-label">显示名称</div><input id="editor-workspace-name" class="field-input" type="text" placeholder="例如：SelfClaw Workspace" value="${escapeHtml(editorState.draft.name)}" /></div><div><div class="field-label">工作区位置</div><div class="field-picker-row"><div class="field-readonly">${escapeHtml(editorState.draft.rootPath || '请选择文件夹')}</div><button class="ghost-btn compact-btn" data-action="pick-workspace-path" type="button">选择</button></div></div>`}</div><div class="editor-footer"><button class="ghost-btn" data-action="close-editor" type="button">取消</button><button class="primary-btn" data-action="save-editor" type="button">保存</button></div></div>`; }
-function render() { const transcriptState = captureScroll('transcript-scroll'), conversationState = captureScroll('conversation-list'), activityState = captureScroll('activity-list'); setTheme(state.theme); const conversations = filteredConversations(); const completedCount = state.agentActivities.filter(i => i.status === 'completed').length; const progress = state.agentActivities.length === 0 ? 0 : Math.max(12, Math.round(completedCount / state.agentActivities.length * 100)); app.innerHTML = `<div class="app-shell"><aside class="panel sidebar"><div class="brand"><div class="brand-badge">SC</div><div><div class="brand-name">SelfClaw</div><div class="status-row"><span class="status-dot"></span><span>${escapeHtml(state.statusText || 'Ready')}</span></div></div></div><button class="sidebar-primary" data-action="new-conversation" type="button">+ 新建对话</button><div class="sidebar-menu"><button class="ghost-link" type="button" disabled>项目档案</button><button class="ghost-link" type="button" disabled>聊天频道</button><button class="ghost-link" type="button" disabled>返回首页</button></div><input id="conversation-search" class="search-box" type="text" placeholder="搜索会话..." value="${escapeHtml(conversationSearch)}" /><div class="section-title">最近会话</div><div id="conversation-list" class="conversation-list">${conversations.length === 0 ? '<div class="muted-placeholder">还没有会话，点击“新建对话”开始。</div>' : conversations.map(item => `<button class="conversation-card ${item.id === state.selectedConversationId ? 'selected' : ''}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button"><div class="conversation-title">${escapeHtml(item.title)}</div><div class="conversation-time">${escapeHtml(item.timestamp)}</div></button>`).join('')}</div><button class="sidebar-footer" data-action="toggle-settings" type="button"><div class="avatar">SC</div><div class="sidebar-footer-copy"><div class="sidebar-footer-title">系统设置</div><div class="sidebar-footer-subtitle">模型、工作区、主题</div></div><div>&rsaquo;</div></button></aside><main class="main-column"><div class="panel topbar"><div class="chip-row"><button class="mode-chip" type="button" disabled>澄清</button><button class="mode-chip" type="button" disabled>协作</button><button class="mode-chip active" type="button" disabled>编程</button></div><div class="chip-row"><div class="workbench-label">桌面工作台</div><button class="icon-btn" type="button" disabled>&#8801;</button><button class="icon-btn" type="button" disabled>&#8984;</button></div></div><section class="panel transcript-panel"><div id="transcript-scroll" class="transcript-scroll">${renderMessages()}</div></section><section class="panel composer-panel"><div class="composer-meta"><span class="meta-pill">Enter 发送</span><span class="meta-pill">Shift+Enter 换行</span><span class="meta-pill">Esc 停止</span><span class="meta-pill">${escapeHtml(state.statusText || 'Ready')}</span></div><div class="composer-grid"><textarea id="composer" class="composer-box" placeholder="描述你想构建的内容，例如修复 Bug、写脚本，或使用 /commit 提交仓库...">${escapeHtml(composerValue)}</textarea><button id="send-button" class="send-btn" type="button">${state.isBusy ? '停' : '发'}</button></div></section></main><aside class="panel steps-panel"><div class="steps-header"><div><div class="steps-title">步骤</div><div class="steps-subtitle">Agent runtime details</div></div><div class="steps-count">${state.agentActivities.length}</div></div><div class="progress-block"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;"><div class="progress-label">进度</div><div class="progress-count">${completedCount}/${state.agentActivities.length || 0}</div></div><div class="progress-bar"><div class="progress-fill" style="width:${progress}%;"></div></div></div><div id="activity-list" class="activity-list">${renderActivities()}</div></aside></div>`; renderSettings(); renderEditor(); updateComposer(); restoreScroll('conversation-list', conversationState); restoreScroll('activity-list', activityState); restoreScroll('transcript-scroll', transcriptState, state.autoScroll || pendingScrollToBottom || transcriptState?.nearBottom); pendingScrollToBottom = false; } window.chrome?.webview?.addEventListener('message', event => { const payload = event.data || {}; if (payload.type === 'replaceState') { Object.assign(state, payload); render(); return; } if (payload.type === 'workspace-path-picked') { if (editorState.open && editorState.kind === 'workspace' && editorState.draft) { editorState.draft.rootPath = payload.rootPath || ''; editorState.feedback = null; renderEditor(); } return; } if (payload.type === 'settings-feedback') { const next = payload.message ? { level: payload.level || 'success', message: payload.message, scope: payload.scope || null } : null; if (editorState.open && payload.scope === editorScope()) { if (payload.level === 'success') { settingsFeedback = next; closeEditor(); } else { settingsFeedback = null; editorState.feedback = next; renderEditor(); } } else settingsFeedback = next; renderSettings(); } });
-document.addEventListener('input', event => { if (event.target.id === 'composer') { composerValue = event.target.value; updateComposer(); return; } if (event.target.id === 'conversation-search') { conversationSearch = event.target.value; render(); return; } if (event.target.id === 'editor-profile-name') { setDraft('name', event.target.value); return; } if (event.target.id === 'editor-profile-endpoint') { setDraft('endpoint', event.target.value); return; } if (event.target.id === 'editor-profile-model') { setDraft('model', event.target.value); return; } if (event.target.id === 'editor-profile-api-key') { setDraft('apiKey', event.target.value); return; } if (event.target.id === 'editor-workspace-name') { setDraft('name', event.target.value); } });
-document.addEventListener('change', event => { if (event.target.id === 'profile-select') { clearFeedback('profile'); post({ type: 'select-profile', profileId: event.target.value }); return; } if (event.target.id === 'workspace-select') { clearFeedback('workspace'); post({ type: 'select-workspace', workspaceRootId: event.target.value || null }); return; } if (event.target.id === 'theme-select') post({ type: 'select-theme', themeId: event.target.value }); });
-document.addEventListener('keydown', event => { if (event.key === 'Escape' && editorState.open) { event.preventDefault(); closeEditor(); return; } if (event.target.id === 'composer' && event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); const prompt = composerValue.trim(); if (!prompt) return; pendingScrollToBottom = true; post({ type: 'send-prompt', prompt }); composerValue = ''; event.target.value = ''; updateComposer(); return; } if (event.key === 'Escape' && state.isBusy) post({ type: 'stop-generation' }); }); document.addEventListener('click', event => { const target = event.target instanceof Element ? event.target : null; if (!target) return; const actionElement = target.closest('[data-action]'); if (actionElement) { const action = actionElement.getAttribute('data-action'); switch (action) { case 'new-conversation': post({ type: 'new-conversation' }); break; case 'select-conversation': post({ type: 'select-conversation', conversationId: actionElement.getAttribute('data-conversation-id') }); break; case 'toggle-settings': clearFeedback(); settingsOpen = true; renderSettings(); break; case 'close-settings': settingsOpen = false; closeEditor(); renderSettings(); break; case 'open-edit-profile': if (state.selectedProfileId) openEditor('profile', 'edit'); break; case 'open-create-profile': openEditor('profile', 'create'); break; case 'open-edit-workspace': if (state.selectedWorkspaceRootId) openEditor('workspace', 'edit'); break; case 'open-create-workspace': openEditor('workspace', 'create'); break; case 'close-editor': closeEditor(); break; case 'pick-workspace-path': post({ type: 'pick-workspace-path' }); break; case 'save-editor': { const error = validateDraft(); if (error) { editorState.feedback = { level: 'error', message: error, scope: editorScope() }; renderEditor(); break; } if (editorState.kind === 'profile') { post({ type: 'save-profile', profileId: editorState.mode === 'edit' ? (state.selectedProfileId || editorState.draft.profileId) : null, name: editorState.draft.name.trim(), endpoint: editorState.draft.endpoint.trim(), model: editorState.draft.model.trim(), apiKey: editorState.draft.apiKey }); } else { post({ type: 'save-workspace', workspaceRootId: editorState.mode === 'edit' ? (state.selectedWorkspaceRootId || editorState.draft.workspaceRootId) : null, name: editorState.draft.name.trim(), rootPath: editorState.draft.rootPath.trim() }); } break; } case 'toggle-thinking': { const id = actionElement.getAttribute('data-message-id'); const block = actionElement.closest('.thinking-block'); if (!id || !block) break; const open = openThoughts.has(id); if (open) { openThoughts.delete(id); block.classList.remove('open'); } else { openThoughts.add(id); block.classList.add('open'); } actionElement.setAttribute('aria-expanded', open ? 'false' : 'true'); break; } case 'toggle-activity': { const id = actionElement.getAttribute('data-activity-id'); const card = actionElement.closest('.activity-card'); if (!id || !card) break; const open = openActivities.has(id); if (open) { openActivities.delete(id); card.classList.remove('open'); } else { openActivities.add(id); card.classList.add('open'); } const toggle = card.querySelector('.activity-toggle'); if (toggle) toggle.textContent = open ? '详情' : '收起'; break; } }return; } const sendButton = target.closest('#send-button'); if (sendButton) { if (state.isBusy) { post({ type: 'stop-generation' }); return; } const prompt = composerValue.trim(); if (!prompt) return; pendingScrollToBottom = true; post({ type: 'send-prompt', prompt }); composerValue = ''; const composer = document.getElementById('composer'); if (composer) composer.value = ''; updateComposer(); return; } const link = target.closest('a[href]'); if (link) { event.preventDefault(); post({ type: 'open-link', href: link.getAttribute('href') }); return; } if (target === editorOverlay) { closeEditor(); return; } if (target === settingsOverlay) { settingsOpen = false; closeEditor(); renderSettings(); } });
+
+const escapeHtml = (value) =>
+	String(value ?? '')
+		.replaceAll('&', '&amp;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
+		.replaceAll('"', '&quot;')
+		.replaceAll("'", '&#39;');
+
+const post = (message) => window.chrome?.webview?.postMessage(message);
+const setTheme = (theme) => {
+	document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+};
+
+const filteredConversations = () => {
+	const query = conversationSearch.trim().toLowerCase();
+	return query ? state.conversations.filter((item) => item.title.toLowerCase().includes(query)) : state.conversations;
+};
+
+const renderOptions = (options, selectedId, placeholder) => {
+	const placeholderOption = placeholder ? `<option value="" ${!selectedId ? 'selected' : ''}>${escapeHtml(placeholder)}</option>` : '';
+
+	return (
+		placeholderOption +
+		options
+			.map((option) => `<option value="${escapeHtml(option.id)}" ${option.id === selectedId ? 'selected' : ''}>${escapeHtml(option.label)}</option>`)
+			.join('')
+	);
+};
+
+const selectedProfile = () => state.profiles.find((item) => item.id === state.selectedProfileId) || null;
+const selectedWorkspace = () => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null;
+const selectedPermissionMode = () => state.toolPermissionModes.find((item) => item.id === state.selectedToolPermissionModeId) || null;
+
+const profileDraft = () => {
+	const profile = selectedProfile();
+	return {
+		profileId: profile?.id || null,
+		name: profile?.label || '',
+		endpoint: profile?.description || '',
+		model: state.selectedProfileModel || '',
+		apiKey: '',
+	};
+};
+
+const workspaceDraft = () => {
+	const workspace = selectedWorkspace();
+	return {
+		workspaceRootId: workspace?.id || null,
+		name: workspace?.label || '',
+		rootPath: workspace?.description || '',
+	};
+};
+
+const clearFeedback = (scope) => {
+	if (settingsFeedback && (!scope || !settingsFeedback.scope || settingsFeedback.scope === scope)) {
+		settingsFeedback = null;
+	}
+};
+
+const editorScope = () => (editorState.kind === 'profile' || editorState.kind === 'workspace' ? editorState.kind : null);
+
+function openEditor(kind, mode) {
+	editorState = {
+		open: true,
+		kind,
+		mode,
+		draft:
+			kind === 'profile'
+				? mode === 'edit' && state.selectedProfileId
+					? profileDraft()
+					: emptyProfile()
+				: mode === 'edit' && state.selectedWorkspaceRootId
+					? workspaceDraft()
+					: emptyWorkspace(),
+		feedback: null,
+	};
+
+	clearFeedback(kind);
+	renderEditor();
+}
+
+function closeEditor() {
+	editorState = closeEditorState();
+	renderEditor();
+}
+
+function setDraft(field, value) {
+	if (!editorState.open || !editorState.draft) {
+		return;
+	}
+
+	editorState.draft[field] = value;
+	editorState.feedback = null;
+}
+
+function validateDraft() {
+	if (!editorState.open || !editorState.draft) {
+		return '没有可保存的表单内容。';
+	}
+
+	if (editorState.kind === 'profile') {
+		if (!editorState.draft.name.trim() || !editorState.draft.endpoint.trim() || !editorState.draft.model.trim()) {
+			return '请完整填写配置名称、Endpoint 和模型。';
+		}
+
+		if (editorState.mode === 'create' && !editorState.draft.apiKey.trim()) {
+			return '新增配置时必须提供 API Key。';
+		}
+
+		return null;
+	}
+
+	if (!editorState.draft.rootPath.trim()) {
+		return '请先选择工作区位置。';
+	}
+
+	return null;
+}
+
+const summaryCard = (label, value, emptyText) => `
+  <div class="selected-summary-card">
+    <div class="selected-summary-label">${escapeHtml(label)}</div>
+    <div class="selected-summary-value">${escapeHtml(value && String(value).trim() ? value : emptyText)}</div>
+  </div>
+`;
+
+const captureScroll = (id) => {
+	const element = document.getElementById(id);
+	return element ? { top: element.scrollTop, nearBottom: element.scrollHeight - element.scrollTop - element.clientHeight < 40 } : null;
+};
+
+const restoreScroll = (id, snapshot, toBottom = false) => {
+	const element = document.getElementById(id);
+	if (!element) {
+		return;
+	}
+
+	if (toBottom) {
+		element.scrollTop = element.scrollHeight;
+		return;
+	}
+
+	if (snapshot) {
+		element.scrollTop = snapshot.top;
+	}
+};
+
+function updateComposer() {
+	const button = document.getElementById('send-button');
+	if (!button) {
+		return;
+	}
+
+	button.disabled = (!composerValue.trim() && !state.isBusy) || !state.selectedProfileId;
+	button.textContent = state.isBusy ? '停' : '发';
+}
+
+function renderThinking(item) {
+	const hasThinking = Boolean(item.thinkingHtml);
+	const pendingThinking = item.role === 'assistant' && item.isThinking && !hasThinking && !item.html;
+
+	if (!hasThinking && !pendingThinking) {
+		return '';
+	}
+
+	const label = item.isThinking ? '思考中...' : '思考过程';
+	if (!hasThinking) {
+		return `
+      <div class="thinking-block pending">
+        <div class="thinking-summary passive">
+          <span class="thinking-label">
+            <span class="thinking-dot live"></span>
+            <span>${label}</span>
+          </span>
+        </div>
+      </div>
+    `;
+	}
+
+	const isOpen = openThoughts.has(item.id);
+	return `
+    <section class="thinking-block ${isOpen ? 'open' : ''}" data-message-id="${escapeHtml(item.id)}">
+      <button class="thinking-summary" type="button" data-action="toggle-thinking" data-message-id="${escapeHtml(item.id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
+        <span class="thinking-label">
+          <span class="thinking-dot ${item.isThinking ? 'live' : ''}"></span>
+          <span>${label}</span>
+        </span>
+        <span class="thinking-chevron">&#9662;</span>
+      </button>
+      <div class="thinking-content">
+        <div class="thinking-markdown">${item.thinkingHtml}</div>
+      </div>
+    </section>
+  `;
+}
+
+const renderBody = (item) => (item.html ? `<div class="body">${item.html}</div>` : '');
+
+function renderMessages() {
+	if (!state.items?.length) {
+		return `
+      <div class="empty">
+        <strong>准备开始</strong>
+        描述你想构建的内容、修复 Bug，或让 SelfClaw 帮你分析工作区。
+      </div>
+    `;
+	}
+
+	return state.items
+		.map((item) => {
+			const avatar = item.role === 'user' ? '你' : item.role === 'assistant' ? 'SC' : 'SYS';
+			const headerClass = item.title ? 'header' : 'header no-title';
+			const headerTitle = item.title ? `<span>${escapeHtml(item.title)}</span>` : '';
+			return `
+      <div class="message-row ${escapeHtml(item.role)} ${escapeHtml(item.status)}">
+        <div class="message-avatar">${escapeHtml(avatar)}</div>
+        <div class="message-main">
+          <article class="item ${escapeHtml(item.kind)} ${escapeHtml(item.role)} ${escapeHtml(item.status)}">
+            <div class="${headerClass}">
+              ${headerTitle}
+              <span>${escapeHtml(item.timestamp)}</span>
+            </div>
+            ${renderThinking(item)}
+            ${renderBody(item)}
+          </article>
+        </div>
+      </div>
+    `;
+		})
+		.join('');
+}
+
+function renderActivities() {
+	if (!state.agentActivities?.length) {
+		return '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
+	}
+
+	return state.agentActivities
+		.map((item) => {
+			const isOpen = openActivities.has(item.id) || item.status === 'awaitingapproval';
+			const actionButtons =
+				item.status === 'awaitingapproval'
+					? `
+        <div class="activity-actions">
+          <button class="activity-action-btn primary" type="button" data-action="approve-tool-execution" data-tool-execution-id="${escapeHtml(item.id)}">确认</button>
+          <button class="activity-action-btn secondary" type="button" data-action="reject-tool-execution" data-tool-execution-id="${escapeHtml(item.id)}">取消</button>
+        </div>
+      `
+					: '';
+
+			return `
+      <div class="activity-card ${escapeHtml(item.status)} ${isOpen ? 'open' : ''}" data-activity-id="${escapeHtml(item.id)}">
+        <div class="activity-summary" data-action="toggle-activity" data-activity-id="${escapeHtml(item.id)}">
+          <div class="activity-top">
+            <div class="activity-title">${escapeHtml(item.title)}</div>
+            <button class="activity-toggle" type="button" tabindex="-1">${isOpen ? '收起' : '详情'}</button>
+          </div>
+          <div class="activity-meta">
+            <div class="activity-meta-item">
+              <div class="activity-meta-label">类型</div>
+              <div class="activity-meta-value">${escapeHtml(item.kindLabel)}</div>
+            </div>
+            <div class="activity-meta-item">
+              <div class="activity-meta-label">状态</div>
+              <div class="activity-meta-value">${escapeHtml(item.statusLabel)}</div>
+            </div>
+            <div class="activity-meta-item">
+              <div class="activity-meta-label">时间</div>
+              <div class="activity-meta-value">${escapeHtml(item.timestamp)}</div>
+            </div>
+          </div>
+          <div class="activity-text">${escapeHtml(item.summary)}</div>
+        </div>
+        <div class="activity-details">
+          ${item.details
+						.map(
+							(detail) => `
+            <div class="detail-block">
+              <div class="detail-label">${escapeHtml(detail.label)}</div>
+              <div class="detail-value ${detail.isCode ? 'code' : ''}">${escapeHtml(detail.value)}</div>
+            </div>
+          `
+						)
+						.join('')}
+          ${actionButtons}
+        </div>
+      </div>
+    `;
+		})
+		.join('');
+}
+
+function renderSettings() {
+	const panel = settingsOverlay.querySelector('.settings-panel');
+	if (panel) {
+		settingsPanelScrollTop = panel.scrollTop;
+	}
+
+	settingsOverlay.className = settingsOpen ? 'settings-overlay open' : 'settings-overlay';
+	if (!settingsOpen) {
+		settingsOverlay.innerHTML = '';
+		return;
+	}
+
+	const feedback = settingsFeedback
+		? `<div class="settings-feedback ${settingsFeedback.level === 'error' ? 'error' : 'success'}">${escapeHtml(settingsFeedback.message)}</div>`
+		: '';
+	const profile = selectedProfile();
+	const workspace = selectedWorkspace();
+
+	settingsOverlay.innerHTML = `
+    <div class="settings-panel" role="dialog" aria-modal="true" aria-label="系统设置">
+      <div class="settings-header">
+        <div>
+          <div class="settings-title">系统设置</div>
+          <div class="settings-hint">这里负责展示和切换当前配置，编辑与新增会在中间弹窗中完成。</div>
+        </div>
+        <button class="close-btn" data-action="close-settings" type="button" aria-label="关闭">&times;</button>
+      </div>
+      ${feedback}
+      <section class="settings-section">
+        <div class="settings-section-header">
+          <div class="settings-section-copy">
+            <div class="field-label">Model Profile</div>
+            <div class="settings-section-title">模型配置</div>
+          </div>
+          <div class="settings-badge">${profile ? '已选择' : '未选择'}</div>
+        </div>
+        <div class="field-group">
+          <div class="field-label">当前配置</div>
+          <div class="settings-select-row">
+            <select id="profile-select" class="field-select">${renderOptions(state.profiles, state.selectedProfileId, '未选择配置')}</select>
+            <button class="ghost-btn compact-btn" data-action="open-edit-profile" type="button" ${profile ? '' : 'disabled'}>编辑</button>
+            <button class="icon-add-btn" data-action="open-create-profile" type="button" aria-label="新增模型配置">+</button>
+          </div>
+        </div>
+        <div class="selected-summary-grid">
+          ${summaryCard('名称', profile?.label, '未选择配置')}
+          ${summaryCard('模型', state.selectedProfileModel, '未选择配置')}
+          ${summaryCard('Endpoint', profile?.description, '未设置 Endpoint')}
+        </div>
+        <div class="field-help">通过下拉切换当前模型配置；点击“编辑”修改当前项，点击加号创建新配置。</div>
+      </section>
+      <section class="settings-section">
+        <div class="settings-section-header">
+          <div class="settings-section-copy">
+            <div class="field-label">Workspace</div>
+            <div class="settings-section-title">工作区</div>
+          </div>
+          <div class="settings-badge">${workspace ? '已绑定' : '未绑定'}</div>
+        </div>
+        <div class="field-group">
+          <div class="field-label">当前工作区</div>
+          <div class="settings-select-row">
+            <select id="workspace-select" class="field-select">${renderOptions(state.workspaceRoots, state.selectedWorkspaceRootId, '未绑定工作区')}</select>
+            <button class="ghost-btn compact-btn" data-action="open-edit-workspace" type="button" ${workspace ? '' : 'disabled'}>编辑</button>
+            <button class="icon-add-btn" data-action="open-create-workspace" type="button" aria-label="新增工作区">+</button>
+          </div>
+        </div>
+        <div class="selected-summary-grid">
+          ${summaryCard('名称', workspace?.label, '未绑定工作区')}
+          ${summaryCard('路径', workspace?.description, '未设置工作区路径')}
+        </div>
+        <div class="field-help">设置页负责展示与切换当前工作区，新增和编辑会在中间弹窗里完成。</div>
+      </section>
+      <section class="settings-section">
+        <div class="settings-section-header">
+          <div class="settings-section-copy">
+            <div class="field-label">Appearance</div>
+            <div class="settings-section-title">主题</div>
+          </div>
+          <div class="settings-badge">${escapeHtml(state.selectedThemeId || 'system')}</div>
+        </div>
+        <div class="field-group">
+          <div class="field-label">界面主题</div>
+          <select id="theme-select" class="field-select">${renderOptions(state.themeOptions, state.selectedThemeId)}</select>
+        </div>
+        <div class="field-help">跟随系统时，聊天区和外层窗口会同步使用当前 Windows 主题。</div>
+      </section>
+      <div class="settings-footer">
+        <button class="ghost-btn" data-action="close-settings" type="button">完成</button>
+      </div>
+    </div>
+  `;
+
+	const nextPanel = settingsOverlay.querySelector('.settings-panel');
+	if (nextPanel) {
+		nextPanel.scrollTop = settingsPanelScrollTop;
+	}
+}
+
+function renderEditor() {
+	editorOverlay.className = editorState.open ? 'editor-overlay open' : 'editor-overlay';
+	if (!editorState.open || !editorState.draft) {
+		editorOverlay.innerHTML = '';
+		return;
+	}
+
+	const isProfileEditor = editorState.kind === 'profile';
+	const title = isProfileEditor
+		? editorState.mode === 'create'
+			? '新增模型配置'
+			: '编辑模型配置'
+		: editorState.mode === 'create'
+			? '新增工作区'
+			: '编辑工作区';
+	const hint = isProfileEditor
+		? editorState.mode === 'create'
+			? '填写名称、Endpoint、模型和 API Key 后保存，新配置会自动加入下拉列表并切换到当前选择。'
+			: '你可以更新当前模型配置；如果不需要替换密钥，API Key 留空即可。'
+		: editorState.mode === 'create'
+			? '填写名称并选择本机目录后保存，工作区会自动加入下拉列表并设为当前选择。'
+			: '在这里调整当前工作区的显示名称或重新选择目录，然后保存变更。';
+	const feedback = editorState.feedback
+		? `<div class="settings-feedback ${editorState.feedback.level === 'error' ? 'error' : 'success'}">${escapeHtml(editorState.feedback.message)}</div>`
+		: '';
+
+	editorOverlay.innerHTML = `
+    <div class="editor-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+      <div class="editor-header">
+        <div>
+          <div class="editor-title">${escapeHtml(title)}</div>
+          <div class="settings-hint">${escapeHtml(hint)}</div>
+        </div>
+        <button class="close-btn" data-action="close-editor" type="button" aria-label="关闭">&times;</button>
+      </div>
+      ${feedback}
+      <div class="editor-body">
+        ${
+					isProfileEditor
+						? `
+          <div class="field-inline">
+            <div>
+              <div class="field-label">配置名称</div>
+              <input id="editor-profile-name" class="field-input" type="text" placeholder="例如：OpenAI / 本地代理" value="${escapeHtml(editorState.draft.name)}" />
+            </div>
+            <div>
+              <div class="field-label">模型</div>
+              <input id="editor-profile-model" class="field-input" type="text" placeholder="例如：gpt-4.1-mini" value="${escapeHtml(editorState.draft.model)}" />
+            </div>
+          </div>
+          <div>
+            <div class="field-label">Endpoint</div>
+            <input id="editor-profile-endpoint" class="field-input" type="text" placeholder="https://api.openai.com/v1" value="${escapeHtml(editorState.draft.endpoint)}" />
+          </div>
+          <div>
+            <div class="field-label">API Key</div>
+            <input id="editor-profile-api-key" class="field-input" type="password" placeholder="${editorState.mode === 'create' ? '新增配置时必填' : '留空则保留现有密钥'}" value="${escapeHtml(editorState.draft.apiKey)}" />
+          </div>
+        `
+						: `
+          <div>
+            <div class="field-label">显示名称</div>
+            <input id="editor-workspace-name" class="field-input" type="text" placeholder="例如：SelfClaw Workspace" value="${escapeHtml(editorState.draft.name)}" />
+          </div>
+          <div>
+            <div class="field-label">工作区位置</div>
+            <div class="field-picker-row">
+              <div class="field-readonly">${escapeHtml(editorState.draft.rootPath || '请选择文件夹')}</div>
+              <button class="ghost-btn compact-btn" data-action="pick-workspace-path" type="button">选择</button>
+            </div>
+          </div>
+        `
+				}
+      </div>
+      <div class="editor-footer">
+        <button class="ghost-btn" data-action="close-editor" type="button">取消</button>
+        <button class="primary-btn" data-action="save-editor" type="button">保存</button>
+      </div>
+    </div>
+  `;
+}
+
+function render() {
+	const transcriptState = captureScroll('transcript-scroll');
+	const conversationState = captureScroll('conversation-list');
+	const activityState = captureScroll('activity-list');
+	setTheme(state.theme);
+
+	const conversations = filteredConversations();
+	const permissionMode = selectedPermissionMode();
+	const permissionTitle = permissionMode?.description || '控制写文件和命令执行是否需要人工确认';
+
+	app.innerHTML = `
+    <div class="app-shell">
+      <aside class="panel sidebar">
+        <div class="brand">
+          <div class="brand-badge">SC</div>
+          <div>
+            <div class="brand-name">SelfClaw</div>
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span>${escapeHtml(state.statusText || 'Ready')}</span>
+            </div>
+          </div>
+        </div>
+        <button class="sidebar-primary" data-action="new-conversation" type="button">+ 新建对话</button>
+        <div class="sidebar-menu">
+          <button class="ghost-link" type="button" disabled>项目档案</button>
+          <button class="ghost-link" type="button" disabled>聊天频道</button>
+          <button class="ghost-link" type="button" disabled>返回首页</button>
+        </div>
+        <input id="conversation-search" class="search-box" type="text" placeholder="搜索会话..." value="${escapeHtml(conversationSearch)}" />
+        <div class="section-title">最近会话</div>
+        <div id="conversation-list" class="conversation-list">
+          ${
+						conversations.length === 0
+							? '<div class="muted-placeholder">还没有会话，点击“新建对话”开始。</div>'
+							: conversations
+									.map(
+										(item) => `
+                <button class="conversation-card ${item.id === state.selectedConversationId ? 'selected' : ''}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">
+                  <div class="conversation-title">${escapeHtml(item.title)}</div>
+                  <div class="conversation-time">${escapeHtml(item.timestamp)}</div>
+                </button>
+              `
+									)
+									.join('')
+					}
+        </div>
+        <button class="sidebar-footer" data-action="toggle-settings" type="button">
+          <div class="avatar">SC</div>
+          <div class="sidebar-footer-copy">
+            <div class="sidebar-footer-title">系统设置</div>
+            <div class="sidebar-footer-subtitle">模型、工作区、主题</div>
+          </div>
+          <div>&rsaquo;</div>
+        </button>
+      </aside>
+      <main class="main-column">
+        <div class="panel topbar">
+          <div class="chip-row">
+            <button class="mode-chip" type="button" disabled>澄清</button>
+            <button class="mode-chip" type="button" disabled>协作</button>
+            <button class="mode-chip active" type="button" disabled>编程</button>
+          </div>
+          <div class="chip-row">
+            <div class="workbench-label">桌面工作台</div>
+            <button class="icon-btn" type="button" disabled>&#8801;</button>
+            <button class="icon-btn" type="button" disabled>&#8984;</button>
+          </div>
+        </div>
+        <section class="panel transcript-panel">
+          <div id="transcript-scroll" class="transcript-scroll">${renderMessages()}</div>
+        </section>
+        <section class="panel composer-panel">
+          <div class="composer-toolbar">
+            <div class="composer-meta">
+              <span class="meta-pill">Enter 发送</span>
+              <span class="meta-pill">Shift+Enter 换行</span>
+              <span class="meta-pill">Esc 停止</span>
+              <span class="meta-pill">${escapeHtml(state.statusText || 'Ready')}</span>
+            </div>
+            <div class="permission-control" title="${escapeHtml(permissionTitle)}">
+              <select id="permission-select" class="permission-select" aria-label="工具权限模式">
+                ${renderOptions(state.toolPermissionModes, state.selectedToolPermissionModeId)}
+              </select>
+            </div>
+          </div>
+          <div class="composer-grid">
+            <textarea id="composer" class="composer-box" placeholder="描述你想构建的内容，例如修复 Bug、写脚本，或使用 /commit 提交仓库...">${escapeHtml(composerValue)}</textarea>
+            <button id="send-button" class="send-btn" type="button">${state.isBusy ? '停' : '发'}</button>
+          </div>
+        </section>
+      </main>
+      <aside class="panel steps-panel">
+        <div class="steps-header">
+          <div>
+            <div class="steps-title">工具</div>
+            <div class="steps-subtitle">Agent runtime details</div>
+          </div>
+          <div class="steps-count">${state.agentActivities.length}</div>
+        </div>
+        <div id="activity-list" class="activity-list">${renderActivities()}</div>
+      </aside>
+    </div>
+  `;
+
+	renderSettings();
+	renderEditor();
+	updateComposer();
+	restoreScroll('conversation-list', conversationState);
+	restoreScroll('activity-list', activityState);
+	restoreScroll('transcript-scroll', transcriptState, state.autoScroll || pendingScrollToBottom || transcriptState?.nearBottom);
+	pendingScrollToBottom = false;
+}
+
+window.chrome?.webview?.addEventListener('message', (event) => {
+	const payload = event.data || {};
+
+	if (payload.type === 'replaceState') {
+		Object.assign(state, payload);
+		state.toolPermissionModes = state.toolPermissionModes || [];
+		state.selectedToolPermissionModeId = state.selectedToolPermissionModeId || 'requireApproval';
+		render();
+		return;
+	}
+
+	if (payload.type === 'workspace-path-picked') {
+		if (editorState.open && editorState.kind === 'workspace' && editorState.draft) {
+			editorState.draft.rootPath = payload.rootPath || '';
+			editorState.feedback = null;
+			renderEditor();
+		}
+		return;
+	}
+
+	if (payload.type === 'settings-feedback') {
+		const nextFeedback = payload.message ? { level: payload.level || 'success', message: payload.message, scope: payload.scope || null } : null;
+
+		if (editorState.open && payload.scope === editorScope()) {
+			if (payload.level === 'success') {
+				settingsFeedback = nextFeedback;
+				closeEditor();
+			} else {
+				settingsFeedback = null;
+				editorState.feedback = nextFeedback;
+				renderEditor();
+			}
+		} else {
+			settingsFeedback = nextFeedback;
+		}
+
+		renderSettings();
+	}
+});
+
+document.addEventListener('input', (event) => {
+	if (event.target.id === 'composer') {
+		composerValue = event.target.value;
+		updateComposer();
+		return;
+	}
+
+	if (event.target.id === 'conversation-search') {
+		conversationSearch = event.target.value;
+		render();
+		return;
+	}
+
+	if (event.target.id === 'editor-profile-name') {
+		setDraft('name', event.target.value);
+		return;
+	}
+
+	if (event.target.id === 'editor-profile-endpoint') {
+		setDraft('endpoint', event.target.value);
+		return;
+	}
+
+	if (event.target.id === 'editor-profile-model') {
+		setDraft('model', event.target.value);
+		return;
+	}
+
+	if (event.target.id === 'editor-profile-api-key') {
+		setDraft('apiKey', event.target.value);
+		return;
+	}
+
+	if (event.target.id === 'editor-workspace-name') {
+		setDraft('name', event.target.value);
+	}
+});
+
+document.addEventListener('change', (event) => {
+	if (event.target.id === 'profile-select') {
+		clearFeedback('profile');
+		post({ type: 'select-profile', profileId: event.target.value });
+		return;
+	}
+
+	if (event.target.id === 'workspace-select') {
+		clearFeedback('workspace');
+		post({ type: 'select-workspace', workspaceRootId: event.target.value || null });
+		return;
+	}
+
+	if (event.target.id === 'permission-select') {
+		post({ type: 'select-tool-permission', permissionModeId: event.target.value });
+		return;
+	}
+
+	if (event.target.id === 'theme-select') {
+		post({ type: 'select-theme', themeId: event.target.value });
+	}
+});
+
+document.addEventListener('keydown', (event) => {
+	if (event.key === 'Escape' && editorState.open) {
+		event.preventDefault();
+		closeEditor();
+		return;
+	}
+
+	if (event.target.id === 'composer' && event.key === 'Enter' && !event.shiftKey) {
+		event.preventDefault();
+		const prompt = composerValue.trim();
+		if (!prompt) {
+			return;
+		}
+
+		pendingScrollToBottom = true;
+		post({ type: 'send-prompt', prompt });
+		composerValue = '';
+		event.target.value = '';
+		updateComposer();
+		return;
+	}
+
+	if (event.key === 'Escape' && state.isBusy) {
+		post({ type: 'stop-generation' });
+	}
+});
+
+document.addEventListener('click', (event) => {
+	const target = event.target instanceof Element ? event.target : null;
+	if (!target) {
+		return;
+	}
+
+	const actionElement = target.closest('[data-action]');
+	if (actionElement) {
+		const action = actionElement.getAttribute('data-action');
+		switch (action) {
+			case 'new-conversation':
+				post({ type: 'new-conversation' });
+				break;
+			case 'select-conversation':
+				post({ type: 'select-conversation', conversationId: actionElement.getAttribute('data-conversation-id') });
+				break;
+			case 'toggle-settings':
+				clearFeedback();
+				settingsOpen = true;
+				renderSettings();
+				break;
+			case 'close-settings':
+				settingsOpen = false;
+				closeEditor();
+				renderSettings();
+				break;
+			case 'open-edit-profile':
+				if (state.selectedProfileId) {
+					openEditor('profile', 'edit');
+				}
+				break;
+			case 'open-create-profile':
+				openEditor('profile', 'create');
+				break;
+			case 'open-edit-workspace':
+				if (state.selectedWorkspaceRootId) {
+					openEditor('workspace', 'edit');
+				}
+				break;
+			case 'open-create-workspace':
+				openEditor('workspace', 'create');
+				break;
+			case 'close-editor':
+				closeEditor();
+				break;
+			case 'pick-workspace-path':
+				post({ type: 'pick-workspace-path' });
+				break;
+			case 'save-editor': {
+				const error = validateDraft();
+				if (error) {
+					editorState.feedback = { level: 'error', message: error, scope: editorScope() };
+					renderEditor();
+					break;
+				}
+
+				if (editorState.kind === 'profile') {
+					post({
+						type: 'save-profile',
+						profileId: editorState.mode === 'edit' ? state.selectedProfileId || editorState.draft.profileId : null,
+						name: editorState.draft.name.trim(),
+						endpoint: editorState.draft.endpoint.trim(),
+						model: editorState.draft.model.trim(),
+						apiKey: editorState.draft.apiKey,
+					});
+				} else {
+					post({
+						type: 'save-workspace',
+						workspaceRootId: editorState.mode === 'edit' ? state.selectedWorkspaceRootId || editorState.draft.workspaceRootId : null,
+						name: editorState.draft.name.trim(),
+						rootPath: editorState.draft.rootPath.trim(),
+					});
+				}
+				break;
+			}
+			case 'toggle-thinking': {
+				const id = actionElement.getAttribute('data-message-id');
+				const block = actionElement.closest('.thinking-block');
+				if (!id || !block) {
+					break;
+				}
+
+				const isOpen = openThoughts.has(id);
+				if (isOpen) {
+					openThoughts.delete(id);
+					block.classList.remove('open');
+				} else {
+					openThoughts.add(id);
+					block.classList.add('open');
+				}
+
+				actionElement.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+				break;
+			}
+			case 'toggle-activity': {
+				const id = actionElement.getAttribute('data-activity-id');
+				const card = actionElement.closest('.activity-card');
+				if (!id || !card) {
+					break;
+				}
+
+				const isOpen = openActivities.has(id);
+				if (isOpen) {
+					openActivities.delete(id);
+					card.classList.remove('open');
+				} else {
+					openActivities.add(id);
+					card.classList.add('open');
+				}
+
+				const toggle = card.querySelector('.activity-toggle');
+				if (toggle) {
+					toggle.textContent = isOpen ? '详情' : '收起';
+				}
+				break;
+			}
+			case 'approve-tool-execution':
+				post({ type: 'approve-tool-execution', toolExecutionId: actionElement.getAttribute('data-tool-execution-id') });
+				break;
+			case 'reject-tool-execution':
+				post({ type: 'reject-tool-execution', toolExecutionId: actionElement.getAttribute('data-tool-execution-id') });
+				break;
+		}
+
+		return;
+	}
+
+	const sendButton = target.closest('#send-button');
+	if (sendButton) {
+		if (state.isBusy) {
+			post({ type: 'stop-generation' });
+			return;
+		}
+
+		const prompt = composerValue.trim();
+		if (!prompt) {
+			return;
+		}
+
+		pendingScrollToBottom = true;
+		post({ type: 'send-prompt', prompt });
+		composerValue = '';
+		const composer = document.getElementById('composer');
+		if (composer) {
+			composer.value = '';
+		}
+		updateComposer();
+		return;
+	}
+
+	const link = target.closest('a[href]');
+	if (link) {
+		event.preventDefault();
+		post({ type: 'open-link', href: link.getAttribute('href') });
+		return;
+	}
+
+	if (target === editorOverlay) {
+		closeEditor();
+		return;
+	}
+
+	if (target === settingsOverlay) {
+		settingsOpen = false;
+		closeEditor();
+		renderSettings();
+	}
+});
+
 render();

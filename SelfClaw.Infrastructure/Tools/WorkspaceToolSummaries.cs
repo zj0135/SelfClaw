@@ -14,4 +14,20 @@ internal static class WorkspaceToolSummaries
         => content.Truncated
             ? $"Read {content.RelativePath} (truncated)."
             : $"Read {content.RelativePath}.";
+
+    public static string Summarize(WorkspaceFileWriteResult result)
+        => !result.Applied
+            ? $"Skipped writing {result.RelativePath}: {result.Message}"
+            : result.OverwroteExisting
+                ? $"Updated {result.RelativePath}."
+                : $"Created {result.RelativePath}.";
+
+    public static string Summarize(ShellCommandResult result)
+        => !result.Executed
+            ? result.Message
+            : result.ExitCode == 0
+                ? result.OutputTruncated
+                    ? "PowerShell command completed (output truncated)."
+                    : "PowerShell command completed."
+                : $"PowerShell exited with code {result.ExitCode}.";
 }

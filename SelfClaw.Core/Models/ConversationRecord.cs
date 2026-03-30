@@ -5,5 +5,6 @@ public sealed record ConversationRecord(
     string Title,
     Guid ProfileId,
     Guid? WorkspaceRootId,
+    ToolPermissionMode ToolPermissionMode,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);

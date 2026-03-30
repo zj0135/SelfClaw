@@ -11,6 +11,8 @@ public sealed record TranscriptRenderState(
     string? SelectedProfileModel,
     IReadOnlyList<ShellSelectOption> WorkspaceRoots,
     string? SelectedWorkspaceRootId,
+    IReadOnlyList<ShellSelectOption> ToolPermissionModes,
+    string? SelectedToolPermissionModeId,
     IReadOnlyList<ShellSelectOption> ThemeOptions,
     string? SelectedThemeId,
     IReadOnlyList<AgentActivityNode> AgentActivities,

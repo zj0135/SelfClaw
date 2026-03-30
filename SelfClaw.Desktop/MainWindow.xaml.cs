@@ -15,7 +15,7 @@ namespace SelfClaw.Desktop;
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
-    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, null, [], null, [], null, [], string.Empty, false);
+    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, null, [], null, [], null, [], null, [], string.Empty, false);
     private bool _webViewReady;
 
     public MainWindow(MainWindowViewModel viewModel)
@@ -101,6 +101,8 @@ public partial class MainWindow : Window
             selectedProfileModel = state.SelectedProfileModel,
             workspaceRoots = state.WorkspaceRoots,
             selectedWorkspaceRootId = state.SelectedWorkspaceRootId,
+            toolPermissionModes = state.ToolPermissionModes,
+            selectedToolPermissionModeId = state.SelectedToolPermissionModeId,
             themeOptions = state.ThemeOptions,
             selectedThemeId = state.SelectedThemeId,
             agentActivities = state.AgentActivities,
@@ -191,6 +193,27 @@ public partial class MainWindow : Window
                     var rawId = document.RootElement.GetProperty("workspaceRootId").GetString();
                     Guid? workspaceRootId = Guid.TryParse(rawId, out var parsed) ? parsed : null;
                     await _viewModel.SetSelectedWorkspaceRootAsync(workspaceRootId);
+                    break;
+                }
+                case "select-tool-permission":
+                    await _viewModel.SetToolPermissionModeAsync(document.RootElement.GetProperty("permissionModeId").GetString());
+                    break;
+                case "approve-tool-execution":
+                {
+                    var toolExecutionId = ParseGuid(document.RootElement, "toolExecutionId");
+                    if (toolExecutionId is Guid approveId)
+                    {
+                        await _viewModel.ApproveToolExecutionAsync(approveId);
+                    }
+                    break;
+                }
+                case "reject-tool-execution":
+                {
+                    var toolExecutionId = ParseGuid(document.RootElement, "toolExecutionId");
+                    if (toolExecutionId is Guid rejectId)
+                    {
+                        await _viewModel.RejectToolExecutionAsync(rejectId);
+                    }
                     break;
                 }
                 case "select-theme":

@@ -21,11 +21,17 @@ namespace SelfClaw.Desktop.ViewModels;
 public sealed class MainWindowViewModel : ObservableObject
 {
     private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
+    private static readonly ShellSelectOption[] ToolPermissionOptions =
+    [
+        new("requireApproval", "默认权限", "写文件和命令执行前需要人工确认"),
+        new("fullAccess", "完全访问权限", "允许 agent 直接写文件并执行 PowerShell")
+    ];
 
     private readonly IConversationRepository _conversationRepository;
     private readonly IProfileRepository _profileRepository;
     private readonly ISecretProtector _secretProtector;
     private readonly IAgentChatRuntime _agentChatRuntime;
+    private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly DesktopSettingsStore _desktopSettingsStore;
     private readonly ILogger<MainWindowViewModel> _logger;
@@ -45,12 +51,14 @@ public sealed class MainWindowViewModel : ObservableObject
     private ThemeOption? _selectedThemeOption;
     private ThemeMode _activeThemeMode = ThemeMode.System;
     private string _effectiveTranscriptTheme = "light";
+    private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
 
     public MainWindowViewModel(
         IConversationRepository conversationRepository,
         IProfileRepository profileRepository,
         ISecretProtector secretProtector,
         IAgentChatRuntime agentChatRuntime,
+        DesktopToolApprovalHandler toolApprovalHandler,
         MarkdownHtmlRenderer markdownHtmlRenderer,
         DesktopSettingsStore desktopSettingsStore,
         ILogger<MainWindowViewModel> logger)
@@ -59,6 +67,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _profileRepository = profileRepository;
         _secretProtector = secretProtector;
         _agentChatRuntime = agentChatRuntime;
+        _toolApprovalHandler = toolApprovalHandler;
         _markdownHtmlRenderer = markdownHtmlRenderer;
         _desktopSettingsStore = desktopSettingsStore;
         _logger = logger;
@@ -124,6 +133,18 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => _effectiveTranscriptTheme;
         private set => SetProperty(ref _effectiveTranscriptTheme, value);
+    }
+
+    public ToolPermissionMode SelectedToolPermissionMode
+    {
+        get => _selectedToolPermissionMode;
+        private set
+        {
+            if (SetProperty(ref _selectedToolPermissionMode, value))
+            {
+                PublishShell(false);
+            }
+        }
     }
 
     public ConversationRecord? SelectedConversation
@@ -254,6 +275,26 @@ public sealed class MainWindowViewModel : ObservableObject
         Stop();
     }
 
+    public Task ApproveToolExecutionAsync(Guid toolExecutionId)
+    {
+        if (!_toolApprovalHandler.TryResolve(toolExecutionId, approved: true))
+        {
+            StatusText = "This approval request is no longer pending.";
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task RejectToolExecutionAsync(Guid toolExecutionId)
+    {
+        if (!_toolApprovalHandler.TryResolve(toolExecutionId, approved: false))
+        {
+            StatusText = "This approval request is no longer pending.";
+        }
+
+        return Task.CompletedTask;
+    }
+
     public Task SetThemePreferenceAsync(string? themeId)
     {
         ApplyThemePreference(ParseThemePreference(themeId), persist: true, refreshShell: true);
@@ -278,6 +319,22 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         PublishShell(false);
+    }
+
+    public async Task SetToolPermissionModeAsync(string? permissionModeId)
+    {
+        var nextMode = ParseToolPermissionMode(permissionModeId);
+        if (SelectedToolPermissionMode == nextMode)
+        {
+            return;
+        }
+
+        SelectedToolPermissionMode = nextMode;
+
+        if (SelectedConversation is not null)
+        {
+            await SaveConversationSelectionAsync(SelectedConversation);
+        }
     }
 
     public async Task SaveProfileAsync(ProfileEditorResult result)
@@ -493,6 +550,7 @@ public sealed class MainWindowViewModel : ObservableObject
             "New chat",
             SelectedProfile.Id,
             SelectedWorkspaceRoot?.Id,
+            SelectedToolPermissionMode,
             now,
             now);
 
@@ -522,6 +580,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedWorkspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
             ? WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
             : null;
+        SelectedToolPermissionMode = conversation.ToolPermissionMode;
 
         PublishAgentActivities();
         PublishShell(false);
@@ -558,6 +617,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 ProfileId = SelectedProfile.Id,
                 WorkspaceRootId = SelectedWorkspaceRoot?.Id,
+                ToolPermissionMode = SelectedToolPermissionMode,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
             await PersistConversationAsync(conversation);
@@ -601,7 +661,14 @@ public sealed class MainWindowViewModel : ObservableObject
             ChatRuntimeCompletedEvent? completion = null;
 
             await foreach (var update in _agentChatRuntime.StreamTurnAsync(
-                               new ChatTurnRequest(conversation.Id, SelectedProfile, apiKey, SelectedWorkspaceRoot, requestMessages),
+                               new ChatTurnRequest(
+                                   conversation.Id,
+                                   SelectedProfile,
+                                   apiKey,
+                                   SelectedWorkspaceRoot,
+                                   SelectedToolPermissionMode,
+                                   _toolApprovalHandler,
+                                   requestMessages),
                                _turnCancellationSource.Token))
             {
                 switch (update)
@@ -771,6 +838,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             ProfileId = SelectedProfile?.Id ?? conversation.ProfileId,
             WorkspaceRootId = SelectedWorkspaceRoot?.Id,
+            ToolPermissionMode = SelectedToolPermissionMode,
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
         await PersistConversationAsync(updated);
@@ -821,6 +889,8 @@ public sealed class MainWindowViewModel : ObservableObject
             .Select(root => new ShellSelectOption(root.Id.ToString("D"), root.Name, root.RootPath))
             .ToArray();
 
+        var toolPermissionModes = ToolPermissionOptions;
+
         var themeOptions = ThemeOptions
             .Select(option => new ShellSelectOption(ThemePreferenceToId(option.Value), option.Label))
             .ToArray();
@@ -836,6 +906,8 @@ public sealed class MainWindowViewModel : ObservableObject
             SelectedProfile?.Model,
             workspaceRoots,
             SelectedWorkspaceRoot?.Id.ToString("D"),
+            toolPermissionModes,
+            ToolPermissionModeToId(SelectedToolPermissionMode),
             themeOptions,
             ThemePreferenceToId(SelectedThemeOption?.Value ?? AppThemePreference.System),
             AgentActivityNodes.ToArray(),
@@ -893,8 +965,8 @@ public sealed class MainWindowViewModel : ObservableObject
             message.Status.ToString().ToLowerInvariant(),
             message.Role switch
             {
-                MessageRole.User => "You",
-                MessageRole.Assistant => "Assistant",
+                MessageRole.User => string.Empty,
+                MessageRole.Assistant => string.Empty,
                 _ => "System"
             },
             rendered,
@@ -915,8 +987,10 @@ public sealed class MainWindowViewModel : ObservableObject
             toolRun.Status switch
             {
                 ToolExecutionStatus.Running => "Running",
+                ToolExecutionStatus.AwaitingApproval => "Awaiting approval",
                 ToolExecutionStatus.Completed => "Completed",
                 ToolExecutionStatus.Failed => "Failed",
+                ToolExecutionStatus.Cancelled => "Cancelled",
                 _ => "Updated"
             },
             HumanizeToolName(toolRun.ToolName),
@@ -933,8 +1007,10 @@ public sealed class MainWindowViewModel : ObservableObject
         => toolRun.Status switch
         {
             ToolExecutionStatus.Running => "Waiting for the tool result.",
+            ToolExecutionStatus.AwaitingApproval => toolRun.ResultSummary ?? "Waiting for your confirmation.",
             ToolExecutionStatus.Completed => toolRun.ResultSummary ?? "Tool call completed.",
             ToolExecutionStatus.Failed => toolRun.ResultSummary ?? "Tool call failed.",
+            ToolExecutionStatus.Cancelled => toolRun.ResultSummary ?? "Tool call was cancelled.",
             _ => toolRun.ResultSummary ?? "Tool activity updated."
         };
 
@@ -942,14 +1018,16 @@ public sealed class MainWindowViewModel : ObservableObject
         => toolRun.Status switch
         {
             ToolExecutionStatus.Running => "Pending result.",
+            ToolExecutionStatus.AwaitingApproval => toolRun.ResultSummary ?? "Waiting for approval.",
             ToolExecutionStatus.Completed => toolRun.ResultSummary ?? "Completed without a stored summary.",
             ToolExecutionStatus.Failed => toolRun.ResultSummary ?? "Failed without an error summary.",
+            ToolExecutionStatus.Cancelled => toolRun.ResultSummary ?? "Cancelled without a stored summary.",
             _ => toolRun.ResultSummary ?? "No result captured."
         };
 
     private static string FormatToolDuration(ToolExecutionRecord toolRun)
         => toolRun.DurationMs is null
-            ? toolRun.Status == ToolExecutionStatus.Running ? "In progress" : "n/a"
+            ? toolRun.Status is ToolExecutionStatus.Running or ToolExecutionStatus.AwaitingApproval ? "In progress" : "n/a"
             : $"{Math.Round(toolRun.DurationMs.Value)} ms";
 
     private static string PrettyPrintJson(string json)
@@ -990,6 +1068,20 @@ public sealed class MainWindowViewModel : ObservableObject
             "light" => AppThemePreference.Light,
             "dark" => AppThemePreference.Dark,
             _ => AppThemePreference.System
+        };
+
+    private static string ToolPermissionModeToId(ToolPermissionMode mode)
+        => mode switch
+        {
+            ToolPermissionMode.FullAccess => "fullAccess",
+            _ => "requireApproval"
+        };
+
+    private static ToolPermissionMode ParseToolPermissionMode(string? permissionModeId)
+        => permissionModeId?.Trim().ToLowerInvariant() switch
+        {
+            "fullaccess" => ToolPermissionMode.FullAccess,
+            _ => ToolPermissionMode.RequireApproval
         };
 
     private static string CreateConversationTitle(string text)

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Data;
 using SelfClaw.Infrastructure.Options;
@@ -36,7 +37,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         var workspace = new WorkspaceRoot(Guid.NewGuid(), "Repo", "E:\\Demo\\SelfClaw", now, now);
         await conversationRepository.UpsertWorkspaceRootAsync(workspace);
 
-        var conversation = new ConversationRecord(Guid.NewGuid(), "Chat", profile.Id, workspace.Id, now, now);
+        var conversation = new ConversationRecord(Guid.NewGuid(), "Chat", profile.Id, workspace.Id, ToolPermissionMode.RequireApproval, now, now);
         await conversationRepository.UpsertConversationAsync(conversation);
 
         var userMessage = new MessageRecord(Guid.NewGuid(), conversation.Id, MessageRole.User, "Hello", MessageStatus.Completed, now, now);
@@ -59,6 +60,49 @@ public sealed class SqliteRepositoriesTests : IDisposable
         loadedMessages.Should().Contain(assistantMessage);
         loadedToolRuns.Should().ContainSingle().Which.Should().Be(toolRun);
         loadedRoots.Should().ContainSingle().Which.Should().Be(workspace);
+    }
+
+    [Fact]
+    public async Task Initialize_adds_tool_permission_mode_to_legacy_conversations_table()
+    {
+        var storagePaths = new StoragePaths(
+            _rootPath,
+            Path.Combine(_rootPath, "selfclaw.db"),
+            Path.Combine(_rootPath, "secrets"));
+        Directory.CreateDirectory(_rootPath);
+
+        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+CREATE TABLE conversations (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    profile_id TEXT NOT NULL,
+    workspace_root_id TEXT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var database = new SqliteDatabase(storagePaths);
+        var repository = new SqliteConversationRepository(database);
+        await repository.InitializeAsync();
+
+        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
+        await verification.OpenAsync();
+        await using var pragma = verification.CreateCommand();
+        pragma.CommandText = "PRAGMA table_info(conversations);";
+        await using var reader = await pragma.ExecuteReaderAsync();
+        var columns = new List<string>();
+        while (await reader.ReadAsync())
+        {
+            columns.Add(reader.GetString(1));
+        }
+
+        columns.Should().Contain("tool_permission_mode");
     }
 
     public void Dispose()

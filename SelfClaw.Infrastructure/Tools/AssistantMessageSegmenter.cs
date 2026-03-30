@@ -6,6 +6,7 @@ public static class AssistantMessageSegmenter
 {
     private const string ThinkOpenTag = "<think>";
     private const string ThinkCloseTag = "</think>";
+    private static readonly char[] TrimPrefixChars = ['\r', '\n', '\uFEFF', '\u200B', '\u200C', '\u200D', '\u2060'];
 
     public static AssistantMessageSegments Split(string? markdown)
     {
@@ -87,21 +88,25 @@ public static class AssistantMessageSegmenter
     }
 
     private static string NormalizeThinkingMarkdown(string markdown)
-        => markdown.Trim('\r', '\n');
+        => markdown.Trim(TrimPrefixChars);
 
     private static string NormalizeContentMarkdown(string markdown)
-        => markdown.TrimStart('\r', '\n');
+        => markdown.TrimStart(TrimPrefixChars);
 
     private static int FindFirstNonWhitespace(string source, int startIndex = 0)
     {
         var index = startIndex;
-        while (index < source.Length && char.IsWhiteSpace(source[index]))
+        while (index < source.Length && IsIgnorableLeadingCharacter(source[index]))
         {
             index++;
         }
 
         return index;
     }
+
+    private static bool IsIgnorableLeadingCharacter(char value)
+        => char.IsWhiteSpace(value) ||
+           value is '\uFEFF' or '\u200B' or '\u200C' or '\u200D' or '\u2060';
 
     private static bool StartsWithIgnoreCase(string source, int index, string value)
         => index >= 0 &&

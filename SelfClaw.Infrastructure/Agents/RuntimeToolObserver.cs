@@ -44,6 +44,28 @@ internal sealed class RuntimeToolObserver
     public void Fail(ToolExecutionRecord record, string message)
         => Finish(record, ToolExecutionStatus.Failed, message);
 
+    public ToolExecutionRecord AwaitApproval(ToolExecutionRecord record, string summary)
+        => Update(record, ToolExecutionStatus.AwaitingApproval, summary);
+
+    public ToolExecutionRecord Resume(ToolExecutionRecord record, string summary)
+        => Update(record, ToolExecutionStatus.Running, summary);
+
+    public void Cancel(ToolExecutionRecord record, string message)
+        => Finish(record, ToolExecutionStatus.Cancelled, message);
+
+    private ToolExecutionRecord Update(ToolExecutionRecord record, ToolExecutionStatus status, string summary)
+    {
+        var updated = record with
+        {
+            Status = status,
+            ResultSummary = summary,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        _writer.TryWrite(new ToolExecutionCompletedEvent(updated));
+        return updated;
+    }
+
     private void Finish(ToolExecutionRecord record, ToolExecutionStatus status, string summary)
     {
         var now = DateTimeOffset.UtcNow;

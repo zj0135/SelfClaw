@@ -17,8 +17,8 @@ namespace SelfClaw.Infrastructure.Agents;
 public sealed class SelfClawAgentChatRuntime : IAgentChatRuntime
 {
     private const string AgentName = "SelfClaw";
-    private const string AgentDescription = "A personal desktop AI client for focused conversation and read-only workspace assistance.";
-    private const string BaseInstructions = "You are SelfClaw, a concise desktop AI assistant. Respond in Markdown. Use read-only tools when they help answer questions about the selected workspace. Never claim to have read files unless a tool actually returned them.";
+    private const string AgentDescription = "A personal desktop AI client for focused conversation and workspace assistance.";
+    private const string BaseInstructions = "You are SelfClaw, a concise desktop AI assistant. Respond in Markdown. Use workspace tools when they materially help. Never claim to have read, written, or executed anything unless a tool actually returned a successful result.";
 
     private readonly IWorkspaceToolService _workspaceToolService;
     private readonly ILoggerFactory _loggerFactory;
@@ -69,7 +69,7 @@ public sealed class SelfClawAgentChatRuntime : IAgentChatRuntime
         var streamedText = new StringBuilder();
         var rawUpdates = new List<AgentResponseUpdate>();
         var toolObserver = new RuntimeToolObserver(writer, request.ConversationId);
-        var tools = CreateTools(request.WorkspaceRoot, toolObserver);
+        var tools = CreateTools(request, toolObserver);
 
         var chatClient = CreateChatClient(request);
         var chatOptions = new ChatOptions
@@ -79,7 +79,7 @@ public sealed class SelfClawAgentChatRuntime : IAgentChatRuntime
 
         var agent = new ChatClientAgent(
             chatClient,
-            BuildInstructions(request.WorkspaceRoot),
+            BuildInstructions(request),
             AgentName,
             AgentDescription,
             tools,
@@ -211,24 +211,35 @@ public sealed class SelfClawAgentChatRuntime : IAgentChatRuntime
         return client.AsIChatClient();
     }
 
-    private static string BuildInstructions(WorkspaceRoot? workspaceRoot)
+    private static string BuildInstructions(ChatTurnRequest request)
     {
-        if (workspaceRoot is null)
+        if (request.WorkspaceRoot is null)
         {
             return BaseInstructions + " No workspace is currently selected, so do not mention workspace tools.";
         }
 
-        return BaseInstructions + $" The trusted workspace root is '{workspaceRoot.RootPath}'. Keep file references relative to that root.";
+        var permissionInstructions = request.ToolPermissionMode == ToolPermissionMode.FullAccess
+            ? " You may use file-writing and PowerShell tools without extra approval, but stay scoped to the selected workspace unless the user explicitly requests otherwise."
+            : " File-writing and PowerShell tools require explicit user approval. Only call them when they are necessary, and keep commands narrowly scoped.";
+
+        return BaseInstructions +
+               $" The trusted workspace root is '{request.WorkspaceRoot.RootPath}'. Keep file references relative to that root." +
+               permissionInstructions;
     }
 
-    private IList<AITool> CreateTools(WorkspaceRoot? workspaceRoot, RuntimeToolObserver observer)
+    private IList<AITool> CreateTools(ChatTurnRequest request, RuntimeToolObserver observer)
     {
-        if (workspaceRoot is null)
+        if (request.WorkspaceRoot is null)
         {
             return [];
         }
 
-        var functions = new WorkspaceToolFunctions(workspaceRoot, _workspaceToolService, observer);
+        var functions = new WorkspaceToolFunctions(
+            request.WorkspaceRoot,
+            _workspaceToolService,
+            observer,
+            request.ToolPermissionMode,
+            request.ToolApprovalHandler);
 
         return
         [
@@ -252,6 +263,20 @@ public sealed class SelfClawAgentChatRuntime : IAgentChatRuntime
                 {
                     Name = "read_workspace_file",
                     Description = "Read a text file from the selected workspace root using a relative path."
+                }),
+            AIFunctionFactory.Create(
+                (Func<string, string, CancellationToken, Task<WorkspaceFileWriteResult>>)functions.WriteWorkspaceFileAsync,
+                new AIFunctionFactoryOptions
+                {
+                    Name = "write_workspace_file",
+                    Description = "Create or overwrite a UTF-8 text file inside the selected workspace root using a relative path."
+                }),
+            AIFunctionFactory.Create(
+                (Func<string, int, CancellationToken, Task<ShellCommandResult>>)functions.RunShellCommandAsync,
+                new AIFunctionFactoryOptions
+                {
+                    Name = "run_shell_command",
+                    Description = "Run a PowerShell command in the selected workspace root. Use this for inspections, build steps, or other shell-based tasks."
                 })
         ];
     }

@@ -81,11 +81,19 @@ CREATE TABLE IF NOT EXISTS conversations (
     title TEXT NOT NULL,
     profile_id TEXT NOT NULL,
     workspace_root_id TEXT NULL,
+    tool_permission_mode INTEGER NOT NULL DEFAULT 0,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
     FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE RESTRICT,
     FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
 );", cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "conversations",
+                "tool_permission_mode",
+                "ALTER TABLE conversations ADD COLUMN tool_permission_mode INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken);
 
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS messages (
@@ -122,6 +130,7 @@ CREATE TABLE IF NOT EXISTS tool_runs (
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_tool_runs_conversation_created ON tool_runs(conversation_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(1, CURRENT_TIMESTAMP);", cancellationToken);
+            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(2, CURRENT_TIMESTAMP);", cancellationToken);
 
             _initialized = true;
         }
@@ -136,5 +145,34 @@ CREATE TABLE IF NOT EXISTS tool_runs (
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task EnsureColumnExistsAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        string alterSql,
+        CancellationToken cancellationToken)
+    {
+        var hasColumn = false;
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"PRAGMA table_info({tableName});";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    hasColumn = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasColumn)
+        {
+            await ExecuteAsync(connection, alterSql, cancellationToken);
+        }
     }
 }

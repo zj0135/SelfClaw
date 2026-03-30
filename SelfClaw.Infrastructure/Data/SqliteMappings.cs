@@ -22,8 +22,9 @@ internal static class SqliteMappings
             reader.GetString(1),
             ReadGuid(reader, 2),
             reader.IsDBNull(3) ? null : ReadGuid(reader, 3),
-            ReadDateTimeOffset(reader, 4),
-            ReadDateTimeOffset(reader, 5));
+            (ToolPermissionMode)reader.GetInt32(4),
+            ReadDateTimeOffset(reader, 5),
+            ReadDateTimeOffset(reader, 6));
 
     public static MessageRecord ReadMessage(SqliteDataReader reader)
         => new(

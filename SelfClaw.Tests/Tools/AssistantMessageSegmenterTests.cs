@@ -49,5 +49,14 @@ public sealed class AssistantMessageSegmenterTests
         result.ThinkingMarkdown.Should().BeNull();
         result.ContentMarkdown.Should().Be("Example XML: <think>value</think>");
     }
+
+    [Fact]
+    public void Split_extracts_think_blocks_after_bom_or_zero_width_prefix()
+    {
+        var result = AssistantMessageSegmenter.Split("\uFEFF\u200B<think>hidden</think>\n\nVisible answer");
+
+        result.ThinkingMarkdown.Should().Be("hidden");
+        result.ContentMarkdown.Should().Be("Visible answer");
+    }
 }
 

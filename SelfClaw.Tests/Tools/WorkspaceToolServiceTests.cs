@@ -37,6 +37,29 @@ public sealed class WorkspaceToolServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Write_file_creates_and_overwrites_text()
+    {
+        var created = await _service.WriteFileAsync(_rootPath, "src/generated.txt", "first pass");
+        var overwritten = await _service.WriteFileAsync(_rootPath, "src/generated.txt", "second pass");
+
+        created.Applied.Should().BeTrue();
+        created.OverwroteExisting.Should().BeFalse();
+        overwritten.Applied.Should().BeTrue();
+        overwritten.OverwroteExisting.Should().BeTrue();
+        File.ReadAllText(Path.Combine(_rootPath, "src", "generated.txt")).Should().Be("second pass");
+    }
+
+    [Fact]
+    public async Task Shell_command_returns_output_and_exit_code()
+    {
+        var result = await _service.RunShellCommandAsync(_rootPath, "Write-Output 'hello from powershell'", 30);
+
+        result.Executed.Should().BeTrue();
+        result.ExitCode.Should().Be(0);
+        result.StandardOutput.Should().Contain("hello from powershell");
+    }
+
+    [Fact]
     public async Task Path_traversal_is_rejected()
     {
         var action = () => _service.ReadFileAsync(_rootPath, "..\\outside.txt");

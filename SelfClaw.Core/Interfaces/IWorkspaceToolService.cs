@@ -18,4 +18,16 @@ public interface IWorkspaceToolService
         string workspaceRootPath,
         string relativePath,
         CancellationToken cancellationToken = default);
+
+    Task<WorkspaceFileWriteResult> WriteFileAsync(
+        string workspaceRootPath,
+        string relativePath,
+        string content,
+        CancellationToken cancellationToken = default);
+
+    Task<ShellCommandResult> RunShellCommandAsync(
+        string workspaceRootPath,
+        string command,
+        int timeoutSeconds,
+        CancellationToken cancellationToken = default);
 }

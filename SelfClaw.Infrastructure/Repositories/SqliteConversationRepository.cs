@@ -21,7 +21,7 @@ public sealed class SqliteConversationRepository : IConversationRepository
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, title, profile_id, workspace_root_id, created_at_utc, updated_at_utc
+SELECT id, title, profile_id, workspace_root_id, tool_permission_mode, created_at_utc, updated_at_utc
 FROM conversations
 ORDER BY updated_at_utc DESC;";
 
@@ -40,7 +40,7 @@ ORDER BY updated_at_utc DESC;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, title, profile_id, workspace_root_id, created_at_utc, updated_at_utc
+SELECT id, title, profile_id, workspace_root_id, tool_permission_mode, created_at_utc, updated_at_utc
 FROM conversations
 WHERE id = $id
 LIMIT 1;";
@@ -57,17 +57,19 @@ LIMIT 1;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-INSERT INTO conversations(id, title, profile_id, workspace_root_id, created_at_utc, updated_at_utc)
-VALUES($id, $title, $profileId, $workspaceRootId, $createdAt, $updatedAt)
+INSERT INTO conversations(id, title, profile_id, workspace_root_id, tool_permission_mode, created_at_utc, updated_at_utc)
+VALUES($id, $title, $profileId, $workspaceRootId, $toolPermissionMode, $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     profile_id = excluded.profile_id,
     workspace_root_id = excluded.workspace_root_id,
+    tool_permission_mode = excluded.tool_permission_mode,
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", conversation.Id.ToString("D"));
         command.Parameters.AddWithValue("$title", conversation.Title);
         command.Parameters.AddWithValue("$profileId", conversation.ProfileId.ToString("D"));
         command.Parameters.AddWithValue("$workspaceRootId", conversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$toolPermissionMode", (int)conversation.ToolPermissionMode);
         command.Parameters.AddWithValue("$createdAt", conversation.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", conversation.UpdatedAtUtc.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
