@@ -33,11 +33,10 @@ public sealed class AssistantMessageSegmenterTests
     {
         var result = AssistantMessageSegmenter.Split("<think>first</think>\n<think>second</think>\n\nAnswer");
 
-        result.ThinkingMarkdown!.ReplaceLineEndings("\n").Should().Be("first\n\nsecond");
+        result.ThinkingMarkdown!.ReplaceLineEndings("\n").Should().Be("firstsecond");
         result.ContentMarkdown.Should().Be("Answer");
         result.Segments.Should().Equal(
-            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "first"),
-            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "second"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "firstsecond"),
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Answer"));
     }
 
@@ -52,6 +51,58 @@ public sealed class AssistantMessageSegmenterTests
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "One\n"),
             new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "second"),
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Two"));
+    }
+
+    [Fact]
+    public void Split_merges_consecutive_think_blocks_after_visible_content()
+    {
+        var result = AssistantMessageSegmenter.Split("<think>first</think>\n\nOne\n<think>second</think>\n<think>third</think>\nTwo");
+
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "first"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "One\n"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "secondthird"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Two"));
+    }
+
+    [Fact]
+    public void Split_merges_all_thinking_before_first_content_into_one_segment()
+    {
+        var result = AssistantMessageSegmenter.Split("<think>first</think><think>second</think>\n\nOne\n<think>third</think>\nTwo");
+
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "firstsecond"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "One\n"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "third"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Two"));
+    }
+
+    [Fact]
+    public void Split_merges_pending_leading_thinking_into_one_streaming_segment()
+    {
+        var result = AssistantMessageSegmenter.Split("<think>first</think><think>second");
+
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "firstsecond", true));
+    }
+
+    [Fact]
+    public void Split_compacts_excessive_blank_lines_inside_thinking_segments()
+    {
+        var result = AssistantMessageSegmenter.Split("<think>first\n\n\n\nsecond\n   \nthird</think>\n\nAnswer");
+
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "first\n\nsecond\n\nthird"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Answer"));
+    }
+
+    [Fact]
+    public void Split_reconstructs_tokenized_adjacent_thinking_into_compact_text()
+    {
+        var result = AssistantMessageSegmenter.Split("<think>我</think><think>们</think><think>多</think><think>次</think><think>得</think><think>到</think>");
+
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "我们多次得到"));
     }
 
     [Fact]

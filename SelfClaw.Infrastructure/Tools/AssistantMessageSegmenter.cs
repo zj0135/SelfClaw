@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace SelfClaw.Infrastructure.Tools;
 
@@ -51,13 +52,22 @@ public static class AssistantMessageSegmenter
                 break;
             }
 
-            AppendContentSegment(segments, visibleContent, source.Substring(cursor, nextThinkIndex - cursor));
+            var betweenSegments = source.Substring(cursor, nextThinkIndex - cursor);
+            if (segments.LastOrDefault()?.Kind == AssistantMessageSegmentKind.Thinking &&
+                string.IsNullOrWhiteSpace(betweenSegments))
+            {
+                AppendThinkingSeparator(segments, betweenSegments);
+                cursor = nextThinkIndex;
+                continue;
+            }
+
+            AppendContentSegment(segments, visibleContent, betweenSegments);
             cursor = nextThinkIndex;
         }
 
         return new AssistantMessageSegments(
             NormalizeContentMarkdown(visibleContent.ToString()),
-            segments);
+            MergeAdjacentThinkingSegments(segments));
     }
 
     private static AssistantMessageSegments BuildVisibleContentSegments(string markdown)
@@ -97,7 +107,7 @@ public static class AssistantMessageSegmenter
         bool isPending = false)
     {
         var normalized = NormalizeThinkingMarkdown(segment);
-        if (!isPending && string.IsNullOrWhiteSpace(normalized))
+        if (!isPending && normalized.Length == 0)
         {
             return;
         }
@@ -105,8 +115,76 @@ public static class AssistantMessageSegmenter
         segments.Add(new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, normalized, isPending));
     }
 
+    private static void AppendThinkingSeparator(
+        ICollection<AssistantMessageSegment> segments,
+        string separator)
+    {
+        if (separator.Length == 0)
+        {
+            return;
+        }
+
+        segments.Add(new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, " "));
+    }
+
+    private static IReadOnlyList<AssistantMessageSegment> MergeAdjacentThinkingSegments(IReadOnlyList<AssistantMessageSegment> segments)
+    {
+        if (segments.Count < 2)
+        {
+            return segments;
+        }
+
+        var mergedSegments = new List<AssistantMessageSegment>(segments.Count);
+
+        foreach (var segment in segments)
+        {
+            if (segment.Kind == AssistantMessageSegmentKind.Thinking &&
+                mergedSegments.LastOrDefault() is { Kind: AssistantMessageSegmentKind.Thinking } previousThinking)
+            {
+                mergedSegments[^1] = previousThinking with
+                {
+                    Markdown = JoinThinkingMarkdown(previousThinking.Markdown, segment.Markdown),
+                    IsPending = previousThinking.IsPending || segment.IsPending
+                };
+
+                continue;
+            }
+
+            mergedSegments.Add(segment);
+        }
+
+        return mergedSegments;
+    }
+
+    private static string JoinThinkingMarkdown(string current, string next)
+    {
+        if (string.IsNullOrWhiteSpace(current))
+        {
+            return next;
+        }
+
+        if (string.IsNullOrWhiteSpace(next))
+        {
+            return current;
+        }
+
+        return current + next;
+    }
+
     private static string NormalizeThinkingMarkdown(string markdown)
-        => markdown.Trim(TrimPrefixChars);
+    {
+        var normalized = markdown.ReplaceLineEndings("\n").Trim(TrimPrefixChars);
+        if (normalized.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        normalized = Regex.Replace(normalized, @"[ \t]{2,}", " ");
+        normalized = Regex.Replace(normalized, @"[ \t]+\n", "\n");
+        normalized = Regex.Replace(normalized, @"\n[ \t]+", "\n");
+        normalized = Regex.Replace(normalized, @"\n{3,}", "\n\n");
+        return normalized;
+    }
 
     private static string NormalizeContentMarkdown(string markdown)
         => markdown.TrimStart(TrimPrefixChars);
