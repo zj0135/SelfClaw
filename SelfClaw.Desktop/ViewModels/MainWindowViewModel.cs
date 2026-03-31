@@ -977,25 +977,45 @@ public sealed class MainWindowViewModel : ObservableObject
     private TranscriptRenderItem BuildMessageItem(MessageRecord message)
     {
         var contentMarkdown = message.MarkdownContent;
-        string? thinkingHtml = null;
+        var renderSegments = new List<TranscriptRenderSegment>();
 
         if (message.Role == MessageRole.Assistant)
         {
             var segments = AssistantMessageSegmenter.Split(message.MarkdownContent);
             contentMarkdown = segments.ContentMarkdown;
-            if (segments.HasThinking)
+
+            foreach (var segment in segments.Segments)
             {
-                thinkingHtml = _markdownHtmlRenderer.ToHtml(segments.ThinkingMarkdown!);
+                var html = string.IsNullOrWhiteSpace(segment.Markdown)
+                    ? string.Empty
+                    : _markdownHtmlRenderer.ToHtml(segment.Markdown);
+
+                renderSegments.Add(new TranscriptRenderSegment(
+                    segment.Kind == AssistantMessageSegmentKind.Thinking ? "thinking" : "content",
+                    html,
+                    segment.IsPending));
             }
         }
-
-        var rendered = string.IsNullOrWhiteSpace(contentMarkdown)
-            ? string.Empty
-            : _markdownHtmlRenderer.ToHtml(contentMarkdown);
+        else if (!string.IsNullOrWhiteSpace(contentMarkdown))
+        {
+            renderSegments.Add(new TranscriptRenderSegment(
+                "content",
+                _markdownHtmlRenderer.ToHtml(contentMarkdown),
+                false));
+        }
 
         if (message.Status == MessageStatus.Failed && !string.IsNullOrWhiteSpace(message.ErrorMessage))
         {
-            rendered += $"<p class=\"message-error\">{WebUtility.HtmlEncode(message.ErrorMessage)}</p>";
+            var errorHtml = $"<p class=\"message-error\">{WebUtility.HtmlEncode(message.ErrorMessage)}</p>";
+
+            if (renderSegments.Count > 0 && string.Equals(renderSegments[^1].Kind, "content", StringComparison.Ordinal))
+            {
+                renderSegments[^1] = renderSegments[^1] with { Html = renderSegments[^1].Html + errorHtml };
+            }
+            else
+            {
+                renderSegments.Add(new TranscriptRenderSegment("content", errorHtml, false));
+            }
         }
 
         return new TranscriptRenderItem(
@@ -1009,8 +1029,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 MessageRole.Assistant => string.Empty,
                 _ => "System"
             },
-            rendered,
-            thinkingHtml,
+            renderSegments,
             message.Role == MessageRole.Assistant && message.Status == MessageStatus.Streaming,
             null,
             message.ErrorMessage,

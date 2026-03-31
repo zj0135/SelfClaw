@@ -195,46 +195,100 @@ function updateComposer() {
 	button.textContent = state.isBusy ? '停' : '发';
 }
 
-function renderThinking(item) {
-	const hasThinking = Boolean(item.thinkingHtml);
-	const pendingThinking = item.role === 'assistant' && item.isThinking && !hasThinking && !item.html;
-
-	if (!hasThinking && !pendingThinking) {
-		return '';
+const getMessageSegments = (item) => {
+	if (Array.isArray(item.segments) && item.segments.length > 0) {
+		return item.segments;
 	}
 
-	const label = item.isThinking ? '思考中...' : '思考过程';
-	if (!hasThinking) {
-		return `
-      <div class="thinking-block pending">
+	const legacySegments = [];
+	if (item.thinkingHtml) {
+		legacySegments.push({ kind: 'thinking', html: item.thinkingHtml, isPending: false });
+	}
+
+	if (item.html) {
+		legacySegments.push({ kind: 'content', html: item.html, isPending: false });
+	}
+
+	return legacySegments;
+};
+
+const thinkingBlockId = (messageId, index) => `${messageId}:thinking:${index}`;
+
+function renderPendingThinking(isLast = false) {
+	return `
+      <section class="thinking-block pending ${isLast ? 'last' : ''}">
         <div class="thinking-summary passive">
           <span class="thinking-label">
             <span class="thinking-dot live"></span>
-            <span>${label}</span>
+            <span>思考中...</span>
           </span>
         </div>
-      </div>
+      </section>
     `;
-	}
-
-	const isOpen = openThoughts.has(item.id);
-	return `
-    <section class="thinking-block ${isOpen ? 'open' : ''}" data-message-id="${escapeHtml(item.id)}">
-      <button class="thinking-summary" type="button" data-action="toggle-thinking" data-message-id="${escapeHtml(item.id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
-        <span class="thinking-label">
-          <span class="thinking-dot ${item.isThinking ? 'live' : ''}"></span>
-          <span>${label}</span>
-        </span>
-        <span class="thinking-chevron">&#9662;</span>
-      </button>
-      <div class="thinking-content">
-        <div class="thinking-markdown">${item.thinkingHtml}</div>
-      </div>
-    </section>
-  `;
 }
 
-const renderBody = (item) => (item.html ? `<div class="body">${item.html}</div>` : '');
+function renderThinkingSegment(item, segment, index, totalSegments) {
+	const isPending = Boolean(segment.isPending);
+	const isLast = index === totalSegments - 1;
+	const label = isPending && item.isThinking ? '思考中...' : '思考';
+
+	if (!segment.html) {
+		return renderPendingThinking(isLast);
+	}
+
+	const id = thinkingBlockId(item.id, index);
+	const isOpen = openThoughts.has(id);
+	return `
+      <section class="thinking-block ${isOpen ? 'open' : ''} ${isPending ? 'pending' : ''} ${isLast ? 'last' : ''}" data-thinking-id="${escapeHtml(id)}">
+        <button class="thinking-summary" type="button" data-action="toggle-thinking" data-thinking-id="${escapeHtml(id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
+          <span class="thinking-label">
+            <span class="thinking-dot ${isPending && item.isThinking ? 'live' : ''}"></span>
+            <span>${label}</span>
+          </span>
+          <span class="thinking-chevron">&rsaquo;</span>
+        </button>
+        <div class="thinking-content">
+          <div class="thinking-markdown">${segment.html}</div>
+        </div>
+      </section>
+    `;
+}
+
+function renderBodySegment(segment, index, totalSegments) {
+	if (!segment.html) {
+		return '';
+	}
+
+	const classes = ['body', 'body-segment'];
+	if (index === 0) {
+		classes.push('first');
+	}
+
+	if (index === totalSegments - 1) {
+		classes.push('last');
+	}
+
+	return `<div class="${classes.join(' ')}">${segment.html}</div>`;
+}
+
+function renderMessageContent(item) {
+	const segments = getMessageSegments(item);
+	if (!segments.length) {
+		return item.role === 'assistant' && item.isThinking ? `<div class="message-flow">${renderPendingThinking(true)}</div>` : '';
+	}
+
+	return `
+      <div class="message-flow">
+        ${segments
+					.map((segment, index) =>
+						segment.kind === 'thinking'
+							? renderThinkingSegment(item, segment, index, segments.length)
+							: renderBodySegment(segment, index, segments.length)
+					)
+					.join('')}
+      </div>
+    `;
+}
 
 function renderMessages() {
 	if (!state.items?.length) {
@@ -260,8 +314,7 @@ function renderMessages() {
               ${headerTitle}
               <span>${escapeHtml(item.timestamp)}</span>
             </div>
-            ${renderThinking(item)}
-            ${renderBody(item)}
+            ${renderMessageContent(item)}
           </article>
         </div>
       </div>
@@ -876,7 +929,7 @@ document.addEventListener('click', (event) => {
 				break;
 			}
 			case 'toggle-thinking': {
-				const id = actionElement.getAttribute('data-message-id');
+				const id = actionElement.getAttribute('data-thinking-id');
 				const block = actionElement.closest('.thinking-block');
 				if (!id || !block) {
 					break;

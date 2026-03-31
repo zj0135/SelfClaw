@@ -12,79 +12,97 @@ public static class AssistantMessageSegmenter
     {
         if (string.IsNullOrEmpty(markdown))
         {
-            return new AssistantMessageSegments(string.Empty, null);
+            return new AssistantMessageSegments(string.Empty, []);
         }
 
         var source = markdown;
         var firstContentIndex = FindFirstNonWhitespace(source);
         if (firstContentIndex >= source.Length || !StartsWithIgnoreCase(source, firstContentIndex, ThinkOpenTag))
         {
-            return new AssistantMessageSegments(source, null);
+            return BuildVisibleContentSegments(source);
         }
 
-        var thinkingSegments = new List<string>();
+        var segments = new List<AssistantMessageSegment>();
+        var visibleContent = new StringBuilder();
         var cursor = firstContentIndex;
 
-        while (cursor < source.Length && StartsWithIgnoreCase(source, cursor, ThinkOpenTag))
+        while (cursor < source.Length)
         {
-            cursor += ThinkOpenTag.Length;
-
-            var closeIndex = source.IndexOf(ThinkCloseTag, cursor, StringComparison.OrdinalIgnoreCase);
-            if (closeIndex < 0)
+            if (StartsWithIgnoreCase(source, cursor, ThinkOpenTag))
             {
-                return new AssistantMessageSegments(
-                    string.Empty,
-                    JoinThinkingSegments(thinkingSegments, source[cursor..]));
+                cursor += ThinkOpenTag.Length;
+
+                var closeIndex = source.IndexOf(ThinkCloseTag, cursor, StringComparison.OrdinalIgnoreCase);
+                if (closeIndex < 0)
+                {
+                    AppendThinkingSegment(segments, source[cursor..], isPending: true);
+                    break;
+                }
+
+                AppendThinkingSegment(segments, source.Substring(cursor, closeIndex - cursor));
+                cursor = closeIndex + ThinkCloseTag.Length;
+                continue;
             }
 
-            thinkingSegments.Add(source.Substring(cursor, closeIndex - cursor));
-            cursor = closeIndex + ThinkCloseTag.Length;
-
-            var nextContentIndex = FindFirstNonWhitespace(source, cursor);
-            if (nextContentIndex >= source.Length || !StartsWithIgnoreCase(source, nextContentIndex, ThinkOpenTag))
+            var nextThinkIndex = source.IndexOf(ThinkOpenTag, cursor, StringComparison.OrdinalIgnoreCase);
+            if (nextThinkIndex < 0)
             {
-                return new AssistantMessageSegments(
-                    NormalizeContentMarkdown(source[cursor..]),
-                    JoinThinkingSegments(thinkingSegments));
+                AppendContentSegment(segments, visibleContent, source[cursor..]);
+                break;
             }
 
-            cursor = nextContentIndex;
+            AppendContentSegment(segments, visibleContent, source.Substring(cursor, nextThinkIndex - cursor));
+            cursor = nextThinkIndex;
         }
 
-        return new AssistantMessageSegments(source, null);
+        return new AssistantMessageSegments(
+            NormalizeContentMarkdown(visibleContent.ToString()),
+            segments);
     }
 
-    private static string JoinThinkingSegments(IEnumerable<string> segments, string? trailingSegment = null)
+    private static AssistantMessageSegments BuildVisibleContentSegments(string markdown)
     {
-        var builder = new StringBuilder();
-
-        foreach (var segment in segments)
-        {
-            AppendNormalizedSegment(builder, segment);
-        }
-
-        if (!string.IsNullOrEmpty(trailingSegment))
-        {
-            AppendNormalizedSegment(builder, trailingSegment);
-        }
-
-        return builder.Length == 0 ? string.Empty : builder.ToString();
+        var normalized = NormalizeContentMarkdown(markdown);
+        return string.IsNullOrWhiteSpace(normalized)
+            ? new AssistantMessageSegments(normalized, [])
+            : new AssistantMessageSegments(
+                normalized,
+                [new AssistantMessageSegment(AssistantMessageSegmentKind.Content, normalized)]);
     }
 
-    private static void AppendNormalizedSegment(StringBuilder builder, string segment)
+    private static void AppendContentSegment(
+        ICollection<AssistantMessageSegment> segments,
+        StringBuilder visibleContent,
+        string segment)
     {
-        var normalized = NormalizeThinkingMarkdown(segment);
+        if (string.IsNullOrEmpty(segment))
+        {
+            return;
+        }
+
+        visibleContent.Append(segment);
+
+        var normalized = NormalizeContentMarkdown(segment);
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return;
         }
 
-        if (builder.Length > 0)
+        segments.Add(new AssistantMessageSegment(AssistantMessageSegmentKind.Content, normalized));
+    }
+
+    private static void AppendThinkingSegment(
+        ICollection<AssistantMessageSegment> segments,
+        string segment,
+        bool isPending = false)
+    {
+        var normalized = NormalizeThinkingMarkdown(segment);
+        if (!isPending && string.IsNullOrWhiteSpace(normalized))
         {
-            builder.Append("\n\n");
+            return;
         }
 
-        builder.Append(normalized);
+        segments.Add(new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, normalized, isPending));
     }
 
     private static string NormalizeThinkingMarkdown(string markdown)

@@ -1,8 +1,35 @@
 namespace SelfClaw.Infrastructure.Tools;
 
+public enum AssistantMessageSegmentKind
+{
+    Content,
+    Thinking
+}
+
+public sealed record AssistantMessageSegment(
+    AssistantMessageSegmentKind Kind,
+    string Markdown,
+    bool IsPending = false);
+
 public sealed record AssistantMessageSegments(
     string ContentMarkdown,
-    string? ThinkingMarkdown)
+    IReadOnlyList<AssistantMessageSegment> Segments)
 {
-    public bool HasThinking => !string.IsNullOrWhiteSpace(ThinkingMarkdown);
+    public bool HasThinking => Segments.Any(item => item.Kind == AssistantMessageSegmentKind.Thinking);
+
+    public string? ThinkingMarkdown
+    {
+        get
+        {
+            var thinkingSegments = Segments
+                .Where(item => item.Kind == AssistantMessageSegmentKind.Thinking)
+                .Select(item => item.Markdown)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .ToArray();
+
+            return thinkingSegments.Length == 0
+                ? null
+                : string.Join("\n\n", thinkingSegments);
+        }
+    }
 }
