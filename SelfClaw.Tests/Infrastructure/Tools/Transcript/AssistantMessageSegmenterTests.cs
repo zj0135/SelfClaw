@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using SelfClaw.Infrastructure.Tools;
 
 namespace SelfClaw.Tests.Tools;
@@ -99,10 +99,10 @@ public sealed class AssistantMessageSegmenterTests
     [Fact]
     public void Split_reconstructs_tokenized_adjacent_thinking_into_compact_text()
     {
-        var result = AssistantMessageSegmenter.Split("<think>我</think><think>们</think><think>多</think><think>次</think><think>得</think><think>到</think>");
+        var result = AssistantMessageSegmenter.Split("<think>a</think><think>b</think><think>c</think>");
 
         result.Segments.Should().Equal(
-            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "我们多次得到"));
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "abc"));
     }
 
     [Fact]
@@ -137,6 +137,32 @@ public sealed class AssistantMessageSegmenterTests
         result.Segments.Should().Equal(
             new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "hidden"),
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Visible answer"));
+    }
+
+    [Fact]
+    public void Split_extracts_block_think_blocks_that_appear_after_visible_content()
+    {
+        var result = AssistantMessageSegmenter.Split("Intro\n<think>hidden</think>\nOutro");
+
+        result.ContentMarkdown.ReplaceLineEndings("\n").Should().Be("Intro\n\nOutro");
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Intro\n"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "hidden"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Outro"));
+    }
+
+    [Fact]
+    public void Split_does_not_extract_inline_think_tag_examples_inside_visible_text()
+    {
+        var result = AssistantMessageSegmenter.Split("Example XML: <think>value</think>\nNext");
+
+        result.ThinkingMarkdown.Should().BeNull();
+        result.ContentMarkdown.ReplaceLineEndings("\n").Should().Be("Example XML: <think>value</think>\nNext");
+        result.Segments.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(
+                new AssistantMessageSegment(
+                    AssistantMessageSegmentKind.Content,
+                    "Example XML: <think>value</think>\nNext"));
     }
 
     [Fact]
@@ -177,4 +203,3 @@ public sealed class AssistantMessageSegmenterTests
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Three"));
     }
 }
-

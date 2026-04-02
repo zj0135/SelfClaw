@@ -136,37 +136,41 @@ public sealed class SelfClawAgentChatRuntime : IAgentChatRuntime
 
     private static string ExtractText(AgentResponseUpdate update)
     {
-        if (update.Contents is not null && update.Contents.Count > 0)
+        var contentText = ExtractTextFromContents(update.Contents);
+        if (!string.IsNullOrWhiteSpace(contentText))
         {
-            var builder = new StringBuilder();
-            foreach (var content in update.Contents)
-            {
-                switch (content)
-                {
-                    case TextContent textContent when !string.IsNullOrEmpty(textContent.Text):
-                        builder.Append(textContent.Text);
-                        break;
-                    default:
-                        var reasoningText = TryExtractReasoningText(content);
-                        if (!string.IsNullOrWhiteSpace(reasoningText))
-                        {
-                            builder.Append("<think>");
-                            builder.Append(reasoningText);
-                            builder.Append("</think>");
-                        }
-                        break;
-                }
-            }
-
-            if (builder.Length > 0)
-            {
-                return builder.ToString();
-            }
+            return contentText;
         }
 
         return string.IsNullOrWhiteSpace(update.Text)
             ? string.Empty
             : update.Text;
+    }
+
+    public static string ExtractTextFromContents(IList<AIContent>? contents)
+    {
+        if (contents is null || contents.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var content in contents)
+        {
+            switch (content)
+            {
+                case TextContent textContent when !string.IsNullOrEmpty(textContent.Text):
+                    builder.Append(textContent.Text);
+                    break;
+                case TextReasoningContent reasoningContent when !string.IsNullOrWhiteSpace(reasoningContent.Text):
+                    builder.Append("<think>");
+                    builder.Append(reasoningContent.Text);
+                    builder.Append("</think>");
+                    break;
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static bool ShouldIncludeInPrompt(MessageRecord message)
@@ -281,23 +285,4 @@ public sealed class SelfClawAgentChatRuntime : IAgentChatRuntime
         ];
     }
 
-    private static string? TryExtractReasoningText(object content)
-    {
-        var contentType = content.GetType();
-        if (!contentType.Name.Contains("Reason", StringComparison.OrdinalIgnoreCase) &&
-            !contentType.Name.Contains("Think", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        var property = contentType.GetProperties()
-            .FirstOrDefault(item =>
-                item.CanRead &&
-                item.PropertyType == typeof(string) &&
-                (item.Name.Contains("Text", StringComparison.OrdinalIgnoreCase) ||
-                 item.Name.Contains("Reason", StringComparison.OrdinalIgnoreCase) ||
-                 item.Name.Contains("Content", StringComparison.OrdinalIgnoreCase)));
-
-        return property?.GetValue(content) as string;
-    }
 }

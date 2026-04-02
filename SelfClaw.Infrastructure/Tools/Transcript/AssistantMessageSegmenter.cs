@@ -44,7 +44,7 @@ public static class AssistantMessageSegmenter
             return string.Empty;
         }
 
-        var source = markdown;
+        var source = NormalizeThinkTagTransitions(markdown);
         var builder = new StringBuilder(source.Length);
         var cursor = 0;
 
@@ -72,17 +72,18 @@ public static class AssistantMessageSegmenter
 
         var source = markdown;
         var firstContentIndex = FindFirstNonWhitespace(source);
-        var hasLeadingThinkBlock = firstContentIndex < source.Length && StartsWithIgnoreCase(source, firstContentIndex, ThinkOpenTag);
+        var firstThinkIndex = FindNextThinkBlockIndex(source, firstContentIndex);
+        var hasThinkBlock = firstThinkIndex >= 0;
         var hasToolAnchors = source.Contains(ToolAnchorPrefix, StringComparison.OrdinalIgnoreCase);
 
-        if (!hasLeadingThinkBlock && !hasToolAnchors)
+        if (!hasThinkBlock && !hasToolAnchors)
         {
             return BuildVisibleContentSegments(source);
         }
 
         var segments = new List<AssistantMessageSegment>();
         var visibleContent = new StringBuilder();
-        var cursor = hasLeadingThinkBlock ? firstContentIndex : 0;
+        var cursor = 0;
 
         while (cursor < source.Length)
         {
@@ -97,7 +98,9 @@ public static class AssistantMessageSegmenter
                 continue;
             }
 
-            if (hasLeadingThinkBlock && StartsWithIgnoreCase(source, cursor, ThinkOpenTag))
+            if ((segments.LastOrDefault()?.Kind == AssistantMessageSegmentKind.Thinking ||
+                 IsThinkBlockBoundary(source, cursor)) &&
+                StartsWithIgnoreCase(source, cursor, ThinkOpenTag))
             {
                 cursor += ThinkOpenTag.Length;
 
@@ -113,7 +116,7 @@ public static class AssistantMessageSegmenter
                 continue;
             }
 
-            var nextSpecialIndex = FindNextSpecialIndex(source, cursor, hasLeadingThinkBlock);
+            var nextSpecialIndex = FindNextSpecialIndex(source, cursor, hasThinkBlock);
             if (nextSpecialIndex < 0)
             {
                 AppendContentSegment(segments, visibleContent, source[cursor..]);
@@ -121,7 +124,7 @@ public static class AssistantMessageSegmenter
             }
 
             var betweenSegments = source.Substring(cursor, nextSpecialIndex - cursor);
-            if (hasLeadingThinkBlock &&
+            if (hasThinkBlock &&
                 segments.LastOrDefault()?.Kind == AssistantMessageSegmentKind.Thinking &&
                 string.IsNullOrWhiteSpace(betweenSegments))
             {
@@ -258,6 +261,12 @@ public static class AssistantMessageSegmenter
     private static string NormalizeContentMarkdown(string markdown)
         => RemoveToolAnchors(markdown).TrimStart(TrimPrefixChars);
 
+    private static string NormalizeThinkTagTransitions(string markdown)
+        => Regex.Replace(
+            markdown,
+            @"(?is)(</think>)[ \t]*(<think>)",
+            "$1\n$2");
+
     private static int FindNextSpecialIndex(string source, int startIndex, bool includeThinkBlocks)
     {
         var nextToolAnchorIndex = source.IndexOf(ToolAnchorPrefix, startIndex, StringComparison.OrdinalIgnoreCase);
@@ -266,7 +275,7 @@ public static class AssistantMessageSegmenter
             return nextToolAnchorIndex;
         }
 
-        var nextThinkIndex = source.IndexOf(ThinkOpenTag, startIndex, StringComparison.OrdinalIgnoreCase);
+        var nextThinkIndex = FindNextThinkBlockIndex(source, startIndex);
         if (nextToolAnchorIndex < 0)
         {
             return nextThinkIndex;
@@ -278,6 +287,28 @@ public static class AssistantMessageSegmenter
         }
 
         return Math.Min(nextToolAnchorIndex, nextThinkIndex);
+    }
+
+    private static int FindNextThinkBlockIndex(string source, int startIndex)
+    {
+        var searchIndex = Math.Max(0, startIndex);
+        while (searchIndex < source.Length)
+        {
+            var thinkIndex = source.IndexOf(ThinkOpenTag, searchIndex, StringComparison.OrdinalIgnoreCase);
+            if (thinkIndex < 0)
+            {
+                return -1;
+            }
+
+            if (IsThinkBlockBoundary(source, thinkIndex))
+            {
+                return thinkIndex;
+            }
+
+            searchIndex = thinkIndex + ThinkOpenTag.Length;
+        }
+
+        return -1;
     }
 
     private static List<ToolAnchorPlacement> ExtractToolAnchors(string? markdown)
@@ -352,10 +383,41 @@ public static class AssistantMessageSegmenter
         => char.IsWhiteSpace(value) ||
            value is '\uFEFF' or '\u200B' or '\u200C' or '\u200D' or '\u2060';
 
+    private static bool IsThinkBlockBoundary(string source, int index)
+    {
+        if (index <= 0)
+        {
+            return true;
+        }
+
+        for (var current = index - 1; current >= 0; current--)
+        {
+            var value = source[current];
+            if (value == '\n' || value == '\r')
+            {
+                return true;
+            }
+
+            if (!IsInlineIgnorableCharacter(value))
+            {
+                return EndsWithIgnoreCase(source, current + 1, ThinkCloseTag);
+            }
+        }
+
+        return true;
+    }
+
     private static bool StartsWithIgnoreCase(string source, int index, string value)
         => index >= 0 &&
            index + value.Length <= source.Length &&
            string.Compare(source, index, value, 0, value.Length, StringComparison.OrdinalIgnoreCase) == 0;
+
+    private static bool EndsWithIgnoreCase(string source, int endExclusive, string value)
+        => endExclusive >= value.Length &&
+           string.Compare(source, endExclusive - value.Length, value, 0, value.Length, StringComparison.OrdinalIgnoreCase) == 0;
+
+    private static bool IsInlineIgnorableCharacter(char value)
+        => value is ' ' or '\t' or '\uFEFF' or '\u200B' or '\u200C' or '\u200D' or '\u2060';
 
     private sealed record ToolAnchorPlacement(Guid ToolExecutionId, int Offset);
 }
