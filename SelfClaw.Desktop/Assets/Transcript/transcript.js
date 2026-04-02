@@ -649,7 +649,7 @@ function render() {
       <main class="main-column">
         <div class="panel topbar">
           <div class="chip-row">
-		    <button class="mode-chip" type="button" disabled>Swarm</button>
+		    <button class="mode-chip" type="button" disabled>团队</button>
             <button class="mode-chip" type="button" disabled>协作</button>
             <button class="mode-chip active" type="button" disabled>编程</button>
           </div>
