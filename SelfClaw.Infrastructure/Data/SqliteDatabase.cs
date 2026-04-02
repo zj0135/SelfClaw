@@ -123,14 +123,31 @@ CREATE TABLE IF NOT EXISTS tool_runs (
     duration_ms REAL NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
+    message_id TEXT NULL,
+    after_segment_index INTEGER NULL,
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "tool_runs",
+                "message_id",
+                "ALTER TABLE tool_runs ADD COLUMN message_id TEXT NULL;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "tool_runs",
+                "after_segment_index",
+                "ALTER TABLE tool_runs ADD COLUMN after_segment_index INTEGER NULL;",
+                cancellationToken);
 
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_conversations_updated ON conversations(updated_at_utc DESC);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_tool_runs_conversation_created ON tool_runs(conversation_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(1, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(2, CURRENT_TIMESTAMP);", cancellationToken);
+            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(3, CURRENT_TIMESTAMP);", cancellationToken);
 
             _initialized = true;
         }

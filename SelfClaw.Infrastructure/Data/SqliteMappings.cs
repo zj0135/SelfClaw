@@ -51,7 +51,9 @@ internal static class SqliteMappings
             reader.IsDBNull(6) ? null : reader.GetString(6),
             reader.IsDBNull(7) ? null : reader.GetDouble(7),
             ReadDateTimeOffset(reader, 8),
-            ReadDateTimeOffset(reader, 9));
+            ReadDateTimeOffset(reader, 9),
+            reader.IsDBNull(10) ? null : ReadGuid(reader, 10),
+            reader.IsDBNull(11) ? null : reader.GetInt32(11));
 
     public static WorkspaceRoot ReadWorkspaceRoot(SqliteDataReader reader)
         => new(

@@ -10,4 +10,6 @@ public sealed record ToolExecutionRecord(
     string? CorrelationId,
     double? DurationMs,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    Guid? MessageId = null,
+    int? AfterSegmentIndex = null);

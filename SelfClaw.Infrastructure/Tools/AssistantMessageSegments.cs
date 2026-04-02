@@ -3,13 +3,15 @@ namespace SelfClaw.Infrastructure.Tools;
 public enum AssistantMessageSegmentKind
 {
     Content,
-    Thinking
+    Thinking,
+    ToolAnchor
 }
 
 public sealed record AssistantMessageSegment(
     AssistantMessageSegmentKind Kind,
     string Markdown,
-    bool IsPending = false);
+    bool IsPending = false,
+    Guid? ToolExecutionId = null);
 
 public sealed record AssistantMessageSegments(
     string ContentMarkdown,

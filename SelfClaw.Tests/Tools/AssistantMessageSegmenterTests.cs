@@ -138,5 +138,43 @@ public sealed class AssistantMessageSegmenterTests
             new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "hidden"),
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Visible answer"));
     }
+
+    [Fact]
+    public void Split_preserves_tool_anchor_positions_inside_visible_content()
+    {
+        var toolExecutionId = Guid.NewGuid();
+        var markdown = AssistantMessageSegmenter.AppendToolAnchor("Before", toolExecutionId) + "After";
+
+        var result = AssistantMessageSegmenter.Split(markdown);
+
+        result.ContentMarkdown.Should().Be("BeforeAfter");
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Before"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, toolExecutionId),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "After"));
+    }
+
+    [Fact]
+    public void RestoreToolAnchors_reapplies_markers_to_a_final_markdown_snapshot()
+    {
+        var firstToolExecutionId = Guid.NewGuid();
+        var secondToolExecutionId = Guid.NewGuid();
+        var anchoredMarkdown =
+            "One" +
+            AssistantMessageSegmenter.AppendToolAnchor(string.Empty, firstToolExecutionId) +
+            "Two" +
+            AssistantMessageSegmenter.AppendToolAnchor(string.Empty, secondToolExecutionId) +
+            "Three";
+
+        var restored = AssistantMessageSegmenter.RestoreToolAnchors("OneTwoThree", anchoredMarkdown);
+        var result = AssistantMessageSegmenter.Split(restored);
+
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "One"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, firstToolExecutionId),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Two"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, secondToolExecutionId),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Three"));
+    }
 }
 

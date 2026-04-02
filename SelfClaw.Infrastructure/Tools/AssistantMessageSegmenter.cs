@@ -7,7 +7,61 @@ public static class AssistantMessageSegmenter
 {
     private const string ThinkOpenTag = "<think>";
     private const string ThinkCloseTag = "</think>";
+    private const string ToolAnchorPrefix = "<!--selfclaw:tool:";
+    private const string ToolAnchorSuffix = "-->";
     private static readonly char[] TrimPrefixChars = ['\r', '\n', '\uFEFF', '\u200B', '\u200C', '\u200D', '\u2060'];
+
+    public static string AppendToolAnchor(string? markdown, Guid toolExecutionId)
+        => string.Concat(markdown ?? string.Empty, CreateToolAnchor(toolExecutionId));
+
+    public static string RestoreToolAnchors(string? markdown, string? anchoredMarkdown)
+    {
+        var anchors = ExtractToolAnchors(anchoredMarkdown);
+        if (anchors.Count == 0)
+        {
+            return markdown ?? string.Empty;
+        }
+
+        var plainMarkdown = RemoveToolAnchors(markdown);
+        var builder = new StringBuilder(plainMarkdown);
+        var insertedLength = 0;
+
+        foreach (var anchor in anchors)
+        {
+            var marker = CreateToolAnchor(anchor.ToolExecutionId);
+            var insertIndex = Math.Clamp(anchor.Offset + insertedLength, 0, builder.Length);
+            builder.Insert(insertIndex, marker);
+            insertedLength += marker.Length;
+        }
+
+        return builder.ToString();
+    }
+
+    public static string RemoveToolAnchors(string? markdown)
+    {
+        if (string.IsNullOrEmpty(markdown))
+        {
+            return string.Empty;
+        }
+
+        var source = markdown;
+        var builder = new StringBuilder(source.Length);
+        var cursor = 0;
+
+        while (cursor < source.Length)
+        {
+            if (TryReadToolAnchor(source, cursor, out _, out var markerLength))
+            {
+                cursor += markerLength;
+                continue;
+            }
+
+            builder.Append(source[cursor]);
+            cursor++;
+        }
+
+        return builder.ToString();
+    }
 
     public static AssistantMessageSegments Split(string? markdown)
     {
@@ -18,18 +72,32 @@ public static class AssistantMessageSegmenter
 
         var source = markdown;
         var firstContentIndex = FindFirstNonWhitespace(source);
-        if (firstContentIndex >= source.Length || !StartsWithIgnoreCase(source, firstContentIndex, ThinkOpenTag))
+        var hasLeadingThinkBlock = firstContentIndex < source.Length && StartsWithIgnoreCase(source, firstContentIndex, ThinkOpenTag);
+        var hasToolAnchors = source.Contains(ToolAnchorPrefix, StringComparison.OrdinalIgnoreCase);
+
+        if (!hasLeadingThinkBlock && !hasToolAnchors)
         {
             return BuildVisibleContentSegments(source);
         }
 
         var segments = new List<AssistantMessageSegment>();
         var visibleContent = new StringBuilder();
-        var cursor = firstContentIndex;
+        var cursor = hasLeadingThinkBlock ? firstContentIndex : 0;
 
         while (cursor < source.Length)
         {
-            if (StartsWithIgnoreCase(source, cursor, ThinkOpenTag))
+            if (TryReadToolAnchor(source, cursor, out var toolExecutionId, out var toolAnchorLength))
+            {
+                segments.Add(new AssistantMessageSegment(
+                    AssistantMessageSegmentKind.ToolAnchor,
+                    string.Empty,
+                    false,
+                    toolExecutionId));
+                cursor += toolAnchorLength;
+                continue;
+            }
+
+            if (hasLeadingThinkBlock && StartsWithIgnoreCase(source, cursor, ThinkOpenTag))
             {
                 cursor += ThinkOpenTag.Length;
 
@@ -45,24 +113,25 @@ public static class AssistantMessageSegmenter
                 continue;
             }
 
-            var nextThinkIndex = source.IndexOf(ThinkOpenTag, cursor, StringComparison.OrdinalIgnoreCase);
-            if (nextThinkIndex < 0)
+            var nextSpecialIndex = FindNextSpecialIndex(source, cursor, hasLeadingThinkBlock);
+            if (nextSpecialIndex < 0)
             {
                 AppendContentSegment(segments, visibleContent, source[cursor..]);
                 break;
             }
 
-            var betweenSegments = source.Substring(cursor, nextThinkIndex - cursor);
-            if (segments.LastOrDefault()?.Kind == AssistantMessageSegmentKind.Thinking &&
+            var betweenSegments = source.Substring(cursor, nextSpecialIndex - cursor);
+            if (hasLeadingThinkBlock &&
+                segments.LastOrDefault()?.Kind == AssistantMessageSegmentKind.Thinking &&
                 string.IsNullOrWhiteSpace(betweenSegments))
             {
                 AppendThinkingSeparator(segments, betweenSegments);
-                cursor = nextThinkIndex;
+                cursor = nextSpecialIndex;
                 continue;
             }
 
             AppendContentSegment(segments, visibleContent, betweenSegments);
-            cursor = nextThinkIndex;
+            cursor = nextSpecialIndex;
         }
 
         return new AssistantMessageSegments(
@@ -187,7 +256,86 @@ public static class AssistantMessageSegmenter
     }
 
     private static string NormalizeContentMarkdown(string markdown)
-        => markdown.TrimStart(TrimPrefixChars);
+        => RemoveToolAnchors(markdown).TrimStart(TrimPrefixChars);
+
+    private static int FindNextSpecialIndex(string source, int startIndex, bool includeThinkBlocks)
+    {
+        var nextToolAnchorIndex = source.IndexOf(ToolAnchorPrefix, startIndex, StringComparison.OrdinalIgnoreCase);
+        if (!includeThinkBlocks)
+        {
+            return nextToolAnchorIndex;
+        }
+
+        var nextThinkIndex = source.IndexOf(ThinkOpenTag, startIndex, StringComparison.OrdinalIgnoreCase);
+        if (nextToolAnchorIndex < 0)
+        {
+            return nextThinkIndex;
+        }
+
+        if (nextThinkIndex < 0)
+        {
+            return nextToolAnchorIndex;
+        }
+
+        return Math.Min(nextToolAnchorIndex, nextThinkIndex);
+    }
+
+    private static List<ToolAnchorPlacement> ExtractToolAnchors(string? markdown)
+    {
+        var result = new List<ToolAnchorPlacement>();
+        if (string.IsNullOrEmpty(markdown))
+        {
+            return result;
+        }
+
+        var source = markdown;
+        var plainOffset = 0;
+        var cursor = 0;
+        while (cursor < source.Length)
+        {
+            if (TryReadToolAnchor(source, cursor, out var toolExecutionId, out var markerLength))
+            {
+                result.Add(new ToolAnchorPlacement(toolExecutionId, plainOffset));
+                cursor += markerLength;
+                continue;
+            }
+
+            plainOffset++;
+            cursor++;
+        }
+
+        return result;
+    }
+
+    private static string CreateToolAnchor(Guid toolExecutionId)
+        => $"{ToolAnchorPrefix}{toolExecutionId:D}{ToolAnchorSuffix}";
+
+    private static bool TryReadToolAnchor(string source, int index, out Guid toolExecutionId, out int markerLength)
+    {
+        toolExecutionId = Guid.Empty;
+        markerLength = 0;
+
+        if (!StartsWithIgnoreCase(source, index, ToolAnchorPrefix))
+        {
+            return false;
+        }
+
+        var idStartIndex = index + ToolAnchorPrefix.Length;
+        var endIndex = source.IndexOf(ToolAnchorSuffix, idStartIndex, StringComparison.OrdinalIgnoreCase);
+        if (endIndex < 0)
+        {
+            return false;
+        }
+
+        var idText = source.Substring(idStartIndex, endIndex - idStartIndex).Trim();
+        if (!Guid.TryParse(idText, out toolExecutionId))
+        {
+            return false;
+        }
+
+        markerLength = endIndex + ToolAnchorSuffix.Length - index;
+        return true;
+    }
 
     private static int FindFirstNonWhitespace(string source, int startIndex = 0)
     {
@@ -208,5 +356,7 @@ public static class AssistantMessageSegmenter
         => index >= 0 &&
            index + value.Length <= source.Length &&
            string.Compare(source, index, value, 0, value.Length, StringComparison.OrdinalIgnoreCase) == 0;
+
+    private sealed record ToolAnchorPlacement(Guid ToolExecutionId, int Offset);
 }
 

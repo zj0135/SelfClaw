@@ -45,7 +45,19 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await conversationRepository.UpsertMessageAsync(userMessage);
         await conversationRepository.UpsertMessageAsync(assistantMessage);
 
-        var toolRun = new ToolExecutionRecord(Guid.NewGuid(), conversation.Id, "read_workspace_file", "{}", ToolExecutionStatus.Completed, "Read Program.cs", "call-1", 4.2d, now, now);
+        var toolRun = new ToolExecutionRecord(
+            Guid.NewGuid(),
+            conversation.Id,
+            "read_workspace_file",
+            "{}",
+            ToolExecutionStatus.Completed,
+            "Read Program.cs",
+            "call-1",
+            4.2d,
+            now,
+            now,
+            assistantMessage.Id,
+            1);
         await conversationRepository.UpsertToolExecutionAsync(toolRun);
 
         var loadedProfiles = await profileRepository.ListProfilesAsync();
@@ -103,6 +115,54 @@ CREATE TABLE conversations (
         }
 
         columns.Should().Contain("tool_permission_mode");
+    }
+
+    [Fact]
+    public async Task Initialize_adds_tool_anchor_columns_to_legacy_tool_runs_table()
+    {
+        var storagePaths = new StoragePaths(
+            _rootPath,
+            Path.Combine(_rootPath, "selfclaw.db"),
+            Path.Combine(_rootPath, "secrets"));
+        Directory.CreateDirectory(_rootPath);
+
+        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+CREATE TABLE tool_runs (
+    id TEXT NOT NULL PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    arguments_json TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    result_summary TEXT NULL,
+    correlation_id TEXT NULL,
+    duration_ms REAL NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var database = new SqliteDatabase(storagePaths);
+        var repository = new SqliteConversationRepository(database);
+        await repository.InitializeAsync();
+
+        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
+        await verification.OpenAsync();
+        await using var pragma = verification.CreateCommand();
+        pragma.CommandText = "PRAGMA table_info(tool_runs);";
+        await using var reader = await pragma.ExecuteReaderAsync();
+        var columns = new List<string>();
+        while (await reader.ReadAsync())
+        {
+            columns.Add(reader.GetString(1));
+        }
+
+        columns.Should().Contain("message_id");
+        columns.Should().Contain("after_segment_index");
     }
 
     public void Dispose()

@@ -31,7 +31,9 @@ internal sealed class RuntimeToolObserver
             correlationId,
             null,
             now,
-            now);
+            now,
+            null,
+            null);
 
         _stopwatches[correlationId] = Stopwatch.StartNew();
         _writer.TryWrite(new ToolExecutionStartedEvent(record));

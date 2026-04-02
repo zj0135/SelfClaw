@@ -254,6 +254,28 @@ function renderThinkingSegment(item, segment, index, totalSegments) {
     `;
 }
 
+function renderToolSegment(segment, index, totalSegments) {
+	const label = segment.text || 'Tool call';
+	const status = segment.status || 'completed';
+	const classes = ['tool-segment', status];
+	if (index === 0) {
+		classes.push('first');
+	}
+
+	if (index === totalSegments - 1) {
+		classes.push('last');
+	}
+
+	return `
+      <div class="${classes.join(' ')}">
+        <div class="inline-tool ${escapeHtml(status)}">
+          <span class="inline-tool-dot"></span>
+          <span class="inline-tool-label">${escapeHtml(label)}</span>
+        </div>
+      </div>
+    `;
+}
+
 function renderBodySegment(segment, index, totalSegments) {
 	if (!segment.html) {
 		return '';
@@ -283,7 +305,9 @@ function renderMessageContent(item) {
 					.map((segment, index) =>
 						segment.kind === 'thinking'
 							? renderThinkingSegment(item, segment, index, segments.length)
-							: renderBodySegment(segment, index, segments.length)
+							: segment.kind === 'tool'
+								? renderToolSegment(segment, index, segments.length)
+								: renderBodySegment(segment, index, segments.length)
 					)
 					.join('')}
       </div>
@@ -625,6 +649,7 @@ function render() {
       <main class="main-column">
         <div class="panel topbar">
           <div class="chip-row">
+		    <button class="mode-chip" type="button" disabled>Swarm</button>
             <button class="mode-chip" type="button" disabled>协作</button>
             <button class="mode-chip active" type="button" disabled>编程</button>
           </div>

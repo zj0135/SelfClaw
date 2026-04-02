@@ -20,6 +20,10 @@ namespace SelfClaw.Desktop.ViewModels;
 
 public sealed class MainWindowViewModel : ObservableObject
 {
+    private sealed record ToolRunAnchor(Guid MessageId, int AfterSegmentIndex);
+
+    private sealed record ToolRunPlacement(ToolExecutionRecord Record, int? AfterSegmentIndex);
+
     private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
     private static readonly ShellSelectOption[] ToolPermissionOptions =
     [
@@ -39,6 +43,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly List<ConversationRecord> _allConversations = [];
     private readonly List<MessageRecord> _messages = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
+    private readonly Dictionary<Guid, ToolRunAnchor> _toolRunAnchors = [];
     private CancellationTokenSource? _turnCancellationSource;
     private bool _initialized;
     private bool _isApplyingThemeSelection;
@@ -166,6 +171,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 _messages.Clear();
                 _toolRuns.Clear();
+                _toolRunAnchors.Clear();
                 PublishAgentActivities();
                 PublishShell(false);
             }
@@ -590,6 +596,14 @@ public sealed class MainWindowViewModel : ObservableObject
         _messages.AddRange(messages);
         _toolRuns.Clear();
         _toolRuns.AddRange(toolRuns);
+        _toolRunAnchors.Clear();
+        foreach (var toolRun in toolRuns)
+        {
+            if (toolRun.MessageId is Guid messageId && toolRun.AfterSegmentIndex is int afterSegmentIndex)
+            {
+                _toolRunAnchors[toolRun.Id] = new ToolRunAnchor(messageId, afterSegmentIndex);
+            }
+        }
 
         SelectedProfile = Profiles.FirstOrDefault(profile => profile.Id == conversation.ProfileId) ?? SelectedProfile;
         SelectedWorkspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
@@ -697,13 +711,18 @@ public sealed class MainWindowViewModel : ObservableObject
                         }
                         break;
                     case ToolExecutionStartedEvent toolStarted:
-                        UpsertToolRun(toolStarted.Record);
-                        await _conversationRepository.UpsertToolExecutionAsync(toolStarted.Record);
+                        FlushAssistantDelta();
+                        InsertToolRunMarker(toolStarted.Record.Id);
+                        var startedRecord = CaptureToolRunAnchor(toolStarted.Record);
+                        UpsertToolRun(startedRecord);
+                        await _conversationRepository.UpsertToolExecutionAsync(startedRecord);
                         PublishAgentActivities();
                         break;
                     case ToolExecutionCompletedEvent toolCompleted:
-                        UpsertToolRun(toolCompleted.Record);
-                        await _conversationRepository.UpsertToolExecutionAsync(toolCompleted.Record);
+                        FlushAssistantDelta();
+                        var completedRecord = CaptureToolRunAnchor(toolCompleted.Record);
+                        UpsertToolRun(completedRecord);
+                        await _conversationRepository.UpsertToolExecutionAsync(completedRecord);
                         PublishAgentActivities();
                         break;
                     case ChatRuntimeCompletedEvent completed:
@@ -713,11 +732,13 @@ public sealed class MainWindowViewModel : ObservableObject
             }
 
             FlushAssistantDelta();
-            var finalMarkdown = accumulatedResponse.ToString();
+            var anchoredMarkdown = accumulatedResponse.ToString();
+            var finalMarkdown = anchoredMarkdown;
             if (!string.IsNullOrWhiteSpace(completion?.FinalMarkdown) &&
-                (string.IsNullOrWhiteSpace(finalMarkdown) || completion.FinalMarkdown.Length > finalMarkdown.Length))
+                (string.IsNullOrWhiteSpace(AssistantMessageSegmenter.RemoveToolAnchors(finalMarkdown)) ||
+                 completion.FinalMarkdown.Length > AssistantMessageSegmenter.RemoveToolAnchors(finalMarkdown).Length))
             {
-                finalMarkdown = completion.FinalMarkdown;
+                finalMarkdown = AssistantMessageSegmenter.RestoreToolAnchors(completion.FinalMarkdown, anchoredMarkdown);
             }
 
             assistantMessage = assistantMessage with
@@ -799,6 +820,59 @@ public sealed class MainWindowViewModel : ObservableObject
             };
             ReplaceMessage(assistantMessage);
             PublishShell(true);
+        }
+
+        void InsertToolRunMarker(Guid toolExecutionId)
+        {
+            if (assistantMessage is null || accumulatedResponse.ToString().Contains(toolExecutionId.ToString("D"), StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            var anchoredMarkdown = AssistantMessageSegmenter.AppendToolAnchor(accumulatedResponse.ToString(), toolExecutionId);
+            accumulatedResponse.Clear();
+            accumulatedResponse.Append(anchoredMarkdown);
+            assistantMessage = assistantMessage with
+            {
+                MarkdownContent = anchoredMarkdown,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            ReplaceMessage(assistantMessage);
+        }
+
+        ToolExecutionRecord CaptureToolRunAnchor(ToolExecutionRecord toolRun)
+        {
+            if (_toolRunAnchors.TryGetValue(toolRun.Id, out var existingAnchor))
+            {
+                return toolRun with
+                {
+                    MessageId = existingAnchor.MessageId,
+                    AfterSegmentIndex = existingAnchor.AfterSegmentIndex
+                };
+            }
+
+            if (toolRun.MessageId is Guid messageId && toolRun.AfterSegmentIndex is int afterSegmentIndex)
+            {
+                _toolRunAnchors[toolRun.Id] = new ToolRunAnchor(messageId, afterSegmentIndex);
+                return toolRun;
+            }
+
+            if (assistantMessage is null)
+            {
+                return toolRun;
+            }
+
+            var segments = AssistantMessageSegmenter.Split(assistantMessage.MarkdownContent).Segments;
+            var anchor = new ToolRunAnchor(
+                assistantMessage.Id,
+                segments.Count - 1);
+
+            _toolRunAnchors[toolRun.Id] = anchor;
+            return toolRun with
+            {
+                MessageId = anchor.MessageId,
+                AfterSegmentIndex = anchor.AfterSegmentIndex
+            };
         }
     }
 
@@ -912,9 +986,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void PublishShell(bool autoScroll)
     {
+        var toolRunsByMessageId = BuildToolRunsByMessageId();
         var orderedItems = _messages
             .OrderBy(item => item.CreatedAtUtc)
-            .Select(BuildMessageItem)
+            .Select(item => BuildMessageItem(
+                item,
+                toolRunsByMessageId.TryGetValue(item.Id, out var toolRuns) ? toolRuns : []))
             .ToArray();
 
         var conversations = Conversations
@@ -975,6 +1052,11 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     private TranscriptRenderItem BuildMessageItem(MessageRecord message)
+        => BuildMessageItem(message, []);
+
+    private TranscriptRenderItem BuildMessageItem(
+        MessageRecord message,
+        IReadOnlyList<ToolRunPlacement> toolRuns)
     {
         var contentMarkdown = message.MarkdownContent;
         var renderSegments = new List<TranscriptRenderSegment>();
@@ -983,9 +1065,23 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             var segments = AssistantMessageSegmenter.Split(message.MarkdownContent);
             contentMarkdown = segments.ContentMarkdown;
+            var toolRunsById = toolRuns.ToDictionary(item => item.Record.Id);
+            var consumedToolRunIds = new HashSet<Guid>();
 
             foreach (var segment in segments.Segments)
             {
+                if (segment.Kind == AssistantMessageSegmentKind.ToolAnchor)
+                {
+                    if (segment.ToolExecutionId is Guid toolExecutionId &&
+                        toolRunsById.TryGetValue(toolExecutionId, out var placement) &&
+                        consumedToolRunIds.Add(toolExecutionId))
+                    {
+                        renderSegments.Add(BuildToolSegment(placement.Record));
+                    }
+
+                    continue;
+                }
+
                 var html = string.IsNullOrWhiteSpace(segment.Markdown)
                     ? string.Empty
                     : _markdownHtmlRenderer.ToHtml(segment.Markdown);
@@ -994,6 +1090,17 @@ public sealed class MainWindowViewModel : ObservableObject
                     segment.Kind == AssistantMessageSegmentKind.Thinking ? "thinking" : "content",
                     html,
                     segment.IsPending));
+            }
+
+            if (toolRuns.Count > consumedToolRunIds.Count)
+            {
+                toolRuns = toolRuns
+                    .Where(item => !consumedToolRunIds.Contains(item.Record.Id))
+                    .ToArray();
+            }
+            else
+            {
+                toolRuns = [];
             }
         }
         else if (!string.IsNullOrWhiteSpace(contentMarkdown))
@@ -1016,6 +1123,11 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 renderSegments.Add(new TranscriptRenderSegment("content", errorHtml, false));
             }
+        }
+
+        if (message.Role == MessageRole.Assistant && toolRuns.Count > 0)
+        {
+            InsertToolSegments(renderSegments, toolRuns);
         }
 
         return new TranscriptRenderItem(
@@ -1073,6 +1185,172 @@ public sealed class MainWindowViewModel : ObservableObject
             _ => toolRun.ResultSummary ?? "Tool activity updated."
         };
 
+    private Dictionary<Guid, IReadOnlyList<ToolRunPlacement>> BuildToolRunsByMessageId()
+    {
+        var result = new Dictionary<Guid, List<ToolRunPlacement>>();
+        var orderedMessages = _messages
+            .OrderBy(item => item.CreatedAtUtc)
+            .ToArray();
+
+        if (orderedMessages.Length == 0 || _toolRuns.Count == 0)
+        {
+            return [];
+        }
+
+        Guid? currentAssistantMessageId = null;
+        var messageIndex = 0;
+
+        foreach (var toolRun in _toolRuns.OrderBy(item => item.CreatedAtUtc))
+        {
+            if (_toolRunAnchors.TryGetValue(toolRun.Id, out var anchor))
+            {
+                AddPlacement(anchor.MessageId, new ToolRunPlacement(toolRun, anchor.AfterSegmentIndex));
+                continue;
+            }
+
+            if (toolRun.MessageId is Guid anchoredMessageId && toolRun.AfterSegmentIndex is int afterSegmentIndex)
+            {
+                AddPlacement(anchoredMessageId, new ToolRunPlacement(toolRun, afterSegmentIndex));
+                continue;
+            }
+
+            while (messageIndex < orderedMessages.Length && orderedMessages[messageIndex].CreatedAtUtc <= toolRun.CreatedAtUtc)
+            {
+                var message = orderedMessages[messageIndex++];
+                switch (message.Role)
+                {
+                    case MessageRole.Assistant:
+                        currentAssistantMessageId = message.Id;
+                        break;
+                    case MessageRole.User:
+                        currentAssistantMessageId = null;
+                        break;
+                }
+            }
+
+            if (currentAssistantMessageId is not Guid messageId)
+            {
+                continue;
+            }
+
+            AddPlacement(messageId, new ToolRunPlacement(toolRun, null));
+        }
+
+        return result.ToDictionary(item => item.Key, item => (IReadOnlyList<ToolRunPlacement>)item.Value);
+
+        void AddPlacement(Guid messageId, ToolRunPlacement placement)
+        {
+            if (!result.TryGetValue(messageId, out var toolRuns))
+            {
+                toolRuns = [];
+                result[messageId] = toolRuns;
+            }
+
+            toolRuns.Add(placement);
+        }
+    }
+
+    private static void InsertToolSegments(List<TranscriptRenderSegment> renderSegments, IReadOnlyList<ToolRunPlacement> toolRuns)
+    {
+        if (toolRuns.Count == 0)
+        {
+            return;
+        }
+
+        var baseSegments = renderSegments.ToArray();
+        if (baseSegments.Length == 0)
+        {
+            renderSegments.AddRange(toolRuns.Select(item => BuildToolSegment(item.Record)));
+            return;
+        }
+
+        var candidateIndexes = Enumerable.Range(0, baseSegments.Length)
+            .Where(index => baseSegments[index].Kind is "thinking" or "content")
+            .ToArray();
+
+        var buckets = new Dictionary<int, List<TranscriptRenderSegment>>();
+        var fallbackCursor = 0;
+
+        foreach (var placement in toolRuns.OrderBy(item => item.Record.CreatedAtUtc))
+        {
+            var afterSegmentIndex = ResolveInsertionIndex(placement.AfterSegmentIndex, candidateIndexes, fallbackCursor);
+            if (!placement.AfterSegmentIndex.HasValue && candidateIndexes.Length > 0 && fallbackCursor < candidateIndexes.Length - 1)
+            {
+                fallbackCursor++;
+            }
+
+            if (!buckets.TryGetValue(afterSegmentIndex, out var bucket))
+            {
+                bucket = [];
+                buckets[afterSegmentIndex] = bucket;
+            }
+
+            bucket.Add(BuildToolSegment(placement.Record));
+        }
+
+        renderSegments.Clear();
+        if (buckets.TryGetValue(-1, out var leadingSegments))
+        {
+            renderSegments.AddRange(leadingSegments);
+        }
+
+        for (var index = 0; index < baseSegments.Length; index++)
+        {
+            renderSegments.Add(baseSegments[index]);
+
+            if (buckets.TryGetValue(index, out var toolSegments))
+            {
+                renderSegments.AddRange(toolSegments);
+            }
+        }
+    }
+
+    private static int ResolveInsertionIndex(int? anchoredIndex, IReadOnlyList<int> candidateIndexes, int fallbackCursor)
+    {
+        if (candidateIndexes.Count == 0)
+        {
+            return -1;
+        }
+
+        if (anchoredIndex.HasValue)
+        {
+            if (anchoredIndex.Value < 0)
+            {
+                return -1;
+            }
+
+            return candidateIndexes
+                .Where(index => index <= anchoredIndex.Value)
+                .DefaultIfEmpty(candidateIndexes[0])
+                .Last();
+        }
+
+        return candidateIndexes[Math.Min(fallbackCursor, candidateIndexes.Count - 1)];
+    }
+
+    private static TranscriptRenderSegment BuildToolSegment(ToolExecutionRecord toolRun)
+        => new(
+            "tool",
+            string.Empty,
+            toolRun.Status is ToolExecutionStatus.Running or ToolExecutionStatus.AwaitingApproval,
+            BuildInlineToolSummary(toolRun),
+            toolRun.Status.ToString().ToLowerInvariant());
+
+    private static string BuildInlineToolSummary(ToolExecutionRecord toolRun)
+    {
+        using var arguments = ParseJsonObject(toolRun.ArgumentsJson);
+
+        return toolRun.ToolName switch
+        {
+            "read_workspace_file" => $"Read {ReadArgument(arguments, "relativePath", "file")}",
+            "write_workspace_file" => $"{ResolveWriteVerb(toolRun)} {ReadArgument(arguments, "relativePath", "file")}",
+            "run_shell_command" => $"Run {ReadArgument(arguments, "command", "command", maxLength: 44)}",
+            "list_workspace_files" => BuildListSummary(arguments),
+            "search_workspace_text" => $"Search {Quote(ReadArgument(arguments, "query", "text", maxLength: 28))}",
+            _ => HumanizeToolName(toolRun.ToolName)
+        };
+    }
+
     private static string BuildToolResultText(ToolExecutionRecord toolRun)
         => toolRun.Status switch
         {
@@ -1105,6 +1383,84 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             return json;
         }
+    }
+
+    private static JsonDocument? ParseJsonObject(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonDocument.Parse(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string BuildListSummary(JsonDocument? arguments)
+    {
+        var relativePath = ReadArgument(arguments, "relativePath", string.Empty);
+        return string.IsNullOrWhiteSpace(relativePath)
+            ? "List workspace"
+            : $"List {relativePath}";
+    }
+
+    private static string ResolveWriteVerb(ToolExecutionRecord toolRun)
+    {
+        if (!string.IsNullOrWhiteSpace(toolRun.ResultSummary) &&
+            toolRun.ResultSummary.StartsWith("Created ", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Create";
+        }
+
+        return "Write";
+    }
+
+    private static string Quote(string value)
+        => string.IsNullOrWhiteSpace(value) ? "\"\"" : $"\"{value}\"";
+
+    private static string ReadArgument(JsonDocument? arguments, string propertyName, string fallback, int? maxLength = null)
+    {
+        if (arguments?.RootElement.ValueKind == JsonValueKind.Object &&
+            arguments.RootElement.TryGetProperty(propertyName, out var property))
+        {
+            var value = property.ValueKind switch
+            {
+                JsonValueKind.String => property.GetString(),
+                JsonValueKind.Number => property.GetRawText(),
+                JsonValueKind.True => bool.TrueString,
+                JsonValueKind.False => bool.FalseString,
+                _ => null
+            };
+
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return TruncateInlineToolText(value, maxLength);
+            }
+        }
+
+        return fallback;
+    }
+
+    private static string TruncateInlineToolText(string value, int? maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.ReplaceLineEndings(" ").Trim();
+        if (!maxLength.HasValue || normalized.Length <= maxLength.Value)
+        {
+            return normalized;
+        }
+
+        return $"{normalized[..Math.Max(0, maxLength.Value - 1)]}…";
     }
 
     private static string HumanizeToolName(string toolName)
