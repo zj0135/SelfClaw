@@ -73,6 +73,17 @@ const selectedProfile = () => state.profiles.find((item) => item.id === state.se
 const selectedWorkspace = () => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null;
 const selectedPermissionMode = () => state.toolPermissionModes.find((item) => item.id === state.selectedToolPermissionModeId) || null;
 const isTeamMode = () => state.selectedConversationModeId === 'team';
+const fallbackStatusText = () => state.statusText || (state.isBusy ? '处理中' : '就绪');
+const selectedThemeLabel = () =>
+	state.themeOptions.find((item) => item.id === state.selectedThemeId)?.label ||
+	{
+		system: '跟随系统',
+		light: '浅色',
+		dark: '深色',
+	}[state.selectedThemeId || 'system'] ||
+	'跟随系统';
+const currentModelLabel = () => state.selectedProfileModel || selectedProfile()?.label || '未选择模型';
+const currentWorkspaceLabel = () => selectedWorkspace()?.label || '未绑定工作区';
 
 const profileDraft = () => {
 	const profile = selectedProfile();
@@ -197,7 +208,7 @@ function updateComposer() {
 	button.disabled = (!composerValue.trim() && !state.isBusy) || !state.selectedProfileId;
 	button.classList.toggle('loading', state.isBusy);
 	button.classList.toggle('idle', !state.isBusy);
-	button.setAttribute('aria-label', state.isBusy ? 'Stop generation' : 'Send message');
+	button.setAttribute('aria-label', state.isBusy ? '停止生成' : '发送消息');
 	button.setAttribute('title', state.isBusy ? '停止生成' : '发送消息');
 	button.innerHTML = renderSendButtonInner(state.isBusy);
 }
@@ -269,7 +280,7 @@ function renderThinkingSegment(item, segment, thinkingOrdinal, index, totalSegme
 }
 
 function renderToolSegment(segment, index, totalSegments) {
-	const label = segment.text || 'Tool call';
+	const label = segment.text || '工具调用';
 	const status = segment.status || 'completed';
 	const classes = ['tool-segment', status];
 	if (index === 0) {
@@ -457,7 +468,7 @@ function renderSettings() {
       <section class="settings-section">
         <div class="settings-section-header">
           <div class="settings-section-copy">
-            <div class="field-label">Model Profile</div>
+            <div class="field-label">模型配置</div>
             <div class="settings-section-title">模型配置</div>
           </div>
           <div class="settings-badge">${profile ? '已选择' : '未选择'}</div>
@@ -480,7 +491,7 @@ function renderSettings() {
       <section class="settings-section">
         <div class="settings-section-header">
           <div class="settings-section-copy">
-            <div class="field-label">Workspace</div>
+            <div class="field-label">工作区</div>
             <div class="settings-section-title">工作区</div>
           </div>
           <div class="settings-badge">${workspace ? '已绑定' : '未绑定'}</div>
@@ -502,10 +513,10 @@ function renderSettings() {
       <section class="settings-section">
         <div class="settings-section-header">
           <div class="settings-section-copy">
-            <div class="field-label">Appearance</div>
+            <div class="field-label">界面主题</div>
             <div class="settings-section-title">主题</div>
           </div>
-          <div class="settings-badge">${escapeHtml(state.selectedThemeId || 'system')}</div>
+          <div class="settings-badge">${escapeHtml(selectedThemeLabel())}</div>
         </div>
         <div class="field-group">
           <div class="field-label">界面主题</div>
@@ -587,7 +598,7 @@ function renderEditor() {
 						: `
           <div>
             <div class="field-label">显示名称</div>
-            <input id="editor-workspace-name" class="field-input" type="text" placeholder="例如：SelfClaw Workspace" value="${escapeHtml(editorState.draft.name)}" />
+            <input id="editor-workspace-name" class="field-input" type="text" placeholder="例如：SelfClaw 主工作区" value="${escapeHtml(editorState.draft.name)}" />
           </div>
           <div>
             <div class="field-label">工作区位置</div>
@@ -616,6 +627,9 @@ function render() {
 	const conversations = filteredConversations();
 	const permissionMode = selectedPermissionMode();
 	const permissionTitle = permissionMode?.description || '控制写文件和命令执行是否需要人工确认';
+	const statusText = fallbackStatusText();
+	const modelLabel = currentModelLabel();
+	const workspaceLabel = currentWorkspaceLabel();
 
 	app.innerHTML = `
     <div class="app-shell">
@@ -626,7 +640,7 @@ function render() {
             <div class="brand-name">SelfClaw</div>
             <div class="status-row">
               <span class="status-dot"></span>
-              <span>${escapeHtml(state.statusText || 'Ready')}</span>
+              <span>${escapeHtml(statusText)}</span>
             </div>
           </div>
         </div>
@@ -647,7 +661,7 @@ function render() {
                     <div class="conversation-time">${escapeHtml(item.timestamp)}</div>
                   </button>
                   <div class="conversation-menu-shell">
-                    <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="Conversation menu">...</button>
+                    <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="会话菜单">⋯</button>
                     ${menuOpen ? `<div class="conversation-menu"><button class="conversation-menu-item danger" data-action="delete-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">删除会话</button></div>` : ''}
                   </div>
                 </div>
@@ -677,10 +691,16 @@ function render() {
 							.join('')}
             <button class="mode-chip" type="button" disabled>协作</button>
           </div>
-          <div class="chip-row">
-            <div class="workbench-label">桌面工作台</div>
-            <button class="icon-btn" type="button" disabled>&#8801;</button>
-            <button class="icon-btn" type="button" disabled>&#8984;</button>
+          <div class="topbar-right">
+            <div class="context-pill" title="${escapeHtml(modelLabel)}">
+              <span class="context-label">模型</span>
+              <span class="context-value">${escapeHtml(modelLabel)}</span>
+            </div>
+            <div class="context-pill" title="${escapeHtml(workspaceLabel)}">
+              <span class="context-label">工作区</span>
+              <span class="context-value">${escapeHtml(workspaceLabel)}</span>
+            </div>
+            <button class="icon-btn" data-action="toggle-settings" type="button" aria-label="打开系统设置">设置</button>
           </div>
         </div>
         <section class="panel transcript-panel">
@@ -692,7 +712,7 @@ function render() {
               <span class="meta-pill">Enter 发送</span>
               <span class="meta-pill">Shift+Enter 换行</span>
               <span class="meta-pill">Esc 停止</span>
-              <span class="meta-pill status-pill">${escapeHtml(state.statusText || 'Ready')}</span>
+              <span class="meta-pill status-pill">${escapeHtml(statusText)}</span>
             </div>
             <div class="permission-control" title="${escapeHtml(permissionTitle)}">
               <select id="permission-select" class="permission-select" aria-label="工具权限模式" ${isTeamMode() ? 'disabled' : ''}>
@@ -702,7 +722,7 @@ function render() {
           </div>
           <div class="composer-grid">
             <textarea id="composer" class="composer-box" placeholder="描述你想构建的内容，例如修复 Bug、写脚本，或使用 /commit 提交仓库...">${escapeHtml(composerValue)}</textarea>
-            <button id="send-button" class="send-btn ${state.isBusy ? 'loading' : 'idle'}" type="button" aria-label="${state.isBusy ? 'Stop generation' : 'Send message'}" title="${state.isBusy ? '停止生成' : '发送消息'}">${renderSendButtonInner(state.isBusy)}</button>
+            <button id="send-button" class="send-btn ${state.isBusy ? 'loading' : 'idle'}" type="button" aria-label="${state.isBusy ? '停止生成' : '发送消息'}" title="${state.isBusy ? '停止生成' : '发送消息'}">${renderSendButtonInner(state.isBusy)}</button>
           </div>
         </section>
       </main>
@@ -710,7 +730,7 @@ function render() {
         <div class="steps-header">
           <div>
             <div class="steps-title">${isTeamMode() ? '团队动态' : '工具'}</div>
-            <div class="steps-subtitle">${isTeamMode() ? 'Team agents and export activity' : 'Agent runtime details'}</div>
+            <div class="steps-subtitle">${isTeamMode() ? '团队成员状态与导出进度' : '运行步骤与工具状态'}</div>
           </div>
           <div class="steps-count">${state.agentActivities.length}</div>
         </div>
