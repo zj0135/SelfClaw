@@ -6,6 +6,8 @@ public sealed record TranscriptRenderState(
     IReadOnlyList<TranscriptConversationItem> Conversations,
     string? SelectedConversationId,
     string Theme,
+    IReadOnlyList<ShellSelectOption> ConversationModes,
+    string? SelectedConversationModeId,
     IReadOnlyList<ShellSelectOption> Profiles,
     string? SelectedProfileId,
     string? SelectedProfileModel,

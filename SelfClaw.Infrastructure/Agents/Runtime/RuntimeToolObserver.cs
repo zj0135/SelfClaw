@@ -9,12 +9,20 @@ internal sealed class RuntimeToolObserver
 {
     private readonly ChannelWriter<ChatRuntimeEvent> _writer;
     private readonly Guid _conversationId;
+    private readonly Guid? _agentId;
+    private readonly Guid? _messageId;
     private readonly Dictionary<string, Stopwatch> _stopwatches = new(StringComparer.Ordinal);
 
-    public RuntimeToolObserver(ChannelWriter<ChatRuntimeEvent> writer, Guid conversationId)
+    public RuntimeToolObserver(
+        ChannelWriter<ChatRuntimeEvent> writer,
+        Guid conversationId,
+        Guid? agentId,
+        Guid? messageId)
     {
         _writer = writer;
         _conversationId = conversationId;
+        _agentId = agentId;
+        _messageId = messageId;
     }
 
     public ToolExecutionRecord Start(string toolName, string argumentsJson)
@@ -32,7 +40,8 @@ internal sealed class RuntimeToolObserver
             null,
             now,
             now,
-            null,
+            _agentId,
+            _messageId,
             null);
 
         _stopwatches[correlationId] = Stopwatch.StartNew();

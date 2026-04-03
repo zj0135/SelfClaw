@@ -22,9 +22,10 @@ internal static class SqliteMappings
             reader.GetString(1),
             ReadGuid(reader, 2),
             reader.IsDBNull(3) ? null : ReadGuid(reader, 3),
-            (ToolPermissionMode)reader.GetInt32(4),
-            ReadDateTimeOffset(reader, 5),
-            ReadDateTimeOffset(reader, 6));
+            (ConversationMode)reader.GetInt32(4),
+            (ToolPermissionMode)reader.GetInt32(5),
+            ReadDateTimeOffset(reader, 6),
+            ReadDateTimeOffset(reader, 7));
 
     public static MessageRecord ReadMessage(SqliteDataReader reader)
         => new(
@@ -35,10 +36,25 @@ internal static class SqliteMappings
             (MessageStatus)reader.GetInt32(4),
             ReadDateTimeOffset(reader, 5),
             ReadDateTimeOffset(reader, 6),
-            reader.IsDBNull(7) ? null : reader.GetInt32(7),
-            reader.IsDBNull(8) ? null : reader.GetInt32(8),
-            reader.IsDBNull(9) ? null : reader.GetDouble(9),
-            reader.IsDBNull(10) ? null : reader.GetString(10));
+            reader.IsDBNull(7) ? null : ReadGuid(reader, 7),
+            reader.IsDBNull(8) ? null : reader.GetString(8),
+            reader.IsDBNull(9) ? null : reader.GetString(9),
+            reader.IsDBNull(10) ? null : reader.GetInt32(10),
+            reader.IsDBNull(11) ? null : reader.GetInt32(11),
+            reader.IsDBNull(12) ? null : reader.GetDouble(12),
+            reader.IsDBNull(13) ? null : reader.GetString(13));
+
+    public static TeamAgentRecord ReadTeamAgent(SqliteDataReader reader)
+        => new(
+            ReadGuid(reader, 0),
+            ReadGuid(reader, 1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            (TeamAgentStatus)reader.GetInt32(5),
+            reader.GetInt32(6),
+            ReadDateTimeOffset(reader, 7),
+            ReadDateTimeOffset(reader, 8));
 
     public static ToolExecutionRecord ReadToolRun(SqliteDataReader reader)
         => new(
@@ -53,7 +69,8 @@ internal static class SqliteMappings
             ReadDateTimeOffset(reader, 8),
             ReadDateTimeOffset(reader, 9),
             reader.IsDBNull(10) ? null : ReadGuid(reader, 10),
-            reader.IsDBNull(11) ? null : reader.GetInt32(11));
+            reader.IsDBNull(11) ? null : ReadGuid(reader, 11),
+            reader.IsDBNull(12) ? null : reader.GetInt32(12));
 
     public static WorkspaceRoot ReadWorkspaceRoot(SqliteDataReader reader)
         => new(

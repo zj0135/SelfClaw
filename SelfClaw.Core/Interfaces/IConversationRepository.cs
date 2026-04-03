@@ -18,6 +18,10 @@ public interface IConversationRepository
 
     Task<MessageRecord> UpsertMessageAsync(MessageRecord message, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<TeamAgentRecord>> ListTeamAgentsAsync(Guid conversationId, CancellationToken cancellationToken = default);
+
+    Task<TeamAgentRecord> UpsertTeamAgentAsync(TeamAgentRecord teamAgent, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
     Task<ToolExecutionRecord> UpsertToolExecutionAsync(ToolExecutionRecord record, CancellationToken cancellationToken = default);

@@ -1,3 +1,5 @@
 namespace SelfClaw.Core.Runtime;
 
-public sealed record AssistantDeltaEvent(string DeltaMarkdown) : ChatRuntimeEvent;
+public sealed record AssistantDeltaEvent(
+    Guid MessageId,
+    string DeltaMarkdown) : ChatRuntimeEvent;

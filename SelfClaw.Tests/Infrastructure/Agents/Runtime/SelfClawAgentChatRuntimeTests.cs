@@ -1,13 +1,14 @@
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.Agents;
+using SelfClaw.Infrastructure.Tools;
 
 namespace SelfClaw.Tests.Runtime;
 
 public sealed class SelfClawAgentChatRuntimeTests
 {
     [Fact]
-    public void ExtractText_wraps_only_text_reasoning_content_in_think_tags()
+    public void ExtractText_wraps_only_text_reasoning_content_in_internal_thinking_markers()
     {
         var contents = new AIContent[]
         {
@@ -16,7 +17,8 @@ public sealed class SelfClawAgentChatRuntimeTests
             new TextContent(" after")
         };
 
-        SelfClawAgentChatRuntime.ExtractTextFromContents(contents).Should().Be("Before <think>internal</think> after");
+        SelfClawAgentChatRuntime.ExtractTextFromContents(contents)
+            .Should().Be($"Before {AssistantMessageSegmenter.WrapThinking("internal")} after");
     }
 
     [Fact]

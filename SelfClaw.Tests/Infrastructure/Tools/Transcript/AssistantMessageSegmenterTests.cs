@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using SelfClaw.Infrastructure.Tools;
 
 namespace SelfClaw.Tests.Tools;
@@ -152,6 +152,17 @@ public sealed class AssistantMessageSegmenterTests
     }
 
     [Fact]
+    public void Split_extracts_internal_thinking_markers_even_when_inline_with_visible_content()
+    {
+        var result = AssistantMessageSegmenter.Split($"Before{AssistantMessageSegmenter.WrapThinking("hidden")}After");
+
+        result.ContentMarkdown.Should().Be("BeforeAfter");
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "hidden"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "BeforeAfter"));
+    }
+
+    [Fact]
     public void Split_does_not_extract_inline_think_tag_examples_inside_visible_text()
     {
         var result = AssistantMessageSegmenter.Split("Example XML: <think>value</think>\nNext");
@@ -201,5 +212,29 @@ public sealed class AssistantMessageSegmenterTests
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Two"),
             new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, secondToolExecutionId),
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Three"));
+    }
+
+    [Fact]
+    public void MergeFinalMarkdown_preserves_streamed_thinking_when_visible_content_matches()
+    {
+        var streamed = $"{AssistantMessageSegmenter.WrapThinking("plan")}Final answer";
+
+        AssistantMessageSegmenter.MergeFinalMarkdown("Final answer", streamed)
+            .Should().Be(streamed);
+    }
+
+    [Fact]
+    public void MergeFinalMarkdown_preserves_streamed_tool_anchor_positions_when_visible_content_matches()
+    {
+        var toolExecutionId = Guid.NewGuid();
+        var streamed = AssistantMessageSegmenter.AppendToolAnchor("Before", toolExecutionId) + "After";
+
+        var merged = AssistantMessageSegmenter.MergeFinalMarkdown("BeforeAfter", streamed);
+        var result = AssistantMessageSegmenter.Split(merged);
+
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Before"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, toolExecutionId),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "After"));
     }
 }

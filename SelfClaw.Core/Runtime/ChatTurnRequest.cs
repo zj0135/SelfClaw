@@ -7,6 +7,8 @@ public sealed record ChatTurnRequest(
     ProviderProfile Profile,
     string ApiKey,
     WorkspaceRoot? WorkspaceRoot,
+    ConversationMode Mode,
     ToolPermissionMode ToolPermissionMode,
     IToolApprovalHandler? ToolApprovalHandler,
-    IReadOnlyList<MessageRecord> Messages);
+    IReadOnlyList<MessageRecord> Messages,
+    IReadOnlyList<TeamAgentRecord> TeamAgents);

@@ -16,7 +16,7 @@ using SelfClaw.Infrastructure.Tools;
 
 namespace SelfClaw.Desktop.ViewModels;
 
-public sealed class MainWindowViewModel : ObservableObject
+public sealed partial class MainWindowViewModel : ObservableObject
 {
     private static readonly ShellSelectOption[] ToolPermissionOptions =
     [
@@ -24,10 +24,17 @@ public sealed class MainWindowViewModel : ObservableObject
         new("fullAccess", "完全访问权限", "允许 agent 直接写文件并执行 PowerShell")
     ];
 
+    private static readonly ShellSelectOption[] ConversationModeOptions =
+    [
+        new("team", "团队", "主 Agent 编排多个子 Agent 讨论并汇总文档"),
+        new("programming", "编程", "单 assistant 的工作区分析与编码助手")
+    ];
+
     private readonly IConversationRepository _conversationRepository;
     private readonly IProfileRepository _profileRepository;
     private readonly ISecretProtector _secretProtector;
     private readonly IAgentChatRuntime _agentChatRuntime;
+    private readonly IWorkspaceToolService _workspaceToolService;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly DesktopSettingsStore _desktopSettingsStore;
@@ -35,6 +42,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private readonly List<ConversationRecord> _allConversations = [];
     private readonly List<MessageRecord> _messages = [];
+    private readonly List<TeamAgentRecord> _teamAgents = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
     private readonly Dictionary<Guid, ToolRunAnchor> _toolRunAnchors = [];
     private CancellationTokenSource? _turnCancellationSource;
@@ -50,6 +58,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private ThemeOption? _selectedThemeOption;
     private ThemeMode _activeThemeMode = ThemeMode.System;
     private string _effectiveTranscriptTheme = "light";
+    private ConversationMode _selectedConversationMode = ConversationMode.Programming;
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
 
     public MainWindowViewModel(
@@ -57,6 +66,7 @@ public sealed class MainWindowViewModel : ObservableObject
         IProfileRepository profileRepository,
         ISecretProtector secretProtector,
         IAgentChatRuntime agentChatRuntime,
+        IWorkspaceToolService workspaceToolService,
         DesktopToolApprovalHandler toolApprovalHandler,
         MarkdownHtmlRenderer markdownHtmlRenderer,
         DesktopSettingsStore desktopSettingsStore,
@@ -66,6 +76,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _profileRepository = profileRepository;
         _secretProtector = secretProtector;
         _agentChatRuntime = agentChatRuntime;
+        _workspaceToolService = workspaceToolService;
         _toolApprovalHandler = toolApprovalHandler;
         _markdownHtmlRenderer = markdownHtmlRenderer;
         _desktopSettingsStore = desktopSettingsStore;
@@ -134,6 +145,18 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _effectiveTranscriptTheme, value);
     }
 
+    public ConversationMode SelectedConversationMode
+    {
+        get => _selectedConversationMode;
+        private set
+        {
+            if (SetProperty(ref _selectedConversationMode, value))
+            {
+                PublishShell(false);
+            }
+        }
+    }
+
     public ToolPermissionMode SelectedToolPermissionMode
     {
         get => _selectedToolPermissionMode;
@@ -163,6 +186,7 @@ public sealed class MainWindowViewModel : ObservableObject
             else
             {
                 _messages.Clear();
+                _teamAgents.Clear();
                 _toolRuns.Clear();
                 _toolRunAnchors.Clear();
                 PublishAgentActivities();
@@ -317,6 +341,9 @@ public sealed class MainWindowViewModel : ObservableObject
         PublishShell(false);
         return Task.CompletedTask;
     }
+
+    public Task SetConversationModeAsync(string? modeId)
+        => SetConversationModeCoreAsync(ParseConversationMode(modeId));
 
     public async Task DeleteConversationAsync(Guid conversationId)
     {
@@ -564,6 +591,7 @@ public sealed class MainWindowViewModel : ObservableObject
             "New chat",
             SelectedProfile.Id,
             SelectedWorkspaceRoot?.Id,
+            SelectedConversationMode,
             SelectedToolPermissionMode,
             now,
             now);
@@ -579,6 +607,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         var version = ++_selectionVersion;
         var messages = await _conversationRepository.ListMessagesAsync(conversation.Id);
+        var teamAgents = await _conversationRepository.ListTeamAgentsAsync(conversation.Id);
         var toolRuns = await _conversationRepository.ListToolExecutionsAsync(conversation.Id);
         if (version != _selectionVersion)
         {
@@ -587,6 +616,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         _messages.Clear();
         _messages.AddRange(messages);
+        _teamAgents.Clear();
+        _teamAgents.AddRange(teamAgents);
         _toolRuns.Clear();
         _toolRuns.AddRange(toolRuns);
         _toolRunAnchors.Clear();
@@ -602,6 +633,7 @@ public sealed class MainWindowViewModel : ObservableObject
         SelectedWorkspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
             ? WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
             : null;
+        SelectedConversationMode = conversation.Mode;
         SelectedToolPermissionMode = conversation.ToolPermissionMode;
         ApplyConversationFilter(conversation.Id);
 
@@ -627,11 +659,8 @@ public sealed class MainWindowViewModel : ObservableObject
         ComposerText = string.Empty;
         StatusText = "Streaming response...";
         _turnCancellationSource = new CancellationTokenSource();
-
-        MessageRecord? assistantMessage = null;
-        var accumulatedResponse = new StringBuilder();
-        var pendingBuffer = new StringBuilder();
-        var flushWatch = Stopwatch.StartNew();
+        var activeMessageIds = new HashSet<Guid>();
+        TeamDocumentReadyEvent? pendingTeamDocument = null;
 
         try
         {
@@ -640,6 +669,7 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 ProfileId = SelectedProfile.Id,
                 WorkspaceRootId = SelectedWorkspaceRoot?.Id,
+                Mode = SelectedConversationMode,
                 ToolPermissionMode = SelectedToolPermissionMode,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
@@ -661,17 +691,6 @@ public sealed class MainWindowViewModel : ObservableObject
                 conversation = conversation with { Title = CreateConversationTitle(prompt), UpdatedAtUtc = DateTimeOffset.UtcNow };
                 await PersistConversationAsync(conversation);
             }
-
-            assistantMessage = new MessageRecord(
-                Guid.NewGuid(),
-                conversation.Id,
-                MessageRole.Assistant,
-                string.Empty,
-                MessageStatus.Streaming,
-                DateTimeOffset.UtcNow,
-                DateTimeOffset.UtcNow);
-            _messages.Add(assistantMessage);
-            await _conversationRepository.UpsertMessageAsync(assistantMessage);
             PublishShell(true);
 
             var apiKey = await _secretProtector.RetrieveSecretAsync(SelectedProfile.SecretRef, _turnCancellationSource.Token);
@@ -680,8 +699,8 @@ public sealed class MainWindowViewModel : ObservableObject
                 throw new InvalidOperationException("The selected profile does not have a readable API key.");
             }
 
-            var requestMessages = _messages.Where(message => message.Id != assistantMessage.Id).ToArray();
-            ChatRuntimeCompletedEvent? completion = null;
+            var requestMessages = _messages.ToArray();
+            var requestTeamAgents = _teamAgents.ToArray();
 
             await foreach (var update in _agentChatRuntime.StreamTurnAsync(
                                new ChatTurnRequest(
@@ -689,102 +708,69 @@ public sealed class MainWindowViewModel : ObservableObject
                                    SelectedProfile,
                                    apiKey,
                                    SelectedWorkspaceRoot,
+                                   SelectedConversationMode,
                                    SelectedToolPermissionMode,
                                    _toolApprovalHandler,
-                                   requestMessages),
+                                   requestMessages,
+                                   requestTeamAgents),
                                _turnCancellationSource.Token))
             {
                 switch (update)
                 {
+                    case AssistantMessageStartedEvent started:
+                        activeMessageIds.Add(started.Message.Id);
+                        ReplaceMessage(started.Message);
+                        PublishShell(true);
+                        break;
                     case AssistantDeltaEvent delta:
-                        pendingBuffer.Append(delta.DeltaMarkdown);
-                        if (flushWatch.ElapsedMilliseconds >= 33)
-                        {
-                            FlushAssistantDelta();
-                        }
+                        ApplyAssistantDelta(delta.MessageId, delta.DeltaMarkdown);
                         break;
                     case ToolExecutionStartedEvent toolStarted:
-                        FlushAssistantDelta();
-                        InsertToolRunMarker(toolStarted.Record.Id);
                         var startedRecord = CaptureToolRunAnchor(toolStarted.Record);
                         UpsertToolRun(startedRecord);
                         await _conversationRepository.UpsertToolExecutionAsync(startedRecord);
                         PublishAgentActivities();
                         break;
                     case ToolExecutionCompletedEvent toolCompleted:
-                        FlushAssistantDelta();
                         var completedRecord = CaptureToolRunAnchor(toolCompleted.Record);
                         UpsertToolRun(completedRecord);
                         await _conversationRepository.UpsertToolExecutionAsync(completedRecord);
                         PublishAgentActivities();
                         break;
-                    case ChatRuntimeCompletedEvent completed:
-                        completion = completed;
+                    case AssistantMessageCompletedEvent completed:
+                        activeMessageIds.Remove(completed.Message.Id);
+                        await CompleteAssistantMessageAsync(completed.Message);
+                        break;
+                    case TeamAgentsPlannedEvent planned:
+                        await UpsertTeamAgentsAsync(planned.Agents);
+                        break;
+                    case TeamAgentStatusChangedEvent statusChanged:
+                        await UpdateTeamAgentStatusAsync(statusChanged.AgentId, statusChanged.Status);
+                        break;
+                    case TeamDocumentReadyEvent documentReady:
+                        pendingTeamDocument = documentReady;
                         break;
                 }
             }
 
-            FlushAssistantDelta();
-            var anchoredMarkdown = accumulatedResponse.ToString();
-            var finalMarkdown = anchoredMarkdown;
-            if (!string.IsNullOrWhiteSpace(completion?.FinalMarkdown) &&
-                (string.IsNullOrWhiteSpace(AssistantMessageSegmenter.RemoveToolAnchors(finalMarkdown)) ||
-                 completion.FinalMarkdown.Length > AssistantMessageSegmenter.RemoveToolAnchors(finalMarkdown).Length))
+            if (pendingTeamDocument is not null)
             {
-                finalMarkdown = AssistantMessageSegmenter.RestoreToolAnchors(completion.FinalMarkdown, anchoredMarkdown);
+                await FinalizeTeamDocumentExportAsync(conversation, pendingTeamDocument, _turnCancellationSource.Token);
             }
 
-            assistantMessage = assistantMessage with
-            {
-                MarkdownContent = finalMarkdown,
-                Status = MessageStatus.Completed,
-                UpdatedAtUtc = DateTimeOffset.UtcNow,
-                DurationMs = completion?.Duration.TotalMilliseconds,
-                InputTokens = completion?.InputTokens,
-                OutputTokens = completion?.OutputTokens,
-                ErrorMessage = null
-            };
-            ReplaceMessage(assistantMessage);
-            await _conversationRepository.UpsertMessageAsync(assistantMessage);
             StatusText = "Ready.";
             PublishShell(true);
         }
         catch (OperationCanceledException)
         {
-            if (assistantMessage is not null)
-            {
-                FlushAssistantDelta();
-                assistantMessage = assistantMessage with
-                {
-                    MarkdownContent = accumulatedResponse.ToString(),
-                    Status = MessageStatus.Failed,
-                    UpdatedAtUtc = DateTimeOffset.UtcNow,
-                    ErrorMessage = "Generation stopped."
-                };
-                ReplaceMessage(assistantMessage);
-                await _conversationRepository.UpsertMessageAsync(assistantMessage);
-            }
-
+            await FailActiveMessagesAsync(activeMessageIds, "Generation stopped.");
             StatusText = "Generation stopped.";
             PublishShell(true);
         }
         catch (Exception exception)
         {
             _logger.LogError(exception, "Chat turn failed.");
-            if (assistantMessage is not null)
-            {
-                FlushAssistantDelta();
-                assistantMessage = assistantMessage with
-                {
-                    MarkdownContent = accumulatedResponse.ToString(),
-                    Status = MessageStatus.Failed,
-                    UpdatedAtUtc = DateTimeOffset.UtcNow,
-                    ErrorMessage = exception.Message
-                };
-                ReplaceMessage(assistantMessage);
-                await _conversationRepository.UpsertMessageAsync(assistantMessage);
-            }
-
+            await FailActiveMessagesAsync(activeMessageIds, exception.Message);
             StatusText = exception.Message;
             PublishShell(true);
         }
@@ -793,79 +779,6 @@ public sealed class MainWindowViewModel : ObservableObject
             _turnCancellationSource?.Dispose();
             _turnCancellationSource = null;
             IsBusy = false;
-        }
-
-        void FlushAssistantDelta()
-        {
-            if (pendingBuffer.Length == 0 || assistantMessage is null)
-            {
-                return;
-            }
-
-            var delta = pendingBuffer.ToString();
-            pendingBuffer.Clear();
-            flushWatch.Restart();
-            accumulatedResponse.Append(delta);
-            assistantMessage = assistantMessage with
-            {
-                MarkdownContent = accumulatedResponse.ToString(),
-                UpdatedAtUtc = DateTimeOffset.UtcNow
-            };
-            ReplaceMessage(assistantMessage);
-            PublishShell(true);
-        }
-
-        void InsertToolRunMarker(Guid toolExecutionId)
-        {
-            if (assistantMessage is null || accumulatedResponse.ToString().Contains(toolExecutionId.ToString("D"), StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            var anchoredMarkdown = AssistantMessageSegmenter.AppendToolAnchor(accumulatedResponse.ToString(), toolExecutionId);
-            accumulatedResponse.Clear();
-            accumulatedResponse.Append(anchoredMarkdown);
-            assistantMessage = assistantMessage with
-            {
-                MarkdownContent = anchoredMarkdown,
-                UpdatedAtUtc = DateTimeOffset.UtcNow
-            };
-            ReplaceMessage(assistantMessage);
-        }
-
-        ToolExecutionRecord CaptureToolRunAnchor(ToolExecutionRecord toolRun)
-        {
-            if (_toolRunAnchors.TryGetValue(toolRun.Id, out var existingAnchor))
-            {
-                return toolRun with
-                {
-                    MessageId = existingAnchor.MessageId,
-                    AfterSegmentIndex = existingAnchor.AfterSegmentIndex
-                };
-            }
-
-            if (toolRun.MessageId is Guid messageId && toolRun.AfterSegmentIndex is int afterSegmentIndex)
-            {
-                _toolRunAnchors[toolRun.Id] = new ToolRunAnchor(messageId, afterSegmentIndex);
-                return toolRun;
-            }
-
-            if (assistantMessage is null)
-            {
-                return toolRun;
-            }
-
-            var segments = AssistantMessageSegmenter.Split(assistantMessage.MarkdownContent).Segments;
-            var anchor = new ToolRunAnchor(
-                assistantMessage.Id,
-                segments.Count - 1);
-
-            _toolRunAnchors[toolRun.Id] = anchor;
-            return toolRun with
-            {
-                MessageId = anchor.MessageId,
-                AfterSegmentIndex = anchor.AfterSegmentIndex
-            };
         }
     }
 
@@ -922,6 +835,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             ProfileId = SelectedProfile?.Id ?? conversation.ProfileId,
             WorkspaceRootId = SelectedWorkspaceRoot?.Id,
+            Mode = SelectedConversationMode,
             ToolPermissionMode = SelectedToolPermissionMode,
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
@@ -991,6 +905,8 @@ public sealed class MainWindowViewModel : ObservableObject
             .Select(BuildConversationItem)
             .ToArray();
 
+        var conversationModes = ConversationModeOptions;
+
         var profiles = Profiles
             .Select(profile => new ShellSelectOption(profile.Id.ToString("D"), profile.Name, profile.Endpoint))
             .ToArray();
@@ -1011,6 +927,8 @@ public sealed class MainWindowViewModel : ObservableObject
             conversations,
             SelectedConversation?.Id.ToString("D"),
             EffectiveTranscriptTheme,
+            conversationModes,
+            ConversationModeToId(SelectedConversationMode),
             profiles,
             SelectedProfile?.Id.ToString("D"),
             SelectedProfile?.Model,
@@ -1034,9 +952,19 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void PublishAgentActivities()
     {
-        var items = _toolRuns
+        var teamAgentItems = SelectedConversationMode == ConversationMode.Team
+            ? _teamAgents
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.CreatedAtUtc)
+                .Select(BuildTeamAgentActivityNode)
+            : [];
+
+        var toolItems = _toolRuns
             .OrderByDescending(item => item.CreatedAtUtc)
-            .Select(TranscriptToolRunPresenter.BuildActivityNode)
+            .Select(TranscriptToolRunPresenter.BuildActivityNode);
+
+        var items = teamAgentItems
+            .Concat(toolItems)
             .ToArray();
 
         ReplaceCollection(AgentActivityNodes, items);
@@ -1128,12 +1056,14 @@ public sealed class MainWindowViewModel : ObservableObject
             "message",
             message.Role.ToString().ToLowerInvariant(),
             message.Status.ToString().ToLowerInvariant(),
+            BuildAvatarText(message),
             message.Role switch
             {
                 MessageRole.User => string.Empty,
-                MessageRole.Assistant => string.Empty,
+                MessageRole.Assistant => message.AgentName ?? string.Empty,
                 _ => "System"
             },
+            message.Role == MessageRole.Assistant ? message.AgentRole : null,
             renderSegments,
             message.Role == MessageRole.Assistant && message.Status == MessageStatus.Streaming,
             null,

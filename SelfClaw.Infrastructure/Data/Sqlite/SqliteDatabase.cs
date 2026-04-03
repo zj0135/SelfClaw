@@ -81,12 +81,20 @@ CREATE TABLE IF NOT EXISTS conversations (
     title TEXT NOT NULL,
     profile_id TEXT NOT NULL,
     workspace_root_id TEXT NULL,
+    mode INTEGER NOT NULL DEFAULT 0,
     tool_permission_mode INTEGER NOT NULL DEFAULT 0,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
     FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE RESTRICT,
     FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
 );", cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "conversations",
+                "mode",
+                "ALTER TABLE conversations ADD COLUMN mode INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken);
 
             await EnsureColumnExistsAsync(
                 connection,
@@ -104,10 +112,48 @@ CREATE TABLE IF NOT EXISTS messages (
     status INTEGER NOT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
+    agent_id TEXT NULL,
+    agent_name TEXT NULL,
+    agent_role TEXT NULL,
     input_tokens INTEGER NULL,
     output_tokens INTEGER NULL,
     duration_ms REAL NULL,
     error_message TEXT NULL,
+    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);", cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "messages",
+                "agent_id",
+                "ALTER TABLE messages ADD COLUMN agent_id TEXT NULL;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "messages",
+                "agent_name",
+                "ALTER TABLE messages ADD COLUMN agent_name TEXT NULL;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "messages",
+                "agent_role",
+                "ALTER TABLE messages ADD COLUMN agent_role TEXT NULL;",
+                cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS team_agents (
+    id TEXT NOT NULL PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    goal_prompt TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    sort_order INTEGER NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken);
 
@@ -123,10 +169,18 @@ CREATE TABLE IF NOT EXISTS tool_runs (
     duration_ms REAL NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
+    agent_id TEXT NULL,
     message_id TEXT NULL,
     after_segment_index INTEGER NULL,
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "tool_runs",
+                "agent_id",
+                "ALTER TABLE tool_runs ADD COLUMN agent_id TEXT NULL;",
+                cancellationToken);
 
             await EnsureColumnExistsAsync(
                 connection,
@@ -144,10 +198,13 @@ CREATE TABLE IF NOT EXISTS tool_runs (
 
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_conversations_updated ON conversations(updated_at_utc DESC);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_team_agents_conversation_sort ON team_agents(conversation_id, sort_order, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_tool_runs_conversation_created ON tool_runs(conversation_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(1, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(2, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(3, CURRENT_TIMESTAMP);", cancellationToken);
+            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(4, CURRENT_TIMESTAMP);", cancellationToken);
+            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(5, CURRENT_TIMESTAMP);", cancellationToken);
 
             _initialized = true;
         }

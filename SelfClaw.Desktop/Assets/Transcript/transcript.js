@@ -8,6 +8,8 @@ const state = {
 	conversations: [],
 	selectedConversationId: null,
 	theme: 'dark',
+	conversationModes: [],
+	selectedConversationModeId: 'programming',
 	profiles: [],
 	selectedProfileId: null,
 	selectedProfileModel: null,
@@ -70,6 +72,7 @@ const renderOptions = (options, selectedId, placeholder) => {
 const selectedProfile = () => state.profiles.find((item) => item.id === state.selectedProfileId) || null;
 const selectedWorkspace = () => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null;
 const selectedPermissionMode = () => state.toolPermissionModes.find((item) => item.id === state.selectedToolPermissionModeId) || null;
+const isTeamMode = () => state.selectedConversationModeId === 'team';
 
 const profileDraft = () => {
 	const profile = selectedProfile();
@@ -192,7 +195,29 @@ function updateComposer() {
 	}
 
 	button.disabled = (!composerValue.trim() && !state.isBusy) || !state.selectedProfileId;
-	button.textContent = state.isBusy ? '停' : '发';
+	button.classList.toggle('loading', state.isBusy);
+	button.classList.toggle('idle', !state.isBusy);
+	button.setAttribute('aria-label', state.isBusy ? 'Stop generation' : 'Send message');
+	button.setAttribute('title', state.isBusy ? '停止生成' : '发送消息');
+	button.innerHTML = renderSendButtonInner(state.isBusy);
+}
+
+function renderSendButtonInner(isBusy) {
+	return isBusy
+		? `
+      <span class="send-btn-spinner" aria-hidden="true">
+        <span class="send-btn-spinner-ring"></span>
+        <span class="send-btn-spinner-core"></span>
+      </span>
+    `
+		: `
+      <span class="send-btn-arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h11"></path>
+          <path d="m12 5 7 7-7 7"></path>
+        </svg>
+      </span>
+    `;
 }
 
 const getMessageSegments = (item) => {
@@ -212,32 +237,21 @@ const getMessageSegments = (item) => {
 	return legacySegments;
 };
 
-const thinkingBlockId = (messageId, index) => `${messageId}:thinking:${index}`;
+const thinkingBlockId = (messageId, ordinal) => `${messageId}:thinking:${ordinal}`;
 
-function renderPendingThinking(isLast = false) {
-	return `
-      <section class="thinking-block pending ${isLast ? 'last' : ''}">
-        <div class="thinking-summary passive">
-          <span class="thinking-label">
-            <span class="thinking-dot live"></span>
-            <span>思考中...</span>
-          </span>
-        </div>
-      </section>
-    `;
+function renderPendingThinking(item, thinkingOrdinal, isLast = false) {
+	return renderThinkingSegment(item, { html: '', isPending: true }, thinkingOrdinal, isLast ? 0 : -1, 1);
 }
 
-function renderThinkingSegment(item, segment, index, totalSegments) {
+function renderThinkingSegment(item, segment, thinkingOrdinal, index, totalSegments) {
 	const isPending = Boolean(segment.isPending);
 	const isLast = index === totalSegments - 1;
 	const label = isPending && item.isThinking ? '思考中...' : '思考';
-
-	if (!segment.html) {
-		return renderPendingThinking(isLast);
-	}
-
-	const id = thinkingBlockId(item.id, index);
+	const id = thinkingBlockId(item.id, thinkingOrdinal);
 	const isOpen = openThoughts.has(id);
+	const contentHtml =
+		segment.html ||
+		'<p class="thinking-placeholder">思考内容流式接收中，展开后会继续实时更新。</p>';
 	return `
       <section class="thinking-block ${isOpen ? 'open' : ''} ${isPending ? 'pending' : ''} ${isLast ? 'last' : ''}" data-thinking-id="${escapeHtml(id)}">
         <button class="thinking-summary" type="button" data-action="toggle-thinking" data-thinking-id="${escapeHtml(id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
@@ -248,7 +262,7 @@ function renderThinkingSegment(item, segment, index, totalSegments) {
           <span class="thinking-chevron">&rsaquo;</span>
         </button>
         <div class="thinking-content">
-          <div class="thinking-markdown">${segment.html}</div>
+          <div class="thinking-markdown">${contentHtml}</div>
         </div>
       </section>
     `;
@@ -296,15 +310,17 @@ function renderBodySegment(segment, index, totalSegments) {
 function renderMessageContent(item) {
 	const segments = getMessageSegments(item);
 	if (!segments.length) {
-		return item.role === 'assistant' && item.isThinking ? `<div class="message-flow">${renderPendingThinking(true)}</div>` : '';
+		return item.role === 'assistant' && item.isThinking ? `<div class="message-flow">${renderPendingThinking(item, 0, true)}</div>` : '';
 	}
+
+	let thinkingOrdinal = 0;
 
 	return `
       <div class="message-flow">
         ${segments
 					.map((segment, index) =>
 						segment.kind === 'thinking'
-							? renderThinkingSegment(item, segment, index, segments.length)
+							? renderThinkingSegment(item, segment, thinkingOrdinal++, index, segments.length)
 							: segment.kind === 'tool'
 								? renderToolSegment(segment, index, segments.length)
 								: renderBodySegment(segment, index, segments.length)
@@ -326,16 +342,17 @@ function renderMessages() {
 
 	return state.items
 		.map((item) => {
-			const avatar = item.role === 'user' ? '你' : item.role === 'assistant' ? 'SC' : 'SYS';
+			const avatar = item.avatarLabel || (item.role === 'user' ? '你' : item.role === 'assistant' ? 'SC' : 'SYS');
 			const headerClass = item.title ? 'header' : 'header no-title';
 			const headerTitle = item.title ? `<span>${escapeHtml(item.title)}</span>` : '';
+			const headerSubtitle = item.subtitle ? `<span class="message-subtitle">${escapeHtml(item.subtitle)}</span>` : '';
 			return `
       <div class="message-row ${escapeHtml(item.role)} ${escapeHtml(item.status)}">
         <div class="message-avatar">${escapeHtml(avatar)}</div>
         <div class="message-main">
           <article class="item ${escapeHtml(item.kind)} ${escapeHtml(item.role)} ${escapeHtml(item.status)}">
             <div class="${headerClass}">
-              ${headerTitle}
+              <span class="message-heading">${headerTitle}${headerSubtitle}</span>
               <span>${escapeHtml(item.timestamp)}</span>
             </div>
             ${renderMessageContent(item)}
@@ -349,7 +366,9 @@ function renderMessages() {
 
 function renderActivities() {
 	if (!state.agentActivities?.length) {
-		return '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
+		return isTeamMode()
+			? '<div class="muted-placeholder">这里会显示团队成员状态、工具读取情况和 Markdown 导出进度。</div>'
+			: '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
 	}
 
 	return state.agentActivities
@@ -649,9 +668,14 @@ function render() {
       <main class="main-column">
         <div class="panel topbar">
           <div class="chip-row">
-		    <button class="mode-chip" type="button" disabled>团队</button>
+            ${state.conversationModes
+							.map(
+								(mode) => `
+              <button class="mode-chip ${mode.id === state.selectedConversationModeId ? 'active' : ''}" type="button" data-action="select-mode" data-mode-id="${escapeHtml(mode.id)}">${escapeHtml(mode.label)}</button>
+            `
+							)
+							.join('')}
             <button class="mode-chip" type="button" disabled>协作</button>
-            <button class="mode-chip active" type="button" disabled>编程</button>
           </div>
           <div class="chip-row">
             <div class="workbench-label">桌面工作台</div>
@@ -668,25 +692,25 @@ function render() {
               <span class="meta-pill">Enter 发送</span>
               <span class="meta-pill">Shift+Enter 换行</span>
               <span class="meta-pill">Esc 停止</span>
-              <span class="meta-pill">${escapeHtml(state.statusText || 'Ready')}</span>
+              <span class="meta-pill status-pill">${escapeHtml(state.statusText || 'Ready')}</span>
             </div>
             <div class="permission-control" title="${escapeHtml(permissionTitle)}">
-              <select id="permission-select" class="permission-select" aria-label="工具权限模式">
+              <select id="permission-select" class="permission-select" aria-label="工具权限模式" ${isTeamMode() ? 'disabled' : ''}>
                 ${renderOptions(state.toolPermissionModes, state.selectedToolPermissionModeId)}
               </select>
             </div>
           </div>
           <div class="composer-grid">
             <textarea id="composer" class="composer-box" placeholder="描述你想构建的内容，例如修复 Bug、写脚本，或使用 /commit 提交仓库...">${escapeHtml(composerValue)}</textarea>
-            <button id="send-button" class="send-btn" type="button">${state.isBusy ? '停' : '发'}</button>
+            <button id="send-button" class="send-btn ${state.isBusy ? 'loading' : 'idle'}" type="button" aria-label="${state.isBusy ? 'Stop generation' : 'Send message'}" title="${state.isBusy ? '停止生成' : '发送消息'}">${renderSendButtonInner(state.isBusy)}</button>
           </div>
         </section>
       </main>
       <aside class="panel steps-panel">
         <div class="steps-header">
           <div>
-            <div class="steps-title">工具</div>
-            <div class="steps-subtitle">Agent runtime details</div>
+            <div class="steps-title">${isTeamMode() ? '团队动态' : '工具'}</div>
+            <div class="steps-subtitle">${isTeamMode() ? 'Team agents and export activity' : 'Agent runtime details'}</div>
           </div>
           <div class="steps-count">${state.agentActivities.length}</div>
         </div>
@@ -735,6 +759,8 @@ window.chrome?.webview?.addEventListener('message', (event) => {
 
 	if (payload.type === 'replaceState') {
 		Object.assign(state, payload);
+		state.conversationModes = state.conversationModes || [];
+		state.selectedConversationModeId = state.selectedConversationModeId || 'programming';
 		state.toolPermissionModes = state.toolPermissionModes || [];
 		state.selectedToolPermissionModeId = state.selectedToolPermissionModeId || 'requireApproval';
 		render();
@@ -826,6 +852,11 @@ document.addEventListener('change', (event) => {
 		return;
 	}
 
+	if (event.target.id === 'conversation-mode-select') {
+		post({ type: 'select-conversation-mode', modeId: event.target.value });
+		return;
+	}
+
 	if (event.target.id === 'theme-select') {
 		post({ type: 'select-theme', themeId: event.target.value });
 	}
@@ -871,6 +902,10 @@ document.addEventListener('click', (event) => {
 			case 'new-conversation':
 				openConversationMenuId = null;
 				post({ type: 'new-conversation' });
+				break;
+			case 'select-mode':
+				openConversationMenuId = null;
+				post({ type: 'select-conversation-mode', modeId: actionElement.getAttribute('data-mode-id') });
 				break;
 			case 'select-conversation':
 				openConversationMenuId = null;

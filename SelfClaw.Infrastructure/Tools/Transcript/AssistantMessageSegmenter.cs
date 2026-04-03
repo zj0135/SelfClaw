@@ -7,12 +7,46 @@ public static class AssistantMessageSegmenter
 {
     private const string ThinkOpenTag = "<think>";
     private const string ThinkCloseTag = "</think>";
+    private const string InternalThinkOpenTag = "<!--selfclaw:think:start-->";
+    private const string InternalThinkCloseTag = "<!--selfclaw:think:end-->";
     private const string ToolAnchorPrefix = "<!--selfclaw:tool:";
     private const string ToolAnchorSuffix = "-->";
     private static readonly char[] TrimPrefixChars = ['\r', '\n', '\uFEFF', '\u200B', '\u200C', '\u200D', '\u2060'];
 
+    public static string WrapThinking(string? markdown)
+        => string.Concat(InternalThinkOpenTag, markdown ?? string.Empty, InternalThinkCloseTag);
+
     public static string AppendToolAnchor(string? markdown, Guid toolExecutionId)
         => string.Concat(markdown ?? string.Empty, CreateToolAnchor(toolExecutionId));
+
+    public static bool HasToolAnchors(string? markdown)
+        => !string.IsNullOrEmpty(markdown) &&
+           markdown.Contains(ToolAnchorPrefix, StringComparison.OrdinalIgnoreCase);
+
+    public static string MergeFinalMarkdown(string? markdown, string? streamedMarkdown)
+    {
+        var finalMarkdown = markdown ?? string.Empty;
+        if (string.IsNullOrEmpty(streamedMarkdown))
+        {
+            return finalMarkdown;
+        }
+
+        var streamedSegments = Split(streamedMarkdown);
+        var finalSegments = Split(finalMarkdown);
+        var streamedHasPendingThinking = streamedSegments.Segments.Any(item =>
+            item.Kind == AssistantMessageSegmentKind.Thinking && item.IsPending);
+
+        if (!streamedHasPendingThinking &&
+            string.Equals(streamedSegments.ContentMarkdown, finalSegments.ContentMarkdown, StringComparison.Ordinal) &&
+            (streamedSegments.HasThinking || HasToolAnchors(streamedMarkdown)))
+        {
+            return streamedMarkdown;
+        }
+
+        return HasToolAnchors(streamedMarkdown)
+            ? RestoreToolAnchors(finalMarkdown, streamedMarkdown)
+            : finalMarkdown;
+    }
 
     public static string RestoreToolAnchors(string? markdown, string? anchoredMarkdown)
     {
@@ -70,7 +104,8 @@ public static class AssistantMessageSegmenter
             return new AssistantMessageSegments(string.Empty, []);
         }
 
-        var source = markdown;
+        var internalThinking = ExtractInternalThinking(markdown);
+        var source = internalThinking.ContentMarkdown;
         var firstContentIndex = FindFirstNonWhitespace(source);
         var firstThinkIndex = FindNextThinkBlockIndex(source, firstContentIndex);
         var hasThinkBlock = firstThinkIndex >= 0;
@@ -78,7 +113,10 @@ public static class AssistantMessageSegmenter
 
         if (!hasThinkBlock && !hasToolAnchors)
         {
-            return BuildVisibleContentSegments(source);
+            var visibleOnly = BuildVisibleContentSegments(source);
+            return new AssistantMessageSegments(
+                visibleOnly.ContentMarkdown,
+                MergeInternalThinkingSegments(visibleOnly.Segments, internalThinking));
         }
 
         var segments = new List<AssistantMessageSegment>();
@@ -98,9 +136,9 @@ public static class AssistantMessageSegmenter
                 continue;
             }
 
-            if ((segments.LastOrDefault()?.Kind == AssistantMessageSegmentKind.Thinking ||
-                 IsThinkBlockBoundary(source, cursor)) &&
-                StartsWithIgnoreCase(source, cursor, ThinkOpenTag))
+            if (StartsWithIgnoreCase(source, cursor, ThinkOpenTag) &&
+                (segments.LastOrDefault()?.Kind == AssistantMessageSegmentKind.Thinking ||
+                 IsThinkBlockBoundary(source, cursor)))
             {
                 cursor += ThinkOpenTag.Length;
 
@@ -137,9 +175,11 @@ public static class AssistantMessageSegmenter
             cursor = nextSpecialIndex;
         }
 
+        var mergedSegments = MergeInternalThinkingSegments(MergeAdjacentThinkingSegments(segments), internalThinking);
+
         return new AssistantMessageSegments(
             NormalizeContentMarkdown(visibleContent.ToString()),
-            MergeAdjacentThinkingSegments(segments));
+            mergedSegments);
     }
 
     private static AssistantMessageSegments BuildVisibleContentSegments(string markdown)
@@ -228,6 +268,36 @@ public static class AssistantMessageSegmenter
         return mergedSegments;
     }
 
+    private static IReadOnlyList<AssistantMessageSegment> MergeInternalThinkingSegments(
+        IReadOnlyList<AssistantMessageSegment> segments,
+        InternalThinkingExtraction internalThinking)
+    {
+        if (!internalThinking.HasThinking)
+        {
+            return segments;
+        }
+
+        var internalSegment = new AssistantMessageSegment(
+            AssistantMessageSegmentKind.Thinking,
+            internalThinking.ThinkingMarkdown,
+            internalThinking.IsPending);
+
+        if (segments.Count > 0 && segments[0].Kind == AssistantMessageSegmentKind.Thinking)
+        {
+            return
+            [
+                internalSegment with
+                {
+                    Markdown = JoinThinkingMarkdown(internalSegment.Markdown, segments[0].Markdown),
+                    IsPending = internalSegment.IsPending || segments[0].IsPending
+                },
+                .. segments.Skip(1)
+            ];
+        }
+
+        return [internalSegment, .. segments];
+    }
+
     private static string JoinThinkingMarkdown(string current, string next)
     {
         if (string.IsNullOrWhiteSpace(current))
@@ -262,10 +332,7 @@ public static class AssistantMessageSegmenter
         => RemoveToolAnchors(markdown).TrimStart(TrimPrefixChars);
 
     private static string NormalizeThinkTagTransitions(string markdown)
-        => Regex.Replace(
-            markdown,
-            @"(?is)(</think>)[ \t]*(<think>)",
-            "$1\n$2");
+        => InsertThinkBoundaryNewline(markdown, ThinkCloseTag, ThinkOpenTag);
 
     private static int FindNextSpecialIndex(string source, int startIndex, bool includeThinkBlocks)
     {
@@ -290,26 +357,7 @@ public static class AssistantMessageSegmenter
     }
 
     private static int FindNextThinkBlockIndex(string source, int startIndex)
-    {
-        var searchIndex = Math.Max(0, startIndex);
-        while (searchIndex < source.Length)
-        {
-            var thinkIndex = source.IndexOf(ThinkOpenTag, searchIndex, StringComparison.OrdinalIgnoreCase);
-            if (thinkIndex < 0)
-            {
-                return -1;
-            }
-
-            if (IsThinkBlockBoundary(source, thinkIndex))
-            {
-                return thinkIndex;
-            }
-
-            searchIndex = thinkIndex + ThinkOpenTag.Length;
-        }
-
-        return -1;
-    }
+        => FindNextExternalThinkBlockIndex(source, startIndex);
 
     private static List<ToolAnchorPlacement> ExtractToolAnchors(string? markdown)
     {
@@ -340,6 +388,34 @@ public static class AssistantMessageSegmenter
 
     private static string CreateToolAnchor(Guid toolExecutionId)
         => $"{ToolAnchorPrefix}{toolExecutionId:D}{ToolAnchorSuffix}";
+
+    private static string InsertThinkBoundaryNewline(string markdown, string closeTag, string openTag)
+        => Regex.Replace(
+            markdown,
+            $"(?is)({Regex.Escape(closeTag)})[ \\t]*({Regex.Escape(openTag)})",
+            "$1\n$2");
+
+    private static int FindNextExternalThinkBlockIndex(string source, int startIndex)
+    {
+        var searchIndex = Math.Max(0, startIndex);
+        while (searchIndex < source.Length)
+        {
+            var thinkIndex = source.IndexOf(ThinkOpenTag, searchIndex, StringComparison.OrdinalIgnoreCase);
+            if (thinkIndex < 0)
+            {
+                return -1;
+            }
+
+            if (IsThinkBlockBoundary(source, thinkIndex))
+            {
+                return thinkIndex;
+            }
+
+            searchIndex = thinkIndex + ThinkOpenTag.Length;
+        }
+
+        return -1;
+    }
 
     private static bool TryReadToolAnchor(string source, int index, out Guid toolExecutionId, out int markerLength)
     {
@@ -420,5 +496,53 @@ public static class AssistantMessageSegmenter
         => value is ' ' or '\t' or '\uFEFF' or '\u200B' or '\u200C' or '\u200D' or '\u2060';
 
     private sealed record ToolAnchorPlacement(Guid ToolExecutionId, int Offset);
+
+    private static InternalThinkingExtraction ExtractInternalThinking(string markdown)
+    {
+        if (string.IsNullOrEmpty(markdown))
+        {
+            return new InternalThinkingExtraction(string.Empty, string.Empty, false);
+        }
+
+        var visibleContent = new StringBuilder(markdown.Length);
+        var thinkingContent = new StringBuilder();
+        var cursor = 0;
+        var isPending = false;
+
+        while (cursor < markdown.Length)
+        {
+            if (!StartsWithIgnoreCase(markdown, cursor, InternalThinkOpenTag))
+            {
+                visibleContent.Append(markdown[cursor]);
+                cursor++;
+                continue;
+            }
+
+            cursor += InternalThinkOpenTag.Length;
+            var closeIndex = markdown.IndexOf(InternalThinkCloseTag, cursor, StringComparison.OrdinalIgnoreCase);
+            if (closeIndex < 0)
+            {
+                thinkingContent.Append(markdown[cursor..]);
+                isPending = true;
+                break;
+            }
+
+            thinkingContent.Append(markdown, cursor, closeIndex - cursor);
+            cursor = closeIndex + InternalThinkCloseTag.Length;
+        }
+
+        return new InternalThinkingExtraction(
+            visibleContent.ToString(),
+            NormalizeThinkingMarkdown(thinkingContent.ToString()),
+            isPending);
+    }
+
+    private sealed record InternalThinkingExtraction(
+        string ContentMarkdown,
+        string ThinkingMarkdown,
+        bool IsPending)
+    {
+        public bool HasThinking => IsPending || !string.IsNullOrWhiteSpace(ThinkingMarkdown);
+    }
 }
 

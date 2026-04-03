@@ -15,7 +15,7 @@ namespace SelfClaw.Desktop;
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
-    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, null, [], null, [], null, [], null, [], string.Empty, false);
+    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], string.Empty, false);
     private bool _webViewReady;
 
     public MainWindow(MainWindowViewModel viewModel)
@@ -96,6 +96,8 @@ public partial class MainWindow : Window
             conversations = state.Conversations,
             selectedConversationId = state.SelectedConversationId,
             theme = state.Theme,
+            conversationModes = state.ConversationModes,
+            selectedConversationModeId = state.SelectedConversationModeId,
             profiles = state.Profiles,
             selectedProfileId = state.SelectedProfileId,
             selectedProfileModel = state.SelectedProfileModel,
@@ -206,6 +208,9 @@ public partial class MainWindow : Window
                 }
                 case "select-tool-permission":
                     await _viewModel.SetToolPermissionModeAsync(document.RootElement.GetProperty("permissionModeId").GetString());
+                    break;
+                case "select-conversation-mode":
+                    await _viewModel.SetConversationModeAsync(document.RootElement.GetProperty("modeId").GetString());
                     break;
                 case "approve-tool-execution":
                 {
