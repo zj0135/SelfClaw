@@ -33,11 +33,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private static readonly ShellSelectOption[] TeamRoundOptions =
     [
-        new("1", "1 轮", "快速完成一轮串行讨论"),
-        new("2", "2 轮", "默认设置，先分析再互评"),
-        new("3", "3 轮", "适合中等复杂度方案讨论"),
-        new("4", "4 轮", "更充分地收敛分歧"),
-        new("5", "5 轮", "最深入，但耗时和 token 更高")
+        new("1", "1 轮", "最多 1 轮，由主 Agent 视情况提前收束"),
+        new("2", "2 轮", "最多 2 轮，默认设置"),
+        new("3", "3 轮", "最多 3 轮，适合中等复杂度讨论"),
+        new("4", "4 轮", "最多 4 轮，留出更多互评空间"),
+        new("5", "5 轮", "最多 5 轮，最充分但耗时更高")
     ];
 
     private static readonly ShellSelectOption[] TeamOutputModeOptions =

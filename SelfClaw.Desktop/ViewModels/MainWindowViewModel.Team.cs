@@ -86,8 +86,8 @@ public sealed partial class MainWindowViewModel
     {
         foreach (var agent in agents.OrderBy(item => item.SortOrder).ThenBy(item => item.CreatedAtUtc))
         {
-            UpsertTeamAgent(agent);
-            await _conversationRepository.UpsertTeamAgentAsync(agent);
+            var persisted = await _conversationRepository.UpsertTeamAgentAsync(agent);
+            UpsertTeamAgent(persisted);
         }
 
         PublishAgentActivities();

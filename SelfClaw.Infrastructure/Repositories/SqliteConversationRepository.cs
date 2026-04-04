@@ -153,9 +153,26 @@ ON CONFLICT(id) DO UPDATE SET
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
+WITH ranked AS (
+    SELECT id,
+           conversation_id,
+           name,
+           role,
+           goal_prompt,
+           status,
+           sort_order,
+           created_at_utc,
+           updated_at_utc,
+           ROW_NUMBER() OVER (
+               PARTITION BY conversation_id, lower(trim(name)), lower(trim(role))
+               ORDER BY sort_order ASC, updated_at_utc DESC, created_at_utc ASC, id ASC
+           ) AS rn
+    FROM team_agents
+    WHERE conversation_id = $conversationId
+)
 SELECT id, conversation_id, name, role, goal_prompt, status, sort_order, created_at_utc, updated_at_utc
-FROM team_agents
-WHERE conversation_id = $conversationId
+FROM ranked
+WHERE rn = 1
 ORDER BY sort_order ASC, created_at_utc ASC;";
         command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
 
@@ -172,6 +189,34 @@ ORDER BY sort_order ASC, created_at_utc ASC;";
     public async Task<TeamAgentRecord> UpsertTeamAgentAsync(TeamAgentRecord teamAgent, CancellationToken cancellationToken = default)
     {
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        var effectiveTeamAgent = teamAgent;
+
+        await using (var existingCommand = connection.CreateCommand())
+        {
+            existingCommand.CommandText = @"
+SELECT id, conversation_id, name, role, goal_prompt, status, sort_order, created_at_utc, updated_at_utc
+FROM team_agents
+WHERE conversation_id = $conversationId
+  AND lower(trim(name)) = lower(trim($name))
+  AND lower(trim(role)) = lower(trim($role))
+ORDER BY sort_order ASC, updated_at_utc DESC, created_at_utc ASC, id ASC
+LIMIT 1;";
+            existingCommand.Parameters.AddWithValue("$conversationId", teamAgent.ConversationId.ToString("D"));
+            existingCommand.Parameters.AddWithValue("$name", teamAgent.Name);
+            existingCommand.Parameters.AddWithValue("$role", teamAgent.Role);
+
+            await using var existingReader = await existingCommand.ExecuteReaderAsync(cancellationToken);
+            if (await existingReader.ReadAsync(cancellationToken))
+            {
+                var existing = SqliteMappings.ReadTeamAgent(existingReader);
+                effectiveTeamAgent = teamAgent with
+                {
+                    Id = existing.Id,
+                    CreatedAtUtc = existing.CreatedAtUtc
+                };
+            }
+        }
+
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 INSERT INTO team_agents(id, conversation_id, name, role, goal_prompt, status, sort_order, created_at_utc, updated_at_utc)
@@ -183,17 +228,17 @@ ON CONFLICT(id) DO UPDATE SET
     status = excluded.status,
     sort_order = excluded.sort_order,
     updated_at_utc = excluded.updated_at_utc;";
-        command.Parameters.AddWithValue("$id", teamAgent.Id.ToString("D"));
-        command.Parameters.AddWithValue("$conversationId", teamAgent.ConversationId.ToString("D"));
-        command.Parameters.AddWithValue("$name", teamAgent.Name);
-        command.Parameters.AddWithValue("$role", teamAgent.Role);
-        command.Parameters.AddWithValue("$goalPrompt", teamAgent.GoalPrompt);
-        command.Parameters.AddWithValue("$status", (int)teamAgent.Status);
-        command.Parameters.AddWithValue("$sortOrder", teamAgent.SortOrder);
-        command.Parameters.AddWithValue("$createdAt", teamAgent.CreatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$updatedAt", teamAgent.UpdatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$id", effectiveTeamAgent.Id.ToString("D"));
+        command.Parameters.AddWithValue("$conversationId", effectiveTeamAgent.ConversationId.ToString("D"));
+        command.Parameters.AddWithValue("$name", effectiveTeamAgent.Name);
+        command.Parameters.AddWithValue("$role", effectiveTeamAgent.Role);
+        command.Parameters.AddWithValue("$goalPrompt", effectiveTeamAgent.GoalPrompt);
+        command.Parameters.AddWithValue("$status", (int)effectiveTeamAgent.Status);
+        command.Parameters.AddWithValue("$sortOrder", effectiveTeamAgent.SortOrder);
+        command.Parameters.AddWithValue("$createdAt", effectiveTeamAgent.CreatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$updatedAt", effectiveTeamAgent.UpdatedAtUtc.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
-        return teamAgent;
+        return effectiveTeamAgent;
     }
 
     public async Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(Guid conversationId, CancellationToken cancellationToken = default)

@@ -40,7 +40,7 @@ public sealed class SelfClawAgentChatRuntimeTests
     [Fact]
     public async Task Team_mode_runs_workers_sequentially_across_rounds_and_shares_discussion_context()
     {
-        var executionService = new FakeAgentExecutionService(autoDocumentDecision: false);
+        var executionService = new FakeAgentExecutionService(autoDocumentDecision: false, desiredDiscussionRounds: 2);
         var runtime = new SelfClawAgentChatRuntime(new NullWorkspaceToolService(), executionService);
         var request = CreateTeamRequest(teamMaxRounds: 2, TeamOutputMode.ReplyOnly);
 
@@ -50,6 +50,7 @@ public sealed class SelfClawAgentChatRuntimeTests
             "Coordinator",
             "Product Manager",
             "Architect",
+            "Coordinator",
             "Product Manager",
             "Architect",
             "Coordinator");
@@ -57,12 +58,16 @@ public sealed class SelfClawAgentChatRuntimeTests
         executionService.Requests[2].Prompt.Should().Contain("PM round 1");
         executionService.Requests[2].Prompt.Should().NotContain("Architect round 1");
 
+        executionService.Requests[3].Prompt.Should().Contain("Current round: 1");
         executionService.Requests[3].Prompt.Should().Contain("PM round 1");
         executionService.Requests[3].Prompt.Should().Contain("Architect round 1");
-        executionService.Requests[3].Prompt.Should().NotContain("PM round 2");
 
-        executionService.Requests[4].Prompt.Should().Contain("PM round 2");
+        executionService.Requests[4].Prompt.Should().Contain("PM round 1");
         executionService.Requests[4].Prompt.Should().Contain("Architect round 1");
+        executionService.Requests[4].Prompt.Should().NotContain("PM round 2");
+
+        executionService.Requests[5].Prompt.Should().Contain("PM round 2");
+        executionService.Requests[5].Prompt.Should().Contain("Architect round 1");
 
         events.OfType<AssistantMessageCompletedEvent>()
             .Select(item => item.Message.AgentName)
@@ -72,9 +77,32 @@ public sealed class SelfClawAgentChatRuntimeTests
     }
 
     [Fact]
+    public async Task Team_mode_stops_early_when_coordinator_judges_no_more_rounds_are_needed()
+    {
+        var executionService = new FakeAgentExecutionService(autoDocumentDecision: false, desiredDiscussionRounds: 1);
+        var runtime = new SelfClawAgentChatRuntime(new NullWorkspaceToolService(), executionService);
+        var request = CreateTeamRequest(teamMaxRounds: 5, TeamOutputMode.ReplyOnly);
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(request));
+
+        executionService.Requests.Select(item => item.Name).Should().Equal(
+            "Coordinator",
+            "Product Manager",
+            "Architect",
+            "Coordinator",
+            "Coordinator");
+
+        executionService.Requests.Should().NotContain(item => item.Prompt.Contains("PM round 2", StringComparison.Ordinal));
+
+        events.OfType<AssistantMessageCompletedEvent>()
+            .Select(item => item.Message.AgentName)
+            .Should().Equal("Product Manager", "Architect", "Coordinator");
+    }
+
+    [Fact]
     public async Task Team_mode_only_prepares_document_export_when_requested_by_output_mode()
     {
-        var executionService = new FakeAgentExecutionService(autoDocumentDecision: false);
+        var executionService = new FakeAgentExecutionService(autoDocumentDecision: false, desiredDiscussionRounds: 1);
         var runtime = new SelfClawAgentChatRuntime(new NullWorkspaceToolService(), executionService);
         var request = CreateTeamRequest(
             teamMaxRounds: 1,
@@ -120,7 +148,7 @@ public sealed class SelfClawAgentChatRuntimeTests
                     Guid.NewGuid(),
                     conversationId,
                     MessageRole.User,
-                    "请团队顺序讨论后给出结论。",
+                    "Please discuss in sequence and then give a conclusion.",
                     MessageStatus.Completed,
                     now,
                     now)
@@ -153,10 +181,13 @@ public sealed class SelfClawAgentChatRuntimeTests
     {
         private readonly Dictionary<string, int> _agentRunCounts = new(StringComparer.OrdinalIgnoreCase);
         private readonly bool _autoDocumentDecision;
+        private readonly int _desiredDiscussionRounds;
+        private int _continuationDecisionCount;
 
-        public FakeAgentExecutionService(bool autoDocumentDecision)
+        public FakeAgentExecutionService(bool autoDocumentDecision, int desiredDiscussionRounds)
         {
             _autoDocumentDecision = autoDocumentDecision;
+            _desiredDiscussionRounds = desiredDiscussionRounds;
         }
 
         public List<CapturedAgentRequest> Requests { get; } = [];
@@ -173,10 +204,12 @@ public sealed class SelfClawAgentChatRuntimeTests
 
             var result = request.Name switch
             {
-                "Coordinator" when request.Instructions.Contains("Return JSON only", StringComparison.Ordinal) =>
-                    "{\"documentTitle\":\"Sequential Team Flow\",\"agents\":[{\"name\":\"Product Manager\",\"role\":\"Requirements\",\"mission\":\"Clarify the user intent and acceptance criteria.\"},{\"name\":\"Architect\",\"role\":\"Architecture\",\"mission\":\"Shape the technical design and trade-offs.\"}]}",
+                "Coordinator" when request.Instructions.Contains("Decide whether the specialist team needs another discussion round", StringComparison.Ordinal) =>
+                    $"{{\"continueDiscussion\":{(ShouldContinueDiscussion() ? "true" : "false")}}}",
                 "Coordinator" when request.Instructions.Contains("Decide whether the final team answer", StringComparison.Ordinal) =>
                     $"{{\"shouldExportDocument\":{(_autoDocumentDecision ? "true" : "false")}}}",
+                "Coordinator" when request.Instructions.Contains("Your job is to choose a compact team of specialists", StringComparison.Ordinal) =>
+                    "{\"documentTitle\":\"Sequential Team Flow\",\"agents\":[{\"name\":\"Product Manager\",\"role\":\"Requirements\",\"mission\":\"Clarify the user intent and acceptance criteria.\"},{\"name\":\"Architect\",\"role\":\"Architecture\",\"mission\":\"Shape the technical design and trade-offs.\"}]}",
                 "Coordinator" =>
                     "# Team Summary\n\nFinal coordinator answer.",
                 "Product Manager" =>
@@ -194,6 +227,12 @@ public sealed class SelfClawAgentChatRuntimeTests
             var next = _agentRunCounts.TryGetValue(agentName, out var current) ? current + 1 : 1;
             _agentRunCounts[agentName] = next;
             return next;
+        }
+
+        private bool ShouldContinueDiscussion()
+        {
+            _continuationDecisionCount++;
+            return _continuationDecisionCount < _desiredDiscussionRounds;
         }
     }
 

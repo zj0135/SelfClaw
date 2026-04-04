@@ -301,9 +301,7 @@ function renderThinkingSegment(item, segment, thinkingOrdinal, index, totalSegme
 	const label = isPending && item.isThinking ? '思考中...' : '思考';
 	const id = thinkingBlockId(item.id, thinkingOrdinal);
 	const isOpen = openThoughts.has(id);
-	const contentHtml =
-		segment.html ||
-		'<p class="thinking-placeholder">思考内容流式接收中，展开后会继续实时更新。</p>';
+	const contentHtml = segment.html || '<p class="thinking-placeholder">思考内容流式接收中，展开后会继续实时更新。</p>';
 	return `
       <section class="thinking-block ${isOpen ? 'open' : ''} ${isPending ? 'pending' : ''} ${isLast ? 'last' : ''}" data-thinking-id="${escapeHtml(id)}">
         <button class="thinking-summary" type="button" data-action="toggle-thinking" data-thinking-id="${escapeHtml(id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
@@ -764,7 +762,7 @@ function render() {
 	const teamRoundMode = selectedTeamRoundMode();
 	const teamOutputMode = selectedTeamOutputMode();
 	const permissionTitle = permissionMode?.description || '控制写文件和命令执行是否需要人工确认';
-	const teamRoundsTitle = teamRoundMode?.description || '设置团队串行讨论的最高轮次';
+	const teamRoundsTitle = teamRoundMode?.description || '设置团队讨论的最大轮次，由主 Agent 视情况提前结束';
 	const teamOutputTitle = teamOutputMode?.description || '设置团队最终以聊天总结还是按需导出文档';
 	const statusText = fallbackStatusText();
 	const modelLabel = currentModelLabel();
@@ -848,8 +846,6 @@ function render() {
         <section class="panel composer-panel">
           <div class="composer-toolbar">
             <div class="composer-meta">
-              <span class="meta-pill">Enter 发送</span>
-              <span class="meta-pill">Shift+Enter 换行</span>
               <span class="meta-pill">Esc 停止</span>
               <span class="meta-pill status-pill">${escapeHtml(statusText)}</span>
             </div>
@@ -858,8 +854,8 @@ function render() {
 								? `
               <div class="team-controls">
                 <label class="team-control" title="${escapeHtml(teamRoundsTitle)}">
-                  <span class="team-control-label">讨论轮次</span>
-                  <select id="team-round-select" class="permission-select" aria-label="团队讨论轮次">
+                  <span class="team-control-label">最大讨论轮次</span>
+                  <select id="team-round-select" class="permission-select" aria-label="团队最大讨论轮次">
                     ${renderOptions(state.teamRoundModes, state.selectedTeamRoundModeId)}
                   </select>
                 </label>

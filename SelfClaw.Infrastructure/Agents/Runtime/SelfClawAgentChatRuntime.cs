@@ -180,6 +180,21 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                     failedAgentIds.Add(agent.Id);
                 }
             }
+
+            if (roundNumber < maxRounds && failedAgentIds.Count < workerAgents.Length)
+            {
+                var shouldContinueDiscussion = await ShouldContinueTeamDiscussionAsync(
+                    request,
+                    discussionEntries,
+                    roundNumber,
+                    maxRounds,
+                    cancellationToken);
+
+                if (!shouldContinueDiscussion)
+                {
+                    break;
+                }
+            }
         }
 
         await writer.WriteAsync(new TeamAgentStatusChangedEvent(coordinator.Id, TeamAgentStatus.Running), cancellationToken);
@@ -333,11 +348,12 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
     private TeamPlan MaterializeTeamPlan(ChatTurnRequest request, TeamBlueprint blueprint)
     {
         var now = DateTimeOffset.UtcNow;
-        var existingAgentsByKey = request.TeamAgents.ToDictionary(BuildAgentKey, StringComparer.OrdinalIgnoreCase);
+        var existingTeamAgents = DeduplicateTeamAgents(request.TeamAgents);
+        var existingAgentsByKey = existingTeamAgents.ToDictionary(BuildAgentKey, StringComparer.OrdinalIgnoreCase);
         var plannedAgents = new List<TeamAgentRecord>();
         var consumedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var coordinator = request.TeamAgents.FirstOrDefault(agent =>
+        var coordinator = existingTeamAgents.FirstOrDefault(agent =>
             string.Equals(agent.Role, CoordinatorRole, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(agent.Name, CoordinatorName, StringComparison.OrdinalIgnoreCase));
 
@@ -397,7 +413,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
             sortOrder++;
         }
 
-        foreach (var existing in request.TeamAgents
+        foreach (var existing in existingTeamAgents
                      .OrderBy(agent => agent.SortOrder)
                      .ThenBy(agent => agent.CreatedAtUtc)
                      .Where(agent => !consumedKeys.Contains(BuildAgentKey(agent))))
@@ -423,6 +439,16 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 ? CreateDocumentTitleFromMessages(request.Messages)
                 : blueprint.DocumentTitle.Trim());
     }
+
+    private static IReadOnlyList<TeamAgentRecord> DeduplicateTeamAgents(IReadOnlyList<TeamAgentRecord> teamAgents)
+        => teamAgents
+            .GroupBy(BuildAgentKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderBy(agent => agent.SortOrder)
+                .ThenByDescending(agent => agent.UpdatedAtUtc)
+                .ThenBy(agent => agent.CreatedAtUtc)
+                .First())
+            .ToArray();
 
     private static IReadOnlyList<ChatMessage> BuildPromptMessages(IReadOnlyList<MessageRecord> messages)
         => messages
@@ -533,6 +559,33 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
             cancellationToken);
 
         return TryParseDocumentDecision(decisionResult.FinalMarkdown)?.ShouldExportDocument ?? false;
+    }
+
+    private async Task<bool> ShouldContinueTeamDiscussionAsync(
+        ChatTurnRequest request,
+        IReadOnlyList<DiscussionEntry> discussionEntries,
+        int currentRound,
+        int maxRounds,
+        CancellationToken cancellationToken)
+    {
+        if (currentRound >= maxRounds)
+        {
+            return false;
+        }
+
+        var decisionResult = await _agentExecutionService.RunAsync(
+            new AgentExecutionRequest(
+                request.Profile,
+                request.ApiKey,
+                CoordinatorName,
+                CoordinatorDescription,
+                BuildRoundContinuationDecisionInstructions(currentRound, maxRounds),
+                BuildRoundContinuationDecisionMessages(request.Messages, discussionEntries, currentRound, maxRounds),
+                []),
+            onTextDelta: null,
+            cancellationToken);
+
+        return TryParseRoundContinuationDecision(decisionResult.FinalMarkdown)?.ContinueDiscussion ?? false;
     }
 
     private static MessageRecord CreateAssistantMessage(
@@ -689,6 +742,18 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         return builder.ToString();
     }
 
+    private static string BuildRoundContinuationDecisionInstructions(int currentRound, int maxRounds)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Decide whether the specialist team needs another discussion round before the final coordinator summary.");
+        builder.AppendLine("Return JSON only with this schema:");
+        builder.AppendLine("{\"continueDiscussion\":true|false}");
+        builder.AppendLine($"The team has completed round {currentRound} and can discuss at most {maxRounds} rounds in total.");
+        builder.AppendLine("Choose true only when another round is likely to materially improve the answer by resolving important disagreements, filling major gaps, or challenging weak assumptions.");
+        builder.AppendLine("Choose false when the current discussion already has enough coverage or when another round would mostly repeat the same points.");
+        return builder.ToString();
+    }
+
     private static string BuildWorkerInstructions(TeamBlueprintAgent agent, WorkspaceRoot? workspaceRoot)
     {
         var builder = new StringBuilder();
@@ -726,14 +791,29 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         return promptMessages;
     }
 
+    private static IReadOnlyList<ChatMessage> BuildRoundContinuationDecisionMessages(
+        IReadOnlyList<MessageRecord> messages,
+        IReadOnlyList<DiscussionEntry> discussionEntries,
+        int currentRound,
+        int maxRounds)
+    {
+        var promptMessages = new List<ChatMessage>(BuildPromptMessages(messages))
+        {
+            new(ChatRole.System, $"Current round: {currentRound}. Maximum allowed rounds: {maxRounds}."),
+            new(ChatRole.System, discussionEntries.Count == 0 ? "No specialist discussion transcript is available." : BuildDiscussionTranscript(discussionEntries))
+        };
+
+        return promptMessages;
+    }
+
     private static string BuildWorkerRoundInstructions(int roundNumber, int maxRounds)
     {
         if (roundNumber <= 1)
         {
-            return $"This is discussion round 1 of {maxRounds}. Provide your initial analysis, preferred approach, major risks, and concrete recommendations from your specialty.";
+            return $"This is discussion round 1 of up to {maxRounds}. Provide your initial analysis, preferred approach, major risks, and concrete recommendations from your specialty.";
         }
 
-        return $"This is discussion round {roundNumber} of {maxRounds}. Read the shared specialist discussion carefully, react to the other agents by name when helpful, correct weak assumptions, resolve conflicts where possible, and add only the net-new insight or revisions that matter.";
+        return $"This is discussion round {roundNumber} of up to {maxRounds}. Read the shared specialist discussion carefully, react to the other agents by name when helpful, correct weak assumptions, resolve conflicts where possible, and add only the net-new insight or revisions that matter.";
     }
 
     private static string BuildDiscussionTranscript(IReadOnlyList<DiscussionEntry> discussionEntries)
@@ -906,6 +986,32 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         }
     }
 
+    private static RoundContinuationDecision? TryParseRoundContinuationDecision(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var json = ExtractJsonObject(raw);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<RoundContinuationDecision>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string? ExtractJsonObject(string raw)
     {
         var fenced = Regex.Match(raw, "```(?:json)?\\s*(\\{[\\s\\S]*\\})\\s*```", RegexOptions.IgnoreCase);
@@ -1018,4 +1124,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 
     private sealed record DocumentDecision(
         bool ShouldExportDocument);
+
+    private sealed record RoundContinuationDecision(
+        bool ContinueDiscussion);
 }
