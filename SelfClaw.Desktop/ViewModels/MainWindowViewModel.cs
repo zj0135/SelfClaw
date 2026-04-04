@@ -928,9 +928,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     private IEnumerable<ConversationRecord> GetFilteredConversations()
-        => SelectedWorkspaceRoot is null
-            ? _allConversations
-            : _allConversations.Where(item => item.WorkspaceRootId == SelectedWorkspaceRoot.Id);
+        => _allConversations.Where(MatchesConversationFilter);
+
+    private bool MatchesConversationFilter(ConversationRecord conversation)
+    {
+        if (conversation.Mode != SelectedConversationMode)
+        {
+            return false;
+        }
+
+        return SelectedWorkspaceRoot is null || conversation.WorkspaceRootId == SelectedWorkspaceRoot.Id;
+    }
 
     private void UpsertToolRun(ToolExecutionRecord record)
     {

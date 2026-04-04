@@ -46,28 +46,37 @@ public sealed partial class MainWindowViewModel
 
     private async Task SetConversationModeCoreAsync(ConversationMode nextMode)
     {
-        if (SelectedConversationMode == nextMode && SelectedConversation?.Mode == nextMode)
+        var previousConversation = SelectedConversation;
+        var previousConversationHasContent = _messages.Count > 0 || _toolRuns.Count > 0 || _teamAgents.Count > 0;
+
+        if (SelectedConversationMode == nextMode && previousConversation?.Mode == nextMode)
         {
             return;
         }
 
         SelectedConversationMode = nextMode;
 
-        if (SelectedConversation is null)
-        {
-            await CreateNewConversationAsync();
-            return;
-        }
-
         if (IsBusy)
         {
             return;
         }
 
-        var hasMessages = _messages.Count > 0 || _toolRuns.Count > 0 || _teamAgents.Count > 0;
-        if (!hasMessages)
+        var existingConversation = GetFilteredConversations().FirstOrDefault();
+        if (existingConversation is not null)
         {
-            var updated = SelectedConversation with
+            ApplyConversationFilter(existingConversation.Id);
+            return;
+        }
+
+        if (previousConversation is null)
+        {
+            await CreateNewConversationAsync();
+            return;
+        }
+
+        if (!previousConversationHasContent)
+        {
+            var updated = previousConversation with
             {
                 Mode = nextMode,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
@@ -76,10 +85,7 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
-        if (SelectedConversation.Mode != nextMode)
-        {
-            await CreateNewConversationAsync();
-        }
+        await CreateNewConversationAsync();
     }
 
     private async Task UpsertTeamAgentsAsync(IReadOnlyList<TeamAgentRecord> agents)
