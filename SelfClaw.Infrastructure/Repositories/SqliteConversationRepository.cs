@@ -21,7 +21,7 @@ public sealed class SqliteConversationRepository : IConversationRepository
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, created_at_utc, updated_at_utc
+SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode, created_at_utc, updated_at_utc
 FROM conversations
 ORDER BY updated_at_utc DESC;";
 
@@ -40,7 +40,7 @@ ORDER BY updated_at_utc DESC;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, created_at_utc, updated_at_utc
+SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode, created_at_utc, updated_at_utc
 FROM conversations
 WHERE id = $id
 LIMIT 1;";
@@ -57,14 +57,16 @@ LIMIT 1;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-INSERT INTO conversations(id, title, profile_id, workspace_root_id, mode, tool_permission_mode, created_at_utc, updated_at_utc)
-VALUES($id, $title, $profileId, $workspaceRootId, $mode, $toolPermissionMode, $createdAt, $updatedAt)
+INSERT INTO conversations(id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode, created_at_utc, updated_at_utc)
+VALUES($id, $title, $profileId, $workspaceRootId, $mode, $toolPermissionMode, $teamMaxRounds, $teamOutputMode, $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     profile_id = excluded.profile_id,
     workspace_root_id = excluded.workspace_root_id,
     mode = excluded.mode,
     tool_permission_mode = excluded.tool_permission_mode,
+    team_max_rounds = excluded.team_max_rounds,
+    team_output_mode = excluded.team_output_mode,
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", conversation.Id.ToString("D"));
         command.Parameters.AddWithValue("$title", conversation.Title);
@@ -72,6 +74,8 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$workspaceRootId", conversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$mode", (int)conversation.Mode);
         command.Parameters.AddWithValue("$toolPermissionMode", (int)conversation.ToolPermissionMode);
+        command.Parameters.AddWithValue("$teamMaxRounds", TeamDiscussionDefaults.ClampRounds(conversation.TeamMaxRounds));
+        command.Parameters.AddWithValue("$teamOutputMode", (int)conversation.TeamOutputMode);
         command.Parameters.AddWithValue("$createdAt", conversation.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", conversation.UpdatedAtUtc.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);

@@ -15,7 +15,6 @@ namespace SelfClaw.Infrastructure.Agents;
 public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 {
     private const int MaxTeamAgents = 5;
-    private const int MaxParallelTeamAgents = 3;
     private const string ProgrammingAgentName = "SelfClaw";
     private const string ProgrammingAgentRole = "Programming Assistant";
     private const string ProgrammingAgentDescription = "A personal desktop AI client for focused conversation and workspace assistance.";
@@ -31,9 +30,18 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         IWorkspaceToolService workspaceToolService,
         ILoggerFactory loggerFactory,
         IServiceProvider serviceProvider)
+        : this(
+            workspaceToolService,
+            new ChatClientAgentExecutionService(loggerFactory, serviceProvider))
+    {
+    }
+
+    internal SelfClawAgentChatRuntime(
+        IWorkspaceToolService workspaceToolService,
+        IAgentExecutionService agentExecutionService)
     {
         _workspaceToolService = workspaceToolService;
-        _agentExecutionService = new ChatClientAgentExecutionService(loggerFactory, serviceProvider);
+        _agentExecutionService = agentExecutionService;
     }
 
     public IAsyncEnumerable<ChatRuntimeEvent> StreamTurnAsync(
@@ -126,29 +134,53 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         var coordinator = teamPlan.Coordinator;
         var workerAgents = teamPlan.Agents
             .Where(agent => agent.Id != coordinator.Id)
+            .OrderBy(agent => agent.SortOrder)
+            .ThenBy(agent => agent.CreatedAtUtc)
             .Take(MaxTeamAgents - 1)
             .ToArray();
+        var maxRounds = TeamDiscussionDefaults.ClampRounds(request.TeamMaxRounds);
+        var discussionEntries = new List<DiscussionEntry>(workerAgents.Length * maxRounds);
+        var failedAgentIds = new HashSet<Guid>();
 
-        var workerOutputs = new List<WorkerOutput>(workerAgents.Length);
-        using var concurrencyGate = new SemaphoreSlim(MaxParallelTeamAgents);
-        var workerTasks = workerAgents.Select(async agent =>
+        for (var roundNumber = 1; roundNumber <= maxRounds; roundNumber++)
         {
-            await concurrencyGate.WaitAsync(cancellationToken);
-            try
+            if (failedAgentIds.Count >= workerAgents.Length)
             {
-                var output = await RunWorkerAgentAsync(request, writer, agent, cancellationToken);
-                lock (workerOutputs)
+                break;
+            }
+
+            if (roundNumber > 1)
+            {
+                foreach (var agent in workerAgents.Where(agent => !failedAgentIds.Contains(agent.Id)))
                 {
-                    workerOutputs.Add(output);
+                    await writer.WriteAsync(new TeamAgentStatusChangedEvent(agent.Id, TeamAgentStatus.Ready), cancellationToken);
                 }
             }
-            finally
-            {
-                concurrencyGate.Release();
-            }
-        }).ToArray();
 
-        await Task.WhenAll(workerTasks);
+            foreach (var agent in workerAgents)
+            {
+                if (failedAgentIds.Contains(agent.Id))
+                {
+                    continue;
+                }
+
+                var entry = await RunWorkerAgentAsync(
+                    request,
+                    writer,
+                    teamPlan.Agents,
+                    agent,
+                    roundNumber,
+                    maxRounds,
+                    discussionEntries,
+                    cancellationToken);
+
+                discussionEntries.Add(entry);
+                if (!entry.Succeeded)
+                {
+                    failedAgentIds.Add(agent.Id);
+                }
+            }
+        }
 
         await writer.WriteAsync(new TeamAgentStatusChangedEvent(coordinator.Id, TeamAgentStatus.Running), cancellationToken);
 
@@ -168,8 +200,8 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 request.ApiKey,
                 coordinator.Name,
                 CoordinatorDescription,
-                coordinator.GoalPrompt,
-                BuildCoordinatorSummaryMessages(request, teamPlan.DocumentTitle, workerOutputs),
+                BuildCoordinatorSummaryInstructions(request.WorkspaceRoot, request.TeamOutputMode),
+                BuildCoordinatorSummaryMessages(request, teamPlan.DocumentTitle, discussionEntries),
                 []),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(coordinatorMessageId, delta), token),
             cancellationToken);
@@ -187,18 +219,31 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 
         await writer.WriteAsync(new AssistantMessageCompletedEvent(completedCoordinatorMessage), cancellationToken);
         await writer.WriteAsync(new TeamAgentStatusChangedEvent(coordinator.Id, TeamAgentStatus.Completed), cancellationToken);
-        await writer.WriteAsync(
-            new TeamDocumentReadyEvent(
-                coordinatorMessageId,
+
+        if (await ShouldPrepareTeamDocumentAsync(
+                request,
+                teamPlan.DocumentTitle,
+                discussionEntries,
                 coordinatorResult.FinalMarkdown,
-                CreateTeamDocumentPath(teamPlan.DocumentTitle)),
-            cancellationToken);
+                cancellationToken))
+        {
+            await writer.WriteAsync(
+                new TeamDocumentReadyEvent(
+                    coordinatorMessageId,
+                    coordinatorResult.FinalMarkdown,
+                    CreateTeamDocumentPath(teamPlan.DocumentTitle)),
+                cancellationToken);
+        }
     }
 
-    private async Task<WorkerOutput> RunWorkerAgentAsync(
+    private async Task<DiscussionEntry> RunWorkerAgentAsync(
         ChatTurnRequest request,
         ChannelWriter<ChatRuntimeEvent> writer,
+        IReadOnlyList<TeamAgentRecord> plannedTeamAgents,
         TeamAgentRecord agent,
+        int roundNumber,
+        int maxRounds,
+        IReadOnlyList<DiscussionEntry> discussionEntries,
         CancellationToken cancellationToken)
     {
         await writer.WriteAsync(new TeamAgentStatusChangedEvent(agent.Id, TeamAgentStatus.Running), cancellationToken);
@@ -223,7 +268,13 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                     agent.Name,
                     $"Team specialist: {agent.Role}",
                     agent.GoalPrompt,
-                    BuildWorkerPromptMessages(request.Messages, request.TeamAgents, agent),
+                    BuildWorkerPromptMessages(
+                        request.Messages,
+                        plannedTeamAgents,
+                        agent,
+                        roundNumber,
+                        maxRounds,
+                        discussionEntries),
                     CreateTools(request, observer, includeWriteTools: false, includeShellTool: false)),
                 (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
                 cancellationToken);
@@ -241,7 +292,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 
             await writer.WriteAsync(new AssistantMessageCompletedEvent(completedMessage), cancellationToken);
             await writer.WriteAsync(new TeamAgentStatusChangedEvent(agent.Id, TeamAgentStatus.Completed), cancellationToken);
-            return new WorkerOutput(agent, result.FinalMarkdown, true, null);
+            return new DiscussionEntry(roundNumber, agent, result.FinalMarkdown, true, null);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -254,7 +305,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 
             await writer.WriteAsync(new AssistantMessageCompletedEvent(failedMessage), cancellationToken);
             await writer.WriteAsync(new TeamAgentStatusChangedEvent(agent.Id, TeamAgentStatus.Failed), cancellationToken);
-            return new WorkerOutput(agent, string.Empty, false, exception.Message);
+            return new DiscussionEntry(roundNumber, agent, string.Empty, false, exception.Message);
         }
     }
 
@@ -266,7 +317,10 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 request.ApiKey,
                 CoordinatorName,
                 CoordinatorDescription,
-                BuildCoordinatorPlanningInstructions(request.WorkspaceRoot, request.TeamAgents),
+                BuildCoordinatorPlanningInstructions(
+                    request.WorkspaceRoot,
+                    request.TeamAgents,
+                    TeamDiscussionDefaults.ClampRounds(request.TeamMaxRounds)),
                 BuildCoordinatorPlanningMessages(request.Messages, request.TeamAgents),
                 []),
             onTextDelta: null,
@@ -293,14 +347,14 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 request.ConversationId,
                 CoordinatorName,
                 CoordinatorRole,
-                BuildCoordinatorSummaryInstructions(request.WorkspaceRoot),
+                BuildCoordinatorSummaryInstructions(request.WorkspaceRoot, request.TeamOutputMode),
                 TeamAgentStatus.Ready,
                 0,
                 now,
                 now)
             : coordinator with
             {
-                GoalPrompt = BuildCoordinatorSummaryInstructions(request.WorkspaceRoot),
+                GoalPrompt = BuildCoordinatorSummaryInstructions(request.WorkspaceRoot, request.TeamOutputMode),
                 Status = TeamAgentStatus.Ready,
                 SortOrder = 0,
                 UpdatedAtUtc = now
@@ -396,60 +450,89 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 
     private static IReadOnlyList<ChatMessage> BuildWorkerPromptMessages(
         IReadOnlyList<MessageRecord> messages,
-        IReadOnlyList<TeamAgentRecord> existingTeamAgents,
-        TeamAgentRecord currentAgent)
+        IReadOnlyList<TeamAgentRecord> plannedTeamAgents,
+        TeamAgentRecord currentAgent,
+        int roundNumber,
+        int maxRounds,
+        IReadOnlyList<DiscussionEntry> discussionEntries)
     {
-        var roster = existingTeamAgents.Count == 0
+        var roster = plannedTeamAgents.Count == 0
             ? $"Current team roster:\n- {currentAgent.Name} ({currentAgent.Role})"
             : "Current team roster:\n" + string.Join(
                 "\n",
-                existingTeamAgents.OrderBy(agent => agent.SortOrder)
+                plannedTeamAgents.OrderBy(agent => agent.SortOrder)
                     .Select(agent => $"- {agent.Name} ({agent.Role})"));
 
         var promptMessages = new List<ChatMessage>
         {
             new(ChatRole.System, roster),
             new(ChatRole.System,
-                $"You are contributing as {currentAgent.Name} ({currentAgent.Role}). Do not write the final consolidated document; focus on your specialty and cite assumptions and risks explicitly.")
+                $"You are contributing as {currentAgent.Name} ({currentAgent.Role}). Do not write the final consolidated answer. Focus on your specialty, cite assumptions and risks explicitly, and react to the rest of the team when discussion context is available."),
+            new(ChatRole.System, BuildWorkerRoundInstructions(roundNumber, maxRounds))
         };
 
         promptMessages.AddRange(BuildPromptMessages(messages));
+
+        promptMessages.Add(new ChatMessage(
+            ChatRole.System,
+            discussionEntries.Count == 0
+                ? "No specialist discussion has happened yet."
+                : BuildDiscussionTranscript(discussionEntries)));
+
         return promptMessages;
     }
 
     private static IReadOnlyList<ChatMessage> BuildCoordinatorSummaryMessages(
         ChatTurnRequest request,
         string documentTitle,
-        IReadOnlyList<WorkerOutput> workerOutputs)
+        IReadOnlyList<DiscussionEntry> discussionEntries)
     {
         var promptMessages = new List<ChatMessage>(BuildPromptMessages(request.Messages));
-        var report = new StringBuilder();
-        report.AppendLine($"Target document title: {documentTitle}");
-        report.AppendLine("Team findings:");
-
-        foreach (var output in workerOutputs.OrderBy(item => item.Agent.SortOrder))
-        {
-            report.AppendLine();
-            report.AppendLine($"## {output.Agent.Name} ({output.Agent.Role})");
-            if (!output.Succeeded)
-            {
-                report.AppendLine("Status: failed");
-                report.AppendLine($"Reason: {output.ErrorMessage}");
-                continue;
-            }
-
-            report.AppendLine(output.Markdown);
-        }
-
-        promptMessages.Add(new ChatMessage(ChatRole.System, report.ToString()));
-        if (request.WorkspaceRoot is null)
-        {
-            promptMessages.Add(new ChatMessage(
-                ChatRole.System,
-                "No workspace is selected. Mention clearly that the final Markdown stays in chat only and no file was written."));
-        }
+        promptMessages.Add(new ChatMessage(ChatRole.System, $"Suggested document title if a file is needed: {documentTitle}"));
+        promptMessages.Add(new ChatMessage(
+            ChatRole.System,
+            discussionEntries.Count == 0
+                ? "No specialist discussion replies were produced. Summarize the user request directly and mention that the team discussion was empty."
+                : BuildDiscussionTranscript(discussionEntries)));
 
         return promptMessages;
+    }
+
+    private async Task<bool> ShouldPrepareTeamDocumentAsync(
+        ChatTurnRequest request,
+        string documentTitle,
+        IReadOnlyList<DiscussionEntry> discussionEntries,
+        string finalMarkdown,
+        CancellationToken cancellationToken)
+    {
+        if (request.WorkspaceRoot is null)
+        {
+            return false;
+        }
+
+        if (request.TeamOutputMode == TeamOutputMode.ReplyOnly)
+        {
+            return false;
+        }
+
+        if (request.TeamOutputMode == TeamOutputMode.AlwaysDocument)
+        {
+            return true;
+        }
+
+        var decisionResult = await _agentExecutionService.RunAsync(
+            new AgentExecutionRequest(
+                request.Profile,
+                request.ApiKey,
+                CoordinatorName,
+                CoordinatorDescription,
+                BuildDocumentDecisionInstructions(),
+                BuildDocumentDecisionMessages(request.Messages, documentTitle, discussionEntries, finalMarkdown),
+                []),
+            onTextDelta: null,
+            cancellationToken);
+
+        return TryParseDocumentDecision(decisionResult.FinalMarkdown)?.ShouldExportDocument ?? false;
     }
 
     private static MessageRecord CreateAssistantMessage(
@@ -530,7 +613,8 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 
     private static string BuildCoordinatorPlanningInstructions(
         WorkspaceRoot? workspaceRoot,
-        IReadOnlyList<TeamAgentRecord> existingTeamAgents)
+        IReadOnlyList<TeamAgentRecord> existingTeamAgents,
+        int maxRounds)
     {
         var builder = new StringBuilder();
         builder.AppendLine("You are the coordinator for a Windows desktop AI product.");
@@ -540,6 +624,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         builder.AppendLine("{\"documentTitle\":\"string\",\"agents\":[{\"name\":\"string\",\"role\":\"string\",\"mission\":\"string\"}]}");
         builder.AppendLine("Rules:");
         builder.AppendLine("- Team size limit is 5 total members including the coordinator.");
+        builder.AppendLine($"- The specialists will discuss the task for at most {maxRounds} rounds, so prefer a small team that can build on each other's feedback.");
         builder.AppendLine("- Prefer specialists like PM, architect, DBA, backend, security, frontend only when relevant.");
         builder.AppendLine("- Prefer reusing the existing team when it already covers the task.");
         builder.AppendLine("- Each mission should be one concise sentence focused on analysis, not coding.");
@@ -560,19 +645,47 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         return builder.ToString();
     }
 
-    private static string BuildCoordinatorSummaryInstructions(WorkspaceRoot? workspaceRoot)
+    private static string BuildCoordinatorSummaryInstructions(
+        WorkspaceRoot? workspaceRoot,
+        TeamOutputMode outputMode)
     {
         var builder = new StringBuilder();
         builder.AppendLine("You are the main coordinator in a team discussion workflow.");
-        builder.AppendLine("Write the final answer in Markdown as a design document suitable for saving to a .md file.");
-        builder.AppendLine("Structure the document with: title, background, requirements, proposed design, data model, key flows, risks, open questions, and implementation guidance.");
         builder.AppendLine("Synthesize and de-duplicate specialist feedback. Preserve conflicts as explicit decisions or open questions.");
         builder.AppendLine("Mention assumptions and unknowns clearly.");
-        if (workspaceRoot is null)
+        switch (outputMode)
         {
-            builder.AppendLine("Make it explicit that no workspace was selected, so the document remains in chat unless the user later selects one.");
+            case TeamOutputMode.ReplyOnly:
+                builder.AppendLine("Write the final answer in Markdown for chat.");
+                builder.AppendLine("Be direct and concise. Use sections only when they improve clarity.");
+                builder.AppendLine("Do not force the response into a standalone document unless the user explicitly asked for one.");
+                break;
+            case TeamOutputMode.AlwaysDocument:
+                builder.AppendLine("Write the final answer in Markdown as a design document suitable for saving to a .md file.");
+                builder.AppendLine("Structure the document with: title, background, requirements, proposed design, data model, key flows, risks, open questions, and implementation guidance.");
+                if (workspaceRoot is null)
+                {
+                    builder.AppendLine("Make it explicit that no workspace was selected, so the document remains in chat unless the user later selects one.");
+                }
+                break;
+            default:
+                builder.AppendLine("Write the final answer in Markdown for chat first.");
+                builder.AppendLine("Use a short summary structure that can stand alone in chat without feeling like a forced file export.");
+                builder.AppendLine("If the user clearly asked for a formal plan or specification, you may make the answer more document-like.");
+                break;
         }
 
+        return builder.ToString();
+    }
+
+    private static string BuildDocumentDecisionInstructions()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Decide whether the final team answer should also be exported as a Markdown document.");
+        builder.AppendLine("Return JSON only with this schema:");
+        builder.AppendLine("{\"shouldExportDocument\":true|false}");
+        builder.AppendLine("Choose true only when a saved document would materially help, such as for implementation plans, design specs, requirements docs, or persistent reports.");
+        builder.AppendLine("Choose false for normal Q&A, quick explanations, or ad-hoc opinions that are sufficient in chat.");
         return builder.ToString();
     }
 
@@ -583,6 +696,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         builder.AppendLine(agent.Mission);
         builder.AppendLine("Respond in Markdown.");
         builder.AppendLine("Focus on your specialty, surface assumptions, identify risks, and suggest concrete design choices.");
+        builder.AppendLine("The coordinator may call you for multiple discussion rounds, so you should refine your position when new specialist feedback appears.");
         builder.AppendLine("Do not write the final consolidated answer. Do not claim tools were used unless tool results were actually returned.");
         if (workspaceRoot is null)
         {
@@ -594,6 +708,64 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         }
 
         return builder.ToString();
+    }
+
+    private static IReadOnlyList<ChatMessage> BuildDocumentDecisionMessages(
+        IReadOnlyList<MessageRecord> messages,
+        string documentTitle,
+        IReadOnlyList<DiscussionEntry> discussionEntries,
+        string finalMarkdown)
+    {
+        var promptMessages = new List<ChatMessage>(BuildPromptMessages(messages))
+        {
+            new(ChatRole.System, $"Candidate document title: {documentTitle}"),
+            new(ChatRole.System, discussionEntries.Count == 0 ? "No specialist discussion transcript is available." : BuildDiscussionTranscript(discussionEntries)),
+            new(ChatRole.System, "Final team answer:\n" + finalMarkdown)
+        };
+
+        return promptMessages;
+    }
+
+    private static string BuildWorkerRoundInstructions(int roundNumber, int maxRounds)
+    {
+        if (roundNumber <= 1)
+        {
+            return $"This is discussion round 1 of {maxRounds}. Provide your initial analysis, preferred approach, major risks, and concrete recommendations from your specialty.";
+        }
+
+        return $"This is discussion round {roundNumber} of {maxRounds}. Read the shared specialist discussion carefully, react to the other agents by name when helpful, correct weak assumptions, resolve conflicts where possible, and add only the net-new insight or revisions that matter.";
+    }
+
+    private static string BuildDiscussionTranscript(IReadOnlyList<DiscussionEntry> discussionEntries)
+    {
+        var transcript = new StringBuilder();
+        transcript.AppendLine("Shared specialist discussion transcript:");
+
+        foreach (var roundGroup in discussionEntries
+                     .OrderBy(entry => entry.RoundNumber)
+                     .ThenBy(entry => entry.Agent.SortOrder)
+                     .ThenBy(entry => entry.Agent.CreatedAtUtc)
+                     .GroupBy(entry => entry.RoundNumber))
+        {
+            transcript.AppendLine();
+            transcript.AppendLine($"# Round {roundGroup.Key}");
+
+            foreach (var entry in roundGroup)
+            {
+                transcript.AppendLine();
+                transcript.AppendLine($"## {entry.Agent.Name} ({entry.Agent.Role})");
+                if (!entry.Succeeded)
+                {
+                    transcript.AppendLine("Status: failed");
+                    transcript.AppendLine($"Reason: {entry.ErrorMessage}");
+                    continue;
+                }
+
+                transcript.AppendLine(entry.Markdown);
+            }
+        }
+
+        return transcript.ToString();
     }
 
     private IList<AITool> CreateTools(
@@ -708,6 +880,32 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         }
     }
 
+    private static DocumentDecision? TryParseDocumentDecision(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var json = ExtractJsonObject(raw);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<DocumentDecision>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string? ExtractJsonObject(string raw)
     {
         var fenced = Regex.Match(raw, "```(?:json)?\\s*(\\{[\\s\\S]*\\})\\s*```", RegexOptions.IgnoreCase);
@@ -811,9 +1009,13 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         string Role,
         string Mission);
 
-    private sealed record WorkerOutput(
+    private sealed record DiscussionEntry(
+        int RoundNumber,
         TeamAgentRecord Agent,
         string Markdown,
         bool Succeeded,
         string? ErrorMessage);
+
+    private sealed record DocumentDecision(
+        bool ShouldExportDocument);
 }

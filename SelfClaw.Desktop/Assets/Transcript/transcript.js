@@ -17,8 +17,13 @@ const state = {
 	selectedWorkspaceRootId: null,
 	toolPermissionModes: [],
 	selectedToolPermissionModeId: 'requireApproval',
+	teamRoundModes: [],
+	selectedTeamRoundModeId: '2',
+	teamOutputModes: [],
+	selectedTeamOutputModeId: 'autoDocument',
 	themeOptions: [],
 	selectedThemeId: 'system',
+	teamMembers: [],
 	agentActivities: [],
 	statusText: '',
 	isBusy: false,
@@ -35,6 +40,15 @@ let openConversationMenuId = null;
 
 const openActivities = new Set();
 const openThoughts = new Set();
+const openStepSections = new Map([
+	['team-members', false],
+	['team-events', true],
+]);
+const openTeamMembers = new Map();
+const scrollFollowState = {
+	transcript: true,
+	transcriptPausedUntil: 0,
+};
 
 const emptyProfile = () => ({ profileId: null, name: '', endpoint: '', model: '', apiKey: '' });
 const emptyWorkspace = () => ({ workspaceRootId: null, name: '', rootPath: '' });
@@ -72,6 +86,9 @@ const renderOptions = (options, selectedId, placeholder) => {
 const selectedProfile = () => state.profiles.find((item) => item.id === state.selectedProfileId) || null;
 const selectedWorkspace = () => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null;
 const selectedPermissionMode = () => state.toolPermissionModes.find((item) => item.id === state.selectedToolPermissionModeId) || null;
+const selectedTeamRoundMode = () => state.teamRoundModes.find((item) => item.id === state.selectedTeamRoundModeId) || null;
+const selectedTeamOutputMode = () => state.teamOutputModes.find((item) => item.id === state.selectedTeamOutputModeId) || null;
+const visibleTeamMembers = () => state.teamMembers || [];
 const isTeamMode = () => state.selectedConversationModeId === 'team';
 const fallbackStatusText = () => state.statusText || (state.isBusy ? '处理中' : '就绪');
 const selectedThemeLabel = () =>
@@ -197,6 +214,30 @@ const restoreScroll = (id, snapshot, toBottom = false) => {
 	if (snapshot) {
 		element.scrollTop = snapshot.top;
 	}
+};
+
+const shouldAutoStickBottom = (snapshot, explicit = false) => explicit || Boolean(snapshot?.nearBottom);
+const isStepSectionOpen = (sectionId, defaultOpen = true) =>
+	openStepSections.has(sectionId) ? Boolean(openStepSections.get(sectionId)) : defaultOpen;
+const isTeamMemberOpen = (memberId) => (openTeamMembers.has(memberId) ? Boolean(openTeamMembers.get(memberId)) : false);
+const pauseTranscriptAutoFollow = (durationMs = 1200) => {
+	scrollFollowState.transcript = false;
+	scrollFollowState.transcriptPausedUntil = Date.now() + durationMs;
+};
+const resumeTranscriptAutoFollow = () => {
+	scrollFollowState.transcript = true;
+	scrollFollowState.transcriptPausedUntil = 0;
+};
+const canAutoFollowTranscript = (snapshot, explicit = false) => {
+	if (explicit) {
+		return true;
+	}
+
+	if (Date.now() < scrollFollowState.transcriptPausedUntil) {
+		return false;
+	}
+
+	return scrollFollowState.transcript && Boolean(snapshot?.nearBottom);
 };
 
 function updateComposer() {
@@ -378,7 +419,7 @@ function renderMessages() {
 function renderActivities() {
 	if (!state.agentActivities?.length) {
 		return isTeamMode()
-			? '<div class="muted-placeholder">这里会显示团队成员状态、工具读取情况和 Markdown 导出进度。</div>'
+			? '<div class="muted-placeholder">这里会显示每位成员的最新状态、工具调用以及按需触发的文档导出流程。</div>'
 			: '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
 	}
 
@@ -435,6 +476,100 @@ function renderActivities() {
     `;
 		})
 		.join('');
+}
+
+function renderTeamMembers() {
+	const members = visibleTeamMembers();
+	if (!members.length) {
+		return '<div class="muted-placeholder">这次会话的团队成员会在主 Agent 完成规划后出现在这里。</div>';
+	}
+
+	return members
+		.map((member) => {
+			const isOpen = isTeamMemberOpen(member.id);
+			const prompt = member.details.find((detail) => detail.label === 'Prompt')?.value || '';
+			return `
+      <article class="team-member-card ${escapeHtml(member.status)} ${isOpen ? 'open' : 'collapsed'}">
+        <button class="team-member-toggle" type="button" data-action="toggle-team-member" data-member-id="${escapeHtml(member.id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
+          <div class="team-member-top">
+            <div>
+              <div class="team-member-name">${escapeHtml(member.title)}</div>
+              <div class="team-member-role">${escapeHtml(member.summary)}</div>
+            </div>
+            <div class="team-member-meta">
+              <span class="team-member-status ${escapeHtml(member.status)}">${escapeHtml(member.statusLabel)}</span>
+              <span class="team-member-chevron">${isOpen ? '▾' : '▸'}</span>
+            </div>
+          </div>
+          <div class="team-member-time">${escapeHtml(member.timestamp)}</div>
+        </button>
+        <div class="team-member-body">
+          <div class="team-member-note">${escapeHtml(prompt || '该成员暂无额外说明。')}</div>
+        </div>
+      </article>
+    `;
+		})
+		.join('');
+}
+
+function renderStepsPanel() {
+	const memberCount = visibleTeamMembers().length;
+	const eventCount = state.agentActivities?.length || 0;
+	const totalCount = isTeamMode() ? memberCount + eventCount : eventCount;
+	const membersOpen = isStepSectionOpen('team-members', false);
+	const eventsOpen = isStepSectionOpen('team-events', true);
+
+	return `
+    <aside class="panel steps-panel">
+      <div class="steps-header">
+        <div>
+          <div class="steps-title">${isTeamMode() ? '团队动态' : '工具'}</div>
+          <div class="steps-subtitle">${isTeamMode() ? '团队成员与团队事件分区展示，滚动时保持当前位置。' : '运行步骤与工具状态'}</div>
+        </div>
+        <div class="steps-count">${totalCount}</div>
+      </div>
+      <div id="steps-scroll" class="steps-scroll">
+        ${
+					isTeamMode()
+						? `
+          <section class="steps-section-block ${membersOpen ? 'open' : 'collapsed'}">
+            <button class="steps-section-head steps-section-toggle" type="button" data-action="toggle-steps-section" data-section-id="team-members" aria-expanded="${membersOpen ? 'true' : 'false'}">
+              <div class="steps-section-heading">
+                <div class="steps-section-title">团队成员</div>
+                <div class="steps-section-count">${memberCount}</div>
+              </div>
+              <span class="steps-section-chevron">${membersOpen ? '▾' : '▸'}</span>
+            </button>
+            <div class="steps-section-body">
+              <div class="team-member-list">${renderTeamMembers()}</div>
+            </div>
+          </section>
+          <section class="steps-section-block ${eventsOpen ? 'open' : 'collapsed'}">
+            <button class="steps-section-head steps-section-toggle" type="button" data-action="toggle-steps-section" data-section-id="team-events" aria-expanded="${eventsOpen ? 'true' : 'false'}">
+              <div class="steps-section-heading">
+                <div class="steps-section-title">团队事件</div>
+                <div class="steps-section-count">${eventCount}</div>
+              </div>
+              <span class="steps-section-chevron">${eventsOpen ? '▾' : '▸'}</span>
+            </button>
+            <div class="steps-section-body">
+              <div class="activity-list">${renderActivities()}</div>
+            </div>
+          </section>
+        `
+						: `
+          <section class="steps-section-block">
+            <div class="steps-section-head">
+              <div class="steps-section-title">运行步骤</div>
+              <div class="steps-section-count">${eventCount}</div>
+            </div>
+            <div class="activity-list">${renderActivities()}</div>
+          </section>
+        `
+				}
+      </div>
+    </aside>
+  `;
 }
 
 function renderSettings() {
@@ -621,12 +756,16 @@ function renderEditor() {
 function render() {
 	const transcriptState = captureScroll('transcript-scroll');
 	const conversationState = captureScroll('conversation-list');
-	const activityState = captureScroll('activity-list');
+	const stepsState = captureScroll('steps-scroll');
 	setTheme(state.theme);
 
 	const conversations = filteredConversations();
 	const permissionMode = selectedPermissionMode();
+	const teamRoundMode = selectedTeamRoundMode();
+	const teamOutputMode = selectedTeamOutputMode();
 	const permissionTitle = permissionMode?.description || '控制写文件和命令执行是否需要人工确认';
+	const teamRoundsTitle = teamRoundMode?.description || '设置团队串行讨论的最高轮次';
+	const teamOutputTitle = teamOutputMode?.description || '设置团队最终以聊天总结还是按需导出文档';
 	const statusText = fallbackStatusText();
 	const modelLabel = currentModelLabel();
 	const workspaceLabel = currentWorkspaceLabel();
@@ -714,11 +853,32 @@ function render() {
               <span class="meta-pill">Esc 停止</span>
               <span class="meta-pill status-pill">${escapeHtml(statusText)}</span>
             </div>
-            <div class="permission-control" title="${escapeHtml(permissionTitle)}">
-              <select id="permission-select" class="permission-select" aria-label="工具权限模式" ${isTeamMode() ? 'disabled' : ''}>
-                ${renderOptions(state.toolPermissionModes, state.selectedToolPermissionModeId)}
-              </select>
-            </div>
+            ${
+							isTeamMode()
+								? `
+              <div class="team-controls">
+                <label class="team-control" title="${escapeHtml(teamRoundsTitle)}">
+                  <span class="team-control-label">讨论轮次</span>
+                  <select id="team-round-select" class="permission-select" aria-label="团队讨论轮次">
+                    ${renderOptions(state.teamRoundModes, state.selectedTeamRoundModeId)}
+                  </select>
+                </label>
+                <label class="team-control" title="${escapeHtml(teamOutputTitle)}">
+                  <span class="team-control-label">总结输出</span>
+                  <select id="team-output-select" class="permission-select" aria-label="团队总结输出方式">
+                    ${renderOptions(state.teamOutputModes, state.selectedTeamOutputModeId)}
+                  </select>
+                </label>
+              </div>
+            `
+								: `
+              <div class="permission-control" title="${escapeHtml(permissionTitle)}">
+                <select id="permission-select" class="permission-select" aria-label="工具权限模式">
+                  ${renderOptions(state.toolPermissionModes, state.selectedToolPermissionModeId)}
+                </select>
+              </div>
+            `
+						}
           </div>
           <div class="composer-grid">
             <textarea id="composer" class="composer-box" placeholder="描述你想构建的内容，例如修复 Bug、写脚本，或使用 /commit 提交仓库...">${escapeHtml(composerValue)}</textarea>
@@ -726,16 +886,7 @@ function render() {
           </div>
         </section>
       </main>
-      <aside class="panel steps-panel">
-        <div class="steps-header">
-          <div>
-            <div class="steps-title">${isTeamMode() ? '团队动态' : '工具'}</div>
-            <div class="steps-subtitle">${isTeamMode() ? '团队成员状态与导出进度' : '运行步骤与工具状态'}</div>
-          </div>
-          <div class="steps-count">${state.agentActivities.length}</div>
-        </div>
-        <div id="activity-list" class="activity-list">${renderActivities()}</div>
-      </aside>
+      ${renderStepsPanel()}
     </div>
   `;
 
@@ -743,8 +894,8 @@ function render() {
 	renderEditor();
 	updateComposer();
 	restoreScroll('conversation-list', conversationState);
-	restoreScroll('activity-list', activityState);
-	restoreScroll('transcript-scroll', transcriptState, state.autoScroll || pendingScrollToBottom || transcriptState?.nearBottom);
+	restoreScroll('steps-scroll', stepsState, false);
+	restoreScroll('transcript-scroll', transcriptState, canAutoFollowTranscript(transcriptState, pendingScrollToBottom));
 	requestAnimationFrame(syncConversationMenuPlacement);
 	pendingScrollToBottom = false;
 }
@@ -783,6 +934,11 @@ window.chrome?.webview?.addEventListener('message', (event) => {
 		state.selectedConversationModeId = state.selectedConversationModeId || 'programming';
 		state.toolPermissionModes = state.toolPermissionModes || [];
 		state.selectedToolPermissionModeId = state.selectedToolPermissionModeId || 'requireApproval';
+		state.teamRoundModes = state.teamRoundModes || [];
+		state.selectedTeamRoundModeId = state.selectedTeamRoundModeId || '2';
+		state.teamOutputModes = state.teamOutputModes || [];
+		state.selectedTeamOutputModeId = state.selectedTeamOutputModeId || 'autoDocument';
+		state.teamMembers = state.teamMembers || [];
 		render();
 		return;
 	}
@@ -869,6 +1025,16 @@ document.addEventListener('change', (event) => {
 
 	if (event.target.id === 'permission-select') {
 		post({ type: 'select-tool-permission', permissionModeId: event.target.value });
+		return;
+	}
+
+	if (event.target.id === 'team-round-select') {
+		post({ type: 'select-team-max-rounds', roundsId: event.target.value });
+		return;
+	}
+
+	if (event.target.id === 'team-output-select') {
+		post({ type: 'select-team-output-mode', outputModeId: event.target.value });
 		return;
 	}
 
@@ -1027,6 +1193,16 @@ document.addEventListener('click', (event) => {
 				actionElement.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
 				break;
 			}
+			case 'toggle-team-member': {
+				const memberId = actionElement.getAttribute('data-member-id');
+				if (!memberId) {
+					break;
+				}
+
+				openTeamMembers.set(memberId, !isTeamMemberOpen(memberId));
+				render();
+				break;
+			}
 			case 'toggle-activity': {
 				const id = actionElement.getAttribute('data-activity-id');
 				const card = actionElement.closest('.activity-card');
@@ -1047,6 +1223,16 @@ document.addEventListener('click', (event) => {
 				if (toggle) {
 					toggle.textContent = isOpen ? '详情' : '收起';
 				}
+				break;
+			}
+			case 'toggle-steps-section': {
+				const sectionId = actionElement.getAttribute('data-section-id');
+				if (!sectionId) {
+					break;
+				}
+
+				openStepSections.set(sectionId, !isStepSectionOpen(sectionId, true));
+				render();
 				break;
 			}
 			case 'approve-tool-execution':
@@ -1108,5 +1294,54 @@ document.addEventListener('click', (event) => {
 		render();
 	}
 });
+
+document.addEventListener(
+	'scroll',
+	(event) => {
+		const target = event.target instanceof HTMLElement ? event.target : null;
+		if (!target || target.id !== 'transcript-scroll') {
+			return;
+		}
+
+		const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 40;
+		if (nearBottom && Date.now() >= scrollFollowState.transcriptPausedUntil) {
+			resumeTranscriptAutoFollow();
+			return;
+		}
+
+		if (!nearBottom) {
+			scrollFollowState.transcript = false;
+		}
+	},
+	true
+);
+
+document.addEventListener(
+	'wheel',
+	(event) => {
+		const target = event.target instanceof Element ? event.target.closest('#transcript-scroll') : null;
+		if (!target) {
+			return;
+		}
+
+		if (event.deltaY < 0) {
+			pauseTranscriptAutoFollow(1600);
+		}
+	},
+	{ passive: true, capture: true }
+);
+
+document.addEventListener(
+	'pointerdown',
+	(event) => {
+		const target = event.target instanceof Element ? event.target.closest('#transcript-scroll') : null;
+		if (!target || !state.isBusy) {
+			return;
+		}
+
+		pauseTranscriptAutoFollow(900);
+	},
+	true
+);
 
 render();

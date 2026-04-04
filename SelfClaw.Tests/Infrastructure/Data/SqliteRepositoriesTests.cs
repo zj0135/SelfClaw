@@ -37,7 +37,17 @@ public sealed class SqliteRepositoriesTests : IDisposable
         var workspace = new WorkspaceRoot(Guid.NewGuid(), "Repo", "E:\\Demo\\SelfClaw", now, now);
         await conversationRepository.UpsertWorkspaceRootAsync(workspace);
 
-        var conversation = new ConversationRecord(Guid.NewGuid(), "Chat", profile.Id, workspace.Id, ToolPermissionMode.RequireApproval, now, now);
+        var conversation = new ConversationRecord(
+            Guid.NewGuid(),
+            "Chat",
+            profile.Id,
+            workspace.Id,
+            ConversationMode.Team,
+            ToolPermissionMode.RequireApproval,
+            4,
+            TeamOutputMode.AlwaysDocument,
+            now,
+            now);
         await conversationRepository.UpsertConversationAsync(conversation);
 
         var userMessage = new MessageRecord(Guid.NewGuid(), conversation.Id, MessageRole.User, "Hello", MessageStatus.Completed, now, now);
@@ -75,7 +85,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
     }
 
     [Fact]
-    public async Task Initialize_adds_tool_permission_mode_to_legacy_conversations_table()
+    public async Task Initialize_adds_team_discussion_columns_to_legacy_conversations_table()
     {
         var storagePaths = new StoragePaths(
             _rootPath,
@@ -115,6 +125,8 @@ CREATE TABLE conversations (
         }
 
         columns.Should().Contain("tool_permission_mode");
+        columns.Should().Contain("team_max_rounds");
+        columns.Should().Contain("team_output_mode");
     }
 
     [Fact]

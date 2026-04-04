@@ -24,8 +24,10 @@ internal static class SqliteMappings
             reader.IsDBNull(3) ? null : ReadGuid(reader, 3),
             (ConversationMode)reader.GetInt32(4),
             (ToolPermissionMode)reader.GetInt32(5),
-            ReadDateTimeOffset(reader, 6),
-            ReadDateTimeOffset(reader, 7));
+            TeamDiscussionDefaults.ClampRounds(reader.GetInt32(6)),
+            reader.IsDBNull(7) ? TeamDiscussionDefaults.DefaultOutputMode : (TeamOutputMode)reader.GetInt32(7),
+            ReadDateTimeOffset(reader, 8),
+            ReadDateTimeOffset(reader, 9));
 
     public static MessageRecord ReadMessage(SqliteDataReader reader)
         => new(

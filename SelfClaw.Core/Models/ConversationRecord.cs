@@ -7,6 +7,8 @@ public sealed record ConversationRecord(
     Guid? WorkspaceRootId,
     ConversationMode Mode,
     ToolPermissionMode ToolPermissionMode,
+    int TeamMaxRounds,
+    TeamOutputMode TeamOutputMode,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc)
 {
@@ -18,7 +20,40 @@ public sealed record ConversationRecord(
         ToolPermissionMode toolPermissionMode,
         DateTimeOffset createdAtUtc,
         DateTimeOffset updatedAtUtc)
-        : this(id, title, profileId, workspaceRootId, ConversationMode.Programming, toolPermissionMode, createdAtUtc, updatedAtUtc)
+        : this(
+            id,
+            title,
+            profileId,
+            workspaceRootId,
+            ConversationMode.Programming,
+            toolPermissionMode,
+            TeamDiscussionDefaults.DefaultMaxRounds,
+            TeamDiscussionDefaults.DefaultOutputMode,
+            createdAtUtc,
+            updatedAtUtc)
+    {
+    }
+
+    public ConversationRecord(
+        Guid id,
+        string title,
+        Guid profileId,
+        Guid? workspaceRootId,
+        ConversationMode mode,
+        ToolPermissionMode toolPermissionMode,
+        DateTimeOffset createdAtUtc,
+        DateTimeOffset updatedAtUtc)
+        : this(
+            id,
+            title,
+            profileId,
+            workspaceRootId,
+            mode,
+            toolPermissionMode,
+            TeamDiscussionDefaults.DefaultMaxRounds,
+            TeamDiscussionDefaults.DefaultOutputMode,
+            createdAtUtc,
+            updatedAtUtc)
     {
     }
 }

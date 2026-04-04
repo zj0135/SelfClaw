@@ -15,8 +15,13 @@ public sealed record TranscriptRenderState(
     string? SelectedWorkspaceRootId,
     IReadOnlyList<ShellSelectOption> ToolPermissionModes,
     string? SelectedToolPermissionModeId,
+    IReadOnlyList<ShellSelectOption> TeamRoundModes,
+    string? SelectedTeamRoundModeId,
+    IReadOnlyList<ShellSelectOption> TeamOutputModes,
+    string? SelectedTeamOutputModeId,
     IReadOnlyList<ShellSelectOption> ThemeOptions,
     string? SelectedThemeId,
+    IReadOnlyList<AgentActivityNode> TeamMembers,
     IReadOnlyList<AgentActivityNode> AgentActivities,
     string StatusText,
     bool IsBusy);

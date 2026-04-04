@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -26,8 +27,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private static readonly ShellSelectOption[] ConversationModeOptions =
     [
-        new("team", "团队", "主 Agent 编排多个子 Agent 讨论并汇总文档"),
+        new("team", "团队", "主 Agent 串行组织多个子 Agent 讨论并总结"),
         new("programming", "编程", "单 assistant 的工作区分析与编码助手")
+    ];
+
+    private static readonly ShellSelectOption[] TeamRoundOptions =
+    [
+        new("1", "1 轮", "快速完成一轮串行讨论"),
+        new("2", "2 轮", "默认设置，先分析再互评"),
+        new("3", "3 轮", "适合中等复杂度方案讨论"),
+        new("4", "4 轮", "更充分地收敛分歧"),
+        new("5", "5 轮", "最深入，但耗时和 token 更高")
+    ];
+
+    private static readonly ShellSelectOption[] TeamOutputModeOptions =
+    [
+        new("replyOnly", "仅聊天总结", "最终只在聊天里总结，不触发文档导出"),
+        new("autoDocument", "自动判断", "主 Agent 认为有必要时再建议导出文档"),
+        new("alwaysDocument", "始终文档", "按文档方式总结，并在可用时建议导出")
     ];
 
     private readonly IConversationRepository _conversationRepository;
@@ -60,6 +77,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private string _effectiveTranscriptTheme = "light";
     private ConversationMode _selectedConversationMode = ConversationMode.Programming;
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
+    private int _selectedTeamMaxRounds = TeamDiscussionDefaults.DefaultMaxRounds;
+    private TeamOutputMode _selectedTeamOutputMode = TeamDiscussionDefaults.DefaultOutputMode;
 
     public MainWindowViewModel(
         IConversationRepository conversationRepository,
@@ -163,6 +182,31 @@ public sealed partial class MainWindowViewModel : ObservableObject
         private set
         {
             if (SetProperty(ref _selectedToolPermissionMode, value))
+            {
+                PublishShell(false);
+            }
+        }
+    }
+
+    public int SelectedTeamMaxRounds
+    {
+        get => _selectedTeamMaxRounds;
+        private set
+        {
+            var normalized = TeamDiscussionDefaults.ClampRounds(value);
+            if (SetProperty(ref _selectedTeamMaxRounds, normalized))
+            {
+                PublishShell(false);
+            }
+        }
+    }
+
+    public TeamOutputMode SelectedTeamOutputMode
+    {
+        get => _selectedTeamOutputMode;
+        private set
+        {
+            if (SetProperty(ref _selectedTeamOutputMode, value))
             {
                 PublishShell(false);
             }
@@ -593,6 +637,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             SelectedWorkspaceRoot?.Id,
             SelectedConversationMode,
             SelectedToolPermissionMode,
+            SelectedTeamMaxRounds,
+            SelectedTeamOutputMode,
             now,
             now);
 
@@ -635,6 +681,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             : null;
         SelectedConversationMode = conversation.Mode;
         SelectedToolPermissionMode = conversation.ToolPermissionMode;
+        SelectedTeamMaxRounds = conversation.TeamMaxRounds;
+        SelectedTeamOutputMode = conversation.TeamOutputMode;
         ApplyConversationFilter(conversation.Id);
 
         PublishAgentActivities();
@@ -671,6 +719,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 WorkspaceRootId = SelectedWorkspaceRoot?.Id,
                 Mode = SelectedConversationMode,
                 ToolPermissionMode = SelectedToolPermissionMode,
+                TeamMaxRounds = SelectedTeamMaxRounds,
+                TeamOutputMode = SelectedTeamOutputMode,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
             await PersistConversationAsync(conversation);
@@ -710,6 +760,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
                                    SelectedWorkspaceRoot,
                                    SelectedConversationMode,
                                    SelectedToolPermissionMode,
+                                   SelectedTeamMaxRounds,
+                                   SelectedTeamOutputMode,
                                    _toolApprovalHandler,
                                    requestMessages,
                                    requestTeamAgents),
@@ -837,6 +889,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             WorkspaceRootId = SelectedWorkspaceRoot?.Id,
             Mode = SelectedConversationMode,
             ToolPermissionMode = SelectedToolPermissionMode,
+            TeamMaxRounds = SelectedTeamMaxRounds,
+            TeamOutputMode = SelectedTeamOutputMode,
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
         await PersistConversationAsync(updated);
@@ -916,6 +970,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
             .ToArray();
 
         var toolPermissionModes = ToolPermissionOptions;
+        var teamRoundModes = TeamRoundOptions;
+        var teamOutputModes = TeamOutputModeOptions;
+        var teamMembers = SelectedConversationMode == ConversationMode.Team
+            ? _teamAgents
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.CreatedAtUtc)
+                .Select(BuildTeamMemberActivityNode)
+                .ToArray()
+            : [];
 
         var themeOptions = ThemeOptions
             .Select(option => new ShellSelectOption(ThemePreferenceToId(option.Value), option.Label))
@@ -936,8 +999,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
             SelectedWorkspaceRoot?.Id.ToString("D"),
             toolPermissionModes,
             ToolPermissionModeToId(SelectedToolPermissionMode),
+            teamRoundModes,
+            SelectedTeamMaxRounds.ToString(CultureInfo.InvariantCulture),
+            teamOutputModes,
+            TeamOutputModeToId(SelectedTeamOutputMode),
             themeOptions,
             ThemePreferenceToId(SelectedThemeOption?.Value ?? AppThemePreference.System),
+            teamMembers,
             AgentActivityNodes.ToArray(),
             StatusText,
             IsBusy));
@@ -954,17 +1022,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         var teamAgentItems = SelectedConversationMode == ConversationMode.Team
             ? _teamAgents
-                .OrderBy(item => item.SortOrder)
-                .ThenBy(item => item.CreatedAtUtc)
-                .Select(BuildTeamAgentActivityNode)
+                .Select(item => (Timestamp: item.UpdatedAtUtc, Node: BuildTeamAgentEventNode(item)))
             : [];
 
         var toolItems = _toolRuns
-            .OrderByDescending(item => item.CreatedAtUtc)
-            .Select(TranscriptToolRunPresenter.BuildActivityNode);
+            .Select(item => (Timestamp: item.UpdatedAtUtc, Node: TranscriptToolRunPresenter.BuildActivityNode(item)));
 
         var items = teamAgentItems
             .Concat(toolItems)
+            .OrderByDescending(item => item.Timestamp)
+            .ThenBy(item => item.Node.Title, StringComparer.Ordinal)
+            .Select(item => item.Node)
             .ToArray();
 
         ReplaceCollection(AgentActivityNodes, items);

@@ -15,7 +15,7 @@ namespace SelfClaw.Desktop;
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
-    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], string.Empty, false);
+    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], null, [], null, [], [], string.Empty, false);
     private bool _webViewReady;
 
     public MainWindow(MainWindowViewModel viewModel)
@@ -105,8 +105,13 @@ public partial class MainWindow : Window
             selectedWorkspaceRootId = state.SelectedWorkspaceRootId,
             toolPermissionModes = state.ToolPermissionModes,
             selectedToolPermissionModeId = state.SelectedToolPermissionModeId,
+            teamRoundModes = state.TeamRoundModes,
+            selectedTeamRoundModeId = state.SelectedTeamRoundModeId,
+            teamOutputModes = state.TeamOutputModes,
+            selectedTeamOutputModeId = state.SelectedTeamOutputModeId,
             themeOptions = state.ThemeOptions,
             selectedThemeId = state.SelectedThemeId,
+            teamMembers = state.TeamMembers,
             agentActivities = state.AgentActivities,
             statusText = state.StatusText,
             isBusy = state.IsBusy
@@ -211,6 +216,12 @@ public partial class MainWindow : Window
                     break;
                 case "select-conversation-mode":
                     await _viewModel.SetConversationModeAsync(document.RootElement.GetProperty("modeId").GetString());
+                    break;
+                case "select-team-max-rounds":
+                    await _viewModel.SetTeamMaxRoundsAsync(document.RootElement.GetProperty("roundsId").GetString());
+                    break;
+                case "select-team-output-mode":
+                    await _viewModel.SetTeamOutputModeAsync(document.RootElement.GetProperty("outputModeId").GetString());
                     break;
                 case "approve-tool-execution":
                 {

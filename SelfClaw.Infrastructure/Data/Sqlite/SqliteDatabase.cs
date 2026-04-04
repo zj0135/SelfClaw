@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     workspace_root_id TEXT NULL,
     mode INTEGER NOT NULL DEFAULT 0,
     tool_permission_mode INTEGER NOT NULL DEFAULT 0,
+    team_max_rounds INTEGER NOT NULL DEFAULT 2,
+    team_output_mode INTEGER NOT NULL DEFAULT 1,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
     FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE RESTRICT,
@@ -101,6 +103,20 @@ CREATE TABLE IF NOT EXISTS conversations (
                 "conversations",
                 "tool_permission_mode",
                 "ALTER TABLE conversations ADD COLUMN tool_permission_mode INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "conversations",
+                "team_max_rounds",
+                "ALTER TABLE conversations ADD COLUMN team_max_rounds INTEGER NOT NULL DEFAULT 2;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "conversations",
+                "team_output_mode",
+                "ALTER TABLE conversations ADD COLUMN team_output_mode INTEGER NOT NULL DEFAULT 1;",
                 cancellationToken);
 
             await ExecuteAsync(connection, @"
@@ -205,6 +221,8 @@ CREATE TABLE IF NOT EXISTS tool_runs (
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(3, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(4, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(5, CURRENT_TIMESTAMP);", cancellationToken);
+            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(6, CURRENT_TIMESTAMP);", cancellationToken);
+            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(7, CURRENT_TIMESTAMP);", cancellationToken);
 
             _initialized = true;
         }

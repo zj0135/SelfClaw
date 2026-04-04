@@ -9,6 +9,8 @@ public sealed record ChatTurnRequest(
     WorkspaceRoot? WorkspaceRoot,
     ConversationMode Mode,
     ToolPermissionMode ToolPermissionMode,
+    int TeamMaxRounds,
+    TeamOutputMode TeamOutputMode,
     IToolApprovalHandler? ToolApprovalHandler,
     IReadOnlyList<MessageRecord> Messages,
     IReadOnlyList<TeamAgentRecord> TeamAgents);

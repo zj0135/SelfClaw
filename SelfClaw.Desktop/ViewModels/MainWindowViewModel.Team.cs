@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
@@ -10,6 +11,38 @@ public sealed partial class MainWindowViewModel
 {
     private const string CoordinatorAgentName = "Coordinator";
     private const string CoordinatorRoleName = "Coordinator";
+
+    public async Task SetTeamMaxRoundsAsync(string? roundsId)
+    {
+        var nextRounds = ParseTeamMaxRounds(roundsId);
+        if (SelectedTeamMaxRounds == nextRounds)
+        {
+            return;
+        }
+
+        SelectedTeamMaxRounds = nextRounds;
+
+        if (SelectedConversation is not null)
+        {
+            await SaveConversationSelectionAsync(SelectedConversation);
+        }
+    }
+
+    public async Task SetTeamOutputModeAsync(string? outputModeId)
+    {
+        var nextMode = ParseTeamOutputMode(outputModeId);
+        if (SelectedTeamOutputMode == nextMode)
+        {
+            return;
+        }
+
+        SelectedTeamOutputMode = nextMode;
+
+        if (SelectedConversation is not null)
+        {
+            await SaveConversationSelectionAsync(SelectedConversation);
+        }
+    }
 
     private async Task SetConversationModeCoreAsync(ConversationMode nextMode)
     {
@@ -299,11 +332,32 @@ public sealed partial class MainWindowViewModel
     private static string ConversationModeToId(ConversationMode mode)
         => mode == ConversationMode.Team ? "team" : "programming";
 
-    private static AgentActivityNode BuildTeamAgentActivityNode(TeamAgentRecord agent)
+    private static string TeamOutputModeToId(TeamOutputMode mode)
+        => mode switch
+        {
+            TeamOutputMode.ReplyOnly => "replyOnly",
+            TeamOutputMode.AlwaysDocument => "alwaysDocument",
+            _ => "autoDocument"
+        };
+
+    private static int ParseTeamMaxRounds(string? roundsId)
+        => int.TryParse(roundsId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? TeamDiscussionDefaults.ClampRounds(parsed)
+            : TeamDiscussionDefaults.DefaultMaxRounds;
+
+    private static TeamOutputMode ParseTeamOutputMode(string? outputModeId)
+        => outputModeId?.Trim().ToLowerInvariant() switch
+        {
+            "replyonly" => TeamOutputMode.ReplyOnly,
+            "alwaysdocument" => TeamOutputMode.AlwaysDocument,
+            _ => TeamOutputMode.AutoDocument
+        };
+
+    private static AgentActivityNode BuildTeamMemberActivityNode(TeamAgentRecord agent)
         => new(
             agent.Id.ToString("D"),
-            "team-agent",
-            "Team agent",
+            "team-member",
+            "Team member",
             agent.Status.ToString().ToLowerInvariant(),
             agent.Status.ToString(),
             agent.Name,
@@ -314,6 +368,32 @@ public sealed partial class MainWindowViewModel
                 new AgentActivityDetail("Prompt", agent.GoalPrompt),
                 new AgentActivityDetail("Status", agent.Status.ToString())
             ]);
+
+    private static AgentActivityNode BuildTeamAgentEventNode(TeamAgentRecord agent)
+        => new(
+            "event-" + agent.Id.ToString("D"),
+            "team-event",
+            "Team event",
+            agent.Status.ToString().ToLowerInvariant(),
+            agent.Status.ToString(),
+            agent.Name,
+            BuildTeamEventSummary(agent),
+            agent.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
+            [
+                new AgentActivityDetail("Role", agent.Role),
+                new AgentActivityDetail("Status", agent.Status.ToString()),
+                new AgentActivityDetail("Prompt", agent.GoalPrompt)
+            ]);
+
+    private static string BuildTeamEventSummary(TeamAgentRecord agent)
+        => agent.Status switch
+        {
+            TeamAgentStatus.Ready => $"{agent.Role} 已就绪，等待参与讨论。",
+            TeamAgentStatus.Running => $"{agent.Role} 正在输出当前轮次意见。",
+            TeamAgentStatus.Completed => $"{agent.Role} 已完成当前阶段反馈。",
+            TeamAgentStatus.Failed => $"{agent.Role} 在本轮处理时失败。",
+            _ => agent.Role
+        };
 
     private MessageRecord CreateSystemNote(Guid conversationId, string content)
     {
