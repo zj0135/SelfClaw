@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <Reference Include="SelfClaw.Core">
       <HintPath>..\SelfClaw.Core\bin\$(Configuration)\net10.0\SelfClaw.Core.dll</HintPath>
@@ -33,12 +33,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Update="Assets\Transcript\transcript.html">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Assets\Transcript\transcript.js">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Update="Assets\TranscriptVue\*;Assets\TranscriptVue\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -66,3 +60,4 @@
           SkipUnchangedFiles="false" />
   </Target>
 </Project>
+

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
@@ -59,18 +59,19 @@ public partial class MainWindow : Window
             TranscriptView.CoreWebView2.WebMessageReceived += OnTranscriptWebMessageReceived;
 
             var assetsRootPath = Path.Combine(AppContext.BaseDirectory, "Assets");
-            var vueTranscriptPath = Path.Combine(AppContext.BaseDirectory, "Assets", "TranscriptVue", "index.html");
-            var legacyTranscriptPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Transcript", "transcript.html");
-            var relativeTranscriptPath = File.Exists(vueTranscriptPath)
-                ? "TranscriptVue/index.html"
-                : "Transcript/transcript.html";
+            var vueTranscriptPath = Path.Combine(assetsRootPath, "TranscriptVue", "index.html");
+
+            if (!File.Exists(vueTranscriptPath))
+            {
+                throw new FileNotFoundException("Unable to locate the Vue transcript host page.", vueTranscriptPath);
+            }
 
             TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 AssetsHostName,
                 assetsRootPath,
                 CoreWebView2HostResourceAccessKind.Allow);
 
-            TranscriptView.Source = new Uri($"https://{AssetsHostName}/{relativeTranscriptPath}");
+            TranscriptView.Source = new Uri($"https://{AssetsHostName}/TranscriptVue/index.html");
         }
         catch
         {
@@ -398,3 +399,4 @@ public partial class MainWindow : Window
             ? property.GetString() ?? string.Empty
             : string.Empty;
 }
+
