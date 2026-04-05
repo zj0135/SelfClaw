@@ -136,7 +136,7 @@ public sealed partial class MainWindowViewModel
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
         ReplaceMessage(updated);
-        PublishShell(true);
+        RequestStreamingShellPublish(true);
     }
 
     private async Task CompleteAssistantMessageAsync(MessageRecord message)
@@ -153,7 +153,7 @@ public sealed partial class MainWindowViewModel
         };
         ReplaceMessage(updated);
         await _conversationRepository.UpsertMessageAsync(updated);
-        PublishShell(true);
+        PublishShellNow(true);
     }
 
     private async Task FailActiveMessagesAsync(IEnumerable<Guid> messageIds, string errorMessage)

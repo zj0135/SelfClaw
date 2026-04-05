@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Data;
@@ -21,7 +22,9 @@ public sealed class SqliteConversationRepository : IConversationRepository
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode, created_at_utc, updated_at_utc
+SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
+       parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+       created_at_utc, updated_at_utc
 FROM conversations
 ORDER BY updated_at_utc DESC;";
 
@@ -40,7 +43,9 @@ ORDER BY updated_at_utc DESC;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode, created_at_utc, updated_at_utc
+SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
+       parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+       created_at_utc, updated_at_utc
 FROM conversations
 WHERE id = $id
 LIMIT 1;";
@@ -55,10 +60,17 @@ LIMIT 1;";
     public async Task<ConversationRecord> UpsertConversationAsync(ConversationRecord conversation, CancellationToken cancellationToken = default)
     {
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        var effectiveConversation = await ReuseExistingAgentConversationAsync(connection, conversation, cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-INSERT INTO conversations(id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode, created_at_utc, updated_at_utc)
-VALUES($id, $title, $profileId, $workspaceRootId, $mode, $toolPermissionMode, $teamMaxRounds, $teamOutputMode, $createdAt, $updatedAt)
+INSERT INTO conversations(
+    id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
+    parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+    created_at_utc, updated_at_utc)
+VALUES(
+    $id, $title, $profileId, $workspaceRootId, $mode, $toolPermissionMode, $teamMaxRounds, $teamOutputMode,
+    $parentConversationId, $rootConversationId, $boundAgentId, $boundAgentName, $boundAgentRole,
+    $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     profile_id = excluded.profile_id,
@@ -67,26 +79,40 @@ ON CONFLICT(id) DO UPDATE SET
     tool_permission_mode = excluded.tool_permission_mode,
     team_max_rounds = excluded.team_max_rounds,
     team_output_mode = excluded.team_output_mode,
+    parent_conversation_id = excluded.parent_conversation_id,
+    root_conversation_id = excluded.root_conversation_id,
+    bound_agent_id = excluded.bound_agent_id,
+    bound_agent_name = excluded.bound_agent_name,
+    bound_agent_role = excluded.bound_agent_role,
     updated_at_utc = excluded.updated_at_utc;";
-        command.Parameters.AddWithValue("$id", conversation.Id.ToString("D"));
-        command.Parameters.AddWithValue("$title", conversation.Title);
-        command.Parameters.AddWithValue("$profileId", conversation.ProfileId.ToString("D"));
-        command.Parameters.AddWithValue("$workspaceRootId", conversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$mode", (int)conversation.Mode);
-        command.Parameters.AddWithValue("$toolPermissionMode", (int)conversation.ToolPermissionMode);
-        command.Parameters.AddWithValue("$teamMaxRounds", TeamDiscussionDefaults.ClampRounds(conversation.TeamMaxRounds));
-        command.Parameters.AddWithValue("$teamOutputMode", (int)conversation.TeamOutputMode);
-        command.Parameters.AddWithValue("$createdAt", conversation.CreatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$updatedAt", conversation.UpdatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$id", effectiveConversation.Id.ToString("D"));
+        command.Parameters.AddWithValue("$title", effectiveConversation.Title);
+        command.Parameters.AddWithValue("$profileId", effectiveConversation.ProfileId.ToString("D"));
+        command.Parameters.AddWithValue("$workspaceRootId", effectiveConversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$mode", (int)effectiveConversation.Mode);
+        command.Parameters.AddWithValue("$toolPermissionMode", (int)effectiveConversation.ToolPermissionMode);
+        command.Parameters.AddWithValue("$teamMaxRounds", TeamDiscussionDefaults.ClampRounds(effectiveConversation.TeamMaxRounds));
+        command.Parameters.AddWithValue("$teamOutputMode", (int)effectiveConversation.TeamOutputMode);
+        command.Parameters.AddWithValue("$parentConversationId", effectiveConversation.ParentConversationId?.ToString("D") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$rootConversationId", effectiveConversation.RootConversationId?.ToString("D") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$boundAgentId", effectiveConversation.BoundAgentId?.ToString("D") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$boundAgentName", effectiveConversation.BoundAgentName ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$boundAgentRole", effectiveConversation.BoundAgentRole ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$createdAt", effectiveConversation.CreatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$updatedAt", effectiveConversation.UpdatedAtUtc.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
-        return conversation;
+        return effectiveConversation;
     }
 
     public async Task DeleteConversationAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM conversations WHERE id = $id;";
+        command.CommandText = @"
+DELETE FROM conversations
+WHERE id = $id
+   OR parent_conversation_id = $id
+   OR root_conversation_id = $id;";
         command.Parameters.AddWithValue("$id", conversationId.ToString("D"));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -331,5 +357,111 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$updatedAt", workspaceRoot.UpdatedAtUtc.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
         return workspaceRoot;
+    }
+
+    private static async Task<ConversationRecord> ReuseExistingAgentConversationAsync(
+        SqliteConnection connection,
+        ConversationRecord conversation,
+        CancellationToken cancellationToken)
+    {
+        if (!conversation.IsAgentConversation)
+        {
+            return conversation;
+        }
+
+        if (conversation.BoundAgentId is Guid boundAgentId)
+        {
+            var existingById = await FindExistingAgentConversationByAgentIdAsync(
+                connection,
+                conversation.EffectiveRootConversationId,
+                boundAgentId,
+                cancellationToken);
+            if (existingById is not null)
+            {
+                return conversation with
+                {
+                    Id = existingById.Id,
+                    CreatedAtUtc = existingById.CreatedAtUtc
+                };
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(conversation.BoundAgentName) ||
+            string.IsNullOrWhiteSpace(conversation.BoundAgentRole))
+        {
+            return conversation;
+        }
+
+        var existingByName = await FindExistingAgentConversationByNameAsync(
+            connection,
+            conversation.EffectiveRootConversationId,
+            conversation.BoundAgentName,
+            conversation.BoundAgentRole,
+            cancellationToken);
+        if (existingByName is null)
+        {
+            return conversation;
+        }
+
+        return conversation with
+        {
+            Id = existingByName.Id,
+            CreatedAtUtc = existingByName.CreatedAtUtc
+        };
+    }
+
+    private static async Task<ConversationRecord?> FindExistingAgentConversationByAgentIdAsync(
+        SqliteConnection connection,
+        Guid rootConversationId,
+        Guid boundAgentId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
+       parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+       created_at_utc, updated_at_utc
+FROM conversations
+WHERE parent_conversation_id IS NOT NULL
+  AND COALESCE(root_conversation_id, parent_conversation_id, id) = $rootConversationId
+  AND bound_agent_id = $boundAgentId
+ORDER BY updated_at_utc DESC, created_at_utc ASC, id ASC
+LIMIT 1;";
+        command.Parameters.AddWithValue("$rootConversationId", rootConversationId.ToString("D"));
+        command.Parameters.AddWithValue("$boundAgentId", boundAgentId.ToString("D"));
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken)
+            ? SqliteMappings.ReadConversation(reader)
+            : null;
+    }
+
+    private static async Task<ConversationRecord?> FindExistingAgentConversationByNameAsync(
+        SqliteConnection connection,
+        Guid rootConversationId,
+        string boundAgentName,
+        string boundAgentRole,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
+       parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+       created_at_utc, updated_at_utc
+FROM conversations
+WHERE parent_conversation_id IS NOT NULL
+  AND COALESCE(root_conversation_id, parent_conversation_id, id) = $rootConversationId
+  AND lower(trim(bound_agent_name)) = lower(trim($boundAgentName))
+  AND lower(trim(bound_agent_role)) = lower(trim($boundAgentRole))
+ORDER BY updated_at_utc DESC, created_at_utc ASC, id ASC
+LIMIT 1;";
+        command.Parameters.AddWithValue("$rootConversationId", rootConversationId.ToString("D"));
+        command.Parameters.AddWithValue("$boundAgentName", boundAgentName);
+        command.Parameters.AddWithValue("$boundAgentRole", boundAgentRole);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken)
+            ? SqliteMappings.ReadConversation(reader)
+            : null;
     }
 }

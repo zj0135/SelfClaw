@@ -85,10 +85,17 @@ CREATE TABLE IF NOT EXISTS conversations (
     tool_permission_mode INTEGER NOT NULL DEFAULT 0,
     team_max_rounds INTEGER NOT NULL DEFAULT 2,
     team_output_mode INTEGER NOT NULL DEFAULT 1,
+    parent_conversation_id TEXT NULL,
+    root_conversation_id TEXT NULL,
+    bound_agent_id TEXT NULL,
+    bound_agent_name TEXT NULL,
+    bound_agent_role TEXT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
     FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE RESTRICT,
-    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
+    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL,
+    FOREIGN KEY(parent_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY(root_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken);
 
             await EnsureColumnExistsAsync(
@@ -117,6 +124,41 @@ CREATE TABLE IF NOT EXISTS conversations (
                 "conversations",
                 "team_output_mode",
                 "ALTER TABLE conversations ADD COLUMN team_output_mode INTEGER NOT NULL DEFAULT 1;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "conversations",
+                "parent_conversation_id",
+                "ALTER TABLE conversations ADD COLUMN parent_conversation_id TEXT NULL;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "conversations",
+                "root_conversation_id",
+                "ALTER TABLE conversations ADD COLUMN root_conversation_id TEXT NULL;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "conversations",
+                "bound_agent_id",
+                "ALTER TABLE conversations ADD COLUMN bound_agent_id TEXT NULL;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "conversations",
+                "bound_agent_name",
+                "ALTER TABLE conversations ADD COLUMN bound_agent_name TEXT NULL;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "conversations",
+                "bound_agent_role",
+                "ALTER TABLE conversations ADD COLUMN bound_agent_role TEXT NULL;",
                 cancellationToken);
 
             await ExecuteAsync(connection, @"
@@ -223,6 +265,7 @@ CREATE TABLE IF NOT EXISTS tool_runs (
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(5, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(6, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(7, CURRENT_TIMESTAMP);", cancellationToken);
+            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(8, CURRENT_TIMESTAMP);", cancellationToken);
 
             _initialized = true;
         }

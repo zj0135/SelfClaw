@@ -37,6 +37,9 @@ let settingsFeedback = null;
 let settingsPanelScrollTop = 0;
 let editorState = { open: false, kind: null, mode: 'create', draft: null, feedback: null };
 let openConversationMenuId = null;
+const mentionState = { open: false, query: '', start: -1, end: -1, activeIndex: 0 };
+let pendingStatePayload = null;
+let renderFrameHandle = 0;
 
 const openActivities = new Set();
 const openThoughts = new Set();
@@ -48,6 +51,7 @@ const openTeamMembers = new Map();
 const scrollFollowState = {
 	transcript: true,
 	transcriptPausedUntil: 0,
+	stepsPausedUntil: 0,
 };
 
 const emptyProfile = () => ({ profileId: null, name: '', endpoint: '', model: '', apiKey: '' });
@@ -69,8 +73,141 @@ const setTheme = (theme) => {
 
 const filteredConversations = () => {
 	const query = conversationSearch.trim().toLowerCase();
-	return query ? state.conversations.filter((item) => item.title.toLowerCase().includes(query)) : state.conversations;
+	if (!query) {
+		return state.conversations;
+	}
+
+	const conversationsById = new Map(state.conversations.map((item) => [item.id, item]));
+	const includedIds = new Set();
+
+	state.conversations.forEach((item) => {
+		const haystack = `${item.title || ''} ${item.badge || ''} ${item.subtitle || ''}`.toLowerCase();
+		if (!haystack.includes(query)) {
+			return;
+		}
+
+		let current = item;
+		while (current) {
+			includedIds.add(current.id);
+			current = current.parentId ? conversationsById.get(current.parentId) || null : null;
+		}
+	});
+
+	return state.conversations.filter((item) => includedIds.has(item.id));
 };
+
+const mentionAgents = () => visibleTeamMembers().map((item) => ({ id: item.id, name: item.title, role: item.summary }));
+const findMentionAgent = (agentId) => mentionAgents().find((item) => item.id === agentId) || null;
+const getMentionCandidates = (query = mentionState.query) => {
+	if (!isTeamMode()) {
+		return [];
+	}
+
+	const normalizedQuery = query.trim().toLowerCase();
+	return mentionAgents().filter((item) => {
+		if (!normalizedQuery) {
+			return true;
+		}
+
+		return item.name.toLowerCase().includes(normalizedQuery) || item.role.toLowerCase().includes(normalizedQuery);
+	});
+};
+
+const closeMentionPicker = () => {
+	mentionState.open = false;
+	mentionState.query = '';
+	mentionState.start = -1;
+	mentionState.end = -1;
+	mentionState.activeIndex = 0;
+	renderMentionPicker();
+};
+
+function syncMentionState(target) {
+	if (!(target instanceof HTMLTextAreaElement) || !isTeamMode()) {
+		closeMentionPicker();
+		return;
+	}
+
+	const selectionStart = target.selectionStart ?? composerValue.length;
+	const beforeCaret = composerValue.slice(0, selectionStart);
+	const tokenStart = Math.max(beforeCaret.lastIndexOf(' '), beforeCaret.lastIndexOf('\n'), beforeCaret.lastIndexOf('\t')) + 1;
+	const token = beforeCaret.slice(tokenStart);
+	if (!token.startsWith('@') || token.startsWith('@{') || token.includes('}') || /\s/.test(token.slice(1))) {
+		closeMentionPicker();
+		return;
+	}
+
+	mentionState.query = token.slice(1);
+	mentionState.start = tokenStart;
+	mentionState.end = selectionStart;
+	const candidates = getMentionCandidates();
+	if (!candidates.length) {
+		closeMentionPicker();
+		return;
+	}
+
+	mentionState.open = true;
+	mentionState.activeIndex = Math.min(mentionState.activeIndex, candidates.length - 1);
+	renderMentionPicker();
+}
+
+function applyMentionSelection(target, agent) {
+	if (!(target instanceof HTMLTextAreaElement) || !agent || mentionState.start < 0 || mentionState.end < mentionState.start) {
+		return;
+	}
+
+	const nextValue = `${composerValue.slice(0, mentionState.start)}@{${agent.name}} ${composerValue.slice(mentionState.end)}`;
+	const nextCaret = mentionState.start + agent.name.length + 4;
+	composerValue = nextValue;
+	target.value = nextValue;
+	target.focus();
+	target.setSelectionRange(nextCaret, nextCaret);
+	updateComposer();
+	closeMentionPicker();
+}
+
+function renderMentionPicker() {
+	const picker = document.getElementById('mention-picker');
+	if (!picker) {
+		return;
+	}
+
+	const candidates = getMentionCandidates();
+	if (!mentionState.open || !candidates.length) {
+		picker.className = 'mention-picker';
+		picker.innerHTML = '';
+		return;
+	}
+
+	picker.className = 'mention-picker open';
+	picker.innerHTML = candidates
+		.map(
+			(item, index) => `
+      <button class="mention-option ${index === mentionState.activeIndex ? 'active' : ''}" type="button" data-action="select-mention" data-agent-id="${escapeHtml(item.id)}">
+        <span class="mention-option-name">@${escapeHtml(item.name)}</span>
+        <span class="mention-option-role">${escapeHtml(item.role)}</span>
+      </button>
+    `
+		)
+		.join('');
+}
+
+function submitComposer() {
+	const prompt = composerValue.trim();
+	if (!prompt) {
+		return;
+	}
+
+	pendingScrollToBottom = true;
+	post({ type: 'send-prompt', prompt });
+	composerValue = '';
+	const composer = document.getElementById('composer');
+	if (composer) {
+		composer.value = '';
+	}
+	updateComposer();
+	closeMentionPicker();
+}
 
 const renderOptions = (options, selectedId, placeholder) => {
 	const placeholderOption = placeholder ? `<option value="" ${!selectedId ? 'selected' : ''}>${escapeHtml(placeholder)}</option>` : '';
@@ -101,6 +238,84 @@ const selectedThemeLabel = () =>
 	'跟随系统';
 const currentModelLabel = () => state.selectedProfileModel || selectedProfile()?.label || '未选择模型';
 const currentWorkspaceLabel = () => selectedWorkspace()?.label || '未绑定工作区';
+const setInnerHtmlIfChanged = (element, html) => {
+	if (!element || element.innerHTML === html) {
+		return;
+	}
+
+	element.innerHTML = html;
+};
+const setTextIfChanged = (element, value) => {
+	if (!element) {
+		return;
+	}
+
+	const nextValue = String(value ?? '');
+	if (element.textContent !== nextValue) {
+		element.textContent = nextValue;
+	}
+};
+const setValueIfChanged = (element, value) => {
+	if (!element) {
+		return;
+	}
+
+	const nextValue = String(value ?? '');
+	if (element.value !== nextValue) {
+		element.value = nextValue;
+	}
+};
+const setTitleIfChanged = (element, value) => {
+	if (!element) {
+		return;
+	}
+
+	const nextValue = String(value ?? '');
+	if (element.getAttribute('title') !== nextValue) {
+		element.setAttribute('title', nextValue);
+	}
+};
+
+function normalizeState() {
+	state.conversationModes = state.conversationModes || [];
+	state.selectedConversationModeId = state.selectedConversationModeId || 'programming';
+	state.toolPermissionModes = state.toolPermissionModes || [];
+	state.selectedToolPermissionModeId = state.selectedToolPermissionModeId || 'requireApproval';
+	state.teamRoundModes = state.teamRoundModes || [];
+	state.selectedTeamRoundModeId = state.selectedTeamRoundModeId || '2';
+	state.teamOutputModes = state.teamOutputModes || [];
+	state.selectedTeamOutputModeId = state.selectedTeamOutputModeId || 'autoDocument';
+	state.teamMembers = state.teamMembers || [];
+	if (!isTeamMode()) {
+		mentionState.open = false;
+		mentionState.query = '';
+		mentionState.start = -1;
+		mentionState.end = -1;
+		mentionState.activeIndex = 0;
+	}
+}
+
+function flushQueuedRender() {
+	renderFrameHandle = 0;
+	if (pendingStatePayload) {
+		Object.assign(state, pendingStatePayload);
+		pendingStatePayload = null;
+		normalizeState();
+	}
+
+	render();
+	if (pendingStatePayload) {
+		scheduleRender();
+	}
+}
+
+function scheduleRender() {
+	if (renderFrameHandle) {
+		return;
+	}
+
+	renderFrameHandle = requestAnimationFrame(flushQueuedRender);
+}
 
 const profileDraft = () => {
 	const profile = selectedProfile();
@@ -228,6 +443,10 @@ const resumeTranscriptAutoFollow = () => {
 	scrollFollowState.transcript = true;
 	scrollFollowState.transcriptPausedUntil = 0;
 };
+const pauseStepsScrollRestore = (durationMs = 1200) => {
+	scrollFollowState.stepsPausedUntil = Date.now() + durationMs;
+};
+const canRestoreStepsScroll = () => Date.now() >= scrollFollowState.stepsPausedUntil;
 const canAutoFollowTranscript = (snapshot, explicit = false) => {
 	if (explicit) {
 		return true;
@@ -265,8 +484,8 @@ function renderSendButtonInner(isBusy) {
 		: `
       <span class="send-btn-arrow" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 12h11"></path>
-          <path d="m12 5 7 7-7 7"></path>
+          <path d="M12 19V7"></path>
+          <path d="m6 11 6-6 6 6"></path>
         </svg>
       </span>
     `;
@@ -510,7 +729,17 @@ function renderTeamMembers() {
 		.join('');
 }
 
-function renderStepsPanel() {
+function renderStepsHeader(totalCount) {
+	return `
+    <div>
+      <div class="steps-title">${isTeamMode() ? '团队动态' : '工具'}</div>
+      <div class="steps-subtitle">${isTeamMode() ? '团队成员与团队事件分区展示，滚动时保持当前位置。' : '运行步骤与工具状态'}</div>
+    </div>
+    <div class="steps-count">${totalCount}</div>
+  `;
+}
+
+function renderStepsPanelContent() {
 	const memberCount = visibleTeamMembers().length;
 	const eventCount = state.agentActivities?.length || 0;
 	const totalCount = isTeamMode() ? memberCount + eventCount : eventCount;
@@ -518,18 +747,9 @@ function renderStepsPanel() {
 	const eventsOpen = isStepSectionOpen('team-events', true);
 
 	return `
-    <aside class="panel steps-panel">
-      <div class="steps-header">
-        <div>
-          <div class="steps-title">${isTeamMode() ? '团队动态' : '工具'}</div>
-          <div class="steps-subtitle">${isTeamMode() ? '团队成员与团队事件分区展示，滚动时保持当前位置。' : '运行步骤与工具状态'}</div>
-        </div>
-        <div class="steps-count">${totalCount}</div>
-      </div>
-      <div id="steps-scroll" class="steps-scroll">
-        ${
-					isTeamMode()
-						? `
+    ${
+			isTeamMode()
+				? `
           <section class="steps-section-block ${membersOpen ? 'open' : 'collapsed'}">
             <button class="steps-section-head steps-section-toggle" type="button" data-action="toggle-steps-section" data-section-id="team-members" aria-expanded="${membersOpen ? 'true' : 'false'}">
               <div class="steps-section-heading">
@@ -564,9 +784,7 @@ function renderStepsPanel() {
             <div class="activity-list">${renderActivities()}</div>
           </section>
         `
-				}
-      </div>
-    </aside>
+		}
   `;
 }
 
@@ -751,6 +969,274 @@ function renderEditor() {
   `;
 }
 
+function renderConversationList(conversations) {
+	if (!conversations.length) {
+		return '<div class="muted-placeholder">还没有会话，点击“新建对话”开始。</div>';
+	}
+
+	return conversations
+		.map((item) => {
+			const menuOpen = openConversationMenuId === item.id;
+			const depth = Number.isFinite(item.depth) ? Number(item.depth) : 0;
+			return `
+      <div class="conversation-row ${item.isAgentConversation ? 'branch' : 'root'}" style="--conversation-depth:${depth};">
+        <button class="conversation-card ${item.id === state.selectedConversationId ? 'selected' : ''} ${item.isAgentConversation ? 'agent-conversation' : ''}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">
+          <div class="conversation-title-row">
+            ${item.badge ? `<span class="conversation-badge">@${escapeHtml(item.badge)}</span>` : ''}
+            <div class="conversation-title">${escapeHtml(item.title)}</div>
+          </div>
+          ${item.subtitle ? `<div class="conversation-subtitle">${escapeHtml(item.subtitle)}</div>` : ''}
+          <div class="conversation-time">${escapeHtml(item.timestamp)}</div>
+        </button>
+        <div class="conversation-menu-shell">
+          <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="会话菜单">⋯</button>
+          ${menuOpen ? `<div class="conversation-menu"><button class="conversation-menu-item danger" data-action="delete-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">删除会话</button></div>` : ''}
+        </div>
+      </div>
+    `;
+		})
+		.join('');
+}
+
+function renderComposerShell() {
+	const profileControl = `
+    <select id="composer-profile-select" class="composer-inline-select" aria-label="当前模型配置">
+      ${renderOptions(state.profiles, state.selectedProfileId, '选择模型')}
+    </select>
+  `;
+	const modeSpecificControls = isTeamMode()
+		? `
+      <select id="composer-team-round-select" class="composer-inline-select" aria-label="团队最大讨论轮次">
+        ${renderOptions(state.teamRoundModes, state.selectedTeamRoundModeId)}
+      </select>
+      <select id="composer-team-output-select" class="composer-inline-select" aria-label="团队总结输出方式">
+        ${renderOptions(state.teamOutputModes, state.selectedTeamOutputModeId)}
+      </select>
+    `
+		: `
+      <select id="composer-permission-select" class="composer-inline-select" aria-label="工具权限模式">
+        ${renderOptions(state.toolPermissionModes, state.selectedToolPermissionModeId)}
+      </select>
+    `;
+
+	return `
+    <div class="composer-surface">
+      <div class="composer-stack">
+        <textarea id="composer" class="composer-box" placeholder="Ask for follow-up changes">${escapeHtml(composerValue)}</textarea>
+        <div id="mention-picker" class="mention-picker"></div>
+      </div>
+      <div class="composer-footer">
+        <div class="composer-controls">
+          ${profileControl}
+          ${modeSpecificControls}
+        </div>
+        <button id="send-button" class="send-btn ${state.isBusy ? 'loading' : 'idle'}" type="button" aria-label="${state.isBusy ? '停止生成' : '发送消息'}" title="${state.isBusy ? '停止生成' : '发送消息'}">${renderSendButtonInner(state.isBusy)}</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderTopbarModeChips() {
+	return `
+    ${state.conversationModes
+			.map(
+				(mode) => `
+      <button class="mode-chip ${mode.id === state.selectedConversationModeId ? 'active' : ''}" type="button" data-action="select-mode" data-mode-id="${escapeHtml(mode.id)}">${escapeHtml(mode.label)}</button>
+    `
+			)
+			.join('')}
+    <button class="mode-chip" type="button" disabled>协作</button>
+  `;
+}
+
+function renderComposerToolbar(permissionTitle, teamRoundsTitle, teamOutputTitle, statusText) {
+	return `
+    <div class="composer-meta">
+      <span class="meta-pill">Esc 停止</span>
+      <span class="meta-pill status-pill">${escapeHtml(statusText)}</span>
+    </div>
+    ${
+			isTeamMode()
+				? `
+      <div class="team-controls">
+        <label class="team-control" title="${escapeHtml(teamRoundsTitle)}">
+          <span class="team-control-label">最大讨论轮次</span>
+          <select id="team-round-select" class="permission-select" aria-label="团队最大讨论轮次">
+            ${renderOptions(state.teamRoundModes, state.selectedTeamRoundModeId)}
+          </select>
+        </label>
+        <label class="team-control" title="${escapeHtml(teamOutputTitle)}">
+          <span class="team-control-label">总结输出</span>
+          <select id="team-output-select" class="permission-select" aria-label="团队总结输出方式">
+            ${renderOptions(state.teamOutputModes, state.selectedTeamOutputModeId)}
+          </select>
+        </label>
+      </div>
+    `
+				: `
+      <div class="permission-control" title="${escapeHtml(permissionTitle)}">
+        <select id="permission-select" class="permission-select" aria-label="工具权限模式">
+          ${renderOptions(state.toolPermissionModes, state.selectedToolPermissionModeId)}
+        </select>
+      </div>
+    `
+		}
+  `;
+}
+
+function renderAppShell() {
+	return `
+    <div class="app-shell">
+      <aside class="panel sidebar">
+        <div class="brand">
+          <div class="brand-badge">SC</div>
+          <div>
+            <div class="brand-name">SelfClaw</div>
+            <div class="status-row">
+              <span class="status-dot"></span>
+              <span id="sidebar-status-text"></span>
+            </div>
+          </div>
+        </div>
+        <button class="sidebar-primary" data-action="new-conversation" type="button">+ 新建对话</button>
+        <input id="conversation-search" class="search-box" type="text" placeholder="搜索会话..." />
+        <div class="section-title">最近会话</div>
+        <div id="conversation-list" class="conversation-list"></div>
+        <button class="sidebar-footer" data-action="toggle-settings" type="button">
+          <div class="avatar">SC</div>
+          <div class="sidebar-footer-copy">
+            <div class="sidebar-footer-title">系统设置</div>
+            <div class="sidebar-footer-subtitle">模型、工作区、主题</div>
+          </div>
+          <div>&rsaquo;</div>
+        </button>
+      </aside>
+      <main class="main-column">
+        <div class="panel topbar">
+          <div id="mode-chip-row" class="chip-row"></div>
+          <div class="topbar-right">
+            <div id="topbar-model-pill" class="context-pill">
+              <span class="context-label">模型</span>
+              <span id="topbar-model-value" class="context-value"></span>
+            </div>
+            <div id="topbar-workspace-pill" class="context-pill">
+              <span class="context-label">工作区</span>
+              <span id="topbar-workspace-value" class="context-value"></span>
+            </div>
+            <button class="icon-btn" data-action="toggle-settings" type="button" aria-label="打开系统设置">设置</button>
+          </div>
+        </div>
+        <section class="panel transcript-panel">
+          <div id="transcript-scroll" class="transcript-scroll"></div>
+        </section>
+        <section class="panel composer-panel">
+          <div id="composer-toolbar" class="composer-toolbar"></div>
+          <div class="composer-grid"></div>
+        </section>
+      </main>
+      <aside id="steps-panel-shell" class="panel steps-panel">
+        <div id="steps-header" class="steps-header"></div>
+        <div id="steps-scroll" class="steps-scroll"></div>
+      </aside>
+    </div>
+  `;
+}
+
+function ensureAppShell() {
+	if (app.querySelector('.app-shell')) {
+		return;
+	}
+
+	app.innerHTML = renderAppShell();
+}
+
+function hydrateConversationTree(conversations) {
+	setInnerHtmlIfChanged(document.getElementById('conversation-list'), renderConversationList(conversations));
+	setTextIfChanged(document.querySelector('.sidebar .section-title'), state.conversations.some((item) => item.parentId) ? '会话树' : '最近会话');
+	setValueIfChanged(document.getElementById('conversation-search'), conversationSearch);
+}
+
+function composerShellFingerprint() {
+	return JSON.stringify({
+		mode: state.selectedConversationModeId,
+		profiles: state.profiles,
+		selectedProfileId: state.selectedProfileId,
+		toolPermissionModes: state.toolPermissionModes,
+		selectedToolPermissionModeId: state.selectedToolPermissionModeId,
+		teamRoundModes: state.teamRoundModes,
+		selectedTeamRoundModeId: state.selectedTeamRoundModeId,
+		teamOutputModes: state.teamOutputModes,
+		selectedTeamOutputModeId: state.selectedTeamOutputModeId,
+	});
+}
+
+function hydrateComposerShell(force = false) {
+	const composerGrid = document.querySelector('.composer-grid');
+	if (!composerGrid) {
+		return;
+	}
+
+	const previousComposer = document.getElementById('composer');
+	const hadFocus = document.activeElement === previousComposer;
+	const selectionStart = previousComposer?.selectionStart ?? composerValue.length;
+	const selectionEnd = previousComposer?.selectionEnd ?? selectionStart;
+	const fingerprint = composerShellFingerprint();
+
+	if (force || composerGrid.dataset.shellFingerprint !== fingerprint) {
+		composerGrid.innerHTML = renderComposerShell();
+		composerGrid.dataset.shellFingerprint = fingerprint;
+		const composer = document.getElementById('composer');
+		if (composer && composer.value !== composerValue) {
+			composer.value = composerValue;
+		}
+
+		if (composer && hadFocus) {
+			composer.focus();
+			composer.setSelectionRange(selectionStart, selectionEnd);
+		}
+	}
+}
+
+function hydrateSidebar(conversations, statusText) {
+	setTextIfChanged(document.getElementById('sidebar-status-text'), statusText);
+	hydrateConversationTree(conversations);
+}
+
+function hydrateTopbar(modelLabel, workspaceLabel) {
+	setInnerHtmlIfChanged(document.getElementById('mode-chip-row'), renderTopbarModeChips());
+	setTextIfChanged(document.getElementById('topbar-model-value'), modelLabel);
+	setTextIfChanged(document.getElementById('topbar-workspace-value'), workspaceLabel);
+	setTitleIfChanged(document.getElementById('topbar-model-pill'), modelLabel);
+	setTitleIfChanged(document.getElementById('topbar-workspace-pill'), workspaceLabel);
+}
+
+function hydrateTranscript() {
+	const transcript = document.getElementById('transcript-scroll');
+	if (!transcript) {
+		return;
+	}
+
+	transcript.innerHTML = renderMessages();
+}
+
+function hydrateComposer(permissionTitle, teamRoundsTitle, teamOutputTitle, statusText) {
+	setInnerHtmlIfChanged(
+		document.getElementById('composer-toolbar'),
+		renderComposerToolbar(permissionTitle, teamRoundsTitle, teamOutputTitle, statusText)
+	);
+	hydrateComposerShell();
+	updateComposer();
+	renderMentionPicker();
+}
+
+function hydrateStepsPanel() {
+	const memberCount = visibleTeamMembers().length;
+	const eventCount = state.agentActivities?.length || 0;
+	const totalCount = isTeamMode() ? memberCount + eventCount : eventCount;
+	setInnerHtmlIfChanged(document.getElementById('steps-header'), renderStepsHeader(totalCount));
+	setInnerHtmlIfChanged(document.getElementById('steps-scroll'), renderStepsPanelContent());
+}
+
 function render() {
 	const transcriptState = captureScroll('transcript-scroll');
 	const conversationState = captureScroll('conversation-list');
@@ -768,129 +1254,18 @@ function render() {
 	const modelLabel = currentModelLabel();
 	const workspaceLabel = currentWorkspaceLabel();
 
-	app.innerHTML = `
-    <div class="app-shell">
-      <aside class="panel sidebar">
-        <div class="brand">
-          <div class="brand-badge">SC</div>
-          <div>
-            <div class="brand-name">SelfClaw</div>
-            <div class="status-row">
-              <span class="status-dot"></span>
-              <span>${escapeHtml(statusText)}</span>
-            </div>
-          </div>
-        </div>
-        <button class="sidebar-primary" data-action="new-conversation" type="button">+ 新建对话</button>
-        <input id="conversation-search" class="search-box" type="text" placeholder="搜索会话..." value="${escapeHtml(conversationSearch)}" />
-        <div class="section-title">最近会话</div>
-        <div id="conversation-list" class="conversation-list">
-          ${
-						conversations.length === 0
-							? '<div class="muted-placeholder">还没有会话，点击“新建对话”开始。</div>'
-							: conversations
-									.map((item) => {
-										const menuOpen = openConversationMenuId === item.id;
-										return `
-                <div class="conversation-row">
-                  <button class="conversation-card ${item.id === state.selectedConversationId ? 'selected' : ''}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">
-                    <div class="conversation-title">${escapeHtml(item.title)}</div>
-                    <div class="conversation-time">${escapeHtml(item.timestamp)}</div>
-                  </button>
-                  <div class="conversation-menu-shell">
-                    <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="会话菜单">⋯</button>
-                    ${menuOpen ? `<div class="conversation-menu"><button class="conversation-menu-item danger" data-action="delete-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">删除会话</button></div>` : ''}
-                  </div>
-                </div>
-              `;
-									})
-									.join('')
-					}
-        </div>
-        <button class="sidebar-footer" data-action="toggle-settings" type="button">
-          <div class="avatar">SC</div>
-          <div class="sidebar-footer-copy">
-            <div class="sidebar-footer-title">系统设置</div>
-            <div class="sidebar-footer-subtitle">模型、工作区、主题</div>
-          </div>
-          <div>&rsaquo;</div>
-        </button>
-      </aside>
-      <main class="main-column">
-        <div class="panel topbar">
-          <div class="chip-row">
-            ${state.conversationModes
-							.map(
-								(mode) => `
-              <button class="mode-chip ${mode.id === state.selectedConversationModeId ? 'active' : ''}" type="button" data-action="select-mode" data-mode-id="${escapeHtml(mode.id)}">${escapeHtml(mode.label)}</button>
-            `
-							)
-							.join('')}
-            <button class="mode-chip" type="button" disabled>协作</button>
-          </div>
-          <div class="topbar-right">
-            <div class="context-pill" title="${escapeHtml(modelLabel)}">
-              <span class="context-label">模型</span>
-              <span class="context-value">${escapeHtml(modelLabel)}</span>
-            </div>
-            <div class="context-pill" title="${escapeHtml(workspaceLabel)}">
-              <span class="context-label">工作区</span>
-              <span class="context-value">${escapeHtml(workspaceLabel)}</span>
-            </div>
-            <button class="icon-btn" data-action="toggle-settings" type="button" aria-label="打开系统设置">设置</button>
-          </div>
-        </div>
-        <section class="panel transcript-panel">
-          <div id="transcript-scroll" class="transcript-scroll">${renderMessages()}</div>
-        </section>
-        <section class="panel composer-panel">
-          <div class="composer-toolbar">
-            <div class="composer-meta">
-              <span class="meta-pill">Esc 停止</span>
-              <span class="meta-pill status-pill">${escapeHtml(statusText)}</span>
-            </div>
-            ${
-							isTeamMode()
-								? `
-              <div class="team-controls">
-                <label class="team-control" title="${escapeHtml(teamRoundsTitle)}">
-                  <span class="team-control-label">最大讨论轮次</span>
-                  <select id="team-round-select" class="permission-select" aria-label="团队最大讨论轮次">
-                    ${renderOptions(state.teamRoundModes, state.selectedTeamRoundModeId)}
-                  </select>
-                </label>
-                <label class="team-control" title="${escapeHtml(teamOutputTitle)}">
-                  <span class="team-control-label">总结输出</span>
-                  <select id="team-output-select" class="permission-select" aria-label="团队总结输出方式">
-                    ${renderOptions(state.teamOutputModes, state.selectedTeamOutputModeId)}
-                  </select>
-                </label>
-              </div>
-            `
-								: `
-              <div class="permission-control" title="${escapeHtml(permissionTitle)}">
-                <select id="permission-select" class="permission-select" aria-label="工具权限模式">
-                  ${renderOptions(state.toolPermissionModes, state.selectedToolPermissionModeId)}
-                </select>
-              </div>
-            `
-						}
-          </div>
-          <div class="composer-grid">
-            <textarea id="composer" class="composer-box" placeholder="描述你想构建的内容，例如修复 Bug、写脚本，或使用 /commit 提交仓库...">${escapeHtml(composerValue)}</textarea>
-            <button id="send-button" class="send-btn ${state.isBusy ? 'loading' : 'idle'}" type="button" aria-label="${state.isBusy ? '停止生成' : '发送消息'}" title="${state.isBusy ? '停止生成' : '发送消息'}">${renderSendButtonInner(state.isBusy)}</button>
-          </div>
-        </section>
-      </main>
-      ${renderStepsPanel()}
-    </div>
-  `;
-
+	ensureAppShell();
+	hydrateSidebar(conversations, statusText);
+	hydrateTopbar(modelLabel, workspaceLabel);
+	hydrateTranscript();
+	hydrateComposer(permissionTitle, teamRoundsTitle, teamOutputTitle, statusText);
+	hydrateStepsPanel();
 	renderSettings();
 	renderEditor();
-	updateComposer();
 	restoreScroll('conversation-list', conversationState);
-	restoreScroll('steps-scroll', stepsState, false);
+	if (canRestoreStepsScroll()) {
+		restoreScroll('steps-scroll', stepsState, false);
+	}
 	restoreScroll('transcript-scroll', transcriptState, canAutoFollowTranscript(transcriptState, pendingScrollToBottom));
 	requestAnimationFrame(syncConversationMenuPlacement);
 	pendingScrollToBottom = false;
@@ -925,17 +1300,8 @@ window.chrome?.webview?.addEventListener('message', (event) => {
 	const payload = event.data || {};
 
 	if (payload.type === 'replaceState') {
-		Object.assign(state, payload);
-		state.conversationModes = state.conversationModes || [];
-		state.selectedConversationModeId = state.selectedConversationModeId || 'programming';
-		state.toolPermissionModes = state.toolPermissionModes || [];
-		state.selectedToolPermissionModeId = state.selectedToolPermissionModeId || 'requireApproval';
-		state.teamRoundModes = state.teamRoundModes || [];
-		state.selectedTeamRoundModeId = state.selectedTeamRoundModeId || '2';
-		state.teamOutputModes = state.teamOutputModes || [];
-		state.selectedTeamOutputModeId = state.selectedTeamOutputModeId || 'autoDocument';
-		state.teamMembers = state.teamMembers || [];
-		render();
+		pendingStatePayload = payload;
+		scheduleRender();
 		return;
 	}
 
@@ -972,12 +1338,16 @@ document.addEventListener('input', (event) => {
 	if (event.target.id === 'composer') {
 		composerValue = event.target.value;
 		updateComposer();
+		syncMentionState(event.target);
 		return;
 	}
 
 	if (event.target.id === 'conversation-search') {
 		conversationSearch = event.target.value;
-		render();
+		if (openConversationMenuId) {
+			openConversationMenuId = null;
+		}
+		scheduleRender();
 		return;
 	}
 
@@ -1013,6 +1383,11 @@ document.addEventListener('change', (event) => {
 		return;
 	}
 
+	if (event.target.id === 'composer-profile-select') {
+		post({ type: 'select-profile', profileId: event.target.value });
+		return;
+	}
+
 	if (event.target.id === 'workspace-select') {
 		clearFeedback('workspace');
 		post({ type: 'select-workspace', workspaceRootId: event.target.value || null });
@@ -1024,12 +1399,27 @@ document.addEventListener('change', (event) => {
 		return;
 	}
 
+	if (event.target.id === 'composer-permission-select') {
+		post({ type: 'select-tool-permission', permissionModeId: event.target.value });
+		return;
+	}
+
 	if (event.target.id === 'team-round-select') {
 		post({ type: 'select-team-max-rounds', roundsId: event.target.value });
 		return;
 	}
 
+	if (event.target.id === 'composer-team-round-select') {
+		post({ type: 'select-team-max-rounds', roundsId: event.target.value });
+		return;
+	}
+
 	if (event.target.id === 'team-output-select') {
+		post({ type: 'select-team-output-mode', outputModeId: event.target.value });
+		return;
+	}
+
+	if (event.target.id === 'composer-team-output-select') {
 		post({ type: 'select-team-output-mode', outputModeId: event.target.value });
 		return;
 	}
@@ -1051,18 +1441,38 @@ document.addEventListener('keydown', (event) => {
 		return;
 	}
 
-	if (event.target.id === 'composer' && event.key === 'Enter' && !event.shiftKey) {
-		event.preventDefault();
-		const prompt = composerValue.trim();
-		if (!prompt) {
+	if (event.target.id === 'composer' && mentionState.open) {
+		const candidates = getMentionCandidates();
+		if (event.key === 'ArrowDown' && candidates.length > 0) {
+			event.preventDefault();
+			mentionState.activeIndex = (mentionState.activeIndex + 1) % candidates.length;
+			renderMentionPicker();
 			return;
 		}
 
-		pendingScrollToBottom = true;
-		post({ type: 'send-prompt', prompt });
-		composerValue = '';
-		event.target.value = '';
-		updateComposer();
+		if (event.key === 'ArrowUp' && candidates.length > 0) {
+			event.preventDefault();
+			mentionState.activeIndex = (mentionState.activeIndex - 1 + candidates.length) % candidates.length;
+			renderMentionPicker();
+			return;
+		}
+
+		if ((event.key === 'Enter' || event.key === 'Tab') && candidates.length > 0) {
+			event.preventDefault();
+			applyMentionSelection(event.target, candidates[mentionState.activeIndex] || candidates[0]);
+			return;
+		}
+
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			closeMentionPicker();
+			return;
+		}
+	}
+
+	if (event.target.id === 'composer' && event.key === 'Enter' && !event.shiftKey) {
+		event.preventDefault();
+		submitComposer();
 		return;
 	}
 
@@ -1096,13 +1506,18 @@ document.addEventListener('click', (event) => {
 			case 'toggle-conversation-menu': {
 				const conversationId = actionElement.getAttribute('data-conversation-id');
 				openConversationMenuId = openConversationMenuId === conversationId ? null : conversationId;
-				render();
+				scheduleRender();
 				break;
 			}
 			case 'delete-conversation':
 				openConversationMenuId = null;
 				post({ type: 'delete-conversation', conversationId: actionElement.getAttribute('data-conversation-id') });
 				break;
+			case 'select-mention': {
+				const composer = document.getElementById('composer');
+				applyMentionSelection(composer, findMentionAgent(actionElement.getAttribute('data-agent-id')));
+				break;
+			}
 			case 'toggle-settings':
 				openConversationMenuId = null;
 				clearFeedback();
@@ -1196,7 +1611,7 @@ document.addEventListener('click', (event) => {
 				}
 
 				openTeamMembers.set(memberId, !isTeamMemberOpen(memberId));
-				render();
+				scheduleRender();
 				break;
 			}
 			case 'toggle-activity': {
@@ -1228,7 +1643,7 @@ document.addEventListener('click', (event) => {
 				}
 
 				openStepSections.set(sectionId, !isStepSectionOpen(sectionId, true));
-				render();
+				scheduleRender();
 				break;
 			}
 			case 'approve-tool-execution':
@@ -1249,19 +1664,7 @@ document.addEventListener('click', (event) => {
 			return;
 		}
 
-		const prompt = composerValue.trim();
-		if (!prompt) {
-			return;
-		}
-
-		pendingScrollToBottom = true;
-		post({ type: 'send-prompt', prompt });
-		composerValue = '';
-		const composer = document.getElementById('composer');
-		if (composer) {
-			composer.value = '';
-		}
-		updateComposer();
+		submitComposer();
 		return;
 	}
 
@@ -1287,7 +1690,12 @@ document.addEventListener('click', (event) => {
 
 	if (openConversationMenuId) {
 		openConversationMenuId = null;
-		render();
+		scheduleRender();
+		return;
+	}
+
+	if (mentionState.open) {
+		closeMentionPicker();
 	}
 });
 
@@ -1315,13 +1723,15 @@ document.addEventListener(
 document.addEventListener(
 	'wheel',
 	(event) => {
-		const target = event.target instanceof Element ? event.target.closest('#transcript-scroll') : null;
-		if (!target) {
+		const transcriptTarget = event.target instanceof Element ? event.target.closest('#transcript-scroll') : null;
+		if (transcriptTarget && event.deltaY < 0) {
+			pauseTranscriptAutoFollow(1600);
 			return;
 		}
 
-		if (event.deltaY < 0) {
-			pauseTranscriptAutoFollow(1600);
+		const stepsTarget = event.target instanceof Element ? event.target.closest('#steps-scroll') : null;
+		if (stepsTarget) {
+			pauseStepsScrollRestore(1600);
 		}
 	},
 	{ passive: true, capture: true }
@@ -1330,12 +1740,16 @@ document.addEventListener(
 document.addEventListener(
 	'pointerdown',
 	(event) => {
-		const target = event.target instanceof Element ? event.target.closest('#transcript-scroll') : null;
-		if (!target || !state.isBusy) {
+		const transcriptTarget = event.target instanceof Element ? event.target.closest('#transcript-scroll') : null;
+		if (transcriptTarget && state.isBusy) {
+			pauseTranscriptAutoFollow(900);
 			return;
 		}
 
-		pauseTranscriptAutoFollow(900);
+		const stepsTarget = event.target instanceof Element ? event.target.closest('#steps-scroll') : null;
+		if (stepsTarget) {
+			pauseStepsScrollRestore(900);
+		}
 	},
 	true
 );

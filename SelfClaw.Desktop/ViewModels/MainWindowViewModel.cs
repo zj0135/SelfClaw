@@ -1,10 +1,11 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Text;
 using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,7 @@ namespace SelfClaw.Desktop.ViewModels;
 
 public sealed partial class MainWindowViewModel : ObservableObject
 {
+    private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(75);
     private static readonly ShellSelectOption[] ToolPermissionOptions =
     [
         new("requireApproval", "默认权限", "写文件和命令执行前需要人工确认"),
@@ -56,9 +58,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly DesktopSettingsStore _desktopSettingsStore;
     private readonly ILogger<MainWindowViewModel> _logger;
+    private readonly DispatcherTimer? _streamingPublishTimer;
 
     private readonly List<ConversationRecord> _allConversations = [];
     private readonly List<MessageRecord> _messages = [];
+    private readonly List<MessageRecord> _contextMessages = [];
     private readonly List<TeamAgentRecord> _teamAgents = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
     private readonly Dictionary<Guid, ToolRunAnchor> _toolRunAnchors = [];
@@ -79,6 +83,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
     private int _selectedTeamMaxRounds = TeamDiscussionDefaults.DefaultMaxRounds;
     private TeamOutputMode _selectedTeamOutputMode = TeamDiscussionDefaults.DefaultOutputMode;
+    private TeamAgentRecord? _selectedBoundAgent;
+    private bool _pendingStreamingPublish;
+    private bool _pendingStreamingAutoScroll;
+    private DateTimeOffset _lastStreamingPublishAtUtc = DateTimeOffset.MinValue;
 
     public MainWindowViewModel(
         IConversationRepository conversationRepository,
@@ -100,6 +108,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _markdownHtmlRenderer = markdownHtmlRenderer;
         _desktopSettingsStore = desktopSettingsStore;
         _logger = logger;
+        if (Application.Current?.Dispatcher is Dispatcher dispatcher)
+        {
+            _streamingPublishTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
+            {
+                Interval = StreamingPublishInterval
+            };
+            _streamingPublishTimer.Tick += OnStreamingPublishTimerTick;
+        }
 
         ThemeOptions.Add(new ThemeOption(AppThemePreference.System, "System"));
         ThemeOptions.Add(new ThemeOption(AppThemePreference.Light, "Light"));
@@ -230,9 +246,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
             else
             {
                 _messages.Clear();
+                _contextMessages.Clear();
                 _teamAgents.Clear();
                 _toolRuns.Clear();
                 _toolRunAnchors.Clear();
+                _selectedBoundAgent = null;
                 PublishAgentActivities();
                 PublishShell(false);
             }
@@ -398,9 +416,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         await _conversationRepository.DeleteConversationAsync(conversationId);
-        _allConversations.RemoveAll(item => item.Id == conversationId);
+        var removedConversationIds = _allConversations
+            .Where(item => item.Id == conversationId || item.ParentConversationId == conversationId || item.RootConversationId == conversationId)
+            .Select(item => item.Id)
+            .ToHashSet();
+        _allConversations.RemoveAll(item => removedConversationIds.Contains(item.Id));
 
-        if (SelectedConversation?.Id == conversationId)
+        if (SelectedConversation is not null && removedConversationIds.Contains(SelectedConversation.Id))
         {
             SelectedConversation = null;
         }
@@ -592,6 +614,87 @@ public sealed partial class MainWindowViewModel : ObservableObject
         });
     }
 
+    private void RequestStreamingShellPublish(bool autoScroll)
+    {
+        if (Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
+        {
+            _ = dispatcher.BeginInvoke(new Action(() => RequestStreamingShellPublish(autoScroll)), DispatcherPriority.Background);
+            return;
+        }
+
+        if (_streamingPublishTimer is null)
+        {
+            PublishShell(autoScroll);
+            return;
+        }
+
+        _pendingStreamingPublish = true;
+        _pendingStreamingAutoScroll |= autoScroll;
+
+        var elapsed = DateTimeOffset.UtcNow - _lastStreamingPublishAtUtc;
+        if (!_streamingPublishTimer.IsEnabled && elapsed >= StreamingPublishInterval)
+        {
+            FlushStreamingShellPublish();
+            return;
+        }
+
+        if (_streamingPublishTimer.IsEnabled)
+        {
+            return;
+        }
+
+        var delay = elapsed >= StreamingPublishInterval
+            ? StreamingPublishInterval
+            : StreamingPublishInterval - elapsed;
+        if (delay < TimeSpan.Zero)
+        {
+            delay = TimeSpan.Zero;
+        }
+
+        _streamingPublishTimer.Interval = delay;
+        _streamingPublishTimer.Start();
+    }
+
+    private void FlushStreamingShellPublish()
+    {
+        if (_streamingPublishTimer?.IsEnabled == true)
+        {
+            _streamingPublishTimer.Stop();
+        }
+
+        if (!_pendingStreamingPublish)
+        {
+            return;
+        }
+
+        var autoScroll = _pendingStreamingAutoScroll;
+        _pendingStreamingPublish = false;
+        _pendingStreamingAutoScroll = false;
+        _lastStreamingPublishAtUtc = DateTimeOffset.UtcNow;
+        PublishShell(autoScroll);
+    }
+
+    private void PublishShellNow(bool autoScroll)
+    {
+        if (Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
+        {
+            _ = dispatcher.BeginInvoke(new Action(() => PublishShellNow(autoScroll)), DispatcherPriority.Background);
+            return;
+        }
+
+        if (_pendingStreamingPublish)
+        {
+            _pendingStreamingAutoScroll |= autoScroll;
+            FlushStreamingShellPublish();
+            return;
+        }
+
+        PublishShell(autoScroll);
+    }
+
+    private void OnStreamingPublishTimerTick(object? sender, EventArgs e)
+        => FlushStreamingShellPublish();
+
     private async Task ReloadProfilesAsync()
     {
         var selectedId = SelectedProfile?.Id;
@@ -652,9 +755,22 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private async Task LoadConversationAsync(ConversationRecord conversation)
     {
         var version = ++_selectionVersion;
-        var messages = await _conversationRepository.ListMessagesAsync(conversation.Id);
-        var teamAgents = await _conversationRepository.ListTeamAgentsAsync(conversation.Id);
-        var toolRuns = await _conversationRepository.ListToolExecutionsAsync(conversation.Id);
+        var rootConversationId = conversation.EffectiveRootConversationId;
+        var messagesTask = _conversationRepository.ListMessagesAsync(conversation.Id);
+        var teamAgentsTask =
+            conversation.Mode == ConversationMode.Team || conversation.IsAgentConversation
+                ? _conversationRepository.ListTeamAgentsAsync(rootConversationId)
+                : Task.FromResult<IReadOnlyList<TeamAgentRecord>>([]);
+        var toolRunsTask = _conversationRepository.ListToolExecutionsAsync(conversation.Id);
+        var contextMessagesTask =
+            conversation.IsTopLevelConversation || rootConversationId == conversation.Id
+                ? Task.FromResult<IReadOnlyList<MessageRecord>>([])
+                : _conversationRepository.ListMessagesAsync(rootConversationId);
+
+        var messages = await messagesTask;
+        var teamAgents = await teamAgentsTask;
+        var toolRuns = await toolRunsTask;
+        var contextMessages = await contextMessagesTask;
         if (version != _selectionVersion)
         {
             return;
@@ -662,11 +778,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         _messages.Clear();
         _messages.AddRange(messages);
+        _contextMessages.Clear();
+        _contextMessages.AddRange(contextMessages);
         _teamAgents.Clear();
         _teamAgents.AddRange(teamAgents);
         _toolRuns.Clear();
         _toolRuns.AddRange(toolRuns);
         _toolRunAnchors.Clear();
+        _selectedBoundAgent = ResolveBoundAgent(conversation, teamAgents);
         foreach (var toolRun in toolRuns)
         {
             if (toolRun.MessageId is Guid messageId && toolRun.AfterSegmentIndex is int afterSegmentIndex)
@@ -709,10 +828,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _turnCancellationSource = new CancellationTokenSource();
         var activeMessageIds = new HashSet<Guid>();
         TeamDocumentReadyEvent? pendingTeamDocument = null;
+        TeamAgentRecord? runningBoundAgent = null;
 
         try
         {
             var conversation = await EnsureConversationAsync();
+            if (TryMatchAgentMention(prompt, out var mentionedAgent, out var branchPrompt))
+            {
+                if (string.IsNullOrWhiteSpace(branchPrompt))
+                {
+                    StatusText = $"Enter a message for {mentionedAgent.Name}.";
+                    PublishShell(false);
+                    return;
+                }
+
+                conversation = await CreateAgentConversationAsync(conversation, mentionedAgent, branchPrompt);
+                prompt = branchPrompt;
+            }
+
             conversation = conversation with
             {
                 ProfileId = SelectedProfile.Id,
@@ -750,7 +883,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
             }
 
             var requestMessages = _messages.ToArray();
+            var requestContextMessages = _contextMessages.ToArray();
             var requestTeamAgents = _teamAgents.ToArray();
+            runningBoundAgent = _selectedBoundAgent;
+
+            if (runningBoundAgent is not null)
+            {
+                await UpdateTeamAgentStatusAsync(runningBoundAgent.Id, TeamAgentStatus.Running);
+            }
 
             await foreach (var update in _agentChatRuntime.StreamTurnAsync(
                                new ChatTurnRequest(
@@ -764,7 +904,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
                                    SelectedTeamOutputMode,
                                    _toolApprovalHandler,
                                    requestMessages,
-                                   requestTeamAgents),
+                                   requestTeamAgents,
+                                   requestContextMessages,
+                                   runningBoundAgent),
                                _turnCancellationSource.Token))
             {
                 switch (update)
@@ -772,7 +914,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                     case AssistantMessageStartedEvent started:
                         activeMessageIds.Add(started.Message.Id);
                         ReplaceMessage(started.Message);
-                        PublishShell(true);
+                        RequestStreamingShellPublish(true);
                         break;
                     case AssistantDeltaEvent delta:
                         ApplyAssistantDelta(delta.MessageId, delta.DeltaMarkdown);
@@ -810,21 +952,36 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 await FinalizeTeamDocumentExportAsync(conversation, pendingTeamDocument, _turnCancellationSource.Token);
             }
 
+            if (runningBoundAgent is not null)
+            {
+                await UpdateTeamAgentStatusAsync(runningBoundAgent.Id, TeamAgentStatus.Completed);
+            }
+
             StatusText = "Ready.";
-            PublishShell(true);
+            PublishShellNow(true);
         }
         catch (OperationCanceledException)
         {
             await FailActiveMessagesAsync(activeMessageIds, "Generation stopped.");
+            if (runningBoundAgent is not null)
+            {
+                await UpdateTeamAgentStatusAsync(runningBoundAgent.Id, TeamAgentStatus.Failed);
+            }
+
             StatusText = "Generation stopped.";
-            PublishShell(true);
+            PublishShellNow(true);
         }
         catch (Exception exception)
         {
             _logger.LogError(exception, "Chat turn failed.");
             await FailActiveMessagesAsync(activeMessageIds, exception.Message);
+            if (runningBoundAgent is not null)
+            {
+                await UpdateTeamAgentStatusAsync(runningBoundAgent.Id, TeamAgentStatus.Failed);
+            }
+
             StatusText = exception.Message;
-            PublishShell(true);
+            PublishShellNow(true);
         }
         finally
         {
@@ -858,6 +1015,129 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         await CreateNewConversationAsync();
         return SelectedConversation!;
+    }
+
+    private TeamAgentRecord? ResolveBoundAgent(
+        ConversationRecord conversation,
+        IReadOnlyList<TeamAgentRecord> teamAgents)
+    {
+        if (!conversation.IsAgentConversation)
+        {
+            return null;
+        }
+
+        var boundAgent = teamAgents.FirstOrDefault(agent =>
+            (conversation.BoundAgentId is Guid boundAgentId && agent.Id == boundAgentId) ||
+            (string.Equals(agent.Name, conversation.BoundAgentName, StringComparison.OrdinalIgnoreCase) &&
+             string.Equals(agent.Role, conversation.BoundAgentRole, StringComparison.OrdinalIgnoreCase)));
+        if (boundAgent is not null)
+        {
+            return boundAgent;
+        }
+
+        if (!string.IsNullOrWhiteSpace(conversation.BoundAgentName) &&
+            !string.IsNullOrWhiteSpace(conversation.BoundAgentRole))
+        {
+            var now = DateTimeOffset.UtcNow;
+            return new TeamAgentRecord(
+                conversation.BoundAgentId ?? Guid.NewGuid(),
+                conversation.EffectiveRootConversationId,
+                conversation.BoundAgentName,
+                conversation.BoundAgentRole,
+                $"{conversation.BoundAgentName} handles follow-up questions as {conversation.BoundAgentRole}.",
+                TeamAgentStatus.Ready,
+                int.MaxValue,
+                now,
+                now);
+        }
+
+        return null;
+    }
+
+    private bool TryMatchAgentMention(
+        string prompt,
+        out TeamAgentRecord agent,
+        out string branchPrompt)
+    {
+        agent = null!;
+        branchPrompt = prompt;
+
+        if (SelectedConversationMode != ConversationMode.Team || _teamAgents.Count == 0)
+        {
+            return false;
+        }
+
+        var trimmedPrompt = prompt.TrimStart();
+        if (!trimmedPrompt.StartsWith("@", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var candidate in _teamAgents
+                     .OrderByDescending(item => item.Name.Length)
+                     .ThenBy(item => item.SortOrder)
+                     .ThenBy(item => item.CreatedAtUtc))
+        {
+            foreach (var mentionToken in new[] { "@{" + candidate.Name.Trim() + "}", "@" + candidate.Name.Trim() })
+            {
+                if (!trimmedPrompt.StartsWith(mentionToken, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (trimmedPrompt.Length > mentionToken.Length &&
+                    !IsMentionBoundary(trimmedPrompt[mentionToken.Length]))
+                {
+                    continue;
+                }
+
+                agent = candidate;
+                branchPrompt = trimmedPrompt[mentionToken.Length..].TrimStart(' ', '\t', '\r', '\n', ':', '-', '>');
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<ConversationRecord> CreateAgentConversationAsync(
+        ConversationRecord sourceConversation,
+        TeamAgentRecord agent,
+        string prompt)
+    {
+        var rootConversation = _allConversations.FirstOrDefault(item => item.Id == sourceConversation.EffectiveRootConversationId)
+            ?? sourceConversation;
+        var now = DateTimeOffset.UtcNow;
+        rootConversation = rootConversation with { UpdatedAtUtc = now };
+        await _conversationRepository.UpsertConversationAsync(rootConversation);
+        UpsertConversation(rootConversation);
+
+        var conversation = new ConversationRecord(
+            Guid.NewGuid(),
+            CreateConversationTitle(prompt),
+            SelectedProfile?.Id ?? sourceConversation.ProfileId,
+            SelectedWorkspaceRoot?.Id ?? sourceConversation.WorkspaceRootId,
+            ConversationMode.Team,
+            SelectedToolPermissionMode,
+            SelectedTeamMaxRounds,
+            SelectedTeamOutputMode,
+            now,
+            now,
+            rootConversation.Id,
+            rootConversation.Id,
+            agent.Id,
+            agent.Name,
+            agent.Role);
+
+        var persistedConversation = await _conversationRepository.UpsertConversationAsync(conversation);
+        UpsertConversation(persistedConversation);
+        ApplyConversationFilter(persistedConversation.Id);
+        await LoadConversationAsync(persistedConversation);
+        StatusText = persistedConversation.Id == conversation.Id
+            ? $"Started a direct session with {agent.Name}."
+            : $"Continued direct session with {agent.Name}.";
+        PublishShell(false);
+        return persistedConversation;
     }
 
     private async Task PersistConversationAsync(ConversationRecord conversation)
@@ -963,9 +1243,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 toolRunsByMessageId.TryGetValue(item.Id, out var toolRuns) ? toolRuns : []))
             .ToArray();
 
-        var conversations = Conversations
-            .Select(BuildConversationItem)
-            .ToArray();
+        var conversations = BuildConversationItems();
 
         var conversationModes = ConversationModeOptions;
 
@@ -1019,12 +1297,69 @@ public sealed partial class MainWindowViewModel : ObservableObject
             IsBusy));
     }
 
-    private TranscriptConversationItem BuildConversationItem(ConversationRecord conversation)
+    private TranscriptConversationItem[] BuildConversationItems()
+    {
+        var filteredConversations = Conversations.ToArray();
+        var childrenByParent = filteredConversations
+            .Where(item => item.ParentConversationId is Guid)
+            .GroupBy(item => item.ParentConversationId!.Value)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(item => item.UpdatedAtUtc)
+                    .ThenBy(item => item.CreatedAtUtc)
+                    .ToArray());
+        var items = new List<TranscriptConversationItem>(filteredConversations.Length);
+        var includedIds = new HashSet<Guid>();
+
+        foreach (var conversation in filteredConversations
+                     .Where(item => item.IsTopLevelConversation)
+                     .OrderByDescending(item => item.UpdatedAtUtc)
+                     .ThenBy(item => item.CreatedAtUtc))
+        {
+            items.Add(BuildConversationItem(conversation, null, 0));
+            includedIds.Add(conversation.Id);
+
+            if (!childrenByParent.TryGetValue(conversation.Id, out var children))
+            {
+                continue;
+            }
+
+            foreach (var child in children)
+            {
+                items.Add(BuildConversationItem(child, conversation.Id, 1));
+                includedIds.Add(child.Id);
+            }
+        }
+
+        foreach (var conversation in filteredConversations
+                     .Where(item => !includedIds.Contains(item.Id))
+                     .OrderByDescending(item => item.UpdatedAtUtc)
+                     .ThenBy(item => item.CreatedAtUtc))
+        {
+            items.Add(BuildConversationItem(
+                conversation,
+                conversation.ParentConversationId,
+                conversation.ParentConversationId is null ? 0 : 1));
+        }
+
+        return items.ToArray();
+    }
+
+    private TranscriptConversationItem BuildConversationItem(
+        ConversationRecord conversation,
+        Guid? parentConversationId,
+        int depth)
         => new(
             conversation.Id.ToString("D"),
             conversation.Title,
             conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
-            SelectedConversation?.Id == conversation.Id);
+            SelectedConversation?.Id == conversation.Id,
+            parentConversationId?.ToString("D"),
+            depth,
+            conversation.IsAgentConversation,
+            conversation.BoundAgentName,
+            conversation.IsAgentConversation ? conversation.BoundAgentRole : null);
 
     private void PublishAgentActivities()
     {
@@ -1178,6 +1513,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var normalized = text.ReplaceLineEndings(" ").Trim();
         return normalized.Length > 48 ? normalized[..48] + "..." : normalized;
     }
+
+    private static bool IsMentionBoundary(char value)
+        => char.IsWhiteSpace(value) || char.IsPunctuation(value) || char.IsSymbol(value);
 
     private static string NormalizeEndpoint(string endpoint)
     {

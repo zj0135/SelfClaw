@@ -13,4 +13,6 @@ public sealed record ChatTurnRequest(
     TeamOutputMode TeamOutputMode,
     IToolApprovalHandler? ToolApprovalHandler,
     IReadOnlyList<MessageRecord> Messages,
-    IReadOnlyList<TeamAgentRecord> TeamAgents);
+    IReadOnlyList<TeamAgentRecord> TeamAgents,
+    IReadOnlyList<MessageRecord>? ContextMessages = null,
+    TeamAgentRecord? BoundAgent = null);

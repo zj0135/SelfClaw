@@ -19,6 +19,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
     private const string ProgrammingAgentRole = "Programming Assistant";
     private const string ProgrammingAgentDescription = "A personal desktop AI client for focused conversation and workspace assistance.";
     private const string ProgrammingBaseInstructions = "You are SelfClaw, a concise desktop AI assistant. Respond in Markdown. Use workspace tools when they materially help. Never claim to have read, written, or executed anything unless a tool actually returned a successful result.";
+    private const string BoundAgentSessionDescription = "A dedicated specialist follow-up session that branches from the main team conversation.";
     private const string CoordinatorName = "Coordinator";
     private const string CoordinatorRole = "Coordinator";
     private const string CoordinatorDescription = "A coordination agent that designs a multi-agent review flow and synthesizes final team output.";
@@ -58,7 +59,11 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         {
             try
             {
-                if (request.Mode == ConversationMode.Team)
+                if (request.BoundAgent is not null)
+                {
+                    await ProduceBoundAgentTurnAsync(request, channel.Writer, cancellationToken);
+                }
+                else if (request.Mode == ConversationMode.Team)
                 {
                     await ProduceTeamTurnAsync(request, channel.Writer, cancellationToken);
                 }
@@ -105,6 +110,49 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 ProgrammingAgentDescription,
                 BuildProgrammingInstructions(request),
                 BuildPromptMessages(request.Messages),
+                CreateTools(request, observer, includeWriteTools: true, includeShellTool: true)),
+            (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
+            cancellationToken);
+
+        await writer.WriteAsync(
+            new AssistantMessageCompletedEvent(startedMessage with
+            {
+                MarkdownContent = result.FinalMarkdown,
+                Status = MessageStatus.Completed,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+                InputTokens = result.InputTokens,
+                OutputTokens = result.OutputTokens,
+                DurationMs = result.Duration.TotalMilliseconds,
+                ErrorMessage = null
+            }),
+            cancellationToken);
+    }
+
+    private async Task ProduceBoundAgentTurnAsync(
+        ChatTurnRequest request,
+        ChannelWriter<ChatRuntimeEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        var agent = request.BoundAgent!;
+        var messageId = Guid.NewGuid();
+        var startedMessage = CreateAssistantMessage(
+            request.ConversationId,
+            messageId,
+            agent.Id,
+            agent.Name,
+            agent.Role);
+
+        await writer.WriteAsync(new AssistantMessageStartedEvent(startedMessage), cancellationToken);
+
+        var observer = new RuntimeToolObserver(writer, request.ConversationId, agent.Id, messageId);
+        var result = await _agentExecutionService.RunAsync(
+            new AgentExecutionRequest(
+                request.Profile,
+                request.ApiKey,
+                agent.Name,
+                BoundAgentSessionDescription,
+                BuildBoundAgentInstructions(request, agent),
+                BuildBoundAgentPromptMessages(request.ContextMessages ?? [], request.Messages, agent),
                 CreateTools(request, observer, includeWriteTools: true, includeShellTool: true)),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
             cancellationToken);
@@ -474,6 +522,37 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         return promptMessages;
     }
 
+    private static IReadOnlyList<ChatMessage> BuildBoundAgentPromptMessages(
+        IReadOnlyList<MessageRecord> contextMessages,
+        IReadOnlyList<MessageRecord> conversationMessages,
+        TeamAgentRecord agent)
+    {
+        var promptMessages = new List<ChatMessage>
+        {
+            new(
+                ChatRole.System,
+                $"This dedicated branch is assigned to {agent.Name} ({agent.Role}). Continue as that specialist and use the inherited main conversation only as background context.")
+        };
+
+        if (contextMessages.Count > 0)
+        {
+            promptMessages.Add(new ChatMessage(
+                ChatRole.System,
+                "Inherited main conversation context begins below. Treat it as read-only background that explains why this branch exists."));
+            promptMessages.AddRange(BuildPromptMessages(contextMessages));
+        }
+
+        if (conversationMessages.Count > 0)
+        {
+            promptMessages.Add(new ChatMessage(
+                ChatRole.System,
+                $"Messages below belong to the dedicated branch with {agent.Name}. Continue this branch directly."));
+            promptMessages.AddRange(BuildPromptMessages(conversationMessages));
+        }
+
+        return promptMessages;
+    }
+
     private static IReadOnlyList<ChatMessage> BuildWorkerPromptMessages(
         IReadOnlyList<MessageRecord> messages,
         IReadOnlyList<TeamAgentRecord> plannedTeamAgents,
@@ -662,6 +741,30 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         return ProgrammingBaseInstructions +
                $" The trusted workspace root is '{request.WorkspaceRoot.RootPath}'. Keep file references relative to that root." +
                permissionInstructions;
+    }
+
+    private static string BuildBoundAgentInstructions(ChatTurnRequest request, TeamAgentRecord agent)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"You are {agent.Name}, acting as {agent.Role}, in a dedicated follow-up session that branches from a larger team conversation.");
+        builder.AppendLine(agent.GoalPrompt);
+        builder.AppendLine("Respond in Markdown.");
+        builder.AppendLine("Use the inherited main-conversation context as background, then answer the user directly in this branch.");
+        builder.AppendLine("Stay in role as this specialist. Do not convert the session back into a coordinator summary unless the user explicitly asks for that.");
+        builder.AppendLine("Do not claim tools were used unless tool results were actually returned.");
+
+        if (request.WorkspaceRoot is null)
+        {
+            builder.AppendLine("No workspace is selected, so rely on the inherited discussion context and the user messages in this branch.");
+            return builder.ToString();
+        }
+
+        builder.AppendLine($"The trusted workspace root is '{request.WorkspaceRoot.RootPath}'. Keep file references relative to that root.");
+        builder.AppendLine(
+            request.ToolPermissionMode == ToolPermissionMode.FullAccess
+                ? "You may use file-writing and PowerShell tools without extra approval, but stay scoped to the selected workspace unless the user explicitly requests otherwise."
+                : "File-writing and PowerShell tools require explicit user approval. Only call them when they are necessary, and keep commands narrowly scoped.");
+        return builder.ToString();
     }
 
     private static string BuildCoordinatorPlanningInstructions(
