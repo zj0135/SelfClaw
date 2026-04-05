@@ -830,6 +830,7 @@ function renderSettings() {
           <div class="settings-select-row">
             <select id="profile-select" class="field-select">${renderOptions(state.profiles, state.selectedProfileId, '未选择配置')}</select>
             <button class="ghost-btn compact-btn" data-action="open-edit-profile" type="button" ${profile ? '' : 'disabled'}>编辑</button>
+            <button class="ghost-btn compact-btn danger-btn" data-action="delete-profile" type="button" ${profile ? '' : 'disabled'}>删除</button>
             <button class="icon-add-btn" data-action="open-create-profile" type="button" aria-label="新增模型配置">+</button>
           </div>
         </div>
@@ -853,6 +854,7 @@ function renderSettings() {
           <div class="settings-select-row">
             <select id="workspace-select" class="field-select">${renderOptions(state.workspaceRoots, state.selectedWorkspaceRootId, '未绑定工作区')}</select>
             <button class="ghost-btn compact-btn" data-action="open-edit-workspace" type="button" ${workspace ? '' : 'disabled'}>编辑</button>
+            <button class="ghost-btn compact-btn danger-btn" data-action="delete-workspace" type="button" ${workspace ? '' : 'disabled'}>删除</button>
             <button class="icon-add-btn" data-action="open-create-workspace" type="button" aria-label="新增工作区">+</button>
           </div>
         </div>
@@ -1632,6 +1634,13 @@ document.addEventListener('click', (event) => {
 				openConversationMenuId = null;
 				openEditor('profile', 'create');
 				break;
+			case 'delete-profile':
+				openConversationMenuId = null;
+				if (state.selectedProfileId) {
+					clearFeedback('profile');
+					post({ type: 'delete-profile', profileId: state.selectedProfileId });
+				}
+				break;
 			case 'open-edit-workspace':
 				openConversationMenuId = null;
 				if (state.selectedWorkspaceRootId) {
@@ -1641,6 +1650,13 @@ document.addEventListener('click', (event) => {
 			case 'open-create-workspace':
 				openConversationMenuId = null;
 				openEditor('workspace', 'create');
+				break;
+			case 'delete-workspace':
+				openConversationMenuId = null;
+				if (state.selectedWorkspaceRootId) {
+					clearFeedback('workspace');
+					post({ type: 'delete-workspace', workspaceRootId: state.selectedWorkspaceRootId });
+				}
 				break;
 			case 'close-editor':
 				openConversationMenuId = null;

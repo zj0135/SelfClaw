@@ -486,6 +486,34 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 
+    public async Task DeleteProfileAsync(Guid profileId)
+    {
+        var profile = Profiles.FirstOrDefault(item => item.Id == profileId);
+        if (profile is null)
+        {
+            return;
+        }
+
+        if (_allConversations.Any(item => item.ProfileId == profileId))
+        {
+            throw new InvalidOperationException($"Profile '{profile.Name}' is still used by one or more conversations.");
+        }
+
+        await _profileRepository.DeleteProfileAsync(profileId);
+        if (!string.IsNullOrWhiteSpace(profile.SecretRef))
+        {
+            await _secretProtector.DeleteSecretAsync(profile.SecretRef);
+        }
+
+        await ReloadProfilesAsync();
+        if (SelectedProfile?.Id == profileId)
+        {
+            SelectedProfile = Profiles.FirstOrDefault();
+        }
+
+        StatusText = $"Deleted profile '{profile.Name}'.";
+    }
+
     public Task SelectWorkspaceAsync(string folderPath)
         => SaveWorkspaceRootAsync(null, folderPath, null);
 
@@ -526,6 +554,27 @@ public sealed partial class MainWindowViewModel : ObservableObject
         StatusText = $"Workspace set to '{workspaceRoot.Name}'.";
 
         ApplyConversationFilter();
+    }
+
+    public async Task DeleteWorkspaceRootAsync(Guid workspaceRootId)
+    {
+        var workspaceRoot = WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId);
+        if (workspaceRoot is null)
+        {
+            return;
+        }
+
+        await _conversationRepository.DeleteWorkspaceRootAsync(workspaceRootId);
+        await ReloadWorkspaceRootsAsync();
+        await ReloadConversationsAsync();
+
+        if (SelectedWorkspaceRoot?.Id == workspaceRootId)
+        {
+            SelectedWorkspaceRoot = WorkspaceRoots.FirstOrDefault();
+        }
+
+        ApplyConversationFilter();
+        StatusText = $"Deleted workspace '{workspaceRoot.Name}'.";
     }
 
     public Task SelectConversationAsync(Guid conversationId)

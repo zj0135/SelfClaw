@@ -247,8 +247,14 @@ public partial class MainWindow : Window
                 case "save-profile":
                     await SaveProfileFromTranscriptAsync(document.RootElement);
                     break;
+                case "delete-profile":
+                    await DeleteProfileFromTranscriptAsync(document.RootElement);
+                    break;
                 case "save-workspace":
                     await SaveWorkspaceFromTranscriptAsync(document.RootElement);
+                    break;
+                case "delete-workspace":
+                    await DeleteWorkspaceFromTranscriptAsync(document.RootElement);
                     break;
                 case "pick-workspace-path":
                     await PickWorkspacePathFromTranscriptAsync();
@@ -282,6 +288,30 @@ public partial class MainWindow : Window
             GetString(root, "name"));
 
         PostUiFeedback("success", "Workspace saved.", "workspace");
+    }
+
+    private async Task DeleteProfileFromTranscriptAsync(JsonElement root)
+    {
+        var profileId = ParseGuid(root, "profileId");
+        if (profileId is not Guid deleteId)
+        {
+            throw new InvalidOperationException("Profile id is required.");
+        }
+
+        await _viewModel.DeleteProfileAsync(deleteId);
+        PostUiFeedback("success", "Profile deleted.", "profile");
+    }
+
+    private async Task DeleteWorkspaceFromTranscriptAsync(JsonElement root)
+    {
+        var workspaceRootId = ParseGuid(root, "workspaceRootId");
+        if (workspaceRootId is not Guid deleteId)
+        {
+            throw new InvalidOperationException("Workspace id is required.");
+        }
+
+        await _viewModel.DeleteWorkspaceRootAsync(deleteId);
+        PostUiFeedback("success", "Workspace deleted.", "workspace");
     }
 
     private Task PickWorkspacePathFromTranscriptAsync()

@@ -350,6 +350,15 @@ ON CONFLICT(id) DO UPDATE SET
         return workspaceRoot;
     }
 
+    public async Task DeleteWorkspaceRootAsync(Guid workspaceRootId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM workspace_roots WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", workspaceRootId.ToString("D"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async Task<ConversationRecord> ReuseExistingAgentConversationAsync(
         SqliteConnection connection,
         ConversationRecord conversation,
