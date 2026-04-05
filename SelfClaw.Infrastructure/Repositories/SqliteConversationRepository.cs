@@ -20,22 +20,13 @@ public sealed class SqliteConversationRepository : IConversationRepository
     public async Task<IReadOnlyList<ConversationRecord>> ListConversationsAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
-SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
-       parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
-       created_at_utc, updated_at_utc
-FROM conversations
-ORDER BY updated_at_utc DESC;";
-
-        var results = new List<ConversationRecord>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        var results = await ReadConversationsAsync(connection, cancellationToken);
+        if (await ConsolidateDuplicateAgentConversationsAsync(connection, results, cancellationToken))
         {
-            results.Add(SqliteMappings.ReadConversation(reader));
+            results = await ReadConversationsAsync(connection, cancellationToken);
         }
 
-        return results;
+        return CollapseDuplicateAgentConversations(results);
     }
 
     public async Task<ConversationRecord?> GetConversationAsync(Guid conversationId, CancellationToken cancellationToken = default)
@@ -371,17 +362,19 @@ ON CONFLICT(id) DO UPDATE SET
 
         if (conversation.BoundAgentId is Guid boundAgentId)
         {
-            var existingById = await FindExistingAgentConversationByAgentIdAsync(
+            var matchesById = await FindExistingAgentConversationsByAgentIdAsync(
                 connection,
                 conversation.EffectiveRootConversationId,
                 boundAgentId,
                 cancellationToken);
-            if (existingById is not null)
+            if (matchesById.Count > 0)
             {
+                var canonicalById = matchesById[0];
+                await MergeDuplicateAgentConversationsAsync(connection, canonicalById, matchesById.Skip(1), cancellationToken);
                 return conversation with
                 {
-                    Id = existingById.Id,
-                    CreatedAtUtc = existingById.CreatedAtUtc
+                    Id = canonicalById.Id,
+                    CreatedAtUtc = canonicalById.CreatedAtUtc
                 };
             }
         }
@@ -392,25 +385,27 @@ ON CONFLICT(id) DO UPDATE SET
             return conversation;
         }
 
-        var existingByName = await FindExistingAgentConversationByNameAsync(
+        var matchesByName = await FindExistingAgentConversationsByNameAsync(
             connection,
             conversation.EffectiveRootConversationId,
             conversation.BoundAgentName,
             conversation.BoundAgentRole,
             cancellationToken);
-        if (existingByName is null)
+        if (matchesByName.Count == 0)
         {
             return conversation;
         }
 
+        var canonicalByName = matchesByName[0];
+        await MergeDuplicateAgentConversationsAsync(connection, canonicalByName, matchesByName.Skip(1), cancellationToken);
         return conversation with
         {
-            Id = existingByName.Id,
-            CreatedAtUtc = existingByName.CreatedAtUtc
+            Id = canonicalByName.Id,
+            CreatedAtUtc = canonicalByName.CreatedAtUtc
         };
     }
 
-    private static async Task<ConversationRecord?> FindExistingAgentConversationByAgentIdAsync(
+    private static async Task<IReadOnlyList<ConversationRecord>> FindExistingAgentConversationsByAgentIdAsync(
         SqliteConnection connection,
         Guid rootConversationId,
         Guid boundAgentId,
@@ -425,18 +420,21 @@ FROM conversations
 WHERE parent_conversation_id IS NOT NULL
   AND COALESCE(root_conversation_id, parent_conversation_id, id) = $rootConversationId
   AND bound_agent_id = $boundAgentId
-ORDER BY updated_at_utc DESC, created_at_utc ASC, id ASC
-LIMIT 1;";
+ORDER BY updated_at_utc DESC, created_at_utc ASC, id ASC;";
         command.Parameters.AddWithValue("$rootConversationId", rootConversationId.ToString("D"));
         command.Parameters.AddWithValue("$boundAgentId", boundAgentId.ToString("D"));
 
+        var results = new List<ConversationRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken)
-            ? SqliteMappings.ReadConversation(reader)
-            : null;
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(SqliteMappings.ReadConversation(reader));
+        }
+
+        return CollapseDuplicateAgentConversations(results);
     }
 
-    private static async Task<ConversationRecord?> FindExistingAgentConversationByNameAsync(
+    private static async Task<IReadOnlyList<ConversationRecord>> FindExistingAgentConversationsByNameAsync(
         SqliteConnection connection,
         Guid rootConversationId,
         string boundAgentName,
@@ -453,15 +451,136 @@ WHERE parent_conversation_id IS NOT NULL
   AND COALESCE(root_conversation_id, parent_conversation_id, id) = $rootConversationId
   AND lower(trim(bound_agent_name)) = lower(trim($boundAgentName))
   AND lower(trim(bound_agent_role)) = lower(trim($boundAgentRole))
-ORDER BY updated_at_utc DESC, created_at_utc ASC, id ASC
-LIMIT 1;";
+ORDER BY updated_at_utc DESC, created_at_utc ASC, id ASC;";
         command.Parameters.AddWithValue("$rootConversationId", rootConversationId.ToString("D"));
         command.Parameters.AddWithValue("$boundAgentName", boundAgentName);
         command.Parameters.AddWithValue("$boundAgentRole", boundAgentRole);
 
+        var results = new List<ConversationRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken)
-            ? SqliteMappings.ReadConversation(reader)
-            : null;
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(SqliteMappings.ReadConversation(reader));
+        }
+
+        return results;
     }
+
+    private static async Task MergeDuplicateAgentConversationsAsync(
+        SqliteConnection connection,
+        ConversationRecord canonical,
+        IEnumerable<ConversationRecord> duplicates,
+        CancellationToken cancellationToken)
+    {
+        foreach (var duplicate in duplicates)
+        {
+            await ReassignConversationReferencesAsync(connection, "messages", duplicate.Id, canonical.Id, cancellationToken);
+            await ReassignConversationReferencesAsync(connection, "tool_runs", duplicate.Id, canonical.Id, cancellationToken);
+
+            await using var deleteCommand = connection.CreateCommand();
+            deleteCommand.CommandText = @"
+DELETE FROM conversations
+WHERE id = $duplicateConversationId;";
+            deleteCommand.Parameters.AddWithValue("$duplicateConversationId", duplicate.Id.ToString("D"));
+            await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static async Task ReassignConversationReferencesAsync(
+        SqliteConnection connection,
+        string tableName,
+        Guid sourceConversationId,
+        Guid targetConversationId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $@"
+UPDATE {tableName}
+SET conversation_id = $targetConversationId
+WHERE conversation_id = $sourceConversationId;";
+        command.Parameters.AddWithValue("$targetConversationId", targetConversationId.ToString("D"));
+        command.Parameters.AddWithValue("$sourceConversationId", sourceConversationId.ToString("D"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<List<ConversationRecord>> ReadConversationsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
+       parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+       created_at_utc, updated_at_utc
+FROM conversations
+ORDER BY updated_at_utc DESC;";
+
+        var results = new List<ConversationRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(SqliteMappings.ReadConversation(reader));
+        }
+
+        return results;
+    }
+
+    private static async Task<bool> ConsolidateDuplicateAgentConversationsAsync(
+        SqliteConnection connection,
+        IEnumerable<ConversationRecord> conversations,
+        CancellationToken cancellationToken)
+    {
+        var duplicateGroups = conversations
+            .Where(item => item.IsAgentConversation)
+            .GroupBy(GetConversationIdentity)
+            .Select(group => group
+                .OrderByDescending(item => item.UpdatedAtUtc)
+                .ThenBy(item => item.CreatedAtUtc)
+                .ThenBy(item => item.Id)
+                .ToArray())
+            .Where(group => group.Length > 1)
+            .ToArray();
+        if (duplicateGroups.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var group in duplicateGroups)
+        {
+            await MergeDuplicateAgentConversationsAsync(connection, group[0], group.Skip(1), cancellationToken);
+        }
+
+        return true;
+    }
+
+    private static IReadOnlyList<ConversationRecord> CollapseDuplicateAgentConversations(IEnumerable<ConversationRecord> conversations)
+        => conversations
+            .GroupBy(GetConversationIdentity)
+            .Select(group => group
+                .OrderByDescending(item => item.UpdatedAtUtc)
+                .ThenBy(item => item.CreatedAtUtc)
+                .ThenBy(item => item.Id)
+                .First())
+            .OrderByDescending(item => item.UpdatedAtUtc)
+            .ToArray();
+
+    private static string GetConversationIdentity(ConversationRecord conversation)
+    {
+        if (!conversation.IsAgentConversation)
+        {
+            return "root:" + conversation.Id.ToString("D");
+        }
+
+        if (conversation.BoundAgentId is Guid boundAgentId)
+        {
+            return $"agent:{conversation.EffectiveRootConversationId:D}:{boundAgentId:D}";
+        }
+
+        return $"agent:{conversation.EffectiveRootConversationId:D}:{NormalizeIdentityPart(conversation.BoundAgentName)}:{NormalizeIdentityPart(conversation.BoundAgentRole)}";
+    }
+
+    private static string NormalizeIdentityPart(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Trim().ToLowerInvariant();
 }

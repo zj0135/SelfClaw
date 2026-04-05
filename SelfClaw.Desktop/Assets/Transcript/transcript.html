@@ -287,22 +287,66 @@
 
 			.conversation-row {
 				position: relative;
-				padding-left: calc(var(--conversation-depth, 0) * 18px);
+				display: block;
+				padding-left: calc(var(--conversation-depth, 0) * 20px);
+				min-width: 0;
 			}
 
 			.conversation-row.branch::before {
 				content: '';
 				position: absolute;
-				left: calc(8px + (var(--conversation-depth, 0) * 18px));
-				top: 8px;
-				bottom: 8px;
+				left: calc((var(--conversation-depth, 0) * 20px) - 10px);
+				top: -8px;
+				bottom: -8px;
 				width: 1px;
 				background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.22), rgba(var(--accent-rgb), 0.06));
 				pointer-events: none;
 			}
 
+			.conversation-row.branch::after {
+				content: '';
+				position: absolute;
+				left: calc((var(--conversation-depth, 0) * 20px) - 10px);
+				top: 22px;
+				width: 12px;
+				height: 1px;
+				background: rgba(var(--accent-rgb), 0.18);
+				pointer-events: none;
+			}
+
+			.conversation-branch-toggle {
+				position: absolute;
+				top: 10px;
+				left: calc((var(--conversation-depth, 0) * 20px) + 10px);
+				width: 22px;
+				height: 22px;
+				border-radius: 9px;
+				border: 1px solid rgba(255, 255, 255, 0.06);
+				background: rgba(255, 255, 255, 0.02);
+				color: var(--muted);
+				display: grid;
+				place-items: center;
+				font-size: 12px;
+				line-height: 1;
+				padding: 0;
+				z-index: 3;
+				transition:
+					transform 140ms ease,
+					background 140ms ease,
+					border-color 140ms ease,
+					color 140ms ease;
+			}
+
+			.conversation-branch-toggle:hover {
+				background: var(--panel-elevated);
+				border-color: rgba(111, 141, 255, 0.22);
+				color: var(--text);
+				transform: translateY(-1px);
+			}
+
 			.conversation-card {
 				width: 100%;
+				min-width: 0;
 				border: 1px solid var(--border);
 				background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent), var(--panel-muted);
 				color: inherit;
@@ -315,6 +359,10 @@
 					border-color 160ms ease,
 					background 160ms ease,
 					box-shadow 160ms ease;
+			}
+
+			.conversation-card.with-children {
+				padding-left: 42px;
 			}
 
 			.conversation-card:hover {
@@ -333,6 +381,15 @@
 				background:
 					linear-gradient(180deg, rgba(var(--accent-rgb), 0.08), transparent 34%),
 					linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent), var(--panel-muted);
+			}
+
+			.conversation-row.branch .conversation-card {
+				border-radius: 16px;
+				padding: 8px 42px 8px 12px;
+			}
+
+			.conversation-row.branch .conversation-card.with-children {
+				padding-left: 34px;
 			}
 
 			.conversation-menu-shell {
@@ -420,6 +477,8 @@
 			.conversation-title {
 				font-size: 13px;
 				font-weight: 650;
+				flex: 1 1 auto;
+				min-width: 0;
 				overflow: hidden;
 				text-overflow: ellipsis;
 				white-space: nowrap;
@@ -428,7 +487,7 @@
 			.conversation-title-row {
 				display: flex;
 				align-items: center;
-				gap: 8px;
+				gap: 7px;
 				min-width: 0;
 			}
 
@@ -449,7 +508,7 @@
 				margin-top: 6px;
 				color: var(--muted);
 				font-size: 11px;
-				line-height: 1.5;
+				line-height: 1.35;
 				overflow: hidden;
 				text-overflow: ellipsis;
 				white-space: nowrap;
@@ -459,6 +518,46 @@
 				margin-top: 4px;
 				color: var(--muted);
 				font-size: 11px;
+			}
+
+			.conversation-row.branch .conversation-title-row {
+				gap: 5px;
+			}
+
+			.conversation-row.branch .conversation-badge {
+				padding: 2px 6px;
+				font-size: 9px;
+			}
+
+			.conversation-row.branch .conversation-title {
+				font-size: 12px;
+			}
+
+			.conversation-row.branch .conversation-subtitle {
+				margin-top: 2px;
+				font-size: 10px;
+				line-height: 1.2;
+			}
+
+			.conversation-row.branch .conversation-time {
+				margin-top: 2px;
+				font-size: 10px;
+			}
+
+			.conversation-row.branch .conversation-menu-shell {
+				top: 5px;
+				right: 6px;
+			}
+
+			.conversation-row.branch .conversation-branch-toggle {
+				top: 7px;
+			}
+
+			.conversation-row.branch .conversation-menu-btn {
+				width: 26px;
+				height: 26px;
+				border-radius: 9px;
+				font-size: 14px;
 			}
 
 			.sidebar-footer {
