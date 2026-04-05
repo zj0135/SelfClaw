@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <Reference Include="SelfClaw.Core">
       <HintPath>..\SelfClaw.Core\bin\$(Configuration)\net10.0\SelfClaw.Core.dll</HintPath>
@@ -39,6 +39,9 @@
     <None Update="Assets\Transcript\transcript.js">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Assets\TranscriptVue\*;Assets\TranscriptVue\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <Target Name="BuildManagedDependencies">
@@ -51,5 +54,15 @@
     <Copy SourceFiles="$(PkgSystem_Security_Cryptography_ProtectedData)\lib\net10.0\System.Security.Cryptography.ProtectedData.dll"
           DestinationFolder="$(OutputPath)"
           SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="SyncTranscriptVueAssets" AfterTargets="Build">
+    <ItemGroup>
+      <TranscriptVueAsset Include="$(MSBuildProjectDirectory)\Assets\TranscriptVue\*;$(MSBuildProjectDirectory)\Assets\TranscriptVue\**\*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(TranscriptVueAsset)"
+          DestinationFiles="@(TranscriptVueAsset->'$(OutDir)Assets\TranscriptVue\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
   </Target>
 </Project>

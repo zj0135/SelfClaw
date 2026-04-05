@@ -1,4 +1,4 @@
-# Visual Studio相关
+﻿# Visual Studio鐩稿叧
 .vscode/
 .vs/
 *.user
@@ -6,13 +6,13 @@
 *.userosscache
 *.sln.docstates
 
-# 编译输出文件夹
+# 缂栬瘧杈撳嚭鏂囦欢澶?
 bin/
 obj/
 build/
 [Bb]uild[Ll]og.*
 
-# NuGet 包
+# NuGet 鍖?
 *.nupkg
 *.snupkg
 packages/
@@ -23,7 +23,7 @@ project.fragment.lock.json
 project.lock.json
 artifacts/
 
-# 临时文件
+# 涓存椂鏂囦欢
 *_i.c
 *_p.c
 *.ilk
@@ -42,7 +42,7 @@ artifacts/
 *.vspscc
 *.vssscc
 
-# 其他配置文件
+# 鍏朵粬閰嶇疆鏂囦欢
 *.config
 *.debug
 *.release
@@ -51,11 +51,11 @@ artifacts/
 *.testsettings
 *.vsconfig
 
-# Rider IDE相关
+# Rider IDE鐩稿叧
 .idea/
 *.sln.iml
 
-# 报告和日志
+# 鎶ュ憡鍜屾棩蹇?
 TestResult/
 TestResults/
 *.trx
@@ -65,5 +65,8 @@ TestResults/
 # Entity Framework Migrations
 migrations/
 
-# Mac相关文件
+# Frontend
+SelfClaw.TranscriptVue/node_modules/
+
+# Mac鐩稿叧鏂囦欢
 .DS_Store

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
@@ -14,6 +14,8 @@ namespace SelfClaw.Desktop;
 
 public partial class MainWindow : Window
 {
+    private const string AssetsHostName = "appassets.selfclaw.local";
+
     private readonly MainWindowViewModel _viewModel;
     private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], null, [], null, [], [], string.Empty, false);
     private bool _webViewReady;
@@ -55,7 +57,20 @@ public partial class MainWindow : Window
             TranscriptView.CoreWebView2.Settings.AreDevToolsEnabled = true;
             TranscriptView.CoreWebView2.Settings.IsStatusBarEnabled = false;
             TranscriptView.CoreWebView2.WebMessageReceived += OnTranscriptWebMessageReceived;
-            TranscriptView.Source = new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "Transcript", "transcript.html"));
+
+            var assetsRootPath = Path.Combine(AppContext.BaseDirectory, "Assets");
+            var vueTranscriptPath = Path.Combine(AppContext.BaseDirectory, "Assets", "TranscriptVue", "index.html");
+            var legacyTranscriptPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Transcript", "transcript.html");
+            var relativeTranscriptPath = File.Exists(vueTranscriptPath)
+                ? "TranscriptVue/index.html"
+                : "Transcript/transcript.html";
+
+            TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                AssetsHostName,
+                assetsRootPath,
+                CoreWebView2HostResourceAccessKind.Allow);
+
+            TranscriptView.Source = new Uri($"https://{AssetsHostName}/{relativeTranscriptPath}");
         }
         catch
         {

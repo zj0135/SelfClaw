@@ -1,0 +1,20 @@
+{
+  "name": "selfclaw-transcript-vue",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/build-legacy-transcript-css.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/build-legacy-transcript-css.mjs",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^5.4.14"
+  }
+}
