@@ -1,7 +1,6 @@
 ﻿using System.Text.Json;
-using SelfClaw.Infrastructure.Channl.Feishu;
 
-namespace SelfClaw.Infrastructure.Channl.Feishu;
+namespace SelfClaw.Infrastructure.Channels.Feishu;
 
 /// <summary>
 /// Configuration for the C# Feishu channel runtime.

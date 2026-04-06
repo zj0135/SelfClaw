@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace SelfClaw.Infrastructure.Channl.Feishu;
+namespace SelfClaw.Infrastructure.Channels.Feishu;
 
 internal static class FeishuJson
 {

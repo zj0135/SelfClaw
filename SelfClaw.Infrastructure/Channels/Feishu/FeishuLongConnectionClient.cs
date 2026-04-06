@@ -4,9 +4,8 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using SelfClaw.Infrastructure.Channl.Feishu;
 
-namespace SelfClaw.Infrastructure.Channl.Feishu;
+namespace SelfClaw.Infrastructure.Channels.Feishu;
 
 /// <summary>
 /// Native .NET implementation of Feishu long-connection mode.

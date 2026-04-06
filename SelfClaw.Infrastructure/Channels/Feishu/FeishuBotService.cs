@@ -2,9 +2,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using SelfClaw.Infrastructure.Channl.Feishu;
 
-namespace SelfClaw.Infrastructure.Channl.Feishu;
+namespace SelfClaw.Infrastructure.Channels.Feishu;
 
 /// <summary>
 /// High-level Feishu service that reproduces the TypeScript provider behavior.

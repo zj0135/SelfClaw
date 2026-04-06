@@ -2,7 +2,7 @@
 using System.Text;
 using System.Text.Json;
 
-namespace SelfClaw.Infrastructure.Channl.Feishu;
+namespace SelfClaw.Infrastructure.Channels.Feishu;
 
 internal static class FeishuWsConstants
 {

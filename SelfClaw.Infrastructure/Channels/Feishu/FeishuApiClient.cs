@@ -3,9 +3,8 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using SelfClaw.Infrastructure.Channl.Feishu;
 
-namespace SelfClaw.Infrastructure.Channl.Feishu;
+namespace SelfClaw.Infrastructure.Channels.Feishu;
 
 /// <summary>
 /// Thin REST client that mirrors the Feishu API surface used by the Electron implementation.
