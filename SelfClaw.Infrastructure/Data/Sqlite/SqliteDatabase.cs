@@ -60,11 +60,43 @@ CREATE TABLE IF NOT EXISTS profiles (
     name TEXT NOT NULL,
     endpoint TEXT NOT NULL,
     model TEXT NOT NULL,
+    temperature_enabled INTEGER NOT NULL DEFAULT 0,
+    temperature REAL NOT NULL DEFAULT 0.7,
+    top_p_enabled INTEGER NOT NULL DEFAULT 0,
+    top_p REAL NOT NULL DEFAULT 0.7,
     api_style INTEGER NOT NULL,
     secret_ref TEXT NOT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL
 );", cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "profiles",
+                "temperature_enabled",
+                "ALTER TABLE profiles ADD COLUMN temperature_enabled INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "profiles",
+                "temperature",
+                "ALTER TABLE profiles ADD COLUMN temperature REAL NOT NULL DEFAULT 0.7;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "profiles",
+                "top_p",
+                "ALTER TABLE profiles ADD COLUMN top_p REAL NOT NULL DEFAULT 0.7;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "profiles",
+                "top_p_enabled",
+                "ALTER TABLE profiles ADD COLUMN top_p_enabled INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken);
 
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS workspace_roots (
@@ -266,6 +298,8 @@ CREATE TABLE IF NOT EXISTS tool_runs (
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(6, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(7, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(8, CURRENT_TIMESTAMP);", cancellationToken);
+            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(9, CURRENT_TIMESTAMP);", cancellationToken);
+            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(10, CURRENT_TIMESTAMP);", cancellationToken);
 
             _initialized = true;
         }

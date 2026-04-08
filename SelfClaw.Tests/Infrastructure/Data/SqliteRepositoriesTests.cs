@@ -31,7 +31,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await conversationRepository.InitializeAsync();
 
         var now = DateTimeOffset.UtcNow;
-        var profile = new ProviderProfile(Guid.NewGuid(), "Local", "https://api.example.com/v1", "gpt-4.1", ApiStyle.OpenAICompatible, "secret:test", now, now);
+        var profile = new ProviderProfile(Guid.NewGuid(), "Local", "https://api.example.com/v1", "gpt-4.1", 0.7, 0.7, ApiStyle.OpenAICompatible, "secret:test", now, now);
         await profileRepository.UpsertProfileAsync(profile);
 
         var workspace = new WorkspaceRoot(Guid.NewGuid(), "Repo", "E:\\Demo\\SelfClaw", now, now);

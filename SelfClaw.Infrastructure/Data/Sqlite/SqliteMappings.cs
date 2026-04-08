@@ -11,10 +11,14 @@ internal static class SqliteMappings
             reader.GetString(1),
             reader.GetString(2),
             reader.GetString(3),
-            (ApiStyle)reader.GetInt32(4),
-            reader.GetString(5),
-            ReadDateTimeOffset(reader, 6),
-            ReadDateTimeOffset(reader, 7));
+            !reader.IsDBNull(4) && reader.GetInt32(4) != 0,
+            reader.IsDBNull(5) ? 0.7 : reader.GetDouble(5),
+            !reader.IsDBNull(6) && reader.GetInt32(6) != 0,
+            reader.IsDBNull(7) ? 0.7 : reader.GetDouble(7),
+            (ApiStyle)reader.GetInt32(8),
+            reader.GetString(9),
+            ReadDateTimeOffset(reader, 10),
+            ReadDateTimeOffset(reader, 11));
 
     public static ConversationRecord ReadConversation(SqliteDataReader reader)
         => new(

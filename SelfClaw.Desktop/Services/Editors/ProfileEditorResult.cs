@@ -5,4 +5,8 @@ public sealed record ProfileEditorResult(
     string Name,
     string Endpoint,
     string Model,
+    bool TemperatureEnabled,
+    double Temperature,
+    bool TopPEnabled,
+    double TopP,
     string ApiKey);

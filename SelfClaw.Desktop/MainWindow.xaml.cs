@@ -290,6 +290,10 @@ public partial class MainWindow : Window
             GetString(root, "name"),
             GetString(root, "endpoint"),
             GetString(root, "model"),
+            GetBool(root, "temperatureEnabled"),
+            GetDouble(root, "temperature", 0.7),
+            GetBool(root, "topPEnabled"),
+            GetDouble(root, "topP", 0.7),
             GetString(root, "apiKey"));
 
         await _viewModel.SaveProfileAsync(result);
@@ -398,5 +402,15 @@ public partial class MainWindow : Window
         => root.TryGetProperty(propertyName, out var property)
             ? property.GetString() ?? string.Empty
             : string.Empty;
+
+    private static double GetDouble(JsonElement root, string propertyName, double defaultValue)
+        => root.TryGetProperty(propertyName, out var property) && property.TryGetDouble(out var value)
+            ? value
+            : defaultValue;
+
+    private static bool GetBool(JsonElement root, string propertyName)
+        => root.TryGetProperty(propertyName, out var property) &&
+           (property.ValueKind == JsonValueKind.True ||
+            (property.ValueKind == JsonValueKind.False ? false : bool.TryParse(property.GetRawText(), out var value) && value));
 }
 

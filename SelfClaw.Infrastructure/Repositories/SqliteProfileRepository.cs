@@ -21,7 +21,7 @@ public sealed class SqliteProfileRepository : IProfileRepository
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, name, endpoint, model, api_style, secret_ref, created_at_utc, updated_at_utc
+SELECT id, name, endpoint, model, temperature, top_p, api_style, secret_ref, created_at_utc, updated_at_utc
 FROM profiles
 ORDER BY updated_at_utc DESC;";
 
@@ -40,7 +40,7 @@ ORDER BY updated_at_utc DESC;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, name, endpoint, model, api_style, secret_ref, created_at_utc, updated_at_utc
+SELECT id, name, endpoint, model, temperature, top_p, api_style, secret_ref, created_at_utc, updated_at_utc
 FROM profiles
 WHERE id = $id
 LIMIT 1;";
@@ -57,12 +57,14 @@ LIMIT 1;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-INSERT INTO profiles(id, name, endpoint, model, api_style, secret_ref, created_at_utc, updated_at_utc)
-VALUES($id, $name, $endpoint, $model, $apiStyle, $secretRef, $createdAt, $updatedAt)
+INSERT INTO profiles(id, name, endpoint, model, temperature, top_p, api_style, secret_ref, created_at_utc, updated_at_utc)
+VALUES($id, $name, $endpoint, $model, $temperature, $topP, $apiStyle, $secretRef, $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
     name = excluded.name,
     endpoint = excluded.endpoint,
     model = excluded.model,
+    temperature = excluded.temperature,
+    top_p = excluded.top_p,
     api_style = excluded.api_style,
     secret_ref = excluded.secret_ref,
     updated_at_utc = excluded.updated_at_utc;";
@@ -71,6 +73,8 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$name", profile.Name);
         command.Parameters.AddWithValue("$endpoint", profile.Endpoint);
         command.Parameters.AddWithValue("$model", profile.Model);
+        command.Parameters.AddWithValue("$temperature", profile.Temperature);
+        command.Parameters.AddWithValue("$topP", profile.TopP);
         command.Parameters.AddWithValue("$apiStyle", (int)profile.ApiStyle);
         command.Parameters.AddWithValue("$secretRef", profile.SecretRef);
         command.Parameters.AddWithValue("$createdAt", profile.CreatedAtUtc.ToString("O"));

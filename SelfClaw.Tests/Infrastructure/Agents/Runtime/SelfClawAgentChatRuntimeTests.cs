@@ -128,6 +128,8 @@ public sealed class SelfClawAgentChatRuntimeTests
             "Local",
             "https://api.example.com/v1",
             "gpt-test",
+            0.7,
+            0.7,
             ApiStyle.OpenAICompatible,
             "secret:test",
             now,

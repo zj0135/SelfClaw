@@ -3,4 +3,8 @@
 public sealed record ShellSelectOption(
     string Id,
     string Label,
-    string? Description = null);
+    string? Description = null,
+    bool? TemperatureEnabled = null,
+    double? Temperature = null,
+    bool? TopPEnabled = null,
+    double? TopP = null);

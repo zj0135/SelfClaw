@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { renderConversationList, renderMessages, renderStepsHeader, renderStepsPanelContent } from './utils/renderers';
 
@@ -31,6 +31,7 @@ const state = reactive({
 const composerValue = ref('');
 const conversationSearch = ref('');
 const settingsOpen = ref(false);
+const activeSettingsSection = ref('profile');
 const settingsFeedback = ref(null);
 const settingsPanelScrollTop = ref(0);
 const openConversationMenuId = ref(null);
@@ -77,7 +78,7 @@ let pendingScrollToBottom = false;
 let pendingStatePayload = null;
 let renderFrameHandle = 0;
 
-const emptyProfile = () => ({ profileId: null, name: '', endpoint: '', model: '', apiKey: '' });
+const emptyProfile = () => ({ profileId: null, name: '', endpoint: '', model: '', temperature: 0.7, topP: 0.7, apiKey: '' });
 const emptyWorkspace = () => ({ workspaceRootId: null, name: '', rootPath: '' });
 
 const post = (message) => window.chrome?.webview?.postMessage(message);
@@ -106,11 +107,46 @@ const currentWorkspaceLabel = computed(() => selectedWorkspace.value?.label || '
 const conversationSectionTitle = computed(() => (state.conversations.some((item) => item.parentId) ? '会话树' : '最近会话'));
 const totalStepCount = computed(() => (isTeamMode.value ? visibleTeamMembers.value.length + (state.agentActivities?.length || 0) : state.agentActivities?.length || 0));
 const sendButtonDisabled = computed(() => ((!composerValue.value.trim() && !state.isBusy) || !state.selectedProfileId));
+const settingsSections = computed(() => [
+	{
+		id: 'profile',
+		eyebrow: '模型配置',
+		title: '模型配置',
+		description: selectedProfile.value
+			? `${selectedProfile.value.label}${state.selectedProfileModel ? ` · ${state.selectedProfileModel}` : ''}`
+			: '选择默认模型，并管理 Endpoint 与 API Key。',
+		badge: selectedProfile.value ? '已选择' : '未选择',
+	},
+	{
+		id: 'workspace',
+		eyebrow: '工作区',
+		title: '工作区',
+		description: selectedWorkspace.value?.label || '绑定本地目录，作为工具读取和搜索范围。',
+		badge: selectedWorkspace.value ? '已绑定' : '未绑定',
+	},
+	{
+		id: 'theme',
+		eyebrow: '界面主题',
+		title: '界面主题',
+		description: state.selectedThemeId === 'system' ? '当前跟随系统外观' : `当前为${selectedThemeLabel.value}`,
+		badge: selectedThemeLabel.value,
+	},
+]);
+const activeSettingsMeta = computed(() => settingsSections.value.find((item) => item.id === activeSettingsSection.value) || settingsSections.value[0] || null);
+const visibleSettingsFeedback = computed(() => {
+	if (!settingsFeedback.value) {
+		return null;
+	}
+
+	return !settingsFeedback.value.scope || settingsFeedback.value.scope === activeSettingsSection.value ? settingsFeedback.value : null;
+});
 
 const profileSummaryCards = computed(() => [
 	{ label: '名称', value: selectedProfile.value?.label || '未选择配置' },
 	{ label: '模型', value: state.selectedProfileModel || '未选择配置' },
 	{ label: 'Endpoint', value: selectedProfile.value?.description || '未设置 Endpoint' },
+	{ label: 'Temperature', value: formatSamplingValue(selectedProfile.value?.temperature ?? 0.7, 2) },
+	{ label: 'Top-P', value: formatSamplingValue(selectedProfile.value?.topP ?? 0.7, 1) },
 ]);
 
 const workspaceSummaryCards = computed(() => [
@@ -295,6 +331,8 @@ function profileDraft() {
 		name: profile?.label || '',
 		endpoint: profile?.description || '',
 		model: state.selectedProfileModel || '',
+		temperature: normalizeSamplingValue(profile?.temperature, 0.7, 2),
+		topP: normalizeSamplingValue(profile?.topP, 0.7, 1),
 		apiKey: '',
 	};
 }
@@ -314,11 +352,28 @@ function clearFeedback(scope) {
 	}
 }
 
+function normalizeSamplingValue(value, fallback, max) {
+	const numeric = Number(value);
+	if (Number.isNaN(numeric) || !Number.isFinite(numeric)) {
+		return fallback;
+	}
+
+	return Math.max(0, Math.min(max, Number(numeric.toFixed(2))));
+}
+
+function formatSamplingValue(value, max) {
+	return normalizeSamplingValue(value, 0.7, max).toFixed(2);
+}
+
 function editorScope() {
 	return editorState.kind === 'profile' || editorState.kind === 'workspace' ? editorState.kind : null;
 }
 
 function openEditor(kind, mode) {
+	if (kind === 'profile' || kind === 'workspace') {
+		activeSettingsSection.value = kind;
+	}
+
 	editorState.open = true;
 	editorState.kind = kind;
 	editorState.mode = mode;
@@ -508,6 +563,9 @@ function scheduleStatePayload(payload) {
 
 function handleSettingsFeedback(payload) {
 	const nextFeedback = payload.message ? { level: payload.level || 'success', message: payload.message, scope: payload.scope || null } : null;
+	if (payload.scope === 'profile' || payload.scope === 'workspace' || payload.scope === 'theme') {
+		activeSettingsSection.value = payload.scope;
+	}
 
 	if (editorState.open && payload.scope === editorScope()) {
 		if (payload.level === 'success') {
@@ -547,6 +605,12 @@ function onDocumentKeydown(event) {
 	if (event.key === 'Escape' && editorState.open) {
 		event.preventDefault();
 		closeEditor();
+		return;
+	}
+
+	if (event.key === 'Escape' && settingsOpen.value) {
+		event.preventDefault();
+		closeSettings();
 		return;
 	}
 
@@ -781,6 +845,19 @@ function selectConversationMode(modeId) {
 	post({ type: 'select-conversation-mode', modeId });
 }
 
+async function selectSettingsSection(sectionId) {
+	if (!sectionId || activeSettingsSection.value === sectionId) {
+		return;
+	}
+
+	activeSettingsSection.value = sectionId;
+	settingsPanelScrollTop.value = 0;
+	await nextTick();
+	if (settingsPanelRef.value) {
+		settingsPanelRef.value.scrollTop = 0;
+	}
+}
+
 function openSettings() {
 	openConversationMenuId.value = null;
 	clearFeedback();
@@ -843,6 +920,8 @@ function saveEditor() {
 			name: editorState.draft.name.trim(),
 			endpoint: editorState.draft.endpoint.trim(),
 			model: editorState.draft.model.trim(),
+			temperature: normalizeSamplingValue(editorState.draft.temperature, 0.7, 2),
+			topP: normalizeSamplingValue(editorState.draft.topP, 0.7, 1),
 			apiKey: editorState.draft.apiKey,
 		});
 		return;
@@ -1043,109 +1122,136 @@ onUnmounted(() => {
 		</div>
 
 		<div id="settings-overlay" class="settings-overlay" :class="{ open: settingsOpen }" @click.self="closeSettings">
-			<div v-if="settingsOpen" ref="settingsPanelRef" class="settings-panel" role="dialog" aria-modal="true"
-				aria-label="系统设置" @scroll="onSettingsPanelScroll">
-				<div class="settings-header">
-					<div>
+			<div v-if="settingsOpen" class="settings-panel" role="dialog" aria-modal="true" aria-label="系统设置">
+				<aside class="settings-nav">
+					<div class="settings-nav-header">
 						<div class="settings-title">系统设置</div>
+						<div class="settings-hint">左侧切换模块，右侧集中完成当前配置。</div>
 					</div>
-					<button class="close-btn" type="button" aria-label="关闭" @click="closeSettings">&times;</button>
-				</div>
 
-				<div v-if="settingsFeedback" class="settings-feedback"
-					:class="settingsFeedback.level === 'error' ? 'error' : 'success'">
-					{{ settingsFeedback.message }}
-				</div>
+					<div class="settings-nav-list">
+						<button v-for="section in settingsSections" :key="section.id" class="settings-nav-item"
+							:class="{ active: activeSettingsSection === section.id }" type="button"
+							:aria-pressed="activeSettingsSection === section.id"
+							@click="selectSettingsSection(section.id)">
+							<div class="settings-nav-item-top">
+								<div class="settings-nav-item-title">{{ section.title }}</div>
+								<div class="settings-nav-item-badge">{{ section.badge }}</div>
+							</div>
+							<div class="settings-nav-item-description">{{ section.description }}</div>
+						</button>
+					</div>
 
-				<section class="settings-section">
-					<div class="settings-section-header">
-						<div class="settings-section-copy">
-							<div class="field-label">模型配置</div>
-							<div class="settings-section-title">模型配置</div>
+					<div class="settings-nav-footer">
+						<button class="ghost-btn" type="button" @click="closeSettings">完成</button>
+					</div>
+				</aside>
+
+				<div ref="settingsPanelRef" class="settings-content" @scroll="onSettingsPanelScroll">
+					<div class="settings-header">
+						<div>
+							<div class="field-label">{{ activeSettingsMeta?.eyebrow }}</div>
+							<div class="settings-section-title settings-section-title-hero">{{ activeSettingsMeta?.title
+								}}
+							</div>
+							<div class="settings-hint settings-header-hint">{{ activeSettingsMeta?.description }}</div>
 						</div>
-						<div class="settings-badge">{{ selectedProfile ? '已选择' : '未选择' }}</div>
+						<button class="close-btn" type="button" aria-label="关闭" @click="closeSettings">&times;</button>
 					</div>
-					<div class="field-group">
-						<div class="field-label">当前配置</div>
-						<div class="settings-select-row">
-							<select id="profile-select" class="field-select" :value="state.selectedProfileId || ''"
-								@change="onSettingsProfileChange">
-								<option value="">未选择配置</option>
-								<option v-for="option in state.profiles" :key="option.id" :value="option.id">{{
+
+					<div v-if="visibleSettingsFeedback" class="settings-feedback"
+						:class="visibleSettingsFeedback.level === 'error' ? 'error' : 'success'">
+						{{ visibleSettingsFeedback.message }}
+					</div>
+
+					<section v-if="activeSettingsSection === 'profile'"
+						class="settings-section settings-section-active">
+						<div class="settings-section-header">
+							<div class="settings-section-copy">
+								<div class="field-label">当前配置</div>
+								<div class="settings-section-title">模型选择与管理</div>
+							</div>
+							<div class="settings-badge">{{ selectedProfile ? '已选择' : '未选择' }}</div>
+						</div>
+						<div class="field-group">
+							<div class="field-label">当前配置</div>
+							<div class="settings-select-row">
+								<select id="profile-select" class="field-select" :value="state.selectedProfileId || ''"
+									@change="onSettingsProfileChange">
+									<option value="">未选择配置</option>
+									<option v-for="option in state.profiles" :key="option.id" :value="option.id">{{
+										option.label }}
+									</option>
+								</select>
+								<button class="ghost-btn compact-btn" type="button" :disabled="!selectedProfile"
+									@click="openEditor('profile', 'edit')">编辑</button>
+								<button class="ghost-btn compact-btn danger-btn" type="button"
+									:disabled="!selectedProfile" @click="deleteProfile">删除</button>
+								<button class="icon-add-btn" type="button" aria-label="新增模型配置"
+									@click="openEditor('profile', 'create')">+</button>
+							</div>
+						</div>
+						<div class="selected-summary-grid">
+							<div v-for="card in profileSummaryCards" :key="card.label" class="selected-summary-card">
+								<div class="selected-summary-label">{{ card.label }}</div>
+								<div class="selected-summary-value">{{ card.value }}</div>
+							</div>
+						</div>
+					</section>
+
+					<section v-else-if="activeSettingsSection === 'workspace'"
+						class="settings-section settings-section-active">
+						<div class="settings-section-header">
+							<div class="settings-section-copy">
+								<div class="field-label">当前工作区</div>
+								<div class="settings-section-title">工作区绑定与切换</div>
+							</div>
+							<div class="settings-badge">{{ selectedWorkspace ? '已绑定' : '未绑定' }}</div>
+						</div>
+						<div class="field-group">
+							<div class="field-label">当前工作区</div>
+							<div class="settings-select-row">
+								<select id="workspace-select" class="field-select"
+									:value="state.selectedWorkspaceRootId || ''" @change="onWorkspaceChange">
+									<option value="">未绑定工作区</option>
+									<option v-for="option in state.workspaceRoots" :key="option.id" :value="option.id">
+										{{
+											option.label }}</option>
+								</select>
+								<button class="ghost-btn compact-btn" type="button" :disabled="!selectedWorkspace"
+									@click="openEditor('workspace', 'edit')">编辑</button>
+								<button class="ghost-btn compact-btn danger-btn" type="button"
+									:disabled="!selectedWorkspace" @click="deleteWorkspace">删除</button>
+								<button class="icon-add-btn" type="button" aria-label="新增工作区"
+									@click="openEditor('workspace', 'create')">+</button>
+							</div>
+						</div>
+						<div class="selected-summary-grid">
+							<div v-for="card in workspaceSummaryCards" :key="card.label" class="selected-summary-card">
+								<div class="selected-summary-label">{{ card.label }}</div>
+								<div class="selected-summary-value">{{ card.value }}</div>
+							</div>
+						</div>
+					</section>
+
+					<section v-else class="settings-section settings-section-active">
+						<div class="settings-section-header">
+							<div class="settings-section-copy">
+								<div class="field-label">界面主题</div>
+								<div class="settings-section-title">主题与外观</div>
+							</div>
+							<div class="settings-badge">{{ selectedThemeLabel }}</div>
+						</div>
+						<div class="field-group">
+							<div class="field-label">界面主题</div>
+							<select id="theme-select" class="field-select" :value="state.selectedThemeId || 'system'"
+								@change="onThemeChange">
+								<option v-for="option in state.themeOptions" :key="option.id" :value="option.id">{{
 									option.label }}
 								</option>
 							</select>
-							<button class="ghost-btn compact-btn" type="button" :disabled="!selectedProfile"
-								@click="openEditor('profile', 'edit')">编辑</button>
-							<button class="ghost-btn compact-btn danger-btn" type="button" :disabled="!selectedProfile"
-								@click="deleteProfile">删除</button>
-							<button class="icon-add-btn" type="button" aria-label="新增模型配置"
-								@click="openEditor('profile', 'create')">+</button>
 						</div>
-					</div>
-					<div class="selected-summary-grid">
-						<div v-for="card in profileSummaryCards" :key="card.label" class="selected-summary-card">
-							<div class="selected-summary-label">{{ card.label }}</div>
-							<div class="selected-summary-value">{{ card.value }}</div>
-						</div>
-					</div>
-				</section>
-
-				<section class="settings-section">
-					<div class="settings-section-header">
-						<div class="settings-section-copy">
-							<div class="field-label">工作区</div>
-							<div class="settings-section-title">工作区</div>
-						</div>
-						<div class="settings-badge">{{ selectedWorkspace ? '已绑定' : '未绑定' }}</div>
-					</div>
-					<div class="field-group">
-						<div class="field-label">当前工作区</div>
-						<div class="settings-select-row">
-							<select id="workspace-select" class="field-select"
-								:value="state.selectedWorkspaceRootId || ''" @change="onWorkspaceChange">
-								<option value="">未绑定工作区</option>
-								<option v-for="option in state.workspaceRoots" :key="option.id" :value="option.id">{{
-									option.label }}</option>
-							</select>
-							<button class="ghost-btn compact-btn" type="button" :disabled="!selectedWorkspace"
-								@click="openEditor('workspace', 'edit')">编辑</button>
-							<button class="ghost-btn compact-btn danger-btn" type="button"
-								:disabled="!selectedWorkspace" @click="deleteWorkspace">删除</button>
-							<button class="icon-add-btn" type="button" aria-label="新增工作区"
-								@click="openEditor('workspace', 'create')">+</button>
-						</div>
-					</div>
-					<div class="selected-summary-grid">
-						<div v-for="card in workspaceSummaryCards" :key="card.label" class="selected-summary-card">
-							<div class="selected-summary-label">{{ card.label }}</div>
-							<div class="selected-summary-value">{{ card.value }}</div>
-						</div>
-					</div>
-					<div class="field-help">设置页负责展示与切换当前工作区，新增和编辑会在中间弹窗里完成。</div>
-				</section>
-
-				<section class="settings-section">
-					<div class="settings-section-header">
-						<div class="settings-section-copy">
-							<div class="field-label">界面主题</div>
-							<div class="settings-section-title">主题</div>
-						</div>
-						<div class="settings-badge">{{ selectedThemeLabel }}</div>
-					</div>
-					<div class="field-group">
-						<div class="field-label">界面主题</div>
-						<select id="theme-select" class="field-select" :value="state.selectedThemeId || 'system'"
-							@change="onThemeChange">
-							<option v-for="option in state.themeOptions" :key="option.id" :value="option.id">{{
-								option.label }}
-							</option>
-						</select>
-					</div>
-				</section>
-
-				<div class="settings-footer">
-					<button class="ghost-btn" type="button" @click="closeSettings">完成</button>
+					</section>
 				</div>
 			</div>
 		</div>
@@ -1163,8 +1269,8 @@ onUnmounted(() => {
 							{{
 								editorState.kind === 'profile'
 									? editorState.mode === 'create'
-										? '填写名称、Endpoint、模型和 API Key 后保存，新配置会自动加入下拉列表并切换到当前选择。'
-										: '你可以更新当前模型配置；如果不需要替换密钥，API Key 留空即可。'
+										? '填写名称、Endpoint、模型、采样参数和 API Key 后保存，新配置会自动加入下拉列表并切换到当前选择。'
+										: '你可以更新当前模型配置和采样参数；如果不需要替换密钥，API Key 留空即可。'
 									: editorState.mode === 'create'
 										? '填写名称并选择本机目录后保存，工作区会自动加入下拉列表并设为当前选择。'
 										: '在这里调整当前工作区的显示名称或重新选择目录，然后保存变更。'
@@ -1197,6 +1303,25 @@ onUnmounted(() => {
 							<div class="field-label">Endpoint</div>
 							<input id="editor-profile-endpoint" v-model="editorState.draft.endpoint" class="field-input"
 								type="text" placeholder="https://api.openai.com/v1" />
+						</div>
+						<div class="field-inline field-inline-ranges">
+							<div class="range-field">
+								<div class="range-header">
+									<div class="field-label">Temperature</div>
+									<div class="range-value">{{ formatSamplingValue(editorState.draft.temperature, 2) }}
+									</div>
+								</div>
+								<input id="editor-profile-temperature" v-model.number="editorState.draft.temperature"
+									class="field-range" type="range" min="0" max="2" step="0.01" />
+							</div>
+							<div class="range-field">
+								<div class="range-header">
+									<div class="field-label">Top-P</div>
+									<div class="range-value">{{ formatSamplingValue(editorState.draft.topP, 1) }}</div>
+								</div>
+								<input id="editor-profile-top-p" v-model.number="editorState.draft.topP"
+									class="field-range" type="range" min="0" max="1" step="0.01" />
+							</div>
 						</div>
 						<div>
 							<div class="field-label">API Key</div>
@@ -1231,7 +1356,3 @@ onUnmounted(() => {
 		</div>
 	</div>
 </template>
-
-
-
-

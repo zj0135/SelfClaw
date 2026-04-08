@@ -470,6 +470,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
             result.Name.Trim(),
             NormalizeEndpoint(result.Endpoint),
             result.Model.Trim(),
+            result.TemperatureEnabled,
+            NormalizeSamplingParameter(result.Temperature, 2),
+            result.TopPEnabled,
+            NormalizeSamplingParameter(result.TopP, 1),
             ApiStyle.OpenAICompatible,
             secretRef,
             existing?.CreatedAtUtc ?? now,
@@ -1297,7 +1301,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var conversationModes = ConversationModeOptions;
 
         var profiles = Profiles
-            .Select(profile => new ShellSelectOption(profile.Id.ToString("D"), profile.Name, profile.Endpoint))
+            .Select(profile => new ShellSelectOption(
+                profile.Id.ToString("D"),
+                profile.Name,
+                profile.Endpoint,
+                profile.TemperatureEnabled,
+                profile.Temperature,
+                profile.TopPEnabled,
+                profile.TopP))
             .ToArray();
 
         var workspaceRoots = WorkspaceRoots
@@ -1576,6 +1587,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         return normalized.TrimEnd('/');
+    }
+
+    private static double NormalizeSamplingParameter(double value, double maxValue)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return 0.7;
+        }
+
+        return Math.Clamp(Math.Round(value, 2), 0, maxValue);
     }
 
     private static string NormalizeWorkspacePath(string folderPath)
