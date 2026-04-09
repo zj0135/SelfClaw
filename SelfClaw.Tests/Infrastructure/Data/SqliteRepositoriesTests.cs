@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Data;
@@ -31,7 +31,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await conversationRepository.InitializeAsync();
 
         var now = DateTimeOffset.UtcNow;
-        var profile = new ProviderProfile(Guid.NewGuid(), "Local", "https://api.example.com/v1", "gpt-4.1", 0.7, 0.7, ApiStyle.OpenAICompatible, "secret:test", now, now);
+        var profile = new ProviderProfile(Guid.NewGuid(), "Local", "https://api.example.com/v1", "gpt-4.1", false, 0.7, false, 0.7, ApiStyle.OpenAICompatible, "secret:test", now, now);
         await profileRepository.UpsertProfileAsync(profile);
 
         var workspace = new WorkspaceRoot(Guid.NewGuid(), "Repo", "E:\\Demo\\SelfClaw", now, now);
@@ -67,7 +67,8 @@ public sealed class SqliteRepositoriesTests : IDisposable
             now,
             now,
             assistantMessage.Id,
-            1);
+            1,
+            "using System;");
         await conversationRepository.UpsertToolExecutionAsync(toolRun);
 
         var loadedProfiles = await profileRepository.ListProfilesAsync();
@@ -175,6 +176,7 @@ CREATE TABLE tool_runs (
 
         columns.Should().Contain("message_id");
         columns.Should().Contain("after_segment_index");
+        columns.Should().Contain("result_content");
     }
 
     public void Dispose()
@@ -193,3 +195,5 @@ CREATE TABLE tool_runs (
         }
     }
 }
+
+

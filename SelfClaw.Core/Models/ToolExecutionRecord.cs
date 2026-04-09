@@ -13,7 +13,8 @@ public sealed record ToolExecutionRecord(
     DateTimeOffset UpdatedAtUtc,
     Guid? AgentId = null,
     Guid? MessageId = null,
-    int? AfterSegmentIndex = null)
+    int? AfterSegmentIndex = null,
+    string? ResultContent = null)
 {
     public ToolExecutionRecord(
         Guid id,
@@ -27,7 +28,8 @@ public sealed record ToolExecutionRecord(
         DateTimeOffset createdAtUtc,
         DateTimeOffset updatedAtUtc,
         Guid? messageId,
-        int? afterSegmentIndex)
+        int? afterSegmentIndex,
+        string? resultContent = null)
         : this(
             id,
             conversationId,
@@ -41,7 +43,8 @@ public sealed record ToolExecutionRecord(
             updatedAtUtc,
             null,
             messageId,
-            afterSegmentIndex)
+            afterSegmentIndex,
+            resultContent)
     {
     }
 }

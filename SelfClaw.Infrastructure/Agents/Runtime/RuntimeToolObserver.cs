@@ -52,8 +52,14 @@ internal sealed class RuntimeToolObserver
     public void Complete(ToolExecutionRecord record, string summary)
         => Finish(record, ToolExecutionStatus.Completed, summary);
 
+    public void Complete(ToolExecutionRecord record, string summary, string? resultContent)
+        => Finish(record, ToolExecutionStatus.Completed, summary, resultContent);
+
     public void Fail(ToolExecutionRecord record, string message)
         => Finish(record, ToolExecutionStatus.Failed, message);
+
+    public void Fail(ToolExecutionRecord record, string message, string? resultContent)
+        => Finish(record, ToolExecutionStatus.Failed, message, resultContent);
 
     public ToolExecutionRecord AwaitApproval(ToolExecutionRecord record, string summary)
         => Update(record, ToolExecutionStatus.AwaitingApproval, summary);
@@ -70,6 +76,7 @@ internal sealed class RuntimeToolObserver
         {
             Status = status,
             ResultSummary = summary,
+            ResultContent = record.ResultContent,
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
 
@@ -77,7 +84,7 @@ internal sealed class RuntimeToolObserver
         return updated;
     }
 
-    private void Finish(ToolExecutionRecord record, ToolExecutionStatus status, string summary)
+    private void Finish(ToolExecutionRecord record, ToolExecutionStatus status, string summary, string? resultContent = null)
     {
         var now = DateTimeOffset.UtcNow;
         var durationMs = TryStop(record.CorrelationId);
@@ -85,6 +92,7 @@ internal sealed class RuntimeToolObserver
         {
             Status = status,
             ResultSummary = summary,
+            ResultContent = resultContent ?? record.ResultContent,
             DurationMs = durationMs,
             UpdatedAtUtc = now
         };

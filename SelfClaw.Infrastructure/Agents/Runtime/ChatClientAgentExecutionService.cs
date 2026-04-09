@@ -35,8 +35,8 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
 
         var chatOptions = new ChatOptions
         {
-            Temperature = (float)request.Profile.Temperature,
-            TopP = (float)request.Profile.TopP,
+            Temperature = request.Profile.TemperatureEnabled ? (float)request.Profile.Temperature : null,
+            TopP = request.Profile.TopPEnabled ? (float)request.Profile.TopP : null,
             ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None
         };
 

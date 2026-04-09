@@ -255,6 +255,7 @@ CREATE TABLE IF NOT EXISTS tool_runs (
     arguments_json TEXT NOT NULL,
     status INTEGER NOT NULL,
     result_summary TEXT NULL,
+    result_content TEXT NULL,
     correlation_id TEXT NULL,
     duration_ms REAL NULL,
     created_at_utc TEXT NOT NULL,
@@ -264,6 +265,13 @@ CREATE TABLE IF NOT EXISTS tool_runs (
     after_segment_index INTEGER NULL,
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "tool_runs",
+                "result_content",
+                "ALTER TABLE tool_runs ADD COLUMN result_content TEXT NULL;",
+                cancellationToken);
 
             await EnsureColumnExistsAsync(
                 connection,
@@ -300,6 +308,7 @@ CREATE TABLE IF NOT EXISTS tool_runs (
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(8, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(9, CURRENT_TIMESTAMP);", cancellationToken);
             await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(10, CURRENT_TIMESTAMP);", cancellationToken);
+            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(11, CURRENT_TIMESTAMP);", cancellationToken);
 
             _initialized = true;
         }

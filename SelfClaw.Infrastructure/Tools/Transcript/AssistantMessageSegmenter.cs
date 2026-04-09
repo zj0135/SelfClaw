@@ -12,6 +12,13 @@ public static class AssistantMessageSegmenter
     private const string ToolAnchorPrefix = "<!--selfclaw:tool:";
     private const string ToolAnchorSuffix = "-->";
     private static readonly char[] TrimPrefixChars = ['\r', '\n', '\uFEFF', '\u200B', '\u200C', '\u200D', '\u2060'];
+    private static readonly string[] ThinkControlTokens =
+    [
+        InternalThinkOpenTag,
+        InternalThinkCloseTag,
+        ThinkCloseTag,
+        ThinkOpenTag
+    ];
 
     public static string WrapThinking(string? markdown)
         => string.Concat(InternalThinkOpenTag, markdown ?? string.Empty, InternalThinkCloseTag);
@@ -104,7 +111,8 @@ public static class AssistantMessageSegmenter
             return new AssistantMessageSegments(string.Empty, []);
         }
 
-        var internalThinking = ExtractInternalThinking(markdown);
+        var normalizedMarkdown = NormalizeThinkTagTransitions(markdown);
+        var internalThinking = ExtractInternalThinking(normalizedMarkdown);
         var source = internalThinking.ContentMarkdown;
         var firstContentIndex = FindFirstNonWhitespace(source);
         var firstThinkIndex = FindNextThinkBlockIndex(source, firstContentIndex);
@@ -332,7 +340,7 @@ public static class AssistantMessageSegmenter
         => RemoveToolAnchors(markdown).TrimStart(TrimPrefixChars);
 
     private static string NormalizeThinkTagTransitions(string markdown)
-        => InsertThinkBoundaryNewline(markdown, ThinkCloseTag, ThinkOpenTag);
+        => InsertThinkBoundaryNewline(NormalizeAnchoredThinkTokens(markdown), ThinkCloseTag, ThinkOpenTag);
 
     private static int FindNextSpecialIndex(string source, int startIndex, bool includeThinkBlocks)
     {
@@ -367,7 +375,7 @@ public static class AssistantMessageSegmenter
             return result;
         }
 
-        var source = markdown;
+        var source = NormalizeAnchoredThinkTokens(markdown);
         var plainOffset = 0;
         var cursor = 0;
         while (cursor < source.Length)
@@ -468,6 +476,12 @@ public static class AssistantMessageSegmenter
 
         for (var current = index - 1; current >= 0; current--)
         {
+            if (TryGetToolAnchorStartEndingAt(source, current + 1, out var toolAnchorStart))
+            {
+                current = toolAnchorStart;
+                continue;
+            }
+
             var value = source[current];
             if (value == '\n' || value == '\r')
             {
@@ -496,6 +510,132 @@ public static class AssistantMessageSegmenter
         => value is ' ' or '\t' or '\uFEFF' or '\u200B' or '\u200C' or '\u200D' or '\u2060';
 
     private sealed record ToolAnchorPlacement(Guid ToolExecutionId, int Offset);
+
+    private static string NormalizeAnchoredThinkTokens(string markdown)
+    {
+        if (string.IsNullOrEmpty(markdown) ||
+            !markdown.Contains(ToolAnchorPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return markdown;
+        }
+
+        var builder = new StringBuilder(markdown.Length);
+        var cursor = 0;
+
+        while (cursor < markdown.Length)
+        {
+            if (TryReadThinkControlToken(markdown, cursor, out var token, out var anchors, out var consumedLength))
+            {
+                builder.Append(token);
+                foreach (var anchor in anchors)
+                {
+                    builder.Append(anchor);
+                }
+
+                cursor += consumedLength;
+                continue;
+            }
+
+            builder.Append(markdown[cursor]);
+            cursor++;
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool TryReadThinkControlToken(
+        string source,
+        int index,
+        out string token,
+        out IReadOnlyList<string> anchors,
+        out int consumedLength)
+    {
+        foreach (var candidate in ThinkControlTokens)
+        {
+            if (TryReadTokenWithInterleavedToolAnchors(source, index, candidate, out anchors, out consumedLength))
+            {
+                token = candidate;
+                return true;
+            }
+        }
+
+        token = string.Empty;
+        anchors = Array.Empty<string>();
+        consumedLength = 0;
+        return false;
+    }
+
+    private static bool TryReadTokenWithInterleavedToolAnchors(
+        string source,
+        int index,
+        string token,
+        out IReadOnlyList<string> anchors,
+        out int consumedLength)
+    {
+        var bufferedAnchors = new List<string>();
+        var cursor = index;
+
+        for (var tokenIndex = 0; tokenIndex < token.Length; tokenIndex++)
+        {
+            while (tokenIndex > 0 && TryReadToolAnchor(source, cursor, out _, out var markerLength))
+            {
+                bufferedAnchors.Add(source.Substring(cursor, markerLength));
+                cursor += markerLength;
+            }
+
+            if (cursor >= source.Length || !EqualsIgnoreCase(source[cursor], token[tokenIndex]))
+            {
+                anchors = Array.Empty<string>();
+                consumedLength = 0;
+                return false;
+            }
+
+            cursor++;
+        }
+
+        if (bufferedAnchors.Count == 0)
+        {
+            anchors = Array.Empty<string>();
+            consumedLength = 0;
+            return false;
+        }
+
+        anchors = bufferedAnchors;
+        consumedLength = cursor - index;
+        return true;
+    }
+
+    private static bool TryGetToolAnchorStartEndingAt(string source, int endExclusive, out int startIndex)
+    {
+        startIndex = -1;
+        if (endExclusive <= 0)
+        {
+            return false;
+        }
+
+        var candidateIndex = source.LastIndexOf(ToolAnchorPrefix, endExclusive - 1, StringComparison.OrdinalIgnoreCase);
+        while (candidateIndex >= 0)
+        {
+            if (TryReadToolAnchor(source, candidateIndex, out _, out var markerLength) &&
+                candidateIndex + markerLength == endExclusive)
+            {
+                startIndex = candidateIndex;
+                return true;
+            }
+
+            if (candidateIndex == 0)
+            {
+                break;
+            }
+
+            candidateIndex = source.LastIndexOf(ToolAnchorPrefix, candidateIndex - 1, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static bool EqualsIgnoreCase(char left, char right)
+        => char.ToUpperInvariant(left) == char.ToUpperInvariant(right);
 
     private static InternalThinkingExtraction ExtractInternalThinking(string markdown)
     {

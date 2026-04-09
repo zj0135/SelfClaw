@@ -21,7 +21,7 @@ public sealed class SqliteProfileRepository : IProfileRepository
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, name, endpoint, model, temperature, top_p, api_style, secret_ref, created_at_utc, updated_at_utc
+SELECT id, name, endpoint, model, temperature_enabled, temperature, top_p_enabled, top_p, api_style, secret_ref, created_at_utc, updated_at_utc
 FROM profiles
 ORDER BY updated_at_utc DESC;";
 
@@ -40,7 +40,7 @@ ORDER BY updated_at_utc DESC;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, name, endpoint, model, temperature, top_p, api_style, secret_ref, created_at_utc, updated_at_utc
+SELECT id, name, endpoint, model, temperature_enabled, temperature, top_p_enabled, top_p, api_style, secret_ref, created_at_utc, updated_at_utc
 FROM profiles
 WHERE id = $id
 LIMIT 1;";
@@ -57,13 +57,15 @@ LIMIT 1;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-INSERT INTO profiles(id, name, endpoint, model, temperature, top_p, api_style, secret_ref, created_at_utc, updated_at_utc)
-VALUES($id, $name, $endpoint, $model, $temperature, $topP, $apiStyle, $secretRef, $createdAt, $updatedAt)
+INSERT INTO profiles(id, name, endpoint, model, temperature_enabled, temperature, top_p_enabled, top_p, api_style, secret_ref, created_at_utc, updated_at_utc)
+VALUES($id, $name, $endpoint, $model, $temperatureEnabled, $temperature, $topPEnabled, $topP, $apiStyle, $secretRef, $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
     name = excluded.name,
     endpoint = excluded.endpoint,
     model = excluded.model,
+    temperature_enabled = excluded.temperature_enabled,
     temperature = excluded.temperature,
+    top_p_enabled = excluded.top_p_enabled,
     top_p = excluded.top_p,
     api_style = excluded.api_style,
     secret_ref = excluded.secret_ref,
@@ -73,7 +75,9 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$name", profile.Name);
         command.Parameters.AddWithValue("$endpoint", profile.Endpoint);
         command.Parameters.AddWithValue("$model", profile.Model);
+        command.Parameters.AddWithValue("$temperatureEnabled", profile.TemperatureEnabled ? 1 : 0);
         command.Parameters.AddWithValue("$temperature", profile.Temperature);
+        command.Parameters.AddWithValue("$topPEnabled", profile.TopPEnabled ? 1 : 0);
         command.Parameters.AddWithValue("$topP", profile.TopP);
         command.Parameters.AddWithValue("$apiStyle", (int)profile.ApiStyle);
         command.Parameters.AddWithValue("$secretRef", profile.SecretRef);

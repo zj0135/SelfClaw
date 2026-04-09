@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using SelfClaw.Infrastructure.Tools;
 
 namespace SelfClaw.Tests.Tools;
@@ -187,6 +187,75 @@ public sealed class AssistantMessageSegmenterTests
         result.ContentMarkdown.Should().Be("BeforeAfter");
         result.Segments.Should().Equal(
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "Before"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, toolExecutionId),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "After"));
+    }
+
+    [Fact]
+    public void Split_repairs_tool_anchor_inserted_inside_a_closing_think_tag()
+    {
+        var toolExecutionId = Guid.NewGuid();
+        var markdown =
+            "<think>first</thi" +
+            AssistantMessageSegmenter.AppendToolAnchor(string.Empty, toolExecutionId) +
+            "nk>\n<think>second</think>";
+
+        var result = AssistantMessageSegmenter.Split(markdown);
+
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "first"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, toolExecutionId),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "second"));
+    }
+
+    [Fact]
+    public void Split_repairs_tool_anchor_inserted_before_a_closing_think_tag_delimiter()
+    {
+        var toolExecutionId = Guid.NewGuid();
+        var markdown =
+            "<think>first</think" +
+            AssistantMessageSegmenter.AppendToolAnchor(string.Empty, toolExecutionId) +
+            ">\n<think>second</think>";
+
+        var result = AssistantMessageSegmenter.Split(markdown);
+
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "first"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, toolExecutionId),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "second"));
+    }
+
+    [Fact]
+    public void Split_treats_tool_anchors_between_think_blocks_as_zero_width_boundaries()
+    {
+        var toolExecutionId = Guid.NewGuid();
+        var markdown =
+            "<think>first</think>" +
+            AssistantMessageSegmenter.AppendToolAnchor(string.Empty, toolExecutionId) +
+            "<think>second</think>";
+
+        var result = AssistantMessageSegmenter.Split(markdown);
+
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "first"),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, toolExecutionId),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "second"));
+    }
+
+    [Fact]
+    public void Split_repairs_tool_anchor_inserted_inside_internal_thinking_markers()
+    {
+        var toolExecutionId = Guid.NewGuid();
+        var markdown =
+            "<!--selfclaw:think:start-->first<!--selfclaw:think:e" +
+            AssistantMessageSegmenter.AppendToolAnchor(string.Empty, toolExecutionId) +
+            "nd-->After";
+
+        var result = AssistantMessageSegmenter.Split(markdown);
+
+        result.ContentMarkdown.Should().Be("After");
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Thinking, "first"),
             new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, toolExecutionId),
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "After"));
     }

@@ -39,7 +39,7 @@ internal sealed class WorkspaceToolFunctions
         try
         {
             var result = await _workspaceToolService.ListFilesAsync(_workspaceRoot.RootPath, relativePath, cancellationToken);
-            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result));
+            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result), WorkspaceToolSummaries.Describe(result));
             return result;
         }
         catch (Exception exception)
@@ -60,7 +60,7 @@ internal sealed class WorkspaceToolFunctions
         try
         {
             var result = await _workspaceToolService.SearchTextAsync(_workspaceRoot.RootPath, query, cancellationToken);
-            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result));
+            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result), WorkspaceToolSummaries.Describe(result));
             return result;
         }
         catch (Exception exception)
@@ -81,7 +81,7 @@ internal sealed class WorkspaceToolFunctions
         try
         {
             var result = await _workspaceToolService.ReadFileAsync(_workspaceRoot.RootPath, relativePath, cancellationToken);
-            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result));
+            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result), WorkspaceToolSummaries.Describe(result));
             return result;
         }
         catch (Exception exception)
@@ -132,7 +132,7 @@ internal sealed class WorkspaceToolFunctions
             }
 
             var result = await _workspaceToolService.WriteFileAsync(_workspaceRoot.RootPath, relativePath, content, cancellationToken);
-            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result));
+            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result), WorkspaceToolSummaries.Describe(result));
             return result;
         }
         catch (Exception exception)
@@ -184,7 +184,7 @@ internal sealed class WorkspaceToolFunctions
             }
 
             var result = await _workspaceToolService.RunShellCommandAsync(_workspaceRoot.RootPath, command, timeoutSeconds, cancellationToken);
-            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result));
+            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result), WorkspaceToolSummaries.Describe(result));
             return result;
         }
         catch (Exception exception)

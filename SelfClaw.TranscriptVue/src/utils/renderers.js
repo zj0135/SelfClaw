@@ -1,4 +1,4 @@
-export const escapeHtml = (value) =>
+﻿export const escapeHtml = (value) =>
 	String(value ?? '')
 		.replaceAll('&', '&amp;')
 		.replaceAll('<', '&lt;')
@@ -24,6 +24,22 @@ const getMessageSegments = (item) => {
 };
 
 const thinkingBlockId = (messageId, ordinal) => `${messageId}:thinking:${ordinal}`;
+const toolSegmentId = (messageId, segment, index) => segment.segmentId || `${messageId}:tool:${index}`;
+
+function toolStatusLabel(status) {
+	switch (status) {
+		case 'running':
+			return '执行中';
+		case 'awaitingapproval':
+			return '等待确认';
+		case 'failed':
+			return '失败';
+		case 'cancelled':
+			return '已取消';
+		default:
+			return '成功';
+	}
+}
 
 function renderPendingThinking(item, thinkingOrdinal, isLast, openThoughts) {
 	return renderThinkingSegment(item, { html: '', isPending: true }, thinkingOrdinal, isLast ? 0 : -1, 1, openThoughts);
@@ -52,9 +68,14 @@ function renderThinkingSegment(item, segment, thinkingOrdinal, index, totalSegme
     `;
 }
 
-function renderToolSegment(segment, index, totalSegments) {
+function renderToolSegment(item, segment, index, totalSegments, openToolSegments) {
 	const label = segment.text || '工具调用';
 	const status = segment.status || 'completed';
+	const id = toolSegmentId(item.id, segment, index);
+	const detailTitle = segment.detailTitle || 'Tool';
+	const detailText = segment.detailText || '暂无可展示的执行结果。';
+	const durationText = segment.durationText || '';
+	const isOpen = openToolSegments.has(id);
 	const classes = ['tool-segment', status];
 	if (index === 0) {
 		classes.push('first');
@@ -66,10 +87,27 @@ function renderToolSegment(segment, index, totalSegments) {
 
 	return `
       <div class="${classes.join(' ')}">
-        <div class="inline-tool ${escapeHtml(status)}">
-          <span class="inline-tool-dot"></span>
-          <span class="inline-tool-label">${escapeHtml(label)}</span>
-        </div>
+        <section class="tool-block ${escapeHtml(status)} ${isOpen ? 'open' : ''}" data-tool-segment-id="${escapeHtml(id)}">
+          <button class="tool-summary" type="button" data-action="toggle-tool-segment" data-tool-segment-id="${escapeHtml(id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
+            <span class="tool-summary-main">
+              <span class="inline-tool-dot"></span>
+              <span class="inline-tool-label">${escapeHtml(label)}</span>
+            </span>
+            <span class="tool-summary-side">
+              ${durationText ? `<span class="tool-summary-duration">${escapeHtml(durationText)}</span>` : ''}
+              <span class="tool-summary-chevron">&rsaquo;</span>
+            </span>
+          </button>
+          <div class="tool-details">
+            <div class="tool-details-header">${escapeHtml(detailTitle)}</div>
+            <div class="tool-details-body">
+              <pre class="tool-details-pre"><code>${escapeHtml(detailText)}</code></pre>
+            </div>
+            <div class="tool-details-footer">
+              <span class="tool-details-status ${escapeHtml(status)}">${escapeHtml(toolStatusLabel(status))}</span>
+            </div>
+          </div>
+        </section>
       </div>
     `;
 }
@@ -91,7 +129,7 @@ function renderBodySegment(segment, index, totalSegments) {
 	return `<div class="${classes.join(' ')}">${segment.html}</div>`;
 }
 
-function renderMessageContent(item, openThoughts) {
+function renderMessageContent(item, openThoughts, openToolSegments) {
 	const segments = getMessageSegments(item);
 	if (!segments.length) {
 		return item.role === 'assistant' && item.isThinking
@@ -108,7 +146,7 @@ function renderMessageContent(item, openThoughts) {
 						segment.kind === 'thinking'
 							? renderThinkingSegment(item, segment, thinkingOrdinal++, index, segments.length, openThoughts)
 							: segment.kind === 'tool'
-								? renderToolSegment(segment, index, segments.length)
+								? renderToolSegment(item, segment, index, segments.length, openToolSegments)
 								: renderBodySegment(segment, index, segments.length)
 					)
 					.join('')}
@@ -116,13 +154,12 @@ function renderMessageContent(item, openThoughts) {
     `;
 }
 
-export function renderMessages(items, openThoughts) {
+export function renderMessages(items, openThoughts, openToolSegments) {
 	if (!items?.length) {
 		return `
       <div class="empty">
-        <strong>准备开始</strong>
-        描述你想构建的内容、修复 Bug，或让 SelfClaw 帮你分析工作区。
-      </div>
+        <strong>鍑嗗寮€濮?/strong>
+        鎻忚堪浣犳兂鏋勫缓鐨勫唴瀹广€佷慨澶?Bug锛屾垨璁?SelfClaw 甯綘鍒嗘瀽宸ヤ綔鍖恒€?      </div>
     `;
 	}
 
@@ -141,7 +178,7 @@ export function renderMessages(items, openThoughts) {
               <span class="message-heading">${headerTitle}${headerSubtitle}</span>
               <span>${escapeHtml(item.timestamp)}</span>
             </div>
-            ${renderMessageContent(item, openThoughts)}
+            ${renderMessageContent(item, openThoughts, openToolSegments)}
           </article>
         </div>
       </div>
@@ -153,8 +190,8 @@ export function renderMessages(items, openThoughts) {
 export function renderActivities(agentActivities, { isTeamMode, openActivities }) {
 	if (!agentActivities?.length) {
 		return isTeamMode
-			? '<div class="muted-placeholder">这里会显示每位成员的最新状态、工具调用以及按需触发的文档导出流程。</div>'
-			: '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
+			? '<div class="muted-placeholder">杩欓噷浼氭樉绀烘瘡浣嶆垚鍛樼殑鏈€鏂扮姸鎬併€佸伐鍏疯皟鐢ㄤ互鍙婃寜闇€瑙﹀彂鐨勬枃妗ｅ鍑烘祦绋嬨€?/div>'
+			: '<div class="muted-placeholder">杩欓噷浼氭樉绀哄伐鍏疯皟鐢ㄣ€佹墽琛岀粨鏋滃拰鍚庣画杩愯姝ラ銆?/div>';
 	}
 
 	return agentActivities
@@ -164,8 +201,8 @@ export function renderActivities(agentActivities, { isTeamMode, openActivities }
 				item.status === 'awaitingapproval'
 					? `
         <div class="activity-actions">
-          <button class="activity-action-btn primary" type="button" data-action="approve-tool-execution" data-tool-execution-id="${escapeHtml(item.id)}">确认</button>
-          <button class="activity-action-btn secondary" type="button" data-action="reject-tool-execution" data-tool-execution-id="${escapeHtml(item.id)}">取消</button>
+          <button class="activity-action-btn primary" type="button" data-action="approve-tool-execution" data-tool-execution-id="${escapeHtml(item.id)}">纭</button>
+          <button class="activity-action-btn secondary" type="button" data-action="reject-tool-execution" data-tool-execution-id="${escapeHtml(item.id)}">鍙栨秷</button>
         </div>
       `
 					: '';
@@ -175,19 +212,19 @@ export function renderActivities(agentActivities, { isTeamMode, openActivities }
         <div class="activity-summary" data-action="toggle-activity" data-activity-id="${escapeHtml(item.id)}">
           <div class="activity-top">
             <div class="activity-title">${escapeHtml(item.title)}</div>
-            <button class="activity-toggle" type="button" tabindex="-1">${isOpen ? '收起' : '详情'}</button>
+			<button class="activity-toggle" type="button" tabindex="-1">${isOpen ? '收起' : '详情'}</button>
           </div>
           <div class="activity-meta">
             <div class="activity-meta-item">
-              <div class="activity-meta-label">类型</div>
+              <div class="activity-meta-label">绫诲瀷</div>
               <div class="activity-meta-value">${escapeHtml(item.kindLabel)}</div>
             </div>
             <div class="activity-meta-item">
-              <div class="activity-meta-label">状态</div>
+              <div class="activity-meta-label">鐘舵€?/div>
               <div class="activity-meta-value">${escapeHtml(item.statusLabel)}</div>
             </div>
             <div class="activity-meta-item">
-              <div class="activity-meta-label">时间</div>
+              <div class="activity-meta-label">鏃堕棿</div>
               <div class="activity-meta-value">${escapeHtml(item.timestamp)}</div>
             </div>
           </div>
@@ -218,7 +255,7 @@ function isTeamMemberOpen(openTeamMembers, memberId) {
 
 export function renderTeamMembers(teamMembers, openTeamMembers) {
 	if (!teamMembers?.length) {
-		return '<div class="muted-placeholder">这次会话的团队成员会在主 Agent 完成规划后出现在这里。</div>';
+		return '<div class="muted-placeholder">杩欐浼氳瘽鐨勫洟闃熸垚鍛樹細鍦ㄤ富 Agent 瀹屾垚瑙勫垝鍚庡嚭鐜板湪杩欓噷銆?/div>';
 	}
 
 	return teamMembers
@@ -235,13 +272,13 @@ export function renderTeamMembers(teamMembers, openTeamMembers) {
             </div>
             <div class="team-member-meta">
               <span class="team-member-status ${escapeHtml(member.status)}">${escapeHtml(member.statusLabel)}</span>
-              <span class="team-member-chevron">${isOpen ? '▾' : '▸'}</span>
+								<span class="team-member-chevron">${isOpen ? '▾' : '▸'}</span>
             </div>
           </div>
           <div class="team-member-time">${escapeHtml(member.timestamp)}</div>
         </button>
         <div class="team-member-body">
-          <div class="team-member-note">${escapeHtml(prompt || '该成员暂无额外说明。')}</div>
+				<div class="team-member-note">${escapeHtml(prompt || '该成员暂时无额外说明。')}</div>
         </div>
       </article>
     `;
@@ -256,8 +293,8 @@ function isStepSectionOpen(openStepSections, sectionId, defaultOpen = true) {
 export function renderStepsHeader({ isTeamMode, totalCount }) {
 	return `
     <div>
-      <div class="steps-title">${isTeamMode ? '团队动态' : '工具'}</div>
-      <div class="steps-subtitle">${isTeamMode ? '团队成员与团队事件状态' : '运行步骤与工具状态'}</div>
+		<div class="steps-title">${isTeamMode ? '团队动态' : '工具'}</div>
+		<div class="steps-subtitle">${isTeamMode ? '团队成员与团队事件状态' : '运行步骤与工具状态'}</div>
     </div>
     <div class="steps-count">${totalCount}</div>
   `;
@@ -276,10 +313,10 @@ export function renderStepsPanelContent({ isTeamMode, teamMembers, agentActiviti
           <section class="steps-section-block ${membersOpen ? 'open' : 'collapsed'}">
             <button class="steps-section-head steps-section-toggle" type="button" data-action="toggle-steps-section" data-section-id="team-members" aria-expanded="${membersOpen ? 'true' : 'false'}">
               <div class="steps-section-heading">
-                <div class="steps-section-title">团队成员</div>
+				<div class="steps-section-title">团队成员</div>
                 <div class="steps-section-count">${memberCount}</div>
               </div>
-              <span class="steps-section-chevron">${membersOpen ? '▾' : '▸'}</span>
+				<span class="steps-section-chevron">${membersOpen ? '▾' : '▸'}</span>
             </button>
             <div class="steps-section-body">
               <div class="team-member-list">${renderTeamMembers(teamMembers, openTeamMembers)}</div>
@@ -288,10 +325,10 @@ export function renderStepsPanelContent({ isTeamMode, teamMembers, agentActiviti
           <section class="steps-section-block ${eventsOpen ? 'open' : 'collapsed'}">
             <button class="steps-section-head steps-section-toggle" type="button" data-action="toggle-steps-section" data-section-id="team-events" aria-expanded="${eventsOpen ? 'true' : 'false'}">
               <div class="steps-section-heading">
-                <div class="steps-section-title">团队事件</div>
+				<div class="steps-section-title">团队事件</div>
                 <div class="steps-section-count">${eventCount}</div>
               </div>
-              <span class="steps-section-chevron">${eventsOpen ? '▾' : '▸'}</span>
+				<span class="steps-section-chevron">${eventsOpen ? '▾' : '▸'}</span>
             </button>
             <div class="steps-section-body">
               <div class="activity-list">${renderActivities(agentActivities, { isTeamMode, openActivities })}</div>
@@ -301,7 +338,7 @@ export function renderStepsPanelContent({ isTeamMode, teamMembers, agentActiviti
 				: `
           <section class="steps-section-block">
             <div class="steps-section-head">
-              <div class="steps-section-title">运行步骤</div>
+              <div class="steps-section-title">杩愯姝ラ</div>
               <div class="steps-section-count">${eventCount}</div>
             </div>
             <div class="activity-list">${renderActivities(agentActivities, { isTeamMode, openActivities })}</div>
@@ -319,7 +356,7 @@ export function renderConversationList({
 	openConversationMenuId,
 }) {
 	if (!conversations.length) {
-		return '<div class="muted-placeholder">还没有会话，点击“新建对话”开始。</div>';
+		return '<div class="muted-placeholder">杩樻病鏈変細璇濓紝鐐瑰嚮鈥滄柊寤哄璇濃€濆紑濮嬨€?/div>';
 	}
 
 	const itemsById = new Map(conversations.map((item) => [item.id, item]));
@@ -392,8 +429,8 @@ export function renderConversationList({
           <div class="conversation-time">${escapeHtml(item.timestamp)}</div>
         </button>
         <div class="conversation-menu-shell">
-          <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="会话菜单">⋯</button>
-          ${menuOpen ? `<div class="conversation-menu"><button class="conversation-menu-item danger" data-action="delete-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">删除会话</button></div>` : ''}
+          <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="浼氳瘽鑿滃崟">鈰?/button>
+          ${menuOpen ? `<div class="conversation-menu"><button class="conversation-menu-item danger" data-action="delete-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">鍒犻櫎浼氳瘽</button></div>` : ''}
         </div>
       </div>
       ${hasChildren && isExpanded ? children.map((child) => renderConversationNode(child)).join('') : ''}
@@ -426,3 +463,5 @@ export function renderConversationList({
 
 	return fragments.join('');
 }
+
+

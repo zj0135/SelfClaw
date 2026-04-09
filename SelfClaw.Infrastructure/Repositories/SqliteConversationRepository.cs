@@ -263,7 +263,7 @@ ON CONFLICT(id) DO UPDATE SET
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index
+SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index, result_content
 FROM tool_runs
 WHERE conversation_id = $conversationId
 ORDER BY created_at_utc ASC;";
@@ -284,11 +284,12 @@ ORDER BY created_at_utc ASC;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-INSERT INTO tool_runs(id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index)
-VALUES($id, $conversationId, $toolName, $argumentsJson, $status, $resultSummary, $correlationId, $durationMs, $createdAt, $updatedAt, $agentId, $messageId, $afterSegmentIndex)
+INSERT INTO tool_runs(id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index, result_content)
+VALUES($id, $conversationId, $toolName, $argumentsJson, $status, $resultSummary, $correlationId, $durationMs, $createdAt, $updatedAt, $agentId, $messageId, $afterSegmentIndex, $resultContent)
 ON CONFLICT(id) DO UPDATE SET
     status = excluded.status,
     result_summary = excluded.result_summary,
+    result_content = COALESCE(excluded.result_content, tool_runs.result_content),
     duration_ms = excluded.duration_ms,
     agent_id = COALESCE(excluded.agent_id, tool_runs.agent_id),
     message_id = COALESCE(excluded.message_id, tool_runs.message_id),
@@ -307,6 +308,7 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$agentId", record.AgentId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$messageId", record.MessageId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$afterSegmentIndex", record.AfterSegmentIndex ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$resultContent", record.ResultContent ?? (object)DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken);
         return record;
     }
