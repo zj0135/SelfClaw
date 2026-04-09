@@ -158,8 +158,9 @@ export function renderMessages(items, openThoughts, openToolSegments) {
 	if (!items?.length) {
 		return `
       <div class="empty">
-        <strong>鍑嗗寮€濮?/strong>
-        鎻忚堪浣犳兂鏋勫缓鐨勫唴瀹广€佷慨澶?Bug锛屾垨璁?SelfClaw 甯綘鍒嗘瀽宸ヤ綔鍖恒€?      </div>
+        <strong>准备开始</strong>
+        描述你想构建的内容、修复 Bug，或让 SelfClaw 帮你分析工作区。
+      </div>
     `;
 	}
 
@@ -190,8 +191,8 @@ export function renderMessages(items, openThoughts, openToolSegments) {
 export function renderActivities(agentActivities, { isTeamMode, openActivities }) {
 	if (!agentActivities?.length) {
 		return isTeamMode
-			? '<div class="muted-placeholder">杩欓噷浼氭樉绀烘瘡浣嶆垚鍛樼殑鏈€鏂扮姸鎬併€佸伐鍏疯皟鐢ㄤ互鍙婃寜闇€瑙﹀彂鐨勬枃妗ｅ鍑烘祦绋嬨€?/div>'
-			: '<div class="muted-placeholder">杩欓噷浼氭樉绀哄伐鍏疯皟鐢ㄣ€佹墽琛岀粨鏋滃拰鍚庣画杩愯姝ラ銆?/div>';
+			? '<div class="muted-placeholder">这里会显示每位成员的最新状态、工具调用以及按需触发的文档导出流程。</div>'
+			: '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
 	}
 
 	return agentActivities
@@ -201,8 +202,8 @@ export function renderActivities(agentActivities, { isTeamMode, openActivities }
 				item.status === 'awaitingapproval'
 					? `
         <div class="activity-actions">
-          <button class="activity-action-btn primary" type="button" data-action="approve-tool-execution" data-tool-execution-id="${escapeHtml(item.id)}">纭</button>
-          <button class="activity-action-btn secondary" type="button" data-action="reject-tool-execution" data-tool-execution-id="${escapeHtml(item.id)}">鍙栨秷</button>
+          <button class="activity-action-btn primary" type="button" data-action="approve-tool-execution" data-tool-execution-id="${escapeHtml(item.id)}">确认</button>
+          <button class="activity-action-btn secondary" type="button" data-action="reject-tool-execution" data-tool-execution-id="${escapeHtml(item.id)}">取消</button>
         </div>
       `
 					: '';
@@ -216,15 +217,15 @@ export function renderActivities(agentActivities, { isTeamMode, openActivities }
           </div>
           <div class="activity-meta">
             <div class="activity-meta-item">
-              <div class="activity-meta-label">绫诲瀷</div>
+              <div class="activity-meta-label">类型</div>
               <div class="activity-meta-value">${escapeHtml(item.kindLabel)}</div>
             </div>
             <div class="activity-meta-item">
-              <div class="activity-meta-label">鐘舵€?/div>
+              <div class="activity-meta-label">状态</div>
               <div class="activity-meta-value">${escapeHtml(item.statusLabel)}</div>
             </div>
             <div class="activity-meta-item">
-              <div class="activity-meta-label">鏃堕棿</div>
+              <div class="activity-meta-label">时间</div>
               <div class="activity-meta-value">${escapeHtml(item.timestamp)}</div>
             </div>
           </div>
@@ -255,7 +256,7 @@ function isTeamMemberOpen(openTeamMembers, memberId) {
 
 export function renderTeamMembers(teamMembers, openTeamMembers) {
 	if (!teamMembers?.length) {
-		return '<div class="muted-placeholder">杩欐浼氳瘽鐨勫洟闃熸垚鍛樹細鍦ㄤ富 Agent 瀹屾垚瑙勫垝鍚庡嚭鐜板湪杩欓噷銆?/div>';
+		return '<div class="muted-placeholder">这次会话的团队成员会在主 Agent 完成规划后出现在这里。</div>';
 	}
 
 	return teamMembers
@@ -338,7 +339,7 @@ export function renderStepsPanelContent({ isTeamMode, teamMembers, agentActiviti
 				: `
           <section class="steps-section-block">
             <div class="steps-section-head">
-              <div class="steps-section-title">杩愯姝ラ</div>
+              <div class="steps-section-title">运行步骤</div>
               <div class="steps-section-count">${eventCount}</div>
             </div>
             <div class="activity-list">${renderActivities(agentActivities, { isTeamMode, openActivities })}</div>
@@ -356,7 +357,7 @@ export function renderConversationList({
 	openConversationMenuId,
 }) {
 	if (!conversations.length) {
-		return '<div class="muted-placeholder">杩樻病鏈変細璇濓紝鐐瑰嚮鈥滄柊寤哄璇濃€濆紑濮嬨€?/div>';
+		return '<div class="muted-placeholder">还没有会话，点击"新建对话"开始。</div>';
 	}
 
 	const itemsById = new Map(conversations.map((item) => [item.id, item]));
@@ -429,8 +430,8 @@ export function renderConversationList({
           <div class="conversation-time">${escapeHtml(item.timestamp)}</div>
         </button>
         <div class="conversation-menu-shell">
-          <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="浼氳瘽鑿滃崟">鈰?/button>
-          ${menuOpen ? `<div class="conversation-menu"><button class="conversation-menu-item danger" data-action="delete-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">鍒犻櫎浼氳瘽</button></div>` : ''}
+          <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="会话菜单">⋯</button>
+          ${menuOpen ? `<div class="conversation-menu"><button class="conversation-menu-item danger" data-action="delete-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button">删除会话</button></div>` : ''}
         </div>
       </div>
       ${hasChildren && isExpanded ? children.map((child) => renderConversationNode(child)).join('') : ''}
@@ -463,5 +464,3 @@ export function renderConversationList({
 
 	return fragments.join('');
 }
-
-

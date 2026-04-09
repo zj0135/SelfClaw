@@ -107,11 +107,11 @@ const selectedThemeLabel = computed(
 	() =>
 		state.themeOptions.find((item) => item.id === state.selectedThemeId)?.label ||
 		{
-			system: '璺熼殢绯荤粺',
-			light: '娴呰壊',
-			dark: '娣辫壊',
+			system: '跟随系统',
+			light: '浅色',
+			dark: '深色',
 		}[state.selectedThemeId || 'system'] ||
-		'璺熼殢绯荤粺'
+		'跟随系统'
 );
 const currentModelLabel = computed(() => state.selectedProfileModel || selectedProfile.value?.label || '未选择模型');
 const currentWorkspaceLabel = computed(() => selectedWorkspace.value?.label || '未绑定工作区');
@@ -137,8 +137,8 @@ const settingsSections = computed(() => [
 	},
 	{
 		id: 'theme',
-		eyebrow: '鐣岄潰涓婚',
-		title: '鐣岄潰涓婚',
+		eyebrow: '界面主题',
+		title: '界面主题',
 		description: state.selectedThemeId === 'system' ? '当前跟随系统外观' : `当前为${selectedThemeLabel.value}`,
 		badge: selectedThemeLabel.value,
 	},
@@ -171,8 +171,8 @@ const profileSummaryCards = computed(() => [
 ]);
 
 const workspaceSummaryCards = computed(() => [
-	{ label: '鍚嶇О', value: selectedWorkspace.value?.label || '鏈粦瀹氬伐浣滃尯' },
-	{ label: '璺緞', value: selectedWorkspace.value?.description || '鏈缃伐浣滃尯璺緞' },
+	{ label: '名称', value: selectedWorkspace.value?.label || '未绑定工作区' },
+	{ label: '路径', value: selectedWorkspace.value?.description || '未设置工作区路径' },
 ]);
 
 const filteredConversations = computed(() => {
@@ -788,7 +788,7 @@ async function handleDelegatedClick(event) {
 
 				const toggle = card.querySelector('.activity-toggle');
 				if (toggle) {
-					toggle.textContent = isOpen ? '璇︽儏' : '鏀惰捣';
+					toggle.textContent = isOpen ? '详情' : '收起';
 				}
 				return;
 			}
@@ -1045,17 +1045,17 @@ onUnmounted(() => {
 						</div>
 					</div>
 				</div>
-				<button class="sidebar-primary" type="button" @click="newConversation">+ 鏂板缓瀵硅瘽</button>
+				<button class="sidebar-primary" type="button" @click="newConversation">+ 新建对话</button>
 				<input id="conversation-search" v-model="conversationSearch" class="search-box" type="text"
-					placeholder="鎼滅储浼氳瘽..." @input="onConversationSearchInput" />
+					placeholder="搜索会话..." @input="onConversationSearchInput" />
 				<div class="section-title">{{ conversationSectionTitle }}</div>
 				<div id="conversation-list" ref="conversationListRef" class="conversation-list"
 					v-html="conversationListHtml"></div>
 				<button class="sidebar-footer" type="button" @click="openSettings">
 					<div class="avatar">SC</div>
 					<div class="sidebar-footer-copy">
-						<div class="sidebar-footer-title">绯荤粺璁剧疆</div>
-					<div class="sidebar-footer-subtitle">模型、工作区、主题</div>
+						<div class="sidebar-footer-title">系统设置</div>
+						<div class="sidebar-footer-subtitle">模型、工作区、主题</div>
 					</div>
 					<div>&rsaquo;</div>
 				</button>
@@ -1069,18 +1069,18 @@ onUnmounted(() => {
 							@click="selectConversationMode(mode.id)">
 							{{ mode.label }}
 						</button>
-						<button class="mode-chip" type="button" disabled>鍗忎綔</button>
+						<button class="mode-chip" type="button" disabled>协作</button>
 					</div>
 					<div class="topbar-right">
 						<div id="topbar-model-pill" class="context-pill" :title="currentModelLabel">
-							<span class="context-label">妯″瀷</span>
+							<span class="context-label">模型</span>
 							<span id="topbar-model-value" class="context-value">{{ currentModelLabel }}</span>
 						</div>
 						<div id="topbar-workspace-pill" class="context-pill" :title="currentWorkspaceLabel">
 							<span class="context-label">工作区</span>
 							<span id="topbar-workspace-value" class="context-value">{{ currentWorkspaceLabel }}</span>
 						</div>
-						<button class="icon-btn" type="button" aria-label="鎵撳紑绯荤粺璁剧疆" @click="openSettings">璁剧疆</button>
+						<button class="icon-btn" type="button" aria-label="打开系统设置" @click="openSettings">设置</button>
 					</div>
 				</div>
 
@@ -1110,9 +1110,9 @@ onUnmounted(() => {
 							<div class="composer-footer">
 								<div class="composer-controls">
 									<select id="composer-profile-select" class="composer-inline-select"
-										aria-label="褰撳墠妯″瀷閰嶇疆" :value="state.selectedProfileId || ''"
+										aria-label="当前模型配置" :value="state.selectedProfileId || ''"
 										@change="onProfileSelectChange">
-										<option value="">閫夋嫨妯″瀷</option>
+										<option value="">选择模型</option>
 										<option v-for="option in state.profiles" :key="option.id" :value="option.id">{{
 											option.label }}</option>
 									</select>
@@ -1124,14 +1124,14 @@ onUnmounted(() => {
 												:value="option.id">{{ option.label }}</option>
 										</select>
 										<select id="composer-team-output-select" class="composer-inline-select"
-											aria-label="鍥㈤槦鎬荤粨杈撳嚭鏂瑰紡" :value="state.selectedTeamOutputModeId"
+											aria-label="团队总结输出方式" :value="state.selectedTeamOutputModeId"
 											@change="onTeamOutputChange">
 											<option v-for="option in state.teamOutputModes" :key="option.id"
 												:value="option.id">{{ option.label }}</option>
 										</select>
 									</template>
 									<select v-else id="composer-permission-select" class="composer-inline-select"
-										aria-label="宸ュ叿鏉冮檺妯″紡" :value="state.selectedToolPermissionModeId"
+										aria-label="工具权限模式" :value="state.selectedToolPermissionModeId"
 										@change="onPermissionChange">
 										<option v-for="option in state.toolPermissionModes" :key="option.id"
 											:value="option.id">{{ option.label }}</option>
@@ -1166,10 +1166,10 @@ onUnmounted(() => {
 		</div>
 
 		<div id="settings-overlay" class="settings-overlay" :class="{ open: settingsOpen }" @click.self="closeSettings">
-			<div v-if="settingsOpen" class="settings-panel" role="dialog" aria-modal="true" aria-label="绯荤粺璁剧疆">
+			<div v-if="settingsOpen" class="settings-panel" role="dialog" aria-modal="true" aria-label="系统设置">
 				<aside class="settings-nav">
 					<div class="settings-nav-header">
-						<div class="settings-title">绯荤粺璁剧疆</div>
+						<div class="settings-title">系统设置</div>
 						<div class="settings-hint">左侧切换模块，右侧集中完成当前配置。</div>
 					</div>
 
@@ -1187,7 +1187,7 @@ onUnmounted(() => {
 					</div>
 
 					<div class="settings-nav-footer">
-						<button class="ghost-btn" type="button" @click="closeSettings">瀹屾垚</button>
+						<button class="ghost-btn" type="button" @click="closeSettings">完成</button>
 					</div>
 				</aside>
 
@@ -1196,11 +1196,11 @@ onUnmounted(() => {
 						<div>
 							<div class="field-label">{{ activeSettingsMeta?.eyebrow }}</div>
 							<div class="settings-section-title settings-section-title-hero">{{ activeSettingsMeta?.title
-								}}
+							}}
 							</div>
 							<div class="settings-hint settings-header-hint">{{ activeSettingsMeta?.description }}</div>
 						</div>
-						<button class="close-btn" type="button" aria-label="鍏抽棴" @click="closeSettings">&times;</button>
+						<button class="close-btn" type="button" aria-label="关闭" @click="closeSettings">&times;</button>
 					</div>
 
 					<div v-if="visibleSettingsFeedback" class="settings-feedback"
@@ -1212,25 +1212,25 @@ onUnmounted(() => {
 						class="settings-section settings-section-active">
 						<div class="settings-section-header">
 							<div class="settings-section-copy">
-								<div class="field-label">褰撳墠閰嶇疆</div>
+								<div class="field-label">当前配置</div>
 								<div class="settings-section-title">模型选择与管理</div>
 							</div>
-							<div class="settings-badge">{{ selectedProfile ? '宸查€夋嫨' : '鏈€夋嫨' }}</div>
+							<div class="settings-badge">{{ selectedProfile ? '已选择' : '未选择' }}</div>
 						</div>
 						<div class="field-group">
-							<div class="field-label">褰撳墠閰嶇疆</div>
+							<div class="field-label">当前配置</div>
 							<div class="settings-select-row">
 								<select id="profile-select" class="field-select" :value="state.selectedProfileId || ''"
 									@change="onSettingsProfileChange">
-									<option value="">鏈€夋嫨閰嶇疆</option>
+									<option value="">未选择配置</option>
 									<option v-for="option in state.profiles" :key="option.id" :value="option.id">{{
 										option.label }}
 									</option>
 								</select>
 								<button class="ghost-btn compact-btn" type="button" :disabled="!selectedProfile"
-									@click="openEditor('profile', 'edit')">缂栬緫</button>
+									@click="openEditor('profile', 'edit')">编辑</button>
 								<button class="ghost-btn compact-btn danger-btn" type="button"
-									:disabled="!selectedProfile" @click="deleteProfile">鍒犻櫎</button>
+									:disabled="!selectedProfile" @click="deleteProfile">删除</button>
 								<button class="icon-add-btn" type="button" aria-label="新增模型配置"
 									@click="openEditor('profile', 'create')">+</button>
 							</div>
@@ -1248,7 +1248,7 @@ onUnmounted(() => {
 						<div class="settings-section-header">
 							<div class="settings-section-copy">
 								<div class="field-label">当前工作区</div>
-								<div class="settings-section-title">宸ヤ綔鍖虹粦瀹氫笌鍒囨崲</div>
+								<div class="settings-section-title">工作区绑定与切换</div>
 							</div>
 							<div class="settings-badge">{{ selectedWorkspace ? '已绑定' : '未绑定' }}</div>
 						</div>
@@ -1257,15 +1257,15 @@ onUnmounted(() => {
 							<div class="settings-select-row">
 								<select id="workspace-select" class="field-select"
 									:value="state.selectedWorkspaceRootId || ''" @change="onWorkspaceChange">
-									<option value="">鏈粦瀹氬伐浣滃尯</option>
+									<option value="">未绑定工作区</option>
 									<option v-for="option in state.workspaceRoots" :key="option.id" :value="option.id">
 										{{
 											option.label }}</option>
 								</select>
 								<button class="ghost-btn compact-btn" type="button" :disabled="!selectedWorkspace"
-									@click="openEditor('workspace', 'edit')">缂栬緫</button>
+									@click="openEditor('workspace', 'edit')">编辑</button>
 								<button class="ghost-btn compact-btn danger-btn" type="button"
-									:disabled="!selectedWorkspace" @click="deleteWorkspace">鍒犻櫎</button>
+									:disabled="!selectedWorkspace" @click="deleteWorkspace">删除</button>
 								<button class="icon-add-btn" type="button" aria-label="新增工作区"
 									@click="openEditor('workspace', 'create')">+</button>
 							</div>
@@ -1281,13 +1281,13 @@ onUnmounted(() => {
 					<section v-else class="settings-section settings-section-active">
 						<div class="settings-section-header">
 							<div class="settings-section-copy">
-								<div class="field-label">鐣岄潰涓婚</div>
+								<div class="field-label">界面主题</div>
 								<div class="settings-section-title">主题与外观</div>
 							</div>
 							<div class="settings-badge">{{ selectedThemeLabel }}</div>
 						</div>
 						<div class="field-group">
-							<div class="field-label">鐣岄潰涓婚</div>
+							<div class="field-label">界面主题</div>
 							<select id="theme-select" class="field-select" :value="state.selectedThemeId || 'system'"
 								@change="onThemeChange">
 								<option v-for="option in state.themeOptions" :key="option.id" :value="option.id">{{
@@ -1321,7 +1321,7 @@ onUnmounted(() => {
 							}}
 						</div>
 					</div>
-					<button class="close-btn" type="button" aria-label="鍏抽棴" @click="closeEditor">&times;</button>
+					<button class="close-btn" type="button" aria-label="关闭" @click="closeEditor">&times;</button>
 				</div>
 
 				<div v-if="editorState.feedback" class="settings-feedback"
@@ -1333,14 +1333,14 @@ onUnmounted(() => {
 					<template v-if="editorState.kind === 'profile'">
 						<div class="field-inline">
 							<div>
-								<div class="field-label">閰嶇疆鍚嶇О</div>
+								<div class="field-label">配置名称</div>
 								<input id="editor-profile-name" v-model="editorState.draft.name" class="field-input"
-									type="text" placeholder="渚嬪锛歄penAI / 鏈湴浠ｇ悊" />
+									type="text" placeholder="例如：OpenAI / 本地代理" />
 							</div>
 							<div>
-								<div class="field-label">妯″瀷</div>
+								<div class="field-label">模型</div>
 								<input id="editor-profile-model" v-model="editorState.draft.model" class="field-input"
-									type="text" placeholder="渚嬪锛歡pt-4.1-mini" />
+									type="text" placeholder="例如：gpt-4.1-mini" />
 							</div>
 						</div>
 						<div>
@@ -1354,13 +1354,15 @@ onUnmounted(() => {
 									<div>
 										<div class="field-label">Temperature</div>
 										<label class="toggle-field">
-											<input id="editor-profile-temperature-enabled" v-model="editorState.draft.temperatureEnabled"
-												class="toggle-input" type="checkbox" />
+											<input id="editor-profile-temperature-enabled"
+												v-model="editorState.draft.temperatureEnabled" class="toggle-input"
+												type="checkbox" />
 											<span class="toggle-switch"></span>
-											<span class="toggle-label">鍚敤</span>
+											<span class="toggle-label">启用</span>
 										</label>
 									</div>
-									<div class="range-value">{{ formatSamplingValue(editorState.draft.temperature, 2) }}</div>
+									<div class="range-value">{{ formatSamplingValue(editorState.draft.temperature, 2) }}
+									</div>
 								</div>
 								<input id="editor-profile-temperature" v-model.number="editorState.draft.temperature"
 									class="field-range" type="range" min="0" max="2" step="0.01"
@@ -1371,10 +1373,11 @@ onUnmounted(() => {
 									<div>
 										<div class="field-label">Top-P</div>
 										<label class="toggle-field">
-											<input id="editor-profile-top-p-enabled" v-model="editorState.draft.topPEnabled"
-												class="toggle-input" type="checkbox" />
+											<input id="editor-profile-top-p-enabled"
+												v-model="editorState.draft.topPEnabled" class="toggle-input"
+												type="checkbox" />
 											<span class="toggle-switch"></span>
-											<span class="toggle-label">鍚敤</span>
+											<span class="toggle-label">启用</span>
 										</label>
 									</div>
 									<div class="range-value">{{ formatSamplingValue(editorState.draft.topP, 1) }}</div>
@@ -1394,29 +1397,26 @@ onUnmounted(() => {
 
 					<template v-else>
 						<div>
-							<div class="field-label">鏄剧ず鍚嶇О</div>
+							<div class="field-label">显示名称</div>
 							<input id="editor-workspace-name" v-model="editorState.draft.name" class="field-input"
-								type="text" placeholder="渚嬪锛歋elfClaw 涓诲伐浣滃尯" />
+								type="text" placeholder="例如：SelfClaw 主工作区" />
 						</div>
 						<div>
 							<div class="field-label">工作区位置</div>
 							<div class="field-picker-row">
 								<div class="field-readonly">{{ editorState.draft.rootPath || '请选择文件夹' }}</div>
 								<button class="ghost-btn compact-btn" type="button"
-									@click="pickWorkspacePath">閫夋嫨</button>
+									@click="pickWorkspacePath">选择</button>
 							</div>
 						</div>
 					</template>
 				</div>
 
 				<div class="editor-footer">
-					<button class="ghost-btn" type="button" @click="closeEditor">鍙栨秷</button>
-					<button class="primary-btn" type="button" @click="saveEditor">淇濆瓨</button>
+					<button class="ghost-btn" type="button" @click="closeEditor">取消</button>
+					<button class="primary-btn" type="button" @click="saveEditor">保存</button>
 				</div>
 			</div>
 		</div>
 	</div>
 </template>
-
-
-
