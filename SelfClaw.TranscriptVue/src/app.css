@@ -48,10 +48,6 @@
 	padding: 0 10px;
 }
 
-.composer-panel {
-	padding: 6px 6px 8px;
-}
-
 .composer-surface {
 	border-radius: 20px;
 	padding: 12px 12px 9px;
@@ -346,7 +342,9 @@
 	border-radius: 999px;
 	border: 1px solid var(--border);
 	background: rgba(255, 255, 255, 0.08);
-	transition: background 140ms ease, border-color 140ms ease;
+	transition:
+		background 140ms ease,
+		border-color 140ms ease;
 }
 
 .toggle-switch::after {
