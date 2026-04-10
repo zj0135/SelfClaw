@@ -18,9 +18,37 @@ public sealed record ThemeOption(
     AppThemePreference Value,
     string Label);
 
-public sealed record DesktopSettings(AppThemePreference ThemePreference)
+public sealed record FeishuDesktopChannelSettings
 {
-    public static DesktopSettings Default { get; } = new(AppThemePreference.System);
+    public bool Enabled { get; init; }
+
+    public string DisplayName { get; init; } = "我的飞书";
+
+    public string AppId { get; init; } = string.Empty;
+
+    public string SecretRef { get; init; } = string.Empty;
+
+    public string BotDisplayName { get; init; } = string.Empty;
+
+    public Guid? ProfileId { get; init; }
+
+    public static FeishuDesktopChannelSettings Default { get; } = new();
+}
+
+public sealed record DesktopChannelSettings
+{
+    public FeishuDesktopChannelSettings Feishu { get; init; } = FeishuDesktopChannelSettings.Default;
+
+    public static DesktopChannelSettings Default { get; } = new();
+}
+
+public sealed record DesktopSettings
+{
+    public AppThemePreference ThemePreference { get; init; } = AppThemePreference.System;
+
+    public DesktopChannelSettings Channels { get; init; } = DesktopChannelSettings.Default;
+
+    public static DesktopSettings Default { get; } = new();
 }
 
 public sealed class DesktopSettingsStore
@@ -33,6 +61,7 @@ public sealed class DesktopSettingsStore
     };
 
     private readonly string _settingsPath;
+    private readonly object _syncRoot = new();
 
     public DesktopSettingsStore(StoragePaths storagePaths)
     {
@@ -40,6 +69,24 @@ public sealed class DesktopSettingsStore
     }
 
     public DesktopSettings Load()
+    {
+        lock (_syncRoot)
+        {
+            return LoadCore();
+        }
+    }
+
+    public void Save(DesktopSettings settings)
+    {
+        lock (_syncRoot)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
+            var json = JsonSerializer.Serialize(Normalize(settings), JsonOptions);
+            File.WriteAllText(_settingsPath, json);
+        }
+    }
+
+    private DesktopSettings LoadCore()
     {
         try
         {
@@ -49,7 +96,7 @@ public sealed class DesktopSettingsStore
             }
 
             var json = File.ReadAllText(_settingsPath);
-            return JsonSerializer.Deserialize<DesktopSettings>(json, JsonOptions) ?? DesktopSettings.Default;
+            return Normalize(JsonSerializer.Deserialize<DesktopSettings>(json, JsonOptions));
         }
         catch
         {
@@ -57,11 +104,31 @@ public sealed class DesktopSettingsStore
         }
     }
 
-    public void Save(DesktopSettings settings)
+    private static DesktopSettings Normalize(DesktopSettings? settings)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
-        var json = JsonSerializer.Serialize(settings, JsonOptions);
-        File.WriteAllText(_settingsPath, json);
+        if (settings is null)
+        {
+            return DesktopSettings.Default;
+        }
+
+        var channels = settings.Channels ?? DesktopChannelSettings.Default;
+        var feishu = channels.Feishu ?? FeishuDesktopChannelSettings.Default;
+
+        return settings with
+        {
+            Channels = channels with
+            {
+                Feishu = feishu with
+                {
+                    DisplayName = string.IsNullOrWhiteSpace(feishu.DisplayName)
+                        ? FeishuDesktopChannelSettings.Default.DisplayName
+                        : feishu.DisplayName.Trim(),
+                    AppId = feishu.AppId?.Trim() ?? string.Empty,
+                    SecretRef = feishu.SecretRef?.Trim() ?? string.Empty,
+                    BotDisplayName = feishu.BotDisplayName?.Trim() ?? string.Empty
+                }
+            }
+        };
     }
 }
 

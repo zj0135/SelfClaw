@@ -36,6 +36,7 @@ public sealed class SqliteConversationRepository : IConversationRepository
         command.CommandText = @"
 SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
        parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+       channel_kind, channel_conversation_id, channel_display_name,
        created_at_utc, updated_at_utc
 FROM conversations
 WHERE id = $id
@@ -57,10 +58,12 @@ LIMIT 1;";
 INSERT INTO conversations(
     id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
     parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+    channel_kind, channel_conversation_id, channel_display_name,
     created_at_utc, updated_at_utc)
 VALUES(
     $id, $title, $profileId, $workspaceRootId, $mode, $toolPermissionMode, $teamMaxRounds, $teamOutputMode,
     $parentConversationId, $rootConversationId, $boundAgentId, $boundAgentName, $boundAgentRole,
+    $channelKind, $channelConversationId, $channelDisplayName,
     $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
@@ -75,6 +78,9 @@ ON CONFLICT(id) DO UPDATE SET
     bound_agent_id = excluded.bound_agent_id,
     bound_agent_name = excluded.bound_agent_name,
     bound_agent_role = excluded.bound_agent_role,
+    channel_kind = excluded.channel_kind,
+    channel_conversation_id = excluded.channel_conversation_id,
+    channel_display_name = excluded.channel_display_name,
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", effectiveConversation.Id.ToString("D"));
         command.Parameters.AddWithValue("$title", effectiveConversation.Title);
@@ -89,6 +95,9 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$boundAgentId", effectiveConversation.BoundAgentId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$boundAgentName", effectiveConversation.BoundAgentName ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$boundAgentRole", effectiveConversation.BoundAgentRole ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$channelKind", effectiveConversation.ChannelKind ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$channelConversationId", effectiveConversation.ChannelConversationId ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$channelDisplayName", effectiveConversation.ChannelDisplayName ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$createdAt", effectiveConversation.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", effectiveConversation.UpdatedAtUtc.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -426,6 +435,7 @@ ON CONFLICT(id) DO UPDATE SET
         command.CommandText = @"
 SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
        parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+       channel_kind, channel_conversation_id, channel_display_name,
        created_at_utc, updated_at_utc
 FROM conversations
 WHERE parent_conversation_id IS NOT NULL
@@ -456,6 +466,7 @@ ORDER BY updated_at_utc DESC, created_at_utc ASC, id ASC;";
         command.CommandText = @"
 SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
        parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+       channel_kind, channel_conversation_id, channel_display_name,
        created_at_utc, updated_at_utc
 FROM conversations
 WHERE parent_conversation_id IS NOT NULL
@@ -522,6 +533,7 @@ WHERE conversation_id = $sourceConversationId;";
         command.CommandText = @"
 SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode, team_max_rounds, team_output_mode,
        parent_conversation_id, root_conversation_id, bound_agent_id, bound_agent_name, bound_agent_role,
+       channel_kind, channel_conversation_id, channel_display_name,
        created_at_utc, updated_at_utc
 FROM conversations
 ORDER BY updated_at_utc DESC;";

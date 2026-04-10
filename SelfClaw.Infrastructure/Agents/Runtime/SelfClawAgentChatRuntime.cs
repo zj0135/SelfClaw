@@ -19,6 +19,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
     private const string ProgrammingAgentRole = "Programming Assistant";
     private const string ProgrammingAgentDescription = "A personal desktop AI client for focused conversation and workspace assistance.";
     private const string ProgrammingBaseInstructions = "You are SelfClaw, a concise desktop AI assistant. Respond in Markdown. Use workspace tools when they materially help. Never claim to have read, written, or executed anything unless a tool actually returned a successful result.";
+    private const string ChannelBaseInstructions = "You are SelfClaw replying to a user from an external chat channel. Keep replies concise, helpful, and easy to read in chat. Respond in Markdown or plain text that still reads well when Markdown is not rendered. Never expose hidden reasoning, internal tools, or implementation details unless the user explicitly asks.";
     private const string BoundAgentSessionDescription = "A dedicated specialist follow-up session that branches from the main team conversation.";
     private const string CoordinatorName = "Coordinator";
     private const string CoordinatorRole = "Coordinator";
@@ -729,6 +730,14 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 
     private static string BuildProgrammingInstructions(ChatTurnRequest request)
     {
+        if (request.Mode == ConversationMode.Channel)
+        {
+            return request.WorkspaceRoot is null
+                ? ChannelBaseInstructions + " No workspace is currently selected, so do not mention workspace tools."
+                : ChannelBaseInstructions +
+                  $" The trusted workspace root is '{request.WorkspaceRoot.RootPath}'. Use workspace tools only when they materially help answer the external user.";
+        }
+
         if (request.WorkspaceRoot is null)
         {
             return ProgrammingBaseInstructions + " No workspace is currently selected, so do not mention workspace tools.";

@@ -21,6 +21,7 @@ public sealed record TranscriptRenderState(
     string? SelectedTeamOutputModeId,
     IReadOnlyList<ShellSelectOption> ThemeOptions,
     string? SelectedThemeId,
+    IReadOnlyList<TranscriptChannelItem> Channels,
     IReadOnlyList<AgentActivityNode> TeamMembers,
     IReadOnlyList<AgentActivityNode> AgentActivities,
     string StatusText,

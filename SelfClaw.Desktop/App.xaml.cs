@@ -21,6 +21,7 @@ public partial class App : Application
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSelfClawInfrastructure();
         builder.Services.AddSingleton<DesktopSettingsStore>();
+        builder.Services.AddSingleton<DesktopChannelManager>();
         builder.Services.AddSingleton<DesktopToolApprovalHandler>();
         builder.Services.AddSingleton<MainWindowViewModel>();
         builder.Services.AddSingleton<MainWindow>();
@@ -39,6 +40,12 @@ public partial class App : Application
     {
         if (_host is not null)
         {
+            var channelManager = _host.Services.GetService<DesktopChannelManager>();
+            if (channelManager is not null)
+            {
+                await channelManager.DisposeAsync();
+            }
+
             await _host.StopAsync();
             _host.Dispose();
         }

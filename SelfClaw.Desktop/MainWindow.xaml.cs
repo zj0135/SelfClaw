@@ -17,7 +17,7 @@ public partial class MainWindow : Window
     private const string AssetsHostName = "appassets.selfclaw.local";
 
     private readonly MainWindowViewModel _viewModel;
-    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], null, [], null, [], [], string.Empty, false);
+    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], null, [], null, [], [], [], string.Empty, false);
     private bool _webViewReady;
 
     public MainWindow(MainWindowViewModel viewModel)
@@ -127,6 +127,7 @@ public partial class MainWindow : Window
             selectedTeamOutputModeId = state.SelectedTeamOutputModeId,
             themeOptions = state.ThemeOptions,
             selectedThemeId = state.SelectedThemeId,
+            channels = state.Channels,
             teamMembers = state.TeamMembers,
             agentActivities = state.AgentActivities,
             statusText = state.StatusText,
@@ -164,6 +165,8 @@ public partial class MainWindow : Window
 
     private async void OnTranscriptWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        string? feedbackScope = null;
+
         try
         {
             using var document = JsonDocument.Parse(e.WebMessageAsJson);
@@ -261,16 +264,28 @@ public partial class MainWindow : Window
                     await _viewModel.SetThemePreferenceAsync(document.RootElement.GetProperty("themeId").GetString());
                     break;
                 case "save-profile":
+                    feedbackScope = "profile";
                     await SaveProfileFromTranscriptAsync(document.RootElement);
                     break;
                 case "delete-profile":
+                    feedbackScope = "profile";
                     await DeleteProfileFromTranscriptAsync(document.RootElement);
                     break;
                 case "save-workspace":
+                    feedbackScope = "workspace";
                     await SaveWorkspaceFromTranscriptAsync(document.RootElement);
                     break;
                 case "delete-workspace":
+                    feedbackScope = "workspace";
                     await DeleteWorkspaceFromTranscriptAsync(document.RootElement);
+                    break;
+                case "save-channel":
+                    feedbackScope = "channels";
+                    await SaveChannelFromTranscriptAsync(document.RootElement);
+                    break;
+                case "toggle-channel":
+                    feedbackScope = "channels";
+                    await ToggleChannelFromTranscriptAsync(document.RootElement);
                     break;
                 case "pick-workspace-path":
                     await PickWorkspacePathFromTranscriptAsync();
@@ -279,7 +294,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            PostUiFeedback("error", exception.Message);
+            PostUiFeedback("error", exception.Message, feedbackScope);
         }
     }
 
@@ -332,6 +347,32 @@ public partial class MainWindow : Window
 
         await _viewModel.DeleteWorkspaceRootAsync(deleteId);
         PostUiFeedback("success", "Workspace deleted.", "workspace");
+    }
+
+    private async Task SaveChannelFromTranscriptAsync(JsonElement root)
+    {
+        var result = new ChannelEditorResult(
+            GetString(root, "channelId"),
+            GetString(root, "displayName"),
+            GetString(root, "appId"),
+            GetString(root, "botDisplayName"),
+            ParseGuid(root, "profileId"),
+            GetString(root, "appSecret"));
+
+        await _viewModel.SaveChannelAsync(result);
+        PostUiFeedback("success", "Channel saved.", "channels");
+    }
+
+    private async Task ToggleChannelFromTranscriptAsync(JsonElement root)
+    {
+        await _viewModel.SetChannelEnabledAsync(
+            GetString(root, "channelId"),
+            GetBool(root, "enabled"));
+
+        PostUiFeedback(
+            "success",
+            GetBool(root, "enabled") ? "Channel started." : "Channel stopped.",
+            "channels");
     }
 
     private Task PickWorkspacePathFromTranscriptAsync()

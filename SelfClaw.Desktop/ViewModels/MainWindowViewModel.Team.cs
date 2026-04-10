@@ -68,6 +68,13 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
+        if (nextMode == ConversationMode.Channel)
+        {
+            ApplyConversationFilter();
+            StatusText = "频道会话会在收到外部消息后自动出现。";
+            return;
+        }
+
         if (previousConversation is null)
         {
             await CreateNewConversationAsync();
@@ -332,11 +339,17 @@ public sealed partial class MainWindowViewModel
         => modeId?.Trim().ToLowerInvariant() switch
         {
             "team" => ConversationMode.Team,
+            "channel" => ConversationMode.Channel,
             _ => ConversationMode.Programming
         };
 
     private static string ConversationModeToId(ConversationMode mode)
-        => mode == ConversationMode.Team ? "team" : "programming";
+        => mode switch
+        {
+            ConversationMode.Team => "team",
+            ConversationMode.Channel => "channel",
+            _ => "programming"
+        };
 
     private static string TeamOutputModeToId(TeamOutputMode mode)
         => mode switch

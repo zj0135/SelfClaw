@@ -22,6 +22,7 @@ const state = reactive({
 	selectedTeamOutputModeId: 'autoDocument',
 	themeOptions: [],
 	selectedThemeId: 'system',
+	channels: [],
 	teamMembers: [],
 	agentActivities: [],
 	statusText: '',
@@ -91,6 +92,15 @@ const emptyProfile = () => ({
 	apiKey: '',
 });
 const emptyWorkspace = () => ({ workspaceRootId: null, name: '', rootPath: '' });
+const emptyChannel = () => ({
+	channelId: 'feishu',
+	displayName: '',
+	appId: '',
+	botDisplayName: '',
+	profileId: '',
+	appSecret: '',
+	hasSecret: false,
+});
 
 const post = (message) => window.chrome?.webview?.postMessage(message);
 
@@ -102,6 +112,8 @@ const selectedProfile = computed(() => state.profiles.find((item) => item.id ===
 const selectedWorkspace = computed(() => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null);
 const visibleTeamMembers = computed(() => state.teamMembers || []);
 const isTeamMode = computed(() => state.selectedConversationModeId === 'team');
+const isChannelMode = computed(() => state.selectedConversationModeId === 'channel');
+const firstChannel = computed(() => (state.channels && state.channels.length > 0 ? state.channels[0] : null));
 const fallbackStatusText = computed(() => state.statusText || (state.isBusy ? '处理中' : '就绪'));
 const selectedThemeLabel = computed(
 	() =>
@@ -115,9 +127,12 @@ const selectedThemeLabel = computed(
 );
 const currentModelLabel = computed(() => state.selectedProfileModel || selectedProfile.value?.label || '未选择模型');
 const currentWorkspaceLabel = computed(() => selectedWorkspace.value?.label || '未绑定工作区');
-const conversationSectionTitle = computed(() => (state.conversations.some((item) => item.parentId) ? '会话树' : '最近会话'));
+const composerPlaceholder = computed(() => (isChannelMode.value ? '频道会话由外部消息自动驱动' : 'Ask for follow-up changes'));
+const conversationSectionTitle = computed(() =>
+	isChannelMode.value ? '频道会话' : state.conversations.some((item) => item.parentId) ? '会话树' : '最近会话'
+);
 const totalStepCount = computed(() => (isTeamMode.value ? visibleTeamMembers.value.length + (state.agentActivities?.length || 0) : state.agentActivities?.length || 0));
-const sendButtonDisabled = computed(() => ((!composerValue.value.trim() && !state.isBusy) || !state.selectedProfileId));
+const sendButtonDisabled = computed(() => isChannelMode.value || ((!composerValue.value.trim() && !state.isBusy) || !state.selectedProfileId));
 const settingsSections = computed(() => [
 	{
 		id: 'profile',
@@ -134,6 +149,15 @@ const settingsSections = computed(() => [
 		title: '工作区',
 		description: selectedWorkspace.value?.label || '绑定本地目录，作为工具读取和搜索范围。',
 		badge: selectedWorkspace.value ? '已绑定' : '未绑定',
+	},
+	{
+		id: 'channels',
+		eyebrow: '我的频道',
+		title: '我的频道',
+		description: firstChannel.value
+			? `${firstChannel.value.name} · ${firstChannel.value.statusLabel}`
+			: '管理外部频道连接与自动收消息。',
+		badge: state.channels.filter((item) => item.isEnabled).length > 0 ? '已启用' : '未启用',
 	},
 	{
 		id: 'theme',
@@ -279,6 +303,7 @@ function normalizeState() {
 	state.teamMembers = state.teamMembers || [];
 	state.agentActivities = state.agentActivities || [];
 	state.themeOptions = state.themeOptions || [];
+	state.channels = state.channels || [];
 }
 
 function closeMentionPicker() {
@@ -369,6 +394,18 @@ function workspaceDraft() {
 	};
 }
 
+function channelDraft(channel) {
+	return {
+		channelId: channel?.id || 'feishu',
+		displayName: channel?.displayName || '',
+		appId: channel?.appId || '',
+		botDisplayName: channel?.botDisplayName || '',
+		profileId: channel?.profileId || '',
+		appSecret: '',
+		hasSecret: Boolean(channel?.hasSecret),
+	};
+}
+
 function clearFeedback(scope) {
 	if (settingsFeedback.value && (!scope || !settingsFeedback.value.scope || settingsFeedback.value.scope === scope)) {
 		settingsFeedback.value = null;
@@ -389,12 +426,20 @@ function formatSamplingValue(value, max) {
 }
 
 function editorScope() {
-	return editorState.kind === 'profile' || editorState.kind === 'workspace' ? editorState.kind : null;
+	if (editorState.kind === 'profile' || editorState.kind === 'workspace') {
+		return editorState.kind;
+	}
+
+	return editorState.kind === 'channel' ? 'channels' : null;
 }
 
-function openEditor(kind, mode) {
+function openEditor(kind, mode, payload = null) {
+	const scope = kind === 'channel' ? 'channels' : kind;
 	if (kind === 'profile' || kind === 'workspace') {
 		activeSettingsSection.value = kind;
+	}
+	if (kind === 'channel') {
+		activeSettingsSection.value = 'channels';
 	}
 
 	editorState.open = true;
@@ -405,11 +450,15 @@ function openEditor(kind, mode) {
 			? mode === 'edit' && state.selectedProfileId
 				? profileDraft()
 				: emptyProfile()
-			: mode === 'edit' && state.selectedWorkspaceRootId
-				? workspaceDraft()
-				: emptyWorkspace();
+			: kind === 'workspace'
+				? mode === 'edit' && state.selectedWorkspaceRootId
+					? workspaceDraft()
+					: emptyWorkspace()
+				: payload
+					? channelDraft(payload)
+					: emptyChannel();
 	editorState.feedback = null;
-	clearFeedback(kind);
+	clearFeedback(scope);
 }
 
 function closeEditor() {
@@ -432,6 +481,26 @@ function validateDraft() {
 
 		if (editorState.mode === 'create' && !editorState.draft.apiKey.trim()) {
 			return '新增配置时必须提供 API Key。';
+		}
+
+		return null;
+	}
+
+	if (editorState.kind === 'channel') {
+		if (!editorState.draft.displayName.trim()) {
+			return '请填写频道名称。';
+		}
+
+		if (!editorState.draft.appId.trim()) {
+			return '请填写飞书 App ID。';
+		}
+
+		if (!editorState.draft.profileId) {
+			return '请先为频道绑定模型。';
+		}
+
+		if (!editorState.draft.hasSecret && !editorState.draft.appSecret.trim()) {
+			return '首次配置飞书频道时必须提供 App Secret。';
 		}
 
 		return null;
@@ -586,7 +655,7 @@ function scheduleStatePayload(payload) {
 
 function handleSettingsFeedback(payload) {
 	const nextFeedback = payload.message ? { level: payload.level || 'success', message: payload.message, scope: payload.scope || null } : null;
-	if (payload.scope === 'profile' || payload.scope === 'workspace' || payload.scope === 'theme') {
+	if (payload.scope === 'profile' || payload.scope === 'workspace' || payload.scope === 'channels' || payload.scope === 'theme') {
 		activeSettingsSection.value = payload.scope;
 	}
 
@@ -879,6 +948,10 @@ function onRootPointerDown(event) {
 
 function newConversation() {
 	openConversationMenuId.value = null;
+	if (isChannelMode.value) {
+		return;
+	}
+
 	post({ type: 'new-conversation' });
 }
 
@@ -948,6 +1021,15 @@ function onThemeChange(event) {
 	post({ type: 'select-theme', themeId: event.target.value });
 }
 
+function toggleChannelEnabled(channel, event) {
+	clearFeedback('channels');
+	post({
+		type: 'toggle-channel',
+		channelId: channel.id,
+		enabled: Boolean(event.target.checked),
+	});
+}
+
 function saveEditor() {
 	const error = validateDraft();
 	if (error) {
@@ -967,6 +1049,19 @@ function saveEditor() {
 			topPEnabled: Boolean(editorState.draft.topPEnabled),
 			topP: normalizeSamplingValue(editorState.draft.topP, 0.7, 1),
 			apiKey: editorState.draft.apiKey,
+		});
+		return;
+	}
+
+	if (editorState.kind === 'channel') {
+		post({
+			type: 'save-channel',
+			channelId: editorState.draft.channelId,
+			displayName: editorState.draft.displayName.trim(),
+			appId: editorState.draft.appId.trim(),
+			botDisplayName: editorState.draft.botDisplayName.trim(),
+			profileId: editorState.draft.profileId || null,
+			appSecret: editorState.draft.appSecret,
 		});
 		return;
 	}
@@ -1004,6 +1099,10 @@ function deleteWorkspace() {
 function onSendClick() {
 	if (state.isBusy) {
 		post({ type: 'stop-generation' });
+		return;
+	}
+
+	if (isChannelMode.value) {
 		return;
 	}
 
@@ -1045,7 +1144,8 @@ onUnmounted(() => {
 						</div>
 					</div>
 				</div>
-				<button class="sidebar-primary" type="button" @click="newConversation">+ 新建对话</button>
+				<button class="sidebar-primary" type="button" :disabled="isChannelMode"
+					:title="isChannelMode ? '频道会话由外部消息自动创建' : '新建对话'" @click="newConversation">+ 新建对话</button>
 				<input id="conversation-search" v-model="conversationSearch" class="search-box" type="text"
 					placeholder="搜索会话..." @input="onConversationSearchInput" />
 				<div class="section-title">{{ conversationSectionTitle }}</div>
@@ -1055,7 +1155,7 @@ onUnmounted(() => {
 					<div class="avatar">SC</div>
 					<div class="sidebar-footer-copy">
 						<div class="sidebar-footer-title">系统设置</div>
-						<div class="sidebar-footer-subtitle">模型、工作区、主题</div>
+						<div class="sidebar-footer-subtitle">模型、工作区、我的频道、主题</div>
 					</div>
 					<div>&rsaquo;</div>
 				</button>
@@ -1069,7 +1169,7 @@ onUnmounted(() => {
 							@click="selectConversationMode(mode.id)">
 							{{ mode.label }}
 						</button>
-						<button class="mode-chip" type="button" disabled>协作</button>
+						
 					</div>
 					<div class="topbar-right">
 						<div id="topbar-model-pill" class="context-pill" :title="currentModelLabel">
@@ -1095,8 +1195,8 @@ onUnmounted(() => {
 						<div class="composer-surface">
 							<div class="composer-stack">
 								<textarea id="composer" ref="composerRef" v-model="composerValue" class="composer-box"
-									placeholder="Ask for follow-up changes" @input="onComposerInput"
-									@keydown="onComposerKeydown"></textarea>
+								:disabled="isChannelMode" :placeholder="composerPlaceholder" @input="onComposerInput"
+								@keydown="onComposerKeydown"></textarea>
 								<div id="mention-picker" class="mention-picker"
 									:class="{ open: mentionState.open && mentionCandidates.length > 0 }">
 									<button v-for="(item, index) in mentionCandidates" :key="item.id"
@@ -1278,6 +1378,54 @@ onUnmounted(() => {
 						</div>
 					</section>
 
+					<section v-else-if="activeSettingsSection === 'channels'"
+						class="settings-section settings-section-active">
+						<div class="settings-section-header">
+							<div class="settings-section-copy">
+								<div class="field-label">支持的频道</div>
+								<div class="settings-section-title">频道接入与监听</div>
+							</div>
+							<div class="settings-badge">{{ state.channels.filter((item) => item.isEnabled).length }} / {{ state.channels.length }}</div>
+						</div>
+						<div class="channel-card-list">
+							<article v-for="channel in state.channels" :key="channel.id" class="channel-card"
+								:class="[{ enabled: channel.isEnabled }, channel.status]">
+								<div class="channel-card-top">
+									<div class="channel-card-copy">
+										<div class="field-label">{{ channel.name }}</div>
+										<div class="settings-section-title">{{ channel.displayName || channel.name }}</div>
+										<div class="settings-hint">{{ channel.description }}</div>
+									</div>
+									<label class="toggle-field channel-toggle">
+										<input class="toggle-input" type="checkbox" :checked="channel.isEnabled"
+											@change="toggleChannelEnabled(channel, $event)" />
+										<span class="toggle-switch"></span>
+										<span class="toggle-label">{{ channel.isEnabled ? '已开启' : '已关闭' }}</span>
+									</label>
+								</div>
+								<div class="selected-summary-grid channel-summary-grid">
+									<div class="selected-summary-card">
+										<div class="selected-summary-label">频道名称</div>
+										<div class="selected-summary-value">{{ channel.displayName || '未设置' }}</div>
+									</div>
+									<div class="selected-summary-card">
+										<div class="selected-summary-label">绑定模型</div>
+										<div class="selected-summary-value">{{ channel.profileLabel || '未绑定' }}</div>
+									</div>
+									<div class="selected-summary-card">
+										<div class="selected-summary-label">App ID</div>
+										<div class="selected-summary-value">{{ channel.appId || '未设置' }}</div>
+									</div>
+								</div>
+								<div v-if="channel.statusDetail" class="settings-hint channel-status-detail">{{ channel.statusDetail }}</div>
+								<div class="channel-card-actions">
+									<div class="settings-badge">{{ channel.statusLabel }}</div>
+									<button class="ghost-btn compact-btn" type="button" @click="openEditor('channel', 'edit', channel)">配置</button>
+								</div>
+							</article>
+						</div>
+					</section>
+
 					<section v-else class="settings-section settings-section-active">
 						<div class="settings-section-header">
 							<div class="settings-section-copy">
@@ -1302,12 +1450,12 @@ onUnmounted(() => {
 
 		<div id="editor-overlay" class="editor-overlay" :class="{ open: editorState.open }" @click.self="closeEditor">
 			<div v-if="editorState.open && editorState.draft" class="editor-panel" role="dialog" aria-modal="true"
-				:aria-label="editorState.kind === 'profile' ? (editorState.mode === 'create' ? '新增模型配置' : '编辑模型配置') : editorState.mode === 'create' ? '新增工作区' : '编辑工作区'">
+				:aria-label="editorState.kind === 'profile' ? (editorState.mode === 'create' ? '新增模型配置' : '编辑模型配置') : editorState.kind === 'channel' ? '编辑频道配置' : editorState.mode === 'create' ? '新增工作区' : '编辑工作区'">
 				<div class="editor-header">
 					<div>
 						<div class="editor-title">
 							{{ editorState.kind === 'profile' ? (editorState.mode === 'create' ? '新增模型配置' : '编辑模型配置') :
-								editorState.mode === 'create' ? '新增工作区' : '编辑工作区' }}
+								editorState.kind === 'channel' ? '编辑频道配置' : editorState.mode === 'create' ? '新增工作区' : '编辑工作区' }}
 						</div>
 						<div class="settings-hint">
 							{{
@@ -1315,9 +1463,11 @@ onUnmounted(() => {
 									? editorState.mode === 'create'
 										? '填写名称、Endpoint、模型、采样参数和 API Key 后保存，新配置会自动加入下拉列表并切换到当前选择。'
 										: '你可以更新当前模型配置和采样参数；如果不需要替换密钥，API Key 留空即可。'
-									: editorState.mode === 'create'
-										? '填写名称并选择本机目录后保存，工作区会自动加入下拉列表并设为当前选择。'
-										: '在这里调整当前工作区的显示名称或重新选择目录，然后保存变更。'
+									: editorState.kind === 'channel'
+								? '填写频道名称、飞书 App ID、App Secret 和绑定模型后保存；开启开关后就会开始接收飞书消息。'
+								: editorState.mode === 'create'
+									? '填写名称并选择本机目录后保存，工作区会自动加入下拉列表并设为当前选择。'
+									: '在这里调整当前工作区的显示名称或重新选择目录，然后保存变更。'
 							}}
 						</div>
 					</div>
@@ -1392,6 +1542,38 @@ onUnmounted(() => {
 							<input id="editor-profile-api-key" v-model="editorState.draft.apiKey" class="field-input"
 								type="password"
 								:placeholder="editorState.mode === 'create' ? '新增配置时必填' : '留空则保留现有密钥'" />
+						</div>
+					</template>
+
+					<template v-else-if="editorState.kind === 'channel'">
+						<div class="field-inline">
+							<div>
+								<div class="field-label">频道名称</div>
+								<input id="editor-channel-display-name" v-model="editorState.draft.displayName" class="field-input"
+									type="text" placeholder="例如：我的飞书" />
+							</div>
+							<div>
+								<div class="field-label">绑定模型</div>
+								<select id="editor-channel-profile" v-model="editorState.draft.profileId" class="field-select">
+									<option value="">请选择模型</option>
+									<option v-for="option in state.profiles" :key="option.id" :value="option.id">{{ option.label }}</option>
+								</select>
+							</div>
+						</div>
+						<div>
+							<div class="field-label">飞书 App ID</div>
+							<input id="editor-channel-app-id" v-model="editorState.draft.appId" class="field-input"
+								type="text" placeholder="cli_xxx" />
+						</div>
+						<div>
+							<div class="field-label">机器人显示名</div>
+							<input id="editor-channel-bot-display-name" v-model="editorState.draft.botDisplayName"
+								class="field-input" type="text" placeholder="用于群聊 @ 提及时识别，可留空" />
+						</div>
+						<div>
+							<div class="field-label">App Secret</div>
+							<input id="editor-channel-app-secret" v-model="editorState.draft.appSecret" class="field-input"
+								type="password" :placeholder="editorState.draft.hasSecret ? '留空则保留现有密钥' : '首次配置时必填'" />
 						</div>
 					</template>
 

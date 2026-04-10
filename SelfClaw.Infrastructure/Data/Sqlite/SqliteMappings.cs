@@ -30,13 +30,16 @@ internal static class SqliteMappings
             (ToolPermissionMode)reader.GetInt32(5),
             TeamDiscussionDefaults.ClampRounds(reader.GetInt32(6)),
             reader.IsDBNull(7) ? TeamDiscussionDefaults.DefaultOutputMode : (TeamOutputMode)reader.GetInt32(7),
-            ReadDateTimeOffset(reader, 13),
-            ReadDateTimeOffset(reader, 14),
+            ReadDateTimeOffset(reader, 16),
+            ReadDateTimeOffset(reader, 17),
             reader.IsDBNull(8) ? null : ReadGuid(reader, 8),
             reader.IsDBNull(9) ? null : ReadGuid(reader, 9),
             reader.IsDBNull(10) ? null : ReadGuid(reader, 10),
             reader.IsDBNull(11) ? null : reader.GetString(11),
-            reader.IsDBNull(12) ? null : reader.GetString(12));
+            reader.IsDBNull(12) ? null : reader.GetString(12),
+            reader.IsDBNull(13) ? null : reader.GetString(13),
+            reader.IsDBNull(14) ? null : reader.GetString(14),
+            reader.IsDBNull(15) ? null : reader.GetString(15));
 
     public static MessageRecord ReadMessage(SqliteDataReader reader)
         => new(

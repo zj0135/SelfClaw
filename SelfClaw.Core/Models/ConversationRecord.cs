@@ -15,7 +15,10 @@ public sealed record ConversationRecord(
     Guid? RootConversationId = null,
     Guid? BoundAgentId = null,
     string? BoundAgentName = null,
-    string? BoundAgentRole = null)
+    string? BoundAgentRole = null,
+    string? ChannelKind = null,
+    string? ChannelConversationId = null,
+    string? ChannelDisplayName = null)
 {
     public ConversationRecord(
         Guid id,

@@ -57,6 +57,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly DesktopSettingsStore _desktopSettingsStore;
+    private readonly DesktopChannelManager _channelManager;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly DispatcherTimer? _streamingPublishTimer;
 
@@ -97,6 +98,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         DesktopToolApprovalHandler toolApprovalHandler,
         MarkdownHtmlRenderer markdownHtmlRenderer,
         DesktopSettingsStore desktopSettingsStore,
+        DesktopChannelManager channelManager,
         ILogger<MainWindowViewModel> logger)
     {
         _conversationRepository = conversationRepository;
@@ -107,7 +109,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _toolApprovalHandler = toolApprovalHandler;
         _markdownHtmlRenderer = markdownHtmlRenderer;
         _desktopSettingsStore = desktopSettingsStore;
+        _channelManager = channelManager;
         _logger = logger;
+        _channelManager.Changed += OnChannelManagerChanged;
         if (Application.Current?.Dispatcher is Dispatcher dispatcher)
         {
             _streamingPublishTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
@@ -330,6 +334,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         await ReloadProfilesAsync();
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
+        await _channelManager.InitializeAsync();
 
         if (SelectedProfile is null && Profiles.Count > 0)
         {
@@ -616,7 +621,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         if (persist)
         {
-            _desktopSettingsStore.Save(new DesktopSettings(preference));
+            var settings = _desktopSettingsStore.Load();
+            _desktopSettingsStore.Save(settings with { ThemePreference = preference });
         }
 
         if (_initialized || refreshShell)
@@ -780,6 +786,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private async Task CreateNewConversationAsync()
     {
+        if (SelectedConversationMode == ConversationMode.Channel)
+        {
+            StatusText = "频道会话会在收到外部消息后自动创建。";
+            PublishShell(false);
+            return;
+        }
+
         if (SelectedProfile is null)
         {
             return;
@@ -863,6 +876,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private async Task SendAsync()
     {
+        if (SelectedConversationMode == ConversationMode.Channel)
+        {
+            StatusText = "频道会话由外部消息驱动，不能在这里手动发送。";
+            PublishShell(false);
+            return;
+        }
+
         if (SelectedProfile is null)
         {
             StatusText = "Create a profile first.";
@@ -1047,10 +1067,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private void Stop() => _turnCancellationSource?.Cancel();
 
     private bool CanSend()
-        => !IsBusy && SelectedProfile is not null && !string.IsNullOrWhiteSpace(ComposerText);
+        => !IsBusy &&
+           SelectedConversationMode != ConversationMode.Channel &&
+           SelectedProfile is not null &&
+           !string.IsNullOrWhiteSpace(ComposerText);
 
     private bool CanCreateConversation()
-        => !IsBusy && SelectedProfile is not null;
+        => !IsBusy &&
+           SelectedConversationMode != ConversationMode.Channel &&
+           SelectedProfile is not null;
 
     private void NotifyCommandStates()
     {
@@ -1270,6 +1295,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return false;
         }
 
+        if (conversation.Mode == ConversationMode.Channel)
+        {
+            return true;
+        }
+
         return SelectedWorkspaceRoot is null || conversation.WorkspaceRootId == SelectedWorkspaceRoot.Id;
     }
 
@@ -1298,7 +1328,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         var conversations = BuildConversationItems();
 
-        var conversationModes = ConversationModeOptions;
+        var conversationModes = BuildConversationModeOptions();
 
         var profiles = Profiles
             .Select(profile => new ShellSelectOption(
@@ -1351,6 +1381,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             TeamOutputModeToId(SelectedTeamOutputMode),
             themeOptions,
             ThemePreferenceToId(SelectedThemeOption?.Value ?? AppThemePreference.System),
+            _channelManager.BuildTranscriptChannels(Profiles.ToArray()),
             teamMembers,
             AgentActivityNodes.ToArray(),
             StatusText,
@@ -1418,7 +1449,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
             parentConversationId?.ToString("D"),
             depth,
             conversation.IsAgentConversation,
-            conversation.BoundAgentName,
+            conversation.IsAgentConversation
+                ? conversation.BoundAgentName
+                : ResolveConversationBadge(conversation),
             conversation.IsAgentConversation ? conversation.BoundAgentRole : null);
 
     private void PublishAgentActivities()
@@ -1545,6 +1578,23 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private static string ThemePreferenceToId(AppThemePreference preference)
         => preference.ToString().ToLowerInvariant();
+
+    private static ShellSelectOption[] BuildConversationModeOptions()
+    {
+        return
+        [
+            new("programming", "编程", "面向工作区分析、问答与编码协作"),
+            new("team", "团队", "多 Agent 讨论后再由协调者总结输出"),
+            new("channel", "频道", "查看并接收来自外部频道的会话消息")
+        ];
+    }
+
+    private static string? ResolveConversationBadge(ConversationRecord conversation)
+        => conversation.ChannelKind?.Trim().ToLowerInvariant() switch
+        {
+            "feishu" => "Feishu",
+            _ => null
+        };
 
     private static AppThemePreference ParseThemePreference(string? themeId)
         => themeId?.Trim().ToLowerInvariant() switch
