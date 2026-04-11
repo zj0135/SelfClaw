@@ -8,11 +8,12 @@ internal static class WindowBackdropHelper
 {
     private const int DwmwaSystemBackdropType = 38;
     private const int MainWindowBackdrop = 2;
+    private const int TransientWindowBackdrop = 3;
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int valueSize);
 
-    public static void TryApplyMica(Window window)
+    public static void TryApplySystemBackdrop(Window window)
     {
         if (Environment.OSVersion.Version.Build < 22523)
         {
@@ -25,7 +26,22 @@ internal static class WindowBackdropHelper
             return;
         }
 
-        var backdrop = MainWindowBackdrop;
-        _ = DwmSetWindowAttribute(handle, DwmwaSystemBackdropType, ref backdrop, sizeof(int));
+        if (TrySetBackdrop(handle, TransientWindowBackdrop))
+        {
+            return;
+        }
+
+        _ = TrySetBackdrop(handle, MainWindowBackdrop);
+    }
+
+    public static void TryApplyMica(Window window)
+    {
+        TryApplySystemBackdrop(window);
+    }
+
+    private static bool TrySetBackdrop(IntPtr handle, int backdropType)
+    {
+        var backdrop = backdropType;
+        return DwmSetWindowAttribute(handle, DwmwaSystemBackdropType, ref backdrop, sizeof(int)) == 0;
     }
 }

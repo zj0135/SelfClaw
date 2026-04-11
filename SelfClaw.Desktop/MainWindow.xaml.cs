@@ -26,7 +26,7 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
-        SourceInitialized += (_, _) => WindowBackdropHelper.TryApplyMica(this);
+        SourceInitialized += (_, _) => WindowBackdropHelper.TryApplySystemBackdrop(this);
         PreviewKeyDown += HandlePreviewKeyDown;
         Closed += OnClosed;
         _viewModel.TranscriptChanged += OnTranscriptChanged;
@@ -148,6 +148,56 @@ public partial class MainWindow : Window
             _viewModel.StopGeneration();
             e.Handled = true;
         }
+    }
+
+    private void OnTitleBarDragRegionMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        if (e.ClickCount == 2)
+        {
+            ToggleWindowState();
+            return;
+        }
+
+        try
+        {
+            DragMove();
+        }
+        catch (InvalidOperationException)
+        {
+            // Ignore transient drag failures while the shell is processing input.
+        }
+    }
+
+    private void OnMinimizeButtonClick(object sender, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Minimized;
+    }
+
+    private void OnToggleMaximizeButtonClick(object sender, RoutedEventArgs e)
+    {
+        ToggleWindowState();
+    }
+
+    private void OnCloseButtonClick(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
+    private void ToggleWindowState()
+    {
+        if (ResizeMode is not (ResizeMode.CanResize or ResizeMode.CanResizeWithGrip))
+        {
+            return;
+        }
+
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

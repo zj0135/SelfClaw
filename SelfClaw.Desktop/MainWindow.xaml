@@ -1,8 +1,9 @@
-﻿<Window x:Class="SelfClaw.Desktop.MainWindow"
+<Window x:Class="SelfClaw.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:webview2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
         Title="SelfClaw"
@@ -11,23 +12,244 @@
         MinWidth="1240"
         MinHeight="760"
         WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        ResizeMode="CanResize"
         Background="Transparent"
         ThemeMode="System">
-    <Grid Background="{StaticResource WindowCanvasBrush}">
-        <webview2:WebView2 x:Name="TranscriptView"
-                           Margin="0"
-/>
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0"
+                            CornerRadius="20"
+                            GlassFrameThickness="0"
+                            ResizeBorderThickness="8"
+                            UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
 
-        <Border x:Name="WebViewFallback"
-                Background="{StaticResource WindowCanvasBrush}"
-                Visibility="Collapsed">
-            <TextBlock HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       TextAlignment="Center"
-                       FontSize="18"
-                       Foreground="{StaticResource SubtleForegroundBrush}"
-                       Text="WebView2 runtime is required to render SelfClaw.&#10;Install Microsoft Edge WebView2 Runtime and restart the app." />
+    <Window.Resources>
+        <SolidColorBrush x:Key="ShellSurfaceBrush"
+                Color="#B30A0F17"/>
+        <SolidColorBrush x:Key="ShellTitleBrush"
+                Color="#CC0C121A"/>
+        <SolidColorBrush x:Key="ShellBorderBrush"
+                Color="#3A2A3342"/>
+        <SolidColorBrush x:Key="ShellTitleBorderBrush"
+                Color="#29FFFFFF"/>
+        <SolidColorBrush x:Key="ShellTitleTextBrush"
+                Color="#DCE6F8"/>
+        <SolidColorBrush x:Key="TrafficGlyphBrush"
+                Color="#8A1A1F2A"/>
+
+        <Style x:Key="TrafficLightButtonStyle"
+                TargetType="Button">
+            <Setter Property="Width"
+                    Value="13"/>
+            <Setter Property="Height"
+                    Value="13"/>
+            <Setter Property="Padding"
+                    Value="0"/>
+            <Setter Property="Margin"
+                    Value="0,0,8,0"/>
+            <Setter Property="BorderThickness"
+                    Value="1"/>
+            <Setter Property="BorderBrush"
+                    Value="#4A000000"/>
+            <Setter Property="Background"
+                    Value="#FF5F57"/>
+            <Setter Property="Cursor"
+                    Value="Hand"/>
+            <Setter Property="Focusable"
+                    Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid Width="{TemplateBinding Width}"
+                                Height="{TemplateBinding Height}">
+                            <Ellipse x:Name="Circle"
+                                     Fill="{TemplateBinding Background}"
+                                     Stroke="{TemplateBinding BorderBrush}"
+                                     StrokeThickness="{TemplateBinding BorderThickness}"/>
+                            <ContentPresenter x:Name="GlyphHost"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Opacity="0.0"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver"
+                                    Value="True">
+                                <Setter TargetName="GlyphHost"
+                                        Property="Opacity"
+                                        Value="0.75"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed"
+                                    Value="True">
+                                <Setter TargetName="Circle"
+                                        Property="Opacity"
+                                        Value="0.82"/>
+                                <Setter TargetName="GlyphHost"
+                                        Property="Opacity"
+                                        Value="0.9"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled"
+                                    Value="False">
+                                <Setter TargetName="Circle"
+                                        Property="Opacity"
+                                        Value="0.38"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="TrafficGlyphPathStyle"
+                TargetType="Path">
+            <Setter Property="Stroke"
+                    Value="{StaticResource TrafficGlyphBrush}"/>
+            <Setter Property="StrokeThickness"
+                    Value="1.2"/>
+            <Setter Property="StrokeStartLineCap"
+                    Value="Round"/>
+            <Setter Property="StrokeEndLineCap"
+                    Value="Round"/>
+            <Setter Property="SnapsToDevicePixels"
+                    Value="True"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="Transparent">
+        <Border x:Name="WindowFrame"
+                Margin="0"
+                CornerRadius="22"
+                BorderThickness="0"
+                BorderBrush="Transparent">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Margin"
+                            Value="12"/>
+                    <Setter Property="CornerRadius"
+                            Value="22"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=WindowState}"
+                                     Value="Maximized">
+                            <Setter Property="Margin"
+                                    Value="8"/>
+                            <Setter Property="CornerRadius"
+                                    Value="12"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <Grid ClipToBounds="True">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="46"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Border Grid.RowSpan="2"
+                        Background="{StaticResource ShellSurfaceBrush}"/>
+
+                <Rectangle Grid.RowSpan="2"
+                        IsHitTestVisible="False">
+                    <Rectangle.Fill>
+                        <RadialGradientBrush Center="0.2,0.0"
+                                GradientOrigin="0.2,0.0"
+                                RadiusX="1.2"
+                                RadiusY="1.2">
+                            <GradientStop Offset="0.0"
+                                    Color="#406F8DFF"/>
+                            <GradientStop Offset="0.45"
+                                    Color="#1063C6FF"/>
+                            <GradientStop Offset="1.0"
+                                    Color="#00000000"/>
+                        </RadialGradientBrush>
+                    </Rectangle.Fill>
+                </Rectangle>
+
+                <Border Grid.Row="0"
+                        Background="{StaticResource ShellTitleBrush}"
+                        BorderBrush="{StaticResource ShellTitleBorderBrush}"
+                        BorderThickness="0,0,0,1"/>
+
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="78"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Right"
+                                Margin="0,0,16,0"
+                                shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Button Style="{StaticResource TrafficLightButtonStyle}"
+                                Background="#FEBC2E"
+                                Click="OnMinimizeButtonClick">
+                            <Grid Width="7"
+                                    Height="7">
+                                <Path Style="{StaticResource TrafficGlyphPathStyle}"
+                                        Data="M1,3.5 L6,3.5"/>
+                            </Grid>
+                        </Button>
+
+                        <Button Style="{StaticResource TrafficLightButtonStyle}"
+                                Background="#28C840"
+                                Click="OnToggleMaximizeButtonClick">
+                            <Grid Width="7"
+                                    Height="7">
+                                <Path Style="{StaticResource TrafficGlyphPathStyle}"
+                                        Data="M1,3.5 L6,3.5 M3.5,1 L3.5,6"/>
+                            </Grid>
+                        </Button>
+
+                        <Button Style="{StaticResource TrafficLightButtonStyle}"
+                                Margin="0"
+                                Background="#FF5F57"
+                                Click="OnCloseButtonClick">
+                            <Grid Width="7"
+                                    Height="7">
+                                <Path Style="{StaticResource TrafficGlyphPathStyle}"
+                                        Data="M1,1 L6,6 M6,1 L1,6"/>
+                            </Grid>
+                        </Button>
+                    </StackPanel>
+
+                    <Border Grid.Column="0"
+                            Background="Transparent"
+                            MouseLeftButtonDown="OnTitleBarDragRegionMouseLeftButtonDown"/>
+
+                    <Border Grid.Column="1"
+                            Background="Transparent"
+                            MouseLeftButtonDown="OnTitleBarDragRegionMouseLeftButtonDown"/>
+
+                    <TextBlock Grid.Column="1"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource ShellTitleTextBrush}"
+                               FontFamily="Segoe UI Variable Display"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Opacity="0.88"
+                               Text="SelfClaw"
+                               IsHitTestVisible="False"/>
+                </Grid>
+
+                <Grid Grid.Row="1">
+                    <webview2:WebView2 x:Name="TranscriptView"
+                            Margin="0"/>
+
+                    <Border x:Name="WebViewFallback"
+                            Background="{StaticResource WindowCanvasBrush}"
+                            Visibility="Collapsed">
+                        <TextBlock HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   TextAlignment="Center"
+                                   FontSize="18"
+                                   Foreground="{StaticResource SubtleForegroundBrush}"
+                                   Text="WebView2 runtime is required to render SelfClaw.&#10;Install Microsoft Edge WebView2 Runtime and restart the app."/>
+                    </Border>
+                </Grid>
+            </Grid>
         </Border>
     </Grid>
 </Window>
-
