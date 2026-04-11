@@ -97,7 +97,19 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
             return streamedText;
         }
 
-        var aggregatedText = rawUpdates.ToAgentResponse().Text;
+        string? aggregatedText;
+        try
+        {
+            aggregatedText = rawUpdates.ToAgentResponse().Text;
+        }
+        catch
+        {
+            // Some providers may emit malformed partial JSON in streaming metadata (for example
+            // incomplete function-call arguments near token limits). If aggregation fails, keep
+            // the already-streamed text instead of failing the entire turn.
+            return streamedText;
+        }
+
         if (string.IsNullOrWhiteSpace(streamedText))
         {
             return aggregatedText ?? string.Empty;
