@@ -36,6 +36,9 @@
     <None Update="Assets\TranscriptVue\*;Assets\TranscriptVue\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Assets\skills\*;Assets\skills\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <Target Name="BuildManagedDependencies">
@@ -59,5 +62,14 @@
           DestinationFiles="@(TranscriptVueAsset->'$(OutDir)Assets\TranscriptVue\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="false" />
   </Target>
-</Project>
 
+  <Target Name="SyncSkillAssets" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)\Assets\skills')">
+    <ItemGroup>
+      <SkillAsset Include="$(MSBuildProjectDirectory)\Assets\skills\*;$(MSBuildProjectDirectory)\Assets\skills\**\*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(SkillAsset)"
+          DestinationFiles="@(SkillAsset->'$(OutDir)Assets\skills\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="false" />
+  </Target>
+</Project>

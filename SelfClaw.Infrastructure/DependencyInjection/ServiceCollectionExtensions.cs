@@ -19,6 +19,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IConversationRepository, SqliteConversationRepository>();
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
+        services.AddSingleton<IAgentContextProviderFactory, FileSystemAgentContextProviderFactory>();
         services.AddSingleton<IAgentChatRuntime, SelfClawAgentChatRuntime>();
         services.AddSingleton<MarkdownHtmlRenderer>();
         return services;

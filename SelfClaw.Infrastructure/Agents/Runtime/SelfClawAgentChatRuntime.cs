@@ -27,13 +27,16 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 
     private readonly IWorkspaceToolService _workspaceToolService;
     private readonly IAgentExecutionService _agentExecutionService;
+    private readonly IAgentContextProviderFactory _agentContextProviderFactory;
 
     public SelfClawAgentChatRuntime(
         IWorkspaceToolService workspaceToolService,
+        IAgentContextProviderFactory agentContextProviderFactory,
         ILoggerFactory loggerFactory,
         IServiceProvider serviceProvider)
         : this(
             workspaceToolService,
+            agentContextProviderFactory,
             new ChatClientAgentExecutionService(loggerFactory, serviceProvider))
     {
     }
@@ -41,8 +44,20 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
     internal SelfClawAgentChatRuntime(
         IWorkspaceToolService workspaceToolService,
         IAgentExecutionService agentExecutionService)
+        : this(
+            workspaceToolService,
+            new EmptyAgentContextProviderFactory(),
+            agentExecutionService)
+    {
+    }
+
+    internal SelfClawAgentChatRuntime(
+        IWorkspaceToolService workspaceToolService,
+        IAgentContextProviderFactory agentContextProviderFactory,
+        IAgentExecutionService agentExecutionService)
     {
         _workspaceToolService = workspaceToolService;
+        _agentContextProviderFactory = agentContextProviderFactory;
         _agentExecutionService = agentExecutionService;
     }
 
@@ -111,7 +126,8 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 ProgrammingAgentDescription,
                 BuildProgrammingInstructions(request),
                 BuildPromptMessages(request.Messages),
-                CreateTools(request, observer, includeWriteTools: true, includeShellTool: true)),
+                CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
+                CreateContextProviders()),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
             cancellationToken);
 
@@ -154,7 +170,8 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 BoundAgentSessionDescription,
                 BuildBoundAgentInstructions(request, agent),
                 BuildBoundAgentPromptMessages(request.ContextMessages ?? [], request.Messages, agent),
-                CreateTools(request, observer, includeWriteTools: true, includeShellTool: true)),
+                CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
+                CreateContextProviders()),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
             cancellationToken);
 
@@ -266,7 +283,8 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 CoordinatorDescription,
                 BuildCoordinatorSummaryInstructions(request.WorkspaceRoot, request.TeamOutputMode),
                 BuildCoordinatorSummaryMessages(request, teamPlan.DocumentTitle, discussionEntries),
-                []),
+                [],
+                CreateContextProviders()),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(coordinatorMessageId, delta), token),
             cancellationToken);
 
@@ -339,7 +357,8 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                         roundNumber,
                         maxRounds,
                         discussionEntries),
-                    CreateTools(request, observer, includeWriteTools: false, includeShellTool: false)),
+                    CreateTools(request, observer, includeWriteTools: false, includeShellTool: false),
+                    CreateContextProviders()),
                 (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
                 cancellationToken);
 
@@ -386,7 +405,8 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                     request.TeamAgents,
                     TeamDiscussionDefaults.ClampRounds(request.TeamMaxRounds)),
                 BuildCoordinatorPlanningMessages(request.Messages, request.TeamAgents),
-                []),
+                [],
+                CreateContextProviders()),
             onTextDelta: null,
             cancellationToken);
 
@@ -1028,6 +1048,9 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         return tools;
     }
 
+    private IReadOnlyList<AIContextProvider> CreateContextProviders()
+        => _agentContextProviderFactory.CreateProviders();
+
     private static TeamBlueprint? TryParseTeamPlan(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -1239,4 +1262,9 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 
     private sealed record RoundContinuationDecision(
         bool ContinueDiscussion);
+
+    private sealed class EmptyAgentContextProviderFactory : IAgentContextProviderFactory
+    {
+        public IReadOnlyList<AIContextProvider> CreateProviders() => [];
+    }
 }

@@ -37,20 +37,26 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
         {
             Temperature = request.Profile.TemperatureEnabled ? (float)request.Profile.Temperature : null,
             TopP = request.Profile.TopPEnabled ? (float)request.Profile.TopP : null,
-            ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None
+            ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
+            Tools = request.Tools
         };
 
+        var agentOptions = new ChatClientAgentOptions
+        {
+            Name = request.Name,
+            Description = request.Description,
+            ChatOptions = chatOptions,
+            AIContextProviders = request.ContextProviders ?? []
+        };
         var agent = new ChatClientAgent(
             CreateChatClient(request.Profile, request.ApiKey),
-            request.Instructions,
-            request.Name,
-            request.Description,
-            request.Tools,
+            agentOptions,
             _loggerFactory,
             _serviceProvider);
+        var promptMessages = PrependInstructions(request.Instructions, request.Messages);
 
         await foreach (var update in agent.RunStreamingAsync(
-                           request.Messages,
+                           promptMessages,
                            null,
                            new ChatClientAgentRunOptions(chatOptions),
                            cancellationToken))
@@ -88,6 +94,21 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
 
         var client = new OpenAIChatClient(profile.Model, new ApiKeyCredential(apiKey), options);
         return client.AsIChatClient();
+    }
+
+    private static IReadOnlyList<ChatMessage> PrependInstructions(string instructions, IReadOnlyList<ChatMessage> messages)
+    {
+        if (string.IsNullOrWhiteSpace(instructions))
+        {
+            return messages;
+        }
+
+        var promptMessages = new List<ChatMessage>(messages.Count + 1)
+        {
+            new(ChatRole.System, instructions)
+        };
+        promptMessages.AddRange(messages);
+        return promptMessages;
     }
 
     public static string ResolveFinalMarkdown(string streamedText, IReadOnlyList<AgentResponseUpdate> rawUpdates)

@@ -1,0 +1,128 @@
+#pragma warning disable MAAI001
+
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.Logging;
+
+namespace SelfClaw.Infrastructure.Agents;
+
+internal sealed class FileSystemAgentContextProviderFactory : IAgentContextProviderFactory
+{
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly IReadOnlyList<string> _assetsRootPaths;
+
+    public FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory)
+        : this(loggerFactory, DiscoverDefaultAssetsRootPaths(AppContext.BaseDirectory))
+    {
+    }
+
+    internal FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, params string[] assetsRootPaths)
+        : this(loggerFactory, (IEnumerable<string>)assetsRootPaths)
+    {
+    }
+
+    internal FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, IEnumerable<string> assetsRootPaths)
+    {
+        _loggerFactory = loggerFactory;
+        _assetsRootPaths = assetsRootPaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public IReadOnlyList<AIContextProvider> CreateProviders()
+    {
+        var skillRoots = DiscoverSkillRoots();
+        if (skillRoots.Count == 0)
+        {
+            return [];
+        }
+
+        var fileOptions = new AgentFileSkillsSourceOptions
+        {
+            // Skill scripts need an explicit execution runner. Until SelfClaw wires one up with
+            // approval semantics, keep discovery limited to SKILL.md and read-only resources.
+            AllowedScriptExtensions = []
+        };
+        var providerOptions = new AgentSkillsProviderOptions
+        {
+            DisableCaching = true,
+        };
+
+        return
+        [
+            new AgentSkillsProvider(
+                skillRoots,
+                scriptRunner: null,
+                fileOptions,
+                providerOptions,
+                _loggerFactory)
+        ];
+    }
+
+    internal IReadOnlyList<string> DiscoverSkillRoots()
+    {
+        var roots = new List<string>();
+        foreach (var assetsRootPath in _assetsRootPaths)
+        {
+            var skillsRootPath = Path.Combine(assetsRootPath, "skills");
+            if (!Directory.Exists(skillsRootPath))
+            {
+                continue;
+            }
+
+            var hasSkillManifest = Directory
+                .EnumerateFiles(skillsRootPath, "SKILL.md", SearchOption.AllDirectories)
+                .Any();
+            if (!hasSkillManifest)
+            {
+                continue;
+            }
+
+            roots.Add(Path.GetFullPath(skillsRootPath));
+        }
+
+        return roots
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    internal static IReadOnlyList<string> DiscoverDefaultAssetsRootPaths(string baseDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(baseDirectory))
+        {
+            return [];
+        }
+
+        var ancestors = EnumerateAncestorDirectories(baseDirectory).ToArray();
+        var candidatePaths = new List<string>(ancestors.Length * 2);
+
+        // Prefer the source-tree Desktop assets when debugging from bin/obj paths, so newly added
+        // skills under the project are visible even before a fresh asset copy occurs.
+        foreach (var ancestor in ancestors)
+        {
+            candidatePaths.Add(Path.Combine(ancestor, "SelfClaw.Desktop", "Assets"));
+        }
+
+        foreach (var ancestor in ancestors)
+        {
+            candidatePaths.Add(Path.Combine(ancestor, "Assets"));
+        }
+
+        return candidatePaths
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> EnumerateAncestorDirectories(string startPath)
+    {
+        for (var current = new DirectoryInfo(Path.GetFullPath(startPath));
+             current is not null;
+             current = current.Parent)
+        {
+            yield return current.FullName;
+        }
+    }
+}
+
+#pragma warning restore MAAI001
