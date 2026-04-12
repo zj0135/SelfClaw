@@ -21,6 +21,7 @@ public partial class App : Application
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSelfClawInfrastructure();
         builder.Services.AddSingleton<DesktopSettingsStore>();
+        builder.Services.AddSingleton<IDesktopChannelAdapter, FeishuDesktopChannelAdapter>();
         builder.Services.AddSingleton<DesktopChannelManager>();
         builder.Services.AddSingleton<DesktopToolApprovalHandler>();
         builder.Services.AddSingleton<MainWindowViewModel>();

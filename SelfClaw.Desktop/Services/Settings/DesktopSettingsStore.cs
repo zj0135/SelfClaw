@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Win32;
@@ -37,7 +38,11 @@ public sealed record FeishuDesktopChannelSettings
 
 public sealed record DesktopChannelSettings
 {
-    public FeishuDesktopChannelSettings Feishu { get; init; } = FeishuDesktopChannelSettings.Default;
+    public IReadOnlyDictionary<string, DesktopChannelConfiguration> Items { get; init; }
+        = new Dictionary<string, DesktopChannelConfiguration>(StringComparer.OrdinalIgnoreCase);
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public FeishuDesktopChannelSettings? Feishu { get; init; }
 
     public static DesktopChannelSettings Default { get; } = new();
 }
@@ -57,6 +62,7 @@ public sealed class DesktopSettingsStore
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         Converters = { new JsonStringEnumConverter() }
     };
 
@@ -112,22 +118,75 @@ public sealed class DesktopSettingsStore
         }
 
         var channels = settings.Channels ?? DesktopChannelSettings.Default;
-        var feishu = channels.Feishu ?? FeishuDesktopChannelSettings.Default;
+        var items = new Dictionary<string, DesktopChannelConfiguration>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (channelId, configuration) in channels.Items ?? new Dictionary<string, DesktopChannelConfiguration>())
+        {
+            var normalizedId = channelId?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedId))
+            {
+                continue;
+            }
+
+            items[normalizedId] = NormalizeChannelConfiguration(configuration);
+        }
+
+        if (channels.Feishu is not null && !items.ContainsKey("feishu"))
+        {
+            items["feishu"] = new DesktopChannelConfiguration
+            {
+                Enabled = channels.Feishu.Enabled,
+                DisplayName = channels.Feishu.DisplayName,
+                ProfileId = channels.Feishu.ProfileId,
+                Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["appId"] = channels.Feishu.AppId,
+                    ["botDisplayName"] = channels.Feishu.BotDisplayName
+                },
+                SecretRefs = string.IsNullOrWhiteSpace(channels.Feishu.SecretRef)
+                    ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["appSecret"] = channels.Feishu.SecretRef
+                    }
+            };
+        }
 
         return settings with
         {
-            Channels = channels with
+            Channels = new DesktopChannelSettings
             {
-                Feishu = feishu with
-                {
-                    DisplayName = string.IsNullOrWhiteSpace(feishu.DisplayName)
-                        ? FeishuDesktopChannelSettings.Default.DisplayName
-                        : feishu.DisplayName.Trim(),
-                    AppId = feishu.AppId?.Trim() ?? string.Empty,
-                    SecretRef = feishu.SecretRef?.Trim() ?? string.Empty,
-                    BotDisplayName = feishu.BotDisplayName?.Trim() ?? string.Empty
-                }
+                Items = items
             }
+        };
+    }
+
+    private static DesktopChannelConfiguration NormalizeChannelConfiguration(DesktopChannelConfiguration? configuration)
+    {
+        if (configuration is null)
+        {
+            return DesktopChannelConfiguration.Default;
+        }
+
+        var values = (configuration.Values ?? new Dictionary<string, string>())
+            .Where(item => !string.IsNullOrWhiteSpace(item.Key))
+            .ToDictionary(
+                item => item.Key.Trim(),
+                item => item.Value?.Trim() ?? string.Empty,
+                StringComparer.OrdinalIgnoreCase);
+
+        var secretRefs = (configuration.SecretRefs ?? new Dictionary<string, string>())
+            .Where(item => !string.IsNullOrWhiteSpace(item.Key) && !string.IsNullOrWhiteSpace(item.Value))
+            .ToDictionary(
+                item => item.Key.Trim(),
+                item => item.Value.Trim(),
+                StringComparer.OrdinalIgnoreCase);
+
+        return configuration with
+        {
+            DisplayName = configuration.DisplayName?.Trim() ?? string.Empty,
+            Values = values,
+            SecretRefs = secretRefs
         };
     }
 }

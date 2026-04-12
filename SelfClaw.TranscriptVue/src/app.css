@@ -285,6 +285,11 @@
 	border-radius: 10px;
 }
 
+.field-textarea {
+	min-height: 96px;
+	resize: vertical;
+}
+
 .field-select {
 	appearance: none;
 	padding-right: 36px;
@@ -770,6 +775,10 @@ html[data-theme='light'] .tool-details-body {
 
 .channel-status-detail {
 	margin-top: 10px;
+}
+
+.channel-field-hint {
+	margin-top: 6px;
 }
 
 .channel-card-actions {

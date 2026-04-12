@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -474,10 +475,8 @@ public partial class MainWindow : Window
         var result = new ChannelEditorResult(
             GetString(root, "channelId"),
             GetString(root, "displayName"),
-            GetString(root, "appId"),
-            GetString(root, "botDisplayName"),
             ParseGuid(root, "profileId"),
-            GetString(root, "appSecret"));
+            GetStringDictionary(root, "fieldValues"));
 
         await _viewModel.SaveChannelAsync(result);
         PostUiFeedback("success", "Channel saved.", "channels");
@@ -563,6 +562,24 @@ public partial class MainWindow : Window
         => root.TryGetProperty(propertyName, out var property)
             ? property.GetString() ?? string.Empty
             : string.Empty;
+
+    private static IReadOnlyDictionary<string, string> GetStringDictionary(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Object)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in property.EnumerateObject())
+        {
+            values[item.Name] = item.Value.ValueKind == JsonValueKind.String
+                ? item.Value.GetString() ?? string.Empty
+                : item.Value.GetRawText();
+        }
+
+        return values;
+    }
 
     private static double GetDouble(JsonElement root, string propertyName, double defaultValue)
         => root.TryGetProperty(propertyName, out var property) && property.TryGetDouble(out var value)

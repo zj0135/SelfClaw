@@ -65,8 +65,6 @@ public sealed partial class MainWindowViewModel
         PublishShell(false);
     }
 
-    private static string ResolveChannelName(string channelId)
-        => string.Equals(channelId, "feishu", StringComparison.OrdinalIgnoreCase)
-            ? "飞书"
-            : channelId;
+    private string ResolveChannelName(string channelId)
+        => _channelManager.GetChannelName(channelId);
 }

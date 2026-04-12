@@ -96,11 +96,8 @@ const emptyWorkspace = () => ({ workspaceRootId: null, name: '', rootPath: '' })
 const emptyChannel = () => ({
 	channelId: 'feishu',
 	displayName: '',
-	appId: '',
-	botDisplayName: '',
 	profileId: '',
-	appSecret: '',
-	hasSecret: false,
+	fields: [],
 });
 
 const post = (message) => window.chrome?.webview?.postMessage(message);
@@ -398,11 +395,11 @@ function channelDraft(channel) {
 	return {
 		channelId: channel?.id || 'feishu',
 		displayName: channel?.displayName || '',
-		appId: channel?.appId || '',
-		botDisplayName: channel?.botDisplayName || '',
 		profileId: channel?.profileId || '',
-		appSecret: '',
-		hasSecret: Boolean(channel?.hasSecret),
+		fields: (channel?.fields || []).map((field) => ({
+			...field,
+			value: field.kind === 'secret' ? '' : field.value || '',
+		})),
 	};
 }
 
@@ -491,16 +488,19 @@ function validateDraft() {
 			return '请填写频道名称。';
 		}
 
-		if (!editorState.draft.appId.trim()) {
-			return '请填写飞书 App ID。';
-		}
-
 		if (!editorState.draft.profileId) {
 			return '请先为频道绑定模型。';
 		}
 
-		if (!editorState.draft.hasSecret && !editorState.draft.appSecret.trim()) {
-			return '首次配置飞书频道时必须提供 App Secret。';
+		for (const field of editorState.draft.fields || []) {
+			const hasText = Boolean((field.value || '').trim());
+			if (field.required && field.kind === 'secret' && !field.hasValue && !hasText) {
+				return `请填写${field.label}。`;
+			}
+
+			if (field.required && field.kind !== 'secret' && !hasText) {
+				return `请填写${field.label}。`;
+			}
 		}
 
 		return null;
@@ -1130,14 +1130,15 @@ function saveEditor() {
 	}
 
 	if (editorState.kind === 'channel') {
+		const fieldValues = Object.fromEntries(
+			(editorState.draft.fields || []).map((field) => [field.key, field.value || ''])
+		);
 		post({
 			type: 'save-channel',
 			channelId: editorState.draft.channelId,
 			displayName: editorState.draft.displayName.trim(),
-			appId: editorState.draft.appId.trim(),
-			botDisplayName: editorState.draft.botDisplayName.trim(),
 			profileId: editorState.draft.profileId || null,
-			appSecret: editorState.draft.appSecret,
+			fieldValues,
 		});
 		return;
 	}
@@ -1480,17 +1481,9 @@ onUnmounted(() => {
 									</label>
 								</div>
 								<div class="selected-summary-grid channel-summary-grid">
-									<div class="selected-summary-card">
-										<div class="selected-summary-label">频道名称</div>
-										<div class="selected-summary-value">{{ channel.displayName || '未设置' }}</div>
-									</div>
-									<div class="selected-summary-card">
-										<div class="selected-summary-label">绑定模型</div>
-										<div class="selected-summary-value">{{ channel.profileLabel || '未绑定' }}</div>
-									</div>
-									<div class="selected-summary-card">
-										<div class="selected-summary-label">App ID</div>
-										<div class="selected-summary-value">{{ channel.appId || '未设置' }}</div>
+									<div v-for="summary in channel.summaryItems" :key="summary.label" class="selected-summary-card">
+										<div class="selected-summary-label">{{ summary.label }}</div>
+										<div class="selected-summary-value">{{ summary.value }}</div>
 									</div>
 								</div>
 								<div v-if="channel.statusDetail" class="settings-hint channel-status-detail">{{ channel.statusDetail }}</div>
@@ -1540,7 +1533,7 @@ onUnmounted(() => {
 										? '填写名称、Endpoint、模型、采样参数和 API Key 后保存，新配置会自动加入下拉列表并切换到当前选择。'
 										: '你可以更新当前模型配置和采样参数；如果不需要替换密钥，API Key 留空即可。'
 									: editorState.kind === 'channel'
-								? '填写频道名称、飞书 App ID、App Secret 和绑定模型后保存；开启开关后就会开始接收飞书消息。'
+										? '填写频道名称、绑定模型和当前渠道要求的连接字段后保存；开启开关后就会开始接收该渠道消息。'
 								: editorState.mode === 'create'
 									? '填写名称并选择本机目录后保存，工作区会自动加入下拉列表并设为当前选择。'
 									: '在这里调整当前工作区的显示名称或重新选择目录，然后保存变更。'
@@ -1636,20 +1629,16 @@ onUnmounted(() => {
 								</select>
 							</div>
 						</div>
-						<div>
-							<div class="field-label">飞书 App ID</div>
-							<input id="editor-channel-app-id" v-model="editorState.draft.appId" class="field-input"
-								type="text" placeholder="cli_xxx" />
-						</div>
-						<div>
-							<div class="field-label">机器人显示名</div>
-							<input id="editor-channel-bot-display-name" v-model="editorState.draft.botDisplayName"
-								class="field-input" type="text" placeholder="用于群聊 @ 提及时识别，可留空" />
-						</div>
-						<div>
-							<div class="field-label">App Secret</div>
-							<input id="editor-channel-app-secret" v-model="editorState.draft.appSecret" class="field-input"
-								type="password" :placeholder="editorState.draft.hasSecret ? '留空则保留现有密钥' : '首次配置时必填'" />
+						<div v-for="field in editorState.draft.fields" :key="field.key">
+							<div class="field-label">{{ field.label }}</div>
+							<textarea v-if="field.kind === 'multiline'" v-model="field.value" class="field-input field-textarea"
+								:placeholder="field.placeholder || ''"></textarea>
+							<input v-else-if="field.kind === 'secret'" v-model="field.value" class="field-input"
+								type="password"
+								:placeholder="field.hasValue ? '留空则保留现有密钥' : (field.placeholder || '请填写')" />
+							<input v-else v-model="field.value" class="field-input" type="text"
+								:placeholder="field.placeholder || ''" />
+							<div v-if="field.description" class="settings-hint channel-field-hint">{{ field.description }}</div>
 						</div>
 					</template>
 

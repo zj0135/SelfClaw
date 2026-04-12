@@ -1589,12 +1589,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ];
     }
 
-    private static string? ResolveConversationBadge(ConversationRecord conversation)
-        => conversation.ChannelKind?.Trim().ToLowerInvariant() switch
-        {
-            "feishu" => "Feishu",
-            _ => null
-        };
+    private string? ResolveConversationBadge(ConversationRecord conversation)
+        => string.IsNullOrWhiteSpace(conversation.ChannelKind)
+            ? null
+            : _channelManager.GetChannelName(conversation.ChannelKind);
 
     private static AppThemePreference ParseThemePreference(string? themeId)
         => themeId?.Trim().ToLowerInvariant() switch

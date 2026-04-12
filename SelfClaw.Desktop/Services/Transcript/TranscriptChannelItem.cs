@@ -10,8 +10,7 @@ public sealed record TranscriptChannelItem(
     string StatusLabel,
     string? StatusDetail,
     string DisplayName,
-    string AppId,
-    string BotDisplayName,
-    bool HasSecret,
     string? ProfileId,
-    string? ProfileLabel);
+    string? ProfileLabel,
+    IReadOnlyList<TranscriptChannelSummaryItem> SummaryItems,
+    IReadOnlyList<TranscriptChannelFieldItem> Fields);
