@@ -195,6 +195,22 @@ export function renderActivities(agentActivities, { isTeamMode, openActivities }
 			: '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
 	}
 
+	const detailValueClasses = (detail) => {
+		const classes = ['detail-value'];
+		if (detail.isCode) {
+			classes.push('code');
+		}
+
+		const normalizedLabel = String(detail.label || '')
+			.trim()
+			.toLowerCase();
+		if (normalizedLabel === 'arguments' || normalizedLabel === 'argument' || normalizedLabel.includes('参数')) {
+			classes.push('arguments');
+		}
+
+		return classes.join(' ');
+	};
+
 	return agentActivities
 		.map((item) => {
 			const isOpen = openActivities.has(item.id) || item.status === 'awaitingapproval';
@@ -237,7 +253,7 @@ export function renderActivities(agentActivities, { isTeamMode, openActivities }
 							(detail) => `
             <div class="detail-block">
               <div class="detail-label">${escapeHtml(detail.label)}</div>
-              <div class="detail-value ${detail.isCode ? 'code' : ''}">${escapeHtml(detail.value)}</div>
+              <div class="${detailValueClasses(detail)}">${escapeHtml(detail.value)}</div>
             </div>
           `
 						)

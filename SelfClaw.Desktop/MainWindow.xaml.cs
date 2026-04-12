@@ -1,10 +1,13 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 using SelfClaw.Desktop.Services;
@@ -15,6 +18,21 @@ namespace SelfClaw.Desktop;
 public partial class MainWindow : Window
 {
     private const string AssetsHostName = "appassets.selfclaw.local";
+    private const int WmGetMinMaxInfo = 0x0024;
+    private const uint MonitorDefaultToNearest = 2;
+
+    private static readonly Color ShellSurfaceDarkColor = Color.FromArgb(0xB3, 0x0A, 0x0F, 0x17);
+    private static readonly Color ShellSurfaceLightColor = Color.FromArgb(0xD9, 0xF6, 0xF9, 0xFD);
+    private static readonly Color ShellTitleDarkColor = Color.FromArgb(0xCC, 0x0C, 0x12, 0x1A);
+    private static readonly Color ShellTitleLightColor = Color.FromArgb(0xE8, 0xFF, 0xFF, 0xFF);
+    private static readonly Color ShellBorderDarkColor = Color.FromArgb(0x3A, 0x2A, 0x33, 0x42);
+    private static readonly Color ShellBorderLightColor = Color.FromArgb(0x66, 0xC9, 0xD6, 0xE8);
+    private static readonly Color ShellTitleBorderDarkColor = Color.FromArgb(0x29, 0xFF, 0xFF, 0xFF);
+    private static readonly Color ShellTitleBorderLightColor = Color.FromArgb(0x66, 0xC9, 0xD6, 0xE8);
+    private static readonly Color ShellTitleTextDarkColor = Color.FromRgb(0xDC, 0xE6, 0xF8);
+    private static readonly Color ShellTitleTextLightColor = Color.FromRgb(0x23, 0x34, 0x4A);
+    private static readonly Color TrafficGlyphDarkColor = Color.FromArgb(0x8A, 0x1A, 0x1F, 0x2A);
+    private static readonly Color TrafficGlyphLightColor = Color.FromArgb(0x8A, 0x2A, 0x37, 0x48);
 
     private readonly MainWindowViewModel _viewModel;
     private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], null, [], null, [], [], [], string.Empty, false);
@@ -26,7 +44,7 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
-        SourceInitialized += (_, _) => WindowBackdropHelper.TryApplySystemBackdrop(this);
+        SourceInitialized += OnSourceInitialized;
         PreviewKeyDown += HandlePreviewKeyDown;
         Closed += OnClosed;
         _viewModel.TranscriptChanged += OnTranscriptChanged;
@@ -46,6 +64,21 @@ public partial class MainWindow : Window
     {
         _viewModel.TranscriptChanged -= OnTranscriptChanged;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+
+        if (PresentationSource.FromVisual(this) is HwndSource source)
+        {
+            source.RemoveHook(WndProc);
+        }
+    }
+
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        WindowBackdropHelper.TryApplySystemBackdrop(this);
+
+        if (PresentationSource.FromVisual(this) is HwndSource source)
+        {
+            source.AddHook(WndProc);
+        }
     }
 
     private async Task EnsureTranscriptHostAsync()
@@ -202,7 +235,8 @@ public partial class MainWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainWindowViewModel.ActiveThemeMode))
+        if (e.PropertyName == nameof(MainWindowViewModel.ActiveThemeMode) ||
+            e.PropertyName == nameof(MainWindowViewModel.EffectiveTranscriptTheme))
         {
             ApplyThemeMode();
         }
@@ -211,6 +245,42 @@ public partial class MainWindow : Window
     private void ApplyThemeMode()
     {
         ThemeMode = _viewModel.ActiveThemeMode;
+        ApplyTitleBarTheme();
+    }
+
+    private void ApplyTitleBarTheme()
+    {
+        var isDark = string.Equals(_viewModel.EffectiveTranscriptTheme, "dark", StringComparison.OrdinalIgnoreCase);
+
+        SetBrushColor("ShellSurfaceBrush", isDark ? ShellSurfaceDarkColor : ShellSurfaceLightColor);
+        SetBrushColor("ShellTitleBrush", isDark ? ShellTitleDarkColor : ShellTitleLightColor);
+        SetBrushColor("ShellBorderBrush", isDark ? ShellBorderDarkColor : ShellBorderLightColor);
+        SetBrushColor("ShellTitleBorderBrush", isDark ? ShellTitleBorderDarkColor : ShellTitleBorderLightColor);
+        SetBrushColor("ShellTitleTextBrush", isDark ? ShellTitleTextDarkColor : ShellTitleTextLightColor);
+        SetBrushColor("TrafficGlyphBrush", isDark ? TrafficGlyphDarkColor : TrafficGlyphLightColor);
+
+        WindowBackdropHelper.TryApplyCaptionTheme(this, isDark);
+    }
+
+    private void SetBrushColor(string resourceKey, Color color)
+    {
+        if (Resources[resourceKey] is SolidColorBrush brush)
+        {
+            if (brush.IsFrozen)
+            {
+                Resources[resourceKey] = new SolidColorBrush(color);
+                return;
+            }
+
+            if (brush.Color != color)
+            {
+                brush.Color = color;
+            }
+
+            return;
+        }
+
+        Resources[resourceKey] = new SolidColorBrush(color);
     }
 
     private async void OnTranscriptWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -503,5 +573,85 @@ public partial class MainWindow : Window
         => root.TryGetProperty(propertyName, out var property) &&
            (property.ValueKind == JsonValueKind.True ||
             (property.ValueKind == JsonValueKind.False ? false : bool.TryParse(property.GetRawText(), out var value) && value));
+
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WmGetMinMaxInfo)
+        {
+            ApplyMaximizedBounds(hwnd, lParam);
+            handled = true;
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private static void ApplyMaximizedBounds(IntPtr hwnd, IntPtr lParam)
+    {
+        var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+        if (monitor == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var monitorInfo = new MonitorInfo();
+        monitorInfo.CbSize = Marshal.SizeOf<MonitorInfo>();
+        if (!GetMonitorInfo(monitor, ref monitorInfo))
+        {
+            return;
+        }
+
+        var workArea = monitorInfo.RcWork;
+        var monitorArea = monitorInfo.RcMonitor;
+        var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+
+        minMaxInfo.PtMaxPosition.X = Math.Abs(workArea.Left - monitorArea.Left);
+        minMaxInfo.PtMaxPosition.Y = Math.Abs(workArea.Top - monitorArea.Top);
+        minMaxInfo.PtMaxSize.X = Math.Abs(workArea.Right - workArea.Left);
+        minMaxInfo.PtMaxSize.Y = Math.Abs(workArea.Bottom - workArea.Top);
+        minMaxInfo.PtMaxTrackSize = minMaxInfo.PtMaxSize;
+
+        Marshal.StructureToPtr(minMaxInfo, lParam, true);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        public Point PtReserved;
+        public Point PtMaxSize;
+        public Point PtMaxPosition;
+        public Point PtMinTrackSize;
+        public Point PtMaxTrackSize;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public int CbSize;
+        public Rect RcMonitor;
+        public Rect RcWork;
+        public int DwFlags;
+    }
 }
 

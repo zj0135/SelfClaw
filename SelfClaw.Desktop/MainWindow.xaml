@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:po="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:webview2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
@@ -26,24 +27,30 @@
 
     <Window.Resources>
         <SolidColorBrush x:Key="ShellSurfaceBrush"
+                po:Freeze="False"
                 Color="#B30A0F17"/>
         <SolidColorBrush x:Key="ShellTitleBrush"
+                po:Freeze="False"
                 Color="#CC0C121A"/>
         <SolidColorBrush x:Key="ShellBorderBrush"
+                po:Freeze="False"
                 Color="#3A2A3342"/>
         <SolidColorBrush x:Key="ShellTitleBorderBrush"
+                po:Freeze="False"
                 Color="#29FFFFFF"/>
         <SolidColorBrush x:Key="ShellTitleTextBrush"
+                po:Freeze="False"
                 Color="#DCE6F8"/>
         <SolidColorBrush x:Key="TrafficGlyphBrush"
+                po:Freeze="False"
                 Color="#8A1A1F2A"/>
 
         <Style x:Key="TrafficLightButtonStyle"
                 TargetType="Button">
             <Setter Property="Width"
-                    Value="13"/>
+                    Value="15"/>
             <Setter Property="Height"
-                    Value="13"/>
+                    Value="15"/>
             <Setter Property="Padding"
                     Value="0"/>
             <Setter Property="Margin"
@@ -70,15 +77,9 @@
                             <ContentPresenter x:Name="GlyphHost"
                                               HorizontalAlignment="Center"
                                               VerticalAlignment="Center"
-                                              Opacity="0.0"/>
+                                              Opacity="0.75"/>
                         </Grid>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver"
-                                    Value="True">
-                                <Setter TargetName="GlyphHost"
-                                        Property="Opacity"
-                                        Value="0.75"/>
-                            </Trigger>
                             <Trigger Property="IsPressed"
                                     Value="True">
                                 <Setter TargetName="Circle"
@@ -93,6 +94,9 @@
                                 <Setter TargetName="Circle"
                                         Property="Opacity"
                                         Value="0.38"/>
+                                <Setter TargetName="GlyphHost"
+                                        Property="Opacity"
+                                        Value="0.38"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -103,7 +107,7 @@
         <Style x:Key="TrafficGlyphPathStyle"
                 TargetType="Path">
             <Setter Property="Stroke"
-                    Value="{StaticResource TrafficGlyphBrush}"/>
+                    Value="{DynamicResource TrafficGlyphBrush}"/>
             <Setter Property="StrokeThickness"
                     Value="1.2"/>
             <Setter Property="StrokeStartLineCap"
@@ -145,7 +149,7 @@
                 </Grid.RowDefinitions>
 
                 <Border Grid.RowSpan="2"
-                        Background="{StaticResource ShellSurfaceBrush}"/>
+                        Background="{DynamicResource ShellSurfaceBrush}"/>
 
                 <Rectangle Grid.RowSpan="2"
                         IsHitTestVisible="False">
@@ -165,8 +169,8 @@
                 </Rectangle>
 
                 <Border Grid.Row="0"
-                        Background="{StaticResource ShellTitleBrush}"
-                        BorderBrush="{StaticResource ShellTitleBorderBrush}"
+                        Background="{DynamicResource ShellTitleBrush}"
+                        BorderBrush="{DynamicResource ShellTitleBorderBrush}"
                         BorderThickness="0,0,0,1"/>
 
                 <Grid Grid.Row="0">
@@ -185,8 +189,8 @@
                         <Button Style="{StaticResource TrafficLightButtonStyle}"
                                 Background="#FEBC2E"
                                 Click="OnMinimizeButtonClick">
-                            <Grid Width="7"
-                                    Height="7">
+                            <Grid Width="7.5"
+                                    Height="7.5">
                                 <Path Style="{StaticResource TrafficGlyphPathStyle}"
                                         Data="M1,3.5 L6,3.5"/>
                             </Grid>
@@ -195,8 +199,8 @@
                         <Button Style="{StaticResource TrafficLightButtonStyle}"
                                 Background="#28C840"
                                 Click="OnToggleMaximizeButtonClick">
-                            <Grid Width="7"
-                                    Height="7">
+                            <Grid Width="7.5"
+                                    Height="7.5">
                                 <Path Style="{StaticResource TrafficGlyphPathStyle}"
                                         Data="M1,3.5 L6,3.5 M3.5,1 L3.5,6"/>
                             </Grid>
@@ -206,8 +210,8 @@
                                 Margin="0"
                                 Background="#FF5F57"
                                 Click="OnCloseButtonClick">
-                            <Grid Width="7"
-                                    Height="7">
+                            <Grid Width="7.5"
+                                    Height="7.5">
                                 <Path Style="{StaticResource TrafficGlyphPathStyle}"
                                         Data="M1,1 L6,6 M6,1 L1,6"/>
                             </Grid>
@@ -225,7 +229,7 @@
                     <TextBlock Grid.Column="1"
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"
-                               Foreground="{StaticResource ShellTitleTextBrush}"
+                               Foreground="{DynamicResource ShellTitleTextBrush}"
                                FontFamily="Segoe UI Variable Display"
                                FontSize="12"
                                FontWeight="SemiBold"

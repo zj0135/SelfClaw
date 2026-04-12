@@ -804,3 +804,49 @@ html[data-theme='light'] .channel-card.error {
 		justify-content: space-between;
 	}
 }
+
+.transcript-vue-app.busy .item,
+.transcript-vue-app.busy .activity-card {
+	transition: none;
+}
+
+.transcript-vue-app.busy .tool-summary,
+.transcript-vue-app.busy .thinking-summary {
+	transition: none;
+}
+
+.transcript-vue-app.busy .item:hover,
+.transcript-vue-app.busy .activity-card:hover {
+	transform: none;
+}
+
+.transcript-vue-app.busy .item:hover {
+	border-color: var(--border);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.03),
+		0 10px 22px rgba(0, 0, 0, 0.08);
+}
+
+.transcript-vue-app.busy .item.message.user:hover {
+	border-color: #334968;
+}
+
+.transcript-vue-app.busy .activity-card:hover {
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent), var(--panel-muted);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.transcript-vue-app.busy .activity-card.awaitingapproval:hover {
+	background: linear-gradient(180deg, rgba(255, 193, 7, 0.08), rgba(255, 193, 7, 0.03)), var(--panel-muted);
+}
+
+.transcript-vue-app.busy .tool-summary:hover,
+.transcript-vue-app.busy .thinking-summary:not(.passive):hover {
+	background: transparent;
+}
+
+.detail-value.code.arguments {
+	height: 184px;
+	overflow: auto;
+	overscroll-behavior: contain;
+}

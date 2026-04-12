@@ -70,13 +70,14 @@ const settingsPanelRef = ref(null);
 const openActivities = new Set();
 const openThoughts = new Set();
 const openToolSegments = new Set();
+const pointerHandledActions = new Map();
 const scrollFollowState = {
 	transcript: true,
 	transcriptPausedUntil: 0,
 	stepsPausedUntil: 0,
 };
+const pointerActionSuppressDurationMs = 700;
 
-let pendingScrollToBottom = false;
 let pendingStatePayload = null;
 let renderFrameHandle = 0;
 
@@ -364,7 +365,6 @@ function submitComposer() {
 		return;
 	}
 
-	pendingScrollToBottom = true;
 	post({ type: 'send-prompt', prompt });
 	composerValue.value = '';
 	closeMentionPicker();
@@ -550,16 +550,16 @@ function canRestoreStepsScroll() {
 	return Date.now() >= scrollFollowState.stepsPausedUntil;
 }
 
-function canAutoFollowTranscript(snapshot, explicit = false) {
-	if (explicit) {
-		return true;
+function canAutoFollowTranscript(snapshot) {
+	if (!snapshot?.nearBottom) {
+		return false;
 	}
 
 	if (Date.now() < scrollFollowState.transcriptPausedUntil) {
 		return false;
 	}
 
-	return scrollFollowState.transcript && Boolean(snapshot?.nearBottom);
+	return scrollFollowState.transcript;
 }
 
 function syncConversationMenuPlacement() {
@@ -622,10 +622,9 @@ async function applyStatePayload(payload) {
 	restoreScroll(
 		transcriptScrollRef.value,
 		transcriptState,
-		canAutoFollowTranscript(transcriptState, pendingScrollToBottom || Boolean(payload.autoScroll))
+		canAutoFollowTranscript(transcriptState)
 	);
 	requestAnimationFrame(syncConversationMenuPlacement);
-	pendingScrollToBottom = false;
 }
 
 async function flushPendingStatePayload() {
@@ -749,6 +748,96 @@ function onComposerKeydown(event) {
 	}
 }
 
+function getActionSuppressKey(action, actionElement) {
+	switch (action) {
+		case 'toggle-thinking': {
+			const id = actionElement.getAttribute('data-thinking-id');
+			return id ? `${action}:${id}` : null;
+		}
+		case 'toggle-tool-segment': {
+			const id = actionElement.getAttribute('data-tool-segment-id');
+			return id ? `${action}:${id}` : null;
+		}
+		default:
+			return null;
+	}
+}
+
+function pruneSuppressedActions() {
+	const now = Date.now();
+	for (const [key, timestamp] of pointerHandledActions) {
+		if (now - timestamp > pointerActionSuppressDurationMs * 3) {
+			pointerHandledActions.delete(key);
+		}
+	}
+}
+
+function markPointerHandledAction(action, actionElement) {
+	const key = getActionSuppressKey(action, actionElement);
+	if (!key) {
+		return;
+	}
+
+	pruneSuppressedActions();
+	pointerHandledActions.set(key, Date.now());
+}
+
+function shouldSuppressClickAction(action, actionElement) {
+	const key = getActionSuppressKey(action, actionElement);
+	if (!key) {
+		return false;
+	}
+
+	const timestamp = pointerHandledActions.get(key);
+	if (typeof timestamp !== 'number') {
+		return false;
+	}
+
+	const isFresh = Date.now() - timestamp <= pointerActionSuppressDurationMs;
+	pointerHandledActions.delete(key);
+	return isFresh;
+}
+
+function toggleThinking(actionElement) {
+	const id = actionElement.getAttribute('data-thinking-id');
+	const block = actionElement.closest('.thinking-block');
+	if (!id || !block) {
+		return false;
+	}
+
+	const isOpen = openThoughts.has(id);
+	if (isOpen) {
+		openThoughts.delete(id);
+		block.classList.remove('open');
+	} else {
+		openThoughts.add(id);
+		block.classList.add('open');
+	}
+
+	actionElement.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+	return true;
+}
+
+function toggleToolSegment(actionElement) {
+	const id = actionElement.getAttribute('data-tool-segment-id');
+	const block = actionElement.closest('.tool-block');
+	if (!id || !block) {
+		return false;
+	}
+
+	const isOpen = openToolSegments.has(id);
+	if (isOpen) {
+		openToolSegments.delete(id);
+		block.classList.remove('open');
+	} else {
+		openToolSegments.add(id);
+		block.classList.add('open');
+	}
+
+	actionElement.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+	return true;
+}
+
 async function handleDelegatedClick(event) {
 	const target = event.target instanceof Element ? event.target : null;
 	if (!target) {
@@ -758,6 +847,10 @@ async function handleDelegatedClick(event) {
 	const actionElement = target.closest('[data-action]');
 	if (actionElement) {
 		const action = actionElement.getAttribute('data-action');
+		if (action && shouldSuppressClickAction(action, actionElement)) {
+			return;
+		}
+
 		switch (action) {
 			case 'select-conversation':
 				openConversationMenuId.value = null;
@@ -789,41 +882,11 @@ async function handleDelegatedClick(event) {
 				post({ type: 'delete-conversation', conversationId: actionElement.getAttribute('data-conversation-id') });
 				return;
 			case 'toggle-thinking': {
-				const id = actionElement.getAttribute('data-thinking-id');
-				const block = actionElement.closest('.thinking-block');
-				if (!id || !block) {
-					return;
-				}
-
-				const isOpen = openThoughts.has(id);
-				if (isOpen) {
-					openThoughts.delete(id);
-					block.classList.remove('open');
-				} else {
-					openThoughts.add(id);
-					block.classList.add('open');
-				}
-
-				actionElement.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+				toggleThinking(actionElement);
 				return;
 			}
 			case 'toggle-tool-segment': {
-				const id = actionElement.getAttribute('data-tool-segment-id');
-				const block = actionElement.closest('.tool-block');
-				if (!id || !block) {
-					return;
-				}
-
-				const isOpen = openToolSegments.has(id);
-				if (isOpen) {
-					openToolSegments.delete(id);
-					block.classList.remove('open');
-				} else {
-					openToolSegments.add(id);
-					block.classList.add('open');
-				}
-
-				actionElement.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+				toggleToolSegment(actionElement);
 				return;
 			}
 			case 'toggle-team-member': {
@@ -910,7 +973,7 @@ function onTranscriptScroll(event) {
 	}
 
 	const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 40;
-	if (nearBottom && Date.now() >= scrollFollowState.transcriptPausedUntil) {
+	if (nearBottom) {
 		resumeTranscriptAutoFollow();
 		return;
 	}
@@ -934,6 +997,19 @@ function onRootWheel(event) {
 }
 
 function onRootPointerDown(event) {
+	const actionElement = event.target instanceof Element ? event.target.closest('[data-action]') : null;
+	if (state.isBusy && actionElement) {
+		const action = actionElement.getAttribute('data-action');
+		const handled =
+			action === 'toggle-thinking' ? toggleThinking(actionElement) : action === 'toggle-tool-segment' ? toggleToolSegment(actionElement) : false;
+		if (handled && action) {
+			markPointerHandledAction(action, actionElement);
+			pauseTranscriptAutoFollow(1600);
+			event.preventDefault();
+			return;
+		}
+	}
+
 	const transcriptTarget = event.target instanceof Element ? event.target.closest('#transcript-scroll') : null;
 	if (transcriptTarget && state.isBusy) {
 		pauseTranscriptAutoFollow(900);
@@ -1130,7 +1206,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<div class="transcript-vue-app" @click="handleDelegatedClick" @wheel.capture.passive="onRootWheel"
+	<div class="transcript-vue-app" :class="{ busy: state.isBusy }" @click="handleDelegatedClick" @wheel.capture.passive="onRootWheel"
 		@pointerdown.capture="onRootPointerDown">
 		<div class="app-shell">
 			<aside class="panel sidebar">
