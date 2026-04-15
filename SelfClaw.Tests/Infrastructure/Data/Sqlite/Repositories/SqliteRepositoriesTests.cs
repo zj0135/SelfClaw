@@ -1,11 +1,11 @@
 ﻿using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
-using SelfClaw.Infrastructure.Data;
+using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Options;
-using SelfClaw.Infrastructure.Repositories;
+using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
-namespace SelfClaw.Tests.Repositories;
+namespace SelfClaw.Tests.Infrastructure.Data.Sqlite.Repositories;
 
 public sealed class SqliteRepositoriesTests : IDisposable
 {

@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text;
 using SelfClaw.Core.Models;
 
-namespace SelfClaw.Infrastructure.Tools;
+namespace SelfClaw.Infrastructure.Tools.Workspace;
 
 internal static class WorkspaceToolSummaries
 {

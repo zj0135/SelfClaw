@@ -1,10 +1,11 @@
 using Microsoft.Data.Sqlite;
 using SelfClaw.Infrastructure.Options;
 
-namespace SelfClaw.Infrastructure.Data;
+namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
+    private const int CurrentSchemaVersion = 12;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private bool _initialized;
@@ -322,18 +323,13 @@ CREATE TABLE IF NOT EXISTS tool_runs (
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_team_agents_conversation_sort ON team_agents(conversation_id, sort_order, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_tool_runs_conversation_created ON tool_runs(conversation_id, created_at_utc);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(1, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(2, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(3, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(4, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(5, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(6, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(7, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(8, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(9, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(10, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(11, CURRENT_TIMESTAMP);", cancellationToken);
-            await ExecuteAsync(connection, "INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES(12, CURRENT_TIMESTAMP);", cancellationToken);
+            for (var version = 1; version <= CurrentSchemaVersion; version++)
+            {
+                await ExecuteAsync(
+                    connection,
+                    $"INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES({version}, CURRENT_TIMESTAMP);",
+                    cancellationToken);
+            }
 
             _initialized = true;
         }

@@ -1,7 +1,7 @@
 ﻿using FluentAssertions;
-using SelfClaw.Infrastructure.Tools;
+using SelfClaw.Infrastructure.Tools.Transcript;
 
-namespace SelfClaw.Tests.Tools;
+namespace SelfClaw.Tests.Infrastructure.Tools.Transcript;
 
 public sealed class AssistantMessageSegmenterTests
 {

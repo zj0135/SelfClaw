@@ -2,7 +2,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using SelfClaw.Core.Models;
 
-namespace SelfClaw.Infrastructure.Agents;
+namespace SelfClaw.Infrastructure.Agents.Runtime;
 
 internal sealed record AgentExecutionRequest(
     ProviderProfile Profile,

@@ -2,7 +2,7 @@ using FluentAssertions;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Security;
 
-namespace SelfClaw.Tests.Runtime;
+namespace SelfClaw.Tests.Infrastructure.Security;
 
 public sealed class DpapiSecretProtectorTests : IDisposable
 {

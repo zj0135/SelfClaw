@@ -3,7 +3,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging;
 
-namespace SelfClaw.Infrastructure.Agents;
+namespace SelfClaw.Infrastructure.Agents.Runtime;
 
 internal sealed class FileSystemAgentContextProviderFactory : IAgentContextProviderFactory
 {

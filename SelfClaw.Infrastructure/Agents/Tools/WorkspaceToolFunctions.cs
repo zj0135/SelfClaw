@@ -2,9 +2,10 @@ using System.Text.Json;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Infrastructure.Tools;
+using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Infrastructure.Tools.Workspace;
 
-namespace SelfClaw.Infrastructure.Agents;
+namespace SelfClaw.Infrastructure.Agents.Tools;
 
 internal sealed class WorkspaceToolFunctions
 {
@@ -28,68 +29,35 @@ internal sealed class WorkspaceToolFunctions
         _toolApprovalHandler = toolApprovalHandler;
     }
 
-    public async Task<IReadOnlyList<WorkspaceFileEntry>> ListWorkspaceFilesAsync(
+    public Task<IReadOnlyList<WorkspaceFileEntry>> ListWorkspaceFilesAsync(
         string? relativePath = null,
         CancellationToken cancellationToken = default)
-    {
-        var record = _observer.Start(
+        => ExecuteObservedAsync(
             "list_workspace_files",
-            JsonSerializer.Serialize(new { relativePath = relativePath ?? string.Empty }));
+            JsonSerializer.Serialize(new { relativePath = relativePath ?? string.Empty }),
+            () => _workspaceToolService.ListFilesAsync(_workspaceRoot.RootPath, relativePath, cancellationToken),
+            WorkspaceToolSummaries.Summarize,
+            WorkspaceToolSummaries.Describe);
 
-        try
-        {
-            var result = await _workspaceToolService.ListFilesAsync(_workspaceRoot.RootPath, relativePath, cancellationToken);
-            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result), WorkspaceToolSummaries.Describe(result));
-            return result;
-        }
-        catch (Exception exception)
-        {
-            _observer.Fail(record, exception.Message);
-            throw;
-        }
-    }
-
-    public async Task<IReadOnlyList<WorkspaceSearchHit>> SearchWorkspaceTextAsync(
+    public Task<IReadOnlyList<WorkspaceSearchHit>> SearchWorkspaceTextAsync(
         string query,
         CancellationToken cancellationToken = default)
-    {
-        var record = _observer.Start(
+        => ExecuteObservedAsync(
             "search_workspace_text",
-            JsonSerializer.Serialize(new { query }));
+            JsonSerializer.Serialize(new { query }),
+            () => _workspaceToolService.SearchTextAsync(_workspaceRoot.RootPath, query, cancellationToken),
+            WorkspaceToolSummaries.Summarize,
+            WorkspaceToolSummaries.Describe);
 
-        try
-        {
-            var result = await _workspaceToolService.SearchTextAsync(_workspaceRoot.RootPath, query, cancellationToken);
-            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result), WorkspaceToolSummaries.Describe(result));
-            return result;
-        }
-        catch (Exception exception)
-        {
-            _observer.Fail(record, exception.Message);
-            throw;
-        }
-    }
-
-    public async Task<WorkspaceFileContent> ReadWorkspaceFileAsync(
+    public Task<WorkspaceFileContent> ReadWorkspaceFileAsync(
         string relativePath,
         CancellationToken cancellationToken = default)
-    {
-        var record = _observer.Start(
+        => ExecuteObservedAsync(
             "read_workspace_file",
-            JsonSerializer.Serialize(new { relativePath }));
-
-        try
-        {
-            var result = await _workspaceToolService.ReadFileAsync(_workspaceRoot.RootPath, relativePath, cancellationToken);
-            _observer.Complete(record, WorkspaceToolSummaries.Summarize(result), WorkspaceToolSummaries.Describe(result));
-            return result;
-        }
-        catch (Exception exception)
-        {
-            _observer.Fail(record, exception.Message);
-            throw;
-        }
-    }
+            JsonSerializer.Serialize(new { relativePath }),
+            () => _workspaceToolService.ReadFileAsync(_workspaceRoot.RootPath, relativePath, cancellationToken),
+            WorkspaceToolSummaries.Summarize,
+            WorkspaceToolSummaries.Describe);
 
     public async Task<WorkspaceFileWriteResult> WriteWorkspaceFileAsync(
         string relativePath,
@@ -210,4 +178,26 @@ internal sealed class WorkspaceToolFunctions
     }
 
     private bool RequiresApproval => _toolPermissionMode != ToolPermissionMode.FullAccess;
+
+    private async Task<T> ExecuteObservedAsync<T>(
+        string toolName,
+        string argumentsJson,
+        Func<Task<T>> action,
+        Func<T, string> summarize,
+        Func<T, string> describe)
+    {
+        var record = _observer.Start(toolName, argumentsJson);
+
+        try
+        {
+            var result = await action();
+            _observer.Complete(record, summarize(result), describe(result));
+            return result;
+        }
+        catch (Exception exception)
+        {
+            _observer.Fail(record, exception.Message);
+            throw;
+        }
+    }
 }

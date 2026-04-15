@@ -1,7 +1,7 @@
 using FluentAssertions;
-using SelfClaw.Infrastructure.Tools;
+using SelfClaw.Infrastructure.Tools.Workspace;
 
-namespace SelfClaw.Tests.Tools;
+namespace SelfClaw.Tests.Infrastructure.Tools.Workspace;
 
 public sealed class WorkspaceToolServiceTests : IDisposable
 {

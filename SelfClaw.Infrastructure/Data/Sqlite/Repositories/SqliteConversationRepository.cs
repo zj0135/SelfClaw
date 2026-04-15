@@ -1,9 +1,9 @@
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
-using SelfClaw.Infrastructure.Data;
+using SelfClaw.Infrastructure.Data.Sqlite;
 
-namespace SelfClaw.Infrastructure.Repositories;
+namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
 public sealed class SqliteConversationRepository : IConversationRepository
 {

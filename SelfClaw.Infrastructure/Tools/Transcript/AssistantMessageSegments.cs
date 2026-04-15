@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.Tools;
+namespace SelfClaw.Infrastructure.Tools.Transcript;
 
 public enum AssistantMessageSegmentKind
 {

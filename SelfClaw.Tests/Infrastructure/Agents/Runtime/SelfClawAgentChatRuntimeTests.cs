@@ -4,10 +4,10 @@ using Microsoft.Extensions.AI;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Infrastructure.Agents;
-using SelfClaw.Infrastructure.Tools;
+using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Infrastructure.Tools.Transcript;
 
-namespace SelfClaw.Tests.Runtime;
+namespace SelfClaw.Tests.Infrastructure.Agents.Runtime;
 
 public sealed class SelfClawAgentChatRuntimeTests
 {

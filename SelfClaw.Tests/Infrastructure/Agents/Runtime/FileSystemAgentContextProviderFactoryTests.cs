@@ -3,9 +3,9 @@
 using FluentAssertions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging.Abstractions;
-using SelfClaw.Infrastructure.Agents;
+using SelfClaw.Infrastructure.Agents.Runtime;
 
-namespace SelfClaw.Tests.Runtime;
+namespace SelfClaw.Tests.Infrastructure.Agents.Runtime;
 
 public sealed class FileSystemAgentContextProviderFactoryTests : IDisposable
 {

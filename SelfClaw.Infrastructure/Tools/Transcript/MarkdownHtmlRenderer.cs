@@ -1,6 +1,6 @@
 using Markdig;
 
-namespace SelfClaw.Infrastructure.Tools;
+namespace SelfClaw.Infrastructure.Tools.Transcript;
 
 public sealed class MarkdownHtmlRenderer
 {

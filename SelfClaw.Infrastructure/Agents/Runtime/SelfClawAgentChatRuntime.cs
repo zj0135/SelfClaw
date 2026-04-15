@@ -8,9 +8,10 @@ using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Infrastructure.Tools;
+using SelfClaw.Infrastructure.Agents.Tools;
+using SelfClaw.Infrastructure.Tools.Transcript;
 
-namespace SelfClaw.Infrastructure.Agents;
+namespace SelfClaw.Infrastructure.Agents.Runtime;
 
 public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 {

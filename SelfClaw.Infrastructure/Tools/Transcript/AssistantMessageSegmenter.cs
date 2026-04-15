@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace SelfClaw.Infrastructure.Tools;
+namespace SelfClaw.Infrastructure.Tools.Transcript;
 
 public static class AssistantMessageSegmenter
 {

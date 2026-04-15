@@ -3,7 +3,7 @@ using System.Text;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 
-namespace SelfClaw.Infrastructure.Tools;
+namespace SelfClaw.Infrastructure.Tools.Workspace;
 
 public sealed class WorkspaceToolService : IWorkspaceToolService
 {

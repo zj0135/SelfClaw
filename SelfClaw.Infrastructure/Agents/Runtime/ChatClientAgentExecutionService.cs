@@ -7,9 +7,9 @@ using Microsoft.Extensions.Logging;
 using OpenAI;
 using OpenAIChatClient = OpenAI.Chat.ChatClient;
 using SelfClaw.Core.Models;
-using SelfClaw.Infrastructure.Tools;
+using SelfClaw.Infrastructure.Tools.Transcript;
 
-namespace SelfClaw.Infrastructure.Agents;
+namespace SelfClaw.Infrastructure.Agents.Runtime;
 
 internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
 {

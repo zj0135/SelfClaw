@@ -1,7 +1,7 @@
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
 
-namespace SelfClaw.Infrastructure.Data;
+namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 internal static class SqliteMappings
 {

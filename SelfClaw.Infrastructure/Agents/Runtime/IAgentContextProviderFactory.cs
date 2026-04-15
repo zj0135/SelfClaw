@@ -1,6 +1,6 @@
 using Microsoft.Agents.AI;
 
-namespace SelfClaw.Infrastructure.Agents;
+namespace SelfClaw.Infrastructure.Agents.Runtime;
 
 public interface IAgentContextProviderFactory
 {

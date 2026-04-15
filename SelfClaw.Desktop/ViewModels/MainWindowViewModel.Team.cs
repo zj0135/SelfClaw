@@ -3,7 +3,7 @@ using System.IO;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services;
-using SelfClaw.Infrastructure.Tools;
+using SelfClaw.Infrastructure.Tools.Transcript;
 
 namespace SelfClaw.Desktop.ViewModels;
 
