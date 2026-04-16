@@ -25,6 +25,138 @@ const getMessageSegments = (item) => {
 
 const thinkingBlockId = (messageId, ordinal) => `${messageId}:thinking:${ordinal}`;
 const toolSegmentId = (messageId, segment, index) => segment.segmentId || `${messageId}:tool:${index}`;
+const toolGroupId = (messageId, startIndex, endIndex) => `${messageId}:tool-group:${startIndex}:${endIndex}`;
+
+const toolActionDescriptors = {
+	run: { verb: 'ran', singular: 'command', plural: 'commands' },
+	edit: { verb: 'edited', singular: 'file', plural: 'files' },
+	read: { verb: 'read', singular: 'file', plural: 'files' },
+	search: { verb: 'searched', singular: 'query', plural: 'queries' },
+	list: { verb: 'listed', singular: 'directory', plural: 'directories' },
+	export: { verb: 'exported', singular: 'document', plural: 'documents' },
+	tool: { verb: 'used', singular: 'tool', plural: 'tools' },
+};
+
+function capitalize(value) {
+	if (!value) {
+		return '';
+	}
+
+	return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function resolveToolName(segment) {
+	const explicitToolName = String(segment.toolName || '')
+		.trim()
+		.toLowerCase();
+	if (explicitToolName) {
+		return explicitToolName;
+	}
+
+	const detailTitle = String(segment.detailTitle || '')
+		.trim()
+		.toLowerCase();
+	switch (detailTitle) {
+		case 'shell':
+			return 'run_shell_command';
+		case 'write file':
+			return 'write_workspace_file';
+		case 'read file':
+			return 'read_workspace_file';
+		case 'search results':
+			return 'search_workspace_text';
+		case 'workspace entries':
+			return 'list_workspace_files';
+		case 'export team document':
+			return 'export_team_document';
+		default:
+			break;
+	}
+
+	const summaryText = String(segment.text || '')
+		.trim()
+		.toLowerCase();
+	if (summaryText.startsWith('run ')) {
+		return 'run_shell_command';
+	}
+
+	if (summaryText.startsWith('write ') || summaryText.startsWith('create ')) {
+		return 'write_workspace_file';
+	}
+
+	if (summaryText.startsWith('read ')) {
+		return 'read_workspace_file';
+	}
+
+	if (summaryText.startsWith('search ')) {
+		return 'search_workspace_text';
+	}
+
+	if (summaryText.startsWith('list ')) {
+		return 'list_workspace_files';
+	}
+
+	return '';
+}
+
+function resolveToolAction(segment) {
+	const toolName = resolveToolName(segment);
+	switch (toolName) {
+		case 'run_shell_command':
+			return 'run';
+		case 'write_workspace_file':
+			return 'edit';
+		case 'read_workspace_file':
+			return 'read';
+		case 'search_workspace_text':
+			return 'search';
+		case 'list_workspace_files':
+			return 'list';
+		case 'export_team_document':
+			return 'export';
+		default:
+			return 'tool';
+	}
+}
+
+function buildToolActionSummary(segments) {
+	const groups = new Map();
+	for (const segment of segments) {
+		const action = resolveToolAction(segment);
+		const existing = groups.get(action) || { action, count: 0 };
+		existing.count += 1;
+		groups.set(action, existing);
+	}
+
+	const fragments = Array.from(groups.values()).map((group, index) => {
+		const descriptor = toolActionDescriptors[group.action] || toolActionDescriptors.tool;
+		const verb = index === 0 ? capitalize(descriptor.verb) : descriptor.verb;
+		const noun = group.count === 1 ? descriptor.singular : descriptor.plural;
+		return `${verb} ${group.count} ${noun}`;
+	});
+
+	return fragments.join(', ');
+}
+
+function resolveToolGroupStatus(segments) {
+	if (segments.some((segment) => segment.status === 'awaitingapproval')) {
+		return 'awaitingapproval';
+	}
+
+	if (segments.some((segment) => segment.status === 'running')) {
+		return 'running';
+	}
+
+	if (segments.some((segment) => segment.status === 'failed')) {
+		return 'failed';
+	}
+
+	if (segments.some((segment) => segment.status === 'cancelled')) {
+		return 'cancelled';
+	}
+
+	return 'completed';
+}
 
 function toolStatusLabel(status) {
 	switch (status) {
@@ -68,14 +200,42 @@ function renderThinkingSegment(item, segment, thinkingOrdinal, index, totalSegme
     `;
 }
 
-function renderToolSegment(item, segment, index, totalSegments, openToolSegments) {
-	const label = segment.text || '工具调用';
+function renderToolCard(item, segment, index, openToolSegments, options = {}) {
+	const summaryLabel = options.summaryLabel || segment.text || '工具调用';
 	const status = segment.status || 'completed';
 	const id = toolSegmentId(item.id, segment, index);
 	const detailTitle = segment.detailTitle || 'Tool';
 	const detailText = segment.detailText || '暂无可展示的执行结果。';
 	const durationText = segment.durationText || '';
 	const isOpen = openToolSegments.has(id);
+
+	return `
+      <section class="tool-block ${escapeHtml(status)} ${isOpen ? 'open' : ''} ${options.nested ? 'nested' : ''}" data-tool-segment-id="${escapeHtml(id)}">
+        <button class="tool-summary ${options.nested ? 'nested' : ''}" type="button" data-action="toggle-tool-segment" data-tool-segment-id="${escapeHtml(id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
+          <span class="tool-summary-main">
+            <span class="inline-tool-label">${escapeHtml(summaryLabel)}</span>
+          </span>
+          <span class="tool-summary-side">
+            ${durationText ? `<span class="tool-summary-duration">${escapeHtml(durationText)}</span>` : ''}
+            <span class="tool-summary-chevron">&rsaquo;</span>
+          </span>
+        </button>
+        <div class="tool-details">
+          <div class="tool-details-header">${escapeHtml(detailTitle)}</div>
+          <div class="tool-details-body">
+            <pre class="tool-details-pre"><code>${escapeHtml(detailText)}</code></pre>
+          </div>
+          <div class="tool-details-footer">
+            <span class="tool-details-status ${escapeHtml(status)}">${escapeHtml(toolStatusLabel(status))}</span>
+          </div>
+        </div>
+      </section>
+    `;
+}
+
+function renderToolSegment(item, segment, index, totalSegments, openToolSegments) {
+	const status = segment.status || 'completed';
+	const summaryLabel = buildToolActionSummary([segment]);
 	const classes = ['tool-segment', status];
 	if (index === 0) {
 		classes.push('first');
@@ -87,25 +247,42 @@ function renderToolSegment(item, segment, index, totalSegments, openToolSegments
 
 	return `
       <div class="${classes.join(' ')}">
-        <section class="tool-block ${escapeHtml(status)} ${isOpen ? 'open' : ''}" data-tool-segment-id="${escapeHtml(id)}">
-          <button class="tool-summary" type="button" data-action="toggle-tool-segment" data-tool-segment-id="${escapeHtml(id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
-            <span class="tool-summary-main">
-              <span class="inline-tool-dot"></span>
-              <span class="inline-tool-label">${escapeHtml(label)}</span>
+        ${renderToolCard(item, segment, index, openToolSegments, { summaryLabel })}
+      </div>
+    `;
+}
+
+function renderToolGroup(item, toolSegments, startIndex, endIndex, totalSegments, openToolSegments, openToolGroups) {
+	const status = resolveToolGroupStatus(toolSegments);
+	const summaryLabel = buildToolActionSummary(toolSegments);
+	const id = toolGroupId(item.id, startIndex, endIndex);
+	const isOpen = openToolGroups.has(id);
+	const classes = ['tool-segment', 'tool-group-segment', status];
+	if (startIndex === 0) {
+		classes.push('first');
+	}
+
+	if (endIndex === totalSegments - 1) {
+		classes.push('last');
+	}
+
+	return `
+      <div class="${classes.join(' ')}">
+        <section class="tool-group-block ${escapeHtml(status)} ${isOpen ? 'open' : ''}" data-tool-group-id="${escapeHtml(id)}">
+          <button class="tool-group-summary" type="button" data-action="toggle-tool-group" data-tool-group-id="${escapeHtml(id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
+            <span class="tool-group-summary-main">
+              <span class="tool-group-label">${escapeHtml(summaryLabel)}</span>
             </span>
-            <span class="tool-summary-side">
-              ${durationText ? `<span class="tool-summary-duration">${escapeHtml(durationText)}</span>` : ''}
-              <span class="tool-summary-chevron">&rsaquo;</span>
+            <span class="tool-group-summary-side">
+              <span class="tool-group-chevron">&rsaquo;</span>
             </span>
           </button>
-          <div class="tool-details">
-            <div class="tool-details-header">${escapeHtml(detailTitle)}</div>
-            <div class="tool-details-body">
-              <pre class="tool-details-pre"><code>${escapeHtml(detailText)}</code></pre>
-            </div>
-            <div class="tool-details-footer">
-              <span class="tool-details-status ${escapeHtml(status)}">${escapeHtml(toolStatusLabel(status))}</span>
-            </div>
+          <div class="tool-group-details">
+            ${toolSegments
+							.map((segment, offset) =>
+								renderToolCard(item, segment, startIndex + offset, openToolSegments, { nested: true })
+							)
+							.join('')}
           </div>
         </section>
       </div>
@@ -129,7 +306,7 @@ function renderBodySegment(segment, index, totalSegments) {
 	return `<div class="${classes.join(' ')}">${segment.html}</div>`;
 }
 
-function renderMessageContent(item, openThoughts, openToolSegments) {
+function renderMessageContent(item, openThoughts, openToolSegments, openToolGroups) {
 	const segments = getMessageSegments(item);
 	if (!segments.length) {
 		return item.role === 'assistant' && item.isThinking
@@ -138,23 +315,43 @@ function renderMessageContent(item, openThoughts, openToolSegments) {
 	}
 
 	let thinkingOrdinal = 0;
+	const parts = [];
+
+	for (let index = 0; index < segments.length; index += 1) {
+		const segment = segments[index];
+		if (segment.kind === 'thinking') {
+			parts.push(renderThinkingSegment(item, segment, thinkingOrdinal++, index, segments.length, openThoughts));
+			continue;
+		}
+
+		if (segment.kind === 'tool') {
+			let endIndex = index;
+			while (endIndex + 1 < segments.length && segments[endIndex + 1].kind === 'tool') {
+				endIndex += 1;
+			}
+
+			const toolSegments = segments.slice(index, endIndex + 1);
+			if (toolSegments.length > 1) {
+				parts.push(renderToolGroup(item, toolSegments, index, endIndex, segments.length, openToolSegments, openToolGroups));
+			} else {
+				parts.push(renderToolSegment(item, segment, index, segments.length, openToolSegments));
+			}
+
+			index = endIndex;
+			continue;
+		}
+
+		parts.push(renderBodySegment(segment, index, segments.length));
+	}
 
 	return `
       <div class="message-flow">
-        ${segments
-					.map((segment, index) =>
-						segment.kind === 'thinking'
-							? renderThinkingSegment(item, segment, thinkingOrdinal++, index, segments.length, openThoughts)
-							: segment.kind === 'tool'
-								? renderToolSegment(item, segment, index, segments.length, openToolSegments)
-								: renderBodySegment(segment, index, segments.length)
-					)
-					.join('')}
+        ${parts.join('')}
       </div>
     `;
 }
 
-export function renderMessages(items, openThoughts, openToolSegments) {
+export function renderMessages(items, openThoughts, openToolSegments, openToolGroups) {
 	if (!items?.length) {
 		return `
       <div class="empty">
@@ -166,20 +363,18 @@ export function renderMessages(items, openThoughts, openToolSegments) {
 
 	return items
 		.map((item) => {
-			const avatar = item.avatarLabel || (item.role === 'user' ? '你' : item.role === 'assistant' ? 'SC' : 'SYS');
 			const headerClass = item.title ? 'header' : 'header no-title';
 			const headerTitle = item.title ? `<span>${escapeHtml(item.title)}</span>` : '';
 			const headerSubtitle = item.subtitle ? `<span class="message-subtitle">${escapeHtml(item.subtitle)}</span>` : '';
 			return `
       <div class="message-row ${escapeHtml(item.role)} ${escapeHtml(item.status)}">
-        <div class="message-avatar">${escapeHtml(avatar)}</div>
         <div class="message-main">
           <article class="item ${escapeHtml(item.kind)} ${escapeHtml(item.role)} ${escapeHtml(item.status)}">
             <div class="${headerClass}">
               <span class="message-heading">${headerTitle}${headerSubtitle}</span>
               <span>${escapeHtml(item.timestamp)}</span>
             </div>
-            ${renderMessageContent(item, openThoughts, openToolSegments)}
+            ${renderMessageContent(item, openThoughts, openToolSegments, openToolGroups)}
           </article>
         </div>
       </div>
@@ -187,7 +382,6 @@ export function renderMessages(items, openThoughts, openToolSegments) {
 		})
 		.join('');
 }
-
 export function renderActivities(agentActivities, { isTeamMode, openActivities }) {
 	if (!agentActivities?.length) {
 		return isTeamMode
@@ -480,3 +674,4 @@ export function renderConversationList({
 
 	return fragments.join('');
 }
+

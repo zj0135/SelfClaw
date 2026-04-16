@@ -73,6 +73,7 @@ const settingsPanelRef = ref(null);
 const openActivities = new Set();
 const openThoughts = new Set();
 const openToolSegments = new Set();
+const openToolGroups = new Set();
 const pointerHandledActions = new Map();
 const scrollFollowState = {
 	transcript: true,
@@ -287,7 +288,7 @@ const conversationListHtml = computed(() =>
 	})
 );
 
-const messagesHtml = computed(() => renderMessages(state.items, openThoughts, openToolSegments));
+const messagesHtml = computed(() => renderMessages(state.items, openThoughts, openToolSegments, openToolGroups));
 const stepsHeaderHtml = computed(() => renderStepsHeader({ isTeamMode: isTeamMode.value, totalCount: totalStepCount.value }));
 const stepsPanelHtml = computed(() =>
 	renderStepsPanelContent({
@@ -833,6 +834,10 @@ function getActionSuppressKey(action, actionElement) {
 			const id = actionElement.getAttribute('data-tool-segment-id');
 			return id ? `${action}:${id}` : null;
 		}
+		case 'toggle-tool-group': {
+			const id = actionElement.getAttribute('data-tool-group-id');
+			return id ? `${action}:${id}` : null;
+		}
 		default:
 			return null;
 	}
@@ -913,6 +918,26 @@ function toggleToolSegment(actionElement) {
 	return true;
 }
 
+function toggleToolGroup(actionElement) {
+	const id = actionElement.getAttribute('data-tool-group-id');
+	const block = actionElement.closest('.tool-group-block');
+	if (!id || !block) {
+		return false;
+	}
+
+	const isOpen = openToolGroups.has(id);
+	if (isOpen) {
+		openToolGroups.delete(id);
+		block.classList.remove('open');
+	} else {
+		openToolGroups.add(id);
+		block.classList.add('open');
+	}
+
+	actionElement.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+	return true;
+}
+
 async function handleDelegatedClick(event) {
 	const target = event.target instanceof Element ? event.target : null;
 	if (!target) {
@@ -962,6 +987,10 @@ async function handleDelegatedClick(event) {
 			}
 			case 'toggle-tool-segment': {
 				toggleToolSegment(actionElement);
+				return;
+			}
+			case 'toggle-tool-group': {
+				toggleToolGroup(actionElement);
 				return;
 			}
 			case 'toggle-team-member': {
@@ -1076,7 +1105,13 @@ function onRootPointerDown(event) {
 	if (state.isBusy && actionElement) {
 		const action = actionElement.getAttribute('data-action');
 		const handled =
-			action === 'toggle-thinking' ? toggleThinking(actionElement) : action === 'toggle-tool-segment' ? toggleToolSegment(actionElement) : false;
+			action === 'toggle-thinking'
+				? toggleThinking(actionElement)
+				: action === 'toggle-tool-segment'
+					? toggleToolSegment(actionElement)
+					: action === 'toggle-tool-group'
+						? toggleToolGroup(actionElement)
+						: false;
 		if (handled && action) {
 			markPointerHandledAction(action, actionElement);
 			pauseTranscriptAutoFollow(1600);
