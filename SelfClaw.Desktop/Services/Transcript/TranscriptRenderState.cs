@@ -24,5 +24,7 @@ public sealed record TranscriptRenderState(
     IReadOnlyList<TranscriptChannelItem> Channels,
     IReadOnlyList<AgentActivityNode> TeamMembers,
     IReadOnlyList<AgentActivityNode> AgentActivities,
+    bool IsPlanningModeEnabled,
+    TranscriptPlanPanel? PlanPanel,
     string StatusText,
     bool IsBusy);

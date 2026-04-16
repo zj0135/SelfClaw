@@ -16,6 +16,8 @@ namespace SelfClaw.Infrastructure.Agents.Runtime;
 public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 {
     private const int MaxTeamAgents = 5;
+    private const int MaxExecutionPlanSteps = 7;
+    private const int MinExecutionPlanSteps = 3;
     private const string ProgrammingAgentName = "SelfClaw";
     private const string ProgrammingAgentRole = "Programming Assistant";
     private const string ProgrammingAgentDescription = "A personal desktop AI client for focused conversation and workspace assistance.";
@@ -84,6 +86,10 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 {
                     await ProduceTeamTurnAsync(request, channel.Writer, cancellationToken);
                 }
+                else if (request.Mode == ConversationMode.Programming && request.EnablePlanMode)
+                {
+                    await ProducePlannedProgrammingTurnAsync(request, channel.Writer, cancellationToken);
+                }
                 else
                 {
                     await ProduceProgrammingTurnAsync(request, channel.Writer, cancellationToken);
@@ -144,6 +150,145 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 ErrorMessage = null
             }),
             cancellationToken);
+    }
+
+    private async Task ProducePlannedProgrammingTurnAsync(
+        ChatTurnRequest request,
+        ChannelWriter<ChatRuntimeEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        await writer.WriteAsync(new ExecutionPlanDraftingStartedEvent(), cancellationToken);
+        var executionPlan = await DraftExecutionPlanAsync(request, writer, cancellationToken);
+        await writer.WriteAsync(new ExecutionPlanPreparedEvent(executionPlan), cancellationToken);
+
+        var completedSteps = new List<CompletedExecutionPlanStep>(executionPlan.Steps.Count);
+        for (var index = 0; index < executionPlan.Steps.Count; index++)
+        {
+            var step = executionPlan.Steps[index];
+            await writer.WriteAsync(
+                new ExecutionPlanStepStatusChangedEvent(step.Id, ExecutionPlanStepStatus.Running),
+                cancellationToken);
+
+            try
+            {
+                var result = await ProduceExecutionPlanStepTurnAsync(
+                    request,
+                    writer,
+                    executionPlan,
+                    step,
+                    completedSteps,
+                    isFinalStep: index == executionPlan.Steps.Count - 1,
+                    cancellationToken);
+
+                completedSteps.Add(new CompletedExecutionPlanStep(step, result.FinalMarkdown));
+                await writer.WriteAsync(
+                    new ExecutionPlanStepStatusChangedEvent(step.Id, ExecutionPlanStepStatus.Completed),
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await writer.WriteAsync(
+                    new ExecutionPlanStepStatusChangedEvent(step.Id, ExecutionPlanStepStatus.Cancelled),
+                    cancellationToken);
+                throw;
+            }
+            catch when (!cancellationToken.IsCancellationRequested)
+            {
+                await writer.WriteAsync(
+                    new ExecutionPlanStepStatusChangedEvent(step.Id, ExecutionPlanStepStatus.Failed),
+                    cancellationToken);
+                throw;
+            }
+        }
+    }
+
+    private async Task<ExecutionPlan> DraftExecutionPlanAsync(
+        ChatTurnRequest request,
+        ChannelWriter<ChatRuntimeEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        var observer = new RuntimeToolObserver(writer, request.ConversationId, null, messageId: null);
+        var result = await _agentExecutionService.RunAsync(
+            new AgentExecutionRequest(
+                request.Profile,
+                request.ApiKey,
+                ProgrammingAgentName,
+                ProgrammingAgentDescription,
+                BuildExecutionPlanInstructions(request),
+                BuildExecutionPlanMessages(request.Messages),
+                CreateTools(request, observer, includeWriteTools: false, includeShellTool: false),
+                CreateContextProviders()),
+            onTextDelta: null,
+            cancellationToken);
+
+        var blueprint = TryParseExecutionPlan(result.FinalMarkdown);
+        return blueprint is null
+            ? BuildFallbackExecutionPlan(request, result.FinalMarkdown)
+            : MaterializeExecutionPlan(request, blueprint);
+    }
+
+    private async Task<AgentExecutionResult> ProduceExecutionPlanStepTurnAsync(
+        ChatTurnRequest request,
+        ChannelWriter<ChatRuntimeEvent> writer,
+        ExecutionPlan executionPlan,
+        ExecutionPlanStep currentStep,
+        IReadOnlyList<CompletedExecutionPlanStep> completedSteps,
+        bool isFinalStep,
+        CancellationToken cancellationToken)
+    {
+        var messageId = Guid.NewGuid();
+        var startedMessage = CreateAssistantMessage(
+            request.ConversationId,
+            messageId,
+            agentId: null,
+            ProgrammingAgentName,
+            ProgrammingAgentRole);
+
+        await writer.WriteAsync(new AssistantMessageStartedEvent(startedMessage), cancellationToken);
+
+        var observer = new RuntimeToolObserver(writer, request.ConversationId, null, messageId: null);
+        try
+        {
+            var result = await _agentExecutionService.RunAsync(
+                new AgentExecutionRequest(
+                    request.Profile,
+                    request.ApiKey,
+                    ProgrammingAgentName,
+                    ProgrammingAgentDescription,
+                    BuildExecutionStepInstructions(request, executionPlan, currentStep, isFinalStep),
+                    BuildExecutionStepMessages(request.Messages, executionPlan, currentStep, completedSteps, isFinalStep),
+                    CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
+                    CreateContextProviders()),
+                (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
+                cancellationToken);
+
+            await writer.WriteAsync(
+                new AssistantMessageCompletedEvent(startedMessage with
+                {
+                    MarkdownContent = result.FinalMarkdown,
+                    Status = MessageStatus.Completed,
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                    InputTokens = result.InputTokens,
+                    OutputTokens = result.OutputTokens,
+                    DurationMs = result.Duration.TotalMilliseconds,
+                    ErrorMessage = null
+                }),
+                cancellationToken);
+
+            return result;
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            await writer.WriteAsync(
+                new AssistantMessageCompletedEvent(startedMessage with
+                {
+                    Status = MessageStatus.Failed,
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                    ErrorMessage = exception.Message
+                }),
+                cancellationToken);
+            throw;
+        }
     }
 
     private async Task ProduceBoundAgentTurnAsync(
@@ -510,6 +655,53 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 : blueprint.DocumentTitle.Trim());
     }
 
+    private ExecutionPlan MaterializeExecutionPlan(ChatTurnRequest request, ExecutionPlanBlueprint blueprint)
+    {
+        var normalizedSteps = blueprint.Steps
+            .Select(step => step with
+            {
+                Title = SanitizeExecutionPlanText(step.Title)
+            })
+            .Where(step => !string.IsNullOrWhiteSpace(step.Title))
+            .Take(MaxExecutionPlanSteps)
+            .ToArray();
+        if (normalizedSteps.Length < MinExecutionPlanSteps)
+        {
+            return BuildFallbackExecutionPlan(request, blueprint.Summary);
+        }
+
+        var usedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var steps = normalizedSteps
+            .Select((step, index) => new ExecutionPlanStep(
+                NormalizeExecutionPlanStepId(step.Id, step.Title, index + 1, usedIds),
+                step.Title.Trim(),
+                ExecutionPlanStepStatus.Pending))
+            .ToArray();
+
+        return new ExecutionPlan(
+            BuildExecutionPlanSummary(request, blueprint.Summary),
+            steps);
+    }
+
+    private static ExecutionPlan BuildFallbackExecutionPlan(ChatTurnRequest request, string? rawSummary)
+    {
+        ExecutionPlanStep[] steps = request.WorkspaceRoot is null
+            ?
+            [
+                new ExecutionPlanStep("clarify-scope", "梳理需求与约束"),
+                new ExecutionPlanStep("work-through-solution", "执行关键分析或修改"),
+                new ExecutionPlanStep("prepare-answer", "整理结果并形成答复")
+            ]
+            :
+            [
+                new ExecutionPlanStep("inspect-workspace", "检查工作区并确认切入点"),
+                new ExecutionPlanStep("execute-core-work", "执行关键检查或修改"),
+                new ExecutionPlanStep("prepare-answer", "整理结果并形成答复")
+            ];
+
+        return new ExecutionPlan(BuildExecutionPlanSummary(request, rawSummary), steps);
+    }
+
     private static IReadOnlyList<TeamAgentRecord> DeduplicateTeamAgents(IReadOnlyList<TeamAgentRecord> teamAgents)
         => teamAgents
             .GroupBy(BuildAgentKey, StringComparer.OrdinalIgnoreCase)
@@ -773,6 +965,85 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                permissionInstructions;
     }
 
+    private static string BuildExecutionPlanInstructions(ChatTurnRequest request)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Draft a compact execution plan before doing any work.");
+        builder.AppendLine("Return JSON only. Do not use Markdown fences.");
+        builder.AppendLine("Schema:");
+        builder.AppendLine("{\"summary\":\"string\",\"steps\":[{\"id\":\"string\",\"title\":\"string\"}]}");
+        builder.AppendLine("Rules:");
+        builder.AppendLine($"- Plan between {MinExecutionPlanSteps} and {MaxExecutionPlanSteps} steps.");
+        builder.AppendLine("- Keep each step title short, concrete, and action-oriented.");
+        builder.AppendLine("- Focus on the actual work needed for this request, not generic process overhead.");
+        builder.AppendLine("- Use workspace inspection tools only when they help shape a more accurate plan.");
+        builder.AppendLine("- Do not include a final user-facing answer inside the plan.");
+        if (request.WorkspaceRoot is null)
+        {
+            builder.AppendLine("- No workspace is selected, so plan around reasoning and chat-only execution.");
+        }
+        else
+        {
+            builder.AppendLine($"- The trusted workspace root is '{request.WorkspaceRoot.RootPath}'.");
+            builder.AppendLine("- You may inspect the workspace read-only via list/search/read tools while planning.");
+        }
+
+        return builder.ToString();
+    }
+
+    private static IReadOnlyList<ChatMessage> BuildExecutionPlanMessages(IReadOnlyList<MessageRecord> messages)
+        => BuildPromptMessages(messages);
+
+    private static string BuildExecutionStepInstructions(
+        ChatTurnRequest request,
+        ExecutionPlan executionPlan,
+        ExecutionPlanStep currentStep,
+        bool isFinalStep)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine(BuildProgrammingInstructions(request));
+        builder.AppendLine();
+        builder.AppendLine("Execute only the current plan step and stream a normal assistant response for this step.");
+        builder.AppendLine($"Current plan step: {currentStep.Title}");
+        builder.AppendLine($"Total steps in this plan: {executionPlan.Steps.Count}.");
+        builder.AppendLine("Respond in Markdown.");
+        builder.AppendLine("Your output for this step will be shown directly in the chat transcript, including any reasoning or tool-driven progress supported by the model.");
+        builder.AppendLine("Stay focused on the current step, avoid repeating the full recap, and mention concrete findings or actions.");
+        if (isFinalStep)
+        {
+            builder.AppendLine("Because this is the final step, end with the concrete user-facing conclusion or next action.");
+        }
+        else
+        {
+            builder.AppendLine("Because later steps still remain, do not present this as the final wrap-up.");
+        }
+
+        return builder.ToString();
+    }
+
+    private static IReadOnlyList<ChatMessage> BuildExecutionStepMessages(
+        IReadOnlyList<MessageRecord> messages,
+        ExecutionPlan executionPlan,
+        ExecutionPlanStep currentStep,
+        IReadOnlyList<CompletedExecutionPlanStep> completedSteps,
+        bool isFinalStep)
+    {
+        var promptMessages = new List<ChatMessage>(BuildPromptMessages(messages))
+        {
+            new(ChatRole.System, BuildExecutionPlanTranscript(executionPlan)),
+            new(ChatRole.System, $"Current step id: {currentStep.Id}\nCurrent step title: {currentStep.Title}\nIs final step: {isFinalStep}")
+        };
+
+        if (completedSteps.Count == 0)
+        {
+            promptMessages.Add(new ChatMessage(ChatRole.System, "No prior plan steps have been completed yet."));
+            return promptMessages;
+        }
+
+        promptMessages.Add(new ChatMessage(ChatRole.System, BuildCompletedExecutionStepTranscript(completedSteps)));
+        return promptMessages;
+    }
+
     private static string BuildBoundAgentInstructions(ChatTurnRequest request, TeamAgentRecord agent)
     {
         var builder = new StringBuilder();
@@ -981,6 +1252,113 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         return transcript.ToString();
     }
 
+    private static string BuildExecutionPlanTranscript(ExecutionPlan executionPlan)
+    {
+        var transcript = new StringBuilder();
+        transcript.AppendLine("Execution plan:");
+        if (!string.IsNullOrWhiteSpace(executionPlan.Summary))
+        {
+            transcript.AppendLine(executionPlan.Summary.Trim());
+        }
+
+        foreach (var step in executionPlan.Steps)
+        {
+            transcript.AppendLine($"- [{step.Id}] {step.Title}");
+        }
+
+        return transcript.ToString();
+    }
+
+    private static string BuildCompletedExecutionStepTranscript(IReadOnlyList<CompletedExecutionPlanStep> completedSteps)
+    {
+        var transcript = new StringBuilder();
+        transcript.AppendLine("Completed execution notes:");
+
+        foreach (var step in completedSteps)
+        {
+            transcript.AppendLine();
+            transcript.AppendLine($"## [{step.Step.Id}] {step.Step.Title}");
+            transcript.AppendLine(step.Markdown);
+        }
+
+        return transcript.ToString();
+    }
+
+    private static string BuildExecutionPlanSummary(ChatTurnRequest request, string? rawSummary)
+    {
+        var sanitizedSummary = SanitizeExecutionPlanText(rawSummary);
+        if (!string.IsNullOrWhiteSpace(sanitizedSummary))
+        {
+            var summary = sanitizedSummary.ReplaceLineEndings(" ").Trim();
+            return summary.Length > 160 ? summary[..160].TrimEnd() + "..." : summary;
+        }
+
+        var latestPrompt = request.Messages.LastOrDefault(message => message.Role == MessageRole.User)?.MarkdownContent;
+        if (!string.IsNullOrWhiteSpace(latestPrompt))
+        {
+            var normalized = latestPrompt.ReplaceLineEndings(" ").Trim();
+            if (normalized.Length > 80)
+            {
+                normalized = normalized[..80].TrimEnd() + "...";
+            }
+
+            return $"围绕“{normalized}”的执行计划。";
+        }
+
+        return "按步骤执行当前请求，并在完成后整理结果。";
+    }
+
+    private static string? SanitizeExecutionPlanText(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var strippedThinking = Regex.Replace(
+            raw,
+            @"(?is)<!--selfclaw:think:start-->.*?<!--selfclaw:think:end-->",
+            " ");
+        strippedThinking = Regex.Replace(
+            strippedThinking,
+            @"(?is)<!--selfclaw:think:start-->.*$",
+            " ");
+        strippedThinking = strippedThinking.Replace("<!--selfclaw:think:end-->", " ", StringComparison.OrdinalIgnoreCase);
+
+        var visibleContent = AssistantMessageSegmenter.Split(strippedThinking).ContentMarkdown;
+        if (string.IsNullOrWhiteSpace(visibleContent))
+        {
+            return null;
+        }
+
+        return Regex.Replace(
+            visibleContent.ReplaceLineEndings(" ").Trim(),
+            @"\s{2,}",
+            " ");
+    }
+
+    private static string NormalizeExecutionPlanStepId(
+        string? rawId,
+        string title,
+        int index,
+        ISet<string> usedIds)
+    {
+        var baseId = Slugify(string.IsNullOrWhiteSpace(rawId) ? title : rawId);
+        if (string.IsNullOrWhiteSpace(baseId) || string.Equals(baseId, "team-summary", StringComparison.Ordinal))
+        {
+            baseId = $"step-{index}";
+        }
+
+        var candidate = baseId;
+        var suffix = 2;
+        while (!usedIds.Add(candidate))
+        {
+            candidate = $"{baseId}-{suffix++}";
+        }
+
+        return candidate;
+    }
+
     private IList<AITool> CreateTools(
         ChatTurnRequest request,
         RuntimeToolObserver observer,
@@ -1089,6 +1467,47 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
             };
 
             return blueprint.Agents.Count == 0 ? null : blueprint;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static ExecutionPlanBlueprint? TryParseExecutionPlan(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var json = ExtractJsonObject(raw);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            var blueprint = JsonSerializer.Deserialize<ExecutionPlanBlueprint>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (blueprint is null || blueprint.Steps.Count == 0)
+            {
+                return null;
+            }
+
+            blueprint = blueprint with
+            {
+                Steps = blueprint.Steps
+                    .Where(step => !string.IsNullOrWhiteSpace(step.Title))
+                    .Take(MaxExecutionPlanSteps)
+                    .ToArray()
+            };
+
+            return blueprint.Steps.Count == 0 ? null : blueprint;
         }
         catch
         {
@@ -1257,6 +1676,18 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         string Markdown,
         bool Succeeded,
         string? ErrorMessage);
+
+    private sealed record ExecutionPlanBlueprint(
+        string? Summary,
+        IReadOnlyList<ExecutionPlanBlueprintStep> Steps);
+
+    private sealed record ExecutionPlanBlueprintStep(
+        string? Id,
+        string Title);
+
+    private sealed record CompletedExecutionPlanStep(
+        ExecutionPlanStep Step,
+        string Markdown);
 
     private sealed record DocumentDecision(
         bool ShouldExportDocument);

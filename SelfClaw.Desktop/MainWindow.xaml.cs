@@ -36,7 +36,7 @@ public partial class MainWindow : Window
     private static readonly Color TrafficGlyphLightColor = Color.FromArgb(0x8A, 0x2A, 0x37, 0x48);
 
     private readonly MainWindowViewModel _viewModel;
-    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], null, [], null, [], [], [], string.Empty, false);
+    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], null, [], null, [], [], [], false, null, string.Empty, false);
     private bool _webViewReady;
 
     public MainWindow(MainWindowViewModel viewModel)
@@ -164,6 +164,8 @@ public partial class MainWindow : Window
             channels = state.Channels,
             teamMembers = state.TeamMembers,
             agentActivities = state.AgentActivities,
+            isPlanningModeEnabled = state.IsPlanningModeEnabled,
+            planPanel = state.PlanPanel,
             statusText = state.StatusText,
             isBusy = state.IsBusy
         }, new JsonSerializerOptions
@@ -383,6 +385,9 @@ public partial class MainWindow : Window
                 }
                 case "select-theme":
                     await _viewModel.SetThemePreferenceAsync(document.RootElement.GetProperty("themeId").GetString());
+                    break;
+                case "set-plan-mode":
+                    await _viewModel.SetPlanningModeAsync(GetBool(document.RootElement, "enabled"));
                     break;
                 case "save-profile":
                     feedbackScope = "profile";

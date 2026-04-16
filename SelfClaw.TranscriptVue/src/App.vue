@@ -16,6 +16,8 @@ const state = reactive({
 	selectedWorkspaceRootId: null,
 	toolPermissionModes: [],
 	selectedToolPermissionModeId: 'requireApproval',
+	isPlanningModeEnabled: false,
+	planPanel: null,
 	teamRoundModes: [],
 	selectedTeamRoundModeId: '2',
 	teamOutputModes: [],
@@ -31,6 +33,7 @@ const state = reactive({
 
 const composerValue = ref('');
 const conversationSearch = ref('');
+const planPanelCollapsed = ref(false);
 const settingsOpen = ref(false);
 const activeSettingsSection = ref('profile');
 const settingsFeedback = ref(null);
@@ -109,8 +112,60 @@ const setTheme = (theme) => {
 const selectedProfile = computed(() => state.profiles.find((item) => item.id === state.selectedProfileId) || null);
 const selectedWorkspace = computed(() => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null);
 const visibleTeamMembers = computed(() => state.teamMembers || []);
+const isProgrammingMode = computed(() => state.selectedConversationModeId === 'programming');
 const isTeamMode = computed(() => state.selectedConversationModeId === 'team');
 const isChannelMode = computed(() => state.selectedConversationModeId === 'channel');
+const showPlanningToggle = computed(() => isProgrammingMode.value);
+const planPanel = computed(() => (isProgrammingMode.value ? state.planPanel : null));
+const showPlanPanel = computed(() => Boolean(planPanel.value?.isVisible));
+const planSteps = computed(() => planPanel.value?.steps || []);
+const currentPlanStepMeta = computed(() => {
+	const steps = planSteps.value;
+	if (!steps.length) {
+		return { index: 0, total: 0, status: planPanel.value?.state || 'planning' };
+	}
+
+	const runningIndex = steps.findIndex((step) => step.status === 'running');
+	if (runningIndex >= 0) {
+		return { index: runningIndex + 1, total: steps.length, status: 'running' };
+	}
+
+	const failedIndex = steps.findIndex((step) => step.status === 'failed');
+	if (failedIndex >= 0) {
+		return { index: failedIndex + 1, total: steps.length, status: 'failed' };
+	}
+
+	const cancelledIndex = steps.findIndex((step) => step.status === 'cancelled');
+	if (cancelledIndex >= 0) {
+		return { index: cancelledIndex + 1, total: steps.length, status: 'cancelled' };
+	}
+
+	const completedCount = steps.filter((step) => step.status === 'completed').length;
+	return {
+		index: Math.min(Math.max(completedCount, 1), steps.length),
+		total: steps.length,
+		status: completedCount === steps.length ? 'completed' : 'pending',
+	};
+});
+const collapsedPlanText = computed(() => {
+	const meta = currentPlanStepMeta.value;
+	if (!meta.total) {
+		return planPanel.value?.state === 'planning' ? '正在梳理计划' : '准备执行';
+	}
+
+	switch (meta.status) {
+		case 'running':
+			return `执行到第 ${meta.index} / ${meta.total} 个任务`;
+		case 'completed':
+			return `已完成 ${meta.total} / ${meta.total} 个任务`;
+		case 'failed':
+			return `第 ${meta.index} / ${meta.total} 个任务失败`;
+		case 'cancelled':
+			return `已停止在第 ${meta.index} / ${meta.total} 个任务`;
+		default:
+			return `准备执行第 ${meta.index} / ${meta.total} 个任务`;
+	}
+});
 const firstChannel = computed(() => (state.channels && state.channels.length > 0 ? state.channels[0] : null));
 const fallbackStatusText = computed(() => state.statusText || (state.isBusy ? '处理中' : '就绪'));
 const selectedThemeLabel = computed(
@@ -278,6 +333,24 @@ watch(
 	}
 );
 
+watch(
+	() => showPlanPanel.value,
+	(isVisible) => {
+		if (!isVisible) {
+			planPanelCollapsed.value = false;
+		}
+	}
+);
+
+watch(
+	() => planPanel.value?.state,
+	(stateValue, previousStateValue) => {
+		if (stateValue === 'planning' && previousStateValue !== 'planning') {
+			planPanelCollapsed.value = false;
+		}
+	}
+);
+
 watch(settingsOpen, async (isOpen) => {
 	if (!isOpen) {
 		return;
@@ -294,6 +367,8 @@ function normalizeState() {
 	state.selectedConversationModeId = state.selectedConversationModeId || 'programming';
 	state.toolPermissionModes = state.toolPermissionModes || [];
 	state.selectedToolPermissionModeId = state.selectedToolPermissionModeId || 'requireApproval';
+	state.isPlanningModeEnabled = Boolean(state.isPlanningModeEnabled);
+	state.planPanel = state.planPanel || null;
 	state.teamRoundModes = state.teamRoundModes || [];
 	state.selectedTeamRoundModeId = state.selectedTeamRoundModeId || '2';
 	state.teamOutputModes = state.teamOutputModes || [];
@@ -1085,6 +1160,14 @@ function onPermissionChange(event) {
 	post({ type: 'select-tool-permission', permissionModeId: event.target.value });
 }
 
+function onPlanningModeChange(event) {
+	post({ type: 'set-plan-mode', enabled: Boolean(event.target.checked) });
+}
+
+function togglePlanPanelCollapse() {
+	planPanelCollapsed.value = !planPanelCollapsed.value;
+}
+
 function onTeamRoundChange(event) {
 	post({ type: 'select-team-max-rounds', roundsId: event.target.value });
 }
@@ -1204,11 +1287,43 @@ onUnmounted(() => {
 	window.chrome?.webview?.removeEventListener?.('message', handleWebViewMessage);
 	document.removeEventListener('keydown', onDocumentKeydown);
 });
+
+function planPanelStatusLabel(stateValue) {
+	switch (stateValue) {
+		case 'planning':
+			return '规划中';
+		case 'executing':
+			return '执行中';
+		case 'completed':
+			return '已完成';
+		case 'failed':
+			return '失败';
+		case 'cancelled':
+			return '已停止';
+		default:
+			return '计划中';
+	}
+}
+
+function planStepStatusLabel(status) {
+	switch (status) {
+		case 'running':
+			return '执行中';
+		case 'completed':
+			return '已完成';
+		case 'failed':
+			return '失败';
+		case 'cancelled':
+			return '已停止';
+		default:
+			return '待执行';
+	}
+}
 </script>
 
 <template>
-	<div class="transcript-vue-app" :class="{ busy: state.isBusy }" @click="handleDelegatedClick" @wheel.capture.passive="onRootWheel"
-		@pointerdown.capture="onRootPointerDown">
+	<div class="transcript-vue-app" :class="{ busy: state.isBusy }" @click="handleDelegatedClick"
+		@wheel.capture.passive="onRootWheel" @pointerdown.capture="onRootPointerDown">
 		<div class="app-shell">
 			<aside class="panel sidebar">
 				<div class="brand">
@@ -1246,7 +1361,7 @@ onUnmounted(() => {
 							@click="selectConversationMode(mode.id)">
 							{{ mode.label }}
 						</button>
-						
+
 					</div>
 					<div class="topbar-right">
 						<div id="topbar-model-pill" class="context-pill" :title="currentModelLabel">
@@ -1262,18 +1377,69 @@ onUnmounted(() => {
 				</div>
 
 				<section class="panel transcript-panel">
-					<div id="transcript-scroll" ref="transcriptScrollRef" class="transcript-scroll"
-						v-html="messagesHtml" @scroll="onTranscriptScroll"></div>
+					<div id="transcript-scroll" ref="transcriptScrollRef" class="transcript-scroll" :class="{
+						'with-floating-plan': showPlanPanel,
+						'with-floating-plan-collapsed': showPlanPanel && planPanelCollapsed,
+					}" v-html="messagesHtml" @scroll="onTranscriptScroll"></div>
 				</section>
 
 				<section class="panel composer-panel">
+					<div v-if="showPlanPanel && planPanel" class="plan-floating-shell"
+						:class="{ collapsed: planPanelCollapsed }">
+						<div class="plan-panel" :class="[planPanel.state, { collapsed: planPanelCollapsed }]">
+							<div class="plan-panel-head">
+								<div class="plan-panel-copy">
+									<div class="plan-panel-title">{{ planPanel.title }}</div>
+									<div class="plan-panel-status-text">
+										{{ planPanelCollapsed ? collapsedPlanText : planPanel.statusText }}
+									</div>
+								</div>
+								<div class="plan-panel-head-actions">
+									<div class="plan-panel-badge">{{ planPanelStatusLabel(planPanel.state) }}</div>
+									<button class="plan-panel-toggle" type="button"
+										:aria-label="planPanelCollapsed ? '展开任务计划' : '折叠任务计划'"
+										:title="planPanelCollapsed ? '展开任务计划' : '折叠任务计划'"
+										@click.stop="togglePlanPanelCollapse">
+										<span class="plan-panel-toggle-chevron"
+											:class="{ collapsed: planPanelCollapsed }">⌄</span>
+									</button>
+								</div>
+							</div>
+							<div v-if="planPanelCollapsed" class="plan-panel-collapsed-row">
+								<div class="plan-panel-collapsed-label">当前进度</div>
+								<div class="plan-panel-collapsed-value">{{ collapsedPlanText }}</div>
+							</div>
+							<template v-else>
+								<div v-if="planPanel.summary" class="plan-panel-summary">{{ planPanel.summary }}</div>
+								<div v-if="planSteps.length > 0" class="plan-step-list">
+									<div v-for="step in planSteps" :key="step.id" class="plan-step"
+										:class="step.status">
+										<div class="plan-step-leading" aria-hidden="true">
+											<span v-if="step.status === 'running'" class="plan-step-spinner"></span>
+											<span v-else class="plan-step-dot"></span>
+										</div>
+										<div class="plan-step-body">
+											<div class="plan-step-title">{{ step.title }}</div>
+										</div>
+										<div class="plan-step-badge">{{ planStepStatusLabel(step.status) }}</div>
+									</div>
+								</div>
+								<div v-else class="plan-panel-placeholder">
+									<div class="plan-panel-placeholder-row">
+										<span class="plan-step-spinner"></span>
+										<span>正在梳理当前请求的执行步骤</span>
+									</div>
+								</div>
+							</template>
+						</div>
+					</div>
 
 					<div class="composer-grid">
 						<div class="composer-surface">
 							<div class="composer-stack">
 								<textarea id="composer" ref="composerRef" v-model="composerValue" class="composer-box"
-								:disabled="isChannelMode" :placeholder="composerPlaceholder" @input="onComposerInput"
-								@keydown="onComposerKeydown"></textarea>
+									:disabled="isChannelMode" :placeholder="composerPlaceholder"
+									@input="onComposerInput" @keydown="onComposerKeydown"></textarea>
 								<div id="mention-picker" class="mention-picker"
 									:class="{ open: mentionState.open && mentionCandidates.length > 0 }">
 									<button v-for="(item, index) in mentionCandidates" :key="item.id"
@@ -1307,12 +1473,31 @@ onUnmounted(() => {
 												:value="option.id">{{ option.label }}</option>
 										</select>
 									</template>
-									<select v-else id="composer-permission-select" class="composer-inline-select"
-										aria-label="工具权限模式" :value="state.selectedToolPermissionModeId"
-										@change="onPermissionChange">
-										<option v-for="option in state.toolPermissionModes" :key="option.id"
-											:value="option.id">{{ option.label }}</option>
-									</select>
+									<template v-else>
+										<select id="composer-permission-select" class="composer-inline-select"
+											aria-label="工具权限模式" :value="state.selectedToolPermissionModeId"
+											@change="onPermissionChange">
+											<option v-for="option in state.toolPermissionModes" :key="option.id"
+												:value="option.id">{{ option.label }}</option>
+										</select>
+										<label v-if="showPlanningToggle" class="plan-mode-toggle"
+											:class="{ disabled: state.isBusy, active: state.isPlanningModeEnabled }">
+											<span class="plan-mode-icon" aria-hidden="true">
+												<svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
+													stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+													<path d="M2.5 3.5h6"></path>
+													<path d="M2.5 8h4.5"></path>
+													<path d="M2.5 12.5h5.5"></path>
+													<path d="m11 3.5 2.5 2.5-4.5 4.5H6.5V8.5L11 3.5Z"></path>
+												</svg>
+											</span>
+											<span class="plan-mode-label">计划模式</span>
+											<input class="toggle-input" type="checkbox"
+												:checked="state.isPlanningModeEnabled" :disabled="state.isBusy"
+												@change="onPlanningModeChange" />
+											<span class="toggle-switch"></span>
+										</label>
+									</template>
 								</div>
 								<button id="send-button" class="send-btn"
 									:class="{ loading: state.isBusy, idle: !state.isBusy }" type="button"
@@ -1462,7 +1647,9 @@ onUnmounted(() => {
 								<div class="field-label">支持的频道</div>
 								<div class="settings-section-title">频道接入与监听</div>
 							</div>
-							<div class="settings-badge">{{ state.channels.filter((item) => item.isEnabled).length }} / {{ state.channels.length }}</div>
+							<div class="settings-badge">{{state.channels.filter((item) => item.isEnabled).length}} /
+								{{
+									state.channels.length }}</div>
 						</div>
 						<div class="channel-card-list">
 							<article v-for="channel in state.channels" :key="channel.id" class="channel-card"
@@ -1470,7 +1657,8 @@ onUnmounted(() => {
 								<div class="channel-card-top">
 									<div class="channel-card-copy">
 										<div class="field-label">{{ channel.name }}</div>
-										<div class="settings-section-title">{{ channel.displayName || channel.name }}</div>
+										<div class="settings-section-title">{{ channel.displayName || channel.name }}
+										</div>
 										<div class="settings-hint">{{ channel.description }}</div>
 									</div>
 									<label class="toggle-field channel-toggle">
@@ -1481,15 +1669,18 @@ onUnmounted(() => {
 									</label>
 								</div>
 								<div class="selected-summary-grid channel-summary-grid">
-									<div v-for="summary in channel.summaryItems" :key="summary.label" class="selected-summary-card">
+									<div v-for="summary in channel.summaryItems" :key="summary.label"
+										class="selected-summary-card">
 										<div class="selected-summary-label">{{ summary.label }}</div>
 										<div class="selected-summary-value">{{ summary.value }}</div>
 									</div>
 								</div>
-								<div v-if="channel.statusDetail" class="settings-hint channel-status-detail">{{ channel.statusDetail }}</div>
+								<div v-if="channel.statusDetail" class="settings-hint channel-status-detail">{{
+									channel.statusDetail }}</div>
 								<div class="channel-card-actions">
 									<div class="settings-badge">{{ channel.statusLabel }}</div>
-									<button class="ghost-btn compact-btn" type="button" @click="openEditor('channel', 'edit', channel)">配置</button>
+									<button class="ghost-btn compact-btn" type="button"
+										@click="openEditor('channel', 'edit', channel)">配置</button>
 								</div>
 							</article>
 						</div>
@@ -1524,7 +1715,8 @@ onUnmounted(() => {
 					<div>
 						<div class="editor-title">
 							{{ editorState.kind === 'profile' ? (editorState.mode === 'create' ? '新增模型配置' : '编辑模型配置') :
-								editorState.kind === 'channel' ? '编辑频道配置' : editorState.mode === 'create' ? '新增工作区' : '编辑工作区' }}
+								editorState.kind === 'channel' ? '编辑频道配置' : editorState.mode === 'create' ? '新增工作区' :
+							'编辑工作区' }}
 						</div>
 						<div class="settings-hint">
 							{{
@@ -1534,9 +1726,9 @@ onUnmounted(() => {
 										: '你可以更新当前模型配置和采样参数；如果不需要替换密钥，API Key 留空即可。'
 									: editorState.kind === 'channel'
 										? '填写频道名称、绑定模型和当前渠道要求的连接字段后保存；开启开关后就会开始接收该渠道消息。'
-								: editorState.mode === 'create'
-									? '填写名称并选择本机目录后保存，工作区会自动加入下拉列表并设为当前选择。'
-									: '在这里调整当前工作区的显示名称或重新选择目录，然后保存变更。'
+										: editorState.mode === 'create'
+											? '填写名称并选择本机目录后保存，工作区会自动加入下拉列表并设为当前选择。'
+											: '在这里调整当前工作区的显示名称或重新选择目录，然后保存变更。'
 							}}
 						</div>
 					</div>
@@ -1618,27 +1810,30 @@ onUnmounted(() => {
 						<div class="field-inline">
 							<div>
 								<div class="field-label">频道名称</div>
-								<input id="editor-channel-display-name" v-model="editorState.draft.displayName" class="field-input"
-									type="text" placeholder="例如：我的飞书" />
+								<input id="editor-channel-display-name" v-model="editorState.draft.displayName"
+									class="field-input" type="text" placeholder="例如：我的飞书" />
 							</div>
 							<div>
 								<div class="field-label">绑定模型</div>
-								<select id="editor-channel-profile" v-model="editorState.draft.profileId" class="field-select">
+								<select id="editor-channel-profile" v-model="editorState.draft.profileId"
+									class="field-select">
 									<option value="">请选择模型</option>
-									<option v-for="option in state.profiles" :key="option.id" :value="option.id">{{ option.label }}</option>
+									<option v-for="option in state.profiles" :key="option.id" :value="option.id">{{
+										option.label }}</option>
 								</select>
 							</div>
 						</div>
 						<div v-for="field in editorState.draft.fields" :key="field.key">
 							<div class="field-label">{{ field.label }}</div>
-							<textarea v-if="field.kind === 'multiline'" v-model="field.value" class="field-input field-textarea"
-								:placeholder="field.placeholder || ''"></textarea>
+							<textarea v-if="field.kind === 'multiline'" v-model="field.value"
+								class="field-input field-textarea" :placeholder="field.placeholder || ''"></textarea>
 							<input v-else-if="field.kind === 'secret'" v-model="field.value" class="field-input"
 								type="password"
 								:placeholder="field.hasValue ? '留空则保留现有密钥' : (field.placeholder || '请填写')" />
 							<input v-else v-model="field.value" class="field-input" type="text"
 								:placeholder="field.placeholder || ''" />
-							<div v-if="field.description" class="settings-hint channel-field-hint">{{ field.description }}</div>
+							<div v-if="field.description" class="settings-hint channel-field-hint">{{ field.description
+								}}</div>
 						</div>
 					</template>
 

@@ -49,8 +49,10 @@
 }
 
 .composer-surface {
+	position: relative;
 	border-radius: 20px;
 	padding: 12px 12px 9px;
+	overflow: visible;
 }
 
 .composer-box {
@@ -66,6 +68,7 @@
 
 .composer-controls {
 	gap: 8px;
+	width: 80%;
 }
 
 .composer-inline-select {
@@ -95,6 +98,356 @@
 .send-btn-spinner {
 	width: 20px;
 	height: 20px;
+}
+
+.composer-panel {
+	position: relative;
+}
+
+.plan-floating-shell {
+	position: absolute;
+	left: 6px;
+	right: 6px;
+	bottom: calc(100% - 4px);
+	z-index: 12;
+	pointer-events: none;
+}
+
+.plan-floating-shell.collapsed {
+	bottom: calc(100% - 2px);
+}
+
+.plan-panel {
+	pointer-events: auto;
+	padding: 9px 10px 10px;
+	border: 1px solid rgba(var(--accent-rgb), 0.18);
+	border-radius: 16px;
+	background:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 42%),
+		linear-gradient(135deg, rgba(var(--accent-rgb), 0.12), rgba(16, 22, 31, 0.18)), var(--panel-muted);
+	box-shadow:
+		0 18px 34px rgba(0, 0, 0, 0.16),
+		inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.plan-panel.collapsed {
+	padding-bottom: 8px;
+}
+
+.plan-panel.completed {
+	border-color: rgba(124, 145, 187, 0.22);
+	background: linear-gradient(180deg, rgba(124, 145, 187, 0.06), transparent 44%), var(--panel-muted);
+}
+
+.plan-panel.failed,
+.plan-panel.cancelled {
+	border-color: rgba(225, 102, 102, 0.26);
+	background: linear-gradient(180deg, rgba(225, 102, 102, 0.08), transparent 44%), var(--panel-muted);
+}
+
+.plan-panel-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.plan-panel-copy {
+	min-width: 0;
+}
+
+.plan-panel-title {
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.01em;
+	color: var(--text);
+}
+
+.plan-panel-status-text {
+	margin-top: 2px;
+	font-size: 11px;
+	color: var(--muted);
+}
+
+.plan-panel-head-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	flex: 0 0 auto;
+}
+
+.plan-panel-badge {
+	flex: 0 0 auto;
+	padding: 4px 8px;
+	border-radius: 999px;
+	border: 1px solid rgba(var(--accent-rgb), 0.16);
+	background: rgba(255, 255, 255, 0.06);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	color: var(--text);
+}
+
+.plan-panel-toggle {
+	width: 26px;
+	height: 26px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid rgba(255, 255, 255, 0.06);
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.04);
+	color: var(--muted);
+	padding: 0;
+}
+
+.plan-panel-toggle:hover {
+	background: rgba(255, 255, 255, 0.07);
+	color: var(--text);
+}
+
+.plan-panel-toggle-chevron {
+	font-size: 14px;
+	line-height: 1;
+	transform: translateY(5px) rotate(180deg);
+	transition: transform 160ms ease;
+}
+
+.plan-panel-toggle-chevron.collapsed {
+	transform: translateY(-5px) rotate(0deg);
+}
+
+.plan-panel-summary {
+	margin-top: 8px;
+	font-size: 11px;
+	line-height: 1.5;
+	color: var(--muted);
+}
+
+.plan-step-list {
+	margin-top: 8px;
+	display: grid;
+	gap: 6px;
+}
+
+.plan-step {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 8px;
+	padding: 7px 8px;
+	border-radius: 11px;
+	border: 1px solid rgba(255, 255, 255, 0.05);
+	background: rgba(255, 255, 255, 0.03);
+	transition:
+		border-color 160ms ease,
+		background 160ms ease,
+		transform 160ms ease;
+}
+
+.plan-step.running {
+	border-color: rgba(66, 211, 128, 0.28);
+	background: rgba(66, 211, 128, 0.08);
+}
+
+.plan-step.completed {
+	border-color: rgba(126, 146, 184, 0.18);
+	background: rgba(126, 146, 184, 0.06);
+}
+
+.plan-step.failed,
+.plan-step.cancelled {
+	border-color: rgba(229, 112, 112, 0.22);
+	background: rgba(229, 112, 112, 0.08);
+}
+
+.plan-step-leading {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 14px;
+	height: 14px;
+}
+
+.plan-step-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: rgba(255, 255, 255, 0.44);
+	box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
+}
+
+.plan-step.running .plan-step-dot {
+	background: #42d380;
+}
+
+.plan-step.completed .plan-step-dot {
+	background: #8ca4c9;
+}
+
+.plan-step.failed .plan-step-dot,
+.plan-step.cancelled .plan-step-dot {
+	background: #e57070;
+}
+
+.plan-step-spinner {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	border: 1.75px solid rgba(255, 255, 255, 0.16);
+	border-top-color: #42d380;
+	animation: plan-step-spin 0.9s linear infinite;
+}
+
+.plan-step-body {
+	min-width: 0;
+}
+
+.plan-step-title {
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.35;
+	color: var(--text);
+}
+
+.plan-step.completed .plan-step-title {
+	color: var(--muted);
+	text-decoration: line-through;
+	text-decoration-thickness: 1.5px;
+	text-decoration-color: rgba(140, 164, 201, 0.65);
+}
+
+.plan-step-badge {
+	flex: 0 0 auto;
+	padding: 3px 7px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.05);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	color: var(--muted);
+}
+
+.plan-step.running .plan-step-badge {
+	color: #89e0ae;
+}
+
+.plan-step.completed .plan-step-badge {
+	color: #a9bdd9;
+}
+
+.plan-step.failed .plan-step-badge,
+.plan-step.cancelled .plan-step-badge {
+	color: #ffb1b1;
+}
+
+.plan-panel-placeholder {
+	margin-top: 8px;
+	padding: 8px 10px;
+	border-radius: 11px;
+	border: 1px dashed rgba(var(--accent-rgb), 0.18);
+	background: rgba(255, 255, 255, 0.02);
+}
+
+.plan-panel-placeholder-row {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 11px;
+	color: var(--muted);
+}
+
+.plan-panel-collapsed-row {
+	margin-top: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 7px 8px;
+	border-radius: 11px;
+	border: 1px solid rgba(255, 255, 255, 0.05);
+	background: rgba(255, 255, 255, 0.03);
+}
+
+.plan-panel-collapsed-label {
+	flex: 0 0 auto;
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--muted);
+}
+
+.plan-panel-collapsed-value {
+	min-width: 0;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text);
+	text-align: right;
+}
+
+.plan-mode-toggle {
+	margin-top: 0;
+	display: inline-grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 7px;
+	min-width: 0;
+	max-width: 146px;
+	flex: 0 1 146px;
+	padding: 5px 8px 5px 9px;
+	border-radius: 999px;
+	border: 1px solid var(--border);
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent), var(--panel-muted);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	overflow: hidden;
+}
+
+.plan-mode-toggle.disabled {
+	opacity: 0.68;
+	cursor: not-allowed;
+}
+
+.plan-mode-toggle.active {
+	border-color: rgba(var(--accent-rgb), 0.36);
+	background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.18), rgba(99, 198, 255, 0.08)), var(--panel-elevated);
+	box-shadow:
+		0 10px 22px rgba(var(--accent-rgb), 0.14),
+		inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.plan-mode-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 14px;
+	height: 14px;
+	color: var(--muted);
+}
+
+.plan-mode-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.plan-mode-label {
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--text);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.plan-mode-toggle.active .plan-mode-icon,
+.plan-mode-toggle.active .plan-mode-label {
+	color: color-mix(in srgb, var(--accent-2) 54%, white 46%);
+}
+
+@keyframes plan-step-spin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .settings-overlay {
@@ -365,8 +718,9 @@
 }
 
 .toggle-input:checked + .toggle-switch {
-	background: rgba(var(--accent-rgb), 0.28);
-	border-color: rgba(var(--accent-rgb), 0.4);
+	background: rgba(var(--accent-rgb), 0.42);
+	border-color: rgba(var(--accent-rgb), 0.56);
+	box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.1);
 }
 
 .toggle-input:checked + .toggle-switch::after {
@@ -492,9 +846,16 @@
 	}
 
 	.composer-inline-select,
-	.permission-select {
+	.permission-select,
+	.plan-mode-toggle {
 		width: 100%;
 		max-width: none;
+	}
+
+	.plan-floating-shell {
+		left: 0;
+		right: 0;
+		bottom: calc(100% + 6px);
 	}
 }
 
@@ -677,6 +1038,67 @@ html[data-theme='light'] .tool-block {
 	border-color: #d7e1ee;
 	background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 249, 252, 0.96));
 	box-shadow: inset 0 1px rgba(255, 255, 255, 0.9);
+}
+
+html[data-theme='light'] .plan-panel {
+	border-color: rgba(89, 120, 173, 0.16);
+	background: linear-gradient(180deg, rgba(89, 120, 173, 0.08), rgba(255, 255, 255, 0.96)), #f8fbff;
+	box-shadow:
+		0 16px 30px rgba(31, 46, 69, 0.08),
+		inset 0 1px rgba(255, 255, 255, 0.92);
+}
+
+html[data-theme='light'] .plan-panel.completed {
+	border-color: rgba(123, 145, 182, 0.22);
+}
+
+html[data-theme='light'] .plan-panel.failed,
+html[data-theme='light'] .plan-panel.cancelled {
+	border-color: rgba(224, 112, 112, 0.2);
+	background: linear-gradient(180deg, rgba(224, 112, 112, 0.1), rgba(255, 255, 255, 0.96)), #fffafa;
+}
+
+html[data-theme='light'] .plan-panel-badge,
+html[data-theme='light'] .plan-step-badge,
+html[data-theme='light'] .plan-mode-toggle {
+	background: rgba(255, 255, 255, 0.78);
+}
+
+html[data-theme='light'] .plan-panel-toggle {
+	background: rgba(255, 255, 255, 0.8);
+	border-color: #dde6f1;
+}
+
+html[data-theme='light'] .plan-mode-toggle.active {
+	border-color: rgba(var(--accent-rgb), 0.28);
+	background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.12), rgba(255, 255, 255, 0.92)), #ffffff;
+	box-shadow:
+		0 12px 24px rgba(78, 112, 235, 0.08),
+		inset 0 1px 0 rgba(255, 255, 255, 0.94);
+}
+
+html[data-theme='light'] .plan-mode-toggle.active .plan-mode-icon,
+html[data-theme='light'] .plan-mode-toggle.active .plan-mode-label {
+	color: var(--accent);
+}
+
+html[data-theme='light'] .plan-step {
+	border-color: #dde6f1;
+	background: rgba(255, 255, 255, 0.72);
+}
+
+html[data-theme='light'] .plan-step.completed .plan-step-title {
+	text-decoration-color: rgba(112, 138, 180, 0.56);
+}
+
+.transcript-scroll.with-floating-plan {
+	padding-bottom: 160px;
+	scroll-padding-bottom: 164px;
+}
+
+.transcript-scroll.with-floating-plan-collapsed {
+	padding-bottom: 108px;
+	scroll-padding-bottom: 112px;
 }
 
 html[data-theme='light'] .tool-block.running {

@@ -55,6 +55,7 @@ public sealed partial class MainWindowViewModel
         }
 
         SelectedConversationMode = nextMode;
+        ClearPlanPanelState(publishShell: false);
 
         if (IsBusy)
         {

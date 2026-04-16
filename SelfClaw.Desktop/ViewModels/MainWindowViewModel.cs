@@ -80,6 +80,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private ThemeOption? _selectedThemeOption;
     private ThemeMode _activeThemeMode = ThemeMode.System;
     private string _effectiveTranscriptTheme = "light";
+    private bool _isPlanningModeEnabled;
+    private TranscriptPlanPanel? _planPanel;
     private ConversationMode _selectedConversationMode = ConversationMode.Programming;
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
     private int _selectedTeamMaxRounds = TeamDiscussionDefaults.DefaultMaxRounds;
@@ -184,6 +186,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
         private set => SetProperty(ref _effectiveTranscriptTheme, value);
     }
 
+    public bool IsPlanningModeEnabled
+    {
+        get => _isPlanningModeEnabled;
+        private set
+        {
+            if (SetProperty(ref _isPlanningModeEnabled, value))
+            {
+                PublishShell(false);
+            }
+        }
+    }
+
     public ConversationMode SelectedConversationMode
     {
         get => _selectedConversationMode;
@@ -243,8 +257,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 return;
             }
 
+            ClearPlanPanelState(publishShell: false);
+
             if (value is not null)
             {
+                PublishShell(false);
                 _ = LoadConversationAsync(value);
             }
             else
@@ -411,6 +428,27 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public Task SetConversationModeAsync(string? modeId)
         => SetConversationModeCoreAsync(ParseConversationMode(modeId));
+
+    public Task SetPlanningModeAsync(bool enabled)
+    {
+        if (IsBusy)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (IsPlanningModeEnabled == enabled)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (!enabled)
+        {
+            ClearPlanPanelState(publishShell: false);
+        }
+
+        IsPlanningModeEnabled = enabled;
+        return Task.CompletedTask;
+    }
 
     public async Task DeleteConversationAsync(Guid conversationId)
     {
@@ -895,9 +933,19 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
+        var usePlanningMode = SelectedConversationMode == ConversationMode.Programming && IsPlanningModeEnabled;
         IsBusy = true;
         ComposerText = string.Empty;
-        StatusText = "Streaming response...";
+        ClearPlanPanelState(publishShell: false);
+        if (usePlanningMode)
+        {
+            StatusText = "Processing request...";
+        }
+        else
+        {
+            StatusText = "Streaming response...";
+        }
+
         _turnCancellationSource = new CancellationTokenSource();
         var activeMessageIds = new HashSet<Guid>();
         TeamDocumentReadyEvent? pendingTeamDocument = null;
@@ -979,18 +1027,34 @@ public sealed partial class MainWindowViewModel : ObservableObject
                                    requestMessages,
                                    requestTeamAgents,
                                    requestContextMessages,
-                                   runningBoundAgent),
+                                   runningBoundAgent,
+                                   usePlanningMode),
                                _turnCancellationSource.Token))
             {
                 switch (update)
                 {
+                    case ExecutionPlanDraftingStartedEvent:
+                        BeginPlanPanelDrafting();
+                        StatusText = "Drafting plan...";
+                        break;
                     case AssistantMessageStartedEvent started:
                         activeMessageIds.Add(started.Message.Id);
                         ReplaceMessage(started.Message);
+                        if (usePlanningMode && _planPanel is null)
+                        {
+                            StatusText = "Streaming response...";
+                        }
+
                         RequestStreamingShellPublish(true);
                         break;
                     case AssistantDeltaEvent delta:
                         ApplyAssistantDelta(delta.MessageId, delta.DeltaMarkdown);
+                        break;
+                    case ExecutionPlanPreparedEvent prepared:
+                        ApplyPreparedExecutionPlan(prepared.Plan);
+                        break;
+                    case ExecutionPlanStepStatusChangedEvent planStepStatus:
+                        ApplyExecutionPlanStepStatus(planStepStatus.StepId, planStepStatus.Status);
                         break;
                     case ToolExecutionStartedEvent toolStarted:
                         var startedRecord = CaptureToolRunAnchor(toolStarted.Record);
@@ -1025,6 +1089,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 await FinalizeTeamDocumentExportAsync(conversation, pendingTeamDocument, _turnCancellationSource.Token);
             }
 
+            if (usePlanningMode)
+            {
+                FinalizePlanPanelAfterSuccessfulTurn();
+            }
+
             if (runningBoundAgent is not null)
             {
                 await UpdateTeamAgentStatusAsync(runningBoundAgent.Id, TeamAgentStatus.Completed);
@@ -1036,6 +1105,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             await FailActiveMessagesAsync(activeMessageIds, "Generation stopped.");
+            if (usePlanningMode && _planPanel is not null)
+            {
+                MarkPlanPanelCancelled();
+            }
+
             if (runningBoundAgent is not null)
             {
                 await UpdateTeamAgentStatusAsync(runningBoundAgent.Id, TeamAgentStatus.Failed);
@@ -1048,6 +1122,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             _logger.LogError(exception, "Chat turn failed.");
             await FailActiveMessagesAsync(activeMessageIds, exception.Message);
+            if (usePlanningMode && _planPanel is not null)
+            {
+                MarkPlanPanelFailed(exception.Message);
+            }
+
             if (runningBoundAgent is not null)
             {
                 await UpdateTeamAgentStatusAsync(runningBoundAgent.Id, TeamAgentStatus.Failed);
@@ -1062,6 +1141,248 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _turnCancellationSource = null;
             IsBusy = false;
         }
+    }
+
+    private void BeginPlanPanelDrafting()
+    {
+        _planPanel = new TranscriptPlanPanel(
+            true,
+            "planning",
+            "计划模式",
+            null,
+            "正在梳理计划",
+            []);
+        PublishShell(false);
+    }
+
+    private void ApplyPreparedExecutionPlan(ExecutionPlan plan)
+    {
+        _planPanel = new TranscriptPlanPanel(
+            true,
+            "executing",
+            "计划模式",
+            string.IsNullOrWhiteSpace(plan.Summary) ? null : plan.Summary,
+            "准备执行",
+            plan.Steps
+                .Select(step => new TranscriptPlanStep(
+                    step.Id,
+                    step.Title,
+                    step.Status.ToString().ToLowerInvariant()))
+                .ToArray());
+        PublishShell(false);
+    }
+
+    private void ApplyExecutionPlanStepStatus(string stepId, ExecutionPlanStepStatus status)
+    {
+        if (_planPanel is null || _planPanel.Steps.Count == 0)
+        {
+            return;
+        }
+
+        var nextStatus = status.ToString().ToLowerInvariant();
+        var changed = false;
+        var nextSteps = _planPanel.Steps
+            .Select(step =>
+            {
+                if (!string.Equals(step.Id, stepId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return step;
+                }
+
+                changed = true;
+                return step with { Status = nextStatus };
+            })
+            .ToArray();
+        if (!changed)
+        {
+            return;
+        }
+
+        var nextState = ResolvePlanPanelState(nextSteps);
+        _planPanel = _planPanel with
+        {
+            State = nextState,
+            StatusText = BuildPlanPanelStatusText(nextSteps, nextState),
+            Steps = nextSteps
+        };
+
+        StatusText = status switch
+        {
+            ExecutionPlanStepStatus.Running => BuildPlanExecutionStatusText(nextSteps),
+            ExecutionPlanStepStatus.Failed => "Plan execution failed.",
+            ExecutionPlanStepStatus.Cancelled => "Generation stopped.",
+            _ when nextState == "completed" => "Plan steps completed.",
+            _ => StatusText
+        };
+
+        PublishShell(false);
+    }
+
+    private void FinalizePlanPanelAfterSuccessfulTurn()
+    {
+        if (_planPanel is null || _planPanel.State is "failed" or "cancelled")
+        {
+            return;
+        }
+
+        var steps = _planPanel.Steps.ToArray();
+        if (steps.Length == 0)
+        {
+            _planPanel = _planPanel with
+            {
+                State = "completed",
+                StatusText = "已完成"
+            };
+        }
+        else if (steps.All(step => string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase)))
+        {
+            _planPanel = _planPanel with
+            {
+                State = "completed",
+                StatusText = "全部步骤已完成"
+            };
+        }
+
+        PublishShell(false);
+    }
+
+    private void MarkPlanPanelFailed(string errorMessage)
+    {
+        if (_planPanel is null)
+        {
+            _planPanel = new TranscriptPlanPanel(
+                true,
+                "failed",
+                "计划模式",
+                string.IsNullOrWhiteSpace(errorMessage) ? null : errorMessage,
+                "计划执行失败",
+                []);
+            PublishShell(false);
+            return;
+        }
+
+        if (string.Equals(_planPanel.State, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var nextSteps = _planPanel.Steps
+            .Select(step => string.Equals(step.Status, "running", StringComparison.OrdinalIgnoreCase)
+                ? step with { Status = "failed" }
+                : step)
+            .ToArray();
+
+        _planPanel = _planPanel with
+        {
+            State = "failed",
+            Summary = string.IsNullOrWhiteSpace(errorMessage) ? _planPanel.Summary : errorMessage,
+            StatusText = "计划执行失败",
+            Steps = nextSteps
+        };
+        PublishShell(false);
+    }
+
+    private void MarkPlanPanelCancelled()
+    {
+        if (_planPanel is null)
+        {
+            _planPanel = new TranscriptPlanPanel(
+                true,
+                "cancelled",
+                "计划模式",
+                null,
+                "已停止执行",
+                []);
+            PublishShell(false);
+            return;
+        }
+
+        if (string.Equals(_planPanel.State, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var nextSteps = _planPanel.Steps
+            .Select(step => string.Equals(step.Status, "running", StringComparison.OrdinalIgnoreCase)
+                ? step with { Status = "cancelled" }
+                : step)
+            .ToArray();
+
+        _planPanel = _planPanel with
+        {
+            State = "cancelled",
+            StatusText = "已停止执行",
+            Steps = nextSteps
+        };
+        PublishShell(false);
+    }
+
+    private void ClearPlanPanelState(bool publishShell)
+    {
+        _planPanel = TranscriptPlanPanel.Hidden;
+        if (publishShell)
+        {
+            PublishShell(false);
+        }
+    }
+
+    private static string ResolvePlanPanelState(IReadOnlyList<TranscriptPlanStep> steps)
+    {
+        if (steps.Any(step => string.Equals(step.Status, "failed", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "failed";
+        }
+
+        if (steps.Any(step => string.Equals(step.Status, "cancelled", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "cancelled";
+        }
+
+        if (steps.Count > 0 && steps.All(step => string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "completed";
+        }
+
+        return "executing";
+    }
+
+    private static string BuildPlanPanelStatusText(IReadOnlyList<TranscriptPlanStep> steps, string panelState)
+    {
+        if (string.Equals(panelState, "failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "有步骤执行失败";
+        }
+
+        if (string.Equals(panelState, "cancelled", StringComparison.OrdinalIgnoreCase))
+        {
+            return "已停止执行";
+        }
+
+        if (string.Equals(panelState, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return "全部步骤已完成";
+        }
+
+        var runningEntry = steps
+            .Select((step, index) => (Step: step, Index: index))
+            .FirstOrDefault(entry => string.Equals(entry.Step.Status, "running", StringComparison.OrdinalIgnoreCase));
+        var runningIndex = runningEntry.Step is null ? -1 : runningEntry.Index;
+
+        return runningIndex >= 0
+            ? $"执行第 {runningIndex + 1}/{steps.Count} 步"
+            : "准备执行";
+    }
+
+    private static string BuildPlanExecutionStatusText(IReadOnlyList<TranscriptPlanStep> steps)
+    {
+        var runningEntry = steps
+            .Select((step, index) => (Step: step, Index: index))
+            .FirstOrDefault(entry => string.Equals(entry.Step.Status, "running", StringComparison.OrdinalIgnoreCase));
+        var runningIndex = runningEntry.Step is null ? -1 : runningEntry.Index;
+
+        return runningIndex >= 0
+            ? $"Executing step {runningIndex + 1}/{steps.Count}..."
+            : "Executing plan...";
     }
 
     private void Stop() => _turnCancellationSource?.Cancel();
@@ -1359,6 +1680,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var themeOptions = ThemeOptions
             .Select(option => new ShellSelectOption(ThemePreferenceToId(option.Value), option.Label))
             .ToArray();
+        var planPanel = SelectedConversationMode == ConversationMode.Programming
+            ? _planPanel ?? TranscriptPlanPanel.Hidden
+            : TranscriptPlanPanel.Hidden;
 
         TranscriptChanged?.Invoke(this, new TranscriptRenderState(
             orderedItems,
@@ -1384,6 +1708,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _channelManager.BuildTranscriptChannels(Profiles.ToArray()),
             teamMembers,
             AgentActivityNodes.ToArray(),
+            IsPlanningModeEnabled,
+            planPanel,
             StatusText,
             IsBusy));
     }
