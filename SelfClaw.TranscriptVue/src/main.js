@@ -1,6 +1,5 @@
 ﻿import { createApp } from 'vue';
 import App from './App.vue';
-import './generated/legacy-transcript.css';
-import './app.css';
+import './transcript.css';
 
 createApp(App).mount('#app');

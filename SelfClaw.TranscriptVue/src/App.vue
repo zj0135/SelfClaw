@@ -1,6 +1,24 @@
-﻿<script setup>
+<script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
-import { renderConversationList, renderMessages, renderStepsHeader, renderStepsPanelContent } from './utils/renderers';
+import ComposerPanel from './components/ComposerPanel.vue';
+import ConversationSidebar from './components/ConversationSidebar.vue';
+import EditorModal from './components/EditorModal.vue';
+import MainTopbar from './components/MainTopbar.vue';
+import SettingsModal from './components/SettingsModal.vue';
+import StepsPanel from './components/StepsPanel.vue';
+import TranscriptPanel from './components/TranscriptPanel.vue';
+import { renderConversationList, renderMessages, renderStepsHeader, renderStepsPanelContent } from './renderers';
+import {
+	createChannelDraft,
+	createProfileDraft,
+	createWorkspaceDraft,
+	emptyChannel,
+	emptyProfile,
+	emptyWorkspace,
+	formatSamplingValue,
+	normalizeSamplingValue,
+	validateEditorDraft,
+} from './utils/editor';
 
 const state = reactive({
 	items: [],
@@ -64,11 +82,11 @@ const mentionState = reactive({
 	activeIndex: 0,
 });
 
-const composerRef = ref(null);
-const conversationListRef = ref(null);
-const transcriptScrollRef = ref(null);
-const stepsScrollRef = ref(null);
-const settingsPanelRef = ref(null);
+const sidebarRef = ref(null);
+const transcriptPanelRef = ref(null);
+const composerPanelRef = ref(null);
+const stepsPanelRef = ref(null);
+const settingsModalRef = ref(null);
 
 const openActivities = new Set();
 const openThoughts = new Set();
@@ -85,30 +103,31 @@ const pointerActionSuppressDurationMs = 700;
 let pendingStatePayload = null;
 let renderFrameHandle = 0;
 
-const emptyProfile = () => ({
-	profileId: null,
-	name: '',
-	endpoint: '',
-	model: '',
-	temperatureEnabled: false,
-	temperature: 0.7,
-	topPEnabled: false,
-	topP: 0.7,
-	apiKey: '',
-});
-const emptyWorkspace = () => ({ workspaceRootId: null, name: '', rootPath: '' });
-const emptyChannel = () => ({
-	channelId: 'feishu',
-	displayName: '',
-	profileId: '',
-	fields: [],
-});
-
 const post = (message) => window.chrome?.webview?.postMessage(message);
 
 const setTheme = (theme) => {
 	document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
 };
+
+function getConversationListElement() {
+	return sidebarRef.value?.getConversationListEl?.() ?? null;
+}
+
+function getTranscriptScrollElement() {
+	return transcriptPanelRef.value?.getScrollEl?.() ?? null;
+}
+
+function getComposerElement() {
+	return composerPanelRef.value?.getComposerEl?.() ?? null;
+}
+
+function getStepsScrollElement() {
+	return stepsPanelRef.value?.getScrollEl?.() ?? null;
+}
+
+function getSettingsPanelElement() {
+	return settingsModalRef.value?.getPanelEl?.() ?? null;
+}
 
 const selectedProfile = computed(() => state.profiles.find((item) => item.id === state.selectedProfileId) || null);
 const selectedWorkspace = computed(() => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null);
@@ -358,8 +377,9 @@ watch(settingsOpen, async (isOpen) => {
 	}
 
 	await nextTick();
-	if (settingsPanelRef.value) {
-		settingsPanelRef.value.scrollTop = settingsPanelScrollTop.value;
+	const panel = getSettingsPanelElement();
+	if (panel) {
+		panel.scrollTop = settingsPanelScrollTop.value;
 	}
 });
 
@@ -416,7 +436,7 @@ function syncMentionState(target) {
 }
 
 function applyMentionSelection(agent) {
-	const target = composerRef.value;
+	const target = getComposerElement();
 	if (!(target instanceof HTMLTextAreaElement) || !agent || mentionState.start < 0 || mentionState.end < mentionState.start) {
 		return;
 	}
@@ -443,59 +463,10 @@ function submitComposer() {
 	closeMentionPicker();
 }
 
-function profileDraft() {
-	const profile = selectedProfile.value;
-	return {
-		profileId: profile?.id || null,
-		name: profile?.label || '',
-		endpoint: profile?.description || '',
-		model: state.selectedProfileModel || '',
-		temperatureEnabled: Boolean(profile?.temperatureEnabled),
-		temperature: normalizeSamplingValue(profile?.temperature, 0.7, 2),
-		topPEnabled: Boolean(profile?.topPEnabled),
-		topP: normalizeSamplingValue(profile?.topP, 0.7, 1),
-		apiKey: '',
-	};
-}
-
-function workspaceDraft() {
-	const workspace = selectedWorkspace.value;
-	return {
-		workspaceRootId: workspace?.id || null,
-		name: workspace?.label || '',
-		rootPath: workspace?.description || '',
-	};
-}
-
-function channelDraft(channel) {
-	return {
-		channelId: channel?.id || 'feishu',
-		displayName: channel?.displayName || '',
-		profileId: channel?.profileId || '',
-		fields: (channel?.fields || []).map((field) => ({
-			...field,
-			value: field.kind === 'secret' ? '' : field.value || '',
-		})),
-	};
-}
-
 function clearFeedback(scope) {
 	if (settingsFeedback.value && (!scope || !settingsFeedback.value.scope || settingsFeedback.value.scope === scope)) {
 		settingsFeedback.value = null;
 	}
-}
-
-function normalizeSamplingValue(value, fallback, max) {
-	const numeric = Number(value);
-	if (Number.isNaN(numeric) || !Number.isFinite(numeric)) {
-		return fallback;
-	}
-
-	return Math.max(0, Math.min(max, Number(numeric.toFixed(2))));
-}
-
-function formatSamplingValue(value, max) {
-	return normalizeSamplingValue(value, 0.7, max).toFixed(2);
 }
 
 function editorScope() {
@@ -521,14 +492,14 @@ function openEditor(kind, mode, payload = null) {
 	editorState.draft =
 		kind === 'profile'
 			? mode === 'edit' && state.selectedProfileId
-				? profileDraft()
+				? createProfileDraft(selectedProfile.value, state.selectedProfileModel)
 				: emptyProfile()
 			: kind === 'workspace'
 				? mode === 'edit' && state.selectedWorkspaceRootId
-					? workspaceDraft()
+					? createWorkspaceDraft(selectedWorkspace.value)
 					: emptyWorkspace()
 				: payload
-					? channelDraft(payload)
+					? createChannelDraft(payload)
 					: emptyChannel();
 	editorState.feedback = null;
 	clearFeedback(scope);
@@ -540,53 +511,6 @@ function closeEditor() {
 	editorState.mode = 'create';
 	editorState.draft = null;
 	editorState.feedback = null;
-}
-
-function validateDraft() {
-	if (!editorState.open || !editorState.draft) {
-		return '没有可保存的表单内容。';
-	}
-
-	if (editorState.kind === 'profile') {
-		if (!editorState.draft.name.trim() || !editorState.draft.endpoint.trim() || !editorState.draft.model.trim()) {
-			return '请完整填写配置名称、Endpoint 和模型。';
-		}
-
-		if (editorState.mode === 'create' && !editorState.draft.apiKey.trim()) {
-			return '新增配置时必须提供 API Key。';
-		}
-
-		return null;
-	}
-
-	if (editorState.kind === 'channel') {
-		if (!editorState.draft.displayName.trim()) {
-			return '请填写频道名称。';
-		}
-
-		if (!editorState.draft.profileId) {
-			return '请先为频道绑定模型。';
-		}
-
-		for (const field of editorState.draft.fields || []) {
-			const hasText = Boolean((field.value || '').trim());
-			if (field.required && field.kind === 'secret' && !field.hasValue && !hasText) {
-				return `请填写${field.label}。`;
-			}
-
-			if (field.required && field.kind !== 'secret' && !hasText) {
-				return `请填写${field.label}。`;
-			}
-		}
-
-		return null;
-	}
-
-	if (!editorState.draft.rootPath.trim()) {
-		return '请先选择工作区位置。';
-	}
-
-	return null;
 }
 
 function captureScroll(element) {
@@ -643,7 +567,7 @@ function syncConversationMenuPlacement() {
 		return;
 	}
 
-	const conversationList = conversationListRef.value;
+	const conversationList = getConversationListElement();
 	const menu = conversationList?.querySelector('.conversation-menu');
 	const menuShell = menu?.parentElement;
 	if (!conversationList || !menu || !(menuShell instanceof HTMLElement)) {
@@ -664,42 +588,38 @@ function syncConversationMenuPlacement() {
 }
 
 async function preserveConversationList(mutator) {
-	const snapshot = captureScroll(conversationListRef.value);
+	const snapshot = captureScroll(getConversationListElement());
 	mutator();
 	await nextTick();
-	restoreScroll(conversationListRef.value, snapshot);
+	restoreScroll(getConversationListElement(), snapshot);
 	requestAnimationFrame(syncConversationMenuPlacement);
 }
 
 async function preserveStepsPanel(mutator) {
-	const snapshot = captureScroll(stepsScrollRef.value);
+	const snapshot = captureScroll(getStepsScrollElement());
 	mutator();
 	await nextTick();
 	if (canRestoreStepsScroll()) {
-		restoreScroll(stepsScrollRef.value, snapshot);
+		restoreScroll(getStepsScrollElement(), snapshot);
 	}
 }
 
 async function applyStatePayload(payload) {
-	const transcriptState = captureScroll(transcriptScrollRef.value);
-	const conversationState = captureScroll(conversationListRef.value);
-	const stepsState = captureScroll(stepsScrollRef.value);
+	const transcriptState = captureScroll(getTranscriptScrollElement());
+	const conversationState = captureScroll(getConversationListElement());
+	const stepsState = captureScroll(getStepsScrollElement());
 	const { type: _type, ...nextState } = payload;
 
 	Object.assign(state, nextState);
 	normalizeState();
 
 	await nextTick();
-	restoreScroll(conversationListRef.value, conversationState);
+	restoreScroll(getConversationListElement(), conversationState);
 	if (canRestoreStepsScroll()) {
-		restoreScroll(stepsScrollRef.value, stepsState);
+		restoreScroll(getStepsScrollElement(), stepsState);
 	}
 
-	restoreScroll(
-		transcriptScrollRef.value,
-		transcriptState,
-		canAutoFollowTranscript(transcriptState)
-	);
+	restoreScroll(getTranscriptScrollElement(), transcriptState, canAutoFollowTranscript(transcriptState));
 	requestAnimationFrame(syncConversationMenuPlacement);
 }
 
@@ -981,18 +901,15 @@ async function handleDelegatedClick(event) {
 				openConversationMenuId.value = null;
 				post({ type: 'delete-conversation', conversationId: actionElement.getAttribute('data-conversation-id') });
 				return;
-			case 'toggle-thinking': {
+			case 'toggle-thinking':
 				toggleThinking(actionElement);
 				return;
-			}
-			case 'toggle-tool-segment': {
+			case 'toggle-tool-segment':
 				toggleToolSegment(actionElement);
 				return;
-			}
-			case 'toggle-tool-group': {
+			case 'toggle-tool-group':
 				toggleToolGroup(actionElement);
 				return;
-			}
 			case 'toggle-team-member': {
 				const memberId = actionElement.getAttribute('data-member-id');
 				if (!memberId) {
@@ -1082,9 +999,7 @@ function onTranscriptScroll(event) {
 		return;
 	}
 
-	if (!nearBottom) {
-		scrollFollowState.transcript = false;
-	}
+	scrollFollowState.transcript = false;
 }
 
 function onRootWheel(event) {
@@ -1154,8 +1069,9 @@ async function selectSettingsSection(sectionId) {
 	activeSettingsSection.value = sectionId;
 	settingsPanelScrollTop.value = 0;
 	await nextTick();
-	if (settingsPanelRef.value) {
-		settingsPanelRef.value.scrollTop = 0;
+	const panel = getSettingsPanelElement();
+	if (panel) {
+		panel.scrollTop = 0;
 	}
 }
 
@@ -1171,61 +1087,65 @@ function closeSettings() {
 	closeEditor();
 }
 
+function onConversationSearchChange(value) {
+	conversationSearch.value = value;
+}
+
 function onConversationSearchInput() {
 	if (openConversationMenuId.value) {
 		openConversationMenuId.value = null;
 	}
 }
 
-function onProfileSelectChange(event) {
-	post({ type: 'select-profile', profileId: event.target.value });
+function onProfileSelectChange(profileId) {
+	post({ type: 'select-profile', profileId });
 }
 
-function onSettingsProfileChange(event) {
+function onSettingsProfileChange(profileId) {
 	clearFeedback('profile');
-	post({ type: 'select-profile', profileId: event.target.value });
+	post({ type: 'select-profile', profileId });
 }
 
-function onWorkspaceChange(event) {
+function onWorkspaceChange(workspaceRootId) {
 	clearFeedback('workspace');
-	post({ type: 'select-workspace', workspaceRootId: event.target.value || null });
+	post({ type: 'select-workspace', workspaceRootId: workspaceRootId || null });
 }
 
-function onPermissionChange(event) {
-	post({ type: 'select-tool-permission', permissionModeId: event.target.value });
+function onPermissionChange(permissionModeId) {
+	post({ type: 'select-tool-permission', permissionModeId });
 }
 
-function onPlanningModeChange(event) {
-	post({ type: 'set-plan-mode', enabled: Boolean(event.target.checked) });
+function onPlanningModeChange(enabled) {
+	post({ type: 'set-plan-mode', enabled: Boolean(enabled) });
 }
 
 function togglePlanPanelCollapse() {
 	planPanelCollapsed.value = !planPanelCollapsed.value;
 }
 
-function onTeamRoundChange(event) {
-	post({ type: 'select-team-max-rounds', roundsId: event.target.value });
+function onTeamRoundChange(roundsId) {
+	post({ type: 'select-team-max-rounds', roundsId });
 }
 
-function onTeamOutputChange(event) {
-	post({ type: 'select-team-output-mode', outputModeId: event.target.value });
+function onTeamOutputChange(outputModeId) {
+	post({ type: 'select-team-output-mode', outputModeId });
 }
 
-function onThemeChange(event) {
-	post({ type: 'select-theme', themeId: event.target.value });
+function onThemeChange(themeId) {
+	post({ type: 'select-theme', themeId });
 }
 
-function toggleChannelEnabled(channel, event) {
+function toggleChannelEnabled({ channel, enabled }) {
 	clearFeedback('channels');
 	post({
 		type: 'toggle-channel',
 		channelId: channel.id,
-		enabled: Boolean(event.target.checked),
+		enabled: Boolean(enabled),
 	});
 }
 
 function saveEditor() {
-	const error = validateDraft();
+	const error = validateEditorDraft(editorState);
 	if (error) {
 		editorState.feedback = { level: 'error', message: error, scope: editorScope() };
 		return;
@@ -1248,9 +1168,7 @@ function saveEditor() {
 	}
 
 	if (editorState.kind === 'channel') {
-		const fieldValues = Object.fromEntries(
-			(editorState.draft.fields || []).map((field) => [field.key, field.value || ''])
-		);
+		const fieldValues = Object.fromEntries((editorState.draft.fields || []).map((field) => [field.key, field.value || '']));
 		post({
 			type: 'save-channel',
 			channelId: editorState.draft.channelId,
@@ -1304,11 +1222,8 @@ function onSendClick() {
 	submitComposer();
 }
 
-function onSettingsPanelScroll(event) {
-	const panel = event.target instanceof HTMLElement ? event.target : null;
-	if (panel) {
-		settingsPanelScrollTop.value = panel.scrollTop;
-	}
+function onSettingsPanelScroll(scrollTop) {
+	settingsPanelScrollTop.value = scrollTop;
 }
 
 onMounted(() => {
@@ -1322,578 +1237,131 @@ onUnmounted(() => {
 	window.chrome?.webview?.removeEventListener?.('message', handleWebViewMessage);
 	document.removeEventListener('keydown', onDocumentKeydown);
 });
-
-function planPanelStatusLabel(stateValue) {
-	switch (stateValue) {
-		case 'planning':
-			return '规划中';
-		case 'executing':
-			return '执行中';
-		case 'completed':
-			return '已完成';
-		case 'failed':
-			return '失败';
-		case 'cancelled':
-			return '已停止';
-		default:
-			return '计划中';
-	}
-}
-
-function planStepStatusLabel(status) {
-	switch (status) {
-		case 'running':
-			return '执行中';
-		case 'completed':
-			return '已完成';
-		case 'failed':
-			return '失败';
-		case 'cancelled':
-			return '已停止';
-		default:
-			return '待执行';
-	}
-}
 </script>
 
 <template>
-	<div class="transcript-vue-app" :class="{ busy: state.isBusy }" @click="handleDelegatedClick"
-		@wheel.capture.passive="onRootWheel" @pointerdown.capture="onRootPointerDown">
+	<div
+		class="transcript-vue-app"
+		:class="{ busy: state.isBusy }"
+		@click="handleDelegatedClick"
+		@wheel.capture.passive="onRootWheel"
+		@pointerdown.capture="onRootPointerDown"
+	>
 		<div class="app-shell">
-			<aside class="panel sidebar">
-				<div class="brand">
-					<div class="brand-badge">SC</div>
-					<div>
-						<div class="brand-name">SelfClaw</div>
-						<div class="status-row">
-							<span class="status-dot"></span>
-							<span id="sidebar-status-text">{{ fallbackStatusText }}</span>
-						</div>
-					</div>
-				</div>
-				<button class="sidebar-primary" type="button" :disabled="isChannelMode"
-					:title="isChannelMode ? '频道会话由外部消息自动创建' : '新建对话'" @click="newConversation">+ 新建对话</button>
-				<input id="conversation-search" v-model="conversationSearch" class="search-box" type="text"
-					placeholder="搜索会话..." @input="onConversationSearchInput" />
-				<div class="section-title">{{ conversationSectionTitle }}</div>
-				<div id="conversation-list" ref="conversationListRef" class="conversation-list"
-					v-html="conversationListHtml"></div>
-				<button class="sidebar-footer" type="button" @click="openSettings">
-					<div class="avatar">SC</div>
-					<div class="sidebar-footer-copy">
-						<div class="sidebar-footer-title">系统设置</div>
-						<div class="sidebar-footer-subtitle">模型、工作区、我的频道、主题</div>
-					</div>
-					<div>&rsaquo;</div>
-				</button>
-			</aside>
+			<ConversationSidebar
+				ref="sidebarRef"
+				:fallback-status-text="fallbackStatusText"
+				:is-channel-mode="isChannelMode"
+				:conversation-search="conversationSearch"
+				:conversation-section-title="conversationSectionTitle"
+				:conversation-list-html="conversationListHtml"
+				@new-conversation="newConversation"
+				@open-settings="openSettings"
+				@search-change="onConversationSearchChange"
+				@search-input="onConversationSearchInput"
+			/>
 
 			<main class="main-column">
-				<div class="panel topbar">
-					<div id="mode-chip-row" class="chip-row">
-						<button v-for="mode in state.conversationModes" :key="mode.id" class="mode-chip"
-							:class="{ active: mode.id === state.selectedConversationModeId }" type="button"
-							@click="selectConversationMode(mode.id)">
-							{{ mode.label }}
-						</button>
+				<MainTopbar
+					:conversation-modes="state.conversationModes"
+					:selected-conversation-mode-id="state.selectedConversationModeId"
+					:current-model-label="currentModelLabel"
+					:current-workspace-label="currentWorkspaceLabel"
+					@select-conversation-mode="selectConversationMode"
+					@open-settings="openSettings"
+				/>
 
-					</div>
-					<div class="topbar-right">
-						<div id="topbar-model-pill" class="context-pill" :title="currentModelLabel">
-							<span class="context-label">模型</span>
-							<span id="topbar-model-value" class="context-value">{{ currentModelLabel }}</span>
-						</div>
-						<div id="topbar-workspace-pill" class="context-pill" :title="currentWorkspaceLabel">
-							<span class="context-label">工作区</span>
-							<span id="topbar-workspace-value" class="context-value">{{ currentWorkspaceLabel }}</span>
-						</div>
-						<button class="icon-btn" type="button" aria-label="打开系统设置" @click="openSettings">设置</button>
-					</div>
-				</div>
+				<TranscriptPanel
+					ref="transcriptPanelRef"
+					:messages-html="messagesHtml"
+					:show-plan-panel="showPlanPanel"
+					:plan-panel-collapsed="planPanelCollapsed"
+					@scroll="onTranscriptScroll"
+				/>
 
-				<section class="panel transcript-panel">
-					<div id="transcript-scroll" ref="transcriptScrollRef" class="transcript-scroll" :class="{
-						'with-floating-plan': showPlanPanel,
-						'with-floating-plan-collapsed': showPlanPanel && planPanelCollapsed,
-					}" v-html="messagesHtml" @scroll="onTranscriptScroll"></div>
-				</section>
-
-				<section class="panel composer-panel">
-					<div v-if="showPlanPanel && planPanel" class="plan-floating-shell"
-						:class="{ collapsed: planPanelCollapsed }">
-						<div class="plan-panel" :class="[planPanel.state, { collapsed: planPanelCollapsed }]">
-							<div class="plan-panel-head">
-								<div class="plan-panel-copy">
-									<div class="plan-panel-title">{{ planPanel.title }}</div>
-									<div class="plan-panel-status-text">
-										{{ planPanelCollapsed ? collapsedPlanText : planPanel.statusText }}
-									</div>
-								</div>
-								<div class="plan-panel-head-actions">
-									<div class="plan-panel-badge">{{ planPanelStatusLabel(planPanel.state) }}</div>
-									<button class="plan-panel-toggle" type="button"
-										:aria-label="planPanelCollapsed ? '展开任务计划' : '折叠任务计划'"
-										:title="planPanelCollapsed ? '展开任务计划' : '折叠任务计划'"
-										@click.stop="togglePlanPanelCollapse">
-										<span class="plan-panel-toggle-chevron"
-											:class="{ collapsed: planPanelCollapsed }">⌄</span>
-									</button>
-								</div>
-							</div>
-							<div v-if="planPanelCollapsed" class="plan-panel-collapsed-row">
-								<div class="plan-panel-collapsed-label">当前进度</div>
-								<div class="plan-panel-collapsed-value">{{ collapsedPlanText }}</div>
-							</div>
-							<template v-else>
-								<div v-if="planPanel.summary" class="plan-panel-summary">{{ planPanel.summary }}</div>
-								<div v-if="planSteps.length > 0" class="plan-step-list">
-									<div v-for="step in planSteps" :key="step.id" class="plan-step"
-										:class="step.status">
-										<div class="plan-step-leading" aria-hidden="true">
-											<span v-if="step.status === 'running'" class="plan-step-spinner"></span>
-											<span v-else class="plan-step-dot"></span>
-										</div>
-										<div class="plan-step-body">
-											<div class="plan-step-title">{{ step.title }}</div>
-										</div>
-										<div class="plan-step-badge">{{ planStepStatusLabel(step.status) }}</div>
-									</div>
-								</div>
-								<div v-else class="plan-panel-placeholder">
-									<div class="plan-panel-placeholder-row">
-										<span class="plan-step-spinner"></span>
-										<span>正在梳理当前请求的执行步骤</span>
-									</div>
-								</div>
-							</template>
-						</div>
-					</div>
-
-					<div class="composer-grid">
-						<div class="composer-surface">
-							<div class="composer-stack">
-								<textarea id="composer" ref="composerRef" v-model="composerValue" class="composer-box"
-									:disabled="isChannelMode" :placeholder="composerPlaceholder"
-									@input="onComposerInput" @keydown="onComposerKeydown"></textarea>
-								<div id="mention-picker" class="mention-picker"
-									:class="{ open: mentionState.open && mentionCandidates.length > 0 }">
-									<button v-for="(item, index) in mentionCandidates" :key="item.id"
-										class="mention-option" :class="{ active: index === mentionState.activeIndex }"
-										type="button" @click.stop="applyMentionSelection(item)">
-										<span class="mention-option-name">@{{ item.name }}</span>
-										<span class="mention-option-role">{{ item.role }}</span>
-									</button>
-								</div>
-							</div>
-							<div class="composer-footer">
-								<div class="composer-controls">
-									<select id="composer-profile-select" class="composer-inline-select"
-										aria-label="当前模型配置" :value="state.selectedProfileId || ''"
-										@change="onProfileSelectChange">
-										<option value="">选择模型</option>
-										<option v-for="option in state.profiles" :key="option.id" :value="option.id">{{
-											option.label }}</option>
-									</select>
-									<template v-if="isTeamMode">
-										<select id="composer-team-round-select" class="composer-inline-select"
-											aria-label="团队最大讨论轮次" :value="state.selectedTeamRoundModeId"
-											@change="onTeamRoundChange">
-											<option v-for="option in state.teamRoundModes" :key="option.id"
-												:value="option.id">{{ option.label }}</option>
-										</select>
-										<select id="composer-team-output-select" class="composer-inline-select"
-											aria-label="团队总结输出方式" :value="state.selectedTeamOutputModeId"
-											@change="onTeamOutputChange">
-											<option v-for="option in state.teamOutputModes" :key="option.id"
-												:value="option.id">{{ option.label }}</option>
-										</select>
-									</template>
-									<template v-else>
-										<select id="composer-permission-select" class="composer-inline-select"
-											aria-label="工具权限模式" :value="state.selectedToolPermissionModeId"
-											@change="onPermissionChange">
-											<option v-for="option in state.toolPermissionModes" :key="option.id"
-												:value="option.id">{{ option.label }}</option>
-										</select>
-										<label v-if="showPlanningToggle" class="plan-mode-toggle"
-											:class="{ disabled: state.isBusy, active: state.isPlanningModeEnabled }">
-											<span class="plan-mode-icon" aria-hidden="true">
-												<svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
-													stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-													<path d="M2.5 3.5h6"></path>
-													<path d="M2.5 8h4.5"></path>
-													<path d="M2.5 12.5h5.5"></path>
-													<path d="m11 3.5 2.5 2.5-4.5 4.5H6.5V8.5L11 3.5Z"></path>
-												</svg>
-											</span>
-											<span class="plan-mode-label">计划模式</span>
-											<input class="toggle-input" type="checkbox"
-												:checked="state.isPlanningModeEnabled" :disabled="state.isBusy"
-												@change="onPlanningModeChange" />
-											<span class="toggle-switch"></span>
-										</label>
-									</template>
-								</div>
-								<button id="send-button" class="send-btn"
-									:class="{ loading: state.isBusy, idle: !state.isBusy }" type="button"
-									:disabled="sendButtonDisabled" :aria-label="state.isBusy ? '停止生成' : '发送消息'"
-									:title="state.isBusy ? '停止生成' : '发送消息'" @click="onSendClick">
-									<span v-if="state.isBusy" class="send-btn-spinner" aria-hidden="true">
-										<span class="send-btn-spinner-ring"></span>
-										<span class="send-btn-spinner-core"></span>
-									</span>
-									<span v-else class="send-btn-arrow" aria-hidden="true">
-										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-											stroke-linecap="round" stroke-linejoin="round">
-											<path d="M12 19V7"></path>
-											<path d="m6 11 6-6 6 6"></path>
-										</svg>
-									</span>
-								</button>
-							</div>
-						</div>
-					</div>
-				</section>
+				<ComposerPanel
+					ref="composerPanelRef"
+					:show-plan-panel="showPlanPanel"
+					:plan-panel="planPanel"
+					:plan-steps="planSteps"
+					:plan-panel-collapsed="planPanelCollapsed"
+					:collapsed-plan-text="collapsedPlanText"
+					:composer-value="composerValue"
+					:composer-placeholder="composerPlaceholder"
+					:is-channel-mode="isChannelMode"
+					:mention-state="mentionState"
+					:mention-candidates="mentionCandidates"
+					:profiles="state.profiles"
+					:selected-profile-id="state.selectedProfileId || ''"
+					:is-team-mode="isTeamMode"
+					:team-round-modes="state.teamRoundModes"
+					:selected-team-round-mode-id="state.selectedTeamRoundModeId"
+					:team-output-modes="state.teamOutputModes"
+					:selected-team-output-mode-id="state.selectedTeamOutputModeId"
+					:tool-permission-modes="state.toolPermissionModes"
+					:selected-tool-permission-mode-id="state.selectedToolPermissionModeId"
+					:show-planning-toggle="showPlanningToggle"
+					:is-busy="state.isBusy"
+					:is-planning-mode-enabled="state.isPlanningModeEnabled"
+					:send-button-disabled="sendButtonDisabled"
+					@composer-input="onComposerInput"
+					@composer-keydown="onComposerKeydown"
+					@apply-mention="applyMentionSelection"
+					@select-profile="onProfileSelectChange"
+					@select-team-round="onTeamRoundChange"
+					@select-team-output="onTeamOutputChange"
+					@select-permission="onPermissionChange"
+					@toggle-planning-mode="onPlanningModeChange"
+					@toggle-plan-panel-collapse="togglePlanPanelCollapse"
+					@send-click="onSendClick"
+				/>
 			</main>
 
-			<aside id="steps-panel-shell" class="panel steps-panel">
-				<div id="steps-header" class="steps-header" v-html="stepsHeaderHtml"></div>
-				<div id="steps-scroll" ref="stepsScrollRef" class="steps-scroll" v-html="stepsPanelHtml"></div>
-			</aside>
+			<StepsPanel ref="stepsPanelRef" :steps-header-html="stepsHeaderHtml" :steps-panel-html="stepsPanelHtml" />
 		</div>
 
-		<div id="settings-overlay" class="settings-overlay" :class="{ open: settingsOpen }" @click.self="closeSettings">
-			<div v-if="settingsOpen" class="settings-panel" role="dialog" aria-modal="true" aria-label="系统设置">
-				<aside class="settings-nav">
-					<div class="settings-nav-header">
-						<div class="settings-title">系统设置</div>
-						<div class="settings-hint">左侧切换模块，右侧集中完成当前配置。</div>
-					</div>
+		<SettingsModal
+			ref="settingsModalRef"
+			:open="settingsOpen"
+			:settings-sections="settingsSections"
+			:active-section="activeSettingsSection"
+			:active-settings-meta="activeSettingsMeta"
+			:visible-feedback="visibleSettingsFeedback"
+			:selected-profile="selectedProfile"
+			:profiles="state.profiles"
+			:selected-profile-id="state.selectedProfileId || ''"
+			:profile-summary-cards="profileSummaryCards"
+			:selected-workspace="selectedWorkspace"
+			:workspace-roots="state.workspaceRoots"
+			:selected-workspace-root-id="state.selectedWorkspaceRootId || ''"
+			:workspace-summary-cards="workspaceSummaryCards"
+			:channels="state.channels"
+			:selected-theme-label="selectedThemeLabel"
+			:theme-options="state.themeOptions"
+			:selected-theme-id="state.selectedThemeId || 'system'"
+			@close="closeSettings"
+			@select-section="selectSettingsSection"
+			@panel-scroll="onSettingsPanelScroll"
+			@select-profile="onSettingsProfileChange"
+			@edit-profile="openEditor('profile', 'edit')"
+			@delete-profile="deleteProfile"
+			@create-profile="openEditor('profile', 'create')"
+			@select-workspace="onWorkspaceChange"
+			@edit-workspace="openEditor('workspace', 'edit')"
+			@delete-workspace="deleteWorkspace"
+			@create-workspace="openEditor('workspace', 'create')"
+			@toggle-channel="toggleChannelEnabled"
+			@edit-channel="openEditor('channel', 'edit', $event)"
+			@select-theme="onThemeChange"
+		/>
 
-					<div class="settings-nav-list">
-						<button v-for="section in settingsSections" :key="section.id" class="settings-nav-item"
-							:class="{ active: activeSettingsSection === section.id }" type="button"
-							:aria-pressed="activeSettingsSection === section.id"
-							@click="selectSettingsSection(section.id)">
-							<div class="settings-nav-item-top">
-								<div class="settings-nav-item-title">{{ section.title }}</div>
-								<div class="settings-nav-item-badge">{{ section.badge }}</div>
-							</div>
-							<div class="settings-nav-item-description">{{ section.description }}</div>
-						</button>
-					</div>
-
-					<div class="settings-nav-footer">
-						<button class="ghost-btn" type="button" @click="closeSettings">完成</button>
-					</div>
-				</aside>
-
-				<div ref="settingsPanelRef" class="settings-content" @scroll="onSettingsPanelScroll">
-					<div class="settings-header">
-						<div>
-							<div class="field-label">{{ activeSettingsMeta?.eyebrow }}</div>
-							<div class="settings-section-title settings-section-title-hero">{{ activeSettingsMeta?.title
-							}}
-							</div>
-							<div class="settings-hint settings-header-hint">{{ activeSettingsMeta?.description }}</div>
-						</div>
-						<button class="close-btn" type="button" aria-label="关闭" @click="closeSettings">&times;</button>
-					</div>
-
-					<div v-if="visibleSettingsFeedback" class="settings-feedback"
-						:class="visibleSettingsFeedback.level === 'error' ? 'error' : 'success'">
-						{{ visibleSettingsFeedback.message }}
-					</div>
-
-					<section v-if="activeSettingsSection === 'profile'"
-						class="settings-section settings-section-active">
-						<div class="settings-section-header">
-							<div class="settings-section-copy">
-								<div class="field-label">当前配置</div>
-								<div class="settings-section-title">模型选择与管理</div>
-							</div>
-							<div class="settings-badge">{{ selectedProfile ? '已选择' : '未选择' }}</div>
-						</div>
-						<div class="field-group">
-							<div class="field-label">当前配置</div>
-							<div class="settings-select-row">
-								<select id="profile-select" class="field-select" :value="state.selectedProfileId || ''"
-									@change="onSettingsProfileChange">
-									<option value="">未选择配置</option>
-									<option v-for="option in state.profiles" :key="option.id" :value="option.id">{{
-										option.label }}
-									</option>
-								</select>
-								<button class="ghost-btn compact-btn" type="button" :disabled="!selectedProfile"
-									@click="openEditor('profile', 'edit')">编辑</button>
-								<button class="ghost-btn compact-btn danger-btn" type="button"
-									:disabled="!selectedProfile" @click="deleteProfile">删除</button>
-								<button class="icon-add-btn" type="button" aria-label="新增模型配置"
-									@click="openEditor('profile', 'create')">+</button>
-							</div>
-						</div>
-						<div class="selected-summary-grid">
-							<div v-for="card in profileSummaryCards" :key="card.label" class="selected-summary-card">
-								<div class="selected-summary-label">{{ card.label }}</div>
-								<div class="selected-summary-value">{{ card.value }}</div>
-							</div>
-						</div>
-					</section>
-
-					<section v-else-if="activeSettingsSection === 'workspace'"
-						class="settings-section settings-section-active">
-						<div class="settings-section-header">
-							<div class="settings-section-copy">
-								<div class="field-label">当前工作区</div>
-								<div class="settings-section-title">工作区绑定与切换</div>
-							</div>
-							<div class="settings-badge">{{ selectedWorkspace ? '已绑定' : '未绑定' }}</div>
-						</div>
-						<div class="field-group">
-							<div class="field-label">当前工作区</div>
-							<div class="settings-select-row">
-								<select id="workspace-select" class="field-select"
-									:value="state.selectedWorkspaceRootId || ''" @change="onWorkspaceChange">
-									<option value="">未绑定工作区</option>
-									<option v-for="option in state.workspaceRoots" :key="option.id" :value="option.id">
-										{{
-											option.label }}</option>
-								</select>
-								<button class="ghost-btn compact-btn" type="button" :disabled="!selectedWorkspace"
-									@click="openEditor('workspace', 'edit')">编辑</button>
-								<button class="ghost-btn compact-btn danger-btn" type="button"
-									:disabled="!selectedWorkspace" @click="deleteWorkspace">删除</button>
-								<button class="icon-add-btn" type="button" aria-label="新增工作区"
-									@click="openEditor('workspace', 'create')">+</button>
-							</div>
-						</div>
-						<div class="selected-summary-grid">
-							<div v-for="card in workspaceSummaryCards" :key="card.label" class="selected-summary-card">
-								<div class="selected-summary-label">{{ card.label }}</div>
-								<div class="selected-summary-value">{{ card.value }}</div>
-							</div>
-						</div>
-					</section>
-
-					<section v-else-if="activeSettingsSection === 'channels'"
-						class="settings-section settings-section-active">
-						<div class="settings-section-header">
-							<div class="settings-section-copy">
-								<div class="field-label">支持的频道</div>
-								<div class="settings-section-title">频道接入与监听</div>
-							</div>
-							<div class="settings-badge">{{state.channels.filter((item) => item.isEnabled).length}} /
-								{{
-									state.channels.length }}</div>
-						</div>
-						<div class="channel-card-list">
-							<article v-for="channel in state.channels" :key="channel.id" class="channel-card"
-								:class="[{ enabled: channel.isEnabled }, channel.status]">
-								<div class="channel-card-top">
-									<div class="channel-card-copy">
-										<div class="field-label">{{ channel.name }}</div>
-										<div class="settings-section-title">{{ channel.displayName || channel.name }}
-										</div>
-										<div class="settings-hint">{{ channel.description }}</div>
-									</div>
-									<label class="toggle-field channel-toggle">
-										<input class="toggle-input" type="checkbox" :checked="channel.isEnabled"
-											@change="toggleChannelEnabled(channel, $event)" />
-										<span class="toggle-switch"></span>
-										<span class="toggle-label">{{ channel.isEnabled ? '已开启' : '已关闭' }}</span>
-									</label>
-								</div>
-								<div class="selected-summary-grid channel-summary-grid">
-									<div v-for="summary in channel.summaryItems" :key="summary.label"
-										class="selected-summary-card">
-										<div class="selected-summary-label">{{ summary.label }}</div>
-										<div class="selected-summary-value">{{ summary.value }}</div>
-									</div>
-								</div>
-								<div v-if="channel.statusDetail" class="settings-hint channel-status-detail">{{
-									channel.statusDetail }}</div>
-								<div class="channel-card-actions">
-									<div class="settings-badge">{{ channel.statusLabel }}</div>
-									<button class="ghost-btn compact-btn" type="button"
-										@click="openEditor('channel', 'edit', channel)">配置</button>
-								</div>
-							</article>
-						</div>
-					</section>
-
-					<section v-else class="settings-section settings-section-active">
-						<div class="settings-section-header">
-							<div class="settings-section-copy">
-								<div class="field-label">界面主题</div>
-								<div class="settings-section-title">主题与外观</div>
-							</div>
-							<div class="settings-badge">{{ selectedThemeLabel }}</div>
-						</div>
-						<div class="field-group">
-							<div class="field-label">界面主题</div>
-							<select id="theme-select" class="field-select" :value="state.selectedThemeId || 'system'"
-								@change="onThemeChange">
-								<option v-for="option in state.themeOptions" :key="option.id" :value="option.id">{{
-									option.label }}
-								</option>
-							</select>
-						</div>
-					</section>
-				</div>
-			</div>
-		</div>
-
-		<div id="editor-overlay" class="editor-overlay" :class="{ open: editorState.open }" @click.self="closeEditor">
-			<div v-if="editorState.open && editorState.draft" class="editor-panel" role="dialog" aria-modal="true"
-				:aria-label="editorState.kind === 'profile' ? (editorState.mode === 'create' ? '新增模型配置' : '编辑模型配置') : editorState.kind === 'channel' ? '编辑频道配置' : editorState.mode === 'create' ? '新增工作区' : '编辑工作区'">
-				<div class="editor-header">
-					<div>
-						<div class="editor-title">
-							{{ editorState.kind === 'profile' ? (editorState.mode === 'create' ? '新增模型配置' : '编辑模型配置') :
-								editorState.kind === 'channel' ? '编辑频道配置' : editorState.mode === 'create' ? '新增工作区' :
-							'编辑工作区' }}
-						</div>
-						<div class="settings-hint">
-							{{
-								editorState.kind === 'profile'
-									? editorState.mode === 'create'
-										? '填写名称、Endpoint、模型、采样参数和 API Key 后保存，新配置会自动加入下拉列表并切换到当前选择。'
-										: '你可以更新当前模型配置和采样参数；如果不需要替换密钥，API Key 留空即可。'
-									: editorState.kind === 'channel'
-										? '填写频道名称、绑定模型和当前渠道要求的连接字段后保存；开启开关后就会开始接收该渠道消息。'
-										: editorState.mode === 'create'
-											? '填写名称并选择本机目录后保存，工作区会自动加入下拉列表并设为当前选择。'
-											: '在这里调整当前工作区的显示名称或重新选择目录，然后保存变更。'
-							}}
-						</div>
-					</div>
-					<button class="close-btn" type="button" aria-label="关闭" @click="closeEditor">&times;</button>
-				</div>
-
-				<div v-if="editorState.feedback" class="settings-feedback"
-					:class="editorState.feedback.level === 'error' ? 'error' : 'success'">
-					{{ editorState.feedback.message }}
-				</div>
-
-				<div class="editor-body">
-					<template v-if="editorState.kind === 'profile'">
-						<div class="field-inline">
-							<div>
-								<div class="field-label">配置名称</div>
-								<input id="editor-profile-name" v-model="editorState.draft.name" class="field-input"
-									type="text" placeholder="例如：OpenAI / 本地代理" />
-							</div>
-							<div>
-								<div class="field-label">模型</div>
-								<input id="editor-profile-model" v-model="editorState.draft.model" class="field-input"
-									type="text" placeholder="例如：gpt-4.1-mini" />
-							</div>
-						</div>
-						<div>
-							<div class="field-label">Endpoint</div>
-							<input id="editor-profile-endpoint" v-model="editorState.draft.endpoint" class="field-input"
-								type="text" placeholder="https://api.openai.com/v1" />
-						</div>
-						<div class="field-inline field-inline-ranges">
-							<div class="range-field" :class="{ disabled: !editorState.draft.temperatureEnabled }">
-								<div class="range-header">
-									<div>
-										<div class="field-label">Temperature</div>
-										<label class="toggle-field">
-											<input id="editor-profile-temperature-enabled"
-												v-model="editorState.draft.temperatureEnabled" class="toggle-input"
-												type="checkbox" />
-											<span class="toggle-switch"></span>
-											<span class="toggle-label">启用</span>
-										</label>
-									</div>
-									<div class="range-value">{{ formatSamplingValue(editorState.draft.temperature, 2) }}
-									</div>
-								</div>
-								<input id="editor-profile-temperature" v-model.number="editorState.draft.temperature"
-									class="field-range" type="range" min="0" max="2" step="0.01"
-									:disabled="!editorState.draft.temperatureEnabled" />
-							</div>
-							<div class="range-field" :class="{ disabled: !editorState.draft.topPEnabled }">
-								<div class="range-header">
-									<div>
-										<div class="field-label">Top-P</div>
-										<label class="toggle-field">
-											<input id="editor-profile-top-p-enabled"
-												v-model="editorState.draft.topPEnabled" class="toggle-input"
-												type="checkbox" />
-											<span class="toggle-switch"></span>
-											<span class="toggle-label">启用</span>
-										</label>
-									</div>
-									<div class="range-value">{{ formatSamplingValue(editorState.draft.topP, 1) }}</div>
-								</div>
-								<input id="editor-profile-top-p" v-model.number="editorState.draft.topP"
-									class="field-range" type="range" min="0" max="1" step="0.01"
-									:disabled="!editorState.draft.topPEnabled" />
-							</div>
-						</div>
-						<div>
-							<div class="field-label">API Key</div>
-							<input id="editor-profile-api-key" v-model="editorState.draft.apiKey" class="field-input"
-								type="password"
-								:placeholder="editorState.mode === 'create' ? '新增配置时必填' : '留空则保留现有密钥'" />
-						</div>
-					</template>
-
-					<template v-else-if="editorState.kind === 'channel'">
-						<div class="field-inline">
-							<div>
-								<div class="field-label">频道名称</div>
-								<input id="editor-channel-display-name" v-model="editorState.draft.displayName"
-									class="field-input" type="text" placeholder="例如：我的飞书" />
-							</div>
-							<div>
-								<div class="field-label">绑定模型</div>
-								<select id="editor-channel-profile" v-model="editorState.draft.profileId"
-									class="field-select">
-									<option value="">请选择模型</option>
-									<option v-for="option in state.profiles" :key="option.id" :value="option.id">{{
-										option.label }}</option>
-								</select>
-							</div>
-						</div>
-						<div v-for="field in editorState.draft.fields" :key="field.key">
-							<div class="field-label">{{ field.label }}</div>
-							<textarea v-if="field.kind === 'multiline'" v-model="field.value"
-								class="field-input field-textarea" :placeholder="field.placeholder || ''"></textarea>
-							<input v-else-if="field.kind === 'secret'" v-model="field.value" class="field-input"
-								type="password"
-								:placeholder="field.hasValue ? '留空则保留现有密钥' : (field.placeholder || '请填写')" />
-							<input v-else v-model="field.value" class="field-input" type="text"
-								:placeholder="field.placeholder || ''" />
-							<div v-if="field.description" class="settings-hint channel-field-hint">{{ field.description
-								}}</div>
-						</div>
-					</template>
-
-					<template v-else>
-						<div>
-							<div class="field-label">显示名称</div>
-							<input id="editor-workspace-name" v-model="editorState.draft.name" class="field-input"
-								type="text" placeholder="例如：SelfClaw 主工作区" />
-						</div>
-						<div>
-							<div class="field-label">工作区位置</div>
-							<div class="field-picker-row">
-								<div class="field-readonly">{{ editorState.draft.rootPath || '请选择文件夹' }}</div>
-								<button class="ghost-btn compact-btn" type="button"
-									@click="pickWorkspacePath">选择</button>
-							</div>
-						</div>
-					</template>
-				</div>
-
-				<div class="editor-footer">
-					<button class="ghost-btn" type="button" @click="closeEditor">取消</button>
-					<button class="primary-btn" type="button" @click="saveEditor">保存</button>
-				</div>
-			</div>
-		</div>
+		<EditorModal
+			:open="editorState.open"
+			:editor="editorState"
+			:profiles="state.profiles"
+			@close="closeEditor"
+			@pick-workspace-path="pickWorkspacePath"
+			@save="saveEditor"
+		/>
 	</div>
 </template>
