@@ -246,7 +246,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 
         await writer.WriteAsync(new AssistantMessageStartedEvent(startedMessage), cancellationToken);
 
-        var observer = new RuntimeToolObserver(writer, request.ConversationId, null, messageId: null);
+        var observer = new RuntimeToolObserver(writer, request.ConversationId, null, messageId);
         try
         {
             var result = await _agentExecutionService.RunAsync(
