@@ -752,7 +752,7 @@ button {
 	padding: 20px 22px 24px;
 	display: flex;
 	flex-direction: column;
-	gap: 16px;
+	gap: 5px;
 	scroll-padding-bottom: 28px;
 }
 

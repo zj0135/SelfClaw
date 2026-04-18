@@ -149,7 +149,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 ProgrammingAgentName,
                 ProgrammingAgentDescription,
                 BuildProgrammingInstructions(request),
-                BuildPromptMessages(request.Messages),
+                BuildPromptMessages(request.Messages, includeAssistantSpeakerPrefix: false),
                 CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
                 CreateContextProviders()),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
@@ -756,10 +756,12 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 .First())
             .ToArray();
 
-    private static IReadOnlyList<ChatMessage> BuildPromptMessages(IReadOnlyList<MessageRecord> messages)
+    private static IReadOnlyList<ChatMessage> BuildPromptMessages(
+        IReadOnlyList<MessageRecord> messages,
+        bool includeAssistantSpeakerPrefix = true)
         => messages
             .Where(ShouldIncludeInPrompt)
-            .Select(MapMessage)
+            .Select(message => MapMessage(message, includeAssistantSpeakerPrefix))
             .ToArray();
 
     private static IReadOnlyList<ChatMessage> BuildCoordinatorPlanningMessages(
@@ -960,13 +962,17 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         return message.Status != MessageStatus.Failed;
     }
 
-    private static ChatMessage MapMessage(MessageRecord message)
+    private static ChatMessage MapMessage(
+        MessageRecord message,
+        bool includeAssistantSpeakerPrefix)
     {
         var content = message.Role == MessageRole.Assistant
             ? AssistantMessageSegmenter.Split(message.MarkdownContent).ContentMarkdown
             : message.MarkdownContent;
 
-        if (message.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(message.AgentName))
+        if (includeAssistantSpeakerPrefix &&
+            message.Role == MessageRole.Assistant &&
+            !string.IsNullOrWhiteSpace(message.AgentName))
         {
             var speaker = string.IsNullOrWhiteSpace(message.AgentRole)
                 ? message.AgentName
@@ -1036,7 +1042,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
     }
 
     private static IReadOnlyList<ChatMessage> BuildExecutionPlanMessages(IReadOnlyList<MessageRecord> messages)
-        => BuildPromptMessages(messages);
+        => BuildPromptMessages(messages, includeAssistantSpeakerPrefix: false);
 
     private static string BuildExecutionStepInstructions(
         ChatTurnRequest request,
@@ -1072,7 +1078,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         IReadOnlyList<CompletedExecutionPlanStep> completedSteps,
         bool isFinalStep)
     {
-        var promptMessages = new List<ChatMessage>(BuildPromptMessages(messages))
+        var promptMessages = new List<ChatMessage>(BuildPromptMessages(messages, includeAssistantSpeakerPrefix: false))
         {
             new(ChatRole.System, BuildExecutionPlanTranscript(executionPlan)),
             new(ChatRole.System, $"Current step id: {currentStep.Id}\nCurrent step title: {currentStep.Title}\nIs final step: {isFinalStep}")
