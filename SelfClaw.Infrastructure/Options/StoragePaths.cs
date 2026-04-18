@@ -5,6 +5,8 @@ public sealed record StoragePaths(
     string DatabasePath,
     string SecretsDirectory)
 {
+    public string LogsDirectory => Path.Combine(AppContext.BaseDirectory, "logs");
+
     public static StoragePaths CreateDefault()
     {
         var root = Path.Combine(

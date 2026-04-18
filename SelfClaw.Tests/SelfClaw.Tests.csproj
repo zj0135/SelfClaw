@@ -8,17 +8,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="SelfClaw.Core">
-      <HintPath>..\SelfClaw.Core\bin\$(Configuration)\net10.0\SelfClaw.Core.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="SelfClaw.Infrastructure">
-      <HintPath>..\SelfClaw.Infrastructure\bin\$(Configuration)\net10.0-windows\SelfClaw.Infrastructure.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Markdig" />
@@ -31,6 +20,11 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SelfClaw.Core\SelfClaw.Core.csproj" />
+    <ProjectReference Include="..\SelfClaw.Desktop\SelfClaw.Desktop.csproj" />
   </ItemGroup>
 
   <ItemGroup>

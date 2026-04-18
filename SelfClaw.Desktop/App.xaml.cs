@@ -1,56 +1,200 @@
+using System.IO;
+using System.Text;
 using System.Windows;
+using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure;
+using SelfClaw.Infrastructure.Options;
+using Serilog;
+using Serilog.Events;
 
 namespace SelfClaw.Desktop;
 
 public partial class App : Application
 {
     private IHost? _host;
+    private StoragePaths? _storagePaths;
+    private int _isShowingUnhandledExceptionDialog;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
-        base.OnStartup(e);
+        _storagePaths = StoragePaths.CreateDefault();
+        ConfigureLogging(_storagePaths);
+        RegisterGlobalExceptionHandlers();
 
-        ThemeMode = ThemeMode.System;
+        try
+        {
+            base.OnStartup(e);
 
-        var builder = Host.CreateApplicationBuilder();
-        builder.Services.AddSelfClawInfrastructure();
-        builder.Services.AddSingleton<DesktopSettingsStore>();
-        builder.Services.AddSingleton<IDesktopChannelAdapter, FeishuDesktopChannelAdapter>();
-        builder.Services.AddSingleton<DesktopChannelManager>();
-        builder.Services.AddSingleton<DesktopToolApprovalHandler>();
-        builder.Services.AddSingleton<MainWindowViewModel>();
-        builder.Services.AddSingleton<MainWindow>();
-        _host = builder.Build();
+            ThemeMode = ThemeMode.System;
 
-        await _host.StartAsync();
-        await _host.Services.GetRequiredService<IProfileRepository>().InitializeAsync();
-        await _host.Services.GetRequiredService<IConversationRepository>().InitializeAsync();
+            var builder = Host.CreateApplicationBuilder();
+            builder.Logging.ClearProviders();
+            builder.Services.AddSerilog(Log.Logger, dispose: false);
+            builder.Services.AddSelfClawInfrastructure(_storagePaths);
+            builder.Services.AddSingleton<DesktopSettingsStore>();
+            builder.Services.AddSingleton<IDesktopChannelAdapter, FeishuDesktopChannelAdapter>();
+            builder.Services.AddSingleton<DesktopChannelManager>();
+            builder.Services.AddSingleton<DesktopToolApprovalHandler>();
+            builder.Services.AddSingleton<MainWindowViewModel>();
+            builder.Services.AddSingleton<MainWindow>();
+            _host = builder.Build();
 
-        var mainWindow = _host.Services.GetRequiredService<MainWindow>();
-        MainWindow = mainWindow;
-        mainWindow.Show();
+            Log.Information("SelfClaw starting. LogsDirectory={LogsDirectory}", _storagePaths.LogsDirectory);
+
+            await _host.StartAsync();
+            await _host.Services.GetRequiredService<IProfileRepository>().InitializeAsync();
+            await _host.Services.GetRequiredService<IConversationRepository>().InitializeAsync();
+
+            var mainWindow = _host.Services.GetRequiredService<MainWindow>();
+            MainWindow = mainWindow;
+            mainWindow.Show();
+        }
+        catch (Exception exception)
+        {
+            Log.Fatal(exception, "Application startup failed.");
+            ShowFatalError("SelfClaw failed to start. The error was written to the log file.", exception.Message);
+            Shutdown(-1);
+        }
     }
 
     protected override async void OnExit(ExitEventArgs e)
     {
-        if (_host is not null)
+        try
         {
-            var channelManager = _host.Services.GetService<DesktopChannelManager>();
-            if (channelManager is not null)
+            if (_host is not null)
             {
-                await channelManager.DisposeAsync();
+                await _host.StopAsync();
+                _host.Dispose();
+                _host = null;
             }
+        }
+        catch (Exception exception)
+        {
+            Log.Error(exception, "Application shutdown failed.");
+        }
+        finally
+        {
+            UnregisterGlobalExceptionHandlers();
+            Log.CloseAndFlush();
+            base.OnExit(e);
+        }
+    }
 
-            await _host.StopAsync();
-            _host.Dispose();
+    private void RegisterGlobalExceptionHandlers()
+    {
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+        AppDomain.CurrentDomain.UnhandledException += OnCurrentDomainUnhandledException;
+    }
+
+    private void UnregisterGlobalExceptionHandlers()
+    {
+        DispatcherUnhandledException -= OnDispatcherUnhandledException;
+        TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+        AppDomain.CurrentDomain.UnhandledException -= OnCurrentDomainUnhandledException;
+    }
+
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        Log.Error(e.Exception, "Unhandled dispatcher exception.");
+        e.Handled = true;
+        ShowUnhandledExceptionDialog("An unexpected UI error was written to the log file.", e.Exception.Message);
+    }
+
+    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        Log.Error(e.Exception, "Unobserved task exception.");
+        e.SetObserved();
+    }
+
+    private static void OnCurrentDomainUnhandledException(object? sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception exception)
+        {
+            Log.Fatal(exception, "Unhandled AppDomain exception. IsTerminating={IsTerminating}", e.IsTerminating);
+            return;
         }
 
-        base.OnExit(e);
+        Log.Fatal(
+            "Unhandled AppDomain exception. IsTerminating={IsTerminating}. ExceptionObject={ExceptionObject}",
+            e.IsTerminating,
+            e.ExceptionObject);
+    }
+
+    private void ShowUnhandledExceptionDialog(string summary, string details)
+    {
+        if (Interlocked.Exchange(ref _isShowingUnhandledExceptionDialog, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            MessageBox.Show(
+                BuildUserFacingErrorMessage(summary, details),
+                "SelfClaw",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _isShowingUnhandledExceptionDialog, 0);
+        }
+    }
+
+    private void ShowFatalError(string summary, string details)
+    {
+        MessageBox.Show(
+            BuildUserFacingErrorMessage(summary, details),
+            "SelfClaw",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
+    }
+
+    private string BuildUserFacingErrorMessage(string summary, string details)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine(summary);
+
+        if (!string.IsNullOrWhiteSpace(details))
+        {
+            builder.AppendLine();
+            builder.AppendLine(details.Trim());
+        }
+
+        var logsDirectory = _storagePaths?.LogsDirectory;
+        if (!string.IsNullOrWhiteSpace(logsDirectory))
+        {
+            builder.AppendLine();
+            builder.AppendLine($"Log directory: {logsDirectory}");
+        }
+
+        return builder.ToString();
+    }
+
+    private static void ConfigureLogging(StoragePaths storagePaths)
+    {
+        Directory.CreateDirectory(storagePaths.LogsDirectory);
+
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Debug()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+            .MinimumLevel.Override("System", LogEventLevel.Warning)
+            .Enrich.FromLogContext()
+            .Enrich.WithProperty("Application", "SelfClaw")
+            .WriteTo.File(
+                Path.Combine(storagePaths.LogsDirectory, "selfclaw-.log"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 31,
+                shared: true,
+                encoding: new UTF8Encoding(false),
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] ({SourceContext}) {Message:lj}{NewLine}{Exception}")
+            .CreateLogger();
     }
 }

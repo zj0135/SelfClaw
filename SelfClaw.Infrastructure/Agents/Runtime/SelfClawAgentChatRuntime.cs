@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
@@ -31,6 +32,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
     private readonly IWorkspaceToolService _workspaceToolService;
     private readonly IAgentExecutionService _agentExecutionService;
     private readonly IAgentContextProviderFactory _agentContextProviderFactory;
+    private readonly ILogger<SelfClawAgentChatRuntime> _logger;
 
     public SelfClawAgentChatRuntime(
         IWorkspaceToolService workspaceToolService,
@@ -40,7 +42,8 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         : this(
             workspaceToolService,
             agentContextProviderFactory,
-            new ChatClientAgentExecutionService(loggerFactory, serviceProvider))
+            new ChatClientAgentExecutionService(loggerFactory, serviceProvider),
+            loggerFactory.CreateLogger<SelfClawAgentChatRuntime>())
     {
     }
 
@@ -50,18 +53,21 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         : this(
             workspaceToolService,
             new EmptyAgentContextProviderFactory(),
-            agentExecutionService)
+            agentExecutionService,
+            NullLogger<SelfClawAgentChatRuntime>.Instance)
     {
     }
 
     internal SelfClawAgentChatRuntime(
         IWorkspaceToolService workspaceToolService,
         IAgentContextProviderFactory agentContextProviderFactory,
-        IAgentExecutionService agentExecutionService)
+        IAgentExecutionService agentExecutionService,
+        ILogger<SelfClawAgentChatRuntime>? logger = null)
     {
         _workspaceToolService = workspaceToolService;
         _agentContextProviderFactory = agentContextProviderFactory;
         _agentExecutionService = agentExecutionService;
+        _logger = logger ?? NullLogger<SelfClawAgentChatRuntime>.Instance;
     }
 
     public IAsyncEnumerable<ChatRuntimeEvent> StreamTurnAsync(
@@ -99,6 +105,17 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
             }
             catch (Exception exception)
             {
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogError(
+                        exception,
+                        "Chat runtime failed. ConversationId={ConversationId}, Mode={Mode}, BoundAgentId={BoundAgentId}, EnablePlanMode={EnablePlanMode}",
+                        request.ConversationId,
+                        request.Mode,
+                        request.BoundAgent?.Id,
+                        request.EnablePlanMode);
+                }
+
                 channel.Writer.TryComplete(exception);
             }
         }, CancellationToken.None);
@@ -222,9 +239,15 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
             cancellationToken);
 
         var blueprint = TryParseExecutionPlan(result.FinalMarkdown);
-        return blueprint is null
-            ? BuildFallbackExecutionPlan(request, result.FinalMarkdown)
-            : MaterializeExecutionPlan(request, blueprint);
+        if (blueprint is null)
+        {
+            _logger.LogWarning(
+                "Execution plan parsing fell back to the built-in plan. ConversationId={ConversationId}",
+                request.ConversationId);
+            return BuildFallbackExecutionPlan(request, result.FinalMarkdown);
+        }
+
+        return MaterializeExecutionPlan(request, blueprint);
     }
 
     private async Task<AgentExecutionResult> ProduceExecutionPlanStepTurnAsync(
@@ -279,6 +302,12 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.LogError(
+                exception,
+                "Execution plan step failed. ConversationId={ConversationId}, StepId={StepId}, StepTitle={StepTitle}",
+                request.ConversationId,
+                currentStep.Id,
+                currentStep.Title);
             await writer.WriteAsync(
                 new AssistantMessageCompletedEvent(startedMessage with
                 {
@@ -525,6 +554,13 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.LogError(
+                exception,
+                "Worker agent failed. ConversationId={ConversationId}, AgentId={AgentId}, AgentName={AgentName}, RoundNumber={RoundNumber}",
+                request.ConversationId,
+                agent.Id,
+                agent.Name,
+                roundNumber);
             var failedMessage = startedMessage with
             {
                 Status = MessageStatus.Failed,
@@ -556,7 +592,15 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
             onTextDelta: null,
             cancellationToken);
 
-        var blueprint = TryParseTeamPlan(planResult.FinalMarkdown) ?? BuildFallbackTeamBlueprint(request);
+        var blueprint = TryParseTeamPlan(planResult.FinalMarkdown);
+        if (blueprint is null)
+        {
+            _logger.LogWarning(
+                "Team plan parsing fell back to the built-in blueprint. ConversationId={ConversationId}",
+                request.ConversationId);
+            blueprint = BuildFallbackTeamBlueprint(request);
+        }
+
         return MaterializeTeamPlan(request, blueprint);
     }
 
@@ -660,7 +704,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         var normalizedSteps = blueprint.Steps
             .Select(step => step with
             {
-                Title = SanitizeExecutionPlanText(step.Title)
+                Title = SanitizeExecutionPlanText(step.Title) ?? string.Empty
             })
             .Where(step => !string.IsNullOrWhiteSpace(step.Title))
             .Take(MaxExecutionPlanSteps)

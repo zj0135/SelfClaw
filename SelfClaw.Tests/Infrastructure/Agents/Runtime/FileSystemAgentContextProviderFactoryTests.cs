@@ -4,6 +4,7 @@ using FluentAssertions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Runtime;
 
@@ -73,6 +74,7 @@ public sealed class FileSystemAgentContextProviderFactoryTests : IDisposable
 
         var factory = new FileSystemAgentContextProviderFactory(
             NullLoggerFactory.Instance,
+            CreateStoragePaths(),
             Path.Combine(_testRootPath, "SelfClaw.Desktop", "Assets"),
             outputAssetsPath);
 
@@ -95,7 +97,13 @@ public sealed class FileSystemAgentContextProviderFactoryTests : IDisposable
     }
 
     private FileSystemAgentContextProviderFactory CreateFactory()
-        => new(NullLoggerFactory.Instance, Path.Combine(_testRootPath, "Assets"));
+        => new(NullLoggerFactory.Instance, CreateStoragePaths(), Path.Combine(_testRootPath, "Assets"));
+
+    private StoragePaths CreateStoragePaths()
+        => new(
+            Path.Combine(_testRootPath, "appdata"),
+            Path.Combine(_testRootPath, "appdata", "selfclaw.db"),
+            Path.Combine(_testRootPath, "appdata", "secrets"));
 }
 
 #pragma warning restore MAAI001

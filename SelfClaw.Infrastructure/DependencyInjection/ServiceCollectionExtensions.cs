@@ -12,9 +12,13 @@ namespace SelfClaw.Infrastructure;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddSelfClawInfrastructure(this IServiceCollection services)
+    public static IServiceCollection AddSelfClawInfrastructure(
+        this IServiceCollection services,
+        StoragePaths? storagePaths = null)
     {
-        services.AddSingleton(StoragePaths.CreateDefault());
+        storagePaths ??= StoragePaths.CreateDefault();
+
+        services.AddSingleton(storagePaths);
         services.AddSingleton<SqliteDatabase>();
         services.AddSingleton<IProfileRepository, SqliteProfileRepository>();
         services.AddSingleton<IConversationRepository, SqliteConversationRepository>();

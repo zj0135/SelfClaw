@@ -1,16 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <Reference Include="SelfClaw.Core">
-      <HintPath>..\SelfClaw.Core\bin\$(Configuration)\net10.0\SelfClaw.Core.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="SelfClaw.Infrastructure">
-      <HintPath>..\SelfClaw.Infrastructure\bin\$(Configuration)\net10.0-windows\SelfClaw.Infrastructure.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="Markdig" />
     <PackageReference Include="Microsoft.Agents.AI" />
@@ -19,6 +8,9 @@
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Web.WebView2" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Extensions.Hosting" />
+    <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" GeneratePathProperty="true" />
   </ItemGroup>
 
@@ -31,6 +23,11 @@
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <ResolveReferencesDependsOn>BuildManagedDependencies;$(ResolveReferencesDependsOn)</ResolveReferencesDependsOn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SelfClaw.Core\SelfClaw.Core.csproj" />
+    <ProjectReference Include="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Update="Assets\TranscriptVue\*;Assets\TranscriptVue\**\*">
@@ -46,11 +43,8 @@
     <MSBuild Projects="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
   </Target>
 
-  <Target Name="CopyProtectedDataAssembly" AfterTargets="Build"
-          Condition="Exists('$(PkgSystem_Security_Cryptography_ProtectedData)\lib\net10.0\System.Security.Cryptography.ProtectedData.dll')">
-    <Copy SourceFiles="$(PkgSystem_Security_Cryptography_ProtectedData)\lib\net10.0\System.Security.Cryptography.ProtectedData.dll"
-          DestinationFolder="$(OutputPath)"
-          SkipUnchangedFiles="true" />
+  <Target Name="CopyProtectedDataAssembly" AfterTargets="Build" Condition="Exists('$(PkgSystem_Security_Cryptography_ProtectedData)\lib\net10.0\System.Security.Cryptography.ProtectedData.dll')">
+    <Copy SourceFiles="$(PkgSystem_Security_Cryptography_ProtectedData)\lib\net10.0\System.Security.Cryptography.ProtectedData.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="SyncTranscriptVueAssets" AfterTargets="Build">
@@ -58,9 +52,7 @@
       <TranscriptVueAsset Include="$(MSBuildProjectDirectory)\Assets\TranscriptVue\*;$(MSBuildProjectDirectory)\Assets\TranscriptVue\**\*" />
     </ItemGroup>
 
-    <Copy SourceFiles="@(TranscriptVueAsset)"
-          DestinationFiles="@(TranscriptVueAsset->'$(OutDir)Assets\TranscriptVue\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(TranscriptVueAsset)" DestinationFiles="@(TranscriptVueAsset->'$(OutDir)Assets\TranscriptVue\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 
   <Target Name="SyncSkillAssets" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)\Assets\skills')">
@@ -68,8 +60,6 @@
       <SkillAsset Include="$(MSBuildProjectDirectory)\Assets\skills\*;$(MSBuildProjectDirectory)\Assets\skills\**\*" />
     </ItemGroup>
 
-    <Copy SourceFiles="@(SkillAsset)"
-          DestinationFiles="@(SkillAsset->'$(OutDir)Assets\skills\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="false" />
+    <Copy SourceFiles="@(SkillAsset)" DestinationFiles="@(SkillAsset->'$(OutDir)Assets\skills\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 </Project>

@@ -1,4 +1,6 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Infrastructure.Data.Sqlite;
@@ -8,25 +10,40 @@ public sealed class SqliteDatabase
     private const int CurrentSchemaVersion = 12;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
+    private readonly ILogger<SqliteDatabase> _logger;
     private bool _initialized;
 
-    public SqliteDatabase(StoragePaths storagePaths)
+    public SqliteDatabase(StoragePaths storagePaths, ILogger<SqliteDatabase>? logger = null)
     {
         _storagePaths = storagePaths;
+        _logger = logger ?? NullLogger<SqliteDatabase>.Instance;
     }
 
     public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken = default)
     {
-        await EnsureInitializedAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken);
 
-        var connection = new SqliteConnection($"Data Source={_storagePaths.DatabasePath}");
-        await connection.OpenAsync(cancellationToken);
+            var connection = new SqliteConnection($"Data Source={_storagePaths.DatabasePath}");
+            await connection.OpenAsync(cancellationToken);
 
-        await using var pragma = connection.CreateCommand();
-        pragma.CommandText = "PRAGMA foreign_keys = ON;";
-        await pragma.ExecuteNonQueryAsync(cancellationToken);
+            await using var pragma = connection.CreateCommand();
+            pragma.CommandText = "PRAGMA foreign_keys = ON;";
+            await pragma.ExecuteNonQueryAsync(cancellationToken);
 
-        return connection;
+            return connection;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Opening SQLite connection was canceled. DatabasePath={DatabasePath}", _storagePaths.DatabasePath);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to open SQLite connection. DatabasePath={DatabasePath}", _storagePaths.DatabasePath);
+            throw;
+        }
     }
 
     public async Task EnsureInitializedAsync(CancellationToken cancellationToken = default)
@@ -332,6 +349,24 @@ CREATE TABLE IF NOT EXISTS tool_runs (
             }
 
             _initialized = true;
+            _logger.LogInformation(
+                "SQLite database initialized. DatabasePath={DatabasePath}, SchemaVersion={SchemaVersion}",
+                _storagePaths.DatabasePath,
+                CurrentSchemaVersion);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("SQLite initialization was canceled. DatabasePath={DatabasePath}", _storagePaths.DatabasePath);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Failed to initialize SQLite database. DatabasePath={DatabasePath}, SchemaVersion={SchemaVersion}",
+                _storagePaths.DatabasePath,
+                CurrentSchemaVersion);
+            throw;
         }
         finally
         {

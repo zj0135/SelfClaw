@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 
@@ -15,97 +17,115 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
     private const int MinShellTimeoutSeconds = 1;
     private const int MaxShellTimeoutSeconds = 600;
     private const long MaxFileBytes = 1_000_000;
+    private readonly ILogger<WorkspaceToolService> _logger;
+
+    public WorkspaceToolService(ILogger<WorkspaceToolService>? logger = null)
+    {
+        _logger = logger ?? NullLogger<WorkspaceToolService>.Instance;
+    }
 
     public Task<IReadOnlyList<WorkspaceFileEntry>> ListFilesAsync(
         string workspaceRootPath,
         string? relativePath,
         CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var root = NormalizeRoot(workspaceRootPath);
-        var target = ResolvePath(root, relativePath ?? string.Empty);
-
-        if (!Directory.Exists(target))
-        {
-            throw new DirectoryNotFoundException($"Directory '{relativePath}' was not found.");
-        }
-
-        var entries = Directory.EnumerateFileSystemEntries(target)
-            .Select(path =>
+        => ExecuteAsync(
+            "list workspace files",
+            workspaceRootPath,
+            () =>
             {
-                var attributes = File.GetAttributes(path);
-                var isDirectory = attributes.HasFlag(FileAttributes.Directory);
-                long? size = null;
-                if (!isDirectory)
+                cancellationToken.ThrowIfCancellationRequested();
+                var root = NormalizeRoot(workspaceRootPath);
+                var target = ResolvePath(root, relativePath ?? string.Empty);
+
+                if (!Directory.Exists(target))
                 {
-                    size = new FileInfo(path).Length;
+                    throw new DirectoryNotFoundException($"Directory '{relativePath}' was not found.");
                 }
 
-                return new WorkspaceFileEntry(Path.GetRelativePath(root, path), isDirectory, size);
-            })
-            .OrderByDescending(entry => entry.IsDirectory)
-            .ThenBy(entry => entry.RelativePath, StringComparer.OrdinalIgnoreCase)
-            .Take(MaxListedEntries)
-            .ToArray();
+                var entries = Directory.EnumerateFileSystemEntries(target)
+                    .Select(path =>
+                    {
+                        var attributes = File.GetAttributes(path);
+                        var isDirectory = attributes.HasFlag(FileAttributes.Directory);
+                        long? size = null;
+                        if (!isDirectory)
+                        {
+                            size = new FileInfo(path).Length;
+                        }
 
-        return Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>(entries);
-    }
+                        return new WorkspaceFileEntry(Path.GetRelativePath(root, path), isDirectory, size);
+                    })
+                    .OrderByDescending(entry => entry.IsDirectory)
+                    .ThenBy(entry => entry.RelativePath, StringComparer.OrdinalIgnoreCase)
+                    .Take(MaxListedEntries)
+                    .ToArray();
+
+                return Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>(entries);
+            },
+            ("RelativePath", relativePath ?? string.Empty));
 
     public async Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(
         string workspaceRootPath,
         string query,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            throw new ArgumentException("Query must not be empty.", nameof(query));
-        }
-
-        var root = NormalizeRoot(workspaceRootPath);
-        var hits = new List<WorkspaceSearchHit>(MaxSearchHits);
-
-        foreach (var path in Directory.EnumerateFiles(root, "*", new EnumerationOptions
-                 {
-                     IgnoreInaccessible = true,
-                     RecurseSubdirectories = true,
-                     ReturnSpecialDirectories = false
-                 }))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var info = new FileInfo(path);
-            if (info.Length > MaxFileBytes || !await IsTextFileAsync(path, cancellationToken))
+        return await ExecuteAsync(
+            "search workspace text",
+            workspaceRootPath,
+            async () =>
             {
-                continue;
-            }
-
-            using var stream = File.OpenRead(path);
-            using var reader = new StreamReader(stream);
-            var lineNumber = 0;
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var line = await reader.ReadLineAsync(cancellationToken);
-                if (line is null)
+                if (string.IsNullOrWhiteSpace(query))
                 {
-                    break;
+                    throw new ArgumentException("Query must not be empty.", nameof(query));
                 }
 
-                lineNumber++;
-                if (!line.Contains(query, StringComparison.OrdinalIgnoreCase))
+                var root = NormalizeRoot(workspaceRootPath);
+                var hits = new List<WorkspaceSearchHit>(MaxSearchHits);
+
+                foreach (var path in Directory.EnumerateFiles(root, "*", new EnumerationOptions
+                         {
+                             IgnoreInaccessible = true,
+                             RecurseSubdirectories = true,
+                             ReturnSpecialDirectories = false
+                         }))
                 {
-                    continue;
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var info = new FileInfo(path);
+                    if (info.Length > MaxFileBytes || !await IsTextFileAsync(path, cancellationToken))
+                    {
+                        continue;
+                    }
+
+                    using var stream = File.OpenRead(path);
+                    using var reader = new StreamReader(stream);
+                    var lineNumber = 0;
+                    while (true)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var line = await reader.ReadLineAsync(cancellationToken);
+                        if (line is null)
+                        {
+                            break;
+                        }
+
+                        lineNumber++;
+                        if (!line.Contains(query, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        hits.Add(new WorkspaceSearchHit(Path.GetRelativePath(root, path), lineNumber, line.Trim()));
+                        if (hits.Count >= MaxSearchHits)
+                        {
+                            return hits;
+                        }
+                    }
                 }
 
-                hits.Add(new WorkspaceSearchHit(Path.GetRelativePath(root, path), lineNumber, line.Trim()));
-                if (hits.Count >= MaxSearchHits)
-                {
-                    return hits;
-                }
-            }
-        }
-
-        return hits;
+                return hits;
+            },
+            ("QueryLength", query?.Length ?? 0));
     }
 
     public async Task<WorkspaceFileContent> ReadFileAsync(
@@ -113,38 +133,45 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
         string relativePath,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(relativePath))
-        {
-            throw new ArgumentException("A file path is required.", nameof(relativePath));
-        }
+        return await ExecuteAsync(
+            "read workspace file",
+            workspaceRootPath,
+            async () =>
+            {
+                if (string.IsNullOrWhiteSpace(relativePath))
+                {
+                    throw new ArgumentException("A file path is required.", nameof(relativePath));
+                }
 
-        var root = NormalizeRoot(workspaceRootPath);
-        var fullPath = ResolvePath(root, relativePath);
-        var fileInfo = new FileInfo(fullPath);
+                var root = NormalizeRoot(workspaceRootPath);
+                var fullPath = ResolvePath(root, relativePath);
+                var fileInfo = new FileInfo(fullPath);
 
-        if (!fileInfo.Exists)
-        {
-            throw new FileNotFoundException("File was not found.", relativePath);
-        }
+                if (!fileInfo.Exists)
+                {
+                    throw new FileNotFoundException("File was not found.", relativePath);
+                }
 
-        if (fileInfo.Length > MaxFileBytes)
-        {
-            throw new InvalidOperationException($"The file is too large to read safely. Limit: {MaxFileBytes} bytes.");
-        }
+                if (fileInfo.Length > MaxFileBytes)
+                {
+                    throw new InvalidOperationException($"The file is too large to read safely. Limit: {MaxFileBytes} bytes.");
+                }
 
-        if (!await IsTextFileAsync(fullPath, cancellationToken))
-        {
-            throw new InvalidOperationException("Only text files can be read.");
-        }
+                if (!await IsTextFileAsync(fullPath, cancellationToken))
+                {
+                    throw new InvalidOperationException("Only text files can be read.");
+                }
 
-        var content = await File.ReadAllTextAsync(fullPath, cancellationToken);
-        var truncated = content.Length > MaxReadCharacters;
-        if (truncated)
-        {
-            content = content[..MaxReadCharacters];
-        }
+                var content = await File.ReadAllTextAsync(fullPath, cancellationToken);
+                var truncated = content.Length > MaxReadCharacters;
+                if (truncated)
+                {
+                    content = content[..MaxReadCharacters];
+                }
 
-        return new WorkspaceFileContent(Path.GetRelativePath(root, fullPath), content, truncated);
+                return new WorkspaceFileContent(Path.GetRelativePath(root, fullPath), content, truncated);
+            },
+            ("RelativePath", relativePath));
     }
 
     public async Task<WorkspaceFileWriteResult> WriteFileAsync(
@@ -153,34 +180,42 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
         string content,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(relativePath))
-        {
-            throw new ArgumentException("A file path is required.", nameof(relativePath));
-        }
+        return await ExecuteAsync(
+            "write workspace file",
+            workspaceRootPath,
+            async () =>
+            {
+                if (string.IsNullOrWhiteSpace(relativePath))
+                {
+                    throw new ArgumentException("A file path is required.", nameof(relativePath));
+                }
 
-        content ??= string.Empty;
-        if (content.Length > MaxWriteCharacters)
-        {
-            throw new InvalidOperationException($"The file content is too large to write safely. Limit: {MaxWriteCharacters} characters.");
-        }
+                content ??= string.Empty;
+                if (content.Length > MaxWriteCharacters)
+                {
+                    throw new InvalidOperationException($"The file content is too large to write safely. Limit: {MaxWriteCharacters} characters.");
+                }
 
-        var root = NormalizeRoot(workspaceRootPath);
-        var fullPath = ResolvePath(root, relativePath);
-        var existed = File.Exists(fullPath);
-        var directoryPath = Path.GetDirectoryName(fullPath);
-        if (!string.IsNullOrWhiteSpace(directoryPath))
-        {
-            Directory.CreateDirectory(directoryPath);
-        }
+                var root = NormalizeRoot(workspaceRootPath);
+                var fullPath = ResolvePath(root, relativePath);
+                var existed = File.Exists(fullPath);
+                var directoryPath = Path.GetDirectoryName(fullPath);
+                if (!string.IsNullOrWhiteSpace(directoryPath))
+                {
+                    Directory.CreateDirectory(directoryPath);
+                }
 
-        await File.WriteAllTextAsync(fullPath, content, new UTF8Encoding(false), cancellationToken);
+                await File.WriteAllTextAsync(fullPath, content, new UTF8Encoding(false), cancellationToken);
 
-        return new WorkspaceFileWriteResult(
-            Path.GetRelativePath(root, fullPath),
-            true,
-            existed,
-            content.Length,
-            existed ? "File updated." : "File created.");
+                return new WorkspaceFileWriteResult(
+                    Path.GetRelativePath(root, fullPath),
+                    true,
+                    existed,
+                    content.Length,
+                    existed ? "File updated." : "File created.");
+            },
+            ("RelativePath", relativePath),
+            ("CharacterCount", content?.Length ?? 0));
     }
 
     public async Task<ShellCommandResult> RunShellCommandAsync(
@@ -189,83 +224,101 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
         int timeoutSeconds,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(command))
-        {
-            throw new ArgumentException("A shell command is required.", nameof(command));
-        }
-
-        var root = NormalizeRoot(workspaceRootPath);
-        var boundedTimeoutSeconds = Math.Clamp(timeoutSeconds, MinShellTimeoutSeconds, MaxShellTimeoutSeconds);
-        var timeout = TimeSpan.FromSeconds(boundedTimeoutSeconds);
-
-        var script = string.Join(
-            Environment.NewLine,
-            "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)",
-            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-            "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-            command);
-        var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
+        var result = await ExecuteAsync(
+            "run workspace shell command",
+            workspaceRootPath,
+            async () =>
             {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encodedCommand}",
-                WorkingDirectory = root,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            }
-        };
+                if (string.IsNullOrWhiteSpace(command))
+                {
+                    throw new ArgumentException("A shell command is required.", nameof(command));
+                }
 
-        if (!process.Start())
+                var root = NormalizeRoot(workspaceRootPath);
+                var boundedTimeoutSeconds = Math.Clamp(timeoutSeconds, MinShellTimeoutSeconds, MaxShellTimeoutSeconds);
+                var timeout = TimeSpan.FromSeconds(boundedTimeoutSeconds);
+
+                var script = string.Join(
+                    Environment.NewLine,
+                    "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)",
+                    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+                    "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+                    command);
+                var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+
+                using var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "powershell.exe",
+                        Arguments = $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encodedCommand}",
+                        WorkingDirectory = root,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true,
+                        StandardOutputEncoding = Encoding.UTF8,
+                        StandardErrorEncoding = Encoding.UTF8
+                    }
+                };
+
+                if (!process.Start())
+                {
+                    throw new InvalidOperationException("Failed to start the PowerShell process.");
+                }
+
+                var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+                var standardErrorTask = process.StandardError.ReadToEndAsync();
+
+                using var registration = cancellationToken.Register(() => TryKillProcess(process));
+                using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutSource.CancelAfter(timeout);
+
+                try
+                {
+                    await process.WaitForExitAsync(timeoutSource.Token);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    TryKillProcess(process);
+                    throw;
+                }
+                catch (OperationCanceledException)
+                {
+                    TryKillProcess(process);
+                    throw new TimeoutException($"The PowerShell command timed out after {boundedTimeoutSeconds} seconds.");
+                }
+
+                var standardOutput = await standardOutputTask;
+                var standardError = await standardErrorTask;
+                var outputTruncated = false;
+                standardOutput = TruncateShellOutput(standardOutput, ref outputTruncated);
+                standardError = TruncateShellOutput(standardError, ref outputTruncated);
+
+                var exitCode = process.ExitCode;
+                return new ShellCommandResult(
+                    command,
+                    true,
+                    exitCode,
+                    standardOutput,
+                    standardError,
+                    outputTruncated,
+                    exitCode == 0
+                        ? "PowerShell command completed."
+                        : $"PowerShell exited with code {exitCode}.");
+            },
+            ("TimeoutSeconds", timeoutSeconds),
+            ("CommandLength", command?.Length ?? 0));
+
+        if (result.ExitCode is int exitCode && exitCode != 0)
         {
-            throw new InvalidOperationException("Failed to start the PowerShell process.");
+            _logger.LogWarning(
+                "Workspace PowerShell command exited with a non-zero code. WorkspaceRoot={WorkspaceRoot}, ExitCode={ExitCode}",
+                workspaceRootPath,
+                exitCode);
         }
 
-        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
-        var standardErrorTask = process.StandardError.ReadToEndAsync();
-
-        using var registration = cancellationToken.Register(() => TryKillProcess(process));
-        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(timeout);
-
-        try
-        {
-            await process.WaitForExitAsync(timeoutSource.Token);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            TryKillProcess(process);
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            TryKillProcess(process);
-            throw new TimeoutException($"The PowerShell command timed out after {boundedTimeoutSeconds} seconds.");
-        }
-
-        var standardOutput = await standardOutputTask;
-        var standardError = await standardErrorTask;
-        var outputTruncated = false;
-        standardOutput = TruncateShellOutput(standardOutput, ref outputTruncated);
-        standardError = TruncateShellOutput(standardError, ref outputTruncated);
-
-        var exitCode = process.ExitCode;
-        return new ShellCommandResult(
-            command,
-            true,
-            exitCode,
-            standardOutput,
-            standardError,
-            outputTruncated,
-            exitCode == 0
-                ? "PowerShell command completed."
-                : $"PowerShell exited with code {exitCode}.");
+        return result;
     }
 
     private static string NormalizeRoot(string workspaceRootPath)
@@ -349,4 +402,40 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
         {
         }
     }
+
+    private async Task<T> ExecuteAsync<T>(
+        string operationName,
+        string workspaceRootPath,
+        Func<Task<T>> action,
+        params (string Name, object? Value)[] properties)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug(
+                "Workspace operation canceled. Operation={Operation}, WorkspaceRoot={WorkspaceRoot}, Details={Details}",
+                operationName,
+                workspaceRootPath,
+                FormatProperties(properties));
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Workspace operation failed. Operation={Operation}, WorkspaceRoot={WorkspaceRoot}, Details={Details}",
+                operationName,
+                workspaceRootPath,
+                FormatProperties(properties));
+            throw;
+        }
+    }
+
+    private static string FormatProperties(IEnumerable<(string Name, object? Value)> properties)
+        => string.Join(
+            ", ",
+            properties.Select(property => $"{property.Name}={property.Value ?? "<null>"}"));
 }

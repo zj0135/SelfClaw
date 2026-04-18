@@ -14,6 +14,7 @@ namespace SelfClaw.Infrastructure.Agents.Runtime;
 internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
 {
     private readonly ILoggerFactory _loggerFactory;
+    private readonly ILogger<ChatClientAgentExecutionService> _logger;
     private readonly IServiceProvider _serviceProvider;
 
     public ChatClientAgentExecutionService(
@@ -21,6 +22,7 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
         IServiceProvider serviceProvider)
     {
         _loggerFactory = loggerFactory;
+        _logger = loggerFactory.CreateLogger<ChatClientAgentExecutionService>();
         _serviceProvider = serviceProvider;
     }
 
@@ -33,56 +35,79 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
         var streamedText = new StringBuilder();
         var rawUpdates = new List<AgentResponseUpdate>();
 
-        var chatOptions = new ChatOptions
+        try
         {
-            Temperature = request.Profile.TemperatureEnabled ? (float)request.Profile.Temperature : null,
-            TopP = request.Profile.TopPEnabled ? (float)request.Profile.TopP : null,
-            ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
-            Tools = request.Tools
-        };
-
-        var agentOptions = new ChatClientAgentOptions
-        {
-            Name = request.Name,
-            Description = request.Description,
-            ChatOptions = chatOptions,
-            AIContextProviders = request.ContextProviders ?? []
-        };
-        var agent = new ChatClientAgent(
-            CreateChatClient(request.Profile, request.ApiKey),
-            agentOptions,
-            _loggerFactory,
-            _serviceProvider);
-        var promptMessages = PrependInstructions(request.Instructions, request.Messages);
-
-        await foreach (var update in agent.RunStreamingAsync(
-                           promptMessages,
-                           null,
-                           new ChatClientAgentRunOptions(chatOptions),
-                           cancellationToken))
-        {
-            rawUpdates.Add(update);
-
-            var deltaText = ExtractText(update);
-            if (string.IsNullOrWhiteSpace(deltaText))
+            var chatOptions = new ChatOptions
             {
-                continue;
+                Temperature = request.Profile.TemperatureEnabled ? (float)request.Profile.Temperature : null,
+                TopP = request.Profile.TopPEnabled ? (float)request.Profile.TopP : null,
+                ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
+                Tools = request.Tools
+            };
+
+            var agentOptions = new ChatClientAgentOptions
+            {
+                Name = request.Name,
+                Description = request.Description,
+                ChatOptions = chatOptions,
+                AIContextProviders = request.ContextProviders ?? []
+            };
+            var agent = new ChatClientAgent(
+                CreateChatClient(request.Profile, request.ApiKey),
+                agentOptions,
+                _loggerFactory,
+                _serviceProvider);
+            var promptMessages = PrependInstructions(request.Instructions, request.Messages);
+
+            await foreach (var update in agent.RunStreamingAsync(
+                               promptMessages,
+                               null,
+                               new ChatClientAgentRunOptions(chatOptions),
+                               cancellationToken))
+            {
+                rawUpdates.Add(update);
+
+                var deltaText = ExtractText(update);
+                if (string.IsNullOrWhiteSpace(deltaText))
+                {
+                    continue;
+                }
+
+                streamedText.Append(deltaText);
+                if (onTextDelta is not null)
+                {
+                    await onTextDelta(deltaText, cancellationToken);
+                }
             }
 
-            streamedText.Append(deltaText);
-            if (onTextDelta is not null)
-            {
-                await onTextDelta(deltaText, cancellationToken);
-            }
+            stopwatch.Stop();
+
+            return new AgentExecutionResult(
+                ResolveFinalMarkdown(streamedText.ToString(), rawUpdates, _logger),
+                null,
+                null,
+                stopwatch.Elapsed);
         }
-
-        stopwatch.Stop();
-
-        return new AgentExecutionResult(
-            ResolveFinalMarkdown(streamedText.ToString(), rawUpdates),
-            null,
-            null,
-            stopwatch.Elapsed);
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogDebug(
+                "Agent execution was canceled. AgentName={AgentName}, ProfileName={ProfileName}, Model={Model}",
+                request.Name,
+                request.Profile.Name,
+                request.Profile.Model);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            stopwatch.Stop();
+            _logger.LogError(
+                exception,
+                "Agent execution failed. AgentName={AgentName}, ProfileName={ProfileName}, Model={Model}",
+                request.Name,
+                request.Profile.Name,
+                request.Profile.Model);
+            throw;
+        }
     }
 
     private static IChatClient CreateChatClient(ProviderProfile profile, string apiKey)
@@ -111,7 +136,10 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
         return promptMessages;
     }
 
-    public static string ResolveFinalMarkdown(string streamedText, IReadOnlyList<AgentResponseUpdate> rawUpdates)
+    public static string ResolveFinalMarkdown(
+        string streamedText,
+        IReadOnlyList<AgentResponseUpdate> rawUpdates,
+        ILogger? logger = null)
     {
         if (rawUpdates.Count == 0)
         {
@@ -123,11 +151,12 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
         {
             aggregatedText = rawUpdates.ToAgentResponse().Text;
         }
-        catch
+        catch (Exception exception)
         {
             // Some providers may emit malformed partial JSON in streaming metadata (for example
             // incomplete function-call arguments near token limits). If aggregation fails, keep
             // the already-streamed text instead of failing the entire turn.
+            logger?.LogWarning(exception, "Failed to aggregate streamed agent response metadata; falling back to streamed text.");
             return streamedText;
         }
 

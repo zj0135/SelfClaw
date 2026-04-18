@@ -165,7 +165,7 @@ public sealed class FeishuDesktopChannelAdapter : IDesktopChannelAdapter
                 running ? DesktopChannelRuntimeState.Running : DesktopChannelRuntimeState.Stopped,
                 running ? "飞书连接已建立。" : "飞书连接已停止。"));
 
-        return new FeishuDesktopChannelConnection(service);
+        return new FeishuDesktopChannelConnection(service, logger);
     }
 
     private static DesktopChannelIncomingMessage ConvertIncomingMessage(FeishuIncomingMessage incomingMessage)
@@ -223,10 +223,12 @@ public sealed class FeishuDesktopChannelAdapter : IDesktopChannelAdapter
     private sealed class FeishuDesktopChannelConnection : IDesktopChannelConnection
     {
         private readonly FeishuBotService _service;
+        private readonly ILogger _logger;
 
-        public FeishuDesktopChannelConnection(FeishuBotService service)
+        public FeishuDesktopChannelConnection(FeishuBotService service, ILogger logger)
         {
             _service = service;
+            _logger = logger;
         }
 
         public Task StartAsync(CancellationToken cancellationToken = default)
@@ -254,8 +256,16 @@ public sealed class FeishuDesktopChannelAdapter : IDesktopChannelAdapter
                     cancellationToken);
                 return new FeishuDesktopChannelStreamingReply(handle);
             }
-            catch
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Failed to create Feishu streaming reply for conversation '{ConversationId}'. Falling back to non-streaming reply.",
+                    incomingMessage.ConversationId);
                 return null;
             }
         }

@@ -24,6 +24,7 @@ public sealed class DesktopChannelManager : IAsyncDisposable
     private readonly ConcurrentDictionary<string, ChannelRuntimeSession> _runtimeSessions = new(StringComparer.OrdinalIgnoreCase);
 
     private bool _initialized;
+    private int _disposeStarted;
 
     public DesktopChannelManager(
         DesktopSettingsStore settingsStore,
@@ -219,6 +220,11 @@ public sealed class DesktopChannelManager : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
+        {
+            return;
+        }
+
         foreach (var channelId in _adapters.Select(item => item.Descriptor.Id))
         {
             await StopChannelAsync(channelId);
