@@ -41,6 +41,7 @@ public partial class App : Application
             builder.Services.AddSingleton<IDesktopChannelAdapter, FeishuDesktopChannelAdapter>();
             builder.Services.AddSingleton<DesktopChannelManager>();
             builder.Services.AddSingleton<DesktopToolApprovalHandler>();
+            builder.Services.AddSingleton<DesktopNotificationService>();
             builder.Services.AddSingleton<MainWindowViewModel>();
             builder.Services.AddSingleton<MainWindow>();
             _host = builder.Build();

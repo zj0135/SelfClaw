@@ -55,6 +55,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly IAgentChatRuntime _agentChatRuntime;
     private readonly IWorkspaceToolService _workspaceToolService;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
+    private readonly DesktopNotificationService _desktopNotificationService;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly DesktopSettingsStore _desktopSettingsStore;
     private readonly DesktopChannelManager _channelManager;
@@ -98,6 +99,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IAgentChatRuntime agentChatRuntime,
         IWorkspaceToolService workspaceToolService,
         DesktopToolApprovalHandler toolApprovalHandler,
+        DesktopNotificationService desktopNotificationService,
         MarkdownHtmlRenderer markdownHtmlRenderer,
         DesktopSettingsStore desktopSettingsStore,
         DesktopChannelManager channelManager,
@@ -109,11 +111,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _agentChatRuntime = agentChatRuntime;
         _workspaceToolService = workspaceToolService;
         _toolApprovalHandler = toolApprovalHandler;
+        _desktopNotificationService = desktopNotificationService;
         _markdownHtmlRenderer = markdownHtmlRenderer;
         _desktopSettingsStore = desktopSettingsStore;
         _channelManager = channelManager;
         _logger = logger;
         _channelManager.Changed += OnChannelManagerChanged;
+        _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
         if (Application.Current?.Dispatcher is Dispatcher dispatcher)
         {
             _streamingPublishTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
@@ -1101,6 +1105,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
             StatusText = "Ready.";
             PublishShellNow(true);
+            PublishConversationCompletedNotification(conversation);
         }
         catch (OperationCanceledException)
         {

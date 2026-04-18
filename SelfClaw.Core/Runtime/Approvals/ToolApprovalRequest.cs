@@ -5,4 +5,5 @@ public sealed record ToolApprovalRequest(
     string ToolName,
     string DisplayName,
     string Description,
-    string ArgumentsJson);
+    string ArgumentsJson,
+    Guid? ConversationId = null);

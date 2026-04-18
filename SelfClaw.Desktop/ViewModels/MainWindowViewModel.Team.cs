@@ -211,7 +211,8 @@ public sealed partial class MainWindowViewModel
                 exportRun.ToolName,
                 "Export Team Document",
                 $"Allow SelfClaw to write the team summary to '{document.SuggestedRelativePath}' inside the selected workspace?",
-                exportRun.ArgumentsJson),
+                exportRun.ArgumentsJson,
+                conversation.Id),
             cancellationToken);
 
         if (!approved)

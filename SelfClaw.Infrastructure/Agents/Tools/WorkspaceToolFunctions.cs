@@ -83,7 +83,8 @@ internal sealed class WorkspaceToolFunctions
                             "write_workspace_file",
                             "Write Workspace File",
                             $"Allow the agent to create or overwrite '{relativePath}' inside the selected workspace?\n\nCharacters: {content.Length}",
-                            argumentsJson),
+                            argumentsJson,
+                            record.ConversationId),
                         cancellationToken))
                 {
                     var denied = new WorkspaceFileWriteResult(
@@ -133,7 +134,8 @@ internal sealed class WorkspaceToolFunctions
                             "run_shell_command",
                             "Run PowerShell Command",
                             $"Allow the agent to run this PowerShell command in '{_workspaceRoot.RootPath}'?\n\nTimeout: {timeoutSeconds} seconds\n\nCommand:\n{command}",
-                            argumentsJson),
+                            argumentsJson,
+                            record.ConversationId),
                         cancellationToken))
                 {
                     var denied = new ShellCommandResult(

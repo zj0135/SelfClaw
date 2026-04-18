@@ -39,7 +39,9 @@ public partial class MainWindow : Window
     private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], null, [], null, [], [], [], false, null, string.Empty, false);
     private bool _webViewReady;
 
-    public MainWindow(MainWindowViewModel viewModel)
+    public MainWindow(
+        MainWindowViewModel viewModel,
+        DesktopNotificationService desktopNotificationService)
     {
         InitializeComponent();
         _viewModel = viewModel;
@@ -51,6 +53,7 @@ public partial class MainWindow : Window
         _viewModel.TranscriptChanged += OnTranscriptChanged;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         TranscriptView.NavigationCompleted += OnTranscriptNavigationCompleted;
+        desktopNotificationService.RegisterMainWindow(this);
     }
 
     private async void OnLoadedAsync(object sender, RoutedEventArgs e)

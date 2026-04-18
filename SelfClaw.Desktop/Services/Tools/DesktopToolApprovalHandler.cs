@@ -7,6 +7,8 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
 {
     private readonly ConcurrentDictionary<Guid, PendingApproval> _pendingApprovals = new();
 
+    public event Action<ToolApprovalRequest>? ApprovalRequested;
+
     public Task<bool> RequestApprovalAsync(
         ToolApprovalRequest request,
         CancellationToken cancellationToken = default)
@@ -28,13 +30,14 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
             });
         }
 
-        var pendingApproval = new PendingApproval(completionSource, registration);
+        var pendingApproval = new PendingApproval(request, completionSource, registration);
         if (!_pendingApprovals.TryAdd(request.ToolExecutionId, pendingApproval))
         {
             registration.Dispose();
             throw new InvalidOperationException($"Tool approval for '{request.ToolExecutionId}' is already pending.");
         }
 
+        ApprovalRequested?.Invoke(request);
         return AwaitApprovalAsync(request.ToolExecutionId, pendingApproval);
     }
 
@@ -62,6 +65,7 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
     }
 
     private sealed record PendingApproval(
+        ToolApprovalRequest Request,
         TaskCompletionSource<bool> CompletionSource,
         CancellationTokenRegistration CancellationRegistration);
 }
