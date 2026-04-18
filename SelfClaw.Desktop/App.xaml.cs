@@ -15,7 +15,7 @@ using Serilog.Events;
 
 namespace SelfClaw.Desktop;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     private IHost? _host;
     private StoragePaths? _storagePaths;
@@ -32,6 +32,7 @@ public partial class App : Application
             base.OnStartup(e);
 
             ThemeMode = ThemeMode.System;
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
 
             var builder = Host.CreateApplicationBuilder();
             builder.Logging.ClearProviders();
@@ -42,6 +43,7 @@ public partial class App : Application
             builder.Services.AddSingleton<DesktopChannelManager>();
             builder.Services.AddSingleton<DesktopToolApprovalHandler>();
             builder.Services.AddSingleton<DesktopNotificationService>();
+            builder.Services.AddSingleton<SystemTrayService>();
             builder.Services.AddSingleton<MainWindowViewModel>();
             builder.Services.AddSingleton<MainWindow>();
             _host = builder.Build();
@@ -53,6 +55,8 @@ public partial class App : Application
             await _host.Services.GetRequiredService<IConversationRepository>().InitializeAsync();
 
             var mainWindow = _host.Services.GetRequiredService<MainWindow>();
+            var systemTrayService = _host.Services.GetRequiredService<SystemTrayService>();
+            systemTrayService.RegisterMainWindow(mainWindow);
             MainWindow = mainWindow;
             mainWindow.Show();
         }
@@ -71,7 +75,16 @@ public partial class App : Application
             if (_host is not null)
             {
                 await _host.StopAsync();
-                _host.Dispose();
+
+                if (_host is IAsyncDisposable asyncDisposableHost)
+                {
+                    await asyncDisposableHost.DisposeAsync();
+                }
+                else
+                {
+                    _host.Dispose();
+                }
+
                 _host = null;
             }
         }
@@ -137,11 +150,11 @@ public partial class App : Application
 
         try
         {
-            MessageBox.Show(
+            System.Windows.MessageBox.Show(
                 BuildUserFacingErrorMessage(summary, details),
                 "SelfClaw",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
         }
         finally
         {
@@ -151,11 +164,11 @@ public partial class App : Application
 
     private void ShowFatalError(string summary, string details)
     {
-        MessageBox.Show(
+        System.Windows.MessageBox.Show(
             BuildUserFacingErrorMessage(summary, details),
             "SelfClaw",
-            MessageBoxButton.OK,
-            MessageBoxImage.Error);
+            System.Windows.MessageBoxButton.OK,
+            System.Windows.MessageBoxImage.Error);
     }
 
     private string BuildUserFacingErrorMessage(string summary, string details)

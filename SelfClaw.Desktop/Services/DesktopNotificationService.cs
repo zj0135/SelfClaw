@@ -66,12 +66,12 @@ public sealed class DesktopNotificationService : IDisposable
         Func<string, Task>? replyAction,
         TimeSpan? autoCloseAfter)
     {
-        if (Application.Current is null)
+        if (System.Windows.Application.Current is null)
         {
             return;
         }
 
-        if (Application.Current.Dispatcher.CheckAccess())
+        if (System.Windows.Application.Current.Dispatcher.CheckAccess())
         {
             ShowCoreOnUiThread(
                 title,
@@ -85,7 +85,7 @@ public sealed class DesktopNotificationService : IDisposable
             return;
         }
 
-        _ = Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+        _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
             ShowCoreOnUiThread(
                 title,
                 message,

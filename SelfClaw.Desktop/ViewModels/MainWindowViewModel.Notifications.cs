@@ -10,7 +10,7 @@ public sealed partial class MainWindowViewModel
 {
     private void OnToolApprovalRequested(ToolApprovalRequest request)
     {
-        if (Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
+        if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
         {
             _ = dispatcher.BeginInvoke(new Action(() => OnToolApprovalRequested(request)), DispatcherPriority.Background);
             return;

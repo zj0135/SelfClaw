@@ -13,6 +13,7 @@
         MinWidth="1240"
         MinHeight="760"
         WindowStartupLocation="CenterScreen"
+        Icon="pack://application:,,,/Assets/icon/icon.ico"
         WindowStyle="None"
         ResizeMode="CanResize"
         Background="Transparent"

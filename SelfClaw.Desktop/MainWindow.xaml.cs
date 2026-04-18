@@ -8,11 +8,12 @@ using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
-using System.Windows.Media;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.ViewModels;
+using MediaColor = System.Windows.Media.Color;
+using MediaSolidColorBrush = System.Windows.Media.SolidColorBrush;
 
 namespace SelfClaw.Desktop;
 
@@ -22,18 +23,18 @@ public partial class MainWindow : Window
     private const int WmGetMinMaxInfo = 0x0024;
     private const uint MonitorDefaultToNearest = 2;
 
-    private static readonly Color ShellSurfaceDarkColor = Color.FromArgb(0xB3, 0x0A, 0x0F, 0x17);
-    private static readonly Color ShellSurfaceLightColor = Color.FromArgb(0xD9, 0xF6, 0xF9, 0xFD);
-    private static readonly Color ShellTitleDarkColor = Color.FromArgb(0xCC, 0x0C, 0x12, 0x1A);
-    private static readonly Color ShellTitleLightColor = Color.FromArgb(0xE8, 0xFF, 0xFF, 0xFF);
-    private static readonly Color ShellBorderDarkColor = Color.FromArgb(0x3A, 0x2A, 0x33, 0x42);
-    private static readonly Color ShellBorderLightColor = Color.FromArgb(0x66, 0xC9, 0xD6, 0xE8);
-    private static readonly Color ShellTitleBorderDarkColor = Color.FromArgb(0x29, 0xFF, 0xFF, 0xFF);
-    private static readonly Color ShellTitleBorderLightColor = Color.FromArgb(0x66, 0xC9, 0xD6, 0xE8);
-    private static readonly Color ShellTitleTextDarkColor = Color.FromRgb(0xDC, 0xE6, 0xF8);
-    private static readonly Color ShellTitleTextLightColor = Color.FromRgb(0x23, 0x34, 0x4A);
-    private static readonly Color TrafficGlyphDarkColor = Color.FromArgb(0x8A, 0x1A, 0x1F, 0x2A);
-    private static readonly Color TrafficGlyphLightColor = Color.FromArgb(0x8A, 0x2A, 0x37, 0x48);
+    private static readonly MediaColor ShellSurfaceDarkColor = MediaColor.FromArgb(0xB3, 0x0A, 0x0F, 0x17);
+    private static readonly MediaColor ShellSurfaceLightColor = MediaColor.FromArgb(0xD9, 0xF6, 0xF9, 0xFD);
+    private static readonly MediaColor ShellTitleDarkColor = MediaColor.FromArgb(0xCC, 0x0C, 0x12, 0x1A);
+    private static readonly MediaColor ShellTitleLightColor = MediaColor.FromArgb(0xE8, 0xFF, 0xFF, 0xFF);
+    private static readonly MediaColor ShellBorderDarkColor = MediaColor.FromArgb(0x3A, 0x2A, 0x33, 0x42);
+    private static readonly MediaColor ShellBorderLightColor = MediaColor.FromArgb(0x66, 0xC9, 0xD6, 0xE8);
+    private static readonly MediaColor ShellTitleBorderDarkColor = MediaColor.FromArgb(0x29, 0xFF, 0xFF, 0xFF);
+    private static readonly MediaColor ShellTitleBorderLightColor = MediaColor.FromArgb(0x66, 0xC9, 0xD6, 0xE8);
+    private static readonly MediaColor ShellTitleTextDarkColor = MediaColor.FromRgb(0xDC, 0xE6, 0xF8);
+    private static readonly MediaColor ShellTitleTextLightColor = MediaColor.FromRgb(0x23, 0x34, 0x4A);
+    private static readonly MediaColor TrafficGlyphDarkColor = MediaColor.FromArgb(0x8A, 0x1A, 0x1F, 0x2A);
+    private static readonly MediaColor TrafficGlyphLightColor = MediaColor.FromArgb(0x8A, 0x2A, 0x37, 0x48);
 
     private readonly MainWindowViewModel _viewModel;
     private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], null, [], null, [], [], [], false, null, string.Empty, false);
@@ -268,13 +269,13 @@ public partial class MainWindow : Window
         WindowBackdropHelper.TryApplyCaptionTheme(this, isDark);
     }
 
-    private void SetBrushColor(string resourceKey, Color color)
+    private void SetBrushColor(string resourceKey, MediaColor color)
     {
-        if (Resources[resourceKey] is SolidColorBrush brush)
+        if (Resources[resourceKey] is MediaSolidColorBrush brush)
         {
             if (brush.IsFrozen)
             {
-                Resources[resourceKey] = new SolidColorBrush(color);
+                Resources[resourceKey] = new MediaSolidColorBrush(color);
                 return;
             }
 
@@ -286,7 +287,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        Resources[resourceKey] = new SolidColorBrush(color);
+        Resources[resourceKey] = new MediaSolidColorBrush(color);
     }
 
     private async void OnTranscriptWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)

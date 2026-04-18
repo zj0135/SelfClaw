@@ -18,7 +18,7 @@ using SelfClaw.Infrastructure.Tools.Transcript;
 
 namespace SelfClaw.Desktop.ViewModels;
 
-public sealed partial class MainWindowViewModel : ObservableObject
+public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(75);
     private static readonly ShellSelectOption[] ToolPermissionOptions =
@@ -91,6 +91,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private bool _pendingStreamingPublish;
     private bool _pendingStreamingAutoScroll;
     private DateTimeOffset _lastStreamingPublishAtUtc = DateTimeOffset.MinValue;
+    private int _disposeStarted;
 
     public MainWindowViewModel(
         IConversationRepository conversationRepository,
@@ -118,7 +119,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _logger = logger;
         _channelManager.Changed += OnChannelManagerChanged;
         _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
-        if (Application.Current?.Dispatcher is Dispatcher dispatcher)
+        if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher)
         {
             _streamingPublishTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
             {
@@ -696,7 +697,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private static void ApplyThemeModeToApplication(ThemeMode mode)
     {
-        if (Application.Current is { } app)
+        if (System.Windows.Application.Current is { } app)
         {
             app.ThemeMode = mode;
         }
@@ -709,7 +710,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        Application.Current?.Dispatcher.Invoke(() =>
+        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
         {
             ApplyThemePreference(AppThemePreference.System, persist: false, refreshShell: true);
         });
@@ -717,7 +718,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private void RequestStreamingShellPublish(bool autoScroll)
     {
-        if (Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
+        if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
         {
             _ = dispatcher.BeginInvoke(new Action(() => RequestStreamingShellPublish(autoScroll)), DispatcherPriority.Background);
             return;
@@ -777,7 +778,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private void PublishShellNow(bool autoScroll)
     {
-        if (Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
+        if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
         {
             _ = dispatcher.BeginInvoke(new Action(() => PublishShellNow(autoScroll)), DispatcherPriority.Background);
             return;
@@ -1158,6 +1159,28 @@ public sealed partial class MainWindowViewModel : ObservableObject
             "正在梳理计划",
             []);
         PublishShell(false);
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
+        {
+            return;
+        }
+
+        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        _channelManager.Changed -= OnChannelManagerChanged;
+        _toolApprovalHandler.ApprovalRequested -= OnToolApprovalRequested;
+
+        if (_streamingPublishTimer is not null)
+        {
+            _streamingPublishTimer.Stop();
+            _streamingPublishTimer.Tick -= OnStreamingPublishTimerTick;
+        }
+
+        _turnCancellationSource?.Cancel();
+        _turnCancellationSource?.Dispose();
+        _turnCancellationSource = null;
     }
 
     private void ApplyPreparedExecutionPlan(ExecutionPlan plan)

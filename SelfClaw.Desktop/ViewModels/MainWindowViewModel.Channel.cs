@@ -25,7 +25,7 @@ public sealed partial class MainWindowViewModel
 
     private async void OnChannelManagerChanged(object? sender, DesktopChannelManagerEvent e)
     {
-        if (Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
+        if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
         {
             _ = dispatcher.BeginInvoke(new Action(() => OnChannelManagerChanged(sender, e)), DispatcherPriority.Background);
             return;

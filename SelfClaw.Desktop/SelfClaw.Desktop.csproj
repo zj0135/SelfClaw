@@ -19,17 +19,27 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>Assets\icon\icon.ico</ApplicationIcon>
     <UseWPF>true</UseWPF>
-    <NoWarn>$(NoWarn);WPF0001</NoWarn>
-    <ResolveReferencesDependsOn>BuildManagedDependencies;$(ResolveReferencesDependsOn)</ResolveReferencesDependsOn>
+    <UseWindowsForms>true</UseWindowsForms>
+    <NoWarn>$(NoWarn);WPF0001;NU1510</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SelfClaw.Core\SelfClaw.Core.csproj" />
-    <ProjectReference Include="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" />
+    <Reference Include="SelfClaw.Core">
+      <HintPath>..\SelfClaw.Core\bin\$(Configuration)\net10.0\SelfClaw.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SelfClaw.Infrastructure">
+      <HintPath>..\SelfClaw.Infrastructure\bin\$(Configuration)\net10.0-windows\SelfClaw.Infrastructure.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+    <Resource Include="Assets\icon\icon.ico" />
     <None Update="Assets\TranscriptVue\*;Assets\TranscriptVue\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -38,7 +48,7 @@
     </None>
   </ItemGroup>
 
-  <Target Name="BuildManagedDependencies">
+  <Target Name="BuildManagedDependencies" BeforeTargets="ResolveReferences">
     <MSBuild Projects="..\SelfClaw.Core\SelfClaw.Core.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
     <MSBuild Projects="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
   </Target>
