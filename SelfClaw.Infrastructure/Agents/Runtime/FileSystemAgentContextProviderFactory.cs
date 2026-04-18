@@ -2,27 +2,31 @@
 
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging;
+using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Infrastructure.Agents.Runtime;
 
 internal sealed class FileSystemAgentContextProviderFactory : IAgentContextProviderFactory
 {
     private readonly ILoggerFactory _loggerFactory;
+    private readonly StoragePaths _storagePaths;
     private readonly IReadOnlyList<string> _assetsRootPaths;
 
-    public FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory)
-        : this(loggerFactory, DiscoverDefaultAssetsRootPaths(AppContext.BaseDirectory))
+    public FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, StoragePaths storagePaths)
+        : this(loggerFactory,storagePaths, DiscoverDefaultAssetsRootPaths(AppContext.BaseDirectory))
     {
     }
 
-    internal FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, params string[] assetsRootPaths)
-        : this(loggerFactory, (IEnumerable<string>)assetsRootPaths)
+    internal FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, StoragePaths storagePaths, params string[] assetsRootPaths)
+        : this(loggerFactory,storagePaths, (IEnumerable<string>)assetsRootPaths)
     {
     }
 
-    internal FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, IEnumerable<string> assetsRootPaths)
+    internal FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, StoragePaths storagePaths, IEnumerable<string> assetsRootPaths)
     {
         _loggerFactory = loggerFactory;
+        _storagePaths = storagePaths;
+
         _assetsRootPaths = assetsRootPaths
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(Path.GetFullPath)
@@ -63,6 +67,19 @@ internal sealed class FileSystemAgentContextProviderFactory : IAgentContextProvi
     internal IReadOnlyList<string> DiscoverSkillRoots()
     {
         var roots = new List<string>();
+
+        var storagePath = Path.Combine(_storagePaths.AppDataDirectory, "skills");
+        if (Directory.Exists(storagePath))
+        {
+            var hasSkillManifest = Directory
+                .EnumerateFiles(storagePath, "SKILL.md", SearchOption.AllDirectories)
+                .Any();
+
+            if (hasSkillManifest)
+                roots.Add(Path.GetFullPath(storagePath));
+            
+        }
+
         foreach (var assetsRootPath in _assetsRootPaths)
         {
             var skillsRootPath = Path.Combine(assetsRootPath, "skills");

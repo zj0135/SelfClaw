@@ -212,7 +212,7 @@ const settingsSections = computed(() => [
 		eyebrow: '模型配置',
 		title: '模型配置',
 		description: selectedProfile.value
-			? `${selectedProfile.value.label}${state.selectedProfileModel ? ` 路 ${state.selectedProfileModel}` : ''}`
+			? `${selectedProfile.value.label}${state.selectedProfileModel ? `  ${state.selectedProfileModel}` : ''}`
 			: '选择默认模型，并管理 Endpoint 与 API Key。',
 		badge: selectedProfile.value ? '已选择' : '未选择',
 	},
@@ -1240,128 +1240,66 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<div
-		class="transcript-vue-app"
-		:class="{ busy: state.isBusy }"
-		@click="handleDelegatedClick"
-		@wheel.capture.passive="onRootWheel"
-		@pointerdown.capture="onRootPointerDown"
-	>
+	<div class="transcript-vue-app" :class="{ busy: state.isBusy }" @click="handleDelegatedClick"
+		@wheel.capture.passive="onRootWheel" @pointerdown.capture="onRootPointerDown">
 		<div class="app-shell">
-			<ConversationSidebar
-				ref="sidebarRef"
-				:fallback-status-text="fallbackStatusText"
-				:is-channel-mode="isChannelMode"
-				:conversation-search="conversationSearch"
-				:conversation-section-title="conversationSectionTitle"
-				:conversation-list-html="conversationListHtml"
-				@new-conversation="newConversation"
-				@open-settings="openSettings"
-				@search-change="onConversationSearchChange"
-				@search-input="onConversationSearchInput"
-			/>
+			<ConversationSidebar ref="sidebarRef" :fallback-status-text="fallbackStatusText"
+				:is-channel-mode="isChannelMode" :conversation-search="conversationSearch"
+				:conversation-section-title="conversationSectionTitle" :conversation-list-html="conversationListHtml"
+				@new-conversation="newConversation" @open-settings="openSettings"
+				@search-change="onConversationSearchChange" @search-input="onConversationSearchInput" />
 
 			<main class="main-column">
-				<MainTopbar
-					:conversation-modes="state.conversationModes"
+				<MainTopbar :conversation-modes="state.conversationModes"
 					:selected-conversation-mode-id="state.selectedConversationModeId"
-					:current-model-label="currentModelLabel"
-					:current-workspace-label="currentWorkspaceLabel"
-					@select-conversation-mode="selectConversationMode"
-					@open-settings="openSettings"
-				/>
+					:current-model-label="currentModelLabel" :current-workspace-label="currentWorkspaceLabel"
+					@select-conversation-mode="selectConversationMode" @open-settings="openSettings" />
 
-				<TranscriptPanel
-					ref="transcriptPanelRef"
-					:messages-html="messagesHtml"
-					:show-plan-panel="showPlanPanel"
-					:plan-panel-collapsed="planPanelCollapsed"
-					@scroll="onTranscriptScroll"
-				/>
+				<TranscriptPanel ref="transcriptPanelRef" :messages-html="messagesHtml" :show-plan-panel="showPlanPanel"
+					:plan-panel-collapsed="planPanelCollapsed" @scroll="onTranscriptScroll" />
 
-				<ComposerPanel
-					ref="composerPanelRef"
-					:show-plan-panel="showPlanPanel"
-					:plan-panel="planPanel"
-					:plan-steps="planSteps"
-					:plan-panel-collapsed="planPanelCollapsed"
-					:collapsed-plan-text="collapsedPlanText"
-					:composer-value="composerValue"
-					:composer-placeholder="composerPlaceholder"
-					:is-channel-mode="isChannelMode"
-					:mention-state="mentionState"
-					:mention-candidates="mentionCandidates"
-					:profiles="state.profiles"
-					:selected-profile-id="state.selectedProfileId || ''"
-					:is-team-mode="isTeamMode"
+				<ComposerPanel ref="composerPanelRef" :show-plan-panel="showPlanPanel" :plan-panel="planPanel"
+					:plan-steps="planSteps" :plan-panel-collapsed="planPanelCollapsed"
+					:collapsed-plan-text="collapsedPlanText" :composer-value="composerValue"
+					:composer-placeholder="composerPlaceholder" :is-channel-mode="isChannelMode"
+					:mention-state="mentionState" :mention-candidates="mentionCandidates" :profiles="state.profiles"
+					:selected-profile-id="state.selectedProfileId || ''" :is-team-mode="isTeamMode"
 					:team-round-modes="state.teamRoundModes"
 					:selected-team-round-mode-id="state.selectedTeamRoundModeId"
 					:team-output-modes="state.teamOutputModes"
 					:selected-team-output-mode-id="state.selectedTeamOutputModeId"
 					:tool-permission-modes="state.toolPermissionModes"
 					:selected-tool-permission-mode-id="state.selectedToolPermissionModeId"
-					:show-planning-toggle="showPlanningToggle"
-					:is-busy="state.isBusy"
-					:is-planning-mode-enabled="state.isPlanningModeEnabled"
-					:send-button-disabled="sendButtonDisabled"
-					@composer-input="onComposerInput"
-					@composer-keydown="onComposerKeydown"
-					@apply-mention="applyMentionSelection"
-					@select-profile="onProfileSelectChange"
-					@select-team-round="onTeamRoundChange"
-					@select-team-output="onTeamOutputChange"
-					@select-permission="onPermissionChange"
-					@toggle-planning-mode="onPlanningModeChange"
-					@toggle-plan-panel-collapse="togglePlanPanelCollapse"
-					@send-click="onSendClick"
-				/>
+					:show-planning-toggle="showPlanningToggle" :is-busy="state.isBusy"
+					:is-planning-mode-enabled="state.isPlanningModeEnabled" :send-button-disabled="sendButtonDisabled"
+					@composer-input="onComposerInput" @composer-keydown="onComposerKeydown"
+					@apply-mention="applyMentionSelection" @select-profile="onProfileSelectChange"
+					@select-team-round="onTeamRoundChange" @select-team-output="onTeamOutputChange"
+					@select-permission="onPermissionChange" @toggle-planning-mode="onPlanningModeChange"
+					@toggle-plan-panel-collapse="togglePlanPanelCollapse" @send-click="onSendClick" />
 			</main>
 
 			<StepsPanel ref="stepsPanelRef" :steps-header-html="stepsHeaderHtml" :steps-panel-html="stepsPanelHtml" />
 		</div>
 
-		<SettingsModal
-			ref="settingsModalRef"
-			:open="settingsOpen"
-			:settings-sections="settingsSections"
-			:active-section="activeSettingsSection"
-			:active-settings-meta="activeSettingsMeta"
-			:visible-feedback="visibleSettingsFeedback"
-			:selected-profile="selectedProfile"
-			:profiles="state.profiles"
-			:selected-profile-id="state.selectedProfileId || ''"
-			:profile-summary-cards="profileSummaryCards"
-			:selected-workspace="selectedWorkspace"
-			:workspace-roots="state.workspaceRoots"
+		<SettingsModal ref="settingsModalRef" :open="settingsOpen" :settings-sections="settingsSections"
+			:active-section="activeSettingsSection" :active-settings-meta="activeSettingsMeta"
+			:visible-feedback="visibleSettingsFeedback" :selected-profile="selectedProfile" :profiles="state.profiles"
+			:selected-profile-id="state.selectedProfileId || ''" :profile-summary-cards="profileSummaryCards"
+			:selected-workspace="selectedWorkspace" :workspace-roots="state.workspaceRoots"
 			:selected-workspace-root-id="state.selectedWorkspaceRootId || ''"
-			:workspace-summary-cards="workspaceSummaryCards"
-			:channels="state.channels"
-			:selected-theme-label="selectedThemeLabel"
-			:theme-options="state.themeOptions"
-			:selected-theme-id="state.selectedThemeId || 'system'"
-			@close="closeSettings"
-			@select-section="selectSettingsSection"
-			@panel-scroll="onSettingsPanelScroll"
-			@select-profile="onSettingsProfileChange"
-			@edit-profile="openEditor('profile', 'edit')"
-			@delete-profile="deleteProfile"
-			@create-profile="openEditor('profile', 'create')"
-			@select-workspace="onWorkspaceChange"
-			@edit-workspace="openEditor('workspace', 'edit')"
-			@delete-workspace="deleteWorkspace"
-			@create-workspace="openEditor('workspace', 'create')"
-			@toggle-channel="toggleChannelEnabled"
-			@edit-channel="openEditor('channel', 'edit', $event)"
-			@select-theme="onThemeChange"
-		/>
+			:workspace-summary-cards="workspaceSummaryCards" :channels="state.channels"
+			:selected-theme-label="selectedThemeLabel" :theme-options="state.themeOptions"
+			:selected-theme-id="state.selectedThemeId || 'system'" @close="closeSettings"
+			@select-section="selectSettingsSection" @panel-scroll="onSettingsPanelScroll"
+			@select-profile="onSettingsProfileChange" @edit-profile="openEditor('profile', 'edit')"
+			@delete-profile="deleteProfile" @create-profile="openEditor('profile', 'create')"
+			@select-workspace="onWorkspaceChange" @edit-workspace="openEditor('workspace', 'edit')"
+			@delete-workspace="deleteWorkspace" @create-workspace="openEditor('workspace', 'create')"
+			@toggle-channel="toggleChannelEnabled" @edit-channel="openEditor('channel', 'edit', $event)"
+			@select-theme="onThemeChange" />
 
-		<EditorModal
-			:open="editorState.open"
-			:editor="editorState"
-			:profiles="state.profiles"
-			@close="closeEditor"
-			@pick-workspace-path="pickWorkspacePath"
-			@save="saveEditor"
-		/>
+		<EditorModal :open="editorState.open" :editor="editorState" :profiles="state.profiles" @close="closeEditor"
+			@pick-workspace-path="pickWorkspacePath" @save="saveEditor" />
 	</div>
 </template>
