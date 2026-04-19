@@ -102,6 +102,7 @@ const pointerActionSuppressDurationMs = 700;
 
 let pendingStatePayload = null;
 let renderFrameHandle = 0;
+let profileModelFetchRequestSeed = 0;
 
 const post = (message) => window.chrome?.webview?.postMessage(message);
 
@@ -513,6 +514,40 @@ function closeEditor() {
 	editorState.feedback = null;
 }
 
+function handleProfileModelsFetched(payload) {
+	if (!editorState.open || editorState.kind !== 'profile' || !editorState.draft) {
+		return;
+	}
+
+	if (Number(payload.requestId || 0) !== Number(editorState.draft.fetchModelsRequestId || 0)) {
+		return;
+	}
+
+	editorState.draft.isFetchingModels = false;
+	editorState.draft.fetchModelsRequestId = 0;
+
+	const modelOptions = Array.isArray(payload.models)
+		? [...new Set(payload.models.filter((item) => typeof item === 'string').map((item) => item.trim()).filter(Boolean))]
+		: [];
+
+	editorState.draft.modelOptions = modelOptions;
+	editorState.feedback = payload.errorMessage
+		? { level: 'error', message: payload.errorMessage, scope: 'profile' }
+		: {
+				level: 'success',
+				message: modelOptions.length ? `已加载 ${modelOptions.length} 个模型。` : '没有获取到任何模型。',
+				scope: 'profile',
+			};
+
+	if (!payload.errorMessage) {
+		editorState.feedback = null;
+	}
+
+	if (!payload.errorMessage && !editorState.draft.model.trim() && modelOptions.length > 0) {
+		editorState.draft.model = modelOptions[0];
+	}
+}
+
 function captureScroll(element) {
 	return element ? { top: element.scrollTop, nearBottom: element.scrollHeight - element.scrollTop - element.clientHeight < 40 } : null;
 }
@@ -680,6 +715,11 @@ function handleWebViewMessage(event) {
 			editorState.draft.rootPath = payload.rootPath || '';
 			editorState.feedback = null;
 		}
+		return;
+	}
+
+	if (payload.type === 'profile-models-fetched') {
+		handleProfileModelsFetched(payload);
 		return;
 	}
 
@@ -1191,6 +1231,31 @@ function pickWorkspacePath() {
 	post({ type: 'pick-workspace-path' });
 }
 
+function fetchProfileModels() {
+	if (!editorState.open || editorState.kind !== 'profile' || !editorState.draft) {
+		return;
+	}
+
+	const endpoint = editorState.draft.endpoint.trim();
+	if (!endpoint) {
+		editorState.feedback = { level: 'error', message: '请先填写 Endpoint。', scope: 'profile' };
+		return;
+	}
+
+	const requestId = ++profileModelFetchRequestSeed;
+	editorState.draft.isFetchingModels = true;
+	editorState.draft.fetchModelsRequestId = requestId;
+	editorState.feedback = null;
+
+	post({
+		type: 'fetch-profile-models',
+		requestId,
+		profileId: editorState.mode === 'edit' ? state.selectedProfileId || editorState.draft.profileId : editorState.draft.profileId || null,
+		endpoint,
+		apiKey: editorState.draft.apiKey || '',
+	});
+}
+
 function deleteProfile() {
 	if (!state.selectedProfileId) {
 		return;
@@ -1300,6 +1365,6 @@ onUnmounted(() => {
 			@select-theme="onThemeChange" />
 
 		<EditorModal :open="editorState.open" :editor="editorState" :profiles="state.profiles" @close="closeEditor"
-			@pick-workspace-path="pickWorkspacePath" @save="saveEditor" />
+			@pick-workspace-path="pickWorkspacePath" @fetch-models="fetchProfileModels" @save="saveEditor" />
 	</div>
 </template>

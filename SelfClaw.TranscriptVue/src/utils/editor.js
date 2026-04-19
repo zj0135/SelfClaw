@@ -3,6 +3,9 @@ export const emptyProfile = () => ({
 	name: '',
 	endpoint: '',
 	model: '',
+	modelOptions: [],
+	isFetchingModels: false,
+	fetchModelsRequestId: 0,
 	temperatureEnabled: false,
 	temperature: 0.7,
 	topPEnabled: false,
@@ -37,11 +40,15 @@ export function formatSamplingValue(value, max) {
 }
 
 export function createProfileDraft(profile, selectedProfileModel) {
+	const model = selectedProfileModel || '';
 	return {
 		profileId: profile?.id || null,
 		name: profile?.label || '',
 		endpoint: profile?.description || '',
-		model: selectedProfileModel || '',
+		model,
+		modelOptions: model ? [model] : [],
+		isFetchingModels: false,
+		fetchModelsRequestId: 0,
 		temperatureEnabled: Boolean(profile?.temperatureEnabled),
 		temperature: normalizeSamplingValue(profile?.temperature, 0.7, 2),
 		topPEnabled: Boolean(profile?.topPEnabled),

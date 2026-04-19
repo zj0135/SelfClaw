@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { formatSamplingValue } from '../utils/editor';
 
 const props = defineProps({
@@ -17,34 +17,120 @@ const props = defineProps({
 	},
 });
 
-const emit = defineEmits(['close', 'pick-workspace-path', 'save']);
+const emit = defineEmits(['close', 'pick-workspace-path', 'fetch-models', 'save']);
+
+const modelComboboxRef = ref(null);
+const modelInputRef = ref(null);
+const isModelMenuOpen = ref(false);
 
 const title = computed(() => {
 	if (props.editor.kind === 'profile') {
-		return props.editor.mode === 'create' ? '新增模型配置' : '编辑模型配置';
+		return props.editor.mode === 'create' ? '新建模型配置' : '编辑模型配置';
 	}
 
 	if (props.editor.kind === 'channel') {
 		return '编辑频道配置';
 	}
 
-	return props.editor.mode === 'create' ? '新增工作区' : '编辑工作区';
+	return props.editor.mode === 'create' ? '新建工作区' : '编辑工作区';
 });
 
 const description = computed(() => {
 	if (props.editor.kind === 'profile') {
 		return props.editor.mode === 'create'
-			? '填写名称、Endpoint、模型、采样参数和 API Key 后保存，新配置会自动加入下拉列表并切换到当前选择。'
-			: '你可以更新当前模型配置和采样参数；如果不需要替换密钥，API Key 留空即可。';
+			? '填写名称、Endpoint、模型和 API Key。点击模型下拉时会自动从当前 Endpoint 的 /models 接口加载模型列表。'
+			: '可以修改当前模型配置，点击模型下拉时会自动从当前 Endpoint 重新加载模型列表。';
 	}
 
 	if (props.editor.kind === 'channel') {
-		return '填写频道名称、绑定模型和当前渠道要求的连接字段后保存；开启开关后就会开始接收该渠道消息。';
+		return '配置频道显示名称、绑定模型以及频道所需的连接参数。';
 	}
 
 	return props.editor.mode === 'create'
-		? '填写名称并选择本机目录后保存，工作区会自动加入下拉列表并设为当前选择。'
-		: '在这里调整当前工作区的显示名称或重新选择目录，然后保存变更。';
+		? '绑定一个本地目录，作为工具读取、搜索和写入的工作区。'
+		: '更新工作区名称或重新选择要绑定的本地目录。';
+});
+
+const profileModelOptions = computed(() => {
+	if (props.editor.kind !== 'profile' || !props.editor.draft) {
+		return [];
+	}
+
+	return [...new Set([...(props.editor.draft.modelOptions || []), props.editor.draft.model].filter((item) => Boolean(item && item.trim())))];
+});
+
+const canFetchProfileModels = computed(() => props.editor.kind === 'profile' && Boolean(props.editor.draft?.endpoint?.trim()));
+
+function closeModelMenu() {
+	isModelMenuOpen.value = false;
+}
+
+async function openModelMenu(fetchOnOpen = false) {
+	if (props.editor.kind !== 'profile' || !props.editor.draft) {
+		return;
+	}
+
+	isModelMenuOpen.value = true;
+
+	if (fetchOnOpen && canFetchProfileModels.value && !props.editor.draft.isFetchingModels) {
+		emit('fetch-models');
+	}
+
+	await nextTick();
+	modelInputRef.value?.focus?.();
+}
+
+function toggleModelMenu() {
+	if (isModelMenuOpen.value) {
+		closeModelMenu();
+		return;
+	}
+
+	void openModelMenu(true);
+}
+
+function handleModelInputKeydown(event) {
+	if (event.key === 'Escape' && isModelMenuOpen.value) {
+		event.preventDefault();
+		closeModelMenu();
+	}
+}
+
+function selectProfileModel(option) {
+	if (props.editor.kind !== 'profile' || !props.editor.draft) {
+		return;
+	}
+
+	props.editor.draft.model = option;
+	closeModelMenu();
+}
+
+function handleDocumentPointerDown(event) {
+	if (!isModelMenuOpen.value) {
+		return;
+	}
+
+	const container = modelComboboxRef.value;
+	if (container && !container.contains(event.target)) {
+		closeModelMenu();
+	}
+}
+
+watch(
+	() => props.open,
+	(isOpen) => {
+		if (!isOpen) {
+			closeModelMenu();
+		}
+	}
+);
+
+onMounted(() => {
+	document.addEventListener('pointerdown', handleDocumentPointerDown, true);
+});
+
+onBeforeUnmount(() => {
+	document.removeEventListener('pointerdown', handleDocumentPointerDown, true);
 });
 </script>
 
@@ -72,7 +158,54 @@ const description = computed(() => {
 						</div>
 						<div>
 							<div class="field-label">模型</div>
-							<input id="editor-profile-model" v-model="editor.draft.model" class="field-input" type="text" placeholder="例如：gpt-4.1-mini" />
+							<div ref="modelComboboxRef" class="field-combobox" :class="{ open: isModelMenuOpen }">
+								<div
+									class="field-combobox-trigger"
+									role="combobox"
+									aria-haspopup="listbox"
+									:aria-expanded="isModelMenuOpen ? 'true' : 'false'"
+								>
+									<input
+										id="editor-profile-model"
+										ref="modelInputRef"
+										v-model="editor.draft.model"
+										class="field-combobox-input"
+										type="text"
+										placeholder="例如：gpt-4.1-mini"
+										@keydown="handleModelInputKeydown"
+									/>
+									<button class="field-combobox-toggle" type="button" aria-label="Toggle model list" @click.stop="toggleModelMenu">
+										<span class="field-combobox-chevron" aria-hidden="true"></span>
+									</button>
+								</div>
+								<div
+									v-if="isModelMenuOpen"
+									class="field-combobox-menu"
+									:class="{ 'has-options': canFetchProfileModels && !editor.draft.isFetchingModels && profileModelOptions.length > 0 }"
+									role="listbox"
+								>
+									<div v-if="editor.draft.isFetchingModels" class="field-combobox-status">
+										正在加载模型列表...
+									</div>
+									<div v-else-if="!canFetchProfileModels" class="field-combobox-status">
+										请先填写 Endpoint
+									</div>
+									<template v-else-if="profileModelOptions.length > 0">
+										<button
+											v-for="option in profileModelOptions"
+											:key="option"
+											class="field-combobox-option"
+											type="button"
+											@click="selectProfileModel(option)"
+										>
+											{{ option }}
+										</button>
+									</template>
+									<div v-else class="field-combobox-status">
+										没有匹配的模型
+									</div>
+								</div>
+							</div>
 						</div>
 					</div>
 					<div>
@@ -134,7 +267,7 @@ const description = computed(() => {
 							v-model="editor.draft.apiKey"
 							class="field-input"
 							type="password"
-							:placeholder="editor.mode === 'create' ? '新增配置时必填' : '留空则保留现有密钥'"
+							:placeholder="editor.mode === 'create' ? '请输入 API Key' : '留空则保持当前 API Key 不变'"
 						/>
 					</div>
 				</template>
@@ -146,9 +279,9 @@ const description = computed(() => {
 							<input id="editor-channel-display-name" v-model="editor.draft.displayName" class="field-input" type="text" placeholder="例如：我的飞书" />
 						</div>
 						<div>
-							<div class="field-label">绑定模型</div>
+							<div class="field-label">绑定模型配置</div>
 							<select id="editor-channel-profile" v-model="editor.draft.profileId" class="field-select">
-								<option value="">请选择模型</option>
+								<option value="">请选择模型配置</option>
 								<option v-for="option in profiles" :key="option.id" :value="option.id">{{ option.label }}</option>
 							</select>
 						</div>
@@ -166,7 +299,7 @@ const description = computed(() => {
 							v-model="field.value"
 							class="field-input"
 							type="password"
-							:placeholder="field.hasValue ? '留空则保留现有密钥' : (field.placeholder || '请填写')"
+							:placeholder="field.hasValue ? '留空则保持当前值不变' : (field.placeholder || '请输入内容')"
 						/>
 						<input v-else v-model="field.value" class="field-input" type="text" :placeholder="field.placeholder || ''" />
 						<div v-if="field.description" class="settings-hint channel-field-hint">{{ field.description }}</div>
@@ -175,11 +308,11 @@ const description = computed(() => {
 
 				<template v-else>
 					<div>
-						<div class="field-label">显示名称</div>
+						<div class="field-label">工作区名称</div>
 						<input id="editor-workspace-name" v-model="editor.draft.name" class="field-input" type="text" placeholder="例如：SelfClaw 主工作区" />
 					</div>
 					<div>
-						<div class="field-label">工作区位置</div>
+						<div class="field-label">工作区目录</div>
 						<div class="field-picker-row">
 							<div class="field-readonly">{{ editor.draft.rootPath || '请选择文件夹' }}</div>
 							<button class="ghost-btn compact-btn" type="button" @click="emit('pick-workspace-path')">选择</button>

@@ -397,6 +397,9 @@ public partial class MainWindow : Window
                     feedbackScope = "profile";
                     await SaveProfileFromTranscriptAsync(document.RootElement);
                     break;
+                case "fetch-profile-models":
+                    await FetchProfileModelsFromTranscriptAsync(document.RootElement);
+                    break;
                 case "delete-profile":
                     feedbackScope = "profile";
                     await DeleteProfileFromTranscriptAsync(document.RootElement);
@@ -443,6 +446,25 @@ public partial class MainWindow : Window
 
         await _viewModel.SaveProfileAsync(result);
         PostUiFeedback("success", "Profile saved.", "profile");
+    }
+
+    private async Task FetchProfileModelsFromTranscriptAsync(JsonElement root)
+    {
+        var requestId = GetInt(root, "requestId");
+
+        try
+        {
+            var models = await _viewModel.FetchProfileModelsAsync(
+                ParseGuid(root, "profileId"),
+                GetString(root, "endpoint"),
+                GetString(root, "apiKey"));
+
+            PostProfileModelsFetched(requestId, models, null);
+        }
+        catch (Exception exception)
+        {
+            PostProfileModelsFetched(requestId, [], exception.Message);
+        }
     }
 
     private async Task SaveWorkspaceFromTranscriptAsync(JsonElement root)
@@ -556,6 +578,28 @@ public partial class MainWindow : Window
         TranscriptView.CoreWebView2.PostWebMessageAsJson(payload);
     }
 
+    private void PostProfileModelsFetched(int requestId, IReadOnlyList<string> models, string? errorMessage)
+    {
+        if (!_webViewReady || TranscriptView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            type = "profile-models-fetched",
+            requestId,
+            models,
+            errorMessage
+        }, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
+
+        TranscriptView.CoreWebView2.PostWebMessageAsJson(payload);
+    }
+
     private static Guid? ParseGuid(JsonElement root, string propertyName)
     {
         if (!root.TryGetProperty(propertyName, out var property))
@@ -571,6 +615,11 @@ public partial class MainWindow : Window
         => root.TryGetProperty(propertyName, out var property)
             ? property.GetString() ?? string.Empty
             : string.Empty;
+
+    private static int GetInt(JsonElement root, string propertyName)
+        => root.TryGetProperty(propertyName, out var property) && property.TryGetInt32(out var value)
+            ? value
+            : 0;
 
     private static IReadOnlyDictionary<string, string> GetStringDictionary(JsonElement root, string propertyName)
     {

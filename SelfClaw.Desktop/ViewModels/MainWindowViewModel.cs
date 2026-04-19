@@ -3,7 +3,10 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -536,6 +539,73 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             await CreateNewConversationAsync();
         }
+    }
+
+    public async Task<IReadOnlyList<string>> FetchProfileModelsAsync(
+        Guid? profileId,
+        string endpoint,
+        string? apiKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Uri.TryCreate(BuildModelsEndpoint(endpoint), UriKind.Absolute, out var requestUri))
+        {
+            throw new InvalidOperationException("The endpoint is not a valid absolute URL.");
+        }
+
+        var resolvedApiKey = apiKey?.Trim();
+        if (string.IsNullOrWhiteSpace(resolvedApiKey) && profileId is Guid existingProfileId)
+        {
+            var existing = await _profileRepository.GetProfileAsync(existingProfileId, cancellationToken);
+            if (existing is not null && !string.IsNullOrWhiteSpace(existing.SecretRef))
+            {
+                resolvedApiKey = await _secretProtector.RetrieveSecretAsync(existing.SecretRef, cancellationToken);
+            }
+        }
+
+        using var httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(20)
+        };
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        if (!string.IsNullOrWhiteSpace(resolvedApiKey))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", resolvedApiKey);
+        }
+
+        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return [];
+        }
+
+        using var document = JsonDocument.Parse(responseBody);
+        if (!document.RootElement.TryGetProperty("data", out var dataElement) || dataElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var models = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var item in dataElement.EnumerateArray())
+        {
+            if (!item.TryGetProperty("id", out var idElement) || idElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var modelId = idElement.GetString()?.Trim();
+            if (string.IsNullOrWhiteSpace(modelId) || !seen.Add(modelId))
+            {
+                continue;
+            }
+
+            models.Add(modelId);
+        }
+
+        return models;
     }
 
     public async Task DeleteProfileAsync(Guid profileId)
@@ -1990,6 +2060,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         return normalized.TrimEnd('/');
     }
+
+    private static string BuildModelsEndpoint(string endpoint)
+        => NormalizeEndpoint(endpoint) + "/models";
 
     private static double NormalizeSamplingParameter(double value, double maxValue)
     {
