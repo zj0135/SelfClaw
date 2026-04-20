@@ -103,8 +103,69 @@ const pointerActionSuppressDurationMs = 700;
 let pendingStatePayload = null;
 let renderFrameHandle = 0;
 let profileModelFetchRequestSeed = 0;
+const profileModelOptionsCache = new Map();
 
 const post = (message) => window.chrome?.webview?.postMessage(message);
+
+function normalizeProfileModelsEndpoint(endpoint) {
+	const normalized = (endpoint || '').trim();
+	if (!normalized) {
+		return '';
+	}
+
+	const withScheme = /^https?:\/\//i.test(normalized) ? normalized : `https://${normalized}`;
+	return withScheme.replace(/\/+$/, '');
+}
+
+function buildProfileModelsCacheKey(profileDraft) {
+	if (!profileDraft) {
+		return '';
+	}
+
+	const endpoint = normalizeProfileModelsEndpoint(profileDraft.endpoint);
+	if (!endpoint) {
+		return '';
+	}
+
+	return JSON.stringify({
+		profileId: profileDraft.profileId || null,
+		endpoint,
+		apiKey: (profileDraft.apiKey || '').trim(),
+	});
+}
+
+function applyProfileModelOptions(profileDraft, cacheKey, modelOptions) {
+	const normalizedOptions = [...new Set((Array.isArray(modelOptions) ? modelOptions : [])
+		.filter((item) => typeof item === 'string')
+		.map((item) => item.trim())
+		.filter(Boolean))];
+	const currentModel = profileDraft.model?.trim() || '';
+
+	profileDraft.modelOptions = currentModel
+		? [...new Set([...normalizedOptions, currentModel])]
+		: normalizedOptions;
+	profileDraft.hasFetchedModelOptions = true;
+	profileDraft.modelOptionsCacheKey = cacheKey;
+	profileDraft.isFetchingModels = false;
+	profileDraft.fetchModelsRequestId = 0;
+
+	if (!currentModel && normalizedOptions.length > 0) {
+		profileDraft.model = normalizedOptions[0];
+	}
+}
+
+function resetProfileModelOptions(profileDraft) {
+	if (!profileDraft) {
+		return;
+	}
+
+	const currentModel = profileDraft.model?.trim() || '';
+	profileDraft.modelOptions = currentModel ? [currentModel] : [];
+	profileDraft.hasFetchedModelOptions = false;
+	profileDraft.modelOptionsCacheKey = '';
+	profileDraft.isFetchingModels = false;
+	profileDraft.fetchModelsRequestId = 0;
+}
 
 const setTheme = (theme) => {
 	document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
@@ -514,6 +575,31 @@ function closeEditor() {
 	editorState.feedback = null;
 }
 
+watch(
+	() => (editorState.open && editorState.kind === 'profile' && editorState.draft
+		? buildProfileModelsCacheKey(editorState.draft)
+		: null),
+	(nextKey, previousKey) => {
+		if (!editorState.open || editorState.kind !== 'profile' || !editorState.draft || nextKey === previousKey) {
+			return;
+		}
+
+		if (!nextKey) {
+			resetProfileModelOptions(editorState.draft);
+			return;
+		}
+
+		if (profileModelOptionsCache.has(nextKey)) {
+			applyProfileModelOptions(editorState.draft, nextKey, profileModelOptionsCache.get(nextKey));
+			return;
+		}
+
+		if (editorState.draft.modelOptionsCacheKey !== nextKey || editorState.draft.fetchModelsRequestId) {
+			resetProfileModelOptions(editorState.draft);
+		}
+	}
+);
+
 function handleProfileModelsFetched(payload) {
 	if (!editorState.open || editorState.kind !== 'profile' || !editorState.draft) {
 		return;
@@ -530,22 +616,17 @@ function handleProfileModelsFetched(payload) {
 		? [...new Set(payload.models.filter((item) => typeof item === 'string').map((item) => item.trim()).filter(Boolean))]
 		: [];
 
-	editorState.draft.modelOptions = modelOptions;
-	editorState.feedback = payload.errorMessage
-		? { level: 'error', message: payload.errorMessage, scope: 'profile' }
-		: {
-				level: 'success',
-				message: modelOptions.length ? `已加载 ${modelOptions.length} 个模型。` : '没有获取到任何模型。',
-				scope: 'profile',
-			};
-
-	if (!payload.errorMessage) {
-		editorState.feedback = null;
+	if (payload.errorMessage) {
+		editorState.draft.hasFetchedModelOptions = false;
+		editorState.draft.modelOptionsCacheKey = '';
+		editorState.feedback = { level: 'error', message: payload.errorMessage, scope: 'profile' };
+		return;
 	}
 
-	if (!payload.errorMessage && !editorState.draft.model.trim() && modelOptions.length > 0) {
-		editorState.draft.model = modelOptions[0];
-	}
+	const cacheKey = buildProfileModelsCacheKey(editorState.draft);
+	profileModelOptionsCache.set(cacheKey, modelOptions);
+	applyProfileModelOptions(editorState.draft, cacheKey, modelOptions);
+	editorState.feedback = null;
 }
 
 function captureScroll(element) {
@@ -1242,7 +1323,20 @@ function fetchProfileModels() {
 		return;
 	}
 
+	const cacheKey = buildProfileModelsCacheKey(editorState.draft);
+	if (editorState.draft.hasFetchedModelOptions && editorState.draft.modelOptionsCacheKey === cacheKey) {
+		return;
+	}
+
+	if (profileModelOptionsCache.has(cacheKey)) {
+		applyProfileModelOptions(editorState.draft, cacheKey, profileModelOptionsCache.get(cacheKey));
+		editorState.feedback = null;
+		return;
+	}
+
 	const requestId = ++profileModelFetchRequestSeed;
+	editorState.draft.hasFetchedModelOptions = false;
+	editorState.draft.modelOptionsCacheKey = cacheKey;
 	editorState.draft.isFetchingModels = true;
 	editorState.draft.fetchModelsRequestId = requestId;
 	editorState.feedback = null;

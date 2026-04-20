@@ -38,8 +38,8 @@ const title = computed(() => {
 const description = computed(() => {
 	if (props.editor.kind === 'profile') {
 		return props.editor.mode === 'create'
-			? '填写名称、Endpoint、模型和 API Key。点击模型下拉时会自动从当前 Endpoint 的 /models 接口加载模型列表。'
-			: '可以修改当前模型配置，点击模型下拉时会自动从当前 Endpoint 重新加载模型列表。';
+			? '填写名称、Endpoint、模型和 API Key。首次点击模型下拉时会从当前 Endpoint 的 /models 接口加载并缓存模型列表。'
+			: '可以修改当前模型配置。首次点击模型下拉时会从当前 Endpoint 加载并缓存模型列表，修改 Endpoint 后会重新请求。';
 	}
 
 	if (props.editor.kind === 'channel') {
@@ -72,7 +72,7 @@ async function openModelMenu(fetchOnOpen = false) {
 
 	isModelMenuOpen.value = true;
 
-	if (fetchOnOpen && canFetchProfileModels.value && !props.editor.draft.isFetchingModels) {
+	if (fetchOnOpen && canFetchProfileModels.value && !props.editor.draft.isFetchingModels && !props.editor.draft.hasFetchedModelOptions) {
 		emit('fetch-models');
 	}
 
