@@ -51,6 +51,7 @@ const state = reactive({
 
 const composerValue = ref('');
 const conversationSearch = ref('');
+const leftPaneCollapsed = ref(false);
 const planPanelCollapsed = ref(false);
 const settingsOpen = ref(false);
 const activeSettingsSection = ref('profile');
@@ -99,6 +100,7 @@ const scrollFollowState = {
 	stepsPausedUntil: 0,
 };
 const pointerActionSuppressDurationMs = 700;
+const desktopPaneCollapseBreakpoint = 1180;
 
 let pendingStatePayload = null;
 let renderFrameHandle = 0;
@@ -1244,6 +1246,11 @@ function togglePlanPanelCollapse() {
 	planPanelCollapsed.value = !planPanelCollapsed.value;
 }
 
+function toggleLeftPaneCollapse() {
+	openConversationMenuId.value = null;
+	leftPaneCollapsed.value = !leftPaneCollapsed.value;
+}
+
 function onTeamRoundChange(roundsId) {
 	post({ type: 'select-team-max-rounds', roundsId });
 }
@@ -1385,28 +1392,45 @@ function onSettingsPanelScroll(scrollTop) {
 	settingsPanelScrollTop.value = scrollTop;
 }
 
+function syncPaneCollapseForViewport() {
+	if (window.innerWidth > desktopPaneCollapseBreakpoint) {
+		return;
+	}
+
+	if (leftPaneCollapsed.value) {
+		openConversationMenuId.value = null;
+	}
+
+	leftPaneCollapsed.value = false;
+}
+
 onMounted(() => {
 	normalizeState();
 	window.chrome?.webview?.addEventListener('message', handleWebViewMessage);
 	document.addEventListener('keydown', onDocumentKeydown);
+	window.addEventListener('resize', syncPaneCollapseForViewport);
+	syncPaneCollapseForViewport();
 	requestAnimationFrame(syncConversationMenuPlacement);
 });
 
 onUnmounted(() => {
 	window.chrome?.webview?.removeEventListener?.('message', handleWebViewMessage);
 	document.removeEventListener('keydown', onDocumentKeydown);
+	window.removeEventListener('resize', syncPaneCollapseForViewport);
 });
 </script>
 
 <template>
 	<div class="transcript-vue-app" :class="{ busy: state.isBusy }" @click="handleDelegatedClick"
 		@wheel.capture.passive="onRootWheel" @pointerdown.capture="onRootPointerDown">
-		<div class="app-shell">
+		<div class="app-shell" :class="{ 'left-pane-collapsed': leftPaneCollapsed }">
 			<ConversationSidebar ref="sidebarRef" :fallback-status-text="fallbackStatusText"
 				:is-channel-mode="isChannelMode" :conversation-search="conversationSearch"
 				:conversation-section-title="conversationSectionTitle" :conversation-list-html="conversationListHtml"
+					:collapsed="leftPaneCollapsed"
 				@new-conversation="newConversation" @open-settings="openSettings"
-				@search-change="onConversationSearchChange" @search-input="onConversationSearchInput" />
+				@search-change="onConversationSearchChange" @search-input="onConversationSearchInput"
+					@toggle-collapse="toggleLeftPaneCollapse" />
 
 			<main class="main-column">
 				<MainTopbar :conversation-modes="state.conversationModes"
@@ -1439,6 +1463,19 @@ onUnmounted(() => {
 			</main>
 
 			<StepsPanel ref="stepsPanelRef" :steps-header-html="stepsHeaderHtml" :steps-panel-html="stepsPanelHtml" />
+
+				<button
+					v-if="leftPaneCollapsed"
+					class="pane-collapse-toggle pane-collapse-toggle-floating pane-collapse-toggle-floating-left"
+					type="button"
+					aria-label="展开左侧会话栏"
+					title="展开左侧会话栏"
+					@click="toggleLeftPaneCollapse"
+				>
+					<svg class="pane-collapse-toggle-icon pane-collapse-toggle-icon-left collapsed" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" aria-hidden="true"><path fill="currentColor" d="M452.864 149.312a29.12 29.12 0 0 1 41.728.064L826.24 489.664a32 32 0 0 1 0 44.672L494.592 874.624a29.12 29.12 0 0 1-41.728 0 30.59 30.59 0 0 1 0-42.752L764.736 512 452.864 192a30.59 30.59 0 0 1 0-42.688m-256 0a29.12 29.12 0 0 1 41.728.064L570.24 489.664a32 32 0 0 1 0 44.672L238.592 874.624a29.12 29.12 0 0 1-41.728 0 30.59 30.59 0 0 1 0-42.752L508.736 512 196.864 192a30.59 30.59 0 0 1 0-42.688"></path></svg>
+				</button>
+
+
 		</div>
 
 		<SettingsModal ref="settingsModalRef" :open="settingsOpen" :settings-sections="settingsSections"
