@@ -3584,10 +3584,6 @@ html[data-theme='light'] .channel-card.error {
 	margin: 0;
 }
 
-.tool-summary.nested {
-	padding: 6px 0;
-}
-
 .tool-details {
 	display: none;
 	padding: 8px 0 12px;
