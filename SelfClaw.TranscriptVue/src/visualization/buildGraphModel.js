@@ -5,6 +5,9 @@ const PROGRAMMING_AGENT_ID = 'programming-agent';
 const FALLBACK_COORDINATOR_ID = 'team-coordinator';
 const NODE_RADIUS = 54;
 const MAX_SATELLITES_PER_AGENT = 3;
+const HUMAN_POSITION = { x: 132, y: 160 };
+const PROGRAMMING_AGENT_POSITION = { x: 760, y: 210 };
+const TEAM_COORDINATOR_POSITION = { x: 684, y: 228 };
 
 function lower(value) {
 	return String(value || '').trim().toLowerCase();
@@ -244,23 +247,49 @@ function buildTeamWorkerPositions(count) {
 		return [];
 	}
 
-	if (count <= 4) {
-		const startX = 310;
-		const endX = 1010;
+	const centerX = 684;
+	const topRowY = 468;
+	const bottomRowY = 598;
+
+	if (count <= 3) {
+		const span = count === 1 ? 0 : 260;
 		return Array.from({ length: count }, (_, index) => {
 			const progress = count === 1 ? 0.5 : index / (count - 1);
 			return {
-				x: startX + (endX - startX) * progress,
-				y: 520 - Math.abs(progress - 0.5) * 36,
+				x: centerX - span + span * 2 * progress,
+				y: topRowY + Math.abs(progress - 0.5) * 28,
 			};
 		});
 	}
 
-	const firstRowCount = Math.ceil(count / 2);
-	const secondRowCount = count - firstRowCount;
-	const firstRow = buildTeamWorkerPositions(firstRowCount).map((item) => ({ ...item, y: item.y - 54 }));
-	const secondRow = buildTeamWorkerPositions(secondRowCount).map((item) => ({ ...item, y: item.y + 68 }));
-	return [...firstRow, ...secondRow];
+	if (count <= 5) {
+		const primarySlots = [centerX - 300, centerX - 110, centerX + 110, centerX + 300];
+		const secondarySlots = [centerX];
+		const positions = primarySlots.slice(0, Math.min(count, primarySlots.length)).map((x, index) => ({
+			x,
+			y: topRowY + (index === 1 || index === 2 ? 18 : 0),
+		}));
+		if (count > primarySlots.length) {
+			positions.push({ x: secondarySlots[0], y: bottomRowY });
+		}
+		return positions;
+	}
+
+	const firstRowSlots = [centerX - 344, centerX - 172, centerX, centerX + 172, centerX + 344];
+	const secondRowSlots = [centerX - 258, centerX - 86, centerX + 86, centerX + 258];
+	const firstRowCount = Math.min(count, firstRowSlots.length);
+	const secondRowCount = Math.max(0, count - firstRowCount);
+	const positions = firstRowSlots.slice(0, firstRowCount).map((x, index) => ({
+		x,
+		y: topRowY + (index === 1 || index === 3 ? 14 : index === 2 ? 22 : 0),
+	}));
+	positions.push(
+		...secondRowSlots.slice(0, secondRowCount).map((x, index) => ({
+			x,
+			y: bottomRowY + (index === 1 || index === 2 ? 14 : 0),
+		}))
+	);
+	return positions;
 }
 
 function buildProgrammingGraph(snapshot) {
@@ -270,11 +299,13 @@ function buildProgrammingGraph(snapshot) {
 		kind: 'human',
 		label: 'Human',
 		summary: 'You',
-		x: 150,
-		y: 128,
+		x: HUMAN_POSITION.x,
+		y: HUMAN_POSITION.y,
 		status: 'idle',
 	});
 	const agent = deriveProgrammingNode(snapshot);
+	agent.x = PROGRAMMING_AGENT_POSITION.x;
+	agent.y = PROGRAMMING_AGENT_POSITION.y;
 	agent.isSelected = humanTargetId === agent.id;
 	return {
 		nodes: [human, agent],
@@ -295,8 +326,8 @@ function buildTeamGraph(snapshot) {
 		kind: 'human',
 		label: 'Human',
 		summary: 'You',
-		x: 150,
-		y: 128,
+		x: HUMAN_POSITION.x,
+		y: HUMAN_POSITION.y,
 		status: 'idle',
 	});
 	const coordinatorNode = buildNode({
@@ -304,8 +335,8 @@ function buildTeamGraph(snapshot) {
 		kind: 'team-agent',
 		label: coordinator?.title || 'Coordinator',
 		summary: coordinator?.summary || 'Coordinator',
-		x: 650,
-		y: 224,
+		x: TEAM_COORDINATOR_POSITION.x,
+		y: TEAM_COORDINATOR_POSITION.y,
 		status: coordinator ? deriveTeamNodeStatus(coordinator, snapshot) : 'idle',
 		selected: targetAgentId === coordinatorId,
 	});
@@ -318,7 +349,7 @@ function buildTeamGraph(snapshot) {
 			kind: 'team-agent',
 			label: member.title,
 			summary: member.summary,
-			x: workerPositions[index]?.x || 650,
+			x: workerPositions[index]?.x || TEAM_COORDINATOR_POSITION.x,
 			y: workerPositions[index]?.y || 520,
 			status: deriveTeamNodeStatus(member, snapshot),
 			selected: targetAgentId === member.id,
@@ -351,8 +382,42 @@ function trimConnection(source, target) {
 	};
 }
 
-function buildPath(source, target) {
+function buildSecondaryPath(source, target) {
+	const startX = source.x;
+	const startY = source.y + source.radius + 8;
+	const endX = target.x;
+	const endY = target.y - target.radius - 8;
+	const branchY = startY + Math.max(54, (endY - startY) * 0.34);
+
+	if (Math.abs(endX - startX) <= 4) {
+		return `M ${startX} ${startY} L ${endX} ${endY}`;
+	}
+
+	return `M ${startX} ${startY} L ${startX} ${branchY} L ${endX} ${branchY} L ${endX} ${endY}`;
+}
+
+function buildPath(source, target, tone = 'primary') {
+	if (tone === 'secondary' && target.y > source.y) {
+		return buildSecondaryPath(source, target);
+	}
+
 	const { startX, startY, endX, endY } = trimConnection(source, target);
+	const dx = endX - startX;
+	const dy = endY - startY;
+	const distance = Math.hypot(dx, dy) || 1;
+
+	if (tone === 'direct') {
+		const midX = startX + dx * 0.5;
+		const controlY = Math.min(startY, endY) - Math.max(56, distance * 0.12);
+		return `M ${startX} ${startY} Q ${midX} ${controlY} ${endX} ${endY}`;
+	}
+
+	if (Math.abs(dx) > 200 || Math.abs(dy) > 140) {
+		const controlX = startX + dx * 0.56;
+		const controlY = startY + dy * 0.2;
+		return `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`;
+	}
+
 	return `M ${startX} ${startY} L ${endX} ${endY}`;
 }
 
@@ -361,7 +426,7 @@ function buildEdge(id, source, target, tone, active = false) {
 		id,
 		sourceId: source.id,
 		targetId: target.id,
-		path: buildPath(source, target),
+		path: buildPath(source, target, tone),
 		tone,
 		active,
 	};
