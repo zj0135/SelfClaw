@@ -644,6 +644,15 @@ function buildBurst(seed, targetType, targetId, kind, status = kind, fallbackNod
 	};
 }
 
+function buildEdgeTrace(seed, edgeId, tone = 'primary') {
+	return {
+		id: `edge-trace-${seed}`,
+		edgeId,
+		tone,
+		durationMs: 620,
+	};
+}
+
 function resolveAssistantFlow(agentId, snapshot) {
 	if (snapshot.modeId !== 'team') {
 		return { sourceId: agentId, targetId: HUMAN_ID };
@@ -673,12 +682,13 @@ export function buildGraphAnimations(previousSnapshot, nextSnapshot, graphModel,
 		previousSnapshot.selectedConversationId !== nextSnapshot.selectedConversationId ||
 		previousSnapshot.modeId !== nextSnapshot.modeId
 	) {
-		return { packets: [], bursts: [], nextSeed: seed };
+		return { packets: [], bursts: [], edgeTraces: [], nextSeed: seed };
 	}
 
 	let nextSeed = seed;
 	const packets = [];
 	const bursts = [];
+	const edgeTraces = [];
 	const nodesById = new Map(graphModel.nodes.map((item) => [item.id, item]));
 	const previousMessagesById = new Map(previousSnapshot.items.map((item) => [item.id, item]));
 	const previousActivitiesById = new Map(previousSnapshot.agentActivities.map((item) => [item.id, item]));
@@ -693,6 +703,18 @@ export function buildGraphAnimations(previousSnapshot, nextSnapshot, graphModel,
 			if (packet) {
 				packets.push(packet);
 			}
+			nextSeed += 1;
+			edgeTraces.push(
+				buildEdgeTrace(
+					nextSeed,
+					nextSnapshot.modeId === 'team' && humanTargetId !== getCoordinatorId(nextSnapshot)
+						? `human:${humanTargetId}:direct`
+						: nextSnapshot.modeId === 'team'
+							? 'human:coordinator'
+							: 'human:programming',
+					nextSnapshot.modeId === 'team' && humanTargetId !== getCoordinatorId(nextSnapshot) ? 'direct' : 'primary'
+				)
+			);
 			continue;
 		}
 
@@ -761,5 +783,5 @@ export function buildGraphAnimations(previousSnapshot, nextSnapshot, graphModel,
 		}
 	}
 
-	return { packets, bursts, nextSeed };
+	return { packets, bursts, edgeTraces, nextSeed };
 }

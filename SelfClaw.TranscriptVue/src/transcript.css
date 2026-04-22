@@ -5462,8 +5462,23 @@ html[data-theme='light'] .pane-collapse-toggle-floating:hover {
 	filter: drop-shadow(0 0 10px var(--graph-edge-active-glow));
 }
 
-.graph-packet-shell {
+.graph-edge-trace {
+	fill: none;
+	stroke-width: 5.4;
+	stroke-linecap: round;
+	opacity: 0;
+	stroke-dasharray: 18 82;
+	stroke-dashoffset: 100;
 	pointer-events: none;
+	filter: drop-shadow(0 0 10px rgba(120, 255, 214, 0.34));
+}
+
+.graph-edge-trace.primary {
+	stroke: rgba(140, 255, 214, 0.96);
+}
+
+.graph-edge-trace.direct {
+	stroke: rgba(132, 205, 255, 0.96);
 }
 
 .graph-packet-core,

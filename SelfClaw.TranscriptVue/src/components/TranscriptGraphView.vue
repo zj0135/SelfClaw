@@ -50,6 +50,7 @@ const model = ref({
 });
 const packets = ref([]);
 const bursts = ref([]);
+const edgeTraces = ref([]);
 const previousSnapshot = ref(null);
 const zoom = ref(1);
 const pan = ref({ x: 0, y: 0 });
@@ -89,6 +90,7 @@ const canvasClasses = computed(() => ({
 	panning: isPanning.value,
 }));
 const nodeLookup = computed(() => new Map(model.value.nodes.map((item) => [item.id, item])));
+const edgeLookup = computed(() => new Map(model.value.edges.map((item) => [item.id, item])));
 const satelliteLookup = computed(() => {
 	const map = new Map();
 	for (const node of model.value.nodes) {
@@ -128,6 +130,22 @@ const statusCounts = computed(() => {
 		{ key: 'failed', label: '异常', value: counters.failed },
 	];
 });
+
+const visibleEdgeTraces = computed(() =>
+	edgeTraces.value
+		.map((trace) => {
+			const edge = edgeLookup.value.get(trace.edgeId);
+			if (!edge) {
+				return null;
+			}
+
+			return {
+				...trace,
+				path: edge.path,
+			};
+		})
+		.filter(Boolean)
+);
 
 const visibleBursts = computed(() =>
 	bursts.value
@@ -169,6 +187,7 @@ watch(
 		model.value = nextModel;
 		pushTransientEntries(packets, animations.packets);
 		pushTransientEntries(bursts, animations.bursts);
+		pushTransientEntries(edgeTraces, animations.edgeTraces || []);
 		previousSnapshot.value = nextSnapshot;
 	},
 	{ immediate: true }
@@ -359,6 +378,13 @@ onBeforeUnmount(() => {
 					<g class="graph-edge-layer">
 						<path v-for="edge in model.edges" :key="edge.id" :d="edge.path"
 							:class="['graph-edge', edge.tone, { active: edge.active }]"></path>
+						<path v-for="trace in visibleEdgeTraces" :key="trace.id" :d="trace.path"
+							:pathLength="100" :class="['graph-edge-trace', trace.tone]">
+							<animate attributeName="stroke-dashoffset" from="100" to="0" :dur="`${trace.durationMs}ms`"
+								repeatCount="1" fill="freeze"></animate>
+							<animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.12;0.82;1"
+								:dur="`${trace.durationMs}ms`" repeatCount="1"></animate>
+						</path>
 					</g>
 
 					<g class="graph-packet-layer">
