@@ -9,4 +9,5 @@ public sealed record TranscriptConversationItem(
     int Depth = 0,
     bool IsAgentConversation = false,
     string? Badge = null,
-    string? Subtitle = null);
+    string? Subtitle = null,
+    string? BoundAgentId = null);

@@ -388,7 +388,8 @@ public sealed partial class MainWindowViewModel
                 new AgentActivityDetail("Role", agent.Role),
                 new AgentActivityDetail("Prompt", agent.GoalPrompt),
                 new AgentActivityDetail("Status", agent.Status.ToString())
-            ]);
+            ],
+            agent.Id.ToString("D"));
 
     private static AgentActivityNode BuildTeamAgentEventNode(TeamAgentRecord agent)
         => new(
@@ -404,7 +405,8 @@ public sealed partial class MainWindowViewModel
                 new AgentActivityDetail("Role", agent.Role),
                 new AgentActivityDetail("Status", agent.Status.ToString()),
                 new AgentActivityDetail("Prompt", agent.GoalPrompt)
-            ]);
+            ],
+            agent.Id.ToString("D"));
 
     private static string BuildTeamEventSummary(TeamAgentRecord agent)
         => agent.Status switch

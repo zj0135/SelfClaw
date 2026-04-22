@@ -83,11 +83,19 @@ defineProps({
 		type: Boolean,
 		default: false,
 	},
+	showVisualizationToggle: {
+		type: Boolean,
+		default: false,
+	},
 	isBusy: {
 		type: Boolean,
 		default: false,
 	},
 	isPlanningModeEnabled: {
+		type: Boolean,
+		default: false,
+	},
+	visualizationEnabled: {
 		type: Boolean,
 		default: false,
 	},
@@ -106,6 +114,7 @@ const emit = defineEmits([
 	'select-team-output',
 	'select-permission',
 	'toggle-planning-mode',
+	'toggle-visualization-mode',
 	'toggle-plan-panel-collapse',
 	'send-click',
 ]);
@@ -217,6 +226,29 @@ defineExpose({
 								<span class="toggle-switch"></span>
 							</label>
 						</template>
+						<label
+							v-if="showVisualizationToggle"
+							class="plan-mode-toggle visualization-toggle"
+							:class="{ active: visualizationEnabled }"
+						>
+							<span class="plan-mode-icon" aria-hidden="true">
+								<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+									<circle cx="3.25" cy="8" r="1.65"></circle>
+									<circle cx="12.75" cy="3.25" r="1.65"></circle>
+									<circle cx="12.75" cy="12.75" r="1.65"></circle>
+									<path d="M4.8 7.2 11.1 4.05"></path>
+									<path d="m4.8 8.8 6.3 3.15"></path>
+								</svg>
+							</span>
+							<span class="plan-mode-label">可视化</span>
+							<input
+								class="toggle-input"
+								type="checkbox"
+								:checked="visualizationEnabled"
+								@change="emit('toggle-visualization-mode', $event.target.checked)"
+							/>
+							<span class="toggle-switch"></span>
+						</label>
 					</div>
 					<button
 						id="send-button"

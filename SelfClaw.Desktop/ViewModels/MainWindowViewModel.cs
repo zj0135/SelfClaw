@@ -1876,7 +1876,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             conversation.IsAgentConversation
                 ? conversation.BoundAgentName
                 : ResolveConversationBadge(conversation),
-            conversation.IsAgentConversation ? conversation.BoundAgentRole : null);
+            conversation.IsAgentConversation ? conversation.BoundAgentRole : null,
+            conversation.BoundAgentId?.ToString("D"));
 
     private void PublishAgentActivities()
     {
@@ -1997,7 +1998,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             null,
             message.ErrorMessage,
             message.DurationMs,
-            message.CreatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"));
+            message.CreatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
+            message.AgentId?.ToString("D"));
     }
 
     private static string ThemePreferenceToId(AppThemePreference preference)

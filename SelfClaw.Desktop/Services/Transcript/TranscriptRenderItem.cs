@@ -13,4 +13,5 @@ public sealed record TranscriptRenderItem(
     string? ArgumentsJson,
     string? Summary,
     double? DurationMs,
-    string Timestamp);
+    string Timestamp,
+    string? AgentId = null);

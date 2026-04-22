@@ -16,4 +16,5 @@ public sealed record AgentActivityNode(
     string Title,
     string Summary,
     string Timestamp,
-    IReadOnlyList<AgentActivityDetail> Details);
+    IReadOnlyList<AgentActivityDetail> Details,
+    string? OwnerAgentId = null);

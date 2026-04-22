@@ -31,7 +31,8 @@ internal static class TranscriptToolRunPresenter
                 new AgentActivityDetail("Arguments", PrettyPrintJson(toolRun.ArgumentsJson), true),
                 new AgentActivityDetail("Result", BuildToolResultText(toolRun)),
                 new AgentActivityDetail("Duration", FormatToolDuration(toolRun))
-            ]);
+            ],
+            toolRun.AgentId?.ToString("D"));
 
     public static Dictionary<Guid, IReadOnlyList<ToolRunPlacement>> BuildToolRunsByMessageId(
         IReadOnlyList<MessageRecord> messages,

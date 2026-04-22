@@ -53,6 +53,7 @@ const composerValue = ref('');
 const conversationSearch = ref('');
 const leftPaneCollapsed = ref(false);
 const planPanelCollapsed = ref(false);
+const visualizationEnabled = ref(false);
 const settingsOpen = ref(false);
 const activeSettingsSection = ref('profile');
 const settingsFeedback = ref(null);
@@ -200,6 +201,8 @@ const isProgrammingMode = computed(() => state.selectedConversationModeId === 'p
 const isTeamMode = computed(() => state.selectedConversationModeId === 'team');
 const isChannelMode = computed(() => state.selectedConversationModeId === 'channel');
 const showPlanningToggle = computed(() => isProgrammingMode.value);
+const showVisualizationToggle = computed(() => !isChannelMode.value);
+const activeVisualizationEnabled = computed(() => visualizationEnabled.value && !isChannelMode.value);
 const planPanel = computed(() => (isProgrammingMode.value ? state.planPanel : null));
 const showPlanPanel = computed(() => Boolean(planPanel.value?.isVisible));
 const planSteps = computed(() => planPanel.value?.steps || []);
@@ -434,6 +437,12 @@ watch(
 		}
 	}
 );
+
+watch(isChannelMode, (channelMode) => {
+	if (channelMode) {
+		visualizationEnabled.value = false;
+	}
+});
 
 watch(settingsOpen, async (isOpen) => {
 	if (!isOpen) {
@@ -1392,6 +1401,10 @@ function onSettingsPanelScroll(scrollTop) {
 	settingsPanelScrollTop.value = scrollTop;
 }
 
+function onVisualizationModeChange(enabled) {
+	visualizationEnabled.value = Boolean(enabled);
+}
+
 function syncPaneCollapseForViewport() {
 	if (window.innerWidth > desktopPaneCollapseBreakpoint) {
 		return;
@@ -1438,7 +1451,12 @@ onUnmounted(() => {
 					:current-model-label="currentModelLabel" :current-workspace-label="currentWorkspaceLabel"
 					@select-conversation-mode="selectConversationMode" @open-settings="openSettings" />
 
-				<TranscriptPanel ref="transcriptPanelRef" :messages-html="messagesHtml" :show-plan-panel="showPlanPanel"
+				<TranscriptPanel ref="transcriptPanelRef" :messages-html="messagesHtml"
+					:visualization-enabled="activeVisualizationEnabled" :items="state.items"
+					:conversations="state.conversations" :selected-conversation-id="state.selectedConversationId"
+					:selected-conversation-mode-id="state.selectedConversationModeId"
+					:selected-profile-model="state.selectedProfileModel || ''" :team-members="state.teamMembers"
+					:agent-activities="state.agentActivities" :show-plan-panel="showPlanPanel"
 					:plan-panel-collapsed="planPanelCollapsed" @scroll="onTranscriptScroll" />
 
 				<ComposerPanel ref="composerPanelRef" :show-plan-panel="showPlanPanel" :plan-panel="planPanel"
@@ -1453,12 +1471,15 @@ onUnmounted(() => {
 					:selected-team-output-mode-id="state.selectedTeamOutputModeId"
 					:tool-permission-modes="state.toolPermissionModes"
 					:selected-tool-permission-mode-id="state.selectedToolPermissionModeId"
-					:show-planning-toggle="showPlanningToggle" :is-busy="state.isBusy"
+					:show-planning-toggle="showPlanningToggle"
+					:show-visualization-toggle="showVisualizationToggle" :is-busy="state.isBusy"
 					:is-planning-mode-enabled="state.isPlanningModeEnabled" :send-button-disabled="sendButtonDisabled"
+					:visualization-enabled="activeVisualizationEnabled"
 					@composer-input="onComposerInput" @composer-keydown="onComposerKeydown"
 					@apply-mention="applyMentionSelection" @select-profile="onProfileSelectChange"
 					@select-team-round="onTeamRoundChange" @select-team-output="onTeamOutputChange"
 					@select-permission="onPermissionChange" @toggle-planning-mode="onPlanningModeChange"
+					@toggle-visualization-mode="onVisualizationModeChange"
 					@toggle-plan-panel-collapse="togglePlanPanelCollapse" @send-click="onSendClick" />
 			</main>
 
