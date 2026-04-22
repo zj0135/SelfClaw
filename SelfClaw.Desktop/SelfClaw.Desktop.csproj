@@ -26,19 +26,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="SelfClaw.Core">
-      <HintPath>..\SelfClaw.Core\bin\$(Configuration)\net10.0\SelfClaw.Core.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="SelfClaw.Infrastructure">
-      <HintPath>..\SelfClaw.Infrastructure\bin\$(Configuration)\net10.0-windows\SelfClaw.Infrastructure.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
     <Using Remove="System.Drawing" />
     <Using Remove="System.Windows.Forms" />
+    <ProjectReference Include="..\SelfClaw.Core\SelfClaw.Core.csproj" />
+    <ProjectReference Include="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" />
     <Resource Include="Assets\icon\icon.ico" />
     <None Update="Assets\TranscriptVue\*;Assets\TranscriptVue\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -47,11 +38,6 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
-
-  <Target Name="BuildManagedDependencies" BeforeTargets="ResolveReferences">
-    <MSBuild Projects="..\SelfClaw.Core\SelfClaw.Core.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
-    <MSBuild Projects="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
-  </Target>
 
   <Target Name="CopyProtectedDataAssembly" AfterTargets="Build" Condition="Exists('$(PkgSystem_Security_Cryptography_ProtectedData)\lib\net10.0\System.Security.Cryptography.ProtectedData.dll')">
     <Copy SourceFiles="$(PkgSystem_Security_Cryptography_ProtectedData)\lib\net10.0\System.Security.Cryptography.ProtectedData.dll" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />

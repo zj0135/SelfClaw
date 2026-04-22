@@ -1,10 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <ResolveReferencesDependsOn>BuildManagedDependencies;$(ResolveReferencesDependsOn)</ResolveReferencesDependsOn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,15 +23,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SelfClaw.Core\SelfClaw.Core.csproj" />
-    <ProjectReference Include="..\SelfClaw.Desktop\SelfClaw.Desktop.csproj" />
+    <ProjectReference Include="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
-
-  <Target Name="BuildManagedDependencies">
-    <MSBuild Projects="..\SelfClaw.Core\SelfClaw.Core.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
-    <MSBuild Projects="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
-  </Target>
 </Project>
