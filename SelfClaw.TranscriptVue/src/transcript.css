@@ -5052,6 +5052,17 @@ html[data-theme='light'] .item.message.user {
 	background-color: color-mix(in srgb, var(--panel-soft) 92%, rgba(var(--accent-rgb), 0.08));
 }
 
+.transcript-vue-app.busy .item.message.assistant:hover,
+.transcript-vue-app.busy .item.message.system:hover {
+	border-color: var(--border);
+	background: var(--panel-soft);
+}
+
+.transcript-vue-app.busy .item.message.user:hover {
+	border-color: rgba(var(--accent-rgb), 0.28);
+	background-color: color-mix(in srgb, var(--panel-soft) 92%, rgba(var(--accent-rgb), 0.08));
+}
+
 .pane-collapse-toggle-icon {
 	width: 14px;
 	height: 14px;
