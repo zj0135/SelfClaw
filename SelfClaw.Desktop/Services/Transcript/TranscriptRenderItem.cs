@@ -14,4 +14,5 @@ public sealed record TranscriptRenderItem(
     string? Summary,
     double? DurationMs,
     string Timestamp,
-    string? AgentId = null);
+    string? AgentId = null,
+    IReadOnlyList<TranscriptImageAttachment>? Attachments = null);

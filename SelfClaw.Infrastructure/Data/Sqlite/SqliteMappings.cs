@@ -58,6 +58,17 @@ internal static class SqliteMappings
             reader.IsDBNull(12) ? null : reader.GetDouble(12),
             reader.IsDBNull(13) ? null : reader.GetString(13));
 
+    public static MessageAttachmentRecord ReadMessageAttachment(SqliteDataReader reader)
+        => new(
+            ReadGuid(reader, 0),
+            ReadGuid(reader, 1),
+            (MessageAttachmentKind)reader.GetInt32(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetInt64(6),
+            ReadDateTimeOffset(reader, 7));
+
     public static TeamAgentRecord ReadTeamAgent(SqliteDataReader reader)
         => new(
             ReadGuid(reader, 0),

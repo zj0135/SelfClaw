@@ -980,6 +980,42 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
             content = $"[{speaker}]\n{content}";
         }
 
+        if (message.Role == MessageRole.User && message.Attachments is { Count: > 0 } attachments)
+        {
+            var contents = new List<AIContent>();
+            if (!string.IsNullOrWhiteSpace(content))
+            {
+                contents.Add(new TextContent(content));
+            }
+
+            foreach (var attachment in attachments)
+            {
+                if (attachment.Kind != MessageAttachmentKind.Image ||
+                    string.IsNullOrWhiteSpace(attachment.StoragePath) ||
+                    !File.Exists(attachment.StoragePath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    contents.Add(new DataContent(File.ReadAllBytes(attachment.StoragePath), attachment.MediaType)
+                    {
+                        Name = attachment.FileName
+                    });
+                }
+                catch
+                {
+                    // A missing or unreadable old attachment should not make the whole conversation unusable.
+                }
+            }
+
+            if (contents.Count > 0)
+            {
+                return new ChatMessage(MapRole(message.Role), contents);
+            }
+        }
+
         return new ChatMessage(MapRole(message.Role), content);
     }
 

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -12,6 +14,9 @@ using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.ViewModels;
+using DrawingBitmap = System.Drawing.Bitmap;
+using DrawingGraphics = System.Drawing.Graphics;
+using DrawingImage = System.Drawing.Image;
 using MediaColor = System.Windows.Media.Color;
 using MediaSolidColorBrush = System.Windows.Media.SolidColorBrush;
 
@@ -20,6 +25,9 @@ namespace SelfClaw.Desktop;
 public partial class MainWindow : Window
 {
     private const string AssetsHostName = "appassets.selfclaw.local";
+    private const int MaxComposerImageAttachments = 6;
+    private const long MaxComposerImageBytes = 10 * 1024 * 1024;
+    private const int ComposerPreviewMaxEdge = 480;
     private const int WmGetMinMaxInfo = 0x0024;
     private const uint MonitorDefaultToNearest = 2;
 
@@ -342,7 +350,8 @@ public partial class MainWindow : Window
                 case "send-prompt":
                 {
                     var prompt = document.RootElement.GetProperty("prompt").GetString() ?? string.Empty;
-                    await _viewModel.SubmitPromptAsync(prompt);
+                    var attachments = ParsePromptImageAttachments(document.RootElement);
+                    await _viewModel.SubmitPromptAsync(prompt, attachments);
                     break;
                 }
                 case "stop-generation":
@@ -429,11 +438,240 @@ public partial class MainWindow : Window
                 case "pick-workspace-path":
                     await PickWorkspacePathFromTranscriptAsync();
                     break;
+                case "pick-composer-images":
+                    await PickComposerImagesFromTranscriptAsync();
+                    break;
+                case "capture-composer-screenshot":
+                    await CaptureComposerScreenshotFromTranscriptAsync();
+                    break;
             }
         }
         catch (Exception exception)
         {
             PostUiFeedback("error", exception.Message, feedbackScope);
+        }
+    }
+
+    private static IReadOnlyList<PromptImageAttachment> ParsePromptImageAttachments(JsonElement root)
+    {
+        if (!root.TryGetProperty("attachments", out var attachmentsElement) ||
+            attachmentsElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return attachmentsElement
+            .EnumerateArray()
+            .Select(item => new PromptImageAttachment(
+                GetString(item, "sourcePath"),
+                GetString(item, "fileName"),
+                GetString(item, "mediaType"),
+                GetLong(item, "byteLength")))
+            .Where(item => !string.IsNullOrWhiteSpace(item.SourcePath))
+            .Take(MaxComposerImageAttachments)
+            .ToArray();
+    }
+
+    private async Task PickComposerImagesFromTranscriptAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "添加图片",
+            Filter = "图片文件 (*.png;*.jpg;*.jpeg;*.webp;*.gif)|*.png;*.jpg;*.jpeg;*.webp;*.gif",
+            Multiselect = true,
+            CheckFileExists = true
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var attachments = dialog.FileNames
+            .Take(MaxComposerImageAttachments)
+            .Select(TryCreateComposerImagePayload)
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .ToArray();
+
+        await PostComposerImagesPickedAsync(attachments);
+    }
+
+    private async Task CaptureComposerScreenshotFromTranscriptAsync()
+    {
+        var restoreWindowState = WindowState;
+        var shouldRestoreWindow = IsVisible;
+        ScreenshotCaptureResult? capture = null;
+
+        try
+        {
+            if (shouldRestoreWindow)
+            {
+                Hide();
+                await Task.Delay(120);
+            }
+
+            capture = ScreenshotCaptureService.Capture();
+        }
+        finally
+        {
+            if (shouldRestoreWindow)
+            {
+                Show();
+                WindowState = restoreWindowState;
+                Activate();
+            }
+        }
+
+        if (capture is null)
+        {
+            return;
+        }
+
+        var attachment = TryCreateComposerImagePayload(capture.FilePath);
+        if (attachment is null)
+        {
+            TryDeleteFile(capture.FilePath);
+            PostUiFeedback("error", "The screenshot is larger than 10 MB. Drag a smaller region and try again.");
+            return;
+        }
+
+        await PostComposerImagesPickedAsync([attachment]);
+    }
+
+    private static object? TryCreateComposerImagePayload(string path)
+    {
+        try
+        {
+            var fileInfo = new FileInfo(path);
+            if (!fileInfo.Exists || fileInfo.Length <= 0 || fileInfo.Length > MaxComposerImageBytes)
+            {
+                return null;
+            }
+
+            var mediaType = ResolveImageMediaType(fileInfo.FullName);
+            if (mediaType is null)
+            {
+                return null;
+            }
+
+            return new
+            {
+                id = Guid.NewGuid().ToString("D"),
+                sourcePath = fileInfo.FullName,
+                fileName = fileInfo.Name,
+                mediaType,
+                byteLength = fileInfo.Length,
+                dataUrl = TryCreateComposerImagePreviewDataUrl(fileInfo.FullName)
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryCreateComposerImagePreviewDataUrl(string path)
+    {
+        try
+        {
+            using var sourceImage = DrawingImage.FromFile(path);
+            if (sourceImage.Width <= 0 || sourceImage.Height <= 0)
+            {
+                return null;
+            }
+
+            var scale = Math.Min(1d, (double)ComposerPreviewMaxEdge / Math.Max(sourceImage.Width, sourceImage.Height));
+            var previewWidth = Math.Max(1, (int)Math.Round(sourceImage.Width * scale));
+            var previewHeight = Math.Max(1, (int)Math.Round(sourceImage.Height * scale));
+
+            using var previewBitmap = new DrawingBitmap(previewWidth, previewHeight, PixelFormat.Format32bppArgb);
+            using (var graphics = DrawingGraphics.FromImage(previewBitmap))
+            {
+                graphics.CompositingQuality = CompositingQuality.HighQuality;
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.SmoothingMode = SmoothingMode.HighQuality;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                graphics.DrawImage(sourceImage, 0, 0, previewWidth, previewHeight);
+            }
+
+            using var stream = new MemoryStream();
+            previewBitmap.Save(stream, ImageFormat.Png);
+            return $"data:image/png;base64,{Convert.ToBase64String(stream.ToArray())}";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Best effort cleanup for oversized transient screenshots.
+        }
+    }
+
+    private async Task PostComposerImagesPickedAsync(IReadOnlyList<object> attachments)
+    {
+        if (!_webViewReady || TranscriptView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            type = "composer-images-picked",
+            attachments
+        }, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
+
+        if (await TryInvokeComposerImagesPickedBridgeAsync(payload))
+        {
+            return;
+        }
+
+        TranscriptView.CoreWebView2.PostWebMessageAsJson(payload);
+    }
+
+    private async Task<bool> TryInvokeComposerImagesPickedBridgeAsync(string payload)
+    {
+        if (TranscriptView.CoreWebView2 is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var script = $$"""
+                (() => {
+                    const payload = {{payload}};
+                    if (typeof window.selfClawComposerImagesPicked === 'function') {
+                        window.selfClawComposerImagesPicked(payload);
+                        return true;
+                    }
+
+                    window.dispatchEvent(new CustomEvent('selfclaw-composer-images-picked', { detail: payload }));
+                    return false;
+                })()
+                """;
+            var result = await TranscriptView.CoreWebView2.ExecuteScriptAsync(script);
+            return string.Equals(result, "true", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -627,6 +865,11 @@ public partial class MainWindow : Window
             ? value
             : 0;
 
+    private static long GetLong(JsonElement root, string propertyName)
+        => root.TryGetProperty(propertyName, out var property) && property.TryGetInt64(out var value)
+            ? value
+            : 0;
+
     private static IReadOnlyDictionary<string, string> GetStringDictionary(JsonElement root, string propertyName)
     {
         if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Object)
@@ -654,6 +897,16 @@ public partial class MainWindow : Window
         => root.TryGetProperty(propertyName, out var property) &&
            (property.ValueKind == JsonValueKind.True ||
             (property.ValueKind == JsonValueKind.False ? false : bool.TryParse(property.GetRawText(), out var value) && value));
+
+    private static string? ResolveImageMediaType(string path)
+        => Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            _ => null
+        };
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {

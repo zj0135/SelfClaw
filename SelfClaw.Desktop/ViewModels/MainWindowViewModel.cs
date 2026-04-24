@@ -17,6 +17,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services;
+using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Tools.Transcript;
 
 namespace SelfClaw.Desktop.ViewModels;
@@ -24,6 +25,9 @@ namespace SelfClaw.Desktop.ViewModels;
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(75);
+    private const int MaxPromptImageAttachments = 6;
+    private const long MaxPromptImageBytes = 10 * 1024 * 1024;
+    private const long MaxPromptImageTotalBytes = 30 * 1024 * 1024;
     private static readonly ShellSelectOption[] ToolPermissionOptions =
     [
         new("requireApproval", "默认权限", "写文件和命令执行前需要人工确认"),
@@ -62,6 +66,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly DesktopSettingsStore _desktopSettingsStore;
     private readonly DesktopChannelManager _channelManager;
+    private readonly StoragePaths _storagePaths;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly DispatcherTimer? _streamingPublishTimer;
 
@@ -71,6 +76,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly List<TeamAgentRecord> _teamAgents = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
     private readonly Dictionary<Guid, ToolRunAnchor> _toolRunAnchors = [];
+    private IReadOnlyList<PromptImageAttachment> _pendingPromptImageAttachments = [];
     private CancellationTokenSource? _turnCancellationSource;
     private bool _initialized;
     private bool _isApplyingThemeSelection;
@@ -107,6 +113,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         MarkdownHtmlRenderer markdownHtmlRenderer,
         DesktopSettingsStore desktopSettingsStore,
         DesktopChannelManager channelManager,
+        StoragePaths storagePaths,
         ILogger<MainWindowViewModel> logger)
     {
         _conversationRepository = conversationRepository;
@@ -119,6 +126,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _markdownHtmlRenderer = markdownHtmlRenderer;
         _desktopSettingsStore = desktopSettingsStore;
         _channelManager = channelManager;
+        _storagePaths = storagePaths;
         _logger = logger;
         _channelManager.Changed += OnChannelManagerChanged;
         _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
@@ -375,9 +383,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         PublishShell(false);
     }
 
-    public async Task SubmitPromptAsync(string prompt)
+    public async Task SubmitPromptAsync(string prompt, IReadOnlyList<PromptImageAttachment>? imageAttachments = null)
     {
         ComposerText = prompt;
+        _pendingPromptImageAttachments = imageAttachments ?? [];
         await SendAsync();
     }
 
@@ -1003,7 +1012,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var prompt = ComposerText.Trim();
-        if (string.IsNullOrWhiteSpace(prompt))
+        var promptImageAttachments = _pendingPromptImageAttachments.ToArray();
+        _pendingPromptImageAttachments = [];
+
+        if (string.IsNullOrWhiteSpace(prompt) && promptImageAttachments.Length == 0)
         {
             return;
         }
@@ -1031,7 +1043,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             var conversation = await EnsureConversationAsync();
             if (TryMatchAgentMention(prompt, out var mentionedAgent, out var branchPrompt))
             {
-                if (string.IsNullOrWhiteSpace(branchPrompt))
+                if (string.IsNullOrWhiteSpace(branchPrompt) && promptImageAttachments.Length == 0)
                 {
                     StatusText = $"Enter a message for {mentionedAgent.Name}.";
                     PublishShell(false);
@@ -1054,20 +1066,32 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             };
             await PersistConversationAsync(conversation);
 
+            var userMessageId = Guid.NewGuid();
+            var userAttachments = await PersistPromptImageAttachmentsAsync(
+                conversation.Id,
+                userMessageId,
+                promptImageAttachments,
+                _turnCancellationSource.Token);
+
             var userMessage = new MessageRecord(
-                Guid.NewGuid(),
+                userMessageId,
                 conversation.Id,
                 MessageRole.User,
                 prompt,
                 MessageStatus.Completed,
                 DateTimeOffset.UtcNow,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                Attachments: userAttachments);
             _messages.Add(userMessage);
             await _conversationRepository.UpsertMessageAsync(userMessage);
 
             if (conversation.Title == "New chat")
             {
-                conversation = conversation with { Title = CreateConversationTitle(prompt), UpdatedAtUtc = DateTimeOffset.UtcNow };
+                conversation = conversation with
+                {
+                    Title = CreateConversationTitle(prompt, userAttachments),
+                    UpdatedAtUtc = DateTimeOffset.UtcNow
+                };
                 await PersistConversationAsync(conversation);
             }
             PublishShell(true);
@@ -1503,6 +1527,120 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         NewConversationCommand.NotifyCanExecuteChanged();
     }
 
+    private async Task<IReadOnlyList<MessageAttachmentRecord>> PersistPromptImageAttachmentsAsync(
+        Guid conversationId,
+        Guid messageId,
+        IReadOnlyList<PromptImageAttachment> attachments,
+        CancellationToken cancellationToken)
+    {
+        if (attachments.Count == 0)
+        {
+            return [];
+        }
+
+        if (attachments.Count > MaxPromptImageAttachments)
+        {
+            throw new InvalidOperationException($"最多一次添加 {MaxPromptImageAttachments} 张图片。");
+        }
+
+        var totalBytes = attachments.Sum(item => Math.Max(0, item.ByteLength));
+        if (totalBytes > MaxPromptImageTotalBytes)
+        {
+            throw new InvalidOperationException("图片总大小超过 30 MB。");
+        }
+
+        var targetDirectory = Path.Combine(
+            _storagePaths.AppDataDirectory,
+            "attachments",
+            conversationId.ToString("D"),
+            messageId.ToString("D"));
+        Directory.CreateDirectory(targetDirectory);
+
+        var results = new List<MessageAttachmentRecord>(attachments.Count);
+        foreach (var attachment in attachments)
+        {
+            var sourcePath = Path.GetFullPath(attachment.SourcePath);
+            if (!File.Exists(sourcePath))
+            {
+                throw new FileNotFoundException("找不到要发送的图片。", sourcePath);
+            }
+
+            var fileInfo = new FileInfo(sourcePath);
+            if (fileInfo.Length <= 0)
+            {
+                throw new InvalidOperationException($"图片 '{fileInfo.Name}' 是空文件。");
+            }
+
+            if (fileInfo.Length > MaxPromptImageBytes)
+            {
+                throw new InvalidOperationException($"图片 '{fileInfo.Name}' 超过 10 MB。");
+            }
+
+            var mediaType = ResolveImageMediaType(fileInfo.FullName, attachment.MediaType);
+            if (mediaType is null)
+            {
+                throw new InvalidOperationException($"不支持的图片格式：{fileInfo.Name}");
+            }
+
+            var safeName = CreateSafeAttachmentFileName(attachment.FileName, fileInfo.Name);
+            var targetPath = Path.Combine(targetDirectory, $"{results.Count + 1:00}-{safeName}");
+            await using (var sourceStream = File.OpenRead(fileInfo.FullName))
+            await using (var targetStream = File.Create(targetPath))
+            {
+                await sourceStream.CopyToAsync(targetStream, cancellationToken);
+            }
+
+            results.Add(new MessageAttachmentRecord(
+                Guid.NewGuid(),
+                messageId,
+                MessageAttachmentKind.Image,
+                safeName,
+                mediaType,
+                targetPath,
+                fileInfo.Length,
+                DateTimeOffset.UtcNow));
+        }
+
+        return results.ToArray();
+    }
+
+    private static string CreateSafeAttachmentFileName(string? requestedName, string fallbackName)
+    {
+        var fileName = Path.GetFileName(string.IsNullOrWhiteSpace(requestedName) ? fallbackName : requestedName);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = fallbackName;
+        }
+
+        foreach (var invalidChar in Path.GetInvalidFileNameChars())
+        {
+            fileName = fileName.Replace(invalidChar, '_');
+        }
+
+        return string.IsNullOrWhiteSpace(fileName) ? "image.png" : fileName;
+    }
+
+    private static string? ResolveImageMediaType(string path, string? suppliedMediaType = null)
+    {
+        if (!string.IsNullOrWhiteSpace(suppliedMediaType) &&
+            IsSupportedImageMediaType(suppliedMediaType))
+        {
+            return suppliedMediaType.Trim().ToLowerInvariant();
+        }
+
+        return Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            _ => null
+        };
+    }
+
+    private static bool IsSupportedImageMediaType(string mediaType)
+        => mediaType.Trim().ToLowerInvariant() is "image/png" or "image/jpeg" or "image/webp" or "image/gif";
+
     private async Task<ConversationRecord> EnsureConversationAsync()
     {
         if (SelectedConversation is not null)
@@ -1901,6 +2039,44 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         PublishShell(false);
     }
 
+    private static IReadOnlyList<TranscriptImageAttachment> BuildImageAttachments(MessageRecord message)
+    {
+        if (message.Attachments is not { Count: > 0 } attachments)
+        {
+            return [];
+        }
+
+        return attachments
+            .Where(item => item.Kind == MessageAttachmentKind.Image)
+            .Select(item => new TranscriptImageAttachment(
+                item.Id.ToString("D"),
+                item.FileName,
+                item.MediaType,
+                item.ByteLength,
+                TryCreateAttachmentDataUrl(item)))
+            .ToArray();
+    }
+
+    private static string? TryCreateAttachmentDataUrl(MessageAttachmentRecord attachment)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(attachment.StoragePath) ||
+                string.IsNullOrWhiteSpace(attachment.MediaType) ||
+                !File.Exists(attachment.StoragePath))
+            {
+                return null;
+            }
+
+            var bytes = File.ReadAllBytes(attachment.StoragePath);
+            return $"data:{attachment.MediaType};base64,{Convert.ToBase64String(bytes)}";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private TranscriptRenderItem BuildMessageItem(MessageRecord message)
         => BuildMessageItem(message, []);
 
@@ -1999,7 +2175,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             message.ErrorMessage,
             message.DurationMs,
             message.CreatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
-            message.AgentId?.ToString("D"));
+            message.AgentId?.ToString("D"),
+            BuildImageAttachments(message));
     }
 
     private static string ThemePreferenceToId(AppThemePreference preference)
@@ -2042,9 +2219,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _ => ToolPermissionMode.RequireApproval
         };
 
-    private static string CreateConversationTitle(string text)
+    private static string CreateConversationTitle(string text, IReadOnlyList<MessageAttachmentRecord>? attachments = null)
     {
         var normalized = text.ReplaceLineEndings(" ").Trim();
+        if (string.IsNullOrWhiteSpace(normalized) && attachments is { Count: > 0 })
+        {
+            normalized = attachments.Count == 1
+                ? attachments[0].FileName
+                : $"{attachments.Count} 张图片";
+        }
+
         return normalized.Length > 48 ? normalized[..48] + "..." : normalized;
     }
 

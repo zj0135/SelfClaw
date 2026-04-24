@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 12;
+    private const int CurrentSchemaVersion = 13;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -276,6 +276,19 @@ CREATE TABLE IF NOT EXISTS messages (
                 cancellationToken);
 
             await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS message_attachments (
+    id TEXT NOT NULL PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    kind INTEGER NOT NULL,
+    file_name TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    storage_path TEXT NOT NULL,
+    byte_length INTEGER NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
+);", cancellationToken);
+
+            await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS team_agents (
     id TEXT NOT NULL PRIMARY KEY,
     conversation_id TEXT NOT NULL,
@@ -338,6 +351,7 @@ CREATE TABLE IF NOT EXISTS tool_runs (
 
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_conversations_updated ON conversations(updated_at_utc DESC);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_message_attachments_message ON message_attachments(message_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_team_agents_conversation_sort ON team_agents(conversation_id, sort_order, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_tool_runs_conversation_created ON tool_runs(conversation_id, created_at_utc);", cancellationToken);
             for (var version = 1; version <= CurrentSchemaVersion; version++)

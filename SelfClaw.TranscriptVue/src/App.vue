@@ -50,6 +50,7 @@ const state = reactive({
 });
 
 const composerValue = ref('');
+const composerAttachments = ref([]);
 const conversationSearch = ref('');
 const leftPaneCollapsed = ref(false);
 const planPanelCollapsed = ref(false);
@@ -106,6 +107,7 @@ const desktopPaneCollapseBreakpoint = 1180;
 let pendingStatePayload = null;
 let renderFrameHandle = 0;
 let profileModelFetchRequestSeed = 0;
+let composerAttachmentSeed = 0;
 const profileModelOptionsCache = new Map();
 
 const post = (message) => window.chrome?.webview?.postMessage(message);
@@ -272,7 +274,9 @@ const conversationSectionTitle = computed(() =>
 	isChannelMode.value ? '频道会话' : state.conversations.some((item) => item.parentId) ? '会话树' : '最近会话'
 );
 const totalStepCount = computed(() => (isTeamMode.value ? visibleTeamMembers.value.length + (state.agentActivities?.length || 0) : state.agentActivities?.length || 0));
-const sendButtonDisabled = computed(() => isChannelMode.value || ((!composerValue.value.trim() && !state.isBusy) || !state.selectedProfileId));
+const sendButtonDisabled = computed(
+	() => isChannelMode.value || (!state.isBusy && !composerValue.value.trim() && composerAttachments.value.length === 0) || !state.selectedProfileId
+);
 const settingsSections = computed(() => [
 	{
 		id: 'profile',
@@ -441,6 +445,7 @@ watch(
 watch(isChannelMode, (channelMode) => {
 	if (channelMode) {
 		visualizationEnabled.value = false;
+		composerAttachments.value = [];
 	}
 });
 
@@ -526,13 +531,27 @@ function applyMentionSelection(agent) {
 }
 
 function submitComposer() {
-	const prompt = composerValue.value.trim();
-	if (!prompt) {
+	if (state.isBusy || isChannelMode.value) {
 		return;
 	}
 
-	post({ type: 'send-prompt', prompt });
+	const prompt = composerValue.value.trim();
+	if (!prompt && composerAttachments.value.length === 0) {
+		return;
+	}
+
+	post({
+		type: 'send-prompt',
+		prompt,
+		attachments: composerAttachments.value.map((attachment) => ({
+			sourcePath: attachment.sourcePath,
+			fileName: attachment.fileName,
+			mediaType: attachment.mediaType,
+			byteLength: attachment.byteLength,
+		})),
+	});
 	composerValue.value = '';
+	composerAttachments.value = [];
 	closeMentionPicker();
 }
 
@@ -638,6 +657,47 @@ function handleProfileModelsFetched(payload) {
 	profileModelOptionsCache.set(cacheKey, modelOptions);
 	applyProfileModelOptions(editorState.draft, cacheKey, modelOptions);
 	editorState.feedback = null;
+}
+
+function normalizeComposerAttachment(rawAttachment) {
+	if (!rawAttachment || !rawAttachment.sourcePath) {
+		return null;
+	}
+
+	return {
+		id: rawAttachment.id || `composer-image-${++composerAttachmentSeed}`,
+		sourcePath: rawAttachment.sourcePath,
+		fileName: rawAttachment.fileName || 'image',
+		mediaType: rawAttachment.mediaType || 'image/png',
+		byteLength: Number(rawAttachment.byteLength || 0),
+		dataUrl: rawAttachment.dataUrl || '',
+	};
+}
+
+function handleComposerImagesPicked(payload) {
+	const picked = Array.isArray(payload.attachments)
+		? payload.attachments.map(normalizeComposerAttachment).filter(Boolean)
+		: [];
+	if (!picked.length) {
+		return;
+	}
+
+	const existingSourcePaths = new Set(composerAttachments.value.map((item) => item.sourcePath));
+	const nextAttachments = [...composerAttachments.value];
+	for (const attachment of picked) {
+		if (existingSourcePaths.has(attachment.sourcePath)) {
+			continue;
+		}
+
+		existingSourcePaths.add(attachment.sourcePath);
+		nextAttachments.push(attachment);
+	}
+
+	composerAttachments.value = nextAttachments.slice(0, 6);
+}
+
+function handleComposerImagesPickedEvent(event) {
+	handleComposerImagesPicked(event?.detail || {});
 }
 
 function captureScroll(element) {
@@ -812,6 +872,11 @@ function handleWebViewMessage(event) {
 
 	if (payload.type === 'profile-models-fetched') {
 		handleProfileModelsFetched(payload);
+		return;
+	}
+
+	if (payload.type === 'composer-images-picked') {
+		handleComposerImagesPicked(payload);
 		return;
 	}
 
@@ -1247,6 +1312,26 @@ function onPermissionChange(permissionModeId) {
 	post({ type: 'select-tool-permission', permissionModeId });
 }
 
+function pickComposerImages() {
+	if (state.isBusy || isChannelMode.value) {
+		return;
+	}
+
+	post({ type: 'pick-composer-images' });
+}
+
+function captureComposerScreenshot() {
+	if (state.isBusy || isChannelMode.value) {
+		return;
+	}
+
+	post({ type: 'capture-composer-screenshot' });
+}
+
+function removeComposerAttachment(attachmentId) {
+	composerAttachments.value = composerAttachments.value.filter((item) => item.id !== attachmentId);
+}
+
 function onPlanningModeChange(enabled) {
 	post({ type: 'set-plan-mode', enabled: Boolean(enabled) });
 }
@@ -1419,6 +1504,8 @@ function syncPaneCollapseForViewport() {
 
 onMounted(() => {
 	normalizeState();
+	window.selfClawComposerImagesPicked = handleComposerImagesPicked;
+	window.addEventListener('selfclaw-composer-images-picked', handleComposerImagesPickedEvent);
 	window.chrome?.webview?.addEventListener('message', handleWebViewMessage);
 	document.addEventListener('keydown', onDocumentKeydown);
 	window.addEventListener('resize', syncPaneCollapseForViewport);
@@ -1427,6 +1514,10 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+	window.removeEventListener('selfclaw-composer-images-picked', handleComposerImagesPickedEvent);
+	if (window.selfClawComposerImagesPicked === handleComposerImagesPicked) {
+		delete window.selfClawComposerImagesPicked;
+	}
 	window.chrome?.webview?.removeEventListener?.('message', handleWebViewMessage);
 	document.removeEventListener('keydown', onDocumentKeydown);
 	window.removeEventListener('resize', syncPaneCollapseForViewport);
@@ -1475,12 +1566,15 @@ onUnmounted(() => {
 					:show-visualization-toggle="showVisualizationToggle" :is-busy="state.isBusy"
 					:is-planning-mode-enabled="state.isPlanningModeEnabled" :send-button-disabled="sendButtonDisabled"
 					:visualization-enabled="activeVisualizationEnabled"
+					:attachments="composerAttachments"
 					@composer-input="onComposerInput" @composer-keydown="onComposerKeydown"
 					@apply-mention="applyMentionSelection" @select-profile="onProfileSelectChange"
 					@select-team-round="onTeamRoundChange" @select-team-output="onTeamOutputChange"
 					@select-permission="onPermissionChange" @toggle-planning-mode="onPlanningModeChange"
 					@toggle-visualization-mode="onVisualizationModeChange"
-					@toggle-plan-panel-collapse="togglePlanPanelCollapse" @send-click="onSendClick" />
+					@toggle-plan-panel-collapse="togglePlanPanelCollapse" @pick-images="pickComposerImages"
+					@capture-screenshot="captureComposerScreenshot"
+					@remove-attachment="removeComposerAttachment" @send-click="onSendClick" />
 			</main>
 
 			<StepsPanel ref="stepsPanelRef" :steps-header-html="stepsHeaderHtml" :steps-panel-html="stepsPanelHtml" />

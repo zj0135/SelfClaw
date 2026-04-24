@@ -285,12 +285,56 @@ function renderBodySegment(segment, index, totalSegments) {
 	return `<div class="${classes.join(' ')}">${segment.html}</div>`;
 }
 
+function formatAttachmentSize(byteLength) {
+	const size = Number(byteLength || 0);
+	if (size >= 1024 * 1024) {
+		return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+	}
+
+	if (size >= 1024) {
+		return `${Math.max(1, Math.round(size / 1024))} KB`;
+	}
+
+	return `${Math.max(0, size)} B`;
+}
+
+function renderMessageAttachments(item) {
+	if (!Array.isArray(item.attachments) || item.attachments.length === 0) {
+		return '';
+	}
+
+	const attachments = item.attachments
+		.filter((attachment) => attachment && String(attachment.mediaType || '').startsWith('image/'))
+		.map((attachment) => {
+			const fileName = escapeHtml(attachment.fileName || 'image');
+			const size = escapeHtml(formatAttachmentSize(attachment.byteLength));
+			const image = attachment.dataUrl
+				? `<img class="message-attachment-image" src="${escapeHtml(attachment.dataUrl)}" alt="${fileName}" loading="lazy" />`
+				: `<div class="message-attachment-image missing" aria-hidden="true"></div>`;
+			return `
+        <figure class="message-attachment">
+          ${image}
+          <figcaption>
+            <span class="message-attachment-name">${fileName}</span>
+            <span class="message-attachment-size">${size}</span>
+          </figcaption>
+        </figure>
+      `;
+		})
+		.join('');
+
+	return attachments ? `<div class="message-attachments">${attachments}</div>` : '';
+}
+
 function renderMessageContent(item, openThoughts, openToolSegments, openToolGroups) {
 	const segments = getMessageSegments(item);
+	const attachmentsHtml = renderMessageAttachments(item);
 	if (!segments.length) {
 		return item.role === 'assistant' && item.isThinking
 			? `<div class="message-flow">${renderPendingThinking(item, 0, true, openThoughts)}</div>`
-			: '';
+			: attachmentsHtml
+				? `<div class="message-flow">${attachmentsHtml}</div>`
+				: '';
 	}
 
 	let thinkingOrdinal = 0;
@@ -325,6 +369,7 @@ function renderMessageContent(item, openThoughts, openToolSegments, openToolGrou
 
 	return `
       <div class="message-flow">
+        ${attachmentsHtml}
         ${parts.join('')}
       </div>
     `;

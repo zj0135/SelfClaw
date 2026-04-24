@@ -135,7 +135,21 @@ ORDER BY created_at_utc ASC;";
             results.Add(SqliteMappings.ReadMessage(reader));
         }
 
-        return results;
+        if (results.Count == 0)
+        {
+            return results;
+        }
+
+        var attachmentsByMessageId = await ReadMessageAttachmentsAsync(
+            connection,
+            results.Select(item => item.Id).ToArray(),
+            cancellationToken);
+
+        return results
+            .Select(message => attachmentsByMessageId.TryGetValue(message.Id, out var attachments)
+                ? message with { Attachments = attachments }
+                : message)
+            .ToArray();
     }
 
     public async Task<MessageRecord> UpsertMessageAsync(MessageRecord message, CancellationToken cancellationToken = default)
@@ -171,7 +185,92 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$durationMs", message.DurationMs ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$errorMessage", message.ErrorMessage ?? (object)DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken);
+
+        if (message.Attachments is not null)
+        {
+            await ReplaceMessageAttachmentsAsync(connection, message, cancellationToken);
+        }
+
         return message;
+    }
+
+    private static async Task<Dictionary<Guid, IReadOnlyList<MessageAttachmentRecord>>> ReadMessageAttachmentsAsync(
+        SqliteConnection connection,
+        IReadOnlyList<Guid> messageIds,
+        CancellationToken cancellationToken)
+    {
+        if (messageIds.Count == 0)
+        {
+            return [];
+        }
+
+        var parameterNames = messageIds
+            .Select((_, index) => "$messageId" + index.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $@"
+SELECT id, message_id, kind, file_name, media_type, storage_path, byte_length, created_at_utc
+FROM message_attachments
+WHERE message_id IN ({string.Join(", ", parameterNames)})
+ORDER BY created_at_utc ASC;";
+
+        for (var index = 0; index < messageIds.Count; index++)
+        {
+            command.Parameters.AddWithValue(parameterNames[index], messageIds[index].ToString("D"));
+        }
+
+        var results = new Dictionary<Guid, List<MessageAttachmentRecord>>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var attachment = SqliteMappings.ReadMessageAttachment(reader);
+            if (!results.TryGetValue(attachment.MessageId, out var attachments))
+            {
+                attachments = [];
+                results[attachment.MessageId] = attachments;
+            }
+
+            attachments.Add(attachment);
+        }
+
+        return results.ToDictionary(
+            item => item.Key,
+            item => (IReadOnlyList<MessageAttachmentRecord>)item.Value.ToArray());
+    }
+
+    private static async Task ReplaceMessageAttachmentsAsync(
+        SqliteConnection connection,
+        MessageRecord message,
+        CancellationToken cancellationToken)
+    {
+        await using (var deleteCommand = connection.CreateCommand())
+        {
+            deleteCommand.CommandText = "DELETE FROM message_attachments WHERE message_id = $messageId;";
+            deleteCommand.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
+            await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (message.Attachments is not { Count: > 0 } attachments)
+        {
+            return;
+        }
+
+        foreach (var attachment in attachments)
+        {
+            await using var insertCommand = connection.CreateCommand();
+            insertCommand.CommandText = @"
+INSERT INTO message_attachments(id, message_id, kind, file_name, media_type, storage_path, byte_length, created_at_utc)
+VALUES($id, $messageId, $kind, $fileName, $mediaType, $storagePath, $byteLength, $createdAt);";
+            insertCommand.Parameters.AddWithValue("$id", attachment.Id.ToString("D"));
+            insertCommand.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
+            insertCommand.Parameters.AddWithValue("$kind", (int)attachment.Kind);
+            insertCommand.Parameters.AddWithValue("$fileName", attachment.FileName);
+            insertCommand.Parameters.AddWithValue("$mediaType", attachment.MediaType);
+            insertCommand.Parameters.AddWithValue("$storagePath", attachment.StoragePath);
+            insertCommand.Parameters.AddWithValue("$byteLength", attachment.ByteLength);
+            insertCommand.Parameters.AddWithValue("$createdAt", attachment.CreatedAtUtc.ToString("O"));
+            await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 
     public async Task<IReadOnlyList<TeamAgentRecord>> ListTeamAgentsAsync(Guid conversationId, CancellationToken cancellationToken = default)

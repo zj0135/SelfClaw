@@ -14,4 +14,5 @@ public sealed record MessageRecord(
     int? InputTokens = null,
     int? OutputTokens = null,
     double? DurationMs = null,
-    string? ErrorMessage = null);
+    string? ErrorMessage = null,
+    IReadOnlyList<MessageAttachmentRecord>? Attachments = null);
