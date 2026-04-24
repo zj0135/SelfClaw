@@ -2,6 +2,7 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Threading;
+using CommunityToolkit.WinUI.Notifications;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,7 @@ public partial class App : System.Windows.Application
     private IHost? _host;
     private StoragePaths? _storagePaths;
     private int _isShowingUnhandledExceptionDialog;
+    private bool _toastActivationRegistered;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -43,6 +45,7 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<DesktopChannelManager>();
             builder.Services.AddSingleton<DesktopToolApprovalHandler>();
             builder.Services.AddSingleton<DesktopNotificationService>();
+            builder.Services.AddSingleton<DesktopNotificationActivationService>();
             builder.Services.AddSingleton<SystemTrayService>();
             builder.Services.AddSingleton<MainWindowViewModel>();
             builder.Services.AddSingleton<MainWindow>();
@@ -53,6 +56,7 @@ public partial class App : System.Windows.Application
             await _host.StartAsync();
             await _host.Services.GetRequiredService<IProfileRepository>().InitializeAsync();
             await _host.Services.GetRequiredService<IConversationRepository>().InitializeAsync();
+            RegisterToastNotifications();
 
             var mainWindow = _host.Services.GetRequiredService<MainWindow>();
             var systemTrayService = _host.Services.GetRequiredService<SystemTrayService>();
@@ -94,6 +98,7 @@ public partial class App : System.Windows.Application
         }
         finally
         {
+            UnregisterToastNotifications();
             UnregisterGlobalExceptionHandlers();
             Log.CloseAndFlush();
             base.OnExit(e);
@@ -210,5 +215,59 @@ public partial class App : System.Windows.Application
                 encoding: new UTF8Encoding(false),
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] ({SourceContext}) {Message:lj}{NewLine}{Exception}")
             .CreateLogger();
+    }
+
+    private void RegisterToastNotifications()
+    {
+        if (_toastActivationRegistered)
+        {
+            return;
+        }
+
+        try
+        {
+            ToastNotificationManagerCompat.OnActivated += OnToastActivated;
+            _toastActivationRegistered = true;
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Failed to register Windows toast activation.");
+        }
+    }
+
+    private void UnregisterToastNotifications()
+    {
+        if (!_toastActivationRegistered)
+        {
+            return;
+        }
+
+        try
+        {
+            ToastNotificationManagerCompat.OnActivated -= OnToastActivated;
+            _toastActivationRegistered = false;
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Failed to unregister Windows toast activation.");
+        }
+    }
+
+    private async void OnToastActivated(ToastNotificationActivatedEventArgsCompat args)
+    {
+        if (_host is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var activationService = _host.Services.GetRequiredService<DesktopNotificationActivationService>();
+            await activationService.HandleActivationAsync(args.Argument, args.UserInput);
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Failed to process a Windows toast activation.");
+        }
     }
 }

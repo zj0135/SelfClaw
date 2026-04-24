@@ -8,6 +8,8 @@ namespace SelfClaw.Desktop.ViewModels;
 
 public sealed partial class MainWindowViewModel
 {
+    private const string NotificationToolAnchorPrefix = "<!--selfclaw:tool:";
+
     private void OnToolApprovalRequested(ToolApprovalRequest request)
     {
         if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
@@ -18,10 +20,10 @@ public sealed partial class MainWindowViewModel
 
         var title = ResolveNotificationTitle(request.ConversationId, request.DisplayName);
         _desktopNotificationService.ShowToolApproval(
+            request.ToolExecutionId,
+            request.ConversationId,
             title,
-            request.Description,
-            () => ApproveToolExecutionAsync(request.ToolExecutionId),
-            () => RejectToolExecutionAsync(request.ToolExecutionId));
+            request.Description);
     }
 
     private void PublishConversationCompletedNotification(ConversationRecord conversation)
@@ -34,9 +36,9 @@ public sealed partial class MainWindowViewModel
         var title = ResolveNotificationTitle(conversation.Id, conversation.Title);
         var message = BuildConversationCompletedMessage(conversation);
         _desktopNotificationService.ShowConversationCompleted(
+            conversation.Id,
             title,
-            message,
-            prompt => ContinueConversationFromNotificationAsync(conversation.Id, prompt));
+            message);
     }
 
     private string BuildConversationCompletedMessage(ConversationRecord conversation)
@@ -78,6 +80,17 @@ public sealed partial class MainWindowViewModel
 
     private string ResolveNotificationTitle(Guid? conversationId, string? fallbackTitle)
     {
+        var latestPrompt = _messages
+            .Where(message => message.Status == MessageStatus.Completed && message.Role == MessageRole.User)
+            .OrderByDescending(message => message.CreatedAtUtc)
+            .Select(message => NormalizeNotificationText(message.MarkdownContent))
+            .FirstOrDefault(prompt => !string.IsNullOrWhiteSpace(prompt));
+
+        if (!string.IsNullOrWhiteSpace(latestPrompt))
+        {
+            return latestPrompt.Length > 64 ? latestPrompt[..64] + "..." : latestPrompt;
+        }
+
         var conversationTitle = conversationId is Guid id
             ? _allConversations.FirstOrDefault(item => item.Id == id)?.Title
             : null;
@@ -96,10 +109,11 @@ public sealed partial class MainWindowViewModel
             return string.Empty;
         }
 
+        var sanitized = RemoveNotificationMetadata(text);
         var builder = new StringBuilder(text.Length);
         var previousWhitespace = false;
 
-        foreach (var character in text)
+        foreach (var character in sanitized)
         {
             var normalized = character switch
             {
@@ -127,15 +141,45 @@ public sealed partial class MainWindowViewModel
         return builder.ToString().Trim();
     }
 
-    private async Task ContinueConversationFromNotificationAsync(Guid conversationId, string prompt)
+    private static string RemoveNotificationMetadata(string text)
     {
-        var normalizedPrompt = prompt.Trim();
-        if (string.IsNullOrWhiteSpace(normalizedPrompt))
+        var startIndex = text.IndexOf(NotificationToolAnchorPrefix, StringComparison.Ordinal);
+        if (startIndex < 0)
         {
-            return;
+            return text;
         }
 
-        var conversation = _allConversations.FirstOrDefault(item => item.Id == conversationId);
+        var builder = new StringBuilder(text.Length);
+        var segmentStart = 0;
+
+        while (startIndex >= 0)
+        {
+            if (startIndex > segmentStart)
+            {
+                builder.Append(text, segmentStart, startIndex - segmentStart);
+            }
+
+            var endIndex = text.IndexOf("-->", startIndex, StringComparison.Ordinal);
+            if (endIndex < 0)
+            {
+                return builder.ToString();
+            }
+
+            segmentStart = endIndex + 3;
+            startIndex = text.IndexOf(NotificationToolAnchorPrefix, segmentStart, StringComparison.Ordinal);
+        }
+
+        if (segmentStart < text.Length)
+        {
+            builder.Append(text, segmentStart, text.Length - segmentStart);
+        }
+
+        return builder.ToString();
+    }
+
+    public async Task OpenConversationFromNotificationAsync(Guid conversationId)
+    {
+        var conversation = await ResolveConversationForNotificationAsync(conversationId);
         if (conversation is null)
         {
             StatusText = "This conversation is no longer available.";
@@ -143,17 +187,29 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
-        if (SelectedConversation?.Id != conversation.Id)
+        if (SelectedConversation?.Id == conversation.Id)
         {
-            SelectedConversationMode = conversation.Mode;
-            SelectedWorkspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
-                ? WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
-                : null;
-
-            ApplyConversationFilter(conversation.Id);
-            await LoadConversationAsync(conversation);
+            return;
         }
 
-        await SubmitPromptAsync(normalizedPrompt);
+        SelectedConversationMode = conversation.Mode;
+        SelectedWorkspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
+            ? WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
+            : null;
+
+        ApplyConversationFilter(conversation.Id);
+        await LoadConversationAsync(conversation);
+    }
+
+    private async Task<ConversationRecord?> ResolveConversationForNotificationAsync(Guid conversationId)
+    {
+        var conversation = _allConversations.FirstOrDefault(item => item.Id == conversationId);
+        if (conversation is not null)
+        {
+            return conversation;
+        }
+
+        await ReloadConversationsAsync();
+        return _allConversations.FirstOrDefault(item => item.Id == conversationId);
     }
 }

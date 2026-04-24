@@ -69,6 +69,12 @@ public partial class MainWindow : Window
     {
         _viewModel.TranscriptChanged -= OnTranscriptChanged;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        TranscriptView.NavigationCompleted -= OnTranscriptNavigationCompleted;
+
+        if (TranscriptView.CoreWebView2 is not null)
+        {
+            TranscriptView.CoreWebView2.WebMessageReceived -= OnTranscriptWebMessageReceived;
+        }
 
         if (PresentationSource.FromVisual(this) is HwndSource source)
         {

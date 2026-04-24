@@ -79,7 +79,7 @@ public sealed class SystemTrayService : IDisposable
         _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() => System.Windows.Application.Current.Shutdown()));
     }
 
-    private void ActivateMainWindow()
+    public void ActivateMainWindow()
     {
         var mainWindow = _mainWindow;
         if (mainWindow is null)
