@@ -2,58 +2,51 @@
 
 ## 项目概述
 
-**SelfClaw** 是一个面向 Windows 桌面的个人 AI 助手客户端，采用 WPF 技术栈构建。它提供聊天式交互界面，支持 OpenAI 兼容模型、工作区工具、团队协作式 AI 讨论，以及外部频道消息接入。
+**SelfClaw** 是一个面向 Windows 桌面的个人 AI 助手客户端，主应用采用 **WPF + .NET 10**。
 
-当前后端结构已经做过一轮按功能归类的整理：
+当前项目由 5 个主要部分组成：
 
-- `SelfClaw.Core` 负责领域模型、接口和运行时事件/请求契约
-- `SelfClaw.Infrastructure` 负责 Agent 执行、SQLite 持久化、工具实现、安全和频道接入
-- `SelfClaw.Tests` 目录结构基本镜像 `Infrastructure` 的功能分组
+- `SelfClaw.Core`：领域模型、接口契约、运行时事件/请求契约
+- `SelfClaw.Infrastructure`：Agent 运行时、SQLite 持久化、工具实现、安全、频道接入
+- `SelfClaw.Desktop`：WPF 桌面应用、ViewModel、通知、系统托盘、频道管理
+- `SelfClaw.Tests`：测试工程，目录结构基本镜像 `Infrastructure`
+- `SelfClaw.TranscriptVue`：Vue + Vite 前端壳层，构建产物输出到 Desktop 资产目录
 
-## 核心特性
+## 当前核心能力
 
-- **多模型支持**：支持配置多个 OpenAI 兼容 Provider Profile
-- **工作区集成**：支持列目录、搜索文本、读取文件，也支持受控写文件和 PowerShell 执行
-- **团队模式**：支持多 Agent 讨论、协调者总结和可选文档导出
-- **频道模式**：支持外部聊天频道接入，当前已包含飞书通道实现
-- **对话管理**：支持主会话、Agent 分支会话、工具执行记录和团队状态持久化
-- **安全存储**：使用 Windows DPAPI 加密存储 API 密钥
-- **现代化渲染**：使用 WebView2 与 Markdig 渲染 Markdown，对流式消息中的 thinking/tool anchor 做分段处理
+- 多 Provider Profile（OpenAI 兼容 endpoint + model + 采样参数）
+- 三种会话模式：`Programming` / `Team` / `Channel`
+- Programming 模式支持 **Plan Mode**（先规划执行步骤，再分步执行）
+- Team 模式支持多 Agent 讨论、协调者总结、可选文档导出
+- Channel 模式支持外部消息接入（当前内置飞书）
+- 工作区工具支持读写文件、全文搜索、PowerShell 执行（含审批模型）
+- Transcript 支持 thinking 分段、tool anchor 和工具运行锚定渲染
+- 消息支持图片附件持久化（`message_attachments`）
+- API Key 使用 Windows DPAPI 加密存储
 
 ## 技术栈
 
-| 层级 | 技术 |
-|------|------|
-| 框架 | .NET 10.0 |
-| UI | WPF |
-| MVVM | CommunityToolkit.Mvvm |
-| AI/LLM | Microsoft.Agents.AI, Microsoft.Extensions.AI |
-| 数据存储 | SQLite (Microsoft.Data.Sqlite) |
-| 渲染 | WebView2, Markdig |
-| 安全 | Windows DPAPI |
-| 外部频道 | Feishu Open Platform |
+| 层         | 技术                                                                         |
+| ---------- | ---------------------------------------------------------------------------- |
+| Runtime    | .NET 10                                                                      |
+| Desktop UI | WPF, CommunityToolkit.Mvvm                                                   |
+| AI         | Microsoft.Agents.AI, Microsoft.Extensions.AI, Microsoft.Extensions.AI.OpenAI |
+| Data       | SQLite (`Microsoft.Data.Sqlite`)                                             |
+| Render     | WebView2, Markdig, TranscriptVue (Vue 3 + Vite)                              |
+| Logging    | Serilog                                                                      |
+| Security   | Windows DPAPI                                                                |
+| Channel    | Feishu Open Platform                                                         |
 
 ## 项目结构
 
 ```text
 SelfClaw/
+├── AGENTS.md
+├── SelfClaw.slnx
 ├── SelfClaw.Core/
 │   ├── Interfaces/
-│   │   ├── Agents/
-│   │   ├── Conversations/
-│   │   ├── Profiles/
-│   │   ├── Security/
-│   │   └── Workspace/
 │   ├── Models/
-│   │   ├── Conversations/
-│   │   ├── Profiles/
-│   │   ├── Teams/
-│   │   ├── Tooling/
-│   │   └── Workspace/
 │   └── Runtime/
-│       ├── Approvals/
-│       ├── Events/
-│       └── Requests/
 ├── SelfClaw.Infrastructure/
 │   ├── Agents/
 │   │   ├── Runtime/
@@ -70,29 +63,33 @@ SelfClaw/
 │       ├── Transcript/
 │       └── Workspace/
 ├── SelfClaw.Desktop/
+│   ├── Services/
+│   ├── ViewModels/
+│   └── Assets/
+│       └── TranscriptVue/
+├── SelfClaw.TranscriptVue/
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.js
 └── SelfClaw.Tests/
     └── Infrastructure/
-        ├── Agents/
-        ├── Data/
-        ├── Security/
-        └── Tools/
 ```
 
 ## 重要约定
 
-### 1. 目录已按功能归类，但 Core 命名空间仍保持稳定
+### 1. Core 目录细分，但命名空间保持稳定
 
-虽然 `SelfClaw.Core` 已拆成 `Conversations / Profiles / Teams / Tooling / Workspace` 子目录，但这些类型当前仍统一使用以下命名空间，避免大面积影响上层代码：
+`SelfClaw.Core` 虽然已按 `Conversations / Profiles / Teams / Tooling / Workspace` 分目录，但命名空间仍统一为：
 
 - `SelfClaw.Core.Interfaces`
 - `SelfClaw.Core.Models`
 - `SelfClaw.Core.Runtime`
 
-也就是说：**目录分组更细了，但 Core 的命名空间没有跟着拆散。**
+新增类型优先沿用这套稳定命名空间，除非明确推进一次命名空间重构。
 
-### 2. Infrastructure 的命名空间基本跟目录一致
+### 2. Infrastructure 命名空间基本跟目录一致
 
-当前常用命名空间：
+常用命名空间：
 
 - `SelfClaw.Infrastructure.Agents.Runtime`
 - `SelfClaw.Infrastructure.Agents.Tools`
@@ -101,151 +98,178 @@ SelfClaw/
 - `SelfClaw.Infrastructure.Tools.Transcript`
 - `SelfClaw.Infrastructure.Tools.Workspace`
 
-## 构建和运行
+### 3. Tests 当前使用 `ProjectReference`
+
+`SelfClaw.Tests.csproj` 当前直接引用：
+
+- `..\SelfClaw.Core\SelfClaw.Core.csproj`
+- `..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj`
+
+当前不是“仅依赖已构建 DLL”的模式。
+
+### 4. TranscriptVue 产物由前端工程构建覆盖
+
+`SelfClaw.TranscriptVue/vite.config.js` 的 `outDir` 指向：
+
+- `SelfClaw.Desktop/Assets/TranscriptVue`
+
+Desktop 构建还会通过 `SyncTranscriptVueAssets` 复制该目录内容到输出目录。
+
+## 构建与运行
 
 ### 环境要求
 
-- .NET SDK 10.0.201 或更高版本
 - Windows 10/11
+- .NET SDK 10.0.201+
 - WebView2 Runtime
+- （前端资产开发时）Node.js + npm
 
-### 构建命令
+### 常用命令
 
 ```powershell
-.\build.ps1
-
 dotnet restore SelfClaw.slnx --force-evaluate
 dotnet build SelfClaw.slnx
-```
-
-### 运行应用
-
-```powershell
 dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
+dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj
 ```
 
-### 运行测试
+### TranscriptVue 开发/打包
 
 ```powershell
-.\test.ps1
-
-dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj
+cd SelfClaw.TranscriptVue
+npm install
+npm run dev
+npm run build
 ```
 
 ## 架构说明
 
-### 1. 依赖注入配置
+### 1. DI 配置
 
-DI 在 `ServiceCollectionExtensions.AddSelfClawInfrastructure()` 中配置：
+基础设施 DI 在 `ServiceCollectionExtensions.AddSelfClawInfrastructure()` 注册：
 
-```csharp
-services.AddSingleton(StoragePaths.CreateDefault());
-services.AddSingleton<SqliteDatabase>();
-services.AddSingleton<IProfileRepository, SqliteProfileRepository>();
-services.AddSingleton<IConversationRepository, SqliteConversationRepository>();
-services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
-services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
-services.AddSingleton<IAgentContextProviderFactory, FileSystemAgentContextProviderFactory>();
-services.AddSingleton<IAgentChatRuntime, SelfClawAgentChatRuntime>();
-services.AddSingleton<MarkdownHtmlRenderer>();
-```
+- `StoragePaths`
+- `SqliteDatabase`
+- `IProfileRepository / IConversationRepository`
+- `ISecretProtector`
+- `IWorkspaceToolService`
+- `IAgentContextProviderFactory`
+- `IAgentChatRuntime`
+- `MarkdownHtmlRenderer`
+
+Desktop 侧在 `App.xaml.cs` 额外注册：
+
+- `DesktopSettingsStore`
+- `DesktopChannelManager`
+- `DesktopToolApprovalHandler`
+- `DesktopNotificationService`
+- `SystemTrayService`
+- `MainWindowViewModel` / `MainWindow`
 
 ### 2. Agent 运行时分层
 
-`SelfClawAgentChatRuntime` 是运行时编排入口，当前负责三种模式：
+`SelfClawAgentChatRuntime` 是运行时编排入口，支持：
 
-- `Programming`：普通编程/对话模式
-- `Team`：多 Agent 讨论和协调总结模式
-- `Channel`：外部频道回复模式
+- `Programming`
+- `Programming + EnablePlanMode`
+- `Team`
+- `Channel`
+- `BoundAgent`（主会话分支出的专属 Agent 会话）
 
-配套职责拆分如下：
+配套组件：
 
-- `SelfClawAgentChatRuntime`：编排回合、消息事件、团队讨论和最终总结
-- `ChatClientAgentExecutionService`：封装模型调用与流式输出
-- `FileSystemAgentContextProviderFactory`：提供本地 skills/context provider
-- `WorkspaceToolFunctions`：把工作区服务包装成 Agent 可调用工具，并接入审批/观测
-- `RuntimeToolObserver`：记录工具开始、审批中、完成、失败等运行时事件
+- `ChatClientAgentExecutionService`：模型调用和流式输出
+- `FileSystemAgentContextProviderFactory`：加载本地 skills（当前禁用脚本执行）
+- `WorkspaceToolFunctions`：工具包装、审批、观测
+- `RuntimeToolObserver`：工具开始/审批中/完成/失败事件落地
 
-### 3. 工作区工具与权限模型
+### 3. Plan Mode（新增重点）
 
-当前工作区工具不再只是只读，实际能力如下：
+Core 运行时已包含：
 
-| 工具名 | 功能 |
-|--------|------|
-| `list_workspace_files` | 列出工作区文件和目录 |
-| `search_workspace_text` | 搜索工作区文本 |
-| `read_workspace_file` | 读取文本文件 |
-| `write_workspace_file` | 在工作区内创建或覆盖 UTF-8 文本文件 |
-| `run_shell_command` | 在工作区根目录下执行 PowerShell 命令 |
+- `ExecutionPlan`
+- `ExecutionPlanStep`
+- `ExecutionPlanStepStatus`
+- `ExecutionPlanDraftingStartedEvent`
+- `ExecutionPlanPreparedEvent`
+- `ExecutionPlanStepStatusChangedEvent`
 
-权限模型由 `ToolPermissionMode` 控制：
+Desktop 渲染层有 `TranscriptPlanPanel` / `TranscriptPlanStep` 对应展示。
 
-- `RequireApproval`：写文件和执行命令前必须走 `IToolApprovalHandler`
-- `FullAccess`：直接执行，不再请求确认
+### 4. 工作区工具与权限模型
 
-`WorkspaceToolService` 本身还负责：
+工具能力：
+
+- `list_workspace_files`
+- `search_workspace_text`
+- `read_workspace_file`
+- `write_workspace_file`
+- `run_shell_command`
+
+权限由 `ToolPermissionMode` 控制：
+
+- `RequireApproval`：写文件和命令执行前需审批
+- `FullAccess`：直接执行
+
+`WorkspaceToolService` 还负责：
 
 - 路径归一化和越界防护
 - 文本文件检测
-- 读取/写入大小限制
-- shell 超时和输出截断
+- 大小限制（读 24k chars、写 200k chars、shell 输出 24k chars）
+- shell 超时控制（1s~600s）
 
-### 4. 数据访问与仓储
+### 5. 数据访问与持久化
 
-SQLite 基础设施由 `SqliteDatabase` 管理，负责：
+`SqliteDatabase` 负责 schema 初始化和增量补齐，当前：
 
-- 数据库文件创建
-- schema 初始化
+- `CurrentSchemaVersion = 13`
 - `PRAGMA foreign_keys = ON`
-- 兼容旧列的增量补齐
-- schema version 记录
+- 自动 `EnsureColumnExists` 兼容旧库
 
-仓储实现：
+主要表：
 
-- `SqliteProfileRepository`：ProviderProfile 持久化
-- `SqliteConversationRepository`：会话、消息、团队 Agent、工具执行、工作区根目录的持久化
+- `profiles`
+- `workspace_roots`
+- `conversations`
+- `messages`
+- `message_attachments`
+- `team_agents`
+- `tool_runs`
 
-`SqliteConversationRepository` 目前还包含一层额外逻辑：
+`SqliteConversationRepository` 还负责：
 
-- 自动复用或合并重复的 Agent 分支会话
-- 在读取时折叠重复 Agent 会话记录
+- Agent 分支会话去重合并
+- 消息附件读写
+- team agent 去重读取
 
-### 5. Transcript / Markdown 渲染
+### 6. Transcript / Markdown
 
-Transcript 相关代码集中在 `SelfClaw.Infrastructure.Tools.Transcript`：
+`SelfClaw.Infrastructure.Tools.Transcript`：
 
-- `AssistantMessageSegmenter`：负责 thinking 区块、tool anchor、最终消息合并
-- `MarkdownHtmlRenderer`：负责 Markdown -> HTML 渲染
+- `AssistantMessageSegmenter`：处理 `<think>`、内部 thinking 标记、tool anchor
+- `MarkdownHtmlRenderer`：Markdig 渲染并禁用原生 HTML
 
-这部分会同时被 Agent 运行时和 Desktop UI 使用。
+### 7. Channel 模式（飞书）
+
+`DesktopChannelManager` 统一管理通道配置、生命周期和消息转发。  
+当前内置 `FeishuDesktopChannelAdapter`，通过 `FeishuBotService` 支持：
+
+- 长连接接收消息
+- @ 提及处理
+- 流式回复（卡片轮换）
+- 图片/文件/语音资源处理
 
 ## 关键数据模型
 
 ### ProviderProfile
 
-Provider 配置，包含模型参数与密钥引用：
-
-```csharp
-record ProviderProfile(
-    Guid Id,
-    string Name,
-    string Endpoint,
-    string Model,
-    bool TemperatureEnabled,
-    double Temperature,
-    bool TopPEnabled,
-    double TopP,
-    ApiStyle ApiStyle,
-    string SecretRef,
-    DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
-```
+Provider 配置模型，包含 endpoint/model/采样参数/secret 引用。
 
 ### ConversationRecord
 
-当前 `ConversationRecord` 已不仅仅是基础会话记录，还包含：
+除基础字段外，还包含：
 
-- `Mode`：`Programming / Team / Channel`
+- `Mode`
 - `ToolPermissionMode`
 - `TeamMaxRounds`
 - `TeamOutputMode`
@@ -253,74 +277,54 @@ record ProviderProfile(
 - `BoundAgentId / BoundAgentName / BoundAgentRole`
 - `ChannelKind / ChannelConversationId / ChannelDisplayName`
 
-### Team 相关模型
+### MessageRecord
 
-- `TeamAgentRecord`
-- `TeamAgentStatus`
-- `TeamDiscussionDefaults`
-- `TeamOutputMode`
+已包含：
 
-### Tool / Workspace 相关模型
+- Agent 元信息与 token 统计
+- 错误信息
+- `Attachments`（当前 `MessageAttachmentKind` 支持 `Image`）
 
-- `ToolExecutionRecord`
-- `ToolExecutionStatus`
-- `ShellCommandResult`
-- `WorkspaceRoot`
-- `WorkspaceFileContent`
-- `WorkspaceFileEntry`
-- `WorkspaceFileWriteResult`
-- `WorkspaceSearchHit`
+### ChatTurnRequest
 
-## 开发约定
+关键字段：
 
-### 代码风格
+- `ContextMessages`
+- `BoundAgent`
+- `EnablePlanMode`
 
-- 使用 `ImplicitUsings` 和 `Nullable`
-- 优先使用 `record` 表达不可变数据模型
-- 异步方法使用 `Async` 后缀
-- 传播 `CancellationToken`
+## 测试现状
 
-### 测试
+- 测试框架：xUnit + FluentAssertions
+- 目录组织：尽量镜像 `Infrastructure`
+- 现有重点测试：
+- `SelfClawAgentChatRuntimeTests`
+- `FileSystemAgentContextProviderFactoryTests`
+- `SqliteRepositoriesTests`
+- `WorkspaceToolServiceTests`
+- `AssistantMessageSegmenterTests`
+- `DpapiSecretProtectorTests`
 
-- 使用 xUnit
-- 使用 FluentAssertions
-- `SelfClaw.Tests` 通过 `<Reference>` 引用 `SelfClaw.Core.dll` 和 `SelfClaw.Infrastructure.dll`
-- 测试目录尽量镜像 `Infrastructure` 的功能结构
+## 关键文件索引
 
-这意味着：
-
-- 如果改动了 `Core` / `Infrastructure` 的公开类型或命名空间，测试前必须确保对应项目已重新构建
-- 直接运行 `dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj` 时，会先触发 `BuildManagedDependencies`
-
-### 数据访问
-
-- 使用原生 SQL 与 `Microsoft.Data.Sqlite`
-- 数据库存储路径默认在 `%LOCALAPPDATA%\SelfClaw\selfclaw.db`
-- `SqliteConversationRepository` 目前职责较大，后续如继续演进，可考虑拆分仓储边界
-
-## 关键文件
-
-| 文件 | 说明 |
-|------|------|
-| `SelfClaw.Desktop/App.xaml.cs` | 应用入口与 DI 容器配置 |
-| `SelfClaw.Desktop/ViewModels/MainWindowViewModel.cs` | 主窗口核心业务逻辑 |
-| `SelfClaw.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs` | 基础设施服务注册 |
-| `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.cs` | Agent 运行时编排入口 |
-| `SelfClaw.Infrastructure/Agents/Runtime/ChatClientAgentExecutionService.cs` | 模型执行与流式输出 |
-| `SelfClaw.Infrastructure/Agents/Tools/WorkspaceToolFunctions.cs` | Agent 工具适配与审批包装 |
-| `SelfClaw.Infrastructure/Tools/Workspace/WorkspaceToolService.cs` | 工作区文件和 shell 能力实现 |
-| `SelfClaw.Infrastructure/Data/Sqlite/SqliteDatabase.cs` | SQLite 初始化与 schema 管理 |
-| `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteConversationRepository.cs` | 会话相关持久化 |
-| `SelfClaw.Core/Interfaces/*` | 核心契约定义 |
+| 文件                                                                               | 说明                                 |
+| ---------------------------------------------------------------------------------- | ------------------------------------ |
+| `SelfClaw.Desktop/App.xaml.cs`                                                     | 应用入口、日志、DI                   |
+| `SelfClaw.Desktop/ViewModels/MainWindowViewModel*.cs`                              | 主业务流程（会话、团队、频道、通知） |
+| `SelfClaw.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs`       | 基础设施服务注册                     |
+| `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.cs`               | 运行时编排核心                       |
+| `SelfClaw.Infrastructure/Agents/Runtime/ChatClientAgentExecutionService.cs`        | 模型执行层                           |
+| `SelfClaw.Infrastructure/Agents/Tools/WorkspaceToolFunctions.cs`                   | 工具适配与审批包装                   |
+| `SelfClaw.Infrastructure/Tools/Workspace/WorkspaceToolService.cs`                  | 工作区文件和 shell 实现              |
+| `SelfClaw.Infrastructure/Data/Sqlite/SqliteDatabase.cs`                            | SQLite 初始化与 schema 管理          |
+| `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteConversationRepository.cs` | 会话/消息/工具/团队持久化            |
+| `SelfClaw.Desktop/Services/Channels/DesktopChannelManager.cs`                      | 外部频道接入编排                     |
+| `SelfClaw.TranscriptVue/src/*`                                                     | Transcript 前端壳层                  |
 
 ## 注意事项
 
-1. **Desktop 和 Tests 的引用方式**：二者都不是完全依赖 `<ProjectReference>`，而是直接引用已构建 DLL；修改后端公开类型时，要注意先构建再测试。
-
-2. **Windows 专属**：WPF、DPAPI 和当前 PowerShell 工具能力都使该应用以 Windows 为主要目标平台。
-
-3. **工作区工具已具备写入和命令执行能力**：不要再把它当成“纯只读工具”理解；安全边界依赖 `WorkspaceToolService` 的路径限制和 `ToolPermissionMode` 的审批策略。
-
-4. **Core 目录与命名空间不完全一一对应**：新增文件时优先遵守当前稳定命名空间，除非明确要推动一次完整命名空间重构。
-
-5. **当前构建存在一个已知提醒**：`SelfClaw.Desktop.csproj` 会给出 `System.Security.Cryptography.ProtectedData` 的 `NU1510` 警告，目前未处理，不影响功能。
+1. 项目是 Windows 优先（WPF、DPAPI、PowerShell、通知和托盘能力都偏 Windows）。
+2. 工作区工具具备写入和命令执行能力，不应按“只读工具”理解。
+3. 安全边界依赖 `WorkspaceToolService` 路径限制和 `ToolPermissionMode` 审批策略。
+4. Core 的目录分组与命名空间目前不是一一对应，新增代码时优先保持一致性。
+5. `SelfClaw.Desktop.csproj` 已通过 `NoWarn` 抑制 `NU1510`，不应继续作为未处理提醒。
