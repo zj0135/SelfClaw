@@ -5213,7 +5213,6 @@ html[data-theme='light'] .conversation-card:hover {
 .conversation-card.selected,
 html[data-theme='light'] .conversation-card.selected {
 	background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.14), rgba(var(--accent-rgb), 0.08)), var(--panel-muted);
-	border-color: rgba(var(--accent-rgb), 0.3);
 }
 
 .conversation-badge,
@@ -5323,7 +5322,7 @@ html[data-theme='light'] .composer-surface {
 html[data-theme='light'] .send-btn {
 	width: 40px;
 	height: 40px;
-	border-radius: 12px;
+	border-radius: 50%;
 	box-shadow: 0 8px 20px rgba(var(--accent-rgb), 0.18);
 }
 
@@ -5392,7 +5391,6 @@ html[data-theme='light'] .activity-card {
 
 .settings-nav-item.active {
 	background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.14), rgba(var(--accent-rgb), 0.07)), var(--panel-muted);
-	border-color: rgba(var(--accent-rgb), 0.28);
 }
 
 .settings-title {
@@ -5458,7 +5456,6 @@ html[data-theme='light'] .sidebar-primary,
 html[data-theme='light'] .send-btn {
 	background: linear-gradient(180deg, #5c75b6, #4d679f);
 	border-color: rgba(68, 96, 165, 0.18);
-	box-shadow: 0 8px 18px rgba(68, 96, 165, 0.16);
 }
 
 html[data-theme='light'] .sidebar-primary:hover,
@@ -5467,20 +5464,11 @@ html[data-theme='light'] .send-btn:hover {
 	filter: none;
 }
 
-html[data-theme='light'] .sidebar-primary:focus-visible,
-html[data-theme='light'] .send-btn:focus-visible {
-	box-shadow:
-		0 0 0 3px rgba(68, 96, 165, 0.14),
-		0 8px 18px rgba(68, 96, 165, 0.16);
-}
-
 html[data-theme='light'] .conversation-card.selected,
 html[data-theme='light'] .mode-chip.active,
 html[data-theme='light'] .plan-mode-toggle.active,
 html[data-theme='light'] .settings-nav-item.active {
 	background: linear-gradient(180deg, rgba(68, 96, 165, 0.1), rgba(68, 96, 165, 0.05)), #f7f9fc;
-	border-color: rgba(68, 96, 165, 0.18);
-	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 html[data-theme='light'] .conversation-card.selected::before {
@@ -5533,10 +5521,7 @@ body {
 .settings-section,
 .item.message.assistant,
 .item.message.system,
-.item.message.user {
-	background-image: none;
-}
-
+.item.message.user,
 html[data-theme='light'] .search-box,
 html[data-theme='light'] .sidebar-footer,
 html[data-theme='light'] .conversation-card,
