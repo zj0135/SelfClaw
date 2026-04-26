@@ -119,24 +119,16 @@ function isStepSectionOpen(openStepSections, sectionId, defaultOpen = true) {
 	return openStepSections.has(sectionId) ? Boolean(openStepSections.get(sectionId)) : defaultOpen;
 }
 
-export function renderStepsHeader({ isTeamMode, totalCount }) {
+export function renderStepsHeader({ isTeamMode }) {
 	return `
     <div>
       <div class="steps-title">${isTeamMode ? '团队动态' : '工具'}</div>
       <div class="steps-subtitle">${isTeamMode ? '团队成员与团队事件状态' : '运行步骤与工具状态'}</div>
     </div>
-    <div class="steps-count">${totalCount}</div>
   `;
 }
 
-export function renderStepsPanelContent({
-	isTeamMode,
-	teamMembers,
-	agentActivities,
-	openStepSections,
-	openActivities,
-	openTeamMembers,
-}) {
+export function renderStepsPanelContent({ isTeamMode, teamMembers, agentActivities, openStepSections, openActivities, openTeamMembers }) {
 	const memberCount = teamMembers?.length || 0;
 	const eventCount = agentActivities?.length || 0;
 	const membersOpen = isStepSectionOpen(openStepSections, 'team-members', false);

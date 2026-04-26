@@ -55,6 +55,7 @@ const conversationSearch = ref('');
 const leftPaneCollapsed = ref(false);
 const planPanelCollapsed = ref(false);
 const visualizationEnabled = ref(false);
+const rightPanelMode = ref('tools');
 const settingsOpen = ref(false);
 const activeSettingsSection = ref('profile');
 const settingsFeedback = ref(null);
@@ -109,8 +110,210 @@ let renderFrameHandle = 0;
 let profileModelFetchRequestSeed = 0;
 let composerAttachmentSeed = 0;
 const profileModelOptionsCache = new Map();
+const workspaceTreeState = reactive({
+	rootId: null,
+	rootLabel: '',
+	rootPath: '',
+	entries: [],
+	isLoading: false,
+	isLoaded: false,
+	error: '',
+});
 
 const post = (message) => window.chrome?.webview?.postMessage(message);
+
+function normalizeWorkspaceRelativePath(relativePath) {
+	return String(relativePath || '').replace(/^[/\\]+|[/\\]+$/g, '');
+}
+
+function getWorkspaceNodeName(relativePath) {
+	const normalized = normalizeWorkspaceRelativePath(relativePath);
+	if (!normalized) {
+		return '';
+	}
+
+	const segments = normalized.split(/[/\\]+/);
+	return segments[segments.length - 1] || normalized;
+}
+
+function createWorkspaceTreeNode(entry) {
+	const relativePath = normalizeWorkspaceRelativePath(entry?.relativePath || '');
+	return {
+		path: relativePath,
+		name: getWorkspaceNodeName(relativePath),
+		isDirectory: Boolean(entry?.isDirectory),
+		sizeBytes: Number(entry?.sizeBytes || 0),
+		children: [],
+		isExpanded: false,
+		isLoaded: !entry?.isDirectory,
+		isLoading: false,
+		loadError: '',
+	};
+}
+
+function createWorkspaceTreeNodes(entries) {
+	return (Array.isArray(entries) ? entries : []).map(createWorkspaceTreeNode);
+}
+
+function resetWorkspaceTreeState() {
+	workspaceTreeState.rootId = state.selectedWorkspaceRootId || null;
+	workspaceTreeState.rootLabel = selectedWorkspace.value?.label || '';
+	workspaceTreeState.rootPath = selectedWorkspace.value?.description || '';
+	workspaceTreeState.entries = [];
+	workspaceTreeState.isLoading = false;
+	workspaceTreeState.isLoaded = false;
+	workspaceTreeState.error = '';
+}
+
+function findWorkspaceTreeNode(relativePath, nodes = workspaceTreeState.entries) {
+	const normalized = normalizeWorkspaceRelativePath(relativePath);
+	for (const node of nodes) {
+		if (node.path === normalized) {
+			return node;
+		}
+
+		if (node.isDirectory && node.children.length > 0) {
+			const nestedNode = findWorkspaceTreeNode(normalized, node.children);
+			if (nestedNode) {
+				return nestedNode;
+			}
+		}
+	}
+
+	return null;
+}
+
+function requestWorkspaceDirectory(relativePath = '') {
+	if (!state.selectedWorkspaceRootId) {
+		resetWorkspaceTreeState();
+		return;
+	}
+
+	const normalizedPath = normalizeWorkspaceRelativePath(relativePath);
+	if (normalizedPath) {
+		const targetNode = findWorkspaceTreeNode(normalizedPath);
+		if (!targetNode || !targetNode.isDirectory || targetNode.isLoading) {
+			return;
+		}
+
+		targetNode.isLoading = true;
+		targetNode.loadError = '';
+	} else {
+		workspaceTreeState.rootId = state.selectedWorkspaceRootId || null;
+		workspaceTreeState.rootLabel = selectedWorkspace.value?.label || '';
+		workspaceTreeState.rootPath = selectedWorkspace.value?.description || '';
+		workspaceTreeState.isLoading = true;
+		workspaceTreeState.error = '';
+	}
+
+	post({
+		type: 'load-workspace-directory',
+		workspaceRootId: state.selectedWorkspaceRootId,
+		relativePath: normalizedPath || null,
+	});
+}
+
+function ensureWorkspaceTreeLoaded(force = false) {
+	if (!state.selectedWorkspaceRootId) {
+		resetWorkspaceTreeState();
+		return;
+	}
+
+	if (force) {
+		resetWorkspaceTreeState();
+	}
+
+	if (workspaceTreeState.isLoading) {
+		return;
+	}
+
+	if (!workspaceTreeState.isLoaded || workspaceTreeState.rootId !== state.selectedWorkspaceRootId) {
+		requestWorkspaceDirectory('');
+	}
+}
+
+function setRightPanelMode(mode) {
+	if (mode !== 'tools' && mode !== 'workspace') {
+		return;
+	}
+
+	rightPanelMode.value = mode;
+	if (mode === 'workspace') {
+		ensureWorkspaceTreeLoaded();
+	}
+}
+
+function toggleWorkspaceDirectory(relativePath) {
+	const targetNode = findWorkspaceTreeNode(relativePath);
+	if (!targetNode || !targetNode.isDirectory) {
+		return;
+	}
+
+	targetNode.isExpanded = !targetNode.isExpanded;
+	if (targetNode.isExpanded && !targetNode.isLoaded) {
+		requestWorkspaceDirectory(targetNode.path);
+	}
+}
+
+function openWorkspaceFile(relativePath) {
+	const normalizedPath = normalizeWorkspaceRelativePath(relativePath);
+	if (!normalizedPath) {
+		return;
+	}
+
+	post({
+		type: 'open-workspace-file',
+		relativePath: normalizedPath,
+	});
+}
+
+function openWorkspaceEntryLocation(payload) {
+	const normalizedPath = normalizeWorkspaceRelativePath(payload?.path);
+	if (!normalizedPath) {
+		return;
+	}
+
+	post({
+		type: 'open-workspace-entry-location',
+		relativePath: normalizedPath,
+		isDirectory: Boolean(payload?.isDirectory),
+	});
+}
+
+function handleWorkspaceDirectoryLoaded(payload) {
+	const payloadRootId = payload.workspaceRootId || null;
+	const activeRootId = state.selectedWorkspaceRootId || null;
+	if (payloadRootId && payloadRootId !== activeRootId) {
+		return;
+	}
+
+	const relativePath = normalizeWorkspaceRelativePath(payload.relativePath);
+	const errorMessage = payload.errorMessage || '';
+	const nextNodes = createWorkspaceTreeNodes(payload.entries);
+
+	if (!relativePath) {
+		workspaceTreeState.rootId = payloadRootId || state.selectedWorkspaceRootId || null;
+		workspaceTreeState.rootLabel = payload.workspaceName || selectedWorkspace.value?.label || '';
+		workspaceTreeState.rootPath = payload.workspaceRootPath || selectedWorkspace.value?.description || '';
+		workspaceTreeState.entries = errorMessage ? [] : nextNodes;
+		workspaceTreeState.isLoading = false;
+		workspaceTreeState.isLoaded = !errorMessage;
+		workspaceTreeState.error = errorMessage;
+		return;
+	}
+
+	const targetNode = findWorkspaceTreeNode(relativePath);
+	if (!targetNode) {
+		return;
+	}
+
+	targetNode.isLoading = false;
+	targetNode.isLoaded = !errorMessage;
+	targetNode.loadError = errorMessage;
+	if (!errorMessage) {
+		targetNode.children = nextNodes;
+	}
+}
 
 function normalizeProfileModelsEndpoint(endpoint) {
 	const normalized = (endpoint || '').trim();
@@ -198,6 +401,7 @@ function getSettingsPanelElement() {
 
 const selectedProfile = computed(() => state.profiles.find((item) => item.id === state.selectedProfileId) || null);
 const selectedWorkspace = computed(() => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null);
+const hasSelectedWorkspace = computed(() => Boolean(state.selectedWorkspaceRootId && selectedWorkspace.value));
 const visibleTeamMembers = computed(() => state.teamMembers || []);
 const isProgrammingMode = computed(() => state.selectedConversationModeId === 'programming');
 const isTeamMode = computed(() => state.selectedConversationModeId === 'team');
@@ -343,6 +547,9 @@ const workspaceSummaryCards = computed(() => [
 	{ label: '路径', value: selectedWorkspace.value?.description || '未设置工作区路径' },
 ]);
 
+const workspaceTreeLabel = computed(() => workspaceTreeState.rootLabel || selectedWorkspace.value?.label || '');
+const workspaceTreePath = computed(() => workspaceTreeState.rootPath || selectedWorkspace.value?.description || '');
+
 const filteredConversations = computed(() => {
 	const query = conversationSearch.value.trim().toLowerCase();
 	if (!query) {
@@ -379,7 +586,7 @@ const conversationListHtml = computed(() =>
 );
 
 const messagesHtml = computed(() => renderMessages(state.items, openThoughts, openToolSegments, openToolGroups));
-const stepsHeaderHtml = computed(() => renderStepsHeader({ isTeamMode: isTeamMode.value, totalCount: totalStepCount.value }));
+const stepsHeaderHtml = computed(() => renderStepsHeader({ isTeamMode: isTeamMode.value }));
 const stepsPanelHtml = computed(() =>
 	renderStepsPanelContent({
 		isTeamMode: isTeamMode.value,
@@ -448,6 +655,26 @@ watch(isChannelMode, (channelMode) => {
 		composerAttachments.value = [];
 	}
 });
+
+watch(
+	() => state.selectedWorkspaceRootId,
+	() => {
+		resetWorkspaceTreeState();
+		if (rightPanelMode.value === 'workspace') {
+			ensureWorkspaceTreeLoaded();
+		}
+	}
+);
+
+watch(
+	() => [selectedWorkspace.value?.label, selectedWorkspace.value?.description],
+	([label, description]) => {
+		if (!workspaceTreeState.rootId || workspaceTreeState.rootId === state.selectedWorkspaceRootId) {
+			workspaceTreeState.rootLabel = label || '';
+			workspaceTreeState.rootPath = description || '';
+		}
+	}
+);
 
 watch(settingsOpen, async (isOpen) => {
 	if (!isOpen) {
@@ -859,6 +1086,11 @@ function handleWebViewMessage(event) {
 
 	if (payload.type === 'replaceState') {
 		scheduleStatePayload(payload);
+		return;
+	}
+
+	if (payload.type === 'workspace-directory-loaded') {
+		handleWorkspaceDirectoryLoaded(payload);
 		return;
 	}
 
@@ -1504,6 +1736,7 @@ function syncPaneCollapseForViewport() {
 
 onMounted(() => {
 	normalizeState();
+	resetWorkspaceTreeState();
 	window.selfClawComposerImagesPicked = handleComposerImagesPicked;
 	window.addEventListener('selfclaw-composer-images-picked', handleComposerImagesPickedEvent);
 	window.chrome?.webview?.addEventListener('message', handleWebViewMessage);
@@ -1531,10 +1764,9 @@ onUnmounted(() => {
 			<ConversationSidebar ref="sidebarRef" :fallback-status-text="fallbackStatusText"
 				:is-channel-mode="isChannelMode" :conversation-search="conversationSearch"
 				:conversation-section-title="conversationSectionTitle" :conversation-list-html="conversationListHtml"
-					:collapsed="leftPaneCollapsed"
-				@new-conversation="newConversation" @open-settings="openSettings"
+				:collapsed="leftPaneCollapsed" @new-conversation="newConversation" @open-settings="openSettings"
 				@search-change="onConversationSearchChange" @search-input="onConversationSearchInput"
-					@toggle-collapse="toggleLeftPaneCollapse" />
+				@toggle-collapse="toggleLeftPaneCollapse" />
 
 			<main class="main-column">
 				<MainTopbar :conversation-modes="state.conversationModes"
@@ -1562,33 +1794,38 @@ onUnmounted(() => {
 					:selected-team-output-mode-id="state.selectedTeamOutputModeId"
 					:tool-permission-modes="state.toolPermissionModes"
 					:selected-tool-permission-mode-id="state.selectedToolPermissionModeId"
-					:show-planning-toggle="showPlanningToggle"
-					:show-visualization-toggle="showVisualizationToggle" :is-busy="state.isBusy"
-					:is-planning-mode-enabled="state.isPlanningModeEnabled" :send-button-disabled="sendButtonDisabled"
-					:visualization-enabled="activeVisualizationEnabled"
-					:attachments="composerAttachments"
-					@composer-input="onComposerInput" @composer-keydown="onComposerKeydown"
-					@apply-mention="applyMentionSelection" @select-profile="onProfileSelectChange"
-					@select-team-round="onTeamRoundChange" @select-team-output="onTeamOutputChange"
-					@select-permission="onPermissionChange" @toggle-planning-mode="onPlanningModeChange"
-					@toggle-visualization-mode="onVisualizationModeChange"
+					:show-planning-toggle="showPlanningToggle" :show-visualization-toggle="showVisualizationToggle"
+					:is-busy="state.isBusy" :is-planning-mode-enabled="state.isPlanningModeEnabled"
+					:send-button-disabled="sendButtonDisabled" :visualization-enabled="activeVisualizationEnabled"
+					:attachments="composerAttachments" @composer-input="onComposerInput"
+					@composer-keydown="onComposerKeydown" @apply-mention="applyMentionSelection"
+					@select-profile="onProfileSelectChange" @select-team-round="onTeamRoundChange"
+					@select-team-output="onTeamOutputChange" @select-permission="onPermissionChange"
+					@toggle-planning-mode="onPlanningModeChange" @toggle-visualization-mode="onVisualizationModeChange"
 					@toggle-plan-panel-collapse="togglePlanPanelCollapse" @pick-images="pickComposerImages"
-					@capture-screenshot="captureComposerScreenshot"
-					@remove-attachment="removeComposerAttachment" @send-click="onSendClick" />
+					@capture-screenshot="captureComposerScreenshot" @remove-attachment="removeComposerAttachment"
+					@send-click="onSendClick" />
 			</main>
 
-			<StepsPanel ref="stepsPanelRef" :steps-header-html="stepsHeaderHtml" :steps-panel-html="stepsPanelHtml" />
+			<StepsPanel ref="stepsPanelRef" :steps-header-html="stepsHeaderHtml" :steps-panel-html="stepsPanelHtml"
+				:panel-mode="rightPanelMode" :workspace-label="workspaceTreeLabel" :workspace-path="workspaceTreePath"
+				:workspace-tree-entries="workspaceTreeState.entries"
+				:workspace-tree-loading="workspaceTreeState.isLoading"
+				:workspace-tree-loaded="workspaceTreeState.isLoaded" :workspace-tree-error="workspaceTreeState.error"
+				:has-workspace="hasSelectedWorkspace" @set-panel-mode="setRightPanelMode"
+				@toggle-workspace-directory="toggleWorkspaceDirectory" @open-workspace-file="openWorkspaceFile"
+				@open-workspace-entry-location="openWorkspaceEntryLocation" />
 
-				<button
-					v-if="leftPaneCollapsed"
-					class="pane-collapse-toggle pane-collapse-toggle-floating pane-collapse-toggle-floating-left"
-					type="button"
-					aria-label="展开左侧会话栏"
-					title="展开左侧会话栏"
-					@click="toggleLeftPaneCollapse"
-				>
-					<svg class="pane-collapse-toggle-icon pane-collapse-toggle-icon-left collapsed" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" aria-hidden="true"><path fill="currentColor" d="M452.864 149.312a29.12 29.12 0 0 1 41.728.064L826.24 489.664a32 32 0 0 1 0 44.672L494.592 874.624a29.12 29.12 0 0 1-41.728 0 30.59 30.59 0 0 1 0-42.752L764.736 512 452.864 192a30.59 30.59 0 0 1 0-42.688m-256 0a29.12 29.12 0 0 1 41.728.064L570.24 489.664a32 32 0 0 1 0 44.672L238.592 874.624a29.12 29.12 0 0 1-41.728 0 30.59 30.59 0 0 1 0-42.752L508.736 512 196.864 192a30.59 30.59 0 0 1 0-42.688"></path></svg>
-				</button>
+			<button v-if="leftPaneCollapsed"
+				class="pane-collapse-toggle pane-collapse-toggle-floating pane-collapse-toggle-floating-left"
+				type="button" aria-label="展开左侧会话栏" title="展开左侧会话栏" @click="toggleLeftPaneCollapse">
+				<svg class="pane-collapse-toggle-icon pane-collapse-toggle-icon-left collapsed"
+					xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" aria-hidden="true">
+					<path fill="currentColor"
+						d="M452.864 149.312a29.12 29.12 0 0 1 41.728.064L826.24 489.664a32 32 0 0 1 0 44.672L494.592 874.624a29.12 29.12 0 0 1-41.728 0 30.59 30.59 0 0 1 0-42.752L764.736 512 452.864 192a30.59 30.59 0 0 1 0-42.688m-256 0a29.12 29.12 0 0 1 41.728.064L570.24 489.664a32 32 0 0 1 0 44.672L238.592 874.624a29.12 29.12 0 0 1-41.728 0 30.59 30.59 0 0 1 0-42.752L508.736 512 196.864 192a30.59 30.59 0 0 1 0-42.688">
+					</path>
+				</svg>
+			</button>
 
 
 		</div>

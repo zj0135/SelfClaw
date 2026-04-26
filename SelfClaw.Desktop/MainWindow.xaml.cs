@@ -12,6 +12,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
+using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.ViewModels;
 using DrawingBitmap = System.Drawing.Bitmap;
@@ -372,6 +373,15 @@ public partial class MainWindow : Window
                     await _viewModel.SetSelectedWorkspaceRootAsync(workspaceRootId);
                     break;
                 }
+                case "load-workspace-directory":
+                    await LoadWorkspaceDirectoryFromTranscriptAsync(document.RootElement);
+                    break;
+                case "open-workspace-file":
+                    await OpenWorkspaceFileFromTranscriptAsync(document.RootElement);
+                    break;
+                case "open-workspace-entry-location":
+                    await OpenWorkspaceEntryLocationFromTranscriptAsync(document.RootElement);
+                    break;
                 case "select-tool-permission":
                     await _viewModel.SetToolPermissionModeAsync(document.RootElement.GetProperty("permissionModeId").GetString());
                     break;
@@ -721,6 +731,207 @@ public partial class MainWindow : Window
         PostUiFeedback("success", "Workspace saved.", "workspace");
     }
 
+    private async Task LoadWorkspaceDirectoryFromTranscriptAsync(JsonElement root)
+    {
+        var requestedWorkspaceRootId = ParseGuid(root, "workspaceRootId");
+        var relativePath = GetString(root, "relativePath");
+        var selectedWorkspace = _viewModel.SelectedWorkspaceRoot;
+
+        if (requestedWorkspaceRootId is Guid requestedId &&
+            selectedWorkspace?.Id != requestedId)
+        {
+            PostWorkspaceDirectoryLoaded(
+                requestedId.ToString("D"),
+                relativePath,
+                [],
+                null,
+                null,
+                "Workspace selection changed. Retry loading the directory.");
+            return;
+        }
+
+        if (selectedWorkspace is null)
+        {
+            PostWorkspaceDirectoryLoaded(
+                requestedWorkspaceRootId?.ToString("D"),
+                relativePath,
+                [],
+                null,
+                null,
+                "Select a workspace first.");
+            return;
+        }
+
+        try
+        {
+            var entries = await _viewModel.ListSelectedWorkspaceFilesAsync(
+                string.IsNullOrWhiteSpace(relativePath) ? null : relativePath);
+            var visibleEntries = FilterWorkspaceTreeEntries(selectedWorkspace.RootPath, entries);
+
+            PostWorkspaceDirectoryLoaded(
+                selectedWorkspace.Id.ToString("D"),
+                relativePath,
+                visibleEntries,
+                selectedWorkspace.Name,
+                selectedWorkspace.RootPath,
+                null);
+        }
+        catch (Exception exception)
+        {
+            PostWorkspaceDirectoryLoaded(
+                selectedWorkspace.Id.ToString("D"),
+                relativePath,
+                [],
+                selectedWorkspace.Name,
+                selectedWorkspace.RootPath,
+                exception.Message);
+        }
+    }
+
+    private static IReadOnlyList<WorkspaceFileEntry> FilterWorkspaceTreeEntries(
+        string workspaceRootPath,
+        IReadOnlyList<WorkspaceFileEntry> entries)
+    {
+        return entries
+            .Where(entry => !IsHiddenWorkspaceTreeEntry(workspaceRootPath, entry.RelativePath))
+            .ToArray();
+    }
+
+    private static bool IsHiddenWorkspaceTreeEntry(string workspaceRootPath, string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            return false;
+        }
+
+        var leafName = Path.GetFileName(relativePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (!string.IsNullOrWhiteSpace(leafName) &&
+            leafName.StartsWith(".", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(Path.Combine(workspaceRootPath, relativePath));
+            return File.GetAttributes(fullPath).HasFlag(FileAttributes.Hidden);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private Task OpenWorkspaceFileFromTranscriptAsync(JsonElement root)
+    {
+        var fullPath = ResolveSelectedWorkspaceEntryPath(GetString(root, "relativePath"));
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("File was not found.", fullPath);
+        }
+
+        if (!TryOpenFileInVisualStudioCode(fullPath))
+        {
+            Process.Start(new ProcessStartInfo(fullPath) { UseShellExecute = true });
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task OpenWorkspaceEntryLocationFromTranscriptAsync(JsonElement root)
+    {
+        var fullPath = ResolveSelectedWorkspaceEntryPath(GetString(root, "relativePath"));
+        if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
+        {
+            throw new FileNotFoundException("Workspace entry was not found.", fullPath);
+        }
+
+        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{fullPath}\"")
+        {
+            UseShellExecute = true
+        });
+
+        return Task.CompletedTask;
+    }
+
+    private string ResolveSelectedWorkspaceEntryPath(string relativePath)
+    {
+        var workspaceRoot = _viewModel.SelectedWorkspaceRoot
+            ?? throw new InvalidOperationException("Select a workspace first.");
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            throw new InvalidOperationException("A workspace path is required.");
+        }
+
+        var rootPath = Path.GetFullPath(workspaceRoot.RootPath);
+        var fullPath = Path.GetFullPath(Path.Combine(rootPath, relativePath));
+        var rootPrefix = rootPath.EndsWith(Path.DirectorySeparatorChar) || rootPath.EndsWith(Path.AltDirectorySeparatorChar)
+            ? rootPath
+            : $"{rootPath}{Path.DirectorySeparatorChar}";
+
+        if (!fullPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(fullPath, rootPath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Workspace path is out of range.");
+        }
+
+        return fullPath;
+    }
+
+    private static bool TryOpenFileInVisualStudioCode(string filePath)
+    {
+        foreach (var candidate in EnumerateVisualStudioCodeCandidates())
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(candidate, $"\"{filePath}\"")
+                {
+                    UseShellExecute = true
+                });
+                return true;
+            }
+            catch
+            {
+                // Try the next VS Code candidate.
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateVisualStudioCodeCandidates()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddCandidate(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            seen.Add(value);
+        }
+
+        AddCandidate(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs",
+            "Microsoft VS Code",
+            "Code.exe"));
+        AddCandidate(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            "Microsoft VS Code",
+            "Code.exe"));
+        AddCandidate(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            "Microsoft VS Code",
+            "Code.exe"));
+        AddCandidate("code");
+
+        return seen;
+    }
+
     private async Task DeleteProfileFromTranscriptAsync(JsonElement root)
     {
         var profileId = ParseGuid(root, "profileId");
@@ -791,6 +1002,37 @@ public partial class MainWindow : Window
         {
             type = "workspace-path-picked",
             rootPath = folderPath
+        }, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
+
+        TranscriptView.CoreWebView2.PostWebMessageAsJson(payload);
+    }
+
+    private void PostWorkspaceDirectoryLoaded(
+        string? workspaceRootId,
+        string? relativePath,
+        IReadOnlyList<WorkspaceFileEntry> entries,
+        string? workspaceName,
+        string? workspaceRootPath,
+        string? errorMessage)
+    {
+        if (!_webViewReady || TranscriptView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            type = "workspace-directory-loaded",
+            workspaceRootId,
+            relativePath = string.IsNullOrWhiteSpace(relativePath) ? null : relativePath,
+            entries,
+            workspaceName,
+            workspaceRootPath,
+            errorMessage
         }, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,

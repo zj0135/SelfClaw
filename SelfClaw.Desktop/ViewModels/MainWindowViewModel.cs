@@ -443,6 +443,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return Task.CompletedTask;
     }
 
+    public async Task<IReadOnlyList<WorkspaceFileEntry>> ListSelectedWorkspaceFilesAsync(
+        string? relativePath,
+        CancellationToken cancellationToken = default)
+    {
+        if (SelectedWorkspaceRoot is null)
+        {
+            return [];
+        }
+
+        return await _workspaceToolService.ListFilesAsync(
+            SelectedWorkspaceRoot.RootPath,
+            relativePath,
+            cancellationToken);
+    }
+
     public Task SetConversationModeAsync(string? modeId)
         => SetConversationModeCoreAsync(ParseConversationMode(modeId));
 
