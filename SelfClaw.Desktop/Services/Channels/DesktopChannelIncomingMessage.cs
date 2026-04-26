@@ -10,7 +10,3 @@ public sealed record DesktopChannelIncomingMessage(
     string? ConversationName = null,
     string? ConversationType = null,
     IReadOnlyList<DesktopChannelAttachment>? Attachments = null);
-
-public sealed record DesktopChannelAttachment(
-    string Kind,
-    string Summary);
