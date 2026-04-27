@@ -682,10 +682,11 @@ button {
 .context-pill {
 	display: inline-flex;
 	align-items: center;
-	gap: 7px;
+	gap: 8px;
+	width: clamp(172px, 19vw, 208px);
 	min-width: 0;
-	max-width: 240px;
-	padding: 8px 12px;
+	max-width: 160px;
+	padding: 7px 10px;
 	border-radius: 11px;
 	border: 1px solid var(--border);
 	background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent), var(--panel-muted);
@@ -708,6 +709,64 @@ button {
 	white-space: nowrap;
 	font-size: 12px;
 	font-weight: 650;
+	color: var(--text);
+}
+
+.topbar-context-select {
+	flex: 1 1 auto;
+	min-width: 0;
+	max-width: none;
+	width: 100%;
+	border: 0;
+	background-color: transparent;
+	color: var(--text);
+	font-size: 12px;
+	font-weight: 650;
+	line-height: 1.1;
+	appearance: none;
+	outline: none;
+	padding: 0 18px 0 0;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' stroke='%2393A4BB' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 0 center;
+	background-size: 14px 14px;
+}
+
+.topbar-context-select:hover {
+	color: var(--text);
+}
+
+.topbar-context-select:focus,
+.topbar-context-select:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+
+.context-icon {
+	width: 16px;
+	height: 16px;
+	flex: 0 0 auto;
+	display: grid;
+	place-items: center;
+	color: var(--muted);
+}
+
+.context-icon svg {
+	width: 16px;
+	height: 16px;
+	display: block;
+	stroke: currentColor;
+	stroke-width: 1.45;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.topbar-context-select--placeholder {
+	color: var(--muted);
+}
+
+.topbar-context-select option {
+	background: var(--panel-elevated);
 	color: var(--text);
 }
 
@@ -2329,7 +2388,7 @@ a:hover {
 .field-input:focus {
 	border-color: rgba(111, 141, 255, 0.48);
 	box-shadow: 0 0 0 3px rgba(111, 141, 255, 0.14);
-	background: var(--panel-elevated);
+	background-color: var(--panel-elevated);
 }
 
 .field-readonly {
@@ -2723,6 +2782,10 @@ html[data-theme='light'] .empty {
 html[data-theme='light'] .context-pill {
 	background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(247, 249, 252, 0.98));
 	border-color: #d7e1ee;
+}
+
+html[data-theme='light'] .topbar-context-select {
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6.5 8 10.5 12 6.5' stroke='%237F8CA0' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 @media (max-width: 1180px) {
@@ -4380,7 +4443,6 @@ body {
 .activity-card,
 .settings-nav-item,
 .selected-summary-card,
-.field-select,
 .field-readonly,
 .field-input,
 .field-combobox-trigger,
@@ -4403,7 +4465,7 @@ body {
 .field-readonly:focus,
 .field-input:focus,
 .field-combobox-trigger:focus {
-	background: var(--panel-elevated);
+	background-color: var(--panel-elevated);
 	border-color: var(--border-strong);
 }
 
@@ -5132,7 +5194,6 @@ body {
 .activity-card,
 .settings-nav-item,
 .selected-summary-card,
-.field-select,
 .field-readonly,
 .field-input,
 .field-combobox-trigger,
@@ -5141,7 +5202,6 @@ body {
 .plan-step,
 .plan-panel-placeholder,
 .plan-panel-collapsed-row,
-.composer-inline-select,
 .plan-mode-toggle {
 	background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 100%), var(--panel-muted);
 	border-color: var(--border);
@@ -5159,7 +5219,6 @@ html[data-theme='light'] .team-member-card,
 html[data-theme='light'] .activity-card,
 html[data-theme='light'] .settings-nav-item,
 html[data-theme='light'] .selected-summary-card,
-html[data-theme='light'] .field-select,
 html[data-theme='light'] .field-readonly,
 html[data-theme='light'] .field-input,
 html[data-theme='light'] .field-combobox-trigger,
@@ -5168,7 +5227,6 @@ html[data-theme='light'] .plan-panel,
 html[data-theme='light'] .plan-step,
 html[data-theme='light'] .plan-panel-placeholder,
 html[data-theme='light'] .plan-panel-collapsed-row,
-html[data-theme='light'] .composer-inline-select,
 html[data-theme='light'] .plan-mode-toggle {
 	background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.72) 100%), var(--panel-muted);
 }
@@ -5505,7 +5563,6 @@ body {
 .activity-card,
 .settings-nav-item,
 .selected-summary-card,
-.field-select,
 .field-readonly,
 .field-input,
 .field-combobox-trigger,
@@ -5514,7 +5571,6 @@ body {
 .plan-step,
 .plan-panel-placeholder,
 .plan-panel-collapsed-row,
-.composer-inline-select,
 .plan-mode-toggle,
 .composer-surface,
 .mention-picker,
@@ -5534,7 +5590,6 @@ html[data-theme='light'] .team-member-card,
 html[data-theme='light'] .activity-card,
 html[data-theme='light'] .settings-nav-item,
 html[data-theme='light'] .selected-summary-card,
-html[data-theme='light'] .field-select,
 html[data-theme='light'] .field-readonly,
 html[data-theme='light'] .field-input,
 html[data-theme='light'] .field-combobox-trigger,
@@ -5543,7 +5598,6 @@ html[data-theme='light'] .plan-panel,
 html[data-theme='light'] .plan-step,
 html[data-theme='light'] .plan-panel-placeholder,
 html[data-theme='light'] .plan-panel-collapsed-row,
-html[data-theme='light'] .composer-inline-select,
 html[data-theme='light'] .plan-mode-toggle,
 html[data-theme='light'] .composer-surface,
 html[data-theme='light'] .mention-picker,

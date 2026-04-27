@@ -10,6 +10,7 @@ public sealed record TranscriptRenderState(
     string? SelectedConversationModeId,
     IReadOnlyList<ShellSelectOption> Profiles,
     string? SelectedProfileId,
+    IReadOnlyList<ShellSelectOption> ProfileModels,
     string? SelectedProfileModel,
     IReadOnlyList<ShellSelectOption> WorkspaceRoots,
     string? SelectedWorkspaceRootId,

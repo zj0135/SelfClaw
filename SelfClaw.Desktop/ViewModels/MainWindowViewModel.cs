@@ -77,12 +77,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly List<ToolExecutionRecord> _toolRuns = [];
     private readonly Dictionary<Guid, ToolRunAnchor> _toolRunAnchors = [];
     private IReadOnlyList<PromptImageAttachment> _pendingPromptImageAttachments = [];
+    private bool _pendingReasoningEnabled;
     private CancellationTokenSource? _turnCancellationSource;
     private bool _initialized;
     private bool _isApplyingThemeSelection;
     private int _selectionVersion;
     private ConversationRecord? _selectedConversation;
     private ProviderProfile? _selectedProfile;
+    private string? _selectedProfileModelOverride;
     private WorkspaceRoot? _selectedWorkspaceRoot;
     private string _composerText = string.Empty;
     private string _statusText = "Add a model profile to get started.";
@@ -301,6 +303,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _selectedProfile, value))
             {
+                _selectedProfileModelOverride = null;
                 NotifyCommandStates();
                 PublishShell(false);
             }
@@ -383,10 +386,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         PublishShell(false);
     }
 
-    public async Task SubmitPromptAsync(string prompt, IReadOnlyList<PromptImageAttachment>? imageAttachments = null)
+    public async Task SubmitPromptAsync(
+        string prompt,
+        IReadOnlyList<PromptImageAttachment>? imageAttachments = null,
+        bool enableReasoning = false,
+        string? profileModel = null)
     {
+        ApplySelectedProfileModel(profileModel, publishShell: false);
         ComposerText = prompt;
         _pendingPromptImageAttachments = imageAttachments ?? [];
+        _pendingReasoningEnabled = enableReasoning;
         await SendAsync();
     }
 
@@ -430,6 +439,103 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         SelectedProfile = Profiles.FirstOrDefault(item => item.Id == profileId) ?? SelectedProfile;
         return Task.CompletedTask;
+    }
+
+    public async Task SetSelectedProfileModelAsync(string? profileModel)
+    {
+        if (SelectedProfile is null)
+        {
+            return;
+        }
+
+        var normalized = NormalizeModelValue(profileModel);
+        if (normalized is null)
+        {
+            ApplySelectedProfileModel(null, publishShell: true);
+            return;
+        }
+
+        if (string.Equals(SelectedProfile.Model, normalized, StringComparison.Ordinal))
+        {
+            ApplySelectedProfileModel(null, publishShell: true);
+            return;
+        }
+
+        var updatedProfile = SelectedProfile with
+        {
+            Model = normalized,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        };
+        await _profileRepository.UpsertProfileAsync(updatedProfile);
+        await ReloadProfilesAsync();
+    }
+
+    private void ApplySelectedProfileModel(string? profileModel, bool publishShell)
+    {
+        var normalized = NormalizeModelValue(profileModel);
+        if (SelectedProfile is null)
+        {
+            normalized = null;
+        }
+
+        if (string.Equals(_selectedProfileModelOverride, normalized, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _selectedProfileModelOverride = normalized;
+        if (publishShell)
+        {
+            PublishShell(false);
+        }
+    }
+
+    private static string? NormalizeModelValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
+    }
+
+    private string[] BuildProfileModelValues(ProviderProfile profile)
+    {
+        var models = Profiles
+            .Where(item =>
+                string.Equals(item.Endpoint, profile.Endpoint, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(item.SecretRef, profile.SecretRef, StringComparison.Ordinal))
+            .Select(item => NormalizeModelValue(item.Model))
+            .Where(item => item is not null)
+            .Cast<string>()
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (models.Length > 0)
+        {
+            return models;
+        }
+
+        var fallback = NormalizeModelValue(profile.Model);
+        return fallback is null ? [] : [fallback];
+    }
+
+    private string? ResolveSelectedProfileModel()
+    {
+        if (SelectedProfile is null)
+        {
+            return null;
+        }
+
+        if (_selectedProfileModelOverride is not null)
+        {
+            return _selectedProfileModelOverride;
+        }
+
+        var fallback = NormalizeModelValue(SelectedProfile.Model);
+        return fallback;
     }
 
     public Task SetSelectedWorkspaceRootAsync(Guid? workspaceRootId)
@@ -1027,6 +1133,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var prompt = ComposerText.Trim();
+        var useReasoning = _pendingReasoningEnabled;
         var promptImageAttachments = _pendingPromptImageAttachments.ToArray();
         _pendingPromptImageAttachments = [];
 
@@ -1121,6 +1228,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             var requestContextMessages = _contextMessages.ToArray();
             var requestTeamAgents = _teamAgents.ToArray();
             runningBoundAgent = _selectedBoundAgent;
+            var selectedProfileModel = ResolveSelectedProfileModel();
+            var requestProfile = selectedProfileModel is null
+                ? SelectedProfile
+                : SelectedProfile with { Model = selectedProfileModel };
+            if (requestProfile is null)
+            {
+                throw new InvalidOperationException("The selected profile is required to submit a prompt.");
+            }
 
             if (runningBoundAgent is not null)
             {
@@ -1130,7 +1245,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             await foreach (var update in _agentChatRuntime.StreamTurnAsync(
                                new ChatTurnRequest(
                                    conversation.Id,
-                                   SelectedProfile,
+                                   requestProfile,
                                    apiKey,
                                    SelectedWorkspaceRoot,
                                    SelectedConversationMode,
@@ -1142,7 +1257,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                                    requestTeamAgents,
                                    requestContextMessages,
                                    runningBoundAgent,
-                                   usePlanningMode),
+                                   usePlanningMode,
+                                   useReasoning),
                                _turnCancellationSource.Token))
             {
                 switch (update)
@@ -1910,8 +2026,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 profile.TemperatureEnabled,
                 profile.Temperature,
                 profile.TopPEnabled,
-                profile.TopP))
+                profile.TopP,
+                profile.Model))
             .ToArray();
+        var profileModelValues = SelectedProfile is null ? [] : BuildProfileModelValues(SelectedProfile);
+        var profileModels = profileModelValues
+            .Select(model => new ShellSelectOption(model, model))
+            .ToArray();
+        var selectedProfileModel = ResolveSelectedProfileModel();
 
         var workspaceRoots = WorkspaceRoots
             .Select(root => new ShellSelectOption(root.Id.ToString("D"), root.Name, root.RootPath))
@@ -1945,7 +2067,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ConversationModeToId(SelectedConversationMode),
             profiles,
             SelectedProfile?.Id.ToString("D"),
-            SelectedProfile?.Model,
+            profileModels,
+            selectedProfileModel,
             workspaceRoots,
             SelectedWorkspaceRoot?.Id.ToString("D"),
             toolPermissionModes,

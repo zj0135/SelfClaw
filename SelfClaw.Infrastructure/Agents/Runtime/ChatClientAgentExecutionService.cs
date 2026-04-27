@@ -45,6 +45,9 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
                 Tools = request.Tools
             };
 
+            if (request.EnableReasoning)
+                chatOptions.Reasoning = new ReasoningOptions() { Effort = ReasoningEffort.ExtraHigh, Output = ReasoningOutput.Full };
+
             var agentOptions = new ChatClientAgentOptions
             {
                 Name = request.Name,

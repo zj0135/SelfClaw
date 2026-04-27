@@ -46,7 +46,35 @@ public partial class MainWindow : Window
     private static readonly MediaColor TrafficGlyphLightColor = MediaColor.FromArgb(0x8A, 0x2A, 0x37, 0x48);
 
     private readonly MainWindowViewModel _viewModel;
-    private TranscriptRenderState _pendingTranscript = new([], false, [], null, "light", [], null, [], null, null, [], null, [], null, [], null, [], null, [], null, [], [], [], false, null, string.Empty, false);
+    private TranscriptRenderState _pendingTranscript = new(
+        Items: [],
+        AutoScroll: false,
+        Conversations: [],
+        SelectedConversationId: null,
+        Theme: "light",
+        ConversationModes: [],
+        SelectedConversationModeId: null,
+        Profiles: [],
+        SelectedProfileId: null,
+        ProfileModels: [],
+        SelectedProfileModel: null,
+        WorkspaceRoots: [],
+        SelectedWorkspaceRootId: null,
+        ToolPermissionModes: [],
+        SelectedToolPermissionModeId: null,
+        TeamRoundModes: [],
+        SelectedTeamRoundModeId: null,
+        TeamOutputModes: [],
+        SelectedTeamOutputModeId: null,
+        ThemeOptions: [],
+        SelectedThemeId: null,
+        Channels: [],
+        TeamMembers: [],
+        AgentActivities: [],
+        IsPlanningModeEnabled: false,
+        PlanPanel: null,
+        StatusText: string.Empty,
+        IsBusy: false);
     private bool _webViewReady;
 
     public MainWindow(
@@ -169,6 +197,7 @@ public partial class MainWindow : Window
             selectedConversationModeId = state.SelectedConversationModeId,
             profiles = state.Profiles,
             selectedProfileId = state.SelectedProfileId,
+            profileModels = state.ProfileModels,
             selectedProfileModel = state.SelectedProfileModel,
             workspaceRoots = state.WorkspaceRoots,
             selectedWorkspaceRootId = state.SelectedWorkspaceRootId,
@@ -352,7 +381,9 @@ public partial class MainWindow : Window
                 {
                     var prompt = document.RootElement.GetProperty("prompt").GetString() ?? string.Empty;
                     var attachments = ParsePromptImageAttachments(document.RootElement);
-                    await _viewModel.SubmitPromptAsync(prompt, attachments);
+                    var enableReasoning = GetBool(document.RootElement, "enableReasoning");
+                    var profileModel = GetString(document.RootElement, "profileModel");
+                    await _viewModel.SubmitPromptAsync(prompt, attachments, enableReasoning, profileModel);
                     break;
                 }
                 case "stop-generation":
@@ -366,6 +397,9 @@ public partial class MainWindow : Window
                     }
                     break;
                 }
+                case "select-profile-model":
+                    await _viewModel.SetSelectedProfileModelAsync(GetString(document.RootElement, "profileModel"));
+                    break;
                 case "select-workspace":
                 {
                     var rawId = document.RootElement.GetProperty("workspaceRootId").GetString();

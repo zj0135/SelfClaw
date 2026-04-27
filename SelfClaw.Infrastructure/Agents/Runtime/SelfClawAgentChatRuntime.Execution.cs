@@ -32,7 +32,8 @@ public sealed partial class SelfClawAgentChatRuntime
                 BuildProgrammingInstructions(request),
                 BuildPromptMessages(request.Messages, includeAssistantSpeakerPrefix: false),
                 CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
-                CreateContextProviders()),
+                CreateContextProviders(),
+                request.EnableReasoning),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
             cancellationToken);
 
@@ -115,7 +116,8 @@ public sealed partial class SelfClawAgentChatRuntime
                 BuildExecutionPlanInstructions(request),
                 BuildExecutionPlanMessages(request.Messages),
                 CreateTools(request, observer, includeWriteTools: false, includeShellTool: false),
-                CreateContextProviders()),
+                CreateContextProviders(),
+                request.EnableReasoning),
             onTextDelta: null,
             cancellationToken);
 
@@ -162,7 +164,8 @@ public sealed partial class SelfClawAgentChatRuntime
                     BuildExecutionStepInstructions(request, executionPlan, currentStep, isFinalStep),
                     BuildExecutionStepMessages(request.Messages, executionPlan, currentStep, completedSteps, isFinalStep),
                     CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
-                    CreateContextProviders()),
+                    CreateContextProviders(),
+                    request.EnableReasoning),
                 (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
                 cancellationToken);
 
@@ -227,7 +230,8 @@ public sealed partial class SelfClawAgentChatRuntime
                 BuildBoundAgentInstructions(request, agent),
                 BuildBoundAgentPromptMessages(request.ContextMessages ?? [], request.Messages, agent),
                 CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
-                CreateContextProviders()),
+                CreateContextProviders(),
+                request.EnableReasoning),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
             cancellationToken);
 

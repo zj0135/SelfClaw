@@ -16,4 +16,5 @@ public sealed record ChatTurnRequest(
     IReadOnlyList<TeamAgentRecord> TeamAgents,
     IReadOnlyList<MessageRecord>? ContextMessages = null,
     TeamAgentRecord? BoundAgent = null,
-    bool EnablePlanMode = false);
+    bool EnablePlanMode = false,
+    bool EnableReasoning = false);

@@ -95,6 +95,10 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	isReasoningEnabled: {
+		type: Boolean,
+		default: false,
+	},
 	visualizationEnabled: {
 		type: Boolean,
 		default: false,
@@ -117,6 +121,7 @@ const emit = defineEmits([
 	'select-team-round',
 	'select-team-output',
 	'select-permission',
+	'toggle-reasoning-mode',
 	'toggle-planning-mode',
 	'toggle-visualization-mode',
 	'toggle-plan-panel-collapse',
@@ -341,6 +346,24 @@ defineExpose({
 								</label>
 							</div>
 						</div>
+						<button
+							class="composer-tools-trigger composer-reasoning-toggle"
+							:class="{ active: isReasoningEnabled }"
+							type="button"
+							:disabled="isChannelMode || isBusy"
+							:aria-pressed="isReasoningEnabled ? 'true' : 'false'"
+							:aria-label="isReasoningEnabled ? '关闭思考模式' : '开启思考模式'"
+							:title="isReasoningEnabled ? '关闭思考模式' : '开启思考模式'"
+							@click="emit('toggle-reasoning-mode', !isReasoningEnabled)"
+						>
+							<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<path d="M7.5 4.25a2.5 2.5 0 0 0-2.5 2.5v.25a2 2 0 0 0-1.75 1.98v.04a2 2 0 0 0 1.61 1.96v.77A2.75 2.75 0 0 0 7.61 14.5h.39v1.5"></path>
+								<path d="M12.5 4.25a2.5 2.5 0 0 1 2.5 2.5v.25a2 2 0 0 1 1.75 1.98v.04a2 2 0 0 1-1.61 1.96v.77a2.75 2.75 0 0 1-2.75 2.75H12v1.5"></path>
+								<path d="M8.75 8.5h2.5"></path>
+								<path d="M8.5 11h3"></path>
+								<path v-if="!isReasoningEnabled" d="M4 4l12 12"></path>
+							</svg>
+						</button>
 						<select
 							id="composer-profile-select"
 							class="composer-inline-select"

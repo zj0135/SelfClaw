@@ -7,4 +7,5 @@ public sealed record ShellSelectOption(
     bool? TemperatureEnabled = null,
     double? Temperature = null,
     bool? TopPEnabled = null,
-    double? TopP = null);
+    double? TopP = null,
+    string? Model = null);

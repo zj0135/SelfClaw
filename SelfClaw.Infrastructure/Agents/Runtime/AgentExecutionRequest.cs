@@ -12,4 +12,5 @@ internal sealed record AgentExecutionRequest(
     string Instructions,
     IReadOnlyList<ChatMessage> Messages,
     IList<AITool> Tools,
-    IReadOnlyList<AIContextProvider>? ContextProviders = null);
+    IReadOnlyList<AIContextProvider>? ContextProviders = null,
+    bool EnableReasoning = false);

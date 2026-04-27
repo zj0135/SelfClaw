@@ -102,7 +102,8 @@ public sealed partial class SelfClawAgentChatRuntime
                 BuildCoordinatorSummaryInstructions(request.WorkspaceRoot, request.TeamOutputMode),
                 BuildCoordinatorSummaryMessages(request, teamPlan.DocumentTitle, discussionEntries),
                 [],
-                CreateContextProviders()),
+                CreateContextProviders(),
+                request.EnableReasoning),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(coordinatorMessageId, delta), token),
             cancellationToken);
 
@@ -176,7 +177,8 @@ public sealed partial class SelfClawAgentChatRuntime
                         maxRounds,
                         discussionEntries),
                     CreateTools(request, observer, includeWriteTools: false, includeShellTool: false),
-                    CreateContextProviders()),
+                    CreateContextProviders(),
+                    request.EnableReasoning),
                 (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
                 cancellationToken);
 
@@ -231,7 +233,8 @@ public sealed partial class SelfClawAgentChatRuntime
                     TeamDiscussionDefaults.ClampRounds(request.TeamMaxRounds)),
                 BuildCoordinatorPlanningMessages(request.Messages, request.TeamAgents),
                 [],
-                CreateContextProviders()),
+                CreateContextProviders(),
+                request.EnableReasoning),
             onTextDelta: null,
             cancellationToken);
 
@@ -430,7 +433,8 @@ public sealed partial class SelfClawAgentChatRuntime
                 CoordinatorDescription,
                 BuildDocumentDecisionInstructions(),
                 BuildDocumentDecisionMessages(request.Messages, documentTitle, discussionEntries, finalMarkdown),
-                []),
+                [],
+                EnableReasoning: request.EnableReasoning),
             onTextDelta: null,
             cancellationToken);
 
@@ -458,7 +462,8 @@ public sealed partial class SelfClawAgentChatRuntime
                 CoordinatorDescription,
                 BuildRoundContinuationDecisionInstructions(currentRound, maxRounds),
                 BuildRoundContinuationDecisionMessages(request.Messages, discussionEntries, currentRound, maxRounds),
-                []),
+                [],
+                EnableReasoning: request.EnableReasoning),
             onTextDelta: null,
             cancellationToken);
 

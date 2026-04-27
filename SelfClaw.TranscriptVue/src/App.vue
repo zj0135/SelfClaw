@@ -28,6 +28,7 @@ const state = reactive({
 	conversationModes: [],
 	selectedConversationModeId: 'programming',
 	profiles: [],
+	profileModels: [],
 	selectedProfileId: null,
 	selectedProfileModel: null,
 	workspaceRoots: [],
@@ -35,6 +36,7 @@ const state = reactive({
 	toolPermissionModes: [],
 	selectedToolPermissionModeId: 'requireApproval',
 	isPlanningModeEnabled: false,
+	isReasoningEnabled: false,
 	planPanel: null,
 	teamRoundModes: [],
 	selectedTeamRoundModeId: '2',
@@ -108,6 +110,8 @@ const desktopPaneCollapseBreakpoint = 1180;
 let pendingStatePayload = null;
 let renderFrameHandle = 0;
 let profileModelFetchRequestSeed = 0;
+let topbarProfileModelsFetchRequestId = 0;
+let topbarProfileModelsFetchCacheKey = '';
 let composerAttachmentSeed = 0;
 const profileModelOptionsCache = new Map();
 const workspaceTreeState = reactive({
@@ -401,6 +405,56 @@ function getSettingsPanelElement() {
 
 const selectedProfile = computed(() => state.profiles.find((item) => item.id === state.selectedProfileId) || null);
 const selectedWorkspace = computed(() => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null);
+
+function normalizeProfileModelList(models, selectedModel = '') {
+	const normalized = [...new Set((Array.isArray(models) ? models : [])
+		.filter((item) => typeof item === 'string')
+		.map((item) => item.trim())
+		.filter(Boolean))];
+	const current = (selectedModel || '').trim();
+	if (current && !normalized.includes(current)) {
+		normalized.push(current);
+	}
+
+	return normalized;
+}
+
+function applyTopbarProfileModels(models) {
+	const normalized = normalizeProfileModelList(models, state.selectedProfileModel || '');
+	state.profileModels = normalized.map((model) => ({ id: model, label: model }));
+}
+
+function buildTopbarProfileModelsCacheDescriptor() {
+	if (!selectedProfile.value) {
+		return null;
+	}
+
+	const endpoint = normalizeProfileModelsEndpoint(selectedProfile.value.description || '');
+	if (!endpoint) {
+		return null;
+	}
+
+	const profileId = selectedProfile.value.id || null;
+	return {
+		profileId,
+		endpoint,
+		cacheKey: JSON.stringify({
+			profileId,
+			endpoint,
+			apiKey: '',
+		}),
+	};
+}
+
+function applyCachedTopbarProfileModels() {
+	const descriptor = buildTopbarProfileModelsCacheDescriptor();
+	if (!descriptor || !profileModelOptionsCache.has(descriptor.cacheKey)) {
+		return;
+	}
+
+	applyTopbarProfileModels(profileModelOptionsCache.get(descriptor.cacheKey));
+}
+
 const hasSelectedWorkspace = computed(() => Boolean(state.selectedWorkspaceRootId && selectedWorkspace.value));
 const visibleTeamMembers = computed(() => state.teamMembers || []);
 const isProgrammingMode = computed(() => state.selectedConversationModeId === 'programming');
@@ -471,7 +525,7 @@ const selectedThemeLabel = computed(
 		}[state.selectedThemeId || 'system'] ||
 		'跟随系统'
 );
-const currentModelLabel = computed(() => state.selectedProfileModel || selectedProfile.value?.label || '未选择模型');
+const currentModelLabel = computed(() => state.selectedProfileModel || '未选择模型');
 const currentWorkspaceLabel = computed(() => selectedWorkspace.value?.label || '未绑定工作区');
 const composerPlaceholder = computed(() => (isChannelMode.value ? '频道会话由外部消息自动驱动' : 'Ask for follow-up changes'));
 const conversationSectionTitle = computed(() =>
@@ -691,9 +745,11 @@ watch(settingsOpen, async (isOpen) => {
 function normalizeState() {
 	state.conversationModes = state.conversationModes || [];
 	state.selectedConversationModeId = state.selectedConversationModeId || 'programming';
+	state.profileModels = state.profileModels || [];
 	state.toolPermissionModes = state.toolPermissionModes || [];
 	state.selectedToolPermissionModeId = state.selectedToolPermissionModeId || 'requireApproval';
 	state.isPlanningModeEnabled = Boolean(state.isPlanningModeEnabled);
+	state.isReasoningEnabled = Boolean(state.isReasoningEnabled);
 	state.planPanel = state.planPanel || null;
 	state.teamRoundModes = state.teamRoundModes || [];
 	state.selectedTeamRoundModeId = state.selectedTeamRoundModeId || '2';
@@ -770,6 +826,8 @@ function submitComposer() {
 	post({
 		type: 'send-prompt',
 		prompt,
+		enableReasoning: Boolean(state.isReasoningEnabled),
+		profileModel: state.selectedProfileModel || null,
 		attachments: composerAttachments.value.map((attachment) => ({
 			sourcePath: attachment.sourcePath,
 			fileName: attachment.fileName,
@@ -811,7 +869,7 @@ function openEditor(kind, mode, payload = null) {
 	editorState.draft =
 		kind === 'profile'
 			? mode === 'edit' && state.selectedProfileId
-				? createProfileDraft(selectedProfile.value, state.selectedProfileModel)
+				? createProfileDraft(selectedProfile.value, state.selectedProfileModel || selectedProfile.value?.model)
 				: emptyProfile()
 			: kind === 'workspace'
 				? mode === 'edit' && state.selectedWorkspaceRootId
@@ -858,20 +916,29 @@ watch(
 );
 
 function handleProfileModelsFetched(payload) {
+	const requestId = Number(payload.requestId || 0);
+	const modelOptions = normalizeProfileModelList(payload.models);
+
+	if (requestId === Number(topbarProfileModelsFetchRequestId || 0)) {
+		const cacheKey = topbarProfileModelsFetchCacheKey;
+		topbarProfileModelsFetchRequestId = 0;
+		topbarProfileModelsFetchCacheKey = '';
+		if (!payload.errorMessage && cacheKey) {
+			profileModelOptionsCache.set(cacheKey, modelOptions);
+			applyTopbarProfileModels(modelOptions);
+		}
+	}
+
 	if (!editorState.open || editorState.kind !== 'profile' || !editorState.draft) {
 		return;
 	}
 
-	if (Number(payload.requestId || 0) !== Number(editorState.draft.fetchModelsRequestId || 0)) {
+	if (requestId !== Number(editorState.draft.fetchModelsRequestId || 0)) {
 		return;
 	}
 
 	editorState.draft.isFetchingModels = false;
 	editorState.draft.fetchModelsRequestId = 0;
-
-	const modelOptions = Array.isArray(payload.models)
-		? [...new Set(payload.models.filter((item) => typeof item === 'string').map((item) => item.trim()).filter(Boolean))]
-		: [];
 
 	if (payload.errorMessage) {
 		editorState.draft.hasFetchedModelOptions = false;
@@ -1026,6 +1093,7 @@ async function applyStatePayload(payload) {
 
 	Object.assign(state, nextState);
 	normalizeState();
+	applyCachedTopbarProfileModels();
 
 	await nextTick();
 	restoreScroll(getConversationListElement(), conversationState);
@@ -1530,6 +1598,37 @@ function onProfileSelectChange(profileId) {
 	post({ type: 'select-profile', profileId });
 }
 
+function requestTopbarProfileModels() {
+	const descriptor = buildTopbarProfileModelsCacheDescriptor();
+	if (!descriptor) {
+		return;
+	}
+
+	if (profileModelOptionsCache.has(descriptor.cacheKey)) {
+		applyTopbarProfileModels(profileModelOptionsCache.get(descriptor.cacheKey));
+		return;
+	}
+
+	if (topbarProfileModelsFetchRequestId && topbarProfileModelsFetchCacheKey === descriptor.cacheKey) {
+		return;
+	}
+
+	const requestId = ++profileModelFetchRequestSeed;
+	topbarProfileModelsFetchRequestId = requestId;
+	topbarProfileModelsFetchCacheKey = descriptor.cacheKey;
+	post({
+		type: 'fetch-profile-models',
+		requestId,
+		profileId: descriptor.profileId,
+		endpoint: descriptor.endpoint,
+		apiKey: '',
+	});
+}
+
+function onProfileModelChange(profileModel) {
+	post({ type: 'select-profile-model', profileModel: profileModel || null });
+}
+
 function onSettingsProfileChange(profileId) {
 	clearFeedback('profile');
 	post({ type: 'select-profile', profileId });
@@ -1566,6 +1665,10 @@ function removeComposerAttachment(attachmentId) {
 
 function onPlanningModeChange(enabled) {
 	post({ type: 'set-plan-mode', enabled: Boolean(enabled) });
+}
+
+function onReasoningModeChange(enabled) {
+	state.isReasoningEnabled = Boolean(enabled);
 }
 
 function togglePlanPanelCollapse() {
@@ -1772,7 +1875,12 @@ onUnmounted(() => {
 				<MainTopbar :conversation-modes="state.conversationModes"
 					:selected-conversation-mode-id="state.selectedConversationModeId"
 					:current-model-label="currentModelLabel" :current-workspace-label="currentWorkspaceLabel"
-					@select-conversation-mode="selectConversationMode" @open-settings="openSettings" />
+					:profile-models="state.profileModels" :selected-profile-model="state.selectedProfileModel || ''"
+					:workspace-roots="state.workspaceRoots"
+					:selected-workspace-root-id="state.selectedWorkspaceRootId || ''"
+					@select-conversation-mode="selectConversationMode" @open-settings="openSettings"
+					@request-profile-models="requestTopbarProfileModels"
+					@select-profile-model="onProfileModelChange" @select-workspace="onWorkspaceChange" />
 
 				<TranscriptPanel ref="transcriptPanelRef" :messages-html="messagesHtml"
 					:visualization-enabled="activeVisualizationEnabled" :items="state.items"
@@ -1796,11 +1904,13 @@ onUnmounted(() => {
 					:selected-tool-permission-mode-id="state.selectedToolPermissionModeId"
 					:show-planning-toggle="showPlanningToggle" :show-visualization-toggle="showVisualizationToggle"
 					:is-busy="state.isBusy" :is-planning-mode-enabled="state.isPlanningModeEnabled"
+					:is-reasoning-enabled="state.isReasoningEnabled"
 					:send-button-disabled="sendButtonDisabled" :visualization-enabled="activeVisualizationEnabled"
 					:attachments="composerAttachments" @composer-input="onComposerInput"
 					@composer-keydown="onComposerKeydown" @apply-mention="applyMentionSelection"
 					@select-profile="onProfileSelectChange" @select-team-round="onTeamRoundChange"
 					@select-team-output="onTeamOutputChange" @select-permission="onPermissionChange"
+					@toggle-reasoning-mode="onReasoningModeChange"
 					@toggle-planning-mode="onPlanningModeChange" @toggle-visualization-mode="onVisualizationModeChange"
 					@toggle-plan-panel-collapse="togglePlanPanelCollapse" @pick-images="pickComposerImages"
 					@capture-screenshot="captureComposerScreenshot" @remove-attachment="removeComposerAttachment"
