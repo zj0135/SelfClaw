@@ -73,6 +73,7 @@ public partial class MainWindow : Window
         AgentActivities: [],
         IsPlanningModeEnabled: false,
         PlanPanel: null,
+        ContextUsage: new TranscriptContextUsage(0, DesktopSettings.DefaultModelContextWindow, DesktopSettings.DefaultModelAutoCompactTokenLimit, false),
         StatusText: string.Empty,
         IsBusy: false);
     private bool _webViewReady;
@@ -214,6 +215,7 @@ public partial class MainWindow : Window
             agentActivities = state.AgentActivities,
             isPlanningModeEnabled = state.IsPlanningModeEnabled,
             planPanel = state.PlanPanel,
+            contextUsage = state.ContextUsage,
             statusText = state.StatusText,
             isBusy = state.IsBusy
         }, new JsonSerializerOptions

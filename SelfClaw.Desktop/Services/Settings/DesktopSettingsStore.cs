@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SelfClaw.Infrastructure.Options;
@@ -9,9 +11,11 @@ namespace SelfClaw.Desktop.Services;
 
 public sealed class DesktopSettingsStore
 {
+    private static readonly UTF8Encoding Utf8WithoutBom = new(false);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         Converters = { new JsonStringEnumConverter() }
@@ -37,9 +41,8 @@ public sealed class DesktopSettingsStore
     {
         lock (_syncRoot)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
             var json = JsonSerializer.Serialize(Normalize(settings), JsonOptions);
-            File.WriteAllText(_settingsPath, json);
+            WriteSettingsJson(json);
         }
     }
 
@@ -47,13 +50,28 @@ public sealed class DesktopSettingsStore
     {
         try
         {
+            var shouldWrite = false;
+            string? originalJson = null;
+            DesktopSettings settings;
             if (!File.Exists(_settingsPath))
             {
-                return DesktopSettings.Default;
+                settings = DesktopSettings.Default;
+                shouldWrite = true;
+            }
+            else
+            {
+                originalJson = File.ReadAllText(_settingsPath);
+                settings = JsonSerializer.Deserialize<DesktopSettings>(originalJson, JsonOptions) ?? DesktopSettings.Default;
             }
 
-            var json = File.ReadAllText(_settingsPath);
-            return Normalize(JsonSerializer.Deserialize<DesktopSettings>(json, JsonOptions));
+            var normalized = Normalize(settings);
+            var normalizedJson = JsonSerializer.Serialize(normalized, JsonOptions);
+            if (shouldWrite || !string.Equals(originalJson, normalizedJson, StringComparison.Ordinal))
+            {
+                WriteSettingsJson(normalizedJson);
+            }
+
+            return normalized;
         }
         catch
         {
@@ -103,8 +121,21 @@ public sealed class DesktopSettingsStore
             };
         }
 
+        var contextWindow = settings.ModelContextWindow > 0
+            ? settings.ModelContextWindow
+            : DesktopSettings.DefaultModelContextWindow;
+        var autoCompactTokenLimit = settings.ModelAutoCompactTokenLimit >= 0
+            ? settings.ModelAutoCompactTokenLimit
+            : DesktopSettings.DefaultModelAutoCompactTokenLimit;
+        if (autoCompactTokenLimit > contextWindow)
+        {
+            autoCompactTokenLimit = contextWindow;
+        }
+
         return settings with
         {
+            ModelContextWindow = contextWindow,
+            ModelAutoCompactTokenLimit = autoCompactTokenLimit,
             Channels = new DesktopChannelSettings
             {
                 Items = items
@@ -139,5 +170,11 @@ public sealed class DesktopSettingsStore
             Values = values,
             SecretRefs = secretRefs
         };
+    }
+
+    private void WriteSettingsJson(string json)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
+        File.WriteAllText(_settingsPath, json, Utf8WithoutBom);
     }
 }

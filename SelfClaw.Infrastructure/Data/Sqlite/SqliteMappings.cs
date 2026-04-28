@@ -69,6 +69,17 @@ internal static class SqliteMappings
             reader.GetInt64(6),
             ReadDateTimeOffset(reader, 7));
 
+    public static ConversationContextSummaryRecord ReadConversationContextSummary(SqliteDataReader reader)
+        => new(
+            ReadGuid(reader, 0),
+            reader.GetString(1),
+            reader.IsDBNull(2) ? null : ReadGuid(reader, 2),
+            reader.IsDBNull(3) ? null : ReadDateTimeOffset(reader, 3),
+            reader.GetInt32(4),
+            reader.GetInt32(5),
+            ReadDateTimeOffset(reader, 6),
+            ReadDateTimeOffset(reader, 7));
+
     public static TeamAgentRecord ReadTeamAgent(SqliteDataReader reader)
         => new(
             ReadGuid(reader, 0),

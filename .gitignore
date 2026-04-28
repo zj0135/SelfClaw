@@ -22,6 +22,7 @@ project.fragment.lock.json
 # DotNetCore/Roslyn
 project.lock.json
 artifacts/
+.dotnet/
 
 # 涓存椂鏂囦欢
 *_i.c

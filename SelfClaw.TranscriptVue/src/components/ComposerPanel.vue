@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import PlanPanel from './PlanPanel.vue';
 
 const props = defineProps({
@@ -107,6 +107,10 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	contextUsage: {
+		type: Object,
+		default: null,
+	},
 	attachments: {
 		type: Array,
 		default: () => [],
@@ -134,6 +138,104 @@ const emit = defineEmits([
 const composerEl = ref(null);
 const toolsShellEl = ref(null);
 const toolsMenuOpen = ref(false);
+const contextMessageOverheadTokens = 4;
+const contextImageMetadataTokens = 32;
+
+const contextStats = computed(() => {
+	const usage = props.contextUsage || {};
+	const contextWindowTokens = normalizeTokenCount(usage.contextWindowTokens);
+	if (contextWindowTokens <= 0) {
+		return { visible: false };
+	}
+
+	const baseTokens = normalizeTokenCount(usage.usedTokens);
+	const draftTokens = estimateDraftTokens(props.composerValue, props.attachments);
+	const usedTokens = Math.max(0, baseTokens + draftTokens);
+	const ratio = usedTokens / contextWindowTokens;
+	const percent = Math.max(0, Math.round(ratio * 100));
+	const ringPercent = `${Math.max(0, Math.min(100, ratio * 100))}%`;
+	const autoCompactTokenLimit = normalizeTokenCount(usage.autoCompactTokenLimit);
+	const level = contextUsageLevel(ratio);
+	const autoCompactText = autoCompactTokenLimit > 0
+		? usedTokens >= autoCompactTokenLimit
+			? 'SelfClaw 自动压缩其背景信息'
+			: `SelfClaw 达到 ${formatTokenCount(autoCompactTokenLimit)} 标记后自动压缩其背景信息`
+		: 'SelfClaw 超过窗口时会尝试压缩其背景信息';
+
+	return {
+		visible: true,
+		usedTokens,
+		contextWindowTokens,
+		percent,
+		percentText: percent > 999 ? '>999%' : `${percent}%`,
+		ringPercent,
+		levelText: level.text,
+		levelClass: level.className,
+		usedText: formatTokenCount(usedTokens),
+		windowText: formatTokenCount(contextWindowTokens),
+		autoCompactText,
+	};
+});
+
+function normalizeTokenCount(value) {
+	const numeric = Number(value || 0);
+	if (!Number.isFinite(numeric) || numeric <= 0) {
+		return 0;
+	}
+
+	return Math.round(numeric);
+}
+
+function estimateDraftTokens(text, attachments) {
+	const contentTokens = estimateTextTokens(text);
+	const attachmentTokens = Array.isArray(attachments) ? attachments.length * contextImageMetadataTokens : 0;
+	return contentTokens > 0 || attachmentTokens > 0
+		? contextMessageOverheadTokens + contentTokens + attachmentTokens
+		: 0;
+}
+
+function estimateTextTokens(text) {
+	if (!text) {
+		return 0;
+	}
+
+	return Math.max(1, Math.ceil(String(text).length / 4));
+}
+
+function contextUsageLevel(ratio) {
+	if (ratio >= 1) {
+		return { text: '超限', className: 'over' };
+	}
+
+	if (ratio >= 0.9) {
+		return { text: '超高', className: 'critical' };
+	}
+
+	if (ratio >= 0.75) {
+		return { text: '较高', className: 'high' };
+	}
+
+	if (ratio >= 0.5) {
+		return { text: '中等', className: 'medium' };
+	}
+
+	return { text: '正常', className: 'normal' };
+}
+
+function formatTokenCount(value) {
+	const tokens = normalizeTokenCount(value);
+	if (tokens >= 1000000) {
+		const scaled = tokens / 1000000;
+		return `${scaled.toFixed(scaled >= 10 ? 0 : 1)}m`;
+	}
+
+	if (tokens >= 1000) {
+		const scaled = tokens / 1000;
+		return `${scaled.toFixed(scaled >= 100 ? 0 : 1)}k`;
+	}
+
+	return `${tokens}`;
+}
 
 function toggleToolsMenu() {
 	if (props.isChannelMode) {
@@ -406,8 +508,25 @@ defineExpose({
 							</select>
 						</template>
 					</div>
-					<button
-						id="send-button"
+					<div class="composer-actions">
+						<div
+							v-if="contextStats.visible"
+							class="composer-context-meter"
+							:class="contextStats.levelClass"
+							:style="{ '--context-used': contextStats.ringPercent }"
+							tabindex="0"
+							:aria-label="`背景信息窗口 ${contextStats.percentText} 已用，已用 ${contextStats.usedText} 标记，共 ${contextStats.windowText} 标记`"
+						>
+							<span class="composer-context-ring" aria-hidden="true"></span>
+							<div class="composer-context-popover" role="tooltip">
+								<div class="composer-context-popover-title">背景信息窗口:</div>
+								<div class="composer-context-popover-percent">{{ contextStats.percentText }} 已用</div>
+								<div>已用 {{ contextStats.usedText }} 标记，共 {{ contextStats.windowText }} 标记</div>
+								<strong>{{ contextStats.autoCompactText }}</strong>
+							</div>
+						</div>
+						<button
+							id="send-button"
 						class="send-btn"
 						:class="{ loading: isBusy, idle: !isBusy }"
 						type="button"
@@ -426,7 +545,8 @@ defineExpose({
 								<path d="m6 11 6-6 6 6"></path>
 							</svg>
 						</span>
-					</button>
+						</button>
+					</div>
 				</div>
 			</div>
 		</div>

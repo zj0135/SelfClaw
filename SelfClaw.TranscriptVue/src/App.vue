@@ -47,6 +47,7 @@ const state = reactive({
 	channels: [],
 	teamMembers: [],
 	agentActivities: [],
+	contextUsage: null,
 	statusText: '',
 	isBusy: false,
 });
@@ -757,6 +758,7 @@ function normalizeState() {
 	state.selectedTeamOutputModeId = state.selectedTeamOutputModeId || 'autoDocument';
 	state.teamMembers = state.teamMembers || [];
 	state.agentActivities = state.agentActivities || [];
+	state.contextUsage = state.contextUsage || null;
 	state.themeOptions = state.themeOptions || [];
 	state.channels = state.channels || [];
 }
@@ -1906,6 +1908,7 @@ onUnmounted(() => {
 					:is-busy="state.isBusy" :is-planning-mode-enabled="state.isPlanningModeEnabled"
 					:is-reasoning-enabled="state.isReasoningEnabled"
 					:send-button-disabled="sendButtonDisabled" :visualization-enabled="activeVisualizationEnabled"
+					:context-usage="state.contextUsage"
 					:attachments="composerAttachments" @composer-input="onComposerInput"
 					@composer-keydown="onComposerKeydown" @apply-mention="applyMentionSelection"
 					@select-profile="onProfileSelectChange" @select-team-round="onTeamRoundChange"

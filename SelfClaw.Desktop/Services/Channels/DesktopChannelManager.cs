@@ -15,6 +15,7 @@ public sealed class DesktopChannelManager : IAsyncDisposable
     private readonly IProfileRepository _profileRepository;
     private readonly ISecretProtector _secretProtector;
     private readonly IAgentChatRuntime _agentChatRuntime;
+    private readonly IConversationContextCompactionService _contextCompactionService;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<DesktopChannelManager> _logger;
     private readonly IReadOnlyList<IDesktopChannelAdapter> _adapters;
@@ -32,6 +33,7 @@ public sealed class DesktopChannelManager : IAsyncDisposable
         IProfileRepository profileRepository,
         ISecretProtector secretProtector,
         IAgentChatRuntime agentChatRuntime,
+        IConversationContextCompactionService contextCompactionService,
         IEnumerable<IDesktopChannelAdapter> adapters,
         ILoggerFactory loggerFactory,
         ILogger<DesktopChannelManager> logger)
@@ -41,6 +43,7 @@ public sealed class DesktopChannelManager : IAsyncDisposable
         _profileRepository = profileRepository;
         _secretProtector = secretProtector;
         _agentChatRuntime = agentChatRuntime;
+        _contextCompactionService = contextCompactionService;
         _loggerFactory = loggerFactory;
         _logger = logger;
         _adapters = adapters.ToArray();
@@ -354,7 +357,8 @@ public sealed class DesktopChannelManager : IAsyncDisposable
         ConversationRecord? conversation = null;
         try
         {
-            var configuration = adapter.NormalizeConfiguration(GetStoredConfiguration(_settingsStore.Load(), adapter.Descriptor.Id));
+            var settings = _settingsStore.Load();
+            var configuration = adapter.NormalizeConfiguration(GetStoredConfiguration(settings, adapter.Descriptor.Id));
             var profileId = configuration.ProfileId
                 ?? throw new InvalidOperationException($"{adapter.Descriptor.Name}频道还没有绑定模型配置。");
             var profile = await _profileRepository.GetProfileAsync(profileId, cancellationToken)
@@ -379,7 +383,15 @@ public sealed class DesktopChannelManager : IAsyncDisposable
             await _conversationRepository.UpsertMessageAsync(userMessage, cancellationToken);
             NotifyChanged(conversation.Id);
 
-            var requestMessages = await _conversationRepository.ListMessagesAsync(conversation.Id, cancellationToken);
+            var rawRequestMessages = await _conversationRepository.ListMessagesAsync(conversation.Id, cancellationToken);
+            var requestMessages = await _contextCompactionService.PrepareMessagesAsync(
+                conversation.Id,
+                profile,
+                apiKey,
+                rawRequestMessages,
+                settings.ModelContextWindow,
+                settings.ModelAutoCompactTokenLimit,
+                cancellationToken);
             var streamingReply = default(IDesktopChannelStreamingReply);
             var streamedMarkdown = new StringBuilder();
             var connection = GetRuntimeSession(adapter.Descriptor.Id, configuration).Connection;
@@ -434,6 +446,13 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                         break;
                 }
             }
+
+            await TryCompactChannelContextAfterSuccessfulTurnAsync(
+                conversation,
+                profile,
+                apiKey,
+                settings,
+                cancellationToken);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -471,6 +490,38 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                     _logger.LogWarning(replyException, "Failed to send failure reply for '{ChannelId}'.", adapter.Descriptor.Id);
                 }
             }
+        }
+    }
+
+    private async Task TryCompactChannelContextAfterSuccessfulTurnAsync(
+        ConversationRecord conversation,
+        ProviderProfile profile,
+        string apiKey,
+        DesktopSettings settings,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var rawMessages = await _conversationRepository.ListMessagesAsync(conversation.Id, cancellationToken);
+            await _contextCompactionService.PrepareMessagesAsync(
+                conversation.Id,
+                profile,
+                apiKey,
+                rawMessages,
+                settings.ModelContextWindow,
+                settings.ModelAutoCompactTokenLimit,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Post-turn channel context compaction failed. ConversationId={ConversationId}",
+                conversation.Id);
         }
     }
 

@@ -65,7 +65,7 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
             await foreach (var update in agent.RunStreamingAsync(
                                promptMessages,
                                null,
-                               new ChatClientAgentRunOptions(chatOptions),
+                               null,
                                cancellationToken))
             {
                 rawUpdates.Add(update);
@@ -84,11 +84,12 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
             }
 
             stopwatch.Stop();
+            var usage = ResolveUsage(rawUpdates, _logger);
 
             return new AgentExecutionResult(
                 ResolveFinalMarkdown(streamedText.ToString(), rawUpdates, _logger),
-                null,
-                null,
+                ToStoredTokenCount(usage?.InputTokenCount),
+                ToStoredTokenCount(usage?.OutputTokenCount),
                 stopwatch.Elapsed);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -174,6 +175,36 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
         }
 
         return streamedText;
+    }
+
+    private static UsageDetails? ResolveUsage(
+        IReadOnlyList<AgentResponseUpdate> rawUpdates,
+        ILogger? logger = null)
+    {
+        if (rawUpdates.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return rawUpdates.ToAgentResponse().Usage;
+        }
+        catch (Exception exception)
+        {
+            logger?.LogWarning(exception, "Failed to aggregate streamed agent usage metadata.");
+            return null;
+        }
+    }
+
+    private static int? ToStoredTokenCount(long? value)
+    {
+        if (value is null or < 0)
+        {
+            return null;
+        }
+
+        return value > int.MaxValue ? int.MaxValue : (int)value.Value;
     }
 
     public static string ExtractText(AgentResponseUpdate update)

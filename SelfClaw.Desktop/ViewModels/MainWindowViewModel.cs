@@ -28,6 +28,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private const int MaxPromptImageAttachments = 6;
     private const long MaxPromptImageBytes = 10 * 1024 * 1024;
     private const long MaxPromptImageTotalBytes = 30 * 1024 * 1024;
+    private const int ContextUsageMessageOverheadTokens = 4;
+    private const int ContextUsageImageMetadataTokens = 32;
     private static readonly ShellSelectOption[] ToolPermissionOptions =
     [
         new("requireApproval", "默认权限", "写文件和命令执行前需要人工确认"),
@@ -60,6 +62,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IProfileRepository _profileRepository;
     private readonly ISecretProtector _secretProtector;
     private readonly IAgentChatRuntime _agentChatRuntime;
+    private readonly IConversationContextCompactionService _contextCompactionService;
     private readonly IWorkspaceToolService _workspaceToolService;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly DesktopNotificationService _desktopNotificationService;
@@ -89,6 +92,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _composerText = string.Empty;
     private string _statusText = "Add a model profile to get started.";
     private bool _isBusy;
+    private DesktopSettings _desktopSettings = DesktopSettings.Default;
     private ThemeOption? _selectedThemeOption;
     private ThemeMode _activeThemeMode = ThemeMode.System;
     private string _effectiveTranscriptTheme = "light";
@@ -109,6 +113,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IProfileRepository profileRepository,
         ISecretProtector secretProtector,
         IAgentChatRuntime agentChatRuntime,
+        IConversationContextCompactionService contextCompactionService,
         IWorkspaceToolService workspaceToolService,
         DesktopToolApprovalHandler toolApprovalHandler,
         DesktopNotificationService desktopNotificationService,
@@ -122,6 +127,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _profileRepository = profileRepository;
         _secretProtector = secretProtector;
         _agentChatRuntime = agentChatRuntime;
+        _contextCompactionService = contextCompactionService;
         _workspaceToolService = workspaceToolService;
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
@@ -844,6 +850,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void LoadThemePreference()
     {
         var settings = _desktopSettingsStore.Load();
+        _desktopSettings = settings;
         SetSelectedThemeOption(settings.ThemePreference);
         ApplyThemePreference(settings.ThemePreference, persist: false, refreshShell: false);
     }
@@ -865,7 +872,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (persist)
         {
             var settings = _desktopSettingsStore.Load();
-            _desktopSettingsStore.Save(settings with { ThemePreference = preference });
+            settings = settings with { ThemePreference = preference };
+            _desktopSettingsStore.Save(settings);
+            _desktopSettings = settings;
         }
 
         if (_initialized || refreshShell)
@@ -1224,8 +1233,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 throw new InvalidOperationException("The selected profile does not have a readable API key.");
             }
 
-            var requestMessages = _messages.ToArray();
-            var requestContextMessages = _contextMessages.ToArray();
             var requestTeamAgents = _teamAgents.ToArray();
             runningBoundAgent = _selectedBoundAgent;
             var selectedProfileModel = ResolveSelectedProfileModel();
@@ -1236,6 +1243,28 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 throw new InvalidOperationException("The selected profile is required to submit a prompt.");
             }
+
+            var settings = _desktopSettingsStore.Load();
+            _desktopSettings = settings;
+            var requestMessages = await _contextCompactionService.PrepareMessagesAsync(
+                conversation.Id,
+                requestProfile,
+                apiKey,
+                _messages.ToArray(),
+                settings.ModelContextWindow,
+                settings.ModelAutoCompactTokenLimit,
+                _turnCancellationSource.Token);
+            var rawContextMessages = _contextMessages.ToArray();
+            var requestContextMessages = rawContextMessages.Length == 0
+                ? rawContextMessages
+                : await _contextCompactionService.PrepareMessagesAsync(
+                    conversation.EffectiveRootConversationId,
+                    requestProfile,
+                    apiKey,
+                    rawContextMessages,
+                    settings.ModelContextWindow,
+                    settings.ModelAutoCompactTokenLimit,
+                    _turnCancellationSource.Token);
 
             if (runningBoundAgent is not null)
             {
@@ -1329,6 +1358,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 await UpdateTeamAgentStatusAsync(runningBoundAgent.Id, TeamAgentStatus.Completed);
             }
 
+            await TryCompactConversationContextAfterSuccessfulTurnAsync(
+                conversation,
+                requestProfile,
+                apiKey,
+                settings,
+                _turnCancellationSource.Token);
+
             StatusText = "Ready.";
             PublishShellNow(true);
             PublishConversationCompletedNotification(conversation);
@@ -1371,6 +1407,52 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _turnCancellationSource?.Dispose();
             _turnCancellationSource = null;
             IsBusy = false;
+        }
+    }
+
+    private async Task TryCompactConversationContextAfterSuccessfulTurnAsync(
+        ConversationRecord conversation,
+        ProviderProfile profile,
+        string apiKey,
+        DesktopSettings settings,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _contextCompactionService.PrepareMessagesAsync(
+                conversation.Id,
+                profile,
+                apiKey,
+                _messages.ToArray(),
+                settings.ModelContextWindow,
+                settings.ModelAutoCompactTokenLimit,
+                cancellationToken);
+
+            var rawContextMessages = _contextMessages.ToArray();
+            if (rawContextMessages.Length == 0)
+            {
+                return;
+            }
+
+            await _contextCompactionService.PrepareMessagesAsync(
+                conversation.EffectiveRootConversationId,
+                profile,
+                apiKey,
+                rawContextMessages,
+                settings.ModelContextWindow,
+                settings.ModelAutoCompactTokenLimit,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Post-turn context compaction failed. ConversationId={ConversationId}",
+                conversation.Id);
         }
     }
 
@@ -2056,6 +2138,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var planPanel = SelectedConversationMode == ConversationMode.Programming
             ? _planPanel ?? TranscriptPlanPanel.Hidden
             : TranscriptPlanPanel.Hidden;
+        var contextUsage = BuildContextUsage();
 
         TranscriptChanged?.Invoke(this, new TranscriptRenderState(
             orderedItems,
@@ -2084,8 +2167,109 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             AgentActivityNodes.ToArray(),
             IsPlanningModeEnabled,
             planPanel,
+            contextUsage,
             StatusText,
             IsBusy));
+    }
+
+    private TranscriptContextUsage BuildContextUsage()
+    {
+        var contextWindow = Math.Max(1, _desktopSettings.ModelContextWindow);
+        var autoCompactLimit = _desktopSettings.ModelAutoCompactTokenLimit < 0
+            ? 0
+            : Math.Min(_desktopSettings.ModelAutoCompactTokenLimit, contextWindow);
+        var usedTokens = ResolveContextUsageTokens(_contextMessages.Concat(_messages), out var isMeasured);
+
+        return new TranscriptContextUsage(usedTokens, contextWindow, autoCompactLimit, isMeasured);
+    }
+
+    private static long ResolveContextUsageTokens(IEnumerable<MessageRecord> messages, out bool isMeasured)
+    {
+        var promptMessages = messages
+            .Where(ShouldIncludeInContextUsage)
+            .OrderBy(message => message.CreatedAtUtc)
+            .ThenBy(message => message.Id)
+            .ToArray();
+        var measuredIndex = Array.FindLastIndex(
+            promptMessages,
+            message => message.Role == MessageRole.Assistant && message.InputTokens is > 0);
+
+        if (measuredIndex < 0)
+        {
+            isMeasured = false;
+            return EstimateContextUsageTokens(promptMessages);
+        }
+
+        isMeasured = true;
+        var measuredMessage = promptMessages[measuredIndex];
+        var total = Math.Max(0L, measuredMessage.InputTokens!.Value);
+
+        // The latest input count is the provider-reported prompt size for that turn.
+        // Add the provider-reported assistant output because it becomes part of the next raw context.
+        total += measuredMessage.OutputTokens is > 0
+            ? measuredMessage.OutputTokens.Value
+            : EstimateContextUsageMessageTokens(measuredMessage);
+
+        for (var index = measuredIndex + 1; index < promptMessages.Length; index++)
+        {
+            total += EstimateContextUsageMessageTokens(promptMessages[index]);
+        }
+
+        return Math.Max(0, total);
+    }
+
+    private static long EstimateContextUsageTokens(IEnumerable<MessageRecord> messages)
+    {
+        var total = 0L;
+        var seenMessageIds = new HashSet<Guid>();
+        foreach (var message in messages)
+        {
+            if (!seenMessageIds.Add(message.Id) || !ShouldIncludeInContextUsage(message))
+            {
+                continue;
+            }
+
+            total += EstimateContextUsageMessageTokens(message);
+        }
+
+        return Math.Max(0L, total);
+    }
+
+    private static long EstimateContextUsageMessageTokens(MessageRecord message)
+    {
+        var content = message.Role == MessageRole.Assistant
+            ? AssistantMessageSegmenter.Split(message.MarkdownContent).ContentMarkdown
+            : message.MarkdownContent;
+        var attachmentTokens = (message.Attachments?.Count ?? 0) * ContextUsageImageMetadataTokens;
+        var speakerTokens = EstimateContextUsageTextTokens(message.AgentName) + EstimateContextUsageTextTokens(message.AgentRole);
+
+        return ContextUsageMessageOverheadTokens + EstimateContextUsageTextTokens(content) + attachmentTokens + speakerTokens;
+    }
+
+    private static long EstimateContextUsageTextTokens(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return 0L;
+        }
+
+        return Math.Max(1L, (long)Math.Ceiling(text.Length / 4d));
+    }
+
+    private static bool ShouldIncludeInContextUsage(MessageRecord message)
+    {
+        if (message.Status == MessageStatus.Failed)
+        {
+            return false;
+        }
+
+        if (message.Role == MessageRole.Assistant)
+        {
+            var segments = AssistantMessageSegmenter.Split(message.MarkdownContent);
+            return !string.IsNullOrWhiteSpace(segments.ContentMarkdown);
+        }
+
+        return true;
     }
 
     private TranscriptConversationItem[] BuildConversationItems()

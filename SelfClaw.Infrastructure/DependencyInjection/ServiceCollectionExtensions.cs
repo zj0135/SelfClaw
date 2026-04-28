@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
@@ -26,6 +27,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
         services.AddSingleton<IAgentContextProviderFactory, FileSystemAgentContextProviderFactory>();
         services.AddSingleton<IAgentChatRuntime, SelfClawAgentChatRuntime>();
+        services.AddSingleton<IConversationContextCompactionService>(provider =>
+        {
+            var loggerFactory = provider.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
+            return new ConversationContextCompactionService(
+                provider.GetRequiredService<IConversationRepository>(),
+                new ChatClientAgentExecutionService(loggerFactory, provider),
+                loggerFactory.CreateLogger<ConversationContextCompactionService>());
+        });
         services.AddSingleton<MarkdownHtmlRenderer>();
         return services;
     }

@@ -27,5 +27,6 @@ public sealed record TranscriptRenderState(
     IReadOnlyList<AgentActivityNode> AgentActivities,
     bool IsPlanningModeEnabled,
     TranscriptPlanPanel? PlanPanel,
+    TranscriptContextUsage ContextUsage,
     string StatusText,
     bool IsBusy);

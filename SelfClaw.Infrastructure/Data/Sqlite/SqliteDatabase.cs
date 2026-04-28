@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 13;
+    private const int CurrentSchemaVersion = 14;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -286,6 +286,19 @@ CREATE TABLE IF NOT EXISTS message_attachments (
     byte_length INTEGER NOT NULL,
     created_at_utc TEXT NOT NULL,
     FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
+);", cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS conversation_context_summaries (
+    conversation_id TEXT NOT NULL PRIMARY KEY,
+    summary_markdown TEXT NOT NULL,
+    covered_through_message_id TEXT NULL,
+    covered_through_message_created_at_utc TEXT NULL,
+    source_token_estimate INTEGER NOT NULL,
+    summary_token_estimate INTEGER NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken);
 
             await ExecuteAsync(connection, @"
