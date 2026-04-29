@@ -46,7 +46,16 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
             };
 
             if (request.EnableReasoning)
-                chatOptions.Reasoning = new ReasoningOptions() { Effort = ReasoningEffort.ExtraHigh, Output = ReasoningOutput.Full };
+            {
+                chatOptions.RawRepresentationFactory = _ =>
+                {
+#pragma warning disable SCME0001
+                    OpenAI.Chat.ChatCompletionOptions completionOptions = new();
+                    completionOptions.Patch.Set("$.thinking.type"u8, "enabled");
+                    return completionOptions;
+#pragma warning restore SCME0001
+                };
+            }
 
             var agentOptions = new ChatClientAgentOptions
             {
