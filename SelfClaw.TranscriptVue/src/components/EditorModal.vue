@@ -265,9 +265,11 @@ onBeforeUnmount(() => {
 					<div>
 						<div class="field-label">工作区目录</div>
 						<div class="field-picker-row">
-							<div class="field-readonly">{{ editor.draft.rootPath || '请选择文件夹' }}</div>
-							<button class="ghost-btn compact-btn" type="button"
-								@click="emit('pick-workspace-path')">选择</button>
+							<input id="editor-workspace-root-path" class="field-input field-path-input" type="text"
+								readonly :value="editor.draft.rootPath" placeholder="请选择文件夹"
+								title="点击选择工作区目录" @click="emit('pick-workspace-path')"
+								@keydown.enter.prevent="emit('pick-workspace-path')"
+								@keydown.space.prevent="emit('pick-workspace-path')" />
 						</div>
 					</div>
 				</template>

@@ -2493,6 +2493,14 @@ a:hover {
 	color: var(--muted-soft);
 }
 
+.field-path-input {
+	cursor: pointer;
+}
+
+.field-path-input[readonly] {
+	user-select: none;
+}
+
 .field-select:focus,
 .field-input:focus {
 	border-color: rgba(111, 141, 255, 0.48);
@@ -6947,6 +6955,651 @@ html[data-theme='light'] .sidebar .conversation-title {
 
 html[data-theme='light'] .sidebar .conversation-card.selected {
 	background: #edf1f7;
+}
+
+/* Darker main workspace surface, matched to the navigation sidebar */
+html:not([data-theme='light']) .main-column,
+html:not([data-theme='light']) .transcript-panel,
+html:not([data-theme='light']) .transcript-scroll {
+	background: #080a0e;
+}
+
+html:not([data-theme='light']) .topbar,
+html:not([data-theme='light']) .steps-panel {
+	background: #080a0e;
+	border-color: #151923;
+}
+
+html:not([data-theme='light']) .context-pill,
+html:not([data-theme='light']) .mode-chip,
+html:not([data-theme='light']) .icon-btn,
+html:not([data-theme='light']) .composer-tools-trigger,
+html:not([data-theme='light']) .composer-inline-select,
+html:not([data-theme='light']) .plan-mode-toggle,
+html:not([data-theme='light']) .activity-toggle,
+html:not([data-theme='light']) .activity-action-btn,
+html:not([data-theme='light']) .steps-mode-toggle,
+html:not([data-theme='light']) .steps-section-toggle,
+html:not([data-theme='light']) .graph-toolbar-btn {
+	border-radius: 6px;
+	background: #10131a;
+	border-color: #202631;
+	color: #c9ced8;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .context-pill:hover,
+html:not([data-theme='light']) .mode-chip:hover,
+html:not([data-theme='light']) .icon-btn:hover,
+html:not([data-theme='light']) .composer-tools-trigger:hover:not(:disabled),
+html:not([data-theme='light']) .composer-inline-select:hover,
+html:not([data-theme='light']) .composer-inline-select:focus,
+html:not([data-theme='light']) .plan-mode-toggle:hover:not(.disabled),
+html:not([data-theme='light']) .activity-action-btn:hover,
+html:not([data-theme='light']) .steps-mode-toggle:hover,
+html:not([data-theme='light']) .steps-section-toggle:hover {
+	background: #151922;
+	border-color: #2b3240;
+	color: #eef1f6;
+	transform: none;
+}
+
+html:not([data-theme='light']) .mode-chip.active,
+html:not([data-theme='light']) .plan-mode-toggle.active {
+	border-color: rgba(139, 92, 246, 0.42);
+	background: rgba(139, 92, 246, 0.14);
+	color: #f0eefc;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .topbar-context-select {
+	color: #d7dbe4;
+}
+
+html:not([data-theme='light']) .item,
+html:not([data-theme='light']) .item.message.assistant,
+html:not([data-theme='light']) .item.message.system,
+html:not([data-theme='light']) .item.message.user {
+	border-radius: 8px;
+	background: #090c12;
+	border-color: #171d27;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .item.message.user {
+	background: #10131a;
+	border-color: #1e2531;
+}
+
+html:not([data-theme='light']) .item.message:hover,
+html:not([data-theme='light']) .transcript-vue-app.busy .item.message:hover,
+html:not([data-theme='light']) .transcript-vue-app.busy .item.message.user:hover {
+	background: #0d1017;
+	border-color: #202735;
+	transform: none;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .body code,
+html:not([data-theme='light']) .message-main code,
+html:not([data-theme='light']) .tool-details-pre {
+	background: #141820;
+	border-color: #242b36;
+}
+
+html:not([data-theme='light']) .tool-summary,
+html:not([data-theme='light']) .tool-group-summary,
+html:not([data-theme='light']) .tool-details-body,
+html:not([data-theme='light']) .tool-group-details {
+	border-radius: 8px;
+	background: #0d1017;
+	border-color: #1e2531;
+}
+
+html:not([data-theme='light']) .composer-panel {
+	background: #080a0e;
+}
+
+html:not([data-theme='light']) .composer-surface {
+	border-radius: 8px;
+	background: #05070b;
+	border-color: #171d27;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .composer-box {
+	background: transparent;
+	color: #d9dde6;
+}
+
+html:not([data-theme='light']) .composer-box::placeholder {
+	color: #777f8d;
+}
+
+html:not([data-theme='light']) .composer-tools-menu,
+html:not([data-theme='light']) .mention-picker {
+	border-radius: 8px;
+	background: #0d1017;
+	border-color: #202631;
+	box-shadow: 0 14px 32px rgba(0, 0, 0, 0.34);
+}
+
+html:not([data-theme='light']) .composer-tools-menu-row:hover,
+html:not([data-theme='light']) .mention-item.active,
+html:not([data-theme='light']) .mention-item:hover {
+	background: #151922;
+}
+
+html:not([data-theme='light']) .send-btn,
+html:not([data-theme='light']) .composer-attachment-remove {
+	border-radius: 6px;
+}
+
+html:not([data-theme='light']) .steps-header,
+html:not([data-theme='light']) .settings-header {
+	border-bottom-color: #171d27;
+}
+
+html:not([data-theme='light']) .team-member-card,
+html:not([data-theme='light']) .activity-card,
+html:not([data-theme='light']) .activity-meta-item {
+	border-radius: 8px;
+	background: #0d1017;
+	border-color: #1e2531;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .activity-card:hover {
+	background: #11151d;
+	border-color: #273040;
+	transform: none;
+	box-shadow: none;
+}
+
+/* Settings surfaces aligned to the current dark workspace style */
+html:not([data-theme='light']) .settings-overlay {
+	background: rgba(2, 4, 7, 0.68);
+	backdrop-filter: blur(10px);
+}
+
+html:not([data-theme='light']) .settings-panel,
+html:not([data-theme='light']) .editor-panel {
+	border-radius: 8px;
+	background: #080a0e;
+	border-color: #151923;
+	box-shadow: 0 22px 50px rgba(0, 0, 0, 0.46);
+}
+
+html:not([data-theme='light']) .settings-nav {
+	background: #2d2f33;
+	border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+html:not([data-theme='light']) .settings-content,
+html:not([data-theme='light']) .editor-body,
+html:not([data-theme='light']) .editor-footer {
+	background: #080a0e;
+}
+
+html:not([data-theme='light']) .settings-header,
+html:not([data-theme='light']) .editor-header {
+	border-bottom-color: #171d27;
+}
+
+html:not([data-theme='light']) .settings-title,
+html:not([data-theme='light']) .settings-section-title,
+html:not([data-theme='light']) .editor-title {
+	color: #eceff5;
+}
+
+html:not([data-theme='light']) .settings-hint,
+html:not([data-theme='light']) .settings-header-hint,
+html:not([data-theme='light']) .field-label,
+html:not([data-theme='light']) .selected-summary-label,
+html:not([data-theme='light']) .channel-field-hint {
+	color: #848b98;
+}
+
+html:not([data-theme='light']) .settings-nav-item {
+	border-radius: 8px;
+	background: transparent;
+	border-color: transparent;
+	color: #c9ced8;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .settings-nav-item:hover {
+	background: rgba(255, 255, 255, 0.055);
+	border-color: transparent;
+	transform: none;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .settings-nav-item.active {
+	background: rgba(255, 255, 255, 0.09);
+	border-color: transparent;
+	box-shadow: inset 3px 0 0 #8b5cf6;
+}
+
+html:not([data-theme='light']) .settings-nav-item-title {
+	color: #eef1f6;
+}
+
+html:not([data-theme='light']) .settings-nav-item-description {
+	color: #8d94a1;
+}
+
+html:not([data-theme='light']) .settings-nav-item-badge,
+html:not([data-theme='light']) .settings-badge {
+	border-radius: 999px;
+	background: #10131a;
+	border-color: #202631;
+	color: #aeb5c2;
+}
+
+html:not([data-theme='light']) .settings-section,
+html:not([data-theme='light']) .selected-summary-card,
+html:not([data-theme='light']) .range-field,
+html:not([data-theme='light']) .channel-card {
+	border-radius: 8px;
+	background: #0d1017;
+	border-color: #1e2531;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .channel-card.enabled {
+	background: #0f131a;
+	border-color: #283142;
+}
+
+html:not([data-theme='light']) .channel-card.running {
+	border-color: rgba(75, 160, 107, 0.34);
+}
+
+html:not([data-theme='light']) .channel-card.error {
+	border-color: rgba(204, 103, 116, 0.38);
+}
+
+html:not([data-theme='light']) .selected-summary-value,
+html:not([data-theme='light']) .range-value,
+html:not([data-theme='light']) .toggle-label {
+	color: #d6dbe4;
+}
+
+html:not([data-theme='light']) .field-select,
+html:not([data-theme='light']) .field-readonly,
+html:not([data-theme='light']) .field-input,
+html:not([data-theme='light']) .field-combobox-trigger {
+	border-radius: 6px;
+	background: #10131a;
+	border-color: #202631;
+	color: #d9dde6;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .field-input::placeholder,
+html:not([data-theme='light']) .field-combobox-input::placeholder {
+	color: #747c89;
+}
+
+html:not([data-theme='light']) .field-select:focus,
+html:not([data-theme='light']) .field-input:focus,
+html:not([data-theme='light']) .field-combobox.open .field-combobox-trigger,
+html:not([data-theme='light']) .field-combobox-trigger:focus-within {
+	background: #141820;
+	border-color: rgba(139, 92, 246, 0.48);
+	box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+}
+
+html:not([data-theme='light']) .field-combobox-menu {
+	border-radius: 8px;
+	background: #0d1017;
+	border-color: #202631;
+	box-shadow: 0 14px 32px rgba(0, 0, 0, 0.34);
+}
+
+html:not([data-theme='light']) .field-combobox-option {
+	border-radius: 6px;
+	color: #d9dde6;
+}
+
+html:not([data-theme='light']) .field-combobox-option:hover {
+	background: #151922;
+	border-color: #2b3240;
+}
+
+html:not([data-theme='light']) .field-combobox-status {
+	border-radius: 6px;
+	background: #10131a;
+	color: #8d94a1;
+}
+
+html:not([data-theme='light']) .ghost-btn,
+html:not([data-theme='light']) .primary-btn,
+html:not([data-theme='light']) .icon-add-btn,
+html:not([data-theme='light']) .close-btn,
+html:not([data-theme='light']) .field-combobox-toggle {
+	border-radius: 6px;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .ghost-btn,
+html:not([data-theme='light']) .close-btn,
+html:not([data-theme='light']) .field-combobox-toggle {
+	background: #10131a;
+	border-color: #202631;
+	color: #c9ced8;
+}
+
+html:not([data-theme='light']) .ghost-btn:hover,
+html:not([data-theme='light']) .close-btn:hover,
+html:not([data-theme='light']) .field-combobox-toggle:hover {
+	background: #151922;
+	border-color: #2b3240;
+	color: #eef1f6;
+	transform: none;
+}
+
+html:not([data-theme='light']) .primary-btn,
+html:not([data-theme='light']) .icon-add-btn {
+	background: rgba(139, 92, 246, 0.16);
+	border: 1px solid rgba(139, 92, 246, 0.38);
+	color: #f0eefc;
+}
+
+html:not([data-theme='light']) .primary-btn:hover,
+html:not([data-theme='light']) .icon-add-btn:hover {
+	background: rgba(139, 92, 246, 0.22);
+	border-color: rgba(139, 92, 246, 0.48);
+	filter: none;
+	transform: none;
+}
+
+html:not([data-theme='light']) .danger-btn {
+	color: #ff9aa6;
+}
+
+html:not([data-theme='light']) .toggle-switch {
+	border-color: #2b3240;
+	background: #10131a;
+}
+
+html:not([data-theme='light']) .toggle-switch::after {
+	background: #808896;
+}
+
+html:not([data-theme='light']) .toggle-input:checked + .toggle-switch {
+	background: rgba(139, 92, 246, 0.26);
+	border-color: rgba(139, 92, 246, 0.52);
+}
+
+html:not([data-theme='light']) .toggle-input:checked + .toggle-switch::after {
+	background: #c7b8ff;
+}
+
+html:not([data-theme='light']) .field-range {
+	accent-color: #8b5cf6;
+}
+
+html:not([data-theme='light']) .settings-feedback {
+	border-radius: 8px;
+}
+
+html:not([data-theme='light']) .settings-feedback.success {
+	background: rgba(75, 160, 107, 0.12);
+	border-color: rgba(75, 160, 107, 0.34);
+	color: #b9f4cd;
+}
+
+html:not([data-theme='light']) .settings-feedback.error {
+	background: rgba(204, 103, 116, 0.13);
+	border-color: rgba(204, 103, 116, 0.38);
+	color: #ffc0c8;
+}
+
+/* Compact settings density */
+.settings-panel {
+	grid-template-columns: 216px minmax(0, 1fr);
+	width: min(960px, calc(100vw - 48px));
+	height: min(660px, calc(100vh - 48px));
+}
+
+.settings-nav {
+	gap: 10px;
+	padding: 12px;
+}
+
+.settings-nav-header {
+	gap: 4px;
+}
+
+.settings-title {
+	font-size: 20px;
+}
+
+.settings-hint {
+	font-size: 12px;
+	line-height: 1.42;
+}
+
+.settings-nav-list {
+	gap: 6px;
+}
+
+.settings-nav-item {
+	padding: 8px 9px;
+}
+
+.settings-nav-item-top {
+	gap: 7px;
+}
+
+.settings-nav-item-title {
+	font-size: 13px;
+	line-height: 1.25;
+}
+
+.settings-nav-item-badge,
+.settings-badge {
+	padding: 2px 6px;
+	font-size: 9px;
+}
+
+.settings-nav-item-description {
+	margin-top: 3px;
+	font-size: 11px;
+	line-height: 1.35;
+}
+
+.settings-content {
+	padding: 14px 16px;
+}
+
+.settings-header {
+	padding-bottom: 10px;
+}
+
+.settings-section-title-hero {
+	font-size: 20px;
+}
+
+.settings-header-hint {
+	margin-top: 4px;
+	line-height: 1.42;
+}
+
+.settings-section {
+	margin-top: 10px;
+	padding: 12px;
+}
+
+.settings-section-active {
+	margin-top: 10px;
+}
+
+.settings-section-title {
+	font-size: 15px;
+}
+
+.field-group {
+	margin-top: 10px;
+}
+
+.field-label {
+	margin-bottom: 5px;
+	font-size: 10px;
+}
+
+.settings-select-row {
+	gap: 6px;
+}
+
+.selected-summary-grid {
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.selected-summary-card {
+	padding: 8px 9px;
+}
+
+.selected-summary-label {
+	font-size: 10px;
+}
+
+.selected-summary-value {
+	margin-top: 5px;
+	font-size: 12px;
+	line-height: 1.4;
+}
+
+.field-select,
+.field-readonly,
+.field-input {
+	padding: 8px 10px;
+	font-size: 12px;
+}
+
+.field-readonly,
+.field-combobox-trigger {
+	min-height: 36px;
+}
+
+.field-combobox-trigger {
+	padding-left: 10px;
+	padding-right: 34px;
+}
+
+.field-combobox-input {
+	padding: 8px 0;
+}
+
+.field-combobox-toggle {
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+}
+
+.field-combobox-menu {
+	top: calc(100% + 6px);
+	gap: 3px;
+	padding: 6px;
+	border-radius: 8px;
+}
+
+.field-combobox-option,
+.field-combobox-status {
+	padding: 7px 9px;
+	font-size: 12px;
+	line-height: 1.35;
+}
+
+.ghost-btn,
+.primary-btn {
+	padding: 8px 10px;
+	font-size: 12px;
+}
+
+.compact-btn {
+	padding: 7px 9px;
+}
+
+.icon-add-btn {
+	width: 34px;
+	height: 34px;
+	font-size: 20px;
+}
+
+.close-btn {
+	width: 32px;
+	height: 32px;
+}
+
+.range-field {
+	padding: 8px 9px;
+}
+
+.range-header {
+	gap: 8px;
+}
+
+.toggle-field {
+	margin-top: 5px;
+	gap: 6px;
+}
+
+.toggle-switch {
+	width: 30px;
+	height: 18px;
+}
+
+.toggle-switch::after {
+	width: 14px;
+	height: 14px;
+}
+
+.toggle-input:checked + .toggle-switch::after {
+	transform: translateX(12px);
+}
+
+.field-textarea {
+	min-height: 76px;
+}
+
+.channel-card {
+	padding: 12px;
+}
+
+.channel-card-list {
+	gap: 8px;
+}
+
+.channel-card-top,
+.channel-card-actions {
+	gap: 8px;
+}
+
+.channel-summary-grid {
+	margin-top: 10px;
+}
+
+.editor-panel {
+	width: min(520px, 100%);
+	padding: 16px;
+}
+
+.editor-title {
+	font-size: 20px;
+}
+
+.editor-body {
+	gap: 8px;
+	margin-top: 10px;
+}
+
+.editor-footer {
+	gap: 8px;
+	margin-top: 12px;
 }
 
 @media (max-width: 1180px) {
