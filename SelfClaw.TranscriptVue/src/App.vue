@@ -54,7 +54,6 @@ const state = reactive({
 
 const composerValue = ref('');
 const composerAttachments = ref([]);
-const conversationSearch = ref('');
 const leftPaneCollapsed = ref(false);
 const planPanelCollapsed = ref(false);
 const visualizationEnabled = ref(false);
@@ -515,7 +514,6 @@ const collapsedPlanText = computed(() => {
 	}
 });
 const firstChannel = computed(() => (state.channels && state.channels.length > 0 ? state.channels[0] : null));
-const fallbackStatusText = computed(() => state.statusText || (state.isBusy ? '处理中' : '就绪'));
 const selectedThemeLabel = computed(
 	() =>
 		state.themeOptions.find((item) => item.id === state.selectedThemeId)?.label ||
@@ -529,9 +527,6 @@ const selectedThemeLabel = computed(
 const currentModelLabel = computed(() => state.selectedProfileModel || '未选择模型');
 const currentWorkspaceLabel = computed(() => selectedWorkspace.value?.label || '未绑定工作区');
 const composerPlaceholder = computed(() => (isChannelMode.value ? '频道会话由外部消息自动驱动' : 'Ask for follow-up changes'));
-const conversationSectionTitle = computed(() =>
-	isChannelMode.value ? '频道会话' : state.conversations.some((item) => item.parentId) ? '会话树' : '最近会话'
-);
 const totalStepCount = computed(() => (isTeamMode.value ? visibleTeamMembers.value.length + (state.agentActivities?.length || 0) : state.agentActivities?.length || 0));
 const sendButtonDisabled = computed(
 	() => isChannelMode.value || (!state.isBusy && !composerValue.value.trim() && composerAttachments.value.length === 0) || !state.selectedProfileId
@@ -605,35 +600,9 @@ const workspaceSummaryCards = computed(() => [
 const workspaceTreeLabel = computed(() => workspaceTreeState.rootLabel || selectedWorkspace.value?.label || '');
 const workspaceTreePath = computed(() => workspaceTreeState.rootPath || selectedWorkspace.value?.description || '');
 
-const filteredConversations = computed(() => {
-	const query = conversationSearch.value.trim().toLowerCase();
-	if (!query) {
-		return state.conversations;
-	}
-
-	const conversationsById = new Map(state.conversations.map((item) => [item.id, item]));
-	const includedIds = new Set();
-
-	state.conversations.forEach((item) => {
-		const haystack = `${item.title || ''} ${item.badge || ''} ${item.subtitle || ''}`.toLowerCase();
-		if (!haystack.includes(query)) {
-			return;
-		}
-
-		let current = item;
-		while (current) {
-			includedIds.add(current.id);
-			current = current.parentId ? conversationsById.get(current.parentId) || null : null;
-		}
-	});
-
-	return state.conversations.filter((item) => includedIds.has(item.id));
-});
-
 const conversationListHtml = computed(() =>
 	renderConversationList({
-		conversations: filteredConversations.value,
-		conversationSearch: conversationSearch.value,
+		conversations: state.conversations,
 		selectedConversationId: state.selectedConversationId,
 		openConversationBranches: openConversationBranches.value,
 		openConversationMenuId: openConversationMenuId.value,
@@ -1057,17 +1026,32 @@ function syncConversationMenuPlacement() {
 		return;
 	}
 
-	menu.classList.remove('upward');
+	menu.classList.remove('upward', 'placed');
+	menu.style.removeProperty('--conversation-menu-left');
+	menu.style.removeProperty('--conversation-menu-top');
 
-	const listRect = conversationList.getBoundingClientRect();
 	const shellRect = menuShell.getBoundingClientRect();
-	const menuHeight = menu.offsetHeight;
-	const spaceBelow = listRect.bottom - (shellRect.top + 42);
-	const spaceAbove = shellRect.bottom - 38 - listRect.top;
+	const menuWidth = menu.offsetWidth || 128;
+	const menuHeight = menu.offsetHeight || 42;
+	const viewportMargin = 8;
+	const menuGap = 6;
+	const spaceBelow = window.innerHeight - shellRect.bottom - viewportMargin;
+	const spaceAbove = shellRect.top - viewportMargin;
+	const placeAbove = menuHeight + menuGap > spaceBelow && spaceAbove > spaceBelow;
+	const left = Math.min(
+		Math.max(shellRect.right - menuWidth, viewportMargin),
+		Math.max(viewportMargin, window.innerWidth - menuWidth - viewportMargin)
+	);
+	const top = placeAbove
+		? Math.max(viewportMargin, shellRect.top - menuHeight - menuGap)
+		: Math.min(shellRect.bottom + menuGap, Math.max(viewportMargin, window.innerHeight - menuHeight - viewportMargin));
 
-	if (menuHeight > spaceBelow && spaceAbove > spaceBelow) {
+	menu.style.setProperty('--conversation-menu-left', `${left}px`);
+	menu.style.setProperty('--conversation-menu-top', `${top}px`);
+	if (placeAbove) {
 		menu.classList.add('upward');
 	}
+	menu.classList.add('placed');
 }
 
 async function preserveConversationList(mutator) {
@@ -1586,16 +1570,6 @@ function closeSettings() {
 	closeEditor();
 }
 
-function onConversationSearchChange(value) {
-	conversationSearch.value = value;
-}
-
-function onConversationSearchInput() {
-	if (openConversationMenuId.value) {
-		openConversationMenuId.value = null;
-	}
-}
-
 function onProfileSelectChange(profileId) {
 	post({ type: 'select-profile', profileId });
 }
@@ -1866,11 +1840,8 @@ onUnmounted(() => {
 	<div class="transcript-vue-app" :class="{ busy: state.isBusy }" @click="handleDelegatedClick"
 		@wheel.capture.passive="onRootWheel" @pointerdown.capture="onRootPointerDown">
 		<div class="app-shell" :class="{ 'left-pane-collapsed': leftPaneCollapsed }">
-			<ConversationSidebar ref="sidebarRef" :fallback-status-text="fallbackStatusText"
-				:is-channel-mode="isChannelMode" :conversation-search="conversationSearch"
-				:conversation-section-title="conversationSectionTitle" :conversation-list-html="conversationListHtml"
+			<ConversationSidebar ref="sidebarRef" :is-channel-mode="isChannelMode" :conversation-list-html="conversationListHtml"
 				:collapsed="leftPaneCollapsed" @new-conversation="newConversation" @open-settings="openSettings"
-				@search-change="onConversationSearchChange" @search-input="onConversationSearchInput"
 				@toggle-collapse="toggleLeftPaneCollapse" />
 
 			<main class="main-column">

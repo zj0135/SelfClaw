@@ -2,21 +2,9 @@
 import { ref } from 'vue';
 
 defineProps({
-	fallbackStatusText: {
-		type: String,
-		default: '',
-	},
 	isChannelMode: {
 		type: Boolean,
 		default: false,
-	},
-	conversationSearch: {
-		type: String,
-		default: '',
-	},
-	conversationSectionTitle: {
-		type: String,
-		default: '',
 	},
 	conversationListHtml: {
 		type: String,
@@ -28,14 +16,9 @@ defineProps({
 	},
 });
 
-const emit = defineEmits(['new-conversation', 'open-settings', 'search-change', 'search-input', 'toggle-collapse']);
+const emit = defineEmits(['new-conversation', 'open-settings', 'toggle-collapse']);
 
 const conversationListEl = ref(null);
-
-function onSearchInput(event) {
-	emit('search-change', event.target.value);
-	emit('search-input');
-}
 
 defineExpose({
 	getConversationListEl: () => conversationListEl.value,
@@ -53,44 +36,178 @@ defineExpose({
 				</path>
 			</svg>
 		</button>
+
 		<div class="sidebar-body">
-			<div class="brand">
-				<div class="brand-badge">SC</div>
-				<div>
-					<div class="brand-name">SelfClaw</div>
-					<div class="status-row">
-						<span class="status-dot"></span>
-						<span id="sidebar-status-text">{{ fallbackStatusText }}</span>
+			<nav class="sidebar-nav" aria-label="SelfClaw navigation">
+				<button class="sidebar-primary" type="button" :disabled="isChannelMode"
+					:title="isChannelMode ? '频道会话由外部消息自动创建' : '新建会话'" @click="emit('new-conversation')">
+					<span class="sidebar-nav-icon" aria-hidden="true">
+						<svg viewBox="0 0 20 20" fill="none">
+							<path d="M5 15h10M5 15V5h10v5" />
+							<path d="M8 8h4M8 11h2" />
+						</svg>
+					</span>
+					<span>新建会话</span>
+				</button>
+
+				<div class="sidebar-nav-scroll">
+					<div class="sidebar-nav-group">
+						<button class="sidebar-nav-item active" type="button" aria-current="page">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<path d="M3.5 7.5h13l-1.2-3h-4.6l-.9 1.2H4.4l-.9 1.8Z" />
+									<path d="M3.5 7.5v7h13v-7" />
+								</svg>
+							</span>
+							<span>所有会话</span>
+						</button>
+						<div ref="conversationListEl" class="sidebar-nav-children sidebar-conversation-list-shell">
+							<div class="sidebar-conversation-date">今天</div>
+							<div id="conversation-list" class="conversation-list" v-html="conversationListHtml"></div>
+						</div>
+						<div class="sidebar-divider"></div>
+						<div class="sidebar-nav-subitem standalone">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<path d="M5 4v12M5 5.5h8l-1 3 1 3H5" />
+								</svg>
+							</span>
+							<span>已标记</span>
+						</div>
+						<div class="sidebar-nav-subitem standalone">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<path d="M4 6.5h12M5.5 6.5v9h9v-9" />
+									<path d="M7.5 4.5h5l.8 2h-6.6l.8-2Z" />
+								</svg>
+							</span>
+							<span>已归档</span>
+						</div>
+					</div>
+
+					<div class="sidebar-divider"></div>
+					<div class="sidebar-nav-subitem standalone">
+						<span class="sidebar-nav-icon" aria-hidden="true">
+							<svg viewBox="0 0 20 20" fill="none">
+								<path d="M4 8.5 9.5 14 16 7.5 11.5 3H5.5L4 4.5v4Z" />
+								<path d="M7.25 6.25h.01" />
+							</svg>
+						</span>
+						<span>标签</span>
+					</div>
+
+					<div class="sidebar-divider"></div>
+					<div class="sidebar-nav-heading">
+						<span class="sidebar-nav-icon" aria-hidden="true">
+							<svg viewBox="0 0 20 20" fill="none">
+								<path d="M5 5.5c0-1.1 2.2-2 5-2s5 .9 5 2-2.2 2-5 2-5-.9-5-2Z" />
+								<path d="M5 5.5v6c0 1.1 2.2 2 5 2s5-.9 5-2v-6" />
+								<path d="M5 8.5c0 1.1 2.2 2 5 2s5-.9 5-2" />
+							</svg>
+						</span>
+						<span>数据源</span>
+					</div>
+					<div class="sidebar-nav-children">
+						<div class="sidebar-nav-subitem">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<circle cx="10" cy="10" r="6.5" />
+									<path d="M3.5 10h13M10 3.5c2 2 2 11 0 13M10 3.5c-2 2-2 11 0 13" />
+								</svg>
+							</span>
+							<span>API</span>
+						</div>
+						<div class="sidebar-nav-subitem">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<path d="M7 13 13 7M6 9.5 4.5 11a2.8 2.8 0 0 0 4 4L10 13.5" />
+									<path d="M10 6.5 11.5 5a2.8 2.8 0 0 1 4 4L14 10.5" />
+								</svg>
+							</span>
+							<span>MCP</span>
+						</div>
+						<div class="sidebar-nav-subitem">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<path d="M3.5 6.5h5l1.2 1.5h6.8v6.5h-13v-8Z" />
+								</svg>
+							</span>
+							<span>本地文件夹</span>
+						</div>
+					</div>
+
+					<div class="sidebar-divider"></div>
+					<div class="sidebar-nav-subitem standalone">
+						<span class="sidebar-nav-icon" aria-hidden="true">
+							<svg viewBox="0 0 20 20" fill="none">
+								<path d="M10 3.5 5.5 10H10l-1 6.5 5.5-8H10V3.5Z" />
+							</svg>
+						</span>
+						<span>技能</span>
+					</div>
+
+					<div class="sidebar-nav-heading">
+						<span class="sidebar-nav-icon" aria-hidden="true">
+							<svg viewBox="0 0 20 20" fill="none">
+								<path d="M4.5 5.5h2v2h-2zM4.5 12.5h2v2h-2zM9 6.5h6.5M9 13.5h6.5" />
+							</svg>
+						</span>
+						<span>自动化</span>
+					</div>
+					<div class="sidebar-nav-children">
+						<div class="sidebar-nav-subitem">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<circle cx="10" cy="10" r="6" />
+									<path d="M10 6.8v3.5l2.4 1.6" />
+								</svg>
+							</span>
+							<span>定时任务</span>
+						</div>
+						<div class="sidebar-nav-subitem">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<path d="M4 11.5c2.5-4 4.5-4 6 0s3.5 4 6 0" />
+									<path d="M4 8.5c2.5 4 4.5 4 6 0s3.5-4 6 0" />
+								</svg>
+							</span>
+							<span>事件触发</span>
+						</div>
+						<div class="sidebar-nav-subitem">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<path d="M5 8.5h10v6H5z" />
+									<path d="M8 8.5V6a2 2 0 1 1 4 0v2.5" />
+									<path d="M7.5 11.5h.01M12.5 11.5h.01" />
+								</svg>
+							</span>
+							<span>智能体</span>
+						</div>
 					</div>
 				</div>
-			</div>
-			<button class="sidebar-primary" type="button" :disabled="isChannelMode"
-				:title="isChannelMode ? '频道会话由外部消息自动创建' : '新建对话'" @click="emit('new-conversation')">
-				+ 新建对话
-			</button>
-			<input id="conversation-search" class="search-box" type="text" :value="conversationSearch"
-				placeholder="搜索会话..." @input="onSearchInput" />
-			<div class="section-title">{{ conversationSectionTitle }}</div>
-			<div id="conversation-list" ref="conversationListEl" class="conversation-list"
-				v-html="conversationListHtml"></div>
-			<button class="sidebar-footer" type="button" @click="emit('open-settings')">
-				<div class="sidebar-footer-icon" aria-hidden="true">
-					<svg viewBox="0 0 16 16">
-						<path
-							d="M8 0a8.2 8.2 0 0 1 .701.031C9.444.095 9.99.645 10.16 1.29l.288 1.107c.018.066.079.158.212.224.231.114.454.243.668.386.123.082.233.09.299.071l1.103-.303c.644-.176 1.392.021 1.82.63.27.385.506.792.704 1.218.315.675.111 1.422-.364 1.891l-.814.806c-.049.048-.098.147-.088.294.016.257.016.515 0 .772-.01.147.038.246.088.294l.814.806c.475.469.679 1.216.364 1.891a7.977 7.977 0 0 1-.704 1.217c-.428.61-1.176.807-1.82.63l-1.102-.302c-.067-.019-.177-.011-.3.071a5.909 5.909 0 0 1-.668.386c-.133.066-.194.158-.211.224l-.29 1.106c-.168.646-.715 1.196-1.458 1.26a8.006 8.006 0 0 1-1.402 0c-.743-.064-1.289-.614-1.458-1.26l-.289-1.106c-.018-.066-.079-.158-.212-.224a5.738 5.738 0 0 1-.668-.386c-.123-.082-.233-.09-.299-.071l-1.103.303c-.644.176-1.392-.021-1.82-.63a8.12 8.12 0 0 1-.704-1.218c-.315-.675-.111-1.422.363-1.891l.815-.806c.05-.048.098-.147.088-.294a6.214 6.214 0 0 1 0-.772c.01-.147-.038-.246-.088-.294l-.815-.806C.635 6.045.431 5.298.746 4.623a7.92 7.92 0 0 1 .704-1.217c.428-.61 1.176-.807 1.82-.63l1.102.302c.067.019.177.011.3-.071.214-.143.437-.272.668-.386.133-.066.194-.158.211-.224l.29-1.106C6.009.645 6.556.095 7.299.03 7.53.01 7.764 0 8 0Zm-.571 1.525c-.036.003-.108.036-.137.146l-.289 1.105c-.147.561-.549.967-.998 1.189-.173.086-.34.183-.5.29-.417.278-.97.423-1.529.27l-1.103-.303c-.109-.03-.175.016-.195.045-.22.312-.412.644-.573.99-.014.031-.021.11.059.19l.815.806c.411.406.562.957.53 1.456a4.709 4.709 0 0 0 0 .582c.032.499-.119 1.05-.53 1.456l-.815.806c-.081.08-.073.159-.059.19.162.346.353.677.573.989.02.03.085.076.195.046l1.102-.303c.56-.153 1.113-.008 1.53.27.161.107.328.204.501.29.447.222.85.629.997 1.189l.289 1.105c.029.109.101.143.137.146a6.6 6.6 0 0 0 1.142 0c.036-.003.108-.036.137-.146l.289-1.105c.147-.561.549-.967.998-1.189.173-.086.34-.183.5-.29.417-.278.97-.423 1.529-.27l1.103.303c.109.029.175-.016.195-.045.22-.313.411-.644.573-.99.014-.031.021-.11-.059-.19l-.815-.806c-.411-.406-.562-.957-.53-1.456a4.709 4.709 0 0 0 0-.582c-.032-.499.119-1.05.53-1.456l.815-.806c.081-.08.073-.159.059-.19a6.464 6.464 0 0 0-.573-.989c-.02-.03-.085-.076-.195-.046l-1.102.303c-.56.153-1.113.008-1.53-.27a4.44 4.44 0 0 0-.501-.29c-.447-.222-.85-.629-.997-1.189l-.289-1.105c-.029-.11-.101-.143-.137-.146a6.6 6.6 0 0 0-1.142 0ZM11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9.5 8a1.5 1.5 0 1 0-3.001.001A1.5 1.5 0 0 0 9.5 8Z"
-						></path>
-					</svg>
+
+				<div class="sidebar-nav-footer">
+					<button class="sidebar-nav-subitem standalone action" type="button" @click="emit('open-settings')">
+						<span class="sidebar-nav-icon" aria-hidden="true">
+							<svg viewBox="0 0 20 20" fill="none">
+								<path d="M10 12.4a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z" />
+								<path d="M4.5 10c0-.4.1-.8.2-1.2L3.5 7.7 5 5.1l1.6.5c.6-.5 1.2-.8 2-1L9 3h3l.4 1.6c.7.2 1.4.6 2 1l1.6-.5 1.5 2.6-1.2 1.1c.1.4.2.8.2 1.2s-.1.8-.2 1.2l1.2 1.1-1.5 2.6-1.6-.5c-.6.5-1.2.8-2 1L12 17H9l-.4-1.6c-.7-.2-1.4-.6-2-1l-1.6.5-1.5-2.6 1.2-1.1c-.1-.4-.2-.8-.2-1.2Z" />
+							</svg>
+						</span>
+						<span>设置</span>
+					</button>
+					<div class="sidebar-nav-subitem standalone">
+						<span class="sidebar-nav-icon" aria-hidden="true">
+							<svg viewBox="0 0 20 20" fill="none">
+								<path d="M4.5 14.5h11M5.5 5.5h9v9h-9z" />
+								<path d="M8 8h4M8 11h2.5" />
+							</svg>
+						</span>
+						<span>最新动态</span>
+					</div>
 				</div>
-				<div class="sidebar-footer-copy">
-					<div class="sidebar-footer-title">系统设置</div>
-					<div class="sidebar-footer-subtitle">模型、工作区、我的频道、主题</div>
-				</div>
-				<div class="sidebar-footer-chevron" aria-hidden="true">
-					<svg viewBox="0 0 16 16" fill="none">
-						<path d="M6 3.5 10.5 8 6 12.5"></path>
-					</svg>
-				</div>
-			</button>
+			</nav>
+
 		</div>
 	</aside>
 </template>

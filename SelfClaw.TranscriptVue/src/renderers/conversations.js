@@ -2,7 +2,6 @@ import { escapeHtml } from './shared';
 
 export function renderConversationList({
 	conversations,
-	conversationSearch,
 	selectedConversationId,
 	openConversationBranches,
 	openConversationMenuId,
@@ -23,7 +22,6 @@ export function renderConversationList({
 		childrenByParent.set(item.parentId, siblings);
 	}
 
-	const forceExpand = Boolean(conversationSearch.trim());
 	const effectiveBranches = new Map(openConversationBranches);
 	let selectedItem = selectedConversationId ? itemsById.get(selectedConversationId) || null : null;
 	while (selectedItem?.parentId) {
@@ -31,7 +29,7 @@ export function renderConversationList({
 		selectedItem = itemsById.get(selectedItem.parentId) || null;
 	}
 
-	const isBranchExpanded = (conversationId) => (forceExpand ? true : effectiveBranches.get(conversationId) !== false);
+	const isBranchExpanded = (conversationId) => effectiveBranches.get(conversationId) !== false;
 	const renderConversationNode = (item) => {
 		const menuOpen = openConversationMenuId === item.id;
 		const depth = Number.isFinite(item.depth) ? Number(item.depth) : 0;
@@ -65,6 +63,7 @@ export function renderConversationList({
 		}
 
 		const titleText = item.title || '未命名会话';
+		const hoverTitle = item.timestamp ? `${titleText} ${item.timestamp}` : titleText;
 		return `
       <div class="${rowClasses.join(' ')}" style="--conversation-depth:${depth};">
         ${
@@ -72,13 +71,12 @@ export function renderConversationList({
 						? `<button class="conversation-branch-toggle" data-action="toggle-conversation-branch" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="${isExpanded ? '折叠子会话' : '展开子会话'}" aria-expanded="${isExpanded ? 'true' : 'false'}" title="${isExpanded ? '折叠子会话' : '展开子会话'}">${isExpanded ? '▾' : '▸'}</button>`
 						: ''
 				}
-        <button class="${conversationClasses.join(' ')}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button" title="${escapeHtml(titleText)}">
+        <button class="${conversationClasses.join(' ')}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button" title="${escapeHtml(hoverTitle)}">
           <div class="conversation-title-row">
             ${item.badge ? `<span class="conversation-badge">@${escapeHtml(item.badge)}</span>` : ''}
-            <div class="conversation-title" title="${escapeHtml(titleText)}">${escapeHtml(titleText)}</div>
+            <div class="conversation-title" title="${escapeHtml(hoverTitle)}">${escapeHtml(titleText)}</div>
           </div>
           ${item.subtitle ? `<div class="conversation-subtitle">${escapeHtml(item.subtitle)}</div>` : ''}
-          <div class="conversation-time">${escapeHtml(item.timestamp)}</div>
         </button>
         <div class="conversation-menu-shell">
           <button class="conversation-menu-btn" data-action="toggle-conversation-menu" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="会话菜单">⋯</button>
