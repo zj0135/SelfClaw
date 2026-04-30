@@ -1,4 +1,4 @@
-export const GRAPH_VIEWBOX = { width: 1200, height: 720 };
+const GRAPH_VIEWBOX = { width: 1200, height: 720 };
 
 const HUMAN_ID = 'human';
 const PROGRAMMING_AGENT_ID = 'programming-agent';

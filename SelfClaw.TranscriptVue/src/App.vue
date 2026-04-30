@@ -48,7 +48,6 @@ const state = reactive({
 	teamMembers: [],
 	agentActivities: [],
 	contextUsage: null,
-	statusText: '',
 	isBusy: false,
 });
 
@@ -524,44 +523,29 @@ const selectedThemeLabel = computed(
 		}[state.selectedThemeId || 'system'] ||
 		'跟随系统'
 );
-const currentModelLabel = computed(() => state.selectedProfileModel || '未选择模型');
-const currentWorkspaceLabel = computed(() => selectedWorkspace.value?.label || '未绑定工作区');
 const composerPlaceholder = computed(() => (isChannelMode.value ? '频道会话由外部消息自动驱动' : 'Ask for follow-up changes'));
-const totalStepCount = computed(() => (isTeamMode.value ? visibleTeamMembers.value.length + (state.agentActivities?.length || 0) : state.agentActivities?.length || 0));
 const sendButtonDisabled = computed(
 	() => isChannelMode.value || (!state.isBusy && !composerValue.value.trim() && composerAttachments.value.length === 0) || !state.selectedProfileId
 );
 const settingsSections = computed(() => [
 	{
 		id: 'profile',
-		eyebrow: '模型配置',
 		title: '模型配置',
-		description: selectedProfile.value
-			? `${selectedProfile.value.label}${state.selectedProfileModel ? `  ${state.selectedProfileModel}` : ''}`
-			: '选择默认模型，并管理 Endpoint 与 API Key。',
 		badge: selectedProfile.value ? '已选择' : '未选择',
 	},
 	{
 		id: 'workspace',
-		eyebrow: '工作区',
 		title: '工作区',
-		description: selectedWorkspace.value?.label || '绑定本地目录，作为工具读取和搜索范围。',
 		badge: selectedWorkspace.value ? '已绑定' : '未绑定',
 	},
 	{
 		id: 'channels',
-		eyebrow: '我的频道',
 		title: '我的频道',
-		description: firstChannel.value
-			? `${firstChannel.value.name} · ${firstChannel.value.statusLabel}`
-			: '管理外部频道连接与自动收消息。',
 		badge: state.channels.filter((item) => item.isEnabled).length > 0 ? '已启用' : '未启用',
 	},
 	{
 		id: 'theme',
-		eyebrow: '界面主题',
 		title: '界面主题',
-		description: state.selectedThemeId === 'system' ? '当前跟随系统外观' : `当前为${selectedThemeLabel.value}`,
 		badge: selectedThemeLabel.value,
 	},
 ]);
@@ -1847,11 +1831,10 @@ onUnmounted(() => {
 			<main class="main-column">
 				<MainTopbar :conversation-modes="state.conversationModes"
 					:selected-conversation-mode-id="state.selectedConversationModeId"
-					:current-model-label="currentModelLabel" :current-workspace-label="currentWorkspaceLabel"
 					:profile-models="state.profileModels" :selected-profile-model="state.selectedProfileModel || ''"
 					:workspace-roots="state.workspaceRoots"
 					:selected-workspace-root-id="state.selectedWorkspaceRootId || ''"
-					@select-conversation-mode="selectConversationMode" @open-settings="openSettings"
+					@select-conversation-mode="selectConversationMode"
 					@request-profile-models="requestTopbarProfileModels"
 					@select-profile-model="onProfileModelChange" @select-workspace="onWorkspaceChange" />
 

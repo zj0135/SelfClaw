@@ -8,14 +8,6 @@ defineProps({
 		type: String,
 		default: '',
 	},
-	currentModelLabel: {
-		type: String,
-		default: '',
-	},
-	currentWorkspaceLabel: {
-		type: String,
-		default: '',
-	},
 	profileModels: {
 		type: Array,
 		default: () => [],
@@ -36,7 +28,6 @@ defineProps({
 
 const emit = defineEmits([
 	'select-conversation-mode',
-	'open-settings',
 	'request-profile-models',
 	'select-profile-model',
 	'select-workspace',
