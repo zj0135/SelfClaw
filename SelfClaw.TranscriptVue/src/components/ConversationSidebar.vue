@@ -27,20 +27,35 @@ defineExpose({
 
 <template>
 	<aside class="panel sidebar" :class="{ collapsed }">
-		<button class="pane-collapse-toggle pane-collapse-toggle-sidebar" type="button"
-			:aria-label="collapsed ? '展开' : '折叠'" :title="collapsed ? '展开' : '折叠'" @click="emit('toggle-collapse')">
-			<svg class="pane-collapse-toggle-icon pane-collapse-toggle-icon-left" xmlns="http://www.w3.org/2000/svg"
-				viewBox="0 0 1024 1024" aria-hidden="true">
-				<path fill="currentColor"
-					d="M529.408 149.376a29.12 29.12 0 0 1 41.728 0 30.59 30.59 0 0 1 0 42.688L259.264 511.936l311.872 319.936a30.59 30.59 0 0 1-.512 43.264 29.12 29.12 0 0 1-41.216-.512L197.76 534.272a32 32 0 0 1 0-44.672zm256 0a29.12 29.12 0 0 1 41.728 0 30.59 30.59 0 0 1 0 42.688L515.264 511.936l311.872 319.936a30.59 30.59 0 0 1-.512 43.264 29.12 29.12 0 0 1-41.216-.512L453.76 534.272a32 32 0 0 1 0-44.672z">
-				</path>
+		<button
+			class="pane-collapse-toggle pane-collapse-toggle-sidebar"
+			type="button"
+			:aria-label="collapsed ? '展开' : '折叠'"
+			:title="collapsed ? '展开' : '折叠'"
+			@click="emit('toggle-collapse')"
+		>
+			<svg
+				class="pane-collapse-toggle-icon pane-collapse-toggle-icon-left"
+				xmlns="http://www.w3.org/2000/svg"
+				viewBox="0 0 1024 1024"
+				aria-hidden="true"
+			>
+				<path
+					fill="currentColor"
+					d="M529.408 149.376a29.12 29.12 0 0 1 41.728 0 30.59 30.59 0 0 1 0 42.688L259.264 511.936l311.872 319.936a30.59 30.59 0 0 1-.512 43.264 29.12 29.12 0 0 1-41.216-.512L197.76 534.272a32 32 0 0 1 0-44.672zm256 0a29.12 29.12 0 0 1 41.728 0 30.59 30.59 0 0 1 0 42.688L515.264 511.936l311.872 319.936a30.59 30.59 0 0 1-.512 43.264 29.12 29.12 0 0 1-41.216-.512L453.76 534.272a32 32 0 0 1 0-44.672z"
+				></path>
 			</svg>
 		</button>
 
 		<div class="sidebar-body">
 			<nav class="sidebar-nav" aria-label="SelfClaw navigation">
-				<button class="sidebar-primary" type="button" :disabled="isChannelMode"
-					:title="isChannelMode ? '频道会话由外部消息自动创建' : '新建会话'" @click="emit('new-conversation')">
+				<button
+					class="sidebar-primary"
+					type="button"
+					:disabled="isChannelMode"
+					:title="isChannelMode ? '频道会话由外部消息自动创建' : '新建会话'"
+					@click="emit('new-conversation')"
+				>
 					<span class="sidebar-nav-icon" aria-hidden="true">
 						<svg viewBox="0 0 20 20" fill="none">
 							<path d="M5 15h10M5 15V5h10v5" />
@@ -62,18 +77,19 @@ defineExpose({
 							<span>所有会话</span>
 						</button>
 						<div ref="conversationListEl" class="sidebar-nav-children sidebar-conversation-list-shell">
-							<div class="sidebar-conversation-date">今天</div>
 							<div id="conversation-list" class="conversation-list" v-html="conversationListHtml"></div>
 						</div>
 						<div class="sidebar-divider"></div>
 						<div class="sidebar-nav-subitem standalone">
 							<span class="sidebar-nav-icon" aria-hidden="true">
 								<svg viewBox="0 0 20 20" fill="none">
-									<path d="M5 4v12M5 5.5h8l-1 3 1 3H5" />
+									<path d="M4 8.5 9.5 14 16 7.5 11.5 3H5.5L4 4.5v4Z" />
+									<path d="M7.25 6.25h.01" />
 								</svg>
 							</span>
-							<span>已标记</span>
+							<span>标签</span>
 						</div>
+
 						<div class="sidebar-nav-subitem standalone">
 							<span class="sidebar-nav-icon" aria-hidden="true">
 								<svg viewBox="0 0 20 20" fill="none">
@@ -84,59 +100,16 @@ defineExpose({
 							<span>已归档</span>
 						</div>
 					</div>
-
-					<div class="sidebar-divider"></div>
-					<div class="sidebar-nav-subitem standalone">
-						<span class="sidebar-nav-icon" aria-hidden="true">
-							<svg viewBox="0 0 20 20" fill="none">
-								<path d="M4 8.5 9.5 14 16 7.5 11.5 3H5.5L4 4.5v4Z" />
-								<path d="M7.25 6.25h.01" />
-							</svg>
-						</span>
-						<span>标签</span>
-					</div>
-
 					<div class="sidebar-divider"></div>
 					<div class="sidebar-nav-heading">
 						<span class="sidebar-nav-icon" aria-hidden="true">
 							<svg viewBox="0 0 20 20" fill="none">
-								<path d="M5 5.5c0-1.1 2.2-2 5-2s5 .9 5 2-2.2 2-5 2-5-.9-5-2Z" />
-								<path d="M5 5.5v6c0 1.1 2.2 2 5 2s5-.9 5-2v-6" />
-								<path d="M5 8.5c0 1.1 2.2 2 5 2s5-.9 5-2" />
+								<path d="M7 13 13 7M6 9.5 4.5 11a2.8 2.8 0 0 0 4 4L10 13.5" />
+								<path d="M10 6.5 11.5 5a2.8 2.8 0 0 1 4 4L14 10.5" />
 							</svg>
 						</span>
-						<span>数据源</span>
+						<span>MCP</span>
 					</div>
-					<div class="sidebar-nav-children">
-						<div class="sidebar-nav-subitem">
-							<span class="sidebar-nav-icon" aria-hidden="true">
-								<svg viewBox="0 0 20 20" fill="none">
-									<circle cx="10" cy="10" r="6.5" />
-									<path d="M3.5 10h13M10 3.5c2 2 2 11 0 13M10 3.5c-2 2-2 11 0 13" />
-								</svg>
-							</span>
-							<span>API</span>
-						</div>
-						<div class="sidebar-nav-subitem">
-							<span class="sidebar-nav-icon" aria-hidden="true">
-								<svg viewBox="0 0 20 20" fill="none">
-									<path d="M7 13 13 7M6 9.5 4.5 11a2.8 2.8 0 0 0 4 4L10 13.5" />
-									<path d="M10 6.5 11.5 5a2.8 2.8 0 0 1 4 4L14 10.5" />
-								</svg>
-							</span>
-							<span>MCP</span>
-						</div>
-						<div class="sidebar-nav-subitem">
-							<span class="sidebar-nav-icon" aria-hidden="true">
-								<svg viewBox="0 0 20 20" fill="none">
-									<path d="M3.5 6.5h5l1.2 1.5h6.8v6.5h-13v-8Z" />
-								</svg>
-							</span>
-							<span>本地文件夹</span>
-						</div>
-					</div>
-
-					<div class="sidebar-divider"></div>
 					<div class="sidebar-nav-subitem standalone">
 						<span class="sidebar-nav-icon" aria-hidden="true">
 							<svg viewBox="0 0 20 20" fill="none">
@@ -145,7 +118,16 @@ defineExpose({
 						</span>
 						<span>技能</span>
 					</div>
-
+					<div class="sidebar-nav-subitem standalone">
+						<span class="sidebar-nav-icon" aria-hidden="true">
+							<svg viewBox="0 0 20 20" fill="none">
+								<path d="M5 8.5h10v6H5z" />
+								<path d="M8 8.5V6a2 2 0 1 1 4 0v2.5" />
+								<path d="M7.5 11.5h.01M12.5 11.5h.01" />
+							</svg>
+						</span>
+						<span>智能体</span>
+					</div>
 					<div class="sidebar-nav-heading">
 						<span class="sidebar-nav-icon" aria-hidden="true">
 							<svg viewBox="0 0 20 20" fill="none">
@@ -173,16 +155,6 @@ defineExpose({
 							</span>
 							<span>事件触发</span>
 						</div>
-						<div class="sidebar-nav-subitem">
-							<span class="sidebar-nav-icon" aria-hidden="true">
-								<svg viewBox="0 0 20 20" fill="none">
-									<path d="M5 8.5h10v6H5z" />
-									<path d="M8 8.5V6a2 2 0 1 1 4 0v2.5" />
-									<path d="M7.5 11.5h.01M12.5 11.5h.01" />
-								</svg>
-							</span>
-							<span>智能体</span>
-						</div>
 					</div>
 				</div>
 
@@ -191,23 +163,15 @@ defineExpose({
 						<span class="sidebar-nav-icon" aria-hidden="true">
 							<svg viewBox="0 0 20 20" fill="none">
 								<path d="M10 12.4a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z" />
-								<path d="M4.5 10c0-.4.1-.8.2-1.2L3.5 7.7 5 5.1l1.6.5c.6-.5 1.2-.8 2-1L9 3h3l.4 1.6c.7.2 1.4.6 2 1l1.6-.5 1.5 2.6-1.2 1.1c.1.4.2.8.2 1.2s-.1.8-.2 1.2l1.2 1.1-1.5 2.6-1.6-.5c-.6.5-1.2.8-2 1L12 17H9l-.4-1.6c-.7-.2-1.4-.6-2-1l-1.6.5-1.5-2.6 1.2-1.1c-.1-.4-.2-.8-.2-1.2Z" />
+								<path
+									d="M4.5 10c0-.4.1-.8.2-1.2L3.5 7.7 5 5.1l1.6.5c.6-.5 1.2-.8 2-1L9 3h3l.4 1.6c.7.2 1.4.6 2 1l1.6-.5 1.5 2.6-1.2 1.1c.1.4.2.8.2 1.2s-.1.8-.2 1.2l1.2 1.1-1.5 2.6-1.6-.5c-.6.5-1.2.8-2 1L12 17H9l-.4-1.6c-.7-.2-1.4-.6-2-1l-1.6.5-1.5-2.6 1.2-1.1c-.1-.4-.2-.8-.2-1.2Z"
+								/>
 							</svg>
 						</span>
 						<span>设置</span>
 					</button>
-					<div class="sidebar-nav-subitem standalone">
-						<span class="sidebar-nav-icon" aria-hidden="true">
-							<svg viewBox="0 0 20 20" fill="none">
-								<path d="M4.5 14.5h11M5.5 5.5h9v9h-9z" />
-								<path d="M8 8h4M8 11h2.5" />
-							</svg>
-						</span>
-						<span>最新动态</span>
-					</div>
 				</div>
 			</nav>
-
 		</div>
 	</aside>
 </template>

@@ -6702,16 +6702,6 @@ html[data-theme='light'] .sidebar .sidebar-primary {
 	stroke-linejoin: round;
 }
 
-.sidebar-conversation-date {
-	flex: 0 0 auto;
-	margin: 5px 8px 4px;
-	color: #777d88;
-	font-size: 12px;
-	font-weight: 560;
-	line-height: 1;
-	letter-spacing: 0;
-}
-
 .sidebar .conversation-list {
 	flex: 0 0 auto;
 	min-height: 0;

@@ -115,7 +115,6 @@ defineExpose({
 			<aside class="settings-nav">
 				<div class="settings-nav-header">
 					<div class="settings-title">系统设置</div>
-					<div class="settings-hint">左侧切换模块，右侧集中完成当前配置。</div>
 				</div>
 
 				<div class="settings-nav-list">
@@ -132,7 +131,6 @@ defineExpose({
 							<div class="settings-nav-item-title">{{ section.title }}</div>
 							<div class="settings-nav-item-badge">{{ section.badge }}</div>
 						</div>
-						<div class="settings-nav-item-description">{{ section.description }}</div>
 					</button>
 				</div>
 
@@ -144,9 +142,7 @@ defineExpose({
 			<div ref="panelEl" class="settings-content" @scroll="onPanelScroll">
 				<div class="settings-header">
 					<div>
-						<div class="field-label">{{ activeSettingsMeta?.eyebrow }}</div>
 						<div class="settings-section-title settings-section-title-hero">{{ activeSettingsMeta?.title }}</div>
-						<div class="settings-hint settings-header-hint">{{ activeSettingsMeta?.description }}</div>
 					</div>
 					<button class="close-btn" type="button" aria-label="关闭" @click="emit('close')">&times;</button>
 				</div>
@@ -158,7 +154,6 @@ defineExpose({
 				<section v-if="activeSection === 'profile'" class="settings-section settings-section-active">
 					<div class="settings-section-header">
 						<div class="settings-section-copy">
-							<div class="field-label">当前配置</div>
 							<div class="settings-section-title">模型选择与管理</div>
 						</div>
 						<div class="settings-badge">{{ selectedProfile ? '已选择' : '未选择' }}</div>
@@ -171,7 +166,9 @@ defineExpose({
 								<option v-for="option in profiles" :key="option.id" :value="option.id">{{ option.label }}</option>
 							</select>
 							<button class="ghost-btn compact-btn" type="button" :disabled="!selectedProfile" @click="emit('edit-profile')">编辑</button>
-							<button class="ghost-btn compact-btn danger-btn" type="button" :disabled="!selectedProfile" @click="emit('delete-profile')">删除</button>
+							<button class="ghost-btn compact-btn danger-btn" type="button" :disabled="!selectedProfile" @click="emit('delete-profile')">
+								删除
+							</button>
 							<button class="icon-add-btn" type="button" aria-label="新增模型配置" @click="emit('create-profile')">+</button>
 						</div>
 					</div>
@@ -186,7 +183,6 @@ defineExpose({
 				<section v-else-if="activeSection === 'workspace'" class="settings-section settings-section-active">
 					<div class="settings-section-header">
 						<div class="settings-section-copy">
-							<div class="field-label">当前工作区</div>
 							<div class="settings-section-title">工作区绑定与切换</div>
 						</div>
 						<div class="settings-badge">{{ selectedWorkspace ? '已绑定' : '未绑定' }}</div>
@@ -194,12 +190,19 @@ defineExpose({
 					<div class="field-group">
 						<div class="field-label">当前工作区</div>
 						<div class="settings-select-row">
-							<select id="workspace-select" class="field-select" :value="selectedWorkspaceRootId || ''" @change="emit('select-workspace', $event.target.value)">
+							<select
+								id="workspace-select"
+								class="field-select"
+								:value="selectedWorkspaceRootId || ''"
+								@change="emit('select-workspace', $event.target.value)"
+							>
 								<option value="">未绑定工作区</option>
 								<option v-for="option in workspaceRoots" :key="option.id" :value="option.id">{{ option.label }}</option>
 							</select>
 							<button class="ghost-btn compact-btn" type="button" :disabled="!selectedWorkspace" @click="emit('edit-workspace')">编辑</button>
-							<button class="ghost-btn compact-btn danger-btn" type="button" :disabled="!selectedWorkspace" @click="emit('delete-workspace')">删除</button>
+							<button class="ghost-btn compact-btn danger-btn" type="button" :disabled="!selectedWorkspace" @click="emit('delete-workspace')">
+								删除
+							</button>
 							<button class="icon-add-btn" type="button" aria-label="新增工作区" @click="emit('create-workspace')">+</button>
 						</div>
 					</div>
@@ -214,7 +217,6 @@ defineExpose({
 				<section v-else-if="activeSection === 'channels'" class="settings-section settings-section-active">
 					<div class="settings-section-header">
 						<div class="settings-section-copy">
-							<div class="field-label">支持的频道</div>
 							<div class="settings-section-title">频道接入与监听</div>
 						</div>
 						<div class="settings-badge">{{ enabledChannelCount }} / {{ channels.length }}</div>
@@ -223,7 +225,6 @@ defineExpose({
 						<article v-for="channel in channels" :key="channel.id" class="channel-card" :class="[{ enabled: channel.isEnabled }, channel.status]">
 							<div class="channel-card-top">
 								<div class="channel-card-copy">
-									<div class="field-label">{{ channel.name }}</div>
 									<div class="settings-section-title">{{ channel.displayName || channel.name }}</div>
 									<div class="settings-hint">{{ channel.description }}</div>
 								</div>
@@ -251,7 +252,6 @@ defineExpose({
 				<section v-else class="settings-section settings-section-active">
 					<div class="settings-section-header">
 						<div class="settings-section-copy">
-							<div class="field-label">界面主题</div>
 							<div class="settings-section-title">主题与外观</div>
 						</div>
 						<div class="settings-badge">{{ selectedThemeLabel }}</div>
