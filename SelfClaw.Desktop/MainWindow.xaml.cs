@@ -71,6 +71,7 @@ public partial class MainWindow : Window
         SelectedThemeId: null,
         Channels: [],
         McpServers: [],
+        Skills: [],
         TeamMembers: [],
         AgentActivities: [],
         IsPlanningModeEnabled: false,
@@ -231,6 +232,8 @@ public partial class MainWindow : Window
             themeOptions = state.ThemeOptions,
             selectedThemeId = state.SelectedThemeId,
             channels = state.Channels,
+            mcpServers = state.McpServers,
+            skills = state.Skills,
             teamMembers = state.TeamMembers,
             agentActivities = state.AgentActivities,
             isPlanningModeEnabled = state.IsPlanningModeEnabled,
@@ -508,6 +511,14 @@ public partial class MainWindow : Window
                 case "delete-mcp-server":
                     feedbackScope = "mcp";
                     await DeleteMcpServerFromTranscriptAsync(document.RootElement);
+                    break;
+                case "set-mcp-server-enabled":
+                    feedbackScope = "mcp";
+                    await SetMcpServerEnabledFromTranscriptAsync(document.RootElement);
+                    break;
+                case "set-skill-enabled":
+                    feedbackScope = "mcp";
+                    await SetSkillEnabledFromTranscriptAsync(document.RootElement);
                     break;
                 case "pick-workspace-path":
                     await PickWorkspacePathFromTranscriptAsync();
@@ -1062,6 +1073,20 @@ public partial class MainWindow : Window
     {
         await _viewModel.DeleteMcpServerAsync(GetString(root, "serverId"));
         PostUiFeedback("success", "MCP server deleted.", "mcp");
+    }
+
+    private async Task SetMcpServerEnabledFromTranscriptAsync(JsonElement root)
+    {
+        var enabled = GetBool(root, "enabled");
+        await _viewModel.SetMcpServerEnabledAsync(GetString(root, "serverId"), enabled);
+        PostUiFeedback("success", enabled ? "MCP server enabled." : "MCP server disabled.", "mcp");
+    }
+
+    private async Task SetSkillEnabledFromTranscriptAsync(JsonElement root)
+    {
+        var enabled = GetBool(root, "enabled");
+        await _viewModel.SetSkillEnabledAsync(GetString(root, "skillId"), enabled);
+        PostUiFeedback("success", enabled ? "Skill enabled." : "Skill disabled.", "mcp");
     }
 
     private Task PickWorkspacePathFromTranscriptAsync()

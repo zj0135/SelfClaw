@@ -11,7 +11,7 @@ internal sealed class FileSystemAgentContextProviderFactory : IAgentContextProvi
     private readonly ILoggerFactory _loggerFactory;
     private readonly StoragePaths _storagePaths;
 
-    internal FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, StoragePaths storagePaths)
+    public FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, StoragePaths storagePaths)
     {
         _loggerFactory = loggerFactory;
         _storagePaths = storagePaths;

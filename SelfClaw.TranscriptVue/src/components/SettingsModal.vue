@@ -230,7 +230,7 @@ defineExpose({
 						<div class="settings-badge">{{ enabledMcpServerCount }} / {{ mcpServers.length }}</div>
 					</div>
 					<div class="channel-card-actions mcp-section-actions">
-						<div class="settings-hint">仅维护本地 selfclaw-desktop.json 中的 mcp_servers 配置，暂不连接后端 MCP 运行时。</div>
+						<div class="settings-hint">仅维护本地 desktop-settings.json 中的 mcp_servers 配置，暂不连接后端 MCP 运行时。</div>
 						<button class="icon-add-btn" type="button" aria-label="新增 MCP 服务" @click="emit('create-mcp-server')">+</button>
 					</div>
 					<div v-if="mcpServers.length > 0" class="channel-card-list">

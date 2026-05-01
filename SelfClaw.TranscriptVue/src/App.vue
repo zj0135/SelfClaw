@@ -50,6 +50,7 @@ const state = reactive({
 	selectedThemeId: 'system',
 	channels: [],
 	mcpServers: [],
+	skills: [],
 	teamMembers: [],
 	agentActivities: [],
 	contextUsage: null,
@@ -726,6 +727,7 @@ function normalizeState() {
 	state.themeOptions = state.themeOptions || [];
 	state.channels = state.channels || [];
 	state.mcpServers = state.mcpServers || [];
+	state.skills = state.skills || [];
 }
 
 function closeMentionPicker() {
@@ -1718,6 +1720,24 @@ function deleteMcpServer(serverId) {
 	post({ type: 'delete-mcp-server', serverId });
 }
 
+function setMcpServerEnabled({ server, enabled }) {
+	if (!server?.id) {
+		return;
+	}
+
+	clearFeedback('mcp');
+	post({ type: 'set-mcp-server-enabled', serverId: server.id, enabled: Boolean(enabled) });
+}
+
+function setSkillEnabled({ skill, enabled }) {
+	if (!skill?.id) {
+		return;
+	}
+
+	clearFeedback('mcp');
+	post({ type: 'set-skill-enabled', skillId: skill.id, enabled: Boolean(enabled) });
+}
+
 function saveEditor() {
 	const error = validateEditorDraft(editorState);
 	if (error) {
@@ -1903,9 +1923,11 @@ onUnmounted(() => {
 		@wheel.capture.passive="onRootWheel" @pointerdown.capture="onRootPointerDown">
 		<div class="app-shell" :class="{ 'left-pane-collapsed': leftPaneCollapsed }">
 			<ConversationSidebar ref="sidebarRef" :is-channel-mode="isChannelMode" :conversation-list-html="conversationListHtml"
-				:collapsed="leftPaneCollapsed" :mcp-servers="state.mcpServers" @new-conversation="newConversation"
+				:collapsed="leftPaneCollapsed" :mcp-servers="state.mcpServers" :skills="state.skills" @new-conversation="newConversation"
 				@open-settings="openSettings" @open-mcp-settings="openSettings('mcp')" @create-mcp-server="createMcpServer"
 				@edit-mcp-server="editMcpServer" @delete-mcp-server="deleteMcpServer"
+				@set-mcp-server-enabled="setMcpServerEnabled"
+				@set-skill-enabled="setSkillEnabled"
 				@toggle-collapse="toggleLeftPaneCollapse" />
 
 			<main class="main-column">

@@ -22,13 +22,11 @@ public sealed class DesktopSettingsStore
     };
 
     private readonly string _settingsPath;
-    private readonly string _legacySettingsPath;
     private readonly object _syncRoot = new();
 
     public DesktopSettingsStore(StoragePaths storagePaths)
     {
-        _settingsPath = Path.Combine(storagePaths.AppDataDirectory, "selfclaw-desktop.json");
-        _legacySettingsPath = Path.Combine(storagePaths.AppDataDirectory, "desktop-settings.json");
+        _settingsPath = Path.Combine(storagePaths.AppDataDirectory, "desktop-settings.json");
     }
 
     public DesktopSettings Load()
@@ -57,16 +55,7 @@ public sealed class DesktopSettingsStore
             DesktopSettings settings;
             if (!File.Exists(_settingsPath))
             {
-                if (File.Exists(_legacySettingsPath))
-                {
-                    originalJson = File.ReadAllText(_legacySettingsPath);
-                    settings = JsonSerializer.Deserialize<DesktopSettings>(originalJson, JsonOptions) ?? DesktopSettings.Default;
-                }
-                else
-                {
-                    settings = DesktopSettings.Default;
-                }
-
+                settings = DesktopSettings.Default;
                 shouldWrite = true;
             }
             else
@@ -100,6 +89,12 @@ public sealed class DesktopSettingsStore
         var channels = settings.Channels ?? DesktopChannelSettings.Default;
         var items = new Dictionary<string, DesktopChannelConfiguration>(StringComparer.OrdinalIgnoreCase);
         var mcpServers = new Dictionary<string, DesktopMcpServerConfiguration>(StringComparer.OrdinalIgnoreCase);
+        var disabledSkills = (settings.DisabledSkills ?? [])
+            .Select(NormalizeSkillId)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
         foreach (var (channelId, configuration) in channels.Items ?? new Dictionary<string, DesktopChannelConfiguration>())
         {
@@ -163,8 +158,20 @@ public sealed class DesktopSettingsStore
             {
                 Items = items
             },
-            McpServers = mcpServers
+            McpServers = mcpServers,
+            DisabledSkills = disabledSkills
         };
+    }
+
+    private static string NormalizeSkillId(string? skillId)
+    {
+        var normalized = (skillId ?? string.Empty).Replace('\\', '/').Trim('/');
+        var segments = normalized
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(item => item is not "." and not "..")
+            .ToArray();
+
+        return string.Join("/", segments);
     }
 
     private static DesktopChannelConfiguration NormalizeChannelConfiguration(DesktopChannelConfiguration? configuration)

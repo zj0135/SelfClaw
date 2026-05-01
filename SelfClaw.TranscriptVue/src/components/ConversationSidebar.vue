@@ -1,7 +1,7 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
-defineProps({
+const props = defineProps({
 	isChannelMode: {
 		type: Boolean,
 		default: false,
@@ -18,6 +18,10 @@ defineProps({
 		type: Array,
 		default: () => [],
 	},
+	skills: {
+		type: Array,
+		default: () => [],
+	},
 });
 
 const emit = defineEmits([
@@ -27,14 +31,63 @@ const emit = defineEmits([
 	'create-mcp-server',
 	'edit-mcp-server',
 	'delete-mcp-server',
+	'set-mcp-server-enabled',
+	'set-skill-enabled',
 	'toggle-collapse',
 ]);
 
 const conversationListEl = ref(null);
 const allConversationsCollapsed = ref(false);
+const mcpCollapsed = ref(false);
+const skillsCollapsed = ref(false);
+const automationCollapsed = ref(false);
+const selectedSkillId = ref(null);
+
+const enabledMcpServerCount = computed(() => props.mcpServers.filter((server) => server.enabled !== false).length);
+const mcpCountLabel = computed(() => (props.mcpServers.length > 0 ? `${enabledMcpServerCount.value} / ${props.mcpServers.length}` : '0'));
+const enabledSkillCount = computed(() => props.skills.filter((skill) => skill.enabled !== false).length);
+const skillCountLabel = computed(() => (props.skills.length > 0 ? `${enabledSkillCount.value} / ${props.skills.length}` : '0'));
+const selectedSkill = computed(() => {
+	return props.skills.find((skill) => skill.id === selectedSkillId.value) || null;
+});
+const activeSkillId = computed(() => selectedSkill.value?.id || null);
 
 function toggleAllConversations() {
 	allConversationsCollapsed.value = !allConversationsCollapsed.value;
+}
+
+function toggleMcp() {
+	mcpCollapsed.value = !mcpCollapsed.value;
+}
+
+function toggleSkills() {
+	skillsCollapsed.value = !skillsCollapsed.value;
+}
+
+function toggleAutomation() {
+	automationCollapsed.value = !automationCollapsed.value;
+}
+
+function openSkill(skill) {
+	selectedSkillId.value = skill.id;
+}
+
+function closeSkill() {
+	selectedSkillId.value = null;
+}
+
+function setMcpServerEnabled(server, event) {
+	emit('set-mcp-server-enabled', {
+		server,
+		enabled: Boolean(event.target?.checked),
+	});
+}
+
+function setSkillEnabled(skill, event) {
+	emit('set-skill-enabled', {
+		skill,
+		enabled: Boolean(event.target?.checked),
+	});
 }
 
 defineExpose({
@@ -85,7 +138,7 @@ defineExpose({
 				<div class="sidebar-nav-scroll">
 					<div class="sidebar-nav-group">
 						<button
-							class="sidebar-nav-item active"
+							class="sidebar-nav-item sidebar-main-node"
 							type="button"
 							aria-current="page"
 							:aria-expanded="allConversationsCollapsed ? 'false' : 'true'"
@@ -128,19 +181,22 @@ defineExpose({
 						</div>
 					</div>
 					<div class="sidebar-divider"></div>
-					<div class="sidebar-nav-heading sidebar-nav-heading-action">
+					<button
+						class="sidebar-nav-heading sidebar-nav-heading-action sidebar-main-node sidebar-mcp-heading"
+						type="button"
+						:aria-expanded="mcpCollapsed ? 'false' : 'true'"
+						@click="toggleMcp"
+					>
 						<span class="sidebar-nav-icon" aria-hidden="true">
 							<svg viewBox="0 0 20 20" fill="none">
 								<path d="M7 13 13 7M6 9.5 4.5 11a2.8 2.8 0 0 0 4 4L10 13.5" />
 								<path d="M10 6.5 11.5 5a2.8 2.8 0 0 1 4 4L14 10.5" />
 							</svg>
 						</span>
-						<button class="sidebar-heading-main" type="button" @click="emit('open-mcp-settings')">MCP</button>
-						<button class="sidebar-heading-action-btn" type="button" aria-label="新增 MCP 服务" title="新增 MCP 服务" @click.stop="emit('create-mcp-server')">
-							+
-						</button>
-					</div>
-					<div class="sidebar-nav-children sidebar-mcp-list">
+						<span class="sidebar-heading-main">MCP</span>
+						<span class="sidebar-mcp-count">{{ mcpCountLabel }}</span>
+					</button>
+					<div class="sidebar-nav-children sidebar-mcp-list" :class="{ collapsed: mcpCollapsed }">
 						<div v-if="mcpServers.length === 0" class="sidebar-nav-subitem sidebar-empty-subitem">
 							<span class="sidebar-nav-icon" aria-hidden="true">
 								<svg viewBox="0 0 20 20" fill="none">
@@ -163,21 +219,78 @@ defineExpose({
 										<span class="sidebar-mcp-meta">{{ server.enabled === false ? '已停用' : '已启用' }}</span>
 									</span>
 								</button>
-								<button class="sidebar-inline-icon-btn danger" type="button" aria-label="删除 MCP 服务" title="删除 MCP 服务" @click.stop="emit('delete-mcp-server', server.id)">
-									x
-								</button>
+								<label class="sidebar-skill-switch" :title="server.enabled === false ? '启用 MCP 服务' : '禁用 MCP 服务'" @click.stop>
+									<input type="checkbox" :checked="server.enabled !== false" @change="setMcpServerEnabled(server, $event)" />
+									<span aria-hidden="true"></span>
+								</label>
 							</div>
 						</template>
 					</div>
-					<div class="sidebar-nav-heading">
+					<button
+						class="sidebar-nav-subitem standalone sidebar-main-node sidebar-skill-heading"
+						type="button"
+						:aria-expanded="skillsCollapsed ? 'false' : 'true'"
+						@click="toggleSkills"
+					>
+						<span class="sidebar-nav-icon" aria-hidden="true">
+							<svg viewBox="0 0 20 20" fill="none">
+								<path d="M5 4.5h7.5L15 7v8.5H5z" />
+								<path d="M12.5 4.5V7H15" />
+								<path d="M7.5 10h5M7.5 12.5h4" />
+							</svg>
+						</span>
+						<span>技能</span>
+						<span class="sidebar-skill-count">{{ skillCountLabel }}</span>
+					</button>
+					<div class="sidebar-nav-children sidebar-skill-list" :class="{ collapsed: skillsCollapsed }">
+						<div v-if="skills.length === 0" class="sidebar-nav-subitem sidebar-empty-subitem">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<path d="M5 10h10" />
+								</svg>
+							</span>
+							<span>暂无技能</span>
+						</div>
+						<template v-else>
+							<div
+								v-for="skill in skills"
+								:key="skill.id"
+								class="sidebar-nav-subitem sidebar-skill-item"
+								:class="{ active: skill.id === activeSkillId, disabled: skill.enabled === false }"
+							>
+								<button class="sidebar-skill-main" type="button" :title="skill.relativePath || skill.id" @click="openSkill(skill)">
+									<span class="sidebar-nav-icon" aria-hidden="true">
+										<svg viewBox="0 0 20 20" fill="none">
+											<path d="M6 4.5h8v11H6z" />
+											<path d="M8 8h4M8 10.5h3.5" />
+										</svg>
+									</span>
+									<span class="sidebar-skill-copy">
+										<span class="sidebar-skill-name">{{ skill.name || skill.id }}</span>
+										<span class="sidebar-skill-meta">{{ skill.enabled === false ? '已禁用' : '已启用' }}</span>
+									</span>
+								</button>
+								<label class="sidebar-skill-switch" :title="skill.enabled === false ? '启用技能' : '禁用技能'" @click.stop>
+									<input type="checkbox" :checked="skill.enabled !== false" @change="setSkillEnabled(skill, $event)" />
+									<span aria-hidden="true"></span>
+								</label>
+							</div>
+						</template>
+					</div>
+					<button
+						class="sidebar-nav-heading sidebar-main-node"
+						type="button"
+						:aria-expanded="automationCollapsed ? 'false' : 'true'"
+						@click="toggleAutomation"
+					>
 						<span class="sidebar-nav-icon" aria-hidden="true">
 							<svg viewBox="0 0 20 20" fill="none">
 								<path d="M4.5 5.5h2v2h-2zM4.5 12.5h2v2h-2zM9 6.5h6.5M9 13.5h6.5" />
 							</svg>
 						</span>
 						<span>自动化</span>
-					</div>
-					<div class="sidebar-nav-children">
+					</button>
+					<div class="sidebar-nav-children" :class="{ collapsed: automationCollapsed }">
 						<div class="sidebar-nav-subitem">
 							<span class="sidebar-nav-icon" aria-hidden="true">
 								<svg viewBox="0 0 20 20" fill="none">
@@ -213,6 +326,18 @@ defineExpose({
 					</button>
 				</div>
 			</nav>
+		</div>
+		<div v-if="selectedSkill" class="skill-modal-backdrop" @click.self="closeSkill">
+			<section class="skill-modal" role="dialog" aria-modal="true" :aria-label="`${selectedSkill.name || selectedSkill.id} SKILL.md`">
+				<header class="skill-modal-head">
+					<div class="skill-modal-title-copy">
+						<div class="skill-modal-title">{{ selectedSkill.name || selectedSkill.id }}</div>
+						<div class="skill-modal-path">{{ selectedSkill.relativePath || selectedSkill.id }} / SKILL.md</div>
+					</div>
+					<button class="skill-modal-close" type="button" aria-label="关闭" title="关闭" @click="closeSkill">×</button>
+				</header>
+				<pre class="skill-modal-content">{{ selectedSkill.markdown || 'SKILL.md 为空' }}</pre>
+			</section>
 		</div>
 	</aside>
 </template>

@@ -4,8 +4,8 @@ namespace SelfClaw.Desktop.Services;
 
 public sealed record DesktopSettings
 {
-    public const int DefaultModelContextWindow = 128_000;
-    public const int DefaultModelAutoCompactTokenLimit = 96_000;
+    public const int DefaultModelContextWindow = 256_000;
+    public const int DefaultModelAutoCompactTokenLimit = 200_000;
 
     [JsonPropertyName("theme_preference")]
     public AppThemePreference ThemePreference { get; init; } = AppThemePreference.System;
@@ -21,6 +21,9 @@ public sealed record DesktopSettings
     [JsonPropertyName("mcp_servers")]
     public IReadOnlyDictionary<string, DesktopMcpServerConfiguration> McpServers { get; init; }
         = new Dictionary<string, DesktopMcpServerConfiguration>(StringComparer.OrdinalIgnoreCase);
+
+    [JsonPropertyName("disabled_skills")]
+    public IReadOnlyList<string> DisabledSkills { get; init; } = [];
 
     public static DesktopSettings Default { get; } = new();
 }

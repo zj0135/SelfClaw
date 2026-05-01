@@ -25,69 +25,6 @@ public sealed class FileSystemAgentContextProviderFactoryTests : IDisposable
         factory.CreateProviders().Should().BeEmpty();
     }
 
-    [Fact]
-    public void DiscoverSkillRoots_returns_assets_skill_root_when_skill_manifest_exists()
-    {
-        var skillDirectoryPath = Path.Combine(_testRootPath, "Assets", "skills", "code-review");
-        Directory.CreateDirectory(skillDirectoryPath);
-        File.WriteAllText(
-            Path.Combine(skillDirectoryPath, "SKILL.md"),
-            """
-            ---
-            name: code-review
-            description: Review code and call out correctness risks.
-            ---
-
-            Review the selected code carefully and focus on correctness.
-            """);
-
-        var factory = CreateFactory();
-
-        factory.DiscoverSkillRoots()
-            .Should()
-            .Equal(Path.GetFullPath(Path.Combine(_testRootPath, "Assets", "skills")));
-
-        factory.CreateProviders()
-            .Should()
-            .ContainSingle()
-            .Which.Should().BeOfType<AgentSkillsProvider>();
-    }
-
-    [Fact]
-    public void DiscoverSkillRoots_returns_project_assets_skill_root_when_multiple_asset_roots_are_available()
-    {
-        var outputAssetsPath = Path.Combine(_testRootPath, "SelfClaw.Desktop", "bin", "Debug", "net10.0-windows", "Assets");
-        Directory.CreateDirectory(outputAssetsPath);
-
-        var projectSkillDirectoryPath = Path.Combine(_testRootPath, "SelfClaw.Desktop", "Assets", "skills", "code-review");
-        Directory.CreateDirectory(projectSkillDirectoryPath);
-        File.WriteAllText(
-            Path.Combine(projectSkillDirectoryPath, "SKILL.md"),
-            """
-            ---
-            name: code-review
-            description: Review code and call out correctness risks.
-            ---
-
-            Review the selected code carefully and focus on correctness.
-            """);
-
-        var factory = new FileSystemAgentContextProviderFactory(
-            NullLoggerFactory.Instance,
-            CreateStoragePaths(),
-            Path.Combine(_testRootPath, "SelfClaw.Desktop", "Assets"),
-            outputAssetsPath);
-
-        factory.DiscoverSkillRoots()
-            .Should()
-            .Equal(Path.GetFullPath(Path.Combine(_testRootPath, "SelfClaw.Desktop", "Assets", "skills")));
-
-        factory.CreateProviders()
-            .Should()
-            .ContainSingle()
-            .Which.Should().BeOfType<AgentSkillsProvider>();
-    }
-
     public void Dispose()
     {
         if (Directory.Exists(_testRootPath))
@@ -97,7 +34,7 @@ public sealed class FileSystemAgentContextProviderFactoryTests : IDisposable
     }
 
     private FileSystemAgentContextProviderFactory CreateFactory()
-        => new(NullLoggerFactory.Instance, CreateStoragePaths(), Path.Combine(_testRootPath, "Assets"));
+        => new(NullLoggerFactory.Instance, CreateStoragePaths());
 
     private StoragePaths CreateStoragePaths()
         => new(

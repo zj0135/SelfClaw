@@ -2164,6 +2164,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ThemePreferenceToId(SelectedThemeOption?.Value ?? AppThemePreference.System),
             _channelManager.BuildTranscriptChannels(Profiles.ToArray()),
             BuildTranscriptMcpServers(),
+            BuildTranscriptSkills(),
             teamMembers,
             AgentActivityNodes.ToArray(),
             IsPlanningModeEnabled,
