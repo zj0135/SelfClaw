@@ -32,6 +32,10 @@ const title = computed(() => {
 		return '编辑频道配置';
 	}
 
+	if (props.editor.kind === 'mcp') {
+		return props.editor.mode === 'create' ? '新增 MCP 服务' : '编辑 MCP 服务';
+	}
+
 	return props.editor.mode === 'create' ? '新建工作区' : '编辑工作区';
 });
 
@@ -254,6 +258,43 @@ onBeforeUnmount(() => {
 						<div v-if="field.description" class="settings-hint channel-field-hint">{{ field.description }}
 						</div>
 					</div>
+				</template>
+
+				<template v-else-if="editor.kind === 'mcp'">
+					<div class="field-inline">
+						<div>
+							<div class="field-label">服务 ID</div>
+							<input id="editor-mcp-server-id" v-model="editor.draft.serverId" class="field-input" type="text"
+								:readonly="editor.mode === 'edit'" placeholder="filesystem" />
+						</div>
+						<div>
+							<div class="field-label">显示名称</div>
+							<input id="editor-mcp-display-name" v-model="editor.draft.displayName" class="field-input"
+								type="text" placeholder="Filesystem" />
+						</div>
+					</div>
+					<div>
+						<div class="field-label">启动命令</div>
+						<input id="editor-mcp-command" v-model="editor.draft.command" class="field-input" type="text"
+							placeholder="npx" />
+					</div>
+					<div>
+						<div class="field-label">参数</div>
+						<textarea id="editor-mcp-args" v-model="editor.draft.argsText" class="field-input field-textarea"
+							placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;D:\Repositories"></textarea>
+						<div class="settings-hint channel-field-hint">每行一个参数，保存后写入 args 数组。</div>
+					</div>
+					<div>
+						<div class="field-label">环境变量</div>
+						<textarea id="editor-mcp-env" v-model="editor.draft.envText" class="field-input field-textarea"
+							placeholder="KEY=value"></textarea>
+						<div class="settings-hint channel-field-hint">每行一个 KEY=VALUE，保存后写入 env 对象。</div>
+					</div>
+					<label class="toggle-field">
+						<input id="editor-mcp-enabled" v-model="editor.draft.enabled" class="toggle-input" type="checkbox" />
+						<span class="toggle-switch"></span>
+						<span class="toggle-label">启用</span>
+					</label>
 				</template>
 
 				<template v-else>

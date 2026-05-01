@@ -28,6 +28,15 @@ export const emptyChannel = () => ({
 	fields: [],
 });
 
+export const emptyMcpServer = () => ({
+	serverId: '',
+	displayName: '',
+	enabled: true,
+	command: '',
+	argsText: '',
+	envText: '',
+});
+
 export function normalizeSamplingValue(value, fallback, max) {
 	const numeric = Number(value);
 	if (Number.isNaN(numeric) || !Number.isFinite(numeric)) {
@@ -81,6 +90,61 @@ export function createChannelDraft(channel) {
 	};
 }
 
+export function formatMcpArgs(args) {
+	return (Array.isArray(args) ? args : [])
+		.filter((item) => typeof item === 'string' && item.trim())
+		.join('\n');
+}
+
+export function formatMcpEnv(env) {
+	return Object.entries(env || {})
+		.filter(([key]) => key && key.trim())
+		.map(([key, value]) => `${key.trim()}=${String(value ?? '').trim()}`)
+		.join('\n');
+}
+
+export function createMcpServerDraft(server) {
+	return {
+		serverId: server?.id || '',
+		displayName: server?.displayName || '',
+		enabled: server?.enabled !== false,
+		command: server?.command || '',
+		argsText: formatMcpArgs(server?.args || []),
+		envText: formatMcpEnv(server?.env || {}),
+	};
+}
+
+export function parseMcpArgsText(value) {
+	return String(value || '')
+		.split(/\r?\n/)
+		.map((item) => item.trim())
+		.filter(Boolean);
+}
+
+export function parseMcpEnvText(value) {
+	const entries = {};
+	const lines = String(value || '')
+		.split(/\r?\n/)
+		.map((item) => item.trim())
+		.filter(Boolean);
+
+	for (const line of lines) {
+		const separatorIndex = line.indexOf('=');
+		if (separatorIndex <= 0) {
+			throw new Error('环境变量请使用 KEY=VALUE 格式。');
+		}
+
+		const key = line.slice(0, separatorIndex).trim();
+		if (!key) {
+			throw new Error('环境变量名称不能为空。');
+		}
+
+		entries[key] = line.slice(separatorIndex + 1).trim();
+	}
+
+	return entries;
+}
+
 export function validateEditorDraft(editor) {
 	if (!editor?.open || !editor?.draft) {
 		return '没有可保存的表单内容。';
@@ -116,6 +180,28 @@ export function validateEditorDraft(editor) {
 			if (field.required && field.kind !== 'secret' && !hasText) {
 				return `请填写${field.label}。`;
 			}
+		}
+
+		return null;
+	}
+
+	if (editor.kind === 'mcp') {
+		if (!editor.draft.serverId.trim()) {
+			return '请填写 MCP 服务 ID。';
+		}
+
+		if (!/^[A-Za-z0-9_.-]+$/.test(editor.draft.serverId.trim())) {
+			return 'MCP 服务 ID 只能包含字母、数字、点、下划线和连字符。';
+		}
+
+		if (!editor.draft.command.trim()) {
+			return '请填写 MCP 服务启动命令。';
+		}
+
+		try {
+			parseMcpEnvText(editor.draft.envText);
+		} catch (error) {
+			return error?.message || '环境变量格式不正确。';
 		}
 
 		return null;

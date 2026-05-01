@@ -22,11 +22,13 @@ public sealed class DesktopSettingsStore
     };
 
     private readonly string _settingsPath;
+    private readonly string _legacySettingsPath;
     private readonly object _syncRoot = new();
 
     public DesktopSettingsStore(StoragePaths storagePaths)
     {
-        _settingsPath = Path.Combine(storagePaths.AppDataDirectory, "desktop-settings.json");
+        _settingsPath = Path.Combine(storagePaths.AppDataDirectory, "selfclaw-desktop.json");
+        _legacySettingsPath = Path.Combine(storagePaths.AppDataDirectory, "desktop-settings.json");
     }
 
     public DesktopSettings Load()
@@ -55,7 +57,16 @@ public sealed class DesktopSettingsStore
             DesktopSettings settings;
             if (!File.Exists(_settingsPath))
             {
-                settings = DesktopSettings.Default;
+                if (File.Exists(_legacySettingsPath))
+                {
+                    originalJson = File.ReadAllText(_legacySettingsPath);
+                    settings = JsonSerializer.Deserialize<DesktopSettings>(originalJson, JsonOptions) ?? DesktopSettings.Default;
+                }
+                else
+                {
+                    settings = DesktopSettings.Default;
+                }
+
                 shouldWrite = true;
             }
             else
@@ -88,6 +99,7 @@ public sealed class DesktopSettingsStore
 
         var channels = settings.Channels ?? DesktopChannelSettings.Default;
         var items = new Dictionary<string, DesktopChannelConfiguration>(StringComparer.OrdinalIgnoreCase);
+        var mcpServers = new Dictionary<string, DesktopMcpServerConfiguration>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (channelId, configuration) in channels.Items ?? new Dictionary<string, DesktopChannelConfiguration>())
         {
@@ -132,6 +144,17 @@ public sealed class DesktopSettingsStore
             autoCompactTokenLimit = contextWindow;
         }
 
+        foreach (var (serverId, configuration) in settings.McpServers ?? new Dictionary<string, DesktopMcpServerConfiguration>())
+        {
+            var normalizedId = serverId?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedId))
+            {
+                continue;
+            }
+
+            mcpServers[normalizedId] = NormalizeMcpServerConfiguration(configuration);
+        }
+
         return settings with
         {
             ModelContextWindow = contextWindow,
@@ -139,7 +162,8 @@ public sealed class DesktopSettingsStore
             Channels = new DesktopChannelSettings
             {
                 Items = items
-            }
+            },
+            McpServers = mcpServers
         };
     }
 
@@ -169,6 +193,34 @@ public sealed class DesktopSettingsStore
             DisplayName = configuration.DisplayName?.Trim() ?? string.Empty,
             Values = values,
             SecretRefs = secretRefs
+        };
+    }
+
+    private static DesktopMcpServerConfiguration NormalizeMcpServerConfiguration(DesktopMcpServerConfiguration? configuration)
+    {
+        if (configuration is null)
+        {
+            return DesktopMcpServerConfiguration.Default;
+        }
+
+        var args = (configuration.Args ?? [])
+            .Select(item => item?.Trim() ?? string.Empty)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .ToArray();
+
+        var env = (configuration.Env ?? new Dictionary<string, string>())
+            .Where(item => !string.IsNullOrWhiteSpace(item.Key))
+            .ToDictionary(
+                item => item.Key.Trim(),
+                item => item.Value?.Trim() ?? string.Empty,
+                StringComparer.OrdinalIgnoreCase);
+
+        return configuration with
+        {
+            DisplayName = configuration.DisplayName?.Trim() ?? string.Empty,
+            Command = configuration.Command?.Trim() ?? string.Empty,
+            Args = args,
+            Env = env
         };
     }
 

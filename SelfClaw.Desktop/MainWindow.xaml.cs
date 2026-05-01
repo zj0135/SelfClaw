@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private const int ComposerPreviewMaxEdge = 480;
     private const int WmGetMinMaxInfo = 0x0024;
     private const uint MonitorDefaultToNearest = 2;
+    private const double StartupWorkAreaMargin = 48d;
 
     private static readonly MediaColor ShellSurfaceDarkColor = MediaColor.FromArgb(0xB3, 0x0A, 0x0F, 0x17);
     private static readonly MediaColor ShellSurfaceLightColor = MediaColor.FromArgb(0xD9, 0xF6, 0xF9, 0xFD);
@@ -69,6 +70,7 @@ public partial class MainWindow : Window
         ThemeOptions: [],
         SelectedThemeId: null,
         Channels: [],
+        McpServers: [],
         TeamMembers: [],
         AgentActivities: [],
         IsPlanningModeEnabled: false,
@@ -83,6 +85,7 @@ public partial class MainWindow : Window
         DesktopNotificationService desktopNotificationService)
     {
         InitializeComponent();
+        ApplyAdaptiveStartupSize();
         _viewModel = viewModel;
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
@@ -93,6 +96,23 @@ public partial class MainWindow : Window
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         TranscriptView.NavigationCompleted += OnTranscriptNavigationCompleted;
         desktopNotificationService.RegisterMainWindow(this);
+    }
+
+    private void ApplyAdaptiveStartupSize()
+    {
+        var workArea = SystemParameters.WorkArea;
+        if (workArea.Width <= 0 || workArea.Height <= 0)
+        {
+            return;
+        }
+
+        var availableWidth = Math.Max(1d, workArea.Width - StartupWorkAreaMargin);
+        var availableHeight = Math.Max(1d, workArea.Height - StartupWorkAreaMargin);
+
+        MinWidth = Math.Min(MinWidth, availableWidth);
+        MinHeight = Math.Min(MinHeight, availableHeight);
+        Width = Math.Min(Math.Max(Width, MinWidth), availableWidth);
+        Height = Math.Min(Math.Max(Height, MinHeight), availableHeight);
     }
 
     private async void OnLoadedAsync(object sender, RoutedEventArgs e)
@@ -480,6 +500,14 @@ public partial class MainWindow : Window
                 case "toggle-channel":
                     feedbackScope = "channels";
                     await ToggleChannelFromTranscriptAsync(document.RootElement);
+                    break;
+                case "save-mcp-server":
+                    feedbackScope = "mcp";
+                    await SaveMcpServerFromTranscriptAsync(document.RootElement);
+                    break;
+                case "delete-mcp-server":
+                    feedbackScope = "mcp";
+                    await DeleteMcpServerFromTranscriptAsync(document.RootElement);
                     break;
                 case "pick-workspace-path":
                     await PickWorkspacePathFromTranscriptAsync();
@@ -1016,6 +1044,26 @@ public partial class MainWindow : Window
             "channels");
     }
 
+    private async Task SaveMcpServerFromTranscriptAsync(JsonElement root)
+    {
+        var result = new McpServerEditorResult(
+            GetString(root, "serverId"),
+            GetString(root, "displayName"),
+            GetBool(root, "enabled"),
+            GetString(root, "command"),
+            GetStringList(root, "args"),
+            GetStringDictionary(root, "env"));
+
+        await _viewModel.SaveMcpServerAsync(result);
+        PostUiFeedback("success", "MCP server saved.", "mcp");
+    }
+
+    private async Task DeleteMcpServerFromTranscriptAsync(JsonElement root)
+    {
+        await _viewModel.DeleteMcpServerAsync(GetString(root, "serverId"));
+        PostUiFeedback("success", "MCP server deleted.", "mcp");
+    }
+
     private Task PickWorkspacePathFromTranscriptAsync()
     {
         var dialog = new OpenFolderDialog();
@@ -1164,6 +1212,21 @@ public partial class MainWindow : Window
         }
 
         return values;
+    }
+
+    private static IReadOnlyList<string> GetStringList(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return property
+            .EnumerateArray()
+            .Select(item => item.ValueKind == JsonValueKind.String
+                ? item.GetString() ?? string.Empty
+                : item.GetRawText())
+            .ToArray();
     }
 
     private static double GetDouble(JsonElement root, string propertyName, double defaultValue)

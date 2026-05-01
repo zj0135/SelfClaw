@@ -23,6 +23,7 @@ public sealed record TranscriptRenderState(
     IReadOnlyList<ShellSelectOption> ThemeOptions,
     string? SelectedThemeId,
     IReadOnlyList<TranscriptChannelItem> Channels,
+    IReadOnlyList<TranscriptMcpServerItem> McpServers,
     IReadOnlyList<AgentActivityNode> TeamMembers,
     IReadOnlyList<AgentActivityNode> AgentActivities,
     bool IsPlanningModeEnabled,

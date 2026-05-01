@@ -10,28 +10,11 @@ internal sealed class FileSystemAgentContextProviderFactory : IAgentContextProvi
 {
     private readonly ILoggerFactory _loggerFactory;
     private readonly StoragePaths _storagePaths;
-    private readonly IReadOnlyList<string> _assetsRootPaths;
 
-    public FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, StoragePaths storagePaths)
-        : this(loggerFactory,storagePaths, DiscoverDefaultAssetsRootPaths(AppContext.BaseDirectory))
-    {
-    }
-
-    internal FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, StoragePaths storagePaths, params string[] assetsRootPaths)
-        : this(loggerFactory,storagePaths, (IEnumerable<string>)assetsRootPaths)
-    {
-    }
-
-    internal FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, StoragePaths storagePaths, IEnumerable<string> assetsRootPaths)
+    internal FileSystemAgentContextProviderFactory(ILoggerFactory loggerFactory, StoragePaths storagePaths)
     {
         _loggerFactory = loggerFactory;
         _storagePaths = storagePaths;
-
-        _assetsRootPaths = assetsRootPaths
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(Path.GetFullPath)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
     }
 
     public IReadOnlyList<AIContextProvider> CreateProviders()
@@ -80,28 +63,7 @@ internal sealed class FileSystemAgentContextProviderFactory : IAgentContextProvi
             
         }
 
-        foreach (var assetsRootPath in _assetsRootPaths)
-        {
-            var skillsRootPath = Path.Combine(assetsRootPath, "skills");
-            if (!Directory.Exists(skillsRootPath))
-            {
-                continue;
-            }
-
-            var hasSkillManifest = Directory
-                .EnumerateFiles(skillsRootPath, "SKILL.md", SearchOption.AllDirectories)
-                .Any();
-            if (!hasSkillManifest)
-            {
-                continue;
-            }
-
-            roots.Add(Path.GetFullPath(skillsRootPath));
-        }
-
-        return roots
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        return [.. roots.Distinct(StringComparer.OrdinalIgnoreCase)];
     }
 
     internal static IReadOnlyList<string> DiscoverDefaultAssetsRootPaths(string baseDirectory)

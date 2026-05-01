@@ -54,6 +54,10 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
+	mcpServers: {
+		type: Array,
+		default: () => [],
+	},
 	channels: {
 		type: Array,
 		default: () => [],
@@ -84,6 +88,9 @@ const emit = defineEmits([
 	'edit-workspace',
 	'delete-workspace',
 	'create-workspace',
+	'create-mcp-server',
+	'edit-mcp-server',
+	'delete-mcp-server',
 	'toggle-channel',
 	'edit-channel',
 	'select-theme',
@@ -91,6 +98,7 @@ const emit = defineEmits([
 
 const panelEl = ref(null);
 
+const enabledMcpServerCount = computed(() => props.mcpServers.filter((item) => item.enabled !== false).length);
 const enabledChannelCount = computed(() => props.channels.filter((item) => item.isEnabled).length);
 
 function onPanelScroll(event) {
@@ -211,6 +219,55 @@ defineExpose({
 							<div class="selected-summary-label">{{ card.label }}</div>
 							<div class="selected-summary-value">{{ card.value }}</div>
 						</div>
+					</div>
+				</section>
+
+				<section v-else-if="activeSection === 'mcp'" class="settings-section settings-section-active">
+					<div class="settings-section-header">
+						<div class="settings-section-copy">
+							<div class="settings-section-title">MCP 服务维护</div>
+						</div>
+						<div class="settings-badge">{{ enabledMcpServerCount }} / {{ mcpServers.length }}</div>
+					</div>
+					<div class="channel-card-actions mcp-section-actions">
+						<div class="settings-hint">仅维护本地 selfclaw-desktop.json 中的 mcp_servers 配置，暂不连接后端 MCP 运行时。</div>
+						<button class="icon-add-btn" type="button" aria-label="新增 MCP 服务" @click="emit('create-mcp-server')">+</button>
+					</div>
+					<div v-if="mcpServers.length > 0" class="channel-card-list">
+						<article v-for="server in mcpServers" :key="server.id" class="channel-card mcp-card" :class="{ enabled: server.enabled !== false }">
+							<div class="channel-card-top">
+								<div class="channel-card-copy">
+									<div class="settings-section-title">{{ server.displayName || server.id }}</div>
+									<div class="settings-hint">{{ server.id }}</div>
+								</div>
+								<div class="settings-badge">{{ server.enabled === false ? '已停用' : '已启用' }}</div>
+							</div>
+							<div class="selected-summary-grid channel-summary-grid">
+								<div class="selected-summary-card">
+									<div class="selected-summary-label">Command</div>
+									<div class="selected-summary-value">{{ server.command || '未设置' }}</div>
+								</div>
+								<div class="selected-summary-card">
+									<div class="selected-summary-label">Args</div>
+									<div class="selected-summary-value">{{ (server.args || []).length ? server.args.join(' ') : '无' }}</div>
+								</div>
+								<div class="selected-summary-card">
+									<div class="selected-summary-label">Env</div>
+									<div class="selected-summary-value">{{ Object.keys(server.env || {}).length }} 项</div>
+								</div>
+							</div>
+							<div class="channel-card-actions">
+								<div class="settings-badge">本地配置</div>
+								<div class="mcp-card-buttons">
+									<button class="ghost-btn compact-btn" type="button" @click="emit('edit-mcp-server', server)">编辑</button>
+									<button class="ghost-btn compact-btn danger-btn" type="button" @click="emit('delete-mcp-server', server.id)">删除</button>
+								</div>
+							</div>
+						</article>
+					</div>
+					<div v-else class="mcp-empty-state">
+						<div class="settings-section-title">暂无 MCP 服务</div>
+						<div class="settings-hint">点击新增后会写入 mcp_servers 对象。</div>
 					</div>
 				</section>
 

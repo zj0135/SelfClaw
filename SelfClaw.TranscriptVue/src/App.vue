@@ -10,13 +10,17 @@ import TranscriptPanel from './components/TranscriptPanel.vue';
 import { renderConversationList, renderMessages, renderStepsHeader, renderStepsPanelContent } from './renderers';
 import {
 	createChannelDraft,
+	createMcpServerDraft,
 	createProfileDraft,
 	createWorkspaceDraft,
 	emptyChannel,
+	emptyMcpServer,
 	emptyProfile,
 	emptyWorkspace,
 	formatSamplingValue,
 	normalizeSamplingValue,
+	parseMcpArgsText,
+	parseMcpEnvText,
 	validateEditorDraft,
 } from './utils/editor';
 
@@ -45,6 +49,7 @@ const state = reactive({
 	themeOptions: [],
 	selectedThemeId: 'system',
 	channels: [],
+	mcpServers: [],
 	teamMembers: [],
 	agentActivities: [],
 	contextUsage: null,
@@ -404,6 +409,7 @@ function getSettingsPanelElement() {
 
 const selectedProfile = computed(() => state.profiles.find((item) => item.id === state.selectedProfileId) || null);
 const selectedWorkspace = computed(() => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null);
+const enabledMcpServerCount = computed(() => state.mcpServers.filter((item) => item.enabled !== false).length);
 
 function normalizeProfileModelList(models, selectedModel = '') {
 	const normalized = [...new Set((Array.isArray(models) ? models : [])
@@ -537,6 +543,11 @@ const settingsSections = computed(() => [
 		id: 'workspace',
 		title: '工作区',
 		badge: selectedWorkspace.value ? '已绑定' : '未绑定',
+	},
+	{
+		id: 'mcp',
+		title: 'MCP 服务',
+		badge: state.mcpServers.length > 0 ? `${enabledMcpServerCount.value} / ${state.mcpServers.length}` : '未配置',
 	},
 	{
 		id: 'channels',
@@ -714,6 +725,7 @@ function normalizeState() {
 	state.contextUsage = state.contextUsage || null;
 	state.themeOptions = state.themeOptions || [];
 	state.channels = state.channels || [];
+	state.mcpServers = state.mcpServers || [];
 }
 
 function closeMentionPicker() {
@@ -806,7 +818,11 @@ function editorScope() {
 		return editorState.kind;
 	}
 
-	return editorState.kind === 'channel' ? 'channels' : null;
+	if (editorState.kind === 'channel') {
+		return 'channels';
+	}
+
+	return editorState.kind === 'mcp' ? 'mcp' : null;
 }
 
 function openEditor(kind, mode, payload = null) {
@@ -816,6 +832,9 @@ function openEditor(kind, mode, payload = null) {
 	}
 	if (kind === 'channel') {
 		activeSettingsSection.value = 'channels';
+	}
+	if (kind === 'mcp') {
+		activeSettingsSection.value = 'mcp';
 	}
 
 	editorState.open = true;
@@ -830,9 +849,13 @@ function openEditor(kind, mode, payload = null) {
 				? mode === 'edit' && state.selectedWorkspaceRootId
 					? createWorkspaceDraft(selectedWorkspace.value)
 					: emptyWorkspace()
-				: payload
-					? createChannelDraft(payload)
-					: emptyChannel();
+				: kind === 'channel'
+					? payload
+						? createChannelDraft(payload)
+						: emptyChannel()
+					: payload
+						? createMcpServerDraft(payload)
+						: emptyMcpServer();
 	editorState.feedback = null;
 	clearFeedback(scope);
 }
@@ -1102,7 +1125,7 @@ function scheduleStatePayload(payload) {
 
 function handleSettingsFeedback(payload) {
 	const nextFeedback = payload.message ? { level: payload.level || 'success', message: payload.message, scope: payload.scope || null } : null;
-	if (payload.scope === 'profile' || payload.scope === 'workspace' || payload.scope === 'channels' || payload.scope === 'theme') {
+	if (payload.scope === 'profile' || payload.scope === 'workspace' || payload.scope === 'mcp' || payload.scope === 'channels' || payload.scope === 'theme') {
 		activeSettingsSection.value = payload.scope;
 	}
 
@@ -1553,9 +1576,13 @@ async function selectSettingsSection(sectionId) {
 	}
 }
 
-function openSettings() {
+function openSettings(sectionId = null) {
 	openConversationMenuId.value = null;
 	clearFeedback();
+	if (sectionId) {
+		activeSettingsSection.value = sectionId;
+		settingsPanelScrollTop.value = 0;
+	}
 	settingsOpen.value = true;
 }
 
@@ -1672,6 +1699,25 @@ function toggleChannelEnabled({ channel, enabled }) {
 	});
 }
 
+function createMcpServer() {
+	openSettings('mcp');
+	openEditor('mcp', 'create');
+}
+
+function editMcpServer(server) {
+	openSettings('mcp');
+	openEditor('mcp', 'edit', server);
+}
+
+function deleteMcpServer(serverId) {
+	if (!serverId) {
+		return;
+	}
+
+	clearFeedback('mcp');
+	post({ type: 'delete-mcp-server', serverId });
+}
+
 function saveEditor() {
 	const error = validateEditorDraft(editorState);
 	if (error) {
@@ -1703,6 +1749,27 @@ function saveEditor() {
 			displayName: editorState.draft.displayName.trim(),
 			profileId: editorState.draft.profileId || null,
 			fieldValues,
+		});
+		return;
+	}
+
+	if (editorState.kind === 'mcp') {
+		let env = {};
+		try {
+			env = parseMcpEnvText(editorState.draft.envText);
+		} catch (error) {
+			editorState.feedback = { level: 'error', message: error?.message || '环境变量格式不正确。', scope: 'mcp' };
+			return;
+		}
+
+		post({
+			type: 'save-mcp-server',
+			serverId: editorState.draft.serverId.trim(),
+			displayName: editorState.draft.displayName.trim(),
+			enabled: Boolean(editorState.draft.enabled),
+			command: editorState.draft.command.trim(),
+			args: parseMcpArgsText(editorState.draft.argsText),
+			env,
 		});
 		return;
 	}
@@ -1836,7 +1903,9 @@ onUnmounted(() => {
 		@wheel.capture.passive="onRootWheel" @pointerdown.capture="onRootPointerDown">
 		<div class="app-shell" :class="{ 'left-pane-collapsed': leftPaneCollapsed }">
 			<ConversationSidebar ref="sidebarRef" :is-channel-mode="isChannelMode" :conversation-list-html="conversationListHtml"
-				:collapsed="leftPaneCollapsed" @new-conversation="newConversation" @open-settings="openSettings"
+				:collapsed="leftPaneCollapsed" :mcp-servers="state.mcpServers" @new-conversation="newConversation"
+				@open-settings="openSettings" @open-mcp-settings="openSettings('mcp')" @create-mcp-server="createMcpServer"
+				@edit-mcp-server="editMcpServer" @delete-mcp-server="deleteMcpServer"
 				@toggle-collapse="toggleLeftPaneCollapse" />
 
 			<main class="main-column">
@@ -1914,7 +1983,7 @@ onUnmounted(() => {
 			:selected-profile-id="state.selectedProfileId || ''" :profile-summary-cards="profileSummaryCards"
 			:selected-workspace="selectedWorkspace" :workspace-roots="state.workspaceRoots"
 			:selected-workspace-root-id="state.selectedWorkspaceRootId || ''"
-			:workspace-summary-cards="workspaceSummaryCards" :channels="state.channels"
+			:workspace-summary-cards="workspaceSummaryCards" :mcp-servers="state.mcpServers" :channels="state.channels"
 			:selected-theme-label="selectedThemeLabel" :theme-options="state.themeOptions"
 			:selected-theme-id="state.selectedThemeId || 'system'" @close="closeSettings"
 			@select-section="selectSettingsSection" @panel-scroll="onSettingsPanelScroll"
@@ -1922,6 +1991,7 @@ onUnmounted(() => {
 			@delete-profile="deleteProfile" @create-profile="openEditor('profile', 'create')"
 			@select-workspace="onWorkspaceChange" @edit-workspace="openEditor('workspace', 'edit')"
 			@delete-workspace="deleteWorkspace" @create-workspace="openEditor('workspace', 'create')"
+			@create-mcp-server="createMcpServer" @edit-mcp-server="editMcpServer" @delete-mcp-server="deleteMcpServer"
 			@toggle-channel="toggleChannelEnabled" @edit-channel="openEditor('channel', 'edit', $event)"
 			@select-theme="onThemeChange" />
 

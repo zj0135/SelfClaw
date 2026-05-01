@@ -14,9 +14,21 @@ defineProps({
 		type: Boolean,
 		default: false,
 	},
+	mcpServers: {
+		type: Array,
+		default: () => [],
+	},
 });
 
-const emit = defineEmits(['new-conversation', 'open-settings', 'toggle-collapse']);
+const emit = defineEmits([
+	'new-conversation',
+	'open-settings',
+	'open-mcp-settings',
+	'create-mcp-server',
+	'edit-mcp-server',
+	'delete-mcp-server',
+	'toggle-collapse',
+]);
 
 const conversationListEl = ref(null);
 const allConversationsCollapsed = ref(false);
@@ -116,32 +128,46 @@ defineExpose({
 						</div>
 					</div>
 					<div class="sidebar-divider"></div>
-					<div class="sidebar-nav-heading">
+					<div class="sidebar-nav-heading sidebar-nav-heading-action">
 						<span class="sidebar-nav-icon" aria-hidden="true">
 							<svg viewBox="0 0 20 20" fill="none">
 								<path d="M7 13 13 7M6 9.5 4.5 11a2.8 2.8 0 0 0 4 4L10 13.5" />
 								<path d="M10 6.5 11.5 5a2.8 2.8 0 0 1 4 4L14 10.5" />
 							</svg>
 						</span>
-						<span>MCP</span>
+						<button class="sidebar-heading-main" type="button" @click="emit('open-mcp-settings')">MCP</button>
+						<button class="sidebar-heading-action-btn" type="button" aria-label="新增 MCP 服务" title="新增 MCP 服务" @click.stop="emit('create-mcp-server')">
+							+
+						</button>
 					</div>
-					<div class="sidebar-nav-subitem standalone">
-						<span class="sidebar-nav-icon" aria-hidden="true">
-							<svg viewBox="0 0 20 20" fill="none">
-								<path d="M10 3.5 5.5 10H10l-1 6.5 5.5-8H10V3.5Z" />
-							</svg>
-						</span>
-						<span>技能</span>
-					</div>
-					<div class="sidebar-nav-subitem standalone">
-						<span class="sidebar-nav-icon" aria-hidden="true">
-							<svg viewBox="0 0 20 20" fill="none">
-								<path d="M5 8.5h10v6H5z" />
-								<path d="M8 8.5V6a2 2 0 1 1 4 0v2.5" />
-								<path d="M7.5 11.5h.01M12.5 11.5h.01" />
-							</svg>
-						</span>
-						<span>智能体</span>
+					<div class="sidebar-nav-children sidebar-mcp-list">
+						<div v-if="mcpServers.length === 0" class="sidebar-nav-subitem sidebar-empty-subitem">
+							<span class="sidebar-nav-icon" aria-hidden="true">
+								<svg viewBox="0 0 20 20" fill="none">
+									<path d="M5 10h10" />
+								</svg>
+							</span>
+							<span>暂无服务</span>
+						</div>
+						<template v-else>
+							<div v-for="server in mcpServers" :key="server.id" class="sidebar-nav-subitem sidebar-mcp-item">
+								<button class="sidebar-mcp-main" type="button" :title="server.command || server.id" @click="emit('edit-mcp-server', server)">
+									<span class="sidebar-nav-icon" aria-hidden="true">
+										<svg viewBox="0 0 20 20" fill="none">
+											<path d="M5 7.5h10M5 12.5h10" />
+											<path d="M7 4.5 4 10l3 5.5M13 4.5 16 10l-3 5.5" />
+										</svg>
+									</span>
+									<span class="sidebar-mcp-copy">
+										<span class="sidebar-mcp-name">{{ server.displayName || server.id }}</span>
+										<span class="sidebar-mcp-meta">{{ server.enabled === false ? '已停用' : '已启用' }}</span>
+									</span>
+								</button>
+								<button class="sidebar-inline-icon-btn danger" type="button" aria-label="删除 MCP 服务" title="删除 MCP 服务" @click.stop="emit('delete-mcp-server', server.id)">
+									x
+								</button>
+							</div>
+						</template>
 					</div>
 					<div class="sidebar-nav-heading">
 						<span class="sidebar-nav-icon" aria-hidden="true">

@@ -18,5 +18,9 @@ public sealed record DesktopSettings
 
     public DesktopChannelSettings Channels { get; init; } = DesktopChannelSettings.Default;
 
+    [JsonPropertyName("mcp_servers")]
+    public IReadOnlyDictionary<string, DesktopMcpServerConfiguration> McpServers { get; init; }
+        = new Dictionary<string, DesktopMcpServerConfiguration>(StringComparer.OrdinalIgnoreCase);
+
     public static DesktopSettings Default { get; } = new();
 }
