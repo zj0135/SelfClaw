@@ -6334,8 +6334,7 @@ html[data-theme='light'] .sidebar .sidebar-primary {
 .sidebar-conversation-list-shell {
 	gap: 4px;
 	padding-top: 3px;
-	min-height: 260px;
-	max-height: 260px;
+	height: 220px;
 	overflow-y: auto;
 	overflow-x: hidden;
 	padding-right: 8px;
@@ -6709,7 +6708,12 @@ html[data-theme='light'] .sidebar .sidebar-primary {
 	white-space: pre-wrap;
 	word-break: break-word;
 	color: #c6cbd6;
-	font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+	font:
+		12px/1.6 ui-monospace,
+		SFMono-Regular,
+		Consolas,
+		'Liberation Mono',
+		monospace;
 }
 
 .sidebar-empty-subitem {
@@ -7491,7 +7495,6 @@ html:not([data-theme='light']) .settings-feedback.error {
 	padding: 2px 6px;
 	font-size: 9px;
 }
-
 
 .settings-content {
 	padding: 14px 16px;
