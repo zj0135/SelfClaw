@@ -19,6 +19,11 @@ defineProps({
 const emit = defineEmits(['new-conversation', 'open-settings', 'toggle-collapse']);
 
 const conversationListEl = ref(null);
+const allConversationsCollapsed = ref(false);
+
+function toggleAllConversations() {
+	allConversationsCollapsed.value = !allConversationsCollapsed.value;
+}
 
 defineExpose({
 	getConversationListEl: () => conversationListEl.value,
@@ -67,7 +72,13 @@ defineExpose({
 
 				<div class="sidebar-nav-scroll">
 					<div class="sidebar-nav-group">
-						<button class="sidebar-nav-item active" type="button" aria-current="page">
+						<button
+							class="sidebar-nav-item active"
+							type="button"
+							aria-current="page"
+							:aria-expanded="allConversationsCollapsed ? 'false' : 'true'"
+							@click="toggleAllConversations"
+						>
 							<span class="sidebar-nav-icon" aria-hidden="true">
 								<svg viewBox="0 0 20 20" fill="none">
 									<path d="M3.5 7.5h13l-1.2-3h-4.6l-.9 1.2H4.4l-.9 1.8Z" />
@@ -76,7 +87,11 @@ defineExpose({
 							</span>
 							<span>所有会话</span>
 						</button>
-						<div ref="conversationListEl" class="sidebar-nav-children sidebar-conversation-list-shell">
+						<div
+							ref="conversationListEl"
+							class="sidebar-nav-children sidebar-conversation-list-shell"
+							:class="{ collapsed: allConversationsCollapsed }"
+						>
 							<div id="conversation-list" class="conversation-list" v-html="conversationListHtml"></div>
 						</div>
 						<div class="sidebar-divider"></div>

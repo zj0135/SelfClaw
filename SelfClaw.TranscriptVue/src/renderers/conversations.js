@@ -25,7 +25,10 @@ export function renderConversationList({
 	const effectiveBranches = new Map(openConversationBranches);
 	let selectedItem = selectedConversationId ? itemsById.get(selectedConversationId) || null : null;
 	while (selectedItem?.parentId) {
-		effectiveBranches.set(selectedItem.parentId, true);
+		if (!effectiveBranches.has(selectedItem.parentId)) {
+			effectiveBranches.set(selectedItem.parentId, true);
+		}
+
 		selectedItem = itemsById.get(selectedItem.parentId) || null;
 	}
 
@@ -47,6 +50,7 @@ export function renderConversationList({
 
 		if (hasChildren) {
 			conversationClasses.push('with-children');
+			conversationClasses.push('collapsible');
 		}
 
 		const rowClasses = ['conversation-row', item.isAgentConversation ? 'branch' : 'root'];
@@ -66,12 +70,7 @@ export function renderConversationList({
 		const hoverTitle = item.timestamp ? `${titleText} ${item.timestamp}` : titleText;
 		return `
       <div class="${rowClasses.join(' ')}" style="--conversation-depth:${depth};">
-        ${
-					hasChildren
-						? `<button class="conversation-branch-toggle" data-action="toggle-conversation-branch" data-conversation-id="${escapeHtml(item.id)}" type="button" aria-label="${isExpanded ? '折叠子会话' : '展开子会话'}" aria-expanded="${isExpanded ? 'true' : 'false'}" title="${isExpanded ? '折叠子会话' : '展开子会话'}">${isExpanded ? '▾' : '▸'}</button>`
-						: ''
-				}
-        <button class="${conversationClasses.join(' ')}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" type="button" title="${escapeHtml(hoverTitle)}">
+        <button class="${conversationClasses.join(' ')}" data-action="select-conversation" data-conversation-id="${escapeHtml(item.id)}" data-has-children="${hasChildren ? 'true' : 'false'}" type="button" title="${escapeHtml(hoverTitle)}"${hasChildren ? ` aria-expanded="${isExpanded ? 'true' : 'false'}"` : ''}>
           <div class="conversation-title-row">
             ${item.badge ? `<span class="conversation-badge">@${escapeHtml(item.badge)}</span>` : ''}
             <div class="conversation-title" title="${escapeHtml(hoverTitle)}">${escapeHtml(titleText)}</div>

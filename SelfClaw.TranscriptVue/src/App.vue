@@ -1339,10 +1339,21 @@ async function handleDelegatedClick(event) {
 		}
 
 		switch (action) {
-			case 'select-conversation':
+			case 'select-conversation': {
+				const conversationId = actionElement.getAttribute('data-conversation-id');
+				const hasChildren = actionElement.getAttribute('data-has-children') === 'true';
 				openConversationMenuId.value = null;
-				post({ type: 'select-conversation', conversationId: actionElement.getAttribute('data-conversation-id') });
+				if (conversationId && hasChildren) {
+					await preserveConversationList(() => {
+						const next = new Map(openConversationBranches.value);
+						next.set(conversationId, openConversationBranches.value.get(conversationId) === false);
+						openConversationBranches.value = next;
+					});
+				}
+
+				post({ type: 'select-conversation', conversationId });
 				return;
+			}
 			case 'toggle-conversation-branch': {
 				const conversationId = actionElement.getAttribute('data-conversation-id');
 				if (!conversationId) {
