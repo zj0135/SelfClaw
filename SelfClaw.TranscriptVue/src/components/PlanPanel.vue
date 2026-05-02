@@ -35,14 +35,12 @@ const emit = defineEmits(['toggle-collapse']);
 				</div>
 				<div class="plan-panel-head-actions">
 					<div class="plan-panel-badge">{{ planPanelStatusLabel(planPanel.state) }}</div>
-					<button
-						class="plan-panel-toggle"
-						type="button"
-						:aria-label="collapsed ? '展开任务计划' : '折叠任务计划'"
-						:title="collapsed ? '展开任务计划' : '折叠任务计划'"
-						@click.stop="emit('toggle-collapse')"
-					>
-						<span class="plan-panel-toggle-chevron" :class="{ collapsed }">⌄</span>
+					<button class="plan-panel-toggle" type="button" :aria-label="collapsed ? '展开' : '折叠'"
+						:title="collapsed ? '展开' : '折叠'" @click.stop="emit('toggle-collapse')">
+						<svg class="plan-panel-toggle-chevron" :class="{ collapsed }" viewBox="0 0 16 16"
+							aria-hidden="true">
+							<path d="M4 6.5 8 10.5 12 6.5" />
+						</svg>
 					</button>
 				</div>
 			</div>
