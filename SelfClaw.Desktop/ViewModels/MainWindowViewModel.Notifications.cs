@@ -26,40 +26,45 @@ public sealed partial class MainWindowViewModel
             request.Description);
     }
 
-    private void PublishConversationCompletedNotification(ConversationRecord conversation)
+    private void PublishConversationCompletedNotification(
+        ConversationRecord conversation,
+        IReadOnlyList<MessageRecord>? messages = null)
     {
         if (conversation.Mode is not (ConversationMode.Programming or ConversationMode.Team))
         {
             return;
         }
 
-        var title = ResolveNotificationTitle(conversation.Id, conversation.Title);
-        var message = BuildConversationCompletedMessage(conversation);
+        messages ??= _messages;
+        var title = ResolveNotificationTitle(conversation.Id, conversation.Title, messages);
+        var message = BuildConversationCompletedMessage(conversation, messages);
         _desktopNotificationService.ShowConversationCompleted(
             conversation.Id,
             title,
             message);
     }
 
-    private string BuildConversationCompletedMessage(ConversationRecord conversation)
+    private string BuildConversationCompletedMessage(
+        ConversationRecord conversation,
+        IReadOnlyList<MessageRecord> messages)
     {
         var modeMessage = conversation.Mode == ConversationMode.Team
             ? "Team session completed."
             : "Programming session completed.";
-        var preview = BuildConversationPreview();
+        var preview = BuildConversationPreview(messages);
 
         return string.IsNullOrWhiteSpace(preview)
             ? modeMessage
             : $"{modeMessage}\n{preview}";
     }
 
-    private string BuildConversationPreview()
+    private static string BuildConversationPreview(IReadOnlyList<MessageRecord> messages)
     {
-        var latestMessage = _messages
+        var latestMessage = messages
             .Where(message => message.Status == MessageStatus.Completed && message.Role == MessageRole.Assistant)
             .OrderByDescending(message => message.CreatedAtUtc)
             .FirstOrDefault()
-            ?? _messages
+            ?? messages
             .Where(message => message.Status == MessageStatus.Completed && message.Role is MessageRole.Assistant or MessageRole.System)
             .OrderByDescending(message => message.CreatedAtUtc)
             .FirstOrDefault();
@@ -78,9 +83,13 @@ public sealed partial class MainWindowViewModel
         return preview.Length > 140 ? preview[..140] + "..." : preview;
     }
 
-    private string ResolveNotificationTitle(Guid? conversationId, string? fallbackTitle)
+    private string ResolveNotificationTitle(
+        Guid? conversationId,
+        string? fallbackTitle,
+        IReadOnlyList<MessageRecord>? messages = null)
     {
-        var latestPrompt = _messages
+        messages ??= _messages;
+        var latestPrompt = messages
             .Where(message => message.Status == MessageStatus.Completed && message.Role == MessageRole.User)
             .OrderByDescending(message => message.CreatedAtUtc)
             .Select(message => NormalizeNotificationText(message.MarkdownContent))

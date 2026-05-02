@@ -79,6 +79,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly List<TeamAgentRecord> _teamAgents = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
     private readonly Dictionary<Guid, ToolRunAnchor> _toolRunAnchors = [];
+    private readonly Dictionary<Guid, ConversationRuntimeState> _conversationRuntimeStates = [];
+    private readonly Dictionary<Guid, TranscriptPlanPanel> _conversationPlanPanels = [];
+    private readonly Dictionary<Guid, bool> _conversationPlanningModes = [];
+    private readonly Dictionary<Guid, string> _conversationStatusTexts = [];
     private IReadOnlyList<PromptImageAttachment> _pendingPromptImageAttachments = [];
     private bool _pendingReasoningEnabled;
     private CancellationTokenSource? _turnCancellationSource;
@@ -213,13 +217,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool IsPlanningModeEnabled
     {
         get => _isPlanningModeEnabled;
-        private set
-        {
-            if (SetProperty(ref _isPlanningModeEnabled, value))
-            {
-                PublishShell(false);
-            }
-        }
+        private set => SetPlanningModeForSelectedConversation(value, publishShell: true);
     }
 
     public ConversationMode SelectedConversationMode
@@ -281,10 +279,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            ClearPlanPanelState(publishShell: false);
-
             if (value is not null)
             {
+                ProjectSelectedRuntimeState(publishShell: false);
                 PublishShell(false);
                 _ = LoadConversationAsync(value);
             }
@@ -296,6 +293,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 _toolRuns.Clear();
                 _toolRunAnchors.Clear();
                 _selectedBoundAgent = null;
+                ProjectSelectedRuntimeState(publishShell: false);
                 PublishAgentActivities();
                 PublishShell(false);
             }
@@ -343,13 +341,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public string StatusText
     {
         get => _statusText;
-        private set
-        {
-            if (SetProperty(ref _statusText, value))
-            {
-                PublishShell(false);
-            }
-        }
+        private set => SetStatusTextForSelectedConversation(value, publishShell: true);
     }
 
     public bool IsBusy
@@ -607,6 +599,23 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .Where(item => item.Id == conversationId || item.ParentConversationId == conversationId || item.RootConversationId == conversationId)
             .Select(item => item.Id)
             .ToHashSet();
+        foreach (var removedId in removedConversationIds)
+        {
+            if (_conversationRuntimeStates.Remove(removedId, out var runtimeState))
+            {
+                if (runtimeState.IsRunning)
+                {
+                    runtimeState.CancellationTokenSource.Cancel();
+                }
+
+                runtimeState.Dispose();
+            }
+
+            _conversationPlanPanels.Remove(removedId);
+            _conversationPlanningModes.Remove(removedId);
+            _conversationStatusTexts.Remove(removedId);
+        }
+
         _allConversations.RemoveAll(item => removedConversationIds.Contains(item.Id));
 
         if (SelectedConversation is not null && removedConversationIds.Contains(SelectedConversation.Id))
@@ -1094,6 +1103,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var runtimeState = _conversationRuntimeStates.TryGetValue(conversation.Id, out var runningState)
+            ? runningState
+            : null;
+        if (runtimeState is not null)
+        {
+            messages = runtimeState.Messages.ToArray();
+            contextMessages = runtimeState.ContextMessages.ToArray();
+            teamAgents = runtimeState.TeamAgents.ToArray();
+            toolRuns = runtimeState.ToolRuns.ToArray();
+        }
+
         _messages.Clear();
         _messages.AddRange(messages);
         _contextMessages.Clear();
@@ -1104,11 +1124,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _toolRuns.AddRange(toolRuns);
         _toolRunAnchors.Clear();
         _selectedBoundAgent = ResolveBoundAgent(conversation, teamAgents);
-        foreach (var toolRun in toolRuns)
+        if (runtimeState is not null)
         {
-            if (toolRun.MessageId is Guid messageId && toolRun.AfterSegmentIndex is int afterSegmentIndex)
+            foreach (var item in runtimeState.ToolRunAnchors)
             {
-                _toolRunAnchors[toolRun.Id] = new ToolRunAnchor(messageId, afterSegmentIndex);
+                _toolRunAnchors[item.Key] = item.Value;
+            }
+        }
+        else
+        {
+            foreach (var toolRun in toolRuns)
+            {
+                if (toolRun.MessageId is Guid messageId && toolRun.AfterSegmentIndex is int afterSegmentIndex)
+                {
+                    _toolRunAnchors[toolRun.Id] = new ToolRunAnchor(messageId, afterSegmentIndex);
+                }
             }
         }
 
@@ -1120,6 +1150,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SelectedToolPermissionMode = conversation.ToolPermissionMode;
         SelectedTeamMaxRounds = conversation.TeamMaxRounds;
         SelectedTeamOutputMode = conversation.TeamOutputMode;
+        SetPlanningModeForSelectedConversation(ResolvePlanningMode(conversation.Id), publishShell: false);
+        ProjectSelectedRuntimeState(publishShell: false);
         ApplyConversationFilter(conversation.Id);
 
         PublishAgentActivities();
@@ -1127,6 +1159,327 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private async Task SendAsync()
+    {
+        if (SelectedConversationMode == ConversationMode.Channel)
+        {
+            StatusText = "Channel conversations are driven by external messages and cannot be sent manually here.";
+            return;
+        }
+
+        var selectedProfile = SelectedProfile;
+        if (selectedProfile is null)
+        {
+            StatusText = "Create a profile first.";
+            return;
+        }
+
+        var prompt = ComposerText.Trim();
+        var useReasoning = _pendingReasoningEnabled;
+        var promptImageAttachments = _pendingPromptImageAttachments.ToArray();
+        var selectedProfileModel = ResolveSelectedProfileModel();
+        var selectedWorkspaceRoot = SelectedWorkspaceRoot;
+        var selectedConversationMode = SelectedConversationMode;
+        var selectedToolPermissionMode = SelectedToolPermissionMode;
+        var selectedTeamMaxRounds = SelectedTeamMaxRounds;
+        var selectedTeamOutputMode = SelectedTeamOutputMode;
+        var usePlanningMode = selectedConversationMode == ConversationMode.Programming && IsPlanningModeEnabled;
+        var baseMessages = _messages.ToArray();
+        var baseContextMessages = _contextMessages.ToArray();
+        var baseTeamAgents = _teamAgents.ToArray();
+        var baseToolRuns = _toolRuns.ToArray();
+        var baseToolRunAnchors = new Dictionary<Guid, ToolRunAnchor>(_toolRunAnchors);
+
+        _pendingPromptImageAttachments = [];
+
+        if (string.IsNullOrWhiteSpace(prompt) && promptImageAttachments.Length == 0)
+        {
+            return;
+        }
+
+        ComposerText = string.Empty;
+
+        ConversationRuntimeState? runtimeState = null;
+        TeamDocumentReadyEvent? pendingTeamDocument = null;
+        TeamAgentRecord? runningBoundAgent = null;
+        DesktopSettings? settings = null;
+        ProviderProfile? requestProfile = null;
+        string? apiKey = null;
+
+        try
+        {
+            var conversation = await EnsureConversationAsync();
+            if (IsConversationRunning(conversation.Id))
+            {
+                StatusText = "This conversation is already running.";
+                return;
+            }
+
+            if (TryMatchAgentMention(prompt, out var mentionedAgent, out var branchPrompt))
+            {
+                if (string.IsNullOrWhiteSpace(branchPrompt) && promptImageAttachments.Length == 0)
+                {
+                    StatusText = $"Enter a message for {mentionedAgent.Name}.";
+                    return;
+                }
+
+                conversation = await CreateAgentConversationAsync(conversation, mentionedAgent, branchPrompt);
+                prompt = branchPrompt;
+                selectedConversationMode = conversation.Mode;
+                selectedWorkspaceRoot = SelectedWorkspaceRoot;
+                selectedToolPermissionMode = SelectedToolPermissionMode;
+                selectedTeamMaxRounds = SelectedTeamMaxRounds;
+                selectedTeamOutputMode = SelectedTeamOutputMode;
+                usePlanningMode = false;
+                baseMessages = _messages.ToArray();
+                baseContextMessages = _contextMessages.ToArray();
+                baseTeamAgents = _teamAgents.ToArray();
+                baseToolRuns = _toolRuns.ToArray();
+                baseToolRunAnchors = new Dictionary<Guid, ToolRunAnchor>(_toolRunAnchors);
+            }
+
+            conversation = conversation with
+            {
+                ProfileId = selectedProfile.Id,
+                WorkspaceRootId = selectedWorkspaceRoot?.Id,
+                Mode = selectedConversationMode,
+                ToolPermissionMode = selectedToolPermissionMode,
+                TeamMaxRounds = selectedTeamMaxRounds,
+                TeamOutputMode = selectedTeamOutputMode,
+                UpdatedAtUtc = DateTimeOffset.UtcNow
+            };
+            await PersistConversationAsync(conversation, preferSelection: IsSelectedConversation(conversation.Id));
+
+            runtimeState = StartConversationRuntimeState(
+                conversation,
+                usePlanningMode,
+                usePlanningMode ? "Processing request..." : "Streaming response...",
+                baseMessages,
+                baseContextMessages,
+                baseTeamAgents,
+                baseToolRuns,
+                baseToolRunAnchors);
+            ClearPlanPanelState(runtimeState, publishShell: false);
+
+            var cancellationToken = runtimeState.CancellationTokenSource.Token;
+            var userMessageId = Guid.NewGuid();
+            var userAttachments = await PersistPromptImageAttachmentsAsync(
+                conversation.Id,
+                userMessageId,
+                promptImageAttachments,
+                cancellationToken);
+
+            var userMessage = new MessageRecord(
+                userMessageId,
+                conversation.Id,
+                MessageRole.User,
+                prompt,
+                MessageStatus.Completed,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                Attachments: userAttachments);
+            ReplaceMessage(runtimeState, userMessage);
+            await _conversationRepository.UpsertMessageAsync(userMessage);
+
+            if (conversation.Title == "New chat")
+            {
+                conversation = conversation with
+                {
+                    Title = CreateConversationTitle(prompt, userAttachments),
+                    UpdatedAtUtc = DateTimeOffset.UtcNow
+                };
+                runtimeState.Conversation = conversation;
+                await PersistConversationAsync(conversation, preferSelection: IsSelectedConversation(conversation.Id));
+            }
+            PublishRuntimeState(runtimeState, true);
+
+            requestProfile = selectedProfileModel is null
+                ? selectedProfile
+                : selectedProfile with { Model = selectedProfileModel };
+            apiKey = await _secretProtector.RetrieveSecretAsync(requestProfile.SecretRef, cancellationToken);
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("The selected profile does not have a readable API key.");
+            }
+
+            var requestTeamAgents = runtimeState.TeamAgents.ToArray();
+            runningBoundAgent = ResolveBoundAgent(conversation, runtimeState.TeamAgents);
+            settings = _desktopSettingsStore.Load();
+            _desktopSettings = settings;
+            var requestMessages = await _contextCompactionService.PrepareMessagesAsync(
+                conversation.Id,
+                requestProfile,
+                apiKey,
+                runtimeState.Messages.ToArray(),
+                settings.ModelContextWindow,
+                settings.ModelAutoCompactTokenLimit,
+                cancellationToken);
+            var rawContextMessages = runtimeState.ContextMessages.ToArray();
+            var requestContextMessages = rawContextMessages.Length == 0
+                ? rawContextMessages
+                : await _contextCompactionService.PrepareMessagesAsync(
+                    conversation.EffectiveRootConversationId,
+                    requestProfile,
+                    apiKey,
+                    rawContextMessages,
+                    settings.ModelContextWindow,
+                    settings.ModelAutoCompactTokenLimit,
+                    cancellationToken);
+
+            if (runningBoundAgent is not null)
+            {
+                await UpdateTeamAgentStatusAsync(runtimeState, runningBoundAgent.Id, TeamAgentStatus.Running);
+            }
+
+            await foreach (var update in _agentChatRuntime.StreamTurnAsync(
+                               new ChatTurnRequest(
+                                   conversation.Id,
+                                   requestProfile,
+                                   apiKey,
+                                   selectedWorkspaceRoot,
+                                   selectedConversationMode,
+                                   selectedToolPermissionMode,
+                                   selectedTeamMaxRounds,
+                                   selectedTeamOutputMode,
+                                   _toolApprovalHandler,
+                                   requestMessages,
+                                   requestTeamAgents,
+                                   requestContextMessages,
+                                   runningBoundAgent,
+                                   usePlanningMode,
+                                   useReasoning),
+                               cancellationToken))
+            {
+                switch (update)
+                {
+                    case ExecutionPlanDraftingStartedEvent:
+                        BeginPlanPanelDrafting(runtimeState);
+                        SetStatusTextForConversation(runtimeState, "Drafting plan...", publishShell: false);
+                        PublishRuntimeState(runtimeState, false);
+                        break;
+                    case AssistantMessageStartedEvent started:
+                        runtimeState.ActiveMessageIds.Add(started.Message.Id);
+                        ReplaceMessage(runtimeState, started.Message);
+                        PublishRuntimeState(runtimeState, true);
+                        break;
+                    case AssistantDeltaEvent delta:
+                        ApplyAssistantDelta(runtimeState, delta.MessageId, delta.DeltaMarkdown);
+                        break;
+                    case ExecutionPlanPreparedEvent prepared:
+                        ApplyPreparedExecutionPlan(runtimeState, prepared.Plan);
+                        break;
+                    case ExecutionPlanStepStatusChangedEvent planStepStatus:
+                        ApplyExecutionPlanStepStatus(runtimeState, planStepStatus.StepId, planStepStatus.Status);
+                        break;
+                    case ToolExecutionStartedEvent toolStarted:
+                        var startedRecord = CaptureToolRunAnchor(runtimeState, toolStarted.Record);
+                        UpsertToolRun(runtimeState, startedRecord);
+                        await _conversationRepository.UpsertToolExecutionAsync(startedRecord);
+                        PublishAgentActivities();
+                        break;
+                    case ToolExecutionCompletedEvent toolCompleted:
+                        var completedRecord = CaptureToolRunAnchor(runtimeState, toolCompleted.Record);
+                        UpsertToolRun(runtimeState, completedRecord);
+                        await _conversationRepository.UpsertToolExecutionAsync(completedRecord);
+                        PublishAgentActivities();
+                        break;
+                    case AssistantMessageCompletedEvent completed:
+                        runtimeState.ActiveMessageIds.Remove(completed.Message.Id);
+                        await CompleteAssistantMessageAsync(runtimeState, completed.Message);
+                        break;
+                    case TeamAgentsPlannedEvent planned:
+                        await UpsertTeamAgentsAsync(runtimeState, planned.Agents);
+                        break;
+                    case TeamAgentStatusChangedEvent statusChanged:
+                        await UpdateTeamAgentStatusAsync(runtimeState, statusChanged.AgentId, statusChanged.Status);
+                        break;
+                    case TeamDocumentReadyEvent documentReady:
+                        pendingTeamDocument = documentReady;
+                        break;
+                }
+            }
+
+            if (pendingTeamDocument is not null)
+            {
+                await FinalizeTeamDocumentExportAsync(
+                    runtimeState,
+                    conversation,
+                    pendingTeamDocument,
+                    selectedWorkspaceRoot,
+                    cancellationToken);
+            }
+
+            if (usePlanningMode)
+            {
+                FinalizePlanPanelAfterSuccessfulTurn(runtimeState);
+            }
+
+            if (runningBoundAgent is not null)
+            {
+                await UpdateTeamAgentStatusAsync(runtimeState, runningBoundAgent.Id, TeamAgentStatus.Completed);
+            }
+
+            await TryCompactConversationContextAfterSuccessfulTurnAsync(
+                runtimeState,
+                conversation,
+                requestProfile,
+                apiKey,
+                settings,
+                cancellationToken);
+
+            SetStatusTextForConversation(runtimeState, "Ready.", publishShell: false);
+            PublishConversationCompletedNotification(conversation, runtimeState.Messages);
+        }
+        catch (OperationCanceledException) when (runtimeState?.CancellationTokenSource.IsCancellationRequested == true)
+        {
+            if (runtimeState is not null)
+            {
+                await FailActiveMessagesAsync(runtimeState, runtimeState.ActiveMessageIds, "Generation stopped.");
+                if (usePlanningMode)
+                {
+                    MarkPlanPanelCancelled(runtimeState);
+                }
+
+                if (runningBoundAgent is not null)
+                {
+                    await UpdateTeamAgentStatusAsync(runtimeState, runningBoundAgent.Id, TeamAgentStatus.Failed);
+                }
+
+                SetStatusTextForConversation(runtimeState, "Generation stopped.", publishShell: false);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Chat turn failed.");
+            if (runtimeState is null)
+            {
+                StatusText = exception.Message;
+                return;
+            }
+
+            await FailActiveMessagesAsync(runtimeState, runtimeState.ActiveMessageIds, exception.Message);
+            if (usePlanningMode)
+            {
+                MarkPlanPanelFailed(runtimeState, exception.Message);
+            }
+
+            if (runningBoundAgent is not null)
+            {
+                await UpdateTeamAgentStatusAsync(runtimeState, runningBoundAgent.Id, TeamAgentStatus.Failed);
+            }
+
+            SetStatusTextForConversation(runtimeState, exception.Message, publishShell: false);
+        }
+        finally
+        {
+            if (runtimeState is not null)
+            {
+                CompleteConversationRuntimeState(runtimeState);
+                runtimeState.CancellationTokenSource.Dispose();
+            }
+        }
+    }
+
+    private async Task SendAsyncLegacy()
     {
         if (SelectedConversationMode == ConversationMode.Channel)
         {
@@ -1411,6 +1764,53 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private async Task TryCompactConversationContextAfterSuccessfulTurnAsync(
+        ConversationRuntimeState runtimeState,
+        ConversationRecord conversation,
+        ProviderProfile profile,
+        string apiKey,
+        DesktopSettings settings,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _contextCompactionService.PrepareMessagesAsync(
+                conversation.Id,
+                profile,
+                apiKey,
+                runtimeState.Messages.ToArray(),
+                settings.ModelContextWindow,
+                settings.ModelAutoCompactTokenLimit,
+                cancellationToken);
+
+            var rawContextMessages = runtimeState.ContextMessages.ToArray();
+            if (rawContextMessages.Length == 0)
+            {
+                return;
+            }
+
+            await _contextCompactionService.PrepareMessagesAsync(
+                conversation.EffectiveRootConversationId,
+                profile,
+                apiKey,
+                rawContextMessages,
+                settings.ModelContextWindow,
+                settings.ModelAutoCompactTokenLimit,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Post-turn context compaction failed. ConversationId={ConversationId}",
+                conversation.Id);
+        }
+    }
+
+    private async Task TryCompactConversationContextAfterSuccessfulTurnAsync(
         ConversationRecord conversation,
         ProviderProfile profile,
         string apiKey,
@@ -1456,6 +1856,194 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void BeginPlanPanelDrafting(ConversationRuntimeState runtimeState)
+    {
+        _conversationPlanPanels[runtimeState.ConversationId] = new TranscriptPlanPanel(
+            true,
+            "planning",
+            "计划模式",
+            null,
+            "正在梳理计划",
+            []);
+        PublishRuntimeState(runtimeState, false);
+    }
+
+    private void ApplyPreparedExecutionPlan(ConversationRuntimeState runtimeState, ExecutionPlan plan)
+    {
+        _conversationPlanPanels[runtimeState.ConversationId] = new TranscriptPlanPanel(
+            true,
+            "executing",
+            "计划模式",
+            string.IsNullOrWhiteSpace(plan.Summary) ? null : plan.Summary,
+            "准备执行",
+            plan.Steps
+                .Select(step => new TranscriptPlanStep(
+                    step.Id,
+                    step.Title,
+                    step.Status.ToString().ToLowerInvariant()))
+                .ToArray());
+        PublishRuntimeState(runtimeState, false);
+    }
+
+    private void ApplyExecutionPlanStepStatus(
+        ConversationRuntimeState runtimeState,
+        string stepId,
+        ExecutionPlanStepStatus status)
+    {
+        if (!_conversationPlanPanels.TryGetValue(runtimeState.ConversationId, out var planPanel) ||
+            planPanel.Steps.Count == 0)
+        {
+            return;
+        }
+
+        var nextStatus = status.ToString().ToLowerInvariant();
+        var changed = false;
+        var nextSteps = planPanel.Steps
+            .Select(step =>
+            {
+                if (!string.Equals(step.Id, stepId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return step;
+                }
+
+                changed = true;
+                return step with { Status = nextStatus };
+            })
+            .ToArray();
+        if (!changed)
+        {
+            return;
+        }
+
+        var nextState = ResolvePlanPanelState(nextSteps);
+        _conversationPlanPanels[runtimeState.ConversationId] = planPanel with
+        {
+            State = nextState,
+            StatusText = BuildPlanPanelStatusText(nextSteps, nextState),
+            Steps = nextSteps
+        };
+
+        var nextConversationStatus = status switch
+        {
+            ExecutionPlanStepStatus.Running => BuildPlanExecutionStatusText(nextSteps),
+            ExecutionPlanStepStatus.Failed => "Plan execution failed.",
+            ExecutionPlanStepStatus.Cancelled => "Generation stopped.",
+            _ when nextState == "completed" => "Plan steps completed.",
+            _ => runtimeState.StatusText
+        };
+        SetStatusTextForConversation(runtimeState, nextConversationStatus, publishShell: false);
+        PublishRuntimeState(runtimeState, false);
+    }
+
+    private void FinalizePlanPanelAfterSuccessfulTurn(ConversationRuntimeState runtimeState)
+    {
+        if (!_conversationPlanPanels.TryGetValue(runtimeState.ConversationId, out var planPanel) ||
+            planPanel.State is "failed" or "cancelled")
+        {
+            return;
+        }
+
+        var steps = planPanel.Steps.ToArray();
+        if (steps.Length == 0)
+        {
+            _conversationPlanPanels[runtimeState.ConversationId] = planPanel with
+            {
+                State = "completed",
+                StatusText = "已完成"
+            };
+        }
+        else if (steps.All(step => string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase)))
+        {
+            _conversationPlanPanels[runtimeState.ConversationId] = planPanel with
+            {
+                State = "completed",
+                StatusText = "全部步骤已完成"
+            };
+        }
+
+        PublishRuntimeState(runtimeState, false);
+    }
+
+    private void MarkPlanPanelFailed(ConversationRuntimeState runtimeState, string errorMessage)
+    {
+        if (!_conversationPlanPanels.TryGetValue(runtimeState.ConversationId, out var planPanel))
+        {
+            _conversationPlanPanels[runtimeState.ConversationId] = new TranscriptPlanPanel(
+                true,
+                "failed",
+                "计划模式",
+                string.IsNullOrWhiteSpace(errorMessage) ? null : errorMessage,
+                "计划执行失败",
+                []);
+            PublishRuntimeState(runtimeState, false);
+            return;
+        }
+
+        if (string.Equals(planPanel.State, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var nextSteps = planPanel.Steps
+            .Select(step => string.Equals(step.Status, "running", StringComparison.OrdinalIgnoreCase)
+                ? step with { Status = "failed" }
+                : step)
+            .ToArray();
+
+        _conversationPlanPanels[runtimeState.ConversationId] = planPanel with
+        {
+            State = "failed",
+            Summary = string.IsNullOrWhiteSpace(errorMessage) ? planPanel.Summary : errorMessage,
+            StatusText = "计划执行失败",
+            Steps = nextSteps
+        };
+        PublishRuntimeState(runtimeState, false);
+    }
+
+    private void MarkPlanPanelCancelled(ConversationRuntimeState runtimeState)
+    {
+        if (!_conversationPlanPanels.TryGetValue(runtimeState.ConversationId, out var planPanel))
+        {
+            _conversationPlanPanels[runtimeState.ConversationId] = new TranscriptPlanPanel(
+                true,
+                "cancelled",
+                "计划模式",
+                null,
+                "已停止执行",
+                []);
+            PublishRuntimeState(runtimeState, false);
+            return;
+        }
+
+        if (string.Equals(planPanel.State, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var nextSteps = planPanel.Steps
+            .Select(step => string.Equals(step.Status, "running", StringComparison.OrdinalIgnoreCase)
+                ? step with { Status = "cancelled" }
+                : step)
+            .ToArray();
+
+        _conversationPlanPanels[runtimeState.ConversationId] = planPanel with
+        {
+            State = "cancelled",
+            StatusText = "已停止执行",
+            Steps = nextSteps
+        };
+        PublishRuntimeState(runtimeState, false);
+    }
+
+    private void ClearPlanPanelState(ConversationRuntimeState runtimeState, bool publishShell)
+    {
+        _conversationPlanPanels[runtimeState.ConversationId] = TranscriptPlanPanel.Hidden;
+        if (publishShell)
+        {
+            PublishRuntimeState(runtimeState, false);
+        }
+    }
+
     private void BeginPlanPanelDrafting()
     {
         _planPanel = new TranscriptPlanPanel(
@@ -1485,6 +2073,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _streamingPublishTimer.Tick -= OnStreamingPublishTimerTick;
         }
 
+        foreach (var runtimeState in _conversationRuntimeStates.Values)
+        {
+            if (runtimeState.IsRunning)
+            {
+                runtimeState.CancellationTokenSource.Cancel();
+            }
+
+            runtimeState.Dispose();
+        }
+
+        _conversationRuntimeStates.Clear();
         _turnCancellationSource?.Cancel();
         _turnCancellationSource?.Dispose();
         _turnCancellationSource = null;
@@ -1655,6 +2254,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void ClearPlanPanelState(bool publishShell)
     {
         _planPanel = TranscriptPlanPanel.Hidden;
+        if (SelectedConversation is { } conversation)
+        {
+            _conversationPlanPanels[conversation.Id] = TranscriptPlanPanel.Hidden;
+        }
+
         if (publishShell)
         {
             PublishShell(false);
@@ -1720,7 +2324,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             : "Executing plan...";
     }
 
-    private void Stop() => _turnCancellationSource?.Cancel();
+    private void Stop()
+    {
+        var runtimeState = GetSelectedRuntimeState();
+        if (runtimeState?.IsRunning == true)
+        {
+            runtimeState.CancellationTokenSource.Cancel();
+            return;
+        }
+
+        _turnCancellationSource?.Cancel();
+    }
 
     private bool CanSend()
         => !IsBusy &&
@@ -1988,16 +2602,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return persistedConversation;
     }
 
-    private async Task PersistConversationAsync(ConversationRecord conversation)
+    private async Task PersistConversationAsync(ConversationRecord conversation, bool preferSelection = true)
     {
         await _conversationRepository.UpsertConversationAsync(conversation);
-        UpsertConversation(conversation);
-        _selectedConversation = conversation;
-        OnPropertyChanged(nameof(SelectedConversation));
+        UpsertConversation(conversation, preferSelection);
+        if (preferSelection || SelectedConversation?.Id == conversation.Id)
+        {
+            _selectedConversation = conversation;
+            OnPropertyChanged(nameof(SelectedConversation));
+        }
+
         PublishShell(false);
     }
 
-    private void UpsertConversation(ConversationRecord conversation)
+    private void UpsertConversation(ConversationRecord conversation, bool preferSelection = true)
     {
         var existing = _allConversations.FirstOrDefault(item => item.Id == conversation.Id);
         if (existing is not null)
@@ -2006,7 +2624,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _allConversations.Insert(0, conversation);
-        ApplyConversationFilter(conversation.Id);
+        ApplyConversationFilter(preferSelection ? conversation.Id : SelectedConversation?.Id);
     }
 
     private async Task SaveConversationSelectionAsync(ConversationRecord conversation)
@@ -2034,6 +2652,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         else
         {
             _messages.Add(message);
+        }
+    }
+
+    private static void ReplaceMessage(ConversationRuntimeState runtimeState, MessageRecord message)
+    {
+        var index = runtimeState.Messages.FindIndex(item => item.Id == message.Id);
+        if (index >= 0)
+        {
+            runtimeState.Messages[index] = message;
+        }
+        else
+        {
+            runtimeState.Messages.Add(message);
         }
     }
 
@@ -2086,10 +2717,31 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    private static void UpsertToolRun(ConversationRuntimeState runtimeState, ToolExecutionRecord record)
+    {
+        var index = runtimeState.ToolRuns.FindIndex(item => item.Id == record.Id);
+        if (index >= 0)
+        {
+            runtimeState.ToolRuns[index] = record;
+        }
+        else
+        {
+            runtimeState.ToolRuns.Add(record);
+        }
+    }
+
     private void PublishShell(bool autoScroll)
     {
-        var toolRunsByMessageId = TranscriptToolRunPresenter.BuildToolRunsByMessageId(_messages, _toolRuns, _toolRunAnchors);
-        var orderedItems = _messages
+        var transcriptMessages = GetSelectedTranscriptMessages();
+        var transcriptContextMessages = GetSelectedTranscriptContextMessages();
+        var transcriptTeamAgents = GetSelectedTranscriptTeamAgents();
+        var transcriptToolRuns = GetSelectedTranscriptToolRuns();
+        var transcriptToolRunAnchors = GetSelectedTranscriptToolRunAnchors();
+        var toolRunsByMessageId = TranscriptToolRunPresenter.BuildToolRunsByMessageId(
+            transcriptMessages,
+            transcriptToolRuns,
+            transcriptToolRunAnchors);
+        var orderedItems = transcriptMessages
             .OrderBy(item => item.CreatedAtUtc)
             .Select(item => BuildMessageItem(
                 item,
@@ -2125,7 +2777,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var teamRoundModes = TeamRoundOptions;
         var teamOutputModes = TeamOutputModeOptions;
         var teamMembers = SelectedConversationMode == ConversationMode.Team
-            ? _teamAgents
+            ? transcriptTeamAgents
                 .OrderBy(item => item.SortOrder)
                 .ThenBy(item => item.CreatedAtUtc)
                 .Select(BuildTeamMemberActivityNode)
@@ -2135,10 +2787,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var themeOptions = ThemeOptions
             .Select(option => new ShellSelectOption(ThemePreferenceToId(option.Value), option.Label))
             .ToArray();
-        var planPanel = SelectedConversationMode == ConversationMode.Programming
-            ? _planPanel ?? TranscriptPlanPanel.Hidden
-            : TranscriptPlanPanel.Hidden;
-        var contextUsage = BuildContextUsage();
+        var planPanel = GetSelectedPlanPanel();
+        var contextUsage = BuildContextUsage(transcriptContextMessages, transcriptMessages);
+        var isBusy = GetSelectedRuntimeState()?.IsRunning == true;
+        var statusText = GetSelectedStatusText();
 
         TranscriptChanged?.Invoke(this, new TranscriptRenderState(
             orderedItems,
@@ -2170,17 +2822,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             IsPlanningModeEnabled,
             planPanel,
             contextUsage,
-            StatusText,
-            IsBusy));
+            statusText,
+            isBusy));
     }
 
-    private TranscriptContextUsage BuildContextUsage()
+    private TranscriptContextUsage BuildContextUsage(
+        IEnumerable<MessageRecord> contextMessages,
+        IEnumerable<MessageRecord> messages)
     {
         var contextWindow = Math.Max(1, _desktopSettings.ModelContextWindow);
         var autoCompactLimit = _desktopSettings.ModelAutoCompactTokenLimit < 0
             ? 0
             : Math.Min(_desktopSettings.ModelAutoCompactTokenLimit, contextWindow);
-        var usedTokens = ResolveContextUsageTokens(_contextMessages.Concat(_messages), out var isMeasured);
+        var usedTokens = ResolveContextUsageTokens(contextMessages.Concat(messages), out var isMeasured);
 
         return new TranscriptContextUsage(usedTokens, contextWindow, autoCompactLimit, isMeasured);
     }
@@ -2343,12 +2997,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void PublishAgentActivities()
     {
+        var transcriptTeamAgents = GetSelectedTranscriptTeamAgents();
+        var transcriptToolRuns = GetSelectedTranscriptToolRuns();
         var teamAgentItems = SelectedConversationMode == ConversationMode.Team
-            ? _teamAgents
+            ? transcriptTeamAgents
                 .Select(item => (Timestamp: item.UpdatedAtUtc, Node: BuildTeamAgentEventNode(item)))
             : [];
 
-        var toolItems = _toolRuns
+        var toolItems = transcriptToolRuns
             .Select(item => (Timestamp: item.UpdatedAtUtc, Node: TranscriptToolRunPresenter.BuildActivityNode(item)));
 
         var items = teamAgentItems
