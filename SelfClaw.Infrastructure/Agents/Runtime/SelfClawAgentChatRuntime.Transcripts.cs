@@ -8,39 +8,6 @@ namespace SelfClaw.Infrastructure.Agents.Runtime;
 
 public sealed partial class SelfClawAgentChatRuntime
 {
-    private static string BuildDiscussionTranscript(IReadOnlyList<DiscussionEntry> discussionEntries)
-    {
-        var transcript = new StringBuilder();
-        transcript.AppendLine("Shared specialist discussion transcript:");
-
-        foreach (var roundGroup in discussionEntries
-                     .OrderBy(entry => entry.RoundNumber)
-                     .ThenBy(entry => entry.Agent.SortOrder)
-                     .ThenBy(entry => entry.Agent.CreatedAtUtc)
-                     .GroupBy(entry => entry.RoundNumber))
-        {
-            transcript.AppendLine();
-            transcript.AppendLine($"# Round {roundGroup.Key}");
-
-            foreach (var entry in roundGroup)
-            {
-                transcript.AppendLine();
-                transcript.AppendLine($"## {entry.Agent.Name} ({entry.Agent.Role})");
-                if (!entry.Succeeded)
-                {
-                    transcript.AppendLine("Status: failed");
-                    transcript.AppendLine($"Reason: {entry.ErrorMessage}");
-                    continue;
-                }
-
-                transcript.AppendLine(entry.Markdown);
-            }
-        }
-
-        return transcript.ToString();
-    }
-
-
     private static string BuildExecutionPlanTranscript(ExecutionPlan executionPlan)
     {
         var transcript = new StringBuilder();
@@ -137,7 +104,7 @@ public sealed partial class SelfClawAgentChatRuntime
         ISet<string> usedIds)
     {
         var baseId = Slugify(string.IsNullOrWhiteSpace(rawId) ? title : rawId);
-        if (string.IsNullOrWhiteSpace(baseId) || string.Equals(baseId, "team-summary", StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(baseId))
         {
             baseId = $"step-{index}";
         }

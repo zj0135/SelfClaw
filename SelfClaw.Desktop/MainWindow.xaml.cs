@@ -63,16 +63,11 @@ public partial class MainWindow : Window
         SelectedWorkspaceRootId: null,
         ToolPermissionModes: [],
         SelectedToolPermissionModeId: null,
-        TeamRoundModes: [],
-        SelectedTeamRoundModeId: null,
-        TeamOutputModes: [],
-        SelectedTeamOutputModeId: null,
         ThemeOptions: [],
         SelectedThemeId: null,
         Channels: [],
         McpServers: [],
         Skills: [],
-        TeamMembers: [],
         AgentActivities: [],
         IsPlanningModeEnabled: false,
         PlanPanel: null,
@@ -225,16 +220,11 @@ public partial class MainWindow : Window
             selectedWorkspaceRootId = state.SelectedWorkspaceRootId,
             toolPermissionModes = state.ToolPermissionModes,
             selectedToolPermissionModeId = state.SelectedToolPermissionModeId,
-            teamRoundModes = state.TeamRoundModes,
-            selectedTeamRoundModeId = state.SelectedTeamRoundModeId,
-            teamOutputModes = state.TeamOutputModes,
-            selectedTeamOutputModeId = state.SelectedTeamOutputModeId,
             themeOptions = state.ThemeOptions,
             selectedThemeId = state.SelectedThemeId,
             channels = state.Channels,
             mcpServers = state.McpServers,
             skills = state.Skills,
-            teamMembers = state.TeamMembers,
             agentActivities = state.AgentActivities,
             isPlanningModeEnabled = state.IsPlanningModeEnabled,
             planPanel = state.PlanPanel,
@@ -446,12 +436,6 @@ public partial class MainWindow : Window
                     break;
                 case "select-conversation-mode":
                     await _viewModel.SetConversationModeAsync(document.RootElement.GetProperty("modeId").GetString());
-                    break;
-                case "select-team-max-rounds":
-                    await _viewModel.SetTeamMaxRoundsAsync(document.RootElement.GetProperty("roundsId").GetString());
-                    break;
-                case "select-team-output-mode":
-                    await _viewModel.SetTeamOutputModeAsync(document.RootElement.GetProperty("outputModeId").GetString());
                     break;
                 case "approve-tool-execution":
                 {

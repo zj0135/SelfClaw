@@ -30,7 +30,7 @@ public sealed partial class MainWindowViewModel
         ConversationRecord conversation,
         IReadOnlyList<MessageRecord>? messages = null)
     {
-        if (conversation.Mode is not (ConversationMode.Programming or ConversationMode.Team))
+        if (conversation.Mode != ConversationMode.Programming)
         {
             return;
         }
@@ -48,9 +48,7 @@ public sealed partial class MainWindowViewModel
         ConversationRecord conversation,
         IReadOnlyList<MessageRecord> messages)
     {
-        var modeMessage = conversation.Mode == ConversationMode.Team
-            ? "Team session completed."
-            : "Programming session completed.";
+        const string modeMessage = "Programming session completed.";
         var preview = BuildConversationPreview(messages);
 
         return string.IsNullOrWhiteSpace(preview)

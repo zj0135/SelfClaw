@@ -2,79 +2,13 @@ const GRAPH_VIEWBOX = { width: 1200, height: 720 };
 
 const HUMAN_ID = 'human';
 const PROGRAMMING_AGENT_ID = 'programming-agent';
-const FALLBACK_COORDINATOR_ID = 'team-coordinator';
 const NODE_RADIUS = 54;
 const MAX_SATELLITES_PER_AGENT = 3;
 const HUMAN_POSITION = { x: 132, y: 160 };
-const PROGRAMMING_AGENT_POSITION = { x: 760, y: 210 };
-const TEAM_COORDINATOR_POSITION = { x: 684, y: 228 };
-
-function lower(value) {
-	return String(value || '').trim().toLowerCase();
-}
+const PROGRAMMING_AGENT_POSITION = { x: 790, y: 250 };
 
 function isRunningStatus(status) {
 	return status === 'streaming' || status === 'running';
-}
-
-function isSelectedConversationDirect(snapshot) {
-	const selectedConversation = getSelectedConversation(snapshot);
-	return Boolean(selectedConversation?.boundAgentId);
-}
-
-function getSelectedConversation(snapshot) {
-	return snapshot.conversations.find((item) => item.id === snapshot.selectedConversationId) || null;
-}
-
-function getCoordinator(snapshot) {
-	if (!snapshot.teamMembers.length) {
-		return null;
-	}
-
-	return snapshot.teamMembers.find((item) => {
-		const title = lower(item.title);
-		const summary = lower(item.summary);
-		return title === 'coordinator' || summary === 'coordinator';
-	}) || snapshot.teamMembers[0];
-}
-
-function getCoordinatorId(snapshot) {
-	return getCoordinator(snapshot)?.id || FALLBACK_COORDINATOR_ID;
-}
-
-function getHumanTargetAgentId(snapshot) {
-	if (snapshot.modeId !== 'team') {
-		return PROGRAMMING_AGENT_ID;
-	}
-
-	const selectedConversation = getSelectedConversation(snapshot);
-	return selectedConversation?.boundAgentId || getCoordinatorId(snapshot);
-}
-
-function getMessageAgentId(message, snapshot) {
-	if (message?.agentId) {
-		return message.agentId;
-	}
-
-	if (snapshot.modeId !== 'team') {
-		return PROGRAMMING_AGENT_ID;
-	}
-
-	const selectedConversation = getSelectedConversation(snapshot);
-	return selectedConversation?.boundAgentId || getCoordinatorId(snapshot);
-}
-
-function getActivityOwnerAgentId(activity, snapshot) {
-	if (activity?.ownerAgentId) {
-		return activity.ownerAgentId;
-	}
-
-	if (snapshot.modeId !== 'team') {
-		return PROGRAMMING_AGENT_ID;
-	}
-
-	const selectedConversation = getSelectedConversation(snapshot);
-	return selectedConversation?.boundAgentId || getCoordinatorId(snapshot);
 }
 
 function getLatestAssistantMessage(snapshot) {
@@ -88,38 +22,13 @@ function getLatestAssistantMessage(snapshot) {
 	return null;
 }
 
-function getLatestAssistantMessageForAgent(snapshot, agentId) {
-	for (let index = snapshot.items.length - 1; index >= 0; index -= 1) {
-		const item = snapshot.items[index];
-		if (item.role !== 'assistant') {
-			continue;
-		}
-
-		if (getMessageAgentId(item, snapshot) === agentId) {
-			return item;
-		}
-	}
-
-	return null;
+function hasAssistantRunning(snapshot) {
+	return snapshot.items.some((item) => item.role === 'assistant' && (Boolean(item.isThinking) || isRunningStatus(item.status)));
 }
 
-function hasAssistantRunningForAgent(snapshot, agentId) {
-	return snapshot.items.some((item) => {
-		if (item.role !== 'assistant') {
-			return false;
-		}
-
-		if (getMessageAgentId(item, snapshot) !== agentId) {
-			return false;
-		}
-
-		return Boolean(item.isThinking) || isRunningStatus(item.status);
-	});
-}
-
-function getToolStatusesForAgent(snapshot, agentId) {
+function getToolStatuses(snapshot) {
 	return snapshot.agentActivities
-		.filter((item) => item.kind === 'tool' && getActivityOwnerAgentId(item, snapshot) === agentId)
+		.filter((item) => item.kind === 'tool')
 		.map((item) => item.status);
 }
 
@@ -143,12 +52,8 @@ function resolveNodeIcon(label, summary, kind) {
 		return 'human';
 	}
 
-	const normalizedLabel = lower(label);
-	const normalizedSummary = lower(summary);
-	if (normalizedLabel === 'coordinator' || normalizedSummary === 'coordinator') {
-		return 'coordinator';
-	}
-
+	const normalizedLabel = String(label || '').trim().toLowerCase();
+	const normalizedSummary = String(summary || '').trim().toLowerCase();
 	if (
 		normalizedLabel.includes('coder') ||
 		normalizedLabel.includes('engineer') ||
@@ -194,12 +99,12 @@ function buildNode({
 
 function deriveProgrammingNode(snapshot) {
 	const latestAssistantMessage = getLatestAssistantMessage(snapshot);
-	const toolStatuses = getToolStatusesForAgent(snapshot, PROGRAMMING_AGENT_ID);
+	const toolStatuses = getToolStatuses(snapshot);
 	let status = 'idle';
 
 	if (toolStatuses.includes('awaitingapproval')) {
 		status = 'awaitingapproval';
-	} else if (toolStatuses.includes('running') || hasAssistantRunningForAgent(snapshot, PROGRAMMING_AGENT_ID)) {
+	} else if (toolStatuses.includes('running') || hasAssistantRunning(snapshot)) {
 		status = 'running';
 	} else if (latestAssistantMessage?.status === 'failed') {
 		status = 'failed';
@@ -212,160 +117,11 @@ function deriveProgrammingNode(snapshot) {
 		kind: 'programming-agent',
 		label: latestAssistantMessage?.title || snapshot.selectedProfileModel || 'Assistant',
 		summary: latestAssistantMessage?.subtitle || snapshot.selectedProfileModel || 'Programming agent',
-		x: 790,
-		y: 250,
+		x: PROGRAMMING_AGENT_POSITION.x,
+		y: PROGRAMMING_AGENT_POSITION.y,
 		status,
 		selected: true,
 	});
-}
-
-function deriveTeamNodeStatus(member, snapshot) {
-	const agentId = member.id;
-	const toolStatuses = getToolStatusesForAgent(snapshot, agentId);
-	if (toolStatuses.includes('awaitingapproval')) {
-		return 'awaitingapproval';
-	}
-
-	if (toolStatuses.includes('running') || hasAssistantRunningForAgent(snapshot, agentId)) {
-		return 'running';
-	}
-
-	switch (member.status) {
-		case 'running':
-			return 'running';
-		case 'failed':
-			return 'failed';
-		case 'completed':
-			return 'completed';
-		default:
-			return 'idle';
-	}
-}
-
-function buildTeamWorkerPositions(count) {
-	if (count <= 0) {
-		return [];
-	}
-
-	const centerX = 684;
-	const topRowY = 468;
-	const bottomRowY = 598;
-
-	if (count <= 3) {
-		const span = count === 1 ? 0 : 260;
-		return Array.from({ length: count }, (_, index) => {
-			const progress = count === 1 ? 0.5 : index / (count - 1);
-			return {
-				x: centerX - span + span * 2 * progress,
-				y: topRowY + Math.abs(progress - 0.5) * 28,
-			};
-		});
-	}
-
-	if (count <= 5) {
-		const primarySlots = [centerX - 300, centerX - 110, centerX + 110, centerX + 300];
-		const secondarySlots = [centerX];
-		const positions = primarySlots.slice(0, Math.min(count, primarySlots.length)).map((x, index) => ({
-			x,
-			y: topRowY + (index === 1 || index === 2 ? 18 : 0),
-		}));
-		if (count > primarySlots.length) {
-			positions.push({ x: secondarySlots[0], y: bottomRowY });
-		}
-		return positions;
-	}
-
-	const firstRowSlots = [centerX - 344, centerX - 172, centerX, centerX + 172, centerX + 344];
-	const secondRowSlots = [centerX - 258, centerX - 86, centerX + 86, centerX + 258];
-	const firstRowCount = Math.min(count, firstRowSlots.length);
-	const secondRowCount = Math.max(0, count - firstRowCount);
-	const positions = firstRowSlots.slice(0, firstRowCount).map((x, index) => ({
-		x,
-		y: topRowY + (index === 1 || index === 3 ? 14 : index === 2 ? 22 : 0),
-	}));
-	positions.push(
-		...secondRowSlots.slice(0, secondRowCount).map((x, index) => ({
-			x,
-			y: bottomRowY + (index === 1 || index === 2 ? 14 : 0),
-		}))
-	);
-	return positions;
-}
-
-function buildProgrammingGraph(snapshot) {
-	const humanTargetId = getHumanTargetAgentId(snapshot);
-	const human = buildNode({
-		id: HUMAN_ID,
-		kind: 'human',
-		label: 'Human',
-		summary: 'You',
-		x: HUMAN_POSITION.x,
-		y: HUMAN_POSITION.y,
-		status: 'idle',
-	});
-	const agent = deriveProgrammingNode(snapshot);
-	agent.x = PROGRAMMING_AGENT_POSITION.x;
-	agent.y = PROGRAMMING_AGENT_POSITION.y;
-	agent.isSelected = humanTargetId === agent.id;
-	return {
-		nodes: [human, agent],
-		targetAgentId: humanTargetId,
-		meta: {
-			modeLabel: 'Programming',
-			targetLabel: agent.label,
-		},
-	};
-}
-
-function buildTeamGraph(snapshot) {
-	const coordinator = getCoordinator(snapshot);
-	const coordinatorId = getCoordinatorId(snapshot);
-	const targetAgentId = getHumanTargetAgentId(snapshot);
-	const human = buildNode({
-		id: HUMAN_ID,
-		kind: 'human',
-		label: 'Human',
-		summary: 'You',
-		x: HUMAN_POSITION.x,
-		y: HUMAN_POSITION.y,
-		status: 'idle',
-	});
-	const coordinatorNode = buildNode({
-		id: coordinatorId,
-		kind: 'team-agent',
-		label: coordinator?.title || 'Coordinator',
-		summary: coordinator?.summary || 'Coordinator',
-		x: TEAM_COORDINATOR_POSITION.x,
-		y: TEAM_COORDINATOR_POSITION.y,
-		status: coordinator ? deriveTeamNodeStatus(coordinator, snapshot) : 'idle',
-		selected: targetAgentId === coordinatorId,
-	});
-
-	const workers = snapshot.teamMembers.filter((item) => item.id !== coordinatorId);
-	const workerPositions = buildTeamWorkerPositions(workers.length);
-	const workerNodes = workers.map((member, index) =>
-		buildNode({
-			id: member.id,
-			kind: 'team-agent',
-			label: member.title,
-			summary: member.summary,
-			x: workerPositions[index]?.x || TEAM_COORDINATOR_POSITION.x,
-			y: workerPositions[index]?.y || 520,
-			status: deriveTeamNodeStatus(member, snapshot),
-			selected: targetAgentId === member.id,
-		})
-	);
-
-	return {
-		nodes: [human, coordinatorNode, ...workerNodes],
-		targetAgentId,
-		meta: {
-			modeLabel: 'Team',
-			targetLabel:
-				workerNodes.find((item) => item.id === targetAgentId)?.label ||
-				(targetAgentId === coordinatorNode.id ? coordinatorNode.label : 'Coordinator'),
-		},
-	};
 }
 
 function trimConnection(source, target) {
@@ -382,40 +138,20 @@ function trimConnection(source, target) {
 	};
 }
 
-function buildSecondaryPath(source, target) {
-	const startX = source.x;
-	const startY = source.y + source.radius + 8;
-	const endX = target.x;
-	const endY = target.y - target.radius - 8;
-	const branchY = startY + Math.max(54, (endY - startY) * 0.34);
-
-	if (Math.abs(endX - startX) <= 4) {
-		return `M ${startX} ${startY} L ${endX} ${endY}`;
-	}
-
-	return `M ${startX} ${startY} L ${startX} ${branchY} L ${endX} ${branchY} L ${endX} ${endY}`;
-}
-
-function buildPath(source, target, tone = 'primary') {
-	if (tone === 'secondary' && target.y > source.y) {
-		return buildSecondaryPath(source, target);
-	}
-
+function buildPath(source, target) {
 	const { startX, startY, endX, endY } = trimConnection(source, target);
 	const dx = endX - startX;
 	const dy = endY - startY;
 	const distance = Math.hypot(dx, dy) || 1;
 
-	if (tone === 'direct') {
-		const midX = startX + dx * 0.5;
-		const controlY = Math.min(startY, endY) - Math.max(56, distance * 0.12);
-		return `M ${startX} ${startY} Q ${midX} ${controlY} ${endX} ${endY}`;
-	}
-
 	if (Math.abs(dx) > 200 || Math.abs(dy) > 140) {
 		const controlX = startX + dx * 0.56;
 		const controlY = startY + dy * 0.2;
 		return `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`;
+	}
+
+	if (distance < 12) {
+		return `M ${startX} ${startY}`;
 	}
 
 	return `M ${startX} ${startY} L ${endX} ${endY}`;
@@ -426,14 +162,14 @@ function buildEdge(id, source, target, tone, active = false) {
 		id,
 		sourceId: source.id,
 		targetId: target.id,
-		path: buildPath(source, target, tone),
+		path: buildPath(source, target),
 		tone,
 		active,
 	};
 }
 
 function resolveToolGlyph(title) {
-	const normalized = lower(title);
+	const normalized = String(title || '').trim().toLowerCase();
 	if (normalized.includes('shell')) {
 		return '>_';
 	}
@@ -454,19 +190,14 @@ function resolveToolGlyph(title) {
 		return 'LS';
 	}
 
-	if (normalized.includes('export')) {
-		return 'EX';
-	}
-
 	return 'TL';
 }
 
 function buildToolSatellite(node, activity, index) {
-	const side = node.x > GRAPH_VIEWBOX.width * 0.68 ? -1 : 1;
 	const offsets = [
-		{ x: 86 * side, y: -46 },
-		{ x: 102 * side, y: 0 },
-		{ x: 86 * side, y: 46 },
+		{ x: -86, y: -46 },
+		{ x: -102, y: 0 },
+		{ x: -86, y: 46 },
 	];
 	const offset = offsets[index] || offsets[offsets.length - 1];
 	return {
@@ -480,139 +211,55 @@ function buildToolSatellite(node, activity, index) {
 	};
 }
 
-function attachToolSatellites(snapshot, nodesById) {
-	const toolBuckets = new Map();
-
-	for (const activity of snapshot.agentActivities) {
-		if (activity.kind !== 'tool') {
-			continue;
-		}
-
-		const ownerAgentId = getActivityOwnerAgentId(activity, snapshot);
-		if (!nodesById.has(ownerAgentId)) {
-			continue;
-		}
-
-		const bucket = toolBuckets.get(ownerAgentId) || [];
-		if (bucket.length >= MAX_SATELLITES_PER_AGENT) {
-			continue;
-		}
-
-		bucket.push(activity);
-		toolBuckets.set(ownerAgentId, bucket);
-	}
-
-	for (const [ownerAgentId, activities] of toolBuckets.entries()) {
-		const node = nodesById.get(ownerAgentId);
-		node.satellites = activities.map((activity, index) => buildToolSatellite(node, activity, index));
-		if (node.satellites.some((item) => item.status === 'awaitingapproval')) {
-			node.status = 'awaitingapproval';
-			node.statusText = formatStatusText(node.status);
-			node.isActive = true;
-		}
+function attachToolSatellites(snapshot, node) {
+	const toolActivities = snapshot.agentActivities
+		.filter((item) => item.kind === 'tool')
+		.slice(0, MAX_SATELLITES_PER_AGENT);
+	node.satellites = toolActivities.map((activity, index) => buildToolSatellite(node, activity, index));
+	if (node.satellites.some((item) => item.status === 'awaitingapproval')) {
+		node.status = 'awaitingapproval';
+		node.statusText = formatStatusText(node.status);
+		node.isActive = true;
 	}
 }
 
-function buildEdges(snapshot, nodes, targetAgentId) {
-	const nodesById = new Map(nodes.map((item) => [item.id, item]));
-	const human = nodesById.get(HUMAN_ID);
-	if (!human) {
-		return [];
-	}
-
-	if (snapshot.modeId !== 'team') {
-		const agent = nodesById.get(PROGRAMMING_AGENT_ID);
-		if (!agent) {
-			return [];
-		}
-
-		return [
-			buildEdge(
-				'human:programming',
-				human,
-				agent,
-				'primary',
-				targetAgentId === agent.id || agent.isActive
-			),
-		];
-	}
-
-	const coordinatorId = getCoordinatorId(snapshot);
-	const coordinator = nodesById.get(coordinatorId);
-	if (!coordinator) {
-		return [];
-	}
-
-	const edges = [
-		buildEdge(
-			'human:coordinator',
-			human,
-			coordinator,
-			'primary',
-			targetAgentId === coordinator.id || coordinator.isActive
-		),
-	];
-
-	nodes
-		.filter((item) => item.id !== HUMAN_ID && item.id !== coordinator.id)
-		.forEach((item) => {
-			edges.push(
-				buildEdge(
-					`${coordinator.id}:${item.id}`,
-					coordinator,
-					item,
-					'secondary',
-					item.isActive || item.status === 'completed' || item.status === 'failed'
-				)
-			);
-		});
-
-	if (targetAgentId && targetAgentId !== coordinator.id && nodesById.has(targetAgentId)) {
-		edges.push(
-			buildEdge(
-				`human:${targetAgentId}:direct`,
-				human,
-				nodesById.get(targetAgentId),
-				'direct',
-				true
-			)
-		);
-	}
-
-	return edges;
-}
-
-function buildGraphMeta(snapshot, targetAgentId, nodesById) {
+function buildGraphMeta(node) {
 	return {
-		modeLabel: snapshot.modeId === 'team' ? 'Team' : 'Programming',
-		targetLabel: nodesById.get(targetAgentId)?.label || 'Assistant',
+		modeLabel: 'Programming',
+		targetLabel: node.label || 'Assistant',
 	};
 }
 
 export function normalizeGraphSnapshot(raw = {}) {
 	return {
-		modeId: raw.selectedConversationModeId === 'team' ? 'team' : 'programming',
 		items: Array.isArray(raw.items) ? raw.items.map((item) => ({ ...item })) : [],
 		conversations: Array.isArray(raw.conversations) ? raw.conversations.map((item) => ({ ...item })) : [],
 		selectedConversationId: raw.selectedConversationId || null,
 		selectedProfileModel: raw.selectedProfileModel || '',
-		teamMembers: Array.isArray(raw.teamMembers) ? raw.teamMembers.map((item) => ({ ...item })) : [],
 		agentActivities: Array.isArray(raw.agentActivities) ? raw.agentActivities.map((item) => ({ ...item })) : [],
 	};
 }
 
 export function buildGraphModel(snapshot) {
-	const baseGraph = snapshot.modeId === 'team' ? buildTeamGraph(snapshot) : buildProgrammingGraph(snapshot);
-	const nodesById = new Map(baseGraph.nodes.map((item) => [item.id, item]));
-	attachToolSatellites(snapshot, nodesById);
-	const edges = buildEdges(snapshot, baseGraph.nodes, baseGraph.targetAgentId);
+	const human = buildNode({
+		id: HUMAN_ID,
+		kind: 'human',
+		label: 'Human',
+		summary: 'You',
+		x: HUMAN_POSITION.x,
+		y: HUMAN_POSITION.y,
+		status: 'idle',
+	});
+	const agent = deriveProgrammingNode(snapshot);
+	attachToolSatellites(snapshot, agent);
+	const edges = [buildEdge('human:programming', human, agent, 'primary', agent.isActive || agent.isSelected)];
 
 	return {
 		viewBox: GRAPH_VIEWBOX,
-		nodes: baseGraph.nodes,
+		nodes: [human, agent],
 		edges,
-		targetAgentId: baseGraph.targetAgentId,
-		meta: buildGraphMeta(snapshot, baseGraph.targetAgentId, nodesById),
+		targetAgentId: PROGRAMMING_AGENT_ID,
+		meta: buildGraphMeta(agent),
 		isEmpty: snapshot.items.length === 0 && snapshot.agentActivities.length === 0,
 	};
 }
@@ -626,9 +273,9 @@ function buildPacket(seed, sourceNode, targetNode, kind, status = kind) {
 		id: `packet-${seed}`,
 		kind,
 		status,
-		durationMs: kind === 'signal' ? 820 : 1080,
+		durationMs: kind === 'user' ? 820 : 1080,
 		path: buildPath(sourceNode, targetNode),
-		radius: kind === 'signal' ? 4.5 : 5.5,
+		radius: kind === 'user' ? 4.5 : 5.5,
 	};
 }
 
@@ -653,23 +300,6 @@ function buildEdgeTrace(seed, edgeId, tone = 'primary') {
 	};
 }
 
-function resolveAssistantFlow(agentId, snapshot) {
-	if (snapshot.modeId !== 'team') {
-		return { sourceId: agentId, targetId: HUMAN_ID };
-	}
-
-	if (isSelectedConversationDirect(snapshot)) {
-		return { sourceId: agentId, targetId: HUMAN_ID };
-	}
-
-	const coordinatorId = getCoordinatorId(snapshot);
-	if (agentId === coordinatorId) {
-		return { sourceId: agentId, targetId: HUMAN_ID };
-	}
-
-	return { sourceId: agentId, targetId: coordinatorId };
-}
-
 function hasAssistantStarted(previousMessage, nextMessage) {
 	const previousRunning = Boolean(previousMessage?.isThinking) || isRunningStatus(previousMessage?.status);
 	const nextRunning = Boolean(nextMessage?.isThinking) || isRunningStatus(nextMessage?.status);
@@ -677,11 +307,7 @@ function hasAssistantStarted(previousMessage, nextMessage) {
 }
 
 export function buildGraphAnimations(previousSnapshot, nextSnapshot, graphModel, seed = 0) {
-	if (
-		!previousSnapshot ||
-		previousSnapshot.selectedConversationId !== nextSnapshot.selectedConversationId ||
-		previousSnapshot.modeId !== nextSnapshot.modeId
-	) {
+	if (!previousSnapshot || previousSnapshot.selectedConversationId !== nextSnapshot.selectedConversationId) {
 		return { packets: [], bursts: [], edgeTraces: [], nextSeed: seed };
 	}
 
@@ -692,29 +318,17 @@ export function buildGraphAnimations(previousSnapshot, nextSnapshot, graphModel,
 	const nodesById = new Map(graphModel.nodes.map((item) => [item.id, item]));
 	const previousMessagesById = new Map(previousSnapshot.items.map((item) => [item.id, item]));
 	const previousActivitiesById = new Map(previousSnapshot.agentActivities.map((item) => [item.id, item]));
-	const previousMembersById = new Map(previousSnapshot.teamMembers.map((item) => [item.id, item]));
 
-	const humanTargetId = getHumanTargetAgentId(nextSnapshot);
 	for (const message of nextSnapshot.items) {
 		const previousMessage = previousMessagesById.get(message.id);
 		if (message.role === 'user' && !previousMessage) {
 			nextSeed += 1;
-			const packet = buildPacket(nextSeed, nodesById.get(HUMAN_ID), nodesById.get(humanTargetId), 'user');
+			const packet = buildPacket(nextSeed, nodesById.get(HUMAN_ID), nodesById.get(PROGRAMMING_AGENT_ID), 'user');
 			if (packet) {
 				packets.push(packet);
 			}
 			nextSeed += 1;
-			edgeTraces.push(
-				buildEdgeTrace(
-					nextSeed,
-					nextSnapshot.modeId === 'team' && humanTargetId !== getCoordinatorId(nextSnapshot)
-						? `human:${humanTargetId}:direct`
-						: nextSnapshot.modeId === 'team'
-							? 'human:coordinator'
-							: 'human:programming',
-					nextSnapshot.modeId === 'team' && humanTargetId !== getCoordinatorId(nextSnapshot) ? 'direct' : 'primary'
-				)
-			);
+			edgeTraces.push(buildEdgeTrace(nextSeed, 'human:programming'));
 			continue;
 		}
 
@@ -722,18 +336,16 @@ export function buildGraphAnimations(previousSnapshot, nextSnapshot, graphModel,
 			continue;
 		}
 
-		const agentId = getMessageAgentId(message, nextSnapshot);
 		if (hasAssistantStarted(previousMessage, message)) {
 			nextSeed += 1;
-			bursts.push(buildBurst(nextSeed, 'node', agentId, 'running'));
+			bursts.push(buildBurst(nextSeed, 'node', PROGRAMMING_AGENT_ID, 'running'));
 		}
 
 		if (message.status === 'completed' && previousMessage?.status !== 'completed') {
 			nextSeed += 1;
-			bursts.push(buildBurst(nextSeed, 'node', agentId, 'completed'));
-			const flow = resolveAssistantFlow(agentId, nextSnapshot);
+			bursts.push(buildBurst(nextSeed, 'node', PROGRAMMING_AGENT_ID, 'completed'));
 			nextSeed += 1;
-			const packet = buildPacket(nextSeed, nodesById.get(flow.sourceId), nodesById.get(flow.targetId), 'assistant', 'completed');
+			const packet = buildPacket(nextSeed, nodesById.get(PROGRAMMING_AGENT_ID), nodesById.get(HUMAN_ID), 'assistant', 'completed');
 			if (packet) {
 				packets.push(packet);
 			}
@@ -741,7 +353,7 @@ export function buildGraphAnimations(previousSnapshot, nextSnapshot, graphModel,
 
 		if (message.status === 'failed' && previousMessage?.status !== 'failed') {
 			nextSeed += 1;
-			bursts.push(buildBurst(nextSeed, 'node', agentId, 'failed'));
+			bursts.push(buildBurst(nextSeed, 'node', PROGRAMMING_AGENT_ID, 'failed'));
 		}
 	}
 
@@ -755,32 +367,8 @@ export function buildGraphAnimations(previousSnapshot, nextSnapshot, graphModel,
 			continue;
 		}
 
-		const ownerAgentId = getActivityOwnerAgentId(activity, nextSnapshot);
 		nextSeed += 1;
-		bursts.push(buildBurst(nextSeed, 'satellite', activity.id, 'tool', activity.status, ownerAgentId));
-	}
-
-	if (nextSnapshot.modeId === 'team') {
-		const coordinatorId = getCoordinatorId(nextSnapshot);
-		for (const member of nextSnapshot.teamMembers) {
-			const previousMember = previousMembersById.get(member.id);
-			if (!previousMember || previousMember.status === member.status) {
-				continue;
-			}
-
-			nextSeed += 1;
-			bursts.push(buildBurst(nextSeed, 'node', member.id, 'status', member.status));
-
-			if (member.id === coordinatorId) {
-				continue;
-			}
-
-			nextSeed += 1;
-			const packet = buildPacket(nextSeed, nodesById.get(coordinatorId), nodesById.get(member.id), 'signal', member.status);
-			if (packet) {
-				packets.push(packet);
-			}
-		}
+		bursts.push(buildBurst(nextSeed, 'satellite', activity.id, 'tool', activity.status, PROGRAMMING_AGENT_ID));
 	}
 
 	return { packets, bursts, edgeTraces, nextSeed };

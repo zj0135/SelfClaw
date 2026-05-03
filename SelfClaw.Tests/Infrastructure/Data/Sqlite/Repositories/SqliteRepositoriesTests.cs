@@ -42,10 +42,8 @@ public sealed class SqliteRepositoriesTests : IDisposable
             "Chat",
             profile.Id,
             workspace.Id,
-            ConversationMode.Team,
+            ConversationMode.Programming,
             ToolPermissionMode.RequireApproval,
-            4,
-            TeamOutputMode.AlwaysDocument,
             now,
             now);
         await conversationRepository.UpsertConversationAsync(conversation);
@@ -98,7 +96,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
     }
 
     [Fact]
-    public async Task Initialize_adds_team_discussion_columns_to_legacy_conversations_table()
+    public async Task Initialize_adds_required_columns_to_legacy_conversations_table()
     {
         var storagePaths = new StoragePaths(
             _rootPath,
@@ -138,8 +136,10 @@ CREATE TABLE conversations (
         }
 
         columns.Should().Contain("tool_permission_mode");
-        columns.Should().Contain("team_max_rounds");
-        columns.Should().Contain("team_output_mode");
+        columns.Should().Contain("mode");
+        columns.Should().Contain("channel_kind");
+        columns.Should().Contain("channel_conversation_id");
+        columns.Should().Contain("channel_display_name");
     }
 
     [Fact]
@@ -260,8 +260,6 @@ CREATE TABLE conversations (
             null,
             ConversationMode.Programming,
             ToolPermissionMode.RequireApproval,
-            TeamDiscussionDefaults.DefaultMaxRounds,
-            TeamDiscussionDefaults.DefaultOutputMode,
             now,
             now);
         await conversationRepository.UpsertConversationAsync(conversation);

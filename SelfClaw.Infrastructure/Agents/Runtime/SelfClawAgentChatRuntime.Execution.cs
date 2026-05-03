@@ -133,6 +133,53 @@ public sealed partial class SelfClawAgentChatRuntime
         return MaterializeExecutionPlan(request, blueprint);
     }
 
+    private ExecutionPlan MaterializeExecutionPlan(ChatTurnRequest request, ExecutionPlanBlueprint blueprint)
+    {
+        var normalizedSteps = blueprint.Steps
+            .Select(step => step with
+            {
+                Title = SanitizeExecutionPlanText(step.Title) ?? string.Empty
+            })
+            .Where(step => !string.IsNullOrWhiteSpace(step.Title))
+            .Take(MaxExecutionPlanSteps)
+            .ToArray();
+        if (normalizedSteps.Length < MinExecutionPlanSteps)
+        {
+            return BuildFallbackExecutionPlan(request, blueprint.Summary);
+        }
+
+        var usedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var steps = normalizedSteps
+            .Select((step, index) => new ExecutionPlanStep(
+                NormalizeExecutionPlanStepId(step.Id, step.Title, index + 1, usedIds),
+                step.Title.Trim(),
+                ExecutionPlanStepStatus.Pending))
+            .ToArray();
+
+        return new ExecutionPlan(
+            BuildExecutionPlanSummary(request, blueprint.Summary),
+            steps);
+    }
+
+    private static ExecutionPlan BuildFallbackExecutionPlan(ChatTurnRequest request, string? rawSummary)
+    {
+        ExecutionPlanStep[] steps = request.WorkspaceRoot is null
+            ?
+            [
+                new ExecutionPlanStep("clarify-scope", "Clarify requirements and constraints"),
+                new ExecutionPlanStep("work-through-solution", "Perform core analysis or implementation work"),
+                new ExecutionPlanStep("prepare-answer", "Summarize the outcome for the user")
+            ]
+            :
+            [
+                new ExecutionPlanStep("inspect-workspace", "Inspect the workspace and confirm entry points"),
+                new ExecutionPlanStep("execute-core-work", "Execute key checks or code changes"),
+                new ExecutionPlanStep("prepare-answer", "Summarize the outcome for the user")
+            ];
+
+        return new ExecutionPlan(BuildExecutionPlanSummary(request, rawSummary), steps);
+    }
+
     private async Task<AgentExecutionResult> ProduceExecutionPlanStepTurnAsync(
         ChatTurnRequest request,
         ChannelWriter<ChatRuntimeEvent> writer,
@@ -203,50 +250,4 @@ public sealed partial class SelfClawAgentChatRuntime
             throw;
         }
     }
-
-    private async Task ProduceBoundAgentTurnAsync(
-        ChatTurnRequest request,
-        ChannelWriter<ChatRuntimeEvent> writer,
-        CancellationToken cancellationToken)
-    {
-        var agent = request.BoundAgent!;
-        var messageId = Guid.NewGuid();
-        var startedMessage = CreateAssistantMessage(
-            request.ConversationId,
-            messageId,
-            agent.Id,
-            agent.Name,
-            agent.Role);
-
-        await writer.WriteAsync(new AssistantMessageStartedEvent(startedMessage), cancellationToken);
-
-        var observer = new RuntimeToolObserver(writer, request.ConversationId, agent.Id, messageId);
-        var result = await _agentExecutionService.RunAsync(
-            new AgentExecutionRequest(
-                request.Profile,
-                request.ApiKey,
-                agent.Name,
-                BoundAgentSessionDescription,
-                BuildBoundAgentInstructions(request, agent),
-                BuildBoundAgentPromptMessages(request.ContextMessages ?? [], request.Messages, agent),
-                CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
-                CreateContextProviders(),
-                request.EnableReasoning),
-            (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
-            cancellationToken);
-
-        await writer.WriteAsync(
-            new AssistantMessageCompletedEvent(startedMessage with
-            {
-                MarkdownContent = result.FinalMarkdown,
-                Status = MessageStatus.Completed,
-                UpdatedAtUtc = DateTimeOffset.UtcNow,
-                InputTokens = result.InputTokens,
-                OutputTokens = result.OutputTokens,
-                DurationMs = result.Duration.TotalMilliseconds,
-                ErrorMessage = null
-            }),
-            cancellationToken);
-    }
-
 }

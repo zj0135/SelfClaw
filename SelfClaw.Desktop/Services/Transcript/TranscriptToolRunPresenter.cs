@@ -318,7 +318,6 @@ internal static class TranscriptToolRunPresenter
             "search_workspace_text" => "Search Results",
             "list_workspace_files" => "Workspace Entries",
             "write_workspace_file" => "Write File",
-            "export_team_document" => "Export Team Document",
             _ => HumanizeToolName(toolRun.ToolName)
         };
 
@@ -338,7 +337,6 @@ internal static class TranscriptToolRunPresenter
             "search_workspace_text" => $"Query: {ReadArgument(arguments, "query", string.Empty)}",
             "list_workspace_files" => BuildListRequestDetails(arguments),
             "write_workspace_file" => BuildWriteRequestDetails(arguments),
-            "export_team_document" => BuildExportRequestDetails(arguments),
             _ => toolRun.ResultSummary ?? PrettyPrintJson(toolRun.ArgumentsJson)
         };
     }
@@ -403,12 +401,6 @@ internal static class TranscriptToolRunPresenter
         return string.IsNullOrWhiteSpace(characterCount)
             ? $"Path: {relativePath}"
             : $"Path: {relativePath}{Environment.NewLine}Characters: {characterCount}";
-    }
-
-    private static string BuildExportRequestDetails(JsonDocument? arguments)
-    {
-        var relativePath = ReadArgument(arguments, "relativePath", "Unknown path");
-        return $"Path: {relativePath}";
     }
 
     private static string TruncateInlineToolText(string value, int? maxLength)

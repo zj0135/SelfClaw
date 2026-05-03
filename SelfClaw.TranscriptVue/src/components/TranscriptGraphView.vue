@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { buildGraphAnimations, buildGraphModel, normalizeGraphSnapshot } from '../visualization/buildGraphModel';
 
@@ -22,10 +22,6 @@ const props = defineProps({
 	selectedProfileModel: {
 		type: String,
 		default: '',
-	},
-	teamMembers: {
-		type: Array,
-		default: () => [],
 	},
 	agentActivities: {
 		type: Array,
@@ -72,7 +68,6 @@ const snapshotInput = computed(() => ({
 	selectedConversationId: props.selectedConversationId,
 	selectedConversationModeId: props.selectedConversationModeId,
 	selectedProfileModel: props.selectedProfileModel,
-	teamMembers: props.teamMembers,
 	agentActivities: props.agentActivities,
 }));
 
@@ -472,3 +467,5 @@ onBeforeUnmount(() => {
 		</div>
 	</div>
 </template>
+
+

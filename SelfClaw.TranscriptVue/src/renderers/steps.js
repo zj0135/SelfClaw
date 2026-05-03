@@ -1,14 +1,8 @@
-import { escapeHtml } from './shared';
+﻿import { escapeHtml } from './shared';
 
-function isTeamMemberOpen(openTeamMembers, memberId) {
-	return openTeamMembers.has(memberId) ? Boolean(openTeamMembers.get(memberId)) : false;
-}
-
-function renderActivities(agentActivities, { isTeamMode, openActivities }) {
+function renderActivities(agentActivities, { openActivities }) {
 	if (!agentActivities?.length) {
-		return isTeamMode
-			? '<div class="muted-placeholder">这里会显示每位成员的最新状态、工具调用以及按需触发的文档导出流程。</div>'
-			: '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
+		return '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
 	}
 
 	const detailValueClasses = (detail) => {
@@ -82,96 +76,31 @@ function renderActivities(agentActivities, { isTeamMode, openActivities }) {
 		.join('');
 }
 
-function renderTeamMembers(teamMembers, openTeamMembers) {
-	if (!teamMembers?.length) {
-		return '<div class="muted-placeholder">这次会话的团队成员会在主 Agent 完成规划后出现在这里。</div>';
-	}
-
-	return teamMembers
-		.map((member) => {
-			const isOpen = isTeamMemberOpen(openTeamMembers, member.id);
-			const prompt = member.details.find((detail) => detail.label === 'Prompt')?.value || '';
-			return `
-      <article class="team-member-card ${escapeHtml(member.status)} ${isOpen ? 'open' : 'collapsed'}">
-        <button class="team-member-toggle" type="button" data-action="toggle-team-member" data-member-id="${escapeHtml(member.id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
-          <div class="team-member-top">
-            <div>
-              <div class="team-member-name">${escapeHtml(member.title)}</div>
-              <div class="team-member-role">${escapeHtml(member.summary)}</div>
-            </div>
-            <div class="team-member-meta">
-              <span class="team-member-status ${escapeHtml(member.status)}">${escapeHtml(member.statusLabel)}</span>
-              <span class="team-member-chevron">${isOpen ? '▾' : '▸'}</span>
-            </div>
-          </div>
-          <div class="team-member-time">${escapeHtml(member.timestamp)}</div>
-        </button>
-        <div class="team-member-body">
-          <div class="team-member-note">${escapeHtml(prompt || '该成员暂时无额外说明。')}</div>
-        </div>
-      </article>
-    `;
-		})
-		.join('');
-}
-
-function isStepSectionOpen(openStepSections, sectionId, defaultOpen = true) {
-	return openStepSections.has(sectionId) ? Boolean(openStepSections.get(sectionId)) : defaultOpen;
-}
-
-export function renderStepsHeader({ isTeamMode }) {
+export function renderStepsHeader() {
 	return `
     <div>
-      <div class="steps-title">${isTeamMode ? '团队动态' : '工具'}</div>
-      <div class="steps-subtitle">${isTeamMode ? '团队成员与团队事件状态' : '运行步骤与工具状态'}</div>
+      <div class="steps-title">工具</div>
+      <div class="steps-subtitle">运行步骤与工具状态</div>
     </div>
   `;
 }
 
-export function renderStepsPanelContent({ isTeamMode, teamMembers, agentActivities, openStepSections, openActivities, openTeamMembers }) {
-	const memberCount = teamMembers?.length || 0;
+export function renderStepsPanelContent({ agentActivities, openStepSections, openActivities }) {
 	const eventCount = agentActivities?.length || 0;
-	const membersOpen = isStepSectionOpen(openStepSections, 'team-members', false);
-	const eventsOpen = isStepSectionOpen(openStepSections, 'team-events', true);
+	const eventsOpen = openStepSections.has('runtime-steps') ? Boolean(openStepSections.get('runtime-steps')) : true;
 
 	return `
-    ${
-			isTeamMode
-				? `
-          <section class="steps-section-block ${membersOpen ? 'open' : 'collapsed'}">
-            <button class="steps-section-head steps-section-toggle" type="button" data-action="toggle-steps-section" data-section-id="team-members" aria-expanded="${membersOpen ? 'true' : 'false'}">
-              <div class="steps-section-heading">
-                <div class="steps-section-title">团队成员</div>
-                <div class="steps-section-count">${memberCount}</div>
-              </div>
-              <span class="steps-section-chevron">${membersOpen ? '▾' : '▸'}</span>
-            </button>
-            <div class="steps-section-body">
-              <div class="team-member-list">${renderTeamMembers(teamMembers, openTeamMembers)}</div>
-            </div>
-          </section>
-          <section class="steps-section-block ${eventsOpen ? 'open' : 'collapsed'}">
-            <button class="steps-section-head steps-section-toggle" type="button" data-action="toggle-steps-section" data-section-id="team-events" aria-expanded="${eventsOpen ? 'true' : 'false'}">
-              <div class="steps-section-heading">
-                <div class="steps-section-title">团队事件</div>
-                <div class="steps-section-count">${eventCount}</div>
-              </div>
-              <span class="steps-section-chevron">${eventsOpen ? '▾' : '▸'}</span>
-            </button>
-            <div class="steps-section-body">
-              <div class="activity-list">${renderActivities(agentActivities, { isTeamMode, openActivities })}</div>
-            </div>
-          </section>
-        `
-				: `
-          <section class="steps-section-block">
-            <div class="steps-section-head">
-              <div class="steps-section-title">运行步骤</div>
-              <div class="steps-section-count">${eventCount}</div>
-            </div>
-            <div class="activity-list">${renderActivities(agentActivities, { isTeamMode, openActivities })}</div>
-          </section>
-        `
-		}
+      <section class="steps-section-block ${eventsOpen ? 'open' : 'collapsed'}">
+        <button class="steps-section-head steps-section-toggle" type="button" data-action="toggle-steps-section" data-section-id="runtime-steps" aria-expanded="${eventsOpen ? 'true' : 'false'}">
+          <div class="steps-section-heading">
+            <div class="steps-section-title">运行步骤</div>
+            <div class="steps-section-count">${eventCount}</div>
+          </div>
+          <span class="steps-section-chevron">${eventsOpen ? '▾' : '▸'}</span>
+        </button>
+        <div class="steps-section-body">
+          <div class="activity-list">${renderActivities(agentActivities, { openActivities })}</div>
+        </div>
+      </section>
   `;
 }

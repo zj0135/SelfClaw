@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import ComposerPanel from './components/ComposerPanel.vue';
 import ConversationSidebar from './components/ConversationSidebar.vue';
@@ -42,16 +42,11 @@ const state = reactive({
 	isPlanningModeEnabled: false,
 	isReasoningEnabled: false,
 	planPanel: null,
-	teamRoundModes: [],
-	selectedTeamRoundModeId: '2',
-	teamOutputModes: [],
-	selectedTeamOutputModeId: 'autoDocument',
 	themeOptions: [],
 	selectedThemeId: 'system',
 	channels: [],
 	mcpServers: [],
 	skills: [],
-	teamMembers: [],
 	agentActivities: [],
 	contextUsage: null,
 	isBusy: false,
@@ -69,13 +64,7 @@ const settingsFeedback = ref(null);
 const settingsPanelScrollTop = ref(0);
 const openConversationMenuId = ref(null);
 const openConversationBranches = ref(new Map());
-const openStepSections = ref(
-	new Map([
-		['team-members', false],
-		['team-events', true],
-	])
-);
-const openTeamMembers = ref(new Map());
+const openStepSections = ref(new Map([['runtime-steps', true]]));
 
 const editorState = reactive({
 	open: false,
@@ -462,9 +451,7 @@ function applyCachedTopbarProfileModels() {
 }
 
 const hasSelectedWorkspace = computed(() => Boolean(state.selectedWorkspaceRootId && selectedWorkspace.value));
-const visibleTeamMembers = computed(() => state.teamMembers || []);
 const isProgrammingMode = computed(() => state.selectedConversationModeId === 'programming');
-const isTeamMode = computed(() => state.selectedConversationModeId === 'team');
 const isChannelMode = computed(() => state.selectedConversationModeId === 'channel');
 const showPlanningToggle = computed(() => isProgrammingMode.value);
 const showVisualizationToggle = computed(() => !isChannelMode.value);
@@ -508,7 +495,7 @@ const collapsedPlanText = computed(() => {
 
 	switch (meta.status) {
 		case 'running':
-			return `执行到第 ${meta.index} / ${meta.total} 个任务`;
+			return `执行第 ${meta.index} / ${meta.total} 个任务`;
 		case 'completed':
 			return `已完成 ${meta.total} / ${meta.total} 个任务`;
 		case 'failed':
@@ -577,14 +564,14 @@ const profileSummaryCards = computed(() => [
 	{
 		label: 'Temperature',
 		value: selectedProfile.value?.temperatureEnabled
-			? `${formatSamplingValue(selectedProfile.value?.temperature ?? 0.7, 2)} · 已启用`
-			: `${formatSamplingValue(selectedProfile.value?.temperature ?? 0.7, 2)} · 未启用`,
+			? `${formatSamplingValue(selectedProfile.value?.temperature ?? 0.7, 2)} / 已启用`
+			: `${formatSamplingValue(selectedProfile.value?.temperature ?? 0.7, 2)} / 未启用`,
 	},
 	{
 		label: 'Top-P',
 		value: selectedProfile.value?.topPEnabled
-			? `${formatSamplingValue(selectedProfile.value?.topP ?? 0.7, 1)} · 已启用`
-			: `${formatSamplingValue(selectedProfile.value?.topP ?? 0.7, 1)} · 未启用`,
+			? `${formatSamplingValue(selectedProfile.value?.topP ?? 0.7, 1)} / 已启用`
+			: `${formatSamplingValue(selectedProfile.value?.topP ?? 0.7, 1)} / 未启用`,
 	},
 ]);
 
@@ -606,33 +593,16 @@ const conversationListHtml = computed(() =>
 );
 
 const messagesHtml = computed(() => renderMessages(state.items, openThoughts, openToolSegments, openToolGroups));
-const stepsHeaderHtml = computed(() => renderStepsHeader({ isTeamMode: isTeamMode.value }));
+const stepsHeaderHtml = computed(() => renderStepsHeader());
 const stepsPanelHtml = computed(() =>
 	renderStepsPanelContent({
-		isTeamMode: isTeamMode.value,
-		teamMembers: visibleTeamMembers.value,
 		agentActivities: state.agentActivities,
 		openStepSections: openStepSections.value,
 		openActivities,
-		openTeamMembers: openTeamMembers.value,
 	})
 );
 
-const mentionAgents = computed(() => visibleTeamMembers.value.map((item) => ({ id: item.id, name: item.title, role: item.summary })));
-const mentionCandidates = computed(() => {
-	if (!isTeamMode.value) {
-		return [];
-	}
-
-	const normalizedQuery = mentionState.query.trim().toLowerCase();
-	return mentionAgents.value.filter((item) => {
-		if (!normalizedQuery) {
-			return true;
-		}
-
-		return item.name.toLowerCase().includes(normalizedQuery) || item.role.toLowerCase().includes(normalizedQuery);
-	});
-});
+const mentionCandidates = computed(() => []);
 
 watch(
 	() => state.theme,
@@ -640,15 +610,6 @@ watch(
 		setTheme(theme);
 	},
 	{ immediate: true }
-);
-
-watch(
-	() => isTeamMode.value,
-	(teamMode) => {
-		if (!teamMode) {
-			closeMentionPicker();
-		}
-	}
 );
 
 watch(
@@ -717,11 +678,6 @@ function normalizeState() {
 	state.isPlanningModeEnabled = Boolean(state.isPlanningModeEnabled);
 	state.isReasoningEnabled = Boolean(state.isReasoningEnabled);
 	state.planPanel = state.planPanel || null;
-	state.teamRoundModes = state.teamRoundModes || [];
-	state.selectedTeamRoundModeId = state.selectedTeamRoundModeId || '2';
-	state.teamOutputModes = state.teamOutputModes || [];
-	state.selectedTeamOutputModeId = state.selectedTeamOutputModeId || 'autoDocument';
-	state.teamMembers = state.teamMembers || [];
 	state.agentActivities = state.agentActivities || [];
 	state.contextUsage = state.contextUsage || null;
 	state.themeOptions = state.themeOptions || [];
@@ -738,31 +694,8 @@ function closeMentionPicker() {
 	mentionState.activeIndex = 0;
 }
 
-function syncMentionState(target) {
-	if (!(target instanceof HTMLTextAreaElement) || !isTeamMode.value) {
-		closeMentionPicker();
-		return;
-	}
-
-	const selectionStart = target.selectionStart ?? composerValue.value.length;
-	const beforeCaret = composerValue.value.slice(0, selectionStart);
-	const tokenStart = Math.max(beforeCaret.lastIndexOf(' '), beforeCaret.lastIndexOf('\n'), beforeCaret.lastIndexOf('\t')) + 1;
-	const token = beforeCaret.slice(tokenStart);
-	if (!token.startsWith('@') || token.startsWith('@{') || token.includes('}') || /\s/.test(token.slice(1))) {
-		closeMentionPicker();
-		return;
-	}
-
-	mentionState.query = token.slice(1);
-	mentionState.start = tokenStart;
-	mentionState.end = selectionStart;
-	if (!mentionCandidates.value.length) {
-		closeMentionPicker();
-		return;
-	}
-
-	mentionState.open = true;
-	mentionState.activeIndex = Math.min(mentionState.activeIndex, mentionCandidates.value.length - 1);
+function syncMentionState() {
+	closeMentionPicker();
 }
 
 function applyMentionSelection(agent) {
@@ -1413,19 +1346,6 @@ async function handleDelegatedClick(event) {
 			case 'toggle-tool-group':
 				toggleToolGroup(actionElement);
 				return;
-			case 'toggle-team-member': {
-				const memberId = actionElement.getAttribute('data-member-id');
-				if (!memberId) {
-					return;
-				}
-
-				await preserveStepsPanel(() => {
-					const next = new Map(openTeamMembers.value);
-					next.set(memberId, !(next.has(memberId) ? Boolean(next.get(memberId)) : false));
-					openTeamMembers.value = next;
-				});
-				return;
-			}
 			case 'toggle-activity': {
 				const id = actionElement.getAttribute('data-activity-id');
 				const card = actionElement.closest('.activity-card');
@@ -1678,14 +1598,6 @@ function togglePlanPanelCollapse() {
 function toggleLeftPaneCollapse() {
 	openConversationMenuId.value = null;
 	leftPaneCollapsed.value = !leftPaneCollapsed.value;
-}
-
-function onTeamRoundChange(roundsId) {
-	post({ type: 'select-team-max-rounds', roundsId });
-}
-
-function onTeamOutputChange(outputModeId) {
-	post({ type: 'select-team-output-mode', outputModeId });
 }
 
 function onThemeChange(themeId) {
@@ -1944,7 +1856,7 @@ onUnmounted(() => {
 					:visualization-enabled="activeVisualizationEnabled" :items="state.items"
 					:conversations="state.conversations" :selected-conversation-id="state.selectedConversationId"
 					:selected-conversation-mode-id="state.selectedConversationModeId"
-					:selected-profile-model="state.selectedProfileModel || ''" :team-members="state.teamMembers"
+					:selected-profile-model="state.selectedProfileModel || ''"
 					:agent-activities="state.agentActivities" :show-plan-panel="showPlanPanel"
 					:plan-panel-collapsed="planPanelCollapsed" @scroll="onTranscriptScroll" />
 
@@ -1952,12 +1864,8 @@ onUnmounted(() => {
 					:plan-steps="planSteps" :plan-panel-collapsed="planPanelCollapsed"
 					:collapsed-plan-text="collapsedPlanText" :composer-value="composerValue"
 					:composer-placeholder="composerPlaceholder" :is-channel-mode="isChannelMode"
-					:mention-state="mentionState" :mention-candidates="mentionCandidates" :profiles="state.profiles"
-					:selected-profile-id="state.selectedProfileId || ''" :is-team-mode="isTeamMode"
-					:team-round-modes="state.teamRoundModes"
-					:selected-team-round-mode-id="state.selectedTeamRoundModeId"
-					:team-output-modes="state.teamOutputModes"
-					:selected-team-output-mode-id="state.selectedTeamOutputModeId"
+					:profiles="state.profiles"
+					:selected-profile-id="state.selectedProfileId || ''"
 					:tool-permission-modes="state.toolPermissionModes"
 					:selected-tool-permission-mode-id="state.selectedToolPermissionModeId"
 					:show-planning-toggle="showPlanningToggle" :show-visualization-toggle="showVisualizationToggle"
@@ -1966,9 +1874,8 @@ onUnmounted(() => {
 					:send-button-disabled="sendButtonDisabled" :visualization-enabled="activeVisualizationEnabled"
 					:context-usage="state.contextUsage"
 					:attachments="composerAttachments" @composer-input="onComposerInput"
-					@composer-keydown="onComposerKeydown" @apply-mention="applyMentionSelection"
-					@select-profile="onProfileSelectChange" @select-team-round="onTeamRoundChange"
-					@select-team-output="onTeamOutputChange" @select-permission="onPermissionChange"
+					@composer-keydown="onComposerKeydown"
+					@select-profile="onProfileSelectChange" @select-permission="onPermissionChange"
 					@toggle-reasoning-mode="onReasoningModeChange"
 					@toggle-planning-mode="onPlanningModeChange" @toggle-visualization-mode="onVisualizationModeChange"
 					@toggle-plan-panel-collapse="togglePlanPanelCollapse" @pick-images="pickComposerImages"
@@ -2021,3 +1928,6 @@ onUnmounted(() => {
 			@pick-workspace-path="pickWorkspacePath" @fetch-models="fetchProfileModels" @save="saveEditor" />
 	</div>
 </template>
+
+
+

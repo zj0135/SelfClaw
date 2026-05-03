@@ -61,8 +61,6 @@ function resolveToolName(segment) {
 			return 'search_workspace_text';
 		case 'workspace entries':
 			return 'list_workspace_files';
-		case 'export team document':
-			return 'export_team_document';
 		default:
 			break;
 	}
@@ -106,8 +104,6 @@ function resolveToolAction(segment) {
 			return 'search';
 		case 'list_workspace_files':
 			return 'list';
-		case 'export_team_document':
-			return 'export';
 		default:
 			return 'tool';
 	}

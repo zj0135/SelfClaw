@@ -26,20 +26,13 @@ internal static class SqliteMappings
             reader.GetString(1),
             ReadGuid(reader, 2),
             reader.IsDBNull(3) ? null : ReadGuid(reader, 3),
-            (ConversationMode)reader.GetInt32(4),
+            reader.IsDBNull(4) ? ConversationMode.Programming : (ConversationMode)reader.GetInt32(4),
             (ToolPermissionMode)reader.GetInt32(5),
-            TeamDiscussionDefaults.ClampRounds(reader.GetInt32(6)),
-            reader.IsDBNull(7) ? TeamDiscussionDefaults.DefaultOutputMode : (TeamOutputMode)reader.GetInt32(7),
-            ReadDateTimeOffset(reader, 16),
-            ReadDateTimeOffset(reader, 17),
-            reader.IsDBNull(8) ? null : ReadGuid(reader, 8),
-            reader.IsDBNull(9) ? null : ReadGuid(reader, 9),
-            reader.IsDBNull(10) ? null : ReadGuid(reader, 10),
-            reader.IsDBNull(11) ? null : reader.GetString(11),
-            reader.IsDBNull(12) ? null : reader.GetString(12),
-            reader.IsDBNull(13) ? null : reader.GetString(13),
-            reader.IsDBNull(14) ? null : reader.GetString(14),
-            reader.IsDBNull(15) ? null : reader.GetString(15));
+            ReadDateTimeOffset(reader, 9),
+            ReadDateTimeOffset(reader, 10),
+            reader.IsDBNull(6) ? null : reader.GetString(6),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            reader.IsDBNull(8) ? null : reader.GetString(8));
 
     public static MessageRecord ReadMessage(SqliteDataReader reader)
         => new(
@@ -80,18 +73,6 @@ internal static class SqliteMappings
             ReadDateTimeOffset(reader, 6),
             ReadDateTimeOffset(reader, 7));
 
-    public static TeamAgentRecord ReadTeamAgent(SqliteDataReader reader)
-        => new(
-            ReadGuid(reader, 0),
-            ReadGuid(reader, 1),
-            reader.GetString(2),
-            reader.GetString(3),
-            reader.GetString(4),
-            (TeamAgentStatus)reader.GetInt32(5),
-            reader.GetInt32(6),
-            ReadDateTimeOffset(reader, 7),
-            ReadDateTimeOffset(reader, 8));
-
     public static ToolExecutionRecord ReadToolRun(SqliteDataReader reader)
         => new(
             ReadGuid(reader, 0),
@@ -122,4 +103,5 @@ internal static class SqliteMappings
 
     private static DateTimeOffset ReadDateTimeOffset(SqliteDataReader reader, int ordinal)
         => DateTimeOffset.Parse(reader.GetString(ordinal), System.Globalization.CultureInfo.InvariantCulture);
+
 }

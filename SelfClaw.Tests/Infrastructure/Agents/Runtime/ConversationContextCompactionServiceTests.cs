@@ -235,8 +235,6 @@ public sealed class ConversationContextCompactionServiceTests : IDisposable
             null,
             ConversationMode.Programming,
             ToolPermissionMode.RequireApproval,
-            TeamDiscussionDefaults.DefaultMaxRounds,
-            TeamDiscussionDefaults.DefaultOutputMode,
             now,
             now);
         await conversationRepository.UpsertConversationAsync(conversation);

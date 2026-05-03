@@ -404,11 +404,8 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                                    null,
                                    ConversationMode.Channel,
                                    ToolPermissionMode.FullAccess,
-                                   TeamDiscussionDefaults.DefaultMaxRounds,
-                                   TeamOutputMode.ReplyOnly,
-                                   null,
-                                   requestMessages,
-                                   []),
+                                    null,
+                                   requestMessages),
                                cancellationToken))
             {
                 switch (update)
@@ -548,8 +545,6 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                 null,
                 ConversationMode.Channel,
                 ToolPermissionMode.FullAccess,
-                TeamDiscussionDefaults.DefaultMaxRounds,
-                TeamOutputMode.ReplyOnly,
                 now,
                 now,
                 ChannelKind: adapter.Descriptor.Id,
@@ -562,8 +557,6 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                 WorkspaceRootId = null,
                 Mode = ConversationMode.Channel,
                 ToolPermissionMode = ToolPermissionMode.FullAccess,
-                TeamMaxRounds = TeamDiscussionDefaults.DefaultMaxRounds,
-                TeamOutputMode = TeamOutputMode.ReplyOnly,
                 UpdatedAtUtc = now,
                 ChannelKind = adapter.Descriptor.Id,
                 ChannelConversationId = incomingMessage.ConversationId,

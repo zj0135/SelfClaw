@@ -10,8 +10,6 @@ public sealed partial class MainWindowViewModel
         public ConversationRuntimeState(
             ConversationRecord conversation,
             IEnumerable<MessageRecord> messages,
-            IEnumerable<MessageRecord> contextMessages,
-            IEnumerable<TeamAgentRecord> teamAgents,
             IEnumerable<ToolExecutionRecord> toolRuns,
             IReadOnlyDictionary<Guid, ToolRunAnchor> toolRunAnchors,
             bool usePlanningMode,
@@ -19,8 +17,6 @@ public sealed partial class MainWindowViewModel
         {
             Conversation = conversation;
             Messages.AddRange(messages);
-            ContextMessages.AddRange(contextMessages);
-            TeamAgents.AddRange(teamAgents);
             ToolRuns.AddRange(toolRuns);
             foreach (var item in toolRunAnchors)
             {
@@ -36,10 +32,6 @@ public sealed partial class MainWindowViewModel
         public Guid ConversationId => Conversation.Id;
 
         public List<MessageRecord> Messages { get; } = [];
-
-        public List<MessageRecord> ContextMessages { get; } = [];
-
-        public List<TeamAgentRecord> TeamAgents { get; } = [];
 
         public List<ToolExecutionRecord> ToolRuns { get; } = [];
 
@@ -158,8 +150,6 @@ public sealed partial class MainWindowViewModel
         bool usePlanningMode,
         string statusText,
         IReadOnlyList<MessageRecord>? messages = null,
-        IReadOnlyList<MessageRecord>? contextMessages = null,
-        IReadOnlyList<TeamAgentRecord>? teamAgents = null,
         IReadOnlyList<ToolExecutionRecord>? toolRuns = null,
         IReadOnlyDictionary<Guid, ToolRunAnchor>? toolRunAnchors = null)
     {
@@ -177,8 +167,6 @@ public sealed partial class MainWindowViewModel
         var state = new ConversationRuntimeState(
             conversation,
             sourceState?.Messages ?? messages ?? _messages,
-            sourceState?.ContextMessages ?? contextMessages ?? _contextMessages,
-            sourceState?.TeamAgents ?? teamAgents ?? _teamAgents,
             sourceState?.ToolRuns ?? toolRuns ?? _toolRuns,
             sourceState?.ToolRunAnchors ?? toolRunAnchors ?? _toolRunAnchors,
             usePlanningMode,
@@ -211,16 +199,12 @@ public sealed partial class MainWindowViewModel
     private void SyncSelectedDisplayStateFromRuntime(ConversationRuntimeState state)
     {
         ReplaceList(_messages, state.Messages);
-        ReplaceList(_contextMessages, state.ContextMessages);
-        ReplaceList(_teamAgents, state.TeamAgents);
         ReplaceList(_toolRuns, state.ToolRuns);
         _toolRunAnchors.Clear();
         foreach (var item in state.ToolRunAnchors)
         {
             _toolRunAnchors[item.Key] = item.Value;
         }
-
-        _selectedBoundAgent = ResolveBoundAgent(state.Conversation, state.TeamAgents);
     }
 
     private void PublishRuntimeState(ConversationRuntimeState state, bool autoScroll)
@@ -247,12 +231,6 @@ public sealed partial class MainWindowViewModel
 
     private IReadOnlyList<MessageRecord> GetSelectedTranscriptMessages()
         => GetSelectedRuntimeState()?.Messages ?? _messages;
-
-    private IReadOnlyList<MessageRecord> GetSelectedTranscriptContextMessages()
-        => GetSelectedRuntimeState()?.ContextMessages ?? _contextMessages;
-
-    private IReadOnlyList<TeamAgentRecord> GetSelectedTranscriptTeamAgents()
-        => GetSelectedRuntimeState()?.TeamAgents ?? _teamAgents;
 
     private IReadOnlyList<ToolExecutionRecord> GetSelectedTranscriptToolRuns()
         => GetSelectedRuntimeState()?.ToolRuns ?? _toolRuns;

@@ -39,10 +39,6 @@ defineProps({
 		type: String,
 		default: '',
 	},
-	teamMembers: {
-		type: Array,
-		default: () => [],
-	},
 	agentActivities: {
 		type: Array,
 		default: () => [],
@@ -77,7 +73,6 @@ defineExpose({
 				:selected-conversation-id="selectedConversationId"
 				:selected-conversation-mode-id="selectedConversationModeId"
 				:selected-profile-model="selectedProfileModel"
-				:team-members="teamMembers"
 				:agent-activities="agentActivities"
 			/>
 			<div v-else v-html="messagesHtml"></div>

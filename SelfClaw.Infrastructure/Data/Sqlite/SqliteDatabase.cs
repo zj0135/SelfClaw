@@ -133,22 +133,13 @@ CREATE TABLE IF NOT EXISTS conversations (
     workspace_root_id TEXT NULL,
     mode INTEGER NOT NULL DEFAULT 0,
     tool_permission_mode INTEGER NOT NULL DEFAULT 0,
-    team_max_rounds INTEGER NOT NULL DEFAULT 2,
-    team_output_mode INTEGER NOT NULL DEFAULT 1,
-    parent_conversation_id TEXT NULL,
-    root_conversation_id TEXT NULL,
-    bound_agent_id TEXT NULL,
-    bound_agent_name TEXT NULL,
-    bound_agent_role TEXT NULL,
     channel_kind TEXT NULL,
     channel_conversation_id TEXT NULL,
     channel_display_name TEXT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
     FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE RESTRICT,
-    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL,
-    FOREIGN KEY(parent_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
-    FOREIGN KEY(root_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
 );", cancellationToken);
 
             await EnsureColumnExistsAsync(
@@ -163,55 +154,6 @@ CREATE TABLE IF NOT EXISTS conversations (
                 "conversations",
                 "tool_permission_mode",
                 "ALTER TABLE conversations ADD COLUMN tool_permission_mode INTEGER NOT NULL DEFAULT 0;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "team_max_rounds",
-                "ALTER TABLE conversations ADD COLUMN team_max_rounds INTEGER NOT NULL DEFAULT 2;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "team_output_mode",
-                "ALTER TABLE conversations ADD COLUMN team_output_mode INTEGER NOT NULL DEFAULT 1;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "parent_conversation_id",
-                "ALTER TABLE conversations ADD COLUMN parent_conversation_id TEXT NULL;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "root_conversation_id",
-                "ALTER TABLE conversations ADD COLUMN root_conversation_id TEXT NULL;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "bound_agent_id",
-                "ALTER TABLE conversations ADD COLUMN bound_agent_id TEXT NULL;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "bound_agent_name",
-                "ALTER TABLE conversations ADD COLUMN bound_agent_name TEXT NULL;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "bound_agent_role",
-                "ALTER TABLE conversations ADD COLUMN bound_agent_role TEXT NULL;",
                 cancellationToken);
 
             await EnsureColumnExistsAsync(
@@ -302,20 +244,6 @@ CREATE TABLE IF NOT EXISTS conversation_context_summaries (
 );", cancellationToken);
 
             await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS team_agents (
-    id TEXT NOT NULL PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    role TEXT NOT NULL,
-    goal_prompt TEXT NOT NULL,
-    status INTEGER NOT NULL,
-    sort_order INTEGER NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);", cancellationToken);
-
-            await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS tool_runs (
     id TEXT NOT NULL PRIMARY KEY,
     conversation_id TEXT NOT NULL,
@@ -365,7 +293,6 @@ CREATE TABLE IF NOT EXISTS tool_runs (
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_conversations_updated ON conversations(updated_at_utc DESC);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_message_attachments_message ON message_attachments(message_id, created_at_utc);", cancellationToken);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_team_agents_conversation_sort ON team_agents(conversation_id, sort_order, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_tool_runs_conversation_created ON tool_runs(conversation_id, created_at_utc);", cancellationToken);
             for (var version = 1; version <= CurrentSchemaVersion; version++)
             {

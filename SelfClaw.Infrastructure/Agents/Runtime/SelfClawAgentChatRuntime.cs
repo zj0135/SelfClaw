@@ -16,7 +16,6 @@ namespace SelfClaw.Infrastructure.Agents.Runtime;
 
 public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 {
-    private const int MaxTeamAgents = 5;
     private const int MaxExecutionPlanSteps = 7;
     private const int MinExecutionPlanSteps = 3;
     private const string ProgrammingAgentName = "SelfClaw";
@@ -24,10 +23,6 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
     private const string ProgrammingAgentDescription = "A personal desktop AI client for focused conversation and workspace assistance.";
     private const string ProgrammingBaseInstructions = "You are SelfClaw, a concise desktop AI assistant. Respond in Markdown. Use workspace tools when they materially help. Never claim to have read, written, or executed anything unless a tool actually returned a successful result.";
     private const string ChannelBaseInstructions = "You are SelfClaw replying to a user from an external chat channel. Keep replies concise, helpful, and easy to read in chat. Respond in Markdown or plain text that still reads well when Markdown is not rendered. Never expose hidden reasoning, internal tools, or implementation details unless the user explicitly asks.";
-    private const string BoundAgentSessionDescription = "A dedicated specialist follow-up session that branches from the main team conversation.";
-    private const string CoordinatorName = "Coordinator";
-    private const string CoordinatorRole = "Coordinator";
-    private const string CoordinatorDescription = "A coordination agent that designs a multi-agent review flow and synthesizes final team output.";
 
     private readonly IWorkspaceToolService _workspaceToolService;
     private readonly IAgentExecutionService _agentExecutionService;
@@ -84,15 +79,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         {
             try
             {
-                if (request.BoundAgent is not null)
-                {
-                    await ProduceBoundAgentTurnAsync(request, channel.Writer, cancellationToken);
-                }
-                else if (request.Mode == ConversationMode.Team)
-                {
-                    await ProduceTeamTurnAsync(request, channel.Writer, cancellationToken);
-                }
-                else if (request.Mode == ConversationMode.Programming && request.EnablePlanMode)
+                if (request.Mode == ConversationMode.Programming && request.EnablePlanMode)
                 {
                     await ProducePlannedProgrammingTurnAsync(request, channel.Writer, cancellationToken);
                 }
@@ -109,10 +96,9 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 {
                     _logger.LogError(
                         exception,
-                        "Chat runtime failed. ConversationId={ConversationId}, Mode={Mode}, BoundAgentId={BoundAgentId}, EnablePlanMode={EnablePlanMode}",
+                        "Chat runtime failed. ConversationId={ConversationId}, Mode={Mode}, EnablePlanMode={EnablePlanMode}",
                         request.ConversationId,
                         request.Mode,
-                        request.BoundAgent?.Id,
                         request.EnablePlanMode);
                 }
 

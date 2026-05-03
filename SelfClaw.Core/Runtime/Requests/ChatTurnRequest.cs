@@ -9,12 +9,7 @@ public sealed record ChatTurnRequest(
     WorkspaceRoot? WorkspaceRoot,
     ConversationMode Mode,
     ToolPermissionMode ToolPermissionMode,
-    int TeamMaxRounds,
-    TeamOutputMode TeamOutputMode,
     IToolApprovalHandler? ToolApprovalHandler,
     IReadOnlyList<MessageRecord> Messages,
-    IReadOnlyList<TeamAgentRecord> TeamAgents,
-    IReadOnlyList<MessageRecord>? ContextMessages = null,
-    TeamAgentRecord? BoundAgent = null,
     bool EnablePlanMode = false,
     bool EnableReasoning = false);

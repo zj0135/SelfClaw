@@ -38,85 +38,6 @@ public sealed class SelfClawAgentChatRuntimeTests
     }
 
     [Fact]
-    public async Task Team_mode_runs_workers_sequentially_across_rounds_and_shares_discussion_context()
-    {
-        var executionService = new FakeAgentExecutionService(autoDocumentDecision: false, desiredDiscussionRounds: 2);
-        var runtime = new SelfClawAgentChatRuntime(new NullWorkspaceToolService(), executionService);
-        var request = CreateTeamRequest(teamMaxRounds: 2, TeamOutputMode.ReplyOnly);
-
-        var events = await CollectAsync(runtime.StreamTurnAsync(request));
-
-        executionService.Requests.Select(item => item.Name).Should().Equal(
-            "Coordinator",
-            "Product Manager",
-            "Architect",
-            "Coordinator",
-            "Product Manager",
-            "Architect",
-            "Coordinator");
-
-        executionService.Requests[2].Prompt.Should().Contain("PM round 1");
-        executionService.Requests[2].Prompt.Should().NotContain("Architect round 1");
-
-        executionService.Requests[3].Prompt.Should().Contain("Current round: 1");
-        executionService.Requests[3].Prompt.Should().Contain("PM round 1");
-        executionService.Requests[3].Prompt.Should().Contain("Architect round 1");
-
-        executionService.Requests[4].Prompt.Should().Contain("PM round 1");
-        executionService.Requests[4].Prompt.Should().Contain("Architect round 1");
-        executionService.Requests[4].Prompt.Should().NotContain("PM round 2");
-
-        executionService.Requests[5].Prompt.Should().Contain("PM round 2");
-        executionService.Requests[5].Prompt.Should().Contain("Architect round 1");
-
-        events.OfType<AssistantMessageCompletedEvent>()
-            .Select(item => item.Message.AgentName)
-            .Should().Equal("Product Manager", "Architect", "Product Manager", "Architect", "Coordinator");
-
-        events.Should().NotContain(item => item is TeamDocumentReadyEvent);
-    }
-
-    [Fact]
-    public async Task Team_mode_stops_early_when_coordinator_judges_no_more_rounds_are_needed()
-    {
-        var executionService = new FakeAgentExecutionService(autoDocumentDecision: false, desiredDiscussionRounds: 1);
-        var runtime = new SelfClawAgentChatRuntime(new NullWorkspaceToolService(), executionService);
-        var request = CreateTeamRequest(teamMaxRounds: 5, TeamOutputMode.ReplyOnly);
-
-        var events = await CollectAsync(runtime.StreamTurnAsync(request));
-
-        executionService.Requests.Select(item => item.Name).Should().Equal(
-            "Coordinator",
-            "Product Manager",
-            "Architect",
-            "Coordinator",
-            "Coordinator");
-
-        executionService.Requests.Should().NotContain(item => item.Prompt.Contains("PM round 2", StringComparison.Ordinal));
-
-        events.OfType<AssistantMessageCompletedEvent>()
-            .Select(item => item.Message.AgentName)
-            .Should().Equal("Product Manager", "Architect", "Coordinator");
-    }
-
-    [Fact]
-    public async Task Team_mode_only_prepares_document_export_when_requested_by_output_mode()
-    {
-        var executionService = new FakeAgentExecutionService(autoDocumentDecision: false, desiredDiscussionRounds: 1);
-        var runtime = new SelfClawAgentChatRuntime(new NullWorkspaceToolService(), executionService);
-        var request = CreateTeamRequest(
-            teamMaxRounds: 1,
-            TeamOutputMode.AlwaysDocument,
-            workspaceRoot: new WorkspaceRoot(Guid.NewGuid(), "Repo", @"D:\Repositories\SelfClaw", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
-
-        var events = await CollectAsync(runtime.StreamTurnAsync(request));
-
-        events.OfType<TeamDocumentReadyEvent>()
-            .Should().ContainSingle()
-            .Which.SuggestedRelativePath.Should().StartWith("docs/selfclaw-team/");
-    }
-
-    [Fact]
     public async Task Programming_mode_with_plan_mode_emits_plan_events_before_final_reply()
     {
         var executionService = new FakePlannedProgrammingExecutionService();
@@ -235,50 +156,6 @@ public sealed class SelfClawAgentChatRuntimeTests
         executionService.Requests.Select(item => item.Kind).Should().Equal("reply");
     }
 
-    private static ChatTurnRequest CreateTeamRequest(
-        int teamMaxRounds,
-        TeamOutputMode outputMode,
-        WorkspaceRoot? workspaceRoot = null)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var conversationId = Guid.NewGuid();
-        var profile = new ProviderProfile(
-            Guid.NewGuid(),
-            "Local",
-            "https://api.example.com/v1",
-            "gpt-test",
-            false,
-            0.7,
-            false,
-            0.7,
-            ApiStyle.OpenAICompatible,
-            "secret:test",
-            now,
-            now);
-
-        return new ChatTurnRequest(
-            conversationId,
-            profile,
-            "test-key",
-            workspaceRoot,
-            ConversationMode.Team,
-            ToolPermissionMode.RequireApproval,
-            teamMaxRounds,
-            outputMode,
-            null,
-            [
-                new MessageRecord(
-                    Guid.NewGuid(),
-                    conversationId,
-                    MessageRole.User,
-                    "Please discuss in sequence and then give a conclusion.",
-                    MessageStatus.Completed,
-                    now,
-                    now)
-            ],
-            []);
-    }
-
     private static ChatTurnRequest CreateProgrammingRequest(
         bool enablePlanMode,
         string prompt = "Please inspect the task, do the work, and then summarize the outcome.",
@@ -307,8 +184,6 @@ public sealed class SelfClawAgentChatRuntimeTests
             workspaceRoot,
             ConversationMode.Programming,
             ToolPermissionMode.RequireApproval,
-            TeamDiscussionDefaults.DefaultMaxRounds,
-            TeamDiscussionDefaults.DefaultOutputMode,
             null,
             [
                 new MessageRecord(
@@ -320,7 +195,6 @@ public sealed class SelfClawAgentChatRuntimeTests
                     now,
                     now)
             ],
-            [],
             EnablePlanMode: enablePlanMode);
     }
 
@@ -362,65 +236,6 @@ public sealed class SelfClawAgentChatRuntimeTests
         }
 
         public string Text { get; }
-    }
-
-    private sealed class FakeAgentExecutionService : IAgentExecutionService
-    {
-        private readonly Dictionary<string, int> _agentRunCounts = new(StringComparer.OrdinalIgnoreCase);
-        private readonly bool _autoDocumentDecision;
-        private readonly int _desiredDiscussionRounds;
-        private int _continuationDecisionCount;
-
-        public FakeAgentExecutionService(bool autoDocumentDecision, int desiredDiscussionRounds)
-        {
-            _autoDocumentDecision = autoDocumentDecision;
-            _desiredDiscussionRounds = desiredDiscussionRounds;
-        }
-
-        public List<CapturedAgentRequest> Requests { get; } = [];
-
-        public Task<AgentExecutionResult> RunAsync(
-            AgentExecutionRequest request,
-            Func<string, CancellationToken, ValueTask>? onTextDelta,
-            CancellationToken cancellationToken)
-        {
-            var prompt = string.Join(
-                "\n\n",
-                request.Messages.Select(message => SelfClawAgentChatRuntime.ExtractTextFromContents(message.Contents)));
-            Requests.Add(new CapturedAgentRequest(request.Name, request.Instructions, prompt, "team"));
-
-            var result = request.Name switch
-            {
-                "Coordinator" when request.Instructions.Contains("Decide whether the specialist team needs another discussion round", StringComparison.Ordinal) =>
-                    $"{{\"continueDiscussion\":{(ShouldContinueDiscussion() ? "true" : "false")}}}",
-                "Coordinator" when request.Instructions.Contains("Decide whether the final team answer", StringComparison.Ordinal) =>
-                    $"{{\"shouldExportDocument\":{(_autoDocumentDecision ? "true" : "false")}}}",
-                "Coordinator" when request.Instructions.Contains("Your job is to choose a compact team of specialists", StringComparison.Ordinal) =>
-                    "{\"documentTitle\":\"Sequential Team Flow\",\"agents\":[{\"name\":\"Product Manager\",\"role\":\"Requirements\",\"mission\":\"Clarify the user intent and acceptance criteria.\"},{\"name\":\"Architect\",\"role\":\"Architecture\",\"mission\":\"Shape the technical design and trade-offs.\"}]}",
-                "Coordinator" =>
-                    "# Team Summary\n\nFinal coordinator answer.",
-                "Product Manager" =>
-                    $"PM round {NextRunCount(request.Name)}",
-                "Architect" =>
-                    $"Architect round {NextRunCount(request.Name)}",
-                _ => throw new InvalidOperationException($"Unexpected agent '{request.Name}'.")
-            };
-
-            return Task.FromResult(new AgentExecutionResult(result, null, null, TimeSpan.FromMilliseconds(10)));
-        }
-
-        private int NextRunCount(string agentName)
-        {
-            var next = _agentRunCounts.TryGetValue(agentName, out var current) ? current + 1 : 1;
-            _agentRunCounts[agentName] = next;
-            return next;
-        }
-
-        private bool ShouldContinueDiscussion()
-        {
-            _continuationDecisionCount++;
-            return _continuationDecisionCount < _desiredDiscussionRounds;
-        }
     }
 
     private sealed class FakePlannedProgrammingExecutionService : IAgentExecutionService

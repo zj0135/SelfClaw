@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import PlanPanel from './PlanPanel.vue';
 
@@ -35,39 +35,11 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
-	mentionState: {
-		type: Object,
-		required: true,
-	},
-	mentionCandidates: {
-		type: Array,
-		default: () => [],
-	},
 	profiles: {
 		type: Array,
 		default: () => [],
 	},
 	selectedProfileId: {
-		type: String,
-		default: '',
-	},
-	isTeamMode: {
-		type: Boolean,
-		default: false,
-	},
-	teamRoundModes: {
-		type: Array,
-		default: () => [],
-	},
-	selectedTeamRoundModeId: {
-		type: String,
-		default: '',
-	},
-	teamOutputModes: {
-		type: Array,
-		default: () => [],
-	},
-	selectedTeamOutputModeId: {
 		type: String,
 		default: '',
 	},
@@ -120,10 +92,7 @@ const props = defineProps({
 const emit = defineEmits([
 	'composer-input',
 	'composer-keydown',
-	'apply-mention',
 	'select-profile',
-	'select-team-round',
-	'select-team-output',
 	'select-permission',
 	'toggle-reasoning-mode',
 	'toggle-planning-mode',
@@ -158,7 +127,7 @@ const contextStats = computed(() => {
 	const level = contextUsageLevel(ratio);
 	const autoCompactText = autoCompactTokenLimit > 0
 		? usedTokens >= autoCompactTokenLimit
-			? 'SelfClaw 自动压缩其背景信息'
+			? 'SelfClaw 已自动压缩其背景信息'
 			: `SelfClaw 达到 ${formatTokenCount(autoCompactTokenLimit)} 标记后自动压缩其背景信息`
 		: 'SelfClaw 超过窗口时会尝试压缩其背景信息';
 
@@ -317,19 +286,6 @@ defineExpose({
 						@input="emit('composer-input', $event)"
 						@keydown="emit('composer-keydown', $event)"
 					></textarea>
-					<div id="mention-picker" class="mention-picker" :class="{ open: mentionState.open && mentionCandidates.length > 0 }">
-						<button
-							v-for="(item, index) in mentionCandidates"
-							:key="item.id"
-							class="mention-option"
-							:class="{ active: index === mentionState.activeIndex }"
-							type="button"
-							@click.stop="emit('apply-mention', item)"
-						>
-							<span class="mention-option-name">@{{ item.name }}</span>
-							<span class="mention-option-role">{{ item.role }}</span>
-						</button>
-					</div>
 					<div v-if="attachments.length > 0" class="composer-attachments" aria-label="待发送图片">
 						<div v-for="attachment in attachments" :key="attachment.id" class="composer-attachment">
 							<img v-if="attachment.dataUrl" class="composer-attachment-preview" :src="attachment.dataUrl" :alt="attachment.fileName" />
@@ -475,38 +431,15 @@ defineExpose({
 						>
 							<option value="">选择模型</option>
 							<option v-for="option in profiles" :key="option.id" :value="option.id">{{ option.label }}</option>
-						</select>
-						<template v-if="isTeamMode">
-							<select
-								id="composer-team-round-select"
-								class="composer-inline-select"
-								aria-label="团队最大讨论轮次"
-								:value="selectedTeamRoundModeId"
-								@change="emit('select-team-round', $event.target.value)"
-							>
-								<option v-for="option in teamRoundModes" :key="option.id" :value="option.id">{{ option.label }}</option>
-							</select>
-							<select
-								id="composer-team-output-select"
-								class="composer-inline-select"
-								aria-label="团队总结输出方式"
-								:value="selectedTeamOutputModeId"
-								@change="emit('select-team-output', $event.target.value)"
-							>
-								<option v-for="option in teamOutputModes" :key="option.id" :value="option.id">{{ option.label }}</option>
-							</select>
-						</template>
-						<template v-else>
-							<select
-								id="composer-permission-select"
-								class="composer-inline-select"
-								aria-label="工具权限模式"
-								:value="selectedToolPermissionModeId"
-								@change="emit('select-permission', $event.target.value)"
-							>
-								<option v-for="option in toolPermissionModes" :key="option.id" :value="option.id">{{ option.label }}</option>
-							</select>
-						</template>
+						</select>					<select
+						id="composer-permission-select"
+						class="composer-inline-select"
+						aria-label="工具权限模式"
+						:value="selectedToolPermissionModeId"
+						@change="emit('select-permission', $event.target.value)"
+					>
+						<option v-for="option in toolPermissionModes" :key="option.id" :value="option.id">{{ option.label }}</option>
+					</select>
 					</div>
 					<div class="composer-actions">
 						<div
@@ -552,3 +485,6 @@ defineExpose({
 		</div>
 	</section>
 </template>
+
+
+

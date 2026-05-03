@@ -15,9 +15,8 @@ Main projects:
 ## Core Capabilities
 
 - Multi-provider profiles (OpenAI-compatible endpoint/model/sampling settings)
-- Conversation modes: `Programming`, `Team`, `Channel`
+- Conversation modes: `Programming`, `Channel`
 - `Programming` mode supports Plan Mode
-- `Team` mode supports multi-agent discussion and coordinator summary, with optional doc export
 - `Channel` mode supports external message ingestion (currently Feishu)
 - Workspace tools support file read/write, full-text search, PowerShell execution with approval
 - Transcript supports thinking segments and tool anchors
@@ -180,9 +179,7 @@ Desktop registration in `App.xaml.cs` includes:
 
 - `Programming`
 - `Programming + EnablePlanMode`
-- `Team`
 - `Channel`
-- `BoundAgent`
 
 Supporting components:
 
@@ -194,11 +191,10 @@ Supporting components:
 Runtime internal structure (partial split):
 
 - `SelfClawAgentChatRuntime.cs`: constants, DI wiring, stream entrypoint, tool/context factory
-- `SelfClawAgentChatRuntime.Execution.cs`: programming turn, plan drafting, plan step execution, bound-agent turn
-- `SelfClawAgentChatRuntime.Team.cs`: team orchestration, worker loop, team/plan materialization
-- `SelfClawAgentChatRuntime.PromptMessages.cs`: prompt-message assembly, message mapping, decision-message builders
-- `SelfClawAgentChatRuntime.Instructions.cs`: instruction builders for programming/team/decision flows
-- `SelfClawAgentChatRuntime.Transcripts.cs`: discussion/plan transcript and plan-text sanitization helpers
+- `SelfClawAgentChatRuntime.Execution.cs`: programming turn, plan drafting, and plan step execution
+- `SelfClawAgentChatRuntime.PromptMessages.cs`: prompt-message assembly and message mapping
+- `SelfClawAgentChatRuntime.Instructions.cs`: instruction builder methods
+- `SelfClawAgentChatRuntime.Transcripts.cs`: plan transcript and plan-text sanitization helpers
 - `SelfClawAgentChatRuntime.Parsing.cs`: JSON extraction/parsing, fallbacks, slug/title helpers
 - `SelfClawAgentChatRuntime.Models.cs`: private runtime records and empty context-provider fallback
 
@@ -239,7 +235,7 @@ Permission model:
 
 `SqliteDatabase` manages schema initialization/migration:
 
-- `CurrentSchemaVersion = 13`
+- `CurrentSchemaVersion = 14`
 - `PRAGMA foreign_keys = ON`
 - backward-compatible `EnsureColumnExists`
 
@@ -250,7 +246,6 @@ Main tables:
 - `conversations`
 - `messages`
 - `message_attachments`
-- `team_agents`
 - `tool_runs`
 
 ### Transcript and markdown
@@ -280,13 +275,12 @@ Desktop channel orchestration remains in `DesktopChannelManager` + `FeishuDeskto
 | File | Purpose |
 | --- | --- |
 | `SelfClaw.Desktop/App.xaml.cs` | App entry, logging, DI setup |
-| `SelfClaw.Desktop/ViewModels/MainWindowViewModel*.cs` | Main conversation/team/channel workflows |
+| `SelfClaw.Desktop/ViewModels/MainWindowViewModel*.cs` | Main conversation/channel workflows |
 | `SelfClaw.Desktop/Services/Settings/DesktopSettingsStore.cs` | Desktop settings load/save/normalize |
 | `SelfClaw.Desktop/Services/Settings/DesktopSettings.cs` | Desktop settings model |
 | `SelfClaw.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs` | Infrastructure service registration |
 | `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.cs` | Runtime orchestration core |
 | `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.Execution.cs` | Programming/plan execution flow |
-| `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.Team.cs` | Team discussion orchestration |
 | `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.PromptMessages.cs` | Prompt message assembly and role/message mapping |
 | `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.Instructions.cs` | Instruction builder methods |
 | `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.Transcripts.cs` | Discussion and execution transcript builders |
@@ -295,7 +289,7 @@ Desktop channel orchestration remains in `DesktopChannelManager` + `FeishuDeskto
 | `SelfClaw.Infrastructure/Agents/Tools/WorkspaceToolFunctions.cs` | Tool wrapping and approval integration |
 | `SelfClaw.Infrastructure/Tools/Workspace/WorkspaceToolService.cs` | Workspace files and shell implementation |
 | `SelfClaw.Infrastructure/Data/Sqlite/SqliteDatabase.cs` | SQLite schema and migration |
-| `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteConversationRepository.cs` | Conversation/message/tool/team persistence |
+| `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteConversationRepository.cs` | Conversation/message/tool persistence |
 | `SelfClaw.Infrastructure/Channels/Feishu/Protocol/FeishuWsFrame.cs` | Feishu long-connection frame model |
 | `SelfClaw.Infrastructure/Channels/Feishu/Models/FeishuIncomingMessage.cs` | Feishu incoming message model |
 | `SelfClaw.TranscriptVue/src/*` | Transcript frontend shell |
