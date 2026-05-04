@@ -63,7 +63,6 @@ const activeSettingsSection = ref('profile');
 const settingsFeedback = ref(null);
 const settingsPanelScrollTop = ref(0);
 const openConversationMenuId = ref(null);
-const openConversationBranches = ref(new Map());
 const openStepSections = ref(new Map([['runtime-steps', true]]));
 
 const editorState = reactive({
@@ -72,14 +71,6 @@ const editorState = reactive({
 	mode: 'create',
 	draft: null,
 	feedback: null,
-});
-
-const mentionState = reactive({
-	open: false,
-	query: '',
-	start: -1,
-	end: -1,
-	activeIndex: 0,
 });
 
 const sidebarRef = ref(null);
@@ -587,7 +578,6 @@ const conversationListHtml = computed(() =>
 	renderConversationList({
 		conversations: state.conversations,
 		selectedConversationId: state.selectedConversationId,
-		openConversationBranches: openConversationBranches.value,
 		openConversationMenuId: openConversationMenuId.value,
 	})
 );
@@ -601,8 +591,6 @@ const stepsPanelHtml = computed(() =>
 		openActivities,
 	})
 );
-
-const mentionCandidates = computed(() => []);
 
 watch(
 	() => state.theme,
@@ -686,35 +674,6 @@ function normalizeState() {
 	state.skills = state.skills || [];
 }
 
-function closeMentionPicker() {
-	mentionState.open = false;
-	mentionState.query = '';
-	mentionState.start = -1;
-	mentionState.end = -1;
-	mentionState.activeIndex = 0;
-}
-
-function syncMentionState() {
-	closeMentionPicker();
-}
-
-function applyMentionSelection(agent) {
-	const target = getComposerElement();
-	if (!(target instanceof HTMLTextAreaElement) || !agent || mentionState.start < 0 || mentionState.end < mentionState.start) {
-		return;
-	}
-
-	const nextValue = `${composerValue.value.slice(0, mentionState.start)}@{${agent.name}} ${composerValue.value.slice(mentionState.end)}`;
-	const nextCaret = mentionState.start + agent.name.length + 4;
-	composerValue.value = nextValue;
-	closeMentionPicker();
-
-	nextTick(() => {
-		target.focus();
-		target.setSelectionRange(nextCaret, nextCaret);
-	});
-}
-
 function submitComposer() {
 	if (state.isBusy || isChannelMode.value) {
 		return;
@@ -739,7 +698,6 @@ function submitComposer() {
 	});
 	composerValue.value = '';
 	composerAttachments.value = [];
-	closeMentionPicker();
 }
 
 function clearFeedback(scope) {
@@ -1133,36 +1091,9 @@ function onDocumentKeydown(event) {
 
 function onComposerInput(event) {
 	composerValue.value = event.target.value;
-	syncMentionState(event.target);
 }
 
 function onComposerKeydown(event) {
-	if (mentionState.open && mentionCandidates.value.length > 0) {
-		if (event.key === 'ArrowDown') {
-			event.preventDefault();
-			mentionState.activeIndex = (mentionState.activeIndex + 1) % mentionCandidates.value.length;
-			return;
-		}
-
-		if (event.key === 'ArrowUp') {
-			event.preventDefault();
-			mentionState.activeIndex = (mentionState.activeIndex - 1 + mentionCandidates.value.length) % mentionCandidates.value.length;
-			return;
-		}
-
-		if (event.key === 'Enter' || event.key === 'Tab') {
-			event.preventDefault();
-			applyMentionSelection(mentionCandidates.value[mentionState.activeIndex] || mentionCandidates.value[0]);
-			return;
-		}
-
-		if (event.key === 'Escape') {
-			event.preventDefault();
-			closeMentionPicker();
-			return;
-		}
-	}
-
 	if (event.key === 'Enter' && !event.shiftKey) {
 		event.preventDefault();
 		submitComposer();
@@ -1299,31 +1230,8 @@ async function handleDelegatedClick(event) {
 		switch (action) {
 			case 'select-conversation': {
 				const conversationId = actionElement.getAttribute('data-conversation-id');
-				const hasChildren = actionElement.getAttribute('data-has-children') === 'true';
 				openConversationMenuId.value = null;
-				if (conversationId && hasChildren) {
-					await preserveConversationList(() => {
-						const next = new Map(openConversationBranches.value);
-						next.set(conversationId, openConversationBranches.value.get(conversationId) === false);
-						openConversationBranches.value = next;
-					});
-				}
-
 				post({ type: 'select-conversation', conversationId });
-				return;
-			}
-			case 'toggle-conversation-branch': {
-				const conversationId = actionElement.getAttribute('data-conversation-id');
-				if (!conversationId) {
-					return;
-				}
-
-				await preserveConversationList(() => {
-					openConversationMenuId.value = null;
-					const next = new Map(openConversationBranches.value);
-					next.set(conversationId, openConversationBranches.value.get(conversationId) === false);
-					openConversationBranches.value = next;
-				});
 				return;
 			}
 			case 'toggle-conversation-menu': {
@@ -1403,10 +1311,6 @@ async function handleDelegatedClick(event) {
 			openConversationMenuId.value = null;
 		});
 		return;
-	}
-
-	if (mentionState.open) {
-		closeMentionPicker();
 	}
 }
 
