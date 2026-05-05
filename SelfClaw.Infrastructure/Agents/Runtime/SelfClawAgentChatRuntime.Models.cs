@@ -20,6 +20,6 @@ public sealed partial class SelfClawAgentChatRuntime
 
     private sealed class EmptyAgentContextProviderFactory : IAgentContextProviderFactory
     {
-        public IReadOnlyList<AIContextProvider> CreateProviders() => [];
+        public IReadOnlyList<AIContextProvider> CreateProviders(AgentRuntimeDefinition agent) => [];
     }
 }

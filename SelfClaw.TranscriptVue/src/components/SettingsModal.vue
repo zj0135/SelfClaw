@@ -54,6 +54,22 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
+	agents: {
+		type: Array,
+		default: () => [],
+	},
+	selectedAgentId: {
+		type: String,
+		default: '',
+	},
+	currentConversationAgentId: {
+		type: String,
+		default: '',
+	},
+	canBindConversationAgent: {
+		type: Boolean,
+		default: false,
+	},
 	mcpServers: {
 		type: Array,
 		default: () => [],
@@ -88,6 +104,11 @@ const emit = defineEmits([
 	'edit-workspace',
 	'delete-workspace',
 	'create-workspace',
+	'select-agent',
+	'edit-agent',
+	'delete-agent',
+	'create-agent',
+	'assign-conversation-agent',
 	'create-mcp-server',
 	'edit-mcp-server',
 	'delete-mcp-server',
@@ -112,6 +133,14 @@ function onChannelToggle(channel, event) {
 	emit('toggle-channel', { channel, enabled: Boolean(event.target.checked) });
 }
 
+function agentMeta(agent) {
+	const parts = [];
+	parts.push(agent.mode === 'plan' ? 'plan' : 'direct');
+	parts.push(agent.isBuiltIn ? '系统内置' : '自定义');
+	parts.push(agent.toolPolicy || 'system');
+	return parts.join(' · ');
+}
+
 defineExpose({
 	getPanelEl: () => panelEl.value,
 });
@@ -119,22 +148,16 @@ defineExpose({
 
 <template>
 	<div id="settings-overlay" class="settings-overlay" :class="{ open }" @click.self="emit('close')">
-		<div v-if="open" class="settings-panel" role="dialog" aria-modal="true" aria-label="系统设置">
+		<div v-if="open" class="settings-panel" role="dialog" aria-modal="true" aria-label="设置">
 			<aside class="settings-nav">
 				<div class="settings-nav-header">
-					<div class="settings-title">系统设置</div>
+					<div class="settings-title">设置</div>
 				</div>
 
 				<div class="settings-nav-list">
-					<button
-						v-for="section in settingsSections"
-						:key="section.id"
-						class="settings-nav-item"
-						:class="{ active: activeSection === section.id }"
-						type="button"
-						:aria-pressed="activeSection === section.id"
-						@click="emit('select-section', section.id)"
-					>
+					<button v-for="section in settingsSections" :key="section.id" class="settings-nav-item"
+						:class="{ active: activeSection === section.id }" type="button"
+						:aria-pressed="activeSection === section.id" @click="emit('select-section', section.id)">
 						<div class="settings-nav-item-top">
 							<div class="settings-nav-item-title">{{ section.title }}</div>
 							<div class="settings-nav-item-badge">{{ section.badge }}</div>
@@ -143,7 +166,7 @@ defineExpose({
 				</div>
 
 				<div class="settings-nav-footer">
-					<button class="ghost-btn" type="button" @click="emit('close')">完成</button>
+					<button class="ghost-btn" type="button" @click="emit('close')">关闭</button>
 				</div>
 			</aside>
 
@@ -162,7 +185,7 @@ defineExpose({
 				<section v-if="activeSection === 'profile'" class="settings-section settings-section-active">
 					<div class="settings-section-header">
 						<div class="settings-section-copy">
-							<div class="settings-section-title">模型选择与管理</div>
+							<div class="settings-section-title">模型配置</div>
 						</div>
 						<div class="settings-badge">{{ selectedProfile ? '已选择' : '未选择' }}</div>
 					</div>
@@ -170,13 +193,11 @@ defineExpose({
 						<div class="field-label">当前配置</div>
 						<div class="settings-select-row">
 							<select id="profile-select" class="field-select" :value="selectedProfileId || ''" @change="emit('select-profile', $event.target.value)">
-								<option value="">未选择配置</option>
+								<option value="">请选择模型配置</option>
 								<option v-for="option in profiles" :key="option.id" :value="option.id">{{ option.label }}</option>
 							</select>
 							<button class="ghost-btn compact-btn" type="button" :disabled="!selectedProfile" @click="emit('edit-profile')">编辑</button>
-							<button class="ghost-btn compact-btn danger-btn" type="button" :disabled="!selectedProfile" @click="emit('delete-profile')">
-								删除
-							</button>
+							<button class="ghost-btn compact-btn danger-btn" type="button" :disabled="!selectedProfile" @click="emit('delete-profile')">删除</button>
 							<button class="icon-add-btn" type="button" aria-label="新增模型配置" @click="emit('create-profile')">+</button>
 						</div>
 					</div>
@@ -191,26 +212,20 @@ defineExpose({
 				<section v-else-if="activeSection === 'workspace'" class="settings-section settings-section-active">
 					<div class="settings-section-header">
 						<div class="settings-section-copy">
-							<div class="settings-section-title">工作区绑定与切换</div>
+							<div class="settings-section-title">工作区</div>
 						</div>
 						<div class="settings-badge">{{ selectedWorkspace ? '已绑定' : '未绑定' }}</div>
 					</div>
 					<div class="field-group">
 						<div class="field-label">当前工作区</div>
 						<div class="settings-select-row">
-							<select
-								id="workspace-select"
-								class="field-select"
-								:value="selectedWorkspaceRootId || ''"
-								@change="emit('select-workspace', $event.target.value)"
-							>
-								<option value="">未绑定工作区</option>
+							<select id="workspace-select" class="field-select" :value="selectedWorkspaceRootId || ''"
+								@change="emit('select-workspace', $event.target.value)">
+								<option value="">请选择工作区</option>
 								<option v-for="option in workspaceRoots" :key="option.id" :value="option.id">{{ option.label }}</option>
 							</select>
 							<button class="ghost-btn compact-btn" type="button" :disabled="!selectedWorkspace" @click="emit('edit-workspace')">编辑</button>
-							<button class="ghost-btn compact-btn danger-btn" type="button" :disabled="!selectedWorkspace" @click="emit('delete-workspace')">
-								删除
-							</button>
+							<button class="ghost-btn compact-btn danger-btn" type="button" :disabled="!selectedWorkspace" @click="emit('delete-workspace')">删除</button>
 							<button class="icon-add-btn" type="button" aria-label="新增工作区" @click="emit('create-workspace')">+</button>
 						</div>
 					</div>
@@ -222,15 +237,76 @@ defineExpose({
 					</div>
 				</section>
 
+				<section v-else-if="activeSection === 'agent'" class="settings-section settings-section-active">
+					<div class="settings-section-header">
+						<div class="settings-section-copy">
+							<div class="settings-section-title">智能体</div>
+						</div>
+						<div class="settings-badge">{{ agents.length }} 个</div>
+					</div>
+					<div class="channel-card-actions mcp-section-actions">
+						<div class="settings-hint">维护系统内置与自定义智能体，支持选择当前智能体、编辑定义，以及将智能体应用到当前会话。</div>
+						<button class="icon-add-btn" type="button" aria-label="新增智能体" @click="emit('create-agent')">+</button>
+					</div>
+					<div v-if="agents.length > 0" class="channel-card-list">
+						<article v-for="agent in agents" :key="agent.id" class="channel-card agent-settings-card"
+							:class="{ enabled: agent.id === selectedAgentId }">
+							<div class="channel-card-top">
+								<div class="channel-card-copy">
+									<button class="settings-inline-link" type="button" @click="emit('edit-agent', agent)">{{ agent.name || agent.id }}</button>
+									<div class="settings-hint">{{ agent.description || '未填写描述' }}</div>
+								</div>
+								<div class="settings-badge">{{ agent.id === selectedAgentId ? '当前智能体' : '可选' }}</div>
+							</div>
+							<div class="selected-summary-grid channel-summary-grid">
+								<div class="selected-summary-card">
+									<div class="selected-summary-label">标识</div>
+									<div class="selected-summary-value">{{ agent.id }}</div>
+								</div>
+								<div class="selected-summary-card">
+									<div class="selected-summary-label">模式</div>
+									<div class="selected-summary-value">{{ agentMeta(agent) }}</div>
+								</div>
+								<div class="selected-summary-card">
+									<div class="selected-summary-label">Skills</div>
+									<div class="selected-summary-value">{{ (agent.skills || []).length }}</div>
+								</div>
+								<div class="selected-summary-card">
+									<div class="selected-summary-label">MCP</div>
+									<div class="selected-summary-value">{{ (agent.mcpServers || []).length }}</div>
+								</div>
+							</div>
+							<div v-if="agent.warnings?.length" class="settings-hint channel-status-detail">
+								<div v-for="warning in agent.warnings" :key="warning">{{ warning }}</div>
+							</div>
+							<div class="channel-card-actions">
+								<div class="settings-badge">{{ agent.isBuiltIn ? '系统内置' : '自定义' }}</div>
+								<div class="mcp-card-buttons">
+									<button class="ghost-btn compact-btn" type="button" @click="emit('select-agent', agent.id)">设为当前</button>
+									<button v-if="canBindConversationAgent && currentConversationAgentId !== agent.id" class="ghost-btn compact-btn"
+										type="button" @click="emit('assign-conversation-agent', agent.id)">应用到当前会话</button>
+									<button class="ghost-btn compact-btn" type="button" @click="emit('edit-agent', agent)">编辑</button>
+									<button v-if="!agent.isBuiltIn" class="ghost-btn compact-btn danger-btn" type="button"
+										@click="emit('delete-agent', agent.id)">删除</button>
+								</div>
+							</div>
+						</article>
+					</div>
+					<div v-else class="mcp-empty-state">
+						<div class="settings-section-title">还没有智能体</div>
+						<div class="settings-hint">点击右上角加号创建自定义智能体。</div>
+					</div>
+				</section>
+
 				<section v-else-if="activeSection === 'mcp'" class="settings-section settings-section-active">
 					<div class="settings-section-header">
 						<div class="settings-section-copy">
-							<div class="settings-section-title">MCP 服务维护</div>
+							<div class="settings-section-title">MCP 服务</div>
 						</div>
 						<div class="settings-badge">{{ enabledMcpServerCount }} / {{ mcpServers.length }}</div>
 					</div>
 					<div class="channel-card-actions mcp-section-actions">
-						<div class="settings-hint">仅维护本地 desktop-settings.json 中的 mcp_servers 配置，暂不连接后端 MCP 运行时。</div>
+						<div class="settings-hint">维护桌面端 MCP 服务配置。</div>
 						<button class="icon-add-btn" type="button" aria-label="新增 MCP 服务" @click="emit('create-mcp-server')">+</button>
 					</div>
 					<div v-if="mcpServers.length > 0" class="channel-card-list">
@@ -240,12 +316,12 @@ defineExpose({
 									<div class="settings-section-title">{{ server.displayName || server.id }}</div>
 									<div class="settings-hint">{{ server.id }}</div>
 								</div>
-								<div class="settings-badge">{{ server.enabled === false ? '已停用' : '已启用' }}</div>
+								<div class="settings-badge">{{ server.enabled === false ? '已禁用' : '已启用' }}</div>
 							</div>
 							<div class="selected-summary-grid channel-summary-grid">
 								<div class="selected-summary-card">
 									<div class="selected-summary-label">Command</div>
-									<div class="selected-summary-value">{{ server.command || '未设置' }}</div>
+									<div class="selected-summary-value">{{ server.command || '未配置' }}</div>
 								</div>
 								<div class="selected-summary-card">
 									<div class="selected-summary-label">Args</div>
@@ -257,7 +333,7 @@ defineExpose({
 								</div>
 							</div>
 							<div class="channel-card-actions">
-								<div class="settings-badge">本地配置</div>
+								<div class="settings-badge">可编辑</div>
 								<div class="mcp-card-buttons">
 									<button class="ghost-btn compact-btn" type="button" @click="emit('edit-mcp-server', server)">编辑</button>
 									<button class="ghost-btn compact-btn danger-btn" type="button" @click="emit('delete-mcp-server', server.id)">删除</button>
@@ -266,15 +342,15 @@ defineExpose({
 						</article>
 					</div>
 					<div v-else class="mcp-empty-state">
-						<div class="settings-section-title">暂无 MCP 服务</div>
-						<div class="settings-hint">点击新增后会写入 mcp_servers 对象。</div>
+						<div class="settings-section-title">还没有 MCP 服务</div>
+						<div class="settings-hint">点击右上角加号创建 MCP 服务配置。</div>
 					</div>
 				</section>
 
 				<section v-else-if="activeSection === 'channels'" class="settings-section settings-section-active">
 					<div class="settings-section-header">
 						<div class="settings-section-copy">
-							<div class="settings-section-title">频道接入与监听</div>
+							<div class="settings-section-title">频道</div>
 						</div>
 						<div class="settings-badge">{{ enabledChannelCount }} / {{ channels.length }}</div>
 					</div>
@@ -288,7 +364,7 @@ defineExpose({
 								<label class="toggle-field channel-toggle">
 									<input class="toggle-input" type="checkbox" :checked="channel.isEnabled" @change="onChannelToggle(channel, $event)" />
 									<span class="toggle-switch"></span>
-									<span class="toggle-label">{{ channel.isEnabled ? '已开启' : '已关闭' }}</span>
+									<span class="toggle-label">{{ channel.isEnabled ? '已启用' : '已停用' }}</span>
 								</label>
 							</div>
 							<div class="selected-summary-grid channel-summary-grid">
@@ -300,7 +376,7 @@ defineExpose({
 							<div v-if="channel.statusDetail" class="settings-hint channel-status-detail">{{ channel.statusDetail }}</div>
 							<div class="channel-card-actions">
 								<div class="settings-badge">{{ channel.statusLabel }}</div>
-								<button class="ghost-btn compact-btn" type="button" @click="emit('edit-channel', channel)">配置</button>
+								<button class="ghost-btn compact-btn" type="button" @click="emit('edit-channel', channel)">编辑</button>
 							</div>
 						</article>
 					</div>
@@ -309,12 +385,12 @@ defineExpose({
 				<section v-else class="settings-section settings-section-active">
 					<div class="settings-section-header">
 						<div class="settings-section-copy">
-							<div class="settings-section-title">主题与外观</div>
+							<div class="settings-section-title">界面主题</div>
 						</div>
 						<div class="settings-badge">{{ selectedThemeLabel }}</div>
 					</div>
 					<div class="field-group">
-						<div class="field-label">界面主题</div>
+						<div class="field-label">当前主题</div>
 						<select id="theme-select" class="field-select" :value="selectedThemeId || 'system'" @change="emit('select-theme', $event.target.value)">
 							<option v-for="option in themeOptions" :key="option.id" :value="option.id">{{ option.label }}</option>
 						</select>

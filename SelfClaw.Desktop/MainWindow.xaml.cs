@@ -13,6 +13,7 @@ using System.Windows.Interop;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.ViewModels;
 using DrawingBitmap = System.Drawing.Bitmap;
@@ -68,6 +69,8 @@ public partial class MainWindow : Window
         Channels: [],
         McpServers: [],
         Skills: [],
+        Agents: [],
+        SelectedAgentId: null,
         AgentActivities: [],
         IsPlanningModeEnabled: false,
         PlanPanel: null,
@@ -225,6 +228,8 @@ public partial class MainWindow : Window
             channels = state.Channels,
             mcpServers = state.McpServers,
             skills = state.Skills,
+            agents = state.Agents,
+            selectedAgentId = state.SelectedAgentId,
             agentActivities = state.AgentActivities,
             isPlanningModeEnabled = state.IsPlanningModeEnabled,
             planPanel = state.PlanPanel,
@@ -392,6 +397,12 @@ public partial class MainWindow : Window
                     }
                     break;
                 }
+                case "select-agent":
+                    await _viewModel.SetSelectedAgentAsync(GetString(document.RootElement, "agentId"));
+                    break;
+                case "assign-conversation-agent":
+                    await AssignConversationAgentFromTranscriptAsync(document.RootElement);
+                    break;
                 case "send-prompt":
                 {
                     var prompt = document.RootElement.GetProperty("prompt").GetString() ?? string.Empty;
@@ -460,6 +471,14 @@ public partial class MainWindow : Window
                     break;
                 case "set-plan-mode":
                     await _viewModel.SetPlanningModeAsync(GetBool(document.RootElement, "enabled"));
+                    break;
+                case "save-agent":
+                    feedbackScope = "agent";
+                    await SaveAgentFromTranscriptAsync(document.RootElement);
+                    break;
+                case "delete-agent":
+                    feedbackScope = "agent";
+                    await DeleteAgentFromTranscriptAsync(document.RootElement);
                     break;
                 case "save-profile":
                     feedbackScope = "profile";
@@ -759,6 +778,41 @@ public partial class MainWindow : Window
 
         await _viewModel.SaveProfileAsync(result);
         PostUiFeedback("success", "Profile saved.", "profile");
+    }
+
+    private async Task SaveAgentFromTranscriptAsync(JsonElement root)
+    {
+        var result = new DesktopAgentEditorResult(
+            GetString(root, "originalAgentId"),
+            GetString(root, "agentId"),
+            GetString(root, "name"),
+            GetString(root, "description"),
+            ParseAgentExecutionMode(GetString(root, "mode")),
+            GetString(root, "toolPolicy"),
+            GetStringList(root, "skills"),
+            GetStringList(root, "mcpServers"),
+            GetString(root, "instructions"));
+
+        await _viewModel.SaveAgentAsync(result);
+        PostUiFeedback("success", "Agent saved.", "agent");
+    }
+
+    private async Task DeleteAgentFromTranscriptAsync(JsonElement root)
+    {
+        await _viewModel.DeleteAgentAsync(GetString(root, "agentId"));
+        PostUiFeedback("success", "Agent deleted.", "agent");
+    }
+
+    private async Task AssignConversationAgentFromTranscriptAsync(JsonElement root)
+    {
+        var conversationId = ParseGuid(root, "conversationId");
+        if (conversationId is Guid targetConversationId &&
+            _viewModel.SelectedConversation?.Id != targetConversationId)
+        {
+            await _viewModel.SelectConversationAsync(targetConversationId);
+        }
+
+        await _viewModel.AssignSelectedConversationAgentAsync(GetString(root, "agentId"));
     }
 
     private async Task FetchProfileModelsFromTranscriptAsync(JsonElement root)
@@ -1072,6 +1126,11 @@ public partial class MainWindow : Window
         await _viewModel.SetSkillEnabledAsync(GetString(root, "skillId"), enabled);
         PostUiFeedback("success", enabled ? "Skill enabled." : "Skill disabled.", "mcp");
     }
+
+    private static AgentExecutionMode ParseAgentExecutionMode(string? modeId)
+        => string.Equals(modeId?.Trim(), "plan", StringComparison.OrdinalIgnoreCase)
+            ? AgentExecutionMode.Plan
+            : AgentExecutionMode.Direct;
 
     private Task PickWorkspacePathFromTranscriptAsync()
     {

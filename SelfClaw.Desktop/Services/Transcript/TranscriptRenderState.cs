@@ -21,6 +21,8 @@ public sealed record TranscriptRenderState(
     IReadOnlyList<TranscriptChannelItem> Channels,
     IReadOnlyList<TranscriptMcpServerItem> McpServers,
     IReadOnlyList<TranscriptSkillItem> Skills,
+    IReadOnlyList<TranscriptAgentItem> Agents,
+    string? SelectedAgentId,
     IReadOnlyList<AgentActivityNode> AgentActivities,
     bool IsPlanningModeEnabled,
     TranscriptPlanPanel? PlanPanel,

@@ -1,0 +1,148 @@
+.sidebar-agent-heading {
+	cursor: pointer;
+}
+
+.sidebar-agent-count {
+	margin-left: auto;
+	color: #7f8794;
+	font-size: 10px;
+	font-weight: 600;
+}
+
+.sidebar-agent-list {
+	gap: 4px;
+}
+
+.sidebar-agent-list.collapsed {
+	display: none;
+}
+
+.sidebar-agent-item {
+	align-items: stretch;
+	padding: 0;
+	overflow: hidden;
+}
+
+.sidebar-agent-item.active {
+	background: rgba(255, 255, 255, 0.07);
+}
+
+.sidebar-agent-item.warning {
+	box-shadow: inset 2px 0 0 rgba(204, 103, 116, 0.72);
+}
+
+.sidebar-agent-main-shell {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 8px;
+	cursor: pointer;
+}
+
+.sidebar-agent-main-shell:hover {
+	background: rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-agent-select {
+	width: 22px;
+	height: 22px;
+	flex: 0 0 auto;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.03);
+	display: grid;
+	place-items: center;
+	padding: 0;
+}
+
+.sidebar-agent-selected-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.32);
+}
+
+.sidebar-agent-item.active .sidebar-agent-select {
+	border-color: rgba(var(--accent-rgb), 0.42);
+	background: rgba(var(--accent-rgb), 0.16);
+}
+
+.sidebar-agent-item.active .sidebar-agent-selected-dot {
+	background: var(--accent);
+}
+
+.sidebar-agent-copy {
+	min-width: 0;
+	display: grid;
+	gap: 2px;
+}
+
+.sidebar-agent-title-btn {
+	min-width: 0;
+	border: 0;
+	background: transparent;
+	color: #eef0f4;
+	font-size: 12px;
+	font-weight: 600;
+	text-align: left;
+	padding: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sidebar-agent-title-btn:hover {
+	color: #ffffff;
+	text-decoration: underline;
+}
+
+.sidebar-agent-meta {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: #8f96a3;
+	font-size: 10px;
+}
+
+.settings-inline-link {
+	border: 0;
+	background: transparent;
+	color: inherit;
+	padding: 0;
+	font: inherit;
+	font-weight: 650;
+	text-align: left;
+}
+
+.settings-inline-link:hover {
+	text-decoration: underline;
+}
+
+.field-textarea-lg {
+	min-height: 220px;
+}
+
+html[data-theme='light'] .sidebar-agent-item.active {
+	background: #18223012;
+}
+
+html[data-theme='light'] .sidebar-agent-main-shell:hover {
+	background: #1822300e;
+}
+
+html[data-theme='light'] .sidebar-agent-select {
+	background: #f8fafc;
+	border-color: #d8dee8;
+}
+
+html[data-theme='light'] .sidebar-agent-selected-dot {
+	background: #94a3b8;
+}
+
+html[data-theme='light'] .sidebar-agent-title-btn {
+	color: #182230;
+}
+
+html[data-theme='light'] .sidebar-agent-meta {
+	color: #667386;
+}

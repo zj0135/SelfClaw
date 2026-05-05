@@ -22,22 +22,31 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
+	agents: {
+		type: Array,
+		default: () => [],
+	},
+	selectedAgentId: {
+		type: String,
+		default: null,
+	},
 });
 
 const emit = defineEmits([
 	'new-conversation',
 	'open-settings',
 	'open-mcp-settings',
-	'create-mcp-server',
 	'edit-mcp-server',
-	'delete-mcp-server',
 	'set-mcp-server-enabled',
 	'set-skill-enabled',
+	'select-agent',
+	'edit-agent',
 	'toggle-collapse',
 ]);
 
 const conversationListEl = ref(null);
 const allConversationsCollapsed = ref(false);
+const agentsCollapsed = ref(false);
 const mcpCollapsed = ref(false);
 const skillsCollapsed = ref(false);
 const automationCollapsed = ref(false);
@@ -47,13 +56,16 @@ const enabledMcpServerCount = computed(() => props.mcpServers.filter((server) =>
 const mcpCountLabel = computed(() => (props.mcpServers.length > 0 ? `${enabledMcpServerCount.value} / ${props.mcpServers.length}` : '0'));
 const enabledSkillCount = computed(() => props.skills.filter((skill) => skill.enabled !== false).length);
 const skillCountLabel = computed(() => (props.skills.length > 0 ? `${enabledSkillCount.value} / ${props.skills.length}` : '0'));
-const selectedSkill = computed(() => {
-	return props.skills.find((skill) => skill.id === selectedSkillId.value) || null;
-});
+const agentCountLabel = computed(() => `${props.agents.length || 0}`);
+const selectedSkill = computed(() => props.skills.find((skill) => skill.id === selectedSkillId.value) || null);
 const activeSkillId = computed(() => selectedSkill.value?.id || null);
 
 function toggleAllConversations() {
 	allConversationsCollapsed.value = !allConversationsCollapsed.value;
+}
+
+function toggleAgents() {
+	agentsCollapsed.value = !agentsCollapsed.value;
 }
 
 function toggleMcp() {
@@ -90,6 +102,19 @@ function setSkillEnabled(skill, event) {
 	});
 }
 
+function agentMeta(agent) {
+	const parts = [];
+	parts.push(agent.mode === 'plan' ? 'plan' : 'direct');
+	parts.push(agent.isBuiltIn ? '系统' : '自定义');
+	if (agent.warnings?.length) {
+		parts.push(`${agent.warnings.length} 条警告`);
+	} else if (agent.description) {
+		parts.push(agent.description);
+	}
+
+	return parts.join(' · ');
+}
+
 defineExpose({
 	getConversationListEl: () => conversationListEl.value,
 });
@@ -98,7 +123,7 @@ defineExpose({
 <template>
 	<aside class="panel sidebar" :class="{ collapsed }">
 		<button class="pane-collapse-toggle pane-collapse-toggle-sidebar" type="button"
-			:aria-label="collapsed ? '展开' : '折叠'" :title="collapsed ? '展开' : '折叠'" @click="emit('toggle-collapse')">
+			:aria-label="collapsed ? '展开左侧栏' : '收起左侧栏'" :title="collapsed ? '展开左侧栏' : '收起左侧栏'" @click="emit('toggle-collapse')">
 			<svg class="pane-collapse-toggle-icon pane-collapse-toggle-icon-left" xmlns="http://www.w3.org/2000/svg"
 				viewBox="0 0 1024 1024" aria-hidden="true">
 				<path fill="currentColor"
@@ -110,55 +135,80 @@ defineExpose({
 		<div class="sidebar-body">
 			<nav class="sidebar-nav" aria-label="SelfClaw navigation">
 				<button class="sidebar-primary" type="button" :disabled="isChannelMode"
-					:title="isChannelMode ? '频道会话由外部消息自动创建' : '新建会话'" @click="emit('new-conversation')">
+					:title="isChannelMode ? '频道会话由外部消息自动创建' : '新建对话'" @click="emit('new-conversation')">
 					<span class="sidebar-nav-icon" aria-hidden="true">
 						<svg viewBox="0 0 20 20" fill="none">
 							<path d="M5 15h10M5 15V5h10v5" />
 							<path d="M8 8h4M8 11h2" />
 						</svg>
 					</span>
-					<span>新建会话</span>
+					<span>新建对话</span>
 				</button>
 
 				<div class="sidebar-nav-scroll">
 					<div class="sidebar-nav-group">
 						<button class="sidebar-nav-item sidebar-main-node" type="button" aria-current="page"
-							:aria-expanded="allConversationsCollapsed ? 'false' : 'true'"
-							@click="toggleAllConversations">
+							:aria-expanded="allConversationsCollapsed ? 'false' : 'true'" @click="toggleAllConversations">
 							<span class="sidebar-nav-icon" aria-hidden="true">
 								<svg viewBox="0 0 20 20" fill="none">
 									<path d="M3.5 7.5h13l-1.2-3h-4.6l-.9 1.2H4.4l-.9 1.8Z" />
 									<path d="M3.5 7.5v7h13v-7" />
 								</svg>
 							</span>
-							<span>所有会话</span>
+							<span>对话</span>
 						</button>
 						<div ref="conversationListEl" class="sidebar-nav-children sidebar-conversation-list-shell"
 							:class="{ collapsed: allConversationsCollapsed }">
 							<div id="conversation-list" class="conversation-list" v-html="conversationListHtml"></div>
 						</div>
-						<div class="sidebar-divider"></div>
-						<div class="sidebar-nav-subitem standalone">
-							<span class="sidebar-nav-icon" aria-hidden="true">
-								<svg viewBox="0 0 20 20" fill="none">
-									<path d="M4 8.5 9.5 14 16 7.5 11.5 3H5.5L4 4.5v4Z" />
-									<path d="M7.25 6.25h.01" />
-								</svg>
-							</span>
-							<span>标签</span>
-						</div>
+					</div>
 
-						<div class="sidebar-nav-subitem standalone">
+					<div class="sidebar-divider"></div>
+
+					<div class="sidebar-nav-group">
+						<button class="sidebar-nav-heading sidebar-nav-heading-action sidebar-main-node sidebar-agent-heading"
+							type="button" :aria-expanded="agentsCollapsed ? 'false' : 'true'" @click="toggleAgents">
 							<span class="sidebar-nav-icon" aria-hidden="true">
 								<svg viewBox="0 0 20 20" fill="none">
-									<path d="M4 6.5h12M5.5 6.5v9h9v-9" />
-									<path d="M7.5 4.5h5l.8 2h-6.6l.8-2Z" />
+									<path d="M6.5 6.5a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0Z" />
+									<path d="M4.5 16c.8-2.3 2.8-3.5 5.5-3.5s4.7 1.2 5.5 3.5" />
 								</svg>
 							</span>
-							<span>已归档</span>
+							<span class="sidebar-heading-main">智能体</span>
+							<span class="sidebar-agent-count">{{ agentCountLabel }}</span>
+						</button>
+						<div class="sidebar-nav-children sidebar-agent-list" :class="{ collapsed: agentsCollapsed }">
+							<div v-if="agents.length === 0" class="sidebar-nav-subitem sidebar-empty-subitem">
+								<span class="sidebar-nav-icon" aria-hidden="true">
+									<svg viewBox="0 0 20 20" fill="none">
+										<path d="M5 10h10" />
+									</svg>
+								</span>
+								<span>还没有智能体</span>
+							</div>
+							<template v-else>
+								<div v-for="agent in agents" :key="agent.id" class="sidebar-nav-subitem sidebar-agent-item"
+									:class="{ active: agent.id === selectedAgentId, warning: (agent.warnings || []).length > 0 }">
+									<div class="sidebar-agent-main-shell" @click="emit('select-agent', agent.id)">
+										<button class="sidebar-agent-select" type="button" :aria-pressed="agent.id === selectedAgentId ? 'true' : 'false'"
+											:title="agent.id === selectedAgentId ? '当前已选中' : '设为当前智能体'">
+											<span class="sidebar-agent-selected-dot" aria-hidden="true"></span>
+										</button>
+										<div class="sidebar-agent-copy">
+											<button class="sidebar-agent-title-btn" type="button" :title="agent.description || agent.id"
+												@click.stop="emit('edit-agent', agent)">
+												{{ agent.name || agent.id }}
+											</button>
+											<span class="sidebar-agent-meta">{{ agentMeta(agent) }}</span>
+										</div>
+									</div>
+								</div>
+							</template>
 						</div>
 					</div>
+
 					<div class="sidebar-divider"></div>
+
 					<button class="sidebar-nav-heading sidebar-nav-heading-action sidebar-main-node sidebar-mcp-heading"
 						type="button" :aria-expanded="mcpCollapsed ? 'false' : 'true'" @click="toggleMcp">
 						<span class="sidebar-nav-icon" aria-hidden="true">
@@ -177,13 +227,11 @@ defineExpose({
 									<path d="M5 10h10" />
 								</svg>
 							</span>
-							<span>暂无服务</span>
+							<span>还没有 MCP 服务</span>
 						</div>
 						<template v-else>
-							<div v-for="server in mcpServers" :key="server.id"
-								class="sidebar-nav-subitem sidebar-mcp-item">
-								<button class="sidebar-mcp-main" type="button" :title="server.command || server.id"
-									@click="emit('edit-mcp-server', server)">
+							<div v-for="server in mcpServers" :key="server.id" class="sidebar-nav-subitem sidebar-mcp-item">
+								<button class="sidebar-mcp-main" type="button" :title="server.command || server.id" @click="emit('edit-mcp-server', server)">
 									<span class="sidebar-nav-icon" aria-hidden="true">
 										<svg viewBox="0 0 20 20" fill="none">
 											<path d="M5 7.5h10M5 12.5h10" />
@@ -192,19 +240,17 @@ defineExpose({
 									</span>
 									<span class="sidebar-mcp-copy">
 										<span class="sidebar-mcp-name">{{ server.displayName || server.id }}</span>
-										<span class="sidebar-mcp-meta">{{ server.enabled === false ? '已停用' : '已启用'
-										}}</span>
+										<span class="sidebar-mcp-meta">{{ server.enabled === false ? '已禁用' : '已启用' }}</span>
 									</span>
 								</button>
-								<label class="sidebar-skill-switch"
-									:title="server.enabled === false ? '启用 MCP 服务' : '禁用 MCP 服务'" @click.stop>
-									<input type="checkbox" :checked="server.enabled !== false"
-										@change="setMcpServerEnabled(server, $event)" />
+								<label class="sidebar-skill-switch" :title="server.enabled === false ? '启用 MCP 服务' : '禁用 MCP 服务'" @click.stop>
+									<input type="checkbox" :checked="server.enabled !== false" @change="setMcpServerEnabled(server, $event)" />
 									<span aria-hidden="true"></span>
 								</label>
 							</div>
 						</template>
 					</div>
+
 					<button class="sidebar-nav-subitem standalone sidebar-main-node sidebar-skill-heading" type="button"
 						:aria-expanded="skillsCollapsed ? 'false' : 'true'" @click="toggleSkills">
 						<span class="sidebar-nav-icon" aria-hidden="true">
@@ -222,13 +268,12 @@ defineExpose({
 									<path d="M5 10h10" />
 								</svg>
 							</span>
-							<span>暂无技能</span>
+							<span>还没有技能</span>
 						</div>
 						<template v-else>
 							<div v-for="skill in skills" :key="skill.id" class="sidebar-nav-subitem sidebar-skill-item"
 								:class="{ active: skill.id === activeSkillId, disabled: skill.enabled === false }">
-								<button class="sidebar-skill-main" type="button" :title="skill.relativePath || skill.id"
-									@click="openSkill(skill)">
+								<button class="sidebar-skill-main" type="button" :title="skill.relativePath || skill.id" @click="openSkill(skill)">
 									<span class="sidebar-nav-icon" aria-hidden="true">
 										<svg viewBox="0 0 20 20" fill="none">
 											<path d="M6 4.5h8v11H6z" />
@@ -237,19 +282,17 @@ defineExpose({
 									</span>
 									<span class="sidebar-skill-copy">
 										<span class="sidebar-skill-name">{{ skill.name || skill.id }}</span>
-										<span class="sidebar-skill-meta">{{ skill.enabled === false ? '已禁用' : '已启用'
-										}}</span>
+										<span class="sidebar-skill-meta">{{ skill.enabled === false ? '已禁用' : '已启用' }}</span>
 									</span>
 								</button>
-								<label class="sidebar-skill-switch" :title="skill.enabled === false ? '启用技能' : '禁用技能'"
-									@click.stop>
-									<input type="checkbox" :checked="skill.enabled !== false"
-										@change="setSkillEnabled(skill, $event)" />
+								<label class="sidebar-skill-switch" :title="skill.enabled === false ? '启用技能' : '禁用技能'" @click.stop>
+									<input type="checkbox" :checked="skill.enabled !== false" @change="setSkillEnabled(skill, $event)" />
 									<span aria-hidden="true"></span>
 								</label>
 							</div>
 						</template>
 					</div>
+
 					<button class="sidebar-nav-heading sidebar-main-node" type="button"
 						:aria-expanded="automationCollapsed ? 'false' : 'true'" @click="toggleAutomation">
 						<span class="sidebar-nav-icon" aria-hidden="true">
@@ -267,7 +310,7 @@ defineExpose({
 									<path d="M10 6.8v3.5l2.4 1.6" />
 								</svg>
 							</span>
-							<span>定时任务</span>
+							<span>稍后执行</span>
 						</div>
 						<div class="sidebar-nav-subitem">
 							<span class="sidebar-nav-icon" aria-hidden="true">
@@ -276,7 +319,7 @@ defineExpose({
 									<path d="M4 8.5c2.5 4 4.5 4 6 0s3.5-4 6 0" />
 								</svg>
 							</span>
-							<span>事件触发</span>
+							<span>监控与回访</span>
 						</div>
 					</div>
 				</div>
@@ -296,18 +339,15 @@ defineExpose({
 			</nav>
 		</div>
 		<div v-if="selectedSkill" class="skill-modal-backdrop" @click.self="closeSkill">
-			<section class="skill-modal" role="dialog" aria-modal="true"
-				:aria-label="`${selectedSkill.name || selectedSkill.id} SKILL.md`">
+			<section class="skill-modal" role="dialog" aria-modal="true" :aria-label="`${selectedSkill.name || selectedSkill.id} SKILL.md`">
 				<header class="skill-modal-head">
 					<div class="skill-modal-title-copy">
 						<div class="skill-modal-title">{{ selectedSkill.name || selectedSkill.id }}</div>
-						<div class="skill-modal-path">{{ selectedSkill.relativePath || selectedSkill.id }} / SKILL.md
-						</div>
+						<div class="skill-modal-path">{{ selectedSkill.relativePath || selectedSkill.id }} / SKILL.md</div>
 					</div>
-					<button class="skill-modal-close" type="button" aria-label="关闭" title="关闭"
-						@click="closeSkill">×</button>
+					<button class="skill-modal-close" type="button" aria-label="关闭" title="关闭" @click="closeSkill">×</button>
 				</header>
-				<pre class="skill-modal-content">{{ selectedSkill.markdown || 'SKILL.md 为空' }}</pre>
+				<pre class="skill-modal-content">{{ selectedSkill.markdown || 'SKILL.md 为空。' }}</pre>
 			</section>
 		</div>
 	</aside>

@@ -28,11 +28,12 @@ internal static class SqliteMappings
             reader.IsDBNull(3) ? null : ReadGuid(reader, 3),
             reader.IsDBNull(4) ? ConversationMode.Programming : (ConversationMode)reader.GetInt32(4),
             (ToolPermissionMode)reader.GetInt32(5),
-            ReadDateTimeOffset(reader, 9),
+            reader.IsDBNull(6) ? "build" : reader.GetString(6),
             ReadDateTimeOffset(reader, 10),
-            reader.IsDBNull(6) ? null : reader.GetString(6),
+            ReadDateTimeOffset(reader, 11),
             reader.IsDBNull(7) ? null : reader.GetString(7),
-            reader.IsDBNull(8) ? null : reader.GetString(8));
+            reader.IsDBNull(8) ? null : reader.GetString(8),
+            reader.IsDBNull(9) ? null : reader.GetString(9));
 
     public static MessageRecord ReadMessage(SqliteDataReader reader)
         => new(

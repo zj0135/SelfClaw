@@ -72,7 +72,7 @@ public sealed class SelfClawAgentChatRuntimeTests
 
         events.OfType<AssistantMessageCompletedEvent>()
             .Select(item => item.Message.AgentName)
-            .Should().Equal("SelfClaw", "SelfClaw", "SelfClaw");
+            .Should().Equal("plan", "plan", "plan");
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public sealed class SelfClawAgentChatRuntimeTests
         events.Should().NotContain(item => item is ExecutionPlanStepStatusChangedEvent);
         events.OfType<AssistantMessageCompletedEvent>()
             .Select(item => item.Message.AgentName)
-            .Should().Equal("SelfClaw");
+            .Should().Equal("build");
         executionService.Requests.Select(item => item.Kind).Should().Equal("reply");
     }
 
@@ -183,6 +183,15 @@ public sealed class SelfClawAgentChatRuntimeTests
             "test-key",
             workspaceRoot,
             ConversationMode.Programming,
+            new AgentRuntimeDefinition(
+                enablePlanMode ? "plan" : "build",
+                enablePlanMode ? "plan" : "build",
+                enablePlanMode ? "Plan agent" : "Build agent",
+                enablePlanMode ? AgentExecutionMode.Plan : AgentExecutionMode.Direct,
+                AgentRuntimeDefinition.SystemToolPolicy,
+                [],
+                [],
+                string.Empty),
             ToolPermissionMode.RequireApproval,
             null,
             [
@@ -195,7 +204,7 @@ public sealed class SelfClawAgentChatRuntimeTests
                     now,
                     now)
             ],
-            EnablePlanMode: enablePlanMode);
+            EnableReasoning: false);
     }
 
     private static async Task<IReadOnlyList<ChatRuntimeEvent>> CollectAsync(IAsyncEnumerable<ChatRuntimeEvent> events)

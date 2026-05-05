@@ -18,9 +18,10 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 {
     private const int MaxExecutionPlanSteps = 7;
     private const int MinExecutionPlanSteps = 3;
-    private const string ProgrammingAgentName = "SelfClaw";
-    private const string ProgrammingAgentRole = "Programming Assistant";
-    private const string ProgrammingAgentDescription = "A personal desktop AI client for focused conversation and workspace assistance.";
+    private const string DefaultProgrammingAgentDescription = "A personal desktop AI client for focused conversation and workspace assistance.";
+    private const string DefaultChannelAgentName = "SelfClaw";
+    private const string DefaultChannelAgentRole = "Channel Assistant";
+    private const string DefaultChannelAgentDescription = "A desktop AI client replying to external channel conversations.";
     private const string ProgrammingBaseInstructions = "You are SelfClaw, a concise desktop AI assistant. Respond in Markdown. Use workspace tools when they materially help. Never claim to have read, written, or executed anything unless a tool actually returned a successful result.";
     private const string ChannelBaseInstructions = "You are SelfClaw replying to a user from an external chat channel. Keep replies concise, helpful, and easy to read in chat. Respond in Markdown or plain text that still reads well when Markdown is not rendered. Never expose hidden reasoning, internal tools, or implementation details unless the user explicitly asks.";
 
@@ -79,7 +80,7 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         {
             try
             {
-                if (request.Mode == ConversationMode.Programming && request.EnablePlanMode)
+                if (request.Mode == ConversationMode.Programming && request.Agent.Mode == AgentExecutionMode.Plan)
                 {
                     await ProducePlannedProgrammingTurnAsync(request, channel.Writer, cancellationToken);
                 }
@@ -96,10 +97,11 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
                 {
                     _logger.LogError(
                         exception,
-                        "Chat runtime failed. ConversationId={ConversationId}, Mode={Mode}, EnablePlanMode={EnablePlanMode}",
+                        "Chat runtime failed. ConversationId={ConversationId}, Mode={Mode}, AgentId={AgentId}, AgentMode={AgentMode}",
                         request.ConversationId,
                         request.Mode,
-                        request.EnablePlanMode);
+                        request.Agent.Id,
+                        request.Agent.Mode);
                 }
 
                 channel.Writer.TryComplete(exception);
@@ -180,7 +182,31 @@ public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
         return tools;
     }
 
-    private IReadOnlyList<AIContextProvider> CreateContextProviders()
-        => _agentContextProviderFactory.CreateProviders();
+    private IReadOnlyList<AIContextProvider> CreateContextProviders(AgentRuntimeDefinition agent)
+        => _agentContextProviderFactory.CreateProviders(agent);
+
+    private static string ResolveAgentName(ChatTurnRequest request)
+        => request.Mode == ConversationMode.Channel
+            ? DefaultChannelAgentName
+            : request.Agent.Name;
+
+    private static string ResolveAgentRole(ChatTurnRequest request)
+        => request.Mode == ConversationMode.Channel
+            ? DefaultChannelAgentRole
+            : request.Agent.Mode == AgentExecutionMode.Plan
+                ? "Plan Agent"
+                : "Agent";
+
+    private static string ResolveAgentDescription(ChatTurnRequest request)
+    {
+        if (request.Mode == ConversationMode.Channel)
+        {
+            return DefaultChannelAgentDescription;
+        }
+
+        return string.IsNullOrWhiteSpace(request.Agent.Description)
+            ? DefaultProgrammingAgentDescription
+            : request.Agent.Description;
+    }
 
 }

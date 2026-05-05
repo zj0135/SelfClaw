@@ -18,16 +18,28 @@ public sealed partial class SelfClawAgentChatRuntime
 
         if (request.WorkspaceRoot is null)
         {
-            return ProgrammingBaseInstructions + " No workspace is currently selected, so do not mention workspace tools.";
+            var fallbackInstructions = ProgrammingBaseInstructions + " No workspace is currently selected, so do not mention workspace tools.";
+            if (!string.IsNullOrWhiteSpace(request.Agent.Instructions))
+            {
+                fallbackInstructions += $"\n\nAdditional agent instructions:\n{request.Agent.Instructions.Trim()}";
+            }
+
+            return fallbackInstructions;
         }
 
         var permissionInstructions = request.ToolPermissionMode == ToolPermissionMode.FullAccess
             ? " You may use file-writing and PowerShell tools without extra approval, but stay scoped to the selected workspace unless the user explicitly requests otherwise."
             : " File-writing and PowerShell tools require explicit user approval. Only call them when they are necessary, and keep commands narrowly scoped.";
 
-        return ProgrammingBaseInstructions +
-               $" The trusted workspace root is '{request.WorkspaceRoot.RootPath}'. Keep file references relative to that root." +
-               permissionInstructions;
+        var instructions = ProgrammingBaseInstructions +
+                           $" The trusted workspace root is '{request.WorkspaceRoot.RootPath}'. Keep file references relative to that root." +
+                           permissionInstructions;
+        if (!string.IsNullOrWhiteSpace(request.Agent.Instructions))
+        {
+            instructions += $"\n\nAdditional agent instructions:\n{request.Agent.Instructions.Trim()}";
+        }
+
+        return instructions;
     }
 
 
@@ -44,6 +56,11 @@ public sealed partial class SelfClawAgentChatRuntime
         builder.AppendLine("- Focus on the actual work needed for this request, not generic process overhead.");
         builder.AppendLine("- Use workspace inspection tools only when they help shape a more accurate plan.");
         builder.AppendLine("- Do not include a final user-facing answer inside the plan.");
+        if (!string.IsNullOrWhiteSpace(request.Agent.Instructions))
+        {
+            builder.AppendLine("- Follow these additional agent instructions when they help:");
+            builder.AppendLine(request.Agent.Instructions.Trim());
+        }
         if (request.WorkspaceRoot is null)
         {
             builder.AppendLine("- No workspace is selected, so plan around reasoning and chat-only execution.");

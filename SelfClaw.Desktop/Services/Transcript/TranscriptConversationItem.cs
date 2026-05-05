@@ -6,4 +6,6 @@ public sealed record TranscriptConversationItem(
     string Timestamp,
     bool IsSelected,
     string? Badge = null,
-    string? Subtitle = null);
+    string? Subtitle = null,
+    string? AgentId = null,
+    string? AgentName = null);

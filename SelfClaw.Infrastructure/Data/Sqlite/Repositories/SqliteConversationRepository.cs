@@ -29,7 +29,7 @@ public sealed class SqliteConversationRepository : IConversationRepository
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode,
-       channel_kind, channel_conversation_id, channel_display_name,
+       agent_id, channel_kind, channel_conversation_id, channel_display_name,
        created_at_utc, updated_at_utc
 FROM conversations
 WHERE id = $id
@@ -48,11 +48,11 @@ LIMIT 1;";
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 INSERT INTO conversations(
-    id, title, profile_id, workspace_root_id, mode, tool_permission_mode,
+    id, title, profile_id, workspace_root_id, mode, tool_permission_mode, agent_id,
     channel_kind, channel_conversation_id, channel_display_name,
     created_at_utc, updated_at_utc)
 VALUES(
-    $id, $title, $profileId, $workspaceRootId, $mode, $toolPermissionMode,
+    $id, $title, $profileId, $workspaceRootId, $mode, $toolPermissionMode, $agentId,
     $channelKind, $channelConversationId, $channelDisplayName,
     $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
@@ -61,6 +61,7 @@ ON CONFLICT(id) DO UPDATE SET
     workspace_root_id = excluded.workspace_root_id,
     mode = excluded.mode,
     tool_permission_mode = excluded.tool_permission_mode,
+    agent_id = excluded.agent_id,
     channel_kind = excluded.channel_kind,
     channel_conversation_id = excluded.channel_conversation_id,
     channel_display_name = excluded.channel_display_name,
@@ -71,6 +72,7 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$workspaceRootId", conversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$mode", (int)conversation.Mode);
         command.Parameters.AddWithValue("$toolPermissionMode", (int)conversation.ToolPermissionMode);
+        command.Parameters.AddWithValue("$agentId", conversation.AgentId);
         command.Parameters.AddWithValue("$channelKind", conversation.ChannelKind ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$channelConversationId", conversation.ChannelConversationId ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$channelDisplayName", conversation.ChannelDisplayName ?? (object)DBNull.Value);
@@ -407,7 +409,7 @@ ON CONFLICT(id) DO UPDATE SET
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode,
-       channel_kind, channel_conversation_id, channel_display_name,
+       agent_id, channel_kind, channel_conversation_id, channel_display_name,
        created_at_utc, updated_at_utc
 FROM conversations
 ORDER BY updated_at_utc DESC;";

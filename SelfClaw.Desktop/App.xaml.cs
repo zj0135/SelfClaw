@@ -41,6 +41,7 @@ public partial class App : System.Windows.Application
             builder.Services.AddSerilog(Log.Logger, dispose: false);
             builder.Services.AddSelfClawInfrastructure(_storagePaths);
             builder.Services.AddSingleton<DesktopSettingsStore>();
+            builder.Services.AddSingleton<DesktopAgentStore>();
             builder.Services.AddSingleton<IDesktopChannelAdapter, FeishuDesktopChannelAdapter>();
             builder.Services.AddSingleton<DesktopChannelManager>();
             builder.Services.AddSingleton<DesktopToolApprovalHandler>();

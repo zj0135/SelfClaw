@@ -45,18 +45,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly DesktopNotificationService _desktopNotificationService;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly DesktopSettingsStore _desktopSettingsStore;
+    private readonly DesktopAgentStore _desktopAgentStore;
     private readonly DesktopChannelManager _channelManager;
     private readonly StoragePaths _storagePaths;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly DispatcherTimer? _streamingPublishTimer;
 
     private readonly List<ConversationRecord> _allConversations = [];
+    private readonly List<DesktopAgentDefinition> _agents = [];
     private readonly List<MessageRecord> _messages = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
     private readonly Dictionary<Guid, ToolRunAnchor> _toolRunAnchors = [];
     private readonly Dictionary<Guid, ConversationRuntimeState> _conversationRuntimeStates = [];
     private readonly Dictionary<Guid, TranscriptPlanPanel> _conversationPlanPanels = [];
-    private readonly Dictionary<Guid, bool> _conversationPlanningModes = [];
     private readonly Dictionary<Guid, string> _conversationStatusTexts = [];
     private IReadOnlyList<PromptImageAttachment> _pendingPromptImageAttachments = [];
     private bool _pendingReasoningEnabled;
@@ -67,6 +68,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private ProviderProfile? _selectedProfile;
     private string? _selectedProfileModelOverride;
     private WorkspaceRoot? _selectedWorkspaceRoot;
+    private string _selectedAgentId = DesktopAgentStore.BuildAgentId;
     private string _composerText = string.Empty;
     private string _statusText = "Add a model profile to get started.";
     private bool _isBusy;
@@ -94,6 +96,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         DesktopNotificationService desktopNotificationService,
         MarkdownHtmlRenderer markdownHtmlRenderer,
         DesktopSettingsStore desktopSettingsStore,
+        DesktopAgentStore desktopAgentStore,
         DesktopChannelManager channelManager,
         StoragePaths storagePaths,
         ILogger<MainWindowViewModel> logger)
@@ -108,6 +111,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _desktopNotificationService = desktopNotificationService;
         _markdownHtmlRenderer = markdownHtmlRenderer;
         _desktopSettingsStore = desktopSettingsStore;
+        _desktopAgentStore = desktopAgentStore;
         _channelManager = channelManager;
         _storagePaths = storagePaths;
         _logger = logger;
@@ -188,7 +192,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public bool IsPlanningModeEnabled
     {
         get => _isPlanningModeEnabled;
-        private set => SetPlanningModeForSelectedConversation(value, publishShell: true);
+        private set
+        {
+            if (SetProperty(ref _isPlanningModeEnabled, value))
+            {
+                PublishShell(false);
+            }
+        }
     }
 
     public ConversationMode SelectedConversationMode
@@ -308,6 +318,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _initialized = true;
+        await ReloadAgentsAsync();
         await ReloadProfilesAsync();
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
@@ -508,27 +519,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public Task SetConversationModeAsync(string? modeId)
         => SetConversationModeCoreAsync(ParseConversationMode(modeId));
 
-    public Task SetPlanningModeAsync(bool enabled)
-    {
-        if (IsBusy)
-        {
-            return Task.CompletedTask;
-        }
-
-        if (IsPlanningModeEnabled == enabled)
-        {
-            return Task.CompletedTask;
-        }
-
-        if (!enabled)
-        {
-            ClearPlanPanelState(publishShell: false);
-        }
-
-        IsPlanningModeEnabled = enabled;
-        return Task.CompletedTask;
-    }
-
     public async Task DeleteConversationAsync(Guid conversationId)
     {
         var conversation = _allConversations.FirstOrDefault(item => item.Id == conversationId);
@@ -549,7 +539,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _conversationPlanPanels.Remove(conversationId);
-        _conversationPlanningModes.Remove(conversationId);
         _conversationStatusTexts.Remove(conversationId);
         _allConversations.RemoveAll(item => item.Id == conversationId);
 
@@ -1002,6 +991,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             SelectedWorkspaceRoot?.Id,
             SelectedConversationMode,
             SelectedToolPermissionMode,
+            ResolveSelectedAgent().Id,
             now,
             now);
 
@@ -1063,7 +1053,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             : null;
         SelectedConversationMode = conversation.Mode;
         SelectedToolPermissionMode = conversation.ToolPermissionMode;
-        SetPlanningModeForSelectedConversation(ResolvePlanningMode(conversation.Id), publishShell: false);
+        SyncSelectedAgentFromConversation(conversation, publishShell: false);
+        RefreshPlanningModeForSelection(publishShell: false);
         ProjectSelectedRuntimeState(publishShell: false);
         ApplyConversationFilter(conversation.Id);
 
@@ -1093,7 +1084,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var selectedWorkspaceRoot = SelectedWorkspaceRoot;
         var selectedConversationMode = SelectedConversationMode;
         var selectedToolPermissionMode = SelectedToolPermissionMode;
-        var usePlanningMode = selectedConversationMode == ConversationMode.Programming && IsPlanningModeEnabled;
+        var usePlanningMode = false;
         var baseMessages = _messages.ToArray();
         var baseToolRuns = _toolRuns.ToArray();
         var baseToolRunAnchors = new Dictionary<Guid, ToolRunAnchor>(_toolRunAnchors);
@@ -1130,6 +1121,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
             await PersistConversationAsync(conversation, preferSelection: IsSelectedConversation(conversation.Id));
+
+            var runtimeAgent = ResolveRuntimeAgent(selectedConversationMode, conversation.AgentId);
+            usePlanningMode = selectedConversationMode == ConversationMode.Programming && runtimeAgent.Mode == AgentExecutionMode.Plan;
 
             runtimeState = StartConversationRuntimeState(
                 conversation,
@@ -1199,10 +1193,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                                    apiKey,
                                    selectedWorkspaceRoot,
                                    selectedConversationMode,
+                                   runtimeAgent,
                                    selectedToolPermissionMode,
                                    _toolApprovalHandler,
                                    requestMessages,
-                                   usePlanningMode,
                                    useReasoning),
                                cancellationToken))
             {
@@ -1984,6 +1978,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             WorkspaceRootId = SelectedWorkspaceRoot?.Id,
             Mode = SelectedConversationMode,
             ToolPermissionMode = SelectedToolPermissionMode,
+            AgentId = conversation.Mode == ConversationMode.Programming ? ResolveSelectedAgent().Id : conversation.AgentId,
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
         await PersistConversationAsync(updated);
@@ -2046,6 +2041,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (conversation.Mode == ConversationMode.Channel)
         {
             return true;
+        }
+
+        if (!string.Equals(conversation.AgentId, ResolveSelectedAgent().Id, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
         }
 
         return SelectedWorkspaceRoot is null || conversation.WorkspaceRootId == SelectedWorkspaceRoot.Id;
@@ -2148,6 +2148,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _channelManager.BuildTranscriptChannels(Profiles.ToArray()),
             BuildTranscriptMcpServers(),
             BuildTranscriptSkills(),
+            BuildTranscriptAgents(),
+            ResolveSelectedAgent().Id,
             AgentActivityNodes.ToArray(),
             IsPlanningModeEnabled,
             planPanel,
@@ -2269,7 +2271,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             conversation.Title,
             conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
             SelectedConversation?.Id == conversation.Id,
-            ResolveConversationBadge(conversation));
+            ResolveConversationBadge(conversation),
+            ResolveConversationAgentName(conversation),
+            conversation.Mode == ConversationMode.Programming ? conversation.AgentId : null,
+            ResolveConversationAgentName(conversation));
 
     private void PublishAgentActivities()
     {

@@ -37,6 +37,20 @@ export const emptyMcpServer = () => ({
 	envText: '',
 });
 
+export const emptyAgent = () => ({
+	originalAgentId: null,
+	agentId: '',
+	name: '',
+	description: '',
+	mode: 'direct',
+	toolPolicy: 'system',
+	skillsText: '',
+	mcpServersText: '',
+	instructions: '',
+	isBuiltIn: false,
+	warnings: [],
+});
+
 export function normalizeSamplingValue(value, fallback, max) {
 	const numeric = Number(value);
 	if (Number.isNaN(numeric) || !Number.isFinite(numeric)) {
@@ -114,11 +128,42 @@ export function createMcpServerDraft(server) {
 	};
 }
 
+export function formatLineList(values) {
+	return (Array.isArray(values) ? values : [])
+		.filter((item) => typeof item === 'string' && item.trim())
+		.join('\n');
+}
+
+export function createAgentDraft(agent) {
+	return {
+		originalAgentId: agent?.id || null,
+		agentId: agent?.id || '',
+		name: agent?.name || '',
+		description: agent?.description || '',
+		mode: agent?.mode || 'direct',
+		toolPolicy: agent?.toolPolicy || 'system',
+		skillsText: formatLineList(agent?.skills || []),
+		mcpServersText: formatLineList(agent?.mcpServers || []),
+		instructions: agent?.instructions || '',
+		isBuiltIn: Boolean(agent?.isBuiltIn),
+		warnings: Array.isArray(agent?.warnings) ? [...agent.warnings] : [],
+	};
+}
+
 export function parseMcpArgsText(value) {
 	return String(value || '')
 		.split(/\r?\n/)
 		.map((item) => item.trim())
 		.filter(Boolean);
+}
+
+export function parseLineListText(value) {
+	return [...new Set(
+		String(value || '')
+			.split(/\r?\n/)
+			.map((item) => item.trim())
+			.filter(Boolean)
+	)];
 }
 
 export function parseMcpEnvText(value) {
@@ -131,7 +176,7 @@ export function parseMcpEnvText(value) {
 	for (const line of lines) {
 		const separatorIndex = line.indexOf('=');
 		if (separatorIndex <= 0) {
-			throw new Error('环境变量请使用 KEY=VALUE 格式。');
+			throw new Error('环境变量格式不正确，请使用 KEY=VALUE。');
 		}
 
 		const key = line.slice(0, separatorIndex).trim();
@@ -147,16 +192,16 @@ export function parseMcpEnvText(value) {
 
 export function validateEditorDraft(editor) {
 	if (!editor?.open || !editor?.draft) {
-		return '没有可保存的表单内容。';
+		return '当前没有可保存的编辑内容。';
 	}
 
 	if (editor.kind === 'profile') {
 		if (!editor.draft.name.trim() || !editor.draft.endpoint.trim() || !editor.draft.model.trim()) {
-			return '请完整填写配置名称、Endpoint 和模型。';
+			return '请填写名称、Endpoint 和模型。';
 		}
 
 		if (editor.mode === 'create' && !editor.draft.apiKey.trim()) {
-			return '新增配置时必须提供 API Key。';
+			return '新建模型配置时必须填写 API Key。';
 		}
 
 		return null;
@@ -164,21 +209,21 @@ export function validateEditorDraft(editor) {
 
 	if (editor.kind === 'channel') {
 		if (!editor.draft.displayName.trim()) {
-			return '请填写频道名称。';
+			return '请填写频道显示名称。';
 		}
 
 		if (!editor.draft.profileId) {
-			return '请先为频道绑定模型。';
+			return '请为频道选择模型配置。';
 		}
 
 		for (const field of editor.draft.fields || []) {
 			const hasText = Boolean((field.value || '').trim());
 			if (field.required && field.kind === 'secret' && !field.hasValue && !hasText) {
-				return `请填写${field.label}。`;
+				return `请填写 ${field.label}。`;
 			}
 
 			if (field.required && field.kind !== 'secret' && !hasText) {
-				return `请填写${field.label}。`;
+				return `请填写 ${field.label}。`;
 			}
 		}
 
@@ -191,11 +236,11 @@ export function validateEditorDraft(editor) {
 		}
 
 		if (!/^[A-Za-z0-9_.-]+$/.test(editor.draft.serverId.trim())) {
-			return 'MCP 服务 ID 只能包含字母、数字、点、下划线和连字符。';
+			return 'MCP 服务 ID 只能包含字母、数字、点、下划线和短横线。';
 		}
 
 		if (!editor.draft.command.trim()) {
-			return '请填写 MCP 服务启动命令。';
+			return '请填写 MCP 服务命令。';
 		}
 
 		try {
@@ -207,8 +252,28 @@ export function validateEditorDraft(editor) {
 		return null;
 	}
 
+	if (editor.kind === 'agent') {
+		if (!editor.draft.agentId.trim()) {
+			return '请填写智能体 ID。';
+		}
+
+		if (!/^[A-Za-z0-9_-]+$/.test(editor.draft.agentId.trim())) {
+			return '智能体 ID 只能包含字母、数字、下划线和短横线。';
+		}
+
+		if (!editor.draft.name.trim()) {
+			return '请填写智能体名称。';
+		}
+
+		if (!editor.draft.instructions.trim()) {
+			return '请填写智能体正文提示词。';
+		}
+
+		return null;
+	}
+
 	if (!editor.draft.rootPath.trim()) {
-		return '请先选择工作区位置。';
+		return '请选择工作区路径。';
 	}
 
 	return null;

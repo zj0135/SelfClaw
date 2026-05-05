@@ -9,16 +9,19 @@ import StepsPanel from './components/StepsPanel.vue';
 import TranscriptPanel from './components/TranscriptPanel.vue';
 import { renderConversationList, renderMessages, renderStepsHeader, renderStepsPanelContent } from './renderers';
 import {
+	createAgentDraft,
 	createChannelDraft,
 	createMcpServerDraft,
 	createProfileDraft,
 	createWorkspaceDraft,
+	emptyAgent,
 	emptyChannel,
 	emptyMcpServer,
 	emptyProfile,
 	emptyWorkspace,
 	formatSamplingValue,
 	normalizeSamplingValue,
+	parseLineListText,
 	parseMcpArgsText,
 	parseMcpEnvText,
 	validateEditorDraft,
@@ -47,6 +50,8 @@ const state = reactive({
 	channels: [],
 	mcpServers: [],
 	skills: [],
+	agents: [],
+	selectedAgentId: null,
 	agentActivities: [],
 	contextUsage: null,
 	isBusy: false,
@@ -390,6 +395,7 @@ function getSettingsPanelElement() {
 
 const selectedProfile = computed(() => state.profiles.find((item) => item.id === state.selectedProfileId) || null);
 const selectedWorkspace = computed(() => state.workspaceRoots.find((item) => item.id === state.selectedWorkspaceRootId) || null);
+const selectedConversation = computed(() => state.conversations.find((item) => item.id === state.selectedConversationId) || null);
 const enabledMcpServerCount = computed(() => state.mcpServers.filter((item) => item.enabled !== false).length);
 
 function normalizeProfileModelList(models, selectedModel = '') {
@@ -444,7 +450,7 @@ function applyCachedTopbarProfileModels() {
 const hasSelectedWorkspace = computed(() => Boolean(state.selectedWorkspaceRootId && selectedWorkspace.value));
 const isProgrammingMode = computed(() => state.selectedConversationModeId === 'programming');
 const isChannelMode = computed(() => state.selectedConversationModeId === 'channel');
-const showPlanningToggle = computed(() => isProgrammingMode.value);
+const showPlanningToggle = computed(() => false);
 const showVisualizationToggle = computed(() => !isChannelMode.value);
 const activeVisualizationEnabled = computed(() => visualizationEnabled.value && !isChannelMode.value);
 const planPanel = computed(() => (isProgrammingMode.value ? state.planPanel : null));
@@ -522,6 +528,11 @@ const settingsSections = computed(() => [
 		id: 'workspace',
 		title: '工作区',
 		badge: selectedWorkspace.value ? '已绑定' : '未绑定',
+	},
+	{
+		id: 'agent',
+		title: '智能体',
+		badge: state.selectedAgentId || 'build',
 	},
 	{
 		id: 'mcp',
@@ -672,6 +683,8 @@ function normalizeState() {
 	state.channels = state.channels || [];
 	state.mcpServers = state.mcpServers || [];
 	state.skills = state.skills || [];
+	state.agents = state.agents || [];
+	state.selectedAgentId = state.selectedAgentId || (state.agents[0]?.id ?? 'build');
 }
 
 function submitComposer() {
@@ -715,12 +728,16 @@ function editorScope() {
 		return 'channels';
 	}
 
-	return editorState.kind === 'mcp' ? 'mcp' : null;
+	if (editorState.kind === 'mcp') {
+		return 'mcp';
+	}
+
+	return editorState.kind === 'agent' ? 'agent' : null;
 }
 
 function openEditor(kind, mode, payload = null) {
 	const scope = kind === 'channel' ? 'channels' : kind;
-	if (kind === 'profile' || kind === 'workspace') {
+	if (kind === 'profile' || kind === 'workspace' || kind === 'agent') {
 		activeSettingsSection.value = kind;
 	}
 	if (kind === 'channel') {
@@ -746,6 +763,10 @@ function openEditor(kind, mode, payload = null) {
 					? payload
 						? createChannelDraft(payload)
 						: emptyChannel()
+					: kind === 'agent'
+						? payload
+							? createAgentDraft(payload)
+							: emptyAgent()
 					: payload
 						? createMcpServerDraft(payload)
 						: emptyMcpServer();
@@ -1018,7 +1039,7 @@ function scheduleStatePayload(payload) {
 
 function handleSettingsFeedback(payload) {
 	const nextFeedback = payload.message ? { level: payload.level || 'success', message: payload.message, scope: payload.scope || null } : null;
-	if (payload.scope === 'profile' || payload.scope === 'workspace' || payload.scope === 'mcp' || payload.scope === 'channels' || payload.scope === 'theme') {
+	if (payload.scope === 'profile' || payload.scope === 'workspace' || payload.scope === 'agent' || payload.scope === 'mcp' || payload.scope === 'channels' || payload.scope === 'theme') {
 		activeSettingsSection.value = payload.scope;
 	}
 
@@ -1554,6 +1575,47 @@ function setSkillEnabled({ skill, enabled }) {
 	post({ type: 'set-skill-enabled', skillId: skill.id, enabled: Boolean(enabled) });
 }
 
+function selectAgent(agentId) {
+	if (!agentId) {
+		return;
+	}
+
+	clearFeedback('agent');
+	post({ type: 'select-agent', agentId });
+}
+
+function createAgent() {
+	openSettings('agent');
+	openEditor('agent', 'create');
+}
+
+function editAgent(agent) {
+	openSettings('agent');
+	openEditor('agent', 'edit', agent);
+}
+
+function deleteAgent(agentId) {
+	if (!agentId) {
+		return;
+	}
+
+	clearFeedback('agent');
+	post({ type: 'delete-agent', agentId });
+}
+
+function assignConversationAgent(agentId) {
+	if (!agentId || !state.selectedConversationId) {
+		return;
+	}
+
+	clearFeedback('agent');
+	post({
+		type: 'assign-conversation-agent',
+		conversationId: state.selectedConversationId,
+		agentId,
+	});
+}
+
 function saveEditor() {
 	const error = validateEditorDraft(editorState);
 	if (error) {
@@ -1606,6 +1668,22 @@ function saveEditor() {
 			command: editorState.draft.command.trim(),
 			args: parseMcpArgsText(editorState.draft.argsText),
 			env,
+		});
+		return;
+	}
+
+	if (editorState.kind === 'agent') {
+		post({
+			type: 'save-agent',
+			originalAgentId: editorState.mode === 'edit' ? editorState.draft.originalAgentId || editorState.draft.agentId : null,
+			agentId: editorState.draft.agentId.trim(),
+			name: editorState.draft.name.trim(),
+			description: editorState.draft.description.trim(),
+			mode: editorState.draft.mode === 'plan' ? 'plan' : 'direct',
+			toolPolicy: editorState.draft.toolPolicy || 'system',
+			skills: parseLineListText(editorState.draft.skillsText),
+			mcpServers: parseLineListText(editorState.draft.mcpServersText),
+			instructions: editorState.draft.instructions,
 		});
 		return;
 	}
@@ -1739,11 +1817,13 @@ onUnmounted(() => {
 		@wheel.capture.passive="onRootWheel" @pointerdown.capture="onRootPointerDown">
 		<div class="app-shell" :class="{ 'left-pane-collapsed': leftPaneCollapsed }">
 			<ConversationSidebar ref="sidebarRef" :is-channel-mode="isChannelMode" :conversation-list-html="conversationListHtml"
-				:collapsed="leftPaneCollapsed" :mcp-servers="state.mcpServers" :skills="state.skills" @new-conversation="newConversation"
-				@open-settings="openSettings" @open-mcp-settings="openSettings('mcp')" @create-mcp-server="createMcpServer"
-				@edit-mcp-server="editMcpServer" @delete-mcp-server="deleteMcpServer"
-				@set-mcp-server-enabled="setMcpServerEnabled"
-				@set-skill-enabled="setSkillEnabled"
+				:collapsed="leftPaneCollapsed" :mcp-servers="state.mcpServers" :skills="state.skills"
+				:agents="state.agents" :selected-agent-id="state.selectedAgentId"
+				@new-conversation="newConversation"
+				@open-settings="openSettings" @open-mcp-settings="openSettings('mcp')"
+				@edit-mcp-server="editMcpServer"
+				@set-mcp-server-enabled="setMcpServerEnabled" @set-skill-enabled="setSkillEnabled"
+				@select-agent="selectAgent" @edit-agent="editAgent"
 				@toggle-collapse="toggleLeftPaneCollapse" />
 
 			<main class="main-column">
@@ -1816,7 +1896,11 @@ onUnmounted(() => {
 			:selected-profile-id="state.selectedProfileId || ''" :profile-summary-cards="profileSummaryCards"
 			:selected-workspace="selectedWorkspace" :workspace-roots="state.workspaceRoots"
 			:selected-workspace-root-id="state.selectedWorkspaceRootId || ''"
-			:workspace-summary-cards="workspaceSummaryCards" :mcp-servers="state.mcpServers" :channels="state.channels"
+			:workspace-summary-cards="workspaceSummaryCards"
+			:agents="state.agents" :selected-agent-id="state.selectedAgentId || ''"
+			:current-conversation-agent-id="selectedConversation?.agentId || ''"
+			:can-bind-conversation-agent="isProgrammingMode && Boolean(state.selectedConversationId)"
+			:mcp-servers="state.mcpServers" :channels="state.channels"
 			:selected-theme-label="selectedThemeLabel" :theme-options="state.themeOptions"
 			:selected-theme-id="state.selectedThemeId || 'system'" @close="closeSettings"
 			@select-section="selectSettingsSection" @panel-scroll="onSettingsPanelScroll"
@@ -1824,6 +1908,8 @@ onUnmounted(() => {
 			@delete-profile="deleteProfile" @create-profile="openEditor('profile', 'create')"
 			@select-workspace="onWorkspaceChange" @edit-workspace="openEditor('workspace', 'edit')"
 			@delete-workspace="deleteWorkspace" @create-workspace="openEditor('workspace', 'create')"
+			@select-agent="selectAgent" @edit-agent="editAgent" @delete-agent="deleteAgent"
+			@create-agent="createAgent" @assign-conversation-agent="assignConversationAgent"
 			@create-mcp-server="createMcpServer" @edit-mcp-server="editMcpServer" @delete-mcp-server="deleteMcpServer"
 			@toggle-channel="toggleChannelEnabled" @edit-channel="openEditor('channel', 'edit', $event)"
 			@select-theme="onThemeChange" />

@@ -44,6 +44,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
             workspace.Id,
             ConversationMode.Programming,
             ToolPermissionMode.RequireApproval,
+            "build",
             now,
             now);
         await conversationRepository.UpsertConversationAsync(conversation);
@@ -137,6 +138,7 @@ CREATE TABLE conversations (
 
         columns.Should().Contain("tool_permission_mode");
         columns.Should().Contain("mode");
+        columns.Should().Contain("agent_id");
         columns.Should().Contain("channel_kind");
         columns.Should().Contain("channel_conversation_id");
         columns.Should().Contain("channel_display_name");
@@ -260,6 +262,7 @@ CREATE TABLE conversations (
             null,
             ConversationMode.Programming,
             ToolPermissionMode.RequireApproval,
+            "build",
             now,
             now);
         await conversationRepository.UpsertConversationAsync(conversation);

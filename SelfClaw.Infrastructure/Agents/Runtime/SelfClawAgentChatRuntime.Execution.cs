@@ -13,12 +13,14 @@ public sealed partial class SelfClawAgentChatRuntime
         CancellationToken cancellationToken)
     {
         var messageId = Guid.NewGuid();
+        var agentName = ResolveAgentName(request);
+        var agentRole = ResolveAgentRole(request);
         var startedMessage = CreateAssistantMessage(
             request.ConversationId,
             messageId,
             agentId: null,
-            ProgrammingAgentName,
-            ProgrammingAgentRole);
+            agentName,
+            agentRole);
 
         await writer.WriteAsync(new AssistantMessageStartedEvent(startedMessage), cancellationToken);
 
@@ -27,12 +29,12 @@ public sealed partial class SelfClawAgentChatRuntime
             new AgentExecutionRequest(
                 request.Profile,
                 request.ApiKey,
-                ProgrammingAgentName,
-                ProgrammingAgentDescription,
+                agentName,
+                ResolveAgentDescription(request),
                 BuildProgrammingInstructions(request),
                 BuildPromptMessages(request.Messages, includeAssistantSpeakerPrefix: false),
                 CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
-                CreateContextProviders(),
+                CreateContextProviders(request.Agent),
                 request.EnableReasoning),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
             cancellationToken);
@@ -111,12 +113,12 @@ public sealed partial class SelfClawAgentChatRuntime
             new AgentExecutionRequest(
                 request.Profile,
                 request.ApiKey,
-                ProgrammingAgentName,
-                ProgrammingAgentDescription,
+                ResolveAgentName(request),
+                ResolveAgentDescription(request),
                 BuildExecutionPlanInstructions(request),
                 BuildExecutionPlanMessages(request.Messages),
                 CreateTools(request, observer, includeWriteTools: false, includeShellTool: false),
-                CreateContextProviders(),
+                CreateContextProviders(request.Agent),
                 request.EnableReasoning),
             onTextDelta: null,
             cancellationToken);
@@ -190,12 +192,14 @@ public sealed partial class SelfClawAgentChatRuntime
         CancellationToken cancellationToken)
     {
         var messageId = Guid.NewGuid();
+        var agentName = ResolveAgentName(request);
+        var agentRole = ResolveAgentRole(request);
         var startedMessage = CreateAssistantMessage(
             request.ConversationId,
             messageId,
             agentId: null,
-            ProgrammingAgentName,
-            ProgrammingAgentRole);
+            agentName,
+            agentRole);
 
         await writer.WriteAsync(new AssistantMessageStartedEvent(startedMessage), cancellationToken);
 
@@ -206,12 +210,12 @@ public sealed partial class SelfClawAgentChatRuntime
                 new AgentExecutionRequest(
                     request.Profile,
                     request.ApiKey,
-                    ProgrammingAgentName,
-                    ProgrammingAgentDescription,
+                    agentName,
+                    ResolveAgentDescription(request),
                     BuildExecutionStepInstructions(request, executionPlan, currentStep, isFinalStep),
                     BuildExecutionStepMessages(request.Messages, executionPlan, currentStep, completedSteps, isFinalStep),
                     CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
-                    CreateContextProviders(),
+                    CreateContextProviders(request.Agent),
                     request.EnableReasoning),
                 (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
                 cancellationToken);

@@ -8,8 +8,8 @@ public sealed record ChatTurnRequest(
     string ApiKey,
     WorkspaceRoot? WorkspaceRoot,
     ConversationMode Mode,
+    AgentRuntimeDefinition Agent,
     ToolPermissionMode ToolPermissionMode,
     IToolApprovalHandler? ToolApprovalHandler,
     IReadOnlyList<MessageRecord> Messages,
-    bool EnablePlanMode = false,
     bool EnableReasoning = false);

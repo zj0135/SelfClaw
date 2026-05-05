@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 14;
+    private const int CurrentSchemaVersion = 15;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     workspace_root_id TEXT NULL,
     mode INTEGER NOT NULL DEFAULT 0,
     tool_permission_mode INTEGER NOT NULL DEFAULT 0,
+    agent_id TEXT NOT NULL DEFAULT 'build',
     channel_kind TEXT NULL,
     channel_conversation_id TEXT NULL,
     channel_display_name TEXT NULL,
@@ -154,6 +155,13 @@ CREATE TABLE IF NOT EXISTS conversations (
                 "conversations",
                 "tool_permission_mode",
                 "ALTER TABLE conversations ADD COLUMN tool_permission_mode INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "conversations",
+                "agent_id",
+                "ALTER TABLE conversations ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'build';",
                 cancellationToken);
 
             await EnsureColumnExistsAsync(

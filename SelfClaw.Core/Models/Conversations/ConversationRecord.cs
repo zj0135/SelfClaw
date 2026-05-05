@@ -7,6 +7,7 @@ public sealed record ConversationRecord(
     Guid? WorkspaceRootId,
     ConversationMode Mode,
     ToolPermissionMode ToolPermissionMode,
+    string AgentId,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
     string? ChannelKind = null,
@@ -19,6 +20,7 @@ public sealed record ConversationRecord(
         Guid profileId,
         Guid? workspaceRootId,
         ToolPermissionMode toolPermissionMode,
+        string agentId,
         DateTimeOffset createdAtUtc,
         DateTimeOffset updatedAtUtc)
         : this(
@@ -28,6 +30,7 @@ public sealed record ConversationRecord(
             workspaceRootId,
             ConversationMode.Programming,
             toolPermissionMode,
+            agentId,
             createdAtUtc,
             updatedAtUtc)
     {

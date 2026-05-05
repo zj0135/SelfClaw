@@ -235,6 +235,7 @@ public sealed class ConversationContextCompactionServiceTests : IDisposable
             null,
             ConversationMode.Programming,
             ToolPermissionMode.RequireApproval,
+            "build",
             now,
             now);
         await conversationRepository.UpsertConversationAsync(conversation);

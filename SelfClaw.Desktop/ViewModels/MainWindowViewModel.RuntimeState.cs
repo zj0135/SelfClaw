@@ -62,22 +62,6 @@ public sealed partial class MainWindowViewModel
     private bool IsConversationRunning(Guid conversationId)
         => _conversationRuntimeStates.TryGetValue(conversationId, out var state) && state.IsRunning;
 
-    private bool ResolvePlanningMode(Guid conversationId)
-        => _conversationPlanningModes.TryGetValue(conversationId, out var enabled) && enabled;
-
-    private void SetPlanningModeForSelectedConversation(bool enabled, bool publishShell)
-    {
-        if (SelectedConversation is { } conversation)
-        {
-            _conversationPlanningModes[conversation.Id] = enabled;
-        }
-
-        if (SetProperty(ref _isPlanningModeEnabled, enabled, nameof(IsPlanningModeEnabled)) && publishShell)
-        {
-            PublishShell(false);
-        }
-    }
-
     private void ProjectSelectedRuntimeState(bool publishShell)
     {
         var runtimeState = GetSelectedRuntimeState();
@@ -89,8 +73,7 @@ public sealed partial class MainWindowViewModel
 
         if (SelectedConversation is { } conversation)
         {
-            var nextPlanningMode = ResolvePlanningMode(conversation.Id);
-            SetProperty(ref _isPlanningModeEnabled, nextPlanningMode, nameof(IsPlanningModeEnabled));
+            RefreshPlanningModeForSelection(publishShell: false);
 
             if (runtimeState is not null)
             {

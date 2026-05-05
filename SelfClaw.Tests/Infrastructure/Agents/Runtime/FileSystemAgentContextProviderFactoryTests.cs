@@ -3,6 +3,7 @@
 using FluentAssertions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging.Abstractions;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.Options;
 
@@ -20,9 +21,18 @@ public sealed class FileSystemAgentContextProviderFactoryTests : IDisposable
     public void DiscoverSkillRoots_returns_empty_when_assets_skills_directory_is_missing()
     {
         var factory = CreateFactory();
+        var agent = new AgentRuntimeDefinition(
+            "build",
+            "build",
+            "Build agent",
+            AgentExecutionMode.Direct,
+            AgentRuntimeDefinition.SystemToolPolicy,
+            [],
+            [],
+            string.Empty);
 
-        factory.DiscoverSkillRoots().Should().BeEmpty();
-        factory.CreateProviders().Should().BeEmpty();
+        factory.DiscoverSkillRoots([]).Should().BeEmpty();
+        factory.CreateProviders(agent).Should().BeEmpty();
     }
 
     public void Dispose()

@@ -2,6 +2,7 @@
 
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Infrastructure.Agents.Runtime;
@@ -17,9 +18,9 @@ internal sealed class FileSystemAgentContextProviderFactory : IAgentContextProvi
         _storagePaths = storagePaths;
     }
 
-    public IReadOnlyList<AIContextProvider> CreateProviders()
+    public IReadOnlyList<AIContextProvider> CreateProviders(AgentRuntimeDefinition agent)
     {
-        var skillRoots = DiscoverSkillRoots();
+        var skillRoots = DiscoverSkillRoots(agent.Skills);
         if (skillRoots.Count == 0)
         {
             return [];
@@ -47,23 +48,49 @@ internal sealed class FileSystemAgentContextProviderFactory : IAgentContextProvi
         ];
     }
 
-    internal IReadOnlyList<string> DiscoverSkillRoots()
+    internal IReadOnlyList<string> DiscoverSkillRoots(IReadOnlyList<string>? selectedSkillIds)
     {
         var roots = new List<string>();
+        if (selectedSkillIds is not { Count: > 0 })
+        {
+            return roots;
+        }
 
         var storagePath = Path.Combine(_storagePaths.AppDataDirectory, "skills");
         if (Directory.Exists(storagePath))
         {
-            var hasSkillManifest = Directory
-                .EnumerateFiles(storagePath, "SKILL.md", SearchOption.AllDirectories)
-                .Any();
+            var selected = selectedSkillIds
+                .Select(NormalizeSkillId)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            if (hasSkillManifest)
-                roots.Add(Path.GetFullPath(storagePath));
-            
+            foreach (var skillDirectory in Directory
+                         .EnumerateFiles(storagePath, "SKILL.md", SearchOption.AllDirectories)
+                         .Select(Path.GetDirectoryName)
+                         .Where(path => !string.IsNullOrWhiteSpace(path))
+                         .Cast<string>())
+            {
+                var relativePath = Path.GetRelativePath(storagePath, skillDirectory);
+                var skillId = NormalizeSkillId(relativePath == "." ? new DirectoryInfo(skillDirectory).Name : relativePath);
+                if (selected.Contains(skillId))
+                {
+                    roots.Add(Path.GetFullPath(skillDirectory));
+                }
+            }
         }
 
         return [.. roots.Distinct(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    private static string NormalizeSkillId(string? skillId)
+    {
+        var normalized = (skillId ?? string.Empty).Replace('\\', '/').Trim('/');
+        var segments = normalized
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(item => item is not "." and not "..")
+            .ToArray();
+
+        return string.Join("/", segments);
     }
 
     internal static IReadOnlyList<string> DiscoverDefaultAssetsRootPaths(string baseDirectory)
