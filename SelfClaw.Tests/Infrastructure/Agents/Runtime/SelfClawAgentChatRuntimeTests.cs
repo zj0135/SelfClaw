@@ -191,6 +191,7 @@ public sealed class SelfClawAgentChatRuntimeTests
                 AgentRuntimeDefinition.SystemToolPolicy,
                 [],
                 [],
+                [],
                 string.Empty),
             ToolPermissionMode.RequireApproval,
             null,

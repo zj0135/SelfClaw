@@ -411,6 +411,7 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                                        AgentRuntimeDefinition.SystemToolPolicy,
                                        [],
                                        [],
+                                       [],
                                        string.Empty),
                                    ToolPermissionMode.FullAccess,
                                    null,

@@ -26,6 +26,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
         services.AddSingleton<IAgentContextProviderFactory, FileSystemAgentContextProviderFactory>();
+        services.AddSingleton<IAgentMcpToolProvider, McpServerToolProvider>();
         services.AddSingleton<IAgentChatRuntime, SelfClawAgentChatRuntime>();
         services.AddSingleton<IConversationContextCompactionService>(provider =>
         {

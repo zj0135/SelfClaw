@@ -1,12 +1,14 @@
 using System.ClientModel;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using OpenAIChatClient = OpenAI.Chat.ChatClient;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Tools.Transcript;
 
 namespace SelfClaw.Infrastructure.Agents.Runtime;
@@ -62,10 +64,12 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
                 Name = request.Name,
                 Description = request.Description,
                 ChatOptions = chatOptions,
-                AIContextProviders = request.ContextProviders ?? []
+                AIContextProviders = request.ContextProviders ?? [],
+                UseProvidedChatClientAsIs = true
             };
+            var chatClient = CreateConfiguredChatClient(request);
             var agent = new ChatClientAgent(
-                CreateChatClient(request.Profile, request.ApiKey),
+                chatClient,
                 agentOptions,
                 _loggerFactory,
                 _serviceProvider);
@@ -132,6 +136,105 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
 
         var client = new OpenAIChatClient(profile.Model, new ApiKeyCredential(apiKey), options);
         return client.AsIChatClient();
+    }
+
+    private IChatClient CreateConfiguredChatClient(AgentExecutionRequest request)
+    {
+        var leafClient = CreateChatClient(request.Profile, request.ApiKey);
+        var functionInvokingClient = new FunctionInvokingChatClient(leafClient, _loggerFactory, _serviceProvider)
+        {
+            FunctionInvoker = (context, cancellationToken) => new ValueTask<object?>(
+                InvokeFunctionAsync(request, context, cancellationToken))
+        };
+
+        return functionInvokingClient;
+    }
+
+    private async Task<object?> InvokeFunctionAsync(
+        AgentExecutionRequest request,
+        FunctionInvocationContext context,
+        CancellationToken cancellationToken)
+    {
+        if (request.ToolObserver is null ||
+            request.ToolMetadata is null ||
+            !request.ToolMetadata.TryGetValue(context.Function.Name, out var metadata))
+        {
+            return await context.Function.InvokeAsync(context.Arguments, cancellationToken);
+        }
+
+        var argumentsJson = SerializeFunctionArguments(context.Arguments, context.Function.JsonSerializerOptions);
+        var record = request.ToolObserver.Start(context.Function.Name, argumentsJson);
+
+        try
+        {
+            if (metadata.RequiresApproval)
+            {
+                if (request.ToolApprovalHandler is null)
+                {
+                    throw new InvalidOperationException("This tool call requires human approval, but no approval handler is available.");
+                }
+
+                record = request.ToolObserver.AwaitApproval(record, "Waiting for your confirmation in the activity panel.");
+                var approved = await request.ToolApprovalHandler.RequestApprovalAsync(
+                    new ToolApprovalRequest(
+                        record.Id,
+                        context.Function.Name,
+                        metadata.ApprovalTitle,
+                        metadata.BuildApprovalDescription(argumentsJson),
+                        argumentsJson,
+                        record.ConversationId),
+                    cancellationToken);
+                if (!approved)
+                {
+                    var deniedResult = metadata.BuildDeniedResult(argumentsJson);
+                    request.ToolObserver.Cancel(record, metadata.SummarizeResult(deniedResult));
+                    return deniedResult;
+                }
+
+                record = request.ToolObserver.Resume(
+                    record,
+                    metadata.BuildApprovalGrantedSummary(argumentsJson));
+            }
+
+            var result = await context.Function.InvokeAsync(context.Arguments, cancellationToken);
+            var summary = metadata.SummarizeResult(result);
+            var description = metadata.DescribeResult(result, context.Function.JsonSerializerOptions);
+            if (string.IsNullOrWhiteSpace(description))
+            {
+                request.ToolObserver.Complete(record, summary);
+            }
+            else
+            {
+                request.ToolObserver.Complete(record, summary, description);
+            }
+
+            return result;
+        }
+        catch (Exception exception)
+        {
+            request.ToolObserver.Fail(record, exception.Message);
+            throw;
+        }
+    }
+
+    private static string SerializeFunctionArguments(
+        AIFunctionArguments arguments,
+        JsonSerializerOptions serializerOptions)
+    {
+        if (arguments.Count == 0)
+        {
+            return "{}";
+        }
+
+        try
+        {
+            var values = arguments.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+            return JsonSerializer.Serialize(values, serializerOptions);
+        }
+        catch
+        {
+            return "{}";
+        }
     }
 
     private static IReadOnlyList<ChatMessage> PrependInstructions(string instructions, IReadOnlyList<ChatMessage> messages)

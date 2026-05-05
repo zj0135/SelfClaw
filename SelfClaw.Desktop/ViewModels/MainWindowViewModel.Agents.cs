@@ -211,10 +211,12 @@ public sealed partial class MainWindowViewModel
                 AgentRuntimeDefinition.SystemToolPolicy,
                 [],
                 [],
+                [],
                 string.Empty);
         }
 
         var agent = ResolveAgent(agentId);
+        var resolvedMcpServers = ResolveGloballyEnabledMcpServers(agent.EnabledMcpServers);
         return new AgentRuntimeDefinition(
             agent.Id,
             agent.Name,
@@ -222,7 +224,8 @@ public sealed partial class MainWindowViewModel
             agent.Mode,
             agent.ToolPolicy,
             ResolveGloballyEnabledSkills(agent.EnabledSkills),
-            ResolveGloballyEnabledMcpServers(agent.EnabledMcpServers),
+            resolvedMcpServers.Select(item => item.Id).ToArray(),
+            resolvedMcpServers,
             agent.Instructions);
     }
 
@@ -258,20 +261,31 @@ public sealed partial class MainWindowViewModel
             .ToArray();
     }
 
-    private IReadOnlyList<string> ResolveGloballyEnabledMcpServers(IReadOnlyList<string> serverIds)
+    private IReadOnlyList<AgentMcpServerDefinition> ResolveGloballyEnabledMcpServers(IReadOnlyList<string> serverIds)
     {
         if (serverIds.Count == 0)
         {
             return [];
         }
 
-        var enabledServerIds = (_desktopSettings.McpServers ?? new Dictionary<string, DesktopMcpServerConfiguration>())
-            .Where(item => (item.Value ?? DesktopMcpServerConfiguration.Default).Enabled)
-            .Select(item => item.Key)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var configuredServers = (_desktopSettings.McpServers ?? new Dictionary<string, DesktopMcpServerConfiguration>())
+            .Where(item =>
+                (item.Value ?? DesktopMcpServerConfiguration.Default).Enabled &&
+                !string.IsNullOrWhiteSpace(item.Value?.Command))
+            .ToDictionary(item => item.Key, item => item.Value ?? DesktopMcpServerConfiguration.Default, StringComparer.OrdinalIgnoreCase);
 
         return serverIds
-            .Where(item => enabledServerIds.Contains(item))
+            .Where(item => configuredServers.ContainsKey(item))
+            .Select(item =>
+            {
+                var configuration = configuredServers[item];
+                return new AgentMcpServerDefinition(
+                    item,
+                    configuration.DisplayName,
+                    configuration.Command,
+                    configuration.Args.ToArray(),
+                    configuration.Env.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase));
+            })
             .ToArray();
     }
 }

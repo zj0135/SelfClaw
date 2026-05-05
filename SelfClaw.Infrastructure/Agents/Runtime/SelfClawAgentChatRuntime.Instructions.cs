@@ -10,15 +10,18 @@ public sealed partial class SelfClawAgentChatRuntime
     {
         if (request.Mode == ConversationMode.Channel)
         {
-            return request.WorkspaceRoot is null
+            var channelInstructions = request.WorkspaceRoot is null
                 ? ChannelBaseInstructions + " No workspace is currently selected, so do not mention workspace tools."
                 : ChannelBaseInstructions +
                   $" The trusted workspace root is '{request.WorkspaceRoot.RootPath}'. Use workspace tools only when they materially help answer the external user.";
+            AppendCapabilityInstructions(request, ref channelInstructions);
+            return channelInstructions;
         }
 
         if (request.WorkspaceRoot is null)
         {
             var fallbackInstructions = ProgrammingBaseInstructions + " No workspace is currently selected, so do not mention workspace tools.";
+            AppendCapabilityInstructions(request, ref fallbackInstructions);
             if (!string.IsNullOrWhiteSpace(request.Agent.Instructions))
             {
                 fallbackInstructions += $"\n\nAdditional agent instructions:\n{request.Agent.Instructions.Trim()}";
@@ -34,6 +37,7 @@ public sealed partial class SelfClawAgentChatRuntime
         var instructions = ProgrammingBaseInstructions +
                            $" The trusted workspace root is '{request.WorkspaceRoot.RootPath}'. Keep file references relative to that root." +
                            permissionInstructions;
+        AppendCapabilityInstructions(request, ref instructions);
         if (!string.IsNullOrWhiteSpace(request.Agent.Instructions))
         {
             instructions += $"\n\nAdditional agent instructions:\n{request.Agent.Instructions.Trim()}";
@@ -56,6 +60,7 @@ public sealed partial class SelfClawAgentChatRuntime
         builder.AppendLine("- Focus on the actual work needed for this request, not generic process overhead.");
         builder.AppendLine("- Use workspace inspection tools only when they help shape a more accurate plan.");
         builder.AppendLine("- Do not include a final user-facing answer inside the plan.");
+        AppendCapabilityInstructions(request, builder);
         if (!string.IsNullOrWhiteSpace(request.Agent.Instructions))
         {
             builder.AppendLine("- Follow these additional agent instructions when they help:");
@@ -100,6 +105,52 @@ public sealed partial class SelfClawAgentChatRuntime
         }
 
         return builder.ToString();
+    }
+
+    private static void AppendCapabilityInstructions(ChatTurnRequest request, ref string instructions)
+    {
+        var capabilityInstructions = BuildCapabilityInstructions(request);
+        if (!string.IsNullOrWhiteSpace(capabilityInstructions))
+        {
+            instructions += capabilityInstructions;
+        }
+    }
+
+    private static void AppendCapabilityInstructions(ChatTurnRequest request, StringBuilder builder)
+    {
+        var capabilityInstructions = BuildCapabilityInstructions(request);
+        if (string.IsNullOrWhiteSpace(capabilityInstructions))
+        {
+            return;
+        }
+
+        foreach (var line in capabilityInstructions
+                     .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            builder.AppendLine(line);
+        }
+    }
+
+    private static string BuildCapabilityInstructions(ChatTurnRequest request)
+    {
+        var sections = new List<string>();
+
+        if (request.Agent.Skills.Count > 0)
+        {
+            sections.Add($" Enabled skills: {string.Join(", ", request.Agent.Skills)}. Use their instructions and resources when relevant.");
+        }
+
+        if (request.Agent.ConfiguredMcpServers.Count > 0)
+        {
+            var serverLabels = request.Agent.ConfiguredMcpServers
+                .Select(item => item.EffectiveDisplayName)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+            sections.Add($" Enabled MCP servers: {string.Join(", ", serverLabels)}. Their tools are available during this turn when they materially help.");
+        }
+
+        return sections.Count == 0
+            ? string.Empty
+            : string.Concat(sections);
     }
 
 }

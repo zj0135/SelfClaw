@@ -29,6 +29,7 @@ public sealed class FileSystemAgentContextProviderFactoryTests : IDisposable
             AgentRuntimeDefinition.SystemToolPolicy,
             [],
             [],
+            [],
             string.Empty);
 
         factory.DiscoverSkillRoots([]).Should().BeEmpty();

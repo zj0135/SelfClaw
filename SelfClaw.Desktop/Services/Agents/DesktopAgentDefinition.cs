@@ -32,6 +32,7 @@ public sealed record DesktopAgentDefinition(
             ToolPolicy,
             EnabledSkills,
             EnabledMcpServers,
+            [],
             Instructions);
 
     private static IReadOnlyList<string> FilterEnabledServices(

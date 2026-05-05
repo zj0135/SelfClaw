@@ -25,6 +25,11 @@ public sealed partial class SelfClawAgentChatRuntime
         await writer.WriteAsync(new AssistantMessageStartedEvent(startedMessage), cancellationToken);
 
         var observer = new RuntimeToolObserver(writer, request.ConversationId, null, messageId);
+        await using var toolScope = await CreateToolsAsync(
+            request,
+            includeWriteTools: true,
+            includeShellTool: true,
+            cancellationToken);
         var result = await _agentExecutionService.RunAsync(
             new AgentExecutionRequest(
                 request.Profile,
@@ -33,9 +38,13 @@ public sealed partial class SelfClawAgentChatRuntime
                 ResolveAgentDescription(request),
                 BuildProgrammingInstructions(request),
                 BuildPromptMessages(request.Messages, includeAssistantSpeakerPrefix: false),
-                CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
+                toolScope.Tools,
                 CreateContextProviders(request.Agent),
-                request.EnableReasoning),
+                request.EnableReasoning,
+                observer,
+                request.ToolPermissionMode,
+                request.ToolApprovalHandler,
+                toolScope.ToolMetadata),
             (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
             cancellationToken);
 
@@ -109,6 +118,11 @@ public sealed partial class SelfClawAgentChatRuntime
         CancellationToken cancellationToken)
     {
         var observer = new RuntimeToolObserver(writer, request.ConversationId, null, messageId: null);
+        await using var toolScope = await CreateToolsAsync(
+            request,
+            includeWriteTools: false,
+            includeShellTool: false,
+            cancellationToken);
         var result = await _agentExecutionService.RunAsync(
             new AgentExecutionRequest(
                 request.Profile,
@@ -117,9 +131,13 @@ public sealed partial class SelfClawAgentChatRuntime
                 ResolveAgentDescription(request),
                 BuildExecutionPlanInstructions(request),
                 BuildExecutionPlanMessages(request.Messages),
-                CreateTools(request, observer, includeWriteTools: false, includeShellTool: false),
+                toolScope.Tools,
                 CreateContextProviders(request.Agent),
-                request.EnableReasoning),
+                request.EnableReasoning,
+                observer,
+                request.ToolPermissionMode,
+                request.ToolApprovalHandler,
+                toolScope.ToolMetadata),
             onTextDelta: null,
             cancellationToken);
 
@@ -204,6 +222,11 @@ public sealed partial class SelfClawAgentChatRuntime
         await writer.WriteAsync(new AssistantMessageStartedEvent(startedMessage), cancellationToken);
 
         var observer = new RuntimeToolObserver(writer, request.ConversationId, null, messageId);
+        await using var toolScope = await CreateToolsAsync(
+            request,
+            includeWriteTools: true,
+            includeShellTool: true,
+            cancellationToken);
         try
         {
             var result = await _agentExecutionService.RunAsync(
@@ -214,9 +237,13 @@ public sealed partial class SelfClawAgentChatRuntime
                     ResolveAgentDescription(request),
                     BuildExecutionStepInstructions(request, executionPlan, currentStep, isFinalStep),
                     BuildExecutionStepMessages(request.Messages, executionPlan, currentStep, completedSteps, isFinalStep),
-                    CreateTools(request, observer, includeWriteTools: true, includeShellTool: true),
+                    toolScope.Tools,
                     CreateContextProviders(request.Agent),
-                    request.EnableReasoning),
+                    request.EnableReasoning,
+                    observer,
+                    request.ToolPermissionMode,
+                    request.ToolApprovalHandler,
+                    toolScope.ToolMetadata),
                 (delta, token) => writer.WriteAsync(new AssistantDeltaEvent(messageId, delta), token),
                 cancellationToken);
 

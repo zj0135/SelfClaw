@@ -2082,6 +2082,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var transcriptMessages = GetSelectedTranscriptMessages();
         var transcriptToolRuns = GetSelectedTranscriptToolRuns();
         var transcriptToolRunAnchors = GetSelectedTranscriptToolRunAnchors();
+        var agentActivities = BuildAgentActivities(transcriptToolRuns);
         var toolRunsByMessageId = TranscriptToolRunPresenter.BuildToolRunsByMessageId(
             transcriptMessages,
             transcriptToolRuns,
@@ -2154,7 +2155,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             availableSkills,
             BuildTranscriptAgents(),
             ResolveSelectedAgent().Id,
-            AgentActivityNodes.ToArray(),
+            agentActivities,
             IsPlanningModeEnabled,
             planPanel,
             contextUsage,
@@ -2282,19 +2283,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void PublishAgentActivities()
     {
-        var transcriptToolRuns = GetSelectedTranscriptToolRuns();
-        var toolItems = transcriptToolRuns
+        var items = BuildAgentActivities(GetSelectedTranscriptToolRuns());
+        ReplaceCollection(AgentActivityNodes, items);
+        OnPropertyChanged(nameof(HasAgentActivityNodes));
+        PublishShell(false);
+    }
+
+    private static AgentActivityNode[] BuildAgentActivities(IReadOnlyList<ToolExecutionRecord> toolRuns)
+    {
+        var toolItems = toolRuns
             .Select(item => (Timestamp: item.UpdatedAtUtc, Node: TranscriptToolRunPresenter.BuildActivityNode(item)));
 
-        var items = toolItems
+        return toolItems
             .OrderByDescending(item => item.Timestamp)
             .ThenBy(item => item.Node.Title, StringComparer.Ordinal)
             .Select(item => item.Node)
             .ToArray();
-
-        ReplaceCollection(AgentActivityNodes, items);
-        OnPropertyChanged(nameof(HasAgentActivityNodes));
-        PublishShell(false);
     }
 
     private static IReadOnlyList<TranscriptImageAttachment> BuildImageAttachments(MessageRecord message)

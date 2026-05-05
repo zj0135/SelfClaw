@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 
 namespace SelfClaw.Infrastructure.Agents.Runtime;
 
@@ -13,4 +14,8 @@ internal sealed record AgentExecutionRequest(
     IReadOnlyList<ChatMessage> Messages,
     IList<AITool> Tools,
     IReadOnlyList<AIContextProvider>? ContextProviders = null,
-    bool EnableReasoning = false);
+    bool EnableReasoning = false,
+    RuntimeToolObserver? ToolObserver = null,
+    ToolPermissionMode ToolPermissionMode = ToolPermissionMode.FullAccess,
+    IToolApprovalHandler? ToolApprovalHandler = null,
+    IReadOnlyDictionary<string, ToolInvocationMetadata>? ToolMetadata = null);
