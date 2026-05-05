@@ -1,0 +1,151 @@
+﻿/* Workspace surface: dark-surface alignment for main workspace, steps panel, and composer shell. */
+
+/* Darker main workspace surface, matched to the navigation sidebar */
+html:not([data-theme='light']) .main-column,
+html:not([data-theme='light']) .transcript-panel,
+html:not([data-theme='light']) .transcript-scroll {
+	background: #080a0e;
+}
+
+html:not([data-theme='light']) .topbar,
+html:not([data-theme='light']) .steps-panel {
+	background: #080a0e;
+	border-color: #151923;
+}
+
+html:not([data-theme='light']) .context-pill,
+html:not([data-theme='light']) .mode-chip,
+html:not([data-theme='light']) .composer-tools-trigger,
+html:not([data-theme='light']) .composer-inline-select,
+html:not([data-theme='light']) .activity-toggle,
+html:not([data-theme='light']) .activity-action-btn,
+html:not([data-theme='light']) .steps-mode-toggle,
+html:not([data-theme='light']) .steps-section-toggle,
+html:not([data-theme='light']) .graph-toolbar-btn {
+	border-radius: 6px;
+	background: #10131a;
+	border-color: #202631;
+	color: #c9ced8;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .context-pill:hover,
+html:not([data-theme='light']) .mode-chip:hover,
+html:not([data-theme='light']) .composer-tools-trigger:hover:not(:disabled),
+html:not([data-theme='light']) .composer-inline-select:hover,
+html:not([data-theme='light']) .composer-inline-select:focus,
+html:not([data-theme='light']) .activity-action-btn:hover,
+html:not([data-theme='light']) .steps-mode-toggle:hover,
+html:not([data-theme='light']) .steps-section-toggle:hover {
+	background: #151922;
+	border-color: #2b3240;
+	color: #eef1f6;
+	transform: none;
+}
+
+html:not([data-theme='light']) .mode-chip.active {
+	border-color: rgba(139, 92, 246, 0.42);
+	background: rgba(139, 92, 246, 0.14);
+	color: #f0eefc;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .topbar-context-select {
+	color: #d7dbe4;
+}
+
+html:not([data-theme='light']) .item,
+html:not([data-theme='light']) .item.message.assistant,
+html:not([data-theme='light']) .item.message.system,
+html:not([data-theme='light']) .item.message.user {
+	border-radius: 8px;
+	background: #090c12;
+	border-color: #171d27;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .item.message.user {
+	background: #10131a;
+	border-color: #1e2531;
+}
+
+html:not([data-theme='light']) .item.message:hover,
+html:not([data-theme='light']) .transcript-vue-app.busy .item.message:hover,
+html:not([data-theme='light']) .transcript-vue-app.busy .item.message.user:hover {
+	background: #0d1017;
+	border-color: #202735;
+	transform: none;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .body code,
+html:not([data-theme='light']) .message-main code,
+html:not([data-theme='light']) .tool-details-pre {
+	background: #141820;
+	border-color: #242b36;
+}
+
+html:not([data-theme='light']) .tool-summary,
+html:not([data-theme='light']) .tool-group-summary,
+html:not([data-theme='light']) .tool-details-body,
+html:not([data-theme='light']) .tool-group-details {
+	border-radius: 8px;
+	background: #0d1017;
+	border-color: #1e2531;
+}
+
+html:not([data-theme='light']) .composer-panel {
+	background: #080a0e;
+}
+
+html:not([data-theme='light']) .composer-surface {
+	border-radius: 8px;
+	background: #05070b;
+	border-color: #171d27;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .composer-box {
+	background: transparent;
+	color: #d9dde6;
+}
+
+html:not([data-theme='light']) .composer-box::placeholder {
+	color: #777f8d;
+}
+
+html:not([data-theme='light']) .composer-tools-menu {
+	border-radius: 8px;
+	background: #0d1017;
+	border-color: #202631;
+	box-shadow: 0 14px 32px rgba(0, 0, 0, 0.34);
+}
+
+html:not([data-theme='light']) .composer-tools-menu-row:hover {
+	background: #151922;
+}
+
+html:not([data-theme='light']) .composer-attachment-remove {
+	border-radius: 6px;
+}
+
+html:not([data-theme='light']) .steps-header,
+html:not([data-theme='light']) .settings-header {
+	border-bottom-color: #171d27;
+}
+
+html:not([data-theme='light']) .activity-card,
+html:not([data-theme='light']) .activity-meta-item {
+	border-radius: 8px;
+	background: #0d1017;
+	border-color: #1e2531;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .activity-card:hover {
+	background: #11151d;
+	border-color: #273040;
+	transform: none;
+	box-shadow: none;
+}
+

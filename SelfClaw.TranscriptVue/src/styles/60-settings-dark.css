@@ -1,0 +1,237 @@
+﻿/* Settings and editor (dark): modal surfaces, nav panels, form controls, and feedback states. */
+
+/* Settings surfaces aligned to the current dark workspace style */
+html:not([data-theme='light']) .settings-overlay {
+	background: rgba(2, 4, 7, 0.68);
+	backdrop-filter: blur(10px);
+}
+
+html:not([data-theme='light']) .settings-panel,
+html:not([data-theme='light']) .editor-panel {
+	border-radius: 8px;
+	background: #080a0e;
+	border-color: #151923;
+	box-shadow: 0 22px 50px rgba(0, 0, 0, 0.46);
+}
+
+html:not([data-theme='light']) .settings-nav {
+	background: #2d2f33;
+	border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+html:not([data-theme='light']) .settings-content,
+html:not([data-theme='light']) .editor-body,
+html:not([data-theme='light']) .editor-footer {
+	background: #080a0e;
+}
+
+html:not([data-theme='light']) .settings-header,
+html:not([data-theme='light']) .editor-header {
+	border-bottom-color: #171d27;
+}
+
+html:not([data-theme='light']) .settings-title,
+html:not([data-theme='light']) .settings-section-title,
+html:not([data-theme='light']) .editor-title {
+	color: #eceff5;
+}
+
+html:not([data-theme='light']) .settings-hint,
+html:not([data-theme='light']) .field-label,
+html:not([data-theme='light']) .selected-summary-label,
+html:not([data-theme='light']) .channel-field-hint {
+	color: #848b98;
+}
+
+html:not([data-theme='light']) .settings-nav-item {
+	border-radius: 8px;
+	background: transparent;
+	border-color: transparent;
+	color: #c9ced8;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .settings-nav-item:hover {
+	background: rgba(255, 255, 255, 0.055);
+	border-color: transparent;
+	transform: none;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .settings-nav-item.active {
+	background: rgba(255, 255, 255, 0.09);
+	border-color: transparent;
+	box-shadow: inset 3px 0 0 #8b5cf6;
+}
+
+html:not([data-theme='light']) .settings-nav-item-title {
+	color: #eef1f6;
+}
+
+html:not([data-theme='light']) .settings-nav-item-badge,
+html:not([data-theme='light']) .settings-badge {
+	border-radius: 999px;
+	background: #10131a;
+	border-color: #202631;
+	color: #aeb5c2;
+}
+
+html:not([data-theme='light']) .settings-section,
+html:not([data-theme='light']) .selected-summary-card,
+html:not([data-theme='light']) .range-field,
+html:not([data-theme='light']) .channel-card {
+	border-radius: 8px;
+	background: #0d1017;
+	border-color: #1e2531;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .channel-card.enabled {
+	background: #0f131a;
+	border-color: #283142;
+}
+
+html:not([data-theme='light']) .channel-card.running {
+	border-color: rgba(75, 160, 107, 0.34);
+}
+
+html:not([data-theme='light']) .channel-card.error {
+	border-color: rgba(204, 103, 116, 0.38);
+}
+
+html:not([data-theme='light']) .selected-summary-value,
+html:not([data-theme='light']) .range-value,
+html:not([data-theme='light']) .toggle-label {
+	color: #d6dbe4;
+}
+
+html:not([data-theme='light']) .field-select,
+html:not([data-theme='light']) .field-input,
+html:not([data-theme='light']) .field-combobox-trigger {
+	border-radius: 6px;
+	background: #10131a;
+	border-color: #202631;
+	color: #d9dde6;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .field-input::placeholder,
+html:not([data-theme='light']) .field-combobox-input::placeholder {
+	color: #747c89;
+}
+
+html:not([data-theme='light']) .field-select:focus,
+html:not([data-theme='light']) .field-input:focus,
+html:not([data-theme='light']) .field-combobox.open .field-combobox-trigger,
+html:not([data-theme='light']) .field-combobox-trigger:focus-within {
+	background: #141820;
+	border-color: rgba(139, 92, 246, 0.48);
+	box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+}
+
+html:not([data-theme='light']) .field-combobox-menu {
+	border-radius: 8px;
+	background: #0d1017;
+	border-color: #202631;
+	box-shadow: 0 14px 32px rgba(0, 0, 0, 0.34);
+}
+
+html:not([data-theme='light']) .field-combobox-option {
+	border-radius: 6px;
+	color: #d9dde6;
+}
+
+html:not([data-theme='light']) .field-combobox-option:hover {
+	background: #151922;
+	border-color: #2b3240;
+}
+
+html:not([data-theme='light']) .field-combobox-status {
+	border-radius: 6px;
+	background: #10131a;
+	color: #8d94a1;
+}
+
+html:not([data-theme='light']) .ghost-btn,
+html:not([data-theme='light']) .primary-btn,
+html:not([data-theme='light']) .icon-add-btn,
+html:not([data-theme='light']) .close-btn,
+html:not([data-theme='light']) .field-combobox-toggle {
+	border-radius: 6px;
+	box-shadow: none;
+}
+
+html:not([data-theme='light']) .ghost-btn,
+html:not([data-theme='light']) .close-btn,
+html:not([data-theme='light']) .field-combobox-toggle {
+	background: #10131a;
+	border-color: #202631;
+	color: #c9ced8;
+}
+
+html:not([data-theme='light']) .ghost-btn:hover,
+html:not([data-theme='light']) .close-btn:hover,
+html:not([data-theme='light']) .field-combobox-toggle:hover {
+	background: #151922;
+	border-color: #2b3240;
+	color: #eef1f6;
+	transform: none;
+}
+
+html:not([data-theme='light']) .primary-btn,
+html:not([data-theme='light']) .icon-add-btn {
+	background: rgba(139, 92, 246, 0.16);
+	border: 1px solid rgba(139, 92, 246, 0.38);
+	color: #f0eefc;
+}
+
+html:not([data-theme='light']) .primary-btn:hover,
+html:not([data-theme='light']) .icon-add-btn:hover {
+	background: rgba(139, 92, 246, 0.22);
+	border-color: rgba(139, 92, 246, 0.48);
+	filter: none;
+	transform: none;
+}
+
+html:not([data-theme='light']) .danger-btn {
+	color: #ff9aa6;
+}
+
+html:not([data-theme='light']) .toggle-switch {
+	border-color: #2b3240;
+	background: #10131a;
+}
+
+html:not([data-theme='light']) .toggle-switch::after {
+	background: #808896;
+}
+
+html:not([data-theme='light']) .toggle-input:checked + .toggle-switch {
+	background: rgba(139, 92, 246, 0.26);
+	border-color: rgba(139, 92, 246, 0.52);
+}
+
+html:not([data-theme='light']) .toggle-input:checked + .toggle-switch::after {
+	background: #c7b8ff;
+}
+
+html:not([data-theme='light']) .field-range {
+	accent-color: #8b5cf6;
+}
+
+html:not([data-theme='light']) .settings-feedback {
+	border-radius: 8px;
+}
+
+html:not([data-theme='light']) .settings-feedback.success {
+	background: rgba(75, 160, 107, 0.12);
+	border-color: rgba(75, 160, 107, 0.34);
+	color: #b9f4cd;
+}
+
+html:not([data-theme='light']) .settings-feedback.error {
+	background: rgba(204, 103, 116, 0.13);
+	border-color: rgba(204, 103, 116, 0.38);
+	color: #ffc0c8;
+}
+

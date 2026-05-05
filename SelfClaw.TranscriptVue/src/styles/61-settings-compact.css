@@ -1,0 +1,285 @@
+﻿/* Settings and editor compact density: spacing and size tuning for tighter layouts. */
+
+/* Compact settings density */
+.settings-panel {
+	grid-template-columns: 216px minmax(0, 1fr);
+	width: min(960px, calc(100vw - 48px));
+	height: min(660px, calc(100vh - 48px));
+}
+
+.settings-nav {
+	gap: 10px;
+	padding: 12px;
+}
+
+.settings-nav-header {
+	gap: 4px;
+}
+
+.settings-title {
+	font-size: 20px;
+}
+
+.settings-hint {
+	font-size: 12px;
+	line-height: 1.42;
+}
+
+.settings-nav-list {
+	gap: 6px;
+}
+
+.settings-nav-item {
+	padding: 8px 9px;
+}
+
+.settings-nav-item-top {
+	gap: 7px;
+}
+
+.settings-nav-item-title {
+	font-size: 13px;
+	line-height: 1.25;
+}
+
+.settings-nav-item-badge,
+.settings-badge {
+	padding: 2px 6px;
+	font-size: 9px;
+}
+
+.settings-content {
+	padding: 14px 16px;
+}
+
+.settings-header {
+	padding-bottom: 10px;
+}
+
+.settings-section-title-hero {
+	font-size: 20px;
+}
+
+.settings-section {
+	margin-top: 10px;
+	padding: 12px;
+}
+
+.settings-section-active {
+	margin-top: 10px;
+}
+
+.settings-section-title {
+	font-size: 15px;
+}
+
+.field-group {
+	margin-top: 10px;
+}
+
+.field-label {
+	margin-bottom: 5px;
+	font-size: 10px;
+}
+
+.settings-select-row {
+	gap: 6px;
+}
+
+.selected-summary-grid {
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.selected-summary-card {
+	padding: 8px 9px;
+}
+
+.selected-summary-label {
+	font-size: 10px;
+}
+
+.selected-summary-value {
+	margin-top: 5px;
+	font-size: 12px;
+	line-height: 1.4;
+}
+
+.field-select,
+.field-input {
+	padding: 8px 10px;
+	font-size: 12px;
+}
+
+.field-combobox-trigger {
+	min-height: 36px;
+}
+
+.field-combobox-trigger {
+	padding-left: 10px;
+	padding-right: 34px;
+}
+
+.field-combobox-input {
+	padding: 8px 0;
+}
+
+.field-combobox-toggle {
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+}
+
+.field-combobox-menu {
+	top: calc(100% + 6px);
+	gap: 3px;
+	padding: 6px;
+	border-radius: 8px;
+}
+
+.field-combobox-option,
+.field-combobox-status {
+	padding: 7px 9px;
+	font-size: 12px;
+	line-height: 1.35;
+}
+
+.ghost-btn,
+.primary-btn {
+	padding: 8px 10px;
+	font-size: 12px;
+}
+
+.compact-btn {
+	padding: 7px 9px;
+}
+
+.icon-add-btn {
+	width: 30px;
+	height: 30px;
+	font-size: 16px;
+}
+
+.close-btn {
+	width: 32px;
+	height: 32px;
+}
+
+.range-field {
+	padding: 8px 9px;
+}
+
+.range-header {
+	gap: 8px;
+}
+
+.toggle-field {
+	margin-top: 5px;
+	gap: 6px;
+}
+
+.toggle-switch {
+	width: 30px;
+	height: 18px;
+}
+
+.toggle-switch::after {
+	width: 14px;
+	height: 14px;
+}
+
+.toggle-input:checked + .toggle-switch::after {
+	transform: translateX(12px);
+}
+
+.field-textarea {
+	min-height: 76px;
+}
+
+.channel-card {
+	padding: 12px;
+}
+
+.channel-card-list {
+	gap: 8px;
+}
+
+.channel-card-top,
+.channel-card-actions {
+	gap: 8px;
+}
+
+.channel-summary-grid {
+	margin-top: 10px;
+}
+
+.editor-panel {
+	width: min(520px, 100%);
+	padding: 16px;
+}
+
+.editor-title {
+	font-size: 20px;
+}
+
+.editor-body {
+	gap: 8px;
+	margin-top: 10px;
+}
+
+.editor-footer {
+	gap: 8px;
+	margin-top: 12px;
+}
+
+@media (max-width: 1180px) {
+	.sidebar .sidebar-body {
+		min-height: 0;
+		height: auto;
+	}
+
+	.sidebar-nav {
+		flex-basis: auto;
+	}
+
+	.sidebar .pane-collapse-toggle-sidebar {
+		display: none;
+	}
+}
+
+@media (max-width: 720px) {
+	.sidebar .sidebar-body {
+		flex-direction: column;
+	}
+
+	.sidebar-nav {
+		flex: 0 0 auto;
+		width: 100%;
+	}
+}
+
+@media (max-width: 960px) {
+	.graph-toolbar,
+	.graph-hud {
+		top: 12px;
+	}
+
+	.graph-toolbar {
+		left: 12px;
+		gap: 6px;
+	}
+
+	.graph-hud {
+		right: 12px;
+		min-width: auto;
+		max-width: min(280px, calc(100% - 24px));
+		padding: 11px 12px;
+	}
+
+	.graph-empty-hint {
+		left: 14px;
+		right: 14px;
+		bottom: 14px;
+	}
+}
+
