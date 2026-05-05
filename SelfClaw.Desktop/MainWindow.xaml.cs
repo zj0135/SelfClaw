@@ -69,6 +69,8 @@ public partial class MainWindow : Window
         Channels: [],
         McpServers: [],
         Skills: [],
+        AvailableMcpServers: [],
+        AvailableSkills: [],
         Agents: [],
         SelectedAgentId: null,
         AgentActivities: [],
@@ -228,6 +230,8 @@ public partial class MainWindow : Window
             channels = state.Channels,
             mcpServers = state.McpServers,
             skills = state.Skills,
+            availableMcpServers = state.AvailableMcpServers,
+            availableSkills = state.AvailableSkills,
             agents = state.Agents,
             selectedAgentId = state.SelectedAgentId,
             agentActivities = state.AgentActivities,
@@ -790,7 +794,9 @@ public partial class MainWindow : Window
             ParseAgentExecutionMode(GetString(root, "mode")),
             GetString(root, "toolPolicy"),
             GetStringList(root, "skills"),
+            GetStringList(root, "disabledSkills"),
             GetStringList(root, "mcpServers"),
+            GetStringList(root, "disabledMcpServers"),
             GetString(root, "instructions"));
 
         await _viewModel.SaveAgentAsync(result);

@@ -2122,6 +2122,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var themeOptions = ThemeOptions
             .Select(option => new ShellSelectOption(ThemePreferenceToId(option.Value), option.Label))
             .ToArray();
+        var availableMcpServers = BuildAvailableTranscriptMcpServers();
+        var availableSkills = BuildAvailableTranscriptSkills();
         var planPanel = GetSelectedPlanPanel();
         var contextUsage = BuildContextUsage(transcriptMessages);
         var isBusy = GetSelectedRuntimeState()?.IsRunning == true;
@@ -2146,8 +2148,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             themeOptions,
             ThemePreferenceToId(SelectedThemeOption?.Value ?? AppThemePreference.System),
             _channelManager.BuildTranscriptChannels(Profiles.ToArray()),
-            BuildTranscriptMcpServers(),
-            BuildTranscriptSkills(),
+            BuildTranscriptMcpServers(availableMcpServers),
+            BuildTranscriptSkills(availableSkills),
+            availableMcpServers,
+            availableSkills,
             BuildTranscriptAgents(),
             ResolveSelectedAgent().Id,
             AgentActivityNodes.ToArray(),

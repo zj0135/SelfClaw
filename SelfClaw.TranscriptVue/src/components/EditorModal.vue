@@ -15,6 +15,14 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
+	availableSkills: {
+		type: Array,
+		default: () => [],
+	},
+	availableMcpServers: {
+		type: Array,
+		default: () => [],
+	},
 });
 
 const emit = defineEmits(['close', 'pick-workspace-path', 'fetch-models', 'save']);
@@ -22,6 +30,11 @@ const emit = defineEmits(['close', 'pick-workspace-path', 'fetch-models', 'save'
 const modelComboboxRef = ref(null);
 const modelInputRef = ref(null);
 const isModelMenuOpen = ref(false);
+const openAgentPickerKind = ref(null);
+const pickerSelections = ref({
+	skills: [],
+	mcpServers: [],
+});
 
 const title = computed(() => {
 	if (props.editor.kind === 'profile') {
@@ -48,13 +61,80 @@ const profileModelOptions = computed(() => {
 		return [];
 	}
 
-	return [...new Set([...(props.editor.draft.modelOptions || []), props.editor.draft.model].filter((item) => Boolean(item && item.trim())))];
+	return [...new Set(
+		[...(props.editor.draft.modelOptions || []), props.editor.draft.model]
+			.filter((item) => Boolean(item && item.trim()))
+	)];
 });
 
 const canFetchProfileModels = computed(() => props.editor.kind === 'profile' && Boolean(props.editor.draft?.endpoint?.trim()));
 
+const selectedAgentSkills = computed(() => buildSelectedAgentServices('skills', props.availableSkills));
+const selectedAgentMcpServers = computed(() => buildSelectedAgentServices('mcpServers', props.availableMcpServers));
+
+const activeAgentPickerKey = computed(() => openAgentPickerKind.value === 'mcpServers' ? 'mcpServers' : 'skills');
+const activeAgentPickerTitle = computed(() => openAgentPickerKind.value === 'mcpServers' ? '选择 MCP 服务' : '选择技能');
+const activeAgentPickerHint = computed(() => openAgentPickerKind.value === 'mcpServers'
+	? '选择要绑定到当前智能体的 MCP 服务，可多选。全局禁用的服务不可选择。'
+	: '选择要绑定到当前智能体的技能，可多选。全局禁用的技能不可选择。');
+const activeAgentPickerEmptyText = computed(() => openAgentPickerKind.value === 'mcpServers'
+	? '当前没有可用的 MCP 服务。'
+	: '当前没有可用的技能。');
+const activeAgentPickerOptions = computed(() => {
+	const kind = activeAgentPickerKey.value;
+	const availableItems = kind === 'mcpServers' ? props.availableMcpServers : props.availableSkills;
+	const selections = pickerSelections.value[kind] || [];
+	return buildAgentServiceOptions(availableItems, selections);
+});
+
 function closeModelMenu() {
 	isModelMenuOpen.value = false;
+}
+
+function normalizeAgentBindings(kind) {
+	if (!props.editor?.draft) {
+		return [];
+	}
+
+	const bindings = Array.isArray(props.editor.draft[kind]) ? props.editor.draft[kind] : [];
+	return bindings
+		.map((item) => ({
+			id: String(item?.id || '').trim(),
+			enabled: item?.enabled !== false,
+		}))
+		.filter((item) => Boolean(item.id));
+}
+
+function cloneAgentBindings(kind) {
+	return normalizeAgentBindings(kind).map((item) => ({ ...item }));
+}
+
+function writeAgentBindings(kind, bindings) {
+	if (!props.editor?.draft) {
+		return;
+	}
+
+	props.editor.draft[kind] = [...bindings]
+		.filter((item) => Boolean(item?.id))
+		.sort((left, right) => String(left.id).localeCompare(String(right.id)));
+}
+
+function openAgentPicker(kind) {
+	pickerSelections.value = {
+		...pickerSelections.value,
+		[kind]: cloneAgentBindings(kind),
+	};
+	openAgentPickerKind.value = kind;
+}
+
+function closeAgentPicker() {
+	openAgentPickerKind.value = null;
+}
+
+function commitAgentPicker() {
+	const kind = activeAgentPickerKey.value;
+	writeAgentBindings(kind, pickerSelections.value[kind] || []);
+	closeAgentPicker();
 }
 
 async function openModelMenu(fetchOnOpen = false) {
@@ -97,6 +177,95 @@ function selectProfileModel(option) {
 	closeModelMenu();
 }
 
+function buildSelectedAgentServices(kind, availableItems) {
+	const availableById = new Map((Array.isArray(availableItems) ? availableItems : []).map((item) => [item.id, item]));
+
+	return normalizeAgentBindings(kind).map((binding) => {
+		const details = availableById.get(binding.id) || null;
+		return {
+			id: binding.id,
+			enabled: binding.enabled,
+			globallyEnabled: details?.enabled !== false,
+		};
+	});
+}
+
+function buildAgentServiceOptions(availableItems, selections) {
+	const selectedById = new Map((selections || []).map((item) => [item.id, item]));
+
+	return (Array.isArray(availableItems) ? availableItems : []).map((item) => {
+		const selected = selectedById.get(item.id) || null;
+		return {
+			id: item.id,
+			selected: Boolean(selected),
+			enabled: selected?.enabled !== false,
+			globallyEnabled: item.enabled !== false,
+		};
+	});
+}
+
+function isServiceGloballyEnabled(kind, serviceId) {
+	const options = kind === 'mcpServers'
+		? buildAgentServiceOptions(props.availableMcpServers, pickerSelections.value.mcpServers)
+		: buildAgentServiceOptions(props.availableSkills, pickerSelections.value.skills);
+	return options.find((item) => item.id === serviceId)?.globallyEnabled !== false;
+}
+
+function togglePickerServiceSelection(kind, serviceId, selected) {
+	const normalizedId = String(serviceId || '').trim();
+	if (!normalizedId) {
+		return;
+	}
+
+	if (selected && !isServiceGloballyEnabled(kind, normalizedId)) {
+		return;
+	}
+
+	const bindings = [...(pickerSelections.value[kind] || [])];
+	const existingIndex = bindings.findIndex((item) => item.id === normalizedId);
+
+	if (selected) {
+		if (existingIndex < 0) {
+			bindings.push({ id: normalizedId, enabled: true });
+		}
+	} else if (existingIndex >= 0) {
+		bindings.splice(existingIndex, 1);
+	}
+
+	pickerSelections.value = {
+		...pickerSelections.value,
+		[kind]: bindings.sort((left, right) => String(left.id).localeCompare(String(right.id))),
+	};
+}
+
+function setAgentServiceEnabled(kind, serviceId, enabled) {
+	const normalizedId = String(serviceId || '').trim();
+	if (!normalizedId) {
+		return;
+	}
+
+	const availableItems = kind === 'mcpServers' ? props.availableMcpServers : props.availableSkills;
+	const availableById = new Map((availableItems || []).map((item) => [item.id, item]));
+	if (availableById.get(normalizedId)?.enabled === false) {
+		return;
+	}
+
+	const bindings = normalizeAgentBindings(kind);
+	const nextBindings = bindings.map((item) => item.id === normalizedId ? { ...item, enabled: Boolean(enabled) } : item);
+	writeAgentBindings(kind, nextBindings);
+}
+
+function removeAgentService(kind, serviceId) {
+	const normalizedId = String(serviceId || '').trim();
+	if (!normalizedId) {
+		return;
+	}
+
+	const bindings = normalizeAgentBindings(kind)
+		.filter((item) => item.id !== normalizedId);
+	writeAgentBindings(kind, bindings);
+}
+
 function handleDocumentPointerDown(event) {
 	if (!isModelMenuOpen.value) {
 		return;
@@ -113,6 +282,7 @@ watch(
 	(isOpen) => {
 		if (!isOpen) {
 			closeModelMenu();
+			closeAgentPicker();
 		}
 	}
 );
@@ -146,7 +316,7 @@ onBeforeUnmount(() => {
 						<div>
 							<div class="field-label">配置名称</div>
 							<input id="editor-profile-name" v-model="editor.draft.name" class="field-input" type="text"
-								placeholder="例如 OpenAI / 本地模型" />
+								placeholder="例如 OpenAI / Azure OpenAI" />
 						</div>
 						<div>
 							<div class="field-label">模型</div>
@@ -156,14 +326,14 @@ onBeforeUnmount(() => {
 									<input id="editor-profile-model" ref="modelInputRef" v-model="editor.draft.model"
 										class="field-combobox-input" type="text" placeholder="例如 gpt-4.1-mini"
 										@keydown="handleModelInputKeydown" />
-									<button class="field-combobox-toggle" type="button" aria-label="切换模型列表" @click.stop="toggleModelMenu">
+									<button class="field-combobox-toggle" type="button" aria-label="展开模型列表" @click.stop="toggleModelMenu">
 										<span class="field-combobox-chevron" aria-hidden="true"></span>
 									</button>
 								</div>
 								<div v-if="isModelMenuOpen" class="field-combobox-menu"
 									:class="{ 'has-options': canFetchProfileModels && !editor.draft.isFetchingModels && profileModelOptions.length > 0 }"
 									role="listbox">
-									<div v-if="editor.draft.isFetchingModels" class="field-combobox-status">正在获取模型列表...</div>
+									<div v-if="editor.draft.isFetchingModels" class="field-combobox-status">正在加载模型列表...</div>
 									<div v-else-if="!canFetchProfileModels" class="field-combobox-status">请先填写 Endpoint</div>
 									<template v-else-if="profileModelOptions.length > 0">
 										<button v-for="option in profileModelOptions" :key="option" class="field-combobox-option" type="button"
@@ -203,8 +373,7 @@ onBeforeUnmount(() => {
 								<div>
 									<div class="field-label">Top-P</div>
 									<label class="toggle-field">
-										<input id="editor-profile-top-p-enabled" v-model="editor.draft.topPEnabled" class="toggle-input"
-											type="checkbox" />
+										<input id="editor-profile-top-p-enabled" v-model="editor.draft.topPEnabled" class="toggle-input" type="checkbox" />
 										<span class="toggle-switch"></span>
 										<span class="toggle-label">启用</span>
 									</label>
@@ -218,19 +387,19 @@ onBeforeUnmount(() => {
 					<div>
 						<div class="field-label">API Key</div>
 						<input id="editor-profile-api-key" v-model="editor.draft.apiKey" class="field-input" type="password"
-							:placeholder="editor.mode === 'create' ? '请输入 API Key' : '留空表示沿用已有 API Key'" />
+							:placeholder="editor.mode === 'create' ? '请输入 API Key' : '留空则保持当前 API Key 不变'" />
 					</div>
 				</template>
 
 				<template v-else-if="editor.kind === 'channel'">
 					<div class="field-inline">
 						<div>
-							<div class="field-label">频道显示名称</div>
+							<div class="field-label">频道名称</div>
 							<input id="editor-channel-display-name" v-model="editor.draft.displayName" class="field-input" type="text"
 								placeholder="例如 飞书机器人" />
 						</div>
 						<div>
-							<div class="field-label">绑定模型配置</div>
+							<div class="field-label">模型配置</div>
 							<select id="editor-channel-profile" v-model="editor.draft.profileId" class="field-select">
 								<option value="">请选择模型配置</option>
 								<option v-for="option in profiles" :key="option.id" :value="option.id">{{ option.label }}</option>
@@ -242,7 +411,7 @@ onBeforeUnmount(() => {
 						<textarea v-if="field.kind === 'multiline'" v-model="field.value" class="field-input field-textarea"
 							:placeholder="field.placeholder || ''"></textarea>
 						<input v-else-if="field.kind === 'secret'" v-model="field.value" class="field-input" type="password"
-							:placeholder="field.hasValue ? '留空表示沿用已有密钥' : (field.placeholder || '请输入密钥')" />
+							:placeholder="field.hasValue ? '留空则保持当前值' : (field.placeholder || '请输入值')" />
 						<input v-else v-model="field.value" class="field-input" type="text" :placeholder="field.placeholder || ''" />
 						<div v-if="field.description" class="settings-hint channel-field-hint">{{ field.description }}</div>
 					</div>
@@ -262,17 +431,17 @@ onBeforeUnmount(() => {
 						</div>
 					</div>
 					<div>
-						<div class="field-label">命令</div>
+						<div class="field-label">Command</div>
 						<input id="editor-mcp-command" v-model="editor.draft.command" class="field-input" type="text" placeholder="npx" />
 					</div>
 					<div>
-						<div class="field-label">参数</div>
+						<div class="field-label">Args</div>
 						<textarea id="editor-mcp-args" v-model="editor.draft.argsText" class="field-input field-textarea"
 							placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;D:\Repositories"></textarea>
 						<div class="settings-hint channel-field-hint">每行一个参数。</div>
 					</div>
 					<div>
-						<div class="field-label">环境变量</div>
+						<div class="field-label">Environment</div>
 						<textarea id="editor-mcp-env" v-model="editor.draft.envText" class="field-input field-textarea"
 							placeholder="KEY=value"></textarea>
 						<div class="settings-hint channel-field-hint">每行一个 `KEY=VALUE`。</div>
@@ -280,7 +449,7 @@ onBeforeUnmount(() => {
 					<label class="toggle-field">
 						<input id="editor-mcp-enabled" v-model="editor.draft.enabled" class="toggle-input" type="checkbox" />
 						<span class="toggle-switch"></span>
-						<span class="toggle-label">启用</span>
+						<span class="toggle-label">全局启用</span>
 					</label>
 				</template>
 
@@ -292,7 +461,7 @@ onBeforeUnmount(() => {
 								:readonly="editor.mode === 'edit' && editor.draft.isBuiltIn" placeholder="code-review" />
 						</div>
 						<div>
-							<div class="field-label">执行模式</div>
+							<div class="field-label">模式</div>
 							<select id="editor-agent-mode" v-model="editor.draft.mode" class="field-select">
 								<option value="direct">direct</option>
 								<option value="plan">plan</option>
@@ -312,26 +481,60 @@ onBeforeUnmount(() => {
 					<div>
 						<div class="field-label">描述</div>
 						<input id="editor-agent-description" v-model="editor.draft.description" class="field-input" type="text"
-							placeholder="代码审查专家，检查代码质量和安全性" />
+							placeholder="简要说明这个智能体的职责和适用场景" />
 					</div>
-					<div class="field-inline">
-						<div>
-							<div class="field-label">skills</div>
-							<textarea id="editor-agent-skills" v-model="editor.draft.skillsText" class="field-input field-textarea"
-								placeholder="skillName1&#10;skillName2"></textarea>
-							<div class="settings-hint channel-field-hint">每行一个 skill id。</div>
+					<div class="field-inline agent-service-fields">
+						<div class="agent-service-section">
+							<div class="field-label-row">
+								<div class="field-label">skills</div>
+								<button class="icon-add-btn icon-add-btn-sm" type="button" aria-label="添加技能" @click="openAgentPicker('skills')">+</button>
+							</div>
+							<div class="agent-service-list agent-service-list-compact">
+								<template v-if="selectedAgentSkills.length > 0">
+									<div v-for="skill in selectedAgentSkills" :key="skill.id" class="agent-service-item agent-service-item-compact" :class="{ muted: !skill.globallyEnabled }">
+										<div class="agent-service-id">{{ skill.id }}</div>
+										<div class="agent-service-actions agent-service-actions-compact">
+											<label class="toggle-field compact-toggle compact-toggle-inline">
+												<input class="toggle-input" type="checkbox" :checked="skill.enabled" :disabled="!skill.globallyEnabled"
+													@change="setAgentServiceEnabled('skills', skill.id, $event.target.checked)" />
+												<span class="toggle-switch"></span>
+											</label>
+											<button class="icon-inline-btn" type="button" aria-label="移除技能" title="移除技能"
+												@click="removeAgentService('skills', skill.id)">&times;</button>
+										</div>
+									</div>
+								</template>
+								<div v-else class="agent-service-empty">未绑定任何服务</div>
+							</div>
 						</div>
-						<div>
-							<div class="field-label">mcpServers</div>
-							<textarea id="editor-agent-mcp-servers" v-model="editor.draft.mcpServersText" class="field-input field-textarea"
-								placeholder="mcpServerName1&#10;mcpServerName2"></textarea>
-							<div class="settings-hint channel-field-hint">每行一个 MCP server id。</div>
+						<div class="agent-service-section">
+							<div class="field-label-row">
+								<div class="field-label">mcpServers</div>
+								<button class="icon-add-btn icon-add-btn-sm" type="button" aria-label="添加 MCP 服务" @click="openAgentPicker('mcpServers')">+</button>
+							</div>
+							<div class="agent-service-list agent-service-list-compact">
+								<template v-if="selectedAgentMcpServers.length > 0">
+									<div v-for="server in selectedAgentMcpServers" :key="server.id" class="agent-service-item agent-service-item-compact" :class="{ muted: !server.globallyEnabled }">
+										<div class="agent-service-id">{{ server.id }}</div>
+										<div class="agent-service-actions agent-service-actions-compact">
+											<label class="toggle-field compact-toggle compact-toggle-inline">
+												<input class="toggle-input" type="checkbox" :checked="server.enabled" :disabled="!server.globallyEnabled"
+													@change="setAgentServiceEnabled('mcpServers', server.id, $event.target.checked)" />
+												<span class="toggle-switch"></span>
+											</label>
+											<button class="icon-inline-btn" type="button" aria-label="移除 MCP 服务" title="移除 MCP 服务"
+												@click="removeAgentService('mcpServers', server.id)">&times;</button>
+										</div>
+									</div>
+								</template>
+								<div v-else class="agent-service-empty">未绑定任何服务</div>
+							</div>
 						</div>
 					</div>
 					<div>
-						<div class="field-label">正文提示词</div>
+						<div class="field-label">指令</div>
 						<textarea id="editor-agent-instructions" v-model="editor.draft.instructions" class="field-input field-textarea field-textarea-lg"
-							placeholder="你是一位资深代码审查员，负责确保代码质量。"></textarea>
+							placeholder="补充该智能体的角色、限制、偏好和执行要求。"></textarea>
 					</div>
 					<div v-if="editor.draft.warnings?.length" class="settings-hint channel-field-hint">
 						<div v-for="warning in editor.draft.warnings" :key="warning">{{ warning }}</div>
@@ -342,13 +545,13 @@ onBeforeUnmount(() => {
 					<div>
 						<div class="field-label">工作区名称</div>
 						<input id="editor-workspace-name" v-model="editor.draft.name" class="field-input" type="text"
-							placeholder="例如 SelfClaw 源码仓库" />
+							placeholder="例如 SelfClaw 仓库" />
 					</div>
 					<div>
 						<div class="field-label">工作区路径</div>
 						<div class="field-picker-row">
 							<input id="editor-workspace-root-path" class="field-input field-path-input" type="text" readonly
-								:value="editor.draft.rootPath" placeholder="请选择一个文件夹" @click="emit('pick-workspace-path')"
+								:value="editor.draft.rootPath" placeholder="点击选择工作区路径" @click="emit('pick-workspace-path')"
 								@keydown.enter.prevent="emit('pick-workspace-path')" @keydown.space.prevent="emit('pick-workspace-path')" />
 						</div>
 					</div>
@@ -358,6 +561,41 @@ onBeforeUnmount(() => {
 			<div class="editor-footer">
 				<button class="ghost-btn" type="button" @click="emit('close')">取消</button>
 				<button class="primary-btn" type="button" @click="emit('save')">保存</button>
+			</div>
+
+			<div v-if="openAgentPickerKind" class="agent-service-modal-backdrop" @click.self="closeAgentPicker">
+				<section class="agent-service-modal" role="dialog" aria-modal="true" :aria-label="activeAgentPickerTitle">
+					<header class="agent-service-modal-header">
+						<div class="agent-service-modal-copy">
+							<div class="agent-service-modal-title">{{ activeAgentPickerTitle }}</div>
+							<div class="settings-hint">{{ activeAgentPickerHint }}</div>
+						</div>
+						<button class="close-btn" type="button" aria-label="关闭" @click="closeAgentPicker">&times;</button>
+					</header>
+					<div v-if="activeAgentPickerOptions.length > 0" class="agent-service-modal-body">
+						<label
+							v-for="item in activeAgentPickerOptions"
+							:key="item.id"
+							class="agent-service-option agent-service-option-modal"
+							:class="{ selected: item.selected, disabled: !item.globallyEnabled }">
+							<input
+								type="checkbox"
+								:checked="item.selected"
+								:disabled="!item.globallyEnabled"
+								@change="togglePickerServiceSelection(activeAgentPickerKey, item.id, $event.target.checked)" />
+							<span class="agent-service-option-copy">
+								<span class="agent-service-name">{{ item.id }}</span>
+							</span>
+						</label>
+					</div>
+					<div v-else class="agent-service-modal-empty">
+						{{ activeAgentPickerEmptyText }}
+					</div>
+					<footer class="agent-service-modal-footer">
+						<button class="ghost-btn" type="button" @click="closeAgentPicker">取消</button>
+						<button class="primary-btn" type="button" @click="commitAgentPicker">完成</button>
+					</footer>
+				</section>
 			</div>
 		</div>
 	</div>

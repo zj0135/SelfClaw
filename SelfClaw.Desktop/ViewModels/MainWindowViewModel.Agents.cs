@@ -140,7 +140,9 @@ public sealed partial class MainWindowViewModel
                 AgentModeToId(item.Mode),
                 item.ToolPolicy,
                 item.Skills.ToArray(),
+                item.DisabledSkills.ToArray(),
                 item.McpServers.ToArray(),
+                item.DisabledMcpServers.ToArray(),
                 item.Instructions,
                 item.FilePath,
                 item.IsBuiltIn,
@@ -212,7 +214,16 @@ public sealed partial class MainWindowViewModel
                 string.Empty);
         }
 
-        return ResolveAgent(agentId).ToRuntimeDefinition();
+        var agent = ResolveAgent(agentId);
+        return new AgentRuntimeDefinition(
+            agent.Id,
+            agent.Name,
+            agent.Description,
+            agent.Mode,
+            agent.ToolPolicy,
+            ResolveGloballyEnabledSkills(agent.EnabledSkills),
+            ResolveGloballyEnabledMcpServers(agent.EnabledMcpServers),
+            agent.Instructions);
     }
 
     private string? ResolveConversationAgentName(ConversationRecord conversation)
@@ -225,4 +236,42 @@ public sealed partial class MainWindowViewModel
 
     private static string AgentModeToId(AgentExecutionMode mode)
         => mode == AgentExecutionMode.Plan ? "plan" : "direct";
+
+    private IReadOnlyList<string> ResolveGloballyEnabledSkills(IReadOnlyList<string> skillIds)
+    {
+        if (skillIds.Count == 0)
+        {
+            return [];
+        }
+
+        var disabledSkills = (_desktopSettings.DisabledSkills ?? [])
+            .Select(NormalizeSkillId)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (disabledSkills.Count == 0)
+        {
+            return skillIds.ToArray();
+        }
+
+        return skillIds
+            .Where(item => !disabledSkills.Contains(NormalizeSkillId(item)))
+            .ToArray();
+    }
+
+    private IReadOnlyList<string> ResolveGloballyEnabledMcpServers(IReadOnlyList<string> serverIds)
+    {
+        if (serverIds.Count == 0)
+        {
+            return [];
+        }
+
+        var enabledServerIds = (_desktopSettings.McpServers ?? new Dictionary<string, DesktopMcpServerConfiguration>())
+            .Where(item => (item.Value ?? DesktopMcpServerConfiguration.Default).Enabled)
+            .Select(item => item.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return serverIds
+            .Where(item => enabledServerIds.Contains(item))
+            .ToArray();
+    }
 }

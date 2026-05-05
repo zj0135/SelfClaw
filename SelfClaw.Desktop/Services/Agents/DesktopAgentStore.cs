@@ -50,6 +50,8 @@ public sealed class DesktopAgentStore
                         AgentRuntimeDefinition.SystemToolPolicy,
                         [],
                         [],
+                        [],
+                        [],
                         string.Empty,
                         filePath,
                         false,
@@ -116,14 +118,20 @@ public sealed class DesktopAgentStore
                 ? AgentExecutionMode.Plan
                 : AgentExecutionMode.Direct;
             var toolPolicy = AgentRuntimeDefinition.SystemToolPolicy;
+            var skills = NormalizeStringList(result.Skills, NormalizeSkillId);
+            var disabledSkills = NormalizeSelectedSubset(result.DisabledSkills, skills, NormalizeSkillId);
+            var mcpServers = NormalizeStringList(result.McpServers, NormalizeMcpServerId);
+            var disabledMcpServers = NormalizeSelectedSubset(result.DisabledMcpServers, mcpServers, NormalizeMcpServerId);
             var definition = new DesktopAgentDefinition(
                 normalizedAgentId,
                 string.IsNullOrWhiteSpace(result.Name) ? normalizedAgentId : result.Name.Trim(),
                 result.Description?.Trim() ?? string.Empty,
                 mode,
                 toolPolicy,
-                NormalizeStringList(result.Skills, NormalizeSkillId),
-                NormalizeStringList(result.McpServers, NormalizeMcpServerId),
+                skills,
+                disabledSkills,
+                mcpServers,
+                disabledMcpServers,
                 NormalizeInstructions(result.Instructions),
                 GetAgentFilePath(normalizedAgentId),
                 IsBuiltInAgentId(normalizedAgentId),
@@ -194,6 +202,8 @@ public sealed class DesktopAgentStore
                 AgentRuntimeDefinition.SystemToolPolicy,
                 [],
                 [],
+                [],
+                [],
                 string.Empty,
                 filePath,
                 IsBuiltInAgentId(agentId),
@@ -226,7 +236,9 @@ public sealed class DesktopAgentStore
             parseResult.Mode,
             parseResult.ToolPolicy,
             parseResult.Skills,
+            parseResult.DisabledSkills,
             parseResult.McpServers,
+            parseResult.DisabledMcpServers,
             parseResult.Instructions,
             filePath,
             IsBuiltInAgentId(agentId),
@@ -245,6 +257,8 @@ public sealed class DesktopAgentStore
             AgentRuntimeDefinition.SystemToolPolicy,
             [],
             [],
+            [],
+            [],
             """
             You are the default build agent for SelfClaw.
             Work directly in the selected workspace, keep changes scoped, and verify important outcomes before you conclude.
@@ -259,6 +273,8 @@ public sealed class DesktopAgentStore
             "计划代理，先生成实施方案再按步骤执行",
             AgentExecutionMode.Plan,
             AgentRuntimeDefinition.SystemToolPolicy,
+            [],
+            [],
             [],
             [],
             """
@@ -300,8 +316,20 @@ public sealed class DesktopAgentStore
             builder.AppendLine($"  - {skillId}");
         }
 
+        builder.AppendLine("disabledSkills:");
+        foreach (var skillId in definition.DisabledSkills)
+        {
+            builder.AppendLine($"  - {skillId}");
+        }
+
         builder.AppendLine("mcpServers:");
         foreach (var serverId in definition.McpServers)
+        {
+            builder.AppendLine($"  - {serverId}");
+        }
+
+        builder.AppendLine("disabledMcpServers:");
+        foreach (var serverId in definition.DisabledMcpServers)
         {
             builder.AppendLine($"  - {serverId}");
         }
@@ -327,6 +355,8 @@ public sealed class DesktopAgentStore
                 AgentRuntimeDefinition.SystemToolPolicy,
                 [],
                 [],
+                [],
+                [],
                 string.Empty,
                 ["Agent file is empty; using default values."]);
         }
@@ -339,6 +369,8 @@ public sealed class DesktopAgentStore
                 string.Empty,
                 AgentExecutionMode.Direct,
                 AgentRuntimeDefinition.SystemToolPolicy,
+                [],
+                [],
                 [],
                 [],
                 normalized.Trim(),
@@ -355,6 +387,8 @@ public sealed class DesktopAgentStore
                 AgentRuntimeDefinition.SystemToolPolicy,
                 [],
                 [],
+                [],
+                [],
                 normalized.Trim(),
                 ["Front matter is incomplete; using default metadata."]);
         }
@@ -367,7 +401,9 @@ public sealed class DesktopAgentStore
         var mode = AgentExecutionMode.Direct;
         var toolPolicy = AgentRuntimeDefinition.SystemToolPolicy;
         var skills = new List<string>();
+        var disabledSkills = new List<string>();
         var mcpServers = new List<string>();
+        var disabledMcpServers = new List<string>();
         string? currentList = null;
 
         foreach (var rawLine in metadataBlock.Split('\n'))
@@ -396,12 +432,28 @@ public sealed class DesktopAgentStore
                         skills.Add(normalizedSkillId);
                     }
                 }
+                else if (currentList == "disabledSkills")
+                {
+                    var normalizedSkillId = NormalizeSkillId(listValue);
+                    if (!string.IsNullOrWhiteSpace(normalizedSkillId))
+                    {
+                        disabledSkills.Add(normalizedSkillId);
+                    }
+                }
                 else if (currentList == "mcpServers")
                 {
                     var normalizedServerId = NormalizeMcpServerId(listValue);
                     if (!string.IsNullOrWhiteSpace(normalizedServerId))
                     {
                         mcpServers.Add(normalizedServerId);
+                    }
+                }
+                else if (currentList == "disabledMcpServers")
+                {
+                    var normalizedServerId = NormalizeMcpServerId(listValue);
+                    if (!string.IsNullOrWhiteSpace(normalizedServerId))
+                    {
+                        disabledMcpServers.Add(normalizedServerId);
                     }
                 }
 
@@ -442,8 +494,14 @@ public sealed class DesktopAgentStore
                 case "skills":
                     currentList = "skills";
                     break;
+                case "disabledSkills":
+                    currentList = "disabledSkills";
+                    break;
                 case "mcpServers":
                     currentList = "mcpServers";
+                    break;
+                case "disabledMcpServers":
+                    currentList = "disabledMcpServers";
                     break;
                 default:
                     warnings.Add($"Ignoring unsupported front matter key '{key}'.");
@@ -451,19 +509,26 @@ public sealed class DesktopAgentStore
             }
         }
 
+        var normalizedSkills = skills
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var normalizedDisabledSkills = NormalizeSelectedSubset(disabledSkills, normalizedSkills, NormalizeSkillId);
+        var normalizedMcpServers = mcpServers
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var normalizedDisabledMcpServers = NormalizeSelectedSubset(disabledMcpServers, normalizedMcpServers, NormalizeMcpServerId);
+
         return new AgentParseResult(
             string.IsNullOrWhiteSpace(name) ? agentId : name.Trim(),
             description.Trim(),
             mode,
             toolPolicy,
-            skills
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
-            mcpServers
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
-                .ToArray(),
+            normalizedSkills,
+            normalizedDisabledSkills,
+            normalizedMcpServers,
+            normalizedDisabledMcpServers,
             NormalizeInstructions(instructions),
             warnings);
     }
@@ -510,6 +575,25 @@ public sealed class DesktopAgentStore
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+    private static IReadOnlyList<string> NormalizeSelectedSubset(
+        IEnumerable<string>? values,
+        IReadOnlyList<string> selectedValues,
+        Func<string?, string> normalize)
+    {
+        if (selectedValues.Count == 0)
+        {
+            return [];
+        }
+
+        var selected = selectedValues.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return (values ?? [])
+            .Select(normalize)
+            .Where(item => !string.IsNullOrWhiteSpace(item) && selected.Contains(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
 
     private HashSet<string> DiscoverInstalledSkillIds()
     {
@@ -601,7 +685,9 @@ public sealed class DesktopAgentStore
         AgentExecutionMode Mode,
         string ToolPolicy,
         IReadOnlyList<string> Skills,
+        IReadOnlyList<string> DisabledSkills,
         IReadOnlyList<string> McpServers,
+        IReadOnlyList<string> DisabledMcpServers,
         string Instructions,
         IReadOnlyList<string> Warnings);
 }

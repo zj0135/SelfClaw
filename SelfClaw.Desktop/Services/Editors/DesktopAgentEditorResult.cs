@@ -10,5 +10,7 @@ public sealed record DesktopAgentEditorResult(
     AgentExecutionMode Mode,
     string ToolPolicy,
     IReadOnlyList<string> Skills,
+    IReadOnlyList<string> DisabledSkills,
     IReadOnlyList<string> McpServers,
+    IReadOnlyList<string> DisabledMcpServers,
     string Instructions);

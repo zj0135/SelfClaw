@@ -21,7 +21,6 @@ import {
 	emptyWorkspace,
 	formatSamplingValue,
 	normalizeSamplingValue,
-	parseLineListText,
 	parseMcpArgsText,
 	parseMcpEnvText,
 	validateEditorDraft,
@@ -50,6 +49,8 @@ const state = reactive({
 	channels: [],
 	mcpServers: [],
 	skills: [],
+	availableMcpServers: [],
+	availableSkills: [],
 	agents: [],
 	selectedAgentId: null,
 	agentActivities: [],
@@ -683,6 +684,8 @@ function normalizeState() {
 	state.channels = state.channels || [];
 	state.mcpServers = state.mcpServers || [];
 	state.skills = state.skills || [];
+	state.availableMcpServers = state.availableMcpServers || [];
+	state.availableSkills = state.availableSkills || [];
 	state.agents = state.agents || [];
 	state.selectedAgentId = state.selectedAgentId || (state.agents[0]?.id ?? 'build');
 }
@@ -1673,6 +1676,15 @@ function saveEditor() {
 	}
 
 	if (editorState.kind === 'agent') {
+		const skills = (editorState.draft.skills || []).map((item) => item.id);
+		const disabledSkills = (editorState.draft.skills || [])
+			.filter((item) => item.enabled === false)
+			.map((item) => item.id);
+		const mcpServers = (editorState.draft.mcpServers || []).map((item) => item.id);
+		const disabledMcpServers = (editorState.draft.mcpServers || [])
+			.filter((item) => item.enabled === false)
+			.map((item) => item.id);
+
 		post({
 			type: 'save-agent',
 			originalAgentId: editorState.mode === 'edit' ? editorState.draft.originalAgentId || editorState.draft.agentId : null,
@@ -1681,8 +1693,10 @@ function saveEditor() {
 			description: editorState.draft.description.trim(),
 			mode: editorState.draft.mode === 'plan' ? 'plan' : 'direct',
 			toolPolicy: editorState.draft.toolPolicy || 'system',
-			skills: parseLineListText(editorState.draft.skillsText),
-			mcpServers: parseLineListText(editorState.draft.mcpServersText),
+			skills,
+			disabledSkills,
+			mcpServers,
+			disabledMcpServers,
 			instructions: editorState.draft.instructions,
 		});
 		return;
@@ -1822,7 +1836,6 @@ onUnmounted(() => {
 				@new-conversation="newConversation"
 				@open-settings="openSettings" @open-mcp-settings="openSettings('mcp')"
 				@edit-mcp-server="editMcpServer"
-				@set-mcp-server-enabled="setMcpServerEnabled" @set-skill-enabled="setSkillEnabled"
 				@select-agent="selectAgent" @edit-agent="editAgent"
 				@toggle-collapse="toggleLeftPaneCollapse" />
 
@@ -1900,7 +1913,7 @@ onUnmounted(() => {
 			:agents="state.agents" :selected-agent-id="state.selectedAgentId || ''"
 			:current-conversation-agent-id="selectedConversation?.agentId || ''"
 			:can-bind-conversation-agent="isProgrammingMode && Boolean(state.selectedConversationId)"
-			:mcp-servers="state.mcpServers" :channels="state.channels"
+			:mcp-servers="state.availableMcpServers" :channels="state.channels"
 			:selected-theme-label="selectedThemeLabel" :theme-options="state.themeOptions"
 			:selected-theme-id="state.selectedThemeId || 'system'" @close="closeSettings"
 			@select-section="selectSettingsSection" @panel-scroll="onSettingsPanelScroll"
@@ -1914,7 +1927,8 @@ onUnmounted(() => {
 			@toggle-channel="toggleChannelEnabled" @edit-channel="openEditor('channel', 'edit', $event)"
 			@select-theme="onThemeChange" />
 
-		<EditorModal :open="editorState.open" :editor="editorState" :profiles="state.profiles" @close="closeEditor"
+		<EditorModal :open="editorState.open" :editor="editorState" :profiles="state.profiles"
+			:available-skills="state.availableSkills" :available-mcp-servers="state.availableMcpServers" @close="closeEditor"
 			@pick-workspace-path="pickWorkspacePath" @fetch-models="fetchProfileModels" @save="saveEditor" />
 	</div>
 </template>

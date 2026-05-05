@@ -44,8 +44,8 @@ export const emptyAgent = () => ({
 	description: '',
 	mode: 'direct',
 	toolPolicy: 'system',
-	skillsText: '',
-	mcpServersText: '',
+	skills: [],
+	mcpServers: [],
 	instructions: '',
 	isBuiltIn: false,
 	warnings: [],
@@ -128,10 +128,23 @@ export function createMcpServerDraft(server) {
 	};
 }
 
-export function formatLineList(values) {
-	return (Array.isArray(values) ? values : [])
-		.filter((item) => typeof item === 'string' && item.trim())
-		.join('\n');
+export function createAgentServiceBindings(values, disabledValues = []) {
+	const disabled = new Set(
+		(Array.isArray(disabledValues) ? disabledValues : [])
+			.filter((item) => typeof item === 'string' && item.trim())
+			.map((item) => item.trim())
+	);
+
+	return [...new Set(
+		(Array.isArray(values) ? values : [])
+			.filter((item) => typeof item === 'string' && item.trim())
+			.map((item) => item.trim())
+	)]
+		.sort((left, right) => left.localeCompare(right))
+		.map((id) => ({
+			id,
+			enabled: !disabled.has(id),
+		}));
 }
 
 export function createAgentDraft(agent) {
@@ -142,8 +155,8 @@ export function createAgentDraft(agent) {
 		description: agent?.description || '',
 		mode: agent?.mode || 'direct',
 		toolPolicy: agent?.toolPolicy || 'system',
-		skillsText: formatLineList(agent?.skills || []),
-		mcpServersText: formatLineList(agent?.mcpServers || []),
+		skills: createAgentServiceBindings(agent?.skills || [], agent?.disabledSkills || []),
+		mcpServers: createAgentServiceBindings(agent?.mcpServers || [], agent?.disabledMcpServers || []),
 		instructions: agent?.instructions || '',
 		isBuiltIn: Boolean(agent?.isBuiltIn),
 		warnings: Array.isArray(agent?.warnings) ? [...agent.warnings] : [],
@@ -155,15 +168,6 @@ export function parseMcpArgsText(value) {
 		.split(/\r?\n/)
 		.map((item) => item.trim())
 		.filter(Boolean);
-}
-
-export function parseLineListText(value) {
-	return [...new Set(
-		String(value || '')
-			.split(/\r?\n/)
-			.map((item) => item.trim())
-			.filter(Boolean)
-	)];
 }
 
 export function parseMcpEnvText(value) {

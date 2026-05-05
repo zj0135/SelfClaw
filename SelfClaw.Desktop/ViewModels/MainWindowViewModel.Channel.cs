@@ -155,7 +155,19 @@ public sealed partial class MainWindowViewModel
         return Task.CompletedTask;
     }
 
-    private IReadOnlyList<TranscriptMcpServerItem> BuildTranscriptMcpServers()
+    private IReadOnlyList<TranscriptMcpServerItem> BuildTranscriptMcpServers(
+        IReadOnlyList<TranscriptMcpServerItem>? availableServers = null)
+    {
+        var selectedServerIds = ResolveSelectedAgent()
+            .EnabledMcpServers
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return (availableServers ?? BuildAvailableTranscriptMcpServers())
+            .Where(item => item.Enabled && selectedServerIds.Contains(item.Id))
+            .ToArray();
+    }
+
+    private IReadOnlyList<TranscriptMcpServerItem> BuildAvailableTranscriptMcpServers()
         => (_desktopSettings.McpServers ?? new Dictionary<string, DesktopMcpServerConfiguration>())
             .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
             .Select(item =>
@@ -176,7 +188,19 @@ public sealed partial class MainWindowViewModel
             })
             .ToArray();
 
-    private IReadOnlyList<TranscriptSkillItem> BuildTranscriptSkills()
+    private IReadOnlyList<TranscriptSkillItem> BuildTranscriptSkills(
+        IReadOnlyList<TranscriptSkillItem>? availableSkills = null)
+    {
+        var selectedSkillIds = ResolveSelectedAgent()
+            .EnabledSkills
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return (availableSkills ?? BuildAvailableTranscriptSkills())
+            .Where(item => item.Enabled && selectedSkillIds.Contains(item.Id))
+            .ToArray();
+    }
+
+    private IReadOnlyList<TranscriptSkillItem> BuildAvailableTranscriptSkills()
     {
         var skillsRoot = Path.Combine(_storagePaths.AppDataDirectory, "skills");
         if (!Directory.Exists(skillsRoot))
