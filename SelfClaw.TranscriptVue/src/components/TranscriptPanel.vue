@@ -45,8 +45,53 @@ defineProps({
 	},
 });
 
-const emit = defineEmits(['scroll']);
+const emit = defineEmits(['scroll', 'preview-image']);
 const scrollEl = ref(null);
+
+function resolvePreviewImage(target) {
+	if (!(target instanceof Element)) {
+		return null;
+	}
+
+	const image = target.closest('.message-attachment-image, .body.body-segment img, .thinking-markdown img');
+	if (!(image instanceof HTMLImageElement)) {
+		return null;
+	}
+
+	const src = image.currentSrc || image.src || '';
+	if (!src) {
+		return null;
+	}
+
+	return {
+		src,
+		alt: image.getAttribute('alt') || '',
+	};
+}
+
+function onTranscriptClick(event) {
+	const previewImage = resolvePreviewImage(event.target);
+	if (!previewImage) {
+		return;
+	}
+
+	event.preventDefault();
+	emit('preview-image', previewImage);
+}
+
+function onTranscriptKeydown(event) {
+	if (event.key !== 'Enter' && event.key !== ' ') {
+		return;
+	}
+
+	const previewImage = resolvePreviewImage(event.target);
+	if (!previewImage) {
+		return;
+	}
+
+	event.preventDefault();
+	emit('preview-image', previewImage);
+}
 
 defineExpose({
 	getScrollEl: () => scrollEl.value,
@@ -65,6 +110,8 @@ defineExpose({
 			'with-floating-plan-collapsed': showPlanPanel && planPanelCollapsed,
 		}"
 		@scroll="emit('scroll', $event)"
+		@click="onTranscriptClick"
+		@keydown="onTranscriptKeydown"
 	>
 			<TranscriptGraphView
 				v-if="visualizationEnabled"

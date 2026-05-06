@@ -68,6 +68,7 @@ const settingsOpen = ref(false);
 const activeSettingsSection = ref('profile');
 const settingsFeedback = ref(null);
 const settingsPanelScrollTop = ref(0);
+const imagePreview = ref(null);
 const openConversationMenuId = ref(null);
 const openStepSections = ref(new Map([['runtime-steps', true]]));
 
@@ -1096,6 +1097,12 @@ function handleWebViewMessage(event) {
 }
 
 function onDocumentKeydown(event) {
+	if (event.key === 'Escape' && imagePreview.value) {
+		event.preventDefault();
+		closeImagePreview();
+		return;
+	}
+
 	if (event.key === 'Escape' && editorState.open) {
 		event.preventDefault();
 		closeEditor();
@@ -1111,6 +1118,22 @@ function onDocumentKeydown(event) {
 	if (event.key === 'Escape' && state.isBusy) {
 		post({ type: 'stop-generation' });
 	}
+}
+
+function openImagePreview(payload) {
+	const src = String(payload?.src || '').trim();
+	if (!src) {
+		return;
+	}
+
+	imagePreview.value = {
+		src,
+		alt: String(payload?.alt || '').trim(),
+	};
+}
+
+function closeImagePreview() {
+	imagePreview.value = null;
 }
 
 function onComposerInput(event) {
@@ -1855,7 +1878,8 @@ onUnmounted(() => {
 					:selected-conversation-mode-id="state.selectedConversationModeId"
 					:selected-profile-model="state.selectedProfileModel || ''"
 					:agent-activities="state.agentActivities" :show-plan-panel="showPlanPanel"
-					:plan-panel-collapsed="planPanelCollapsed" @scroll="onTranscriptScroll" />
+					:plan-panel-collapsed="planPanelCollapsed" @scroll="onTranscriptScroll"
+					@preview-image="openImagePreview" />
 
 				<ComposerPanel ref="composerPanelRef" :show-plan-panel="showPlanPanel" :plan-panel="planPanel"
 					:plan-steps="planSteps" :plan-panel-collapsed="planPanelCollapsed"
@@ -1930,6 +1954,17 @@ onUnmounted(() => {
 		<EditorModal :open="editorState.open" :editor="editorState" :profiles="state.profiles"
 			:available-skills="state.availableSkills" :available-mcp-servers="state.availableMcpServers" @close="closeEditor"
 			@pick-workspace-path="pickWorkspacePath" @fetch-models="fetchProfileModels" @save="saveEditor" />
+
+		<div v-if="imagePreview" class="image-preview-backdrop" role="dialog" aria-modal="true"
+			:aria-label="imagePreview.alt ? `Preview ${imagePreview.alt}` : 'Image preview'" @click.self="closeImagePreview">
+			<section class="image-preview-modal">
+				<button class="image-preview-close" type="button" aria-label="Close preview" title="Close preview"
+					@click="closeImagePreview">
+					×
+				</button>
+				<img class="image-preview-full" :src="imagePreview.src" :alt="imagePreview.alt || 'Preview image'" />
+			</section>
+		</div>
 	</div>
 </template>
 

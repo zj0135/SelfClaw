@@ -144,13 +144,31 @@
 .message-attachment-image {
 	display: block;
 	width: 100%;
-	aspect-ratio: 4 / 3;
-	object-fit: cover;
+	max-height: min(280px, 42vh);
+	height: auto;
+	object-fit: contain;
+	object-position: center;
 	background: var(--panel-muted);
+	cursor: zoom-in;
 }
 
 .message-attachment-image.missing {
+	aspect-ratio: 4 / 3;
+	min-height: 128px;
 	background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 46%), var(--panel-muted);
+}
+
+.body.body-segment img,
+.thinking-markdown img {
+	display: block;
+	max-width: min(100%, 560px);
+	max-height: min(420px, 52vh);
+	width: auto;
+	height: auto;
+	margin: 10px 0;
+	border-radius: 10px;
+	object-fit: contain;
+	cursor: zoom-in;
 }
 
 .message-attachment figcaption {
