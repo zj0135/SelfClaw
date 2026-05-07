@@ -17,7 +17,7 @@ internal sealed class ToolInvocationMetadata
 
     public required Func<string, object?> BuildDeniedResult { get; init; }
 
-    public required Func<object?, string> SummarizeResult { get; init; }
+    public required Func<object?, JsonSerializerOptions, string> SummarizeResult { get; init; }
 
     public required Func<object?, JsonSerializerOptions, string?> DescribeResult { get; init; }
 
@@ -38,10 +38,10 @@ internal sealed class ToolInvocationMetadata
             BuildDeniedResult = buildDeniedResult is null
                 ? _ => default(T)
                 : argumentsJson => buildDeniedResult(argumentsJson),
-            SummarizeResult = result => summarizeResult(CastResult<T>(result)),
+            SummarizeResult = (result, serializerOptions) => summarizeResult(CastResult<T>(result, serializerOptions)),
             DescribeResult = describeResult is null
                 ? static (_, _) => null
-                : (result, _) => describeResult(CastResult<T>(result))
+                : (result, serializerOptions) => describeResult(CastResult<T>(result, serializerOptions))
         };
 
     public static ToolInvocationMetadata CreateMcp(
@@ -63,7 +63,7 @@ internal sealed class ToolInvocationMetadata
                 server = server.Id,
                 tool = originalToolName
             }),
-            SummarizeResult = _ => $"Completed MCP tool '{server.EffectiveDisplayName}/{originalToolName}'.",
+            SummarizeResult = (_, _) => $"Completed MCP tool '{server.EffectiveDisplayName}/{originalToolName}'.",
             DescribeResult = (result, serializerOptions) => SerializeResult(result, serializerOptions)
         };
 
@@ -95,7 +95,7 @@ internal sealed class ToolInvocationMetadata
         }
     }
 
-    private static T CastResult<T>(object? result)
+    private static T CastResult<T>(object? result, JsonSerializerOptions serializerOptions)
     {
         if (result is T typed)
         {
@@ -105,6 +105,29 @@ internal sealed class ToolInvocationMetadata
         if (result is null)
         {
             return default!;
+        }
+
+        if (result is JsonElement element)
+        {
+            if (element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            {
+                return default!;
+            }
+
+            try
+            {
+                var deserialized = element.Deserialize<T>(serializerOptions);
+                if (deserialized is not null)
+                {
+                    return deserialized;
+                }
+            }
+            catch (Exception exception)
+            {
+                throw new InvalidCastException(
+                    $"Expected tool result of type '{typeof(T).FullName}', but received '{result.GetType().FullName}'.",
+                    exception);
+            }
         }
 
         throw new InvalidCastException($"Expected tool result of type '{typeof(T).FullName}', but received '{result.GetType().FullName}'.");

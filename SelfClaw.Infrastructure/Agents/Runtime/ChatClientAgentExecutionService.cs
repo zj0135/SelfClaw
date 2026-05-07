@@ -187,7 +187,7 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
                 if (!approved)
                 {
                     var deniedResult = metadata.BuildDeniedResult(argumentsJson);
-                    request.ToolObserver.Cancel(record, metadata.SummarizeResult(deniedResult));
+                    request.ToolObserver.Cancel(record, metadata.SummarizeResult(deniedResult, context.Function.JsonSerializerOptions));
                     return deniedResult;
                 }
 
@@ -197,7 +197,7 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
             }
 
             var result = await context.Function.InvokeAsync(context.Arguments, cancellationToken);
-            var summary = metadata.SummarizeResult(result);
+            var summary = metadata.SummarizeResult(result, context.Function.JsonSerializerOptions);
             var description = metadata.DescribeResult(result, context.Function.JsonSerializerOptions);
             if (string.IsNullOrWhiteSpace(description))
             {
