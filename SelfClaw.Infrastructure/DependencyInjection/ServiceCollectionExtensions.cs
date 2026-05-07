@@ -1,7 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
-using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Infrastructure.Agents.Runtime.Compaction;
+using SelfClaw.Infrastructure.Agents.Runtime.Context;
+using SelfClaw.Infrastructure.Agents.Runtime.Execution;
+using SelfClaw.Infrastructure.Agents.Runtime.Mcp;
+using SelfClaw.Infrastructure.Agents.Runtime.Orchestration;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;

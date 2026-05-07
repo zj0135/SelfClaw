@@ -416,7 +416,6 @@ html[data-theme='light'] .field-combobox-toggle:hover {
 	background: #eef2f6;
 	border-color: #cbd5e1;
 	color: #182230;
-	transform: none;
 }
 
 html[data-theme='light'] .primary-btn,
@@ -455,4 +454,3 @@ html[data-theme='light'] .toggle-input:checked + .toggle-switch::after {
 html[data-theme='light'] .settings-feedback {
 	border-radius: 8px;
 }
-

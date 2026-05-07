@@ -4,7 +4,8 @@ using Microsoft.Extensions.AI;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Infrastructure.Agents.Runtime.Execution;
+using SelfClaw.Infrastructure.Agents.Runtime.Orchestration;
 using SelfClaw.Infrastructure.Tools.Transcript;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Runtime;

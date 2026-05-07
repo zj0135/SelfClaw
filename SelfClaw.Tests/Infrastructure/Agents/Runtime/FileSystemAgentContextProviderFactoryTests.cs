@@ -4,7 +4,7 @@ using FluentAssertions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Infrastructure.Agents.Runtime.Context;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Runtime;

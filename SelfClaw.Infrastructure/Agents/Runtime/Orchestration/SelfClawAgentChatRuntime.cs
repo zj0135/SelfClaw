@@ -10,11 +10,15 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Infrastructure.Agents.Runtime.Context;
+using SelfClaw.Infrastructure.Agents.Runtime.Execution;
+using SelfClaw.Infrastructure.Agents.Runtime.Mcp;
+using SelfClaw.Infrastructure.Agents.Runtime.Tools;
 using SelfClaw.Infrastructure.Agents.Tools;
 using SelfClaw.Infrastructure.Tools.Workspace;
 using SelfClaw.Infrastructure.Tools.Transcript;
 
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Orchestration;
 
 public sealed partial class SelfClawAgentChatRuntime : IAgentChatRuntime
 {

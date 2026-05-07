@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Options;
 
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Context;
 
 internal sealed class FileSystemAgentContextProviderFactory : IAgentContextProviderFactory
 {

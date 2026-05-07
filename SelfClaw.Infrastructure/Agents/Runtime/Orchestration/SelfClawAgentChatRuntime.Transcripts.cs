@@ -4,7 +4,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Tools.Transcript;
 
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Orchestration;
 
 public sealed partial class SelfClawAgentChatRuntime
 {

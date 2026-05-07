@@ -3,7 +3,7 @@ using System.Threading.Channels;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Tools;
 
 internal sealed class RuntimeToolObserver
 {

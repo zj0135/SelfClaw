@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Orchestration;
 
 public sealed partial class SelfClawAgentChatRuntime
 {

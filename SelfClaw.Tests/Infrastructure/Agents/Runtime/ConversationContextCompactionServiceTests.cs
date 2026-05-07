@@ -1,7 +1,9 @@
 using Microsoft.Extensions.AI;
 using FluentAssertions;
 using SelfClaw.Core.Models;
-using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Infrastructure.Agents.Runtime.Compaction;
+using SelfClaw.Infrastructure.Agents.Runtime.Execution;
+using SelfClaw.Infrastructure.Agents.Runtime.Orchestration;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;

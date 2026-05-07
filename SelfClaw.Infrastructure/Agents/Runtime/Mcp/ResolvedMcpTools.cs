@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
+using SelfClaw.Infrastructure.Agents.Runtime.Tools;
 
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Mcp;
 
 internal sealed class ResolvedMcpTools : IAsyncDisposable
 {

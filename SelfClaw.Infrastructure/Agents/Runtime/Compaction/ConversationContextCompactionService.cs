@@ -1,17 +1,15 @@
-using System.Text;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Infrastructure.Agents.Runtime.Execution;
 using SelfClaw.Infrastructure.Tools.Transcript;
 
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Compaction;
 
 internal sealed class ConversationContextCompactionService : IConversationContextCompactionService
 {
-    private const int MessageOverheadTokens = 4;
-    private const int ImageMetadataTokens = 32;
     private const int MinimumRecentMessages = 6;
     private const double RecentTailFraction = 0.25d;
     private const string CompactorName = "ContextCompactor";
@@ -55,7 +53,7 @@ internal sealed class ConversationContextCompactionService : IConversationContex
         }
 
         var latestUserMessage = promptMessages.LastOrDefault(message => message.Role == MessageRole.User);
-        if (latestUserMessage is not null && EstimateMessageTokens(latestUserMessage) > contextWindow)
+        if (latestUserMessage is not null && ConversationContextTokens.EstimateMessageTokens(latestUserMessage) > contextWindow)
         {
             throw new InvalidOperationException(
                 "The latest user message is larger than the configured model_context_window and cannot be sent safely.");
@@ -64,9 +62,9 @@ internal sealed class ConversationContextCompactionService : IConversationContex
         var existingSummary = await _conversationRepository.GetConversationContextSummaryAsync(conversationId, cancellationToken);
         var uncoveredMessages = existingSummary is null
             ? promptMessages
-            : promptMessages.Where(message => !IsCoveredBySummary(message, existingSummary)).ToArray();
-        var localEffectiveTokenEstimate = EstimateEffectiveTokens(existingSummary, uncoveredMessages);
-        var measuredEffectiveTokenEstimate = EstimateMeasuredEffectiveTokens(existingSummary, promptMessages);
+            : promptMessages.Where(message => !ConversationContextTokens.IsCoveredBySummary(message, existingSummary)).ToArray();
+        var localEffectiveTokenEstimate = ConversationContextTokens.EstimateEffectiveTokens(existingSummary, uncoveredMessages);
+        var measuredEffectiveTokenEstimate = ConversationContextTokens.EstimateMeasuredEffectiveTokens(existingSummary, promptMessages);
         var effectiveTokenEstimate = Math.Max(localEffectiveTokenEstimate, measuredEffectiveTokenEstimate);
 
         if (effectiveTokenEstimate < triggerLimit)
@@ -81,7 +79,7 @@ internal sealed class ConversationContextCompactionService : IConversationContex
         var recentTailIds = recentTail.Select(message => message.Id).ToHashSet();
         var historyToSummarize = promptMessages
             .Where(message => !recentTailIds.Contains(message.Id))
-            .Where(message => existingSummary is null || !IsCoveredBySummary(message, existingSummary))
+            .Where(message => existingSummary is null || !ConversationContextTokens.IsCoveredBySummary(message, existingSummary))
             .ToArray();
 
         if (historyToSummarize.Length == 0 && existingSummary is not null)
@@ -192,8 +190,8 @@ internal sealed class ConversationContextCompactionService : IConversationContex
             runningSummary.Trim(),
             coveredThrough?.Id ?? existingSummary?.CoveredThroughMessageId,
             coveredThrough?.CreatedAtUtc ?? existingSummary?.CoveredThroughMessageCreatedAtUtc,
-            Math.Max(existingSummary?.SourceTokenEstimate ?? 0, 0) + historyToSummarize.Sum(EstimateMessageTokens),
-            EstimateTextTokens(runningSummary),
+            Math.Max(existingSummary?.SourceTokenEstimate ?? 0, 0) + historyToSummarize.Sum(ConversationContextTokens.EstimateMessageTokens),
+            ConversationContextTokens.EstimateTextTokens(runningSummary),
             existingSummary?.CreatedAtUtc ?? now,
             now);
     }
@@ -205,14 +203,14 @@ internal sealed class ConversationContextCompactionService : IConversationContex
         IReadOnlyList<MessageRecord> batch,
         CancellationToken cancellationToken)
     {
-        var payload = BuildCompactionPayload(existingSummary, batch);
+        var payload = ConversationCompactionPromptBuilder.BuildPayload(existingSummary, batch);
         var result = await _agentExecutionService.RunAsync(
             new AgentExecutionRequest(
                 profile,
                 apiKey,
                 CompactorName,
                 CompactorDescription,
-                BuildCompactionInstructions(),
+                ConversationCompactionPromptBuilder.BuildInstructions(),
                 [new ChatMessage(ChatRole.User, payload)],
                 [],
                 ContextProviders: null,
@@ -221,71 +219,6 @@ internal sealed class ConversationContextCompactionService : IConversationContex
             cancellationToken);
 
         return result.FinalMarkdown;
-    }
-
-    private static string BuildCompactionInstructions()
-        => """
-Summarize older conversation history for a future assistant prompt.
-
-Requirements:
-- Preserve user goals, decisions, constraints, unresolved questions, important file paths, commands, tool outcomes mentioned in assistant content, and current task state.
-- Keep named agents, roles, channel context, and plan decisions when present.
-- Do not invent facts or claim tool access.
-- Do not include hidden reasoning or transcript mechanics.
-- Prefer compact Markdown with short sections.
-- Target roughly 800-1200 tokens unless the source requires more.
-""";
-
-    private static string BuildCompactionPayload(string? existingSummary, IReadOnlyList<MessageRecord> batch)
-    {
-        var builder = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(existingSummary))
-        {
-            builder.AppendLine("Existing compacted summary:");
-            builder.AppendLine(existingSummary.Trim());
-            builder.AppendLine();
-        }
-
-        builder.AppendLine("New conversation history to merge into the compacted summary:");
-        foreach (var message in batch)
-        {
-            builder.AppendLine();
-            builder.AppendLine(FormatMessageForSummary(message));
-        }
-
-        return builder.ToString();
-    }
-
-    private static string FormatMessageForSummary(MessageRecord message)
-    {
-        var role = message.Role.ToString();
-        var speaker = message.Role == MessageRole.Assistant && !string.IsNullOrWhiteSpace(message.AgentName)
-            ? string.IsNullOrWhiteSpace(message.AgentRole)
-                ? message.AgentName
-                : $"{message.AgentName} ({message.AgentRole})"
-            : role;
-
-        var content = message.Role == MessageRole.Assistant
-            ? AssistantMessageSegmenter.Split(message.MarkdownContent).ContentMarkdown
-            : message.MarkdownContent;
-
-        var builder = new StringBuilder();
-        builder.AppendLine($"[{message.CreatedAtUtc:O}] {speaker}:");
-        if (!string.IsNullOrWhiteSpace(content))
-        {
-            builder.AppendLine(content.Trim());
-        }
-
-        if (message.Attachments is { Count: > 0 } attachments)
-        {
-            foreach (var attachment in attachments)
-            {
-                builder.AppendLine(
-                    $"- Attachment metadata: {attachment.Kind}, {attachment.FileName}, {attachment.MediaType}, {attachment.ByteLength} bytes");
-            }
-        }
-
-        return builder.ToString().TrimEnd();
     }
 
     private static IReadOnlyList<IReadOnlyList<MessageRecord>> CreateBatches(
@@ -302,7 +235,7 @@ Requirements:
         var currentTokens = 0;
         foreach (var message in messages)
         {
-            var messageTokens = EstimateMessageTokens(message);
+            var messageTokens = ConversationContextTokens.EstimateMessageTokens(message);
             if (current.Count > 0 && currentTokens + messageTokens > batchTokenLimit)
             {
                 batches.Add(current.ToArray());
@@ -339,7 +272,7 @@ Requirements:
             }
 
             selected.Add(message);
-            selectedTokens += EstimateMessageTokens(message);
+            selectedTokens += ConversationContextTokens.EstimateMessageTokens(message);
         }
 
         selected.Reverse();
@@ -353,7 +286,7 @@ Requirements:
     {
         var trimmed = tail.ToList();
         var latestUserMessage = trimmed.LastOrDefault(message => message.Role == MessageRole.User);
-        while (EstimateEffectiveTokens(summary, trimmed) > contextWindow && trimmed.Count > 1)
+        while (ConversationContextTokens.EstimateEffectiveTokens(summary, trimmed) > contextWindow && trimmed.Count > 1)
         {
             var removeIndex = trimmed.FindIndex(message => latestUserMessage is null || message.Id != latestUserMessage.Id);
             if (removeIndex < 0)
@@ -373,18 +306,18 @@ Requirements:
         int contextWindow)
     {
         var fittedTail = TrimTailToFit(summary, tail, contextWindow);
-        var tailTokens = fittedTail.Sum(EstimateMessageTokens);
-        var availableSummaryTokens = Math.Max(1, contextWindow - tailTokens - MessageOverheadTokens);
-        if (EstimateTextTokens(summary.SummaryMarkdown) <= availableSummaryTokens)
+        var tailTokens = fittedTail.Sum(ConversationContextTokens.EstimateMessageTokens);
+        var availableSummaryTokens = Math.Max(1, contextWindow - tailTokens - ConversationContextTokens.MessageOverheadTokens);
+        if (ConversationContextTokens.EstimateTextTokens(summary.SummaryMarkdown) <= availableSummaryTokens)
         {
             return summary;
         }
 
-        var truncated = TruncateToEstimatedTokens(summary.SummaryMarkdown, availableSummaryTokens);
+        var truncated = ConversationContextTokens.TruncateToEstimatedTokens(summary.SummaryMarkdown, availableSummaryTokens);
         return summary with
         {
             SummaryMarkdown = truncated,
-            SummaryTokenEstimate = EstimateTextTokens(truncated),
+            SummaryTokenEstimate = ConversationContextTokens.EstimateTextTokens(truncated),
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
     }
@@ -415,11 +348,11 @@ Requirements:
         IReadOnlyList<MessageRecord> tail,
         int contextWindow)
     {
-        var tailTokens = tail.Sum(EstimateMessageTokens);
-        var availableSummaryTokens = Math.Max(1, contextWindow - tailTokens - MessageOverheadTokens);
-        var summaryMarkdown = EstimateTextTokens(summary.SummaryMarkdown) <= availableSummaryTokens
+        var tailTokens = tail.Sum(ConversationContextTokens.EstimateMessageTokens);
+        var availableSummaryTokens = Math.Max(1, contextWindow - tailTokens - ConversationContextTokens.MessageOverheadTokens);
+        var summaryMarkdown = ConversationContextTokens.EstimateTextTokens(summary.SummaryMarkdown) <= availableSummaryTokens
             ? summary.SummaryMarkdown
-            : TruncateToEstimatedTokens(summary.SummaryMarkdown, availableSummaryTokens);
+            : ConversationContextTokens.TruncateToEstimatedTokens(summary.SummaryMarkdown, availableSummaryTokens);
         var content = $"{SyntheticSummaryPrefix}\n\n{summaryMarkdown.Trim()}";
         return new MessageRecord(
             Guid.NewGuid(),
@@ -429,111 +362,6 @@ Requirements:
             MessageStatus.Completed,
             summary.UpdatedAtUtc,
             summary.UpdatedAtUtc);
-    }
-
-    private static bool IsCoveredBySummary(MessageRecord message, ConversationContextSummaryRecord summary)
-    {
-        if (summary.CoveredThroughMessageCreatedAtUtc is not DateTimeOffset coveredAt)
-        {
-            return false;
-        }
-
-        return message.CreatedAtUtc <= coveredAt;
-    }
-
-    private static int EstimateEffectiveTokens(
-        ConversationContextSummaryRecord? summary,
-        IReadOnlyList<MessageRecord> messages)
-    {
-        var total = messages.Sum(EstimateMessageTokens);
-        if (summary is not null && !string.IsNullOrWhiteSpace(summary.SummaryMarkdown))
-        {
-            total += EstimateTextTokens(summary.SummaryMarkdown) + MessageOverheadTokens;
-        }
-
-        return Math.Max(0, total);
-    }
-
-    private static int EstimateMeasuredEffectiveTokens(
-        ConversationContextSummaryRecord? summary,
-        IReadOnlyList<MessageRecord> promptMessages)
-    {
-        var measuredIndex = -1;
-        for (var index = promptMessages.Count - 1; index >= 0; index--)
-        {
-            if (promptMessages[index].Role == MessageRole.Assistant && promptMessages[index].InputTokens is > 0)
-            {
-                measuredIndex = index;
-                break;
-            }
-        }
-
-        if (measuredIndex < 0)
-        {
-            return 0;
-        }
-
-        var measuredMessage = promptMessages[measuredIndex];
-        if (summary is not null && IsCoveredBySummary(measuredMessage, summary))
-        {
-            return 0;
-        }
-
-        var total = Math.Max(0L, measuredMessage.InputTokens!.Value);
-        total += measuredMessage.OutputTokens is > 0
-            ? measuredMessage.OutputTokens.Value
-            : EstimateMessageTokens(measuredMessage);
-
-        for (var index = measuredIndex + 1; index < promptMessages.Count; index++)
-        {
-            var message = promptMessages[index];
-            if (summary is not null && IsCoveredBySummary(message, summary))
-            {
-                continue;
-            }
-
-            total += EstimateMessageTokens(message);
-        }
-
-        return total > int.MaxValue ? int.MaxValue : (int)Math.Max(0L, total);
-    }
-
-    private static int EstimateMessageTokens(MessageRecord message)
-    {
-        var content = message.Role == MessageRole.Assistant
-            ? AssistantMessageSegmenter.Split(message.MarkdownContent).ContentMarkdown
-            : message.MarkdownContent;
-        var attachmentTokens = message.Attachments?.Count * ImageMetadataTokens ?? 0;
-        var speakerTokens = EstimateTextTokens(message.AgentName) + EstimateTextTokens(message.AgentRole);
-        return MessageOverheadTokens + EstimateTextTokens(content) + attachmentTokens + speakerTokens;
-    }
-
-    private static int EstimateTextTokens(string? text)
-    {
-        if (string.IsNullOrEmpty(text))
-        {
-            return 0;
-        }
-
-        return Math.Max(1, (int)Math.Ceiling(text.Length / 4d));
-    }
-
-    private static string TruncateToEstimatedTokens(string text, int maxTokens)
-    {
-        if (maxTokens <= 0)
-        {
-            return string.Empty;
-        }
-
-        var maxChars = Math.Max(1, maxTokens * 4);
-        if (text.Length <= maxChars)
-        {
-            return text;
-        }
-
-        const string suffix = "\n\n[Compacted summary truncated to fit model_context_window.]";
-        var contentChars = Math.Max(1, maxChars - suffix.Length);
-        return text[..contentChars].TrimEnd() + suffix;
     }
 
     private static bool ShouldIncludeInPrompt(MessageRecord message)

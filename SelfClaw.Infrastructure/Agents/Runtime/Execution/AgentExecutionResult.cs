@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Execution;
 
 internal sealed record AgentExecutionResult(
     string FinalMarkdown,

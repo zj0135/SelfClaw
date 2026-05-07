@@ -9,9 +9,10 @@ using OpenAI;
 using OpenAIChatClient = OpenAI.Chat.ChatClient;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Infrastructure.Agents.Runtime.Tools;
 using SelfClaw.Infrastructure.Tools.Transcript;
 
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Execution;
 
 internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
 {

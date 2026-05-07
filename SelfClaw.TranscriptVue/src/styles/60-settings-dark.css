@@ -175,7 +175,6 @@ html:not([data-theme='light']) .field-combobox-toggle:hover {
 	background: #151922;
 	border-color: #2b3240;
 	color: #eef1f6;
-	transform: none;
 }
 
 html:not([data-theme='light']) .primary-btn,
@@ -234,4 +233,3 @@ html:not([data-theme='light']) .settings-feedback.error {
 	border-color: rgba(204, 103, 116, 0.38);
 	color: #ffc0c8;
 }
-

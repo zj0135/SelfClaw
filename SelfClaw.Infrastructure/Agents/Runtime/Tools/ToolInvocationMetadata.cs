@@ -1,7 +1,7 @@
 using System.Text.Json;
 using SelfClaw.Core.Runtime;
 
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Tools;
 
 internal sealed class ToolInvocationMetadata
 {

@@ -2,8 +2,11 @@
 using Microsoft.Extensions.AI;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Infrastructure.Agents.Runtime.Context;
+using SelfClaw.Infrastructure.Agents.Runtime.Mcp;
+using SelfClaw.Infrastructure.Agents.Runtime.Tools;
 
-namespace SelfClaw.Infrastructure.Agents.Runtime;
+namespace SelfClaw.Infrastructure.Agents.Runtime.Orchestration;
 
 public sealed partial class SelfClawAgentChatRuntime
 {

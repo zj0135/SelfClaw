@@ -40,47 +40,53 @@ Main projects:
 
 ```text
 SelfClaw/
-├── AGENTS.md
-├── SelfClaw.slnx
-├── SelfClaw.Core/
-│   ├── Interfaces/
-│   ├── Models/
-│   └── Runtime/
-├── SelfClaw.Infrastructure/
-│   ├── Agents/
-│   │   ├── Runtime/
-│   │   └── Tools/
-│   ├── Channels/
-│   │   └── Feishu/
-│   │       ├── Contracts/
-│   │       ├── Enums/
-│   │       ├── Helpers/
-│   │       ├── Models/
-│   │       └── Protocol/
-│   ├── Data/
-│   │   └── Sqlite/
-│   │       └── Repositories/
-│   ├── DependencyInjection/
-│   ├── Options/
-│   ├── Security/
-│   └── Tools/
-│       ├── Transcript/
-│       └── Workspace/
-├── SelfClaw.Desktop/
-│   ├── Services/
-│   │   ├── Channels/
-│   │   ├── Settings/
-│   │   ├── Tools/
-│   │   └── Transcript/
-│   ├── ViewModels/
-│   └── Assets/
-│       └── TranscriptVue/
-├── SelfClaw.TranscriptVue/
-│   ├── src/
-│   ├── package.json
-│   └── vite.config.js
-└── SelfClaw.Tests/
-    └── Infrastructure/
+|-- AGENTS.md
+|-- SelfClaw.slnx
+|-- SelfClaw.Core/
+|   |-- Interfaces/
+|   |-- Models/
+|   `-- Runtime/
+|-- SelfClaw.Infrastructure/
+|   |-- Agents/
+|   |   |-- Runtime/
+|   |   |   |-- Compaction/
+|   |   |   |-- Context/
+|   |   |   |-- Execution/
+|   |   |   |-- Mcp/
+|   |   |   |-- Orchestration/
+|   |   |   `-- Tools/
+|   |   `-- Tools/
+|   |-- Channels/
+|   |   `-- Feishu/
+|   |       |-- Contracts/
+|   |       |-- Enums/
+|   |       |-- Helpers/
+|   |       |-- Models/
+|   |       `-- Protocol/
+|   |-- Data/
+|   |   `-- Sqlite/
+|   |       `-- Repositories/
+|   |-- DependencyInjection/
+|   |-- Options/
+|   |-- Security/
+|   `-- Tools/
+|       |-- Transcript/
+|       `-- Workspace/
+|-- SelfClaw.Desktop/
+|   |-- Services/
+|   |   |-- Channels/
+|   |   |-- Settings/
+|   |   |-- Tools/
+|   |   `-- Transcript/
+|   |-- ViewModels/
+|   `-- Assets/
+|       `-- TranscriptVue/
+|-- SelfClaw.TranscriptVue/
+|   |-- src/
+|   |-- package.json
+|   `-- vite.config.js
+`-- SelfClaw.Tests/
+    `-- Infrastructure/
 ```
 
 ## Important Conventions
@@ -99,7 +105,12 @@ Prefer these stable namespaces for new types unless a deliberate namespace refac
 
 Common namespaces:
 
-- `SelfClaw.Infrastructure.Agents.Runtime`
+- `SelfClaw.Infrastructure.Agents.Runtime.Orchestration`
+- `SelfClaw.Infrastructure.Agents.Runtime.Execution`
+- `SelfClaw.Infrastructure.Agents.Runtime.Context`
+- `SelfClaw.Infrastructure.Agents.Runtime.Mcp`
+- `SelfClaw.Infrastructure.Agents.Runtime.Tools`
+- `SelfClaw.Infrastructure.Agents.Runtime.Compaction`
 - `SelfClaw.Infrastructure.Agents.Tools`
 - `SelfClaw.Infrastructure.Data.Sqlite`
 - `SelfClaw.Infrastructure.Data.Sqlite.Repositories`
@@ -161,7 +172,9 @@ Infrastructure registration in `ServiceCollectionExtensions.AddSelfClawInfrastru
 - `ISecretProtector`
 - `IWorkspaceToolService`
 - `IAgentContextProviderFactory`
+- `IAgentMcpToolProvider`
 - `IAgentChatRuntime`
+- `IConversationContextCompactionService`
 - `MarkdownHtmlRenderer`
 
 Desktop registration in `App.xaml.cs` includes:
@@ -185,10 +198,21 @@ Supporting components:
 
 - `ChatClientAgentExecutionService`
 - `FileSystemAgentContextProviderFactory`
+- `McpServerToolProvider`
+- `ConversationContextCompactionService`
 - `WorkspaceToolFunctions`
 - `RuntimeToolObserver`
 
-Runtime internal structure (partial split):
+Runtime folder structure:
+
+- `Orchestration/`: `SelfClawAgentChatRuntime` stream orchestration and plan/direct turn flow
+- `Execution/`: model client execution contracts, request/response records, and OpenAI-compatible chat execution
+- `Context/`: file-system backed agent skill/context provider discovery
+- `Mcp/`: MCP server connection, tool discovery, tool naming, and owned resource lifetime
+- `Tools/`: runtime tool-run observation and approval/result metadata
+- `Compaction/`: conversation context auto-compaction, summary prompt building, and token/window estimates
+
+`Orchestration/SelfClawAgentChatRuntime` partial split:
 
 - `SelfClawAgentChatRuntime.cs`: constants, DI wiring, stream entrypoint, tool/context factory
 - `SelfClawAgentChatRuntime.Execution.cs`: programming turn, plan drafting, and plan step execution
@@ -279,13 +303,20 @@ Desktop channel orchestration remains in `DesktopChannelManager` + `FeishuDeskto
 | `SelfClaw.Desktop/Services/Settings/DesktopSettingsStore.cs` | Desktop settings load/save/normalize |
 | `SelfClaw.Desktop/Services/Settings/DesktopSettings.cs` | Desktop settings model |
 | `SelfClaw.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs` | Infrastructure service registration |
-| `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.cs` | Runtime orchestration core |
-| `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.Execution.cs` | Programming/plan execution flow |
-| `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.PromptMessages.cs` | Prompt message assembly and role/message mapping |
-| `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.Instructions.cs` | Instruction builder methods |
-| `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.Transcripts.cs` | Discussion and execution transcript builders |
-| `SelfClaw.Infrastructure/Agents/Runtime/SelfClawAgentChatRuntime.Parsing.cs` | Runtime JSON parsing and fallback builders |
-| `SelfClaw.Infrastructure/Agents/Runtime/ChatClientAgentExecutionService.cs` | Model execution layer |
+| `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.cs` | Runtime orchestration core |
+| `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.Execution.cs` | Programming/plan execution flow |
+| `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.PromptMessages.cs` | Prompt message assembly and role/message mapping |
+| `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.Instructions.cs` | Instruction builder methods |
+| `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.Transcripts.cs` | Discussion and execution transcript builders |
+| `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.Parsing.cs` | Runtime JSON parsing and fallback builders |
+| `SelfClaw.Infrastructure/Agents/Runtime/Execution/ChatClientAgentExecutionService.cs` | Model execution layer |
+| `SelfClaw.Infrastructure/Agents/Runtime/Context/FileSystemAgentContextProviderFactory.cs` | Agent skill/context provider discovery |
+| `SelfClaw.Infrastructure/Agents/Runtime/Mcp/McpServerToolProvider.cs` | MCP server tool discovery and wrapping |
+| `SelfClaw.Infrastructure/Agents/Runtime/Tools/RuntimeToolObserver.cs` | Tool-run event emission for transcripts |
+| `SelfClaw.Infrastructure/Agents/Runtime/Tools/ToolInvocationMetadata.cs` | Tool approval/result metadata and summaries |
+| `SelfClaw.Infrastructure/Agents/Runtime/Compaction/ConversationContextCompactionService.cs` | Conversation context auto-compaction flow |
+| `SelfClaw.Infrastructure/Agents/Runtime/Compaction/ConversationCompactionPromptBuilder.cs` | Compaction summary prompt/payload construction |
+| `SelfClaw.Infrastructure/Agents/Runtime/Compaction/ConversationContextTokens.cs` | Token/window estimate helpers for compaction |
 | `SelfClaw.Infrastructure/Agents/Tools/WorkspaceToolFunctions.cs` | Tool wrapping and approval integration |
 | `SelfClaw.Infrastructure/Tools/Workspace/WorkspaceToolService.cs` | Workspace files and shell implementation |
 | `SelfClaw.Infrastructure/Data/Sqlite/SqliteDatabase.cs` | SQLite schema and migration |
