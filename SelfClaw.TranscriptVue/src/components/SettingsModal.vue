@@ -74,6 +74,10 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
+	availableSkills: {
+		type: Array,
+		default: () => [],
+	},
 	channels: {
 		type: Array,
 		default: () => [],
@@ -112,6 +116,7 @@ const emit = defineEmits([
 	'create-mcp-server',
 	'edit-mcp-server',
 	'delete-mcp-server',
+	'toggle-skill',
 	'toggle-channel',
 	'edit-channel',
 	'select-theme',
@@ -120,6 +125,7 @@ const emit = defineEmits([
 const panelEl = ref(null);
 
 const enabledMcpServerCount = computed(() => props.mcpServers.filter((item) => item.enabled !== false).length);
+const enabledSkillCount = computed(() => props.availableSkills.filter((item) => item.enabled !== false).length);
 const enabledChannelCount = computed(() => props.channels.filter((item) => item.isEnabled).length);
 
 function onPanelScroll(event) {
@@ -131,6 +137,10 @@ function onPanelScroll(event) {
 
 function onChannelToggle(channel, event) {
 	emit('toggle-channel', { channel, enabled: Boolean(event.target.checked) });
+}
+
+function onSkillToggle(skill, event) {
+	emit('toggle-skill', { skill, enabled: Boolean(event.target.checked) });
 }
 
 function agentMeta(agent) {
@@ -344,6 +354,47 @@ defineExpose({
 					<div v-else class="mcp-empty-state">
 						<div class="settings-section-title">还没有 MCP 服务</div>
 						<div class="settings-hint">点击右上角加号创建 MCP 服务配置。</div>
+					</div>
+				</section>
+
+				<section v-else-if="activeSection === 'skills'" class="settings-section settings-section-active">
+					<div class="settings-section-header">
+						<div class="settings-section-copy">
+							<div class="settings-section-title">{{ '\u6280\u80fd' }}</div>
+						</div>
+						<div class="settings-badge">{{ enabledSkillCount }} / {{ availableSkills.length }}</div>
+					</div>
+					<div class="channel-card-actions mcp-section-actions">
+						<div class="settings-hint">{{ '\u7ba1\u7406\u5168\u5c40\u53ef\u7528\u7684 skills\uff0c\u7981\u7528\u540e\u4e0d\u518d\u5bf9\u667a\u80fd\u4f53\u548c\u8fd0\u884c\u65f6\u66b4\u9732\u3002' }}</div>
+					</div>
+					<div v-if="availableSkills.length > 0" class="channel-card-list">
+						<article v-for="skill in availableSkills" :key="skill.id" class="channel-card" :class="{ enabled: skill.enabled !== false }">
+							<div class="channel-card-top">
+								<div class="channel-card-copy">
+									<div class="settings-section-title">{{ skill.name || skill.id }}</div>
+									<div class="settings-hint">{{ skill.id }}</div>
+								</div>
+								<label class="toggle-field channel-toggle">
+									<input class="toggle-input" type="checkbox" :checked="skill.enabled !== false" @change="onSkillToggle(skill, $event)" />
+									<span class="toggle-switch"></span>
+									<span class="toggle-label">{{ skill.enabled === false ? '\u5df2\u7981\u7528' : '\u5df2\u542f\u7528' }}</span>
+								</label>
+							</div>
+							<div class="selected-summary-grid channel-summary-grid">
+								<div class="selected-summary-card">
+									<div class="selected-summary-label">Path</div>
+									<div class="selected-summary-value">{{ skill.relativePath || skill.id }}</div>
+								</div>
+								<div class="selected-summary-card">
+									<div class="selected-summary-label">File</div>
+									<div class="selected-summary-value">{{ skill.skillFilePath || 'SKILL.md' }}</div>
+								</div>
+							</div>
+						</article>
+					</div>
+					<div v-else class="mcp-empty-state">
+						<div class="settings-section-title">{{ '\u8fd8\u6ca1\u6709 skills' }}</div>
+						<div class="settings-hint">{{ '\u5f53\u524d app data \u76ee\u5f55\u4e0b\u672a\u53d1\u73b0 SKILL.md\u3002' }}</div>
 					</div>
 				</section>
 

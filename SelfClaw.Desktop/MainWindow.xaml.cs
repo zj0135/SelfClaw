@@ -524,7 +524,7 @@ public partial class MainWindow : Window
                     await SetMcpServerEnabledFromTranscriptAsync(document.RootElement);
                     break;
                 case "set-skill-enabled":
-                    feedbackScope = "mcp";
+                    feedbackScope = "skills";
                     await SetSkillEnabledFromTranscriptAsync(document.RootElement);
                     break;
                 case "pick-workspace-path":
@@ -1130,7 +1130,7 @@ public partial class MainWindow : Window
     {
         var enabled = GetBool(root, "enabled");
         await _viewModel.SetSkillEnabledAsync(GetString(root, "skillId"), enabled);
-        PostUiFeedback("success", enabled ? "Skill enabled." : "Skill disabled.", "mcp");
+        PostUiFeedback("success", enabled ? "Skill enabled." : "Skill disabled.", "skills");
     }
 
     private static AgentExecutionMode ParseAgentExecutionMode(string? modeId)

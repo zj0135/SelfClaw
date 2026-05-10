@@ -555,6 +555,13 @@ const settingsSections = computed(() => [
 		badge: state.mcpServers.length > 0 ? `${enabledMcpServerCount.value} / ${state.mcpServers.length}` : '未配置',
 	},
 	{
+		id: 'skills',
+		title: '技能',
+		badge: state.availableSkills.length > 0
+			? `${state.availableSkills.filter((item) => item.enabled !== false).length} / ${state.availableSkills.length}`
+			: '未配置',
+	},
+	{
 		id: 'channels',
 		title: '我的频道',
 		badge: state.channels.filter((item) => item.isEnabled).length > 0 ? '已启用' : '未启用',
@@ -1056,7 +1063,7 @@ function scheduleStatePayload(payload) {
 
 function handleSettingsFeedback(payload) {
 	const nextFeedback = payload.message ? { level: payload.level || 'success', message: payload.message, scope: payload.scope || null } : null;
-	if (payload.scope === 'profile' || payload.scope === 'workspace' || payload.scope === 'agent' || payload.scope === 'mcp' || payload.scope === 'channels' || payload.scope === 'theme') {
+	if (payload.scope === 'profile' || payload.scope === 'workspace' || payload.scope === 'agent' || payload.scope === 'mcp' || payload.scope === 'skills' || payload.scope === 'channels' || payload.scope === 'theme') {
 		activeSettingsSection.value = payload.scope;
 	}
 
@@ -1623,7 +1630,7 @@ function setSkillEnabled({ skill, enabled }) {
 		return;
 	}
 
-	clearFeedback('mcp');
+	clearFeedback('skills');
 	post({ type: 'set-skill-enabled', skillId: skill.id, enabled: Boolean(enabled) });
 }
 
@@ -1963,7 +1970,7 @@ onUnmounted(() => {
 			:agents="state.agents" :selected-agent-id="state.selectedAgentId || ''"
 			:current-conversation-agent-id="selectedConversation?.agentId || ''"
 			:can-bind-conversation-agent="isProgrammingMode && Boolean(state.selectedConversationId)"
-			:mcp-servers="state.availableMcpServers" :channels="state.channels"
+			:mcp-servers="state.availableMcpServers" :available-skills="state.availableSkills" :channels="state.channels"
 			:selected-theme-label="selectedThemeLabel" :theme-options="state.themeOptions"
 			:selected-theme-id="state.selectedThemeId || 'system'" @close="closeSettings"
 			@select-section="selectSettingsSection" @panel-scroll="onSettingsPanelScroll"
@@ -1974,7 +1981,8 @@ onUnmounted(() => {
 			@select-agent="selectAgent" @edit-agent="editAgent" @delete-agent="deleteAgent"
 			@create-agent="createAgent" @assign-conversation-agent="assignConversationAgent"
 			@create-mcp-server="createMcpServer" @edit-mcp-server="editMcpServer" @delete-mcp-server="deleteMcpServer"
-			@toggle-channel="toggleChannelEnabled" @edit-channel="openEditor('channel', 'edit', $event)"
+			@toggle-skill="setSkillEnabled" @toggle-channel="toggleChannelEnabled"
+			@edit-channel="openEditor('channel', 'edit', $event)"
 			@select-theme="onThemeChange" />
 
 		<EditorModal :open="editorState.open" :editor="editorState" :profiles="state.profiles"
