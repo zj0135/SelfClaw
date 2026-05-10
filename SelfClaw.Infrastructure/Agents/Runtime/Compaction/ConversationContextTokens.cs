@@ -24,45 +24,137 @@ internal static class ConversationContextTokens
         IReadOnlyList<MessageRecord> messages)
     {
         var total = messages.Sum(EstimateMessageTokens);
-        if (summary is not null && !string.IsNullOrWhiteSpace(summary.SummaryMarkdown))
-        {
-            total += EstimateTextTokens(summary.SummaryMarkdown) + MessageOverheadTokens;
-        }
+        total += EstimateSummaryTokens(summary);
 
         return Math.Max(0, total);
     }
 
+    /// <summary>
+    /// Estimates the effective token count for messages using the provider-reported InputTokens
+    /// from assistant messages, with system/tool overhead subtracted via delta calibration.
+    /// </summary>
+    /// <remarks>
+    /// The API-reported InputTokens includes the entire request payload: system prompt,
+    /// tool definitions, context providers, AND message history. Since the compaction trigger
+    /// limit is designed as a budget for message content only, we need to exclude the fixed
+    /// non-message overhead (system prompt + tools).
+    ///
+    /// Strategy: Two-point delta calibration.
+    /// If two assistant messages have InputTokens, the overhead cancels in the difference:
+    ///   ratio = (InputTokens_B - InputTokens_A) / (localEstimate_B - localEstimate_A)
+    /// This gives a true calibration ratio without needing to know the overhead.
+    ///
+    /// If only one measurement exists, we infer overhead = InputTokens - localEstimate
+    /// (for messages BEFORE the assistant turn, per P1 fix). The ratio defaults to 1.0
+    /// in this case, but we still correctly subtract the overhead from the reported value.
+    ///
+    /// P1 fix: InputTokens on an assistant message represents the prompt tokens that
+    /// produced that response. It includes all messages BEFORE the assistant message
+    /// but NOT the assistant message itself. So we use index &lt; measuredIndex.
+    /// </remarks>
     public static int EstimateMeasuredEffectiveTokens(
         ConversationContextSummaryRecord? summary,
         IReadOnlyList<MessageRecord> promptMessages)
     {
-        var measuredIndex = -1;
+        // Find the two most recent assistant messages with InputTokens for delta calibration.
+        var measuredIndexB = -1;
+        var measuredIndexA = -1;
         for (var index = promptMessages.Count - 1; index >= 0; index--)
         {
             if (promptMessages[index].Role == MessageRole.Assistant && promptMessages[index].InputTokens is > 0)
             {
-                measuredIndex = index;
-                break;
+                if (summary is not null && IsCoveredBySummary(promptMessages[index], summary))
+                {
+                    continue;
+                }
+
+                if (measuredIndexB < 0)
+                {
+                    measuredIndexB = index;
+                }
+                else
+                {
+                    measuredIndexA = index;
+                    break;
+                }
             }
         }
 
-        if (measuredIndex < 0)
+        if (measuredIndexB < 0)
         {
             return 0;
         }
 
-        var measuredMessage = promptMessages[measuredIndex];
-        if (summary is not null && IsCoveredBySummary(measuredMessage, summary))
+        var measuredMessageB = promptMessages[measuredIndexB];
+        // Compute calibration ratio using delta between two measurement points.
+        var calibrationRatio = 1.0;
+
+        if (measuredIndexA >= 0)
         {
-            return 0;
+            // Two-point delta: overhead cancels out.
+            // InputTokens represents the prompt BEFORE the assistant response (P1 fix: index < measuredIndex).
+            var inputTokensB = Math.Max(0L, measuredMessageB.InputTokens!.Value);
+            var inputTokensA = Math.Max(0L, promptMessages[measuredIndexA].InputTokens!.Value);
+
+            // Local estimate for messages in [0, measuredIndexB) minus messages in [0, measuredIndexA)
+            // = messages in [measuredIndexA, measuredIndexB)
+            var localEstimateDelta = 0L;
+            for (var index = measuredIndexA; index < measuredIndexB; index++)
+            {
+                var message = promptMessages[index];
+                if (summary is not null && IsCoveredBySummary(message, summary))
+                {
+                    continue;
+                }
+
+                localEstimateDelta += EstimateMessageTokens(message);
+            }
+
+            var inputDelta = inputTokensB - inputTokensA;
+            if (localEstimateDelta > 0 && inputDelta > 0)
+            {
+                calibrationRatio = (double)inputDelta / localEstimateDelta;
+                // Sanity bound: ratio should be between 0.5 and 3.0.
+                calibrationRatio = Math.Clamp(calibrationRatio, 0.5, 3.0);
+            }
+        }
+        else
+        {
+            // Single measurement point: can't determine ratio independently.
+            // Infer overhead = InputTokens - localEstimate(messages before the assistant turn).
+            // P1 fix: InputTokens covers messages BEFORE the assistant message, not including it.
+            var reportedInputTokens = Math.Max(0L, measuredMessageB.InputTokens!.Value);
+            var localEstimateBeforeB = EstimateSummaryTokens(summary);
+            for (var index = 0; index < measuredIndexB; index++)
+            {
+                var message = promptMessages[index];
+                if (summary is not null && IsCoveredBySummary(message, summary))
+                {
+                    continue;
+                }
+
+                localEstimateBeforeB += EstimateMessageTokens(message);
+            }
+
+            if (localEstimateBeforeB <= 0L)
+            {
+                return 0;
+            }
+
+            var inferredOverhead = Math.Max(0L, reportedInputTokens - localEstimateBeforeB);
+
+            // If overhead is unreasonably large (>95%), the local estimate is too inaccurate.
+            if (inferredOverhead > reportedInputTokens * 95 / 100)
+            {
+                return 0;
+            }
+
+            // With single point, ratio stays 1.0 (we can't calibrate, but overhead is subtracted).
         }
 
-        var total = Math.Max(0L, measuredMessage.InputTokens!.Value);
-        total += measuredMessage.OutputTokens is > 0
-            ? measuredMessage.OutputTokens.Value
-            : EstimateMessageTokens(measuredMessage);
-
-        for (var index = measuredIndex + 1; index < promptMessages.Count; index++)
+        // Compute the local estimate for ALL current uncovered messages and apply the ratio.
+        var localEstimateForAllMessages = 0L;
+        for (var index = 0; index < promptMessages.Count; index++)
         {
             var message = promptMessages[index];
             if (summary is not null && IsCoveredBySummary(message, summary))
@@ -70,10 +162,37 @@ internal static class ConversationContextTokens
                 continue;
             }
 
-            total += EstimateMessageTokens(message);
+            localEstimateForAllMessages += EstimateMessageTokens(message);
         }
 
-        return total > int.MaxValue ? int.MaxValue : (int)Math.Max(0L, total);
+        // Apply calibration to get a more accurate message-only token count.
+        var calibratedTotal = (long)Math.Ceiling(localEstimateForAllMessages * calibrationRatio);
+
+        // P1-output fix: The latest measured assistant's OutputTokens is part of the next
+        // round's context but is NOT included in its own InputTokens. If we have real
+        // OutputTokens, use them instead of the local estimate (which is already in
+        // localEstimateForAllMessages and thus in calibratedTotal).
+        if (measuredMessageB.OutputTokens is > 0)
+        {
+            var estimatedOutput = (long)Math.Ceiling(EstimateMessageTokens(measuredMessageB) * calibrationRatio);
+            var realOutput = measuredMessageB.OutputTokens.Value;
+            var outputDelta = realOutput - estimatedOutput;
+            if (outputDelta > 0)
+            {
+                calibratedTotal += outputDelta;
+            }
+        }
+
+        calibratedTotal += EstimateSummaryTokens(summary);
+
+        return calibratedTotal > int.MaxValue ? int.MaxValue : (int)Math.Max(0L, calibratedTotal);
+    }
+
+    private static int EstimateSummaryTokens(ConversationContextSummaryRecord? summary)
+    {
+        return summary is null || string.IsNullOrWhiteSpace(summary.SummaryMarkdown)
+            ? 0
+            : EstimateTextTokens(summary.SummaryMarkdown) + MessageOverheadTokens;
     }
 
     public static int EstimateMessageTokens(MessageRecord message)

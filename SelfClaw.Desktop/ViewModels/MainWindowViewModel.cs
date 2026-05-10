@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -2181,29 +2181,101 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .OrderBy(message => message.CreatedAtUtc)
             .ThenBy(message => message.Id)
             .ToArray();
-        var measuredIndex = Array.FindLastIndex(
-            promptMessages,
-            message => message.Role == MessageRole.Assistant && message.InputTokens is > 0);
 
-        if (measuredIndex < 0)
+        // Find the two most recent assistant messages with InputTokens for delta calibration.
+        var measuredIndexB = -1;
+        var measuredIndexA = -1;
+        for (var index = promptMessages.Length - 1; index >= 0; index--)
+        {
+            if (promptMessages[index].Role == MessageRole.Assistant && promptMessages[index].InputTokens is > 0)
+            {
+                if (measuredIndexB < 0)
+                {
+                    measuredIndexB = index;
+                }
+                else
+                {
+                    measuredIndexA = index;
+                    break;
+                }
+            }
+        }
+
+        if (measuredIndexB < 0)
         {
             isMeasured = false;
             return EstimateContextUsageTokens(promptMessages);
         }
 
         isMeasured = true;
-        var measuredMessage = promptMessages[measuredIndex];
-        var total = Math.Max(0L, measuredMessage.InputTokens!.Value);
+        var measuredMessageB = promptMessages[measuredIndexB];
 
-        // The latest input count is the provider-reported prompt size for that turn.
-        // Add the provider-reported assistant output because it becomes part of the next raw context.
-        total += measuredMessage.OutputTokens is > 0
-            ? measuredMessage.OutputTokens.Value
-            : EstimateContextUsageMessageTokens(measuredMessage);
+        // Compute calibration ratio using delta between two measurement points.
+        var calibrationRatio = 1.0;
 
-        for (var index = measuredIndex + 1; index < promptMessages.Length; index++)
+        if (measuredIndexA >= 0)
         {
-            total += EstimateContextUsageMessageTokens(promptMessages[index]);
+            // Two-point delta: overhead cancels out.
+            var inputTokensB = Math.Max(0L, measuredMessageB.InputTokens!.Value);
+            var inputTokensA = Math.Max(0L, promptMessages[measuredIndexA].InputTokens!.Value);
+
+            // Local estimate for messages in [measuredIndexA, measuredIndexB)
+            var localEstimateDelta = 0L;
+            for (var index = measuredIndexA; index < measuredIndexB; index++)
+            {
+                localEstimateDelta += EstimateContextUsageMessageTokens(promptMessages[index]);
+            }
+
+            var inputDelta = inputTokensB - inputTokensA;
+            if (localEstimateDelta > 0 && inputDelta > 0)
+            {
+                calibrationRatio = (double)inputDelta / localEstimateDelta;
+                calibrationRatio = Math.Clamp(calibrationRatio, 0.5, 3.0);
+            }
+        }
+        else
+        {
+            // Single measurement point: infer overhead, ratio stays 1.0.
+            // P1 fix: InputTokens covers messages BEFORE the assistant message.
+            var reportedInputTokens = Math.Max(0L, measuredMessageB.InputTokens!.Value);
+            var localEstimateBeforeB = 0L;
+            for (var index = 0; index < measuredIndexB; index++)
+            {
+                localEstimateBeforeB += EstimateContextUsageMessageTokens(promptMessages[index]);
+            }
+
+            if (localEstimateBeforeB <= 0)
+            {
+                isMeasured = false;
+                return EstimateContextUsageTokens(promptMessages);
+            }
+
+            var inferredOverhead = Math.Max(0L, reportedInputTokens - localEstimateBeforeB);
+            if (inferredOverhead > reportedInputTokens * 95 / 100)
+            {
+                isMeasured = false;
+                return EstimateContextUsageTokens(promptMessages);
+            }
+        }
+
+        // Apply calibration to ALL current messages.
+        var localEstimateForAllMessages = 0L;
+        for (var index = 0; index < promptMessages.Length; index++)
+        {
+            localEstimateForAllMessages += EstimateContextUsageMessageTokens(promptMessages[index]);
+        }
+
+        var total = (long)Math.Ceiling(localEstimateForAllMessages * calibrationRatio);
+
+        // Adjust for real output tokens on the measured message if available.
+        if (measuredMessageB.OutputTokens is > 0)
+        {
+            var estimatedOutput = EstimateContextUsageMessageTokens(measuredMessageB);
+            var outputDelta = measuredMessageB.OutputTokens.Value - (long)(estimatedOutput * calibrationRatio);
+            if (outputDelta > 0)
+            {
+                total += outputDelta;
+            }
         }
 
         return Math.Max(0, total);
