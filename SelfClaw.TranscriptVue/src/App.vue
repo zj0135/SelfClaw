@@ -7,7 +7,19 @@ import MainTopbar from './components/MainTopbar.vue';
 import SettingsModal from './components/SettingsModal.vue';
 import StepsPanel from './components/StepsPanel.vue';
 import TranscriptPanel from './components/TranscriptPanel.vue';
-import { renderConversationList, renderMessages, renderStepsHeader, renderStepsPanelContent } from './renderers';
+import { renderConversationList, renderStepsHeader, renderStepsPanelContent } from './renderers';
+import { createMessageHtmlCache } from './renderers/messageCache';
+import {
+	clearThinkingContent,
+	clearToolGroupDetails,
+	clearToolDetails,
+	ensureThinkingContent,
+	ensureToolGroupDetails,
+	ensureToolDetails,
+	findThinkingSegment,
+	findToolGroup,
+	findToolSegment,
+} from './renderers/messageLookup';
 import {
 	createAgentDraft,
 	createChannelDraft,
@@ -90,6 +102,7 @@ const openActivities = new Set();
 const openThoughts = new Set();
 const openToolSegments = new Set();
 const openToolGroups = new Set();
+const messageHtmlCache = createMessageHtmlCache();
 const pointerHandledActions = new Map();
 const scrollFollowState = {
 	transcript: true,
@@ -595,7 +608,7 @@ const conversationListHtml = computed(() =>
 	})
 );
 
-const messagesHtml = computed(() => renderMessages(state.items, openThoughts, openToolSegments, openToolGroups));
+const messagesHtml = computed(() => messageHtmlCache.render(state.items, openThoughts, openToolSegments, openToolGroups));
 const stepsHeaderHtml = computed(() => renderStepsHeader());
 const stepsPanelHtml = computed(() =>
 	renderStepsPanelContent({
@@ -1211,9 +1224,11 @@ function toggleThinking(actionElement) {
 	const isOpen = openThoughts.has(id);
 	if (isOpen) {
 		openThoughts.delete(id);
+		clearThinkingContent(block);
 		block.classList.remove('open');
 	} else {
 		openThoughts.add(id);
+		ensureThinkingContent(block, findThinkingSegment(state.items, actionElement));
 		block.classList.add('open');
 	}
 
@@ -1231,9 +1246,11 @@ function toggleToolSegment(actionElement) {
 	const isOpen = openToolSegments.has(id);
 	if (isOpen) {
 		openToolSegments.delete(id);
+		clearToolDetails(block);
 		block.classList.remove('open');
 	} else {
 		openToolSegments.add(id);
+		ensureToolDetails(block, findToolSegment(state.items, actionElement));
 		block.classList.add('open');
 	}
 
@@ -1251,9 +1268,11 @@ function toggleToolGroup(actionElement) {
 	const isOpen = openToolGroups.has(id);
 	if (isOpen) {
 		openToolGroups.delete(id);
+		clearToolGroupDetails(block);
 		block.classList.remove('open');
 	} else {
 		openToolGroups.add(id);
+		ensureToolGroupDetails(block, findToolGroup(state.items, actionElement), openToolSegments);
 		block.classList.add('open');
 	}
 
@@ -1311,9 +1330,16 @@ async function handleDelegatedClick(event) {
 				const isOpen = openActivities.has(id);
 				if (isOpen) {
 					openActivities.delete(id);
+					card.querySelector('.activity-details')?.replaceChildren();
 					card.classList.remove('open');
 				} else {
 					openActivities.add(id);
+					if (card.getAttribute('data-activity-has-details') === 'true') {
+						await preserveStepsPanel(() => {
+							openStepSections.value = new Map(openStepSections.value);
+						});
+						return;
+					}
 					card.classList.add('open');
 				}
 

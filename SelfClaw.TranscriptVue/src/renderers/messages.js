@@ -1,6 +1,6 @@
 import { escapeHtml, toolStatusLabel } from './shared';
 
-const getMessageSegments = (item) => {
+export const getMessageSegments = (item) => {
 	if (Array.isArray(item.segments) && item.segments.length > 0) {
 		return item.segments;
 	}
@@ -17,9 +17,9 @@ const getMessageSegments = (item) => {
 	return legacySegments;
 };
 
-const thinkingBlockId = (messageId, ordinal) => `${messageId}:thinking:${ordinal}`;
-const toolSegmentId = (messageId, segment, index) => segment.segmentId || `${messageId}:tool:${index}`;
-const toolGroupId = (messageId, startIndex, endIndex) => `${messageId}:tool-group:${startIndex}:${endIndex}`;
+export const thinkingBlockId = (messageId, ordinal) => `${messageId}:thinking:${ordinal}`;
+export const toolSegmentId = (messageId, segment, index) => segment.segmentId || `${messageId}:tool:${index}`;
+export const toolGroupId = (messageId, startIndex, endIndex) => `${messageId}:tool-group:${startIndex}:${endIndex}`;
 
 const toolActionDescriptors = {
 	run: { verb: 'ran', singular: 'command', plural: 'commands' },
@@ -152,6 +152,11 @@ function renderPendingThinking(item, thinkingOrdinal, isLast, openThoughts) {
 	return renderThinkingSegment(item, { html: '', isPending: true }, thinkingOrdinal, isLast ? 0 : -1, 1, openThoughts);
 }
 
+export function renderThinkingContent(segment) {
+	const contentHtml = segment.html || '<p class="thinking-placeholder">Thinking content is streaming.</p>';
+	return `<div class="thinking-markdown">${contentHtml}</div>`;
+}
+
 function renderThinkingSegment(item, segment, thinkingOrdinal, index, totalSegments, openThoughts) {
 	const isPending = Boolean(segment.isPending);
 	const isLast = index === totalSegments - 1;
@@ -169,7 +174,7 @@ function renderThinkingSegment(item, segment, thinkingOrdinal, index, totalSegme
           <span class="thinking-chevron">&rsaquo;</span>
         </button>
         <div class="thinking-content">
-          <div class="thinking-markdown">${contentHtml}</div>
+          ${isOpen ? renderThinkingContent(segment) : ''}
         </div>
       </section>
     `;
@@ -195,6 +200,13 @@ function renderToolCard(item, segment, index, openToolSegments, options = {}) {
             <span class="tool-summary-chevron">&rsaquo;</span>
           </span>
         </button>
+        ${isOpen ? renderToolDetails(status, detailTitle, detailText) : ''}
+      </section>
+    `;
+}
+
+export function renderToolDetails(status, detailTitle, detailText) {
+	return `
         <div class="tool-details">
           <div class="tool-details-header">${escapeHtml(detailTitle)}</div>
           <div class="tool-details-body">
@@ -204,8 +216,7 @@ function renderToolCard(item, segment, index, openToolSegments, options = {}) {
             <span class="tool-details-status ${escapeHtml(status)}">${escapeHtml(toolStatusLabel(status))}</span>
           </div>
         </div>
-      </section>
-    `;
+      `;
 }
 
 function renderToolSegment(item, segment, index, totalSegments, openToolSegments) {
@@ -225,6 +236,12 @@ function renderToolSegment(item, segment, index, totalSegments, openToolSegments
         ${renderToolCard(item, segment, index, openToolSegments, { summaryLabel })}
       </div>
     `;
+}
+
+export function renderToolGroupDetails(item, toolSegments, startIndex, openToolSegments) {
+	return toolSegments
+		.map((toolSegment, offset) => renderToolCard(item, toolSegment, startIndex + offset, openToolSegments, { nested: true }))
+		.join('');
 }
 
 function renderToolGroup(item, toolSegments, startIndex, endIndex, totalSegments, openToolSegments, openToolGroups) {
@@ -253,11 +270,7 @@ function renderToolGroup(item, toolSegments, startIndex, endIndex, totalSegments
             </span>
           </button>
           <div class="tool-group-details">
-            ${toolSegments
-							.map((toolSegment, offset) =>
-								renderToolCard(item, toolSegment, startIndex + offset, openToolSegments, { nested: true })
-							)
-							.join('')}
+            ${isOpen ? renderToolGroupDetails(item, toolSegments, startIndex, openToolSegments) : ''}
           </div>
         </section>
       </div>
@@ -387,7 +400,7 @@ export function renderMessages(items, openThoughts, openToolSegments, openToolGr
 			const headerTitle = item.title ? `<span>${escapeHtml(item.title)}</span>` : '';
 			const headerSubtitle = item.subtitle ? `<span class="message-subtitle">${escapeHtml(item.subtitle)}</span>` : '';
 			return `
-      <div class="message-row ${escapeHtml(item.role)} ${escapeHtml(item.status)}">
+      <div class="message-row ${escapeHtml(item.role)} ${escapeHtml(item.status)}" data-message-id="${escapeHtml(item.id)}">
         <div class="message-main">
           <article class="item ${escapeHtml(item.kind)} ${escapeHtml(item.role)} ${escapeHtml(item.status)}">
             <div class="${headerClass}">

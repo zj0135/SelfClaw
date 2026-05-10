@@ -1,5 +1,29 @@
 ﻿import { escapeHtml } from './shared';
 
+const openActivityDetails = new WeakMap();
+
+function getActivityDetailsHtml(item, actionButtons, detailValueClasses) {
+	if (openActivityDetails.has(item)) {
+		return openActivityDetails.get(item);
+	}
+
+	const detailsHtml = `
+          ${item.details
+						.map(
+							(detail) => `
+            <div class="detail-block">
+              <div class="detail-label">${escapeHtml(detail.label)}</div>
+              <div class="${detailValueClasses(detail)}">${escapeHtml(detail.value)}</div>
+            </div>
+          `
+						)
+						.join('')}
+          ${actionButtons}
+        `;
+	openActivityDetails.set(item, detailsHtml);
+	return detailsHtml;
+}
+
 function renderActivities(agentActivities, { openActivities }) {
 	if (!agentActivities?.length) {
 		return '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
@@ -35,7 +59,7 @@ function renderActivities(agentActivities, { openActivities }) {
 					: '';
 
 			return `
-      <div class="activity-card ${escapeHtml(item.status)} ${isOpen ? 'open' : ''}" data-activity-id="${escapeHtml(item.id)}">
+      <div class="activity-card ${escapeHtml(item.status)} ${isOpen ? 'open' : ''}" data-activity-id="${escapeHtml(item.id)}" data-activity-has-details="${item.details?.length || actionButtons ? 'true' : 'false'}">
         <div class="activity-summary" data-action="toggle-activity" data-activity-id="${escapeHtml(item.id)}">
           <div class="activity-top">
             <div class="activity-title">${escapeHtml(item.title)}</div>
@@ -58,17 +82,7 @@ function renderActivities(agentActivities, { openActivities }) {
           <div class="activity-text">${escapeHtml(item.summary)}</div>
         </div>
         <div class="activity-details">
-          ${item.details
-						.map(
-							(detail) => `
-            <div class="detail-block">
-              <div class="detail-label">${escapeHtml(detail.label)}</div>
-              <div class="${detailValueClasses(detail)}">${escapeHtml(detail.value)}</div>
-            </div>
-          `
-						)
-						.join('')}
-          ${actionButtons}
+          ${isOpen ? getActivityDetailsHtml(item, actionButtons, detailValueClasses) : ''}
         </div>
       </div>
     `;
