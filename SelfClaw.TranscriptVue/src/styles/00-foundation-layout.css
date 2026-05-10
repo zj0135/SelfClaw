@@ -775,28 +775,44 @@ a:hover {
 .composer-box {
 	min-height: 56px;
 	max-height: 192px;
-	resize: none;
 	width: 100%;
+	overflow-y: auto;
+	position: relative;
+	z-index: 2;
 	border: 0;
 	border-radius: 0;
 	background: transparent;
 	color: var(--text);
+	caret-color: var(--text);
 	padding: 2px 6px 16px;
-	outline: none;
+	outline: none !important;
 	line-height: 1.6;
 	font-size: 16px;
+	text-align: left;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	word-break: break-word;
 	box-shadow: none;
+	-webkit-appearance: none;
+	appearance: none;
 	transition:
 		border-color 160ms ease,
 		box-shadow 160ms ease,
 		background 160ms ease;
 }
 
-.composer-box::placeholder {
+.composer-box.empty::before {
+	content: attr(data-placeholder);
+	display: block;
+	width: 100%;
 	color: color-mix(in srgb, var(--muted-soft) 84%, white 16%);
+	pointer-events: none;
+	text-align: left;
 }
 
-.composer-box:focus {
+.composer-box:focus,
+.composer-box:focus-visible {
+	outline: none !important;
 	background: transparent;
 	box-shadow: none;
 }
@@ -2339,7 +2355,7 @@ html[data-theme='light'] .composer-attachment-remove:hover {
 	background: rgba(68, 96, 165, 0.08);
 }
 
-html[data-theme='light'] .composer-box::placeholder,
+html[data-theme='light'] .composer-box.empty::before,
 html[data-theme='light'] .composer-inline-select {
 	color: #7f8ca0;
 }

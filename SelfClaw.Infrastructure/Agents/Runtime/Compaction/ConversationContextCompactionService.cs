@@ -141,6 +141,57 @@ internal sealed class ConversationContextCompactionService : IConversationContex
         return BuildPreparedMessages(conversationId, fittedSummary, recentTail, contextWindow);
     }
 
+    public async Task<ConversationContextSummaryRecord?> CompactNowAsync(
+        Guid conversationId,
+        ProviderProfile profile,
+        string apiKey,
+        IReadOnlyList<MessageRecord> messages,
+        int modelContextWindow,
+        string? focus = null,
+        CancellationToken cancellationToken = default)
+    {
+        var contextWindow = Math.Max(1, modelContextWindow);
+        var promptMessages = messages
+            .Where(ShouldIncludeInPrompt)
+            .OrderBy(message => message.CreatedAtUtc)
+            .ToArray();
+
+        if (promptMessages.Length == 0)
+        {
+            return null;
+        }
+
+        var existingSummary = await _conversationRepository.GetConversationContextSummaryAsync(conversationId, cancellationToken);
+        var uncoveredMessages = existingSummary is null
+            ? promptMessages
+            : promptMessages.Where(message => !ConversationContextTokens.IsCoveredBySummary(message, existingSummary)).ToArray();
+        if (uncoveredMessages.Length == 0 && existingSummary is not null)
+        {
+            return existingSummary;
+        }
+
+        var triggerLimit = Math.Max(1_000, contextWindow);
+        var nextSummary = await CompactHistoryAsync(
+            conversationId,
+            profile,
+            apiKey,
+            existingSummary,
+            uncoveredMessages,
+            contextWindow,
+            triggerLimit,
+            cancellationToken,
+            focus);
+
+        if (nextSummary is null)
+        {
+            return existingSummary;
+        }
+
+        var fittedSummary = FitSummaryToWindow(nextSummary, [], contextWindow);
+        await _conversationRepository.UpsertConversationContextSummaryAsync(fittedSummary, cancellationToken);
+        return fittedSummary;
+    }
+
     private async Task<ConversationContextSummaryRecord?> CompactHistoryAsync(
         Guid conversationId,
         ProviderProfile profile,
@@ -149,7 +200,8 @@ internal sealed class ConversationContextCompactionService : IConversationContex
         IReadOnlyList<MessageRecord> historyToSummarize,
         int contextWindow,
         int triggerLimit,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? focus = null)
     {
         if (historyToSummarize.Count == 0 && existingSummary is null)
         {
@@ -170,7 +222,8 @@ internal sealed class ConversationContextCompactionService : IConversationContex
                 apiKey,
                 runningSummary,
                 batch,
-                cancellationToken);
+                cancellationToken,
+                focus);
         }
 
         if (string.IsNullOrWhiteSpace(runningSummary))
@@ -201,7 +254,8 @@ internal sealed class ConversationContextCompactionService : IConversationContex
         string apiKey,
         string? existingSummary,
         IReadOnlyList<MessageRecord> batch,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? focus = null)
     {
         var payload = ConversationCompactionPromptBuilder.BuildPayload(existingSummary, batch);
         var result = await _agentExecutionService.RunAsync(
@@ -210,7 +264,7 @@ internal sealed class ConversationContextCompactionService : IConversationContex
                 apiKey,
                 CompactorName,
                 CompactorDescription,
-                ConversationCompactionPromptBuilder.BuildInstructions(),
+                ConversationCompactionPromptBuilder.BuildInstructions(focus),
                 [new ChatMessage(ChatRole.User, payload)],
                 [],
                 ContextProviders: null,

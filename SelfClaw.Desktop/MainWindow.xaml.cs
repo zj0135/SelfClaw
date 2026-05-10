@@ -71,6 +71,8 @@ public partial class MainWindow : Window
         Skills: [],
         AvailableMcpServers: [],
         AvailableSkills: [],
+        SlashCommands: [],
+        CommandFeedback: null,
         Agents: [],
         SelectedAgentId: null,
         AgentActivities: [],
@@ -232,6 +234,8 @@ public partial class MainWindow : Window
             skills = state.Skills,
             availableMcpServers = state.AvailableMcpServers,
             availableSkills = state.AvailableSkills,
+            slashCommands = state.SlashCommands,
+            commandFeedback = state.CommandFeedback,
             agents = state.Agents,
             selectedAgentId = state.SelectedAgentId,
             agentActivities = state.AgentActivities,
@@ -416,6 +420,17 @@ public partial class MainWindow : Window
                     await _viewModel.SubmitPromptAsync(prompt, attachments, enableReasoning, profileModel);
                     break;
                 }
+                case "execute-command":
+                {
+                    var command = GetString(document.RootElement, "command");
+                    var arguments = GetString(document.RootElement, "arguments");
+                    var confirmed = GetBool(document.RootElement, "confirmed");
+                    await _viewModel.ExecuteSlashCommandAsync(command, arguments, confirmed);
+                    break;
+                }
+                case "clear-command-feedback":
+                    _viewModel.ClearCommandFeedback();
+                    break;
                 case "stop-generation":
                     _viewModel.StopGeneration();
                     break;

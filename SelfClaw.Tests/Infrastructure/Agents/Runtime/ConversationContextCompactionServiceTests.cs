@@ -319,6 +319,41 @@ public sealed class ConversationContextCompactionServiceTests : IDisposable
             .WithMessage("*model_context_window*compaction failed*");
     }
 
+    [Fact]
+    public async Task CompactNow_forces_compaction_and_passes_focus()
+    {
+        var (repository, conversation, profile) = await CreateRepositoryAsync();
+        var execution = new FakeCompactionExecutionService("Manual summary");
+        var service = new ConversationContextCompactionService(repository, execution);
+        var messages = new[]
+        {
+            CreateMessage(conversation.Id, 0, MessageRole.User, "first short prompt"),
+            CreateMessage(conversation.Id, 1, MessageRole.Assistant, "first short answer"),
+            CreateMessage(conversation.Id, 2, MessageRole.User, "second short prompt")
+        };
+
+        var summary = await service.CompactNowAsync(
+            conversation.Id,
+            profile,
+            "test-key",
+            messages,
+            modelContextWindow: 1_000,
+            focus: "重点关注第二部分");
+
+        summary.Should().NotBeNull();
+        summary!.SummaryMarkdown.Should().Be("Manual summary");
+        execution.RunCount.Should().Be(1);
+        execution.Instructions.Should().Contain(instructions => instructions.Contains("重点关注第二部分", StringComparison.Ordinal));
+
+        var persisted = await repository.GetConversationContextSummaryAsync(conversation.Id);
+        persisted.Should().NotBeNull();
+        persisted!.SummaryMarkdown.Should().Be("Manual summary");
+        persisted.CoveredThroughMessageId.Should().Be(messages[2].Id);
+
+        var storedMessages = await repository.ListMessagesAsync(conversation.Id);
+        storedMessages.Should().BeEmpty("manual compaction stores only the summary, not slash command messages");
+    }
+
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))
@@ -419,12 +454,15 @@ public sealed class ConversationContextCompactionServiceTests : IDisposable
 
         public List<string> Payloads { get; } = [];
 
+        public List<string> Instructions { get; } = [];
+
         public Task<AgentExecutionResult> RunAsync(
             AgentExecutionRequest request,
             Func<string, CancellationToken, ValueTask>? onTextDelta,
             CancellationToken cancellationToken)
         {
             RunCount++;
+            Instructions.Add(request.Instructions);
             Payloads.Add(string.Join(
                 "\n\n",
                 request.Messages.Select(message => SelfClawAgentChatRuntime.ExtractTextFromContents(message.Contents))));

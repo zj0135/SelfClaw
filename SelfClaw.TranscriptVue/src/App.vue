@@ -63,6 +63,8 @@ const state = reactive({
 	skills: [],
 	availableMcpServers: [],
 	availableSkills: [],
+	slashCommands: [],
+	commandFeedback: null,
 	agents: [],
 	selectedAgentId: null,
 	agentActivities: [],
@@ -72,6 +74,13 @@ const state = reactive({
 
 const composerValue = ref('');
 const composerAttachments = ref([]);
+const slashPalette = reactive({
+	open: false,
+	query: '',
+	start: 0,
+	end: 0,
+	activeIndex: 0,
+});
 const leftPaneCollapsed = ref(false);
 const planPanelCollapsed = ref(false);
 const visualizationEnabled = ref(false);
@@ -533,6 +542,37 @@ const composerPlaceholder = computed(() => (isChannelMode.value ? '频道会话�
 const sendButtonDisabled = computed(
 	() => isChannelMode.value || (!state.isBusy && !composerValue.value.trim() && composerAttachments.value.length === 0) || !state.selectedProfileId
 );
+const slashCommandItems = computed(() => (state.slashCommands || []).map((command) => ({
+	type: 'command',
+	id: command.id || command.command,
+	command: command.command || `/${command.id || ''}`,
+	label: command.command || `/${command.id || ''}`,
+	name: command.name || command.command || command.id || '',
+	description: command.description || '',
+	argumentHint: command.argumentHint || '',
+	requiresConfirmation: Boolean(command.requiresConfirmation),
+})));
+const slashSkillItems = computed(() => (state.skills || []).map((skill) => ({
+	type: 'skill',
+	id: skill.id,
+	label: skill.name || skill.id,
+	name: skill.name || skill.id,
+	description: skill.relativePath || skill.id || '',
+})));
+const slashPaletteItems = computed(() => {
+	const query = slashPalette.query.trim().replace(/^\//, '').toLowerCase();
+	const allItems = [...slashCommandItems.value, ...slashSkillItems.value];
+	if (!query) {
+		return allItems;
+	}
+
+	return allItems.filter((item) => [
+		item.label,
+		item.name,
+		item.description,
+		item.command,
+	].some((value) => String(value || '').toLowerCase().includes(query)));
+});
 const settingsSections = computed(() => [
 	{
 		id: 'profile',
@@ -705,9 +745,11 @@ function normalizeState() {
 	state.channels = state.channels || [];
 	state.mcpServers = state.mcpServers || [];
 	state.skills = state.skills || [];
-	state.availableMcpServers = state.availableMcpServers || [];
-	state.availableSkills = state.availableSkills || [];
-	state.agents = state.agents || [];
+state.availableMcpServers = state.availableMcpServers || [];
+state.availableSkills = state.availableSkills || [];
+	state.slashCommands = state.slashCommands || [];
+	state.commandFeedback = state.commandFeedback || null;
+state.agents = state.agents || [];
 	state.selectedAgentId = state.selectedAgentId || (state.agents[0]?.id ?? 'build');
 }
 
@@ -717,6 +759,10 @@ function submitComposer() {
 	}
 
 	const prompt = composerValue.value.trim();
+	if (tryExecuteSlashCommand(prompt)) {
+		return;
+	}
+
 	if (!prompt && composerAttachments.value.length === 0) {
 		return;
 	}
@@ -735,6 +781,63 @@ function submitComposer() {
 	});
 	composerValue.value = '';
 	composerAttachments.value = [];
+	closeSlashPalette();
+}
+
+function tryExecuteSlashCommand(prompt) {
+	if (!prompt.startsWith('/')) {
+		return false;
+	}
+
+	const [rawCommand, ...argumentParts] = prompt.split(/\s+/);
+	const command = slashCommandItems.value.find((item) =>
+		String(item.command || '').toLowerCase() === rawCommand.toLowerCase());
+	if (!command) {
+		state.commandFeedback = {
+			level: 'error',
+			message: `Unknown command '${rawCommand}'.`,
+		};
+		return true;
+	}
+
+	post({
+		type: 'execute-command',
+		command: command.command,
+		arguments: argumentParts.join(' ').trim(),
+		confirmed: false,
+	});
+	composerValue.value = '';
+	composerAttachments.value = [];
+	closeSlashPalette();
+	return true;
+}
+
+function confirmCommandFeedback() {
+	const feedback = state.commandFeedback;
+	if (!feedback?.requiresConfirmation || !feedback.commandId) {
+		return;
+	}
+
+	const command = slashCommandItems.value.find((item) => item.id === feedback.commandId);
+	post({
+		type: 'execute-command',
+		command: command?.command || feedback.commandId,
+		arguments: feedback.arguments || '',
+		confirmed: true,
+	});
+	state.commandFeedback = {
+		...feedback,
+		level: 'info',
+		message: 'Running command...',
+		requiresConfirmation: false,
+	};
+}
+
+function clearCommandFeedback() {
+	state.commandFeedback = null;
+	post({
+		type: 'clear-command-feedback',
+	});
 }
 
 function clearFeedback(scope) {
@@ -1135,6 +1238,12 @@ function onDocumentKeydown(event) {
 		return;
 	}
 
+	if (event.key === 'Escape' && slashPalette.open) {
+		event.preventDefault();
+		closeSlashPalette();
+		return;
+	}
+
 	if (event.key === 'Escape' && state.isBusy) {
 		post({ type: 'stop-generation' });
 	}
@@ -1156,15 +1265,207 @@ function closeImagePreview() {
 	imagePreview.value = null;
 }
 
-function onComposerInput(event) {
-	composerValue.value = event.target.value;
+function onComposerInput(payload) {
+	if (typeof payload === 'string') {
+		composerValue.value = payload;
+		updateSlashPaletteFromInput(getComposerElement());
+		return;
+	}
+
+	composerValue.value = payload?.value ?? payload?.target?.value ?? '';
+	updateSlashPaletteFromInput(payload?.target ?? getComposerElement());
 }
 
 function onComposerKeydown(event) {
+	if ((event.key === 'Backspace' || event.key === 'Delete') && removeAdjacentSkillToken(event)) {
+		return;
+	}
+
+	if (slashPalette.open) {
+		if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			moveSlashPaletteSelection(1);
+			return;
+		}
+
+		if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			moveSlashPaletteSelection(-1);
+			return;
+		}
+
+		if (event.key === 'Tab' || event.key === 'Enter') {
+			event.preventDefault();
+			applySlashPaletteItem(slashPaletteItems.value[slashPalette.activeIndex]);
+			return;
+		}
+
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			closeSlashPalette();
+			return;
+		}
+	}
+
 	if (event.key === 'Enter' && !event.shiftKey) {
 		event.preventDefault();
 		submitComposer();
 	}
+}
+
+function removeAdjacentSkillToken(event) {
+	const inputEl = getComposerElement();
+	if (!inputEl || event.ctrlKey || event.metaKey || event.altKey) {
+		return false;
+	}
+
+	const value = composerValue.value;
+	const start = inputEl.selectionStart ?? 0;
+	const end = inputEl.selectionEnd ?? start;
+	const token = start !== end
+		? findFullySelectedSkillToken(value, start, end)
+		: event.key === 'Backspace'
+			? findSkillTokenBeforeOrAtOffset(value, start)
+			: findSkillTokenAfterOrAtOffset(value, start);
+	if (!token) {
+		return false;
+	}
+
+	event.preventDefault();
+	composerValue.value = `${value.slice(0, token.start)}${value.slice(token.end)}`;
+	nextTick(() => {
+		inputEl.focus?.();
+		inputEl.setSelectionRange?.(token.start, token.start);
+		updateSlashPaletteFromInput(inputEl);
+	});
+	return true;
+}
+
+function findFullySelectedSkillToken(value, selectionStart, selectionEnd) {
+	const token = findSkillTokenAtOffset(value, selectionStart);
+	if (!token || token.start !== selectionStart || token.end !== selectionEnd) {
+		return null;
+	}
+
+	return token;
+}
+
+function findSkillTokenAtOffset(value, offset) {
+	const pattern = /\[\/[^\]\r\n]{1,80}\]/g;
+	let match;
+	while ((match = pattern.exec(value || '')) !== null) {
+		const start = match.index;
+		const end = start + match[0].length;
+		if (start <= offset && offset <= end) {
+			return { start, end };
+		}
+	}
+
+	return null;
+}
+
+function findSkillTokenBeforeOrAtOffset(value, offset) {
+	const pattern = /\[\/[^\]\r\n]{1,80}\]/g;
+	let match;
+	while ((match = pattern.exec(value || '')) !== null) {
+		const start = match.index;
+		const end = start + match[0].length;
+		if (start < offset && offset <= end) {
+			return { start, end };
+		}
+	}
+
+	return null;
+}
+
+function findSkillTokenAfterOrAtOffset(value, offset) {
+	const pattern = /\[\/[^\]\r\n]{1,80}\]/g;
+	let match;
+	while ((match = pattern.exec(value || '')) !== null) {
+		const start = match.index;
+		const end = start + match[0].length;
+		if (start <= offset && offset < end) {
+			return { start, end };
+		}
+	}
+
+	return null;
+}
+
+function updateSlashPaletteFromInput(inputEl) {
+	if (!inputEl || isChannelMode.value) {
+		closeSlashPalette();
+		return;
+	}
+
+	const cursor = inputEl.selectionStart ?? inputEl.getSelectionOffset?.() ?? composerValue.value.length;
+	const value = composerValue.value;
+	const beforeCursor = value.slice(0, cursor);
+	const segmentStart = Math.max(beforeCursor.lastIndexOf('\n'), beforeCursor.lastIndexOf(' '), beforeCursor.lastIndexOf('\t')) + 1;
+	const segment = value.slice(segmentStart, cursor);
+	if (!segment.startsWith('/')) {
+		closeSlashPalette();
+		return;
+	}
+
+	slashPalette.open = true;
+	slashPalette.query = segment.slice(1);
+	slashPalette.start = segmentStart;
+	slashPalette.end = cursor;
+	if (slashPalette.activeIndex >= slashPaletteItems.value.length) {
+		slashPalette.activeIndex = 0;
+	}
+}
+
+function closeSlashPalette() {
+	slashPalette.open = false;
+	slashPalette.query = '';
+	slashPalette.start = 0;
+	slashPalette.end = 0;
+	slashPalette.activeIndex = 0;
+}
+
+function moveSlashPaletteSelection(delta) {
+	const count = slashPaletteItems.value.length;
+	if (count <= 0) {
+		slashPalette.activeIndex = 0;
+		return;
+	}
+
+	slashPalette.activeIndex = (slashPalette.activeIndex + delta + count) % count;
+}
+
+function applySlashPaletteItem(item) {
+	if (!item) {
+		return;
+	}
+
+	if (item.type === 'skill') {
+		insertComposerReplacement(`[/${item.name || item.label || item.id}]`, true, { suffix: '' });
+		return;
+	}
+
+	insertComposerReplacement(item.command, true);
+}
+
+function insertComposerReplacement(replacement, closeAfterInsert, options = {}) {
+	const value = composerValue.value;
+	const suffix = options.suffix ?? (closeAfterInsert ? ' ' : '');
+	const nextValue = `${value.slice(0, slashPalette.start)}${replacement}${suffix}${value.slice(slashPalette.end)}`;
+	const nextCursor = slashPalette.start + replacement.length + suffix.length;
+	composerValue.value = nextValue;
+	if (closeAfterInsert) {
+		closeSlashPalette();
+	} else {
+		slashPalette.end = nextCursor;
+		slashPalette.query = replacement.startsWith('/') ? replacement.slice(1).trim() : '';
+	}
+
+	nextTick(() => {
+		const inputEl = getComposerElement();
+		inputEl?.focus?.();
+		inputEl?.setSelectionRange?.(nextCursor, nextCursor);
+	});
 }
 
 function getActionSuppressKey(action, actionElement) {
@@ -1927,8 +2228,12 @@ onUnmounted(() => {
 					:is-reasoning-enabled="state.isReasoningEnabled"
 					:send-button-disabled="sendButtonDisabled" :visualization-enabled="activeVisualizationEnabled"
 					:context-usage="state.contextUsage"
+					:slash-palette="slashPalette" :slash-palette-items="slashPaletteItems"
+					:command-feedback="state.commandFeedback"
 					:attachments="composerAttachments" @composer-input="onComposerInput"
 					@composer-keydown="onComposerKeydown"
+					@select-slash-item="applySlashPaletteItem" @confirm-command="confirmCommandFeedback"
+					@clear-command-feedback="clearCommandFeedback"
 					@select-profile="onProfileSelectChange" @select-permission="onPermissionChange"
 					@toggle-reasoning-mode="onReasoningModeChange"
 					@toggle-planning-mode="onPlanningModeChange" @toggle-visualization-mode="onVisualizationModeChange"

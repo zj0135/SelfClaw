@@ -6,6 +6,31 @@ namespace SelfClaw.Infrastructure.Agents.Runtime.Compaction;
 
 internal static class ConversationCompactionPromptBuilder
 {
+    public static string BuildInstructions(string? focus = null)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("""
+Summarize older conversation history for a future assistant prompt.
+
+Requirements:
+- Preserve user goals, decisions, constraints, unresolved questions, important file paths, commands, tool outcomes mentioned in assistant content, and current task state.
+- Keep named agents, roles, channel context, and plan decisions when present.
+- Do not invent facts or claim tool access.
+- Do not include hidden reasoning or transcript mechanics.
+- Prefer compact Markdown with short sections.
+- Target roughly 800-1200 tokens unless the source requires more.
+""");
+
+        if (!string.IsNullOrWhiteSpace(focus))
+        {
+            builder.AppendLine();
+            builder.AppendLine("User-requested focus for this compaction:");
+            builder.AppendLine(focus.Trim());
+        }
+
+        return builder.ToString();
+    }
+
     public static string BuildInstructions()
         => """
 Summarize older conversation history for a future assistant prompt.

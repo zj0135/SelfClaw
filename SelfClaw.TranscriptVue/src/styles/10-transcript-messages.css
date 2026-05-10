@@ -122,6 +122,11 @@
 	padding-bottom: 19px;
 }
 
+.message-skill-chip {
+	margin: 0 2px;
+	vertical-align: -4px;
+}
+
 .message-flow {
 	gap: 16px;
 }

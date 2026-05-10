@@ -62,10 +62,13 @@ public sealed partial class MainWindowViewModel
     private bool IsConversationRunning(Guid conversationId)
         => _conversationRuntimeStates.TryGetValue(conversationId, out var state) && state.IsRunning;
 
+    private bool IsSelectedConversationRunning()
+        => GetSelectedRuntimeState()?.IsRunning == true;
+
     private void ProjectSelectedRuntimeState(bool publishShell)
     {
         var runtimeState = GetSelectedRuntimeState();
-        var nextBusy = runtimeState?.IsRunning == true;
+        var nextBusy = runtimeState?.IsRunning == true || _isCommandRunning;
         if (SetProperty(ref _isBusy, nextBusy, nameof(IsBusy)))
         {
             NotifyCommandStates();

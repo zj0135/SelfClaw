@@ -228,7 +228,7 @@ html[data-theme='light'] .composer-box {
 	color: #182230;
 }
 
-html[data-theme='light'] .composer-box::placeholder {
+html[data-theme='light'] .composer-box.empty::before {
 	color: #8792a2;
 }
 

@@ -46,6 +46,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly DesktopSettingsStore _desktopSettingsStore;
     private readonly DesktopAgentStore _desktopAgentStore;
+    private readonly SlashCommandRegistry _slashCommandRegistry;
     private readonly DesktopChannelManager _channelManager;
     private readonly StoragePaths _storagePaths;
     private readonly ILogger<MainWindowViewModel> _logger;
@@ -77,6 +78,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private ThemeMode _activeThemeMode = ThemeMode.System;
     private string _effectiveTranscriptTheme = "light";
     private bool _isPlanningModeEnabled;
+    private TranscriptCommandFeedback? _commandFeedback;
+    private CancellationTokenSource? _commandCancellationTokenSource;
+    private bool _isCommandRunning;
     private TranscriptPlanPanel? _planPanel;
     private ConversationMode _selectedConversationMode = ConversationMode.Programming;
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
@@ -97,6 +101,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         MarkdownHtmlRenderer markdownHtmlRenderer,
         DesktopSettingsStore desktopSettingsStore,
         DesktopAgentStore desktopAgentStore,
+        SlashCommandRegistry slashCommandRegistry,
         DesktopChannelManager channelManager,
         StoragePaths storagePaths,
         ILogger<MainWindowViewModel> logger)
@@ -112,6 +117,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _markdownHtmlRenderer = markdownHtmlRenderer;
         _desktopSettingsStore = desktopSettingsStore;
         _desktopAgentStore = desktopAgentStore;
+        _slashCommandRegistry = slashCommandRegistry;
         _channelManager = channelManager;
         _storagePaths = storagePaths;
         _logger = logger;
@@ -299,7 +305,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public bool IsBusy
     {
-        get => _isBusy;
+        get => _isBusy || _isCommandRunning;
         private set
         {
             if (SetProperty(ref _isBusy, value))
@@ -308,6 +314,126 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 PublishShell(false);
             }
         }
+    }
+
+    public async Task ExecuteSlashCommandAsync(string? command, string? arguments, bool confirmed = false)
+    {
+        var handler = _slashCommandRegistry.Resolve(command);
+        if (handler is null)
+        {
+            SetCommandFeedback("error", $"Unknown command '{command}'.");
+            return;
+        }
+
+        if (IsBusy)
+        {
+            SetCommandFeedback("error", "SelfClaw is busy. Stop the current task before running a command.");
+            return;
+        }
+
+        if (SelectedConversationMode == ConversationMode.Channel)
+        {
+            SetCommandFeedback("error", "Slash commands are only available in programming conversations.");
+            return;
+        }
+
+        _commandCancellationTokenSource?.Dispose();
+        var commandCancellationTokenSource = new CancellationTokenSource();
+        _commandCancellationTokenSource = commandCancellationTokenSource;
+        var cancellationToken = commandCancellationTokenSource.Token;
+        SetCommandRunning(true);
+        SetCommandFeedback("info", $"Running {handler.Definition.Command}...", handler.Definition.Id, arguments, false);
+
+        try
+        {
+            var selectedProfile = SelectedProfile;
+            var requestProfile = selectedProfile is null
+                ? null
+                : ResolveSelectedProfileModel() is { } selectedProfileModel
+                    ? selectedProfile with { Model = selectedProfileModel }
+                    : selectedProfile;
+            var apiKey = requestProfile is null || string.IsNullOrWhiteSpace(requestProfile.SecretRef)
+                ? null
+                : await _secretProtector.RetrieveSecretAsync(requestProfile.SecretRef, cancellationToken);
+            var settings = _desktopSettingsStore.Load();
+            _desktopSettings = settings;
+
+            var context = new SlashCommandContext(
+                arguments?.Trim() ?? string.Empty,
+                confirmed,
+                SelectedConversation,
+                requestProfile,
+                apiKey,
+                SelectedWorkspaceRoot,
+                GetSelectedTranscriptMessages().ToArray(),
+                settings,
+                cancellationToken);
+
+            var result = await handler.ExecuteAsync(context);
+            SetCommandFeedback(
+                result.Level ?? (result.Succeeded ? "success" : "error"),
+                result.Message,
+                handler.Definition.Id,
+                arguments,
+                result.RequiresConfirmation);
+            StatusText = result.Message;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            SetCommandFeedback("warning", $"{handler.Definition.Command} cancelled.", handler.Definition.Id, arguments);
+            StatusText = $"{handler.Definition.Command} cancelled.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Slash command failed. Command={Command}", handler.Definition.Command);
+            SetCommandFeedback("error", exception.Message, handler.Definition.Id, arguments);
+            StatusText = exception.Message;
+        }
+        finally
+        {
+            SetCommandRunning(false);
+            if (ReferenceEquals(_commandCancellationTokenSource, commandCancellationTokenSource))
+            {
+                _commandCancellationTokenSource = null;
+            }
+
+            commandCancellationTokenSource.Dispose();
+        }
+    }
+
+    public void ClearCommandFeedback()
+    {
+        _commandFeedback = null;
+        PublishShell(false);
+    }
+
+    private void SetCommandRunning(bool running)
+    {
+        if (_isCommandRunning == running)
+        {
+            return;
+        }
+
+        _isCommandRunning = running;
+        OnPropertyChanged(nameof(IsBusy));
+        NotifyCommandStates();
+        PublishShell(false);
+    }
+
+    private void SetCommandFeedback(
+        string level,
+        string message,
+        string? commandId = null,
+        string? arguments = null,
+        bool requiresConfirmation = false)
+    {
+        _commandFeedback = new TranscriptCommandFeedback(
+            level,
+            message,
+            commandId,
+            arguments,
+            requiresConfirmation);
+        PublishShell(false);
     }
 
     public async Task InitializeAsync()
@@ -1795,6 +1921,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void Stop()
     {
+        if (_commandCancellationTokenSource is not null)
+        {
+            _commandCancellationTokenSource.Cancel();
+        }
+
         var runtimeState = GetSelectedRuntimeState();
         if (runtimeState?.IsRunning == true)
         {
@@ -2125,9 +2256,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .ToArray();
         var availableMcpServers = BuildAvailableTranscriptMcpServers();
         var availableSkills = BuildAvailableTranscriptSkills();
+        var slashCommands = _slashCommandRegistry.Definitions
+            .Select(command => new TranscriptSlashCommandItem(
+                command.Id,
+                command.Command,
+                command.Name,
+                command.Description,
+                command.ArgumentHint,
+                command.RequiresConfirmation))
+            .ToArray();
         var planPanel = GetSelectedPlanPanel();
         var contextUsage = BuildContextUsage(transcriptMessages);
-        var isBusy = GetSelectedRuntimeState()?.IsRunning == true;
+        var isBusy = IsSelectedConversationRunning() || _isCommandRunning;
         var statusText = GetSelectedStatusText();
 
         TranscriptChanged?.Invoke(this, new TranscriptRenderState(
@@ -2153,6 +2293,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             BuildTranscriptSkills(availableSkills),
             availableMcpServers,
             availableSkills,
+            slashCommands,
+            _commandFeedback,
             BuildTranscriptAgents(),
             ResolveSelectedAgent().Id,
             agentActivities,

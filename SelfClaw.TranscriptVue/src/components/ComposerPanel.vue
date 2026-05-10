@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import PlanPanel from './PlanPanel.vue';
 
 const props = defineProps({
@@ -83,6 +83,18 @@ const props = defineProps({
 		type: Object,
 		default: null,
 	},
+	slashPalette: {
+		type: Object,
+		default: () => ({ open: false, activeIndex: 0 }),
+	},
+	slashPaletteItems: {
+		type: Array,
+		default: () => [],
+	},
+	commandFeedback: {
+		type: Object,
+		default: null,
+	},
 	attachments: {
 		type: Array,
 		default: () => [],
@@ -101,12 +113,16 @@ const emit = defineEmits([
 	'pick-images',
 	'capture-screenshot',
 	'remove-attachment',
+	'select-slash-item',
+	'confirm-command',
+	'clear-command-feedback',
 	'send-click',
 ]);
 
 const composerEl = ref(null);
 const toolsShellEl = ref(null);
 const toolsMenuOpen = ref(false);
+const isSyncingComposerDom = ref(false);
 const contextMessageOverheadTokens = 4;
 const contextImageMetadataTokens = 32;
 
@@ -249,8 +265,282 @@ function formatAttachmentSize(byteLength) {
 	return `${Math.max(0, size)} B`;
 }
 
+function slashItemTypeLabel(item) {
+	return item?.type === 'skill' ? '[skill]' : '[command]';
+}
+
+function slashItemDescription(item) {
+	if (!item) {
+		return '';
+	}
+
+	if (item.type === 'command' && item.argumentHint) {
+		return `${item.description || ''} ${item.argumentHint}`.trim();
+	}
+
+	return item.description || '';
+}
+
+function renderComposerDomFromValue(value) {
+	const editor = composerEl.value;
+	if (!editor || serializeComposerEditor(editor) === String(value || '')) {
+		return;
+	}
+
+	isSyncingComposerDom.value = true;
+	editor.replaceChildren(...createComposerNodes(String(value || '')));
+	isSyncingComposerDom.value = false;
+}
+
+function createComposerNodes(value) {
+	const nodes = [];
+	const pattern = /\[\/([^\]\r\n]{1,80})\]/g;
+	let lastIndex = 0;
+	let match;
+	while ((match = pattern.exec(value)) !== null) {
+		if (match.index > lastIndex) {
+			nodes.push(document.createTextNode(value.slice(lastIndex, match.index)));
+		}
+
+		nodes.push(createSkillChipNode(match[1], match[0]));
+		lastIndex = match.index + match[0].length;
+	}
+
+	if (lastIndex < value.length) {
+		nodes.push(document.createTextNode(value.slice(lastIndex)));
+	}
+
+	return nodes;
+}
+
+function createSkillChipNode(label, rawText) {
+	const chip = document.createElement('span');
+	chip.className = 'composer-inline-skill';
+	chip.contentEditable = 'false';
+	chip.dataset.raw = rawText;
+	chip.dataset.skillName = label;
+	chip.setAttribute('role', 'text');
+
+	const icon = document.createElement('span');
+	icon.className = 'composer-inline-skill-icon';
+	icon.setAttribute('aria-hidden', 'true');
+	icon.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M8 1.8 13 4.6v6.8L8 14.2l-5-2.8V4.6L8 1.8Z"></path><path d="M3.2 4.8 8 7.5l4.8-2.7"></path><path d="M8 7.5v6.2"></path></svg>';
+
+	const name = document.createElement('span');
+	name.className = 'composer-inline-skill-name';
+	name.textContent = label;
+
+	chip.append(icon, name);
+	return chip;
+}
+
+function serializeComposerEditor(editor) {
+	let text = '';
+	for (const node of editor.childNodes) {
+		text += serializeComposerNode(node);
+	}
+
+	return text.replace(/\u00a0/g, ' ');
+}
+
+function serializeComposerNode(node) {
+	if (node.nodeType === Node.TEXT_NODE) {
+		return node.nodeValue || '';
+	}
+
+	if (!(node instanceof HTMLElement)) {
+		return node.textContent || '';
+	}
+
+	if (node.classList.contains('composer-inline-skill')) {
+		return node.dataset.raw || `[/${node.dataset.skillName || node.textContent || ''}]`;
+	}
+
+	if (node.tagName === 'BR') {
+		return '\n';
+	}
+
+	let text = '';
+	for (const child of node.childNodes) {
+		text += serializeComposerNode(child);
+	}
+
+	if (node.tagName === 'DIV' || node.tagName === 'P') {
+		return `${text}\n`;
+	}
+
+	return text;
+}
+
+function getComposerSelectionOffset() {
+	return getComposerSelectionOffsets().start;
+}
+
+function getComposerSelectionOffsets() {
+	const editor = composerEl.value;
+	const selection = window.getSelection();
+	if (!editor || !selection || selection.rangeCount === 0) {
+		const offset = props.composerValue.length;
+		return { start: offset, end: offset };
+	}
+
+	const range = selection.getRangeAt(0);
+	if (
+		(!editor.contains(range.startContainer) && range.startContainer !== editor) ||
+		(!editor.contains(range.endContainer) && range.endContainer !== editor)
+	) {
+		const offset = props.composerValue.length;
+		return { start: offset, end: offset };
+	}
+
+	return {
+		start: getComposerBoundaryOffset(editor, range.startContainer, range.startOffset),
+		end: getComposerBoundaryOffset(editor, range.endContainer, range.endOffset),
+	};
+}
+
+function getComposerBoundaryOffset(editor, container, offset) {
+	const before = document.createRange();
+	before.selectNodeContents(editor);
+	before.setEnd(container, offset);
+	return serializeRangeContents(before);
+}
+
+function serializeRangeContents(range) {
+	const fragment = range.cloneContents();
+	let text = '';
+	for (const node of fragment.childNodes) {
+		text += serializeComposerNode(node);
+	}
+
+	return text.replace(/\u00a0/g, ' ').length;
+}
+
+function setComposerSelectionRange(start, end = start) {
+	const editor = composerEl.value;
+	if (!editor) {
+		return;
+	}
+
+	const selection = window.getSelection();
+	if (!selection) {
+		return;
+	}
+
+	const range = document.createRange();
+	const startPoint = findComposerDomPoint(editor, Math.max(0, start));
+	const endPoint = findComposerDomPoint(editor, Math.max(0, end));
+	range.setStart(startPoint.node, startPoint.offset);
+	range.setEnd(endPoint.node, endPoint.offset);
+	selection.removeAllRanges();
+	selection.addRange(range);
+}
+
+function findComposerDomPoint(root, targetOffset) {
+	let remaining = targetOffset;
+	let lastPoint = { node: root, offset: root.childNodes.length };
+
+	for (let index = 0; index < root.childNodes.length; index += 1) {
+		const node = root.childNodes[index];
+		const length = serializedNodeLength(node);
+		if (remaining <= length) {
+			return pointWithinComposerNode(root, node, index, remaining);
+		}
+
+		remaining -= length;
+		lastPoint = { node: root, offset: index + 1 };
+	}
+
+	return lastPoint;
+}
+
+function pointWithinComposerNode(parent, node, index, offset) {
+	if (node.nodeType === Node.TEXT_NODE) {
+		return { node, offset: Math.min(offset, (node.nodeValue || '').length) };
+	}
+
+	if (node instanceof HTMLElement && node.classList.contains('composer-inline-skill')) {
+		return offset <= 0 ? { node: parent, offset: index } : { node: parent, offset: index + 1 };
+	}
+
+	if (node instanceof HTMLElement && node.tagName === 'BR') {
+		return offset <= 0 ? { node: parent, offset: index } : { node: parent, offset: index + 1 };
+	}
+
+	if (node instanceof HTMLElement) {
+		return findComposerDomPoint(node, offset);
+	}
+
+	return { node: parent, offset: index };
+}
+
+function serializedNodeLength(node) {
+	return serializeComposerNode(node).length;
+}
+
+function emitComposerValueFromDom() {
+	if (isSyncingComposerDom.value) {
+		return;
+	}
+
+	const editor = composerEl.value;
+	if (!editor) {
+		return;
+	}
+
+	const selection = getComposerSelectionOffsets();
+	emit('composer-input', {
+		value: serializeComposerEditor(editor),
+		selectionStart: selection.start,
+		selectionEnd: selection.end,
+		target: getComposerApi(),
+	});
+}
+
+function onComposerKeydownInternal(event) {
+	if (props.isChannelMode) {
+		event.preventDefault();
+		return;
+	}
+
+	emit('composer-keydown', event);
+}
+
+function onComposerInputInternal() {
+	emitComposerValueFromDom();
+}
+
+function onComposerPaste(event) {
+	event.preventDefault();
+	const text = event.clipboardData?.getData('text/plain') || '';
+	document.execCommand('insertText', false, text);
+}
+
+function getComposerApi() {
+	return {
+		focus: () => composerEl.value?.focus(),
+		get selectionStart() {
+			return getComposerSelectionOffset();
+		},
+		get selectionEnd() {
+			return getComposerSelectionOffsets().end;
+		},
+		get value() {
+			return composerEl.value ? serializeComposerEditor(composerEl.value) : '';
+		},
+		getSelectionOffset: () => getComposerSelectionOffset(),
+		setSelectionRange: (start, end = start) => setComposerSelectionRange(start, end),
+	};
+}
+
+watch(
+	() => props.composerValue,
+	(value) => renderComposerDomFromValue(value),
+);
+
 onMounted(() => {
 	document.addEventListener('pointerdown', onDocumentPointerDown);
+	renderComposerDomFromValue(props.composerValue);
 });
 
 onUnmounted(() => {
@@ -258,7 +548,7 @@ onUnmounted(() => {
 });
 
 defineExpose({
-	getComposerEl: () => composerEl.value,
+	getComposerEl: () => getComposerApi(),
 });
 </script>
 
@@ -274,18 +564,59 @@ defineExpose({
 		/>
 
 		<div class="composer-grid">
+			<div v-if="commandFeedback" class="command-feedback" :class="commandFeedback.level || 'info'">
+				<span class="command-feedback-message">{{ commandFeedback.message }}</span>
+				<button
+					v-if="commandFeedback.requiresConfirmation"
+					class="command-feedback-action"
+					type="button"
+					@click="emit('confirm-command')"
+				>
+					Confirm
+				</button>
+				<button
+					class="command-feedback-dismiss"
+					type="button"
+					aria-label="Dismiss command feedback"
+					title="Dismiss"
+					@click="emit('clear-command-feedback')"
+				>
+					×
+				</button>
+			</div>
 			<div class="composer-surface">
 				<div class="composer-stack">
-					<textarea
+					<div
 						id="composer"
 						ref="composerEl"
 						class="composer-box"
-						:value="composerValue"
-						:disabled="isChannelMode"
-						:placeholder="composerPlaceholder"
-						@input="emit('composer-input', $event)"
-						@keydown="emit('composer-keydown', $event)"
-					></textarea>
+						:class="{ empty: !composerValue, disabled: isChannelMode }"
+						:contenteditable="isChannelMode ? 'false' : 'true'"
+						:data-placeholder="composerPlaceholder"
+						role="textbox"
+						aria-multiline="true"
+						spellcheck="false"
+						@input="onComposerInputInternal"
+						@keydown="onComposerKeydownInternal"
+						@paste="onComposerPaste"
+					></div>
+					<div v-if="slashPalette.open" class="slash-palette" role="listbox" aria-label="Slash commands">
+						<button
+							v-for="(item, index) in slashPaletteItems"
+							:key="`${item.type}-${item.id}`"
+							class="slash-palette-row"
+							:class="{ active: index === slashPalette.activeIndex }"
+							type="button"
+							role="option"
+							:aria-selected="index === slashPalette.activeIndex ? 'true' : 'false'"
+							@mousedown.prevent="emit('select-slash-item', item)"
+						>
+							<span class="slash-palette-token">{{ item.type === 'command' ? item.command : item.name }}</span>
+							<span class="slash-palette-description">{{ slashItemDescription(item) }}</span>
+							<span class="slash-palette-kind">{{ slashItemTypeLabel(item) }}</span>
+						</button>
+						<div v-if="slashPaletteItems.length === 0" class="slash-palette-empty">No matches</div>
+					</div>
 					<div v-if="attachments.length > 0" class="composer-attachments" aria-label="待发送图片">
 						<div v-for="attachment in attachments" :key="attachment.id" class="composer-attachment">
 							<img v-if="attachment.dataUrl" class="composer-attachment-preview" :src="attachment.dataUrl" :alt="attachment.fileName" />

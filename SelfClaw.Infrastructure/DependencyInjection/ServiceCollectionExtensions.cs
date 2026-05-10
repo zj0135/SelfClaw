@@ -29,7 +29,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IConversationRepository, SqliteConversationRepository>();
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
+        services.AddSingleton<IAgentExecutionService>(provider =>
+        {
+            var loggerFactory = provider.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
+            return new ChatClientAgentExecutionService(loggerFactory, provider);
+        });
         services.AddSingleton<IAgentContextProviderFactory, FileSystemAgentContextProviderFactory>();
+        services.AddSingleton<IWorkspaceMemoryInitializationService, WorkspaceMemoryInitializationService>();
         services.AddSingleton<IAgentMcpToolProvider, McpServerToolProvider>();
         services.AddSingleton<IAgentChatRuntime, SelfClawAgentChatRuntime>();
         services.AddSingleton<IConversationContextCompactionService>(provider =>
@@ -37,7 +43,7 @@ public static class ServiceCollectionExtensions
             var loggerFactory = provider.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
             return new ConversationContextCompactionService(
                 provider.GetRequiredService<IConversationRepository>(),
-                new ChatClientAgentExecutionService(loggerFactory, provider),
+                provider.GetRequiredService<IAgentExecutionService>(),
                 loggerFactory.CreateLogger<ConversationContextCompactionService>());
         });
         services.AddSingleton<MarkdownHtmlRenderer>();

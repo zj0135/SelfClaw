@@ -23,6 +23,8 @@ public sealed record TranscriptRenderState(
     IReadOnlyList<TranscriptSkillItem> Skills,
     IReadOnlyList<TranscriptMcpServerItem> AvailableMcpServers,
     IReadOnlyList<TranscriptSkillItem> AvailableSkills,
+    IReadOnlyList<TranscriptSlashCommandItem> SlashCommands,
+    TranscriptCommandFeedback? CommandFeedback,
     IReadOnlyList<TranscriptAgentItem> Agents,
     string? SelectedAgentId,
     IReadOnlyList<AgentActivityNode> AgentActivities,

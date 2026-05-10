@@ -42,6 +42,9 @@ public partial class App : System.Windows.Application
             builder.Services.AddSelfClawInfrastructure(_storagePaths);
             builder.Services.AddSingleton<DesktopSettingsStore>();
             builder.Services.AddSingleton<DesktopAgentStore>();
+            builder.Services.AddSingleton<ISlashCommandHandler, CompactSlashCommandHandler>();
+            builder.Services.AddSingleton<ISlashCommandHandler, InitSlashCommandHandler>();
+            builder.Services.AddSingleton<SlashCommandRegistry>();
             builder.Services.AddSingleton<IDesktopChannelAdapter, FeishuDesktopChannelAdapter>();
             builder.Services.AddSingleton<DesktopChannelManager>();
             builder.Services.AddSingleton<DesktopToolApprovalHandler>();

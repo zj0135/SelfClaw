@@ -12,4 +12,13 @@ public interface IConversationContextCompactionService
         int modelContextWindow,
         int modelAutoCompactTokenLimit,
         CancellationToken cancellationToken = default);
+
+    Task<ConversationContextSummaryRecord?> CompactNowAsync(
+        Guid conversationId,
+        ProviderProfile profile,
+        string apiKey,
+        IReadOnlyList<MessageRecord> messages,
+        int modelContextWindow,
+        string? focus = null,
+        CancellationToken cancellationToken = default);
 }

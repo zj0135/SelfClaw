@@ -349,7 +349,6 @@ html[data-theme='light'] .tool-details-body {
 
 .empty,
 .muted-placeholder {
-	border: 1px dashed var(--border);
 	border-radius: 12px;
 	background: var(--panel-soft);
 	box-shadow: none;
@@ -372,10 +371,11 @@ html[data-theme='light'] .composer-surface {
 	padding: 0 0 14px;
 	font-size: 15px;
 	line-height: 1.6;
+	text-align: left;
 }
 
-.composer-box::placeholder,
-html[data-theme='light'] .composer-box::placeholder {
+.composer-box.empty::before,
+html[data-theme='light'] .composer-box.empty::before {
 	color: var(--muted-soft);
 }
 
@@ -1223,4 +1223,3 @@ html[data-theme='light'] .pane-collapse-toggle-floating:hover {
 	border-color: rgba(68, 96, 165, 0.36);
 	color: white;
 }
-

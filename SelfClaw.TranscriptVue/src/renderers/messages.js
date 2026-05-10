@@ -277,7 +277,73 @@ function renderToolGroup(item, toolSegments, startIndex, endIndex, totalSegments
     `;
 }
 
-function renderBodySegment(segment, index, totalSegments) {
+const skillTokenPattern = /\[\/([^\]\r\n]{1,80})\]/g;
+const skillTokenSkipTags = new Set(['A', 'CODE', 'KBD', 'PRE', 'SAMP', 'SCRIPT', 'STYLE']);
+
+function renderSkillChipHtml(name) {
+	const safeName = escapeHtml(name);
+	return `<span class="composer-inline-skill message-skill-chip" role="text"><span class="composer-inline-skill-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M8 1.8 13 4.6v6.8L8 14.2l-5-2.8V4.6L8 1.8Z"></path><path d="M3.2 4.8 8 7.5l4.8-2.7"></path><path d="M8 7.5v6.2"></path></svg></span><span class="composer-inline-skill-name">${safeName}</span></span>`;
+}
+
+function renderSkillTokensInText(text) {
+	let html = '';
+	let lastIndex = 0;
+	let match;
+	skillTokenPattern.lastIndex = 0;
+	while ((match = skillTokenPattern.exec(text || '')) !== null) {
+		html += escapeHtml(text.slice(lastIndex, match.index));
+		html += renderSkillChipHtml(match[1]);
+		lastIndex = match.index + match[0].length;
+	}
+
+	return html + escapeHtml(String(text || '').slice(lastIndex));
+}
+
+function shouldSkipSkillTokenRendering(node) {
+	let current = node.parentElement;
+	while (current) {
+		if (skillTokenSkipTags.has(current.tagName)) {
+			return true;
+		}
+
+		current = current.parentElement;
+	}
+
+	return false;
+}
+
+function renderSkillTokensInUserHtml(html) {
+	if (!html || !html.includes('[/') || typeof document === 'undefined') {
+		return html;
+	}
+
+	const template = document.createElement('template');
+	template.innerHTML = html;
+	const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
+	const textNodes = [];
+	let node = walker.nextNode();
+	while (node) {
+		const text = node.nodeValue || '';
+		if (text.includes('[/') && !shouldSkipSkillTokenRendering(node)) {
+			skillTokenPattern.lastIndex = 0;
+			if (skillTokenPattern.test(text)) {
+				textNodes.push(node);
+			}
+		}
+
+		node = walker.nextNode();
+	}
+
+	for (const textNode of textNodes) {
+		const wrapper = document.createElement('span');
+		wrapper.innerHTML = renderSkillTokensInText(textNode.nodeValue || '');
+		textNode.replaceWith(...wrapper.childNodes);
+	}
+
+	return template.innerHTML;
+}
+
+function renderBodySegment(item, segment, index, totalSegments) {
 	if (!segment.html) {
 		return '';
 	}
@@ -291,7 +357,10 @@ function renderBodySegment(segment, index, totalSegments) {
 		classes.push('last');
 	}
 
-	return `<div class="${classes.join(' ')}">${segment.html}</div>`;
+	const html = item.role === 'user'
+		? renderSkillTokensInUserHtml(segment.html)
+		: segment.html;
+	return `<div class="${classes.join(' ')}">${html}</div>`;
 }
 
 function formatAttachmentSize(byteLength) {
@@ -373,7 +442,7 @@ function renderMessageContent(item, openThoughts, openToolSegments, openToolGrou
 			continue;
 		}
 
-		parts.push(renderBodySegment(segment, index, segments.length));
+		parts.push(renderBodySegment(item, segment, index, segments.length));
 	}
 
 	return `
