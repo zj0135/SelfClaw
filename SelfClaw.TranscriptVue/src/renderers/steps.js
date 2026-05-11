@@ -26,7 +26,7 @@ function getActivityDetailsHtml(item, actionButtons, detailValueClasses) {
 
 function renderActivities(agentActivities, { openActivities }) {
 	if (!agentActivities?.length) {
-		return '<div class="muted-placeholder">这里会显示工具调用、执行结果和后续运行步骤。</div>';
+		return '<div class="muted-placeholder">暂无运行记录</div>';
 	}
 
 	const detailValueClasses = (detail) => {
@@ -94,7 +94,6 @@ export function renderStepsHeader() {
 	return `
     <div>
       <div class="steps-title">工具</div>
-      <div class="steps-subtitle">运行步骤与工具状态</div>
     </div>
   `;
 }

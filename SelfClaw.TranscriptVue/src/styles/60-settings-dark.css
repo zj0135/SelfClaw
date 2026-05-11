@@ -71,24 +71,30 @@ html:not([data-theme='light']) .settings-nav-item-title {
 html:not([data-theme='light']) .settings-nav-item-badge,
 html:not([data-theme='light']) .settings-badge {
 	border-radius: 999px;
-	background: #10131a;
-	border-color: #202631;
-	color: #aeb5c2;
+	background: rgba(255, 255, 255, 0.03);
+	border-color: rgba(255, 255, 255, 0.08);
+	color: #b4bcc9;
+}
+
+html:not([data-theme='light']) .settings-badge-strong {
+	background: rgba(139, 92, 246, 0.18);
+	border-color: rgba(139, 92, 246, 0.3);
+	color: #f3edff;
 }
 
 html:not([data-theme='light']) .settings-section,
 html:not([data-theme='light']) .selected-summary-card,
 html:not([data-theme='light']) .range-field,
 html:not([data-theme='light']) .channel-card {
-	border-radius: 8px;
-	background: #0d1017;
-	border-color: #1e2531;
-	box-shadow: none;
+	border-radius: 10px;
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0.008)), #0d1017;
+	border-color: #1f2734;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 
 html:not([data-theme='light']) .channel-card.enabled {
-	background: #0f131a;
-	border-color: #283142;
+	background: linear-gradient(180deg, rgba(139, 92, 246, 0.06), rgba(255, 255, 255, 0.012)), #10141c;
+	border-color: rgba(139, 92, 246, 0.24);
 }
 
 html:not([data-theme='light']) .channel-card.running {
@@ -109,8 +115,8 @@ html:not([data-theme='light']) .field-select,
 html:not([data-theme='light']) .field-input,
 html:not([data-theme='light']) .field-combobox-trigger {
 	border-radius: 6px;
-	background: #10131a;
-	border-color: #202631;
+	background: #10141c;
+	border-color: #222a37;
 	color: #d9dde6;
 	box-shadow: none;
 }
@@ -164,8 +170,8 @@ html:not([data-theme='light']) .field-combobox-toggle {
 html:not([data-theme='light']) .ghost-btn,
 html:not([data-theme='light']) .close-btn,
 html:not([data-theme='light']) .field-combobox-toggle {
-	background: #10131a;
-	border-color: #202631;
+	background: #11161e;
+	border-color: #252d3b;
 	color: #c9ced8;
 }
 
@@ -179,8 +185,8 @@ html:not([data-theme='light']) .field-combobox-toggle:hover {
 
 html:not([data-theme='light']) .primary-btn,
 html:not([data-theme='light']) .icon-add-btn {
-	background: rgba(139, 92, 246, 0.16);
-	border: 1px solid rgba(139, 92, 246, 0.38);
+	background: linear-gradient(180deg, rgba(139, 92, 246, 0.2), rgba(139, 92, 246, 0.12));
+	border: 1px solid rgba(139, 92, 246, 0.34);
 	color: #f0eefc;
 }
 
@@ -190,6 +196,19 @@ html:not([data-theme='light']) .icon-add-btn:hover {
 	border-color: rgba(139, 92, 246, 0.48);
 	filter: none;
 	transform: none;
+}
+
+html:not([data-theme='light']) .channel-card-actions {
+	border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+html:not([data-theme='light']) .settings-inline-meta {
+	color: #8d96a5;
+}
+
+html:not([data-theme='light']) .mcp-empty-state {
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0.008)), #0e131a;
+	border-color: rgba(255, 255, 255, 0.1);
 }
 
 html:not([data-theme='light']) .danger-btn {

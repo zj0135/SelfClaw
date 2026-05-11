@@ -880,7 +880,7 @@ public partial class MainWindow : Window
                 [],
                 null,
                 null,
-                "Workspace selection changed. Retry loading the directory.");
+                "工作区已切换");
             return;
         }
 
@@ -892,7 +892,7 @@ public partial class MainWindow : Window
                 [],
                 null,
                 null,
-                "Select a workspace first.");
+                "未绑定工作区");
             return;
         }
 

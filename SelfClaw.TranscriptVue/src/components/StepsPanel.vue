@@ -208,14 +208,14 @@ defineExpose({
 
 		<div v-else id="steps-scroll" ref="scrollEl" class="steps-scroll workspace-tree-scroll"
 			@scroll.passive="closeContextMenu">
-			<div v-if="!props.hasWorkspace" class="muted-placeholder">选择工作区后，这里会显示目录和文件树。</div>
+			<div v-if="!props.hasWorkspace" class="muted-placeholder">未绑定工作区</div>
 			<div v-else-if="props.workspaceTreeLoading && !props.workspaceTreeLoaded" class="workspace-tree-state">
 				正在加载目录...
 			</div>
 			<div v-else-if="props.workspaceTreeError && !props.workspaceTreeLoaded" class="workspace-tree-state error">
 				{{ props.workspaceTreeError }}
 			</div>
-			<div v-else-if="props.workspaceTreeEntries.length === 0" class="muted-placeholder">当前工作区没有可显示的文件。</div>
+			<div v-else-if="props.workspaceTreeEntries.length === 0" class="muted-placeholder">没有可显示的文件</div>
 			<div v-else class="workspace-tree-list">
 				<WorkspaceTreeNode v-for="entry in props.workspaceTreeEntries" :key="entry.path" :node="entry"
 					@toggle-directory="onWorkspaceDirectoryToggle" @open-file="onWorkspaceFileOpen"

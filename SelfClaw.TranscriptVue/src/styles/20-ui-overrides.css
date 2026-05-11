@@ -853,6 +853,12 @@ html[data-theme='light'] .conversation-card.selected {
 	color: var(--muted);
 }
 
+.settings-section,
+.selected-summary-card,
+.channel-card {
+	backdrop-filter: blur(8px);
+}
+
 .transcript-scroll {
 	padding: 24px 26px 26px;
 	gap: 10px;

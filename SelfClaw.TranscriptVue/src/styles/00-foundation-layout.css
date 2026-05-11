@@ -1938,6 +1938,13 @@ a:hover {
 	min-width: 0;
 }
 
+.settings-section-tools {
+	display: inline-flex;
+	align-items: center;
+	gap: 10px;
+	flex: 0 0 auto;
+}
+
 .settings-section-title {
 	font-family: var(--font-display);
 	font-size: 18px;
@@ -3311,6 +3318,15 @@ html[data-theme='light'] .channel-card.error {
 }
 
 @media (max-width: 960px) {
+	.settings-section-header {
+		align-items: flex-start;
+	}
+
+	.settings-section-tools {
+		width: 100%;
+		justify-content: flex-end;
+	}
+
 	.channel-card-top,
 	.channel-card-actions {
 		flex-direction: column;

@@ -538,7 +538,7 @@ const selectedThemeLabel = computed(
 		}[state.selectedThemeId || 'system'] ||
 		'跟随系统'
 );
-const composerPlaceholder = computed(() => (isChannelMode.value ? '频道会话由外部消息自动驱动' : 'Ask for follow-up changes'));
+const composerPlaceholder = computed(() => (isChannelMode.value ? '频道消息由外部驱动' : '输入你的需求'));
 const sendButtonDisabled = computed(
 	() => isChannelMode.value || (!state.isBusy && !composerValue.value.trim() && composerAttachments.value.length === 0) || !state.selectedProfileId
 );
@@ -624,9 +624,9 @@ const visibleSettingsFeedback = computed(() => {
 const profileSummaryCards = computed(() => [
 	{ label: '名称', value: selectedProfile.value?.label || '未选择配置' },
 	{ label: '模型', value: state.selectedProfileModel || '未选择配置' },
-	{ label: 'Endpoint', value: selectedProfile.value?.description || '未设置 Endpoint' },
+	{ label: '地址', value: selectedProfile.value?.description || '未设置地址' },
 	{
-		label: 'Temperature',
+		label: '温度',
 		value: selectedProfile.value?.temperatureEnabled
 			? `${formatSamplingValue(selectedProfile.value?.temperature ?? 0.7, 2)} / 已启用`
 			: `${formatSamplingValue(selectedProfile.value?.temperature ?? 0.7, 2)} / 未启用`,
@@ -1841,6 +1841,8 @@ function onSettingsProfileChange(profileId) {
 
 function onWorkspaceChange(workspaceRootId) {
 	clearFeedback('workspace');
+	state.selectedWorkspaceRootId = workspaceRootId || null;
+	resetWorkspaceTreeState();
 	post({ type: 'select-workspace', workspaceRootId: workspaceRootId || null });
 }
 

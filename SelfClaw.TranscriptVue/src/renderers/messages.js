@@ -357,9 +357,7 @@ function renderBodySegment(item, segment, index, totalSegments) {
 		classes.push('last');
 	}
 
-	const html = item.role === 'user'
-		? renderSkillTokensInUserHtml(segment.html)
-		: segment.html;
+	const html = item.role === 'user' ? renderSkillTokensInUserHtml(segment.html) : segment.html;
 	return `<div class="${classes.join(' ')}">${html}</div>`;
 }
 

@@ -249,6 +249,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
             else
             {
+                _selectionVersion++;
                 _messages.Clear();
                 _toolRuns.Clear();
                 _toolRunAnchors.Clear();
@@ -885,11 +886,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
 
-        if (SelectedWorkspaceRoot?.Id == workspaceRootId)
-        {
-            SelectedWorkspaceRoot = WorkspaceRoots.FirstOrDefault();
-        }
-
         ApplyConversationFilter();
         StatusText = $"Deleted workspace '{workspaceRoot.Name}'.";
     }
@@ -1083,7 +1079,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var selectedId = SelectedWorkspaceRoot?.Id;
         var workspaceRoots = await _conversationRepository.ListWorkspaceRootsAsync();
         ReplaceCollection(WorkspaceRoots, workspaceRoots);
-        SelectedWorkspaceRoot = workspaceRoots.FirstOrDefault(root => root.Id == selectedId) ?? workspaceRoots.FirstOrDefault();
+        SelectedWorkspaceRoot = selectedId is Guid id
+            ? workspaceRoots.FirstOrDefault(root => root.Id == id)
+            : null;
     }
 
     private async Task ReloadConversationsAsync()
@@ -2179,7 +2177,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return false;
         }
 
-        return SelectedWorkspaceRoot is null || conversation.WorkspaceRootId == SelectedWorkspaceRoot.Id;
+        return SelectedWorkspaceRoot is null
+            ? conversation.WorkspaceRootId is null
+            : conversation.WorkspaceRootId == SelectedWorkspaceRoot.Id;
     }
 
     private void UpsertToolRun(ToolExecutionRecord record)

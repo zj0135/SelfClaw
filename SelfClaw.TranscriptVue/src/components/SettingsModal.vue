@@ -252,11 +252,10 @@ defineExpose({
 						<div class="settings-section-copy">
 							<div class="settings-section-title">智能体</div>
 						</div>
-						<div class="settings-badge">{{ agents.length }} 个</div>
-					</div>
-					<div class="channel-card-actions mcp-section-actions">
-						<div class="settings-hint">维护系统内置与自定义智能体，支持选择当前智能体、编辑定义，以及将智能体应用到当前会话。</div>
-						<button class="icon-add-btn" type="button" aria-label="新增智能体" @click="emit('create-agent')">+</button>
+						<div class="settings-section-tools">
+							<div class="settings-badge">{{ agents.length }} 个</div>
+							<button class="icon-add-btn settings-section-add-btn" type="button" aria-label="新增智能体" @click="emit('create-agent')">+</button>
+						</div>
 					</div>
 					<div v-if="agents.length > 0" class="channel-card-list">
 						<article v-for="agent in agents" :key="agent.id" class="channel-card agent-settings-card"
@@ -266,7 +265,7 @@ defineExpose({
 									<button class="settings-inline-link" type="button" @click="emit('edit-agent', agent)">{{ agent.name || agent.id }}</button>
 									<div class="settings-hint">{{ agent.description || '未填写描述' }}</div>
 								</div>
-								<div class="settings-badge">{{ agent.id === selectedAgentId ? '当前智能体' : '可选' }}</div>
+								<div v-if="agent.id === selectedAgentId" class="settings-badge settings-badge-strong">当前</div>
 							</div>
 							<div class="selected-summary-grid channel-summary-grid">
 								<div class="selected-summary-card">
@@ -278,7 +277,7 @@ defineExpose({
 									<div class="selected-summary-value">{{ agentMeta(agent) }}</div>
 								</div>
 								<div class="selected-summary-card">
-									<div class="selected-summary-label">Skills</div>
+									<div class="selected-summary-label">技能</div>
 									<div class="selected-summary-value">{{ (agent.skills || []).length }}</div>
 								</div>
 								<div class="selected-summary-card">
@@ -290,7 +289,7 @@ defineExpose({
 								<div v-for="warning in agent.warnings" :key="warning">{{ warning }}</div>
 							</div>
 							<div class="channel-card-actions">
-								<div class="settings-badge">{{ agent.isBuiltIn ? '系统内置' : '自定义' }}</div>
+								<div class="settings-inline-meta">{{ agent.isBuiltIn ? '系统内置' : '自定义' }}</div>
 								<div class="mcp-card-buttons">
 									<button class="ghost-btn compact-btn" type="button" @click="emit('select-agent', agent.id)">设为当前</button>
 									<button v-if="canBindConversationAgent && currentConversationAgentId !== agent.id" class="ghost-btn compact-btn"
@@ -313,11 +312,10 @@ defineExpose({
 						<div class="settings-section-copy">
 							<div class="settings-section-title">MCP 服务</div>
 						</div>
-						<div class="settings-badge">{{ enabledMcpServerCount }} / {{ mcpServers.length }}</div>
-					</div>
-					<div class="channel-card-actions mcp-section-actions">
-						<div class="settings-hint">维护桌面端 MCP 服务配置。</div>
-						<button class="icon-add-btn" type="button" aria-label="新增 MCP 服务" @click="emit('create-mcp-server')">+</button>
+						<div class="settings-section-tools">
+							<div class="settings-badge">{{ enabledMcpServerCount }} / {{ mcpServers.length }}</div>
+							<button class="icon-add-btn settings-section-add-btn" type="button" aria-label="新增 MCP 服务" @click="emit('create-mcp-server')">+</button>
+						</div>
 					</div>
 					<div v-if="mcpServers.length > 0" class="channel-card-list">
 						<article v-for="server in mcpServers" :key="server.id" class="channel-card mcp-card" :class="{ enabled: server.enabled !== false }">
@@ -326,24 +324,23 @@ defineExpose({
 									<div class="settings-section-title">{{ server.displayName || server.id }}</div>
 									<div class="settings-hint">{{ server.id }}</div>
 								</div>
-								<div class="settings-badge">{{ server.enabled === false ? '已禁用' : '已启用' }}</div>
+								<div class="settings-inline-meta">{{ server.enabled === false ? '已禁用' : '已启用' }}</div>
 							</div>
 							<div class="selected-summary-grid channel-summary-grid">
 								<div class="selected-summary-card">
-									<div class="selected-summary-label">Command</div>
+									<div class="selected-summary-label">命令</div>
 									<div class="selected-summary-value">{{ server.command || '未配置' }}</div>
 								</div>
 								<div class="selected-summary-card">
-									<div class="selected-summary-label">Args</div>
+									<div class="selected-summary-label">参数</div>
 									<div class="selected-summary-value">{{ (server.args || []).length ? server.args.join(' ') : '无' }}</div>
 								</div>
 								<div class="selected-summary-card">
-									<div class="selected-summary-label">Env</div>
+									<div class="selected-summary-label">环境变量</div>
 									<div class="selected-summary-value">{{ Object.keys(server.env || {}).length }} 项</div>
 								</div>
 							</div>
 							<div class="channel-card-actions">
-								<div class="settings-badge">可编辑</div>
 								<div class="mcp-card-buttons">
 									<button class="ghost-btn compact-btn" type="button" @click="emit('edit-mcp-server', server)">编辑</button>
 									<button class="ghost-btn compact-btn danger-btn" type="button" @click="emit('delete-mcp-server', server.id)">删除</button>
@@ -364,9 +361,6 @@ defineExpose({
 						</div>
 						<div class="settings-badge">{{ enabledSkillCount }} / {{ availableSkills.length }}</div>
 					</div>
-					<div class="channel-card-actions mcp-section-actions">
-						<div class="settings-hint">{{ '\u7ba1\u7406\u5168\u5c40\u53ef\u7528\u7684 skills\uff0c\u7981\u7528\u540e\u4e0d\u518d\u5bf9\u667a\u80fd\u4f53\u548c\u8fd0\u884c\u65f6\u66b4\u9732\u3002' }}</div>
-					</div>
 					<div v-if="availableSkills.length > 0" class="channel-card-list">
 						<article v-for="skill in availableSkills" :key="skill.id" class="channel-card" :class="{ enabled: skill.enabled !== false }">
 							<div class="channel-card-top">
@@ -377,16 +371,16 @@ defineExpose({
 								<label class="toggle-field channel-toggle">
 									<input class="toggle-input" type="checkbox" :checked="skill.enabled !== false" @change="onSkillToggle(skill, $event)" />
 									<span class="toggle-switch"></span>
-									<span class="toggle-label">{{ skill.enabled === false ? '\u5df2\u7981\u7528' : '\u5df2\u542f\u7528' }}</span>
+									<span class="toggle-label">{{ skill.enabled === false ? '\u7981\u7528' : '\u542f\u7528' }}</span>
 								</label>
 							</div>
 							<div class="selected-summary-grid channel-summary-grid">
 								<div class="selected-summary-card">
-									<div class="selected-summary-label">Path</div>
+									<div class="selected-summary-label">路径</div>
 									<div class="selected-summary-value">{{ skill.relativePath || skill.id }}</div>
 								</div>
 								<div class="selected-summary-card">
-									<div class="selected-summary-label">File</div>
+									<div class="selected-summary-label">文件</div>
 									<div class="selected-summary-value">{{ skill.skillFilePath || 'SKILL.md' }}</div>
 								</div>
 							</div>
@@ -415,7 +409,7 @@ defineExpose({
 								<label class="toggle-field channel-toggle">
 									<input class="toggle-input" type="checkbox" :checked="channel.isEnabled" @change="onChannelToggle(channel, $event)" />
 									<span class="toggle-switch"></span>
-									<span class="toggle-label">{{ channel.isEnabled ? '已启用' : '已停用' }}</span>
+									<span class="toggle-label">{{ channel.isEnabled ? '启用' : '停用' }}</span>
 								</label>
 							</div>
 							<div class="selected-summary-grid channel-summary-grid">
@@ -426,7 +420,7 @@ defineExpose({
 							</div>
 							<div v-if="channel.statusDetail" class="settings-hint channel-status-detail">{{ channel.statusDetail }}</div>
 							<div class="channel-card-actions">
-								<div class="settings-badge">{{ channel.statusLabel }}</div>
+								<div class="settings-inline-meta">{{ channel.statusLabel }}</div>
 								<button class="ghost-btn compact-btn" type="button" @click="emit('edit-channel', channel)">编辑</button>
 							</div>
 						</article>

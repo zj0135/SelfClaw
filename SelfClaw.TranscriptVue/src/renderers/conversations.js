@@ -6,7 +6,7 @@ export function renderConversationList({
 	openConversationMenuId,
 }) {
 	if (!conversations.length) {
-		return '<div class="muted-placeholder">还没有会话，点击“新建对话”开始。</div>';
+		return '<div class="muted-placeholder">暂无会话</div>';
 	}
 
 	return conversations
