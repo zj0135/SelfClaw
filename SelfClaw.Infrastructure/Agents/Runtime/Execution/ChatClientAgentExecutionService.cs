@@ -45,20 +45,16 @@ internal sealed class ChatClientAgentExecutionService : IAgentExecutionService
                 Temperature = request.Profile.TemperatureEnabled ? (float)request.Profile.Temperature : null,
                 TopP = request.Profile.TopPEnabled ? (float)request.Profile.TopP : null,
                 ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
-                Tools = request.Tools
-            };
-
-            if (request.EnableReasoning)
-            {
-                chatOptions.RawRepresentationFactory = _ =>
-                {
+                Tools = request.Tools,
+                RawRepresentationFactory = _ =>
+                    {
 #pragma warning disable SCME0001
-                    OpenAI.Chat.ChatCompletionOptions completionOptions = new();
-                    completionOptions.Patch.Set("$.thinking.type"u8, "enabled");
-                    return completionOptions;
+                        OpenAI.Chat.ChatCompletionOptions completionOptions = new();
+                        completionOptions.Patch.Set("$.thinking.type"u8, request.EnableReasoning ? "enabled" : "disabled");
+                        return completionOptions;
 #pragma warning restore SCME0001
-                };
-            }
+                    }
+            };
 
             var agentOptions = new ChatClientAgentOptions
             {
