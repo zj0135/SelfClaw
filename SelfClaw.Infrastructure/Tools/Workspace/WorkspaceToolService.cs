@@ -19,6 +19,54 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
     private const long MaxFileBytes = 1_000_000;
     private readonly ILogger<WorkspaceToolService> _logger;
 
+    /// <summary>
+    /// Directory names to skip during recursive search (case-insensitive).
+    /// </summary>
+    private static readonly HashSet<string> SkippedDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git", ".vs", ".idea", ".vscode",
+        "bin", "obj", "out", "build", "dist",
+        "node_modules", "packages", ".nuget",
+        "__pycache__", ".mypy_cache", ".pytest_cache",
+        "target", "vendor", ".gradle"
+    };
+
+    /// <summary>
+    /// Extensions known to be binary — skip without opening.
+    /// </summary>
+    private static readonly HashSet<string> BinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".exe", ".dll", ".pdb", ".so", ".dylib",
+        ".zip", ".gz", ".tar", ".7z", ".rar", ".nupkg",
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg",
+        ".mp3", ".mp4", ".avi", ".mov", ".wav", ".flac",
+        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".woff", ".woff2", ".ttf", ".eot", ".otf",
+        ".class", ".pyc", ".o", ".obj", ".lib", ".a",
+        ".db", ".sqlite", ".mdb", ".ldf", ".mdf",
+        ".snk", ".pfx", ".cer"
+    };
+
+    /// <summary>
+    /// Extensions known to be text — skip binary detection.
+    /// </summary>
+    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".cs", ".csx", ".fs", ".fsx", ".vb",
+        ".java", ".kt", ".scala", ".groovy",
+        ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".vue", ".svelte",
+        ".py", ".rb", ".php", ".go", ".rs", ".swift", ".c", ".h", ".cpp", ".hpp", ".cc",
+        ".html", ".htm", ".css", ".scss", ".sass", ".less",
+        ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+        ".md", ".txt", ".rst", ".log", ".csv", ".tsv",
+        ".sh", ".bash", ".zsh", ".ps1", ".psm1", ".psd1", ".bat", ".cmd",
+        ".sql", ".graphql", ".gql",
+        ".sln", ".slnx", ".csproj", ".fsproj", ".vbproj", ".props", ".targets",
+        ".razor", ".cshtml", ".xaml", ".axaml",
+        ".dockerfile", ".dockerignore", ".gitignore", ".editorconfig",
+        ".env", ".lock", ".config"
+    };
+
     public WorkspaceToolService(ILogger<WorkspaceToolService>? logger = null)
     {
         _logger = logger ?? NullLogger<WorkspaceToolService>.Instance;
@@ -82,24 +130,32 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
                 var root = NormalizeRoot(workspaceRootPath);
                 var hits = new List<WorkspaceSearchHit>(MaxSearchHits);
 
-                foreach (var path in Directory.EnumerateFiles(root, "*", new EnumerationOptions
-                         {
-                             IgnoreInaccessible = true,
-                             RecurseSubdirectories = true,
-                             ReturnSpecialDirectories = false
-                         }))
+                foreach (var path in EnumerateSearchableFiles(root))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
                     var info = new FileInfo(path);
-                    if (info.Length > MaxFileBytes || !await IsTextFileAsync(path, cancellationToken))
+                    if (info.Length == 0 || info.Length > MaxFileBytes)
                     {
                         continue;
                     }
 
-                    using var stream = File.OpenRead(path);
-                    using var reader = new StreamReader(stream);
+                    var extension = info.Extension;
+
+                    // Skip known binary extensions immediately.
+                    if (BinaryExtensions.Contains(extension))
+                    {
+                        continue;
+                    }
+
+                    var knownText = TextExtensions.Contains(extension);
+
+                    await using var stream = File.OpenRead(path);
+                    using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+
                     var lineNumber = 0;
+                    var checkedBinary = knownText; // skip binary check for known text files
+
                     while (true)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -110,6 +166,17 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
                         }
 
                         lineNumber++;
+
+                        // For unknown extensions, check the first line for null bytes.
+                        if (!checkedBinary)
+                        {
+                            checkedBinary = true;
+                            if (line.Contains('\0'))
+                            {
+                                break; // binary file, skip
+                            }
+                        }
+
                         if (!line.Contains(query, StringComparison.OrdinalIgnoreCase))
                         {
                             continue;
@@ -319,6 +386,65 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Enumerates files eligible for text search, skipping known non-productive directories.
+    /// Uses a manual stack-based traversal to allow per-directory filtering.
+    /// </summary>
+    private static IEnumerable<string> EnumerateSearchableFiles(string root)
+    {
+        var stack = new Stack<string>();
+        stack.Push(root);
+
+        while (stack.Count > 0)
+        {
+            var directory = stack.Pop();
+
+            // Enumerate child directories and push non-skipped ones.
+            IEnumerable<string> subDirectories;
+            try
+            {
+                subDirectories = Directory.EnumerateDirectories(directory);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+
+            foreach (var subDirectory in subDirectories)
+            {
+                var dirName = Path.GetFileName(subDirectory);
+                if (!SkippedDirectoryNames.Contains(dirName))
+                {
+                    stack.Push(subDirectory);
+                }
+            }
+
+            // Enumerate files in the current directory.
+            IEnumerable<string> files;
+            try
+            {
+                files = Directory.EnumerateFiles(directory);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+
+            foreach (var file in files)
+            {
+                yield return file;
+            }
+        }
     }
 
     private static string NormalizeRoot(string workspaceRootPath)
