@@ -21,14 +21,15 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
 
     /// <summary>
     /// Directory names to skip during recursive search (case-insensitive).
+    /// Dot-prefixed and Hidden-attributed directories are already skipped by
+    /// EnumerateSearchableFiles, so only non-dot build/dependency dirs are listed here.
     /// </summary>
     private static readonly HashSet<string> SkippedDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".git", ".vs", ".idea", ".vscode",
         "bin", "obj", "out", "build", "dist",
-        "node_modules", "packages", ".nuget",
-        "__pycache__", ".mypy_cache", ".pytest_cache",
-        "target", "vendor", ".gradle"
+        "node_modules", "packages",
+        "__pycache__",
+        "target", "vendor"
     };
 
     /// <summary>
@@ -389,7 +390,8 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
     }
 
     /// <summary>
-    /// Enumerates files eligible for text search, skipping known non-productive directories.
+    /// Enumerates files eligible for text search, skipping known non-productive directories
+    /// and any hidden directories (name starts with a dot or has the Hidden file attribute).
     /// Uses a manual stack-based traversal to allow per-directory filtering.
     /// </summary>
     private static IEnumerable<string> EnumerateSearchableFiles(string root)
@@ -419,10 +421,34 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
             foreach (var subDirectory in subDirectories)
             {
                 var dirName = Path.GetFileName(subDirectory);
-                if (!SkippedDirectoryNames.Contains(dirName))
+
+                // Skip dot-prefixed hidden directories (.git, .vs, .idea, etc.).
+                if (dirName.StartsWith('.'))
                 {
-                    stack.Push(subDirectory);
+                    continue;
                 }
+
+                // Skip known build/dependency directories.
+                if (SkippedDirectoryNames.Contains(dirName))
+                {
+                    continue;
+                }
+
+                // Skip directories marked Hidden by the OS.
+                try
+                {
+                    var attributes = File.GetAttributes(subDirectory);
+                    if (attributes.HasFlag(FileAttributes.Hidden))
+                    {
+                        continue;
+                    }
+                }
+                catch (IOException)
+                {
+                    continue;
+                }
+
+                stack.Push(subDirectory);
             }
 
             // Enumerate files in the current directory.
