@@ -623,6 +623,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ? WorkspaceRoots.FirstOrDefault(item => item.Id == id)
             : null;
 
+        PersistSelectedWorkspaceRoot();
         ApplyConversationFilter();
         PublishShell(false);
         return Task.CompletedTask;
@@ -869,6 +870,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         await _conversationRepository.UpsertWorkspaceRootAsync(workspaceRoot);
         await ReloadWorkspaceRootsAsync();
         SelectedWorkspaceRoot = WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRoot.Id);
+        PersistSelectedWorkspaceRoot();
         StatusText = $"Workspace set to '{workspaceRoot.Name}'.";
 
         ApplyConversationFilter();
@@ -885,6 +887,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         await _conversationRepository.DeleteWorkspaceRootAsync(workspaceRootId);
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
+        PersistSelectedWorkspaceRoot();
 
         ApplyConversationFilter();
         StatusText = $"Deleted workspace '{workspaceRoot.Name}'.";
@@ -1076,7 +1079,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task ReloadWorkspaceRootsAsync()
     {
-        var selectedId = SelectedWorkspaceRoot?.Id;
+        var selectedId = SelectedWorkspaceRoot?.Id ?? _desktopSettings.SelectedWorkspaceRootId;
         var workspaceRoots = await _conversationRepository.ListWorkspaceRootsAsync();
         ReplaceCollection(WorkspaceRoots, workspaceRoots);
         SelectedWorkspaceRoot = selectedId is Guid id
@@ -1175,6 +1178,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SelectedWorkspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
             ? WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
             : null;
+        PersistSelectedWorkspaceRoot();
         SelectedConversationMode = conversation.Mode;
         SelectedToolPermissionMode = conversation.ToolPermissionMode;
         SyncSelectedAgentFromConversation(conversation, publishShell: false);
@@ -2111,6 +2115,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
         await PersistConversationAsync(updated);
+    }
+
+    private void PersistSelectedWorkspaceRoot()
+    {
+        var selectedId = SelectedWorkspaceRoot?.Id;
+        if (_desktopSettings.SelectedWorkspaceRootId == selectedId)
+        {
+            return;
+        }
+
+        var settings = _desktopSettingsStore.Load() with
+        {
+            SelectedWorkspaceRootId = selectedId
+        };
+        _desktopSettingsStore.Save(settings);
+        _desktopSettings = settings;
     }
 
     private void ReplaceMessage(MessageRecord message)

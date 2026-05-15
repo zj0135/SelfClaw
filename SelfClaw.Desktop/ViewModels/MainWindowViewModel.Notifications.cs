@@ -203,6 +203,7 @@ public sealed partial class MainWindowViewModel
         SelectedWorkspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
             ? WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
             : null;
+        PersistSelectedWorkspaceRoot();
 
         ApplyConversationFilter(conversation.Id);
         await LoadConversationAsync(conversation);

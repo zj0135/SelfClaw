@@ -16,6 +16,9 @@ public sealed record DesktopSettings
     [JsonPropertyName("model_auto_compact_token_limit")]
     public int ModelAutoCompactTokenLimit { get; init; } = DefaultModelAutoCompactTokenLimit;
 
+    [JsonPropertyName("selected_workspace_root_id")]
+    public Guid? SelectedWorkspaceRootId { get; init; }
+
     public DesktopChannelSettings Channels { get; init; } = DesktopChannelSettings.Default;
 
     [JsonPropertyName("mcp_servers")]
