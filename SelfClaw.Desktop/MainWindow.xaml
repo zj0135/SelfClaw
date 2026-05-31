@@ -167,7 +167,7 @@
                         BorderBrush="#D9DDE4"
                         BorderThickness="0,0,1,0"
                         Panel.ZIndex="1">
-                    <local:LeftSidebar/>
+                    <local:LeftSidebar SystemSettingsRequested="OnSystemSettingsRequested"/>
                 </Border>
 
                 <Grid Grid.Column="1">
@@ -289,6 +289,9 @@
                               Grid.Column="0">
                             <webview2:WebView2 x:Name="TranscriptView"
                                                Margin="0"/>
+
+                            <local:SystemSettingsPanel x:Name="SystemSettingsPanelHost"
+                                                       Visibility="Collapsed"/>
 
                             <Border x:Name="WebViewFallback"
                                     Background="#FFFFFF"

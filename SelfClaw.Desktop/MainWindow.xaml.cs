@@ -297,6 +297,7 @@ public partial class MainWindow : Window
 
     private void OnTerminalToolButtonClick(object sender, RoutedEventArgs e)
     {
+        SetSystemSettingsOpen(false);
         SetTerminalDrawerOpen(!_isTerminalDrawerOpen);
     }
 
@@ -307,14 +308,35 @@ public partial class MainWindow : Window
 
     private void OnFileManagerToolButtonClick(object sender, RoutedEventArgs e)
     {
+        SetSystemSettingsOpen(false);
         ToggleRightPanelTool("files");
         SetTerminalDrawerOpen(false);
     }
 
     private void OnBrowserToolButtonClick(object sender, RoutedEventArgs e)
     {
+        SetSystemSettingsOpen(false);
         ToggleRightPanelTool("browser");
         SetTerminalDrawerOpen(false);
+    }
+
+    private void OnSystemSettingsRequested(object? sender, EventArgs e)
+    {
+        SetSystemSettingsOpen(true);
+        SetTerminalDrawerOpen(false);
+        SetRightPanelOpen(false);
+    }
+
+    private void SetSystemSettingsOpen(bool isOpen)
+    {
+        SystemSettingsPanelHost.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+
+        if (WebViewFallback.Visibility == Visibility.Visible)
+        {
+            return;
+        }
+
+        TranscriptView.Visibility = isOpen ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void SetTerminalDrawerOpen(bool isOpen)

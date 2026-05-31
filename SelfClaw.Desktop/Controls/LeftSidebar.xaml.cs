@@ -8,6 +8,8 @@ public partial class LeftSidebar : UserControl
 {
     private bool _areExtensionsExpanded;
 
+    public event EventHandler? SystemSettingsRequested;
+
     public LeftSidebar()
     {
         InitializeComponent();
@@ -21,5 +23,10 @@ public partial class LeftSidebar : UserControl
             : System.Windows.Visibility.Collapsed;
 
         ExtensionsChevron.RenderTransform = new RotateTransform(_areExtensionsExpanded ? 90 : 0);
+    }
+
+    private void OnSystemSettingsNodeMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        SystemSettingsRequested?.Invoke(this, EventArgs.Empty);
     }
 }
