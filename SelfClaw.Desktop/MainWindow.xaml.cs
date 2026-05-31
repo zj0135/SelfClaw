@@ -8,8 +8,10 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 using SelfClaw.Core.Models;
@@ -19,13 +21,14 @@ using SelfClaw.Desktop.ViewModels;
 using DrawingBitmap = System.Drawing.Bitmap;
 using DrawingGraphics = System.Drawing.Graphics;
 using DrawingImage = System.Drawing.Image;
-using MediaColor = System.Windows.Media.Color;
-using MediaSolidColorBrush = System.Windows.Media.SolidColorBrush;
 
 namespace SelfClaw.Desktop;
 
 public partial class MainWindow : Window
 {
+    private const double ExpandedRightPanelWidth = 320d;
+    private const double ExpandedTerminalDrawerHeight = 286d;
+    private static readonly Duration DrawerAnimationDuration = TimeSpan.FromMilliseconds(180);
     private const string AssetsHostName = "appassets.selfclaw.local";
     private const int MaxComposerImageAttachments = 6;
     private const long MaxComposerImageBytes = 10 * 1024 * 1024;
@@ -33,19 +36,6 @@ public partial class MainWindow : Window
     private const int WmGetMinMaxInfo = 0x0024;
     private const uint MonitorDefaultToNearest = 2;
     private const double StartupWorkAreaMargin = 48d;
-
-    private static readonly MediaColor ShellSurfaceDarkColor = MediaColor.FromArgb(0xB3, 0x0A, 0x0F, 0x17);
-    private static readonly MediaColor ShellSurfaceLightColor = MediaColor.FromArgb(0xD9, 0xF6, 0xF9, 0xFD);
-    private static readonly MediaColor ShellTitleDarkColor = MediaColor.FromArgb(0xCC, 0x0C, 0x12, 0x1A);
-    private static readonly MediaColor ShellTitleLightColor = MediaColor.FromArgb(0xE8, 0xFF, 0xFF, 0xFF);
-    private static readonly MediaColor ShellBorderDarkColor = MediaColor.FromArgb(0x3A, 0x2A, 0x33, 0x42);
-    private static readonly MediaColor ShellBorderLightColor = MediaColor.FromArgb(0x66, 0xC9, 0xD6, 0xE8);
-    private static readonly MediaColor ShellTitleBorderDarkColor = MediaColor.FromArgb(0x29, 0xFF, 0xFF, 0xFF);
-    private static readonly MediaColor ShellTitleBorderLightColor = MediaColor.FromArgb(0x66, 0xC9, 0xD6, 0xE8);
-    private static readonly MediaColor ShellTitleTextDarkColor = MediaColor.FromRgb(0xDC, 0xE6, 0xF8);
-    private static readonly MediaColor ShellTitleTextLightColor = MediaColor.FromRgb(0x23, 0x34, 0x4A);
-    private static readonly MediaColor TrafficGlyphDarkColor = MediaColor.FromArgb(0x8A, 0x1A, 0x1F, 0x2A);
-    private static readonly MediaColor TrafficGlyphLightColor = MediaColor.FromArgb(0x8A, 0x2A, 0x37, 0x48);
 
     private readonly MainWindowViewModel _viewModel;
     private TranscriptRenderState _pendingTranscript = new(
@@ -82,6 +72,11 @@ public partial class MainWindow : Window
         StatusText: string.Empty,
         IsBusy: false);
     private bool _webViewReady;
+    private bool _isTerminalDrawerOpen;
+    private bool _isRightPanelOpen;
+    private string? _activeRightPanelTool;
+    private DispatcherTimer? _terminalDrawerAnimationTimer;
+    private DispatcherTimer? _rightPanelAnimationTimer;
 
     public MainWindow(
         MainWindowViewModel viewModel,
@@ -300,6 +295,109 @@ public partial class MainWindow : Window
         Close();
     }
 
+    private void OnTerminalToolButtonClick(object sender, RoutedEventArgs e)
+    {
+        SetTerminalDrawerOpen(!_isTerminalDrawerOpen);
+    }
+
+    private void OnTerminalPanelCloseRequested(object? sender, EventArgs e)
+    {
+        SetTerminalDrawerOpen(false);
+    }
+
+    private void OnFileManagerToolButtonClick(object sender, RoutedEventArgs e)
+    {
+        ToggleRightPanelTool("files");
+        SetTerminalDrawerOpen(false);
+    }
+
+    private void OnBrowserToolButtonClick(object sender, RoutedEventArgs e)
+    {
+        ToggleRightPanelTool("browser");
+        SetTerminalDrawerOpen(false);
+    }
+
+    private void SetTerminalDrawerOpen(bool isOpen)
+    {
+        _isTerminalDrawerOpen = isOpen;
+        if (isOpen)
+        {
+            TerminalDrawerHost.Visibility = Visibility.Visible;
+        }
+
+        AnimateGridLength(
+            ref _terminalDrawerAnimationTimer,
+            TerminalDrawerRow.Height.Value,
+            isOpen ? ExpandedTerminalDrawerHeight : 0,
+            value => TerminalDrawerRow.Height = new GridLength(value),
+            isOpen ? null : () => TerminalDrawerHost.Visibility = Visibility.Collapsed);
+    }
+
+    private void ToggleRightPanelTool(string toolId)
+    {
+        var shouldClose = _isRightPanelOpen && string.Equals(_activeRightPanelTool, toolId, StringComparison.Ordinal);
+        SetRightPanelOpen(!shouldClose, shouldClose ? null : toolId);
+    }
+
+    private void SetRightPanelOpen(bool isOpen, string? activeToolId = null)
+    {
+        _isRightPanelOpen = isOpen;
+        _activeRightPanelTool = isOpen ? activeToolId : null;
+        if (isOpen)
+        {
+            RightPanelHost.Visibility = Visibility.Visible;
+        }
+
+        AnimateGridLength(
+            ref _rightPanelAnimationTimer,
+            RightPanelColumn.Width.Value,
+            isOpen ? ExpandedRightPanelWidth : 0,
+            value => RightPanelColumn.Width = new GridLength(value),
+            isOpen ? null : () => RightPanelHost.Visibility = Visibility.Collapsed);
+    }
+
+    private void AnimateGridLength(
+        ref DispatcherTimer? timer,
+        double from,
+        double to,
+        Action<double> applyValue,
+        Action? completed)
+    {
+        timer?.Stop();
+
+        if (Math.Abs(from - to) < 0.5d)
+        {
+            applyValue(to);
+            completed?.Invoke();
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var animationTimer = new DispatcherTimer(DispatcherPriority.Render)
+        {
+            Interval = TimeSpan.FromMilliseconds(16)
+        };
+
+        animationTimer.Tick += (_, _) =>
+        {
+            var rawProgress = Math.Min(1d, stopwatch.Elapsed.TotalMilliseconds / DrawerAnimationDuration.TimeSpan.TotalMilliseconds);
+            var easedProgress = 1d - Math.Pow(1d - rawProgress, 2d);
+            applyValue(from + ((to - from) * easedProgress));
+
+            if (rawProgress < 1d)
+            {
+                return;
+            }
+
+            animationTimer.Stop();
+            applyValue(to);
+            completed?.Invoke();
+        };
+
+        timer = animationTimer;
+        animationTimer.Start();
+    }
+
     private void ToggleWindowState()
     {
         if (ResizeMode is not (ResizeMode.CanResize or ResizeMode.CanResizeWithGrip))
@@ -314,8 +412,7 @@ public partial class MainWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainWindowViewModel.ActiveThemeMode) ||
-            e.PropertyName == nameof(MainWindowViewModel.EffectiveTranscriptTheme))
+        if (e.PropertyName == nameof(MainWindowViewModel.ActiveThemeMode))
         {
             ApplyThemeMode();
         }
@@ -324,42 +421,7 @@ public partial class MainWindow : Window
     private void ApplyThemeMode()
     {
         ThemeMode = _viewModel.ActiveThemeMode;
-        ApplyTitleBarTheme();
-    }
-
-    private void ApplyTitleBarTheme()
-    {
-        var isDark = string.Equals(_viewModel.EffectiveTranscriptTheme, "dark", StringComparison.OrdinalIgnoreCase);
-
-        SetBrushColor("ShellSurfaceBrush", isDark ? ShellSurfaceDarkColor : ShellSurfaceLightColor);
-        SetBrushColor("ShellTitleBrush", isDark ? ShellTitleDarkColor : ShellTitleLightColor);
-        SetBrushColor("ShellBorderBrush", isDark ? ShellBorderDarkColor : ShellBorderLightColor);
-        SetBrushColor("ShellTitleBorderBrush", isDark ? ShellTitleBorderDarkColor : ShellTitleBorderLightColor);
-        SetBrushColor("ShellTitleTextBrush", isDark ? ShellTitleTextDarkColor : ShellTitleTextLightColor);
-        SetBrushColor("TrafficGlyphBrush", isDark ? TrafficGlyphDarkColor : TrafficGlyphLightColor);
-
-        WindowBackdropHelper.TryApplyCaptionTheme(this, isDark);
-    }
-
-    private void SetBrushColor(string resourceKey, MediaColor color)
-    {
-        if (Resources[resourceKey] is MediaSolidColorBrush brush)
-        {
-            if (brush.IsFrozen)
-            {
-                Resources[resourceKey] = new MediaSolidColorBrush(color);
-                return;
-            }
-
-            if (brush.Color != color)
-            {
-                brush.Color = color;
-            }
-
-            return;
-        }
-
-        Resources[resourceKey] = new MediaSolidColorBrush(color);
+        WindowBackdropHelper.TryApplyCaptionTheme(this, false);
     }
 
     private async void OnTranscriptWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
