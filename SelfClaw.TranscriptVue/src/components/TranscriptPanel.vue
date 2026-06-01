@@ -45,7 +45,7 @@ defineProps({
 	},
 });
 
-const emit = defineEmits(['scroll', 'preview-image']);
+const emit = defineEmits(['scroll', 'preview-image', 'transcript-click', 'transcript-keydown']);
 const scrollEl = ref(null);
 
 function resolvePreviewImage(target) {
@@ -71,12 +71,12 @@ function resolvePreviewImage(target) {
 
 function onTranscriptClick(event) {
 	const previewImage = resolvePreviewImage(event.target);
-	if (!previewImage) {
-		return;
+	if (previewImage) {
+		event.preventDefault();
+		emit('preview-image', previewImage);
 	}
 
-	event.preventDefault();
-	emit('preview-image', previewImage);
+	emit('transcript-click', event);
 }
 
 function onTranscriptKeydown(event) {
@@ -86,6 +86,7 @@ function onTranscriptKeydown(event) {
 
 	const previewImage = resolvePreviewImage(event.target);
 	if (!previewImage) {
+		emit('transcript-keydown', event);
 		return;
 	}
 
