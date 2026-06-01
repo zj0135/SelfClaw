@@ -463,16 +463,13 @@ export function renderMessages(items, openThoughts, openToolSegments, openToolGr
 
 	return items
 		.map((item) => {
-			const headerClass = item.title ? 'header' : 'header no-title';
-			const headerTitle = item.title ? `<span>${escapeHtml(item.title)}</span>` : '';
-			const headerSubtitle = item.subtitle ? `<span class="message-subtitle">${escapeHtml(item.subtitle)}</span>` : '';
+			const headerClass = item.role === 'user' ? 'header user-time-header' : 'header assistant-time-header';
 			return `
       <div class="message-row ${escapeHtml(item.role)} ${escapeHtml(item.status)}" data-message-id="${escapeHtml(item.id)}">
         <div class="message-main">
           <article class="item ${escapeHtml(item.kind)} ${escapeHtml(item.role)} ${escapeHtml(item.status)}">
             <div class="${headerClass}">
-              <span class="message-heading">${headerTitle}${headerSubtitle}</span>
-              <span>${escapeHtml(item.timestamp)}</span>
+              <span class="message-time">${escapeHtml(item.timestamp)}</span>
             </div>
             ${renderMessageContent(item, openThoughts, openToolSegments, openToolGroups)}
           </article>

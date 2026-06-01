@@ -5,7 +5,6 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
@@ -401,6 +400,14 @@ public partial class MainWindow : Window
                     {
                         Process.Start(new ProcessStartInfo(href) { UseShellExecute = true });
                     }
+                    break;
+                }
+                case "send-prompt":
+                {
+                    var prompt = document.RootElement.TryGetProperty("prompt", out var promptElement)
+                        ? promptElement.GetString() ?? string.Empty
+                        : string.Empty;
+                    await _viewModel.SubmitPromptAsync(prompt);
                     break;
                 }
             }
