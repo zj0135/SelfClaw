@@ -10,7 +10,10 @@ namespace SelfClaw.Desktop.Services;
 
 public sealed class DesktopChannelManager : IAsyncDisposable
 {
-    private readonly DesktopSettingsStore _settingsStore;
+    private const int DefaultModelContextWindow = 256_000;
+    private const int DefaultModelAutoCompactTokenLimit = 200_000;
+
+    private readonly DesktopChannelSettingsStore _settingsStore;
     private readonly IConversationRepository _conversationRepository;
     private readonly IProfileRepository _profileRepository;
     private readonly ISecretProtector _secretProtector;
@@ -28,7 +31,7 @@ public sealed class DesktopChannelManager : IAsyncDisposable
     private int _disposeStarted;
 
     public DesktopChannelManager(
-        DesktopSettingsStore settingsStore,
+        DesktopChannelSettingsStore settingsStore,
         IConversationRepository conversationRepository,
         IProfileRepository profileRepository,
         ISecretProtector secretProtector,
@@ -54,7 +57,7 @@ public sealed class DesktopChannelManager : IAsyncDisposable
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        var settings = DesktopSettings.Default;
+        var settings = DesktopChannelSettings.Default;
 
         await _lifecycleLock.WaitAsync(cancellationToken);
         try
@@ -389,8 +392,8 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                 profile,
                 apiKey,
                 rawRequestMessages,
-                settings.ModelContextWindow,
-                settings.ModelAutoCompactTokenLimit,
+                DefaultModelContextWindow,
+                DefaultModelAutoCompactTokenLimit,
                 cancellationToken);
             var streamingReply = default(IDesktopChannelStreamingReply);
             var streamedMarkdown = new StringBuilder();
@@ -458,7 +461,6 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                 conversation,
                 profile,
                 apiKey,
-                settings,
                 cancellationToken);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
@@ -504,7 +506,6 @@ public sealed class DesktopChannelManager : IAsyncDisposable
         ConversationRecord conversation,
         ProviderProfile profile,
         string apiKey,
-        DesktopSettings settings,
         CancellationToken cancellationToken)
     {
         try
@@ -515,8 +516,8 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                 profile,
                 apiKey,
                 rawMessages,
-                settings.ModelContextWindow,
-                settings.ModelAutoCompactTokenLimit,
+                DefaultModelContextWindow,
+                DefaultModelAutoCompactTokenLimit,
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -594,17 +595,11 @@ public sealed class DesktopChannelManager : IAsyncDisposable
     private void PersistConfiguration(
         string channelId,
         DesktopChannelConfiguration configuration,
-        DesktopSettings settings)
+        DesktopChannelSettings settings)
     {
-        var items = settings.Channels.Items.ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase);
+        var items = settings.Items.ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase);
         items[channelId] = configuration;
-        _settingsStore.Save(settings with
-        {
-            Channels = new DesktopChannelSettings
-            {
-                Items = items
-            }
-        });
+        _settingsStore.Save(settings with { Items = items });
 
         UpdateRuntimeConfiguration(channelId, configuration);
         NotifyChanged();
@@ -639,8 +634,8 @@ public sealed class DesktopChannelManager : IAsyncDisposable
             .ToArray();
     }
 
-    private DesktopChannelConfiguration GetStoredConfiguration(DesktopSettings settings, string channelId)
-        => settings.Channels.Items.TryGetValue(channelId, out var configuration)
+    private DesktopChannelConfiguration GetStoredConfiguration(DesktopChannelSettings settings, string channelId)
+        => settings.Items.TryGetValue(channelId, out var configuration)
             ? configuration
             : DesktopChannelConfiguration.Default;
 

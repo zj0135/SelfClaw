@@ -187,7 +187,7 @@ public sealed partial class MainWindowViewModel
     public async Task OpenConversationFromNotificationAsync(Guid conversationId)
     {
         var conversation = await ResolveConversationForNotificationAsync(conversationId);
-        if (conversation is null)
+        if (conversation is null || conversation.Mode != ConversationMode.Programming)
         {
             StatusText = "This conversation is no longer available.";
             PublishShell(false);
@@ -199,11 +199,9 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
-        SelectedConversationMode = conversation.Mode;
         SelectedWorkspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
             ? WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
             : null;
-        PersistSelectedWorkspaceRoot();
 
         ApplyConversationFilter(conversation.Id);
         await LoadConversationAsync(conversation);

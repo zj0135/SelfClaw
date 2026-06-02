@@ -12,7 +12,6 @@ public sealed partial class MainWindowViewModel
             IEnumerable<MessageRecord> messages,
             IEnumerable<ToolExecutionRecord> toolRuns,
             IReadOnlyDictionary<Guid, ToolRunAnchor> toolRunAnchors,
-            bool usePlanningMode,
             string statusText)
         {
             Conversation = conversation;
@@ -23,7 +22,6 @@ public sealed partial class MainWindowViewModel
                 ToolRunAnchors[item.Key] = item.Value;
             }
 
-            UsePlanningMode = usePlanningMode;
             StatusText = statusText;
         }
 
@@ -40,8 +38,6 @@ public sealed partial class MainWindowViewModel
         public HashSet<Guid> ActiveMessageIds { get; } = [];
 
         public CancellationTokenSource CancellationTokenSource { get; } = new();
-
-        public bool UsePlanningMode { get; }
 
         public string StatusText { get; set; }
 
@@ -68,7 +64,7 @@ public sealed partial class MainWindowViewModel
     private void ProjectSelectedRuntimeState(bool publishShell)
     {
         var runtimeState = GetSelectedRuntimeState();
-        var nextBusy = runtimeState?.IsRunning == true || _isCommandRunning;
+        var nextBusy = runtimeState?.IsRunning == true;
         if (SetProperty(ref _isBusy, nextBusy, nameof(IsBusy)))
         {
             NotifyCommandStates();
@@ -76,8 +72,6 @@ public sealed partial class MainWindowViewModel
 
         if (SelectedConversation is { } conversation)
         {
-            RefreshPlanningModeForSelection(publishShell: false);
-
             if (runtimeState is not null)
             {
                 SetProperty(ref _statusText, runtimeState.StatusText, nameof(StatusText));
@@ -87,11 +81,6 @@ public sealed partial class MainWindowViewModel
                 SetProperty(ref _statusText, statusText, nameof(StatusText));
             }
         }
-        else
-        {
-            SetProperty(ref _isPlanningModeEnabled, false, nameof(IsPlanningModeEnabled));
-        }
-
         NotifyCommandStates();
         if (publishShell)
         {
@@ -133,7 +122,6 @@ public sealed partial class MainWindowViewModel
 
     private ConversationRuntimeState StartConversationRuntimeState(
         ConversationRecord conversation,
-        bool usePlanningMode,
         string statusText,
         IReadOnlyList<MessageRecord>? messages = null,
         IReadOnlyList<ToolExecutionRecord>? toolRuns = null,
@@ -155,12 +143,10 @@ public sealed partial class MainWindowViewModel
             sourceState?.Messages ?? messages ?? _messages,
             sourceState?.ToolRuns ?? toolRuns ?? _toolRuns,
             sourceState?.ToolRunAnchors ?? toolRunAnchors ?? _toolRunAnchors,
-            usePlanningMode,
             statusText);
 
         _conversationRuntimeStates[conversation.Id] = state;
         _conversationStatusTexts[conversation.Id] = statusText;
-        _conversationPlanPanels[conversation.Id] = TranscriptPlanPanel.Hidden;
 
         if (IsSelectedConversation(conversation.Id))
         {
@@ -223,19 +209,6 @@ public sealed partial class MainWindowViewModel
 
     private IReadOnlyDictionary<Guid, ToolRunAnchor> GetSelectedTranscriptToolRunAnchors()
         => GetSelectedRuntimeState()?.ToolRunAnchors ?? _toolRunAnchors;
-
-    private TranscriptPlanPanel GetSelectedPlanPanel()
-    {
-        if (SelectedConversation is not { } conversation ||
-            SelectedConversationMode != ConversationMode.Programming)
-        {
-            return TranscriptPlanPanel.Hidden;
-        }
-
-        return _conversationPlanPanels.TryGetValue(conversation.Id, out var planPanel)
-            ? planPanel
-            : TranscriptPlanPanel.Hidden;
-    }
 
     private string GetSelectedStatusText()
     {

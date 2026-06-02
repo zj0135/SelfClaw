@@ -3,10 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -25,29 +22,20 @@ namespace SelfClaw.Desktop.ViewModels;
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(75);
+    private const int DefaultModelContextWindow = 256_000;
+    private const int DefaultModelAutoCompactTokenLimit = 200_000;
     private const int MaxPromptImageAttachments = 6;
     private const long MaxPromptImageBytes = 10 * 1024 * 1024;
     private const long MaxPromptImageTotalBytes = 30 * 1024 * 1024;
-    private const int ContextUsageMessageOverheadTokens = 4;
-    private const int ContextUsageImageMetadataTokens = 32;
-    private static readonly ShellSelectOption[] ToolPermissionOptions =
-    [
-        new("requireApproval", "默认权限", "写文件和命令执行前需要人工确认"),
-        new("fullAccess", "完全访问权限", "允许 agent 直接写文件并执行 PowerShell")
-    ];
     private readonly IConversationRepository _conversationRepository;
     private readonly IProfileRepository _profileRepository;
     private readonly ISecretProtector _secretProtector;
     private readonly IAgentChatRuntime _agentChatRuntime;
     private readonly IConversationContextCompactionService _contextCompactionService;
-    private readonly IWorkspaceToolService _workspaceToolService;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly DesktopNotificationService _desktopNotificationService;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
-    private readonly DesktopSettingsStore _desktopSettingsStore;
     private readonly DesktopAgentStore _desktopAgentStore;
-    private readonly SlashCommandRegistry _slashCommandRegistry;
-    private readonly DesktopChannelManager _channelManager;
     private readonly StoragePaths _storagePaths;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly DispatcherTimer? _streamingPublishTimer;
@@ -58,13 +46,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly List<ToolExecutionRecord> _toolRuns = [];
     private readonly Dictionary<Guid, ToolRunAnchor> _toolRunAnchors = [];
     private readonly Dictionary<Guid, ConversationRuntimeState> _conversationRuntimeStates = [];
-    private readonly Dictionary<Guid, TranscriptPlanPanel> _conversationPlanPanels = [];
     private readonly Dictionary<Guid, string> _conversationStatusTexts = [];
     private readonly HashSet<Guid> _expandedSidebarWorkspaceRootIds = [];
     private IReadOnlyList<PromptImageAttachment> _pendingPromptImageAttachments = [];
     private bool _pendingReasoningEnabled;
     private bool _initialized;
-    private bool _isApplyingThemeSelection;
     private int _selectionVersion;
     private bool _isSidebarProjectsExpanded = true;
     private ConversationRecord? _selectedConversation;
@@ -75,17 +61,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _composerText = string.Empty;
     private string _statusText = "Add a model profile to get started.";
     private bool _isBusy;
-    private DesktopSettings _desktopSettings = DesktopSettings.Default;
-    private ThemeOption? _selectedThemeOption;
     private ThemeMode _activeThemeMode = ThemeMode.System;
     private string _effectiveTranscriptTheme = "light";
-    private bool _isPlanningModeEnabled;
     private bool _isSidebarStandaloneConversationsExpanded = true;
-    private TranscriptCommandFeedback? _commandFeedback;
-    private CancellationTokenSource? _commandCancellationTokenSource;
-    private bool _isCommandRunning;
-    private TranscriptPlanPanel? _planPanel;
-    private ConversationMode _selectedConversationMode = ConversationMode.Programming;
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
     private bool _pendingStreamingPublish;
     private bool _pendingStreamingAutoScroll;
@@ -98,14 +76,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ISecretProtector secretProtector,
         IAgentChatRuntime agentChatRuntime,
         IConversationContextCompactionService contextCompactionService,
-        IWorkspaceToolService workspaceToolService,
         DesktopToolApprovalHandler toolApprovalHandler,
         DesktopNotificationService desktopNotificationService,
         MarkdownHtmlRenderer markdownHtmlRenderer,
-        DesktopSettingsStore desktopSettingsStore,
         DesktopAgentStore desktopAgentStore,
-        SlashCommandRegistry slashCommandRegistry,
-        DesktopChannelManager channelManager,
         StoragePaths storagePaths,
         ILogger<MainWindowViewModel> logger)
     {
@@ -114,17 +88,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _secretProtector = secretProtector;
         _agentChatRuntime = agentChatRuntime;
         _contextCompactionService = contextCompactionService;
-        _workspaceToolService = workspaceToolService;
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
         _markdownHtmlRenderer = markdownHtmlRenderer;
-        _desktopSettingsStore = desktopSettingsStore;
         _desktopAgentStore = desktopAgentStore;
-        _slashCommandRegistry = slashCommandRegistry;
-        _channelManager = channelManager;
         _storagePaths = storagePaths;
         _logger = logger;
-        _channelManager.Changed += OnChannelManagerChanged;
         _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
         if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher)
         {
@@ -135,11 +104,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _streamingPublishTimer.Tick += OnStreamingPublishTimerTick;
         }
 
-        ThemeOptions.Add(new ThemeOption(AppThemePreference.System, "System"));
-        ThemeOptions.Add(new ThemeOption(AppThemePreference.Light, "Light"));
-        ThemeOptions.Add(new ThemeOption(AppThemePreference.Dark, "Dark"));
-
-        LoadThemePreference();
+        ApplySystemTheme(refreshShell: false);
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         SendCommand = new AsyncRelayCommand(SendAsync, CanSend);
@@ -160,8 +125,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public ObservableCollection<WorkspaceRoot> WorkspaceRoots { get; } = [];
 
     public ObservableCollection<AgentActivityNode> AgentActivityNodes { get; } = [];
-
-    public ObservableCollection<ThemeOption> ThemeOptions { get; } = [];
 
     public IAsyncRelayCommand SendCommand { get; }
 
@@ -195,25 +158,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public bool HasAgentActivityNodes => AgentActivityNodes.Count > 0;
 
-    public ThemeOption? SelectedThemeOption
-    {
-        get => _selectedThemeOption;
-        set
-        {
-            if (!SetProperty(ref _selectedThemeOption, value))
-            {
-                return;
-            }
-
-            if (_isApplyingThemeSelection)
-            {
-                return;
-            }
-
-            ApplyThemePreference(value?.Value ?? AppThemePreference.System, persist: true, refreshShell: true);
-        }
-    }
-
     public ThemeMode ActiveThemeMode
     {
         get => _activeThemeMode;
@@ -224,30 +168,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         get => _effectiveTranscriptTheme;
         private set => SetProperty(ref _effectiveTranscriptTheme, value);
-    }
-
-    public bool IsPlanningModeEnabled
-    {
-        get => _isPlanningModeEnabled;
-        private set
-        {
-            if (SetProperty(ref _isPlanningModeEnabled, value))
-            {
-                PublishShell(false);
-            }
-        }
-    }
-
-    public ConversationMode SelectedConversationMode
-    {
-        get => _selectedConversationMode;
-        private set
-        {
-            if (SetProperty(ref _selectedConversationMode, value))
-            {
-                PublishShell(false);
-            }
-        }
     }
 
     public ToolPermissionMode SelectedToolPermissionMode
@@ -337,7 +257,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public bool IsBusy
     {
-        get => _isBusy || _isCommandRunning;
+        get => _isBusy;
         private set
         {
             if (SetProperty(ref _isBusy, value))
@@ -346,126 +266,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 PublishShell(false);
             }
         }
-    }
-
-    public async Task ExecuteSlashCommandAsync(string? command, string? arguments, bool confirmed = false)
-    {
-        var handler = _slashCommandRegistry.Resolve(command);
-        if (handler is null)
-        {
-            SetCommandFeedback("error", $"Unknown command '{command}'.");
-            return;
-        }
-
-        if (IsBusy)
-        {
-            SetCommandFeedback("error", "SelfClaw is busy. Stop the current task before running a command.");
-            return;
-        }
-
-        if (SelectedConversationMode == ConversationMode.Channel)
-        {
-            SetCommandFeedback("error", "Slash commands are only available in programming conversations.");
-            return;
-        }
-
-        _commandCancellationTokenSource?.Dispose();
-        var commandCancellationTokenSource = new CancellationTokenSource();
-        _commandCancellationTokenSource = commandCancellationTokenSource;
-        var cancellationToken = commandCancellationTokenSource.Token;
-        SetCommandRunning(true);
-        SetCommandFeedback("info", $"Running {handler.Definition.Command}...", handler.Definition.Id, arguments, false);
-
-        try
-        {
-            var selectedProfile = SelectedProfile;
-            var requestProfile = selectedProfile is null
-                ? null
-                : ResolveSelectedProfileModel() is { } selectedProfileModel
-                    ? selectedProfile with { Model = selectedProfileModel }
-                    : selectedProfile;
-            var apiKey = requestProfile is null || string.IsNullOrWhiteSpace(requestProfile.SecretRef)
-                ? null
-                : await _secretProtector.RetrieveSecretAsync(requestProfile.SecretRef, cancellationToken);
-            var settings = _desktopSettingsStore.Load();
-            _desktopSettings = settings;
-
-            var context = new SlashCommandContext(
-                arguments?.Trim() ?? string.Empty,
-                confirmed,
-                SelectedConversation,
-                requestProfile,
-                apiKey,
-                SelectedWorkspaceRoot,
-                GetSelectedTranscriptMessages().ToArray(),
-                settings,
-                cancellationToken);
-
-            var result = await handler.ExecuteAsync(context);
-            SetCommandFeedback(
-                result.Level ?? (result.Succeeded ? "success" : "error"),
-                result.Message,
-                handler.Definition.Id,
-                arguments,
-                result.RequiresConfirmation);
-            StatusText = result.Message;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            SetCommandFeedback("warning", $"{handler.Definition.Command} cancelled.", handler.Definition.Id, arguments);
-            StatusText = $"{handler.Definition.Command} cancelled.";
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "Slash command failed. Command={Command}", handler.Definition.Command);
-            SetCommandFeedback("error", exception.Message, handler.Definition.Id, arguments);
-            StatusText = exception.Message;
-        }
-        finally
-        {
-            SetCommandRunning(false);
-            if (ReferenceEquals(_commandCancellationTokenSource, commandCancellationTokenSource))
-            {
-                _commandCancellationTokenSource = null;
-            }
-
-            commandCancellationTokenSource.Dispose();
-        }
-    }
-
-    public void ClearCommandFeedback()
-    {
-        _commandFeedback = null;
-        PublishShell(false);
-    }
-
-    private void SetCommandRunning(bool running)
-    {
-        if (_isCommandRunning == running)
-        {
-            return;
-        }
-
-        _isCommandRunning = running;
-        OnPropertyChanged(nameof(IsBusy));
-        NotifyCommandStates();
-        PublishShell(false);
-    }
-
-    private void SetCommandFeedback(
-        string level,
-        string message,
-        string? commandId = null,
-        string? arguments = null,
-        bool requiresConfirmation = false)
-    {
-        _commandFeedback = new TranscriptCommandFeedback(
-            level,
-            message,
-            commandId,
-            arguments,
-            requiresConfirmation);
-        PublishShell(false);
     }
 
     public async Task InitializeAsync()
@@ -480,7 +280,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         await ReloadProfilesAsync();
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
-        await _channelManager.InitializeAsync();
 
         if (SelectedProfile is null && Profiles.Count > 0)
         {
@@ -517,7 +316,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public async Task CreateStandaloneConversationFromUiAsync()
     {
         SelectedWorkspaceRoot = null;
-        PersistSelectedWorkspaceRoot();
         ApplyConversationFilter();
         await CreateNewConversationAsync();
     }
@@ -568,47 +366,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return Task.CompletedTask;
     }
 
-    public Task SetThemePreferenceAsync(string? themeId)
-    {
-        ApplyThemePreference(ParseThemePreference(themeId), persist: true, refreshShell: true);
-        return Task.CompletedTask;
-    }
-
-    public Task SetSelectedProfileAsync(Guid profileId)
-    {
-        SelectedProfile = Profiles.FirstOrDefault(item => item.Id == profileId) ?? SelectedProfile;
-        return Task.CompletedTask;
-    }
-
-    public async Task SetSelectedProfileModelAsync(string? profileModel)
-    {
-        if (SelectedProfile is null)
-        {
-            return;
-        }
-
-        var normalized = NormalizeModelValue(profileModel);
-        if (normalized is null)
-        {
-            ApplySelectedProfileModel(null, publishShell: true);
-            return;
-        }
-
-        if (string.Equals(SelectedProfile.Model, normalized, StringComparison.Ordinal))
-        {
-            ApplySelectedProfileModel(null, publishShell: true);
-            return;
-        }
-
-        var updatedProfile = SelectedProfile with
-        {
-            Model = normalized,
-            UpdatedAtUtc = DateTimeOffset.UtcNow
-        };
-        await _profileRepository.UpsertProfileAsync(updatedProfile);
-        await ReloadProfilesAsync();
-    }
-
     private void ApplySelectedProfileModel(string? profileModel, bool publishShell)
     {
         var normalized = NormalizeModelValue(profileModel);
@@ -639,28 +396,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return value.Trim();
     }
 
-    private string[] BuildProfileModelValues(ProviderProfile profile)
-    {
-        var models = Profiles
-            .Where(item =>
-                string.Equals(item.Endpoint, profile.Endpoint, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(item.SecretRef, profile.SecretRef, StringComparison.Ordinal))
-            .Select(item => NormalizeModelValue(item.Model))
-            .Where(item => item is not null)
-            .Cast<string>()
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        if (models.Length > 0)
-        {
-            return models;
-        }
-
-        var fallback = NormalizeModelValue(profile.Model);
-        return fallback is null ? [] : [fallback];
-    }
-
     private string? ResolveSelectedProfileModel()
     {
         if (SelectedProfile is null)
@@ -683,274 +418,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ? WorkspaceRoots.FirstOrDefault(item => item.Id == id)
             : null;
 
-        PersistSelectedWorkspaceRoot();
         ApplyConversationFilter();
         PublishShell(false);
         return Task.CompletedTask;
-    }
-
-    public async Task<IReadOnlyList<WorkspaceFileEntry>> ListSelectedWorkspaceFilesAsync(
-        string? relativePath,
-        CancellationToken cancellationToken = default)
-    {
-        if (SelectedWorkspaceRoot is null)
-        {
-            return [];
-        }
-
-        return await _workspaceToolService.ListFilesAsync(
-            SelectedWorkspaceRoot.RootPath,
-            relativePath,
-            cancellationToken);
-    }
-
-    public Task SetConversationModeAsync(string? modeId)
-        => SetConversationModeCoreAsync(ParseConversationMode(modeId));
-
-    public async Task DeleteConversationAsync(Guid conversationId)
-    {
-        var conversation = _allConversations.FirstOrDefault(item => item.Id == conversationId);
-        if (conversation is null)
-        {
-            return;
-        }
-
-        await _conversationRepository.DeleteConversationAsync(conversationId);
-        if (_conversationRuntimeStates.Remove(conversationId, out var runtimeState))
-        {
-            if (runtimeState.IsRunning)
-            {
-                runtimeState.CancellationTokenSource.Cancel();
-            }
-
-            runtimeState.Dispose();
-        }
-
-        _conversationPlanPanels.Remove(conversationId);
-        _conversationStatusTexts.Remove(conversationId);
-        _allConversations.RemoveAll(item => item.Id == conversationId);
-
-        if (SelectedConversation?.Id == conversationId)
-        {
-            SelectedConversation = null;
-        }
-
-        ApplyConversationFilter();
-        StatusText = $"Deleted conversation '{conversation.Title}'.";
-    }
-
-    public async Task SetToolPermissionModeAsync(string? permissionModeId)
-    {
-        var nextMode = ParseToolPermissionMode(permissionModeId);
-        if (SelectedToolPermissionMode == nextMode)
-        {
-            return;
-        }
-
-        SelectedToolPermissionMode = nextMode;
-
-        if (SelectedConversation is not null)
-        {
-            await SaveConversationSelectionAsync(SelectedConversation);
-        }
-    }
-
-    public async Task SaveProfileAsync(ProfileEditorResult result)
-    {
-        var existing = result.ProfileId is Guid profileId
-            ? await _profileRepository.GetProfileAsync(profileId)
-            : null;
-
-        if (existing is null && string.IsNullOrWhiteSpace(result.ApiKey))
-        {
-            throw new InvalidOperationException("A new profile requires an API key.");
-        }
-
-        var secretRef = existing?.SecretRef ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(result.ApiKey))
-        {
-            secretRef = await _secretProtector.StoreSecretAsync(result.ApiKey.Trim(), existing?.SecretRef);
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        var profile = new ProviderProfile(
-            existing?.Id ?? Guid.NewGuid(),
-            result.Name.Trim(),
-            NormalizeEndpoint(result.Endpoint),
-            result.Model.Trim(),
-            result.TemperatureEnabled,
-            NormalizeSamplingParameter(result.Temperature, 2),
-            result.TopPEnabled,
-            NormalizeSamplingParameter(result.TopP, 1),
-            ApiStyle.OpenAICompatible,
-            secretRef,
-            existing?.CreatedAtUtc ?? now,
-            now);
-
-        await _profileRepository.UpsertProfileAsync(profile);
-        await ReloadProfilesAsync();
-        SelectedProfile = Profiles.FirstOrDefault(item => item.Id == profile.Id);
-        StatusText = $"Saved profile '{profile.Name}'.";
-
-        if (SelectedConversation is null && SelectedProfile is not null)
-        {
-            await CreateNewConversationAsync();
-        }
-    }
-
-    public async Task<IReadOnlyList<string>> FetchProfileModelsAsync(
-        Guid? profileId,
-        string endpoint,
-        string? apiKey,
-        CancellationToken cancellationToken = default)
-    {
-        if (!Uri.TryCreate(BuildModelsEndpoint(endpoint), UriKind.Absolute, out var requestUri))
-        {
-            throw new InvalidOperationException("The endpoint is not a valid absolute URL.");
-        }
-
-        var resolvedApiKey = apiKey?.Trim();
-        if (string.IsNullOrWhiteSpace(resolvedApiKey) && profileId is Guid existingProfileId)
-        {
-            var existing = await _profileRepository.GetProfileAsync(existingProfileId, cancellationToken);
-            if (existing is not null && !string.IsNullOrWhiteSpace(existing.SecretRef))
-            {
-                resolvedApiKey = await _secretProtector.RetrieveSecretAsync(existing.SecretRef, cancellationToken);
-            }
-        }
-
-        using var httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(20)
-        };
-        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        if (!string.IsNullOrWhiteSpace(resolvedApiKey))
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", resolvedApiKey);
-        }
-
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            return [];
-        }
-
-        using var document = JsonDocument.Parse(responseBody);
-        if (!document.RootElement.TryGetProperty("data", out var dataElement) || dataElement.ValueKind != JsonValueKind.Array)
-        {
-            return [];
-        }
-
-        var models = new List<string>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var item in dataElement.EnumerateArray())
-        {
-            if (!item.TryGetProperty("id", out var idElement) || idElement.ValueKind != JsonValueKind.String)
-            {
-                continue;
-            }
-
-            var modelId = idElement.GetString()?.Trim();
-            if (string.IsNullOrWhiteSpace(modelId) || !seen.Add(modelId))
-            {
-                continue;
-            }
-
-            models.Add(modelId);
-        }
-
-        return models;
-    }
-
-    public async Task DeleteProfileAsync(Guid profileId)
-    {
-        var profile = Profiles.FirstOrDefault(item => item.Id == profileId);
-        if (profile is null)
-        {
-            return;
-        }
-
-        if (_allConversations.Any(item => item.ProfileId == profileId))
-        {
-            throw new InvalidOperationException($"Profile '{profile.Name}' is still used by one or more conversations.");
-        }
-
-        await _profileRepository.DeleteProfileAsync(profileId);
-        if (!string.IsNullOrWhiteSpace(profile.SecretRef))
-        {
-            await _secretProtector.DeleteSecretAsync(profile.SecretRef);
-        }
-
-        await ReloadProfilesAsync();
-        if (SelectedProfile?.Id == profileId)
-        {
-            SelectedProfile = Profiles.FirstOrDefault();
-        }
-
-        StatusText = $"Deleted profile '{profile.Name}'.";
-    }
-
-    public Task SelectWorkspaceAsync(string folderPath)
-        => SaveWorkspaceRootAsync(null, folderPath, null);
-
-    public async Task SaveWorkspaceRootAsync(Guid? workspaceRootId, string folderPath, string? workspaceName)
-    {
-        if (string.IsNullOrWhiteSpace(folderPath))
-        {
-            throw new InvalidOperationException("Workspace path is required.");
-        }
-
-        var normalizedPath = NormalizeWorkspacePath(folderPath);
-        if (!Directory.Exists(normalizedPath))
-        {
-            throw new DirectoryNotFoundException($"Workspace path '{normalizedPath}' does not exist.");
-        }
-
-        var existingById = workspaceRootId is Guid id
-            ? WorkspaceRoots.FirstOrDefault(root => root.Id == id)
-            : null;
-        var existingByPath = WorkspaceRoots.FirstOrDefault(root =>
-            string.Equals(NormalizeWorkspacePath(root.RootPath), normalizedPath, StringComparison.OrdinalIgnoreCase));
-        var existing = existingByPath ?? existingById;
-
-        var now = DateTimeOffset.UtcNow;
-        var name = ResolveWorkspaceName(workspaceName, normalizedPath);
-        var workspaceRoot = existing is null
-            ? new WorkspaceRoot(Guid.NewGuid(), name, normalizedPath, now, now)
-            : existing with
-            {
-                Name = name,
-                RootPath = normalizedPath,
-                UpdatedAtUtc = now
-            };
-
-        await _conversationRepository.UpsertWorkspaceRootAsync(workspaceRoot);
-        await ReloadWorkspaceRootsAsync();
-        SelectedWorkspaceRoot = WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRoot.Id);
-        PersistSelectedWorkspaceRoot();
-        StatusText = $"Workspace set to '{workspaceRoot.Name}'.";
-
-        ApplyConversationFilter();
-    }
-
-    public async Task DeleteWorkspaceRootAsync(Guid workspaceRootId)
-    {
-        var workspaceRoot = WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId);
-        if (workspaceRoot is null)
-        {
-            return;
-        }
-
-        await _conversationRepository.DeleteWorkspaceRootAsync(workspaceRootId);
-        await ReloadWorkspaceRootsAsync();
-        await ReloadConversationsAsync();
-        PersistSelectedWorkspaceRoot();
-
-        ApplyConversationFilter();
-        StatusText = $"Deleted workspace '{workspaceRoot.Name}'.";
     }
 
     public Task SelectConversationAsync(Guid conversationId)
@@ -965,35 +435,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return Task.CompletedTask;
     }
 
-    private void LoadThemePreference()
+    private void ApplySystemTheme(bool refreshShell)
     {
-        var settings = _desktopSettingsStore.Load();
-        _desktopSettings = settings;
-        SetSelectedThemeOption(settings.ThemePreference);
-        ApplyThemePreference(settings.ThemePreference, persist: false, refreshShell: false);
-    }
-
-    private void ApplyThemePreference(AppThemePreference preference, bool persist, bool refreshShell)
-    {
-        var themeMode = preference switch
-        {
-            AppThemePreference.Light => ThemeMode.Light,
-            AppThemePreference.Dark => ThemeMode.Dark,
-            _ => ThemeMode.System
-        };
-
-        ActiveThemeMode = themeMode;
-        EffectiveTranscriptTheme = ResolveTranscriptTheme(preference);
-        ApplyThemeModeToApplication(themeMode);
-        SetSelectedThemeOption(preference);
-
-        if (persist)
-        {
-            var settings = _desktopSettingsStore.Load();
-            settings = settings with { ThemePreference = preference };
-            _desktopSettingsStore.Save(settings);
-            _desktopSettings = settings;
-        }
+        ActiveThemeMode = ThemeMode.System;
+        EffectiveTranscriptTheme = ResolveTranscriptTheme();
+        ApplyThemeModeToApplication(ThemeMode.System);
 
         if (_initialized || refreshShell)
         {
@@ -1001,26 +447,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void SetSelectedThemeOption(AppThemePreference preference)
-    {
-        _isApplyingThemeSelection = true;
-        try
-        {
-            SelectedThemeOption = ThemeOptions.FirstOrDefault(option => option.Value == preference) ?? ThemeOptions.FirstOrDefault();
-        }
-        finally
-        {
-            _isApplyingThemeSelection = false;
-        }
-    }
-
-    private static string ResolveTranscriptTheme(AppThemePreference preference)
-        => preference switch
-        {
-            AppThemePreference.Dark => "dark",
-            AppThemePreference.Light => "light",
-            _ => SystemThemeReader.IsDarkModeEnabled() ? "dark" : "light"
-        };
+    private static string ResolveTranscriptTheme()
+        => SystemThemeReader.IsDarkModeEnabled() ? "dark" : "light";
 
     private static void ApplyThemeModeToApplication(ThemeMode mode)
     {
@@ -1032,14 +460,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
     {
-        if ((SelectedThemeOption?.Value ?? AppThemePreference.System) != AppThemePreference.System)
-        {
-            return;
-        }
-
         System.Windows.Application.Current?.Dispatcher.Invoke(() =>
         {
-            ApplyThemePreference(AppThemePreference.System, persist: false, refreshShell: true);
+            ApplySystemTheme(refreshShell: true);
         });
     }
 
@@ -1139,7 +562,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task ReloadWorkspaceRootsAsync()
     {
-        var selectedId = SelectedWorkspaceRoot?.Id ?? _desktopSettings.SelectedWorkspaceRootId;
+        var selectedId = SelectedWorkspaceRoot?.Id;
         var workspaceRoots = await _conversationRepository.ListWorkspaceRootsAsync();
         ReplaceCollection(WorkspaceRoots, workspaceRoots);
         SelectedWorkspaceRoot = selectedId is Guid id
@@ -1158,13 +581,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task CreateNewConversationAsync()
     {
-        if (SelectedConversationMode == ConversationMode.Channel)
-        {
-            StatusText = "Channel conversations will appear automatically after external messages arrive.";
-            PublishShell(false);
-            return;
-        }
-
         if (SelectedProfile is null)
         {
             return;
@@ -1176,7 +592,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             "New chat",
             SelectedProfile.Id,
             SelectedWorkspaceRoot?.Id,
-            SelectedConversationMode,
+            ConversationMode.Programming,
             SelectedToolPermissionMode,
             ResolveSelectedAgent().Id,
             now,
@@ -1238,11 +654,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SelectedWorkspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
             ? WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
             : null;
-        PersistSelectedWorkspaceRoot();
-        SelectedConversationMode = conversation.Mode;
         SelectedToolPermissionMode = conversation.ToolPermissionMode;
         SyncSelectedAgentFromConversation(conversation, publishShell: false);
-        RefreshPlanningModeForSelection(publishShell: false);
         ProjectSelectedRuntimeState(publishShell: false);
         ApplyConversationFilter(conversation.Id);
 
@@ -1252,12 +665,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task SendAsync()
     {
-        if (SelectedConversationMode == ConversationMode.Channel)
-        {
-            StatusText = "Channel conversations are driven by external messages and cannot be sent manually here.";
-            return;
-        }
-
         var selectedProfile = SelectedProfile;
         if (selectedProfile is null)
         {
@@ -1270,9 +677,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var promptImageAttachments = _pendingPromptImageAttachments.ToArray();
         var selectedProfileModel = ResolveSelectedProfileModel();
         var selectedWorkspaceRoot = SelectedWorkspaceRoot;
-        var selectedConversationMode = SelectedConversationMode;
         var selectedToolPermissionMode = SelectedToolPermissionMode;
-        var usePlanningMode = false;
         var baseMessages = _messages.ToArray();
         var baseToolRuns = _toolRuns.ToArray();
         var baseToolRunAnchors = new Dictionary<Guid, ToolRunAnchor>(_toolRunAnchors);
@@ -1287,7 +692,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ComposerText = string.Empty;
 
         ConversationRuntimeState? runtimeState = null;
-        DesktopSettings? settings = null;
         ProviderProfile? requestProfile = null;
         string? apiKey = null;
 
@@ -1304,23 +708,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 ProfileId = selectedProfile.Id,
                 WorkspaceRootId = selectedWorkspaceRoot?.Id,
-                Mode = selectedConversationMode,
+                Mode = ConversationMode.Programming,
                 ToolPermissionMode = selectedToolPermissionMode,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
             await PersistConversationAsync(conversation, preferSelection: IsSelectedConversation(conversation.Id));
 
-            var runtimeAgent = ResolveRuntimeAgent(selectedConversationMode, conversation.AgentId);
-            usePlanningMode = selectedConversationMode == ConversationMode.Programming && runtimeAgent.Mode == AgentExecutionMode.Plan;
+            var runtimeAgent = ResolveRuntimeAgent(conversation.AgentId);
 
             runtimeState = StartConversationRuntimeState(
                 conversation,
-                usePlanningMode,
-                usePlanningMode ? "Processing request..." : "Streaming response...",
+                "Streaming response...",
                 baseMessages,
                 baseToolRuns,
                 baseToolRunAnchors);
-            ClearPlanPanelState(runtimeState, publishShell: false);
 
             var cancellationToken = runtimeState.CancellationTokenSource.Token;
             var userMessageId = Guid.NewGuid();
@@ -1363,15 +764,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 throw new InvalidOperationException("The selected profile does not have a readable API key.");
             }
 
-            settings = _desktopSettingsStore.Load();
-            _desktopSettings = settings;
             var requestMessages = await _contextCompactionService.PrepareMessagesAsync(
                 conversation.Id,
                 requestProfile,
                 apiKey,
                 runtimeState.Messages.ToArray(),
-                settings.ModelContextWindow,
-                settings.ModelAutoCompactTokenLimit,
+                DefaultModelContextWindow,
+                DefaultModelAutoCompactTokenLimit,
                 cancellationToken);
 
             await foreach (var update in _agentChatRuntime.StreamTurnAsync(
@@ -1380,7 +779,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                                    requestProfile,
                                    apiKey,
                                    selectedWorkspaceRoot,
-                                   selectedConversationMode,
+                                   ConversationMode.Programming,
                                    runtimeAgent,
                                    selectedToolPermissionMode,
                                    _toolApprovalHandler,
@@ -1390,11 +789,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 switch (update)
                 {
-                    case ExecutionPlanDraftingStartedEvent:
-                        BeginPlanPanelDrafting(runtimeState);
-                        SetStatusTextForConversation(runtimeState, "Drafting plan...", publishShell: false);
-                        PublishRuntimeState(runtimeState, false);
-                        break;
                     case AssistantMessageStartedEvent started:
                         runtimeState.ActiveMessageIds.Add(started.Message.Id);
                         ReplaceMessage(runtimeState, started.Message);
@@ -1402,12 +796,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                         break;
                     case AssistantDeltaEvent delta:
                         ApplyAssistantDelta(runtimeState, delta.MessageId, delta.DeltaMarkdown);
-                        break;
-                    case ExecutionPlanPreparedEvent prepared:
-                        ApplyPreparedExecutionPlan(runtimeState, prepared.Plan);
-                        break;
-                    case ExecutionPlanStepStatusChangedEvent planStepStatus:
-                        ApplyExecutionPlanStepStatus(runtimeState, planStepStatus.StepId, planStepStatus.Status);
                         break;
                     case ToolExecutionStartedEvent toolStarted:
                         var startedRecord = CaptureToolRunAnchor(runtimeState, toolStarted.Record);
@@ -1428,17 +816,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
             }
 
-            if (usePlanningMode)
-            {
-                FinalizePlanPanelAfterSuccessfulTurn(runtimeState);
-            }
-
             await TryCompactConversationContextAfterSuccessfulTurnAsync(
                 runtimeState,
                 conversation,
                 requestProfile,
                 apiKey,
-                settings,
                 cancellationToken);
 
             SetStatusTextForConversation(runtimeState, "Ready.", publishShell: false);
@@ -1449,11 +831,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (runtimeState is not null)
             {
                 await FailActiveMessagesAsync(runtimeState, runtimeState.ActiveMessageIds, "Generation stopped.");
-                if (usePlanningMode)
-                {
-                    MarkPlanPanelCancelled(runtimeState);
-                }
-
                 SetStatusTextForConversation(runtimeState, "Generation stopped.", publishShell: false);
             }
         }
@@ -1467,11 +844,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             await FailActiveMessagesAsync(runtimeState, runtimeState.ActiveMessageIds, exception.Message);
-            if (usePlanningMode)
-            {
-                MarkPlanPanelFailed(runtimeState, exception.Message);
-            }
-
             SetStatusTextForConversation(runtimeState, exception.Message, publishShell: false);
         }
         finally
@@ -1489,7 +861,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ConversationRecord conversation,
         ProviderProfile profile,
         string apiKey,
-        DesktopSettings settings,
         CancellationToken cancellationToken)
     {
         try
@@ -1499,8 +870,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 profile,
                 apiKey,
                 runtimeState.Messages.ToArray(),
-                settings.ModelContextWindow,
-                settings.ModelAutoCompactTokenLimit,
+                DefaultModelContextWindow,
+                DefaultModelAutoCompactTokenLimit,
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1516,206 +887,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void BeginPlanPanelDrafting(ConversationRuntimeState runtimeState)
-    {
-        _conversationPlanPanels[runtimeState.ConversationId] = new TranscriptPlanPanel(
-            true,
-            "planning",
-            "计划模式",
-            null,
-            "正在梳理计划",
-            []);
-        PublishRuntimeState(runtimeState, false);
-    }
-
-    private void ApplyPreparedExecutionPlan(ConversationRuntimeState runtimeState, ExecutionPlan plan)
-    {
-        _conversationPlanPanels[runtimeState.ConversationId] = new TranscriptPlanPanel(
-            true,
-            "executing",
-            "计划模式",
-            string.IsNullOrWhiteSpace(plan.Summary) ? null : plan.Summary,
-            "准备执行",
-            plan.Steps
-                .Select(step => new TranscriptPlanStep(
-                    step.Id,
-                    step.Title,
-                    step.Status.ToString().ToLowerInvariant()))
-                .ToArray());
-        PublishRuntimeState(runtimeState, false);
-    }
-
-    private void ApplyExecutionPlanStepStatus(
-        ConversationRuntimeState runtimeState,
-        string stepId,
-        ExecutionPlanStepStatus status)
-    {
-        if (!_conversationPlanPanels.TryGetValue(runtimeState.ConversationId, out var planPanel) ||
-            planPanel.Steps.Count == 0)
-        {
-            return;
-        }
-
-        var nextStatus = status.ToString().ToLowerInvariant();
-        var changed = false;
-        var nextSteps = planPanel.Steps
-            .Select(step =>
-            {
-                if (!string.Equals(step.Id, stepId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return step;
-                }
-
-                changed = true;
-                return step with { Status = nextStatus };
-            })
-            .ToArray();
-        if (!changed)
-        {
-            return;
-        }
-
-        var nextState = ResolvePlanPanelState(nextSteps);
-        _conversationPlanPanels[runtimeState.ConversationId] = planPanel with
-        {
-            State = nextState,
-            StatusText = BuildPlanPanelStatusText(nextSteps, nextState),
-            Steps = nextSteps
-        };
-
-        var nextConversationStatus = status switch
-        {
-            ExecutionPlanStepStatus.Running => BuildPlanExecutionStatusText(nextSteps),
-            ExecutionPlanStepStatus.Failed => "Plan execution failed.",
-            ExecutionPlanStepStatus.Cancelled => "Generation stopped.",
-            _ when nextState == "completed" => "Plan steps completed.",
-            _ => runtimeState.StatusText
-        };
-        SetStatusTextForConversation(runtimeState, nextConversationStatus, publishShell: false);
-        PublishRuntimeState(runtimeState, false);
-    }
-
-    private void FinalizePlanPanelAfterSuccessfulTurn(ConversationRuntimeState runtimeState)
-    {
-        if (!_conversationPlanPanels.TryGetValue(runtimeState.ConversationId, out var planPanel) ||
-            planPanel.State is "failed" or "cancelled")
-        {
-            return;
-        }
-
-        var steps = planPanel.Steps.ToArray();
-        if (steps.Length == 0)
-        {
-            _conversationPlanPanels[runtimeState.ConversationId] = planPanel with
-            {
-                State = "completed",
-                StatusText = "已完成"
-            };
-        }
-        else if (steps.All(step => string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase)))
-        {
-            _conversationPlanPanels[runtimeState.ConversationId] = planPanel with
-            {
-                State = "completed",
-                StatusText = "全部步骤已完成"
-            };
-        }
-
-        PublishRuntimeState(runtimeState, false);
-    }
-
-    private void MarkPlanPanelFailed(ConversationRuntimeState runtimeState, string errorMessage)
-    {
-        if (!_conversationPlanPanels.TryGetValue(runtimeState.ConversationId, out var planPanel))
-        {
-            _conversationPlanPanels[runtimeState.ConversationId] = new TranscriptPlanPanel(
-                true,
-                "failed",
-                "计划模式",
-                string.IsNullOrWhiteSpace(errorMessage) ? null : errorMessage,
-                "计划执行失败",
-                []);
-            PublishRuntimeState(runtimeState, false);
-            return;
-        }
-
-        if (string.Equals(planPanel.State, "completed", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var nextSteps = planPanel.Steps
-            .Select(step => string.Equals(step.Status, "running", StringComparison.OrdinalIgnoreCase)
-                ? step with { Status = "failed" }
-                : step)
-            .ToArray();
-
-        _conversationPlanPanels[runtimeState.ConversationId] = planPanel with
-        {
-            State = "failed",
-            Summary = string.IsNullOrWhiteSpace(errorMessage) ? planPanel.Summary : errorMessage,
-            StatusText = "计划执行失败",
-            Steps = nextSteps
-        };
-        PublishRuntimeState(runtimeState, false);
-    }
-
-    private void MarkPlanPanelCancelled(ConversationRuntimeState runtimeState)
-    {
-        if (!_conversationPlanPanels.TryGetValue(runtimeState.ConversationId, out var planPanel))
-        {
-            _conversationPlanPanels[runtimeState.ConversationId] = new TranscriptPlanPanel(
-                true,
-                "cancelled",
-                "计划模式",
-                null,
-                "已停止执行",
-                []);
-            PublishRuntimeState(runtimeState, false);
-            return;
-        }
-
-        if (string.Equals(planPanel.State, "completed", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var nextSteps = planPanel.Steps
-            .Select(step => string.Equals(step.Status, "running", StringComparison.OrdinalIgnoreCase)
-                ? step with { Status = "cancelled" }
-                : step)
-            .ToArray();
-
-        _conversationPlanPanels[runtimeState.ConversationId] = planPanel with
-        {
-            State = "cancelled",
-            StatusText = "已停止执行",
-            Steps = nextSteps
-        };
-        PublishRuntimeState(runtimeState, false);
-    }
-
-    private void ClearPlanPanelState(ConversationRuntimeState runtimeState, bool publishShell)
-    {
-        _conversationPlanPanels[runtimeState.ConversationId] = TranscriptPlanPanel.Hidden;
-        if (publishShell)
-        {
-            PublishRuntimeState(runtimeState, false);
-        }
-    }
-
-    private void BeginPlanPanelDrafting()
-    {
-        _planPanel = new TranscriptPlanPanel(
-            true,
-            "planning",
-            "计划模式",
-            null,
-            "正在梳理计划",
-            []);
-        PublishShell(false);
-    }
-
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
@@ -1724,7 +895,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
-        _channelManager.Changed -= OnChannelManagerChanged;
         _toolApprovalHandler.ApprovalRequested -= OnToolApprovalRequested;
 
         if (_streamingPublishTimer is not null)
@@ -1746,248 +916,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _conversationRuntimeStates.Clear();
     }
 
-    private void ApplyPreparedExecutionPlan(ExecutionPlan plan)
-    {
-        _planPanel = new TranscriptPlanPanel(
-            true,
-            "executing",
-            "计划模式",
-            string.IsNullOrWhiteSpace(plan.Summary) ? null : plan.Summary,
-            "准备执行",
-            plan.Steps
-                .Select(step => new TranscriptPlanStep(
-                    step.Id,
-                    step.Title,
-                    step.Status.ToString().ToLowerInvariant()))
-                .ToArray());
-        PublishShell(false);
-    }
-
-    private void ApplyExecutionPlanStepStatus(string stepId, ExecutionPlanStepStatus status)
-    {
-        if (_planPanel is null || _planPanel.Steps.Count == 0)
-        {
-            return;
-        }
-
-        var nextStatus = status.ToString().ToLowerInvariant();
-        var changed = false;
-        var nextSteps = _planPanel.Steps
-            .Select(step =>
-            {
-                if (!string.Equals(step.Id, stepId, StringComparison.OrdinalIgnoreCase))
-                {
-                    return step;
-                }
-
-                changed = true;
-                return step with { Status = nextStatus };
-            })
-            .ToArray();
-        if (!changed)
-        {
-            return;
-        }
-
-        var nextState = ResolvePlanPanelState(nextSteps);
-        _planPanel = _planPanel with
-        {
-            State = nextState,
-            StatusText = BuildPlanPanelStatusText(nextSteps, nextState),
-            Steps = nextSteps
-        };
-
-        StatusText = status switch
-        {
-            ExecutionPlanStepStatus.Running => BuildPlanExecutionStatusText(nextSteps),
-            ExecutionPlanStepStatus.Failed => "Plan execution failed.",
-            ExecutionPlanStepStatus.Cancelled => "Generation stopped.",
-            _ when nextState == "completed" => "Plan steps completed.",
-            _ => StatusText
-        };
-
-        PublishShell(false);
-    }
-
-    private void FinalizePlanPanelAfterSuccessfulTurn()
-    {
-        if (_planPanel is null || _planPanel.State is "failed" or "cancelled")
-        {
-            return;
-        }
-
-        var steps = _planPanel.Steps.ToArray();
-        if (steps.Length == 0)
-        {
-            _planPanel = _planPanel with
-            {
-                State = "completed",
-                StatusText = "已完成"
-            };
-        }
-        else if (steps.All(step => string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase)))
-        {
-            _planPanel = _planPanel with
-            {
-                State = "completed",
-                StatusText = "全部步骤已完成"
-            };
-        }
-
-        PublishShell(false);
-    }
-
-    private void MarkPlanPanelFailed(string errorMessage)
-    {
-        if (_planPanel is null)
-        {
-            _planPanel = new TranscriptPlanPanel(
-                true,
-                "failed",
-                "计划模式",
-                string.IsNullOrWhiteSpace(errorMessage) ? null : errorMessage,
-                "计划执行失败",
-                []);
-            PublishShell(false);
-            return;
-        }
-
-        if (string.Equals(_planPanel.State, "completed", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var nextSteps = _planPanel.Steps
-            .Select(step => string.Equals(step.Status, "running", StringComparison.OrdinalIgnoreCase)
-                ? step with { Status = "failed" }
-                : step)
-            .ToArray();
-
-        _planPanel = _planPanel with
-        {
-            State = "failed",
-            Summary = string.IsNullOrWhiteSpace(errorMessage) ? _planPanel.Summary : errorMessage,
-            StatusText = "计划执行失败",
-            Steps = nextSteps
-        };
-        PublishShell(false);
-    }
-
-    private void MarkPlanPanelCancelled()
-    {
-        if (_planPanel is null)
-        {
-            _planPanel = new TranscriptPlanPanel(
-                true,
-                "cancelled",
-                "计划模式",
-                null,
-                "已停止执行",
-                []);
-            PublishShell(false);
-            return;
-        }
-
-        if (string.Equals(_planPanel.State, "completed", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var nextSteps = _planPanel.Steps
-            .Select(step => string.Equals(step.Status, "running", StringComparison.OrdinalIgnoreCase)
-                ? step with { Status = "cancelled" }
-                : step)
-            .ToArray();
-
-        _planPanel = _planPanel with
-        {
-            State = "cancelled",
-            StatusText = "已停止执行",
-            Steps = nextSteps
-        };
-        PublishShell(false);
-    }
-
-    private void ClearPlanPanelState(bool publishShell)
-    {
-        _planPanel = TranscriptPlanPanel.Hidden;
-        if (SelectedConversation is { } conversation)
-        {
-            _conversationPlanPanels[conversation.Id] = TranscriptPlanPanel.Hidden;
-        }
-
-        if (publishShell)
-        {
-            PublishShell(false);
-        }
-    }
-
-    private static string ResolvePlanPanelState(IReadOnlyList<TranscriptPlanStep> steps)
-    {
-        if (steps.Any(step => string.Equals(step.Status, "failed", StringComparison.OrdinalIgnoreCase)))
-        {
-            return "failed";
-        }
-
-        if (steps.Any(step => string.Equals(step.Status, "cancelled", StringComparison.OrdinalIgnoreCase)))
-        {
-            return "cancelled";
-        }
-
-        if (steps.Count > 0 && steps.All(step => string.Equals(step.Status, "completed", StringComparison.OrdinalIgnoreCase)))
-        {
-            return "completed";
-        }
-
-        return "executing";
-    }
-
-    private static string BuildPlanPanelStatusText(IReadOnlyList<TranscriptPlanStep> steps, string panelState)
-    {
-        if (string.Equals(panelState, "failed", StringComparison.OrdinalIgnoreCase))
-        {
-            return "有步骤执行失败";
-        }
-
-        if (string.Equals(panelState, "cancelled", StringComparison.OrdinalIgnoreCase))
-        {
-            return "已停止执行";
-        }
-
-        if (string.Equals(panelState, "completed", StringComparison.OrdinalIgnoreCase))
-        {
-            return "全部步骤已完成";
-        }
-
-        var runningEntry = steps
-            .Select((step, index) => (Step: step, Index: index))
-            .FirstOrDefault(entry => string.Equals(entry.Step.Status, "running", StringComparison.OrdinalIgnoreCase));
-        var runningIndex = runningEntry.Step is null ? -1 : runningEntry.Index;
-
-        return runningIndex >= 0
-            ? $"执行第 {runningIndex + 1}/{steps.Count} 步..."
-            : "准备执行";
-    }
-
-    private static string BuildPlanExecutionStatusText(IReadOnlyList<TranscriptPlanStep> steps)
-    {
-        var runningEntry = steps
-            .Select((step, index) => (Step: step, Index: index))
-            .FirstOrDefault(entry => string.Equals(entry.Step.Status, "running", StringComparison.OrdinalIgnoreCase));
-        var runningIndex = runningEntry.Step is null ? -1 : runningEntry.Index;
-
-        return runningIndex >= 0
-            ? $"Executing step {runningIndex + 1}/{steps.Count}..."
-            : "Executing plan...";
-    }
-
     private void Stop()
     {
-        if (_commandCancellationTokenSource is not null)
-        {
-            _commandCancellationTokenSource.Cancel();
-        }
-
         var runtimeState = GetSelectedRuntimeState();
         if (runtimeState?.IsRunning == true)
         {
@@ -1997,13 +927,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool CanSend()
         => !IsBusy &&
-           SelectedConversationMode != ConversationMode.Channel &&
            SelectedProfile is not null &&
            !string.IsNullOrWhiteSpace(ComposerText);
 
     private bool CanCreateConversation()
         => !IsBusy &&
-           SelectedConversationMode != ConversationMode.Channel &&
            SelectedProfile is not null;
 
     private void NotifyCommandStates()
@@ -2169,28 +1097,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             ProfileId = SelectedProfile?.Id ?? conversation.ProfileId,
             WorkspaceRootId = SelectedWorkspaceRoot?.Id,
-            Mode = SelectedConversationMode,
+            Mode = ConversationMode.Programming,
             ToolPermissionMode = SelectedToolPermissionMode,
-            AgentId = conversation.Mode == ConversationMode.Programming ? ResolveSelectedAgent().Id : conversation.AgentId,
+            AgentId = ResolveSelectedAgent().Id,
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
         await PersistConversationAsync(updated);
-    }
-
-    private void PersistSelectedWorkspaceRoot()
-    {
-        var selectedId = SelectedWorkspaceRoot?.Id;
-        if (_desktopSettings.SelectedWorkspaceRootId == selectedId)
-        {
-            return;
-        }
-
-        var settings = _desktopSettingsStore.Load() with
-        {
-            SelectedWorkspaceRootId = selectedId
-        };
-        _desktopSettingsStore.Save(settings);
-        _desktopSettings = settings;
     }
 
     private void ReplaceMessage(MessageRecord message)
@@ -2243,14 +1155,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private bool MatchesConversationFilter(ConversationRecord conversation)
     {
-        if (conversation.Mode != SelectedConversationMode)
+        if (conversation.Mode != ConversationMode.Programming)
         {
             return false;
-        }
-
-        if (conversation.Mode == ConversationMode.Channel)
-        {
-            return true;
         }
 
         if (!string.Equals(conversation.AgentId, ResolveSelectedAgent().Id, StringComparison.OrdinalIgnoreCase))
@@ -2356,48 +1263,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var conversations = BuildConversationItems();
 
-        var conversationModes = BuildConversationModeOptions();
-
-        var profiles = Profiles
-            .Select(profile => new ShellSelectOption(
-                profile.Id.ToString("D"),
-                profile.Name,
-                profile.Endpoint,
-                profile.TemperatureEnabled,
-                profile.Temperature,
-                profile.TopPEnabled,
-                profile.TopP,
-                profile.Model))
-            .ToArray();
-        var profileModelValues = SelectedProfile is null ? [] : BuildProfileModelValues(SelectedProfile);
-        var profileModels = profileModelValues
-            .Select(model => new ShellSelectOption(model, model))
-            .ToArray();
-        var selectedProfileModel = ResolveSelectedProfileModel();
-
-        var workspaceRoots = WorkspaceRoots
-            .Select(root => new ShellSelectOption(root.Id.ToString("D"), root.Name, root.RootPath))
-            .ToArray();
-
-        var toolPermissionModes = ToolPermissionOptions;
-        var themeOptions = ThemeOptions
-            .Select(option => new ShellSelectOption(ThemePreferenceToId(option.Value), option.Label))
-            .ToArray();
-        var availableMcpServers = BuildAvailableTranscriptMcpServers();
-        var availableSkills = BuildAvailableTranscriptSkills();
-        var slashCommands = _slashCommandRegistry.Definitions
-            .Select(command => new TranscriptSlashCommandItem(
-                command.Id,
-                command.Command,
-                command.Name,
-                command.Description,
-                command.ArgumentHint,
-                command.RequiresConfirmation))
-            .ToArray();
-        var planPanel = GetSelectedPlanPanel();
-        var contextUsage = BuildContextUsage(transcriptMessages);
-        var isBusy = IsSelectedConversationRunning() || _isCommandRunning;
-        var statusText = GetSelectedStatusText();
+        var isBusy = IsSelectedConversationRunning();
 
         TranscriptChanged?.Invoke(this, new TranscriptRenderState(
             orderedItems,
@@ -2406,178 +1272,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             SelectedConversation?.Id.ToString("D"),
             EffectiveTranscriptTheme,
             isBusy));
-    }
-
-    private TranscriptContextUsage BuildContextUsage(IEnumerable<MessageRecord> messages)
-    {
-        var contextWindow = Math.Max(1, _desktopSettings.ModelContextWindow);
-        var autoCompactLimit = _desktopSettings.ModelAutoCompactTokenLimit < 0
-            ? 0
-            : Math.Min(_desktopSettings.ModelAutoCompactTokenLimit, contextWindow);
-        var usedTokens = ResolveContextUsageTokens(messages, out var isMeasured);
-
-        return new TranscriptContextUsage(usedTokens, contextWindow, autoCompactLimit, isMeasured);
-    }
-
-    private static long ResolveContextUsageTokens(IEnumerable<MessageRecord> messages, out bool isMeasured)
-    {
-        var promptMessages = messages
-            .Where(ShouldIncludeInContextUsage)
-            .OrderBy(message => message.CreatedAtUtc)
-            .ThenBy(message => message.Id)
-            .ToArray();
-
-        // Find the two most recent assistant messages with InputTokens for delta calibration.
-        var measuredIndexB = -1;
-        var measuredIndexA = -1;
-        for (var index = promptMessages.Length - 1; index >= 0; index--)
-        {
-            if (promptMessages[index].Role == MessageRole.Assistant && promptMessages[index].InputTokens is > 0)
-            {
-                if (measuredIndexB < 0)
-                {
-                    measuredIndexB = index;
-                }
-                else
-                {
-                    measuredIndexA = index;
-                    break;
-                }
-            }
-        }
-
-        if (measuredIndexB < 0)
-        {
-            isMeasured = false;
-            return EstimateContextUsageTokens(promptMessages);
-        }
-
-        isMeasured = true;
-        var measuredMessageB = promptMessages[measuredIndexB];
-
-        // Compute calibration ratio using delta between two measurement points.
-        var calibrationRatio = 1.0;
-
-        if (measuredIndexA >= 0)
-        {
-            // Two-point delta: overhead cancels out.
-            var inputTokensB = Math.Max(0L, measuredMessageB.InputTokens!.Value);
-            var inputTokensA = Math.Max(0L, promptMessages[measuredIndexA].InputTokens!.Value);
-
-            // Local estimate for messages in [measuredIndexA, measuredIndexB)
-            var localEstimateDelta = 0L;
-            for (var index = measuredIndexA; index < measuredIndexB; index++)
-            {
-                localEstimateDelta += EstimateContextUsageMessageTokens(promptMessages[index]);
-            }
-
-            var inputDelta = inputTokensB - inputTokensA;
-            if (localEstimateDelta > 0 && inputDelta > 0)
-            {
-                calibrationRatio = (double)inputDelta / localEstimateDelta;
-                calibrationRatio = Math.Clamp(calibrationRatio, 0.5, 3.0);
-            }
-        }
-        else
-        {
-            // Single measurement point: infer overhead, ratio stays 1.0.
-            // P1 fix: InputTokens covers messages BEFORE the assistant message.
-            var reportedInputTokens = Math.Max(0L, measuredMessageB.InputTokens!.Value);
-            var localEstimateBeforeB = 0L;
-            for (var index = 0; index < measuredIndexB; index++)
-            {
-                localEstimateBeforeB += EstimateContextUsageMessageTokens(promptMessages[index]);
-            }
-
-            if (localEstimateBeforeB <= 0)
-            {
-                isMeasured = false;
-                return EstimateContextUsageTokens(promptMessages);
-            }
-
-            var inferredOverhead = Math.Max(0L, reportedInputTokens - localEstimateBeforeB);
-            if (inferredOverhead > reportedInputTokens * 95 / 100)
-            {
-                isMeasured = false;
-                return EstimateContextUsageTokens(promptMessages);
-            }
-        }
-
-        // Apply calibration to ALL current messages.
-        var localEstimateForAllMessages = 0L;
-        for (var index = 0; index < promptMessages.Length; index++)
-        {
-            localEstimateForAllMessages += EstimateContextUsageMessageTokens(promptMessages[index]);
-        }
-
-        var total = (long)Math.Ceiling(localEstimateForAllMessages * calibrationRatio);
-
-        // Adjust for real output tokens on the measured message if available.
-        if (measuredMessageB.OutputTokens is > 0)
-        {
-            var estimatedOutput = EstimateContextUsageMessageTokens(measuredMessageB);
-            var outputDelta = measuredMessageB.OutputTokens.Value - (long)(estimatedOutput * calibrationRatio);
-            if (outputDelta > 0)
-            {
-                total += outputDelta;
-            }
-        }
-
-        return Math.Max(0, total);
-    }
-
-    private static long EstimateContextUsageTokens(IEnumerable<MessageRecord> messages)
-    {
-        var total = 0L;
-        var seenMessageIds = new HashSet<Guid>();
-        foreach (var message in messages)
-        {
-            if (!seenMessageIds.Add(message.Id) || !ShouldIncludeInContextUsage(message))
-            {
-                continue;
-            }
-
-            total += EstimateContextUsageMessageTokens(message);
-        }
-
-        return Math.Max(0L, total);
-    }
-
-    private static long EstimateContextUsageMessageTokens(MessageRecord message)
-    {
-        var content = message.Role == MessageRole.Assistant
-            ? AssistantMessageSegmenter.Split(message.MarkdownContent).ContentMarkdown
-            : message.MarkdownContent;
-        var attachmentTokens = (message.Attachments?.Count ?? 0) * ContextUsageImageMetadataTokens;
-        var speakerTokens = EstimateContextUsageTextTokens(message.AgentName) + EstimateContextUsageTextTokens(message.AgentRole);
-
-        return ContextUsageMessageOverheadTokens + EstimateContextUsageTextTokens(content) + attachmentTokens + speakerTokens;
-    }
-
-    private static long EstimateContextUsageTextTokens(string? text)
-    {
-        if (string.IsNullOrEmpty(text))
-        {
-            return 0L;
-        }
-
-        return Math.Max(1L, (long)Math.Ceiling(text.Length / 4d));
-    }
-
-    private static bool ShouldIncludeInContextUsage(MessageRecord message)
-    {
-        if (message.Status == MessageStatus.Failed)
-        {
-            return false;
-        }
-
-        if (message.Role == MessageRole.Assistant)
-        {
-            var segments = AssistantMessageSegmenter.Split(message.MarkdownContent);
-            return !string.IsNullOrWhiteSpace(segments.ContentMarkdown);
-        }
-
-        return true;
     }
 
     private TranscriptConversationItem[] BuildConversationItems()
@@ -2593,9 +1287,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             conversation.Title,
             conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
             SelectedConversation?.Id == conversation.Id,
-            ResolveConversationBadge(conversation),
+            null,
             ResolveConversationAgentName(conversation),
-            conversation.Mode == ConversationMode.Programming ? conversation.AgentId : null,
+            conversation.AgentId,
             ResolveConversationAgentName(conversation));
 
     private void PublishAgentActivities()
@@ -2758,45 +1452,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             BuildImageAttachments(message));
     }
 
-    private static string ThemePreferenceToId(AppThemePreference preference)
-        => preference.ToString().ToLowerInvariant();
-
-    private static ShellSelectOption[] BuildConversationModeOptions()
-    {
-        return
-        [
-            new("programming", "编程", "面向工作区分析、问答与编码协作"),
-            new("channel", "频道", "查看并接收来自外部频道的会话消息")
-        ];
-    }
-
-    private string? ResolveConversationBadge(ConversationRecord conversation)
-        => string.IsNullOrWhiteSpace(conversation.ChannelKind)
-            ? null
-            : _channelManager.GetChannelName(conversation.ChannelKind);
-
-    private static AppThemePreference ParseThemePreference(string? themeId)
-        => themeId?.Trim().ToLowerInvariant() switch
-        {
-            "light" => AppThemePreference.Light,
-            "dark" => AppThemePreference.Dark,
-            _ => AppThemePreference.System
-        };
-
-    private static string ToolPermissionModeToId(ToolPermissionMode mode)
-        => mode switch
-        {
-            ToolPermissionMode.FullAccess => "fullAccess",
-            _ => "requireApproval"
-        };
-
-    private static ToolPermissionMode ParseToolPermissionMode(string? permissionModeId)
-        => permissionModeId?.Trim().ToLowerInvariant() switch
-        {
-            "fullaccess" => ToolPermissionMode.FullAccess,
-            _ => ToolPermissionMode.RequireApproval
-        };
-
     private static string CreateConversationTitle(string text, IReadOnlyList<MessageAttachmentRecord>? attachments = null)
     {
         var normalized = text.ReplaceLineEndings(" ").Trim();
@@ -2812,46 +1467,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private static bool IsMentionBoundary(char value)
         => char.IsWhiteSpace(value) || char.IsPunctuation(value) || char.IsSymbol(value);
-
-    private static string NormalizeEndpoint(string endpoint)
-    {
-        var normalized = endpoint.Trim();
-        if (!normalized.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = "https://" + normalized;
-        }
-
-        return normalized.TrimEnd('/');
-    }
-
-    private static string BuildModelsEndpoint(string endpoint)
-        => NormalizeEndpoint(endpoint) + "/models";
-
-    private static double NormalizeSamplingParameter(double value, double maxValue)
-    {
-        if (double.IsNaN(value) || double.IsInfinity(value))
-        {
-            return 0.7;
-        }
-
-        return Math.Clamp(Math.Round(value, 2), 0, maxValue);
-    }
-
-    private static string NormalizeWorkspacePath(string folderPath)
-        => Path.TrimEndingDirectorySeparator(Path.GetFullPath(folderPath.Trim()));
-
-    private static string ResolveWorkspaceName(string? workspaceName, string normalizedPath)
-    {
-        var explicitName = workspaceName?.Trim();
-        if (!string.IsNullOrWhiteSpace(explicitName))
-        {
-            return explicitName;
-        }
-
-        var fallbackName = Path.GetFileName(normalizedPath);
-        return string.IsNullOrWhiteSpace(fallbackName) ? normalizedPath : fallbackName;
-    }
 
     private static void ReplaceCollection<T>(ObservableCollection<T> target, IEnumerable<T> source)
     {

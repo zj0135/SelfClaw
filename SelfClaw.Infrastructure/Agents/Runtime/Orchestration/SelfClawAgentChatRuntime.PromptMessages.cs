@@ -119,33 +119,4 @@ public sealed partial class SelfClawAgentChatRuntime
             _ => ChatRole.Assistant
         };
 
-
-    private static IReadOnlyList<ChatMessage> BuildExecutionPlanMessages(IReadOnlyList<MessageRecord> messages)
-        => BuildPromptMessages(messages, includeAssistantSpeakerPrefix: false);
-
-
-    private static IReadOnlyList<ChatMessage> BuildExecutionStepMessages(
-        IReadOnlyList<MessageRecord> messages,
-        ExecutionPlan executionPlan,
-        ExecutionPlanStep currentStep,
-        IReadOnlyList<CompletedExecutionPlanStep> completedSteps,
-        bool isFinalStep)
-    {
-        var promptMessages = new List<ChatMessage>(BuildPromptMessages(messages, includeAssistantSpeakerPrefix: false))
-        {
-            new(ChatRole.System, BuildExecutionPlanTranscript(executionPlan)),
-            new(ChatRole.System, $"Current step id: {currentStep.Id}\nCurrent step title: {currentStep.Title}\nIs final step: {isFinalStep}")
-        };
-
-        if (completedSteps.Count == 0)
-        {
-            promptMessages.Add(new ChatMessage(ChatRole.System, "No prior plan steps have been completed yet."));
-            return promptMessages;
-        }
-
-        promptMessages.Add(new ChatMessage(ChatRole.System, BuildCompletedExecutionStepTranscript(completedSteps)));
-        return promptMessages;
-    }
-
-
 }

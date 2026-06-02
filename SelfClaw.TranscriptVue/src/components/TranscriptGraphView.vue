@@ -15,10 +15,6 @@ const props = defineProps({
 		type: String,
 		default: null,
 	},
-	selectedConversationModeId: {
-		type: String,
-		default: 'programming',
-	},
 	selectedProfileModel: {
 		type: String,
 		default: '',
@@ -66,7 +62,6 @@ const snapshotInput = computed(() => ({
 	items: props.items,
 	conversations: props.conversations,
 	selectedConversationId: props.selectedConversationId,
-	selectedConversationModeId: props.selectedConversationModeId,
 	selectedProfileModel: props.selectedProfileModel,
 	agentActivities: props.agentActivities,
 }));

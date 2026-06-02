@@ -10,18 +10,6 @@ namespace SelfClaw.Infrastructure.Agents.Runtime.Orchestration;
 
 public sealed partial class SelfClawAgentChatRuntime
 {
-    private sealed record ExecutionPlanBlueprint(
-        string? Summary,
-        IReadOnlyList<ExecutionPlanBlueprintStep> Steps);
-
-    private sealed record ExecutionPlanBlueprintStep(
-        string? Id,
-        string Title);
-
-    private sealed record CompletedExecutionPlanStep(
-        ExecutionPlanStep Step,
-        string Markdown);
-
     private sealed class AgentToolScope : IAsyncDisposable
     {
         private readonly IAsyncDisposable? _ownedResources;

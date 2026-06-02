@@ -8,18 +8,15 @@ namespace SelfClaw.Desktop.Services;
 public sealed class DesktopAgentStore
 {
     public const string BuildAgentId = "build";
-    public const string PlanAgentId = "plan";
 
     private static readonly UTF8Encoding Utf8WithoutBom = new(false);
 
     private readonly string _agentsDirectory;
-    private readonly DesktopSettingsStore _desktopSettingsStore;
     private readonly object _syncRoot = new();
 
-    public DesktopAgentStore(StoragePaths storagePaths, DesktopSettingsStore desktopSettingsStore)
+    public DesktopAgentStore(StoragePaths storagePaths)
     {
         _agentsDirectory = Path.Combine(storagePaths.AppDataDirectory, "agents");
-        _desktopSettingsStore = desktopSettingsStore;
     }
 
     public string AgentsDirectory => _agentsDirectory;
@@ -31,13 +28,12 @@ public sealed class DesktopAgentStore
             EnsureSystemAgents();
 
             var installedSkillIds = DiscoverInstalledSkillIds();
-            var configuredMcpServerIds = DiscoverConfiguredMcpServerIds();
             var agents = new List<DesktopAgentDefinition>();
             foreach (var filePath in Directory.EnumerateFiles(_agentsDirectory, "*.md", SearchOption.TopDirectoryOnly))
             {
                 try
                 {
-                    agents.Add(LoadAgentFromFile(filePath, installedSkillIds, configuredMcpServerIds));
+                    agents.Add(LoadAgentFromFile(filePath, installedSkillIds));
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
                 {
@@ -114,9 +110,6 @@ public sealed class DesktopAgentStore
                 throw new InvalidOperationException($"Agent '{normalizedAgentId}' already exists.");
             }
 
-            var mode = result.Mode == AgentExecutionMode.Plan
-                ? AgentExecutionMode.Plan
-                : AgentExecutionMode.Direct;
             var toolPolicy = AgentRuntimeDefinition.SystemToolPolicy;
             var skills = NormalizeStringList(result.Skills, NormalizeSkillId);
             var disabledSkills = NormalizeSelectedSubset(result.DisabledSkills, skills, NormalizeSkillId);
@@ -126,7 +119,7 @@ public sealed class DesktopAgentStore
                 normalizedAgentId,
                 string.IsNullOrWhiteSpace(result.Name) ? normalizedAgentId : result.Name.Trim(),
                 result.Description?.Trim() ?? string.Empty,
-                mode,
+                AgentExecutionMode.Direct,
                 toolPolicy,
                 skills,
                 disabledSkills,
@@ -178,8 +171,7 @@ public sealed class DesktopAgentStore
 
     private DesktopAgentDefinition LoadAgentFromFile(
         string filePath,
-        ISet<string> installedSkillIds,
-        ISet<string> configuredMcpServerIds)
+        ISet<string> installedSkillIds)
     {
         var agentId = NormalizeAgentId(Path.GetFileNameWithoutExtension(filePath));
         if (!IsValidAgentId(agentId))
@@ -221,14 +213,6 @@ public sealed class DesktopAgentStore
             }
         }
 
-        foreach (var serverId in parseResult.McpServers)
-        {
-            if (!configuredMcpServerIds.Contains(serverId))
-            {
-                warnings.Add($"MCP server '{serverId}' is not configured.");
-            }
-        }
-
         return new DesktopAgentDefinition(
             agentId,
             parseResult.Name,
@@ -267,23 +251,6 @@ public sealed class DesktopAgentStore
             true,
             []));
 
-        EnsureSystemAgentFile(new DesktopAgentDefinition(
-            PlanAgentId,
-            PlanAgentId,
-            "计划代理，先生成实施方案再按步骤执行",
-            AgentExecutionMode.Plan,
-            AgentRuntimeDefinition.SystemToolPolicy,
-            [],
-            [],
-            [],
-            [],
-            """
-            You are the default plan agent for SelfClaw.
-            Break work into concrete execution steps, then carry them through one by one until the task is complete.
-            """,
-            GetAgentFilePath(PlanAgentId),
-            true,
-            []));
     }
 
     private void EnsureSystemAgentFile(DesktopAgentDefinition definition)
@@ -538,7 +505,8 @@ public sealed class DesktopAgentStore
         var normalized = Unquote(value).Trim();
         if (string.Equals(normalized, "plan", StringComparison.OrdinalIgnoreCase))
         {
-            return AgentExecutionMode.Plan;
+            warnings.Add("Mode 'plan' is no longer supported. Using 'direct'.");
+            return AgentExecutionMode.Direct;
         }
 
         if (!string.IsNullOrWhiteSpace(normalized) &&
@@ -551,7 +519,7 @@ public sealed class DesktopAgentStore
     }
 
     private static string ToModeId(AgentExecutionMode mode)
-        => mode == AgentExecutionMode.Plan ? "plan" : "direct";
+        => "direct";
 
     private static string NormalizeInstructions(string? instructions)
         => string.IsNullOrWhiteSpace(instructions)
@@ -623,25 +591,16 @@ public sealed class DesktopAgentStore
         return results;
     }
 
-    private HashSet<string> DiscoverConfiguredMcpServerIds()
-        => (_desktopSettingsStore.Load().McpServers ?? new Dictionary<string, DesktopMcpServerConfiguration>())
-            .Keys
-            .Select(NormalizeMcpServerId)
-            .Where(item => !string.IsNullOrWhiteSpace(item))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
     private string GetAgentFilePath(string agentId)
         => Path.Combine(_agentsDirectory, $"{agentId}.md");
 
     private static bool IsBuiltInAgentId(string agentId)
-        => string.Equals(agentId, BuildAgentId, StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(agentId, PlanAgentId, StringComparison.OrdinalIgnoreCase);
+        => string.Equals(agentId, BuildAgentId, StringComparison.OrdinalIgnoreCase);
 
     private static int GetAgentSortOrder(string agentId)
         => agentId.ToLowerInvariant() switch
         {
             BuildAgentId => 0,
-            PlanAgentId => 1,
             _ => 2
         };
 
