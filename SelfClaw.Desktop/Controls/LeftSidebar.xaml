@@ -230,6 +230,96 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style x:Key="SidebarAnimatedGroupContentBaseStyle"
+               TargetType="Border">
+            <Setter Property="ClipToBounds"
+                    Value="True"/>
+            <Setter Property="Opacity"
+                    Value="0"/>
+            <Setter Property="MaxHeight"
+                    Value="0"/>
+        </Style>
+
+        <Style x:Key="SidebarProjectsGroupContentStyle"
+               TargetType="Border"
+               BasedOn="{StaticResource SidebarAnimatedGroupContentBaseStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSidebarProjectsExpanded}"
+                             Value="True">
+                    <Setter Property="Opacity"
+                            Value="1"/>
+                    <Setter Property="MaxHeight"
+                            Value="2000"/>
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="MaxHeight"
+                                                 To="2000"
+                                                 Duration="0:0:0.16"
+                                                 DecelerationRatio="0.85"/>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 To="1"
+                                                 Duration="0:0:0.12"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="MaxHeight"
+                                                 To="0"
+                                                 Duration="0:0:0.14"
+                                                 DecelerationRatio="0.85"/>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 To="0"
+                                                 Duration="0:0:0.10"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.ExitActions>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="SidebarStandaloneGroupContentStyle"
+               TargetType="Border"
+               BasedOn="{StaticResource SidebarAnimatedGroupContentBaseStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSidebarStandaloneConversationsExpanded}"
+                             Value="True">
+                    <Setter Property="Opacity"
+                            Value="1"/>
+                    <Setter Property="MaxHeight"
+                            Value="2000"/>
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="MaxHeight"
+                                                 To="2000"
+                                                 Duration="0:0:0.16"
+                                                 DecelerationRatio="0.85"/>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 To="1"
+                                                 Duration="0:0:0.12"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="MaxHeight"
+                                                 To="0"
+                                                 Duration="0:0:0.14"
+                                                 DecelerationRatio="0.85"/>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 To="0"
+                                                 Duration="0:0:0.10"/>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.ExitActions>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <Border Background="{StaticResource SidebarBackgroundBrush}">
@@ -459,69 +549,70 @@
                             </Button>
                         </Grid>
 
-                        <ItemsControl Grid.Row="1"
-                                      ItemsSource="{Binding SidebarProjects}"
-                                      Visibility="{Binding IsSidebarProjectsExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Margin="0,2,0,2">
-                                        <Button Style="{StaticResource SidebarNodeButtonStyle}"
-                                                Tag="{Binding Id}"
-                                                ToolTip="{Binding RootPath}"
-                                                Click="OnProjectButtonClick">
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="28"/>
-                                                    <ColumnDefinition Width="*"/>
-                                                </Grid.ColumnDefinitions>
+                        <Border Grid.Row="1"
+                                Style="{StaticResource SidebarProjectsGroupContentStyle}">
+                            <ItemsControl ItemsSource="{Binding SidebarProjects}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,2,0,2">
+                                            <Button Style="{StaticResource SidebarNodeButtonStyle}"
+                                                    Tag="{Binding Id}"
+                                                    ToolTip="{Binding RootPath}"
+                                                    Click="OnProjectButtonClick">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="28"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
 
-                                                <Path Width="15"
-                                                      Height="13"
-                                                      HorizontalAlignment="Center"
-                                                      VerticalAlignment="Center"
-                                                      Style="{StaticResource SidebarSubtleIconPathStyle}"
-                                                      Data="M1.7,5.1 L5.1,5.1 L6.3,6.8 L14,6.8 L14,12.4 L1.7,12.4 Z M1.7,5.1 L1.7,3.6 L5.8,3.6 L7.1,5.1 L14,5.1"/>
-                                                <TextBlock Grid.Column="1"
-                                                           Style="{StaticResource NavTextStyle}"
-                                                           FontSize="13"
-                                                           Text="{Binding Name}"
-                                                           TextTrimming="CharacterEllipsis"/>
-                                            </Grid>
-                                        </Button>
+                                                    <Path Width="15"
+                                                          Height="13"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"
+                                                          Style="{StaticResource SidebarSubtleIconPathStyle}"
+                                                          Data="M1.7,5.1 L5.1,5.1 L6.3,6.8 L14,6.8 L14,12.4 L1.7,12.4 Z M1.7,5.1 L1.7,3.6 L5.8,3.6 L7.1,5.1 L14,5.1"/>
+                                                    <TextBlock Grid.Column="1"
+                                                               Style="{StaticResource NavTextStyle}"
+                                                               FontSize="13"
+                                                               Text="{Binding Name}"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                </Grid>
+                                            </Button>
 
-                                        <ItemsControl Margin="0,0,0,0"
-                                                      ItemsSource="{Binding Conversations}"
-                                                      Visibility="{Binding IsExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Button Style="{StaticResource SidebarSelectableNodeButtonStyle}"
-                                                            Height="32"
-                                                            Tag="{Binding Id}"
-                                                            Click="OnConversationButtonClick">
-                                                        <Grid>
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="28"/>
-                                                                <ColumnDefinition Width="*"/>
-                                                                <ColumnDefinition Width="Auto"/>
-                                                            </Grid.ColumnDefinitions>
-                                                            <TextBlock Grid.Column="1"
-                                                                       Style="{StaticResource NavTextStyle}"
-                                                                       FontSize="12"
-                                                                       Text="{Binding Title}"
-                                                                       TextTrimming="CharacterEllipsis"/>
-                                                            <TextBlock Grid.Column="2"
-                                                                       Margin="8,0,0,0"
-                                                                       Style="{StaticResource MutedLabelStyle}"
-                                                                       Text="{Binding Timestamp}"/>
-                                                        </Grid>
-                                                    </Button>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                                            <ItemsControl Margin="0,0,0,0"
+                                                          ItemsSource="{Binding Conversations}"
+                                                          Visibility="{Binding IsExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Button Style="{StaticResource SidebarSelectableNodeButtonStyle}"
+                                                                Height="32"
+                                                                Tag="{Binding Id}"
+                                                                Click="OnConversationButtonClick">
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="28"/>
+                                                                    <ColumnDefinition Width="*"/>
+                                                                    <ColumnDefinition Width="Auto"/>
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Grid.Column="1"
+                                                                           Style="{StaticResource NavTextStyle}"
+                                                                           FontSize="12"
+                                                                           Text="{Binding Title}"
+                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Grid.Column="2"
+                                                                           Margin="8,0,0,0"
+                                                                           Style="{StaticResource MutedLabelStyle}"
+                                                                           Text="{Binding Timestamp}"/>
+                                                            </Grid>
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
                     </Grid>
 
                     <Border Grid.Row="3"
@@ -639,35 +730,36 @@
                             </TextBlock.Style>
                         </TextBlock>
 
-                        <ItemsControl Grid.Row="2"
-                                      Margin="0,7,0,0"
-                                      ItemsSource="{Binding SidebarStandaloneConversations}"
-                                      Visibility="{Binding IsSidebarStandaloneConversationsExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Button Style="{StaticResource SidebarSelectableNodeButtonStyle}"
-                                            Tag="{Binding Id}"
-                                            Click="OnConversationButtonClick">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="28"/>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="1"
-                                                       Style="{StaticResource NavTextStyle}"
-                                                       FontSize="13"
-                                                       Text="{Binding Title}"
-                                                       TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Column="2"
-                                                       Margin="8,0,0,0"
-                                                       Style="{StaticResource MutedLabelStyle}"
-                                                       Text="{Binding Timestamp}"/>
-                                        </Grid>
-                                    </Button>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                        <Border Grid.Row="2"
+                                Margin="0,7,0,0"
+                                Style="{StaticResource SidebarStandaloneGroupContentStyle}">
+                            <ItemsControl ItemsSource="{Binding SidebarStandaloneConversations}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource SidebarSelectableNodeButtonStyle}"
+                                                Tag="{Binding Id}"
+                                                Click="OnConversationButtonClick">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="28"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="1"
+                                                           Style="{StaticResource NavTextStyle}"
+                                                           FontSize="13"
+                                                           Text="{Binding Title}"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Grid.Column="2"
+                                                           Margin="8,0,0,0"
+                                                           Style="{StaticResource MutedLabelStyle}"
+                                                           Text="{Binding Timestamp}"/>
+                                            </Grid>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
                     </Grid>
                 </StackPanel>
             </ScrollViewer>
