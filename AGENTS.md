@@ -7,21 +7,31 @@ SelfClaw is a Windows-first personal AI assistant desktop app built with WPF and
 Main projects:
 
 - `SelfClaw.Core`: domain models, interfaces, runtime request/event contracts
-- `SelfClaw.Infrastructure`: agent runtime, SQLite persistence, tools, security, channel integrations
-- `SelfClaw.Desktop`: WPF desktop app, ViewModels, notifications, tray, channel management
+- `SelfClaw.Infrastructure`: agent runtime, SQLite persistence, workspace tools, security, Feishu implementation
+- `SelfClaw.Desktop`: WPF desktop app, ViewModels, notifications, tray, retained channel adapters
 - `SelfClaw.Tests`: xUnit test project, mostly mirrors Infrastructure layout
 - `SelfClaw.TranscriptVue`: Vue + Vite transcript shell, build output goes to Desktop assets
+
+## Current Product Shape
+
+- The active desktop workflow is the main programming agent only.
+- `AgentExecutionMode` currently has `Direct` only.
+- Plan mode has been removed from active runtime, core events, desktop transcript models, and TranscriptVue.
+- The old desktop system settings model/store has been removed. The current WPF settings panel still exists and should be treated as the WPF UI surface for future settings work.
+- Feishu/channel implementation is retained, but channel manager/adapters are not registered by default in `App.xaml.cs`.
+- `ConversationMode.Channel` remains for retained channel code and persistence compatibility; the desktop VM filters active sidebar/history behavior to programming conversations.
 
 ## Core Capabilities
 
 - Multi-provider profiles (OpenAI-compatible endpoint/model/sampling settings)
-- Conversation modes: `Programming`, `Channel`
-- `Programming` mode supports Plan Mode
-- `Channel` mode supports external message ingestion (currently Feishu)
-- Workspace tools support file read/write, full-text search, PowerShell execution with approval
-- Transcript supports thinking segments and tool anchors
-- Message image attachments persisted in `message_attachments`
+- Direct programming conversations using the selected model profile and selected workspace
+- Agent definitions loaded from markdown files under the app data `agents` directory
+- Workspace tools support file read/write, full-text search, and PowerShell execution with approval
+- Transcript supports thinking segments, tool anchors, tool activity, image attachments, and conversation navigation
+- Message image attachments are persisted in `message_attachments`
+- Conversation context summaries are persisted in `conversation_context_summaries`
 - API keys are encrypted with Windows DPAPI
+- Feishu Open Platform implementation is retained for later channel wiring
 
 ## Tech Stack
 
@@ -34,7 +44,7 @@ Main projects:
 | Render | WebView2, Markdig, TranscriptVue (Vue 3 + Vite) |
 | Logging | Serilog |
 | Security | Windows DPAPI |
-| Channel | Feishu Open Platform |
+| Retained channel implementation | Feishu Open Platform |
 
 ## Project Structure (Current)
 
@@ -73,11 +83,16 @@ SelfClaw/
 |       |-- Transcript/
 |       `-- Workspace/
 |-- SelfClaw.Desktop/
+|   |-- Controls/
 |   |-- Services/
+|   |   |-- Agents/
 |   |   |-- Channels/
+|   |   |-- Editors/
 |   |   |-- Settings/
+|   |   |-- Sidebar/
 |   |   |-- Tools/
-|   |   `-- Transcript/
+|   |   |-- Transcript/
+|   |   `-- Windowing/
 |   |-- ViewModels/
 |   `-- Assets/
 |       `-- TranscriptVue/
@@ -171,28 +186,28 @@ Infrastructure registration in `ServiceCollectionExtensions.AddSelfClawInfrastru
 - `IProfileRepository`, `IConversationRepository`
 - `ISecretProtector`
 - `IWorkspaceToolService`
+- `IAgentExecutionService`
 - `IAgentContextProviderFactory`
+- `IWorkspaceMemoryInitializationService`
 - `IAgentMcpToolProvider`
 - `IAgentChatRuntime`
 - `IConversationContextCompactionService`
 - `MarkdownHtmlRenderer`
 
-Desktop registration in `App.xaml.cs` includes:
+Desktop registration in `App.xaml.cs` currently includes:
 
-- `DesktopSettingsStore`
-- `DesktopChannelManager`
+- `DesktopAgentStore`
 - `DesktopToolApprovalHandler`
 - `DesktopNotificationService`
+- `DesktopNotificationActivationService`
 - `SystemTrayService`
 - `MainWindowViewModel`, `MainWindow`
 
+Desktop no longer registers `DesktopSettingsStore`, `DesktopChannelManager`, Feishu adapters, or slash command handlers.
+
 ### Agent runtime
 
-`SelfClawAgentChatRuntime` orchestrates:
-
-- `Programming`
-- `Programming + EnablePlanMode`
-- `Channel`
+`SelfClawAgentChatRuntime` now always produces a direct programming turn through `ProduceProgrammingTurnAsync`.
 
 Supporting components:
 
@@ -205,7 +220,7 @@ Supporting components:
 
 Runtime folder structure:
 
-- `Orchestration/`: `SelfClawAgentChatRuntime` stream orchestration and plan/direct turn flow
+- `Orchestration/`: `SelfClawAgentChatRuntime` stream orchestration, direct turn execution, prompt assembly, instructions, and private models
 - `Execution/`: model client execution contracts, request/response records, and OpenAI-compatible chat execution
 - `Context/`: file-system backed agent skill/context provider discovery
 - `Mcp/`: MCP server connection, tool discovery, tool naming, and owned resource lifetime
@@ -215,28 +230,64 @@ Runtime folder structure:
 `Orchestration/SelfClawAgentChatRuntime` partial split:
 
 - `SelfClawAgentChatRuntime.cs`: constants, DI wiring, stream entrypoint, tool/context factory
-- `SelfClawAgentChatRuntime.Execution.cs`: programming turn, plan drafting, and plan step execution
-- `SelfClawAgentChatRuntime.PromptMessages.cs`: prompt-message assembly and message mapping
-- `SelfClawAgentChatRuntime.Instructions.cs`: instruction builder methods
-- `SelfClawAgentChatRuntime.Transcripts.cs`: plan transcript and plan-text sanitization helpers
-- `SelfClawAgentChatRuntime.Parsing.cs`: JSON extraction/parsing, fallbacks, slug/title helpers
-- `SelfClawAgentChatRuntime.Models.cs`: private runtime records and empty context-provider fallback
+- `SelfClawAgentChatRuntime.Execution.cs`: direct programming turn execution
+- `SelfClawAgentChatRuntime.PromptMessages.cs`: prompt message assembly and role/message mapping
+- `SelfClawAgentChatRuntime.Instructions.cs`: programming instruction builder and capability hints
+- `SelfClawAgentChatRuntime.Models.cs`: private runtime records and empty provider fallbacks
 
-### Plan Mode
+### Desktop ViewModel
 
-Core runtime includes:
+`MainWindowViewModel` owns the active desktop programming workflow:
 
-- `ExecutionPlan`
-- `ExecutionPlanStep`
-- `ExecutionPlanStepStatus`
-- `ExecutionPlanDraftingStartedEvent`
-- `ExecutionPlanPreparedEvent`
-- `ExecutionPlanStepStatusChangedEvent`
+- profile, workspace, agent, conversation, message, tool-run, and runtime state
+- WebView transcript state publishing through `TranscriptRenderState`
+- selected agent resolution from `DesktopAgentStore`
+- image attachment persistence under app data
+- tool approval notifications
+- context compaction before and after successful turns
 
-Desktop transcript models include:
+`MainWindowViewModel.Agents.cs` resolves runtime agents as `AgentExecutionMode.Direct`. Agent skills from agent markdown are passed through; configured MCP servers are currently empty until a new settings surface is implemented.
 
-- `TranscriptPlanPanel`
-- `TranscriptPlanStep`
+`MainWindowViewModel.Notifications.cs` handles Windows toast activation for programming conversations only.
+
+`MainWindowViewModel.RuntimeState.cs` tracks running conversations, active messages, status text, and cancellation.
+
+### Agent definitions
+
+`DesktopAgentStore` stores agent markdown files under the app data `agents` directory.
+
+The built-in agent id is:
+
+- `build`
+
+Agent markdown still supports fields for skills and MCP server ids, but MCP configuration is not currently wired from desktop settings. Missing skills produce warnings; MCP ids are persisted in agent files but are not converted to configured runtime MCP servers by the desktop VM yet.
+
+### WPF shell and settings
+
+The desktop app uses a WPF shell around a WebView2 transcript host:
+
+- `MainWindow.xaml` owns the window chrome, toolbar, transcript WebView, right panel, terminal drawer, and WPF settings overlay host.
+- `LeftSidebar.xaml` owns the current sidebar including the Settings entry.
+- `SystemSettingsPanel.xaml` is the current WPF settings panel surface and should remain in place while the new settings implementation is designed.
+
+The old non-WPF `DesktopSettings` / `DesktopSettingsStore` model was removed. `SystemThemeReader` remains for following the Windows app theme.
+
+### Retained channel and Feishu implementation
+
+Feishu implementation remains under:
+
+- `SelfClaw.Infrastructure/Channels/Feishu`
+- `SelfClaw.Desktop/Services/Channels/FeishuDesktopChannelAdapter.cs`
+
+Desktop channel orchestration code also remains:
+
+- `DesktopChannelManager`
+- `DesktopChannelSettingsStore`
+- `DesktopChannelSettings`
+- `DesktopChannelConfiguration`
+- `IDesktopChannelAdapter`, `IDesktopChannelConnection`
+
+These are retained implementation pieces and are not active in default desktop DI. `DesktopChannelSettingsStore` uses `desktop-channel-settings.json` if channel orchestration is wired again later.
 
 ### Workspace tools and permissions
 
@@ -259,7 +310,7 @@ Permission model:
 
 `SqliteDatabase` manages schema initialization/migration:
 
-- `CurrentSchemaVersion = 14`
+- `CurrentSchemaVersion = 15`
 - `PRAGMA foreign_keys = ON`
 - backward-compatible `EnsureColumnExists`
 
@@ -270,6 +321,7 @@ Main tables:
 - `conversations`
 - `messages`
 - `message_attachments`
+- `conversation_context_summaries`
 - `tool_runs`
 
 ### Transcript and markdown
@@ -282,33 +334,35 @@ Main tables:
 - `AssistantMessageSegments`
 - `MarkdownHtmlRenderer`
 
-### Feishu channel structure
+Desktop transcript service models include:
 
-`SelfClaw.Infrastructure.Channels.Feishu` is split by responsibility:
-
-- `Models/`: channel models and records
-- `Enums/`: file/urgent/resource enums
-- `Contracts/`: streaming reply contract
-- `Helpers/`: value conversion helpers
-- `Protocol/`: long-connection frame/header/protobuf/exception types
-
-Desktop channel orchestration remains in `DesktopChannelManager` + `FeishuDesktopChannelAdapter`.
+- `TranscriptRenderState`
+- `TranscriptRenderItem`
+- `TranscriptRenderSegment`
+- `TranscriptConversationItem`
+- `TranscriptImageAttachment`
+- `ToolRunAnchor`
+- `ToolRunPlacement`
+- `TranscriptToolRunPresenter`
+- `AgentActivityNode`
 
 ## Key File Index (Current)
 
 | File | Purpose |
 | --- | --- |
 | `SelfClaw.Desktop/App.xaml.cs` | App entry, logging, DI setup |
-| `SelfClaw.Desktop/ViewModels/MainWindowViewModel*.cs` | Main conversation/channel workflows |
-| `SelfClaw.Desktop/Services/Settings/DesktopSettingsStore.cs` | Desktop settings load/save/normalize |
-| `SelfClaw.Desktop/Services/Settings/DesktopSettings.cs` | Desktop settings model |
+| `SelfClaw.Desktop/MainWindow.xaml` | WPF shell layout around TranscriptVue WebView2 |
+| `SelfClaw.Desktop/Controls/SystemSettingsPanel.xaml` | Current WPF settings panel surface |
+| `SelfClaw.Desktop/ViewModels/MainWindowViewModel*.cs` | Main programming conversation workflow |
+| `SelfClaw.Desktop/Services/Agents/DesktopAgentStore.cs` | Agent markdown load/save and built-in agent provisioning |
+| `SelfClaw.Desktop/Services/Channels/DesktopChannelSettingsStore.cs` | Retained channel configuration persistence |
+| `SelfClaw.Desktop/Services/Channels/DesktopChannelManager.cs` | Retained desktop channel orchestration |
+| `SelfClaw.Desktop/Services/Channels/FeishuDesktopChannelAdapter.cs` | Retained Feishu desktop adapter |
 | `SelfClaw.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs` | Infrastructure service registration |
 | `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.cs` | Runtime orchestration core |
-| `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.Execution.cs` | Programming/plan execution flow |
+| `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.Execution.cs` | Direct programming turn execution |
 | `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.PromptMessages.cs` | Prompt message assembly and role/message mapping |
 | `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.Instructions.cs` | Instruction builder methods |
-| `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.Transcripts.cs` | Discussion and execution transcript builders |
-| `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.Parsing.cs` | Runtime JSON parsing and fallback builders |
 | `SelfClaw.Infrastructure/Agents/Runtime/Execution/ChatClientAgentExecutionService.cs` | Model execution layer |
 | `SelfClaw.Infrastructure/Agents/Runtime/Context/FileSystemAgentContextProviderFactory.cs` | Agent skill/context provider discovery |
 | `SelfClaw.Infrastructure/Agents/Runtime/Mcp/McpServerToolProvider.cs` | MCP server tool discovery and wrapping |
@@ -321,6 +375,7 @@ Desktop channel orchestration remains in `DesktopChannelManager` + `FeishuDeskto
 | `SelfClaw.Infrastructure/Tools/Workspace/WorkspaceToolService.cs` | Workspace files and shell implementation |
 | `SelfClaw.Infrastructure/Data/Sqlite/SqliteDatabase.cs` | SQLite schema and migration |
 | `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteConversationRepository.cs` | Conversation/message/tool persistence |
+| `SelfClaw.Infrastructure/Channels/Feishu/FeishuBotService.cs` | Feishu high-level bot service |
 | `SelfClaw.Infrastructure/Channels/Feishu/Protocol/FeishuWsFrame.cs` | Feishu long-connection frame model |
 | `SelfClaw.Infrastructure/Channels/Feishu/Models/FeishuIncomingMessage.cs` | Feishu incoming message model |
 | `SelfClaw.TranscriptVue/src/*` | Transcript frontend shell |
@@ -331,4 +386,6 @@ Desktop channel orchestration remains in `DesktopChannelManager` + `FeishuDeskto
 2. Workspace tools are not read-only; they can write files and execute shell commands.
 3. Security boundaries depend on `WorkspaceToolService` path checks and `ToolPermissionMode`.
 4. Core folder grouping and namespaces are intentionally not 1:1.
-5. `SelfClaw.Desktop.csproj` already suppresses `NU1510` via `NoWarn`.
+5. Plan mode files and old desktop settings files are intentionally removed.
+6. Feishu/channel code is retained but currently not active in default desktop startup.
+7. `SelfClaw.Desktop.csproj` already suppresses `NU1510` via `NoWarn`.
