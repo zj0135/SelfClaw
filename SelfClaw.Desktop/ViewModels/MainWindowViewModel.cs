@@ -60,11 +60,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly Dictionary<Guid, ConversationRuntimeState> _conversationRuntimeStates = [];
     private readonly Dictionary<Guid, TranscriptPlanPanel> _conversationPlanPanels = [];
     private readonly Dictionary<Guid, string> _conversationStatusTexts = [];
+    private readonly HashSet<Guid> _expandedSidebarWorkspaceRootIds = [];
     private IReadOnlyList<PromptImageAttachment> _pendingPromptImageAttachments = [];
     private bool _pendingReasoningEnabled;
     private bool _initialized;
     private bool _isApplyingThemeSelection;
     private int _selectionVersion;
+    private bool _isSidebarProjectsExpanded = true;
     private ConversationRecord? _selectedConversation;
     private ProviderProfile? _selectedProfile;
     private string? _selectedProfileModelOverride;
@@ -78,6 +80,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private ThemeMode _activeThemeMode = ThemeMode.System;
     private string _effectiveTranscriptTheme = "light";
     private bool _isPlanningModeEnabled;
+    private bool _isSidebarStandaloneConversationsExpanded = true;
     private TranscriptCommandFeedback? _commandFeedback;
     private CancellationTokenSource? _commandCancellationTokenSource;
     private bool _isCommandRunning;
@@ -148,6 +151,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<ConversationRecord> Conversations { get; } = [];
 
+    public ObservableCollection<SidebarProjectItem> SidebarProjects { get; } = [];
+
+    public ObservableCollection<SidebarConversationItem> SidebarStandaloneConversations { get; } = [];
+
     public ObservableCollection<ProviderProfile> Profiles { get; } = [];
 
     public ObservableCollection<WorkspaceRoot> WorkspaceRoots { get; } = [];
@@ -161,6 +168,30 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public IRelayCommand StopCommand { get; }
 
     public IAsyncRelayCommand NewConversationCommand { get; }
+
+    public int SidebarProjectCount => SidebarProjects.Count;
+
+    public bool IsSidebarProjectsExpanded
+    {
+        get => _isSidebarProjectsExpanded;
+        private set => SetProperty(ref _isSidebarProjectsExpanded, value);
+    }
+
+    public int SidebarStandaloneConversationCount => SidebarStandaloneConversations.Count;
+
+    public bool HasSidebarStandaloneConversations => SidebarStandaloneConversations.Count > 0;
+
+    public bool IsSidebarStandaloneConversationsExpanded
+    {
+        get => _isSidebarStandaloneConversationsExpanded;
+        private set
+        {
+            if (SetProperty(ref _isSidebarStandaloneConversationsExpanded, value))
+            {
+                RefreshSidebarHistory();
+            }
+        }
+    }
 
     public bool HasAgentActivityNodes => AgentActivityNodes.Count > 0;
 
@@ -481,6 +512,35 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public async Task CreateNewConversationFromUiAsync()
     {
         await CreateNewConversationAsync();
+    }
+
+    public async Task CreateStandaloneConversationFromUiAsync()
+    {
+        SelectedWorkspaceRoot = null;
+        PersistSelectedWorkspaceRoot();
+        ApplyConversationFilter();
+        await CreateNewConversationAsync();
+    }
+
+    public void ToggleSidebarProjects()
+    {
+        IsSidebarProjectsExpanded = !IsSidebarProjectsExpanded;
+    }
+
+    public void ToggleSidebarStandaloneConversations()
+    {
+        IsSidebarStandaloneConversationsExpanded = !IsSidebarStandaloneConversationsExpanded;
+    }
+
+    public Task ToggleSidebarWorkspaceRootAsync(Guid workspaceRootId)
+    {
+        if (!_expandedSidebarWorkspaceRootIds.Add(workspaceRootId))
+        {
+            _expandedSidebarWorkspaceRootIds.Remove(workspaceRootId);
+        }
+
+        RefreshSidebarHistory();
+        return SetSelectedWorkspaceRootAsync(workspaceRootId);
     }
 
     public void StopGeneration()
@@ -895,7 +955,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public Task SelectConversationAsync(Guid conversationId)
     {
-        var conversation = Conversations.FirstOrDefault(item => item.Id == conversationId);
+        var conversation = _allConversations.FirstOrDefault(item => item.Id == conversationId);
         if (conversation is null || SelectedConversation?.Id == conversation.Id)
         {
             return Task.CompletedTask;
@@ -2163,6 +2223,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var filtered = GetFilteredConversations().ToArray();
         ReplaceCollection(Conversations, filtered);
+        RefreshSidebarHistory();
 
         var targetConversation = filtered.FirstOrDefault(item => item.Id == preferredConversationId)
             ?? filtered.FirstOrDefault(item => item.Id == SelectedConversation?.Id)
@@ -2201,6 +2262,54 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ? conversation.WorkspaceRootId is null
             : conversation.WorkspaceRootId == SelectedWorkspaceRoot.Id;
     }
+
+    private void RefreshSidebarHistory()
+    {
+        var programmingConversations = _allConversations
+            .Where(item => item.Mode == ConversationMode.Programming)
+            .OrderByDescending(item => item.UpdatedAtUtc)
+            .ThenBy(item => item.CreatedAtUtc)
+            .ToArray();
+
+        var conversationsByWorkspaceId = programmingConversations
+            .Where(item => item.WorkspaceRootId is Guid)
+            .GroupBy(item => item.WorkspaceRootId!.Value)
+            .ToDictionary(item => item.Key, item => item.ToArray());
+
+        var projects = WorkspaceRoots
+            .Select(root =>
+            {
+                conversationsByWorkspaceId.TryGetValue(root.Id, out var conversations);
+                conversations ??= [];
+                return new SidebarProjectItem(
+                    root.Id,
+                    root.Name,
+                    root.RootPath,
+                    _expandedSidebarWorkspaceRootIds.Contains(root.Id),
+                    new ObservableCollection<SidebarConversationItem>(
+                        conversations.Select(BuildSidebarConversationItem)));
+            })
+            .ToArray();
+
+        var standaloneConversations = programmingConversations
+            .Where(item => item.WorkspaceRootId is null)
+            .Select(BuildSidebarConversationItem)
+            .ToArray();
+
+        ReplaceCollection(SidebarProjects, projects);
+        ReplaceCollection(SidebarStandaloneConversations, standaloneConversations);
+        OnPropertyChanged(nameof(SidebarProjectCount));
+        OnPropertyChanged(nameof(SidebarStandaloneConversationCount));
+        OnPropertyChanged(nameof(HasSidebarStandaloneConversations));
+        OnPropertyChanged(nameof(IsSidebarStandaloneConversationsExpanded));
+    }
+
+    private SidebarConversationItem BuildSidebarConversationItem(ConversationRecord conversation)
+        => new(
+            conversation.Id,
+            conversation.Title,
+            conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture),
+            SelectedConversation?.Id == conversation.Id);
 
     private void UpsertToolRun(ToolExecutionRecord record)
     {

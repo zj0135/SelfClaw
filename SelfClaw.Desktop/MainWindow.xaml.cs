@@ -262,6 +262,40 @@ public partial class MainWindow : Window
         SetRightPanelOpen(false);
     }
 
+    private async void OnSidebarNewConversationRequested(object? sender, EventArgs e)
+    {
+        SetSystemSettingsOpen(false);
+        await _viewModel.CreateNewConversationFromUiAsync();
+    }
+
+    private void OnSidebarProjectsToggleRequested(object? sender, EventArgs e)
+    {
+        _viewModel.ToggleSidebarProjects();
+    }
+
+    private async void OnSidebarStandaloneConversationRequested(object? sender, EventArgs e)
+    {
+        SetSystemSettingsOpen(false);
+        await _viewModel.CreateStandaloneConversationFromUiAsync();
+    }
+
+    private void OnSidebarStandaloneConversationsToggleRequested(object? sender, EventArgs e)
+    {
+        _viewModel.ToggleSidebarStandaloneConversations();
+    }
+
+    private async void OnSidebarWorkspaceRootSelected(object? sender, Guid workspaceRootId)
+    {
+        SetSystemSettingsOpen(false);
+        await _viewModel.ToggleSidebarWorkspaceRootAsync(workspaceRootId);
+    }
+
+    private async void OnSidebarConversationSelected(object? sender, Guid conversationId)
+    {
+        SetSystemSettingsOpen(false);
+        await _viewModel.SelectConversationAsync(conversationId);
+    }
+
     private void SetSystemSettingsOpen(bool isOpen)
     {
         SystemSettingsPanelHost.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;

@@ -167,7 +167,14 @@
                         BorderBrush="#D9DDE4"
                         BorderThickness="0,0,1,0"
                         Panel.ZIndex="1">
-                    <local:LeftSidebar SystemSettingsRequested="OnSystemSettingsRequested"/>
+                    <local:LeftSidebar x:Name="LeftSidebarControl"
+                                       SystemSettingsRequested="OnSystemSettingsRequested"
+                                       NewConversationRequested="OnSidebarNewConversationRequested"
+                                       ProjectsToggleRequested="OnSidebarProjectsToggleRequested"
+                                       StandaloneConversationRequested="OnSidebarStandaloneConversationRequested"
+                                       StandaloneConversationsToggleRequested="OnSidebarStandaloneConversationsToggleRequested"
+                                       WorkspaceRootSelected="OnSidebarWorkspaceRootSelected"
+                                       ConversationSelected="OnSidebarConversationSelected"/>
                 </Border>
 
                 <Grid Grid.Column="1">

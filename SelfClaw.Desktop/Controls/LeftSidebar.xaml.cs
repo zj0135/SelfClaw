@@ -9,6 +9,12 @@ public partial class LeftSidebar : UserControl
     private bool _areExtensionsExpanded;
 
     public event EventHandler? SystemSettingsRequested;
+    public event EventHandler? NewConversationRequested;
+    public event EventHandler? ProjectsToggleRequested;
+    public event EventHandler? StandaloneConversationRequested;
+    public event EventHandler? StandaloneConversationsToggleRequested;
+    public event EventHandler<Guid>? WorkspaceRootSelected;
+    public event EventHandler<Guid>? ConversationSelected;
 
     public LeftSidebar()
     {
@@ -28,5 +34,52 @@ public partial class LeftSidebar : UserControl
     private void OnSystemSettingsNodeMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         SystemSettingsRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnNewConversationNodeMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        NewConversationRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnProjectsHeaderMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        ProjectsToggleRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnProjectsImportButtonClick(object sender, System.Windows.RoutedEventArgs e)
+    {
+        e.Handled = true;
+    }
+
+    private void OnProjectsAddButtonClick(object sender, System.Windows.RoutedEventArgs e)
+    {
+        e.Handled = true;
+    }
+
+    private void OnStandaloneNewConversationButtonClick(object sender, System.Windows.RoutedEventArgs e)
+    {
+        e.Handled = true;
+        StandaloneConversationRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnStandaloneHeaderMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        StandaloneConversationsToggleRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnProjectButtonClick(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: Guid workspaceRootId })
+        {
+            WorkspaceRootSelected?.Invoke(this, workspaceRootId);
+        }
+    }
+
+    private void OnConversationButtonClick(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: Guid conversationId })
+        {
+            ConversationSelected?.Invoke(this, conversationId);
+        }
     }
 }
