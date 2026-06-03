@@ -265,7 +265,7 @@ public partial class MainWindow : Window
     private async void OnSidebarNewConversationRequested(object? sender, EventArgs e)
     {
         SetSystemSettingsOpen(false);
-        await _viewModel.CreateNewConversationFromUiAsync();
+        await _viewModel.CreateStandaloneConversationFromUiAsync();
     }
 
     private void OnSidebarProjectsToggleRequested(object? sender, EventArgs e)
@@ -288,6 +288,12 @@ public partial class MainWindow : Window
     {
         SetSystemSettingsOpen(false);
         await _viewModel.ToggleSidebarWorkspaceRootAsync(workspaceRootId);
+    }
+
+    private async void OnSidebarProjectConversationRequested(object? sender, Guid workspaceRootId)
+    {
+        SetSystemSettingsOpen(false);
+        await _viewModel.CreateProjectConversationFromUiAsync(workspaceRootId);
     }
 
     private async void OnSidebarConversationSelected(object? sender, Guid conversationId)

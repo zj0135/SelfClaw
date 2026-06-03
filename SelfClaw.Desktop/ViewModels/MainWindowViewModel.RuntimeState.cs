@@ -11,8 +11,7 @@ public sealed partial class MainWindowViewModel
             ConversationRecord conversation,
             IEnumerable<MessageRecord> messages,
             IEnumerable<ToolExecutionRecord> toolRuns,
-            IReadOnlyDictionary<Guid, ToolRunAnchor> toolRunAnchors,
-            string statusText)
+            IReadOnlyDictionary<Guid, ToolRunAnchor> toolRunAnchors)
         {
             Conversation = conversation;
             Messages.AddRange(messages);
@@ -21,8 +20,6 @@ public sealed partial class MainWindowViewModel
             {
                 ToolRunAnchors[item.Key] = item.Value;
             }
-
-            StatusText = statusText;
         }
 
         public ConversationRecord Conversation { get; set; }
@@ -38,8 +35,6 @@ public sealed partial class MainWindowViewModel
         public HashSet<Guid> ActiveMessageIds { get; } = [];
 
         public CancellationTokenSource CancellationTokenSource { get; } = new();
-
-        public string StatusText { get; set; }
 
         public bool IsRunning { get; set; } = true;
 
@@ -67,62 +62,16 @@ public sealed partial class MainWindowViewModel
         var nextBusy = runtimeState?.IsRunning == true;
         if (SetProperty(ref _isBusy, nextBusy, nameof(IsBusy)))
         {
-            NotifyCommandStates();
         }
 
-        if (SelectedConversation is { } conversation)
-        {
-            if (runtimeState is not null)
-            {
-                SetProperty(ref _statusText, runtimeState.StatusText, nameof(StatusText));
-            }
-            else if (_conversationStatusTexts.TryGetValue(conversation.Id, out var statusText))
-            {
-                SetProperty(ref _statusText, statusText, nameof(StatusText));
-            }
-        }
-        NotifyCommandStates();
         if (publishShell)
         {
             PublishShell(false);
         }
     }
 
-    private void SetStatusTextForSelectedConversation(string statusText, bool publishShell)
-    {
-        if (SelectedConversation is { } conversation)
-        {
-            _conversationStatusTexts[conversation.Id] = statusText;
-            if (_conversationRuntimeStates.TryGetValue(conversation.Id, out var runtimeState))
-            {
-                runtimeState.StatusText = statusText;
-            }
-        }
-
-        if (SetProperty(ref _statusText, statusText, nameof(StatusText)) && publishShell)
-        {
-            PublishShell(false);
-        }
-    }
-
-    private void SetStatusTextForConversation(ConversationRuntimeState state, string statusText, bool publishShell)
-    {
-        state.StatusText = statusText;
-        _conversationStatusTexts[state.ConversationId] = statusText;
-
-        if (IsSelectedConversation(state.ConversationId))
-        {
-            SetProperty(ref _statusText, statusText, nameof(StatusText));
-            if (publishShell)
-            {
-                PublishShell(false);
-            }
-        }
-    }
-
     private ConversationRuntimeState StartConversationRuntimeState(
         ConversationRecord conversation,
-        string statusText,
         IReadOnlyList<MessageRecord>? messages = null,
         IReadOnlyList<ToolExecutionRecord>? toolRuns = null,
         IReadOnlyDictionary<Guid, ToolRunAnchor>? toolRunAnchors = null)
@@ -142,11 +91,9 @@ public sealed partial class MainWindowViewModel
             conversation,
             sourceState?.Messages ?? messages ?? _messages,
             sourceState?.ToolRuns ?? toolRuns ?? _toolRuns,
-            sourceState?.ToolRunAnchors ?? toolRunAnchors ?? _toolRunAnchors,
-            statusText);
+            sourceState?.ToolRunAnchors ?? toolRunAnchors ?? _toolRunAnchors);
 
         _conversationRuntimeStates[conversation.Id] = state;
-        _conversationStatusTexts[conversation.Id] = statusText;
 
         if (IsSelectedConversation(conversation.Id))
         {
@@ -209,23 +156,6 @@ public sealed partial class MainWindowViewModel
 
     private IReadOnlyDictionary<Guid, ToolRunAnchor> GetSelectedTranscriptToolRunAnchors()
         => GetSelectedRuntimeState()?.ToolRunAnchors ?? _toolRunAnchors;
-
-    private string GetSelectedStatusText()
-    {
-        if (SelectedConversation is not { } conversation)
-        {
-            return StatusText;
-        }
-
-        if (_conversationRuntimeStates.TryGetValue(conversation.Id, out var runtimeState))
-        {
-            return runtimeState.StatusText;
-        }
-
-        return _conversationStatusTexts.TryGetValue(conversation.Id, out var statusText)
-            ? statusText
-            : StatusText;
-    }
 
     private static void ReplaceList<T>(List<T> target, IEnumerable<T> source)
     {

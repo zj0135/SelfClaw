@@ -25,6 +25,8 @@
                          Color="#F8FAFC"/>
         <SolidColorBrush x:Key="BadgeStrokeBrush"
                          Color="#E0E4EA"/>
+        <SolidColorBrush x:Key="DangerTextBrush"
+                         Color="#E11D48"/>
         <services:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
 
         <Style x:Key="SidebarIconPathStyle"
@@ -318,6 +320,102 @@
                             Value="Visible"/>
                 </DataTrigger>
             </Style.Triggers>
+        </Style>
+
+        <Style x:Key="ProjectMenuStyle"
+               TargetType="ContextMenu">
+            <Setter Property="Width"
+                    Value="206"/>
+            <Setter Property="Padding"
+                    Value="0"/>
+            <Setter Property="Background"
+                    Value="#FFFFFF"/>
+            <Setter Property="BorderBrush"
+                    Value="#DDE1E8"/>
+            <Setter Property="BorderThickness"
+                    Value="1"/>
+            <Setter Property="HasDropShadow"
+                    Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContextMenu">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                Padding="0,6">
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ProjectMenuItemStyle"
+               TargetType="MenuItem">
+            <Setter Property="Height"
+                    Value="32"/>
+            <Setter Property="Padding"
+                    Value="12,0"/>
+            <Setter Property="Foreground"
+                    Value="{StaticResource PrimaryTextBrush}"/>
+            <Setter Property="FontSize"
+                    Value="14"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <Border x:Name="Root"
+                                Margin="5,0"
+                                Background="Transparent"
+                                CornerRadius="5">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="24"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter Grid.Column="0"
+                                                  ContentSource="Icon"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"/>
+                                <ContentPresenter Grid.Column="1"
+                                                  Margin="8,0,0,0"
+                                                  ContentSource="Header"
+                                                  VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted"
+                                     Value="True">
+                                <Setter TargetName="Root"
+                                        Property="Background"
+                                        Value="#F2F4F7"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ProjectDangerMenuItemStyle"
+               TargetType="MenuItem"
+               BasedOn="{StaticResource ProjectMenuItemStyle}">
+            <Setter Property="Foreground"
+                    Value="{StaticResource DangerTextBrush}"/>
+        </Style>
+
+        <Style x:Key="ProjectMenuSeparatorStyle"
+               TargetType="Separator">
+            <Setter Property="Margin"
+                    Value="0,6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1"
+                                Background="{StaticResource DividerBrush}"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="SidebarAnimatedGroupContentBaseStyle"
@@ -644,29 +742,169 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel Margin="0,2,0,2">
-                                            <Button Style="{StaticResource SidebarNodeButtonStyle}"
-                                                    Tag="{Binding Id}"
-                                                    ToolTip="{Binding RootPath}"
-                                                    Click="OnProjectButtonClick">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="28"/>
-                                                        <ColumnDefinition Width="*"/>
-                                                    </Grid.ColumnDefinitions>
+                                            <Grid Height="34"
+                                                  Background="Transparent">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="28"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="26"/>
+                                                    <ColumnDefinition Width="26"/>
+                                                </Grid.ColumnDefinitions>
 
-                                                    <Path Width="15"
+                                                <Button Grid.ColumnSpan="2"
+                                                        Style="{StaticResource SidebarNodeButtonStyle}"
+                                                        Tag="{Binding Id}"
+                                                        ToolTip="{Binding RootPath}"
+                                                        Click="OnProjectButtonClick">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="28"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <Path Width="15"
+                                                              Height="13"
+                                                              HorizontalAlignment="Center"
+                                                              VerticalAlignment="Center"
+                                                              Style="{StaticResource SidebarSubtleIconPathStyle}"
+                                                              Data="M1.7,5.1 L5.1,5.1 L6.3,6.8 L14,6.8 L14,12.4 L1.7,12.4 Z M1.7,5.1 L1.7,3.6 L5.8,3.6 L7.1,5.1 L14,5.1"/>
+                                                        <TextBlock Grid.Column="1"
+                                                                   Style="{StaticResource NavTextStyle}"
+                                                                   FontSize="13"
+                                                                   Text="{Binding Name}"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    </Grid>
+                                                </Button>
+
+                                                <Button Grid.Column="2"
+                                                        Style="{StaticResource IconButtonStyle}"
+                                                        Tag="{Binding Id}"
+                                                        ToolTip="New chat"
+                                                        Click="OnProjectNewConversationButtonClick">
+                                                    <Path Width="13"
                                                           Height="13"
-                                                          HorizontalAlignment="Center"
-                                                          VerticalAlignment="Center"
-                                                          Style="{StaticResource SidebarSubtleIconPathStyle}"
-                                                          Data="M1.7,5.1 L5.1,5.1 L6.3,6.8 L14,6.8 L14,12.4 L1.7,12.4 Z M1.7,5.1 L1.7,3.6 L5.8,3.6 L7.1,5.1 L14,5.1"/>
-                                                    <TextBlock Grid.Column="1"
-                                                               Style="{StaticResource NavTextStyle}"
-                                                               FontSize="13"
-                                                               Text="{Binding Name}"
-                                                               TextTrimming="CharacterEllipsis"/>
-                                                </Grid>
-                                            </Button>
+                                                          Style="{StaticResource SidebarIconPathStyle}"
+                                                          Data="M6.5,1.8 L6.5,11.2 M1.8,6.5 L11.2,6.5"/>
+                                                </Button>
+
+                                                <Button Grid.Column="3"
+                                                        Style="{StaticResource IconButtonStyle}"
+                                                        Tag="{Binding Id}"
+                                                        ToolTip="Project actions"
+                                                        Click="OnProjectActionsButtonClick">
+                                                    <Button.ContextMenu>
+                                                        <ContextMenu Style="{StaticResource ProjectMenuStyle}">
+                                                            <MenuItem Header="打开项目"
+                                                                      Style="{StaticResource ProjectMenuItemStyle}">
+                                                                <MenuItem.Icon>
+                                                                    <Path Width="15"
+                                                                          Height="15"
+                                                                          Style="{StaticResource SidebarSubtleIconPathStyle}"
+                                                                          Data="M1.8,5.3 L5.2,5.3 L6.4,6.8 L14,6.8 L14,12.4 L1.8,12.4 Z M1.8,5.3 L1.8,3.7 L5.8,3.7 L7.1,5.3 L14,5.3"/>
+                                                                </MenuItem.Icon>
+                                                            </MenuItem>
+                                                            <MenuItem Header="重命名"
+                                                                      Style="{StaticResource ProjectMenuItemStyle}">
+                                                                <MenuItem.Icon>
+                                                                    <Path Width="15"
+                                                                          Height="15"
+                                                                          Style="{StaticResource SidebarSubtleIconPathStyle}"
+                                                                          Data="M3,11.7 L4.4,8.4 L10.6,2.2 C11.1,1.7 11.9,1.7 12.4,2.2 L12.8,2.6 C13.3,3.1 13.3,3.9 12.8,4.4 L6.6,10.6 L3,11.7 Z M9.8,3 L12,5.2"/>
+                                                                </MenuItem.Icon>
+                                                            </MenuItem>
+                                                            <MenuItem Header="工作目录"
+                                                                      Style="{StaticResource ProjectMenuItemStyle}">
+                                                                <MenuItem.Icon>
+                                                                    <Path Width="15"
+                                                                          Height="15"
+                                                                          Style="{StaticResource SidebarSubtleIconPathStyle}"
+                                                                          Data="M2,4 L5.2,4 L6.5,5.6 L13,5.6 L13,12 L2,12 Z M2,4 L2,2.7 L5.8,2.7 L7,4 L13,4"/>
+                                                                </MenuItem.Icon>
+                                                            </MenuItem>
+                                                            <Separator Style="{StaticResource ProjectMenuSeparatorStyle}"/>
+                                                            <MenuItem Header="项目档案"
+                                                                      Style="{StaticResource ProjectMenuItemStyle}">
+                                                                <MenuItem.Icon>
+                                                                    <Path Width="15"
+                                                                          Height="15"
+                                                                          Style="{StaticResource SidebarSubtleIconPathStyle}"
+                                                                          Data="M2.5,3 L12.5,3 L12.5,12 L2.5,12 Z M5,3 L5,12 M7,5.5 L10.5,5.5 M7,8 L10.5,8"/>
+                                                                </MenuItem.Icon>
+                                                            </MenuItem>
+                                                            <MenuItem Header="聊天频道"
+                                                                      Style="{StaticResource ProjectMenuItemStyle}">
+                                                                <MenuItem.Icon>
+                                                                    <Path Width="15"
+                                                                          Height="15"
+                                                                          Style="{StaticResource SidebarSubtleIconPathStyle}"
+                                                                          Data="M2.2,3.4 L12.8,3.4 L12.8,10 L7.4,10 L4.6,12.5 L4.6,10 L2.2,10 Z"/>
+                                                                </MenuItem.Icon>
+                                                            </MenuItem>
+                                                            <MenuItem Header="Git"
+                                                                      Style="{StaticResource ProjectMenuItemStyle}">
+                                                                <MenuItem.Icon>
+                                                                    <Path Width="15"
+                                                                          Height="15"
+                                                                          Style="{StaticResource SidebarSubtleIconPathStyle}"
+                                                                          Data="M4,3.2 L7.6,6.8 M7.6,6.8 L11,3.4 M7.6,6.8 L7.6,11.5 M4,3.2 C4.7,3.2 5.2,3.7 5.2,4.4 C5.2,5.1 4.7,5.6 4,5.6 C3.3,5.6 2.8,5.1 2.8,4.4 C2.8,3.7 3.3,3.2 4,3.2 Z M11,3.4 C11.7,3.4 12.2,3.9 12.2,4.6 C12.2,5.3 11.7,5.8 11,5.8 C10.3,5.8 9.8,5.3 9.8,4.6 C9.8,3.9 10.3,3.4 11,3.4 Z M7.6,10.2 C8.3,10.2 8.8,10.7 8.8,11.4 C8.8,12.1 8.3,12.6 7.6,12.6 C6.9,12.6 6.4,12.1 6.4,11.4 C6.4,10.7 6.9,10.2 7.6,10.2 Z"/>
+                                                                </MenuItem.Icon>
+                                                            </MenuItem>
+                                                            <Separator Style="{StaticResource ProjectMenuSeparatorStyle}"/>
+                                                            <MenuItem Header="导出项目为 JSON"
+                                                                      Style="{StaticResource ProjectMenuItemStyle}">
+                                                                <MenuItem.Icon>
+                                                                    <Path Width="15"
+                                                                          Height="15"
+                                                                          Style="{StaticResource SidebarSubtleIconPathStyle}"
+                                                                          Data="M7.5,2 L7.5,9 M4.8,6.3 L7.5,9 L10.2,6.3 M3,11.5 L3,13 L12,13 L12,11.5"/>
+                                                                </MenuItem.Icon>
+                                                            </MenuItem>
+                                                            <MenuItem Header="清空会话列表"
+                                                                      Style="{StaticResource ProjectDangerMenuItemStyle}">
+                                                                <MenuItem.Icon>
+                                                                    <Path Width="15"
+                                                                          Height="15"
+                                                                          Stroke="{StaticResource DangerTextBrush}"
+                                                                          StrokeThickness="1.45"
+                                                                          StrokeStartLineCap="Round"
+                                                                          StrokeEndLineCap="Round"
+                                                                          StrokeLineJoin="Round"
+                                                                          Fill="Transparent"
+                                                                          Data="M4,7.5 L7.5,4 L11,7.5 L7.5,11 Z M2.5,7.5 L4,6 M11,6 L12.5,7.5 M4,9 L2.5,7.5 M12.5,7.5 L11,9"/>
+                                                                </MenuItem.Icon>
+                                                            </MenuItem>
+                                                            <MenuItem Header="置顶"
+                                                                      Style="{StaticResource ProjectMenuItemStyle}">
+                                                                <MenuItem.Icon>
+                                                                    <Path Width="15"
+                                                                          Height="15"
+                                                                          Style="{StaticResource SidebarSubtleIconPathStyle}"
+                                                                          Data="M5.2,2.5 L10.8,2.5 M7.5,2.5 L7.5,8.5 M4.7,8.5 L10.3,8.5 L9,5.4 L6,5.4 Z M7.5,8.5 L7.5,13"/>
+                                                                </MenuItem.Icon>
+                                                            </MenuItem>
+                                                            <Separator Style="{StaticResource ProjectMenuSeparatorStyle}"/>
+                                                            <MenuItem Header="删除"
+                                                                      Style="{StaticResource ProjectDangerMenuItemStyle}">
+                                                                <MenuItem.Icon>
+                                                                    <Path Width="15"
+                                                                          Height="15"
+                                                                          Stroke="{StaticResource DangerTextBrush}"
+                                                                          StrokeThickness="1.45"
+                                                                          StrokeStartLineCap="Round"
+                                                                          StrokeEndLineCap="Round"
+                                                                          StrokeLineJoin="Round"
+                                                                          Fill="Transparent"
+                                                                          Data="M3,4.2 L12,4.2 M6,4.2 L6.4,2.8 L9.6,2.8 L10,4.2 M4.3,5.8 L4.9,12.5 L10.1,12.5 L10.7,5.8 M6.7,7.2 L6.7,11 M9.3,7.2 L9.3,11"/>
+                                                                </MenuItem.Icon>
+                                                            </MenuItem>
+                                                        </ContextMenu>
+                                                    </Button.ContextMenu>
+                                                    <Path Width="15"
+                                                          Height="15"
+                                                          Style="{StaticResource SidebarIconPathStyle}"
+                                                          Data="M3.2,7.5 L3.25,7.5 M7.5,7.5 L7.55,7.5 M11.8,7.5 L11.85,7.5"/>
+                                                </Button>
+                                            </Grid>
 
                                             <ItemsControl Margin="0,0,0,0"
                                                           ItemsSource="{Binding Conversations}"

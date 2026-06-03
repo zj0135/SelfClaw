@@ -14,6 +14,7 @@ public partial class LeftSidebar : UserControl
     public event EventHandler? StandaloneConversationRequested;
     public event EventHandler? StandaloneConversationsToggleRequested;
     public event EventHandler<Guid>? WorkspaceRootSelected;
+    public event EventHandler<Guid>? ProjectConversationRequested;
     public event EventHandler<Guid>? ConversationSelected;
     public event EventHandler<Guid>? ConversationDeleteRequested;
 
@@ -73,6 +74,25 @@ public partial class LeftSidebar : UserControl
         if (sender is Button { Tag: Guid workspaceRootId })
         {
             WorkspaceRootSelected?.Invoke(this, workspaceRootId);
+        }
+    }
+
+    private void OnProjectNewConversationButtonClick(object sender, System.Windows.RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is Button { Tag: Guid workspaceRootId })
+        {
+            ProjectConversationRequested?.Invoke(this, workspaceRootId);
+        }
+    }
+
+    private void OnProjectActionsButtonClick(object sender, System.Windows.RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is Button { ContextMenu: { } menu } button)
+        {
+            menu.PlacementTarget = button;
+            menu.IsOpen = true;
         }
     }
 

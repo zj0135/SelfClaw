@@ -6,28 +6,6 @@ namespace SelfClaw.Desktop.ViewModels;
 
 public sealed partial class MainWindowViewModel
 {
-    private void ApplyAssistantDelta(Guid messageId, string deltaMarkdown)
-    {
-        if (string.IsNullOrWhiteSpace(deltaMarkdown))
-        {
-            return;
-        }
-
-        var message = _messages.FirstOrDefault(item => item.Id == messageId);
-        if (message is null)
-        {
-            return;
-        }
-
-        var updated = message with
-        {
-            MarkdownContent = message.MarkdownContent + deltaMarkdown,
-            UpdatedAtUtc = DateTimeOffset.UtcNow
-        };
-        ReplaceMessage(updated);
-        RequestStreamingShellPublish(true);
-    }
-
     private void ApplyAssistantDelta(ConversationRuntimeState runtimeState, Guid messageId, string deltaMarkdown)
     {
         if (string.IsNullOrWhiteSpace(deltaMarkdown))
@@ -50,23 +28,6 @@ public sealed partial class MainWindowViewModel
         PublishRuntimeState(runtimeState, true);
     }
 
-    private async Task CompleteAssistantMessageAsync(MessageRecord message)
-    {
-        var existing = _messages.FirstOrDefault(item => item.Id == message.Id);
-        var finalMarkdown = AssistantMessageSegmenter.MergeFinalMarkdown(
-            message.MarkdownContent,
-            existing?.MarkdownContent);
-
-        var updated = message with
-        {
-            MarkdownContent = finalMarkdown,
-            UpdatedAtUtc = DateTimeOffset.UtcNow
-        };
-        ReplaceMessage(updated);
-        await _conversationRepository.UpsertMessageAsync(updated);
-        PublishShellNow(true);
-    }
-
     private async Task CompleteAssistantMessageAsync(ConversationRuntimeState runtimeState, MessageRecord message)
     {
         var existing = runtimeState.Messages.FirstOrDefault(item => item.Id == message.Id);
@@ -82,28 +43,6 @@ public sealed partial class MainWindowViewModel
         ReplaceMessage(runtimeState, updated);
         await _conversationRepository.UpsertMessageAsync(updated);
         PublishRuntimeStateNow(runtimeState, true);
-    }
-
-    private async Task FailActiveMessagesAsync(IEnumerable<Guid> messageIds, string errorMessage)
-    {
-        foreach (var messageId in messageIds.ToArray())
-        {
-            var existing = _messages.FirstOrDefault(item => item.Id == messageId);
-            if (existing is null)
-            {
-                continue;
-            }
-
-            var updated = existing with
-            {
-                Status = MessageStatus.Failed,
-                UpdatedAtUtc = DateTimeOffset.UtcNow,
-                ErrorMessage = errorMessage
-            };
-
-            ReplaceMessage(updated);
-            await _conversationRepository.UpsertMessageAsync(updated);
-        }
     }
 
     private async Task FailActiveMessagesAsync(
@@ -129,61 +68,6 @@ public sealed partial class MainWindowViewModel
             ReplaceMessage(runtimeState, updated);
             await _conversationRepository.UpsertMessageAsync(updated);
         }
-    }
-
-    private ToolExecutionRecord CaptureToolRunAnchor(ToolExecutionRecord toolRun)
-    {
-        if (_toolRunAnchors.TryGetValue(toolRun.Id, out var existingAnchor))
-        {
-            return toolRun with
-            {
-                MessageId = existingAnchor.MessageId,
-                AfterSegmentIndex = existingAnchor.AfterSegmentIndex
-            };
-        }
-
-        if (toolRun.MessageId is Guid messageId && toolRun.AfterSegmentIndex is int afterSegmentIndex)
-        {
-            _toolRunAnchors[toolRun.Id] = new ToolRunAnchor(messageId, afterSegmentIndex);
-            return toolRun;
-        }
-
-        if (toolRun.MessageId is not Guid anchoredMessageId)
-        {
-            return toolRun;
-        }
-
-        var message = _messages.FirstOrDefault(item => item.Id == anchoredMessageId);
-        if (message is null)
-        {
-            return toolRun;
-        }
-
-        var anchoredMarkdown = AssistantMessageSegmenter.AppendToolAnchor(message.MarkdownContent, toolRun.Id);
-        var anchoredSegments = message.Role == MessageRole.Assistant
-            ? AssistantMessageSegmenter.Split(anchoredMarkdown).Segments
-            : [];
-        var anchorIndex = anchoredSegments
-            .Select((item, index) => (item, index))
-            .FirstOrDefault(entry =>
-                entry.item.Kind == AssistantMessageSegmentKind.ToolAnchor &&
-                entry.item.ToolExecutionId == toolRun.Id)
-            .index;
-        var anchorAfterSegmentIndex = anchorIndex > 0 ? anchorIndex - 1 : -1;
-        var anchor = new ToolRunAnchor(anchoredMessageId, anchorAfterSegmentIndex);
-
-        ReplaceMessage(message with
-        {
-            MarkdownContent = anchoredMarkdown,
-            UpdatedAtUtc = DateTimeOffset.UtcNow
-        });
-
-        _toolRunAnchors[toolRun.Id] = anchor;
-        return toolRun with
-        {
-            MessageId = anchor.MessageId,
-            AfterSegmentIndex = anchor.AfterSegmentIndex
-        };
     }
 
     private ToolExecutionRecord CaptureToolRunAnchor(ConversationRuntimeState runtimeState, ToolExecutionRecord toolRun)

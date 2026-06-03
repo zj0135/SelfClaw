@@ -7,7 +7,6 @@ using System.Text;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 using SelfClaw.Core.Interfaces;
@@ -42,11 +41,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private readonly List<ConversationRecord> _allConversations = [];
     private readonly List<DesktopAgentDefinition> _agents = [];
+    private readonly List<ProviderProfile> _profiles = [];
+    private readonly List<WorkspaceRoot> _workspaceRoots = [];
     private readonly List<MessageRecord> _messages = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
     private readonly Dictionary<Guid, ToolRunAnchor> _toolRunAnchors = [];
     private readonly Dictionary<Guid, ConversationRuntimeState> _conversationRuntimeStates = [];
-    private readonly Dictionary<Guid, string> _conversationStatusTexts = [];
     private readonly HashSet<Guid> _expandedSidebarWorkspaceRootIds = [];
     private IReadOnlyList<PromptImageAttachment> _pendingPromptImageAttachments = [];
     private bool _pendingReasoningEnabled;
@@ -59,7 +59,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private WorkspaceRoot? _selectedWorkspaceRoot;
     private string _selectedAgentId = DesktopAgentStore.BuildAgentId;
     private string _composerText = string.Empty;
-    private string _statusText = "Add a model profile to get started.";
     private bool _isBusy;
     private ThemeMode _activeThemeMode = ThemeMode.System;
     private string _effectiveTranscriptTheme = "light";
@@ -107,9 +106,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ApplySystemTheme(refreshShell: false);
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
-        SendCommand = new AsyncRelayCommand(SendAsync, CanSend);
-        StopCommand = new RelayCommand(Stop, () => IsBusy);
-        NewConversationCommand = new AsyncRelayCommand(CreateNewConversationAsync, CanCreateConversation);
     }
 
     public event EventHandler<TranscriptRenderState>? TranscriptChanged;
@@ -119,18 +115,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public ObservableCollection<SidebarProjectItem> SidebarProjects { get; } = [];
 
     public ObservableCollection<SidebarConversationItem> SidebarStandaloneConversations { get; } = [];
-
-    public ObservableCollection<ProviderProfile> Profiles { get; } = [];
-
-    public ObservableCollection<WorkspaceRoot> WorkspaceRoots { get; } = [];
-
-    public ObservableCollection<AgentActivityNode> AgentActivityNodes { get; } = [];
-
-    public IAsyncRelayCommand SendCommand { get; }
-
-    public IRelayCommand StopCommand { get; }
-
-    public IAsyncRelayCommand NewConversationCommand { get; }
 
     public int SidebarProjectCount => SidebarProjects.Count;
 
@@ -156,8 +140,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public bool HasAgentActivityNodes => AgentActivityNodes.Count > 0;
-
     public ThemeMode ActiveThemeMode
     {
         get => _activeThemeMode;
@@ -168,18 +150,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         get => _effectiveTranscriptTheme;
         private set => SetProperty(ref _effectiveTranscriptTheme, value);
-    }
-
-    public ToolPermissionMode SelectedToolPermissionMode
-    {
-        get => _selectedToolPermissionMode;
-        private set
-        {
-            if (SetProperty(ref _selectedToolPermissionMode, value))
-            {
-                PublishShell(false);
-            }
-        }
     }
 
     public ConversationRecord? SelectedConversation
@@ -205,54 +175,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 _toolRuns.Clear();
                 _toolRunAnchors.Clear();
                 ProjectSelectedRuntimeState(publishShell: false);
-                PublishAgentActivities();
                 PublishShell(false);
             }
         }
-    }
-
-    public ProviderProfile? SelectedProfile
-    {
-        get => _selectedProfile;
-        set
-        {
-            if (SetProperty(ref _selectedProfile, value))
-            {
-                _selectedProfileModelOverride = null;
-                NotifyCommandStates();
-                PublishShell(false);
-            }
-        }
-    }
-
-    public WorkspaceRoot? SelectedWorkspaceRoot
-    {
-        get => _selectedWorkspaceRoot;
-        set
-        {
-            if (SetProperty(ref _selectedWorkspaceRoot, value))
-            {
-                PublishShell(false);
-            }
-        }
-    }
-
-    public string ComposerText
-    {
-        get => _composerText;
-        set
-        {
-            if (SetProperty(ref _composerText, value))
-            {
-                NotifyCommandStates();
-            }
-        }
-    }
-
-    public string StatusText
-    {
-        get => _statusText;
-        private set => SetStatusTextForSelectedConversation(value, publishShell: true);
     }
 
     public bool IsBusy
@@ -262,7 +187,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _isBusy, value))
             {
-                NotifyCommandStates();
                 PublishShell(false);
             }
         }
@@ -281,17 +205,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
 
-        if (SelectedProfile is null && Profiles.Count > 0)
+        if (_selectedProfile is null && _profiles.Count > 0)
         {
-            SelectedProfile = Profiles[0];
+            SelectProfile(_profiles[0], publishShell: false);
         }
 
-        if (SelectedConversation is null && SelectedProfile is not null)
-        {
-            await CreateNewConversationAsync();
-        }
-
-        PublishAgentActivities();
         PublishShell(false);
     }
 
@@ -302,7 +220,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         string? profileModel = null)
     {
         ApplySelectedProfileModel(profileModel, publishShell: false);
-        ComposerText = prompt;
+        _composerText = prompt;
         _pendingPromptImageAttachments = imageAttachments ?? [];
         _pendingReasoningEnabled = enableReasoning;
         await SendAsync();
@@ -315,8 +233,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public async Task CreateStandaloneConversationFromUiAsync()
     {
-        SelectedWorkspaceRoot = null;
+        SelectWorkspaceRoot(null, publishShell: false);
         ApplyConversationFilter();
+        await CreateNewConversationAsync();
+    }
+
+    public async Task CreateProjectConversationFromUiAsync(Guid workspaceRootId)
+    {
+        if (!_expandedSidebarWorkspaceRootIds.Contains(workspaceRootId))
+        {
+            _expandedSidebarWorkspaceRootIds.Add(workspaceRootId);
+            RefreshSidebarHistory();
+        }
+
+        await SetSelectedWorkspaceRootAsync(workspaceRootId);
         await CreateNewConversationAsync();
     }
 
@@ -345,7 +275,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         await _conversationRepository.DeleteConversationAsync(conversationId);
         _allConversations.RemoveAll(item => item.Id == conversationId);
-        _conversationStatusTexts.Remove(conversationId);
         _conversationRuntimeStates.Remove(conversationId, out _);
 
         ApplyConversationFilter();
@@ -369,20 +298,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public Task ApproveToolExecutionAsync(Guid toolExecutionId)
     {
-        if (!_toolApprovalHandler.TryResolve(toolExecutionId, approved: true))
-        {
-            StatusText = "This approval request is no longer pending.";
-        }
+        _toolApprovalHandler.TryResolve(toolExecutionId, approved: true);
 
         return Task.CompletedTask;
     }
 
     public Task RejectToolExecutionAsync(Guid toolExecutionId)
     {
-        if (!_toolApprovalHandler.TryResolve(toolExecutionId, approved: false))
-        {
-            StatusText = "This approval request is no longer pending.";
-        }
+        _toolApprovalHandler.TryResolve(toolExecutionId, approved: false);
 
         return Task.CompletedTask;
     }
@@ -390,7 +313,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void ApplySelectedProfileModel(string? profileModel, bool publishShell)
     {
         var normalized = NormalizeModelValue(profileModel);
-        if (SelectedProfile is null)
+        if (_selectedProfile is null)
         {
             normalized = null;
         }
@@ -419,7 +342,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private string? ResolveSelectedProfileModel()
     {
-        if (SelectedProfile is null)
+        if (_selectedProfile is null)
         {
             return null;
         }
@@ -429,15 +352,46 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return _selectedProfileModelOverride;
         }
 
-        var fallback = NormalizeModelValue(SelectedProfile.Model);
+        var fallback = NormalizeModelValue(_selectedProfile.Model);
         return fallback;
+    }
+
+    private void SelectProfile(ProviderProfile? profile, bool publishShell)
+    {
+        if (_selectedProfile?.Id == profile?.Id)
+        {
+            return;
+        }
+
+        _selectedProfile = profile;
+        _selectedProfileModelOverride = null;
+        if (publishShell)
+        {
+            PublishShell(false);
+        }
+    }
+
+    private void SelectWorkspaceRoot(WorkspaceRoot? workspaceRoot, bool publishShell)
+    {
+        if (_selectedWorkspaceRoot?.Id == workspaceRoot?.Id)
+        {
+            return;
+        }
+
+        _selectedWorkspaceRoot = workspaceRoot;
+        if (publishShell)
+        {
+            PublishShell(false);
+        }
     }
 
     public Task SetSelectedWorkspaceRootAsync(Guid? workspaceRootId)
     {
-        SelectedWorkspaceRoot = workspaceRootId is Guid id
-            ? WorkspaceRoots.FirstOrDefault(item => item.Id == id)
-            : null;
+        SelectWorkspaceRoot(
+            workspaceRootId is Guid id
+                ? _workspaceRoots.FirstOrDefault(item => item.Id == id)
+                : null,
+            publishShell: false);
 
         ApplyConversationFilter();
         PublishShell(false);
@@ -570,25 +524,24 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task ReloadProfilesAsync()
     {
-        var selectedId = SelectedProfile?.Id;
+        var selectedId = _selectedProfile?.Id;
         var profiles = await _profileRepository.ListProfilesAsync();
-        ReplaceCollection(Profiles, profiles);
-        SelectedProfile = profiles.FirstOrDefault(profile => profile.Id == selectedId) ?? profiles.FirstOrDefault();
-        NotifyCommandStates();
-        if (SelectedProfile is not null)
-        {
-            StatusText = "Ready.";
-        }
+        ReplaceList(_profiles, profiles);
+        SelectProfile(
+            profiles.FirstOrDefault(profile => profile.Id == selectedId) ?? profiles.FirstOrDefault(),
+            publishShell: false);
     }
 
     private async Task ReloadWorkspaceRootsAsync()
     {
-        var selectedId = SelectedWorkspaceRoot?.Id;
+        var selectedId = _selectedWorkspaceRoot?.Id;
         var workspaceRoots = await _conversationRepository.ListWorkspaceRootsAsync();
-        ReplaceCollection(WorkspaceRoots, workspaceRoots);
-        SelectedWorkspaceRoot = selectedId is Guid id
-            ? workspaceRoots.FirstOrDefault(root => root.Id == id)
-            : null;
+        ReplaceList(_workspaceRoots, workspaceRoots);
+        SelectWorkspaceRoot(
+            selectedId is Guid id
+                ? workspaceRoots.FirstOrDefault(root => root.Id == id)
+                : null,
+            publishShell: false);
     }
 
     private async Task ReloadConversationsAsync()
@@ -602,28 +555,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task CreateNewConversationAsync()
     {
-        if (SelectedProfile is null)
+        if (_selectedProfile is null)
         {
             return;
         }
 
-        var now = DateTimeOffset.UtcNow;
-        var conversation = new ConversationRecord(
-            Guid.NewGuid(),
-            "New chat",
-            SelectedProfile.Id,
-            SelectedWorkspaceRoot?.Id,
-            ConversationMode.Programming,
-            SelectedToolPermissionMode,
-            ResolveSelectedAgent().Id,
-            now,
-            now);
-
-        await _conversationRepository.UpsertConversationAsync(conversation);
-        UpsertConversation(conversation);
-        ApplyConversationFilter(conversation.Id);
-        StatusText = "Started a new chat.";
+        SelectedConversation = null;
         PublishShell(false);
+        await Task.CompletedTask;
     }
 
     private async Task LoadConversationAsync(ConversationRecord conversation)
@@ -671,34 +610,34 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        SelectedProfile = Profiles.FirstOrDefault(profile => profile.Id == conversation.ProfileId) ?? SelectedProfile;
-        SelectedWorkspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
-            ? WorkspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
-            : null;
-        SelectedToolPermissionMode = conversation.ToolPermissionMode;
+        SelectProfile(_profiles.FirstOrDefault(profile => profile.Id == conversation.ProfileId) ?? _selectedProfile, publishShell: false);
+        SelectWorkspaceRoot(
+            conversation.WorkspaceRootId is Guid workspaceRootId
+                ? _workspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
+                : null,
+            publishShell: false);
+        _selectedToolPermissionMode = conversation.ToolPermissionMode;
         SyncSelectedAgentFromConversation(conversation, publishShell: false);
         ProjectSelectedRuntimeState(publishShell: false);
         ApplyConversationFilter(conversation.Id);
 
-        PublishAgentActivities();
         PublishShell(false);
     }
 
     private async Task SendAsync()
     {
-        var selectedProfile = SelectedProfile;
+        var selectedProfile = _selectedProfile;
         if (selectedProfile is null)
         {
-            StatusText = "Create a profile first.";
             return;
         }
 
-        var prompt = ComposerText.Trim();
+        var prompt = _composerText.Trim();
         var useReasoning = _pendingReasoningEnabled;
         var promptImageAttachments = _pendingPromptImageAttachments.ToArray();
         var selectedProfileModel = ResolveSelectedProfileModel();
-        var selectedWorkspaceRoot = SelectedWorkspaceRoot;
-        var selectedToolPermissionMode = SelectedToolPermissionMode;
+        var selectedWorkspaceRoot = _selectedWorkspaceRoot;
+        var selectedToolPermissionMode = _selectedToolPermissionMode;
         var baseMessages = _messages.ToArray();
         var baseToolRuns = _toolRuns.ToArray();
         var baseToolRunAnchors = new Dictionary<Guid, ToolRunAnchor>(_toolRunAnchors);
@@ -710,7 +649,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        ComposerText = string.Empty;
+        _composerText = string.Empty;
 
         ConversationRuntimeState? runtimeState = null;
         ProviderProfile? requestProfile = null;
@@ -719,9 +658,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             var conversation = await EnsureConversationAsync();
+            var preferConversationSelection = SelectedConversation is null || IsSelectedConversation(conversation.Id);
             if (IsConversationRunning(conversation.Id))
             {
-                StatusText = "This conversation is already running.";
                 return;
             }
 
@@ -733,13 +672,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 ToolPermissionMode = selectedToolPermissionMode,
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
-            await PersistConversationAsync(conversation, preferSelection: IsSelectedConversation(conversation.Id));
+            await PersistConversationAsync(conversation, preferSelection: preferConversationSelection);
 
             var runtimeAgent = ResolveRuntimeAgent(conversation.AgentId);
 
             runtimeState = StartConversationRuntimeState(
                 conversation,
-                "Streaming response...",
                 baseMessages,
                 baseToolRuns,
                 baseToolRunAnchors);
@@ -772,7 +710,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     UpdatedAtUtc = DateTimeOffset.UtcNow
                 };
                 runtimeState.Conversation = conversation;
-                await PersistConversationAsync(conversation, preferSelection: IsSelectedConversation(conversation.Id));
+                await PersistConversationAsync(conversation, preferSelection: preferConversationSelection);
             }
             PublishRuntimeState(runtimeState, true);
 
@@ -822,13 +760,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                         var startedRecord = CaptureToolRunAnchor(runtimeState, toolStarted.Record);
                         UpsertToolRun(runtimeState, startedRecord);
                         await _conversationRepository.UpsertToolExecutionAsync(startedRecord);
-                        PublishAgentActivities();
+                        PublishShell(false);
                         break;
                     case ToolExecutionCompletedEvent toolCompleted:
                         var completedRecord = CaptureToolRunAnchor(runtimeState, toolCompleted.Record);
                         UpsertToolRun(runtimeState, completedRecord);
                         await _conversationRepository.UpsertToolExecutionAsync(completedRecord);
-                        PublishAgentActivities();
+                        PublishShell(false);
                         break;
                     case AssistantMessageCompletedEvent completed:
                         runtimeState.ActiveMessageIds.Remove(completed.Message.Id);
@@ -844,7 +782,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 apiKey,
                 cancellationToken);
 
-            SetStatusTextForConversation(runtimeState, "Ready.", publishShell: false);
             PublishConversationCompletedNotification(conversation, runtimeState.Messages);
         }
         catch (OperationCanceledException) when (runtimeState?.CancellationTokenSource.IsCancellationRequested == true)
@@ -852,7 +789,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (runtimeState is not null)
             {
                 await FailActiveMessagesAsync(runtimeState, runtimeState.ActiveMessageIds, "Generation stopped.");
-                SetStatusTextForConversation(runtimeState, "Generation stopped.", publishShell: false);
             }
         }
         catch (Exception exception)
@@ -860,12 +796,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _logger.LogError(exception, "Chat turn failed.");
             if (runtimeState is null)
             {
-                StatusText = exception.Message;
                 return;
             }
 
             await FailActiveMessagesAsync(runtimeState, runtimeState.ActiveMessageIds, exception.Message);
-            SetStatusTextForConversation(runtimeState, exception.Message, publishShell: false);
         }
         finally
         {
@@ -944,22 +878,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             runtimeState.CancellationTokenSource.Cancel();
         }
-    }
-
-    private bool CanSend()
-        => !IsBusy &&
-           SelectedProfile is not null &&
-           !string.IsNullOrWhiteSpace(ComposerText);
-
-    private bool CanCreateConversation()
-        => !IsBusy &&
-           SelectedProfile is not null;
-
-    private void NotifyCommandStates()
-    {
-        SendCommand.NotifyCanExecuteChanged();
-        StopCommand.NotifyCanExecuteChanged();
-        NewConversationCommand.NotifyCanExecuteChanged();
     }
 
     private async Task<IReadOnlyList<MessageAttachmentRecord>> PersistPromptImageAttachmentsAsync(
@@ -1083,8 +1001,28 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return SelectedConversation;
         }
 
-        await CreateNewConversationAsync();
-        return SelectedConversation!;
+        await Task.CompletedTask;
+        return CreateConversationRecord();
+    }
+
+    private ConversationRecord CreateConversationRecord()
+    {
+        if (_selectedProfile is null)
+        {
+            throw new InvalidOperationException("Create a profile first.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        return new ConversationRecord(
+            Guid.NewGuid(),
+            "New chat",
+            _selectedProfile.Id,
+            _selectedWorkspaceRoot?.Id,
+            ConversationMode.Programming,
+            _selectedToolPermissionMode,
+            ResolveSelectedAgent().Id,
+            now,
+            now);
     }
 
     private async Task PersistConversationAsync(ConversationRecord conversation, bool preferSelection = true)
@@ -1112,33 +1050,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ApplyConversationFilter(preferSelection ? conversation.Id : SelectedConversation?.Id);
     }
 
-    private async Task SaveConversationSelectionAsync(ConversationRecord conversation)
-    {
-        var updated = conversation with
-        {
-            ProfileId = SelectedProfile?.Id ?? conversation.ProfileId,
-            WorkspaceRootId = SelectedWorkspaceRoot?.Id,
-            Mode = ConversationMode.Programming,
-            ToolPermissionMode = SelectedToolPermissionMode,
-            AgentId = ResolveSelectedAgent().Id,
-            UpdatedAtUtc = DateTimeOffset.UtcNow
-        };
-        await PersistConversationAsync(updated);
-    }
-
-    private void ReplaceMessage(MessageRecord message)
-    {
-        var index = _messages.FindIndex(item => item.Id == message.Id);
-        if (index >= 0)
-        {
-            _messages[index] = message;
-        }
-        else
-        {
-            _messages.Add(message);
-        }
-    }
-
     private static void ReplaceMessage(ConversationRuntimeState runtimeState, MessageRecord message)
     {
         var index = runtimeState.Messages.FindIndex(item => item.Id == message.Id);
@@ -1159,8 +1070,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         RefreshSidebarHistory();
 
         var targetConversation = filtered.FirstOrDefault(item => item.Id == preferredConversationId)
-            ?? filtered.FirstOrDefault(item => item.Id == SelectedConversation?.Id)
-            ?? filtered.FirstOrDefault();
+            ?? filtered.FirstOrDefault(item => item.Id == SelectedConversation?.Id);
 
         if (SelectedConversation?.Id == targetConversation?.Id)
         {
@@ -1186,9 +1096,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return false;
         }
 
-        return SelectedWorkspaceRoot is null
+        return _selectedWorkspaceRoot is null
             ? conversation.WorkspaceRootId is null
-            : conversation.WorkspaceRootId == SelectedWorkspaceRoot.Id;
+            : conversation.WorkspaceRootId == _selectedWorkspaceRoot.Id;
     }
 
     private void RefreshSidebarHistory()
@@ -1204,7 +1114,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .GroupBy(item => item.WorkspaceRootId!.Value)
             .ToDictionary(item => item.Key, item => item.ToArray());
 
-        var projects = WorkspaceRoots
+        var projects = _workspaceRoots
             .Select(root =>
             {
                 conversationsByWorkspaceId.TryGetValue(root.Id, out var conversations);
@@ -1238,19 +1148,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             conversation.Title,
             conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture),
             SelectedConversation?.Id == conversation.Id);
-
-    private void UpsertToolRun(ToolExecutionRecord record)
-    {
-        var index = _toolRuns.FindIndex(item => item.Id == record.Id);
-        if (index >= 0)
-        {
-            _toolRuns[index] = record;
-        }
-        else
-        {
-            _toolRuns.Add(record);
-        }
-    }
 
     private static void UpsertToolRun(ConversationRuntimeState runtimeState, ToolExecutionRecord record)
     {
@@ -1313,14 +1210,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             conversation.AgentId,
             ResolveConversationAgentName(conversation));
 
-    private void PublishAgentActivities()
-    {
-        var items = BuildAgentActivities(GetSelectedTranscriptToolRuns());
-        ReplaceCollection(AgentActivityNodes, items);
-        OnPropertyChanged(nameof(HasAgentActivityNodes));
-        PublishShell(false);
-    }
-
     private static AgentActivityNode[] BuildAgentActivities(IReadOnlyList<ToolExecutionRecord> toolRuns)
     {
         var toolItems = toolRuns
@@ -1370,9 +1259,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return null;
         }
     }
-
-    private TranscriptRenderItem BuildMessageItem(MessageRecord message)
-        => BuildMessageItem(message, []);
 
     private TranscriptRenderItem BuildMessageItem(
         MessageRecord message,
