@@ -14,6 +14,7 @@ const state = reactive({
 const composerText = ref('');
 const transcriptPanelRef = ref(null);
 const imagePreview = ref(null);
+const composerShellRef = ref(null);
 const openThoughts = ref(new Set());
 const openToolSegments = ref(new Set());
 const openToolGroups = ref(new Set());
@@ -30,6 +31,7 @@ const messagesHtml = computed(() =>
 	renderMessages(state.items || [], openThoughts.value, openToolSegments.value, openToolGroups.value)
 );
 const canSend = computed(() => composerText.value.trim().length > 0 && !state.isBusy);
+const isEmptyConversation = computed(() => (state.items || []).length === 0 && !state.isBusy);
 
 function getTranscriptScrollEl() {
 	return transcriptPanelRef.value?.getScrollEl?.() ?? null;
@@ -73,14 +75,40 @@ function shouldFollowTranscript() {
 function replaceState(payload) {
 	const transcriptEl = getTranscriptScrollEl();
 	const scrollSnapshot = snapshotScrollPosition(transcriptEl);
+	const nextItems = Array.isArray(payload.items) ? payload.items : [];
+	const nextBusy = Boolean(payload.isBusy);
+	const wasEmpty = (state.items || []).length === 0 && !state.isBusy;
+	const willBeEmpty = nextItems.length === 0 && !nextBusy;
+	const previousComposerRect = wasEmpty && !willBeEmpty
+		? composerShellRef.value?.getBoundingClientRect()
+		: null;
 
-	state.items = Array.isArray(payload.items) ? payload.items : [];
+	state.items = nextItems;
 	state.conversations = Array.isArray(payload.conversations) ? payload.conversations : [];
 	state.selectedConversationId = payload.selectedConversationId || null;
 	state.autoScroll = Boolean(payload.autoScroll);
-	state.isBusy = Boolean(payload.isBusy);
+	state.isBusy = nextBusy;
 
 	nextTick(() => {
+		const composer = composerShellRef.value;
+		if (composer && previousComposerRect) {
+			const nextComposerRect = composer.getBoundingClientRect();
+			const deltaY = previousComposerRect.top - nextComposerRect.top;
+
+			if (Math.abs(deltaY) > 4) {
+				composer.animate(
+					[
+						{ transform: `translateY(${deltaY}px)` },
+						{ transform: 'translateY(0)' },
+					],
+					{
+						duration: 850,
+						easing: 'cubic-bezier(0.18, 0.86, 0.24, 1)',
+					}
+				);
+			}
+		}
+
 		const currentTranscriptEl = getTranscriptScrollEl();
 		if (state.autoScroll || shouldFollowTranscript()) {
 			scrollTranscriptToBottom();
@@ -238,28 +266,24 @@ onUnmounted(() => {
 
 <template>
 	<div class="app" :class="{ busy: state.isBusy }">
-		<div class="workspace">
-			<TranscriptPanel
-				ref="transcriptPanelRef"
-				:messages-html="messagesHtml"
-				:items="state.items"
-				:conversations="state.conversations"
-				:selected-conversation-id="state.selectedConversationId"
-				@scroll="onTranscriptScroll"
-				@preview-image="openImagePreview"
-				@transcript-click="onTranscriptClick"
-				@transcript-keydown="onTranscriptKeydown"
-			/>
-			<section class="composer-shell" aria-label="消息输入">
+		<div class="workspace" :class="{
+			'empty-workspace': isEmptyConversation,
+		}">
+			<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :messages-html="messagesHtml"
+				:items="state.items" :conversations="state.conversations"
+				:selected-conversation-id="state.selectedConversationId" @scroll="onTranscriptScroll"
+				@preview-image="openImagePreview" @transcript-click="onTranscriptClick"
+				@transcript-keydown="onTranscriptKeydown" />
+			<section v-else class="empty-composer-stage" aria-label="新对话">
+				<div class="empty-composer-copy">
+					<h1>想聊些什么？</h1>
+					<p>随意提问，也可以使用搜索与已选择的 MCP 工具。</p>
+				</div>
+			</section>
+			<section ref="composerShellRef" class="composer-shell" aria-label="消息输入">
 				<div class="composer-grip" aria-hidden="true"></div>
-				<textarea
-					v-model="composerText"
-					class="composer-input"
-					rows="3"
-					placeholder="让助手帮你处理项目..."
-					:disabled="state.isBusy"
-					@keydown="onComposerKeydown"
-				></textarea>
+				<textarea v-model="composerText" class="composer-input" rows="3" placeholder="让助手帮你处理项目..."
+					:disabled="state.isBusy" @keydown="onComposerKeydown"></textarea>
 				<div class="composer-toolbar">
 					<div class="composer-tools-left">
 						<button class="composer-model" type="button" title="模型选择">
@@ -274,7 +298,8 @@ onUnmounted(() => {
 						</button>
 						<button class="icon-btn" type="button" title="文件">
 							<svg viewBox="0 0 20 20" aria-hidden="true">
-								<path d="M3.5 6.5h4l1.4 1.6h7.6v6.4a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2Z"></path>
+								<path d="M3.5 6.5h4l1.4 1.6h7.6v6.4a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2Z">
+								</path>
 								<path d="M3.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h3.7l1.4 1.7h5.6a1 1 0 0 1 1 1v1.9"></path>
 							</svg>
 						</button>
@@ -384,6 +409,42 @@ button {
 	display: grid;
 	grid-template-rows: minmax(0, 1fr) auto;
 	background: #ffffff;
+	transition: grid-template-rows 850ms cubic-bezier(0.18, 0.86, 0.24, 1);
+}
+
+.workspace.empty-workspace {
+	grid-template-rows: minmax(128px, 0.78fr) auto minmax(194px, 1fr);
+	align-items: stretch;
+}
+
+.empty-composer-stage {
+	min-height: 0;
+	display: flex;
+	align-items: flex-end;
+	justify-content: center;
+	padding: 0 28px 26px;
+	background: #ffffff;
+}
+
+.empty-composer-copy {
+	text-align: center;
+}
+
+.empty-composer-copy h1 {
+	margin: 0;
+	color: #171a1f;
+	font-family: var(--font-display);
+	font-size: clamp(34px, 4vw, 44px);
+	font-weight: 760;
+	line-height: 1.1;
+	letter-spacing: 0;
+}
+
+.empty-composer-copy p {
+	margin: 14px 0 0;
+	color: #9aa2ad;
+	font-size: 14px;
+	line-height: 1.6;
 }
 
 .panel,
@@ -543,7 +604,7 @@ button {
 	line-height: 1.6;
 }
 
-.body > * {
+.body>* {
 	max-width: 100%;
 }
 
@@ -614,7 +675,7 @@ code {
 	font-size: 13px;
 }
 
-:not(pre) > code {
+:not(pre)>code {
 	padding: 2px 6px;
 	border-radius: 5px;
 	background: #eef2f7;
@@ -870,7 +931,7 @@ a:hover {
 	padding: 0;
 }
 
-.tool-segment + .tool-segment {
+.tool-segment+.tool-segment {
 	margin-top: 6px;
 }
 
@@ -1275,6 +1336,13 @@ a:hover {
 		0 10px 24px rgba(23, 26, 31, 0.06);
 }
 
+.empty-workspace .composer-shell {
+	width: min(calc(100% - 72px), 728px);
+	min-height: 138px;
+	margin-bottom: 0;
+	padding-top: 24px;
+}
+
 .composer-grip {
 	position: absolute;
 	top: 5px;
@@ -1436,6 +1504,7 @@ a:hover {
 }
 
 @media (max-width: 960px) {
+
 	.message-main,
 	.message-row.user .message-main {
 		max-width: 100%;
@@ -1449,5 +1518,23 @@ a:hover {
 	.composer-shell {
 		width: calc(100% - 28px);
 	}
+
+	.workspace.empty-workspace {
+		grid-template-rows: minmax(112px, 0.7fr) auto minmax(156px, 1fr);
+	}
+
+	.empty-composer-stage {
+		padding-inline: 18px;
+		padding-bottom: 22px;
+	}
+
+	.empty-composer-copy h1 {
+		font-size: 32px;
+	}
+
+	.empty-workspace .composer-shell {
+		width: calc(100% - 28px);
+	}
+
 }
 </style>
