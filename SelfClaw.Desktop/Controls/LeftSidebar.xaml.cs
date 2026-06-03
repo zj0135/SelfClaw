@@ -15,6 +15,7 @@ public partial class LeftSidebar : UserControl
     public event EventHandler? StandaloneConversationsToggleRequested;
     public event EventHandler<Guid>? WorkspaceRootSelected;
     public event EventHandler<Guid>? ConversationSelected;
+    public event EventHandler<Guid>? ConversationDeleteRequested;
 
     public LeftSidebar()
     {
@@ -80,6 +81,15 @@ public partial class LeftSidebar : UserControl
         if (sender is Button { Tag: Guid conversationId })
         {
             ConversationSelected?.Invoke(this, conversationId);
+        }
+    }
+
+    private void OnDeleteConversationButtonClick(object sender, System.Windows.RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is Button { Tag: Guid conversationId })
+        {
+            ConversationDeleteRequested?.Invoke(this, conversationId);
         }
     }
 }

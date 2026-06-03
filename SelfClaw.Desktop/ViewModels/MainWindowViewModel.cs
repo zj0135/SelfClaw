@@ -330,6 +330,27 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IsSidebarStandaloneConversationsExpanded = !IsSidebarStandaloneConversationsExpanded;
     }
 
+    public async Task DeleteConversationAsync(Guid conversationId)
+    {
+        var conversation = _allConversations.FirstOrDefault(item => item.Id == conversationId);
+        if (conversation is null)
+        {
+            return;
+        }
+
+        if (_conversationRuntimeStates.TryGetValue(conversationId, out var runtimeState) && runtimeState.IsRunning)
+        {
+            runtimeState.CancellationTokenSource.Cancel();
+        }
+
+        await _conversationRepository.DeleteConversationAsync(conversationId);
+        _allConversations.RemoveAll(item => item.Id == conversationId);
+        _conversationStatusTexts.Remove(conversationId);
+        _conversationRuntimeStates.Remove(conversationId, out _);
+
+        ApplyConversationFilter();
+    }
+
     public Task ToggleSidebarWorkspaceRootAsync(Guid workspaceRootId)
     {
         if (!_expandedSidebarWorkspaceRootIds.Add(workspaceRootId))

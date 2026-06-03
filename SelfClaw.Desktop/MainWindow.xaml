@@ -174,7 +174,8 @@
                                        StandaloneConversationRequested="OnSidebarStandaloneConversationRequested"
                                        StandaloneConversationsToggleRequested="OnSidebarStandaloneConversationsToggleRequested"
                                        WorkspaceRootSelected="OnSidebarWorkspaceRootSelected"
-                                       ConversationSelected="OnSidebarConversationSelected"/>
+                                       ConversationSelected="OnSidebarConversationSelected"
+                                       ConversationDeleteRequested="OnSidebarConversationDeleteRequested"/>
                 </Border>
 
                 <Grid Grid.Column="1">

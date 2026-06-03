@@ -231,6 +231,95 @@
             </Setter>
         </Style>
 
+        <Style x:Key="SidebarConversationRowStyle"
+               TargetType="Border">
+            <Setter Property="Background"
+                    Value="Transparent"/>
+            <Setter Property="CornerRadius"
+                    Value="6"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver"
+                         Value="True">
+                    <Setter Property="Background"
+                            Value="#E9ECF2"/>
+                </Trigger>
+                <DataTrigger Binding="{Binding IsSelected}"
+                             Value="True">
+                    <Setter Property="Background"
+                            Value="#E2E8F0"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="SidebarConversationSelectButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SidebarNodeButtonStyle}">
+            <Setter Property="Height"
+                    Value="32"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SidebarConversationDeleteButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource IconButtonStyle}">
+            <Setter Property="Width"
+                    Value="28"/>
+            <Setter Property="Height"
+                    Value="28"/>
+            <Setter Property="MinHeight"
+                    Value="28"/>
+            <Setter Property="Margin"
+                    Value="4,0,0,0"/>
+            <Setter Property="HorizontalAlignment"
+                    Value="Right"/>
+            <Setter Property="VerticalAlignment"
+                    Value="Center"/>
+            <Setter Property="ToolTip"
+                    Value="Delete chat"/>
+            <Setter Property="Visibility"
+                    Value="Collapsed"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver"
+                                     Value="True">
+                                <Setter TargetName="Root"
+                                        Property="Background"
+                                        Value="#EEF2F7"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed"
+                                     Value="True">
+                                <Setter TargetName="Root"
+                                        Property="Background"
+                                        Value="#E5E7EB"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Grid}}"
+                             Value="True">
+                    <Setter Property="Visibility"
+                            Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
         <Style x:Key="SidebarAnimatedGroupContentBaseStyle"
                TargetType="Border">
             <Setter Property="ClipToBounds"
@@ -584,27 +673,44 @@
                                                           Visibility="{Binding IsExpanded, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Button Style="{StaticResource SidebarSelectableNodeButtonStyle}"
-                                                                Height="32"
-                                                                Tag="{Binding Id}"
-                                                                Click="OnConversationButtonClick">
-                                                            <Grid>
+                                                        <Border Style="{StaticResource SidebarConversationRowStyle}">
+                                                            <Grid Height="32"
+                                                                  Background="Transparent">
                                                                 <Grid.ColumnDefinitions>
                                                                     <ColumnDefinition Width="28"/>
                                                                     <ColumnDefinition Width="*"/>
-                                                                    <ColumnDefinition Width="Auto"/>
+                                                                    <ColumnDefinition Width="30"/>
                                                                 </Grid.ColumnDefinitions>
-                                                                <TextBlock Grid.Column="1"
-                                                                           Style="{StaticResource NavTextStyle}"
-                                                                           FontSize="12"
-                                                                           Text="{Binding Title}"
-                                                                           TextTrimming="CharacterEllipsis"/>
-                                                                <TextBlock Grid.Column="2"
-                                                                           Margin="8,0,0,0"
-                                                                           Style="{StaticResource MutedLabelStyle}"
-                                                                           Text="{Binding Timestamp}"/>
+                                                                <Button Grid.ColumnSpan="2"
+                                                                        Style="{StaticResource SidebarConversationSelectButtonStyle}"
+                                                                        Tag="{Binding Id}"
+                                                                        Click="OnConversationButtonClick">
+                                                                    <Grid>
+                                                                        <Grid.ColumnDefinitions>
+                                                                            <ColumnDefinition Width="28"/>
+                                                                            <ColumnDefinition Width="*"/>
+                                                                        </Grid.ColumnDefinitions>
+                                                                        <TextBlock Grid.Column="1"
+                                                                                   Style="{StaticResource NavTextStyle}"
+                                                                                   FontSize="12"
+                                                                                   Text="{Binding Title}"
+                                                                                   TextTrimming="CharacterEllipsis"/>
+                                                                    </Grid>
+                                                                </Button>
+                                                                <Button Grid.Column="2"
+                                                                        Style="{StaticResource SidebarConversationDeleteButtonStyle}"
+                                                                        Tag="{Binding Id}"
+                                                                        Click="OnDeleteConversationButtonClick">
+                                                                    <Path Width="11"
+                                                                          Height="11"
+                                                                          Stroke="#374151"
+                                                                          StrokeThickness="1.35"
+                                                                          StrokeStartLineCap="Round"
+                                                                          StrokeEndLineCap="Round"
+                                                                          Data="M2,2 L9,9 M9,2 L2,9"/>
+                                                                </Button>
                                                             </Grid>
-                                                        </Button>
+                                                        </Border>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
@@ -736,26 +842,44 @@
                             <ItemsControl ItemsSource="{Binding SidebarStandaloneConversations}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Button Style="{StaticResource SidebarSelectableNodeButtonStyle}"
-                                                Tag="{Binding Id}"
-                                                Click="OnConversationButtonClick">
-                                            <Grid>
+                                        <Border Style="{StaticResource SidebarConversationRowStyle}">
+                                            <Grid Height="32"
+                                                  Background="Transparent">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="28"/>
                                                     <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="30"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="1"
-                                                           Style="{StaticResource NavTextStyle}"
-                                                           FontSize="13"
-                                                           Text="{Binding Title}"
-                                                           TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Grid.Column="2"
-                                                           Margin="8,0,0,0"
-                                                           Style="{StaticResource MutedLabelStyle}"
-                                                           Text="{Binding Timestamp}"/>
+                                                <Button Grid.ColumnSpan="2"
+                                                        Style="{StaticResource SidebarConversationSelectButtonStyle}"
+                                                        Tag="{Binding Id}"
+                                                        Click="OnConversationButtonClick">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="28"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Grid.Column="1"
+                                                                   Style="{StaticResource NavTextStyle}"
+                                                                   FontSize="13"
+                                                                   Text="{Binding Title}"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    </Grid>
+                                                </Button>
+                                                <Button Grid.Column="2"
+                                                        Style="{StaticResource SidebarConversationDeleteButtonStyle}"
+                                                        Tag="{Binding Id}"
+                                                        Click="OnDeleteConversationButtonClick">
+                                                    <Path Width="11"
+                                                          Height="11"
+                                                          Stroke="#374151"
+                                                          StrokeThickness="1.35"
+                                                          StrokeStartLineCap="Round"
+                                                          StrokeEndLineCap="Round"
+                                                          Data="M2,2 L9,9 M9,2 L2,9"/>
+                                                </Button>
                                             </Grid>
-                                        </Button>
+                                        </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>

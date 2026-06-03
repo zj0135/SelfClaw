@@ -296,6 +296,12 @@ public partial class MainWindow : Window
         await _viewModel.SelectConversationAsync(conversationId);
     }
 
+    private async void OnSidebarConversationDeleteRequested(object? sender, Guid conversationId)
+    {
+        SetSystemSettingsOpen(false);
+        await _viewModel.DeleteConversationAsync(conversationId);
+    }
+
     private void SetSystemSettingsOpen(bool isOpen)
     {
         SystemSettingsPanelHost.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
