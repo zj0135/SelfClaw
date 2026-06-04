@@ -279,12 +279,6 @@
                     </Grid>
 
                     <Grid Grid.Row="1">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition x:Name="TerminalDrawerRow"
-                                           Height="0"/>
-                        </Grid.RowDefinitions>
-
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"
                                               MinWidth="600"/>
@@ -315,24 +309,11 @@
                         </Grid>
 
                         <Border x:Name="RightPanelHost"
-                                Grid.RowSpan="2"
                                 Grid.Column="1"
                                 BorderBrush="#E5E7EB"
                                 BorderThickness="1,0,0,0"
                                 Visibility="Collapsed">
                             <local:RightPanel/>
-                        </Border>
-
-                        <Border x:Name="TerminalDrawerHost"
-                                Grid.Row="1"
-                                Grid.Column="0"
-                                Margin="0"
-                                HorizontalAlignment="Stretch"
-                                VerticalAlignment="Stretch"
-                                Visibility="Collapsed"
-                                Panel.ZIndex="10">
-                            <local:TerminalPanel x:Name="TerminalPanelControl"
-                                                 CloseRequested="OnTerminalPanelCloseRequested"/>
                         </Border>
                     </Grid>
                 </Grid>

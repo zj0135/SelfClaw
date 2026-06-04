@@ -146,6 +146,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _activeThemeMode, value);
     }
 
+    public string? SelectedWorkspaceRootPath => _selectedWorkspaceRoot?.RootPath;
+
     public string EffectiveTranscriptTheme
     {
         get => _effectiveTranscriptTheme;
@@ -379,6 +381,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _selectedWorkspaceRoot = workspaceRoot;
+        OnPropertyChanged(nameof(SelectedWorkspaceRootPath));
         if (publishShell)
         {
             PublishShell(false);

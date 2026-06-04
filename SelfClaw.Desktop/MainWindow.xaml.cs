@@ -10,6 +10,7 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using SelfClaw.Desktop.Services;
+using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.ViewModels;
 
 namespace SelfClaw.Desktop;
@@ -17,9 +18,10 @@ namespace SelfClaw.Desktop;
 public partial class MainWindow : Window
 {
     private const double ExpandedRightPanelWidth = 320d;
-    private const double ExpandedTerminalDrawerHeight = 286d;
     private static readonly Duration DrawerAnimationDuration = TimeSpan.FromMilliseconds(180);
     private const string AssetsHostName = "appassets.selfclaw.local";
+    private const int DefaultTerminalColumns = 120;
+    private const int DefaultTerminalRows = 24;
     private const int WmGetMinMaxInfo = 0x0024;
     private const uint MonitorDefaultToNearest = 2;
     private const double StartupWorkAreaMargin = 48d;
@@ -34,10 +36,15 @@ public partial class MainWindow : Window
         IsBusy: false);
     private bool _webViewReady;
     private bool _isTerminalDrawerOpen;
+    private bool _terminalReady;
+    private bool _isTerminalFocused;
     private bool _isRightPanelOpen;
     private string? _activeRightPanelTool;
-    private DispatcherTimer? _terminalDrawerAnimationTimer;
     private DispatcherTimer? _rightPanelAnimationTimer;
+    private ConPtyTerminalSession? _terminalSession;
+    private string _terminalWorkingDirectory = ResolveDefaultTerminalWorkingDirectory();
+    private int _terminalColumns = DefaultTerminalColumns;
+    private int _terminalRows = DefaultTerminalRows;
 
     public MainWindow(
         MainWindowViewModel viewModel,
@@ -87,6 +94,7 @@ public partial class MainWindow : Window
         _viewModel.TranscriptChanged -= OnTranscriptChanged;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         TranscriptView.NavigationCompleted -= OnTranscriptNavigationCompleted;
+        StopTerminalSession();
 
         if (TranscriptView.CoreWebView2 is not null)
         {
@@ -150,6 +158,7 @@ public partial class MainWindow : Window
 
         _webViewReady = true;
         PostTranscript(_pendingTranscript);
+        PostTerminalState();
     }
 
     private void OnTranscriptChanged(object? sender, TranscriptRenderState state)
@@ -187,6 +196,14 @@ public partial class MainWindow : Window
     {
         if (e.Key == Key.Escape)
         {
+            if (_isTerminalFocused && _terminalSession is not null)
+            {
+                _terminalSession.WriteInput("\x1b");
+                FocusTranscriptView();
+                e.Handled = true;
+                return;
+            }
+
             _viewModel.StopGeneration();
             e.Handled = true;
         }
@@ -234,11 +251,6 @@ public partial class MainWindow : Window
     {
         SetSystemSettingsOpen(false);
         SetTerminalDrawerOpen(!_isTerminalDrawerOpen);
-    }
-
-    private void OnTerminalPanelCloseRequested(object? sender, EventArgs e)
-    {
-        SetTerminalDrawerOpen(false);
     }
 
     private void OnFileManagerToolButtonClick(object sender, RoutedEventArgs e)
@@ -323,17 +335,25 @@ public partial class MainWindow : Window
     private void SetTerminalDrawerOpen(bool isOpen)
     {
         _isTerminalDrawerOpen = isOpen;
-        if (isOpen)
+        if (!isOpen)
         {
-            TerminalDrawerHost.Visibility = Visibility.Visible;
+            _isTerminalFocused = false;
         }
 
-        AnimateGridLength(
-            ref _terminalDrawerAnimationTimer,
-            TerminalDrawerRow.Height.Value,
-            isOpen ? ExpandedTerminalDrawerHeight : 0,
-            value => TerminalDrawerRow.Height = new GridLength(value),
-            isOpen ? null : () => TerminalDrawerHost.Visibility = Visibility.Collapsed);
+        if (isOpen)
+        {
+            var resolvedWorkingDirectory = ResolveTerminalWorkingDirectory();
+            if (!PathsEqual(_terminalWorkingDirectory, resolvedWorkingDirectory))
+            {
+                _terminalWorkingDirectory = resolvedWorkingDirectory;
+                StopTerminalSession();
+            }
+
+            EnsureTerminalSession();
+            FocusTranscriptView();
+        }
+
+        PostTerminalState();
     }
 
     private void ToggleRightPanelTool(string toolId)
@@ -401,6 +421,17 @@ public partial class MainWindow : Window
         animationTimer.Start();
     }
 
+    private string ResolveTerminalWorkingDirectory()
+    {
+        var workspaceRootPath = _viewModel.SelectedWorkspaceRootPath;
+        if (!string.IsNullOrWhiteSpace(workspaceRootPath) && Directory.Exists(workspaceRootPath))
+        {
+            return workspaceRootPath;
+        }
+
+        return ResolveDefaultTerminalWorkingDirectory();
+    }
+
     private void ToggleWindowState()
     {
         if (ResizeMode is not (ResizeMode.CanResize or ResizeMode.CanResizeWithGrip))
@@ -418,6 +449,10 @@ public partial class MainWindow : Window
         if (e.PropertyName == nameof(MainWindowViewModel.ActiveThemeMode))
         {
             ApplyThemeMode();
+        }
+        else if (e.PropertyName == nameof(MainWindowViewModel.SelectedWorkspaceRootPath) && _isTerminalDrawerOpen)
+        {
+            ResetTerminalWorkingDirectoryIfNeeded();
         }
     }
 
@@ -456,12 +491,228 @@ public partial class MainWindow : Window
                     await _viewModel.SubmitPromptAsync(prompt);
                     break;
                 }
+                case "terminal-ready":
+                    _terminalReady = true;
+                    ApplyTerminalResize(document.RootElement);
+                    PostTerminalState();
+                    if (_isTerminalDrawerOpen)
+                    {
+                        EnsureTerminalSession();
+                    }
+                    break;
+                case "terminal-input":
+                    if (_terminalSession is not null && document.RootElement.TryGetProperty("data", out var dataElement))
+                    {
+                        _terminalSession.WriteInput(dataElement.GetString() ?? string.Empty);
+                    }
+                    break;
+                case "terminal-resize":
+                    ApplyTerminalResize(document.RootElement);
+                    break;
+                case "terminal-focus-change":
+                    _isTerminalFocused = document.RootElement.TryGetProperty("isFocused", out var isFocusedElement) &&
+                                         isFocusedElement.GetBoolean() &&
+                                         _isTerminalDrawerOpen;
+                    break;
+                case "terminal-close":
+                    SetTerminalDrawerOpen(false);
+                    break;
+                case "terminal-restart":
+                    RestartTerminalSession();
+                    break;
             }
         }
         catch (Exception exception)
         {
             Debug.WriteLine(exception);
         }
+    }
+
+    private void EnsureTerminalSession()
+    {
+        if (!_terminalReady || _terminalSession is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            _terminalSession = new ConPtyTerminalSession(
+                ResolvePowerShellExecutable(),
+                _terminalWorkingDirectory,
+                _terminalColumns,
+                _terminalRows);
+            _terminalSession.OutputReceived += OnTerminalOutputReceived;
+            _terminalSession.Exited += OnTerminalExited;
+            _terminalSession.Start();
+            PostTerminalState();
+            PostTerminalFocus();
+        }
+        catch (Exception exception)
+        {
+            PostTerminalOutput($"\r\nFailed to start terminal: {exception.Message}\r\n");
+        }
+    }
+
+    private void RestartTerminalSession()
+    {
+        StopTerminalSession();
+        PostTerminalMessage(new { type = "terminal-clear" });
+        if (_isTerminalDrawerOpen)
+        {
+            EnsureTerminalSession();
+        }
+    }
+
+    private void StopTerminalSession()
+    {
+        var session = _terminalSession;
+        _terminalSession = null;
+        if (session is null)
+        {
+            return;
+        }
+
+        session.OutputReceived -= OnTerminalOutputReceived;
+        session.Exited -= OnTerminalExited;
+        session.Dispose();
+        _isTerminalFocused = false;
+        PostTerminalState();
+    }
+
+    private void OnTerminalOutputReceived(object? sender, string data)
+    {
+        _ = Dispatcher.BeginInvoke(new Action(() => PostTerminalOutput(data)), DispatcherPriority.Background);
+    }
+
+    private void OnTerminalExited(object? sender, int? exitCode)
+    {
+        _ = Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                var exitedSession = sender as ConPtyTerminalSession;
+                if (ReferenceEquals(sender, _terminalSession))
+                {
+                    _terminalSession = null;
+                }
+
+                if (exitedSession is not null)
+                {
+                    exitedSession.OutputReceived -= OnTerminalOutputReceived;
+                    exitedSession.Exited -= OnTerminalExited;
+                    exitedSession.Dispose();
+                }
+
+                PostTerminalOutput(exitCode is int code
+                    ? $"\r\n[terminal exited with code {code}]\r\n"
+                    : "\r\n[terminal exited]\r\n");
+                PostTerminalState();
+            }),
+            DispatcherPriority.Background);
+    }
+
+    private void ApplyTerminalResize(JsonElement root)
+    {
+        if (!root.TryGetProperty("cols", out var colsElement) ||
+            !root.TryGetProperty("rows", out var rowsElement))
+        {
+            return;
+        }
+
+        var cols = Math.Max(1, colsElement.GetInt32());
+        var rows = Math.Max(1, rowsElement.GetInt32());
+        _terminalColumns = cols;
+        _terminalRows = rows;
+        _terminalSession?.Resize(cols, rows);
+    }
+
+    private void PostTerminalOutput(string data)
+        => PostTerminalMessage(new
+        {
+            type = "terminal-output",
+            data
+        });
+
+    private void PostTerminalState()
+        => PostTerminalMessage(new
+        {
+            type = "terminal-state",
+            isOpen = _isTerminalDrawerOpen,
+            isRunning = _terminalSession is not null,
+            cwd = _terminalWorkingDirectory
+        });
+
+    private void PostTerminalFocus()
+        => PostTerminalMessage(new { type = "terminal-focus" });
+
+    private void PostTerminalMessage(object payload)
+    {
+        if (!_webViewReady || TranscriptView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
+        TranscriptView.CoreWebView2.PostWebMessageAsJson(json);
+    }
+
+    private void FocusTranscriptView()
+    {
+        if (TranscriptView.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        TranscriptView.Focus();
+        Keyboard.Focus(TranscriptView);
+        PostTerminalFocus();
+    }
+
+    private static string ResolvePowerShellExecutable()
+        => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell",
+            "v1.0",
+            "powershell.exe");
+
+    private static string ResolveDefaultTerminalWorkingDirectory()
+    {
+        var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (!string.IsNullOrWhiteSpace(desktopPath) && Directory.Exists(desktopPath))
+        {
+            return desktopPath;
+        }
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return string.IsNullOrWhiteSpace(userProfile) ? AppContext.BaseDirectory : userProfile;
+    }
+
+    private static bool PathsEqual(string left, string right)
+        => string.Equals(
+            Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
+
+    private void ResetTerminalWorkingDirectoryIfNeeded()
+    {
+        var resolvedWorkingDirectory = ResolveTerminalWorkingDirectory();
+        if (PathsEqual(_terminalWorkingDirectory, resolvedWorkingDirectory))
+        {
+            return;
+        }
+
+        _terminalWorkingDirectory = resolvedWorkingDirectory;
+        StopTerminalSession();
+        if (_isTerminalDrawerOpen)
+        {
+            EnsureTerminalSession();
+        }
+
+        PostTerminalState();
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

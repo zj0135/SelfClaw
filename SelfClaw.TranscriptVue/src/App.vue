@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
+import TerminalPanel from './components/TerminalPanel.vue';
 import TranscriptPanel from './components/TranscriptPanel.vue';
 import { renderMessages } from './renderers';
 
@@ -9,10 +10,16 @@ const state = reactive({
 	selectedConversationId: null,
 	autoScroll: false,
 	isBusy: false,
+	terminal: {
+		isOpen: false,
+		isRunning: false,
+		cwd: '',
+	},
 });
 
 const composerText = ref('');
 const transcriptPanelRef = ref(null);
+const terminalPanelRef = ref(null);
 const imagePreview = ref(null);
 const composerShellRef = ref(null);
 const openThoughts = ref(new Set());
@@ -127,6 +134,20 @@ function handleIncomingMessage(event) {
 
 	if (payload.type === 'replaceState') {
 		replaceState(payload);
+	} else if (payload.type === 'terminal-state') {
+		state.terminal.isOpen = Boolean(payload.isOpen);
+		state.terminal.isRunning = Boolean(payload.isRunning);
+		state.terminal.cwd = payload.cwd || '';
+		nextTick(() => {
+			terminalPanelRef.value?.fit?.();
+			terminalPanelRef.value?.focus?.();
+		});
+	} else if (payload.type === 'terminal-output') {
+		terminalPanelRef.value?.write?.(payload.data || '');
+	} else if (payload.type === 'terminal-clear') {
+		terminalPanelRef.value?.clear?.();
+	} else if (payload.type === 'terminal-focus') {
+		nextTick(() => terminalPanelRef.value?.focus?.());
 	}
 }
 
@@ -251,6 +272,60 @@ function onDocumentKeydown(event) {
 	}
 }
 
+function onTerminalReady(size) {
+	post({
+		type: 'terminal-ready',
+		cols: size.cols,
+		rows: size.rows,
+	});
+}
+
+function onTerminalInput(data) {
+	post({
+		type: 'terminal-input',
+		data,
+	});
+}
+
+function onTerminalResize(size) {
+	post({
+		type: 'terminal-resize',
+		cols: size.cols,
+		rows: size.rows,
+	});
+}
+
+function onTerminalClose() {
+	post({ type: 'terminal-close' });
+}
+
+function onTerminalRestart() {
+	post({ type: 'terminal-restart' });
+}
+
+function onTerminalFocusChange(isFocused) {
+	post({
+		type: 'terminal-focus-change',
+		isFocused,
+	});
+}
+
+function onWorkspacePointerDown(event) {
+	if (event.target instanceof Element && event.target.closest('.terminal-panel')) {
+		return;
+	}
+
+	onTerminalFocusChange(false);
+}
+
+function onWorkspaceFocusIn(event) {
+	if (event.target instanceof Element && event.target.closest('.terminal-panel')) {
+		return;
+	}
+
+	onTerminalFocusChange(false);
+}
+
 onMounted(() => {
 	window.chrome?.webview?.addEventListener('message', handleIncomingMessage);
 	document.addEventListener('click', handleDocumentClick);
@@ -268,7 +343,8 @@ onUnmounted(() => {
 	<div class="app" :class="{ busy: state.isBusy }">
 		<div class="workspace" :class="{
 			'empty-workspace': isEmptyConversation,
-		}">
+			'terminal-open': state.terminal.isOpen,
+		}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
 			<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :messages-html="messagesHtml"
 				:items="state.items" :conversations="state.conversations"
 				:selected-conversation-id="state.selectedConversationId" @scroll="onTranscriptScroll"
@@ -322,6 +398,10 @@ onUnmounted(() => {
 					</div>
 				</div>
 			</section>
+			<TerminalPanel ref="terminalPanelRef" :is-open="state.terminal.isOpen"
+				:is-running="state.terminal.isRunning" :cwd="state.terminal.cwd" @ready="onTerminalReady"
+				@input="onTerminalInput" @resize="onTerminalResize" @close="onTerminalClose"
+				@restart="onTerminalRestart" @focus-change="onTerminalFocusChange" />
 		</div>
 		<div v-if="imagePreview" class="image-preview-backdrop" @click.self="closeImagePreview">
 			<div class="image-preview-dialog">
@@ -407,14 +487,22 @@ button {
 	width: 100%;
 	height: 100%;
 	display: grid;
-	grid-template-rows: minmax(0, 1fr) auto;
+	grid-template-rows: minmax(0, 1fr) auto 0;
 	background: #ffffff;
 	transition: grid-template-rows 850ms cubic-bezier(0.18, 0.86, 0.24, 1);
 }
 
 .workspace.empty-workspace {
-	grid-template-rows: minmax(128px, 0.78fr) auto minmax(194px, 1fr);
+	grid-template-rows: minmax(128px, 0.78fr) auto 0 minmax(194px, 1fr);
 	align-items: stretch;
+}
+
+.workspace.terminal-open {
+	grid-template-rows: minmax(0, 1fr) auto 286px;
+}
+
+.workspace.empty-workspace.terminal-open {
+	grid-template-rows: minmax(96px, 1fr) auto 286px 0;
 }
 
 .empty-composer-stage {
@@ -1520,7 +1608,11 @@ a:hover {
 	}
 
 	.workspace.empty-workspace {
-		grid-template-rows: minmax(112px, 0.7fr) auto minmax(156px, 1fr);
+		grid-template-rows: minmax(112px, 0.7fr) auto 0 minmax(156px, 1fr);
+	}
+
+	.workspace.empty-workspace.terminal-open {
+		grid-template-rows: minmax(84px, 1fr) auto 286px 0;
 	}
 
 	.empty-composer-stage {
