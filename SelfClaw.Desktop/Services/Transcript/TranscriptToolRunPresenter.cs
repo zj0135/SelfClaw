@@ -8,32 +8,6 @@ internal static class TranscriptToolRunPresenter
 {
     private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
 
-    public static AgentActivityNode BuildActivityNode(ToolExecutionRecord toolRun)
-        => new(
-            toolRun.Id.ToString("D"),
-            "tool",
-            "Tool call",
-            toolRun.Status.ToString().ToLowerInvariant(),
-            toolRun.Status switch
-            {
-                ToolExecutionStatus.Running => "Running",
-                ToolExecutionStatus.AwaitingApproval => "Awaiting approval",
-                ToolExecutionStatus.Completed => "Completed",
-                ToolExecutionStatus.Failed => "Failed",
-                ToolExecutionStatus.Cancelled => "Cancelled",
-                _ => "Updated"
-            },
-            HumanizeToolName(toolRun.ToolName),
-            BuildToolSummary(toolRun),
-            toolRun.CreatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
-            [
-                new AgentActivityDetail("Tool", toolRun.ToolName),
-                new AgentActivityDetail("Arguments", PrettyPrintJson(toolRun.ArgumentsJson), true),
-                new AgentActivityDetail("Result", BuildToolResultText(toolRun)),
-                new AgentActivityDetail("Duration", FormatToolDuration(toolRun))
-            ],
-            toolRun.AgentId?.ToString("D"));
-
     public static Dictionary<Guid, IReadOnlyList<ToolRunPlacement>> BuildToolRunsByMessageId(
         IReadOnlyList<MessageRecord> messages,
         IReadOnlyList<ToolExecutionRecord> toolRuns,
@@ -169,17 +143,6 @@ internal static class TranscriptToolRunPresenter
             BuildToolDetailTitle(toolRun),
             BuildToolDetailText(toolRun));
 
-    private static string BuildToolSummary(ToolExecutionRecord toolRun)
-        => toolRun.Status switch
-        {
-            ToolExecutionStatus.Running => "Waiting for the tool result.",
-            ToolExecutionStatus.AwaitingApproval => toolRun.ResultSummary ?? "Waiting for your confirmation.",
-            ToolExecutionStatus.Completed => toolRun.ResultSummary ?? "Tool call completed.",
-            ToolExecutionStatus.Failed => toolRun.ResultSummary ?? "Tool call failed.",
-            ToolExecutionStatus.Cancelled => toolRun.ResultSummary ?? "Tool call was cancelled.",
-            _ => toolRun.ResultSummary ?? "Tool activity updated."
-        };
-
     private static int ResolveInsertionIndex(int? anchoredIndex, IReadOnlyList<int> candidateIndexes, int fallbackCursor)
     {
         if (candidateIndexes.Count == 0)
@@ -217,22 +180,6 @@ internal static class TranscriptToolRunPresenter
             _ => HumanizeToolName(toolRun.ToolName)
         };
     }
-
-    private static string BuildToolResultText(ToolExecutionRecord toolRun)
-        => toolRun.Status switch
-        {
-            ToolExecutionStatus.Running => "Pending result.",
-            ToolExecutionStatus.AwaitingApproval => toolRun.ResultSummary ?? "Waiting for approval.",
-            ToolExecutionStatus.Completed => toolRun.ResultSummary ?? "Completed without a stored summary.",
-            ToolExecutionStatus.Failed => toolRun.ResultSummary ?? "Failed without an error summary.",
-            ToolExecutionStatus.Cancelled => toolRun.ResultSummary ?? "Cancelled without a stored summary.",
-            _ => toolRun.ResultSummary ?? "No result captured."
-        };
-
-    private static string FormatToolDuration(ToolExecutionRecord toolRun)
-        => toolRun.DurationMs is null
-            ? toolRun.Status is ToolExecutionStatus.Running or ToolExecutionStatus.AwaitingApproval ? "In progress" : "n/a"
-            : $"{Math.Round(toolRun.DurationMs.Value)} ms";
 
     private static string? FormatInlineToolDuration(ToolExecutionRecord toolRun)
     {

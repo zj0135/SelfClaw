@@ -1,35 +1,10 @@
 <script setup>
 import { ref } from 'vue';
-import TranscriptGraphView from './TranscriptGraphView.vue';
 
 defineProps({
 	messagesHtml: {
 		type: String,
 		default: '',
-	},
-	visualizationEnabled: {
-		type: Boolean,
-		default: false,
-	},
-	items: {
-		type: Array,
-		default: () => [],
-	},
-	conversations: {
-		type: Array,
-		default: () => [],
-	},
-	selectedConversationId: {
-		type: String,
-		default: null,
-	},
-	selectedProfileModel: {
-		type: String,
-		default: '',
-	},
-	agentActivities: {
-		type: Array,
-		default: () => [],
 	},
 });
 
@@ -91,24 +66,13 @@ defineExpose({
 	<section class="panel transcript-panel">
 		<div
 			id="transcript-scroll"
-		ref="scrollEl"
-		class="transcript-scroll"
-		:class="{
-			'graph-mode': visualizationEnabled,
-		}"
-		@scroll="emit('scroll', $event)"
-		@click="onTranscriptClick"
-		@keydown="onTranscriptKeydown"
-	>
-			<TranscriptGraphView
-				v-if="visualizationEnabled"
-				:items="items"
-				:conversations="conversations"
-				:selected-conversation-id="selectedConversationId"
-				:selected-profile-model="selectedProfileModel"
-				:agent-activities="agentActivities"
-			/>
-			<div v-else v-html="messagesHtml"></div>
+			ref="scrollEl"
+			class="transcript-scroll"
+			@scroll="emit('scroll', $event)"
+			@click="onTranscriptClick"
+			@keydown="onTranscriptKeydown"
+		>
+			<div v-html="messagesHtml"></div>
 		</div>
 	</section>
 </template>

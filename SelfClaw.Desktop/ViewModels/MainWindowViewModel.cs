@@ -1170,7 +1170,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var transcriptMessages = GetSelectedTranscriptMessages();
         var transcriptToolRuns = GetSelectedTranscriptToolRuns();
         var transcriptToolRunAnchors = GetSelectedTranscriptToolRunAnchors();
-        var agentActivities = BuildAgentActivities(transcriptToolRuns);
         var toolRunsByMessageId = TranscriptToolRunPresenter.BuildToolRunsByMessageId(
             transcriptMessages,
             transcriptToolRuns,
@@ -1212,18 +1211,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ResolveConversationAgentName(conversation),
             conversation.AgentId,
             ResolveConversationAgentName(conversation));
-
-    private static AgentActivityNode[] BuildAgentActivities(IReadOnlyList<ToolExecutionRecord> toolRuns)
-    {
-        var toolItems = toolRuns
-            .Select(item => (Timestamp: item.UpdatedAtUtc, Node: TranscriptToolRunPresenter.BuildActivityNode(item)));
-
-        return toolItems
-            .OrderByDescending(item => item.Timestamp)
-            .ThenBy(item => item.Node.Title, StringComparer.Ordinal)
-            .Select(item => item.Node)
-            .ToArray();
-    }
 
     private static IReadOnlyList<TranscriptImageAttachment> BuildImageAttachments(MessageRecord message)
     {
