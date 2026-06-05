@@ -12,6 +12,7 @@ using Microsoft.Web.WebView2.Core;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.ViewModels;
+using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop;
 
@@ -20,6 +21,7 @@ public partial class MainWindow : Window
     private const double ExpandedRightPanelWidth = 320d;
     private static readonly Duration DrawerAnimationDuration = TimeSpan.FromMilliseconds(180);
     private const string AssetsHostName = "appassets.selfclaw.local";
+    private const string AttachmentHostName = "attachments.selfclaw.local";
     private const int DefaultTerminalColumns = 120;
     private const int DefaultTerminalRows = 24;
     private const int WmGetMinMaxInfo = 0x0024;
@@ -27,6 +29,7 @@ public partial class MainWindow : Window
     private const double StartupWorkAreaMargin = 48d;
 
     private readonly MainWindowViewModel _viewModel;
+    private readonly StoragePaths _storagePaths;
     private TranscriptRenderState _pendingTranscript = new(
         Items: [],
         AutoScroll: false,
@@ -48,11 +51,13 @@ public partial class MainWindow : Window
 
     public MainWindow(
         MainWindowViewModel viewModel,
-        DesktopNotificationService desktopNotificationService)
+        DesktopNotificationService desktopNotificationService,
+        StoragePaths storagePaths)
     {
         InitializeComponent();
         ApplyAdaptiveStartupSize();
         _viewModel = viewModel;
+        _storagePaths = storagePaths;
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
         SourceInitialized += OnSourceInitialized;
@@ -138,6 +143,13 @@ public partial class MainWindow : Window
             TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 AssetsHostName,
                 assetsRootPath,
+                CoreWebView2HostResourceAccessKind.Allow);
+
+            var attachmentsRootPath = Path.Combine(_storagePaths.AppDataDirectory, "attachments");
+            Directory.CreateDirectory(attachmentsRootPath);
+            TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                AttachmentHostName,
+                attachmentsRootPath,
                 CoreWebView2HostResourceAccessKind.Allow);
 
             TranscriptView.Source = new Uri($"https://{AssetsHostName}/TranscriptVue/index.html");

@@ -384,8 +384,9 @@ function renderMessageAttachments(item) {
 		.map((attachment) => {
 			const fileName = escapeHtml(attachment.fileName || 'image');
 			const size = escapeHtml(formatAttachmentSize(attachment.byteLength));
-			const image = attachment.dataUrl
-				? `<img class="message-attachment-image" src="${escapeHtml(attachment.dataUrl)}" alt="${fileName}" loading="lazy" />`
+			const sourceUrl = attachment.sourceUrl || attachment.dataUrl || '';
+			const image = sourceUrl
+				? `<img class="message-attachment-image" src="${escapeHtml(sourceUrl)}" alt="${fileName}" loading="lazy" />`
 				: `<div class="message-attachment-image missing" aria-hidden="true"></div>`;
 			return `
         <figure class="message-attachment">

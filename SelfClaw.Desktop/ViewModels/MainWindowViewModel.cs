@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Text;
+using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -26,6 +27,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private const int MaxPromptImageAttachments = 6;
     private const long MaxPromptImageBytes = 10 * 1024 * 1024;
     private const long MaxPromptImageTotalBytes = 30 * 1024 * 1024;
+    private const string AttachmentHostName = "attachments.selfclaw.local";
     private readonly IConversationRepository _conversationRepository;
     private readonly IProfileRepository _profileRepository;
     private readonly ISecretProtector _secretProtector;
@@ -66,6 +68,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
     private bool _pendingStreamingPublish;
     private bool _pendingStreamingAutoScroll;
+    private string? _lastPublishedShellFingerprint;
     private DateTimeOffset _lastStreamingPublishAtUtc = DateTimeOffset.MinValue;
     private int _disposeStarted;
 
@@ -1170,6 +1173,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var transcriptMessages = GetSelectedTranscriptMessages();
         var transcriptToolRuns = GetSelectedTranscriptToolRuns();
         var transcriptToolRunAnchors = GetSelectedTranscriptToolRunAnchors();
+        var fingerprint = BuildShellFingerprint(
+            autoScroll,
+            transcriptMessages,
+            transcriptToolRuns,
+            transcriptToolRunAnchors);
+        if (string.Equals(_lastPublishedShellFingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastPublishedShellFingerprint = fingerprint;
+
         var toolRunsByMessageId = TranscriptToolRunPresenter.BuildToolRunsByMessageId(
             transcriptMessages,
             transcriptToolRuns,
@@ -1194,6 +1209,113 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             isBusy));
     }
 
+    private string BuildShellFingerprint(
+        bool autoScroll,
+        IReadOnlyList<MessageRecord> transcriptMessages,
+        IReadOnlyList<ToolExecutionRecord> transcriptToolRuns,
+        IReadOnlyDictionary<Guid, ToolRunAnchor> transcriptToolRunAnchors)
+    {
+        var builder = new StringBuilder();
+        builder.Append(autoScroll ? '1' : '0')
+            .Append('|')
+            .Append(SelectedConversation?.Id.ToString("D"))
+            .Append('|')
+            .Append(EffectiveTranscriptTheme)
+            .Append('|')
+            .Append(IsSelectedConversationRunning() ? '1' : '0')
+            .Append('|')
+            .Append(Conversations.Count)
+            .Append('|');
+
+        foreach (var conversation in Conversations.OrderByDescending(item => item.UpdatedAtUtc).ThenBy(item => item.CreatedAtUtc))
+        {
+            builder.Append(conversation.Id.ToString("D"))
+                .Append(':')
+                .Append(conversation.UpdatedAtUtc.UtcTicks)
+                .Append(':')
+                .Append(SelectedConversation?.Id == conversation.Id ? '1' : '0')
+                .Append(';');
+        }
+
+        builder.Append('|')
+            .Append(transcriptMessages.Count)
+            .Append('|');
+
+        foreach (var message in transcriptMessages.OrderBy(item => item.CreatedAtUtc))
+        {
+            builder.Append(message.Id.ToString("D"))
+                .Append(':')
+                .Append((int)message.Role)
+                .Append(':')
+                .Append((int)message.Status)
+                .Append(':')
+                .Append(message.UpdatedAtUtc.UtcTicks)
+                .Append(':')
+                .Append(message.MarkdownContent.Length)
+                .Append(':')
+                .Append(StringComparer.Ordinal.GetHashCode(message.MarkdownContent))
+                .Append(':')
+                .Append(message.DurationMs)
+                .Append(':')
+                .Append(message.ErrorMessage)
+                .Append(':');
+
+            if (message.Attachments is { Count: > 0 } attachments)
+            {
+                foreach (var attachment in attachments)
+                {
+                    builder.Append(attachment.Id.ToString("D"))
+                        .Append(',')
+                        .Append(attachment.StoragePath)
+                        .Append(',')
+                        .Append(attachment.ByteLength)
+                        .Append(',');
+                }
+            }
+
+            builder.Append(';');
+        }
+
+        builder.Append('|')
+            .Append(transcriptToolRuns.Count)
+            .Append('|');
+
+        foreach (var toolRun in transcriptToolRuns.OrderBy(item => item.CreatedAtUtc))
+        {
+            builder.Append(toolRun.Id.ToString("D"))
+                .Append(':')
+                .Append((int)toolRun.Status)
+                .Append(':')
+                .Append(toolRun.UpdatedAtUtc.UtcTicks)
+                .Append(':')
+                .Append(toolRun.DurationMs)
+                .Append(':')
+                .Append(toolRun.MessageId)
+                .Append(':')
+                .Append(toolRun.AfterSegmentIndex)
+                .Append(':')
+                .Append(toolRun.ResultSummary)
+                .Append(':')
+                .Append(toolRun.ResultContent?.Length ?? 0)
+                .Append(':')
+                .Append(toolRun.ResultContent is null ? 0 : StringComparer.Ordinal.GetHashCode(toolRun.ResultContent))
+                .Append(';');
+        }
+
+        builder.Append('|');
+        foreach (var anchor in transcriptToolRunAnchors.OrderBy(item => item.Key))
+        {
+            builder.Append(anchor.Key.ToString("D"))
+                .Append(':')
+                .Append(anchor.Value.MessageId.ToString("D"))
+                .Append(':')
+                .Append(anchor.Value.AfterSegmentIndex)
+                .Append(';');
+        }
+
+        return builder.ToString();
+    }
+
     private TranscriptConversationItem[] BuildConversationItems()
         => Conversations
             .OrderByDescending(item => item.UpdatedAtUtc)
@@ -1212,7 +1334,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             conversation.AgentId,
             ResolveConversationAgentName(conversation));
 
-    private static IReadOnlyList<TranscriptImageAttachment> BuildImageAttachments(MessageRecord message)
+    private IReadOnlyList<TranscriptImageAttachment> BuildImageAttachments(MessageRecord message)
     {
         if (message.Attachments is not { Count: > 0 } attachments)
         {
@@ -1226,23 +1348,31 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 item.FileName,
                 item.MediaType,
                 item.ByteLength,
-                TryCreateAttachmentDataUrl(item)))
+                TryCreateAttachmentSourceUrl(item)))
             .ToArray();
     }
 
-    private static string? TryCreateAttachmentDataUrl(MessageAttachmentRecord attachment)
+    private string? TryCreateAttachmentSourceUrl(MessageAttachmentRecord attachment)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(attachment.StoragePath) ||
-                string.IsNullOrWhiteSpace(attachment.MediaType) ||
                 !File.Exists(attachment.StoragePath))
             {
                 return null;
             }
 
-            var bytes = File.ReadAllBytes(attachment.StoragePath);
-            return $"data:{attachment.MediaType};base64,{Convert.ToBase64String(bytes)}";
+            var attachmentsRoot = Path.GetFullPath(Path.Combine(_storagePaths.AppDataDirectory, "attachments"));
+            var attachmentPath = Path.GetFullPath(attachment.StoragePath);
+            var relativePath = Path.GetRelativePath(attachmentsRoot, attachmentPath);
+            if (relativePath.StartsWith("..", StringComparison.Ordinal) ||
+                Path.IsPathRooted(relativePath))
+            {
+                return null;
+            }
+
+            var normalizedPath = relativePath.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
+            return $"https://{AttachmentHostName}/{Uri.EscapeDataString(normalizedPath).Replace("%2F", "/", StringComparison.OrdinalIgnoreCase)}";
         }
         catch
         {

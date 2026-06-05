@@ -5,4 +5,4 @@ public sealed record TranscriptImageAttachment(
     string FileName,
     string MediaType,
     long ByteLength,
-    string? DataUrl);
+    string? SourceUrl);
