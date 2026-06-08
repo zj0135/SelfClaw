@@ -30,38 +30,46 @@ v1 OpenAI provider 必须同时支持：
 
 > 实现位置：`SelfClaw.Infrastructure/AiProviders/Abstractions/`（新增独立文件夹，命名空间 `SelfClaw.Infrastructure.AiProviders.Abstractions`，与原有功能目录隔离）。
 
-### 2. 新增 provider adapter 接口
+### 2. 新增 provider adapter 接口 ✅ 已完成
 
-- 添加 `IAiProviderAdapter`
-- 添加 `SupportsApiFormat(AiProviderApiFormat apiFormat)`
-- 添加 `IAiProviderRegistry`
-- 添加 `AiProviderRegistry`
-- registry 按 `AiProviderKind` 查找 adapter
-- registry 对重复 provider kind 直接抛出 `InvalidOperationException`
-- adapter 对不支持的 api format 抛出 `NotSupportedException`
+- [x] 添加 `IAiProviderAdapter`
+- [x] 添加 `SupportsApiFormat(AiProviderApiFormat apiFormat)`
+- [x] 添加 `IAiProviderRegistry`
+- [x] 添加 `AiProviderRegistry`
+- [x] registry 按 `AiProviderKind` 查找 adapter
+- [x] registry 对重复 provider kind 直接抛出 `InvalidOperationException`
+- [x] adapter 对不支持的 api format 抛出 `NotSupportedException`
 
-### 3. 实现 OpenAI Chat Completions 支持
+> 实现位置：接口在 `SelfClaw.Infrastructure/AiProviders/Abstractions/`（`IAiProviderAdapter`、`IAiProviderRegistry`，public）；实现 `AiProviderRegistry` 在 `SelfClaw.Infrastructure/AiProviders/`（`internal sealed`，构造时按 kind 建索引，重复 kind 抛 `InvalidOperationException`，未找到抛 `KeyNotFoundException`）。adapter 对不支持的 api format 抛 `NotSupportedException` 的契约已在接口文档注释中约定，具体实现见 Task 3/4。
 
-- 在 `OpenAiProviderAdapter` 中支持 `AiProviderApiFormat.OpenAIChatCompletions`
-- 使用 OpenAI SDK 创建 `OpenAI.Chat.ChatClient`
-- 使用 `AiProviderConnection.Endpoint`
-- 使用 `request.Secrets["api_key"]`
-- 转换为 `IChatClient`
-- 创建 `ChatOptions`
-- 映射 temperature/top_p/tool mode/tools
-- 支持 `thinking.type`、`reasoning_effort`、`parallel_tool_calls`、`store`
-- 对未知或类型不匹配 model options 记录日志但不中断
+### 3. 实现 OpenAI Chat Completions 支持 ✅ 已完成
 
-### 4. 实现 OpenAI Responses API 支持
+- [x] 在 `OpenAiProviderAdapter` 中支持 `AiProviderApiFormat.OpenAIChatCompletions`
+- [x] 使用 OpenAI SDK 创建 `OpenAI.Chat.ChatClient`
+- [x] 使用 `AiProviderConnection.Endpoint`
+- [x] 使用 `request.Secrets["api_key"]`
+- [x] 转换为 `IChatClient`
+- [x] 创建 `ChatOptions`
+- [x] 映射 temperature/top_p/tool mode/tools
+- [x] 支持 `thinking.type`、`reasoning_effort`、`parallel_tool_calls`、`store`
+- [x] 对未知或类型不匹配 model options 记录日志但不中断
 
-- 在 `OpenAiProviderAdapter` 中支持 `AiProviderApiFormat.OpenAIResponses`
-- 使用 OpenAI SDK 创建 `OpenAI.Responses.ResponsesClient`
-- 使用 `AiProviderConnection.Endpoint`
-- 使用 `request.Secrets["api_key"]`
-- 通过 `ResponsesClient.AsIChatClient(profile.Model)` 转换为 `IChatClient`
-- 复用统一 `ChatOptions`
-- 支持 `reasoning.effort`、`reasoning.summary`、`store`、`max_output_tokens`、`truncation`、`parallel_tool_calls`
-- Responses reasoning 只由 `ModelOptions` 显式控制，不默认使用 `EnableReasoning` 注入 reasoning 参数
+> 实现位置：`SelfClaw.Infrastructure/AiProviders/OpenAi/`（`internal sealed partial class OpenAiProviderAdapter`）。核心分部 `OpenAiProviderAdapter.cs` 负责 format 分派、共享 `ChatOptions`（采样/工具模式/工具）、API key 解析与 option 读取/日志助手；`OpenAiProviderAdapter.ChatCompletions.cs` 负责 Chat Completions 客户端创建与 raw 选项注入（通过 `Patch.Set`）。未知 option 记 debug 日志，类型不匹配记 warning 并忽略。
+>
+> 代码评审修正：① `thinking.type` 是非标准参数，严格 `OpenAI` 端点会 400，故只有 `OpenAICompatible` kind 才由 `EnableReasoning` 推导默认写入 `$.thinking.type`，严格 `OpenAI` 仅在显式配置时写入（显式对两 kind 都生效）；② adapter 现同时服务 `AiProviderKind.OpenAI` 与 `OpenAICompatible`（构造参数区分，每 kind 注册一个实例），消除 `OpenAICompatible` 无 adapter 的缺口；③ API key 校验改用 `IsNullOrWhiteSpace`。
+
+### 4. 实现 OpenAI Responses API 支持 ✅ 已完成
+
+- [x] 在 `OpenAiProviderAdapter` 中支持 `AiProviderApiFormat.OpenAIResponses`
+- [x] 使用 OpenAI SDK 创建 `OpenAI.Responses.ResponsesClient`
+- [x] 使用 `AiProviderConnection.Endpoint`
+- [x] 使用 `request.Secrets["api_key"]`
+- [x] 通过 `ResponsesClient.AsIChatClient(profile.Model)` 转换为 `IChatClient`
+- [x] 复用统一 `ChatOptions`
+- [x] 支持 `reasoning.effort`、`reasoning.summary`、`store`、`max_output_tokens`、`truncation`、`parallel_tool_calls`
+- [x] Responses reasoning 只由 `ModelOptions` 显式控制，不默认使用 `EnableReasoning` 注入 reasoning 参数
+
+> 实现位置：`SelfClaw.Infrastructure/AiProviders/OpenAi/OpenAiProviderAdapter.Responses.cs`（新分部）。`ResponsesClient(ApiKeyCredential, OpenAIClientOptions)` + `AsIChatClient(profile.Model)`；raw 选项用强类型 `CreateResponseOptions`（`ReasoningOptions`/`StoredOutputEnabled`/`MaxOutputTokenCount`/`TruncationMode`/`ParallelToolCallsEnabled`，符合设计偏好）。reasoning 仅在 `reasoning.effort`/`reasoning.summary` 显式存在时才注入，绝不读 `EnableReasoning`。核心分部已扩展 `SupportsApiFormat`（含 Responses）、分派 switch，并新增 `TryReadInt` 助手。Responses 为 SDK 评估期 API，整文件以 `#pragma warning disable OPENAI001` 抑制。
 
 ### 5. 新增全新 SQLite schema
 

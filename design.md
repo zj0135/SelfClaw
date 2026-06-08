@@ -136,6 +136,7 @@ public interface IAiProviderRegistry
 
 OpenAI provider adapter 负责：
 
+- 同时服务 `AiProviderKind.OpenAI`（严格 api.openai.com）与 `AiProviderKind.OpenAICompatible`（任意 OpenAI 兼容端点）；二者共用同一 OpenAI SDK，仅 provider 特有默认值（如 `thinking.type`）按 kind 区分。每个 kind 注册一个 adapter 实例
 - 根据 `AiModelProfile.ApiFormat` 创建不同 OpenAI SDK client
 - 使用 `request.Secrets["api_key"]` 创建 `ApiKeyCredential`
 - 使用 `AiProviderConnection.Endpoint` 创建 `OpenAIClientOptions`
@@ -151,13 +152,13 @@ OpenAI provider adapter 负责：
 - 使用 `OpenAI.Chat.ChatClient`
 - 调用 `.AsIChatClient()`
 - raw options 类型为 `OpenAI.Chat.ChatCompletionOptions`
-- 保留当前项目行为：默认写入 `$.thinking.type = enabled/disabled`
+- `thinking.type` 是非标准参数，严格 `OpenAI` 端点会拒绝它，因此只有 `OpenAICompatible` 端点才由 `EnableReasoning` 推导默认写入 `$.thinking.type`；严格 `OpenAI` 仅在 `ModelOptions` 显式配置时写入。显式配置对两种 kind 都生效。
 
 支持的 model-specific options：
 
 | Option Key | Type | Behavior |
 | --- | --- | --- |
-| `thinking.type` | string | 写入 `$.thinking.type`，默认由 `EnableReasoning` 推导为 `enabled` / `disabled` |
+| `thinking.type` | string | 显式配置时写入 `$.thinking.type`（两种 kind）；未显式配置时，仅 `OpenAICompatible` 由 `EnableReasoning` 推导为 `enabled` / `disabled`，严格 `OpenAI` 不写入 |
 | `reasoning_effort` | string | 如果存在，写入 raw chat completion options |
 | `parallel_tool_calls` | bool | 如果存在，写入 raw chat completion options |
 | `store` | bool | 如果存在，写入 raw chat completion options |
@@ -305,7 +306,11 @@ CREATE INDEX ix_ai_model_profiles_updated ON ai_model_profiles(updated_at_utc DE
 新增注册：
 
 ```csharp
-services.AddSingleton<IAiProviderAdapter, OpenAiProviderAdapter>();
+// 每个 OpenAI-family kind 注册一个 adapter 实例（同一实现类，构造参数区分 kind）
+services.AddSingleton<IAiProviderAdapter>(sp =>
+    new OpenAiProviderAdapter(AiProviderKind.OpenAI, sp.GetService<ILogger<OpenAiProviderAdapter>>()));
+services.AddSingleton<IAiProviderAdapter>(sp =>
+    new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, sp.GetService<ILogger<OpenAiProviderAdapter>>()));
 services.AddSingleton<IAiProviderRegistry, AiProviderRegistry>();
 ```
 
