@@ -1,0 +1,12 @@
+namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
+
+/// <summary>
+/// Identifies a concrete AI provider implementation. The kind selects which
+/// <c>IAiProviderAdapter</c> handles client creation and option mapping.
+/// </summary>
+public enum AiProviderKind
+{
+    OpenAI = 0,
+    OpenAICompatible = 1,
+    DeepSeek = 2
+}
