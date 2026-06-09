@@ -8,5 +8,6 @@ public enum AiProviderKind
 {
     OpenAI = 0,
     OpenAICompatible = 1,
-    DeepSeek = 2
+    DeepSeek = 2,
+    Anthropic = 3
 }

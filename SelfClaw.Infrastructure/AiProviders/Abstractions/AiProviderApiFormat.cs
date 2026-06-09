@@ -7,5 +7,6 @@ namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
 public enum AiProviderApiFormat
 {
     OpenAIChatCompletions = 0,
-    OpenAIResponses = 1
+    OpenAIResponses = 1,
+    AnthropicMessages = 2
 }

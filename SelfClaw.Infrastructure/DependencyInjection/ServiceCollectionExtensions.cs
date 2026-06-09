@@ -6,6 +6,7 @@ using SelfClaw.Infrastructure.Agents.Runtime.Context;
 using SelfClaw.Infrastructure.Agents.Runtime.Execution;
 using SelfClaw.Infrastructure.Agents.Runtime.Mcp;
 using SelfClaw.Infrastructure.Agents.Runtime.Orchestration;
+using SelfClaw.Infrastructure.AiProviders.Anthropic;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.OpenAi;
@@ -39,6 +40,11 @@ public static class ServiceCollectionExtensions
             new OpenAiProviderAdapter(
                 AiProviderKind.OpenAICompatible,
                 provider.GetService<ILogger<OpenAiProviderAdapter>>()));
+        services.AddSingleton<IAiProviderAdapter>(provider =>
+            new AnthropicProviderAdapter(
+                provider.GetService<ILogger<AnthropicProviderAdapter>>(),
+                provider.GetService<ILoggerFactory>(),
+                provider));
         services.AddSingleton<IAiProviderRegistry, AiProviderRegistry>();
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();

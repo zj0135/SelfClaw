@@ -39,7 +39,7 @@ Main projects:
 | --- | --- |
 | Runtime | .NET 10 |
 | Desktop UI | WPF, CommunityToolkit.Mvvm |
-| AI | Microsoft.Agents.AI, Microsoft.Extensions.AI, Microsoft.Extensions.AI.OpenAI |
+| AI | Microsoft.Agents.AI, Microsoft.Agents.AI.Anthropic, Microsoft.Extensions.AI, Microsoft.Extensions.AI.OpenAI |
 | Data | SQLite (`Microsoft.Data.Sqlite`) |
 | Render | WebView2, Markdig, TranscriptVue (Vue 3 + Vite) |
 | Logging | Serilog |
@@ -185,7 +185,7 @@ Infrastructure registration in `ServiceCollectionExtensions.AddSelfClawInfrastru
 - `SqliteDatabase`
 - `IProfileRepository`, `IConversationRepository`
 - `IAiProviderRepository`
-- `IAiProviderAdapter` for `OpenAI` and `OpenAICompatible`, `IAiProviderRegistry`
+- `IAiProviderAdapter` for `OpenAI`, `OpenAICompatible`, and `Anthropic`, `IAiProviderRegistry`
 - `ISecretProtector`
 - `IWorkspaceToolService`
 - `IAgentExecutionService`
@@ -364,6 +364,7 @@ Desktop transcript service models include:
 | `SelfClaw.Desktop/Services/Channels/DesktopChannelManager.cs` | Retained desktop channel orchestration |
 | `SelfClaw.Desktop/Services/Channels/FeishuDesktopChannelAdapter.cs` | Retained Feishu desktop adapter |
 | `SelfClaw.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs` | Infrastructure service registration |
+| `SelfClaw.Infrastructure/AiProviders/Anthropic/AnthropicProviderAdapter.cs` | Anthropic provider adapter |
 | `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.cs` | Runtime orchestration core |
 | `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.Execution.cs` | Direct programming turn execution |
 | `SelfClaw.Infrastructure/Agents/Runtime/Orchestration/SelfClawAgentChatRuntime.PromptMessages.cs` | Prompt message assembly and role/message mapping |

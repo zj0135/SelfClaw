@@ -127,6 +127,23 @@ v1 OpenAI provider 必须同时支持：
 
 > 实现位置：新增 `SelfClaw.Tests/Infrastructure/AiProviders/AiProviderRegistryTests.cs` 覆盖 registry 成功、未找到和重复 kind；新增 `SelfClaw.Tests/Infrastructure/AiProviders/OpenAiProviderAdapterTests.cs` 覆盖 OpenAI adapter 的 format 声明、两种 `IChatClient` 创建、采样/工具映射、Chat Completions raw option、Responses raw option 和 unsupported format。repository 覆盖在 `SqliteRepositoriesTests`，DI 覆盖在 `ServiceCollectionExtensionsTests`。当前 `dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj --no-restore` 通过，67 passed。
 
+### 9. 新增 Anthropic provider 支持 ✅ 已完成
+
+- [x] 添加 `AiProviderKind.Anthropic`
+- [x] 添加 `AiProviderApiFormat.AnthropicMessages`
+- [x] 添加官方 `Microsoft.Agents.AI.Anthropic` 包引用
+- [x] 新增 `AnthropicProviderAdapter`
+- [x] 使用 `request.Secrets["api_key"]`
+- [x] 使用 `AiProviderConnection.Endpoint` 设置 Anthropic SDK `BaseUrl`
+- [x] 通过官方 `AsAIAgent` 的 `clientFactory` 捕获底层 `IChatClient`
+- [x] 映射 temperature/top_p/tool mode/tools
+- [x] 支持 `max_tokens` model option
+- [x] 在 Infrastructure DI 中注册 Anthropic adapter
+- [x] 不修改现有 `IAgentExecutionService` 行为
+- [x] 添加 Anthropic adapter 单元测试
+
+> 当前 Agent Framework 支持情况：官方包 `Microsoft.Agents.AI.Anthropic` 提供 Anthropic/Claude agent 支持；该包公开的是 `AsAIAgent` 扩展，并通过 `clientFactory` 暴露底层 `IChatClient`。因此 SelfClaw 现有 provider 抽象可以继续保持 `IChatClient` 入口，不需要绕过当前 Agent Framework。实现位置：`SelfClaw.Infrastructure/AiProviders/Anthropic/AnthropicProviderAdapter.cs`。测试位置：`SelfClaw.Tests/Infrastructure/AiProviders/AnthropicProviderAdapterTests.cs`。当前 `dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj --no-restore` 通过，73 passed。
+
 ## Acceptance Criteria
 
 - `dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj` 通过

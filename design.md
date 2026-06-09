@@ -42,7 +42,8 @@ public enum AiProviderKind
 {
     OpenAI = 0,
     OpenAICompatible = 1,
-    DeepSeek = 2
+    DeepSeek = 2,
+    Anthropic = 3
 }
 ```
 
@@ -50,7 +51,8 @@ public enum AiProviderKind
 public enum AiProviderApiFormat
 {
     OpenAIChatCompletions = 0,
-    OpenAIResponses = 1
+    OpenAIResponses = 1,
+    AnthropicMessages = 2
 }
 ```
 
@@ -210,6 +212,32 @@ OpenAI provider adapter 负责：
 
 Responses API 不使用 `thinking.type` 作为默认 reasoning 开关；`EnableReasoning` 在 v1 中只影响 Chat Completions 的 `thinking.type` 默认值。Responses reasoning 由 `ModelOptions` 显式控制，避免给不支持 reasoning 的 Responses 模型注入无效参数。
 
+## Anthropic v1 Behavior
+
+Anthropic provider adapter 负责：
+
+- 服务 `AiProviderKind.Anthropic`
+- 使用官方 `Microsoft.Agents.AI.Anthropic` 包与 Anthropic .NET SDK
+- 当前 Agent Framework 的 Anthropic 包公开 `AsAIAgent`，不直接公开 `AsIChatClient`；adapter 通过 `clientFactory` 捕获 `AsAIAgent` 创建的底层 `IChatClient`，保持 SelfClaw provider 抽象不变
+- 使用 `request.Secrets["api_key"]` 创建 `AnthropicClient`
+- 使用 `AiProviderConnection.Endpoint` 设置 Anthropic SDK `BaseUrl`
+- 返回 Microsoft.Extensions.AI `IChatClient`
+- 根据统一 `AiSamplingOptions` 设置 `ChatOptions.Temperature`、`TopP`
+- 根据工具数量设置 `ChatToolMode.Auto` 或 `ChatToolMode.None`
+- `EnableReasoning` 在 Anthropic v1 中不注入默认 reasoning 参数；后续可通过显式 `ModelOptions` 扩展 thinking 配置
+
+当 `ApiFormat = AnthropicMessages`：
+
+- 使用 `Anthropic.AnthropicClient`
+- 调用官方 `AnthropicClientExtensions.AsAIAgent(...)`
+- 通过 `clientFactory` 捕获底层 `IChatClient`
+
+支持的 model-specific options：
+
+| Option Key | Type | Behavior |
+| --- | --- | --- |
+| `max_tokens` | int | 写入 `ChatOptions.MaxOutputTokens`，并作为 `AsAIAgent` 的默认 max tokens |
+
 ## Execution Layer Integration Design
 
 v1 可以先不接入现有系统，但后续接入时应按以下方式改造：
@@ -336,6 +364,11 @@ services.AddSingleton<IAiProviderAdapter>(sp =>
     new OpenAiProviderAdapter(AiProviderKind.OpenAI, sp.GetService<ILogger<OpenAiProviderAdapter>>()));
 services.AddSingleton<IAiProviderAdapter>(sp =>
     new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, sp.GetService<ILogger<OpenAiProviderAdapter>>()));
+services.AddSingleton<IAiProviderAdapter>(sp =>
+    new AnthropicProviderAdapter(
+        sp.GetService<ILogger<AnthropicProviderAdapter>>(),
+        sp.GetService<ILoggerFactory>(),
+        sp));
 services.AddSingleton<IAiProviderRegistry, AiProviderRegistry>();
 services.AddSingleton<IAiProviderRepository, SqliteAiProviderRepository>();
 ```
@@ -356,6 +389,9 @@ v1 需要覆盖：
 - Chat Completions 下 `EnableReasoning` 能映射到 raw OpenAI option
 - Chat Completions model-specific options 能写入 raw chat completion options
 - Responses model-specific options 能写入 raw response options
+- Anthropic adapter 支持 `AnthropicMessages`
+- Anthropic adapter 能创建 `IChatClient`
+- Anthropic adapter 能映射 temperature/top_p/tool mode/max_tokens
 - adapter 收到不支持的 `ApiFormat` 时抛出明确异常
 - 未知 provider kind 时 registry 抛出明确异常
 - 重复 provider kind 注册时 registry 抛出明确异常
@@ -372,3 +408,4 @@ v1 需要覆盖：
 - v1 继续以 Microsoft Agent Framework 的 `ChatClientAgent` 和 `IChatClient` 为运行时核心
 - OpenAI Responses API 支持基于当前包版本 `Microsoft.Extensions.AI.OpenAI 10.5.0` 和 `OpenAI 2.10.0`
 - DeepSeek v1 不实现，只预留 `AiProviderKind.DeepSeek` 和 adapter 扩展位置
+- Anthropic 支持基于当前包版本 `Microsoft.Agents.AI.Anthropic 1.3.0-preview.260423.1` 和 `Anthropic 12.13.0`
