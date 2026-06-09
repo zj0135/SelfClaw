@@ -6,9 +6,13 @@ public interface IAiProviderRepository
 
     Task<IReadOnlyList<AiProviderConnection>> ListProviderConnectionsAsync(CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<AiProviderConnection>> ListAllProviderConnectionsAsync(CancellationToken cancellationToken = default);
+
     Task<AiProviderConnection?> GetProviderConnectionAsync(Guid providerConnectionId, CancellationToken cancellationToken = default);
 
     Task<AiProviderConnection> UpsertProviderConnectionAsync(AiProviderConnection connection, CancellationToken cancellationToken = default);
+
+    Task SetProviderConnectionEnabledAsync(Guid providerConnectionId, bool isEnabled, CancellationToken cancellationToken = default);
 
     Task DeleteProviderConnectionAsync(Guid providerConnectionId, CancellationToken cancellationToken = default);
 

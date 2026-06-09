@@ -45,6 +45,7 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<DesktopNotificationService>();
             builder.Services.AddSingleton<DesktopNotificationActivationService>();
             builder.Services.AddSingleton<SystemTrayService>();
+            builder.Services.AddSingleton<SystemSettingsViewModel>();
             builder.Services.AddSingleton<MainWindowViewModel>();
             builder.Services.AddSingleton<MainWindow>();
             _host = builder.Build();

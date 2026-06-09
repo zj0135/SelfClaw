@@ -22,10 +22,30 @@ public sealed class SqliteAiProviderRepository : IAiProviderRepository
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc
+SELECT id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc, is_enabled
 FROM ai_provider_connections
 WHERE is_enabled != 0
 ORDER BY updated_at_utc DESC;";
+
+        var results = new List<AiProviderConnection>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(SqliteMappings.ReadAiProviderConnection(reader));
+        }
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<AiProviderConnection>> ListAllProviderConnectionsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+SELECT id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc, is_enabled
+FROM ai_provider_connections
+ORDER BY is_enabled DESC, updated_at_utc DESC;";
 
         var results = new List<AiProviderConnection>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -44,7 +64,7 @@ ORDER BY updated_at_utc DESC;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc
+SELECT id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc, is_enabled
 FROM ai_provider_connections
 WHERE id = $id AND is_enabled != 0
 LIMIT 1;";
@@ -68,7 +88,7 @@ INSERT INTO ai_provider_connections(
     is_enabled, created_at_utc, updated_at_utc)
 VALUES(
     $id, $name, $providerKind, $endpoint, $authKind, $credentialRefsJson, $connectionOptionsJson,
-    1, $createdAt, $updatedAt)
+    $isEnabled, $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
     name = excluded.name,
     provider_kind = excluded.provider_kind,
@@ -76,7 +96,7 @@ ON CONFLICT(id) DO UPDATE SET
     auth_kind = excluded.auth_kind,
     credential_refs_json = excluded.credential_refs_json,
     connection_options_json = excluded.connection_options_json,
-    is_enabled = 1,
+    is_enabled = excluded.is_enabled,
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", providerConnection.Id.ToString("D"));
         command.Parameters.AddWithValue("$name", providerConnection.Name);
@@ -85,11 +105,30 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$authKind", (int)providerConnection.AuthKind);
         command.Parameters.AddWithValue("$credentialRefsJson", Serialize(providerConnection.CredentialRefs));
         command.Parameters.AddWithValue("$connectionOptionsJson", Serialize(providerConnection.ConnectionOptions));
+        command.Parameters.AddWithValue("$isEnabled", providerConnection.IsEnabled ? 1 : 0);
         command.Parameters.AddWithValue("$createdAt", providerConnection.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", providerConnection.UpdatedAtUtc.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
 
         return providerConnection;
+    }
+
+    public async Task SetProviderConnectionEnabledAsync(
+        Guid providerConnectionId,
+        bool isEnabled,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+UPDATE ai_provider_connections
+SET is_enabled = $isEnabled,
+    updated_at_utc = $updatedAt
+WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", providerConnectionId.ToString("D"));
+        command.Parameters.AddWithValue("$isEnabled", isEnabled ? 1 : 0);
+        command.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task DeleteProviderConnectionAsync(Guid providerConnectionId, CancellationToken cancellationToken = default)

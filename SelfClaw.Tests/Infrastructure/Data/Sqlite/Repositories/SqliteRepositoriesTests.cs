@@ -237,6 +237,59 @@ public sealed class SqliteRepositoriesTests : IDisposable
     }
 
     [Fact]
+    public async Task AiProviderRepository_disabling_provider_keeps_connection_and_models()
+    {
+        var storagePaths = new StoragePaths(
+            _rootPath,
+            Path.Combine(_rootPath, "selfclaw.db"),
+            Path.Combine(_rootPath, "secrets"));
+        var repository = new SqliteAiProviderRepository(new SqliteDatabase(storagePaths));
+
+        var now = DateTimeOffset.UtcNow;
+        var providerConnection = new AiProviderConnection(
+            Guid.NewGuid(),
+            "Local",
+            AiProviderKind.OpenAICompatible,
+            new Uri("http://localhost:11434/v1/"),
+            AiProviderAuthKind.ApiKey,
+            new Dictionary<string, string>
+            {
+                ["api_key"] = "secret:local"
+            },
+            ReadJsonObject("{}"),
+            now,
+            now);
+        var modelProfile = new AiModelProfile(
+            Guid.NewGuid(),
+            providerConnection.Id,
+            "Local model",
+            AiProviderApiFormat.OpenAIChatCompletions,
+            "local-model",
+            new AiSamplingOptions(false, 0.7, false, 0.7),
+            ReadJsonObject("{}"),
+            now,
+            now);
+
+        await repository.UpsertProviderConnectionAsync(providerConnection);
+        await repository.UpsertModelProfileAsync(modelProfile);
+
+        await repository.SetProviderConnectionEnabledAsync(providerConnection.Id, false);
+
+        var enabledConnections = await repository.ListProviderConnectionsAsync();
+        var allConnections = await repository.ListAllProviderConnectionsAsync();
+        var loadedModelProfile = await repository.GetModelProfileAsync(modelProfile.Id);
+
+        enabledConnections.Should().BeEmpty();
+        allConnections.Should().ContainSingle().Which.IsEnabled.Should().BeFalse();
+        loadedModelProfile.Should().NotBeNull();
+
+        await repository.SetProviderConnectionEnabledAsync(providerConnection.Id, true);
+
+        enabledConnections = await repository.ListProviderConnectionsAsync();
+        enabledConnections.Should().ContainSingle().Which.Id.Should().Be(providerConnection.Id);
+    }
+
+    [Fact]
     public async Task Initialize_adds_required_columns_to_legacy_conversations_table()
     {
         var storagePaths = new StoragePaths(

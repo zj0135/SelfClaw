@@ -51,6 +51,7 @@ public partial class MainWindow : Window
 
     public MainWindow(
         MainWindowViewModel viewModel,
+        SystemSettingsViewModel systemSettingsViewModel,
         DesktopNotificationService desktopNotificationService,
         StoragePaths storagePaths)
     {
@@ -59,6 +60,7 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         _storagePaths = storagePaths;
         DataContext = viewModel;
+        SystemSettingsPanelHost.DataContext = systemSettingsViewModel;
         Loaded += OnLoadedAsync;
         SourceInitialized += OnSourceInitialized;
         PreviewKeyDown += HandlePreviewKeyDown;

@@ -21,4 +21,5 @@ public sealed record AiProviderConnection(
     IReadOnlyDictionary<string, string> CredentialRefs,
     IReadOnlyDictionary<string, JsonElement> ConnectionOptions,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    bool IsEnabled = true);

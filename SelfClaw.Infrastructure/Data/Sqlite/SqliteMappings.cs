@@ -32,7 +32,8 @@ internal static class SqliteMappings
             ReadStringDictionary(reader, 5),
             ReadJsonElementDictionary(reader, 6),
             ReadDateTimeOffset(reader, 7),
-            ReadDateTimeOffset(reader, 8));
+            ReadDateTimeOffset(reader, 8),
+            reader.FieldCount <= 9 || reader.IsDBNull(9) || reader.GetInt32(9) != 0);
 
     public static AiModelProfile ReadAiModelProfile(SqliteDataReader reader)
         => new(
