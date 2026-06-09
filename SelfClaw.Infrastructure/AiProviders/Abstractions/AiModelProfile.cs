@@ -20,7 +20,5 @@ public sealed record AiModelProfile(
     string Model,
     AiSamplingOptions Sampling,
     IReadOnlyDictionary<string, JsonElement> ModelOptions,
-    int? ContextWindowTokens,
-    int? AutoCompactTokenLimit,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);

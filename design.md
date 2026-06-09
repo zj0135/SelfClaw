@@ -87,8 +87,6 @@ public sealed record AiModelProfile(
     string Model,
     AiSamplingOptions Sampling,
     IReadOnlyDictionary<string, JsonElement> ModelOptions,
-    int? ContextWindowTokens,
-    int? AutoCompactTokenLimit,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
 ```
@@ -319,8 +317,6 @@ CREATE TABLE ai_model_profiles (
     top_p_enabled INTEGER NOT NULL DEFAULT 0,
     top_p REAL NOT NULL DEFAULT 0.7,
     model_options_json TEXT NOT NULL DEFAULT '{}',
-    context_window_tokens INTEGER NULL,
-    auto_compact_token_limit INTEGER NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
@@ -344,7 +340,6 @@ CREATE TABLE ai_model_profile_selections (
 默认 scope：
 
 - `desktop.default`
-- `compaction.default`
 
 ### Indexes
 

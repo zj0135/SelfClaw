@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 16;
+    private const int CurrentSchemaVersion = 17;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -114,8 +114,6 @@ CREATE TABLE IF NOT EXISTS ai_model_profiles (
     top_p_enabled INTEGER NOT NULL DEFAULT 0,
     top_p REAL NOT NULL DEFAULT 0.7,
     model_options_json TEXT NOT NULL DEFAULT '{}',
-    context_window_tokens INTEGER NULL,
-    auto_compact_token_limit INTEGER NULL,
     is_enabled INTEGER NOT NULL DEFAULT 1,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
@@ -278,19 +276,6 @@ CREATE TABLE IF NOT EXISTS message_attachments (
     byte_length INTEGER NOT NULL,
     created_at_utc TEXT NOT NULL,
     FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
-);", cancellationToken);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS conversation_context_summaries (
-    conversation_id TEXT NOT NULL PRIMARY KEY,
-    summary_markdown TEXT NOT NULL,
-    covered_through_message_id TEXT NULL,
-    covered_through_message_created_at_utc TEXT NULL,
-    source_token_estimate INTEGER NOT NULL,
-    summary_token_estimate INTEGER NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken);
 
             await ExecuteAsync(connection, @"

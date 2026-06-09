@@ -29,7 +29,6 @@ Main projects:
 - Workspace tools support file read/write, full-text search, and PowerShell execution with approval
 - Transcript supports thinking segments, tool anchors, tool activity, image attachments, and conversation navigation
 - Message image attachments are persisted in `message_attachments`
-- Conversation context summaries are persisted in `conversation_context_summaries`
 - API keys are encrypted with Windows DPAPI
 - Feishu Open Platform implementation is retained for later channel wiring
 
@@ -59,7 +58,6 @@ SelfClaw/
 |-- SelfClaw.Infrastructure/
 |   |-- Agents/
 |   |   |-- Runtime/
-|   |   |   |-- Compaction/
 |   |   |   |-- Context/
 |   |   |   |-- Execution/
 |   |   |   |-- Mcp/
@@ -125,7 +123,6 @@ Common namespaces:
 - `SelfClaw.Infrastructure.Agents.Runtime.Context`
 - `SelfClaw.Infrastructure.Agents.Runtime.Mcp`
 - `SelfClaw.Infrastructure.Agents.Runtime.Tools`
-- `SelfClaw.Infrastructure.Agents.Runtime.Compaction`
 - `SelfClaw.Infrastructure.Agents.Tools`
 - `SelfClaw.Infrastructure.Data.Sqlite`
 - `SelfClaw.Infrastructure.Data.Sqlite.Repositories`
@@ -193,7 +190,6 @@ Infrastructure registration in `ServiceCollectionExtensions.AddSelfClawInfrastru
 - `IWorkspaceMemoryInitializationService`
 - `IAgentMcpToolProvider`
 - `IAgentChatRuntime`
-- `IConversationContextCompactionService`
 - `MarkdownHtmlRenderer`
 
 Desktop registration in `App.xaml.cs` currently includes:
@@ -216,7 +212,6 @@ Supporting components:
 - `ChatClientAgentExecutionService`
 - `FileSystemAgentContextProviderFactory`
 - `McpServerToolProvider`
-- `ConversationContextCompactionService`
 - `WorkspaceToolFunctions`
 - `RuntimeToolObserver`
 
@@ -227,7 +222,6 @@ Runtime folder structure:
 - `Context/`: file-system backed agent skill/context provider discovery
 - `Mcp/`: MCP server connection, tool discovery, tool naming, and owned resource lifetime
 - `Tools/`: runtime tool-run observation and approval/result metadata
-- `Compaction/`: conversation context auto-compaction, summary prompt building, and token/window estimates
 
 `Orchestration/SelfClawAgentChatRuntime` partial split:
 
@@ -246,7 +240,6 @@ Runtime folder structure:
 - selected agent resolution from `DesktopAgentStore`
 - image attachment persistence under app data
 - tool approval notifications
-- context compaction before and after successful turns
 
 `MainWindowViewModel.Agents.cs` resolves runtime agents as `AgentExecutionMode.Direct`. Agent skills from agent markdown are passed through; configured MCP servers are currently empty until a new settings surface is implemented.
 
@@ -326,7 +319,6 @@ Main tables:
 - `conversations`
 - `messages`
 - `message_attachments`
-- `conversation_context_summaries`
 - `tool_runs`
 
 ### Transcript and markdown
@@ -374,9 +366,6 @@ Desktop transcript service models include:
 | `SelfClaw.Infrastructure/Agents/Runtime/Mcp/McpServerToolProvider.cs` | MCP server tool discovery and wrapping |
 | `SelfClaw.Infrastructure/Agents/Runtime/Tools/RuntimeToolObserver.cs` | Tool-run event emission for transcripts |
 | `SelfClaw.Infrastructure/Agents/Runtime/Tools/ToolInvocationMetadata.cs` | Tool approval/result metadata and summaries |
-| `SelfClaw.Infrastructure/Agents/Runtime/Compaction/ConversationContextCompactionService.cs` | Conversation context auto-compaction flow |
-| `SelfClaw.Infrastructure/Agents/Runtime/Compaction/ConversationCompactionPromptBuilder.cs` | Compaction summary prompt/payload construction |
-| `SelfClaw.Infrastructure/Agents/Runtime/Compaction/ConversationContextTokens.cs` | Token/window estimate helpers for compaction |
 | `SelfClaw.Infrastructure/Agents/Tools/WorkspaceToolFunctions.cs` | Tool wrapping and approval integration |
 | `SelfClaw.Infrastructure/Tools/Workspace/WorkspaceToolService.cs` | Workspace files and shell implementation |
 | `SelfClaw.Infrastructure/Data/Sqlite/SqliteDatabase.cs` | SQLite schema and migration |

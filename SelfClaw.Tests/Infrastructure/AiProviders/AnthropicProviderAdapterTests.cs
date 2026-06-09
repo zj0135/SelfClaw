@@ -114,8 +114,6 @@ public sealed class AnthropicProviderAdapterTests
             "claude-sonnet-4-5",
             sampling ?? new AiSamplingOptions(false, 0.7, false, 0.7),
             modelOptions ?? ReadJsonObject("{}"),
-            null,
-            null,
             now,
             now);
 

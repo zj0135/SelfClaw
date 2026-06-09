@@ -55,16 +55,6 @@ public sealed class SqliteRepositoriesTests : IDisposable
         var assistantMessage = new MessageRecord(Guid.NewGuid(), conversation.Id, MessageRole.Assistant, "Hi there", MessageStatus.Completed, now, now, OutputTokens: 32);
         await conversationRepository.UpsertMessageAsync(userMessage);
         await conversationRepository.UpsertMessageAsync(assistantMessage);
-        var contextSummary = new ConversationContextSummaryRecord(
-            conversation.Id,
-            "Earlier conversation summary.",
-            userMessage.Id,
-            userMessage.CreatedAtUtc,
-            512,
-            32,
-            now,
-            now);
-        await conversationRepository.UpsertConversationContextSummaryAsync(contextSummary);
 
         var toolRun = new ToolExecutionRecord(
             Guid.NewGuid(),
@@ -85,7 +75,6 @@ public sealed class SqliteRepositoriesTests : IDisposable
         var loadedProfiles = await profileRepository.ListProfilesAsync();
         var loadedConversations = await conversationRepository.ListConversationsAsync();
         var loadedMessages = await conversationRepository.ListMessagesAsync(conversation.Id);
-        var loadedContextSummary = await conversationRepository.GetConversationContextSummaryAsync(conversation.Id);
         var loadedToolRuns = await conversationRepository.ListToolExecutionsAsync(conversation.Id);
         var loadedRoots = await conversationRepository.ListWorkspaceRootsAsync();
 
@@ -93,7 +82,6 @@ public sealed class SqliteRepositoriesTests : IDisposable
         loadedConversations.Should().ContainSingle().Which.Should().Be(conversation);
         loadedMessages.Should().HaveCount(2);
         loadedMessages.Should().Contain(assistantMessage);
-        loadedContextSummary.Should().Be(contextSummary);
         loadedToolRuns.Should().ContainSingle().Which.Should().Be(toolRun);
         loadedRoots.Should().ContainSingle().Which.Should().Be(workspace);
     }
@@ -125,7 +113,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
         var maxSchemaVersion = await versionCommand.ExecuteScalarAsync();
-        maxSchemaVersion.Should().Be(16L);
+        maxSchemaVersion.Should().Be(17L);
     }
 
     [Fact]
@@ -162,8 +150,6 @@ public sealed class SqliteRepositoriesTests : IDisposable
             "gpt-4.1",
             new AiSamplingOptions(true, 0.2, true, 0.9),
             ReadJsonObject("{\"reasoning.effort\":\"medium\",\"store\":true}"),
-            128000,
-            96000,
             now,
             now);
         await repository.UpsertModelProfileAsync(modelProfile);
@@ -197,8 +183,6 @@ public sealed class SqliteRepositoriesTests : IDisposable
         loadedModelProfile.Sampling.Should().Be(modelProfile.Sampling);
         loadedModelProfile.ModelOptions["reasoning.effort"].GetString().Should().Be("medium");
         loadedModelProfile.ModelOptions["store"].GetBoolean().Should().BeTrue();
-        loadedModelProfile.ContextWindowTokens.Should().Be(128000);
-        loadedModelProfile.AutoCompactTokenLimit.Should().Be(96000);
 
         loadedSelection.Should().Be(selection);
     }
@@ -234,8 +218,6 @@ public sealed class SqliteRepositoriesTests : IDisposable
             "local-model",
             new AiSamplingOptions(false, 0.7, false, 0.7),
             ReadJsonObject("{}"),
-            null,
-            null,
             now,
             now);
 
@@ -349,95 +331,6 @@ CREATE TABLE tool_runs (
         columns.Should().Contain("message_id");
         columns.Should().Contain("after_segment_index");
         columns.Should().Contain("result_content");
-    }
-
-    [Fact]
-    public async Task Initialize_adds_context_summary_table_to_legacy_database()
-    {
-        var storagePaths = new StoragePaths(
-            _rootPath,
-            Path.Combine(_rootPath, "selfclaw.db"),
-            Path.Combine(_rootPath, "secrets"));
-        Directory.CreateDirectory(_rootPath);
-
-        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
-        {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = @"
-CREATE TABLE conversations (
-    id TEXT NOT NULL PRIMARY KEY,
-    title TEXT NOT NULL,
-    profile_id TEXT NOT NULL,
-    workspace_root_id TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);";
-            await command.ExecuteNonQueryAsync();
-        }
-
-        var database = new SqliteDatabase(storagePaths);
-        var repository = new SqliteConversationRepository(database);
-        await repository.InitializeAsync();
-
-        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
-        await verification.OpenAsync();
-        await using var pragma = verification.CreateCommand();
-        pragma.CommandText = "PRAGMA table_info(conversation_context_summaries);";
-        await using var reader = await pragma.ExecuteReaderAsync();
-        var columns = new List<string>();
-        while (await reader.ReadAsync())
-        {
-            columns.Add(reader.GetString(1));
-        }
-
-        columns.Should().Contain("conversation_id");
-        columns.Should().Contain("summary_markdown");
-        columns.Should().Contain("covered_through_message_id");
-    }
-
-    [Fact]
-    public async Task DeleteConversation_removes_context_summary()
-    {
-        var storagePaths = new StoragePaths(
-            _rootPath,
-            Path.Combine(_rootPath, "selfclaw.db"),
-            Path.Combine(_rootPath, "secrets"));
-        var database = new SqliteDatabase(storagePaths);
-        var profileRepository = new SqliteProfileRepository(database);
-        var conversationRepository = new SqliteConversationRepository(database);
-
-        await profileRepository.InitializeAsync();
-        await conversationRepository.InitializeAsync();
-
-        var now = DateTimeOffset.UtcNow;
-        var profile = new ProviderProfile(Guid.NewGuid(), "Local", "https://api.example.com/v1", "gpt-4.1", false, 0.7, false, 0.7, ApiStyle.OpenAICompatible, "secret:test", now, now);
-        await profileRepository.UpsertProfileAsync(profile);
-        var conversation = new ConversationRecord(
-            Guid.NewGuid(),
-            "Chat",
-            profile.Id,
-            null,
-            ConversationMode.Programming,
-            ToolPermissionMode.RequireApproval,
-            "build",
-            now,
-            now);
-        await conversationRepository.UpsertConversationAsync(conversation);
-        await conversationRepository.UpsertConversationContextSummaryAsync(new ConversationContextSummaryRecord(
-            conversation.Id,
-            "Earlier conversation summary.",
-            null,
-            null,
-            512,
-            32,
-            now,
-            now));
-
-        await conversationRepository.DeleteConversationAsync(conversation.Id);
-
-        var loadedSummary = await conversationRepository.GetConversationContextSummaryAsync(conversation.Id);
-        loadedSummary.Should().BeNull();
     }
 
     public void Dispose()

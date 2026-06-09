@@ -47,10 +47,8 @@ internal static class SqliteMappings
                 !reader.IsDBNull(7) && reader.GetInt32(7) != 0,
                 reader.IsDBNull(8) ? 0.7 : reader.GetDouble(8)),
             ReadJsonElementDictionary(reader, 9),
-            reader.IsDBNull(10) ? null : reader.GetInt32(10),
-            reader.IsDBNull(11) ? null : reader.GetInt32(11),
-            ReadDateTimeOffset(reader, 12),
-            ReadDateTimeOffset(reader, 13));
+            ReadDateTimeOffset(reader, 10),
+            ReadDateTimeOffset(reader, 11));
 
     public static AiModelProfileSelection ReadAiModelProfileSelection(SqliteDataReader reader)
         => new(
@@ -99,17 +97,6 @@ internal static class SqliteMappings
             reader.GetString(4),
             reader.GetString(5),
             reader.GetInt64(6),
-            ReadDateTimeOffset(reader, 7));
-
-    public static ConversationContextSummaryRecord ReadConversationContextSummary(SqliteDataReader reader)
-        => new(
-            ReadGuid(reader, 0),
-            reader.GetString(1),
-            reader.IsDBNull(2) ? null : ReadGuid(reader, 2),
-            reader.IsDBNull(3) ? null : ReadDateTimeOffset(reader, 3),
-            reader.GetInt32(4),
-            reader.GetInt32(5),
-            ReadDateTimeOffset(reader, 6),
             ReadDateTimeOffset(reader, 7));
 
     public static ToolExecutionRecord ReadToolRun(SqliteDataReader reader)

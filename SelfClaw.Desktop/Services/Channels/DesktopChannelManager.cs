@@ -10,15 +10,11 @@ namespace SelfClaw.Desktop.Services;
 
 public sealed class DesktopChannelManager : IAsyncDisposable
 {
-    private const int DefaultModelContextWindow = 256_000;
-    private const int DefaultModelAutoCompactTokenLimit = 200_000;
-
     private readonly DesktopChannelSettingsStore _settingsStore;
     private readonly IConversationRepository _conversationRepository;
     private readonly IProfileRepository _profileRepository;
     private readonly ISecretProtector _secretProtector;
     private readonly IAgentChatRuntime _agentChatRuntime;
-    private readonly IConversationContextCompactionService _contextCompactionService;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<DesktopChannelManager> _logger;
     private readonly IReadOnlyList<IDesktopChannelAdapter> _adapters;
@@ -36,7 +32,6 @@ public sealed class DesktopChannelManager : IAsyncDisposable
         IProfileRepository profileRepository,
         ISecretProtector secretProtector,
         IAgentChatRuntime agentChatRuntime,
-        IConversationContextCompactionService contextCompactionService,
         IEnumerable<IDesktopChannelAdapter> adapters,
         ILoggerFactory loggerFactory,
         ILogger<DesktopChannelManager> logger)
@@ -46,7 +41,6 @@ public sealed class DesktopChannelManager : IAsyncDisposable
         _profileRepository = profileRepository;
         _secretProtector = secretProtector;
         _agentChatRuntime = agentChatRuntime;
-        _contextCompactionService = contextCompactionService;
         _loggerFactory = loggerFactory;
         _logger = logger;
         _adapters = adapters.ToArray();
@@ -386,15 +380,7 @@ public sealed class DesktopChannelManager : IAsyncDisposable
             await _conversationRepository.UpsertMessageAsync(userMessage, cancellationToken);
             NotifyChanged(conversation.Id);
 
-            var rawRequestMessages = await _conversationRepository.ListMessagesAsync(conversation.Id, cancellationToken);
-            var requestMessages = await _contextCompactionService.PrepareMessagesAsync(
-                conversation.Id,
-                profile,
-                apiKey,
-                rawRequestMessages,
-                DefaultModelContextWindow,
-                DefaultModelAutoCompactTokenLimit,
-                cancellationToken);
+            var requestMessages = await _conversationRepository.ListMessagesAsync(conversation.Id, cancellationToken);
             var streamingReply = default(IDesktopChannelStreamingReply);
             var streamedMarkdown = new StringBuilder();
             var connection = GetRuntimeSession(adapter.Descriptor.Id, configuration).Connection;
@@ -457,11 +443,6 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                 }
             }
 
-            await TryCompactChannelContextAfterSuccessfulTurnAsync(
-                conversation,
-                profile,
-                apiKey,
-                cancellationToken);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -499,37 +480,6 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                     _logger.LogWarning(replyException, "Failed to send failure reply for '{ChannelId}'.", adapter.Descriptor.Id);
                 }
             }
-        }
-    }
-
-    private async Task TryCompactChannelContextAfterSuccessfulTurnAsync(
-        ConversationRecord conversation,
-        ProviderProfile profile,
-        string apiKey,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var rawMessages = await _conversationRepository.ListMessagesAsync(conversation.Id, cancellationToken);
-            await _contextCompactionService.PrepareMessagesAsync(
-                conversation.Id,
-                profile,
-                apiKey,
-                rawMessages,
-                DefaultModelContextWindow,
-                DefaultModelAutoCompactTokenLimit,
-                cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(
-                exception,
-                "Post-turn channel context compaction failed. ConversationId={ConversationId}",
-                conversation.Id);
         }
     }
 

@@ -220,8 +220,6 @@ public sealed class OpenAiProviderAdapterTests
             "test-model",
             sampling ?? new AiSamplingOptions(false, 0.7, false, 0.7),
             modelOptions ?? ReadJsonObject("{}"),
-            null,
-            null,
             now,
             now);
 

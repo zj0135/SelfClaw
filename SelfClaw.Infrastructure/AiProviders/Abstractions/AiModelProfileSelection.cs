@@ -2,7 +2,7 @@ namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
 
 /// <summary>
 /// Stores the selected model profile for a named runtime scope, such as the
-/// desktop default model or the compaction default model.
+/// desktop default model.
 /// </summary>
 public sealed record AiModelProfileSelection(
     string Scope,

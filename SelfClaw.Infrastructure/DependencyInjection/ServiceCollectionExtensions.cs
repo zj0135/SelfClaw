@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
-using SelfClaw.Infrastructure.Agents.Runtime.Compaction;
 using SelfClaw.Infrastructure.Agents.Runtime.Context;
 using SelfClaw.Infrastructure.Agents.Runtime.Execution;
 using SelfClaw.Infrastructure.Agents.Runtime.Mcp;
@@ -57,14 +56,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IWorkspaceMemoryInitializationService, WorkspaceMemoryInitializationService>();
         services.AddSingleton<IAgentMcpToolProvider, McpServerToolProvider>();
         services.AddSingleton<IAgentChatRuntime, SelfClawAgentChatRuntime>();
-        services.AddSingleton<IConversationContextCompactionService>(provider =>
-        {
-            var loggerFactory = provider.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
-            return new ConversationContextCompactionService(
-                provider.GetRequiredService<IConversationRepository>(),
-                provider.GetRequiredService<IAgentExecutionService>(),
-                loggerFactory.CreateLogger<ConversationContextCompactionService>());
-        });
         services.AddSingleton<MarkdownHtmlRenderer>();
         return services;
     }

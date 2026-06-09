@@ -111,7 +111,7 @@ ON CONFLICT(id) DO UPDATE SET
         {
             command.CommandText = @"
 SELECT id, provider_connection_id, name, api_format, model, temperature_enabled, temperature, top_p_enabled, top_p,
-       model_options_json, context_window_tokens, auto_compact_token_limit, created_at_utc, updated_at_utc
+       model_options_json, created_at_utc, updated_at_utc
 FROM ai_model_profiles
 WHERE provider_connection_id = $providerConnectionId AND is_enabled != 0
 ORDER BY updated_at_utc DESC;";
@@ -121,7 +121,7 @@ ORDER BY updated_at_utc DESC;";
         {
             command.CommandText = @"
 SELECT id, provider_connection_id, name, api_format, model, temperature_enabled, temperature, top_p_enabled, top_p,
-       model_options_json, context_window_tokens, auto_compact_token_limit, created_at_utc, updated_at_utc
+       model_options_json, created_at_utc, updated_at_utc
 FROM ai_model_profiles
 WHERE is_enabled != 0
 ORDER BY updated_at_utc DESC;";
@@ -143,7 +143,7 @@ ORDER BY updated_at_utc DESC;";
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 SELECT id, provider_connection_id, name, api_format, model, temperature_enabled, temperature, top_p_enabled, top_p,
-       model_options_json, context_window_tokens, auto_compact_token_limit, created_at_utc, updated_at_utc
+       model_options_json, created_at_utc, updated_at_utc
 FROM ai_model_profiles
 WHERE id = $id AND is_enabled != 0
 LIMIT 1;";
@@ -164,10 +164,10 @@ LIMIT 1;";
         command.CommandText = @"
 INSERT INTO ai_model_profiles(
     id, provider_connection_id, name, api_format, model, temperature_enabled, temperature, top_p_enabled, top_p,
-    model_options_json, context_window_tokens, auto_compact_token_limit, is_enabled, created_at_utc, updated_at_utc)
+    model_options_json, is_enabled, created_at_utc, updated_at_utc)
 VALUES(
     $id, $providerConnectionId, $name, $apiFormat, $model, $temperatureEnabled, $temperature, $topPEnabled, $topP,
-    $modelOptionsJson, $contextWindowTokens, $autoCompactTokenLimit, 1, $createdAt, $updatedAt)
+    $modelOptionsJson, 1, $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
     provider_connection_id = excluded.provider_connection_id,
     name = excluded.name,
@@ -178,8 +178,6 @@ ON CONFLICT(id) DO UPDATE SET
     top_p_enabled = excluded.top_p_enabled,
     top_p = excluded.top_p,
     model_options_json = excluded.model_options_json,
-    context_window_tokens = excluded.context_window_tokens,
-    auto_compact_token_limit = excluded.auto_compact_token_limit,
     is_enabled = 1,
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", profile.Id.ToString("D"));
@@ -192,8 +190,6 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$topPEnabled", profile.Sampling.TopPEnabled ? 1 : 0);
         command.Parameters.AddWithValue("$topP", profile.Sampling.TopP);
         command.Parameters.AddWithValue("$modelOptionsJson", Serialize(profile.ModelOptions));
-        command.Parameters.AddWithValue("$contextWindowTokens", profile.ContextWindowTokens ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$autoCompactTokenLimit", profile.AutoCompactTokenLimit ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$createdAt", profile.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", profile.UpdatedAtUtc.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);

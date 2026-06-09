@@ -22,8 +22,6 @@ namespace SelfClaw.Desktop.ViewModels;
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(75);
-    private const int DefaultModelContextWindow = 256_000;
-    private const int DefaultModelAutoCompactTokenLimit = 200_000;
     private const int MaxPromptImageAttachments = 6;
     private const long MaxPromptImageBytes = 10 * 1024 * 1024;
     private const long MaxPromptImageTotalBytes = 30 * 1024 * 1024;
@@ -32,7 +30,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IProfileRepository _profileRepository;
     private readonly ISecretProtector _secretProtector;
     private readonly IAgentChatRuntime _agentChatRuntime;
-    private readonly IConversationContextCompactionService _contextCompactionService;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly DesktopNotificationService _desktopNotificationService;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
@@ -77,7 +74,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IProfileRepository profileRepository,
         ISecretProtector secretProtector,
         IAgentChatRuntime agentChatRuntime,
-        IConversationContextCompactionService contextCompactionService,
         DesktopToolApprovalHandler toolApprovalHandler,
         DesktopNotificationService desktopNotificationService,
         MarkdownHtmlRenderer markdownHtmlRenderer,
@@ -89,7 +85,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _profileRepository = profileRepository;
         _secretProtector = secretProtector;
         _agentChatRuntime = agentChatRuntime;
-        _contextCompactionService = contextCompactionService;
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
         _markdownHtmlRenderer = markdownHtmlRenderer;
@@ -729,14 +724,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 throw new InvalidOperationException("The selected profile does not have a readable API key.");
             }
 
-            var requestMessages = await _contextCompactionService.PrepareMessagesAsync(
-                conversation.Id,
-                requestProfile,
-                apiKey,
-                runtimeState.Messages.ToArray(),
-                DefaultModelContextWindow,
-                DefaultModelAutoCompactTokenLimit,
-                cancellationToken);
+            var requestMessages = runtimeState.Messages.ToArray();
 
             await foreach (var update in _agentChatRuntime.StreamTurnAsync(
                                new ChatTurnRequest(
@@ -781,13 +769,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 }
             }
 
-            await TryCompactConversationContextAfterSuccessfulTurnAsync(
-                runtimeState,
-                conversation,
-                requestProfile,
-                apiKey,
-                cancellationToken);
-
             PublishConversationCompletedNotification(conversation, runtimeState.Messages);
         }
         catch (OperationCanceledException) when (runtimeState?.CancellationTokenSource.IsCancellationRequested == true)
@@ -814,37 +795,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 CompleteConversationRuntimeState(runtimeState);
                 runtimeState.CancellationTokenSource.Dispose();
             }
-        }
-    }
-
-    private async Task TryCompactConversationContextAfterSuccessfulTurnAsync(
-        ConversationRuntimeState runtimeState,
-        ConversationRecord conversation,
-        ProviderProfile profile,
-        string apiKey,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _contextCompactionService.PrepareMessagesAsync(
-                conversation.Id,
-                profile,
-                apiKey,
-                runtimeState.Messages.ToArray(),
-                DefaultModelContextWindow,
-                DefaultModelAutoCompactTokenLimit,
-                cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(
-                exception,
-                "Post-turn context compaction failed. ConversationId={ConversationId}",
-                conversation.Id);
         }
     }
 

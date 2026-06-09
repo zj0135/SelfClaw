@@ -168,58 +168,6 @@ ON CONFLICT(id) DO UPDATE SET
         return message;
     }
 
-    public async Task<ConversationContextSummaryRecord?> GetConversationContextSummaryAsync(
-        Guid conversationId,
-        CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
-SELECT conversation_id, summary_markdown, covered_through_message_id, covered_through_message_created_at_utc,
-       source_token_estimate, summary_token_estimate, created_at_utc, updated_at_utc
-FROM conversation_context_summaries
-WHERE conversation_id = $conversationId
-LIMIT 1;";
-        command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken)
-            ? SqliteMappings.ReadConversationContextSummary(reader)
-            : null;
-    }
-
-    public async Task<ConversationContextSummaryRecord> UpsertConversationContextSummaryAsync(
-        ConversationContextSummaryRecord summary,
-        CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
-INSERT INTO conversation_context_summaries(
-    conversation_id, summary_markdown, covered_through_message_id, covered_through_message_created_at_utc,
-    source_token_estimate, summary_token_estimate, created_at_utc, updated_at_utc)
-VALUES(
-    $conversationId, $summaryMarkdown, $coveredThroughMessageId, $coveredThroughMessageCreatedAt,
-    $sourceTokenEstimate, $summaryTokenEstimate, $createdAt, $updatedAt)
-ON CONFLICT(conversation_id) DO UPDATE SET
-    summary_markdown = excluded.summary_markdown,
-    covered_through_message_id = excluded.covered_through_message_id,
-    covered_through_message_created_at_utc = excluded.covered_through_message_created_at_utc,
-    source_token_estimate = excluded.source_token_estimate,
-    summary_token_estimate = excluded.summary_token_estimate,
-    updated_at_utc = excluded.updated_at_utc;";
-        command.Parameters.AddWithValue("$conversationId", summary.ConversationId.ToString("D"));
-        command.Parameters.AddWithValue("$summaryMarkdown", summary.SummaryMarkdown);
-        command.Parameters.AddWithValue("$coveredThroughMessageId", summary.CoveredThroughMessageId?.ToString("D") ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$coveredThroughMessageCreatedAt", summary.CoveredThroughMessageCreatedAtUtc?.ToString("O") ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$sourceTokenEstimate", summary.SourceTokenEstimate);
-        command.Parameters.AddWithValue("$summaryTokenEstimate", summary.SummaryTokenEstimate);
-        command.Parameters.AddWithValue("$createdAt", summary.CreatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$updatedAt", summary.UpdatedAtUtc.ToString("O"));
-        await command.ExecuteNonQueryAsync(cancellationToken);
-        return summary;
-    }
-
     private static async Task<Dictionary<Guid, IReadOnlyList<MessageAttachmentRecord>>> ReadMessageAttachmentsAsync(
         SqliteConnection connection,
         IReadOnlyList<Guid> messageIds,
