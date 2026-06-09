@@ -184,6 +184,8 @@ Infrastructure registration in `ServiceCollectionExtensions.AddSelfClawInfrastru
 - `StoragePaths`
 - `SqliteDatabase`
 - `IProfileRepository`, `IConversationRepository`
+- `IAiProviderRepository`
+- `IAiProviderAdapter` for `OpenAI` and `OpenAICompatible`, `IAiProviderRegistry`
 - `ISecretProtector`
 - `IWorkspaceToolService`
 - `IAgentExecutionService`
@@ -310,13 +312,16 @@ Permission model:
 
 `SqliteDatabase` manages schema initialization/migration:
 
-- `CurrentSchemaVersion = 15`
+- `CurrentSchemaVersion = 16`
 - `PRAGMA foreign_keys = ON`
 - backward-compatible `EnsureColumnExists`
 
 Main tables:
 
 - `profiles`
+- `ai_provider_connections`
+- `ai_model_profiles`
+- `ai_model_profile_selections`
 - `workspace_roots`
 - `conversations`
 - `messages`
@@ -374,6 +379,7 @@ Desktop transcript service models include:
 | `SelfClaw.Infrastructure/Agents/Tools/WorkspaceToolFunctions.cs` | Tool wrapping and approval integration |
 | `SelfClaw.Infrastructure/Tools/Workspace/WorkspaceToolService.cs` | Workspace files and shell implementation |
 | `SelfClaw.Infrastructure/Data/Sqlite/SqliteDatabase.cs` | SQLite schema and migration |
+| `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteAiProviderRepository.cs` | AI provider/profile persistence |
 | `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteConversationRepository.cs` | Conversation/message/tool persistence |
 | `SelfClaw.Infrastructure/Channels/Feishu/FeishuBotService.cs` | Feishu high-level bot service |
 | `SelfClaw.Infrastructure/Channels/Feishu/Protocol/FeishuWsFrame.cs` | Feishu long-connection frame model |

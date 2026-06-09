@@ -108,6 +108,13 @@ public sealed record AiProviderClientRequest(
     IReadOnlyList<AITool> Tools);
 ```
 
+```csharp
+public sealed record AiModelProfileSelection(
+    string Scope,
+    Guid ModelProfileId,
+    DateTimeOffset UpdatedAtUtc);
+```
+
 新增 provider 抽象：
 
 ```csharp
@@ -129,6 +136,24 @@ public interface IAiProviderAdapter
 public interface IAiProviderRegistry
 {
     IAiProviderAdapter GetRequiredAdapter(AiProviderKind providerKind);
+}
+```
+
+新增 provider/profile repository 抽象：
+
+```csharp
+public interface IAiProviderRepository
+{
+    Task<IReadOnlyList<AiProviderConnection>> ListProviderConnectionsAsync(CancellationToken cancellationToken = default);
+    Task<AiProviderConnection?> GetProviderConnectionAsync(Guid providerConnectionId, CancellationToken cancellationToken = default);
+    Task<AiProviderConnection> UpsertProviderConnectionAsync(AiProviderConnection connection, CancellationToken cancellationToken = default);
+    Task DeleteProviderConnectionAsync(Guid providerConnectionId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AiModelProfile>> ListModelProfilesAsync(Guid? providerConnectionId = null, CancellationToken cancellationToken = default);
+    Task<AiModelProfile?> GetModelProfileAsync(Guid modelProfileId, CancellationToken cancellationToken = default);
+    Task<AiModelProfile> UpsertModelProfileAsync(AiModelProfile profile, CancellationToken cancellationToken = default);
+    Task DeleteModelProfileAsync(Guid modelProfileId, CancellationToken cancellationToken = default);
+    Task<AiModelProfileSelection?> GetModelProfileSelectionAsync(string scope, CancellationToken cancellationToken = default);
+    Task<AiModelProfileSelection> SetModelProfileSelectionAsync(AiModelProfileSelection selection, CancellationToken cancellationToken = default);
 }
 ```
 
@@ -312,6 +337,7 @@ services.AddSingleton<IAiProviderAdapter>(sp =>
 services.AddSingleton<IAiProviderAdapter>(sp =>
     new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, sp.GetService<ILogger<OpenAiProviderAdapter>>()));
 services.AddSingleton<IAiProviderRegistry, AiProviderRegistry>();
+services.AddSingleton<IAiProviderRepository, SqliteAiProviderRepository>();
 ```
 
 `AiProviderRegistry` 构造时收集所有 `IAiProviderAdapter`，按 `ProviderKind` 建索引；重复注册同一 kind 时启动即失败。

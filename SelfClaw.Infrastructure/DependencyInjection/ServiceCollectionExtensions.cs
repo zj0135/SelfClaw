@@ -6,6 +6,9 @@ using SelfClaw.Infrastructure.Agents.Runtime.Context;
 using SelfClaw.Infrastructure.Agents.Runtime.Execution;
 using SelfClaw.Infrastructure.Agents.Runtime.Mcp;
 using SelfClaw.Infrastructure.Agents.Runtime.Orchestration;
+using SelfClaw.Infrastructure.AiProviders;
+using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.OpenAi;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
@@ -27,6 +30,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SqliteDatabase>();
         services.AddSingleton<IProfileRepository, SqliteProfileRepository>();
         services.AddSingleton<IConversationRepository, SqliteConversationRepository>();
+        services.AddSingleton<IAiProviderRepository, SqliteAiProviderRepository>();
+        services.AddSingleton<IAiProviderAdapter>(provider =>
+            new OpenAiProviderAdapter(
+                AiProviderKind.OpenAI,
+                provider.GetService<ILogger<OpenAiProviderAdapter>>()));
+        services.AddSingleton<IAiProviderAdapter>(provider =>
+            new OpenAiProviderAdapter(
+                AiProviderKind.OpenAICompatible,
+                provider.GetService<ILogger<OpenAiProviderAdapter>>()));
+        services.AddSingleton<IAiProviderRegistry, AiProviderRegistry>();
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
         services.AddSingleton<IAgentExecutionService>(provider =>

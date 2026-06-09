@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 15;
+    private const int CurrentSchemaVersion = 16;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -86,6 +86,48 @@ CREATE TABLE IF NOT EXISTS profiles (
     secret_ref TEXT NOT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL
+);", cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS ai_provider_connections (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    provider_kind INTEGER NOT NULL,
+    endpoint TEXT NOT NULL,
+    auth_kind INTEGER NOT NULL,
+    credential_refs_json TEXT NOT NULL DEFAULT '{}',
+    connection_options_json TEXT NOT NULL DEFAULT '{}',
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);", cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS ai_model_profiles (
+    id TEXT NOT NULL PRIMARY KEY,
+    provider_connection_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    api_format INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    temperature_enabled INTEGER NOT NULL DEFAULT 0,
+    temperature REAL NOT NULL DEFAULT 0.7,
+    top_p_enabled INTEGER NOT NULL DEFAULT 0,
+    top_p REAL NOT NULL DEFAULT 0.7,
+    model_options_json TEXT NOT NULL DEFAULT '{}',
+    context_window_tokens INTEGER NULL,
+    auto_compact_token_limit INTEGER NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    FOREIGN KEY(provider_connection_id) REFERENCES ai_provider_connections(id) ON DELETE CASCADE
+);", cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS ai_model_profile_selections (
+    scope TEXT NOT NULL PRIMARY KEY,
+    model_profile_id TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    FOREIGN KEY(model_profile_id) REFERENCES ai_model_profiles(id) ON DELETE CASCADE
 );", cancellationToken);
 
             await EnsureColumnExistsAsync(
@@ -302,6 +344,9 @@ CREATE TABLE IF NOT EXISTS tool_runs (
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_message_attachments_message ON message_attachments(message_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_tool_runs_conversation_created ON tool_runs(conversation_id, created_at_utc);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_ai_provider_connections_kind ON ai_provider_connections(provider_kind);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_ai_model_profiles_connection ON ai_model_profiles(provider_connection_id);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_ai_model_profiles_updated ON ai_model_profiles(updated_at_utc DESC);", cancellationToken);
             for (var version = 1; version <= CurrentSchemaVersion; version++)
             {
                 await ExecuteAsync(

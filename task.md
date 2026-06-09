@@ -71,53 +71,61 @@ v1 OpenAI provider 必须同时支持：
 
 > 实现位置：`SelfClaw.Infrastructure/AiProviders/OpenAi/OpenAiProviderAdapter.Responses.cs`（新分部）。`ResponsesClient(ApiKeyCredential, OpenAIClientOptions)` + `AsIChatClient(profile.Model)`；raw 选项用强类型 `CreateResponseOptions`（`ReasoningOptions`/`StoredOutputEnabled`/`MaxOutputTokenCount`/`TruncationMode`/`ParallelToolCallsEnabled`，符合设计偏好）。reasoning 仅在 `reasoning.effort`/`reasoning.summary` 显式存在时才注入，绝不读 `EnableReasoning`。核心分部已扩展 `SupportsApiFormat`（含 Responses）、分派 switch，并新增 `TryReadInt` 助手。Responses 为 SDK 评估期 API，整文件以 `#pragma warning disable OPENAI001` 抑制。
 
-### 5. 新增全新 SQLite schema
+### 5. 新增全新 SQLite schema ✅ 已完成
 
-- 新增 `ai_provider_connections`
-- 新增 `ai_model_profiles`
-- 新增 `ai_model_profile_selections`
-- 新增索引：
+- [x] 新增 `ai_provider_connections`
+- [x] 新增 `ai_model_profiles`
+- [x] 新增 `ai_model_profile_selections`
+- [x] 新增索引：
   - `ix_ai_provider_connections_kind`
   - `ix_ai_model_profiles_connection`
   - `ix_ai_model_profiles_updated`
-- 不扩展旧 `profiles` 表
-- 不做旧 `profiles` 到新表的数据迁移
+- [x] 不扩展旧 `profiles` 表
+- [x] 不做旧 `profiles` 到新表的数据迁移
 
-### 6. 新增 repository
+> 实现位置：`SelfClaw.Infrastructure/Data/Sqlite/SqliteDatabase.cs`。`CurrentSchemaVersion` 已提升到 `16`；初始化阶段新增三张独立 AI provider/profile 表与三个索引，继续使用 `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`，不修改旧 `profiles` 表，也不执行旧 profile 数据迁移。新增测试 `Initialize_adds_ai_provider_schema` 覆盖表、索引和 schema version 记录。
 
-- 添加 provider connection 的 list/get/upsert/delete
-- 添加 model profile 的 list/get/upsert/delete
-- 添加默认 selection 的 get/set
-- JSON 字段读写使用 `System.Text.Json`
-- 删除 provider connection 时依赖外键级联删除 model profiles
-- secret 只保存 ref，不保存明文
+### 6. 新增 repository ✅ 已完成
 
-### 7. 添加 DI 注册
+- [x] 添加 provider connection 的 list/get/upsert/delete
+- [x] 添加 model profile 的 list/get/upsert/delete
+- [x] 添加默认 selection 的 get/set
+- [x] JSON 字段读写使用 `System.Text.Json`
+- [x] 删除 provider connection 时依赖外键级联删除 model profiles
+- [x] secret 只保存 ref，不保存明文
 
-- 在 Infrastructure DI 中注册 `OpenAiProviderAdapter`
-- 注册 `AiProviderRegistry`
-- 注册新 repository
-- 不修改现有 `IAgentExecutionService` 的行为
-- 不改动现有 runtime 调用链
+> 实现位置：新增 `AiModelProfileSelection` 与 `IAiProviderRepository` 于 `SelfClaw.Infrastructure/AiProviders/Abstractions/`；新增 SQLite 实现 `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteAiProviderRepository.cs`。repository 只读写新表，`credential_refs_json` 只保存 secret ref，`connection_options_json`/`model_options_json` 通过 `System.Text.Json` 序列化。新增测试覆盖 provider connection、model profile、selection 的保存读取，以及删除 provider connection 后 model profile/selection 的级联删除。
 
-### 8. 添加单元测试
+### 7. 添加 DI 注册 ✅ 已完成
 
-- registry 查找成功
-- registry 未找到 provider 时抛出明确异常
-- registry 重复 provider kind 时抛出明确异常
-- OpenAI adapter 声明支持 Chat Completions 和 Responses
-- OpenAI Chat Completions 创建 `IChatClient`
-- OpenAI Responses 创建 `IChatClient`
-- OpenAI adapter 映射采样参数
-- OpenAI adapter 映射 tool mode
-- Chat Completions 应用 reasoning 默认值
-- Chat Completions 应用 model-specific options
-- Responses 应用 model-specific options
-- 不支持的 api format 抛出明确异常
-- repository 保存和读取 provider connection
-- repository 保存和读取 model profile
-- repository 保存和读取 selection
-- 删除 provider connection 后 model profiles 被级联删除
+- [x] 在 Infrastructure DI 中注册 `OpenAiProviderAdapter`
+- [x] 注册 `AiProviderRegistry`
+- [x] 注册新 repository
+- [x] 不修改现有 `IAgentExecutionService` 的行为
+- [x] 不改动现有 runtime 调用链
+
+> 实现位置：`SelfClaw.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs`。Infrastructure DI 现在注册 `IAiProviderRepository`、两个 `IAiProviderAdapter`（`OpenAI` 与 `OpenAICompatible` 各一个 `OpenAiProviderAdapter` 实例）和 `IAiProviderRegistry`。现有 `IAgentExecutionService` factory 与 runtime 调用链保持不变。新增 `ServiceCollectionExtensionsTests` 验证默认 DI 能解析新 repository、registry 和两个 OpenAI-family adapter。
+
+### 8. 添加单元测试 ✅ 已完成
+
+- [x] registry 查找成功
+- [x] registry 未找到 provider 时抛出明确异常
+- [x] registry 重复 provider kind 时抛出明确异常
+- [x] OpenAI adapter 声明支持 Chat Completions 和 Responses
+- [x] OpenAI Chat Completions 创建 `IChatClient`
+- [x] OpenAI Responses 创建 `IChatClient`
+- [x] OpenAI adapter 映射采样参数
+- [x] OpenAI adapter 映射 tool mode
+- [x] Chat Completions 应用 reasoning 默认值
+- [x] Chat Completions 应用 model-specific options
+- [x] Responses 应用 model-specific options
+- [x] 不支持的 api format 抛出明确异常
+- [x] repository 保存和读取 provider connection
+- [x] repository 保存和读取 model profile
+- [x] repository 保存和读取 selection
+- [x] 删除 provider connection 后 model profiles 被级联删除
+
+> 实现位置：新增 `SelfClaw.Tests/Infrastructure/AiProviders/AiProviderRegistryTests.cs` 覆盖 registry 成功、未找到和重复 kind；新增 `SelfClaw.Tests/Infrastructure/AiProviders/OpenAiProviderAdapterTests.cs` 覆盖 OpenAI adapter 的 format 声明、两种 `IChatClient` 创建、采样/工具映射、Chat Completions raw option、Responses raw option 和 unsupported format。repository 覆盖在 `SqliteRepositoriesTests`，DI 覆盖在 `ServiceCollectionExtensionsTests`。当前 `dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj --no-restore` 通过，67 passed。
 
 ## Acceptance Criteria
 

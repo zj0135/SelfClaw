@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
+using SelfClaw.Infrastructure.AiProviders.Abstractions;
 
 namespace SelfClaw.Infrastructure.Data.Sqlite;
 
@@ -19,6 +21,42 @@ internal static class SqliteMappings
             reader.GetString(9),
             ReadDateTimeOffset(reader, 10),
             ReadDateTimeOffset(reader, 11));
+
+    public static AiProviderConnection ReadAiProviderConnection(SqliteDataReader reader)
+        => new(
+            ReadGuid(reader, 0),
+            reader.GetString(1),
+            (AiProviderKind)reader.GetInt32(2),
+            new Uri(reader.GetString(3), UriKind.Absolute),
+            (AiProviderAuthKind)reader.GetInt32(4),
+            ReadStringDictionary(reader, 5),
+            ReadJsonElementDictionary(reader, 6),
+            ReadDateTimeOffset(reader, 7),
+            ReadDateTimeOffset(reader, 8));
+
+    public static AiModelProfile ReadAiModelProfile(SqliteDataReader reader)
+        => new(
+            ReadGuid(reader, 0),
+            ReadGuid(reader, 1),
+            reader.GetString(2),
+            (AiProviderApiFormat)reader.GetInt32(3),
+            reader.GetString(4),
+            new AiSamplingOptions(
+                !reader.IsDBNull(5) && reader.GetInt32(5) != 0,
+                reader.IsDBNull(6) ? 0.7 : reader.GetDouble(6),
+                !reader.IsDBNull(7) && reader.GetInt32(7) != 0,
+                reader.IsDBNull(8) ? 0.7 : reader.GetDouble(8)),
+            ReadJsonElementDictionary(reader, 9),
+            reader.IsDBNull(10) ? null : reader.GetInt32(10),
+            reader.IsDBNull(11) ? null : reader.GetInt32(11),
+            ReadDateTimeOffset(reader, 12),
+            ReadDateTimeOffset(reader, 13));
+
+    public static AiModelProfileSelection ReadAiModelProfileSelection(SqliteDataReader reader)
+        => new(
+            reader.GetString(0),
+            ReadGuid(reader, 1),
+            ReadDateTimeOffset(reader, 2));
 
     public static ConversationRecord ReadConversation(SqliteDataReader reader)
         => new(
@@ -105,4 +143,9 @@ internal static class SqliteMappings
     private static DateTimeOffset ReadDateTimeOffset(SqliteDataReader reader, int ordinal)
         => DateTimeOffset.Parse(reader.GetString(ordinal), System.Globalization.CultureInfo.InvariantCulture);
 
+    private static IReadOnlyDictionary<string, string> ReadStringDictionary(SqliteDataReader reader, int ordinal)
+        => JsonSerializer.Deserialize<Dictionary<string, string>>(reader.GetString(ordinal)) ?? [];
+
+    private static IReadOnlyDictionary<string, JsonElement> ReadJsonElementDictionary(SqliteDataReader reader, int ordinal)
+        => JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(reader.GetString(ordinal)) ?? [];
 }
