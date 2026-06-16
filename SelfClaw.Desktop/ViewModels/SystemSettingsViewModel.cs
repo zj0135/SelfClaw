@@ -281,11 +281,14 @@ public sealed class SystemSettingsViewModel : ObservableObject
     private AiProviderSettingsItem CreateEnabledProviderItem(AiProviderConnection connection)
     {
         var defaultApiFormat = ResolveDefaultApiFormat(connection);
+        var catalogItem = FindCatalogItem(connection.Name, connection.ProviderKind, defaultApiFormat);
         return new AiProviderSettingsItem(
             ResolveCatalogId(connection.Name, connection.ProviderKind, defaultApiFormat),
             connection.Id,
             connection.Name,
             GetIconText(connection.Name, connection.ProviderKind),
+            catalogItem?.IconImagePath,
+            catalogItem?.IconBrush ?? GetIconBrush(connection.Name, connection.ProviderKind),
             connection.ProviderKind,
             defaultApiFormat,
             connection.Endpoint.AbsoluteUri.TrimEnd('/'),
@@ -296,6 +299,20 @@ public sealed class SystemSettingsViewModel : ObservableObject
 
     private void RebuildDisabledProviderCatalog()
     {
+        _allDisabledProviders.RemoveAll(item => item.ConnectionId is null);
+
+        var existingCatalogIds = _allEnabledProviders
+            .Concat(_allDisabledProviders)
+            .Select(item => item.CatalogId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var catalogItem in CreateProviderCatalog())
+        {
+            if (!existingCatalogIds.Contains(catalogItem.CatalogId))
+            {
+                _allDisabledProviders.Add(catalogItem);
+            }
+        }
     }
 
     private void RefreshProviderLists()
@@ -922,16 +939,37 @@ public sealed class SystemSettingsViewModel : ObservableObject
            item.ModelId.Contains(searchText, StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<AiProviderSettingsItem> CreateProviderCatalog()
-        => [];
+        =>
+        [
+            CreateCatalogItem("openai", "OpenAI", "O", AiProviderKind.OpenAI, AiProviderApiFormat.OpenAIChatCompletions, "https://api.openai.com/v1"),
+            CreateCatalogItem("routin-ai", "Routin AI", "R", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://api.routin.ai/v1"),
+            CreateCatalogItem("routin-ai-package", "Routin AI（套餐）", "R", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://api.routin.ai/v1"),
+            CreateCatalogItem("anthropic", "Anthropic", "A", AiProviderKind.Anthropic, AiProviderApiFormat.AnthropicMessages, "https://api.anthropic.com"),
+            CreateCatalogItem("longcat", "LongCat", "LC", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://api.longcat.chat/openai/v1"),
+            CreateCatalogItem("google-gemini", "Google Gemini", "G", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://generativelanguage.googleapis.com/v1beta/openai"),
+            CreateCatalogItem("deepseek", "DeepSeek", "D", AiProviderKind.DeepSeek, AiProviderApiFormat.OpenAIChatCompletions, "https://api.deepseek.com/v1"),
+            CreateCatalogItem("openrouter", "OpenRouter", "OR", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://openrouter.ai/api/v1"),
+            CreateCatalogItem("ollama", "Ollama", "O", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "http://localhost:11434/v1"),
+            CreateCatalogItem("azure-openai", "Azure OpenAI", "AZ", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://your-resource.openai.azure.com/openai/v1"),
+            CreateCatalogItem("moonshot-package", "Moonshot（套餐）", "M", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://api.moonshot.cn/v1"),
+            CreateCatalogItem("moonshot-official", "Moonshot（官方）", "M", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://api.moonshot.cn/v1"),
+            CreateCatalogItem("modelscope-package", "通义千问（套餐）", "Q", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            CreateCatalogItem("modelscope-official", "通义千问（官方）", "Q", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            CreateCatalogItem("baidu-package", "百度智能云（套餐）", "B", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://qianfan.baidubce.com/v2"),
+            CreateCatalogItem("baidu-official", "百度智能云（官方）", "B", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://qianfan.baidubce.com/v2"),
+            CreateCatalogItem("minimax-package", "MiniMax（套餐）", "MM", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://api.minimax.chat/v1"),
+            CreateCatalogItem("minimax-official", "MiniMax（官方）", "MM", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, "https://api.minimax.chat/v1")
+        ];
 
     private static AiProviderSettingsItem CreateCatalogItem(
         string catalogId,
         string name,
-        string iconText,
-        AiProviderKind providerKind,
+            string iconText,
+            AiProviderKind providerKind,
         AiProviderApiFormat apiFormat,
-        string endpoint)
-        => new(catalogId, null, name, iconText, providerKind, apiFormat, endpoint, false, false, null);
+        string endpoint,
+        string? iconImagePath = null)
+        => new(catalogId, null, name, iconText, iconImagePath, GetIconBrush(name, providerKind), providerKind, apiFormat, endpoint, false, false, null);
 
     private static IReadOnlyList<AiModelSettingsItem> CreateModelCatalog(AiProviderSettingsItem provider)
     {
@@ -957,11 +995,14 @@ public sealed class SystemSettingsViewModel : ObservableObject
 
     private static string ResolveCatalogId(string name, AiProviderKind providerKind, AiProviderApiFormat apiFormat)
     {
-        var known = CreateProviderCatalog().FirstOrDefault(item =>
-            string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase) &&
-            item.ProviderKind == providerKind);
+        var known = FindCatalogItem(name, providerKind, apiFormat);
         return known?.CatalogId ?? $"custom:{providerKind}:{apiFormat}:{name}".ToLowerInvariant();
     }
+
+    private static AiProviderSettingsItem? FindCatalogItem(string name, AiProviderKind providerKind, AiProviderApiFormat apiFormat)
+        => CreateProviderCatalog().FirstOrDefault(item =>
+            string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase) &&
+            item.ProviderKind == providerKind);
 
     private static bool IsKnownCatalogName(string name)
         => CreateProviderCatalog().Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -990,6 +1031,39 @@ public sealed class SystemSettingsViewModel : ObservableObject
             AiProviderKind.DeepSeek => "D",
             _ => string.IsNullOrWhiteSpace(name) ? "AI" : name[..Math.Min(2, name.Length)]
         };
+
+    private static string GetIconBrush(string name, AiProviderKind kind)
+    {
+        if (kind == AiProviderKind.OpenAI)
+        {
+            return "#111827";
+        }
+
+        if (kind == AiProviderKind.Anthropic)
+        {
+            return "#8B6B4A";
+        }
+
+        if (kind == AiProviderKind.DeepSeek)
+        {
+            return "#7C9CF8";
+        }
+
+        return name.ToLowerInvariant() switch
+        {
+            var value when value.Contains("google", StringComparison.Ordinal) => "#4285F4",
+            var value when value.Contains("openrouter", StringComparison.Ordinal) => "#777777",
+            var value when value.Contains("ollama", StringComparison.Ordinal) => "#8B8B8B",
+            var value when value.Contains("azure", StringComparison.Ordinal) => "#5B8DEF",
+            var value when value.Contains("moonshot", StringComparison.Ordinal) => "#7C7C7C",
+            var value when value.Contains("通义", StringComparison.Ordinal) => "#8B7CFF",
+            var value when value.Contains("百度", StringComparison.Ordinal) => "#6A7DFF",
+            var value when value.Contains("minimax", StringComparison.Ordinal) => "#F472B6",
+            var value when value.Contains("routin", StringComparison.Ordinal) => "#B88A63",
+            var value when value.Contains("longcat", StringComparison.Ordinal) => "#9CA3AF",
+            _ => "#8B94A1"
+        };
+    }
 
     private static AiProviderApiFormat ResolveDefaultApiFormat(AiProviderConnection connection)
     {
@@ -1052,6 +1126,8 @@ public sealed class AiProviderSettingsItem : ObservableObject
         Guid? connectionId,
         string name,
         string iconText,
+        string? iconImagePath,
+        string iconBrush,
         AiProviderKind providerKind,
         AiProviderApiFormat defaultApiFormat,
         string endpointText,
@@ -1063,6 +1139,8 @@ public sealed class AiProviderSettingsItem : ObservableObject
         ConnectionId = connectionId;
         Name = name;
         IconText = iconText;
+        IconImagePath = iconImagePath;
+        IconBrush = iconBrush;
         ProviderKind = providerKind;
         DefaultApiFormat = defaultApiFormat;
         _endpointText = endpointText;
@@ -1081,6 +1159,10 @@ public sealed class AiProviderSettingsItem : ObservableObject
     public string Name { get; }
 
     public string IconText { get; }
+
+    public string? IconImagePath { get; }
+
+    public string IconBrush { get; }
 
     public AiProviderKind ProviderKind { get; }
 
@@ -1165,7 +1247,7 @@ public sealed class AiProviderSettingsItem : ObservableObject
         }
 
         var prefixLength = Math.Min(3, secret.Length);
-        return $"{secret[..prefixLength]}...";
+        return new string('•', Math.Max(32, secret.Length));
     }
 }
 

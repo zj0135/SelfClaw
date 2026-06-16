@@ -337,6 +337,8 @@ public partial class MainWindow : Window
     private void SetSystemSettingsOpen(bool isOpen)
     {
         SystemSettingsPanelHost.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+        SettingsTitleBarHost.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+        LeftSidebarHost.Visibility = isOpen ? Visibility.Collapsed : Visibility.Visible;
 
         if (WebViewFallback.Visibility == Visibility.Visible)
         {
