@@ -1,0 +1,1183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenCowork — 设置</title>
+<style>
+/* ============================================================
+   OpenCowork · 桌面设置窗口
+   浅色专业工作台 · 冷中性灰底 + 白卡 + 1px 细边框
+   选中态 = 深色药丸(参考图一致) · 主操作蓝 #2f6feb
+   ============================================================ */
+:root{
+  --bg:        #f3f4f6;          /* 应用窗口底色（冷灰） */
+  --surface:   #ffffff;          /* 卡片/内容面 */
+  --surface-2: #fafbfc;          /* 次级面（输入、表头） */
+  --sidebar:   #f6f7f9;          /* 侧栏底色 */
+  --fg:        #15171c;          /* 近黑正文 */
+  --fg-2:      #3a3f4a;          /* 次级文字 */
+  --muted:     #6b7180;          /* 说明/占位 */
+  --faint:     #868d9c;          /* 更弱 */
+  --border:    #e4e7ec;          /* 细边框 */
+  --border-2:  #d3d7df;          /* 输入边框（略深） */
+  --pill:      #1f232b;          /* 选中药丸（深） */
+  --pill-fg:   #ffffff;
+  --accent:    #2f6feb;          /* 主操作 / 链接 / 焦点 */
+  --accent-ink:#1f5fe0;
+  --accent-wash:#eaf1fe;
+  --success:   #18794e;
+  --success-wash:#e7f4ed;
+  --warn:      #9a6b00;
+  --warn-wash: #fbf2dd;
+  --danger:    #b42318;
+  --danger-wash:#fdeceb;
+  --code-bg:   #f1f2f5;
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", system-ui, sans-serif;
+  --mono: "SF Mono", "Cascadia Code", "JetBrains Mono", ui-monospace,
+          Consolas, Menlo, monospace;
+
+  --r-sm: 6px; --r-md: 9px; --r-lg: 12px;
+  --sb-w: 264px;
+  --ease: cubic-bezier(.2,.7,.3,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:#dfe2e8;
+  font-family:var(--font);
+  color:var(--fg);
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:22px;
+}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+::selection{background:var(--accent-wash)}
+
+/* ---------- 窗口外壳 ---------- */
+.window{
+  width:min(1180px,100%);
+  height:min(760px,calc(100vh - 44px));
+  background:var(--surface);
+  border-radius:14px;
+  border:1px solid #cfd3db;
+  box-shadow:0 24px 60px -18px rgba(20,23,28,.34),0 2px 6px rgba(20,23,28,.08);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.titlebar{
+  height:42px;flex:none;
+  display:flex;align-items:center;gap:10px;
+  padding:0 14px;
+  background:linear-gradient(180deg,#fbfcfd,#f4f6f8);
+  border-bottom:1px solid var(--border);
+  user-select:none;
+}
+.traffic{display:flex;gap:8px;align-items:center}
+.dot{width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.08)}
+.dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+.win-title{
+  font-size:12.5px;color:var(--muted);font-weight:550;
+  letter-spacing:.01em;display:flex;align-items:center;gap:7px;
+}
+.win-title svg{width:14px;height:14px;color:var(--fg-2)}
+.titlebar-spacer{flex:1}
+.win-ctl{
+  width:26px;height:26px;border-radius:6px;border:0;background:transparent;
+  color:var(--muted);display:grid;place-items:center;cursor:pointer;
+}
+.win-ctl:hover{background:rgba(20,23,28,.07);color:var(--fg)}
+.win-ctl svg{width:14px;height:14px}
+
+/* ---------- 主体：侧栏 + 内容 ---------- */
+.body{flex:1;display:flex;min-height:0}
+
+/* 侧栏 */
+.sidebar{
+  width:var(--sb-w);flex:none;
+  background:var(--sidebar);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  min-height:0;
+}
+.sb-head{padding:20px 20px 14px}
+.sb-head h1{font-size:19px;font-weight:650;letter-spacing:-.01em}
+.sb-head p{font-size:12.5px;color:var(--muted);margin-top:2px}
+.sb-nav{flex:1;overflow-y:auto;padding:2px 12px 14px}
+.sb-nav::-webkit-scrollbar{width:9px}
+.sb-nav::-webkit-scrollbar-thumb{background:#d7dae1;border-radius:9px;border:2px solid var(--sidebar)}
+.sb-group{margin-top:14px}
+.sb-group:first-child{margin-top:0}
+.sb-label{
+  font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--faint);padding:6px 10px 6px;
+}
+.nav-item{
+  display:flex;align-items:center;gap:11px;width:100%;
+  padding:8px 10px;border-radius:8px;border:0;background:transparent;
+  color:var(--fg-2);font-size:13.5px;font-weight:500;font-family:inherit;
+  cursor:pointer;text-align:left;line-height:1.2;
+  transition:background .14s var(--ease),color .14s var(--ease);
+}
+.nav-item:hover{background:rgba(20,23,28,.05);color:var(--fg)}
+.nav-item.active{background:var(--pill);color:var(--pill-fg);font-weight:550}
+.nav-item.active .ni-ico{color:var(--pill-fg)}
+.ni-ico{width:17px;height:17px;flex:none;color:var(--muted)}
+.nav-item:hover .ni-ico{color:var(--fg-2)}
+.ni-badge{
+  margin-left:auto;font-size:11px;font-weight:600;
+  padding:1px 7px;border-radius:999px;
+  background:rgba(20,23,28,.07);color:var(--muted);
+}
+.nav-item.active .ni-badge{background:rgba(255,255,255,.18);color:#fff}
+.sb-foot{
+  padding:11px 20px;border-top:1px solid var(--border);
+  font-size:11px;color:var(--faint);display:flex;align-items:center;gap:7px;
+}
+.sb-foot .liv{width:6px;height:6px;border-radius:50%;background:var(--success)}
+
+/* 内容区 */
+.content{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--surface)}
+.scroll{flex:1;overflow-y:auto;min-height:0;scroll-behavior:smooth}
+.scroll::-webkit-scrollbar{width:11px}
+.scroll::-webkit-scrollbar-thumb{background:#dcdfe5;border-radius:11px;border:3px solid var(--surface)}
+.scroll::-webkit-scrollbar-thumb:hover{background:#cbcfd7}
+.page{max-width:760px;margin:0 auto;padding:34px 40px 90px;display:none}
+.page.show{display:block;animation:fade .26s var(--ease)}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+</style>
+<style>
+/* ---------- 页头 ---------- */
+.page-head{margin-bottom:24px}
+.page-head h2{font-size:21px;font-weight:650;letter-spacing:-.015em}
+.page-head .sub{font-size:13.5px;color:var(--muted);margin-top:4px}
+.head-row{display:flex;align-items:flex-start;gap:16px}
+.head-row .grow{flex:1;min-width:0}
+
+/* ---------- 区块 ---------- */
+.block{margin-top:30px}
+.block:first-of-type{margin-top:4px}
+.block-title{
+  display:flex;align-items:center;gap:9px;margin-bottom:13px;
+}
+.block-title h3{font-size:14px;font-weight:600;letter-spacing:-.005em}
+.block-title .bt-ico{width:16px;height:16px;color:var(--muted)}
+.block-title .hint{font-size:12px;color:var(--faint);margin-left:auto;font-weight:500}
+
+/* ---------- 卡片 ---------- */
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r-lg);padding:18px 20px;
+}
+.card + .card{margin-top:12px}
+.card-h{display:flex;align-items:center;gap:11px;margin-bottom:6px}
+.card-h .ch-title{font-size:14px;font-weight:600}
+.card-h .ch-desc{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.5}
+.card-h .grow{flex:1;min-width:0}
+
+/* 设置行（label / control 并排） */
+.row{display:flex;align-items:center;gap:18px;padding:13px 0;border-top:1px solid var(--border)}
+.row:first-child{border-top:0;padding-top:2px}
+.row .rl{flex:1;min-width:0}
+.row .rl .t{font-size:13.5px;font-weight:550}
+.row .rl .d{font-size:12px;color:var(--muted);margin-top:2px}
+.row .rc{flex:none;display:flex;align-items:center;gap:9px}
+
+/* ---------- 表单控件 ---------- */
+label.fld{display:block;margin-bottom:14px}
+label.fld:last-child{margin-bottom:0}
+.fld > .lab{display:block;font-size:12.5px;font-weight:550;color:var(--fg-2);margin-bottom:6px}
+.fld .help{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.5}
+input[type=text],input[type=url],input[type=password],input[type=number],select,textarea{
+  width:100%;font-family:inherit;font-size:13.5px;color:var(--fg);
+  background:var(--surface);border:1px solid var(--border-2);border-radius:var(--r-sm);
+  padding:9px 11px;outline:none;transition:border-color .14s,box-shadow .14s;
+}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+input:focus,select:focus,textarea:focus{
+  border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-wash);
+}
+textarea{resize:vertical;min-height:64px;font-family:var(--mono);font-size:12.5px;line-height:1.6}
+select{
+  appearance:none;cursor:pointer;padding-right:34px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7180' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat:no-repeat;background-position:right 10px center;
+}
+.input-mono{font-family:var(--mono);font-size:12.5px}
+.input-wrap{position:relative;display:flex;align-items:center}
+.input-wrap input{padding-right:74px}
+.in-actions{position:absolute;right:6px;display:flex;gap:2px}
+.icon-btn{
+  width:28px;height:28px;border:0;background:transparent;border-radius:6px;
+  color:var(--muted);display:grid;place-items:center;cursor:pointer;
+}
+.icon-btn:hover{background:var(--surface-2);color:var(--fg)}
+.icon-btn svg{width:15px;height:15px}
+
+/* 分段控件 */
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:3px;gap:2px}
+.seg button{
+  border:0;background:transparent;font-family:inherit;font-size:12.5px;font-weight:550;
+  color:var(--muted);padding:6px 14px;border-radius:6px;cursor:pointer;
+  display:flex;align-items:center;gap:6px;transition:.14s var(--ease);
+}
+.seg button svg{width:14px;height:14px}
+.seg button.on{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(20,23,28,.1);}
+
+/* 开关 */
+.switch{position:relative;width:38px;height:22px;flex:none;cursor:pointer}
+.switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.switch .tk{
+  position:absolute;inset:0;border-radius:999px;background:#cdd2da;
+  transition:background .18s var(--ease);
+}
+.switch .tk::after{
+  content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;
+  background:#fff;border-radius:50%;box-shadow:0 1px 2px rgba(0,0,0,.25);
+  transition:transform .18s var(--ease);
+}
+.switch input:checked + .tk{background:var(--accent)}
+.switch input:checked + .tk::after{transform:translateX(16px)}
+.switch input:focus-visible + .tk{box-shadow:0 0 0 3px var(--accent-wash)}
+.switch input:disabled + .tk{opacity:.5;cursor:not-allowed}
+
+/* ---------- 按钮 ---------- */
+.btn{
+  display:inline-flex;align-items:center;gap:7px;justify-content:center;
+  font-family:inherit;font-size:13px;font-weight:550;letter-spacing:.005em;
+  padding:8px 14px;border-radius:var(--r-sm);border:1px solid var(--border-2);
+  background:var(--surface);color:var(--fg);cursor:pointer;white-space:nowrap;
+  transition:background .14s,border-color .14s,box-shadow .14s,transform .04s;
+}
+.btn:hover{background:var(--surface-2);border-color:var(--border-2)}
+.btn:active{transform:translateY(1px)}
+.btn svg{width:15px;height:15px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-ink);border-color:var(--accent-ink)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--accent);font-weight:600}
+.btn.ghost:hover{background:var(--accent-wash)}
+.btn.sm{padding:6px 10px;font-size:12.5px}
+.btn.danger{color:var(--danger);border-color:var(--border-2)}
+.btn.danger:hover{background:var(--danger-wash);border-color:#f3c6c1}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.linkbtn{background:0;border:0;color:var(--accent);font-family:inherit;font-size:13px;font-weight:550;cursor:pointer;padding:0}
+.linkbtn:hover{text-decoration:underline}
+
+/* ---------- 徽章 / 药丸 ---------- */
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11.5px;font-weight:600;letter-spacing:.01em;
+  padding:3px 9px;border-radius:999px;background:var(--surface-2);
+  border:1px solid var(--border);color:var(--fg-2);
+}
+.chip .led{width:6px;height:6px;border-radius:50%;background:var(--faint)}
+.chip.mono{font-family:var(--mono);font-weight:500;letter-spacing:0}
+.chip.run{background:var(--success-wash);border-color:#bfe3cf;color:var(--success)}
+.chip.run .led{background:var(--success);box-shadow:0 0 0 3px rgba(24,121,78,.16)}
+.chip.stop{background:var(--surface-2);color:var(--muted)}
+.chip.stop .led{background:var(--faint)}
+.chip.warn{background:var(--warn-wash);border-color:#ecd9a6;color:var(--warn)}
+.led.oa{background:#10a37f}.led.an{background:#cc785c}.led.ds{background:#4d6bfe}.led.cp{background:#8a93a3}
+
+/* ---------- 服务商 / MCP 列表卡 ---------- */
+.lcard{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
+  padding:16px 18px;transition:border-color .14s,box-shadow .14s;
+}
+.lcard + .lcard{margin-top:11px}
+.lcard:hover{border-color:var(--border-2);box-shadow:0 2px 8px -4px rgba(20,23,28,.14)}
+.lcard.off{opacity:.72}
+.lc-top{display:flex;align-items:center;gap:12px}
+.lc-ico{
+  width:38px;height:38px;flex:none;border-radius:9px;background:var(--surface-2);
+  border:1px solid var(--border);display:grid;place-items:center;color:var(--fg-2);
+}
+.lc-ico svg{width:19px;height:19px}
+.lc-name{font-size:14px;font-weight:600;display:flex;align-items:center;gap:9px}
+.lc-meta{font-size:12px;color:var(--muted);margin-top:2px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lc-meta .mono{font-family:var(--mono);font-size:11.5px}
+.lc-grow{flex:1;min-width:0}
+.lc-act{display:flex;align-items:center;gap:8px;flex:none}
+.lc-body{margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
+.kv{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:12.5px}
+.kv .k{width:96px;flex:none;color:var(--muted);font-weight:500}
+.kv .v{flex:1;min-width:0;font-family:var(--mono);font-size:12px;color:var(--fg-2);word-break:break-all}
+.cmd{
+  font-family:var(--mono);font-size:12px;line-height:1.7;color:var(--fg-2);
+  background:var(--code-bg);border:1px solid var(--border);border-radius:8px;
+  padding:10px 12px;white-space:pre-wrap;word-break:break-all;
+}
+.cmd .tok{color:var(--accent-ink)}
+.cmd .flag{color:var(--warn)}
+
+/* ---------- 模型表 ---------- */
+.table{width:100%;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:var(--surface)}
+.thead,.trow{display:grid;grid-template-columns:1.5fr 1.4fr 1fr .9fr 64px;align-items:center;gap:14px}
+.thead{
+  background:var(--surface-2);padding:10px 18px;
+  font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);
+  border-bottom:1px solid var(--border);
+}
+.trow{padding:13px 18px;border-top:1px solid var(--border);cursor:pointer;transition:background .12s}
+.trow:first-child{border-top:0}
+.trow:hover{background:var(--surface-2)}
+.trow .nm{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px}
+.trow .nm .star{color:var(--warn)}
+.trow .mdl{font-family:var(--mono);font-size:12px;color:var(--fg-2)}
+.trow .sub{font-size:12px;color:var(--muted)}
+.trow .ar{justify-self:end;color:var(--faint);display:flex;align-items:center}
+.trow .ar svg{width:16px;height:16px}
+
+/* ---------- 右侧抽屉 ---------- */
+.scrim{
+  position:fixed;inset:0;background:rgba(17,20,26,.36);
+  opacity:0;visibility:hidden;transition:opacity .2s var(--ease),visibility .2s;
+  z-index:60;backdrop-filter:blur(1.5px);
+}
+.scrim.open{opacity:1;visibility:visible}
+.drawer{
+  position:fixed;top:0;right:0;height:100%;width:min(460px,94vw);
+  background:var(--surface);border-left:1px solid var(--border);
+  box-shadow:-18px 0 50px -20px rgba(20,23,28,.4);
+  transform:translateX(100%);transition:transform .26s var(--ease);
+  z-index:61;display:flex;flex-direction:column;
+}
+.drawer.open{transform:none}
+.dr-head{
+  padding:18px 22px;border-bottom:1px solid var(--border);
+  display:flex;align-items:flex-start;gap:12px;flex:none;
+}
+.dr-head h3{font-size:16px;font-weight:650;letter-spacing:-.01em}
+.dr-head p{font-size:12.5px;color:var(--muted);margin-top:2px}
+.dr-body{flex:1;overflow-y:auto;padding:20px 22px}
+.dr-body::-webkit-scrollbar{width:10px}
+.dr-body::-webkit-scrollbar-thumb{background:#dcdfe5;border-radius:10px;border:3px solid var(--surface)}
+.dr-foot{
+  flex:none;padding:14px 22px;border-top:1px solid var(--border);
+  display:flex;gap:10px;justify-content:flex-end;background:var(--surface-2);
+}
+.dr-sec{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:20px 0 12px}
+.dr-sec:first-child{margin-top:0}
+.field-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* 采样滑块 */
+.slider-row{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.slider-row .sl-lab{width:104px;flex:none;font-size:12.5px;font-weight:550;color:var(--fg-2)}
+.slider-row input[type=range]{flex:1;accent-color:var(--accent);height:4px}
+.slider-row .sl-val{width:48px;flex:none;text-align:right;font-family:var(--mono);font-size:12.5px;color:var(--accent-ink);font-weight:600}
+
+/* env 键值行 */
+.env-row{display:grid;grid-template-columns:1fr 1fr 30px;gap:8px;margin-bottom:8px;align-items:center}
+.env-row input{font-family:var(--mono);font-size:12px;padding:7px 9px}
+
+/* ---------- 未保存条 ---------- */
+.savebar{
+  position:absolute;left:0;right:0;bottom:0;
+  display:flex;align-items:center;gap:14px;
+  padding:12px 24px;background:var(--surface);
+  border-top:1px solid var(--border);
+  box-shadow:0 -8px 24px -16px rgba(20,23,28,.3);
+  transform:translateY(120%);transition:transform .24s var(--ease);
+  z-index:20;
+}
+.savebar.show{transform:none}
+.savebar .sv-msg{flex:1;font-size:13px;color:var(--fg-2);display:flex;align-items:center;gap:9px}
+.savebar .sv-msg .pulse{width:7px;height:7px;border-radius:50%;background:var(--warn)}
+
+/* ---------- Toast ---------- */
+.toasts{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:80;display:flex;flex-direction:column;gap:8px;align-items:center}
+.toast{
+  display:flex;align-items:center;gap:9px;
+  background:var(--pill);color:#fff;font-size:13px;font-weight:500;
+  padding:9px 15px;border-radius:9px;box-shadow:0 8px 24px -6px rgba(20,23,28,.5);
+  animation:tin .26s var(--ease);
+}
+.toast svg{width:15px;height:15px}
+.toast .tg{color:#5fd39a}
+@keyframes tin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+/* about */
+.about-hero{display:flex;align-items:center;gap:16px;margin-bottom:8px}
+.about-mark{width:54px;height:54px;border-radius:13px;background:var(--pill);display:grid;place-items:center;color:#fff;flex:none}
+.about-mark svg{width:28px;height:28px}
+.about-hero h2{font-size:20px;font-weight:650}
+.about-hero .ver{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:3px}
+.meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 28px;margin-top:6px}
+.meta-grid .kv{border-top:1px solid var(--border)}
+
+@media (max-width:920px){
+  :root{--sb-w:228px}
+  .page{padding:28px 26px 90px}
+  .thead,.trow{grid-template-columns:1.4fr 1.3fr 60px}
+  .thead .c-prov,.trow .c-prov,.thead .c-fmt,.trow .c-fmt{display:none}
+}
+</style>
+</head>
+<body>
+<div class="window">
+
+  <!-- 标题栏 -->
+  <div class="titlebar">
+    <div class="win-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      OpenCowork · 设置
+    </div>
+    <div class="titlebar-spacer"></div>
+    <button class="win-ctl" aria-label="最小化"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+    <button class="win-ctl" aria-label="最大化"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg></button>
+    <button class="win-ctl" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+  </div>
+
+  <div class="body">
+
+    <!-- 侧栏 -->
+    <aside class="sidebar">
+      <div class="sb-head">
+        <h1>设置</h1>
+        <p>偏好与模型设置</p>
+      </div>
+      <nav class="sb-nav" id="nav">
+        <div class="sb-group">
+          <div class="sb-label">系统</div>
+          <button class="nav-item active" data-target="sys">
+            <svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            系统设置
+          </button>
+        </div>
+        <div class="sb-group">
+          <div class="sb-label">AI 能力</div>
+          <button class="nav-item" data-target="providers">
+            <svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/></svg>
+            AI 服务商<span class="ni-badge num">4</span>
+          </button>
+          <button class="nav-item" data-target="models">
+            <svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            模型管理<span class="ni-badge num">5</span>
+          </button>
+        </div>
+        <div class="sb-group">
+          <div class="sb-label">扩展与集成</div>
+          <button class="nav-item" data-target="plugins">
+            <svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h3a2 2 0 0 0 2-2 2 2 0 1 1 4 0 2 2 0 0 0 2 2h3v3a2 2 0 0 1-2 2 2 2 0 1 0 0 4 2 2 0 0 1 2 2v3h-3a2 2 0 0 1-2-2 2 2 0 1 0-4 0 2 2 0 0 1-2 2H4v-3a2 2 0 0 0 2-2 2 2 0 1 0 0-4 2 2 0 0 0-2-2z"/></svg>
+            插件
+          </button>
+          <button class="nav-item" data-target="mcp">
+            <svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H13a2.5 2.5 0 0 1 2.5 2.5v1M8.5 18H13a2.5 2.5 0 0 0 2.5-2.5v-1"/></svg>
+            MCP 服务器<span class="ni-badge num">3</span>
+          </button>
+        </div>
+        <div class="sb-group">
+          <div class="sb-label">关于</div>
+          <button class="nav-item" data-target="about">
+            <svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            关于
+          </button>
+        </div>
+      </nav>
+      <div class="sb-foot"><span class="liv"></span> Powered by OpenCowork</div>
+    </aside>
+
+    <!-- 内容区 -->
+    <main class="content" style="position:relative">
+      <div class="scroll" id="scroll">
+
+        <!-- ============ 系统设置 ============ -->
+        <section class="page show" id="page-sys" data-od-id="page-sys">
+          <div class="page-head">
+            <h2>系统设置</h2>
+            <p class="sub">Shell 运行时、代理与系统级执行偏好</p>
+          </div>
+
+          <div class="block">
+            <div class="block-title">
+              <svg class="bt-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/></svg>
+              <h3>外观与语言</h3>
+            </div>
+            <div class="card">
+              <div class="row">
+                <div class="rl"><div class="t">主题</div><div class="d">界面配色,默认跟随操作系统</div></div>
+                <div class="rc">
+                  <div class="seg" data-seg="theme">
+                    <button type="button" class="on" data-v="system">跟随系统</button>
+                    <button type="button" data-v="light">浅色</button>
+                    <button type="button" data-v="dark">深色</button>
+                  </div>
+                </div>
+              </div>
+              <div class="row">
+                <div class="rl"><div class="t">界面语言</div><div class="d">重启后对全部窗口生效</div></div>
+                <div class="rc">
+                  <select style="width:170px">
+                    <option>简体中文</option><option>English</option><option>繁體中文</option><option>日本語</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row">
+                <div class="rl"><div class="t">开机自启</div><div class="d">登录系统后在后台启动 OpenCowork</div></div>
+                <div class="rc"><label class="switch"><input type="checkbox"><span class="tk"></span></label></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-title">
+              <svg class="bt-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              <h3>Shell 执行端</h3>
+            </div>
+            <div class="card">
+              <div class="card-h">
+                <div class="grow">
+                  <div class="ch-title" style="font-weight:550;font-size:13.5px">默认 Shell</div>
+                  <div class="ch-desc">选择 OpenCowork 在 Bash 工具调用中使用哪个 shell。可选项会根据当前操作系统过滤。</div>
+                </div>
+                <span class="chip mono">当前系统:&nbsp;win32</span>
+              </div>
+              <div style="margin-top:12px">
+                <select id="shell-sel">
+                  <option value="auto">自动(系统默认)</option>
+                  <option value="pwsh">PowerShell 7 (pwsh)</option>
+                  <option value="powershell">Windows PowerShell</option>
+                  <option value="cmd">命令提示符 (cmd.exe)</option>
+                  <option value="gitbash">Git Bash</option>
+                  <option value="wsl">WSL · bash</option>
+                </select>
+                <div class="help">使用应用默认解析:macOS / Linux 优先 <span style="font-family:var(--mono)">$SHELL</span> → zsh → bash → sh,Windows 使用系统命令 shell。</div>
+                <div id="shell-resolve" style="margin-top:12px;font-size:12.5px;color:var(--muted);font-family:var(--mono);background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:9px 12px">
+                  当前解析:自动,将在执行时选择
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-title">
+              <svg class="bt-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+              <h3>系统代理</h3>
+            </div>
+            <div class="card">
+              <div class="ch-desc" style="margin-bottom:12px">设置整个应用进程使用的代理地址,例如 <span style="font-family:var(--mono);color:var(--accent-ink)">http://127.0.0.1:7890</span> 或 <span style="font-family:var(--mono);color:var(--accent-ink)">http://host:port</span>。留空则不使用代理。</div>
+              <div style="display:flex;gap:12px;align-items:center">
+                <input type="text" id="proxy" class="input-mono" value="http://127.0.0.1:7890" style="flex:1">
+                <button class="linkbtn" id="proxy-reset">恢复默认</button>
+              </div>
+              <div class="row" style="margin-top:6px;border-top:1px solid var(--border)">
+                <div class="rl"><div class="t">模型请求也走代理</div><div class="d">关闭后服务商连接将直连,仅工具调用使用代理</div></div>
+                <div class="rc"><label class="switch"><input type="checkbox" checked><span class="tk"></span></label></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-title">
+              <svg class="bt-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+              <h3>数据与日志</h3>
+            </div>
+            <div class="card">
+              <div class="row" style="padding-top:2px">
+                <div class="rl"><div class="t">数据目录</div><div class="d input-mono" style="font-size:11.5px;color:var(--muted)">%AppData%\OpenCowork\store</div></div>
+                <div class="rc"><button class="btn sm">打开</button><button class="btn sm">更改…</button></div>
+              </div>
+              <div class="row">
+                <div class="rl"><div class="t">日志级别</div><div class="d">影响诊断日志的详细程度</div></div>
+                <div class="rc"><select style="width:150px"><option>Information</option><option>Debug</option><option>Warning</option><option>Error</option></select></div>
+              </div>
+              <div class="row">
+                <div class="rl"><div class="t">清除缓存</div><div class="d">转写、缩略图与临时工作区文件 · 当前约 <span class="num">182&nbsp;MB</span></div></div>
+                <div class="rc"><button class="btn sm danger" data-toast="缓存已清除">清除…</button></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ AI 服务商 ============ -->
+        <section class="page" id="page-providers" data-od-id="page-providers">
+          <div class="page-head head-row">
+            <div class="grow"><h2>AI 服务商</h2><p class="sub">连接到模型供应商。密钥以加密引用存储,绝不写入明文配置。</p></div>
+            <button class="btn primary" data-drawer="provider"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加服务商</button>
+          </div>
+          <div id="provider-list">
+
+            <div class="lcard" data-prov="anthropic">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 20l5-16 5 16M9.2 14h5.6"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">Anthropic <span class="chip"><span class="led an"></span>Anthropic</span></div>
+                  <div class="lc-meta"><span class="mono">api.anthropic.com</span> · 鉴权 API Key · 3 个模型</div>
+                </div>
+                <div class="lc-act">
+                  <button class="btn sm test"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>测试连接</button>
+                  <button class="btn sm" data-drawer="provider" data-edit="Anthropic">编辑</button>
+                  <label class="switch"><input type="checkbox" checked><span class="tk"></span></label>
+                </div>
+              </div>
+              <div class="lc-body">
+                <div class="kv"><span class="k">API 密钥</span><span class="v"><span class="input-wrap" style="max-width:340px"><input type="password" value="sk-ant-api03-7Qf3xR" class="input-mono" readonly style="padding-right:64px"><span class="in-actions"><button class="icon-btn reveal" title="显示/隐藏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button><button class="icon-btn copy" title="复制"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></span></span></span></div>
+                <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><span class="chip">超时 120s</span><span class="chip">代理 跟随系统</span><span class="chip">API 格式 Messages</span></div>
+              </div>
+            </div>
+
+            <div class="lcard" data-prov="openai">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18M3 12h18"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">OpenAI <span class="chip"><span class="led oa"></span>OpenAI</span></div>
+                  <div class="lc-meta"><span class="mono">api.openai.com/v1</span> · 鉴权 API Key · 2 个模型</div>
+                </div>
+                <div class="lc-act">
+                  <button class="btn sm test"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>测试连接</button>
+                  <button class="btn sm" data-drawer="provider" data-edit="OpenAI">编辑</button>
+                  <label class="switch"><input type="checkbox" checked><span class="tk"></span></label>
+                </div>
+              </div>
+              <div class="lc-body">
+                <div class="kv"><span class="k">API 密钥</span><span class="v"><span class="input-wrap" style="max-width:340px"><input type="password" value="sk-proj-A1b2C3d4" class="input-mono" readonly style="padding-right:64px"><span class="in-actions"><button class="icon-btn reveal" title="显示/隐藏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button><button class="icon-btn copy" title="复制"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></span></span></span></div>
+                <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><span class="chip">组织 org-default</span><span class="chip">超时 120s</span><span class="chip">API 格式 Responses</span></div>
+              </div>
+            </div>
+
+            <div class="lcard" data-prov="deepseek">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9c4 4 4 14 0 18"/><circle cx="9" cy="10" r="1"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">DeepSeek <span class="chip"><span class="led ds"></span>DeepSeek</span></div>
+                  <div class="lc-meta"><span class="mono">api.deepseek.com</span> · 鉴权 API Key · 1 个模型</div>
+                </div>
+                <div class="lc-act">
+                  <button class="btn sm test"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>测试连接</button>
+                  <button class="btn sm" data-drawer="provider" data-edit="DeepSeek">编辑</button>
+                  <label class="switch"><input type="checkbox" checked><span class="tk"></span></label>
+                </div>
+              </div>
+            </div>
+
+            <div class="lcard off" data-prov="compat">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6v6H9z"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">本地 Ollama <span class="chip"><span class="led cp"></span>OpenAI 兼容</span><span class="chip stop"><span class="led"></span>已停用</span></div>
+                  <div class="lc-meta"><span class="mono">http://localhost:11434/v1</span> · 无需鉴权</div>
+                </div>
+                <div class="lc-act">
+                  <button class="btn sm" data-drawer="provider" data-edit="本地 Ollama">编辑</button>
+                  <label class="switch"><input type="checkbox"><span class="tk"></span></label>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- ============ 模型管理 ============ -->
+        <section class="page" id="page-models" data-od-id="page-models">
+          <div class="page-head head-row">
+            <div class="grow"><h2>模型管理</h2><p class="sub">模型档案绑定到服务商连接,携带 API 格式与采样参数。</p></div>
+            <button class="btn primary" data-drawer="model"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加模型</button>
+          </div>
+          <div style="position:relative;margin-bottom:14px">
+            <svg style="position:absolute;left:11px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--faint)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="model-search" placeholder="搜索名称或模型 id…" style="padding-left:34px">
+          </div>
+          <div class="table">
+            <div class="thead">
+              <div>名称</div><div>模型</div><div class="c-prov">服务商</div><div class="c-fmt">API 格式</div><div></div>
+            </div>
+            <div id="model-rows">
+              <div class="trow" data-edit="主力对话">
+                <div class="nm"><svg class="star" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2l2.9 6.3 6.9.6-5.2 4.6 1.6 6.8L12 17.3 5.8 20.9l1.6-6.8L2.2 8.9l6.9-.6z"/></svg>主力对话</div>
+                <div class="mdl">claude-sonnet-4-5</div>
+                <div class="sub c-prov">Anthropic</div>
+                <div class="sub c-fmt">Messages</div>
+                <div class="ar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
+              </div>
+              <div class="trow" data-edit="深度推理">
+                <div class="nm">深度推理</div>
+                <div class="mdl">o3</div>
+                <div class="sub c-prov">OpenAI</div>
+                <div class="sub c-fmt">Responses</div>
+                <div class="ar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
+              </div>
+              <div class="trow" data-edit="快速草稿">
+                <div class="nm">快速草稿</div>
+                <div class="mdl">claude-haiku-latest</div>
+                <div class="sub c-prov">Anthropic</div>
+                <div class="sub c-fmt">Messages</div>
+                <div class="ar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
+              </div>
+              <div class="trow" data-edit="经济模型">
+                <div class="nm">经济模型</div>
+                <div class="mdl">deepseek-chat</div>
+                <div class="sub c-prov">DeepSeek</div>
+                <div class="sub c-fmt">Chat Completions</div>
+                <div class="ar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
+              </div>
+              <div class="trow" data-edit="语音转写">
+                <div class="nm">语音转写</div>
+                <div class="mdl">gpt-4o-transcribe</div>
+                <div class="sub c-prov">OpenAI</div>
+                <div class="sub c-fmt">Audio</div>
+                <div class="ar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
+              </div>
+            </div>
+          </div>
+          <p style="font-size:12px;color:var(--faint);margin-top:12px">提示:被标记 <svg style="width:12px;height:12px;color:var(--warn);vertical-align:-1px" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.3 6.9.6-5.2 4.6 1.6 6.8L12 17.3 5.8 20.9l1.6-6.8L2.2 8.9l6.9-.6z"/></svg> 的模型为默认主力,新会话将自动选用。</p>
+        </section>
+
+        <!-- ============ 插件 ============ -->
+        <section class="page" id="page-plugins" data-od-id="page-plugins">
+          <div class="page-head head-row">
+            <div class="grow"><h2>插件</h2><p class="sub">为代理扩展能力。内置插件随应用更新,第三方插件可单独启用或停用。</p></div>
+            <button class="btn" data-toast="已打开插件目录"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>浏览插件目录</button>
+          </div>
+          <div id="plugin-list">
+            <div class="lcard">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">联网搜索 <span class="chip">内置</span></div>
+                  <div class="lc-meta">通过搜索引擎为代理补充实时信息 · <span class="mono">v1.4.0</span></div>
+                </div>
+                <div class="lc-act"><button class="btn sm" data-toast="打开「联网搜索」配置">配置</button><label class="switch"><input type="checkbox" checked><span class="tk"></span></label></div>
+              </div>
+            </div>
+            <div class="lcard">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 12l9 4 9-4M3 17l9 4 9-4"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">技能市场 <span class="chip">内置</span></div>
+                  <div class="lc-meta">下载并管理可复用技能包 · <span class="mono">v0.9.2</span></div>
+                </div>
+                <div class="lc-act"><button class="btn sm" data-toast="打开「技能市场」配置">配置</button><label class="switch"><input type="checkbox" checked><span class="tk"></span></label></div>
+              </div>
+            </div>
+            <div class="lcard">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">迁移中心 <span class="chip">内置</span></div>
+                  <div class="lc-meta">从其他客户端导入会话与配置 · <span class="mono">v1.1.0</span></div>
+                </div>
+                <div class="lc-act"><button class="btn sm" data-toast="打开「迁移中心」配置">配置</button><label class="switch"><input type="checkbox"><span class="tk"></span></label></div>
+              </div>
+            </div>
+            <div class="lcard">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H5.2L4 17.5z"/><path d="M8 9h8M8 12h5"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">转写视图 <span class="chip">已安装</span></div>
+                  <div class="lc-meta">以富文本渲染会话记录,支持代码与 Markdown · <span class="mono">v2.0.1</span></div>
+                </div>
+                <div class="lc-act"><button class="btn sm" data-toast="打开「转写视图」配置">配置</button><label class="switch"><input type="checkbox" checked><span class="tk"></span></label></div>
+              </div>
+            </div>
+            <div class="lcard">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">工作区工具 <span class="chip warn">核心 · 不可禁用</span></div>
+                  <div class="lc-meta">文件读写、grep、补丁等工作区内置工具 · <span class="mono">core</span></div>
+                </div>
+                <div class="lc-act"><button class="btn sm" disabled>配置</button><label class="switch"><input type="checkbox" checked disabled><span class="tk"></span></label></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ MCP 服务器 ============ -->
+        <section class="page" id="page-mcp" data-od-id="page-mcp">
+          <div class="page-head head-row">
+            <div class="grow"><h2>MCP 服务器</h2><p class="sub">通过 Model Context Protocol 接入外部工具。以 stdio 启动子进程,代理按需调用其工具。</p></div>
+            <button class="btn primary" data-drawer="mcp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加 MCP 服务器</button>
+          </div>
+          <div id="mcp-list">
+
+            <div class="lcard">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">filesystem <span class="chip mono">stdio</span><span class="chip run"><span class="led"></span>运行中</span></div>
+                  <div class="lc-meta">本地文件系统访问 · 暴露 <span class="num">12</span> 个工具</div>
+                </div>
+                <div class="lc-act"><button class="btn sm mcp-toggle" data-running="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>停止</button><button class="btn sm" data-drawer="mcp" data-edit="filesystem">编辑</button><label class="switch"><input type="checkbox" checked><span class="tk"></span></label></div>
+              </div>
+              <div class="lc-body">
+                <div class="cmd"><span class="tok">npx</span> <span class="flag">-y</span> @modelcontextprotocol/server-filesystem ~/workspace ~/Documents</div>
+                <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><span class="chip">环境变量 0</span><span class="chip">自动启动 开</span></div>
+              </div>
+            </div>
+
+            <div class="lcard off">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-4 1.5-4-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.3 4.3 0 0 0-.1-3.2s-1-.3-3.5 1.3a12 12 0 0 0-6.3 0C6.3 3.1 5.3 3.4 5.3 3.4a4.3 4.3 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.8c0 4.6 2.7 5.7 5.5 6-.4.4-.5 1-.5 2V21"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">github <span class="chip mono">stdio</span><span class="chip stop"><span class="led"></span>已停止</span></div>
+                  <div class="lc-meta">仓库、Issue 与 PR 操作 · 暴露 <span class="num">26</span> 个工具</div>
+                </div>
+                <div class="lc-act"><button class="btn sm mcp-toggle" data-running="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>启动</button><button class="btn sm" data-drawer="mcp" data-edit="github">编辑</button><label class="switch"><input type="checkbox"><span class="tk"></span></label></div>
+              </div>
+              <div class="lc-body">
+                <div class="cmd"><span class="tok">npx</span> <span class="flag">-y</span> @modelcontextprotocol/server-github</div>
+                <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><span class="chip mono">GITHUB_TOKEN · ghp_••••</span><span class="chip">自动启动 关</span></div>
+              </div>
+            </div>
+
+            <div class="lcard">
+              <div class="lc-top">
+                <div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></div>
+                <div class="lc-grow">
+                  <div class="lc-name">sqlite <span class="chip mono">stdio</span><span class="chip run"><span class="led"></span>运行中</span></div>
+                  <div class="lc-meta">查询本地数据库 · 暴露 <span class="num">6</span> 个工具</div>
+                </div>
+                <div class="lc-act"><button class="btn sm mcp-toggle" data-running="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>停止</button><button class="btn sm" data-drawer="mcp" data-edit="sqlite">编辑</button><label class="switch"><input type="checkbox" checked><span class="tk"></span></label></div>
+              </div>
+              <div class="lc-body">
+                <div class="cmd"><span class="tok">uvx</span> mcp-server-sqlite <span class="flag">--db</span> ./data/app.db</div>
+                <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><span class="chip">环境变量 0</span><span class="chip">自动启动 开</span></div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- ============ 关于 ============ -->
+        <section class="page" id="page-about" data-od-id="page-about">
+          <div class="page-head"><h2>关于</h2><p class="sub">版本信息与运行环境</p></div>
+          <div class="card">
+            <div class="about-hero">
+              <div class="about-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
+              <div><h2>OpenCowork</h2><div class="ver">SelfClaw 桌面客户端 · v0.4.2 (build 1782)</div></div>
+              <div style="margin-left:auto"><button class="btn primary" data-toast="已是最新版本">检查更新</button></div>
+            </div>
+            <div class="meta-grid">
+              <div class="kv"><span class="k">运行时</span><span class="v">.NET 10.0 · WPF</span></div>
+              <div class="kv"><span class="k">系统</span><span class="v">Windows · win32 x64</span></div>
+              <div class="kv"><span class="k">数据目录</span><span class="v">%AppData%\OpenCowork</span></div>
+              <div class="kv"><span class="k">许可证</span><span class="v">MIT</span></div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:16px">
+              <button class="btn sm" data-toast="已在浏览器打开项目主页">项目主页</button>
+              <button class="btn sm" data-toast="已打开开源许可清单">开源许可</button>
+              <button class="btn sm" data-toast="诊断信息已复制">复制诊断信息</button>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- 未保存条 -->
+      <div class="savebar" id="savebar">
+        <div class="sv-msg"><span class="pulse"></span>有未保存的更改</div>
+        <button class="btn sm" id="discard">放弃</button>
+        <button class="btn sm primary" id="save">保存更改</button>
+      </div>
+    </main>
+
+  </div>
+</div>
+
+<!-- 抽屉 -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dr-head">
+    <div class="grow"><h3 id="dr-title">添加</h3><p id="dr-sub"></p></div>
+    <button class="icon-btn" id="dr-close" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg></button>
+  </div>
+  <div class="dr-body" id="dr-body"></div>
+  <div class="dr-foot">
+    <button class="btn" id="dr-cancel">取消</button>
+    <button class="btn primary" id="dr-save">保存</button>
+  </div>
+</aside>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+(function(){
+  "use strict";
+  var $  = function(s,r){return (r||document).querySelector(s);};
+  var $$ = function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s));};
+
+  /* ---------- 图标片段 ---------- */
+  var ICO = {
+    eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>',
+    eyeOff:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.4 10.4 0 0 1 12 19c-6.5 0-10-7-10-7a18 18 0 0 1 5.1-5.9M9.9 5.2A10 10 0 0 1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-2.3 3.3M9.5 9.5a3 3 0 0 0 4 4"/><line x1="3" y1="3" x2="21" y2="21"/></svg>',
+    check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    spin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="animation:spin .8s linear infinite"><path d="M21 12a9 9 0 1 1-6.2-8.5"/></svg>',
+    play:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg>',
+    stop:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>',
+    trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>'
+  };
+  var st=document.createElement('style');
+  st.textContent='@keyframes spin{to{transform:rotate(360deg)}}';
+  document.head.appendChild(st);
+
+  /* ---------- Toast ---------- */
+  function toast(msg){
+    var box=$('#toasts');
+    var t=document.createElement('div');
+    t.className='toast';
+    t.innerHTML='<span class="tg">'+ICO.check+'</span>'+msg;
+    box.appendChild(t);
+    setTimeout(function(){t.style.transition='opacity .3s,transform .3s';t.style.opacity='0';t.style.transform='translateY(8px)';setTimeout(function(){t.remove();},320);},2100);
+  }
+
+  /* ---------- 导航切换 ---------- */
+  var scroll=$('#scroll');
+  $('#nav').addEventListener('click',function(e){
+    var b=e.target.closest('.nav-item'); if(!b) return;
+    $$('.nav-item').forEach(function(n){n.classList.remove('active');});
+    b.classList.add('active');
+    $$('.page').forEach(function(p){p.classList.remove('show');});
+    var pg=$('#page-'+b.dataset.target);
+    if(pg){pg.classList.add('show'); scroll.scrollTop=0;}
+  });
+
+  /* ---------- 未保存条 ---------- */
+  var savebar=$('#savebar'), dirty=false;
+  function markDirty(){ if(dirty) return; dirty=true; savebar.classList.add('show'); }
+  function clearDirty(){ dirty=false; savebar.classList.remove('show'); }
+  scroll.addEventListener('input',function(e){ if(e.target.id==='model-search') return; markDirty(); });
+  scroll.addEventListener('change',function(e){ if(e.target.id==='model-search') return; markDirty(); });
+  $('#save').addEventListener('click',function(){ clearDirty(); toast('设置已保存'); });
+  $('#discard').addEventListener('click',function(){ clearDirty(); toast('已放弃更改'); });
+
+  /* ---------- 分段控件 ---------- */
+  $$('.seg').forEach(function(seg){
+    seg.addEventListener('click',function(e){
+      var b=e.target.closest('button'); if(!b) return;
+      $$('button',seg).forEach(function(x){x.classList.remove('on');});
+      b.classList.add('on'); markDirty();
+    });
+  });
+
+  /* ---------- Shell 解析提示 ---------- */
+  var shellMap={auto:'自动,将在执行时选择',pwsh:'pwsh -NoProfile -Command',powershell:'powershell.exe -Command',cmd:'cmd.exe /c',gitbash:'C:\\Program Files\\Git\\bin\\bash.exe -lc',wsl:'wsl.exe bash -lc'};
+  var shellSel=$('#shell-sel');
+  if(shellSel) shellSel.addEventListener('change',function(){ $('#shell-resolve').textContent='当前解析:'+(shellMap[this.value]||this.value); });
+
+  /* ---------- 系统代理恢复默认 ---------- */
+  $('#proxy-reset').addEventListener('click',function(){ $('#proxy').value='http://127.0.0.1:7890'; toast('已恢复默认代理'); markDirty(); });
+
+  /* ---------- 密钥显隐 / 复制 ---------- */
+  document.addEventListener('click',function(e){
+    var rv=e.target.closest('.reveal');
+    if(rv){
+      var inp=rv.closest('.input-wrap').querySelector('input');
+      var show=inp.type==='password';
+      inp.type=show?'text':'password';
+      rv.innerHTML=show?ICO.eyeOff:ICO.eye;
+      return;
+    }
+    var cp=e.target.closest('.copy');
+    if(cp){
+      var i2=cp.closest('.input-wrap').querySelector('input');
+      try{navigator.clipboard&&navigator.clipboard.writeText(i2.value);}catch(_){}
+      toast('密钥已复制到剪贴板');
+      return;
+    }
+    /* 通用 data-toast */
+    var dt=e.target.closest('[data-toast]');
+    if(dt){ toast(dt.getAttribute('data-toast')); }
+  });
+
+  /* ---------- 测试连接 ---------- */
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('.test'); if(!b||b.dataset.busy) return;
+    b.dataset.busy='1'; var orig=b.innerHTML;
+    b.innerHTML=ICO.spin+'连接中…'; b.disabled=true;
+    setTimeout(function(){
+      b.innerHTML=ICO.check+'连接正常'; b.style.color='var(--success)'; b.style.borderColor='#bfe3cf';
+      setTimeout(function(){ b.innerHTML=orig; b.disabled=false; b.style.color=''; b.style.borderColor=''; b.removeAttribute('data-busy'); },1600);
+    },950);
+  });
+
+  /* ---------- MCP 启动/停止 ---------- */
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('.mcp-toggle'); if(!b) return;
+    var card=b.closest('.lcard');
+    var chip=card.querySelector('.lc-name .chip.run, .lc-name .chip.stop');
+    var running=b.dataset.running==='1';
+    if(running){
+      b.dataset.running='0'; b.innerHTML=ICO.play+'启动'; card.classList.add('off');
+      if(chip){chip.className='chip stop';chip.innerHTML='<span class="led"></span>已停止';}
+      toast('已停止 '+name(card));
+    }else{
+      b.dataset.running='1'; b.innerHTML=ICO.stop+'停止'; card.classList.remove('off');
+      if(chip){chip.className='chip run';chip.innerHTML='<span class="led"></span>运行中';}
+      toast('已启动 '+name(card));
+    }
+    function name(c){return (c.querySelector('.lc-name').childNodes[0].textContent||'').trim();}
+  });
+
+  /* ---------- 模型搜索 ---------- */
+  var ms=$('#model-search');
+  if(ms) ms.addEventListener('input',function(){
+    var q=this.value.trim().toLowerCase();
+    $$('#model-rows .trow').forEach(function(r){
+      var hit=r.textContent.toLowerCase().indexOf(q)>-1;
+      r.style.display=hit?'':'none';
+    });
+  });
+
+  /* ===================== 抽屉 ===================== */
+  var scrim=$('#scrim'), drawer=$('#drawer'), drBody=$('#dr-body'),
+      drTitle=$('#dr-title'), drSub=$('#dr-sub'), drSave=$('#dr-save');
+
+  var provPreset={
+    'Anthropic':{kind:'Anthropic',ep:'https://api.anthropic.com',key:'sk-ant-api03-7Qf3xR'},
+    'OpenAI':{kind:'OpenAI',ep:'https://api.openai.com/v1',key:'sk-proj-A1b2C3d4'},
+    'DeepSeek':{kind:'DeepSeek',ep:'https://api.deepseek.com',key:'sk-ds-9f8e7d'},
+    '本地 Ollama':{kind:'OpenAI 兼容',ep:'http://localhost:11434/v1',key:''}
+  };
+  var mcpPreset={
+    'filesystem':{cmd:'npx',args:'-y @modelcontextprotocol/server-filesystem ~/workspace'},
+    'github':{cmd:'npx',args:'-y @modelcontextprotocol/server-github'},
+    'sqlite':{cmd:'uvx',args:'mcp-server-sqlite --db ./data/app.db'}
+  };
+
+  function fldSelect(lab,opts,sel){
+    var o=opts.map(function(x){return '<option'+(x===sel?' selected':'')+'>'+x+'</option>';}).join('');
+    return '<label class="fld"><span class="lab">'+lab+'</span><select>'+o+'</select></label>';
+  }
+  function fld(lab,val,ph,mono){
+    return '<label class="fld"><span class="lab">'+lab+'</span><input type="text" '+(mono?'class="input-mono" ':'')+'value="'+(val||'')+'" placeholder="'+(ph||'')+'"></label>';
+  }
+
+  function tplProvider(edit){
+    var p=edit?provPreset[edit]:null;
+    return ''
+      + fld('显示名称', edit||'', '例如:我的 Claude')
+      + fldSelect('供应商类型', ['OpenAI','OpenAI 兼容','DeepSeek','Anthropic'], p?p.kind:'Anthropic')
+      + fld('接口地址 (Endpoint)', p?p.ep:'', 'https://api.example.com/v1', true)
+      + '<div class="dr-sec">鉴权</div>'
+      + '<label class="fld"><span class="lab">API 密钥</span><span class="input-wrap"><input type="password" class="input-mono" value="'+(p?p.key:'')+'" placeholder="粘贴密钥,将以加密引用存储" style="padding-right:40px"><span class="in-actions"><button type="button" class="icon-btn reveal">'+ICO.eye+'</button></span></span><span class="help">密钥仅以 <span style="font-family:var(--mono)">secret ref</span> 形式保存,明文不写入配置文件。</span></label>'
+      + '<div class="dr-sec">连接选项</div>'
+      + '<div class="field-2">'+fld('组织 (可选)','','org-…')+fld('请求超时 (秒)','120','')+'</div>'
+      + '<div class="row" style="border:0;padding:8px 0 0"><div class="rl"><div class="t">通过系统代理</div><div class="d">复用「系统设置」中的代理地址</div></div><div class="rc"><label class="switch"><input type="checkbox" checked><span class="tk"></span></label></div></div>';
+  }
+  function tplModel(edit){
+    return ''
+      + fld('档案名称', edit||'', '例如:主力对话')
+      + fldSelect('服务商连接', ['Anthropic','OpenAI','DeepSeek','本地 Ollama'], 'Anthropic')
+      + fld('模型 id', edit==='深度推理'?'o3':'claude-sonnet-4-5', 'claude-sonnet-4-5', true)
+      + fldSelect('API 格式', ['Messages','Chat Completions','Responses','Audio'], 'Messages')
+      + '<div class="dr-sec">采样参数</div>'
+      + '<div class="slider-row"><span class="sl-lab">temperature</span><input type="range" min="0" max="2" step="0.1" value="1"><span class="sl-val">1.0</span></div>'
+      + '<div class="slider-row"><span class="sl-lab">top_p</span><input type="range" min="0" max="1" step="0.05" value="1"><span class="sl-val">1.00</span></div>'
+      + '<div class="slider-row"><span class="sl-lab">最大输出</span><input type="range" min="1024" max="64000" step="1024" value="8192"><span class="sl-val">8192</span></div>'
+      + '<div class="dr-sec">高级</div>'
+      + fldSelect('推理强度', ['关闭','low','medium','high'], edit==='深度推理'?'high':'关闭')
+      + '<div class="row" style="border:0;padding:6px 0"><div class="rl"><div class="t">并行工具调用</div></div><div class="rc"><label class="switch"><input type="checkbox" checked><span class="tk"></span></label></div></div>'
+      + '<div class="row" style="border-top:1px solid var(--border);padding:10px 0 0"><div class="rl"><div class="t">设为默认主力模型</div></div><div class="rc"><label class="switch"><input type="checkbox"'+(edit==='主力对话'?' checked':'')+'><span class="tk"></span></label></div></div>';
+  }
+  function tplMcp(edit){
+    var m=edit?mcpPreset[edit]:null;
+    return ''
+      + fld('显示名称', edit||'', '例如:filesystem')
+      + fldSelect('传输方式', ['stdio (本地子进程)','SSE (远程)'], 'stdio (本地子进程)')
+      + fld('启动命令', m?m.cmd:'', 'npx / uvx / node', true)
+      + '<label class="fld"><span class="lab">参数 (每行一个或空格分隔)</span><textarea placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;~/workspace">'+(m?m.args.split(' ').join('\n'):'')+'</textarea></label>'
+      + '<div class="dr-sec">环境变量</div>'
+      + '<div id="env-rows">'+envRow(edit==='github'?'GITHUB_TOKEN':'',edit==='github'?'ghp_xxx':'')+'</div>'
+      + '<button type="button" class="btn sm" id="env-add" style="margin-top:2px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加变量</button>'
+      + '<div class="row" style="border-top:1px solid var(--border);padding:12px 0 0;margin-top:14px"><div class="rl"><div class="t">应用启动时自动运行</div></div><div class="rc"><label class="switch"><input type="checkbox" checked><span class="tk"></span></label></div></div>';
+  }
+  function envRow(k,v){
+    return '<div class="env-row"><input type="text" placeholder="KEY" value="'+(k||'')+'"><input type="text" placeholder="value" value="'+(v||'')+'"><button type="button" class="icon-btn env-del">'+ICO.trash+'</button></div>';
+  }
+
+  var META={
+    provider:{title:'服务商',sub:'连接到模型供应商',tpl:tplProvider},
+    model:{title:'模型档案',sub:'绑定到服务商连接的模型配置',tpl:tplModel},
+    mcp:{title:'MCP 服务器',sub:'以 stdio 启动外部工具进程',tpl:tplMcp}
+  };
+  var cur={type:null,mode:'add'};
+
+  function openDrawer(type,edit){
+    var m=META[type]; if(!m) return;
+    cur.type=type; cur.mode=edit?'edit':'add';
+    drTitle.textContent=(edit?'编辑':'添加')+m.title;
+    drSub.textContent=edit?edit:m.sub;
+    drBody.innerHTML=m.tpl(edit);
+    drSave.textContent=edit?'保存更改':'添加';
+    scrim.classList.add('open'); drawer.classList.add('open'); drawer.setAttribute('aria-hidden','false');
+    bindSliders(drBody);
+  }
+  function closeDrawer(){ scrim.classList.remove('open'); drawer.classList.remove('open'); drawer.setAttribute('aria-hidden','true'); }
+
+  function bindSliders(root){
+    $$('.slider-row input[type=range]',root).forEach(function(r){
+      var out=r.nextElementSibling;
+      r.addEventListener('input',function(){
+        var v=parseFloat(r.value);
+        out.textContent = (r.step.indexOf('.')>-1) ? v.toFixed(2).replace(/0$/, v%1===0?'0':'') : r.value;
+        if(r.step==='0.1') out.textContent=v.toFixed(1);
+        else if(r.step==='0.05') out.textContent=v.toFixed(2);
+        else out.textContent=r.value;
+      });
+    });
+  }
+
+  /* 打开抽屉的入口 */
+  document.addEventListener('click',function(e){
+    var t=e.target.closest('[data-drawer]');
+    if(t){ openDrawer(t.getAttribute('data-drawer'), t.getAttribute('data-edit')||null); return; }
+    var row=e.target.closest('.trow');
+    if(row){ openDrawer('model', row.getAttribute('data-edit')||null); return; }
+  });
+  $('#dr-close').addEventListener('click',closeDrawer);
+  $('#dr-cancel').addEventListener('click',closeDrawer);
+  scrim.addEventListener('click',closeDrawer);
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&drawer.classList.contains('open')) closeDrawer(); });
+
+  /* 抽屉内动态：env 增删 */
+  drBody.addEventListener('click',function(e){
+    if(e.target.closest('#env-add')){ $('#env-rows').insertAdjacentHTML('beforeend',envRow('','')); }
+    var del=e.target.closest('.env-del'); if(del){ del.closest('.env-row').remove(); }
+  });
+
+  /* 抽屉保存 */
+  drSave.addEventListener('click',function(){
+    var name=(drBody.querySelector('input')||{}).value||'未命名';
+    if(cur.mode==='add'){ appendItem(cur.type, name); toast('已添加「'+name+'」'); }
+    else { toast('已保存「'+name+'」'); }
+    closeDrawer();
+  });
+
+  function appendItem(type,name){
+    if(type==='provider'){
+      var kind=drBody.querySelectorAll('select')[0].value;
+      var ep=drBody.querySelectorAll('input')[2] ? drBody.querySelectorAll('input[type=text]')[1].value : '';
+      var dot={'OpenAI':'oa','Anthropic':'an','DeepSeek':'ds','OpenAI 兼容':'cp'}[kind]||'cp';
+      var html='<div class="lcard"><div class="lc-top"><div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><line x1="7" y1="7" x2="7.01" y2="7"/><line x1="7" y1="17" x2="7.01" y2="17"/></svg></div>'
+        +'<div class="lc-grow"><div class="lc-name">'+name+' <span class="chip"><span class="led '+dot+'"></span>'+kind+'</span><span class="chip"><span class="led" style="background:var(--success)"></span>新增</span></div>'
+        +'<div class="lc-meta"><span class="mono">'+(ep||'—')+'</span> · 鉴权 API Key</div></div>'
+        +'<div class="lc-act"><button class="btn sm test"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg>测试连接</button><label class="switch"><input type="checkbox" checked><span class="tk"></span></label></div></div></div>';
+      $('#provider-list').insertAdjacentHTML('beforeend',html);
+    } else if(type==='model'){
+      var mdl=drBody.querySelectorAll('input[type=text]')[1].value||'—';
+      var prov=drBody.querySelectorAll('select')[0].value;
+      var fmt=drBody.querySelectorAll('select')[1].value;
+      var html='<div class="trow" data-edit="'+name+'"><div class="nm">'+name+'</div><div class="mdl">'+mdl+'</div><div class="sub c-prov">'+prov+'</div><div class="sub c-fmt">'+fmt+'</div><div class="ar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div></div>';
+      $('#model-rows').insertAdjacentHTML('beforeend',html);
+    } else if(type==='mcp'){
+      var cmd=drBody.querySelectorAll('input[type=text]')[1].value||'npx';
+      var args=(drBody.querySelector('textarea').value||'').split('\n').join(' ').trim();
+      var html='<div class="lcard off"><div class="lc-top"><div class="lc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H13a2.5 2.5 0 0 1 2.5 2.5v1"/></svg></div>'
+        +'<div class="lc-grow"><div class="lc-name">'+name+' <span class="chip mono">stdio</span><span class="chip stop"><span class="led"></span>已停止</span></div><div class="lc-meta">新添加 · 启动后探测工具</div></div>'
+        +'<div class="lc-act"><button class="btn sm mcp-toggle" data-running="0">'+ICO.play+'启动</button><label class="switch"><input type="checkbox"><span class="tk"></span></label></div></div>'
+        +'<div class="lc-body"><div class="cmd">'+cmd+' '+args+'</div></div></div>';
+      $('#mcp-list').insertAdjacentHTML('beforeend',html);
+    }
+  }
+})();
+</script>
+</body>
+</html>

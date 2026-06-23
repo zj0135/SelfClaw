@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private bool _terminalReady;
     private bool _isTerminalFocused;
     private bool _isRightPanelOpen;
+    private bool _isSystemSettingsOpen;
     private string? _activeRightPanelTool;
     private DispatcherTimer? _rightPanelAnimationTimer;
     private ConPtyTerminalSession? _terminalSession;
@@ -51,7 +52,6 @@ public partial class MainWindow : Window
 
     public MainWindow(
         MainWindowViewModel viewModel,
-        SystemSettingsViewModel systemSettingsViewModel,
         DesktopNotificationService desktopNotificationService,
         StoragePaths storagePaths)
     {
@@ -60,7 +60,6 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         _storagePaths = storagePaths;
         DataContext = viewModel;
-        SystemSettingsPanelHost.DataContext = systemSettingsViewModel;
         Loaded += OnLoadedAsync;
         SourceInitialized += OnSourceInitialized;
         PreviewKeyDown += HandlePreviewKeyDown;
@@ -336,16 +335,23 @@ public partial class MainWindow : Window
 
     private void SetSystemSettingsOpen(bool isOpen)
     {
-        SystemSettingsPanelHost.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
-        SettingsTitleBarHost.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+        _isSystemSettingsOpen = isOpen;
         LeftSidebarHost.Visibility = isOpen ? Visibility.Collapsed : Visibility.Visible;
+        LeftSidebarColumn.MinWidth = isOpen ? 0 : 240;
+        LeftSidebarColumn.MaxWidth = isOpen ? 0 : 400;
+        LeftSidebarColumn.Width = isOpen ? new GridLength(0) : new GridLength(280);
+        PostSettingsState();
+    }
 
-        if (WebViewFallback.Visibility == Visibility.Visible)
+    private void PostSettingsState()
+        => PostTerminalMessage(new
         {
-            return;
-        }
+            type = _isSystemSettingsOpen ? "show-settings" : "hide-settings"
+        });
 
-        TranscriptView.Visibility = isOpen ? Visibility.Collapsed : Visibility.Visible;
+    private void OnSettingsClosedFromWebView()
+    {
+        SetSystemSettingsOpen(false);
     }
 
     private void SetTerminalDrawerOpen(bool isOpen)
@@ -535,6 +541,9 @@ public partial class MainWindow : Window
                     break;
                 case "terminal-restart":
                     RestartTerminalSession();
+                    break;
+                case "settings-closed":
+                    OnSettingsClosedFromWebView();
                     break;
             }
         }

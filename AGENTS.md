@@ -261,9 +261,9 @@ Agent markdown still supports fields for skills and MCP server ids, but MCP conf
 
 The desktop app uses a WPF shell around a WebView2 transcript host:
 
-- `MainWindow.xaml` owns the window chrome, toolbar, transcript WebView, right panel, terminal drawer, and WPF settings overlay host.
+- `MainWindow.xaml` owns the window chrome, toolbar, transcript WebView, right panel, and terminal drawer.
 - `LeftSidebar.xaml` owns the current sidebar including the Settings entry.
-- `SystemSettingsPanel.xaml` is the current WPF settings panel surface and should remain in place while the new settings implementation is designed.
+- Settings is a Vue view (`SelfClaw.TranscriptVue/src/components/Settings.vue`) rendered inside the transcript WebView. The WPF shell opens it by posting a `show-settings` web message and collapsing the sidebar column; `LeftSidebar` raises `SystemSettingsRequested`, and the Vue side posts `settings-closed` when the user exits. It is currently front-end only with mock data (no backend persistence wired).
 
 The old non-WPF `DesktopSettings` / `DesktopSettingsStore` model was removed. `SystemThemeReader` remains for following the Windows app theme.
 
@@ -349,7 +349,7 @@ Desktop transcript service models include:
 | --- | --- |
 | `SelfClaw.Desktop/App.xaml.cs` | App entry, logging, DI setup |
 | `SelfClaw.Desktop/MainWindow.xaml` | WPF shell layout around TranscriptVue WebView2 |
-| `SelfClaw.Desktop/Controls/SystemSettingsPanel.xaml` | Current WPF settings panel surface |
+| `SelfClaw.TranscriptVue/src/components/Settings.vue` | Settings view (front-end only, rendered inside the transcript WebView) |
 | `SelfClaw.Desktop/ViewModels/MainWindowViewModel*.cs` | Main programming conversation workflow |
 | `SelfClaw.Desktop/Services/Agents/DesktopAgentStore.cs` | Agent markdown load/save and built-in agent provisioning |
 | `SelfClaw.Desktop/Services/Channels/DesktopChannelSettingsStore.cs` | Retained channel configuration persistence |

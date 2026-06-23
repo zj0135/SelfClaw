@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import TerminalPanel from './components/TerminalPanel.vue';
 import TranscriptPanel from './components/TranscriptPanel.vue';
+import Settings from './components/Settings.vue';
 import { renderMessages } from './renderers';
 
 const state = reactive({
@@ -18,6 +19,7 @@ const state = reactive({
 });
 
 const composerText = ref('');
+const showSettings = ref(false);
 const transcriptPanelRef = ref(null);
 const terminalPanelRef = ref(null);
 const imagePreview = ref(null);
@@ -148,7 +150,18 @@ function handleIncomingMessage(event) {
 		terminalPanelRef.value?.clear?.();
 	} else if (payload.type === 'terminal-focus') {
 		nextTick(() => terminalPanelRef.value?.focus?.());
+	} else if (payload.type === 'show-settings') {
+		showSettings.value = true;
+	} else if (payload.type === 'hide-settings') {
+		showSettings.value = false;
+	} else if (payload.type === 'toggle-settings') {
+		showSettings.value = !showSettings.value;
 	}
+}
+
+function closeSettings() {
+	showSettings.value = false;
+	post({ type: 'settings-closed' });
 }
 
 function handleDocumentClick(event) {
@@ -341,7 +354,8 @@ onUnmounted(() => {
 
 <template>
 	<div class="app" :class="{ busy: state.isBusy }">
-		<div class="workspace" :class="{
+		<Settings v-if="showSettings" @close="showSettings = false" />
+		<div v-show="!showSettings" class="workspace" :class="{
 			'empty-workspace': isEmptyConversation,
 			'terminal-open': state.terminal.isOpen,
 		}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
