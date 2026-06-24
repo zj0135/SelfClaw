@@ -354,67 +354,70 @@ onUnmounted(() => {
 
 <template>
 	<div class="app" :class="{ busy: state.isBusy }">
-		<Settings v-if="showSettings" @close="showSettings = false" />
-		<div v-show="!showSettings" class="workspace" :class="{
-			'empty-workspace': isEmptyConversation,
-			'terminal-open': state.terminal.isOpen,
-		}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
-			<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :messages-html="messagesHtml"
-				@scroll="onTranscriptScroll" @preview-image="openImagePreview" @transcript-click="onTranscriptClick"
-				@transcript-keydown="onTranscriptKeydown" />
-			<section v-else class="empty-composer-stage" aria-label="新对话">
-				<div class="empty-composer-copy">
-					<h1>想聊些什么？</h1>
-					<p>随意提问，也可以使用搜索与已选择的 MCP 工具。</p>
-				</div>
-			</section>
-			<section ref="composerShellRef" class="composer-shell" aria-label="消息输入">
-				<div class="composer-grip" aria-hidden="true"></div>
-				<textarea v-model="composerText" class="composer-input" rows="3" placeholder="让助手帮你处理项目..."
-					:disabled="state.isBusy" @keydown="onComposerKeydown"></textarea>
-				<div class="composer-toolbar">
-					<div class="composer-tools-left">
-						<button class="composer-model" type="button" title="模型选择">
-							<span class="model-dot" aria-hidden="true"></span>
-							<span>Kimi K2.6 Code Preview</span>
-						</button>
-						<button class="icon-btn" type="button" title="参数">
-							<span aria-hidden="true">⌘</span>
-						</button>
-						<button class="icon-btn icon-btn-strong" type="button" title="添加">
-							<span aria-hidden="true">+</span>
-						</button>
-						<button class="icon-btn" type="button" title="文件">
-							<svg viewBox="0 0 20 20" aria-hidden="true">
-								<path d="M3.5 6.5h4l1.4 1.6h7.6v6.4a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2Z">
-								</path>
-								<path d="M3.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h3.7l1.4 1.7h5.6a1 1 0 0 1 1 1v1.9"></path>
-							</svg>
-						</button>
+		<aside class="sidebar"></aside>
+		<main class="main">
+			<Settings v-if="showSettings" @close="showSettings = false" />
+			<div v-show="!showSettings" class="workspace" :class="{
+				'empty-workspace': isEmptyConversation,
+				'terminal-open': state.terminal.isOpen,
+			}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
+				<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :messages-html="messagesHtml"
+					@scroll="onTranscriptScroll" @preview-image="openImagePreview" @transcript-click="onTranscriptClick"
+					@transcript-keydown="onTranscriptKeydown" />
+				<section v-else class="empty-composer-stage" aria-label="新对话">
+					<div class="empty-composer-copy">
+						<h1>想聊些什么？</h1>
+						<p>随意提问，也可以使用搜索与已选择的 MCP 工具。</p>
 					</div>
-					<div class="composer-tools-right">
-						<button class="composer-meter" type="button" title="上下文">
-							<span class="meter-ring" aria-hidden="true"></span>
-							<span>7%</span>
-						</button>
-						<button class="icon-btn" type="button" title="增强">
-							<span aria-hidden="true">✦</span>
-						</button>
-						<button class="send-btn" type="button" :disabled="!canSend" @click="submitComposer">
-							<span>开始</span>
-							<svg viewBox="0 0 20 20" aria-hidden="true">
-								<path d="M17 3 8.2 11.8"></path>
-								<path d="M17 3 12.1 17 8.2 11.8 3 7.9 17 3Z"></path>
-							</svg>
-						</button>
+				</section>
+				<section ref="composerShellRef" class="composer-shell" aria-label="消息输入">
+					<div class="composer-grip" aria-hidden="true"></div>
+					<textarea v-model="composerText" class="composer-input" rows="3" placeholder="让助手帮你处理项目..."
+						:disabled="state.isBusy" @keydown="onComposerKeydown"></textarea>
+					<div class="composer-toolbar">
+						<div class="composer-tools-left">
+							<button class="composer-model" type="button" title="模型选择">
+								<span class="model-dot" aria-hidden="true"></span>
+								<span>Kimi K2.6 Code Preview</span>
+							</button>
+							<button class="icon-btn" type="button" title="参数">
+								<span aria-hidden="true">⌘</span>
+							</button>
+							<button class="icon-btn icon-btn-strong" type="button" title="添加">
+								<span aria-hidden="true">+</span>
+							</button>
+							<button class="icon-btn" type="button" title="文件">
+								<svg viewBox="0 0 20 20" aria-hidden="true">
+									<path d="M3.5 6.5h4l1.4 1.6h7.6v6.4a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2Z">
+									</path>
+									<path d="M3.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h3.7l1.4 1.7h5.6a1 1 0 0 1 1 1v1.9"></path>
+								</svg>
+							</button>
+						</div>
+						<div class="composer-tools-right">
+							<button class="composer-meter" type="button" title="上下文">
+								<span class="meter-ring" aria-hidden="true"></span>
+								<span>7%</span>
+							</button>
+							<button class="icon-btn" type="button" title="增强">
+								<span aria-hidden="true">✦</span>
+							</button>
+							<button class="send-btn" type="button" :disabled="!canSend" @click="submitComposer">
+								<span>开始</span>
+								<svg viewBox="0 0 20 20" aria-hidden="true">
+									<path d="M17 3 8.2 11.8"></path>
+									<path d="M17 3 12.1 17 8.2 11.8 3 7.9 17 3Z"></path>
+								</svg>
+							</button>
+						</div>
 					</div>
-				</div>
-			</section>
-			<TerminalPanel ref="terminalPanelRef" :is-open="state.terminal.isOpen"
-				:is-running="state.terminal.isRunning" :cwd="state.terminal.cwd" @ready="onTerminalReady"
-				@input="onTerminalInput" @resize="onTerminalResize" @close="onTerminalClose"
-				@restart="onTerminalRestart" @focus-change="onTerminalFocusChange" />
-		</div>
+				</section>
+				<TerminalPanel ref="terminalPanelRef" :is-open="state.terminal.isOpen"
+					:is-running="state.terminal.isRunning" :cwd="state.terminal.cwd" @ready="onTerminalReady"
+					@input="onTerminalInput" @resize="onTerminalResize" @close="onTerminalClose"
+					@restart="onTerminalRestart" @focus-change="onTerminalFocusChange" />
+			</div>
+		</main>
 		<div v-if="imagePreview" class="image-preview-backdrop" @click.self="closeImagePreview">
 			<div class="image-preview-dialog">
 				<img :src="imagePreview.src" :alt="imagePreview.alt || 'Preview image'" />
@@ -492,7 +495,21 @@ button {
 .app {
 	width: 100%;
 	height: 100%;
+	display: grid;
+	grid-template-columns: 280px 1fr;
 	background: var(--bg);
+}
+
+.sidebar {
+	background: #F4F5F7;
+	border-right: 1px solid #D9DDE4;
+	overflow: hidden;
+}
+
+.main {
+	min-width: 0;
+	height: 100%;
+	overflow: hidden;
 }
 
 .workspace {
