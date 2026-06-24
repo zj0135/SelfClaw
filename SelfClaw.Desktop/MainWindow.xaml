@@ -152,36 +152,9 @@
             </Border.Style>
 
             <Grid ClipToBounds="True">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition x:Name="LeftSidebarColumn"
-                                      Width="280"
-                                      MinWidth="240"
-                                      MaxWidth="400"/>
-                    <ColumnDefinition Width="*"
-                                      MinWidth="920"/>
-                </Grid.ColumnDefinitions>
+                <Border Background="#FFFFFF"/>
 
-                <Border Grid.ColumnSpan="2"
-                        Background="#FFFFFF"/>
-
-                <Border Grid.Column="0"
-                        x:Name="LeftSidebarHost"
-                        BorderBrush="#D9DDE4"
-                        BorderThickness="0,0,1,0"
-                        Panel.ZIndex="1">
-                    <local:LeftSidebar x:Name="LeftSidebarControl"
-                                       SystemSettingsRequested="OnSystemSettingsRequested"
-                                       NewConversationRequested="OnSidebarNewConversationRequested"
-                                       ProjectsToggleRequested="OnSidebarProjectsToggleRequested"
-                                       StandaloneConversationRequested="OnSidebarStandaloneConversationRequested"
-                                       StandaloneConversationsToggleRequested="OnSidebarStandaloneConversationsToggleRequested"
-                                       WorkspaceRootSelected="OnSidebarWorkspaceRootSelected"
-                                       ProjectConversationRequested="OnSidebarProjectConversationRequested"
-                                       ConversationSelected="OnSidebarConversationSelected"
-                                       ConversationDeleteRequested="OnSidebarConversationDeleteRequested"/>
-                </Border>
-
-                <Grid Grid.Column="1">
+                <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="46"/>
                         <RowDefinition Height="*"/>

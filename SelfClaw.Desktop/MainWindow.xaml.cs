@@ -280,66 +280,9 @@ public partial class MainWindow : Window
         SetTerminalDrawerOpen(false);
     }
 
-    private void OnSystemSettingsRequested(object? sender, EventArgs e)
-    {
-        SetSystemSettingsOpen(true);
-        SetTerminalDrawerOpen(false);
-        SetRightPanelOpen(false);
-    }
-
-    private async void OnSidebarNewConversationRequested(object? sender, EventArgs e)
-    {
-        SetSystemSettingsOpen(false);
-        await _viewModel.CreateStandaloneConversationFromUiAsync();
-    }
-
-    private void OnSidebarProjectsToggleRequested(object? sender, EventArgs e)
-    {
-        _viewModel.ToggleSidebarProjects();
-    }
-
-    private async void OnSidebarStandaloneConversationRequested(object? sender, EventArgs e)
-    {
-        SetSystemSettingsOpen(false);
-        await _viewModel.CreateStandaloneConversationFromUiAsync();
-    }
-
-    private void OnSidebarStandaloneConversationsToggleRequested(object? sender, EventArgs e)
-    {
-        _viewModel.ToggleSidebarStandaloneConversations();
-    }
-
-    private async void OnSidebarWorkspaceRootSelected(object? sender, Guid workspaceRootId)
-    {
-        SetSystemSettingsOpen(false);
-        await _viewModel.ToggleSidebarWorkspaceRootAsync(workspaceRootId);
-    }
-
-    private async void OnSidebarProjectConversationRequested(object? sender, Guid workspaceRootId)
-    {
-        SetSystemSettingsOpen(false);
-        await _viewModel.CreateProjectConversationFromUiAsync(workspaceRootId);
-    }
-
-    private async void OnSidebarConversationSelected(object? sender, Guid conversationId)
-    {
-        SetSystemSettingsOpen(false);
-        await _viewModel.SelectConversationAsync(conversationId);
-    }
-
-    private async void OnSidebarConversationDeleteRequested(object? sender, Guid conversationId)
-    {
-        SetSystemSettingsOpen(false);
-        await _viewModel.DeleteConversationAsync(conversationId);
-    }
-
     private void SetSystemSettingsOpen(bool isOpen)
     {
         _isSystemSettingsOpen = isOpen;
-        LeftSidebarHost.Visibility = isOpen ? Visibility.Collapsed : Visibility.Visible;
-        LeftSidebarColumn.MinWidth = isOpen ? 0 : 240;
-        LeftSidebarColumn.MaxWidth = isOpen ? 0 : 400;
-        LeftSidebarColumn.Width = isOpen ? new GridLength(0) : new GridLength(280);
         PostSettingsState();
     }
 
