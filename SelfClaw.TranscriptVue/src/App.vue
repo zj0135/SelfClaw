@@ -4,11 +4,6 @@ import AppSidebar from './components/AppSidebar.vue';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
 
-const navItems = [
-	{ id: 'chat', label: '对话' },
-	{ id: 'settings', label: '设置' },
-];
-
 const viewRegistry = {
 	chat: markRaw(ChatView),
 	settings: markRaw(SettingsView),
@@ -18,6 +13,31 @@ const currentViewId = ref('chat');
 const activeViewComponent = computed(() => viewRegistry[currentViewId.value] || ChatView);
 const activeViewRef = ref(null);
 const imagePreview = ref(null);
+
+const navItems = [
+	{ id: 'new-chat', label: '新建对话', type: 'action' },
+	{ id: 'search', label: '搜索', type: 'action' },
+	{ id: 'plugins', label: '插件', type: 'action' },
+	{ id: 'extensions', label: '扩展功能', type: 'action' },
+	{ id: 'automation', label: '自动化', type: 'action' },
+	{
+		id: 'projects',
+		label: '项目节点',
+		type: 'group',
+		children: [
+			{ id: 'project-demo-1', label: '示例项目会话', type: 'conversation' },
+		],
+	},
+	{
+		id: 'conversations',
+		label: '对话节点',
+		type: 'group',
+		children: [
+			{ id: 'conversation-demo-1', label: '示例非项目会话', type: 'conversation' },
+		],
+	},
+	{ id: 'settings', label: '设置', type: 'view' },
+];
 
 function post(message) {
 	window.chrome?.webview?.postMessage(message);
@@ -61,6 +81,17 @@ function closeImagePreview() {
 	imagePreview.value = null;
 }
 
+function onSidebarAction() {
+	// 仅前端样式占位，不触发实际功能。
+}
+
+function onSidebarSelect(id) {
+	// 仅切换顶部视图（设置），其他均为样式占位。
+	if (id in viewRegistry) {
+		currentViewId.value = id;
+	}
+}
+
 onMounted(() => {
 	window.chrome?.webview?.addEventListener('message', handleIncomingMessage);
 	document.addEventListener('click', handleDocumentClick);
@@ -76,7 +107,12 @@ onUnmounted(() => {
 
 <template>
 	<div class="app">
-		<AppSidebar :items="navItems" :active-id="currentViewId" @select="currentViewId = $event" />
+		<AppSidebar
+			:items="navItems"
+			:active-id="currentViewId"
+			@select="onSidebarSelect"
+			@action="onSidebarAction"
+		/>
 		<main class="main">
 			<component :is="activeViewComponent" ref="activeViewRef" @preview-image="openImagePreview" />
 		</main>
