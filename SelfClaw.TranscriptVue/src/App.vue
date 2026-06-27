@@ -22,19 +22,15 @@ const navItems = [
 	{ id: 'automation', label: '自动化', type: 'action' },
 	{
 		id: 'projects',
-		label: '项目节点',
+		label: '项目',
 		type: 'group',
-		children: [
-			{ id: 'project-demo-1', label: '示例项目会话', type: 'conversation' },
-		],
+		children: [{ id: 'project-demo-1', label: '示例项目会话', type: 'conversation' }],
 	},
 	{
 		id: 'conversations',
-		label: '对话节点',
+		label: '对话',
 		type: 'group',
-		children: [
-			{ id: 'conversation-demo-1', label: '示例非项目会话', type: 'conversation' },
-		],
+		children: [{ id: 'conversation-demo-1', label: '示例非项目会话', type: 'conversation' }],
 	},
 	{ id: 'settings', label: '设置', type: 'view' },
 ];
@@ -107,12 +103,7 @@ onUnmounted(() => {
 
 <template>
 	<div class="app">
-		<AppSidebar
-			:items="navItems"
-			:active-id="currentViewId"
-			@select="onSidebarSelect"
-			@action="onSidebarAction"
-		/>
+		<AppSidebar :items="navItems" :active-id="currentViewId" @select="onSidebarSelect" @action="onSidebarAction" />
 		<main class="main">
 			<component :is="activeViewComponent" ref="activeViewRef" @preview-image="openImagePreview" />
 		</main>
@@ -361,7 +352,7 @@ button {
 	line-height: 1.6;
 }
 
-.body>* {
+.body > * {
 	max-width: 100%;
 }
 
@@ -432,7 +423,7 @@ code {
 	font-size: 13px;
 }
 
-:not(pre)>code {
+:not(pre) > code {
 	padding: 2px 6px;
 	border-radius: 5px;
 	background: #eef2f7;
@@ -688,7 +679,7 @@ a:hover {
 	padding: 0;
 }
 
-.tool-segment+.tool-segment {
+.tool-segment + .tool-segment {
 	margin-top: 6px;
 }
 
@@ -854,7 +845,6 @@ a:hover {
 }
 
 @media (max-width: 960px) {
-
 	.message-main,
 	.message-row.user .message-main {
 		max-width: 100%;
