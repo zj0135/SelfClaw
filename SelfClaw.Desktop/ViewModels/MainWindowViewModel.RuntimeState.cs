@@ -56,20 +56,6 @@ public sealed partial class MainWindowViewModel
     private bool IsSelectedConversationRunning()
         => GetSelectedRuntimeState()?.IsRunning == true;
 
-    private void ProjectSelectedRuntimeState(bool publishShell)
-    {
-        var runtimeState = GetSelectedRuntimeState();
-        var nextBusy = runtimeState?.IsRunning == true;
-        if (SetProperty(ref _isBusy, nextBusy, nameof(IsBusy)))
-        {
-        }
-
-        if (publishShell)
-        {
-            PublishShell(false);
-        }
-    }
-
     private ConversationRuntimeState StartConversationRuntimeState(
         ConversationRecord conversation,
         IReadOnlyList<MessageRecord>? messages = null,
@@ -98,7 +84,7 @@ public sealed partial class MainWindowViewModel
         if (IsSelectedConversation(conversation.Id))
         {
             SyncSelectedDisplayStateFromRuntime(state);
-            ProjectSelectedRuntimeState(publishShell: true);
+            PublishShell(false);
         }
 
         return state;
@@ -110,7 +96,6 @@ public sealed partial class MainWindowViewModel
         if (IsSelectedConversation(state.ConversationId))
         {
             SyncSelectedDisplayStateFromRuntime(state);
-            ProjectSelectedRuntimeState(publishShell: false);
             PublishShellNow(true);
         }
     }

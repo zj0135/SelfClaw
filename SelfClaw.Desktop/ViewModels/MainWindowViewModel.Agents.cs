@@ -6,12 +6,11 @@ namespace SelfClaw.Desktop.ViewModels;
 
 public sealed partial class MainWindowViewModel
 {
-    public async Task ReloadAgentsAsync(string? preferredAgentId = null)
+    private void ReloadAgents()
     {
         _agents.Clear();
         _agents.AddRange(_desktopAgentStore.LoadAll());
-        SelectAgentCore(preferredAgentId, publishShell: false, applyFilter: false);
-        await Task.CompletedTask;
+        SelectAgentCore(null);
     }
 
     private DesktopAgentDefinition ResolveSelectedAgent()
@@ -25,26 +24,15 @@ public sealed partial class MainWindowViewModel
                ?? _agents.First();
     }
 
-    private void SelectAgentCore(string? agentId, bool publishShell, bool applyFilter)
+    private void SelectAgentCore(string? agentId)
     {
         var nextAgent = ResolveAgent(agentId);
-        var changed = !string.Equals(_selectedAgentId, nextAgent.Id, StringComparison.OrdinalIgnoreCase);
         _selectedAgentId = nextAgent.Id;
-
-        if (applyFilter)
-        {
-            ApplyConversationFilter(SelectedConversation?.Id);
-        }
-
-        if (publishShell && (changed || !applyFilter))
-        {
-            PublishShell(false);
-        }
     }
 
-    private void SyncSelectedAgentFromConversation(ConversationRecord conversation, bool publishShell)
+    private void SyncSelectedAgentFromConversation(ConversationRecord conversation)
     {
-        SelectAgentCore(conversation.AgentId, publishShell, applyFilter: false);
+        SelectAgentCore(conversation.AgentId);
     }
 
     private AgentRuntimeDefinition ResolveRuntimeAgent(string? agentId)

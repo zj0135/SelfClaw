@@ -37,16 +37,14 @@ public sealed partial class MainWindowViewModel
 
         messages ??= _messages;
         var title = ResolveNotificationTitle(conversation.Id, conversation.Title, messages);
-        var message = BuildConversationCompletedMessage(conversation, messages);
+        var message = BuildConversationCompletedMessage(messages);
         _desktopNotificationService.ShowConversationCompleted(
             conversation.Id,
             title,
             message);
     }
 
-    private string BuildConversationCompletedMessage(
-        ConversationRecord conversation,
-        IReadOnlyList<MessageRecord> messages)
+    private static string BuildConversationCompletedMessage(IReadOnlyList<MessageRecord> messages)
     {
         const string modeMessage = "Programming session completed.";
         var preview = BuildConversationPreview(messages);

@@ -143,9 +143,9 @@
                         <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=WindowState}"
                                      Value="Maximized">
                             <Setter Property="Margin"
-                                    Value="8"/>
+                                    Value="0"/>
                             <Setter Property="CornerRadius"
-                                    Value="12"/>
+                                    Value="0"/>
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>
@@ -155,139 +155,45 @@
                 <Border Background="#FFFFFF"/>
 
                 <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="46"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"
+                                          MinWidth="600"/>
+                        <ColumnDefinition x:Name="RightPanelColumn"
+                                          Width="0"
+                                          MinWidth="0"
+                                          MaxWidth="480"/>
+                    </Grid.ColumnDefinitions>
 
-                    <Border Grid.Row="0"
-                            Background="#FFFFFF"
-                            BorderBrush="Transparent"
-                            BorderThickness="0,0,0,1"/>
+                    <Grid Grid.Column="0">
+                        <webview2:WebView2 x:Name="TranscriptView"
+                                           Margin="0"/>
 
-                    <Grid Grid.Row="0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="78"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-
-                        <StackPanel Grid.Column="2"
-                                    Orientation="Horizontal"
-                                    VerticalAlignment="Center"
-                                    HorizontalAlignment="Right"
-                                    Margin="0,0,10,0"
-                                    shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                            <Button Style="{StaticResource ToolIconButtonStyle}"
-                                    ToolTip="Terminal"
-                                    Click="OnTerminalToolButtonClick">
-                                <Path Width="16"
-                                      Height="16"
-                                      Style="{StaticResource TitleIconPathStyle}"
-                                      Data="M2.5,3.5 L13.5,3.5 L13.5,12.5 L2.5,12.5 Z M5,6.2 L7.1,8 L5,9.8 M8.6,10 L11,10"/>
-                            </Button>
-
-                            <Button Style="{StaticResource ToolIconButtonStyle}"
-                                    ToolTip="Files"
-                                    Click="OnFileManagerToolButtonClick">
-                                <Path Width="16"
-                                      Height="16"
-                                      Style="{StaticResource TitleIconPathStyle}"
-                                      Data="M2,5.2 L5.8,5.2 L7.2,6.7 L14,6.7 L14,12.8 L2,12.8 Z M2,5.2 L2,3.7 L6.2,3.7 L7.6,5.2 L14,5.2"/>
-                            </Button>
-
-                            <Button Style="{StaticResource ToolIconButtonStyle}"
-                                    ToolTip="Browser"
-                                    Click="OnBrowserToolButtonClick">
-                                <Path Width="16"
-                                      Height="16"
-                                      Style="{StaticResource TitleIconPathStyle}"
-                                      Data="M8,2.2 C4.8,2.2 2.2,4.8 2.2,8 C2.2,11.2 4.8,13.8 8,13.8 C11.2,13.8 13.8,11.2 13.8,8 C13.8,4.8 11.2,2.2 8,2.2 Z M2.5,8 L13.5,8 M8,2.4 C9.25,3.9 10,5.8 10,8 C10,10.2 9.25,12.1 8,13.6 M8,2.4 C6.75,3.9 6,5.8 6,8 C6,10.2 6.75,12.1 8,13.6"/>
-                            </Button>
-
-                            <Button Style="{StaticResource WindowCaptionButtonStyle}"
-                                    ToolTip="Minimize"
-                                    Click="OnMinimizeButtonClick">
-                                <Path Width="12"
-                                      Height="12"
-                                      Style="{StaticResource TitleIconPathStyle}"
-                                      Data="M1.5,7 L10.5,7"/>
-                            </Button>
-
-                            <Button Style="{StaticResource WindowCaptionButtonStyle}"
-                                    ToolTip="Maximize"
-                                    Click="OnToggleMaximizeButtonClick">
-                                <Path Width="12"
-                                      Height="12"
-                                      Style="{StaticResource TitleIconPathStyle}"
-                                      Data="M2.5,2.5 L9.5,2.5 L9.5,9.5 L2.5,9.5 Z"/>
-                            </Button>
-
-                            <Button Style="{StaticResource WindowCaptionButtonStyle}"
-                                    ToolTip="Close"
-                                    Click="OnCloseButtonClick">
-                                <Path Width="12"
-                                      Height="12"
-                                      Style="{StaticResource TitleIconPathStyle}"
-                                      Data="M2.5,2.5 L9.5,9.5 M9.5,2.5 L2.5,9.5"/>
-                            </Button>
-                        </StackPanel>
-
-                        <Border Grid.Column="0"
-                                Background="Transparent"
-                                MouseLeftButtonDown="OnTitleBarDragRegionMouseLeftButtonDown"/>
-
-                        <Border Grid.Column="1"
-                                Background="Transparent"
-                                MouseLeftButtonDown="OnTitleBarDragRegionMouseLeftButtonDown"/>
-
-                        <TextBlock Grid.Column="1"
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"
-                                   Foreground="#171A1F"
-                                   FontFamily="Segoe UI Variable Display"
-                                   FontSize="12"
-                                   FontWeight="SemiBold"
-                                   Opacity="0.88"
-                                   Text="SelfClaw"
-                                   IsHitTestVisible="False"/>
-                    </Grid>
-
-                    <Grid Grid.Row="1">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"
-                                              MinWidth="600"/>
-                            <ColumnDefinition x:Name="RightPanelColumn"
-                                              Width="0"
-                                              MinWidth="0"
-                                              MaxWidth="480"/>
-                        </Grid.ColumnDefinitions>
-
-                        <Grid Grid.Row="0"
-                              Grid.Column="0">
-                            <webview2:WebView2 x:Name="TranscriptView"
-                                               Margin="0"/>
-
-                            <Border x:Name="WebViewFallback"
-                                    Background="#FFFFFF"
-                                    Visibility="Collapsed">
-                                <TextBlock HorizontalAlignment="Center"
-                                           VerticalAlignment="Center"
-                                           TextAlignment="Center"
+                        <Border x:Name="WebViewFallback"
+                                Background="#FFFFFF"
+                                Visibility="Collapsed">
+                            <StackPanel HorizontalAlignment="Center"
+                                        VerticalAlignment="Center">
+                                <TextBlock TextAlignment="Center"
                                            FontSize="18"
                                            Foreground="#8A929E"
                                            Text="WebView2 runtime is required to render SelfClaw.&#10;Install Microsoft Edge WebView2 Runtime and restart the app."/>
-                            </Border>
-                        </Grid>
-
-                        <Border x:Name="RightPanelHost"
-                                Grid.Column="1"
-                                BorderBrush="#E5E7EB"
-                                BorderThickness="1,0,0,0"
-                                Visibility="Collapsed">
-                            <local:RightPanel/>
+                                <Button Width="96"
+                                        Height="34"
+                                        Margin="0,18,0,0"
+                                        HorizontalAlignment="Center"
+                                        Content="Close"
+                                        Click="OnFallbackCloseButtonClick"/>
+                            </StackPanel>
                         </Border>
                     </Grid>
+
+                    <Border x:Name="RightPanelHost"
+                            Grid.Column="1"
+                            BorderBrush="#E5E7EB"
+                            BorderThickness="1,0,0,0"
+                            Visibility="Collapsed">
+                        <local:RightPanel/>
+                    </Border>
                 </Grid>
             </Grid>
         </Border>

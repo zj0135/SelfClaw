@@ -25,8 +25,10 @@ public partial class MainWindow : Window
     private const int DefaultTerminalColumns = 120;
     private const int DefaultTerminalRows = 24;
     private const int WmGetMinMaxInfo = 0x0024;
+    private const int WmNcLButtonDown = 0x00A1;
     private const uint MonitorDefaultToNearest = 2;
     private const double StartupWorkAreaMargin = 48d;
+    private static readonly IntPtr HtCaption = new(2);
 
     private readonly MainWindowViewModel _viewModel;
     private readonly StoragePaths _storagePaths;
@@ -62,6 +64,7 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
         SourceInitialized += OnSourceInitialized;
+        StateChanged += OnWindowStateChanged;
         PreviewKeyDown += HandlePreviewKeyDown;
         Closed += OnClosed;
         _viewModel.TranscriptChanged += OnTranscriptChanged;
@@ -99,6 +102,7 @@ public partial class MainWindow : Window
     {
         _viewModel.TranscriptChanged -= OnTranscriptChanged;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        StateChanged -= OnWindowStateChanged;
         TranscriptView.NavigationCompleted -= OnTranscriptNavigationCompleted;
         StopTerminalSession();
 
@@ -172,6 +176,7 @@ public partial class MainWindow : Window
         _webViewReady = true;
         PostTranscript(_pendingTranscript);
         PostTerminalState();
+        PostWindowState();
     }
 
     private void OnTranscriptChanged(object? sender, TranscriptRenderState state)
@@ -222,58 +227,23 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnTitleBarDragRegionMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.LeftButton != MouseButtonState.Pressed)
-        {
-            return;
-        }
+    private void OnFallbackCloseButtonClick(object sender, RoutedEventArgs e)
+        => Close();
 
-        if (e.ClickCount == 2)
-        {
-            ToggleWindowState();
-            return;
-        }
-
-        try
-        {
-            DragMove();
-        }
-        catch (InvalidOperationException)
-        {
-            // Ignore transient drag failures while the shell is processing input.
-        }
-    }
-
-    private void OnMinimizeButtonClick(object sender, RoutedEventArgs e)
-    {
-        WindowState = WindowState.Minimized;
-    }
-
-    private void OnToggleMaximizeButtonClick(object sender, RoutedEventArgs e)
-    {
-        ToggleWindowState();
-    }
-
-    private void OnCloseButtonClick(object sender, RoutedEventArgs e)
-    {
-        Close();
-    }
-
-    private void OnTerminalToolButtonClick(object sender, RoutedEventArgs e)
+    private void ToggleTerminalTool()
     {
         SetSystemSettingsOpen(false);
         SetTerminalDrawerOpen(!_isTerminalDrawerOpen);
     }
 
-    private void OnFileManagerToolButtonClick(object sender, RoutedEventArgs e)
+    private void ToggleFileManagerTool()
     {
         SetSystemSettingsOpen(false);
         ToggleRightPanelTool("files");
         SetTerminalDrawerOpen(false);
     }
 
-    private void OnBrowserToolButtonClick(object sender, RoutedEventArgs e)
+    private void ToggleBrowserTool()
     {
         SetSystemSettingsOpen(false);
         ToggleRightPanelTool("browser");
@@ -409,6 +379,28 @@ public partial class MainWindow : Window
             : WindowState.Maximized;
     }
 
+    private void StartWindowDrag()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        ReleaseCapture();
+        SendMessage(hwnd, WmNcLButtonDown, HtCaption, IntPtr.Zero);
+    }
+
+    private void OnWindowStateChanged(object? sender, EventArgs e)
+        => PostWindowState();
+
+    private void PostWindowState()
+        => PostTerminalMessage(new
+        {
+            type = "window-state",
+            isMaximized = WindowState == WindowState.Maximized
+        });
+
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainWindowViewModel.ActiveThemeMode))
@@ -456,6 +448,27 @@ public partial class MainWindow : Window
                     await _viewModel.SubmitPromptAsync(prompt);
                     break;
                 }
+                case "window-drag":
+                    StartWindowDrag();
+                    break;
+                case "window-minimize":
+                    WindowState = WindowState.Minimized;
+                    break;
+                case "window-toggle-maximize":
+                    ToggleWindowState();
+                    break;
+                case "window-close":
+                    Close();
+                    break;
+                case "toggle-terminal":
+                    ToggleTerminalTool();
+                    break;
+                case "toggle-files":
+                    ToggleFileManagerTool();
+                    break;
+                case "toggle-browser":
+                    ToggleBrowserTool();
+                    break;
                 case "terminal-ready":
                     _terminalReady = true;
                     ApplyTerminalResize(document.RootElement);
@@ -724,6 +737,12 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);

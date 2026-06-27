@@ -1,6 +1,7 @@
 <script setup>
-import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue';
+import { computed, markRaw, onMounted, onUnmounted, reactive, ref } from 'vue';
 import AppSidebar from './components/AppSidebar.vue';
+import WindowControls from './components/WindowControls.vue';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
 
@@ -13,6 +14,9 @@ const currentViewId = ref('chat');
 const activeViewComponent = computed(() => viewRegistry[currentViewId.value] || ChatView);
 const activeViewRef = ref(null);
 const imagePreview = ref(null);
+const windowChrome = reactive({
+	isMaximized: false,
+});
 
 const navItems = [
 	{ id: 'new-chat', label: '新建对话', type: 'action' },
@@ -45,7 +49,44 @@ function handleIncomingMessage(event) {
 		return;
 	}
 
+	if (payload.type === 'window-state') {
+		windowChrome.isMaximized = Boolean(payload.isMaximized);
+		return;
+	}
+
 	activeViewRef.value?.handleMessage?.(payload);
+}
+
+function onWindowDragPointerDown(event) {
+	if (event.button !== 0) {
+		return;
+	}
+
+	event.preventDefault();
+	post({ type: event.detail > 1 ? 'window-toggle-maximize' : 'window-drag' });
+}
+
+function onWindowControlAction(action) {
+	switch (action) {
+		case 'terminal':
+			post({ type: 'toggle-terminal' });
+			break;
+		case 'files':
+			post({ type: 'toggle-files' });
+			break;
+		case 'browser':
+			post({ type: 'toggle-browser' });
+			break;
+		case 'minimize':
+			post({ type: 'window-minimize' });
+			break;
+		case 'toggle-maximize':
+			post({ type: 'window-toggle-maximize' });
+			break;
+		case 'close':
+			post({ type: 'window-close' });
+			break;
+	}
 }
 
 function handleDocumentClick(event) {
@@ -104,6 +145,8 @@ onUnmounted(() => {
 <template>
 	<div class="app">
 		<AppSidebar :items="navItems" :active-id="currentViewId" @select="onSidebarSelect" @action="onSidebarAction" />
+		<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>
+		<WindowControls :is-maximized="windowChrome.isMaximized" @action="onWindowControlAction" />
 		<main class="main">
 			<component :is="activeViewComponent" ref="activeViewRef" @preview-image="openImagePreview" />
 		</main>
@@ -189,7 +232,19 @@ button {
 	background: var(--bg);
 }
 
+.window-drag-region {
+	position: fixed;
+	top: 0;
+	left: 280px;
+	right: 244px;
+	z-index: 110;
+	height: 46px;
+	-webkit-user-select: none;
+	user-select: none;
+}
+
 .main {
+	position: relative;
 	min-width: 0;
 	height: 100%;
 	overflow: hidden;
@@ -215,7 +270,7 @@ button {
 	overflow-y: auto;
 	overflow-x: hidden;
 	overscroll-behavior: contain;
-	padding: 28px min(11.5vw, 104px) 32px;
+	padding: 58px min(11.5vw, 104px) 32px;
 	scroll-padding-bottom: 32px;
 	background: #ffffff;
 }

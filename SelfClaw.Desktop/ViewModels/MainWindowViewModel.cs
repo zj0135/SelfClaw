@@ -1,5 +1,3 @@
-using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -38,6 +36,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer? _streamingPublishTimer;
 
     private readonly List<ConversationRecord> _allConversations = [];
+    private readonly List<ConversationRecord> _filteredConversations = [];
     private readonly List<DesktopAgentDefinition> _agents = [];
     private readonly List<ProviderProfile> _profiles = [];
     private readonly List<WorkspaceRoot> _workspaceRoots = [];
@@ -55,7 +54,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private WorkspaceRoot? _selectedWorkspaceRoot;
     private string _selectedAgentId = DesktopAgentStore.BuildAgentId;
     private string _composerText = string.Empty;
-    private bool _isBusy;
     private ThemeMode _activeThemeMode = ThemeMode.System;
     private string _effectiveTranscriptTheme = "light";
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
@@ -104,8 +102,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public event EventHandler<TranscriptRenderState>? TranscriptChanged;
 
-    public ObservableCollection<ConversationRecord> Conversations { get; } = [];
-
     public ThemeMode ActiveThemeMode
     {
         get => _activeThemeMode;
@@ -132,7 +128,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (value is not null)
             {
-                ProjectSelectedRuntimeState(publishShell: false);
                 PublishShell(false);
                 _ = LoadConversationAsync(value);
             }
@@ -142,19 +137,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 _messages.Clear();
                 _toolRuns.Clear();
                 _toolRunAnchors.Clear();
-                ProjectSelectedRuntimeState(publishShell: false);
-                PublishShell(false);
-            }
-        }
-    }
-
-    public bool IsBusy
-    {
-        get => _isBusy;
-        private set
-        {
-            if (SetProperty(ref _isBusy, value))
-            {
                 PublishShell(false);
             }
         }
@@ -168,7 +150,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _initialized = true;
-        await ReloadAgentsAsync();
+        ReloadAgents();
         await ReloadProfilesAsync();
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
@@ -192,38 +174,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _pendingPromptImageAttachments = imageAttachments ?? [];
         _pendingReasoningEnabled = enableReasoning;
         await SendAsync();
-    }
-
-    public async Task CreateNewConversationFromUiAsync()
-    {
-        await CreateNewConversationAsync();
-    }
-
-    public async Task CreateStandaloneConversationFromUiAsync()
-    {
-        SelectWorkspaceRoot(null, publishShell: false);
-        ApplyConversationFilter();
-        await CreateNewConversationAsync();
-    }
-
-    public async Task DeleteConversationAsync(Guid conversationId)
-    {
-        var conversation = _allConversations.FirstOrDefault(item => item.Id == conversationId);
-        if (conversation is null)
-        {
-            return;
-        }
-
-        if (_conversationRuntimeStates.TryGetValue(conversationId, out var runtimeState) && runtimeState.IsRunning)
-        {
-            runtimeState.CancellationTokenSource.Cancel();
-        }
-
-        await _conversationRepository.DeleteConversationAsync(conversationId);
-        _allConversations.RemoveAll(item => item.Id == conversationId);
-        _conversationRuntimeStates.Remove(conversationId, out _);
-
-        ApplyConversationFilter();
     }
 
     public void StopGeneration()
@@ -319,31 +269,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             PublishShell(false);
         }
-    }
-
-    public Task SetSelectedWorkspaceRootAsync(Guid? workspaceRootId)
-    {
-        SelectWorkspaceRoot(
-            workspaceRootId is Guid id
-                ? _workspaceRoots.FirstOrDefault(item => item.Id == id)
-                : null,
-            publishShell: false);
-
-        ApplyConversationFilter();
-        PublishShell(false);
-        return Task.CompletedTask;
-    }
-
-    public Task SelectConversationAsync(Guid conversationId)
-    {
-        var conversation = _allConversations.FirstOrDefault(item => item.Id == conversationId);
-        if (conversation is null || SelectedConversation?.Id == conversation.Id)
-        {
-            return Task.CompletedTask;
-        }
-
-        SelectedConversation = conversation;
-        return Task.CompletedTask;
     }
 
     private void ApplySystemTheme(bool refreshShell)
@@ -489,18 +414,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ApplyConversationFilter(selectedId);
     }
 
-    private async Task CreateNewConversationAsync()
-    {
-        if (_selectedProfile is null)
-        {
-            return;
-        }
-
-        SelectedConversation = null;
-        PublishShell(false);
-        await Task.CompletedTask;
-    }
-
     private async Task LoadConversationAsync(ConversationRecord conversation)
     {
         var version = ++_selectionVersion;
@@ -553,8 +466,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 : null,
             publishShell: false);
         _selectedToolPermissionMode = conversation.ToolPermissionMode;
-        SyncSelectedAgentFromConversation(conversation, publishShell: false);
-        ProjectSelectedRuntimeState(publishShell: false);
+        SyncSelectedAgentFromConversation(conversation);
         ApplyConversationFilter(conversation.Id);
 
         PublishShell(false);
@@ -957,7 +869,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private void ApplyConversationFilter(Guid? preferredConversationId = null)
     {
         var filtered = GetFilteredConversations().ToArray();
-        ReplaceCollection(Conversations, filtered);
+        ReplaceList(_filteredConversations, filtered);
 
         var targetConversation = filtered.FirstOrDefault(item => item.Id == preferredConversationId)
             ?? filtered.FirstOrDefault(item => item.Id == SelectedConversation?.Id);
@@ -1060,10 +972,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .Append('|')
             .Append(IsSelectedConversationRunning() ? '1' : '0')
             .Append('|')
-            .Append(Conversations.Count)
+            .Append(_filteredConversations.Count)
             .Append('|');
 
-        foreach (var conversation in Conversations.OrderByDescending(item => item.UpdatedAtUtc).ThenBy(item => item.CreatedAtUtc))
+        foreach (var conversation in _filteredConversations.OrderByDescending(item => item.UpdatedAtUtc).ThenBy(item => item.CreatedAtUtc))
         {
             builder.Append(conversation.Id.ToString("D"))
                 .Append(':')
@@ -1153,7 +1065,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private TranscriptConversationItem[] BuildConversationItems()
-        => Conversations
+        => _filteredConversations
             .OrderByDescending(item => item.UpdatedAtUtc)
             .ThenBy(item => item.CreatedAtUtc)
             .Select(BuildConversationItem)
@@ -1328,17 +1240,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         return normalized.Length > 48 ? normalized[..48] + "..." : normalized;
     }
 
-    private static bool IsMentionBoundary(char value)
-        => char.IsWhiteSpace(value) || char.IsPunctuation(value) || char.IsSymbol(value);
-
-    private static void ReplaceCollection<T>(ObservableCollection<T> target, IEnumerable<T> source)
-    {
-        target.Clear();
-        foreach (var item in source)
-        {
-            target.Add(item);
-        }
-    }
 }
 
 
