@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, reactive, ref } from 'vue';
+import ComposerPanel from '../components/ComposerPanel.vue';
 import TerminalPanel from '../components/TerminalPanel.vue';
 import TranscriptPanel from '../components/TranscriptPanel.vue';
 import { renderMessages } from '../renderers';
@@ -19,7 +20,6 @@ const state = reactive({
 	},
 });
 
-const composerText = ref('');
 const transcriptPanelRef = ref(null);
 const terminalPanelRef = ref(null);
 const composerShellRef = ref(null);
@@ -35,10 +35,7 @@ function post(message) {
 	window.chrome?.webview?.postMessage(message);
 }
 
-const messagesHtml = computed(() =>
-	renderMessages(state.items || [], openThoughts.value, openToolSegments.value, openToolGroups.value)
-);
-const canSend = computed(() => composerText.value.trim().length > 0 && !state.isBusy);
+const messagesHtml = computed(() => renderMessages(state.items || [], openThoughts.value, openToolSegments.value, openToolGroups.value));
 const isEmptyConversation = computed(() => (state.items || []).length === 0 && !state.isBusy);
 
 function getTranscriptScrollEl() {
@@ -46,9 +43,7 @@ function getTranscriptScrollEl() {
 }
 
 function snapshotScrollPosition(element) {
-	return element
-		? { top: element.scrollTop, nearBottom: element.scrollHeight - element.scrollTop - element.clientHeight < 40 }
-		: null;
+	return element ? { top: element.scrollTop, nearBottom: element.scrollHeight - element.scrollTop - element.clientHeight < 40 } : null;
 }
 
 function restoreScrollPosition(element, snapshot) {
@@ -87,9 +82,7 @@ function replaceState(payload) {
 	const nextBusy = Boolean(payload.isBusy);
 	const wasEmpty = (state.items || []).length === 0 && !state.isBusy;
 	const willBeEmpty = nextItems.length === 0 && !nextBusy;
-	const previousComposerRect = wasEmpty && !willBeEmpty
-		? composerShellRef.value?.getBoundingClientRect()
-		: null;
+	const previousComposerRect = wasEmpty && !willBeEmpty ? composerShellRef.value?.getShellEl()?.getBoundingClientRect() : null;
 
 	state.items = nextItems;
 	state.conversations = Array.isArray(payload.conversations) ? payload.conversations : [];
@@ -98,22 +91,16 @@ function replaceState(payload) {
 	state.isBusy = nextBusy;
 
 	nextTick(() => {
-		const composer = composerShellRef.value;
-		if (composer && previousComposerRect) {
-			const nextComposerRect = composer.getBoundingClientRect();
+		const composerEl = composerShellRef.value?.getShellEl();
+		if (composerEl && previousComposerRect) {
+			const nextComposerRect = composerEl.getBoundingClientRect();
 			const deltaY = previousComposerRect.top - nextComposerRect.top;
 
 			if (Math.abs(deltaY) > 4) {
-				composer.animate(
-					[
-						{ transform: `translateY(${deltaY}px)` },
-						{ transform: 'translateY(0)' },
-					],
-					{
-						duration: 850,
-						easing: 'cubic-bezier(0.18, 0.86, 0.24, 1)',
-					}
-				);
+				composerEl.animate([{ transform: `translateY(${deltaY}px)` }, { transform: 'translateY(0)' }], {
+					duration: 850,
+					easing: 'cubic-bezier(0.18, 0.86, 0.24, 1)',
+				});
 			}
 		}
 
@@ -144,23 +131,12 @@ function openImagePreview(preview) {
 	emit('preview-image', preview);
 }
 
-function submitComposer() {
-	const prompt = composerText.value.trim();
+function submitComposer(prompt) {
 	if (!prompt || state.isBusy) {
 		return;
 	}
 
 	post({ type: 'send-prompt', prompt });
-	composerText.value = '';
-}
-
-function onComposerKeydown(event) {
-	if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
-		return;
-	}
-
-	event.preventDefault();
-	submitComposer();
 }
 
 function toggleSetEntry(source, id) {
@@ -301,65 +277,43 @@ defineExpose({
 </script>
 
 <template>
-	<div class="workspace" :class="{
-		'empty-workspace': isEmptyConversation,
-		'terminal-open': state.terminal.isOpen,
-	}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
-		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :messages-html="messagesHtml"
-			@scroll="onTranscriptScroll" @preview-image="openImagePreview" @transcript-click="onTranscriptClick"
-			@transcript-keydown="onTranscriptKeydown" />
+	<div
+		class="workspace"
+		:class="{
+			'empty-workspace': isEmptyConversation,
+			'terminal-open': state.terminal.isOpen,
+		}"
+		@pointerdown="onWorkspacePointerDown"
+		@focusin="onWorkspaceFocusIn"
+	>
+		<TranscriptPanel
+			v-if="!isEmptyConversation"
+			ref="transcriptPanelRef"
+			:messages-html="messagesHtml"
+			@scroll="onTranscriptScroll"
+			@preview-image="openImagePreview"
+			@transcript-click="onTranscriptClick"
+			@transcript-keydown="onTranscriptKeydown"
+		/>
 		<section v-else class="empty-composer-stage" aria-label="新对话">
 			<div class="empty-composer-copy">
 				<h1>想聊些什么？</h1>
-				<p>随意提问，也可以使用搜索与已选择的 MCP 工具。</p>
+				<p>随意提问，或使用命令/工具。</p>
 			</div>
 		</section>
-		<section ref="composerShellRef" class="composer-shell" aria-label="消息输入">
-			<div class="composer-grip" aria-hidden="true"></div>
-			<textarea v-model="composerText" class="composer-input" rows="3" placeholder="让助手帮你处理项目..."
-				:disabled="state.isBusy" @keydown="onComposerKeydown"></textarea>
-			<div class="composer-toolbar">
-				<div class="composer-tools-left">
-					<button class="composer-model" type="button" title="模型选择">
-						<span class="model-dot" aria-hidden="true"></span>
-						<span>Kimi K2.6 Code Preview</span>
-					</button>
-					<button class="icon-btn" type="button" title="参数">
-						<span aria-hidden="true">⌘</span>
-					</button>
-					<button class="icon-btn icon-btn-strong" type="button" title="添加">
-						<span aria-hidden="true">+</span>
-					</button>
-					<button class="icon-btn" type="button" title="文件">
-						<svg viewBox="0 0 20 20" aria-hidden="true">
-							<path d="M3.5 6.5h4l1.4 1.6h7.6v6.4a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2Z">
-							</path>
-							<path d="M3.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h3.7l1.4 1.7h5.6a1 1 0 0 1 1 1v1.9"></path>
-						</svg>
-					</button>
-				</div>
-				<div class="composer-tools-right">
-					<button class="composer-meter" type="button" title="上下文">
-						<span class="meter-ring" aria-hidden="true"></span>
-						<span>7%</span>
-					</button>
-					<button class="icon-btn" type="button" title="增强">
-						<span aria-hidden="true">✦</span>
-					</button>
-					<button class="send-btn" type="button" :disabled="!canSend" @click="submitComposer">
-						<span>开始</span>
-						<svg viewBox="0 0 20 20" aria-hidden="true">
-							<path d="M17 3 8.2 11.8"></path>
-							<path d="M17 3 12.1 17 8.2 11.8 3 7.9 17 3Z"></path>
-						</svg>
-					</button>
-				</div>
-			</div>
-		</section>
-		<TerminalPanel ref="terminalPanelRef" :is-open="state.terminal.isOpen"
-			:is-running="state.terminal.isRunning" :cwd="state.terminal.cwd" @ready="onTerminalReady"
-			@input="onTerminalInput" @resize="onTerminalResize" @close="onTerminalClose"
-			@restart="onTerminalRestart" @focus-change="onTerminalFocusChange" />
+		<ComposerPanel ref="composerShellRef" :disabled="state.isBusy" @submit="submitComposer" />
+		<TerminalPanel
+			ref="terminalPanelRef"
+			:is-open="state.terminal.isOpen"
+			:is-running="state.terminal.isRunning"
+			:cwd="state.terminal.cwd"
+			@ready="onTerminalReady"
+			@input="onTerminalInput"
+			@resize="onTerminalResize"
+			@close="onTerminalClose"
+			@restart="onTerminalRestart"
+			@focus-change="onTerminalFocusChange"
+		/>
 	</div>
 </template>
 
@@ -374,7 +328,7 @@ defineExpose({
 }
 
 .workspace.empty-workspace {
-	grid-template-rows: minmax(128px, 0.78fr) auto 0 minmax(194px, 1fr);
+	grid-template-rows: minmax(128px, 0.78fr) auto 0 minmax(160px, 1fr);
 	align-items: stretch;
 }
 
@@ -391,7 +345,7 @@ defineExpose({
 	display: flex;
 	align-items: flex-end;
 	justify-content: center;
-	padding: 0 28px 26px;
+	padding: 0 28px 28px;
 	background: #ffffff;
 }
 
@@ -403,189 +357,22 @@ defineExpose({
 	margin: 0;
 	color: #171a1f;
 	font-family: var(--font-display);
-	font-size: clamp(34px, 4vw, 44px);
-	font-weight: 760;
+	font-size: clamp(32px, 4vw, 42px);
+	font-weight: 700;
 	line-height: 1.1;
-	letter-spacing: 0;
+	letter-spacing: -0.02em;
 }
 
 .empty-composer-copy p {
-	margin: 14px 0 0;
+	margin: 12px 0 0;
 	color: #9aa2ad;
 	font-size: 14px;
 	line-height: 1.6;
 }
 
-.composer-shell {
-	position: relative;
-	width: min(calc(100% - 72px), 820px);
-	min-height: 160px;
-	margin: 0 auto 14px;
-	display: grid;
-	grid-template-rows: 1fr auto;
-	padding: 29px 18px 13px;
-	border: 1px solid #d7dbe3;
-	border-radius: 17px;
-	background: #ffffff;
-	box-shadow:
-		0 1px 2px rgba(23, 26, 31, 0.06),
-		0 10px 24px rgba(23, 26, 31, 0.06);
-}
-
-.empty-workspace .composer-shell {
-	width: min(calc(100% - 72px), 728px);
-	min-height: 138px;
-	margin-bottom: 0;
-	padding-top: 24px;
-}
-
-.composer-grip {
-	position: absolute;
-	top: 5px;
-	left: 50%;
-	width: 44px;
-	height: 4px;
-	border-radius: 99px;
-	background: #dde1e7;
-	transform: translateX(-50%);
-}
-
-.composer-input {
-	width: 100%;
-	min-height: 70px;
-	resize: none;
-	padding: 0 2px;
-	border: 0;
-	outline: none;
-	background: transparent;
-	color: #20242a;
-	font: 14px/1.65 var(--font-ui);
-}
-
-.composer-input::placeholder {
-	color: #8f9aab;
-}
-
-.composer-input:disabled {
-	opacity: 0.68;
-}
-
-.composer-toolbar {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 14px;
-	min-height: 38px;
-}
-
-.composer-tools-left,
-.composer-tools-right {
-	display: inline-flex;
-	align-items: center;
-	gap: 12px;
-	min-width: 0;
-}
-
-.composer-model,
-.icon-btn,
-.composer-meter,
-.send-btn {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	border: 0;
-	background: transparent;
-	color: #161a20;
-}
-
-.composer-model {
-	gap: 8px;
-	padding: 6px 4px;
-	min-width: 0;
-	font-size: 12px;
-	white-space: nowrap;
-}
-
-.model-dot {
-	width: 3px;
-	height: 3px;
-	border-radius: 50%;
-	background: #1677ff;
-}
-
-.icon-btn {
-	width: 24px;
-	height: 24px;
-	padding: 0;
-	color: #111827;
-	font-size: 18px;
-	line-height: 1;
-}
-
-.icon-btn svg {
-	width: 18px;
-	height: 18px;
-	fill: none;
-	stroke: currentColor;
-	stroke-width: 1.8;
-	stroke-linecap: round;
-	stroke-linejoin: round;
-}
-
-.icon-btn:not(.icon-btn-strong) {
-	color: #555f6f;
-}
-
-.composer-meter {
-	gap: 4px;
-	width: 34px;
-	height: 34px;
-	border-radius: 50%;
-	color: #6c7788;
-	font-size: 8px;
-}
-
-.meter-ring {
-	width: 10px;
-	height: 10px;
-	border-radius: 50%;
-	border: 2px solid #e4e7ec;
-	border-top-color: #20c970;
-}
-
-.send-btn {
-	height: 44px;
-	gap: 10px;
-	padding: 0 14px 0 16px;
-	border-radius: 18px;
-	background: #8c8d91;
-	color: #ffffff;
-	font-size: 14px;
-	font-weight: 700;
-}
-
-.send-btn svg {
-	width: 17px;
-	height: 17px;
-	fill: none;
-	stroke: currentColor;
-	stroke-width: 1.8;
-	stroke-linecap: round;
-	stroke-linejoin: round;
-}
-
-.send-btn:disabled {
-	cursor: default;
-	opacity: 0.58;
-}
-
 @media (max-width: 960px) {
-	.composer-shell {
-		width: calc(100% - 28px);
-	}
-
 	.workspace.empty-workspace {
-		grid-template-rows: minmax(112px, 0.7fr) auto 0 minmax(156px, 1fr);
+		grid-template-rows: minmax(112px, 0.7fr) auto 0 minmax(140px, 1fr);
 	}
 
 	.workspace.empty-workspace.terminal-open {
@@ -598,11 +385,7 @@ defineExpose({
 	}
 
 	.empty-composer-copy h1 {
-		font-size: 32px;
-	}
-
-	.empty-workspace .composer-shell {
-		width: calc(100% - 28px);
+		font-size: 30px;
 	}
 }
 </style>
