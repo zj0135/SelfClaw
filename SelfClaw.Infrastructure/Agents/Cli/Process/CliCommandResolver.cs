@@ -112,21 +112,23 @@ public sealed partial class CliCommandResolver
     }
 
     /// <summary>
-    /// Probes a candidate path as-is and with each PATHEXT extension appended, returning the first
-    /// existing file. The as-is probe handles commands given with an explicit extension.
+    /// Probes a candidate path for a launchable file, mirroring how the Windows shell resolves a name.
+    /// A candidate that already carries a recognised executable extension is probed as-is. A bare name
+    /// (or one with an unrecognised extension) resolves through PATHEXT <em>first</em> — the shell never
+    /// launches an extensionless file, so we must not either: npm installs a POSIX <c>claude</c> shell
+    /// shim right next to the launchable <c>claude.cmd</c>, and probing as-is first would wrongly pick the
+    /// shim and hand <c>CreateProcess</c> a script it cannot run. The as-is probe is kept only as a last
+    /// resort for an extensionless path given explicitly.
     /// </summary>
     private string? ProbeWithExtensions(string candidate)
     {
-        if (_fileExists(candidate))
-            return candidate;
-
         if (!_isWindows)
-            return null;
+            return _fileExists(candidate) ? candidate : null;
 
-        // Only append PATHEXT when the candidate lacks a recognised executable extension.
+        // A recognised executable extension is launchable directly; use it verbatim.
         var existingExt = Path.GetExtension(candidate);
         if (existingExt.Length > 0 && PathExtContains(existingExt))
-            return null;
+            return _fileExists(candidate) ? candidate : null;
 
         foreach (var ext in _pathExt.Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -141,7 +143,9 @@ public sealed partial class CliCommandResolver
                 return withExt;
         }
 
-        return null;
+        // No PATHEXT match: fall back to an exact extensionless file only as a last resort, so a real
+        // launchable target (e.g. claude.cmd) is always preferred over a non-executable sibling.
+        return _fileExists(candidate) ? candidate : null;
     }
 
     private bool PathExtContains(string extension) =>

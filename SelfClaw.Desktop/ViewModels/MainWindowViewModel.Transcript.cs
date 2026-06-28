@@ -28,23 +28,6 @@ public sealed partial class MainWindowViewModel
         PublishRuntimeState(runtimeState, true);
     }
 
-    private async Task CompleteAssistantMessageAsync(ConversationRuntimeState runtimeState, MessageRecord message)
-    {
-        var existing = runtimeState.Messages.FirstOrDefault(item => item.Id == message.Id);
-        var finalMarkdown = AssistantMessageSegmenter.MergeFinalMarkdown(
-            message.MarkdownContent,
-            existing?.MarkdownContent);
-
-        var updated = message with
-        {
-            MarkdownContent = finalMarkdown,
-            UpdatedAtUtc = DateTimeOffset.UtcNow
-        };
-        ReplaceMessage(runtimeState, updated);
-        await _conversationRepository.UpsertMessageAsync(updated);
-        PublishRuntimeStateNow(runtimeState, true);
-    }
-
     private async Task FailActiveMessagesAsync(
         ConversationRuntimeState runtimeState,
         IEnumerable<Guid> messageIds,

@@ -61,7 +61,7 @@ internal static class SqliteMappings
         => new(
             ReadGuid(reader, 0),
             reader.GetString(1),
-            ReadGuid(reader, 2),
+            reader.IsDBNull(2) ? null : ReadGuid(reader, 2),
             reader.IsDBNull(3) ? null : ReadGuid(reader, 3),
             reader.IsDBNull(4) ? ConversationMode.Programming : (ConversationMode)reader.GetInt32(4),
             (ToolPermissionMode)reader.GetInt32(5),

@@ -3,7 +3,7 @@ namespace SelfClaw.Core.Models;
 public sealed record ConversationRecord(
     Guid Id,
     string Title,
-    Guid ProfileId,
+    Guid? ProfileId,
     Guid? WorkspaceRootId,
     ConversationMode Mode,
     ToolPermissionMode ToolPermissionMode,
@@ -17,7 +17,7 @@ public sealed record ConversationRecord(
     public ConversationRecord(
         Guid id,
         string title,
-        Guid profileId,
+        Guid? profileId,
         Guid? workspaceRootId,
         ToolPermissionMode toolPermissionMode,
         string agentId,

@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 18;
+    private const int CurrentSchemaVersion = 19;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS workspace_roots (
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT NOT NULL PRIMARY KEY,
     title TEXT NOT NULL,
-    profile_id TEXT NOT NULL,
+    profile_id TEXT NULL,
     workspace_root_id TEXT NULL,
     mode INTEGER NOT NULL DEFAULT 0,
     tool_permission_mode INTEGER NOT NULL DEFAULT 0,
@@ -224,6 +224,11 @@ CREATE TABLE IF NOT EXISTS conversations (
                 "channel_display_name",
                 "ALTER TABLE conversations ADD COLUMN channel_display_name TEXT NULL;",
                 cancellationToken);
+
+            // Schema v19: CLI agents use their own local configuration, so a conversation no longer
+            // requires a profile. Relax conversations.profile_id from NOT NULL to nullable. SQLite cannot
+            // alter a column's nullability in place, so older databases are migrated by rebuilding the table.
+            await EnsureConversationProfileIdNullableAsync(connection, cancellationToken);
 
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS messages (
@@ -383,6 +388,69 @@ CREATE TABLE IF NOT EXISTS cli_agent_sessions (
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Rebuilds the <c>conversations</c> table when its <c>profile_id</c> column is still <c>NOT NULL</c>
+    /// (databases created before schema v19), relaxing it to nullable. SQLite has no
+    /// <c>ALTER COLUMN</c>, so the standard recreate-and-copy dance is used inside the caller's transaction.
+    /// </summary>
+    private static async Task EnsureConversationProfileIdNullableAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var profileIdNotNull = false;
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA table_info(conversations);";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk.
+                if (string.Equals(reader.GetString(1), "profile_id", StringComparison.OrdinalIgnoreCase))
+                {
+                    profileIdNotNull = reader.GetInt32(3) != 0;
+                    break;
+                }
+            }
+        }
+
+        if (!profileIdNotNull)
+        {
+            return;
+        }
+
+        // Foreign keys must be off while the table is swapped; restored by the connection's PRAGMA on reopen.
+        await ExecuteAsync(connection, "PRAGMA foreign_keys = OFF;", cancellationToken);
+        await ExecuteAsync(connection, @"
+CREATE TABLE conversations_new (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    profile_id TEXT NULL,
+    workspace_root_id TEXT NULL,
+    mode INTEGER NOT NULL DEFAULT 0,
+    tool_permission_mode INTEGER NOT NULL DEFAULT 0,
+    agent_id TEXT NOT NULL DEFAULT 'build',
+    channel_kind TEXT NULL,
+    channel_conversation_id TEXT NULL,
+    channel_display_name TEXT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE RESTRICT,
+    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
+);", cancellationToken);
+        await ExecuteAsync(connection, @"
+INSERT INTO conversations_new(
+    id, title, profile_id, workspace_root_id, mode, tool_permission_mode, agent_id,
+    channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc)
+SELECT
+    id, title, profile_id, workspace_root_id, mode, tool_permission_mode, agent_id,
+    channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc
+FROM conversations;", cancellationToken);
+        await ExecuteAsync(connection, "DROP TABLE conversations;", cancellationToken);
+        await ExecuteAsync(connection, "ALTER TABLE conversations_new RENAME TO conversations;", cancellationToken);
+        await ExecuteAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken);
+    }
+
 
     private static async Task EnsureColumnExistsAsync(
         SqliteConnection connection,

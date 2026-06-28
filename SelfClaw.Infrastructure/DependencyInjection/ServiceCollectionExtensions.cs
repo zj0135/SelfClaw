@@ -32,7 +32,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
         services.AddSingleton<CliCommandResolver>();
         services.AddSingleton<ICliAgentProcessHost, CliAgentProcessHost>();
-        services.AddSingleton<CliAgentRegistry>();
+        // Use the parameterless constructor so the built-in definitions (Claude) are seeded. Registering
+        // the type directly would make DI pick the IEnumerable<CliAgentDefinition> constructor and resolve
+        // it to an empty set, leaving the registry without any agents.
+        services.AddSingleton(_ => new CliAgentRegistry());
         services.AddSingleton<ICliAgentSessionStore, SqliteCliAgentSessionStore>();
         services.AddSingleton<CliSessionResolver>();
         services.AddSingleton<CliAgentChatRuntime>();

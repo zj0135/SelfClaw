@@ -45,7 +45,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly Dictionary<Guid, ToolRunAnchor> _toolRunAnchors = [];
     private readonly Dictionary<Guid, ConversationRuntimeState> _conversationRuntimeStates = [];
     private IReadOnlyList<PromptImageAttachment> _pendingPromptImageAttachments = [];
-    private bool _pendingReasoningEnabled;
     private bool _initialized;
     private int _selectionVersion;
     private ConversationRecord? _selectedConversation;
@@ -166,13 +165,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public async Task SubmitPromptAsync(
         string prompt,
         IReadOnlyList<PromptImageAttachment>? imageAttachments = null,
-        bool enableReasoning = false,
         string? profileModel = null)
     {
         ApplySelectedProfileModel(profileModel, publishShell: false);
         _composerText = prompt;
         _pendingPromptImageAttachments = imageAttachments ?? [];
-        _pendingReasoningEnabled = enableReasoning;
         await SendAsync();
     }
 
@@ -474,14 +471,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task SendAsync()
     {
+        // CLI agents use their own local configuration, so a profile is optional. When one is selected it
+        // is still persisted on the conversation, but its absence no longer blocks sending.
         var selectedProfile = _selectedProfile;
-        if (selectedProfile is null)
-        {
-            return;
-        }
 
         var prompt = _composerText.Trim();
-        var useReasoning = _pendingReasoningEnabled;
         var promptImageAttachments = _pendingPromptImageAttachments.ToArray();
         var selectedProfileModel = ResolveSelectedProfileModel();
         var selectedWorkspaceRoot = _selectedWorkspaceRoot;
@@ -514,7 +508,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
             conversation = conversation with
             {
-                ProfileId = selectedProfile.Id,
+                ProfileId = selectedProfile?.Id,
                 WorkspaceRootId = selectedWorkspaceRoot?.Id,
                 Mode = ConversationMode.Programming,
                 ToolPermissionMode = selectedToolPermissionMode,
@@ -562,16 +556,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
             PublishRuntimeState(runtimeState, true);
 
-            requestProfile = selectedProfileModel is null
-                ? selectedProfile
-                : selectedProfile with { Model = selectedProfileModel };
-            apiKey = await _secretProtector.RetrieveSecretAsync(requestProfile.SecretRef, cancellationToken);
-            if (string.IsNullOrWhiteSpace(apiKey))
+            // CLI agents use their own local configuration, so a profile is optional. When one is
+            // selected we still resolve its key/model so a future Direct runtime (or env injection) can
+            // use it; with none selected the turn runs purely on the CLI's own config.
+            if (selectedProfile is not null)
             {
-                throw new InvalidOperationException("The selected profile does not have a readable API key.");
+                requestProfile = selectedProfileModel is null
+                    ? selectedProfile
+                    : selectedProfile with { Model = selectedProfileModel };
+                apiKey = await _secretProtector.RetrieveSecretAsync(requestProfile.SecretRef, cancellationToken);
             }
 
             var requestMessages = runtimeState.Messages.ToArray();
+            var turnState = new AgentTurnState(runtimeAgent);
 
             await foreach (var update in _agentChatRuntime.StreamTurnAsync(
                                new ChatTurnRequest(
@@ -583,14 +580,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                                    runtimeAgent,
                                    selectedToolPermissionMode,
                                    _toolApprovalHandler,
-                                   requestMessages,
-                                   useReasoning),
+                                   requestMessages),
                                cancellationToken))
             {
-                // TODO(阶段6): 将 AgentStreamEvent 转换为 MessageRecord / ToolExecutionRecord，
-                // 复用下方暂时保留的转换方法（ApplyAssistantDelta / CaptureToolRunAnchor / CompleteAssistantMessageAsync 等）。
-                // 阶段0 的占位运行时不发射事件，这里暂为最小桩，仅保证编译与启动。
-                _ = update;
+                await HandleAgentStreamEventAsync(runtimeState, turnState, update, cancellationToken);
             }
 
             PublishConversationCompletedNotification(conversation, runtimeState.Messages);
@@ -787,16 +780,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private ConversationRecord CreateConversationRecord()
     {
-        if (_selectedProfile is null)
-        {
-            throw new InvalidOperationException("Create a profile first.");
-        }
-
+        // CLI agents use their own local configuration, so a profile is optional when starting a chat.
         var now = DateTimeOffset.UtcNow;
         return new ConversationRecord(
             Guid.NewGuid(),
             "New chat",
-            _selectedProfile.Id,
+            _selectedProfile?.Id,
             _selectedWorkspaceRoot?.Id,
             ConversationMode.Programming,
             _selectedToolPermissionMode,

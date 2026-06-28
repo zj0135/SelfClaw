@@ -114,7 +114,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
         var maxSchemaVersion = await versionCommand.ExecuteScalarAsync();
-        maxSchemaVersion.Should().Be(18L);
+        maxSchemaVersion.Should().Be(19L);
     }
 
     [Fact]

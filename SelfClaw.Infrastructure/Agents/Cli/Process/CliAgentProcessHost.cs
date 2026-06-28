@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Process;
 
@@ -9,6 +10,9 @@ namespace SelfClaw.Infrastructure.Agents.Cli.Process;
 /// </summary>
 public sealed class CliAgentProcessHost : ICliAgentProcessHost
 {
+    // UTF-8 without a BOM: the BOM would corrupt the first stdin JSONL line the child reads.
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     public ICliAgentProcessSession Start(
         CliProcessStartInfo startInfo,
         CancellationToken cancellationToken = default)
@@ -29,6 +33,12 @@ public sealed class CliAgentProcessHost : ICliAgentProcessHost
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
+            // The CLI emits UTF-8 JSONL. Without these the child's output is decoded with the OS
+            // default code page (e.g. GBK on Chinese Windows), mangling any non-ASCII text. Use a
+            // BOM-less UTF-8 so the prompt written to stdin is not prefixed with a BOM either.
+            StandardOutputEncoding = Utf8NoBom,
+            StandardErrorEncoding = Utf8NoBom,
+            StandardInputEncoding = Utf8NoBom,
         };
 
         if (invocation.IsShellWrapped)

@@ -41,6 +41,10 @@ public static class ClaudeAgentDefinition
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             "--verbose",
+            // Emit Anthropic streaming events (content_block_delta / thinking_delta) so the UI renders
+            // token-by-token instead of a single block on message completion. ClaudeStreamJsonParser
+            // consumes these via the `stream_event` wrapper and de-dupes against the full message.
+            "--include-partial-messages",
         };
 
         // Resume an existing session when we have one, otherwise pin the freshly minted id so the next

@@ -68,7 +68,7 @@ ON CONFLICT(id) DO UPDATE SET
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", conversation.Id.ToString("D"));
         command.Parameters.AddWithValue("$title", conversation.Title);
-        command.Parameters.AddWithValue("$profileId", conversation.ProfileId.ToString("D"));
+        command.Parameters.AddWithValue("$profileId", conversation.ProfileId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$workspaceRootId", conversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$mode", (int)conversation.Mode);
         command.Parameters.AddWithValue("$toolPermissionMode", (int)conversation.ToolPermissionMode);

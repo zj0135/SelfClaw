@@ -114,12 +114,47 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
         {
             Invocation = invocation,
             WorkingDirectory = runContext.WorkingDirectory,
-            Environment = BuildEnvironment(kind, request),
+            // The CLI uses its own local configuration (API key / base URL / model), so SelfClaw injects
+            // nothing into the child environment. A selected profile, if any, no longer travels to the agent.
         };
+
+        _logger.LogInformation(
+            "Starting {Kind} CLI agent. FileName={FileName}, ShellWrapped={ShellWrapped}, Args={Args}, VerbatimArgs={VerbatimArgs}, WorkingDirectory={WorkingDirectory}",
+            kind,
+            invocation.FileName,
+            invocation.IsShellWrapped,
+            string.Join(' ', invocation.ArgumentList),
+            invocation.VerbatimArguments,
+            runContext.WorkingDirectory);
 
         var parser = CreateParser(definition.StreamFormat);
 
-        await using var session = _processHost.Start(startInfo, cancellationToken);
+        // Launching the child can throw synchronously (e.g. a Win32Exception when the resolved target is
+        // not a real executable). Surface it as a clean completion rather than letting it escape the
+        // iterator, where it would be swallowed before any assistant message exists.
+        ICliAgentProcessSession? session = null;
+        string? startError = null;
+        try
+        {
+            session = _processHost.Start(startInfo, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to start the {Kind} CLI agent process.", kind);
+            startError = ex.Message;
+        }
+
+        if (session is null)
+        {
+            yield return new RunCompletedEvent(RunCompletionStatus.Failed, FinalText: null, ErrorMessage: startError);
+            yield break;
+        }
+
+        await using var _ = session.ConfigureAwait(false);
 
         // Deliver the prompt, then close stdin to end the turn. A write failure (e.g. the child died on
         // startup) is captured so we can report it through the normal completion path.
@@ -146,7 +181,11 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
         {
             await foreach (var line in session.ReadOutputLinesAsync(cancellationToken).ConfigureAwait(false))
             {
-                foreach (var streamEvent in parser.Feed(line))
+                _logger.LogDebug("{Kind} stdout: {Line}", kind, line);
+                // ReadOutputLinesAsync yields newline-stripped lines, but the parser splits its input on
+                // '\n' internally (it is built to accept raw stdout chunks). Re-append the terminator so
+                // each line is parsed immediately instead of being buffered until Flush() concatenates them.
+                foreach (var streamEvent in parser.Feed(line + '\n'))
                 {
                     if (streamEvent is RunStartedEvent started)
                     {
@@ -172,6 +211,14 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
         }
 
         var result = await session.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation(
+            "{Kind} CLI agent exited. Status={Status}, ExitCode={ExitCode}, TimedOut={TimedOut}, RunCompletedEmitted={Emitted}, StdErr={StdErr}",
+            kind,
+            result.Status,
+            result.ExitCode,
+            result.TimedOut,
+            runCompletedEmitted,
+            result.StandardError);
 
         // The parser emits RunCompletedEvent off the agent's own `result` line. When the stream ends
         // without one (crash, non-zero exit, write failure), synthesize the terminal event from the
@@ -217,32 +264,6 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
     {
         var instructions = agent.Instructions?.Trim();
         return string.IsNullOrEmpty(instructions) ? null : instructions;
-    }
-
-    /// <summary>
-    /// Builds the environment overrides passed to the child so provider key / base-url / model travel
-    /// out-of-band rather than on the command line (plan.md §5, §7). Claude Code reads the
-    /// <c>ANTHROPIC_*</c> variables; Codex / OpenCode mappings arrive with 阶段 7.
-    /// </summary>
-    private static IReadOnlyDictionary<string, string?> BuildEnvironment(
-        CliAgentKind kind,
-        ChatTurnRequest request)
-    {
-        var environment = new Dictionary<string, string?>(StringComparer.Ordinal);
-
-        switch (kind)
-        {
-            case CliAgentKind.Claude:
-                if (!string.IsNullOrWhiteSpace(request.ApiKey))
-                    environment["ANTHROPIC_API_KEY"] = request.ApiKey;
-                if (!string.IsNullOrWhiteSpace(request.Profile.Endpoint))
-                    environment["ANTHROPIC_BASE_URL"] = request.Profile.Endpoint;
-                if (!string.IsNullOrWhiteSpace(request.Profile.Model))
-                    environment["ANTHROPIC_MODEL"] = request.Profile.Model;
-                break;
-        }
-
-        return environment;
     }
 
     private static IAgentStreamParser CreateParser(CliStreamFormat format) => format switch
