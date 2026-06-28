@@ -47,46 +47,12 @@ public sealed class DesktopNotificationActivationService
         _systemTrayService.ActivateMainWindow();
         await _mainWindowViewModel.InitializeAsync();
 
-        switch (action)
+        // 后端重构后，VM 仅保留发送→渲染主路径：打开指定会话 / 工具审批的入口方法已移除。
+        // 通知激活因此只负责把主窗口带到前台（上面的 ActivateMainWindow / InitializeAsync），
+        // OpenApp 之外的动作暂不处理，待后续按新架构重新接线。
+        if (!string.Equals(action, DesktopNotificationArguments.OpenAppAction, StringComparison.Ordinal))
         {
-            case DesktopNotificationArguments.OpenAppAction:
-                return;
-            case DesktopNotificationArguments.OpenConversationAction:
-                if (TryParseGuid(arguments, DesktopNotificationArguments.ConversationIdKey, out var conversationId))
-                {
-                    await _mainWindowViewModel.OpenConversationFromNotificationAsync(conversationId);
-                }
-                return;
-            case DesktopNotificationArguments.ApproveToolAction:
-                if (TryParseGuid(arguments, DesktopNotificationArguments.ToolExecutionIdKey, out var approveToolExecutionId))
-                {
-                    await _mainWindowViewModel.ApproveToolExecutionAsync(approveToolExecutionId);
-                }
-                return;
-            case DesktopNotificationArguments.RejectToolAction:
-                if (TryParseGuid(arguments, DesktopNotificationArguments.ToolExecutionIdKey, out var rejectToolExecutionId))
-                {
-                    await _mainWindowViewModel.RejectToolExecutionAsync(rejectToolExecutionId);
-                }
-                return;
-            default:
-                _logger.LogDebug("Ignoring unsupported notification action '{Action}'.", action);
-                return;
+            _logger.LogDebug("Ignoring unsupported notification action '{Action}'.", action);
         }
     }
-
-    private static bool TryParseGuid(
-        IReadOnlyDictionary<string, string> arguments,
-        string key,
-        out Guid value)
-    {
-        if (arguments.TryGetValue(key, out var rawValue) && Guid.TryParse(rawValue, out value))
-        {
-            return true;
-        }
-
-        value = Guid.Empty;
-        return false;
-    }
-
 }

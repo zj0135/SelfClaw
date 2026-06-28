@@ -5,5 +5,4 @@ public sealed record TranscriptRenderState(
     bool AutoScroll,
     IReadOnlyList<TranscriptConversationItem> Conversations,
     string? SelectedConversationId,
-    string Theme,
     bool IsBusy);

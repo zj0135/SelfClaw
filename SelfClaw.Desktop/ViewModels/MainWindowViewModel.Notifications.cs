@@ -10,22 +10,9 @@ public sealed partial class MainWindowViewModel
 {
     private const string NotificationToolAnchorPrefix = "<!--selfclaw:tool:";
 
-    private void OnToolApprovalRequested(ToolApprovalRequest request)
-    {
-        if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
-        {
-            _ = dispatcher.BeginInvoke(new Action(() => OnToolApprovalRequested(request)), DispatcherPriority.Background);
-            return;
-        }
-
-        var title = ResolveNotificationTitle(request.ConversationId, request.DisplayName);
-        _desktopNotificationService.ShowToolApproval(
-            request.ToolExecutionId,
-            request.ConversationId,
-            title,
-            request.Description);
-    }
-
+    /// <summary>
+    /// 回合结束后弹出"对话完成"系统通知。由 <c>SendAsync</c> 在流式结束时调用，是发送→渲染主路径的一部分。
+    /// </summary>
     private void PublishConversationCompletedNotification(
         ConversationRecord conversation,
         IReadOnlyList<MessageRecord>? messages = null)
@@ -180,41 +167,5 @@ public sealed partial class MainWindowViewModel
         }
 
         return builder.ToString();
-    }
-
-    public async Task OpenConversationFromNotificationAsync(Guid conversationId)
-    {
-        var conversation = await ResolveConversationForNotificationAsync(conversationId);
-        if (conversation is null || conversation.Mode != ConversationMode.Programming)
-        {
-            PublishShell(false);
-            return;
-        }
-
-        if (SelectedConversation?.Id == conversation.Id)
-        {
-            return;
-        }
-
-        SelectWorkspaceRoot(
-            conversation.WorkspaceRootId is Guid workspaceRootId
-                ? _workspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
-                : null,
-            publishShell: false);
-
-        ApplyConversationFilter(conversation.Id);
-        await LoadConversationAsync(conversation);
-    }
-
-    private async Task<ConversationRecord?> ResolveConversationForNotificationAsync(Guid conversationId)
-    {
-        var conversation = _allConversations.FirstOrDefault(item => item.Id == conversationId);
-        if (conversation is not null)
-        {
-            return conversation;
-        }
-
-        await ReloadConversationsAsync();
-        return _allConversations.FirstOrDefault(item => item.Id == conversationId);
     }
 }

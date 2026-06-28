@@ -37,7 +37,6 @@ public partial class MainWindow : Window
         AutoScroll: false,
         Conversations: [],
         SelectedConversationId: null,
-        Theme: "light",
         IsBusy: false);
     private bool _webViewReady;
     private bool _isTerminalDrawerOpen;
@@ -92,10 +91,8 @@ public partial class MainWindow : Window
 
     private async void OnLoadedAsync(object sender, RoutedEventArgs e)
     {
-        ApplyThemeMode();
         await EnsureTranscriptHostAsync();
         await _viewModel.InitializeAsync();
-        ApplyThemeMode();
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -120,6 +117,7 @@ public partial class MainWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         WindowBackdropHelper.TryApplySystemBackdrop(this);
+        WindowBackdropHelper.TryApplyCaptionTheme(this, false);
 
         if (PresentationSource.FromVisual(this) is HwndSource source)
         {
@@ -197,7 +195,6 @@ public partial class MainWindow : Window
             type = "replaceState",
             autoScroll = state.AutoScroll,
             items = state.Items,
-            theme = state.Theme,
             conversations = state.Conversations,
             selectedConversationId = state.SelectedConversationId,
             isBusy = state.IsBusy
@@ -222,8 +219,8 @@ public partial class MainWindow : Window
                 return;
             }
 
-            _viewModel.StopGeneration();
-            e.Handled = true;
+            // 后端重构后 VM 不再暴露 StopGeneration；Esc 仅用于退出终端输入，
+            // 中止生成的入口待新架构重新接线。
         }
     }
 
@@ -403,20 +400,10 @@ public partial class MainWindow : Window
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(MainWindowViewModel.ActiveThemeMode))
-        {
-            ApplyThemeMode();
-        }
-        else if (e.PropertyName == nameof(MainWindowViewModel.SelectedWorkspaceRootPath) && _isTerminalDrawerOpen)
+        if (e.PropertyName == nameof(MainWindowViewModel.SelectedWorkspaceRootPath) && _isTerminalDrawerOpen)
         {
             ResetTerminalWorkingDirectoryIfNeeded();
         }
-    }
-
-    private void ApplyThemeMode()
-    {
-        ThemeMode = _viewModel.ActiveThemeMode;
-        WindowBackdropHelper.TryApplyCaptionTheme(this, false);
     }
 
     private async void OnTranscriptWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)

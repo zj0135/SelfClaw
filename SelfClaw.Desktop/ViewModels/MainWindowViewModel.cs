@@ -1,12 +1,10 @@
 using System.IO;
 using System.Net;
 using System.Text;
-using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.Extensions.Logging;
-using Microsoft.Win32;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
@@ -53,8 +51,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private WorkspaceRoot? _selectedWorkspaceRoot;
     private string _selectedAgentId = DesktopAgentStore.BuildAgentId;
     private string _composerText = string.Empty;
-    private ThemeMode _activeThemeMode = ThemeMode.System;
-    private string _effectiveTranscriptTheme = "light";
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
     private bool _pendingStreamingPublish;
     private bool _pendingStreamingAutoScroll;
@@ -84,7 +80,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _desktopAgentStore = desktopAgentStore;
         _storagePaths = storagePaths;
         _logger = logger;
-        _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
+        // 工具审批 UI 已随前端重构移除；运行时仍接收 _toolApprovalHandler（见 SendAsync 的 ChatTurnRequest），
+        // 但 VM 不再订阅 ApprovalRequested，也不再弹审批通知。
         if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher)
         {
             _streamingPublishTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
@@ -93,27 +90,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             };
             _streamingPublishTimer.Tick += OnStreamingPublishTimerTick;
         }
-
-        ApplySystemTheme(refreshShell: false);
-        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
-
     }
 
+    /// <summary>
+    /// 渲染输出：每次 transcript（消息 / 工具运行 / 会话列表）变化时携带完整快照触发，
+    /// 由宿主窗口推送给 Vue 前端。属于发送→渲染主路径的出口。
+    /// </summary>
     public event EventHandler<TranscriptRenderState>? TranscriptChanged;
 
-    public ThemeMode ActiveThemeMode
-    {
-        get => _activeThemeMode;
-        private set => SetProperty(ref _activeThemeMode, value);
-    }
-
+    /// <summary>
+    /// 当前选中工作区根目录路径。供宿主窗口解析终端工作目录使用。
+    /// </summary>
     public string? SelectedWorkspaceRootPath => _selectedWorkspaceRoot?.RootPath;
-
-    public string EffectiveTranscriptTheme
-    {
-        get => _effectiveTranscriptTheme;
-        private set => SetProperty(ref _effectiveTranscriptTheme, value);
-    }
 
     public ConversationRecord? SelectedConversation
     {
@@ -141,6 +129,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// 启动时一次性加载：代理、Profile、工作区、会话列表，并发布初始 transcript。
+    /// 由宿主窗口（OnLoaded）与通知激活服务调用，是渲染路径的引导入口。
+    /// </summary>
     public async Task InitializeAsync()
     {
         if (_initialized)
@@ -162,6 +154,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         PublishShell(false);
     }
 
+    /// <summary>
+    /// 前端唯一保留的入口：WebView 的 "send-prompt" 消息最终落到这里，触发一次发送回合。
+    /// 其余前端交互（窗口、终端、面板、设置）都在宿主窗口内处理，不经过 VM。
+    /// </summary>
     public async Task SubmitPromptAsync(
         string prompt,
         IReadOnlyList<PromptImageAttachment>? imageAttachments = null,
@@ -171,25 +167,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _composerText = prompt;
         _pendingPromptImageAttachments = imageAttachments ?? [];
         await SendAsync();
-    }
-
-    public void StopGeneration()
-    {
-        Stop();
-    }
-
-    public Task ApproveToolExecutionAsync(Guid toolExecutionId)
-    {
-        _toolApprovalHandler.TryResolve(toolExecutionId, approved: true);
-
-        return Task.CompletedTask;
-    }
-
-    public Task RejectToolExecutionAsync(Guid toolExecutionId)
-    {
-        _toolApprovalHandler.TryResolve(toolExecutionId, approved: false);
-
-        return Task.CompletedTask;
     }
 
     private void ApplySelectedProfileModel(string? profileModel, bool publishShell)
@@ -266,37 +243,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             PublishShell(false);
         }
-    }
-
-    private void ApplySystemTheme(bool refreshShell)
-    {
-        ActiveThemeMode = ThemeMode.System;
-        EffectiveTranscriptTheme = ResolveTranscriptTheme();
-        ApplyThemeModeToApplication(ThemeMode.System);
-
-        if (_initialized || refreshShell)
-        {
-            PublishShell(false);
-        }
-    }
-
-    private static string ResolveTranscriptTheme()
-        => SystemThemeReader.IsDarkModeEnabled() ? "dark" : "light";
-
-    private static void ApplyThemeModeToApplication(ThemeMode mode)
-    {
-        if (System.Windows.Application.Current is { } app)
-        {
-            app.ThemeMode = mode;
-        }
-    }
-
-    private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
-    {
-        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-        {
-            ApplySystemTheme(refreshShell: true);
-        });
     }
 
     private void RequestStreamingShellPublish(bool autoScroll)
@@ -622,9 +568,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
-        _toolApprovalHandler.ApprovalRequested -= OnToolApprovalRequested;
-
         if (_streamingPublishTimer is not null)
         {
             _streamingPublishTimer.Stop();
@@ -642,15 +585,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _conversationRuntimeStates.Clear();
-    }
-
-    private void Stop()
-    {
-        var runtimeState = GetSelectedRuntimeState();
-        if (runtimeState?.IsRunning == true)
-        {
-            runtimeState.CancellationTokenSource.Cancel();
-        }
     }
 
     private async Task<IReadOnlyList<MessageAttachmentRecord>> PersistPromptImageAttachmentsAsync(
@@ -919,7 +853,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             autoScroll,
             conversations,
             SelectedConversation?.Id.ToString("D"),
-            EffectiveTranscriptTheme,
             isBusy));
     }
 
@@ -933,8 +866,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         builder.Append(autoScroll ? '1' : '0')
             .Append('|')
             .Append(SelectedConversation?.Id.ToString("D"))
-            .Append('|')
-            .Append(EffectiveTranscriptTheme)
             .Append('|')
             .Append(IsSelectedConversationRunning() ? '1' : '0')
             .Append('|')
