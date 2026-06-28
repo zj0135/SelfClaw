@@ -29,6 +29,11 @@ const navGroups = [
 				label: '模型管理',
 				icon: 'layers',
 			},
+			{
+				id: 'coding-assistant',
+				label: '编程助手',
+				icon: 'code',
+			},
 		],
 	},
 	{
@@ -43,6 +48,11 @@ const navGroups = [
 				id: 'mcp',
 				label: 'MCP 服务器',
 				icon: 'network',
+			},
+			{
+				id: 'pet',
+				label: '宠物',
+				icon: 'paw',
 			},
 		],
 	},
@@ -66,10 +76,27 @@ const componentMap = markRaw({
 	sys: defineAsyncComponent(() => import('../components/settings/SystemSettings.vue')),
 	providers: defineAsyncComponent(() => import('../components/settings/AIProviders.vue')),
 	models: defineAsyncComponent(() => import('../components/settings/ModelManagement.vue')),
+	'coding-assistant': defineAsyncComponent(() => import('../components/settings/ProgrammingAssistant.vue')),
 	plugins: defineAsyncComponent(() => import('../components/settings/Plugins.vue')),
 	mcp: defineAsyncComponent(() => import('../components/settings/MCPServers.vue')),
+	pet: defineAsyncComponent(() => import('../components/settings/Pet.vue')),
 	about: defineAsyncComponent(() => import('../components/settings/About.vue')),
 });
+
+const iconMap = {
+	settings: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`,
+	server: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>`,
+	layers: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
+	wrench: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`,
+	network: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H13a2.5 2.5 0 0 1 2.5 2.5v1"/><path d="M8.5 18H13a2.5 2.5 0 0 0 2.5-2.5v-1"/></svg>`,
+	info: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`,
+	code: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
+	paw: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="4" cy="8" r="2"/><path d="M12 22c-4 0-7-2-7-5 0-2 1.5-3.5 3-4l4 2 4-2c1.5.5 3 2 3 4 0 3-3 5-7 5z"/></svg>`,
+};
+
+function getIcon(id) {
+	return iconMap[id] || '';
+}
 
 function selectItem(id) {
 	activeTarget.value = id;
@@ -91,67 +118,11 @@ function selectItem(id) {
 					<div class="sb-label">{{ group.label }}</div>
 					<button v-for="item in group.items" :key="item.id" class="nav-item"
 						:class="{ active: activeTarget === item.id }" @click="selectItem(item.id)">
-						<!-- Settings (gear) -->
-						<svg v-if="item.icon === 'settings'" class="ni-ico" viewBox="0 0 24 24" fill="none"
-							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<path
-								d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-							<circle cx="12" cy="12" r="3" />
-						</svg>
-
-						<!-- Server (stacked rects) -->
-						<svg v-else-if="item.icon === 'server'" class="ni-ico" viewBox="0 0 24 24" fill="none"
-							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<rect x="2" y="2" width="20" height="8" rx="2" />
-							<rect x="2" y="14" width="20" height="8" rx="2" />
-							<line x1="6" y1="6" x2="6.01" y2="6" />
-							<line x1="6" y1="18" x2="6.01" y2="18" />
-						</svg>
-
-						<!-- Layers (3D boxes) -->
-						<svg v-else-if="item.icon === 'layers'" class="ni-ico" viewBox="0 0 24 24" fill="none"
-							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<path
-								d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-							<polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-							<line x1="12" y1="22.08" x2="12" y2="12" />
-						</svg>
-
-						<!-- Wrench (plugins) -->
-						<svg v-else-if="item.icon === 'wrench'" class="ni-ico" viewBox="0 0 24 24" fill="none"
-							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<path
-								d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-						</svg>
-
-						<!-- Network (MCP) -->
-						<svg v-else-if="item.icon === 'network'" class="ni-ico" viewBox="0 0 24 24" fill="none"
-							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<circle cx="6" cy="6" r="2.5" />
-							<circle cx="6" cy="18" r="2.5" />
-							<circle cx="18" cy="12" r="2.5" />
-							<path d="M8.5 6H13a2.5 2.5 0 0 1 2.5 2.5v1" />
-							<path d="M8.5 18H13a2.5 2.5 0 0 0 2.5-2.5v-1" />
-						</svg>
-
-						<!-- Info (about) -->
-						<svg v-else-if="item.icon === 'info'" class="ni-ico" viewBox="0 0 24 24" fill="none"
-							stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<circle cx="12" cy="12" r="10" />
-							<path d="M12 16v-4" />
-							<path d="M12 8h.01" />
-						</svg>
-
+						<span class="ni-ico-wrap" aria-hidden="true" v-html="getIcon(item.icon)"></span>
 						{{ item.label }}
-
 					</button>
 				</div>
 			</nav>
-
-			<div class="sb-foot">
-				<span class="liv"></span>
-				Powered by OpenCowork
-			</div>
 		</aside>
 
 		<!-- Right: content panel -->
@@ -176,7 +147,6 @@ function selectItem(id) {
 	width: 264px;
 	min-width: 264px;
 	height: 100%;
-	background: var(--panel-soft, #f7f8fa);
 	border-right: 1px solid var(--border);
 	overflow: hidden;
 	font-family: var(--font-ui);
@@ -288,27 +258,19 @@ function selectItem(id) {
 	pointer-events: none;
 }
 
+.ni-ico-wrap {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 17px;
+	height: 17px;
+	flex: 0 0 auto;
+}
+
 .nav-item:hover .ni-ico {
 	color: var(--muted-soft, #8a929e);
 }
 
-
-.sb-foot {
-	padding: 11px 20px;
-	border-top: 1px solid var(--border);
-	font-size: 11px;
-	color: var(--muted-soft, #8a929e);
-	display: flex;
-	align-items: center;
-	gap: 7px;
-}
-
-.sb-foot .liv {
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: var(--success, #2f855a);
-}
 
 /* Focus visible for keyboard navigation */
 .nav-item:focus-visible {

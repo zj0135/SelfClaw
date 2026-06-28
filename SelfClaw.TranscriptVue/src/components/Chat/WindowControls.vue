@@ -72,7 +72,7 @@ function send(action) {
 
 <style scoped>
 .window-controls {
-	position: fixed;
+	position: absolute;
 	top: 6px;
 	right: 8px;
 	z-index: 120;

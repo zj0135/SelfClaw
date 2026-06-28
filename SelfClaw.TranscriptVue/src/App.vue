@@ -145,10 +145,14 @@ onUnmounted(() => {
 <template>
 	<div class="app">
 		<AppSidebar :items="navItems" :active-id="currentViewId" @select="onSidebarSelect" @action="onSidebarAction" />
-		<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>
-		<WindowControls :is-maximized="windowChrome.isMaximized" @action="onWindowControlAction" />
 		<main class="main">
-			<component :is="activeViewComponent" ref="activeViewRef" @preview-image="openImagePreview" />
+			<div class="main-header">
+				<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>
+				<WindowControls :is-maximized="windowChrome.isMaximized" @action="onWindowControlAction" />
+			</div>
+			<div class="main-content">
+				<component :is="activeViewComponent" ref="activeViewRef" @preview-image="openImagePreview" />
+			</div>
 		</main>
 		<div v-if="imagePreview" class="image-preview-backdrop" @click.self="closeImagePreview">
 			<div class="image-preview-dialog">
@@ -233,12 +237,10 @@ button {
 }
 
 .window-drag-region {
-	position: fixed;
-	top: 0;
-	left: 280px;
+	position: absolute;
+	inset: 0;
 	right: 244px;
 	z-index: 110;
-	height: 46px;
 	-webkit-user-select: none;
 	user-select: none;
 }
@@ -247,6 +249,21 @@ button {
 	position: relative;
 	min-width: 0;
 	height: 100%;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.main-header {
+	position: relative;
+	flex: 0 0 46px;
+	height: 46px;
+}
+
+.main-content {
+	position: relative;
+	min-height: 0;
+	flex: 1 1 auto;
 	overflow: hidden;
 }
 
