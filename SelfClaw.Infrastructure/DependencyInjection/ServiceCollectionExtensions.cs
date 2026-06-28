@@ -1,5 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using SelfClaw.Core.Interfaces;
+using SelfClaw.Infrastructure.Agents.Cli.Definitions;
+using SelfClaw.Infrastructure.Agents.Cli.Process;
+using SelfClaw.Infrastructure.Agents.Cli.Session;
 using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.Data.Sqlite;
@@ -26,6 +29,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAiProviderRepository, SqliteAiProviderRepository>();
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
+        services.AddSingleton<CliCommandResolver>();
+        services.AddSingleton<ICliAgentProcessHost, CliAgentProcessHost>();
+        services.AddSingleton<CliAgentRegistry>();
+        services.AddSingleton<ICliAgentSessionStore, SqliteCliAgentSessionStore>();
+        services.AddSingleton<CliSessionResolver>();
         services.AddSingleton<IAgentChatRuntime, PlaceholderAgentChatRuntime>();
         services.AddSingleton<MarkdownHtmlRenderer>();
         return services;

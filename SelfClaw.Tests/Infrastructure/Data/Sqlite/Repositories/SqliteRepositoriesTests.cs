@@ -106,6 +106,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         tables.Should().Contain("ai_provider_connections");
         tables.Should().Contain("ai_model_profiles");
         tables.Should().Contain("ai_model_profile_selections");
+        tables.Should().Contain("cli_agent_sessions");
         indexes.Should().Contain("ix_ai_provider_connections_kind");
         indexes.Should().Contain("ix_ai_model_profiles_connection");
         indexes.Should().Contain("ix_ai_model_profiles_updated");
@@ -113,7 +114,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
         var maxSchemaVersion = await versionCommand.ExecuteScalarAsync();
-        maxSchemaVersion.Should().Be(17L);
+        maxSchemaVersion.Should().Be(18L);
     }
 
     [Fact]
