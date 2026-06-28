@@ -4,14 +4,19 @@ namespace SelfClaw.Infrastructure.Agents.Cli.Definitions;
 
 /// <summary>
 /// Maps a <see cref="CliAgentKind"/> to its <see cref="CliAgentDefinition"/> (plan.md 阶段 4, T4.3).
-/// The first version registers Claude Code only; Codex / OpenCode are added in 阶段 7.
+/// Registers Claude Code, Codex and OpenCode (Codex / OpenCode added in 阶段 7, T7.4).
 /// </summary>
 public sealed class CliAgentRegistry
 {
     private readonly IReadOnlyDictionary<CliAgentKind, CliAgentDefinition> _definitions;
 
     public CliAgentRegistry()
-        : this(new[] { ClaudeAgentDefinition.Create() })
+        : this(new[]
+        {
+            ClaudeAgentDefinition.Create(),
+            CodexAgentDefinition.Create(),
+            OpenCodeAgentDefinition.Create(),
+        })
     {
     }
 

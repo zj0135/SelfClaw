@@ -127,7 +127,7 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
             invocation.VerbatimArguments,
             runContext.WorkingDirectory);
 
-        var parser = CreateParser(definition.StreamFormat);
+        var parser = CreateParser(definition.StreamFormat, kind);
 
         // Launching the child can throw synchronously (e.g. a Win32Exception when the resolved target is
         // not a real executable). Surface it as a clean completion rather than letting it escape the
@@ -233,10 +233,11 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
     }
 
     /// <summary>
-    /// Resolves which CLI the agent targets. The first version registers Claude Code only, so every
-    /// CLI agent maps to <see cref="CliAgentKind.Claude"/>; Codex / OpenCode selection lands in 阶段 7.
+    /// Resolves which CLI the agent targets. There is no UI to pick the CLI yet, so this is hardcoded.
+    /// TEMP: forced to <see cref="CliAgentKind.OpenCode"/> for manual end-to-end testing of 阶段 7; revert
+    /// to <see cref="CliAgentKind.Claude"/> (or wire agent → kind selection) afterwards.
     /// </summary>
-    private static CliAgentKind ResolveAgentKind(AgentRuntimeDefinition agent) => CliAgentKind.Claude;
+    private static CliAgentKind ResolveAgentKind(AgentRuntimeDefinition agent) => CliAgentKind.OpenCode;
 
     /// <summary>The latest user message is the prompt; the CLI keeps prior turns via session resume.</summary>
     private static string? ExtractPrompt(IReadOnlyList<MessageRecord> messages)
@@ -266,10 +267,10 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
         return string.IsNullOrEmpty(instructions) ? null : instructions;
     }
 
-    private static IAgentStreamParser CreateParser(CliStreamFormat format) => format switch
+    private static IAgentStreamParser CreateParser(CliStreamFormat format, CliAgentKind kind) => format switch
     {
         CliStreamFormat.ClaudeStreamJson => new ClaudeStreamJsonParser(),
-        // JsonEventStreamParser (Codex / OpenCode) lands in 阶段 7.
+        CliStreamFormat.JsonEventStream => new JsonEventStreamParser(kind),
         _ => throw new NotSupportedException($"No stream parser is available for '{format}'."),
     };
 
