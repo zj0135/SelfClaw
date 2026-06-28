@@ -34,7 +34,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         var runtime = provider.GetRequiredService<IAgentChatRuntime>();
 
         repository.Should().BeOfType<SqliteAiProviderRepository>();
-        runtime.Should().BeOfType<PlaceholderAgentChatRuntime>();
+        runtime.Should().BeOfType<DispatchingAgentChatRuntime>();
     }
 
     public void Dispose()

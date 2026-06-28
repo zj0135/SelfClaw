@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using SelfClaw.Core.Interfaces;
+using SelfClaw.Infrastructure.Agents.Cli;
 using SelfClaw.Infrastructure.Agents.Cli.Definitions;
 using SelfClaw.Infrastructure.Agents.Cli.Process;
 using SelfClaw.Infrastructure.Agents.Cli.Session;
@@ -34,7 +35,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<CliAgentRegistry>();
         services.AddSingleton<ICliAgentSessionStore, SqliteCliAgentSessionStore>();
         services.AddSingleton<CliSessionResolver>();
-        services.AddSingleton<IAgentChatRuntime, PlaceholderAgentChatRuntime>();
+        services.AddSingleton<CliAgentChatRuntime>();
+        services.AddSingleton<IAgentChatRuntime, DispatchingAgentChatRuntime>();
         services.AddSingleton<MarkdownHtmlRenderer>();
         return services;
     }
