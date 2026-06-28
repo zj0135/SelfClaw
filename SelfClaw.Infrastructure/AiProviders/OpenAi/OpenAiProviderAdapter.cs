@@ -1,9 +1,10 @@
-using System.ClientModel;
-using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using OpenAI.Responses;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using System.ClientModel;
+using System.Text.Json;
 using OpenAIClientOptions = OpenAI.OpenAIClientOptions;
 
 namespace SelfClaw.Infrastructure.AiProviders.OpenAi;
@@ -74,9 +75,13 @@ internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
             _ => throw UnsupportedFormat(request)
         };
 
-    private static OpenAIClientOptions CreateClientOptions(AiProviderConnection connection) =>
+#pragma warning disable OPENAI001
+    private static ResponsesClientOptions CreateResponsesClientOptions(AiProviderConnection connection) =>
         new() { Endpoint = connection.Endpoint };
+#pragma warning restore OPENAI001
 
+    private static OpenAIClientOptions CreateClientOptions(AiProviderConnection connection) =>
+       new() { Endpoint = connection.Endpoint };
     private static ApiKeyCredential CreateCredential(AiProviderClientRequest request) =>
         new(ResolveApiKey(request));
 

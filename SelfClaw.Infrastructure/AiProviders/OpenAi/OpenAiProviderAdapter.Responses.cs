@@ -45,7 +45,7 @@ internal sealed partial class OpenAiProviderAdapter
     {
         var client = new OpenAIResponsesClient(
             CreateCredential(request),
-            CreateClientOptions(request.Connection));
+            CreateResponsesClientOptions(request.Connection));
         return client.AsIChatClient(request.Profile.Model);
     }
 
