@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Infrastructure;
+using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
@@ -17,7 +19,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void AddSelfClawInfrastructure_registers_ai_provider_services()
+    public void AddSelfClawInfrastructure_registers_repository_and_runtime_services()
     {
         var storagePaths = new StoragePaths(
             _rootPath,
@@ -28,17 +30,11 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         services.AddSelfClawInfrastructure(storagePaths);
 
         using var provider = services.BuildServiceProvider();
-        var adapters = provider.GetServices<IAiProviderAdapter>().ToArray();
-        var registry = provider.GetRequiredService<IAiProviderRegistry>();
         var repository = provider.GetRequiredService<IAiProviderRepository>();
+        var runtime = provider.GetRequiredService<IAgentChatRuntime>();
 
-        adapters.Select(adapter => adapter.ProviderKind)
-            .Should()
-            .BeEquivalentTo([AiProviderKind.OpenAI, AiProviderKind.OpenAICompatible, AiProviderKind.Anthropic]);
-        registry.GetRequiredAdapter(AiProviderKind.OpenAI).ProviderKind.Should().Be(AiProviderKind.OpenAI);
-        registry.GetRequiredAdapter(AiProviderKind.OpenAICompatible).ProviderKind.Should().Be(AiProviderKind.OpenAICompatible);
-        registry.GetRequiredAdapter(AiProviderKind.Anthropic).ProviderKind.Should().Be(AiProviderKind.Anthropic);
         repository.Should().BeOfType<SqliteAiProviderRepository>();
+        runtime.Should().BeOfType<PlaceholderAgentChatRuntime>();
     }
 
     public void Dispose()

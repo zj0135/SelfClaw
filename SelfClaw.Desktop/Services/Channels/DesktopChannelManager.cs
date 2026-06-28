@@ -407,40 +407,12 @@ public sealed class DesktopChannelManager : IAsyncDisposable
                                    requestMessages),
                                cancellationToken))
             {
-                switch (update)
-                {
-                    case AssistantMessageStartedEvent:
-                        if (connection is not null && streamingReply is null)
-                        {
-                            streamingReply = await connection.CreateStreamingReplyAsync(incomingMessage, cancellationToken);
-                        }
-
-                        break;
-                    case AssistantDeltaEvent delta:
-                        streamedMarkdown.Append(delta.DeltaMarkdown);
-                        if (streamingReply is not null)
-                        {
-                            await streamingReply.UpdateAsync(ExtractChannelReply(streamedMarkdown.ToString()), cancellationToken);
-                        }
-
-                        break;
-                    case AssistantMessageCompletedEvent completed:
-                        await _conversationRepository.UpsertMessageAsync(completed.Message, cancellationToken);
-                        await TouchConversationAsync(conversation, completed.Message.UpdatedAtUtc, cancellationToken);
-
-                        var replyContent = ExtractChannelReply(completed.Message.MarkdownContent);
-                        if (streamingReply is not null)
-                        {
-                            await streamingReply.FinishAsync(replyContent, cancellationToken);
-                        }
-                        else if (connection is not null)
-                        {
-                            await connection.ReplyAsync(incomingMessage, replyContent, cancellationToken);
-                        }
-
-                        NotifyChanged(conversation.Id);
-                        break;
-                }
+                // TODO(阶段6): 频道（Feishu）为未注册的 dead code。事件模型已切换为 AgentStreamEvent，
+                // 这里暂为最小桩仅保证编译；后续若恢复频道功能需重写为新事件转换。
+                _ = update;
+                _ = streamingReply;
+                _ = streamedMarkdown;
+                _ = connection;
             }
 
         }

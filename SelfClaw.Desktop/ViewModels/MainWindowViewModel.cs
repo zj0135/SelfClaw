@@ -587,33 +587,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                                    useReasoning),
                                cancellationToken))
             {
-                switch (update)
-                {
-                    case AssistantMessageStartedEvent started:
-                        runtimeState.ActiveMessageIds.Add(started.Message.Id);
-                        ReplaceMessage(runtimeState, started.Message);
-                        PublishRuntimeState(runtimeState, true);
-                        break;
-                    case AssistantDeltaEvent delta:
-                        ApplyAssistantDelta(runtimeState, delta.MessageId, delta.DeltaMarkdown);
-                        break;
-                    case ToolExecutionStartedEvent toolStarted:
-                        var startedRecord = CaptureToolRunAnchor(runtimeState, toolStarted.Record);
-                        UpsertToolRun(runtimeState, startedRecord);
-                        await _conversationRepository.UpsertToolExecutionAsync(startedRecord);
-                        PublishShell(false);
-                        break;
-                    case ToolExecutionCompletedEvent toolCompleted:
-                        var completedRecord = CaptureToolRunAnchor(runtimeState, toolCompleted.Record);
-                        UpsertToolRun(runtimeState, completedRecord);
-                        await _conversationRepository.UpsertToolExecutionAsync(completedRecord);
-                        PublishShell(false);
-                        break;
-                    case AssistantMessageCompletedEvent completed:
-                        runtimeState.ActiveMessageIds.Remove(completed.Message.Id);
-                        await CompleteAssistantMessageAsync(runtimeState, completed.Message);
-                        break;
-                }
+                // TODO(阶段6): 将 AgentStreamEvent 转换为 MessageRecord / ToolExecutionRecord，
+                // 复用下方暂时保留的转换方法（ApplyAssistantDelta / CaptureToolRunAnchor / CompleteAssistantMessageAsync 等）。
+                // 阶段0 的占位运行时不发射事件，这里暂为最小桩，仅保证编译与启动。
+                _ = update;
             }
 
             PublishConversationCompletedNotification(conversation, runtimeState.Messages);
