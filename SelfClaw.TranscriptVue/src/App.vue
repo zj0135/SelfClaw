@@ -1,7 +1,7 @@
 <script setup>
 import { computed, markRaw, onMounted, onUnmounted, reactive, ref } from 'vue';
-import AppSidebar from './components/AppSidebar.vue';
-import WindowControls from './components/WindowControls.vue';
+import AppSidebar from './components/SideBar/AppSidebar.vue';
+import WindowControls from './components/Chat/WindowControls.vue';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
 
@@ -407,7 +407,7 @@ button {
 	line-height: 1.6;
 }
 
-.body > * {
+.body>* {
 	max-width: 100%;
 }
 
@@ -478,7 +478,7 @@ code {
 	font-size: 13px;
 }
 
-:not(pre) > code {
+:not(pre)>code {
 	padding: 2px 6px;
 	border-radius: 5px;
 	background: #eef2f7;
@@ -734,7 +734,7 @@ a:hover {
 	padding: 0;
 }
 
-.tool-segment + .tool-segment {
+.tool-segment+.tool-segment {
 	margin-top: 6px;
 }
 
@@ -900,6 +900,7 @@ a:hover {
 }
 
 @media (max-width: 960px) {
+
 	.message-main,
 	.message-row.user .message-main {
 		max-width: 100%;

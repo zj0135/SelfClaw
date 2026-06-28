@@ -1,0 +1,1 @@
+import{_ as t,o as a,c,a as s}from"./index-D_rWEDZz.js";const o={},n={class:"settings-panel"};function r(d,e){return a(),c("div",n,[...e[0]||(e[0]=[s("h2",{class:"panel-title"},"AI 服务商",-1),s("p",{class:"panel-desc"},"配置 AI 模型的 API 密钥和访问端点",-1)])])}const _=t(o,[["render",r],["__scopeId","data-v-5b36350d"]]);export{_ as default};

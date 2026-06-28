@@ -1,8 +1,8 @@
 <script setup>
 import { computed, nextTick, reactive, ref } from 'vue';
-import ComposerPanel from '../components/ComposerPanel.vue';
-import TerminalPanel from '../components/TerminalPanel.vue';
-import TranscriptPanel from '../components/TranscriptPanel.vue';
+import ComposerPanel from '../components/Chat/ComposerPanel.vue';
+import TerminalPanel from '../components/Chat/TerminalPanel.vue';
+import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
 import { renderMessages } from '../renderers';
 
 const emit = defineEmits(['preview-image']);
@@ -277,24 +277,13 @@ defineExpose({
 </script>
 
 <template>
-	<div
-		class="workspace"
-		:class="{
-			'empty-workspace': isEmptyConversation,
-			'terminal-open': state.terminal.isOpen,
-		}"
-		@pointerdown="onWorkspacePointerDown"
-		@focusin="onWorkspaceFocusIn"
-	>
-		<TranscriptPanel
-			v-if="!isEmptyConversation"
-			ref="transcriptPanelRef"
-			:messages-html="messagesHtml"
-			@scroll="onTranscriptScroll"
-			@preview-image="openImagePreview"
-			@transcript-click="onTranscriptClick"
-			@transcript-keydown="onTranscriptKeydown"
-		/>
+	<div class="workspace" :class="{
+		'empty-workspace': isEmptyConversation,
+		'terminal-open': state.terminal.isOpen,
+	}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
+		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :messages-html="messagesHtml"
+			@scroll="onTranscriptScroll" @preview-image="openImagePreview" @transcript-click="onTranscriptClick"
+			@transcript-keydown="onTranscriptKeydown" />
 		<section v-else class="empty-composer-stage" aria-label="新对话">
 			<div class="empty-composer-copy">
 				<h1>想聊些什么？</h1>
@@ -302,18 +291,9 @@ defineExpose({
 			</div>
 		</section>
 		<ComposerPanel ref="composerShellRef" :disabled="state.isBusy" @submit="submitComposer" />
-		<TerminalPanel
-			ref="terminalPanelRef"
-			:is-open="state.terminal.isOpen"
-			:is-running="state.terminal.isRunning"
-			:cwd="state.terminal.cwd"
-			@ready="onTerminalReady"
-			@input="onTerminalInput"
-			@resize="onTerminalResize"
-			@close="onTerminalClose"
-			@restart="onTerminalRestart"
-			@focus-change="onTerminalFocusChange"
-		/>
+		<TerminalPanel ref="terminalPanelRef" :is-open="state.terminal.isOpen" :is-running="state.terminal.isRunning"
+			:cwd="state.terminal.cwd" @ready="onTerminalReady" @input="onTerminalInput" @resize="onTerminalResize"
+			@close="onTerminalClose" @restart="onTerminalRestart" @focus-change="onTerminalFocusChange" />
 	</div>
 </template>
 
