@@ -11,11 +11,14 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Tools.Transcript;
+using SelfClaw.Infrastructure.Tools.Transcript.Models;
 
 namespace SelfClaw.Desktop.ViewModels;
 
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
+    #region 字段与构造函数 —— 依赖注入字段、运行时集合状态、流式发布定时器初始化
+
     private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(75);
     private const int MaxPromptImageAttachments = 6;
     private const long MaxPromptImageBytes = 10 * 1024 * 1024;
@@ -91,6 +94,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _streamingPublishTimer.Tick += OnStreamingPublishTimerTick;
         }
     }
+
+    #endregion
+
+    #region 公开入口与属性 —— 暴露给宿主窗口 / WebView 的事件、选中会话属性与发送入口
 
     /// <summary>
     /// 渲染输出：每次 transcript（消息 / 工具运行 / 会话列表）变化时携带完整快照触发，
@@ -169,6 +176,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         await SendAsync();
     }
 
+    #endregion
+
+    #region Profile / 工作区选择与模型解析 —— 解析、规范化、切换当前 Profile / 模型 / 工作区
+
     private void ApplySelectedProfileModel(string? profileModel, bool publishShell)
     {
         var normalized = NormalizeModelValue(profileModel);
@@ -244,6 +255,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             PublishShell(false);
         }
     }
+
+    #endregion
+
+    #region 流式发布调度 —— 通过定时器节流向前端推送 transcript 快照（节流 / 立即 / 定时回调）
 
     private void RequestStreamingShellPublish(bool autoScroll)
     {
@@ -325,6 +340,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnStreamingPublishTimerTick(object? sender, EventArgs e)
         => FlushStreamingShellPublish();
+
+    #endregion
+
+    #region 数据加载 —— 重载 Profile / 工作区 / 会话列表，并加载选中会话的消息与工具运行
 
     private async Task ReloadProfilesAsync()
     {
@@ -414,6 +433,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         PublishShell(false);
     }
+
+    #endregion
+
+    #region 发送回合与释放 —— 组织一次发送（建会话→落用户消息→流式回合），以及 VM 释放
 
     private async Task SendAsync()
     {
@@ -587,6 +610,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _conversationRuntimeStates.Clear();
     }
 
+    #endregion
+
+    #region 图片附件处理 —— 校验并落盘提示图片附件、生成安全文件名、解析图片媒体类型
+
     private async Task<IReadOnlyList<MessageAttachmentRecord>> PersistPromptImageAttachmentsAsync(
         Guid conversationId,
         Guid messageId,
@@ -700,6 +727,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private static bool IsSupportedImageMediaType(string mediaType)
         => mediaType.Trim().ToLowerInvariant() is "image/png" or "image/jpeg" or "image/webp" or "image/gif";
+
+    #endregion
+
+    #region 会话创建 / 持久化 / 过滤 —— 新建会话记录、落盘并同步选中、维护会话列表与可见性过滤
 
     private async Task<ConversationRecord> EnsureConversationAsync()
     {
@@ -815,6 +846,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             runtimeState.ToolRuns.Add(record);
         }
     }
+
+    #endregion
+
+    #region Transcript 渲染构建 —— 计算快照指纹去重后，把消息 / 工具运行 / 附件构建成前端渲染项并触发 TranscriptChanged
 
     private void PublishShell(bool autoScroll)
     {
@@ -1136,6 +1171,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         return normalized.Length > 48 ? normalized[..48] + "..." : normalized;
     }
+
+    #endregion
 
 }
 
