@@ -1,6 +1,6 @@
 using SelfClaw.Core.Runtime.Agent;
 
-namespace SelfClaw.Infrastructure.Agents.Cli.Definitions;
+namespace SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
 
 /// <summary>
 /// A declarative description of how to drive one CLI agent: how to build its argument vector, how the

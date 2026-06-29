@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.Agents.Cli.Process;
+namespace SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 
 /// <summary>
 /// A fully resolved, launch-ready command produced by <see cref="CliCommandResolver"/>.

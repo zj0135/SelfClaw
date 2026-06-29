@@ -1,4 +1,5 @@
-namespace SelfClaw.Infrastructure.Agents.Cli.Process;
+using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
+namespace SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 
 /// <summary>
 /// Launches a CLI agent subprocess for a single turn and exposes its stdout as a line stream.

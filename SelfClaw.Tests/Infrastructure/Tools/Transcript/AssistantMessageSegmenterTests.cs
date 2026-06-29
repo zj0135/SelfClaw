@@ -1,5 +1,6 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using SelfClaw.Infrastructure.Tools.Transcript;
+using SelfClaw.Infrastructure.Tools.Transcript.Models;
 
 namespace SelfClaw.Tests.Infrastructure.Tools.Transcript;
 

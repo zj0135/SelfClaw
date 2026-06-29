@@ -5,6 +5,7 @@ using OpenAI.Responses;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using System.ClientModel;
 using System.Text.Json;
+using SelfClaw.Infrastructure.AiProviders.Models;
 using OpenAIClientOptions = OpenAI.OpenAIClientOptions;
 
 namespace SelfClaw.Infrastructure.AiProviders.OpenAi;

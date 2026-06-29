@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.Agents.Cli.Definitions;
+namespace SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
 
 /// <summary>
 /// Identifies the stdout stream format a CLI agent produces, used to pick the matching

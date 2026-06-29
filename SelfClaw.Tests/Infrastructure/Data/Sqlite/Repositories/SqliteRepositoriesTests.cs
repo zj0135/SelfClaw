@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using SelfClaw.Core.Models;
@@ -6,6 +6,7 @@ using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
+using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Tests.Infrastructure.Data.Sqlite.Repositories;
 

@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
+namespace SelfClaw.Infrastructure.AiProviders.Models;
 
 /// <summary>
 /// Authentication scheme used by a provider connection. v1 only supports an

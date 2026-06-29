@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Models;
 using OpenAIResponsesClient = OpenAI.Responses.ResponsesClient;
 using OpenAICreateResponseOptions = OpenAI.Responses.CreateResponseOptions;
 using OpenAIResponseReasoningOptions = OpenAI.Responses.ResponseReasoningOptions;

@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.Agents.Cli.Process;
+namespace SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 
 /// <summary>
 /// Everything <see cref="CliAgentProcessHost"/> needs to launch a single CLI agent turn:

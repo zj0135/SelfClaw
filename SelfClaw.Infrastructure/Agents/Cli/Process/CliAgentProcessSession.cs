@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text;
 using System.Threading.Channels;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
+using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Process;
 

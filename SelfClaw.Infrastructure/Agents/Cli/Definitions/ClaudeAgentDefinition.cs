@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Definitions;
 

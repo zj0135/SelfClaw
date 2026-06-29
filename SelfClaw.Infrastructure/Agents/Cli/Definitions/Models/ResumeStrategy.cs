@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.Agents.Cli.Definitions;
+namespace SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
 
 /// <summary>
 /// How a CLI agent resumes an earlier conversation across turns (plan.md §6).

@@ -1,4 +1,5 @@
-namespace SelfClaw.Infrastructure.Agents.Cli.Process;
+using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
+namespace SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 
 /// <summary>
 /// A running CLI agent turn. Callers write the JSONL prompt with

@@ -9,6 +9,10 @@ using SelfClaw.Infrastructure.Agents.Cli.Definitions;
 using SelfClaw.Infrastructure.Agents.Cli.Parsers;
 using SelfClaw.Infrastructure.Agents.Cli.Process;
 using SelfClaw.Infrastructure.Agents.Cli.Session;
+using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
+using SelfClaw.Infrastructure.Agents.Cli.Parsers.Abstractions;
+using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
+using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Cli;
 

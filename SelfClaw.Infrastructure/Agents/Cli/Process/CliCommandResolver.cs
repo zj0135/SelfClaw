@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Process;
 

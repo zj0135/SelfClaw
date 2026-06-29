@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using SelfClaw.Infrastructure.Tools.Transcript.Models;
 
 namespace SelfClaw.Infrastructure.Tools.Transcript;
 

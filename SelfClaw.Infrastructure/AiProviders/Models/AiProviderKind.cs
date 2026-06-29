@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
+namespace SelfClaw.Infrastructure.AiProviders.Models;
 
 /// <summary>
 /// Identifies a concrete AI provider implementation. The kind selects which

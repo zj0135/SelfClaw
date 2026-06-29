@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 

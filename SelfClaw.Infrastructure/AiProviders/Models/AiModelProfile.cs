@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
+namespace SelfClaw.Infrastructure.AiProviders.Models;
 
 /// <summary>
 /// A concrete model configuration bound to a provider connection. Carries the

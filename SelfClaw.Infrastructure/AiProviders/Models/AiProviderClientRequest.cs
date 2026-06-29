@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
 
-namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
+namespace SelfClaw.Infrastructure.AiProviders.Models;
 
 /// <summary>
 /// Resolved input handed to an <c>IAiProviderAdapter</c> to build an

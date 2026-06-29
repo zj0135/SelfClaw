@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
+namespace SelfClaw.Infrastructure.AiProviders.Models;
 
 /// <summary>
 /// Selects which OpenAI wire format a model profile targets. A single provider

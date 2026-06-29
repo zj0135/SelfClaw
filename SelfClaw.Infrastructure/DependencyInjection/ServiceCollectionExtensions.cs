@@ -12,6 +12,8 @@ using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Security;
 using SelfClaw.Infrastructure.Tools.Transcript;
 using SelfClaw.Infrastructure.Tools.Workspace;
+using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
+using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 
 namespace SelfClaw.Infrastructure;
 

@@ -1,6 +1,6 @@
 using SelfClaw.Core.Runtime.Agent;
 
-namespace SelfClaw.Infrastructure.Agents.Cli.Definitions;
+namespace SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
 
 /// <summary>
 /// Per-turn inputs that a <see cref="CliAgentDefinition"/> consumes when building the command line and

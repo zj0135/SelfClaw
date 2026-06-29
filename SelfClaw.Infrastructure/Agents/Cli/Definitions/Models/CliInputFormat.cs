@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.Agents.Cli.Definitions;
+namespace SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
 
 /// <summary>
 /// How a CLI agent expects the prompt to be delivered on stdin. Determines what the

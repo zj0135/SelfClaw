@@ -1,6 +1,6 @@
 using SelfClaw.Core.Runtime.Agent;
 
-namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
+namespace SelfClaw.Infrastructure.Agents.Cli.Parsers.Abstractions;
 
 /// <summary>
 /// Translates a CLI agent's raw stdout into <see cref="AgentStreamEvent"/>s. Implementations buffer

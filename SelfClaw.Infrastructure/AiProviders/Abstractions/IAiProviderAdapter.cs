@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
 

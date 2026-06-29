@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text;
+using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
+using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Process;
 

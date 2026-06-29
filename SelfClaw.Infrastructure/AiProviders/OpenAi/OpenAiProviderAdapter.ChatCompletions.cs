@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Models;
 using OpenAIChatClient = OpenAI.Chat.ChatClient;
 using OpenAIChatCompletionOptions = OpenAI.Chat.ChatCompletionOptions;
 

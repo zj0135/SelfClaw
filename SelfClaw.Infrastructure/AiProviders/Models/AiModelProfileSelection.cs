@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
+namespace SelfClaw.Infrastructure.AiProviders.Models;
 
 /// <summary>
 /// Stores the selected model profile for a named runtime scope, such as the

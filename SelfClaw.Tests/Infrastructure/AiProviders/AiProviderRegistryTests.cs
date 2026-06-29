@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Tests.Infrastructure.AiProviders;
 

@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
+using SelfClaw.Infrastructure.Agents.Cli.Parsers.Abstractions;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
 

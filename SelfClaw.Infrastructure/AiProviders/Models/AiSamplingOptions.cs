@@ -1,4 +1,4 @@
-namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
+namespace SelfClaw.Infrastructure.AiProviders.Models;
 
 /// <summary>
 /// Common sampling parameters shared across providers. Each value carries an

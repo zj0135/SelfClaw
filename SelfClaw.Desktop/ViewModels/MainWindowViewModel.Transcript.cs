@@ -1,6 +1,7 @@
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Infrastructure.Tools.Transcript;
+using SelfClaw.Infrastructure.Tools.Transcript.Models;
 
 namespace SelfClaw.Desktop.ViewModels;
 

@@ -1,6 +1,6 @@
 using SelfClaw.Core.Runtime.Agent;
 
-namespace SelfClaw.Infrastructure.Agents.Cli.Process;
+namespace SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 
 /// <summary>
 /// The terminal outcome of a CLI agent turn, derived from the process exit code and cancellation

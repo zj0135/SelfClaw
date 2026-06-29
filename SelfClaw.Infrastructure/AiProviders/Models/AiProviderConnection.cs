@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
+namespace SelfClaw.Infrastructure.AiProviders.Models;
 
 /// <summary>
 /// Provider-level connection: endpoint, auth scheme, credential references and
