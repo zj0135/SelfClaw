@@ -1,1 +1,0 @@
-import{_ as a,o as t,c as n,a as e}from"./index-BtkOzSne.js";const c={},o={class:"settings-panel"};function r(l,s){return t(),n("div",o,[...s[0]||(s[0]=[e("h2",{class:"panel-title"},"编程助手",-1),e("p",{class:"panel-desc"},"编程辅助功能配置",-1)])])}const d=a(c,[["render",r],["__scopeId","data-v-baf2877e"]]);export{d as default};

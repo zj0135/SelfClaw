@@ -1,0 +1,1 @@
+import{_ as a,o as t,c as n,a as s}from"./index-Bl89C58-.js";const c={},o={class:"settings-panel"};function l(r,e){return t(),n("div",o,[...e[0]||(e[0]=[s("h2",{class:"panel-title"},"模型管理",-1),s("p",{class:"panel-desc"},"查看和管理已配置的 AI 模型",-1)])])}const d=a(c,[["render",l],["__scopeId","data-v-22f15144"]]);export{d as default};

@@ -1,0 +1,1 @@
+import{_ as a,o as t,c,a as s}from"./index-Bl89C58-.js";const n={},o={class:"settings-panel"};function l(r,e){return t(),c("div",o,[...e[0]||(e[0]=[s("h2",{class:"panel-title"},"插件",-1),s("p",{class:"panel-desc"},"安装和管理扩展插件",-1)])])}const d=a(n,[["render",l],["__scopeId","data-v-302cab77"]]);export{d as default};
