@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Desktop.Services;
+using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure;
 using SelfClaw.Infrastructure.Options;
@@ -41,9 +42,11 @@ public partial class App : System.Windows.Application
             builder.Services.AddSerilog(Log.Logger, dispose: false);
             builder.Services.AddSelfClawInfrastructure(_storagePaths);
             builder.Services.AddSingleton<DesktopAgentStore>();
+            builder.Services.AddSingleton<DesktopSettingsJsonStore>();
             builder.Services.AddSingleton<DesktopToolApprovalHandler>();
             builder.Services.AddSingleton<DesktopNotificationService>();
             builder.Services.AddSingleton<DesktopNotificationActivationService>();
+            builder.Services.AddSingleton<ProgrammingAssistantSettingsService>();
             builder.Services.AddSingleton<SystemTrayService>();
             builder.Services.AddSingleton<MainWindowViewModel>();
             builder.Services.AddSingleton<MainWindow>();
@@ -54,6 +57,7 @@ public partial class App : System.Windows.Application
             await _host.StartAsync();
             await _host.Services.GetRequiredService<IProfileRepository>().InitializeAsync();
             await _host.Services.GetRequiredService<IConversationRepository>().InitializeAsync();
+            await _host.Services.GetRequiredService<ProgrammingAssistantSettingsService>().GetOrInitializeAsync();
             RegisterToastNotifications();
 
             var mainWindow = _host.Services.GetRequiredService<MainWindow>();

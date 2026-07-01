@@ -1,0 +1,1 @@
+import{_ as t,o as a,c,a as s}from"./index-3o0nrgIP.js";const n={},o={class:"settings-panel"};function r(l,e){return a(),c("div",o,[...e[0]||(e[0]=[s("h2",{class:"panel-title"},"宠物",-1),s("p",{class:"panel-desc"},"桌面宠物设置",-1)])])}const d=t(n,[["render",r],["__scopeId","data-v-7f8a400c"]]);export{d as default};

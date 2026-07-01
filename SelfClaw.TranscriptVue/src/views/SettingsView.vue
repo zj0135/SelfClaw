@@ -4,6 +4,7 @@ import { computed, defineAsyncComponent, markRaw, ref } from 'vue';
 const emit = defineEmits(['navigate']);
 
 const activeTarget = ref('sys');
+const activeComponentRef = ref(null);
 
 const navGroups = [
 	{
@@ -102,6 +103,12 @@ function selectItem(id) {
 	activeTarget.value = id;
 	emit('navigate', id);
 }
+
+defineExpose({
+	handleMessage(payload) {
+		activeComponentRef.value?.handleMessage?.(payload);
+	},
+});
 </script>
 
 <template>
@@ -127,7 +134,7 @@ function selectItem(id) {
 
 		<!-- Right: content panel -->
 		<main class="settings-content">
-			<component :is="activeComponent" />
+			<component :is="activeComponent" ref="activeComponentRef" />
 		</main>
 	</div>
 </template>

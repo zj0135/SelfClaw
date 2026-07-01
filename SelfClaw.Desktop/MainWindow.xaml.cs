@@ -10,6 +10,7 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using SelfClaw.Desktop.Services;
+using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.Options;
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
 
     private readonly MainWindowViewModel _viewModel;
     private readonly StoragePaths _storagePaths;
+    private readonly ProgrammingAssistantSettingsService _programmingAssistantSettingsService;
     private TranscriptRenderState _pendingTranscript = new(
         Items: [],
         AutoScroll: false,
@@ -54,12 +56,14 @@ public partial class MainWindow : Window
     public MainWindow(
         MainWindowViewModel viewModel,
         DesktopNotificationService desktopNotificationService,
+        ProgrammingAssistantSettingsService programmingAssistantSettingsService,
         StoragePaths storagePaths)
     {
         InitializeComponent();
         ApplyAdaptiveStartupSize();
         _viewModel = viewModel;
         _storagePaths = storagePaths;
+        _programmingAssistantSettingsService = programmingAssistantSettingsService;
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
         SourceInitialized += OnSourceInitialized;
@@ -488,6 +492,33 @@ public partial class MainWindow : Window
                 case "settings-closed":
                     OnSettingsClosedFromWebView();
                     break;
+                case "scan-programming-clis":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    await PostProgrammingAssistantSettingsAsync(requestId, refresh: true);
+                    break;
+                }
+                case "get-programming-assistant-settings":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    await PostProgrammingAssistantSettingsAsync(requestId, refresh: false);
+                    break;
+                }
+                case "select-programming-cli":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    var cliId = document.RootElement.TryGetProperty("cliId", out var cliIdElement)
+                        ? cliIdElement.GetString()
+                        : null;
+                    await SelectProgrammingCliAsync(requestId, cliId);
+                    break;
+                }
             }
         }
         catch (Exception exception)
@@ -495,6 +526,60 @@ public partial class MainWindow : Window
             Debug.WriteLine(exception);
         }
     }
+
+    private async Task PostProgrammingAssistantSettingsAsync(string? requestId, bool refresh)
+    {
+        try
+        {
+            var settings = refresh
+                ? await _programmingAssistantSettingsService.RescanAsync()
+                : await _programmingAssistantSettingsService.GetOrInitializeAsync();
+            PostProgrammingAssistantSettings(requestId, settings);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            PostTerminalMessage(new
+            {
+                type = "programming-assistant-settings",
+                requestId,
+                tools = Array.Empty<DetectedProgrammingCli>(),
+                selectedCliId = (string?)null,
+                error = exception.Message
+            });
+        }
+    }
+
+    private async Task SelectProgrammingCliAsync(string? requestId, string? cliId)
+    {
+        try
+        {
+            var settings = await _programmingAssistantSettingsService.SelectCliAsync(cliId);
+            PostProgrammingAssistantSettings(requestId, settings);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            PostTerminalMessage(new
+            {
+                type = "programming-assistant-settings",
+                requestId,
+                tools = Array.Empty<DetectedProgrammingCli>(),
+                selectedCliId = (string?)null,
+                error = exception.Message
+            });
+        }
+    }
+
+    private void PostProgrammingAssistantSettings(string? requestId, ProgrammingAssistantSettings settings)
+        => PostTerminalMessage(new
+        {
+            type = "programming-assistant-settings",
+            requestId,
+            selectedCliId = settings.SelectedCliId,
+            tools = settings.Tools,
+            scannedAtUtc = settings.ScannedAtUtc
+        });
 
     private void EnsureTerminalSession()
     {

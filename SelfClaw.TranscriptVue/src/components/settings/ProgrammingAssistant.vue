@@ -1,59 +1,121 @@
 <script setup>
-import { onUnmounted, reactive, ref } from 'vue';
+import { computed, defineExpose, onMounted, onUnmounted, reactive, ref } from 'vue';
 import claudeIcon from '../../../assets/agents-icons/claude.svg';
 import codexIcon from '../../../assets/agents-icons/codex.svg';
 import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
 
+const defaultModel = 'Default (CLI config)';
+const isLoading = ref(false);
 const isRescanning = ref(false);
+const scanError = ref('');
+const selectedCliId = ref('');
 const testTimers = new Map();
-let rescanTimer = null;
+let scanRequestId = 0;
+let activeScanRequestId = null;
+let fallbackTimer = null;
 
-const cliTools = reactive([
-	{
+const cliRegistry = {
+	claude: {
 		id: 'claude',
 		name: 'Claude Code',
 		vendor: 'Anthropic official CLI',
-		version: '2.1.195',
 		iconSrc: claudeIcon,
 		iconBackground: '#ffffff',
-		models: ['Default (CLI config)', 'claude-sonnet-4.5', 'claude-opus-4.1', 'claude-haiku-4'],
-		selectedModel: 'Default (CLI config)',
-		testMessage: '连接正常 · CLI 版本 2.1.195',
-		isOpen: true,
-		testing: false,
-		showToast: false,
+		models: [defaultModel],
 	},
-	{
+	codex: {
 		id: 'codex',
 		name: 'Codex CLI',
 		vendor: 'OpenAI official CLI',
-		version: 'codex-cli 0.142.3',
 		iconSrc: codexIcon,
 		iconBackground: '#ffffff',
-		models: ['Default (CLI config)', 'gpt-5.1-codex', 'gpt-5.1', 'o4-mini'],
-		selectedModel: 'Default (CLI config)',
-		reasoningLevels: ['Default (CLI config)', 'Low', 'Medium', 'High'],
-		selectedReasoningLevel: 'Default (CLI config)',
-		testMessage: '连接正常 · CLI 版本 0.142.3',
-		isOpen: false,
-		testing: false,
-		showToast: false,
+		models: [defaultModel],
+		reasoningLevels: [defaultModel, 'Low', 'Medium', 'High'],
 	},
-	{
+	opencode: {
 		id: 'opencode',
 		name: 'OpenCode',
 		vendor: 'Open-source agent CLI',
-		version: '1.17.11',
 		iconSrc: opencodeIcon,
 		iconBackground: '#ffffff',
-		models: ['Default (CLI config)', 'claude-sonnet-4.5', 'gpt-5.1-codex', 'deepseek-v4', 'qwen3-coder-480b'],
-		selectedModel: 'Default (CLI config)',
-		testMessage: '连接正常 · 已检测到 4 个可用模型',
-		isOpen: false,
+		models: [defaultModel],
+	},
+};
+
+const cliTools = reactive([]);
+const hasCliTools = computed(() => cliTools.length > 0);
+const scanStatusText = computed(() => {
+	if (isLoading.value) {
+		return '正在加载本地 CLI 缓存…';
+	}
+
+	if (isRescanning.value) {
+		return '正在扫描本机 PATH…';
+	}
+
+	if (scanError.value) {
+		return scanError.value;
+	}
+
+	return hasCliTools.value ? '' : '还没有检测到 Claude Code、Codex CLI 或 OpenCode。';
+});
+
+function postToHost(message) {
+	window.chrome?.webview?.postMessage(message);
+}
+
+function createCliTool(rawTool, index) {
+	const base = cliRegistry[rawTool?.id] || {};
+	const models = normalizeList(rawTool?.models, base.models || [defaultModel]);
+	const reasoningLevels = normalizeOptionalList(rawTool?.reasoningLevels, base.reasoningLevels || []);
+	const version = typeof rawTool?.version === 'string' ? rawTool.version.trim() : '';
+
+	return {
+		...base,
+		...rawTool,
+		name: rawTool?.name || base.name || rawTool?.id || 'CLI',
+		vendor: rawTool?.vendor || base.vendor || '',
+		version,
+		iconSrc: base.iconSrc,
+		iconBackground: base.iconBackground || '#ffffff',
+		iconFallback: getCliInitials(rawTool?.name || base.name || rawTool?.id || 'CLI'),
+		models,
+		selectedModel: models[0] || defaultModel,
+		reasoningLevels,
+		selectedReasoningLevel: reasoningLevels[0] || '',
+		testMessage: version ? `连接正常 · CLI 版本 ${version}` : '连接正常 · 已检测到 CLI',
+		isOpen: index === 0,
 		testing: false,
 		showToast: false,
-	},
-]);
+	};
+}
+
+function normalizeList(value, fallback) {
+	const values = Array.isArray(value) ? value : fallback;
+	const normalized = values
+		.filter((item) => typeof item === 'string' && item.trim().length > 0)
+		.map((item) => item.trim());
+
+	return normalized.length > 0 ? [...new Set(normalized)] : [defaultModel];
+}
+
+function normalizeOptionalList(value, fallback) {
+	const values = Array.isArray(value) ? value : fallback;
+	const normalized = values
+		.filter((item) => typeof item === 'string' && item.trim().length > 0)
+		.map((item) => item.trim());
+
+	return [...new Set(normalized)];
+}
+
+function getCliInitials(value) {
+	return String(value || 'CLI')
+		.split(/\s+/)
+		.filter(Boolean)
+		.slice(0, 2)
+		.map((part) => part.charAt(0).toUpperCase())
+		.join('') || 'CLI';
+}
 
 function toggleOpen(cli) {
 	const shouldOpen = !cli.isOpen;
@@ -89,24 +151,121 @@ function testCli(cli) {
 	testTimers.set(cli.id, timer);
 }
 
-function rescanCliTools() {
-	if (isRescanning.value) {
+function requestProgrammingAssistantSettings({ refresh = false } = {}) {
+	if (isLoading.value || isRescanning.value) {
 		return;
 	}
 
-	isRescanning.value = true;
-	rescanTimer = window.setTimeout(() => {
-		isRescanning.value = false;
-		rescanTimer = null;
-	}, 750);
+	const requestId = `cli-scan-${Date.now()}-${++scanRequestId}`;
+	activeScanRequestId = requestId;
+	isLoading.value = !refresh;
+	isRescanning.value = refresh;
+	scanError.value = '';
+
+	postToHost({
+		type: refresh ? 'scan-programming-clis' : 'get-programming-assistant-settings',
+		requestId,
+	});
+
+	if (!window.chrome?.webview) {
+		fallbackTimer = window.setTimeout(() => {
+			applySettingsResult({ tools: [], selectedCliId: null }, requestId);
+		}, 250);
+	}
 }
+
+function rescanCliTools() {
+	requestProgrammingAssistantSettings({ refresh: true });
+}
+
+function selectCli(cli) {
+	if (!cli?.id || selectedCliId.value === cli.id || isLoading.value || isRescanning.value) {
+		return;
+	}
+
+	const requestId = `cli-select-${Date.now()}-${++scanRequestId}`;
+	activeScanRequestId = requestId;
+	selectedCliId.value = cli.id;
+	scanError.value = '';
+
+	postToHost({
+		type: 'select-programming-cli',
+		requestId,
+		cliId: cli.id,
+	});
+
+	if (!window.chrome?.webview) {
+		fallbackTimer = window.setTimeout(() => {
+			applySettingsResult({ tools: cliTools, selectedCliId: cli.id }, requestId);
+		}, 250);
+	}
+}
+
+function applySettingsResult(payload, requestId) {
+	if (requestId && activeScanRequestId && requestId !== activeScanRequestId) {
+		return;
+	}
+
+	const rawTools = Array.isArray(payload?.tools) ? payload.tools : [];
+	const normalizedSelected = normalizeSelectedCliId(rawTools, payload?.selectedCliId);
+	const nextTools = rawTools
+		.map(createCliTool)
+		.filter((tool) => Boolean(tool.id));
+
+	nextTools.forEach((tool, index) => {
+		tool.isOpen = normalizedSelected ? tool.id === normalizedSelected : index === 0;
+	});
+
+	cliTools.splice(0, cliTools.length, ...nextTools);
+	selectedCliId.value = normalizedSelected || '';
+	scanError.value = payload?.error ? `本地 CLI 设置同步失败：${payload.error}` : '';
+	isLoading.value = false;
+	isRescanning.value = false;
+	activeScanRequestId = null;
+
+	if (fallbackTimer) {
+		window.clearTimeout(fallbackTimer);
+		fallbackTimer = null;
+	}
+}
+
+function normalizeSelectedCliId(tools, value) {
+	const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+	if (normalized && tools.some((tool) => tool?.id === normalized)) {
+		return normalized;
+	}
+
+	return tools[0]?.id || '';
+}
+
+function handleMessage(payload) {
+	if (payload?.type !== 'programming-assistant-settings') {
+		return;
+	}
+
+	applySettingsResult(payload, payload.requestId);
+}
+
+defineExpose({
+	handleMessage,
+});
+
+onMounted(() => {
+	requestProgrammingAssistantSettings({ refresh: false });
+});
 
 onUnmounted(() => {
 	testTimers.forEach((timer) => window.clearTimeout(timer));
 	testTimers.clear();
 
-	if (rescanTimer) {
-		window.clearTimeout(rescanTimer);
+	if (fallbackTimer) {
+		window.clearTimeout(fallbackTimer);
+	}
+
+	if (isLoading.value || isRescanning.value) {
+		isLoading.value = false;
+		isRescanning.value = false;
+		activeScanRequestId = null;
 	}
 });
 </script>
@@ -130,18 +289,24 @@ onUnmounted(() => {
 			</div>
 
 			<div class="cli-list">
+				<div v-if="scanStatusText" class="scan-state" :class="{ 'scan-state--error': scanError }">
+					{{ scanStatusText }}
+				</div>
+
 				<article v-for="cli in cliTools" :key="cli.id" class="cli-card" :class="{ 'is-open': cli.isOpen }">
 					<div class="cli-row" role="button" tabindex="0" :aria-expanded="cli.isOpen ? 'true' : 'false'"
 						@click="toggleOpen(cli)" @keydown.enter.prevent="toggleOpen(cli)"
 						@keydown.space.prevent="toggleOpen(cli)">
 						<div class="cli-icon" :style="{ background: cli.iconBackground }">
-							<img class="cli-svg" :src="cli.iconSrc" alt="" aria-hidden="true" />
+							<img v-if="cli.iconSrc" class="cli-svg" :src="cli.iconSrc" alt="" aria-hidden="true" />
+							<span v-else class="cli-initials" aria-hidden="true">{{ cli.iconFallback }}</span>
 						</div>
 
 						<div class="cli-body">
 							<div class="cli-titleline">
 								<span class="cli-name">{{ cli.name }}</span>
 								<span v-if="cli.vendor" class="cli-vendor">· {{ cli.vendor }}</span>
+								<span v-if="selectedCliId === cli.id" class="badge badge--selected">已选择</span>
 							</div>
 
 							<div class="cli-meta">
@@ -184,7 +349,7 @@ onUnmounted(() => {
 									</svg>
 								</div>
 
-								<div v-if="cli.reasoningLevels" class="select-field">
+								<div v-if="cli.reasoningLevels.length" class="select-field">
 									<label class="select-field__label" :for="`reasoning-${cli.id}`">推理等级</label>
 									<div class="select-wrap select-wrap--reasoning">
 										<select :id="`reasoning-${cli.id}`" v-model="cli.selectedReasoningLevel"
@@ -203,6 +368,11 @@ onUnmounted(() => {
 								<button class="pa-btn pa-btn--ghost cli-test" type="button" :disabled="cli.testing"
 									@click="testCli(cli)">
 									{{ cli.testing ? '测试中…' : '测试' }}
+								</button>
+
+								<button v-if="selectedCliId !== cli.id" class="pa-btn cli-select" type="button"
+									:disabled="isLoading || isRescanning" @click="selectCli(cli)">
+									设为默认
 								</button>
 							</div>
 
@@ -345,6 +515,10 @@ onUnmounted(() => {
 	background: var(--pa-accent-weak);
 }
 
+.cli-select {
+	color: var(--pa-fg-soft);
+}
+
 .scan-icon {
 	transform-origin: center;
 }
@@ -358,6 +532,23 @@ onUnmounted(() => {
 	max-width: 720px;
 	flex-direction: column;
 	gap: 12px;
+}
+
+.scan-state {
+	display: flex;
+	align-items: center;
+	min-height: 64px;
+	padding: 16px 18px;
+	border: 1px dashed var(--pa-border-2);
+	border-radius: 12px;
+	background: var(--pa-surface-2);
+	color: var(--pa-muted);
+	font-size: 13.5px;
+}
+
+.scan-state--error {
+	border-color: color-mix(in oklch, var(--pa-accent), var(--pa-border-2) 35%);
+	color: var(--pa-fg-soft);
 }
 
 .cli-card {
@@ -422,6 +613,13 @@ onUnmounted(() => {
 	width: 26px;
 	height: 26px;
 	object-fit: contain;
+}
+
+.cli-initials {
+	color: var(--pa-fg-soft);
+	font-family: var(--pa-mono);
+	font-size: 13px;
+	font-weight: 700;
 }
 
 .cli-body {
@@ -520,6 +718,12 @@ onUnmounted(() => {
 	font-family: var(--pa-mono);
 	font-size: 11px;
 	letter-spacing: 0;
+}
+
+.badge--selected {
+	background: var(--pa-ok-bg);
+	color: var(--pa-ok);
+	font-size: 11.5px;
 }
 
 .cli-config {
