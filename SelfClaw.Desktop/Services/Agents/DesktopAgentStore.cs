@@ -63,112 +63,6 @@ public sealed class DesktopAgentStore
         }
     }
 
-    public DesktopAgentDefinition? GetAgent(string? agentId)
-    {
-        var normalizedAgentId = NormalizeAgentId(agentId);
-        if (string.IsNullOrWhiteSpace(normalizedAgentId))
-        {
-            normalizedAgentId = BuildAgentId;
-        }
-
-        return LoadAll().FirstOrDefault(item => string.Equals(item.Id, normalizedAgentId, StringComparison.OrdinalIgnoreCase));
-    }
-
-    public DesktopAgentDefinition Save(DesktopAgentEditorResult result)
-    {
-        lock (_syncRoot)
-        {
-            EnsureSystemAgents();
-
-            var normalizedAgentId = NormalizeAgentId(result.AgentId);
-            if (!IsValidAgentId(normalizedAgentId))
-            {
-                throw new InvalidOperationException("Agent id can only contain letters, numbers, underscores, and hyphens.");
-            }
-
-            var originalAgentId = NormalizeAgentId(result.OriginalAgentId);
-            if (string.IsNullOrWhiteSpace(originalAgentId))
-            {
-                originalAgentId = normalizedAgentId;
-            }
-
-            if (IsBuiltInAgentId(originalAgentId) &&
-                !string.Equals(originalAgentId, normalizedAgentId, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("Built-in agents cannot be renamed.");
-            }
-
-            if (string.IsNullOrWhiteSpace(result.OriginalAgentId) &&
-                File.Exists(GetAgentFilePath(normalizedAgentId)))
-            {
-                throw new InvalidOperationException($"Agent '{normalizedAgentId}' already exists.");
-            }
-
-            if (!string.Equals(originalAgentId, normalizedAgentId, StringComparison.OrdinalIgnoreCase) &&
-                File.Exists(GetAgentFilePath(normalizedAgentId)))
-            {
-                throw new InvalidOperationException($"Agent '{normalizedAgentId}' already exists.");
-            }
-
-            var toolPolicy = AgentRuntimeDefinition.SystemToolPolicy;
-            var skills = NormalizeStringList(result.Skills, NormalizeSkillId);
-            var disabledSkills = NormalizeSelectedSubset(result.DisabledSkills, skills, NormalizeSkillId);
-            var mcpServers = NormalizeStringList(result.McpServers, NormalizeMcpServerId);
-            var disabledMcpServers = NormalizeSelectedSubset(result.DisabledMcpServers, mcpServers, NormalizeMcpServerId);
-            var definition = new DesktopAgentDefinition(
-                normalizedAgentId,
-                string.IsNullOrWhiteSpace(result.Name) ? normalizedAgentId : result.Name.Trim(),
-                result.Description?.Trim() ?? string.Empty,
-                AgentExecutionMode.Direct,
-                toolPolicy,
-                skills,
-                disabledSkills,
-                mcpServers,
-                disabledMcpServers,
-                NormalizeInstructions(result.Instructions),
-                GetAgentFilePath(normalizedAgentId),
-                IsBuiltInAgentId(normalizedAgentId),
-                []);
-
-            WriteAgentFile(definition);
-
-            var originalPath = GetAgentFilePath(originalAgentId);
-            if (!string.Equals(originalPath, definition.FilePath, StringComparison.OrdinalIgnoreCase) &&
-                File.Exists(originalPath))
-            {
-                File.Delete(originalPath);
-            }
-
-            return GetAgent(normalizedAgentId)
-                ?? throw new InvalidOperationException($"Agent '{normalizedAgentId}' was not found after saving.");
-        }
-    }
-
-    public void Delete(string? agentId)
-    {
-        lock (_syncRoot)
-        {
-            EnsureSystemAgents();
-
-            var normalizedAgentId = NormalizeAgentId(agentId);
-            if (string.IsNullOrWhiteSpace(normalizedAgentId))
-            {
-                throw new InvalidOperationException("Agent id is required.");
-            }
-
-            if (IsBuiltInAgentId(normalizedAgentId))
-            {
-                throw new InvalidOperationException("Built-in agents cannot be deleted.");
-            }
-
-            var filePath = GetAgentFilePath(normalizedAgentId);
-            if (File.Exists(filePath))
-            {
-                File.Delete(filePath);
-            }
-        }
-    }
-
     private DesktopAgentDefinition LoadAgentFromFile(
         string filePath,
         ISet<string> installedSkillIds)
@@ -533,16 +427,6 @@ public sealed class DesktopAgentStore
             ? AgentRuntimeDefinition.SystemToolPolicy
             : normalized;
     }
-
-    private static IReadOnlyList<string> NormalizeStringList(
-        IEnumerable<string>? values,
-        Func<string?, string> normalize)
-        => (values ?? [])
-            .Select(normalize)
-            .Where(item => !string.IsNullOrWhiteSpace(item))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
 
     private static IReadOnlyList<string> NormalizeSelectedSubset(
         IEnumerable<string>? values,
