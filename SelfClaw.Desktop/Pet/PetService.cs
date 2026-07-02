@@ -36,6 +36,7 @@ public sealed class PetService : IDisposable
     private PetSettings _settings = new();
     private bool _loaded;
     private PetWindow? _window;
+    private bool _windowPetLoaded;
     private DispatcherTimer? _persistTimer;
     private Point _pendingPosition;
     private bool _disposed;
@@ -86,7 +87,12 @@ public sealed class PetService : IDisposable
             () =>
             {
                 EnsureWindow();
-                _window!.LoadPet(_settings);
+                if (!_windowPetLoaded)
+                {
+                    _window!.LoadPet(_settings);
+                    _windowPetLoaded = true;
+                }
+
                 _window!.Show();
                 RestoreWindowPosition();
             },
@@ -175,6 +181,7 @@ public sealed class PetService : IDisposable
         }
 
         _window = null;
+        _windowPetLoaded = false;
     }
 
     /// <summary>
@@ -389,6 +396,7 @@ public sealed class PetService : IDisposable
             _window.Closed -= OnWindowClosed;
             _window.Close();
             _window = null;
+            _windowPetLoaded = false;
         }
     }
 }

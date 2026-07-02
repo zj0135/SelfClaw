@@ -13,6 +13,11 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 {
     private static readonly TimeSpan WaitingAfter = TimeSpan.FromSeconds(45);
     private static readonly TimeSpan BubbleVisibleFor = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan AmbientPlayMin = TimeSpan.FromMilliseconds(1400);
+    private static readonly TimeSpan AmbientPlayVariance = TimeSpan.FromMilliseconds(900);
+    private static readonly TimeSpan AmbientRestMin = TimeSpan.FromMilliseconds(9000);
+    private static readonly TimeSpan AmbientRestVariance = TimeSpan.FromMilliseconds(9000);
+    private static readonly TimeSpan AmbientInitialDelayMin = TimeSpan.FromMilliseconds(4000);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -24,7 +29,9 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     private readonly PetStateMachine _stateMachine = new();
     private readonly DispatcherTimer _waitingTimer;
     private readonly DispatcherTimer _bubbleTimer;
+    private readonly DispatcherTimer _ambientTimer;
     private SpriteAnimator? _animator;
+    private SpriteSheet? _spriteSheet;
     private ImageSource? _currentFrame;
     private BitmapScalingMode _bitmapScalingMode = BitmapScalingMode.HighQuality;
     private string? _loadError;
@@ -32,6 +39,9 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     private bool _isBubbleVisible;
     private bool _isAnimationRunning;
     private bool _disposed;
+    private AmbientPhase _ambientPhase;
+    private string? _ambientRowId;
+    private string? _lastAmbientRowId;
 
     public PetViewModel(ILogger<PetViewModel>? logger = null)
     {
@@ -41,6 +51,8 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
         _waitingTimer.Tick += OnWaitingTimerTick;
         _bubbleTimer = new DispatcherTimer { Interval = BubbleVisibleFor };
         _bubbleTimer.Tick += OnBubbleTimerTick;
+        _ambientTimer = new DispatcherTimer();
+        _ambientTimer.Tick += OnAmbientTimerTick;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -87,6 +99,7 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
             var sheet = SpriteSheet.Create(bitmap, package.Grid ?? settings.Grid ?? PetLayout.CreateDefaultGrid());
 
             _animator?.Dispose();
+            _spriteSheet = sheet;
             _animator = new SpriteAnimator(sheet, PetLayout.IdleRowId);
             _animator.FrameChanged += OnFrameChanged;
             CurrentFrame = sheet.GetFrame(PetLayout.IdleRowId, 0);
@@ -98,6 +111,7 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
             _logger?.LogWarning(exception, "Failed to load pet spritesheet.");
             _animator?.Dispose();
             _animator = null;
+            _spriteSheet = null;
             CurrentFrame = null;
             LoadError = exception.Message;
         }
@@ -109,6 +123,7 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
         _isAnimationRunning = true;
         _animator?.Start();
         RestartWaitingTimer();
+        StartAmbientScheduler(initial: true);
     }
 
     public void StopAnimation()
@@ -116,6 +131,7 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
         _isAnimationRunning = false;
         _animator?.Stop();
         _waitingTimer.Stop();
+        CancelAmbient(resetToBaseRow: false);
     }
 
     public void PointerEntered()
@@ -215,7 +231,12 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 
     private void OnInteractionChanged(PetInteraction interaction)
     {
-        _animator?.SetRow(PetLayout.GetRowId(interaction));
+        CancelAmbient(resetToBaseRow: false);
+        SetAnimationRow(PetLayout.GetRowId(interaction));
+        if (interaction == PetInteraction.Idle)
+        {
+            StartAmbientScheduler(initial: true);
+        }
     }
 
     private void OnWaitingTimerTick(object? sender, EventArgs e)
@@ -231,7 +252,12 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 
     private void RegisterUserInteraction()
     {
+        CancelAmbient(resetToBaseRow: true);
         RestartWaitingTimer();
+        if (_stateMachine.Current == PetInteraction.Idle)
+        {
+            StartAmbientScheduler(initial: true);
+        }
     }
 
     private void RestartWaitingTimer()
@@ -243,6 +269,117 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 
         _waitingTimer.Stop();
         _waitingTimer.Start();
+    }
+
+    private void OnAmbientTimerTick(object? sender, EventArgs e)
+    {
+        _ambientTimer.Stop();
+        if (!_isAnimationRunning || _stateMachine.Current != PetInteraction.Idle)
+        {
+            CancelAmbient(resetToBaseRow: false);
+            return;
+        }
+
+        if (_ambientPhase == AmbientPhase.WaitingToPlay)
+        {
+            StartAmbientPlay();
+            return;
+        }
+
+        if (_ambientPhase == AmbientPhase.Playing)
+        {
+            EndAmbientPlay();
+        }
+    }
+
+    private void StartAmbientScheduler(bool initial)
+    {
+        if (!_isAnimationRunning || _stateMachine.Current != PetInteraction.Idle || _animator is null)
+        {
+            return;
+        }
+
+        _ambientPhase = AmbientPhase.WaitingToPlay;
+        _ambientTimer.Stop();
+        _ambientTimer.Interval = initial
+            ? RandomDelay(AmbientInitialDelayMin, AmbientRestVariance)
+            : RandomDelay(AmbientRestMin, AmbientRestVariance);
+        _ambientTimer.Start();
+    }
+
+    private void StartAmbientPlay()
+    {
+        var rowId = PickAmbientRowId();
+        if (rowId is null)
+        {
+            StartAmbientScheduler(initial: false);
+            return;
+        }
+
+        _ambientRowId = rowId;
+        _lastAmbientRowId = rowId;
+        _ambientPhase = AmbientPhase.Playing;
+        SetAnimationRow(rowId);
+        _ambientTimer.Interval = RandomDelay(AmbientPlayMin, AmbientPlayVariance);
+        _ambientTimer.Start();
+    }
+
+    private void EndAmbientPlay()
+    {
+        _ambientRowId = null;
+        SetAnimationRow(PetLayout.GetRowId(_stateMachine.Current));
+        StartAmbientScheduler(initial: false);
+    }
+
+    private void CancelAmbient(bool resetToBaseRow)
+    {
+        _ambientTimer.Stop();
+        _ambientPhase = AmbientPhase.None;
+        var hadAmbientRow = _ambientRowId is not null;
+        _ambientRowId = null;
+
+        if (hadAmbientRow && resetToBaseRow)
+        {
+            SetAnimationRow(PetLayout.GetRowId(_stateMachine.Current));
+        }
+    }
+
+    private string? PickAmbientRowId()
+    {
+        var sheet = _spriteSheet;
+        if (sheet is null)
+        {
+            return null;
+        }
+
+        var candidates = PetLayout.AmbientRowIds
+            .Where(sheet.HasRow)
+            .Where(rowId => !string.Equals(rowId, _lastAmbientRowId, StringComparison.Ordinal))
+            .ToArray();
+
+        if (candidates.Length == 0)
+        {
+            candidates = PetLayout.AmbientRowIds.Where(sheet.HasRow).ToArray();
+        }
+
+        return candidates.Length == 0 ? null : candidates[Random.Shared.Next(candidates.Length)];
+    }
+
+    private void SetAnimationRow(string rowId)
+    {
+        try
+        {
+            _animator?.SetRow(rowId);
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogWarning(exception, "Failed to switch pet animation row to {RowId}.", rowId);
+        }
+    }
+
+    private static TimeSpan RandomDelay(TimeSpan minimum, TimeSpan variance)
+    {
+        return minimum + TimeSpan.FromMilliseconds(Random.Shared.NextDouble() * variance.TotalMilliseconds);
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -275,12 +412,21 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
         _waitingTimer.Tick -= OnWaitingTimerTick;
         _bubbleTimer.Stop();
         _bubbleTimer.Tick -= OnBubbleTimerTick;
+        _ambientTimer.Stop();
+        _ambientTimer.Tick -= OnAmbientTimerTick;
         if (_animator is not null)
         {
             _animator.FrameChanged -= OnFrameChanged;
             _animator.Dispose();
             _animator = null;
         }
+    }
+
+    private enum AmbientPhase
+    {
+        None,
+        WaitingToPlay,
+        Playing,
     }
 
     private sealed record PetPackage(string SpriteSheetPath, GridConfig? Grid);

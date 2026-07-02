@@ -11,7 +11,7 @@
         Height="112"
         Title="SelfClaw Pet">
     <!--
-        阶段3:spritesheet 动画 + hover/drag/waiting 交互状态。
+        阶段4:spritesheet 动画 + hover/drag/waiting/ambient 交互状态。
         缺少 libwebp.dll 或素材加载失败时显示占位图形,避免浮窗启动崩溃。
     -->
     <Grid x:Name="PetRoot"

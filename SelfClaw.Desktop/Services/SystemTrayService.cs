@@ -72,11 +72,7 @@ public sealed class SystemTrayService : IDisposable
 
     private void OnContextMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        // 打开菜单时同步勾选状态,反映宠物当前可见性。
-        if (_petMenuItem is not null)
-        {
-            _petMenuItem.Checked = _petService.IsVisible;
-        }
+        SyncPetMenuItem();
     }
 
     private async void OnPetMenuItemClick(object? sender, EventArgs e)
@@ -84,11 +80,25 @@ public sealed class SystemTrayService : IDisposable
         try
         {
             await _petService.ToggleAsync();
+            SyncPetMenuItem();
         }
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "Failed to toggle the desktop pet.");
+            SyncPetMenuItem();
         }
+    }
+
+    private void SyncPetMenuItem()
+    {
+        if (_petMenuItem is null)
+        {
+            return;
+        }
+
+        var isVisible = _petService.IsVisible;
+        _petMenuItem.Checked = isVisible;
+        _petMenuItem.Text = isVisible ? "Hide Pet" : "Show Pet";
     }
 
     private void OnExitMenuItemClick(object? sender, EventArgs e)

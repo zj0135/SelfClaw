@@ -95,6 +95,11 @@ public sealed class SpriteSheet
         throw new InvalidOperationException($"Pet spritesheet row '{rowId}' is not defined.");
     }
 
+    public bool HasRow(string rowId)
+    {
+        return _rowsById.ContainsKey(rowId);
+    }
+
     public ImageSource GetFrame(string rowId, int frameIndex)
     {
         var row = GetRow(rowId);

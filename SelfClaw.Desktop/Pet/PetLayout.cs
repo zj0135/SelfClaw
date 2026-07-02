@@ -9,8 +9,18 @@ public static class PetLayout
     public const string WavingRowId = "waving";
     public const string RunningRightRowId = "running-right";
     public const string RunningLeftRowId = "running-left";
+    public const string RunningRowId = "running";
     public const string JumpingRowId = "jumping";
+    public const string ReviewRowId = "review";
     public const string WaitingRowId = "waiting";
+
+    public static readonly IReadOnlyList<string> AmbientRowIds =
+    [
+        WavingRowId,
+        JumpingRowId,
+        RunningRowId,
+        ReviewRowId,
+    ];
 
     public static string GetRowId(PetInteraction interaction)
     {
