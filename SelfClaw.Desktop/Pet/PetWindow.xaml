@@ -8,7 +8,7 @@
         ShowInTaskbar="False"
         ResizeMode="NoResize"
         Width="192"
-        Height="224"
+        Height="112"
         Title="SelfClaw Pet">
     <!--
         阶段2:spritesheet idle 行逐帧渲染。
@@ -16,7 +16,7 @@
     -->
     <Grid x:Name="PetRoot"
           Width="192"
-          Height="224"
+          Height="112"
           Background="Transparent"
           MouseLeftButtonDown="OnPetMouseLeftButtonDown"
           MouseMove="OnPetMouseMove"
@@ -24,18 +24,18 @@
           LostMouseCapture="OnPetLostMouseCapture">
         <Image Source="{Binding CurrentFrame}"
                Width="192"
-               Height="208"
+               Height="104"
                Stretch="Uniform"
                HorizontalAlignment="Center"
                VerticalAlignment="Bottom"
                RenderOptions.BitmapScalingMode="{Binding BitmapScalingMode}" />
 
-        <Border CornerRadius="16"
+        <Border CornerRadius="8"
                 Background="#CC2D2D3A"
                 BorderBrush="#66FFFFFF"
                 BorderThickness="1"
                 Width="160"
-                Height="176"
+                Height="88"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Bottom">
             <Border.Style>
@@ -49,13 +49,13 @@
                 </Style>
             </Border.Style>
             <Border.Effect>
-                <DropShadowEffect BlurRadius="16"
+                <DropShadowEffect BlurRadius="8"
                                   ShadowDepth="0"
                                   Opacity="0.5"
                                   Color="#000000" />
             </Border.Effect>
             <TextBlock Text="SC"
-                       FontSize="42"
+                       FontSize="24"
                        FontWeight="SemiBold"
                        Foreground="#FFFFFFFF"
                        HorizontalAlignment="Center"
