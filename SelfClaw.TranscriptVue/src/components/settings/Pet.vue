@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 
 const DEFAULT_PET_ID = 'yorha-sit-2b'
 
@@ -45,17 +45,6 @@ const syncPending = ref(false)
 const syncError = ref('')
 const pendingRequests = new Set()
 let requestSeq = 0
-
-const currentName = computed(() => {
-  const pet = pets.find((item) => item.id === selectedPet.value)
-  return pet ? pet.name : '-'
-})
-
-const footerStatus = computed(() => {
-  if (syncError.value) return `同步失败：${syncError.value}`
-  if (syncPending.value) return '正在同步桌面设置...'
-  return `${pets.length} 只内置宠物 · 单击卡片切换默认`
-})
 
 function buildBuiltinPets() {
   return Object.entries(manifestModules)
@@ -205,11 +194,6 @@ defineExpose({
 <template>
   <main class="pet-view settings-content">
     <div class="panel-inner">
-      <header class="panel-head">
-        <h2 class="panel-title">宠物</h2>
-        <p class="panel-desc">桌面宠物设置</p>
-      </header>
-
       <div class="tab-bar">
         <div class="tab-strip" role="tablist" aria-label="宠物来源">
           <button
@@ -228,7 +212,7 @@ defineExpose({
 
         <button
           type="button"
-          class="pill-toggle"
+          class="pet-toggle"
           :disabled="syncPending"
           :aria-pressed="petVisible ? 'true' : 'false'"
           title="切换桌面宠物可见性"
@@ -267,21 +251,10 @@ defineExpose({
                 <span>{{ pet.id }}</span>
                 <span v-if="pet.author">by {{ pet.author }}</span>
               </span>
-              <span v-if="selectedPet !== pet.id" class="pet-cta">设为默认</span>
             </span>
           </button>
         </div>
 
-        <footer class="pet-footer">
-          <span class="pf-current">
-            <span class="pf-dot" aria-hidden="true"></span>
-            <span class="pf-label">当前默认</span>
-            <span class="pf-value">{{ currentName }}</span>
-          </span>
-          <span class="pf-count" :data-error="syncError ? 'true' : 'false'">
-            {{ footerStatus }}
-          </span>
-        </footer>
       </section>
 
       <section v-show="activeTab === 'custom'" class="tab-panel" role="tabpanel">
@@ -333,7 +306,7 @@ defineExpose({
   --shadow-sm: 0 1px 2px rgba(23, 26, 31, 0.06);
 
   color: var(--text);
-  font: 14px/1.5 inherit;
+  font: 13px/1.45 inherit;
 }
 .pet-view * { box-sizing: border-box; }
 .pet-view button { cursor: pointer; font: inherit; color: inherit; }
@@ -346,25 +319,8 @@ defineExpose({
   background: #ffffff;
 }
 .panel-inner {
-  padding: 28px 32px 40px;
+  padding: 22px 32px 36px;
   max-width: 1120px;
-}
-
-.panel-head { margin-bottom: 18px; }
-.panel-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 20px;
-  font-weight: 650;
-  line-height: 1.3;
-  letter-spacing: 0;
-  color: var(--text);
-}
-.panel-desc {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
 }
 
 .tab-bar {
@@ -384,12 +340,12 @@ defineExpose({
   background: var(--panel-soft);
 }
 .tab-btn {
-  padding: 6px 16px;
+  padding: 5px 14px;
   border: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0;
   transition: background 0.14s, color 0.14s, box-shadow 0.14s;
@@ -406,45 +362,51 @@ defineExpose({
   outline-offset: 2px;
 }
 
-.pill-toggle {
+.pet-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 14px 7px 12px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  justify-content: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
   background: var(--panel);
   color: var(--text);
-  font-size: 13px;
-  font-weight: 500;
-  transition: border-color 0.14s, background 0.14s, color 0.14s;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  transition: border-color 0.14s, background 0.14s, color 0.14s, transform 0.08s;
 }
-.pill-toggle:hover {
-  border-color: var(--border-strong);
+.pet-toggle:hover {
+  border-color: #cfd5df;
   background: var(--panel-soft);
 }
-.pill-toggle:disabled {
-  cursor: default;
-  opacity: 0.64;
+.pet-toggle:active:not(:disabled) {
+  transform: translateY(1px);
 }
-.pill-toggle .pt-ico {
-  width: 14px;
-  height: 14px;
+.pet-toggle:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+.pet-toggle .pt-ico {
+  width: 13px;
+  height: 13px;
   color: var(--muted);
   transition: color 0.14s;
 }
-.pill-toggle[aria-pressed="true"] {
+.pet-toggle[aria-pressed="true"] {
   border-color: color-mix(in oklab, var(--accent) 34%, var(--border));
   background: var(--accent-soft);
   color: var(--accent-2);
 }
-.pill-toggle[aria-pressed="true"] .pt-ico { color: var(--accent-2); }
+.pet-toggle[aria-pressed="true"] .pt-ico { color: var(--accent-2); }
 
 .tab-lead {
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.55;
-  margin-bottom: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 16px;
   max-width: 68ch;
 }
 
@@ -456,14 +418,14 @@ defineExpose({
 .pet-card {
   display: flex;
   align-items: flex-start;
-  gap: 14px;
-  min-height: 116px;
-  padding: 14px;
+  gap: 12px;
+  min-height: 104px;
+  padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
   text-align: left;
-  font-size: 13px;
+  font-size: 12px;
   color: inherit;
   transition: border-color 0.14s, box-shadow 0.14s, background 0.14s;
 }
@@ -494,8 +456,8 @@ defineExpose({
 
 .pet-avatar {
   flex: 0 0 auto;
-  width: 58px;
-  height: 58px;
+  width: 54px;
+  height: 54px;
   overflow: hidden;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -512,7 +474,7 @@ defineExpose({
 }
 .pet-initials {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -533,7 +495,7 @@ defineExpose({
   flex: 1 1 auto;
   min-width: 0;
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.35;
   overflow: hidden;
@@ -542,18 +504,18 @@ defineExpose({
 }
 .pet-badge {
   flex: 0 0 auto;
-  padding: 1px 8px;
+  padding: 1px 7px;
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-2);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0;
   line-height: 1.55;
 }
 .pet-desc {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -565,74 +527,8 @@ defineExpose({
   flex-wrap: wrap;
   gap: 6px;
   color: var(--muted-soft);
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 1.4;
-}
-.pet-cta {
-  margin-top: 4px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 16px;
-  color: var(--accent-2);
-  font-size: 12px;
-  font-weight: 550;
-  letter-spacing: 0;
-  opacity: 0;
-  transform: translateX(-2px);
-  transition: opacity 0.14s, transform 0.14s;
-}
-.pet-card:hover .pet-cta,
-.pet-card:focus-visible .pet-cta {
-  opacity: 1;
-  transform: none;
-}
-
-.pet-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 20px;
-  padding: 12px 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-soft);
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-.pf-current {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.pf-dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 18%, transparent);
-}
-.pf-label {
-  color: var(--muted-soft);
-  font-weight: 500;
-  letter-spacing: 0;
-}
-.pf-value {
-  color: var(--text);
-  font-weight: 600;
-  letter-spacing: 0;
-}
-.pf-count {
-  min-width: 0;
-  color: var(--muted-soft);
-  text-align: right;
-}
-.pf-count[data-error="true"] {
-  color: var(--danger);
 }
 
 .empty-state {
@@ -656,7 +552,7 @@ defineExpose({
 .empty-state h3 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text);
   letter-spacing: 0;
@@ -664,7 +560,7 @@ defineExpose({
 .empty-state p {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.55;
   max-width: 46ch;
 }
@@ -674,25 +570,25 @@ defineExpose({
   gap: 10px;
 }
 .btn-primary {
-  padding: 8px 16px;
+  padding: 7px 12px;
   border: 1px solid var(--accent-2);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--accent);
   color: #fff;
-  font-size: 13px;
-  font-weight: 550;
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0;
   transition: background 0.14s;
 }
 .btn-primary:hover { background: var(--accent-2); }
 .btn-secondary {
-  padding: 8px 14px;
+  padding: 7px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--panel);
   color: var(--text);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
   transition: border-color 0.14s, background 0.14s;
 }
 .btn-secondary:hover {
@@ -714,11 +610,6 @@ defineExpose({
     flex-direction: column;
   }
   .tab-strip { width: max-content; max-width: 100%; }
-  .pet-footer {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .pf-count { text-align: left; }
 }
 
 @media (prefers-reduced-motion: reduce) {
