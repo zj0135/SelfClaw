@@ -6,6 +6,25 @@ namespace SelfClaw.Desktop.Pet;
 public static class PetLayout
 {
     public const string IdleRowId = "idle";
+    public const string WavingRowId = "waving";
+    public const string RunningRightRowId = "running-right";
+    public const string RunningLeftRowId = "running-left";
+    public const string JumpingRowId = "jumping";
+    public const string WaitingRowId = "waiting";
+
+    public static string GetRowId(PetInteraction interaction)
+    {
+        return interaction switch
+        {
+            PetInteraction.Hover => WavingRowId,
+            PetInteraction.DragRight => RunningRightRowId,
+            PetInteraction.DragLeft => RunningLeftRowId,
+            PetInteraction.DragUp => JumpingRowId,
+            PetInteraction.DragDown => WavingRowId,
+            PetInteraction.Waiting => WaitingRowId,
+            _ => IdleRowId,
+        };
+    }
 
     public static GridConfig CreateDefaultGrid()
     {

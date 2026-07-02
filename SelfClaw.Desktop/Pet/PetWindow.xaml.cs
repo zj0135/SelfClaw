@@ -6,14 +6,15 @@ namespace SelfClaw.Desktop.Pet;
 
 /// <summary>
 /// 桌宠浮窗:无边框、透明、置顶、不占任务栏的独立窗口。
-/// 阶段1 只负责窗口几何与指针交互(拖拽、点击/拖拽区分),
-/// 视觉为占位图形,帧动画留给阶段2。位置持久化委托给 <see cref="PetService"/>。
+/// 负责窗口几何与指针交互(拖拽、点击/拖拽区分),并把交互转发给 ViewModel 状态机。
 /// 详见 docs/pet-system-design.md §6.3 / §7。
 /// </summary>
 public partial class PetWindow : Window
 {
     /// <summary>抖动过滤阈值(DIP):指针位移小于此值不视为拖动(区分点击 vs 拖动)。见 §3.3。</summary>
     private const double DragThreshold = 4d;
+    private const double DragGestureMin = 14d;
+    private const double DragAxisBias = 1.18d;
 
     private Point _pressOriginScreen;
     private double _windowLeftAtPress;
@@ -51,6 +52,16 @@ public partial class PetWindow : Window
         }
     }
 
+    private void OnPetMouseEnter(object sender, MouseEventArgs e)
+    {
+        _viewModel.PointerEntered();
+    }
+
+    private void OnPetMouseLeave(object sender, MouseEventArgs e)
+    {
+        _viewModel.PointerExited();
+    }
+
     private void OnPetMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         _isPressed = true;
@@ -58,6 +69,7 @@ public partial class PetWindow : Window
         _pressOriginScreen = PointToScreen(e.GetPosition(this));
         _windowLeftAtPress = Left;
         _windowTopAtPress = Top;
+        _viewModel.PointerPressed();
         PetRoot.CaptureMouse();
         e.Handled = true;
     }
@@ -90,8 +102,37 @@ public partial class PetWindow : Window
         }
 
         _isDragging = true;
+        _viewModel.DismissBubble();
+        var dragInteraction = ResolveDragInteraction(dx, dy);
+        if (dragInteraction is not null)
+        {
+            _viewModel.DragDirectionChanged(dragInteraction.Value);
+        }
+
         Left = _windowLeftAtPress + dx;
         Top = _windowTopAtPress + dy;
+    }
+
+    private static PetInteraction? ResolveDragInteraction(double dx, double dy)
+    {
+        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) < DragGestureMin)
+        {
+            return null;
+        }
+
+        var absX = Math.Abs(dx);
+        var absY = Math.Abs(dy);
+        if (absX > absY * DragAxisBias)
+        {
+            return dx >= 0 ? PetInteraction.DragRight : PetInteraction.DragLeft;
+        }
+
+        if (absY > absX * DragAxisBias)
+        {
+            return dy >= 0 ? PetInteraction.DragDown : PetInteraction.DragUp;
+        }
+
+        return null;
     }
 
     /// <summary>把物理像素位移转换为 DIP 位移,适配非 100% DPI 缩放。</summary>
@@ -141,12 +182,15 @@ public partial class PetWindow : Window
         if (_isDragging)
         {
             _isDragging = false;
+            _viewModel.PointerReleased(PetRoot.IsMouseOver);
             PositionCommitted?.Invoke(this, new Point(Left, Top));
             return;
         }
 
+        _viewModel.PointerReleased(PetRoot.IsMouseOver);
         if (commitClick)
         {
+            _viewModel.ToggleBubble();
             Clicked?.Invoke(this, EventArgs.Empty);
         }
     }

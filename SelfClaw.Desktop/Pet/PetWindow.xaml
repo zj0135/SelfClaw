@@ -11,7 +11,7 @@
         Height="112"
         Title="SelfClaw Pet">
     <!--
-        阶段2:spritesheet idle 行逐帧渲染。
+        阶段3:spritesheet 动画 + hover/drag/waiting 交互状态。
         缺少 libwebp.dll 或素材加载失败时显示占位图形,避免浮窗启动崩溃。
     -->
     <Grid x:Name="PetRoot"
@@ -21,7 +21,9 @@
           MouseLeftButtonDown="OnPetMouseLeftButtonDown"
           MouseMove="OnPetMouseMove"
           MouseLeftButtonUp="OnPetMouseLeftButtonUp"
-          LostMouseCapture="OnPetLostMouseCapture">
+          LostMouseCapture="OnPetLostMouseCapture"
+          MouseEnter="OnPetMouseEnter"
+          MouseLeave="OnPetMouseLeave">
         <Image Source="{Binding CurrentFrame}"
                Width="192"
                Height="104"
@@ -60,6 +62,31 @@
                        Foreground="#FFFFFFFF"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center" />
+        </Border>
+
+        <Border IsHitTestVisible="False"
+                Background="#F2FFFFFF"
+                BorderBrush="#33000000"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="10,4"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsBubbleVisible}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <TextBlock Text="{Binding BubbleText}"
+                       Foreground="#E6000000"
+                       FontSize="11"
+                       FontWeight="SemiBold"
+                       TextWrapping="NoWrap" />
         </Border>
     </Grid>
 </Window>
