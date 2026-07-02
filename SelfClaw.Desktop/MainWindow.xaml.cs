@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
+using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Terminal;
@@ -34,6 +35,7 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel;
     private readonly StoragePaths _storagePaths;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettingsService;
+    private readonly PetService _petService;
     private TranscriptRenderState _pendingTranscript = new(
         Items: [],
         AutoScroll: false,
@@ -57,6 +59,7 @@ public partial class MainWindow : Window
         MainWindowViewModel viewModel,
         DesktopNotificationService desktopNotificationService,
         ProgrammingAssistantSettingsService programmingAssistantSettingsService,
+        PetService petService,
         StoragePaths storagePaths)
     {
         InitializeComponent();
@@ -64,6 +67,7 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         _storagePaths = storagePaths;
         _programmingAssistantSettingsService = programmingAssistantSettingsService;
+        _petService = petService;
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
         SourceInitialized += OnSourceInitialized;
@@ -519,6 +523,35 @@ public partial class MainWindow : Window
                     await SelectProgrammingCliAsync(requestId, cliId);
                     break;
                 }
+                case "get-pet-settings":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    await PostPetSettingsAsync(requestId);
+                    break;
+                }
+                case "set-pet-visible":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    var enabled = document.RootElement.TryGetProperty("enabled", out var enabledElement) &&
+                                  enabledElement.GetBoolean();
+                    await SetPetVisibleAsync(requestId, enabled);
+                    break;
+                }
+                case "select-builtin-pet":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    var petId = document.RootElement.TryGetProperty("petId", out var petIdElement)
+                        ? petIdElement.GetString()
+                        : null;
+                    await SelectBuiltInPetAsync(requestId, petId);
+                    break;
+                }
             }
         }
         catch (Exception exception)
@@ -579,6 +612,69 @@ public partial class MainWindow : Window
             selectedCliId = settings.SelectedCliId,
             tools = settings.Tools,
             scannedAtUtc = settings.ScannedAtUtc
+        });
+
+    private async Task PostPetSettingsAsync(string? requestId)
+    {
+        try
+        {
+            var settings = await _petService.GetSettingsAsync();
+            PostPetSettings(requestId, settings);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            PostPetSettingsError(requestId, exception);
+        }
+    }
+
+    private async Task SetPetVisibleAsync(string? requestId, bool enabled)
+    {
+        try
+        {
+            var settings = await _petService.SetEnabledAsync(enabled);
+            PostPetSettings(requestId, settings);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            PostPetSettingsError(requestId, exception);
+        }
+    }
+
+    private async Task SelectBuiltInPetAsync(string? requestId, string? petId)
+    {
+        try
+        {
+            var settings = await _petService.SelectBuiltInPetAsync(petId);
+            PostPetSettings(requestId, settings);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            PostPetSettingsError(requestId, exception);
+        }
+    }
+
+    private void PostPetSettings(string? requestId, PetSettings settings)
+        => PostTerminalMessage(new
+        {
+            type = "pet-settings",
+            requestId,
+            enabled = settings.Enabled,
+            selectedPetId = PetAssetPaths.ResolveSelectedBuiltInPetId(settings.SpriteSheetPath),
+            spriteSheetPath = settings.SpriteSheetPath
+        });
+
+    private void PostPetSettingsError(string? requestId, Exception exception)
+        => PostTerminalMessage(new
+        {
+            type = "pet-settings",
+            requestId,
+            enabled = false,
+            selectedPetId = PetAssetPaths.DefaultBuiltInPetId,
+            spriteSheetPath = (string?)null,
+            error = exception.Message
         });
 
     private void EnsureTerminalSession()

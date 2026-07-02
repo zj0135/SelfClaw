@@ -68,6 +68,7 @@ migrations/
 
 # Frontend
 SelfClaw.TranscriptVue/node_modules/
+SelfClaw.Desktop/Assets/TranscriptVue/
 
 # Mac鐩稿叧鏂囦欢
 .DS_Store

@@ -38,7 +38,8 @@
     <None Update="Assets\skills\*;Assets\skills\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="Assets\pets\*;Assets\pets\**\*">
+    <None Include="..\SelfClaw.TranscriptVue\assets\pets\**\*">
+      <Link>Assets\pets\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="runtimes\win-x64\native\*">
@@ -64,5 +65,13 @@
     </ItemGroup>
 
     <Copy SourceFiles="@(SkillAsset)" DestinationFiles="@(SkillAsset->'$(OutDir)Assets\skills\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
+  </Target>
+
+  <Target Name="SyncPetAssets" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)\..\SelfClaw.TranscriptVue\assets\pets')">
+    <ItemGroup>
+      <PetAsset Include="$(MSBuildProjectDirectory)\..\SelfClaw.TranscriptVue\assets\pets\*;$(MSBuildProjectDirectory)\..\SelfClaw.TranscriptVue\assets\pets\**\*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(PetAsset)" DestinationFiles="@(PetAsset->'$(OutDir)Assets\pets\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" />
   </Target>
 </Project>

@@ -191,10 +191,10 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
         var configuredPath = settings.SpriteSheetPath;
         if (string.IsNullOrWhiteSpace(configuredPath))
         {
-            return LoadPackage(Path.Combine(AppContext.BaseDirectory, "Assets", "pets", "yorha-sit-2b"));
+            return LoadPackage(PetAssetPaths.ResolveDefaultPackageDirectory());
         }
 
-        var fullPath = Path.GetFullPath(configuredPath);
+        var fullPath = PetAssetPaths.ResolveConfiguredPath(configuredPath);
         if (Directory.Exists(fullPath))
         {
             return LoadPackage(fullPath);

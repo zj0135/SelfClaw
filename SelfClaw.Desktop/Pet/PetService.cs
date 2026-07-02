@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
@@ -64,6 +65,63 @@ public sealed class PetService : IDisposable
 
             return _window is { IsVisible: true };
         }
+    }
+
+    public Task<PetSettings> GetSettingsAsync(CancellationToken cancellationToken = default)
+        => LoadAsync(cancellationToken);
+
+    public async Task<PetSettings> SetEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        if (enabled)
+        {
+            await ShowAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await HideAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return await LoadAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<PetSettings> SelectBuiltInPetAsync(string? petId, CancellationToken cancellationToken = default)
+    {
+        if (!PetAssetPaths.IsSafeBuiltInPetId(petId))
+        {
+            throw new ArgumentException("Pet id is invalid.", nameof(petId));
+        }
+
+        var normalizedPetId = petId!.Trim();
+        var packageDirectory = PetAssetPaths.GetBuiltInPackageDirectory(normalizedPetId);
+        if (!Directory.Exists(packageDirectory))
+        {
+            throw new FileNotFoundException("Built-in pet package was not found.", packageDirectory);
+        }
+
+        await LoadAsync(cancellationToken).ConfigureAwait(false);
+
+        var next = _settings with
+        {
+            SpriteSheetPath = normalizedPetId,
+            Grid = null,
+        };
+
+        await UpdateSettingsAsync(next, cancellationToken).ConfigureAwait(false);
+
+        await InvokeOnUiThreadAsync(
+            () =>
+            {
+                if (_window is null)
+                {
+                    return;
+                }
+
+                _window.LoadPet(_settings);
+                _windowPetLoaded = true;
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return _settings;
     }
 
     /// <summary>

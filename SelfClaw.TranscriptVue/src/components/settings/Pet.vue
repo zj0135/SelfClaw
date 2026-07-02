@@ -1,87 +1,210 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
-/* ---- 持久化键（沿用原型行为） ---- */
-const STORE_TAB = 'pet.settings.tab'
-const STORE_VIS = 'pet.settings.visible'
-const STORE_PET = 'pet.settings.selected'
+const DEFAULT_PET_ID = 'yorha-sit-2b'
 
-/* ---- Tab 定义 ---- */
+const manifestModules = import.meta.glob('../../../assets/pets/*/pet.json', {
+  eager: true,
+  import: 'default',
+})
+const spriteModules = import.meta.glob('../../../assets/pets/*/spritesheet.webp', {
+  eager: true,
+  import: 'default',
+  query: '?url',
+})
+
 const tabs = [
   { id: 'builtin', label: '内置' },
   { id: 'custom', label: '自定义' },
   { id: 'community', label: '社区' },
 ]
-const activeTab = ref('builtin')
-
-/* ---- 显示宠物开关 ---- */
-const petVisible = ref(false)
-
-/* ---- 内置宠物数据 ---- */
-const pets = [
-  { id: 'yorha-si', name: 'YoRHa Si', desc: '沉稳静坐的 YoRHa 风格 chibi 程序员，专注写代码时不打扰你。', icon: 'yorha' },
-  { id: 'yelling-dario', name: 'Yelling Dario', desc: '大声嘶吼的迷你 Dario Amodei，遇到棘手 bug 时会替你先喊出来。', icon: 'yelling' },
-  { id: 'tux', name: 'Tux', desc: '像素风的 Linux 吉祥物，永远站在角落里看着你敲终端。', icon: 'tux' },
-  { id: 'slavik', name: 'Slavik', desc: '黑袍下蹲的调皮小地精，偶尔会偷偷把你的 tab 键换个位置。', icon: 'slavik' },
-  { id: 'nyako-shigure', name: 'Nyako Shigure', desc: '温暖沉稳的机械猫娘，编译等待时会哼一小段电子铃声。', icon: 'nyako' },
-  { id: 'dentist', name: 'Dentist', desc: '亲切治愈的 chibi 牙医吉祥物，长时间坐姿时会提醒你起来喝水。', icon: 'dentist' },
-  { id: 'dario', name: 'Dario', desc: '沮丧摸鱼的 Codex 小助手，看到重复代码会长长地叹一口气。', icon: 'dario' },
-  { id: 'clippy', name: 'Clippy', desc: '经典回锅的曲别针助理，检测到你写文档时会礼貌地探出来。', icon: 'clippy' },
+const builtinOrder = [
+  'yorha-sit-2b',
+  'yelling-dario',
+  'tux',
+  'slavik',
+  'nyako-shigure',
+  'dentist',
+  'dario',
+  'clippit',
 ]
-const selectedPet = ref('yorha-si')
-
-const currentName = computed(() => {
-  const p = pets.find((x) => x.id === selectedPet.value)
-  return p ? p.name : '—'
-})
-
-/* ---- 交互 ---- */
-function selectTab(id) {
-  activeTab.value = id
-  try { localStorage.setItem(STORE_TAB, id) } catch (_) {}
+const legacyPetIds = {
+  'yorha-si': 'yorha-sit-2b',
+  clippy: 'clippit',
 }
 
-function onTabKey(e, index) {
-  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
-  e.preventDefault()
-  const next = e.key === 'ArrowRight'
+const pets = buildBuiltinPets()
+const defaultPetId = pets.some((pet) => pet.id === DEFAULT_PET_ID)
+  ? DEFAULT_PET_ID
+  : pets[0]?.id || DEFAULT_PET_ID
+
+const activeTab = ref('builtin')
+const petVisible = ref(false)
+const selectedPet = ref(defaultPetId)
+const syncPending = ref(false)
+const syncError = ref('')
+const pendingRequests = new Set()
+let requestSeq = 0
+
+const currentName = computed(() => {
+  const pet = pets.find((item) => item.id === selectedPet.value)
+  return pet ? pet.name : '-'
+})
+
+const footerStatus = computed(() => {
+  if (syncError.value) return `同步失败：${syncError.value}`
+  if (syncPending.value) return '正在同步桌面设置...'
+  return `${pets.length} 只内置宠物 · 单击卡片切换默认`
+})
+
+function buildBuiltinPets() {
+  return Object.entries(manifestModules)
+    .map(([path, manifest]) => {
+      const packageId = getPackageId(path)
+      const id = normalizeString(manifest?.id) || packageId
+      const spritePath = path.replace('/pet.json', '/spritesheet.webp')
+      const grid = manifest?.grid || {}
+
+      return {
+        id,
+        packageId,
+        name: normalizeString(manifest?.displayName) || id,
+        desc: normalizeString(manifest?.description) || '内置桌面宠物包。',
+        author: normalizeString(manifest?.author),
+        tags: Array.isArray(manifest?.tags) ? manifest.tags.filter(Boolean) : [],
+        previewSrc: spriteModules[spritePath] || '',
+        cols: Number(grid.cols) > 0 ? Number(grid.cols) : 8,
+        rows: Number(grid.rows) > 0 ? Number(grid.rows) : 9,
+      }
+    })
+    .sort((a, b) => {
+      const ai = builtinOrder.indexOf(a.id)
+      const bi = builtinOrder.indexOf(b.id)
+      if (ai !== -1 || bi !== -1) {
+        return (ai === -1 ? Number.MAX_SAFE_INTEGER : ai) -
+          (bi === -1 ? Number.MAX_SAFE_INTEGER : bi)
+      }
+
+      return a.name.localeCompare(b.name)
+    })
+}
+
+function normalizeString(value) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function getPackageId(path) {
+  const match = path.match(/\/assets\/pets\/([^/]+)\/pet\.json$/)
+  return match?.[1] || ''
+}
+
+function normalizePetId(id) {
+  const normalized = legacyPetIds[id] || id
+  return pets.some((pet) => pet.id === normalized) ? normalized : defaultPetId
+}
+
+function previewStyle(pet) {
+  if (!pet.previewSrc) return {}
+  return {
+    backgroundImage: `url("${pet.previewSrc}")`,
+    backgroundSize: `${pet.cols * 100}% ${pet.rows * 100}%`,
+    backgroundPosition: '0 0',
+  }
+}
+
+function initials(name) {
+  return String(name || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join('') || '?'
+}
+
+function selectTab(id) {
+  activeTab.value = id
+}
+
+function onTabKey(event, index) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  event.preventDefault()
+  const next = event.key === 'ArrowRight'
     ? (index + 1) % tabs.length
     : (index - 1 + tabs.length) % tabs.length
   selectTab(tabs[next].id)
-  const btns = document.querySelectorAll('.pet-view .tab-btn')
-  if (btns[next]) btns[next].focus()
+  const buttons = document.querySelectorAll('.pet-view .tab-btn')
+  buttons[next]?.focus()
 }
 
 function toggleVisible() {
-  petVisible.value = !petVisible.value
-  try { localStorage.setItem(STORE_VIS, petVisible.value ? '1' : '0') } catch (_) {}
+  const next = !petVisible.value
+  syncError.value = ''
+  sendHostMessage('set-pet-visible', { enabled: next })
 }
 
 function selectPet(id) {
-  selectedPet.value = id
-  try { localStorage.setItem(STORE_PET, id) } catch (_) {}
+  const next = normalizePetId(id)
+  if (selectedPet.value === next) return
+
+  syncError.value = ''
+  sendHostMessage('select-builtin-pet', { petId: next })
 }
 
-/* ---- 恢复上次状态 ---- */
+function sendHostMessage(type, payload = {}) {
+  const webview = window.chrome?.webview
+  if (!webview) {
+    syncError.value = '需要在桌面应用中读取 desktop-settings.json'
+    return null
+  }
+
+  const requestId = `pet-${Date.now()}-${++requestSeq}`
+  pendingRequests.add(requestId)
+  syncPending.value = true
+  webview.postMessage({ type, requestId, ...payload })
+  return requestId
+}
+
+function requestHostSettings() {
+  sendHostMessage('get-pet-settings')
+}
+
+function applyHostSettings(payload) {
+  const requestId = payload?.requestId
+  if (requestId && pendingRequests.size > 0 && !pendingRequests.has(requestId)) {
+    return
+  }
+
+  if (requestId) {
+    pendingRequests.delete(requestId)
+  }
+  syncPending.value = pendingRequests.size > 0
+
+  if (payload?.error) {
+    syncError.value = payload.error
+    return
+  }
+
+  syncError.value = ''
+  petVisible.value = Boolean(payload?.enabled)
+  selectedPet.value = normalizePetId(payload?.selectedPetId)
+}
+
 onMounted(() => {
-  try {
-    const savedTab = localStorage.getItem(STORE_TAB)
-    if (savedTab && tabs.some((t) => t.id === savedTab)) activeTab.value = savedTab
-  } catch (_) {}
-  try {
-    petVisible.value = localStorage.getItem(STORE_VIS) === '1'
-  } catch (_) {}
-  try {
-    const savedPet = localStorage.getItem(STORE_PET)
-    if (savedPet && pets.some((p) => p.id === savedPet)) selectedPet.value = savedPet
-  } catch (_) {}
+  requestHostSettings()
+})
+
+defineExpose({
+  handleMessage(payload) {
+    if (payload?.type === 'pet-settings') {
+      applyHostSettings(payload)
+    }
+  },
 })
 </script>
 
 <template>
   <main class="pet-view settings-content">
     <div class="panel-inner">
-
       <header class="panel-head">
         <h2 class="panel-title">宠物</h2>
         <p class="panel-desc">桌面宠物设置</p>
@@ -90,7 +213,7 @@ onMounted(() => {
       <div class="tab-bar">
         <div class="tab-strip" role="tablist" aria-label="宠物来源">
           <button
-            v-for="(tab, i) in tabs"
+            v-for="(tab, index) in tabs"
             :key="tab.id"
             type="button"
             class="tab-btn"
@@ -99,13 +222,14 @@ onMounted(() => {
             :aria-selected="activeTab === tab.id ? 'true' : 'false'"
             :tabindex="activeTab === tab.id ? 0 : -1"
             @click="selectTab(tab.id)"
-            @keydown="onTabKey($event, i)"
+            @keydown="onTabKey($event, index)"
           >{{ tab.label }}</button>
         </div>
 
         <button
           type="button"
           class="pill-toggle"
+          :disabled="syncPending"
           :aria-pressed="petVisible ? 'true' : 'false'"
           title="切换桌面宠物可见性"
           @click="toggleVisible"
@@ -115,9 +239,8 @@ onMounted(() => {
         </button>
       </div>
 
-      <!-- 内置 -->
       <section v-show="activeTab === 'builtin'" class="tab-panel" role="tabpanel">
-        <p class="tab-lead">Open Design 内置的精选宠物 — 一键领养。</p>
+        <p class="tab-lead">从内置宠物包中选择默认桌面伙伴，资源来自 TranscriptVue 的 assets/pets。</p>
 
         <div class="pet-grid">
           <button
@@ -125,27 +248,14 @@ onMounted(() => {
             :key="pet.id"
             type="button"
             class="pet-card"
+            :disabled="syncPending"
             :data-selected="selectedPet === pet.id ? 'true' : 'false'"
             title="点击设为默认"
             @click="selectPet(pet.id)"
           >
             <span class="pet-avatar" aria-hidden="true">
-              <!-- YoRHa Si -->
-              <svg v-if="pet.icon === 'yorha'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8l1.5 3v3h-11V7z"/><circle cx="10" cy="8" r="0.6" fill="currentColor" stroke="none"/><circle cx="14" cy="8" r="0.6" fill="currentColor" stroke="none"/><path d="M6.5 10h11v6a3.5 3.5 0 0 1-3.5 3.5h-4A3.5 3.5 0 0 1 6.5 16z"/><path d="M9 20l-1 2M15 20l1 2"/></svg>
-              <!-- Yelling Dario -->
-              <svg v-else-if="pet.icon === 'yelling'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M8 8.5c-1-.2-2-.2-3 .2M16 8.5c1-.2 2-.2 3 .2"/><path d="M10 11a3 3 0 0 0 4 0"/><path d="M6 21c1-3 3.5-4.5 6-4.5s5 1.5 6 4.5"/></svg>
-              <!-- Tux -->
-              <svg v-else-if="pet.icon === 'tux'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="13" rx="6" ry="8"/><path d="M12 5c1.5 0 2.6 1.2 2.6 2.5v.5h-5.2v-.5C9.4 6.2 10.5 5 12 5z"/><circle cx="10.5" cy="9.5" r="0.6" fill="currentColor" stroke="none"/><circle cx="13.5" cy="9.5" r="0.6" fill="currentColor" stroke="none"/><path d="M11 12l1 1 1-1"/><path d="M7 20l2-2M17 20l-2-2"/></svg>
-              <!-- Slavik -->
-              <svg v-else-if="pet.icon === 'slavik'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12c0-3.3 2.7-6 6-6s6 2.7 6 6v3H6z"/><path d="M9 12v3M15 12v3"/><path d="M6 15l-2 6h16l-2-6"/><circle cx="10" cy="12" r="0.7" fill="currentColor" stroke="none"/><circle cx="14" cy="12" r="0.7" fill="currentColor" stroke="none"/><path d="M10.5 14.5c.5.5 2.5.5 3 0"/></svg>
-              <!-- Nyako Shigure -->
-              <svg v-else-if="pet.icon === 'nyako'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12l-1-4 4 2h6l4-2-1 4z"/><path d="M5 12v5a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4v-5"/><circle cx="10" cy="14" r="0.7" fill="currentColor" stroke="none"/><circle cx="14" cy="14" r="0.7" fill="currentColor" stroke="none"/><path d="M11 17c.5.3 1.5.3 2 0"/></svg>
-              <!-- Dentist -->
-              <svg v-else-if="pet.icon === 'dentist'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4c-2 0-3 2-3 4 0 3 1 5 1 8 0 2 1 3 2 3s1.5-1 2-3 1-3 2-3 1.5 1 2 3 1 3 2 3 2-1 2-3c0-3 1-5 1-8 0-2-1-4-3-4-1.5 0-2 1-4 1s-2.5-1-4-1z"/></svg>
-              <!-- Dario -->
-              <svg v-else-if="pet.icon === 'dario'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><rect x="8.5" y="7.5" width="7" height="2" rx="0.4"/><line x1="12" y1="7.5" x2="12" y2="9.5"/><path d="M6 21c1-3 3.5-4.5 6-4.5s5 1.5 6 4.5"/></svg>
-              <!-- Clippy -->
-              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3v13a4 4 0 0 1-8 0V6a2.5 2.5 0 0 1 5 0v9a1 1 0 0 1-2 0V6.5"/></svg>
+              <span v-if="pet.previewSrc" class="pet-sprite" :style="previewStyle(pet)"></span>
+              <span v-else class="pet-initials">{{ initials(pet.name) }}</span>
             </span>
             <span class="pet-body">
               <span class="pet-name-row">
@@ -153,6 +263,10 @@ onMounted(() => {
                 <span v-if="selectedPet === pet.id" class="pet-badge">默认</span>
               </span>
               <span class="pet-desc">{{ pet.desc }}</span>
+              <span class="pet-meta">
+                <span>{{ pet.id }}</span>
+                <span v-if="pet.author">by {{ pet.author }}</span>
+              </span>
               <span v-if="selectedPet !== pet.id" class="pet-cta">设为默认</span>
             </span>
           </button>
@@ -164,13 +278,12 @@ onMounted(() => {
             <span class="pf-label">当前默认</span>
             <span class="pf-value">{{ currentName }}</span>
           </span>
-          <span class="pf-count">
-            {{ pets.length }} 只内置宠物 · 单击卡片切换默认
+          <span class="pf-count" :data-error="syncError ? 'true' : 'false'">
+            {{ footerStatus }}
           </span>
         </footer>
       </section>
 
-      <!-- 自定义 -->
       <section v-show="activeTab === 'custom'" class="tab-panel" role="tabpanel">
         <p class="tab-lead">你亲手定制的宠物会在这里出现。可以从形象、动作到出场频率完全按需调整。</p>
 
@@ -185,9 +298,8 @@ onMounted(() => {
         </div>
       </section>
 
-      <!-- 社区 -->
       <section v-show="activeTab === 'community'" class="tab-panel" role="tabpanel">
-        <p class="tab-lead">来自社区分享的宠物 — 浏览、试用或投稿你自己的作品。</p>
+        <p class="tab-lead">来自社区分享的宠物，稍后可以在这里浏览、试用或投稿作品。</p>
 
         <div class="empty-state">
           <svg class="es-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13 13 0 0 1 0 18M12 3a13 13 0 0 0 0 18"/></svg>
@@ -203,7 +315,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* ---- Tokens (aligned with App.vue :root) ---- */
 .pet-view {
   --panel: #ffffff;
   --panel-soft: #f7f8fa;
@@ -217,6 +328,7 @@ onMounted(() => {
   --accent-2: #375fae;
   --accent-soft: #eef2fb;
   --success: #2f855a;
+  --danger: #c24150;
   --font-display: 'Segoe UI Variable Display', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --shadow-sm: 0 1px 2px rgba(23, 26, 31, 0.06);
 
@@ -226,7 +338,6 @@ onMounted(() => {
 .pet-view * { box-sizing: border-box; }
 .pet-view button { cursor: pointer; font: inherit; color: inherit; }
 
-/* Content panel */
 .settings-content {
   flex: 1;
   min-width: 0;
@@ -239,7 +350,6 @@ onMounted(() => {
   max-width: 1120px;
 }
 
-/* Header block */
 .panel-head { margin-bottom: 18px; }
 .panel-title {
   margin: 0;
@@ -247,7 +357,7 @@ onMounted(() => {
   font-size: 20px;
   font-weight: 650;
   line-height: 1.3;
-  letter-spacing: -0.005em;
+  letter-spacing: 0;
   color: var(--text);
 }
 .panel-desc {
@@ -257,7 +367,6 @@ onMounted(() => {
   line-height: 1.5;
 }
 
-/* Tab bar row */
 .tab-bar {
   display: flex;
   align-items: center;
@@ -282,7 +391,7 @@ onMounted(() => {
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   transition: background 0.14s, color 0.14s, box-shadow 0.14s;
 }
 .tab-btn:hover { color: var(--text); }
@@ -314,6 +423,10 @@ onMounted(() => {
   border-color: var(--border-strong);
   background: var(--panel-soft);
 }
+.pill-toggle:disabled {
+  cursor: default;
+  opacity: 0.64;
+}
 .pill-toggle .pt-ico {
   width: 14px;
   height: 14px;
@@ -327,28 +440,27 @@ onMounted(() => {
 }
 .pill-toggle[aria-pressed="true"] .pt-ico { color: var(--accent-2); }
 
-/* Tab-level lead-in copy */
 .tab-lead {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.55;
   margin-bottom: 18px;
-  max-width: 60ch;
+  max-width: 68ch;
 }
 
-/* Pet grid */
 .pet-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(238px, 1fr));
   gap: 12px;
 }
 .pet-card {
   display: flex;
   align-items: flex-start;
   gap: 14px;
+  min-height: 116px;
   padding: 14px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--panel);
   text-align: left;
   font-size: 13px;
@@ -359,6 +471,15 @@ onMounted(() => {
   border-color: var(--border-strong);
   background: var(--panel-soft);
   box-shadow: var(--shadow-sm);
+}
+.pet-card:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+.pet-card:disabled:hover {
+  border-color: var(--border);
+  background: var(--panel);
+  box-shadow: none;
 }
 .pet-card:focus-visible {
   outline: none;
@@ -373,16 +494,27 @@ onMounted(() => {
 
 .pet-avatar {
   flex: 0 0 auto;
-  width: 52px;
-  height: 52px;
-  border-radius: 10px;
+  width: 58px;
+  height: 58px;
+  overflow: hidden;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--panel-muted);
   display: grid;
   place-items: center;
   color: var(--muted);
 }
-.pet-avatar svg { width: 26px; height: 26px; }
+.pet-sprite {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+  image-rendering: auto;
+}
+.pet-initials {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
 
 .pet-body {
   min-width: 0;
@@ -416,7 +548,7 @@ onMounted(() => {
   color: var(--accent-2);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   line-height: 1.55;
 }
 .pet-desc {
@@ -428,6 +560,14 @@ onMounted(() => {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.pet-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted-soft);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
 .pet-cta {
   margin-top: 4px;
   display: inline-flex;
@@ -437,7 +577,7 @@ onMounted(() => {
   color: var(--accent-2);
   font-size: 12px;
   font-weight: 550;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   opacity: 0;
   transform: translateX(-2px);
   transition: opacity 0.14s, transform 0.14s;
@@ -448,7 +588,6 @@ onMounted(() => {
   transform: none;
 }
 
-/* Footer strip under the 内置 grid */
 .pet-footer {
   display: flex;
   align-items: center;
@@ -457,7 +596,7 @@ onMounted(() => {
   margin-top: 20px;
   padding: 12px 16px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--panel-soft);
   color: var(--muted);
   font-size: 12.5px;
@@ -480,16 +619,22 @@ onMounted(() => {
 .pf-label {
   color: var(--muted-soft);
   font-weight: 500;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
 }
 .pf-value {
   color: var(--text);
   font-weight: 600;
-  letter-spacing: -0.005em;
+  letter-spacing: 0;
 }
-.pf-count { color: var(--muted-soft); }
+.pf-count {
+  min-width: 0;
+  color: var(--muted-soft);
+  text-align: right;
+}
+.pf-count[data-error="true"] {
+  color: var(--danger);
+}
 
-/* Empty state for 自定义 / 社区 tabs */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -499,7 +644,7 @@ onMounted(() => {
   padding: 60px 24px 68px;
   text-align: center;
   border: 1px dashed var(--border-strong);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--panel-soft);
 }
 .empty-state .es-ico {
@@ -514,7 +659,7 @@ onMounted(() => {
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
-  letter-spacing: -0.005em;
+  letter-spacing: 0;
 }
 .empty-state p {
   margin: 0;
@@ -536,7 +681,7 @@ onMounted(() => {
   color: #fff;
   font-size: 13px;
   font-weight: 550;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   transition: background 0.14s;
 }
 .btn-primary:hover { background: var(--accent-2); }
@@ -555,12 +700,25 @@ onMounted(() => {
   background: var(--panel-soft);
 }
 
-/* Scrollbars — match main app */
 .settings-content::-webkit-scrollbar { width: 9px; }
 .settings-content::-webkit-scrollbar-thumb {
   background: #d7dae1;
   border-radius: 9px;
   border: 2px solid var(--panel-soft);
+}
+
+@media (max-width: 760px) {
+  .panel-inner { padding: 22px 18px 32px; }
+  .tab-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .tab-strip { width: max-content; max-width: 100%; }
+  .pet-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .pf-count { text-align: left; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,1 +1,0 @@
-import{_ as t,o,c as a,a as s}from"./index-Cqxs8zFt.js";const c={},n={class:"settings-panel"};function r(l,e){return o(),a("div",n,[...e[0]||(e[0]=[s("h2",{class:"panel-title"},"MCP 服务器",-1),s("p",{class:"panel-desc"},"管理 Model Context Protocol 服务器连接",-1)])])}const d=t(c,[["render",r],["__scopeId","data-v-fb6997f3"]]);export{d as default};
