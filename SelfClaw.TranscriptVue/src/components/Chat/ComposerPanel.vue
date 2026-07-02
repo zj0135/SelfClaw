@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
+import ModelSelector from './ModelSelector.vue';
 
 const props = defineProps({
 	disabled: {
@@ -52,10 +53,7 @@ defineExpose({
 		></textarea>
 		<div class="composer-toolbar">
 			<div class="composer-tools-left">
-				<button class="composer-model" type="button" title="模型选择">
-					<span class="model-dot" aria-hidden="true"></span>
-					<span>Kimi K2.6 Code Preview</span>
-				</button>
+				<ModelSelector />
 				<button class="icon-btn" type="button" title="功能" aria-label="功能">
 					<svg viewBox="0 0 20 20" aria-hidden="true">
 						<path d="M3 7h3M10 7h7" />
@@ -152,34 +150,6 @@ defineExpose({
 	align-items: center;
 	gap: 6px;
 	min-width: 0;
-}
-
-.composer-model {
-	display: inline-flex;
-	align-items: center;
-	gap: 7px;
-	padding: 5px 10px 5px 8px;
-	border: 1px solid #e5e7eb;
-	border-radius: 8px;
-	background: transparent;
-	color: #161a20;
-	font-size: 12px;
-	font-weight: 500;
-	letter-spacing: 0.02em;
-	white-space: nowrap;
-	cursor: pointer;
-	transition: background 0.15s;
-}
-
-.composer-model:hover {
-	background: #f7f8fa;
-}
-
-.model-dot {
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: #17a34a;
 }
 
 .icon-btn {

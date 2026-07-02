@@ -1,0 +1,1 @@
+import{_ as t,o as a,c,a as s}from"./index-Cqxs8zFt.js";const n={},o={class:"settings-panel"};function l(r,e){return a(),c("div",o,[...e[0]||(e[0]=[s("h2",{class:"panel-title"},"插件",-1),s("p",{class:"panel-desc"},"安装和管理扩展插件",-1)])])}const d=t(n,[["render",l],["__scopeId","data-v-5269d5f5"]]);export{d as default};

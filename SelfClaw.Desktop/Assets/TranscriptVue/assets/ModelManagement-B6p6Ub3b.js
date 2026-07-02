@@ -1,0 +1,1 @@
+import{_ as a,o as t,c,a as s}from"./index-Cqxs8zFt.js";const n={},o={class:"settings-panel"};function d(l,e){return t(),c("div",o,[...e[0]||(e[0]=[s("h2",{class:"panel-title"},"模型管理",-1),s("p",{class:"panel-desc"},"查看和管理已配置的 AI 模型",-1)])])}const _=a(n,[["render",d],["__scopeId","data-v-5d1bcd21"]]);export{_ as default};

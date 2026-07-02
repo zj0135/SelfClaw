@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
+using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.ViewModels;
@@ -47,6 +48,7 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<DesktopNotificationService>();
             builder.Services.AddSingleton<DesktopNotificationActivationService>();
             builder.Services.AddSingleton<ProgrammingAssistantSettingsService>();
+            builder.Services.AddSingleton<PetService>();
             builder.Services.AddSingleton<SystemTrayService>();
             builder.Services.AddSingleton<MainWindowViewModel>();
             builder.Services.AddSingleton<MainWindow>();
@@ -65,6 +67,9 @@ public partial class App : System.Windows.Application
             systemTrayService.RegisterMainWindow(mainWindow);
             MainWindow = mainWindow;
             mainWindow.Show();
+
+            // 主窗口已被显式设为 Application.MainWindow,此后再显示 PetWindow 不会篡夺 MainWindow(见 §7.2)。
+            await _host.Services.GetRequiredService<PetService>().InitializeAsync();
         }
         catch (Exception exception)
         {

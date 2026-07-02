@@ -1,1 +1,0 @@
-import{_ as t,o as a,c,a as s}from"./index-3o0nrgIP.js";const o={},n={class:"settings-panel"};function r(l,e){return a(),c("div",n,[...e[0]||(e[0]=[s("h2",{class:"panel-title"},"关于",-1),s("p",{class:"panel-desc"},"应用信息和版本详情",-1)])])}const d=t(o,[["render",r],["__scopeId","data-v-c0e22869"]]);export{d as default};

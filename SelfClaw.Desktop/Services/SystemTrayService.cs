@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using Microsoft.Extensions.Logging;
+using SelfClaw.Desktop.Pet;
 using DrawingBitmap = System.Drawing.Bitmap;
 using DrawingIcon = System.Drawing.Icon;
 using Forms = System.Windows.Forms;
@@ -13,25 +14,31 @@ public sealed class SystemTrayService : IDisposable
     private static readonly Uri IconUri = new("pack://application:,,,/Assets/icon/icon.ico", UriKind.Absolute);
 
     private readonly ILogger<SystemTrayService> _logger;
+    private readonly PetService _petService;
     private readonly Forms.NotifyIcon? _notifyIcon;
     private readonly Forms.ContextMenuStrip? _contextMenu;
     private readonly Forms.ToolStripMenuItem? _openMenuItem;
+    private readonly Forms.ToolStripMenuItem? _petMenuItem;
     private readonly Forms.ToolStripMenuItem? _exitMenuItem;
     private Window? _mainWindow;
 
-    public SystemTrayService(ILogger<SystemTrayService> logger)
+    public SystemTrayService(ILogger<SystemTrayService> logger, PetService petService)
     {
         _logger = logger;
+        _petService = petService;
 
         try
         {
             _openMenuItem = new Forms.ToolStripMenuItem("Open SelfClaw");
+            _petMenuItem = new Forms.ToolStripMenuItem("Show Pet") { CheckOnClick = true };
             _exitMenuItem = new Forms.ToolStripMenuItem("Exit");
             _openMenuItem.Click += OnOpenMenuItemClick;
+            _petMenuItem.Click += OnPetMenuItemClick;
             _exitMenuItem.Click += OnExitMenuItemClick;
 
             _contextMenu = new Forms.ContextMenuStrip();
-            _contextMenu.Items.AddRange([_openMenuItem, new Forms.ToolStripSeparator(), _exitMenuItem]);
+            _contextMenu.Items.AddRange([_openMenuItem, _petMenuItem, new Forms.ToolStripSeparator(), _exitMenuItem]);
+            _contextMenu.Opening += OnContextMenuOpening;
 
             _notifyIcon = new Forms.NotifyIcon
             {
@@ -61,6 +68,27 @@ public sealed class SystemTrayService : IDisposable
     private void OnOpenMenuItemClick(object? sender, EventArgs e)
     {
         ActivateMainWindow();
+    }
+
+    private void OnContextMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        // 打开菜单时同步勾选状态,反映宠物当前可见性。
+        if (_petMenuItem is not null)
+        {
+            _petMenuItem.Checked = _petService.IsVisible;
+        }
+    }
+
+    private async void OnPetMenuItemClick(object? sender, EventArgs e)
+    {
+        try
+        {
+            await _petService.ToggleAsync();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to toggle the desktop pet.");
+        }
     }
 
     private void OnExitMenuItemClick(object? sender, EventArgs e)
@@ -167,12 +195,21 @@ public sealed class SystemTrayService : IDisposable
             _openMenuItem.Click -= OnOpenMenuItemClick;
         }
 
+        if (_petMenuItem is not null)
+        {
+            _petMenuItem.Click -= OnPetMenuItemClick;
+        }
+
         if (_exitMenuItem is not null)
         {
             _exitMenuItem.Click -= OnExitMenuItemClick;
         }
 
-        _contextMenu?.Dispose();
+        if (_contextMenu is not null)
+        {
+            _contextMenu.Opening -= OnContextMenuOpening;
+            _contextMenu.Dispose();
+        }
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
