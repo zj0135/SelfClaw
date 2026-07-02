@@ -7,33 +7,57 @@
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
-        SizeToContent="WidthAndHeight"
+        Width="192"
+        Height="224"
         Title="SelfClaw Pet">
     <!--
-        阶段1:静态浮窗 + 拖拽 + 位置持久化。
-        视觉先用占位图形(圆角矩形 + 文字),真正的 spritesheet 帧渲染留给阶段2。
-        窗口尺寸略大于精灵单格(192×208),给拖影/气泡留余量。
+        阶段2:spritesheet idle 行逐帧渲染。
+        缺少 libwebp.dll 或素材加载失败时显示占位图形,避免浮窗启动崩溃。
     -->
     <Grid x:Name="PetRoot"
-          Width="160"
-          Height="176"
+          Width="192"
+          Height="224"
           Background="Transparent"
           MouseLeftButtonDown="OnPetMouseLeftButtonDown"
           MouseMove="OnPetMouseMove"
           MouseLeftButtonUp="OnPetMouseLeftButtonUp"
           LostMouseCapture="OnPetLostMouseCapture">
+        <Image Source="{Binding CurrentFrame}"
+               Width="192"
+               Height="208"
+               Stretch="Uniform"
+               HorizontalAlignment="Center"
+               VerticalAlignment="Bottom"
+               RenderOptions.BitmapScalingMode="{Binding BitmapScalingMode}" />
+
         <Border CornerRadius="16"
                 Background="#CC2D2D3A"
                 BorderBrush="#66FFFFFF"
-                BorderThickness="1">
+                BorderThickness="1"
+                Width="160"
+                Height="176"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding CurrentFrame}" Value="{x:Null}">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
             <Border.Effect>
                 <DropShadowEffect BlurRadius="16"
                                   ShadowDepth="0"
                                   Opacity="0.5"
                                   Color="#000000" />
             </Border.Effect>
-            <TextBlock Text="🐾"
-                       FontSize="56"
+            <TextBlock Text="SC"
+                       FontSize="42"
+                       FontWeight="SemiBold"
+                       Foreground="#FFFFFFFF"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center" />
         </Border>

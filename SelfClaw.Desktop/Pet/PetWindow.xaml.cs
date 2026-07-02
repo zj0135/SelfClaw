@@ -20,6 +20,7 @@ public partial class PetWindow : Window
     private double _windowTopAtPress;
     private bool _isPressed;
     private bool _isDragging;
+    private readonly PetViewModel _viewModel;
 
     /// <summary>拖拽结束且位置发生变化时触发,携带当前窗口左上角坐标(屏幕 DIP)。</summary>
     public event EventHandler<Point>? PositionCommitted;
@@ -28,8 +29,26 @@ public partial class PetWindow : Window
     public event EventHandler? Clicked;
 
     public PetWindow()
+        : this(new PetViewModel())
     {
+    }
+
+    public PetWindow(PetViewModel viewModel)
+    {
+        _viewModel = viewModel;
         InitializeComponent();
+        DataContext = _viewModel;
+        IsVisibleChanged += OnIsVisibleChanged;
+        Closed += OnClosed;
+    }
+
+    public void LoadPet(PetSettings settings)
+    {
+        _viewModel.Load(settings);
+        if (IsVisible)
+        {
+            _viewModel.StartAnimation();
+        }
     }
 
     private void OnPetMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -130,5 +149,24 @@ public partial class PetWindow : Window
         {
             Clicked?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (Equals(e.NewValue, true))
+        {
+            _viewModel.StartAnimation();
+        }
+        else
+        {
+            _viewModel.StopAnimation();
+        }
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        IsVisibleChanged -= OnIsVisibleChanged;
+        Closed -= OnClosed;
+        _viewModel.Dispose();
     }
 }

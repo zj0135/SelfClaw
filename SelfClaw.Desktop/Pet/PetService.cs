@@ -30,6 +30,7 @@ public sealed class PetService : IDisposable
 
     private readonly DesktopSettingsJsonStore _settingsStore;
     private readonly ILogger<PetService> _logger;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     private PetSettings _settings = new();
@@ -39,10 +40,14 @@ public sealed class PetService : IDisposable
     private Point _pendingPosition;
     private bool _disposed;
 
-    public PetService(DesktopSettingsJsonStore settingsStore, ILogger<PetService> logger)
+    public PetService(
+        DesktopSettingsJsonStore settingsStore,
+        ILogger<PetService> logger,
+        ILoggerFactory loggerFactory)
     {
         _settingsStore = settingsStore;
         _logger = logger;
+        _loggerFactory = loggerFactory;
     }
 
     /// <summary>宠物当前是否可见。</summary>
@@ -81,6 +86,7 @@ public sealed class PetService : IDisposable
             () =>
             {
                 EnsureWindow();
+                _window!.LoadPet(_settings);
                 _window!.Show();
                 RestoreWindowPosition();
             },
@@ -155,7 +161,7 @@ public sealed class PetService : IDisposable
             return;
         }
 
-        _window = new PetWindow();
+        _window = new PetWindow(new PetViewModel(_loggerFactory.CreateLogger<PetViewModel>()));
         _window.PositionCommitted += OnPositionCommitted;
         _window.Closed += OnWindowClosed;
     }

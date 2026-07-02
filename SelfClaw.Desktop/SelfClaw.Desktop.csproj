@@ -38,6 +38,12 @@
     <None Update="Assets\skills\*;Assets\skills\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Assets\pets\*;Assets\pets\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="runtimes\win-x64\native\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <Target Name="CopyProtectedDataAssembly" AfterTargets="Build" Condition="Exists('$(PkgSystem_Security_Cryptography_ProtectedData)\lib\net10.0\System.Security.Cryptography.ProtectedData.dll')">
