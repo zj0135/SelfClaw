@@ -3,27 +3,31 @@ import { computed, ref } from 'vue';
 import ModelSelector from './ModelSelector.vue';
 
 const props = defineProps({
-	disabled: {
+	busy: {
 		type: Boolean,
 		default: false,
 	},
 });
 
-const emit = defineEmits(['submit']);
+const emit = defineEmits(['submit', 'stop']);
 
 const composerText = ref('');
 const shellRef = ref(null);
 
-const canSend = computed(() => composerText.value.trim().length > 0 && !props.disabled);
+const canSend = computed(() => composerText.value.trim().length > 0 && !props.busy);
 
 function submit() {
 	const prompt = composerText.value.trim();
-	if (!prompt || props.disabled) {
+	if (!prompt || props.busy) {
 		return;
 	}
 
 	emit('submit', prompt);
 	composerText.value = '';
+}
+
+function stop() {
+	emit('stop');
 }
 
 function onKeydown(event) {
@@ -48,7 +52,6 @@ defineExpose({
 			class="composer-input"
 			rows="3"
 			placeholder="让助手帮你处理项目..."
-			:disabled="props.disabled"
 			@keydown="onKeydown"
 		></textarea>
 		<div class="composer-toolbar">
@@ -70,7 +73,12 @@ defineExpose({
 				</button>
 			</div>
 			<div class="composer-tools-right">
-				<button class="send-btn" type="button" :disabled="!canSend" title="发送" aria-label="发送" @click="submit">
+				<button v-if="props.busy" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成" @click="stop">
+					<svg viewBox="0 0 20 20" aria-hidden="true">
+						<rect x="6" y="6" width="8" height="8" rx="1.5" fill="currentColor" stroke="none" />
+					</svg>
+				</button>
+				<button v-else class="send-btn" type="button" :disabled="!canSend" title="发送" aria-label="发送" @click="submit">
 					<svg viewBox="0 0 20 20" aria-hidden="true">
 						<path d="M5 10h10M10 5l5 5-5 5" />
 					</svg>

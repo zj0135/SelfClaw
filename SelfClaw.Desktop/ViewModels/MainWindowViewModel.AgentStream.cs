@@ -61,11 +61,17 @@ public sealed partial class MainWindowViewModel
                 turnState.OutputTokens = usage.OutputTokens ?? turnState.OutputTokens;
                 break;
 
+            case RunStatusEvent runStatus:
+                EnsureAssistantMessage(runtimeState, turnState);
+                runtimeState.ActivityText = MapRunStatusText(runStatus.Status);
+                PublishRuntimeState(runtimeState, true);
+                break;
+
             case RunCompletedEvent completed:
                 await CompleteAssistantTurnAsync(runtimeState, turnState, completed, cancellationToken);
                 break;
 
-            // RunStatusEvent / RawOutputEvent / PermissionRequestedEvent carry no transcript state in v1.
+            // RawOutputEvent / PermissionRequestedEvent carry no transcript state in v1.
             default:
                 break;
         }
@@ -208,6 +214,17 @@ public sealed partial class MainWindowViewModel
             ToolCallStatus.Failed => ToolExecutionStatus.Failed,
             ToolCallStatus.Canceled => ToolExecutionStatus.Cancelled,
             _ => ToolExecutionStatus.Completed
+        };
+
+    /// <summary>Shown in the transcript's pending indicator while the turn has produced no content yet.</summary>
+    private static string MapRunStatusText(AgentRunStatus status)
+        => status switch
+        {
+            AgentRunStatus.Initializing => "正在初始化...",
+            AgentRunStatus.Requesting => "正在请求模型...",
+            AgentRunStatus.Thinking => "正在思考...",
+            AgentRunStatus.Running => "正在执行...",
+            _ => "准备中..."
         };
 
     /// <summary>Per-turn translation state shared across the events of a single <c>StreamTurnAsync</c> call.</summary>

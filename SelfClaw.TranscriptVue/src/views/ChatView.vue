@@ -3,7 +3,7 @@ import { computed, nextTick, reactive, ref } from 'vue';
 import ComposerPanel from '../components/Chat/ComposerPanel.vue';
 import TerminalPanel from '../components/Chat/TerminalPanel.vue';
 import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
-import { renderMessages } from '../renderers';
+import { renderMessageBody } from '../renderers';
 
 const emit = defineEmits(['preview-image']);
 
@@ -13,6 +13,7 @@ const state = reactive({
 	selectedConversationId: null,
 	autoScroll: false,
 	isBusy: false,
+	activityText: '',
 	terminal: {
 		isOpen: false,
 		isRunning: false,
@@ -35,7 +36,13 @@ function post(message) {
 	window.chrome?.webview?.postMessage(message);
 }
 
-const messagesHtml = computed(() => renderMessages(state.items || [], openThoughts.value, openToolSegments.value, openToolGroups.value));
+const renderedMessages = computed(() =>
+	(state.items || []).map((item) => ({
+		id: item.id,
+		role: item.role,
+		status: item.status,
+		html: renderMessageBody(item, openThoughts.value, openToolSegments.value, openToolGroups.value, state.activityText),
+	})));
 const isEmptyConversation = computed(() => (state.items || []).length === 0 && !state.isBusy);
 
 function getTranscriptScrollEl() {
@@ -89,6 +96,7 @@ function replaceState(payload) {
 	state.selectedConversationId = payload.selectedConversationId || null;
 	state.autoScroll = Boolean(payload.autoScroll);
 	state.isBusy = nextBusy;
+	state.activityText = payload.activityText || '';
 
 	nextTick(() => {
 		const composerEl = composerShellRef.value?.getShellEl();
@@ -105,7 +113,9 @@ function replaceState(payload) {
 		}
 
 		const currentTranscriptEl = getTranscriptScrollEl();
-		if (state.autoScroll || shouldFollowTranscript()) {
+		// autoScroll 只表达“这是一次允许跟随的流式更新”；是否真的滚到底部由用户
+		// 的滚动状态决定，避免用户上翻阅读历史时被每次发布强制拽回底部。
+		if (state.autoScroll && shouldFollowTranscript()) {
 			scrollTranscriptToBottom();
 			return;
 		}
@@ -136,7 +146,18 @@ function submitComposer(prompt) {
 		return;
 	}
 
+	// 发送自己的消息时重新开启跟随，让新回合从底部开始。
+	scrollFollowState.transcript = true;
+	scrollFollowState.transcriptPausedUntil = 0;
 	post({ type: 'send-prompt', prompt });
+}
+
+function stopGeneration() {
+	if (!state.isBusy) {
+		return;
+	}
+
+	post({ type: 'stop-generation' });
 }
 
 function toggleSetEntry(source, id) {
@@ -281,7 +302,7 @@ defineExpose({
 		'empty-workspace': isEmptyConversation,
 		'terminal-open': state.terminal.isOpen,
 	}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
-		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :messages-html="messagesHtml"
+		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :messages="renderedMessages"
 			@scroll="onTranscriptScroll" @preview-image="openImagePreview" @transcript-click="onTranscriptClick"
 			@transcript-keydown="onTranscriptKeydown" />
 		<section v-else class="empty-composer-stage" aria-label="新对话">
@@ -290,7 +311,7 @@ defineExpose({
 				<p>随意提问，或使用命令/工具。</p>
 			</div>
 		</section>
-		<ComposerPanel ref="composerShellRef" :disabled="state.isBusy" @submit="submitComposer" />
+		<ComposerPanel ref="composerShellRef" :busy="state.isBusy" @submit="submitComposer" @stop="stopGeneration" />
 		<TerminalPanel ref="terminalPanelRef" :is-open="state.terminal.isOpen" :is-running="state.terminal.isRunning"
 			:cwd="state.terminal.cwd" @ready="onTerminalReady" @input="onTerminalInput" @resize="onTerminalResize"
 			@close="onTerminalClose" @restart="onTerminalRestart" @focus-change="onTerminalFocusChange" />

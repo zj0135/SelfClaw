@@ -176,6 +176,29 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         await SendAsync();
     }
 
+    /// <summary>
+    /// Cancels the selected conversation's running turn (WebView "stop-generation" / Esc).
+    /// The cancellation flows through <c>SendAsync</c>'s OperationCanceledException path,
+    /// which fails the active messages with "Generation stopped.".
+    /// </summary>
+    public void StopSelectedConversation()
+    {
+        var runtimeState = GetSelectedRuntimeState();
+        if (runtimeState?.IsRunning != true)
+        {
+            return;
+        }
+
+        try
+        {
+            runtimeState.CancellationTokenSource.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The turn finished between the IsRunning check and Cancel — nothing to stop.
+        }
+    }
+
     #endregion
 
     #region Profile / 工作区选择与模型解析 —— 解析、规范化、切换当前 Profile / 模型 / 工作区
@@ -539,6 +562,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             var requestMessages = runtimeState.Messages.ToArray();
             var turnState = new AgentTurnState(runtimeAgent);
 
+            // Surface the assistant placeholder immediately: CLI process startup can take seconds
+            // before the first stream event (RunStarted) arrives, and the transcript would
+            // otherwise show nothing but the user message.
+            EnsureAssistantMessage(runtimeState, turnState);
+
             await foreach (var update in _agentChatRuntime.StreamTurnAsync(
                                new ChatTurnRequest(
                                    conversation.Id,
@@ -856,11 +884,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var transcriptMessages = GetSelectedTranscriptMessages();
         var transcriptToolRuns = GetSelectedTranscriptToolRuns();
         var transcriptToolRunAnchors = GetSelectedTranscriptToolRunAnchors();
+        var isBusy = IsSelectedConversationRunning();
+        var activityText = isBusy ? GetSelectedRuntimeState()?.ActivityText : null;
         var fingerprint = BuildShellFingerprint(
             autoScroll,
             transcriptMessages,
             transcriptToolRuns,
-            transcriptToolRunAnchors);
+            transcriptToolRunAnchors,
+            activityText);
         if (string.Equals(_lastPublishedShellFingerprint, fingerprint, StringComparison.Ordinal))
         {
             return;
@@ -872,30 +903,31 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             transcriptMessages,
             transcriptToolRuns,
             transcriptToolRunAnchors);
+        PruneMessageRenderCache(transcriptMessages);
         var orderedItems = transcriptMessages
             .OrderBy(item => item.CreatedAtUtc)
-            .Select(item => BuildMessageItem(
+            .Select(item => BuildMessageItemCached(
                 item,
                 toolRunsByMessageId.TryGetValue(item.Id, out var toolRuns) ? toolRuns : []))
             .ToArray();
 
         var conversations = BuildConversationItems();
 
-        var isBusy = IsSelectedConversationRunning();
-
         TranscriptChanged?.Invoke(this, new TranscriptRenderState(
             orderedItems,
             autoScroll,
             conversations,
             SelectedConversation?.Id.ToString("D"),
-            isBusy));
+            isBusy,
+            activityText));
     }
 
     private string BuildShellFingerprint(
         bool autoScroll,
         IReadOnlyList<MessageRecord> transcriptMessages,
         IReadOnlyList<ToolExecutionRecord> transcriptToolRuns,
-        IReadOnlyDictionary<Guid, ToolRunAnchor> transcriptToolRunAnchors)
+        IReadOnlyDictionary<Guid, ToolRunAnchor> transcriptToolRunAnchors,
+        string? activityText)
     {
         var builder = new StringBuilder();
         builder.Append(autoScroll ? '1' : '0')
@@ -903,6 +935,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .Append(SelectedConversation?.Id.ToString("D"))
             .Append('|')
             .Append(IsSelectedConversationRunning() ? '1' : '0')
+            .Append('|')
+            .Append(activityText)
             .Append('|')
             .Append(_filteredConversations.Count)
             .Append('|');
@@ -1058,6 +1092,109 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Per-message render cache: markdown → HTML conversion, segment splitting and attachment
+    /// resolution are skipped for messages whose fingerprint is unchanged, so a streaming tick
+    /// only rebuilds the streaming message instead of the whole transcript.
+    /// Keyed by message id; only touched on the dispatcher thread via <see cref="PublishShell"/>.
+    /// </summary>
+    private readonly Dictionary<Guid, (string Fingerprint, TranscriptRenderItem Item)> _messageRenderCache = new();
+
+    private TranscriptRenderItem BuildMessageItemCached(
+        MessageRecord message,
+        IReadOnlyList<ToolRunPlacement> toolRuns)
+    {
+        var fingerprint = BuildMessageRenderFingerprint(message, toolRuns);
+        if (_messageRenderCache.TryGetValue(message.Id, out var cached) &&
+            string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            return cached.Item;
+        }
+
+        var item = BuildMessageItem(message, toolRuns);
+        _messageRenderCache[message.Id] = (fingerprint, item);
+        return item;
+    }
+
+    private void PruneMessageRenderCache(IReadOnlyList<MessageRecord> messages)
+    {
+        if (_messageRenderCache.Count == 0)
+        {
+            return;
+        }
+
+        var liveIds = new HashSet<Guid>(messages.Select(item => item.Id));
+        List<Guid>? staleIds = null;
+        foreach (var id in _messageRenderCache.Keys)
+        {
+            if (!liveIds.Contains(id))
+            {
+                (staleIds ??= []).Add(id);
+            }
+        }
+
+        if (staleIds is null)
+        {
+            return;
+        }
+
+        foreach (var id in staleIds)
+        {
+            _messageRenderCache.Remove(id);
+        }
+    }
+
+    private static string BuildMessageRenderFingerprint(
+        MessageRecord message,
+        IReadOnlyList<ToolRunPlacement> toolRuns)
+    {
+        var builder = new StringBuilder();
+        builder.Append((int)message.Role)
+            .Append(':')
+            .Append((int)message.Status)
+            .Append(':')
+            .Append(message.UpdatedAtUtc.UtcTicks)
+            .Append(':')
+            .Append(message.MarkdownContent.Length)
+            .Append(':')
+            .Append(StringComparer.Ordinal.GetHashCode(message.MarkdownContent))
+            .Append(':')
+            .Append(message.DurationMs)
+            .Append(':')
+            .Append(message.ErrorMessage)
+            .Append(':')
+            .Append(message.AgentName)
+            .Append(':');
+
+        if (message.Attachments is { Count: > 0 } attachments)
+        {
+            foreach (var attachment in attachments)
+            {
+                builder.Append(attachment.Id.ToString("D"))
+                    .Append(',')
+                    .Append(attachment.StoragePath)
+                    .Append(',')
+                    .Append(attachment.ByteLength)
+                    .Append(',');
+            }
+        }
+
+        builder.Append('|');
+        foreach (var placement in toolRuns)
+        {
+            builder.Append(placement.Record.Id.ToString("D"))
+                .Append(':')
+                .Append((int)placement.Record.Status)
+                .Append(':')
+                .Append(placement.Record.UpdatedAtUtc.UtcTicks)
+                .Append(':')
+                .Append(placement.AfterSegmentIndex)
+                .Append(';');
+        }
+
+        return builder.ToString();
     }
 
     private TranscriptRenderItem BuildMessageItem(

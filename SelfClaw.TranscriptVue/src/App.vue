@@ -528,26 +528,6 @@ a:hover {
 	text-decoration: underline;
 }
 
-.empty {
-	margin: 8px auto 0;
-	padding: 44px 28px;
-	width: min(100%, 720px);
-	border: 1px dashed #d5dae3;
-	border-radius: 8px;
-	background: #fafbfc;
-	color: var(--muted);
-	text-align: center;
-}
-
-.empty strong {
-	display: block;
-	margin-bottom: 8px;
-	color: var(--text);
-	font-family: var(--font-display);
-	font-size: 1.08rem;
-	font-weight: 650;
-}
-
 .message-flow {
 	display: flex;
 	flex-direction: column;
@@ -745,6 +725,35 @@ a:hover {
 	margin: 0;
 	color: var(--muted-soft);
 	font-size: 12px;
+}
+
+.preparing-indicator {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	padding: 6px 0;
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+}
+
+.shimmer-text {
+	background: linear-gradient(90deg, #93a3bb 25%, #33465f 50%, #93a3bb 75%);
+	background-size: 200% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	animation: shimmer-text-sweep 1.8s linear infinite;
+}
+
+@keyframes shimmer-text-sweep {
+	0% {
+		background-position: 200% 0;
+	}
+
+	100% {
+		background-position: -200% 0;
+	}
 }
 
 .tool-segment {

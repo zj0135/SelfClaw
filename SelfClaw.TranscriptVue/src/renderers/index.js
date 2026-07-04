@@ -1,1 +1,1 @@
-export { renderMessages } from './messages';
+export { renderMessageBody } from './messages';

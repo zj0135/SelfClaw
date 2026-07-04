@@ -148,8 +148,14 @@ function resolveToolGroupStatus(segments) {
 	return 'completed';
 }
 
-function renderPendingThinking(item, thinkingOrdinal, isLast, openThoughts) {
-	return renderThinkingSegment(item, { html: '', isPending: true }, thinkingOrdinal, isLast ? 0 : -1, 1, openThoughts);
+function renderPreparingIndicator(activityText) {
+	const label = String(activityText || '').trim() || '准备中...';
+	return `
+      <div class="preparing-indicator" role="status">
+        <span class="thinking-dot live"></span>
+        <span class="shimmer-text">${escapeHtml(label)}</span>
+      </div>
+    `;
 }
 
 export function renderThinkingContent(segment) {
@@ -159,18 +165,34 @@ export function renderThinkingContent(segment) {
 
 function renderThinkingSegment(item, segment, thinkingOrdinal, index, totalSegments, openThoughts) {
 	const isPending = Boolean(segment.isPending);
+	const isLive = isPending && item.isThinking;
+	const hasContent = Boolean(segment.html);
+	if (!hasContent && !isLive) {
+		return '';
+	}
+
 	const isLast = index === totalSegments - 1;
-	const label = isPending && item.isThinking ? '思考中...' : '思考';
+	const label = isLive ? '思考中...' : '思考';
+	const labelHtml = `
+          <span class="thinking-label">
+            <span class="thinking-dot ${isLive ? 'live' : ''}"></span>
+            <span class="${isLive ? 'shimmer-text' : ''}">${label}</span>
+          </span>`;
+
+	if (!hasContent) {
+		return `
+      <section class="thinking-block pending ${isLast ? 'last' : ''}">
+        <div class="thinking-summary passive">${labelHtml}</div>
+      </section>
+    `;
+	}
+
 	const id = thinkingBlockId(item.id, thinkingOrdinal);
 	const isOpen = openThoughts.has(id);
-	const contentHtml = segment.html || '<p class="thinking-placeholder">思考内容流式接收中，展开后会继续实时更新。</p>';
 	return `
       <section class="thinking-block ${isOpen ? 'open' : ''} ${isPending ? 'pending' : ''} ${isLast ? 'last' : ''}" data-thinking-id="${escapeHtml(id)}">
         <button class="thinking-summary" type="button" data-action="toggle-thinking" data-thinking-id="${escapeHtml(id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
-          <span class="thinking-label">
-            <span class="thinking-dot ${isPending && item.isThinking ? 'live' : ''}"></span>
-            <span>${label}</span>
-          </span>
+          ${labelHtml}
           <span class="thinking-chevron">&rsaquo;</span>
         </button>
         <div class="thinking-content">
@@ -312,9 +334,18 @@ function shouldSkipSkillTokenRendering(node) {
 	return false;
 }
 
+// 用户消息的 HTML 在会话内不变，缓存 token 替换结果避免每次重渲染都做 DOM 解析。
+const skillTokenHtmlCache = new Map();
+const skillTokenHtmlCacheLimit = 200;
+
 function renderSkillTokensInUserHtml(html) {
 	if (!html || !html.includes('[/') || typeof document === 'undefined') {
 		return html;
+	}
+
+	const cached = skillTokenHtmlCache.get(html);
+	if (cached !== undefined) {
+		return cached;
 	}
 
 	const template = document.createElement('template');
@@ -340,7 +371,13 @@ function renderSkillTokensInUserHtml(html) {
 		textNode.replaceWith(...wrapper.childNodes);
 	}
 
-	return template.innerHTML;
+	const result = template.innerHTML;
+	if (skillTokenHtmlCache.size >= skillTokenHtmlCacheLimit) {
+		skillTokenHtmlCache.clear();
+	}
+
+	skillTokenHtmlCache.set(html, result);
+	return result;
 }
 
 function renderBodySegment(item, segment, index, totalSegments) {
@@ -403,12 +440,12 @@ function renderMessageAttachments(item) {
 	return attachments ? `<div class="message-attachments">${attachments}</div>` : '';
 }
 
-function renderMessageContent(item, openThoughts, openToolSegments, openToolGroups) {
+function renderMessageContent(item, openThoughts, openToolSegments, openToolGroups, activityText) {
 	const segments = getMessageSegments(item);
 	const attachmentsHtml = renderMessageAttachments(item);
 	if (!segments.length) {
 		return item.role === 'assistant' && item.isThinking
-			? `<div class="message-flow">${renderPendingThinking(item, 0, true, openThoughts)}</div>`
+			? `<div class="message-flow">${renderPreparingIndicator(activityText)}</div>`
 			: attachmentsHtml
 				? `<div class="message-flow">${attachmentsHtml}</div>`
 				: '';
@@ -452,31 +489,16 @@ function renderMessageContent(item, openThoughts, openToolSegments, openToolGrou
     `;
 }
 
-export function renderMessages(items, openThoughts, openToolSegments, openToolGroups) {
-	if (!items?.length) {
-		return `
-      <div class="empty">
-        <strong>准备开始</strong>
-        描述你想构建的内容、修复 Bug，或让 SelfClaw 帮你分析工作区。
-      </div>
-    `;
-	}
-
-	return items
-		.map((item) => {
-			const headerClass = item.role === 'user' ? 'header user-time-header' : 'header assistant-time-header';
-			return `
-      <div class="message-row ${escapeHtml(item.role)} ${escapeHtml(item.status)}" data-message-id="${escapeHtml(item.id)}">
+export function renderMessageBody(item, openThoughts, openToolSegments, openToolGroups, activityText) {
+	const headerClass = item.role === 'user' ? 'header user-time-header' : 'header assistant-time-header';
+	return `
         <div class="message-main">
           <article class="item ${escapeHtml(item.kind)} ${escapeHtml(item.role)} ${escapeHtml(item.status)}">
             <div class="${headerClass}">
               <span class="message-time">${escapeHtml(item.timestamp)}</span>
             </div>
-            ${renderMessageContent(item, openThoughts, openToolSegments, openToolGroups)}
+            ${renderMessageContent(item, openThoughts, openToolSegments, openToolGroups, activityText)}
           </article>
         </div>
-      </div>
     `;
-		})
-		.join('');
 }

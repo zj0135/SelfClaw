@@ -34,6 +34,9 @@ public sealed partial class MainWindowViewModel
 
         public HashSet<Guid> ActiveMessageIds { get; } = [];
 
+        /// <summary>Latest RunStatusEvent text, shown while the streaming message has no content yet.</summary>
+        public string? ActivityText { get; set; }
+
         public CancellationTokenSource CancellationTokenSource { get; } = new();
 
         public bool IsRunning { get; set; } = true;

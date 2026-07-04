@@ -2,9 +2,9 @@
 import { ref } from 'vue';
 
 defineProps({
-	messagesHtml: {
-		type: String,
-		default: '',
+	messages: {
+		type: Array,
+		default: () => [],
 	},
 });
 
@@ -64,15 +64,12 @@ defineExpose({
 
 <template>
 	<section class="panel transcript-panel">
-		<div
-			id="transcript-scroll"
-			ref="scrollEl"
-			class="transcript-scroll"
-			@scroll="emit('scroll', $event)"
-			@click="onTranscriptClick"
-			@keydown="onTranscriptKeydown"
-		>
-			<div v-html="messagesHtml"></div>
+		<div id="transcript-scroll" ref="scrollEl" class="transcript-scroll" @scroll="emit('scroll', $event)"
+			@click="onTranscriptClick" @keydown="onTranscriptKeydown">
+			<!-- 每条消息是独立的 keyed 节点：流式更新时只有内容变化的那条会被替换 innerHTML，
+			     其余消息的 DOM（文本选区、图片、动画）保持不动。 -->
+			<div v-for="message in messages" :key="message.id" class="message-row"
+				:class="[message.role, message.status]" :data-message-id="message.id" v-html="message.html"></div>
 		</div>
 	</section>
 </template>

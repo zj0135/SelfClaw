@@ -205,7 +205,8 @@ public partial class MainWindow : Window
             items = state.Items,
             conversations = state.Conversations,
             selectedConversationId = state.SelectedConversationId,
-            isBusy = state.IsBusy
+            isBusy = state.IsBusy,
+            activityText = state.ActivityText
         }, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -227,8 +228,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // 后端重构后 VM 不再暴露 StopGeneration；Esc 仅用于退出终端输入，
-            // 中止生成的入口待新架构重新接线。
+            _viewModel.StopSelectedConversation();
         }
     }
 
@@ -443,6 +443,9 @@ public partial class MainWindow : Window
                     await _viewModel.SubmitPromptAsync(prompt);
                     break;
                 }
+                case "stop-generation":
+                    _viewModel.StopSelectedConversation();
+                    break;
                 case "window-drag":
                     StartWindowDrag();
                     break;
