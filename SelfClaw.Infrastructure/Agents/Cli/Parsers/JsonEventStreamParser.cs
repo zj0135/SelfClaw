@@ -326,7 +326,10 @@ public sealed class JsonEventStreamParser : IAgentStreamParser
                 return new AgentStreamEvent[] { new AssistantThinkingDeltaEvent(GetString(payload, "id"), text) };
             }
 
+            // OpenCode ≤1.16 framed tool calls with a top-level type of "tool"; 1.17+ uses
+            // "tool_use" (the nested part keeps `type: "tool"`). Accept both.
             case "tool":
+            case "tool_use":
                 return HandleOpenCodeTool(payload);
 
             case "step_finish":
