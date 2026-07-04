@@ -1,15 +1,31 @@
 <script setup>
 import { computed, ref } from 'vue';
 import ModelSelector from './ModelSelector.vue';
+import WorkspaceSelector from './WorkspaceSelector.vue';
 
 const props = defineProps({
 	busy: {
 		type: Boolean,
 		default: false,
 	},
+	workspaceSelection: {
+		type: Object,
+		default: () => ({}),
+	},
+	workspaceLoading: {
+		type: Boolean,
+		default: false,
+	},
 });
 
-const emit = defineEmits(['submit', 'stop']);
+const emit = defineEmits([
+	'submit',
+	'stop',
+	'request-workspace',
+	'select-workspace-root',
+	'select-workspace-path',
+	'browse-workspace-folder',
+]);
 
 const composerText = ref('');
 const shellRef = ref(null);
@@ -28,6 +44,22 @@ function submit() {
 
 function stop() {
 	emit('stop');
+}
+
+function requestWorkspace(refresh) {
+	emit('request-workspace', Boolean(refresh));
+}
+
+function selectWorkspaceRoot(rootId) {
+	emit('select-workspace-root', rootId);
+}
+
+function selectWorkspacePath(rootPath) {
+	emit('select-workspace-path', rootPath);
+}
+
+function browseWorkspaceFolder() {
+	emit('browse-workspace-folder');
 }
 
 function onKeydown(event) {
@@ -65,12 +97,14 @@ defineExpose({
 						<circle cx="12" cy="13" r="2" />
 					</svg>
 				</button>
-				<button class="icon-btn" type="button" title="文件夹" aria-label="文件夹">
-					<svg viewBox="0 0 20 20" aria-hidden="true">
-						<path d="M3 7h4.5l1.5 1.5H17v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5V7Z" />
-						<path d="M3 7V5a1.5 1.5 0 0 1 1.5-1.5H8l1.5 1.5H15a1 1 0 0 1 1 1V7" />
-					</svg>
-				</button>
+				<WorkspaceSelector
+					:workspace-selection="workspaceSelection"
+					:loading="workspaceLoading"
+					@refresh="requestWorkspace"
+					@select-root="selectWorkspaceRoot"
+					@select-path="selectWorkspacePath"
+					@browse="browseWorkspaceFolder"
+				/>
 			</div>
 			<div class="composer-tools-right">
 				<button v-if="props.busy" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成" @click="stop">

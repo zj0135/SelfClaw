@@ -8,4 +8,7 @@ public sealed record TranscriptConversationItem(
     string? Badge = null,
     string? Subtitle = null,
     string? AgentId = null,
-    string? AgentName = null);
+    string? AgentName = null,
+    string? WorkspaceRootId = null,
+    string? WorkspaceRootName = null,
+    string? WorkspaceRootPath = null);

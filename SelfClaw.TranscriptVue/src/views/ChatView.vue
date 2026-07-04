@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import ComposerPanel from '../components/Chat/ComposerPanel.vue';
 import TerminalPanel from '../components/Chat/TerminalPanel.vue';
 import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
@@ -19,6 +19,13 @@ const state = reactive({
 		isRunning: false,
 		cwd: '',
 	},
+	workspace: {
+		current: null,
+		roots: [],
+		commonFolders: [],
+		isLoading: false,
+		error: '',
+	},
 });
 
 const transcriptPanelRef = ref(null);
@@ -31,6 +38,7 @@ const scrollFollowState = {
 	transcript: true,
 	transcriptPausedUntil: 0,
 };
+let workspaceRequestSequence = 0;
 
 function post(message) {
 	window.chrome?.webview?.postMessage(message);
@@ -160,6 +168,73 @@ function stopGeneration() {
 	post({ type: 'stop-generation' });
 }
 
+function nextWorkspaceRequestId(prefix) {
+	workspaceRequestSequence += 1;
+	return `${prefix}-${Date.now()}-${workspaceRequestSequence}`;
+}
+
+function setWorkspaceLoading(isLoading) {
+	state.workspace.isLoading = isLoading;
+	if (isLoading) {
+		state.workspace.error = '';
+	}
+}
+
+function requestWorkspaceSelection(refresh = false) {
+	if (!window.chrome?.webview) {
+		return;
+	}
+
+	setWorkspaceLoading(true);
+	post({
+		type: 'get-workspace-selection',
+		requestId: nextWorkspaceRequestId(refresh ? 'workspace-refresh' : 'workspace-get'),
+		refresh: Boolean(refresh),
+	});
+}
+
+function selectWorkspaceRoot(workspaceRootId) {
+	if (!workspaceRootId) {
+		return;
+	}
+
+	setWorkspaceLoading(true);
+	post({
+		type: 'select-workspace-root',
+		requestId: nextWorkspaceRequestId('workspace-root'),
+		workspaceRootId,
+	});
+}
+
+function selectWorkspacePath(rootPath) {
+	if (!rootPath) {
+		return;
+	}
+
+	setWorkspaceLoading(true);
+	post({
+		type: 'select-workspace-root',
+		requestId: nextWorkspaceRequestId('workspace-path'),
+		rootPath,
+	});
+}
+
+function browseWorkspaceFolder() {
+	setWorkspaceLoading(true);
+	post({
+		type: 'browse-workspace-folder',
+		requestId: nextWorkspaceRequestId('workspace-browse'),
+	});
+}
+
+function applyWorkspaceSelection(payload) {
+	state.workspace.current = payload.current || null;
+	state.workspace.roots = Array.isArray(payload.roots) ? payload.roots : [];
+	state.workspace.commonFolders = Array.isArray(payload.commonFolders) ? payload.commonFolders : [];
+	state.workspace.error = payload.error || '';
+	state.workspace.isLoading = false;
+}
+
 function toggleSetEntry(source, id) {
 	const next = new Set(source.value);
 	if (next.has(id)) {
@@ -274,6 +349,10 @@ function onTerminalFocusChange(isFocused) {
 	});
 }
 
+onMounted(() => {
+	requestWorkspaceSelection(false);
+});
+
 defineExpose({
 	handleMessage(payload) {
 		if (payload.type === 'replaceState') {
@@ -292,6 +371,8 @@ defineExpose({
 			terminalPanelRef.value?.clear?.();
 		} else if (payload.type === 'terminal-focus') {
 			nextTick(() => terminalPanelRef.value?.focus?.());
+		} else if (payload.type === 'workspace-selection') {
+			applyWorkspaceSelection(payload);
 		}
 	},
 });
@@ -311,7 +392,18 @@ defineExpose({
 				<p>随意提问，或使用命令/工具。</p>
 			</div>
 		</section>
-		<ComposerPanel ref="composerShellRef" :busy="state.isBusy" @submit="submitComposer" @stop="stopGeneration" />
+		<ComposerPanel
+			ref="composerShellRef"
+			:busy="state.isBusy"
+			:workspace-selection="state.workspace"
+			:workspace-loading="state.workspace.isLoading"
+			@submit="submitComposer"
+			@stop="stopGeneration"
+			@request-workspace="requestWorkspaceSelection"
+			@select-workspace-root="selectWorkspaceRoot"
+			@select-workspace-path="selectWorkspacePath"
+			@browse-workspace-folder="browseWorkspaceFolder"
+		/>
 		<TerminalPanel ref="terminalPanelRef" :is-open="state.terminal.isOpen" :is-running="state.terminal.isRunning"
 			:cwd="state.terminal.cwd" @ready="onTerminalReady" @input="onTerminalInput" @resize="onTerminalResize"
 			@close="onTerminalClose" @restart="onTerminalRestart" @focus-change="onTerminalFocusChange" />

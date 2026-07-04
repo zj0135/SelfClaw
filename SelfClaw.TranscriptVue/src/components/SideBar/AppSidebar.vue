@@ -16,12 +16,11 @@ const emit = defineEmits(['select', 'action']);
 
 const expandedGroups = ref(new Set(['projects', 'conversations']));
 const expandedFolders = ref(new Set());
-const activeNodeId = ref(null);
-const settingsActive = ref(false);
 
 const actionItems = computed(() => props.items.filter((i) => i.type === 'action'));
 const groupItems = computed(() => props.items.filter((i) => i.type === 'group'));
 const settingsItem = computed(() => props.items.find((i) => i.type === 'view' && i.id === 'settings'));
+const settingsActive = computed(() => props.activeId === 'settings');
 
 function toggleGroup(groupId) {
 	if (expandedGroups.value.has(groupId)) {
@@ -40,14 +39,10 @@ function toggleFolder(folderId) {
 }
 
 function selectNode(nodeId) {
-	activeNodeId.value = nodeId;
-	settingsActive.value = false;
 	emit('select', nodeId);
 }
 
 function selectSettings() {
-	activeNodeId.value = null;
-	settingsActive.value = true;
 	emit('select', 'settings');
 }
 
@@ -65,6 +60,14 @@ function isGroupOpen(groupId) {
 
 function isFolderOpen(folderId) {
 	return expandedFolders.value.has(folderId);
+}
+
+function folderHasActiveChild(folder) {
+	return Array.isArray(folder?.children) && folder.children.some((child) => child.id === props.activeId);
+}
+
+function isNodeActive(nodeId) {
+	return props.activeId === nodeId;
 }
 
 const iconMap = {
@@ -149,7 +152,7 @@ function getIcon(id) {
 				<div class="group-body">
 					<template v-if="group.id === 'projects'">
 						<!-- 项目节点：三级结构 项目→目录→会话 -->
-						<div v-for="folder in group.children" :key="folder.id" class="subfolder" :class="{ open: isFolderOpen(folder.id) }">
+						<div v-for="folder in group.children" :key="folder.id" class="subfolder" :class="{ open: isFolderOpen(folder.id) || folderHasActiveChild(folder) }">
 							<button class="project-folder" type="button" @click="toggleFolder(folder.id)">
 								<span class="folder-ico" aria-hidden="true">
 									<svg viewBox="0 0 16 16" fill="none">
@@ -169,20 +172,21 @@ function getIcon(id) {
 								</span>
 							</button>
 							<div class="subfolder-body">
-								<button
-									v-for="session in folder.children"
-									:key="session.id"
-									class="node kind-chat"
-									:class="{ active: activeNodeId === session.id }"
-									type="button"
-									@click="selectNode(session.id)"
-								>
+							<button
+								v-for="session in folder.children"
+								:key="session.id"
+								class="node kind-chat"
+								:class="{ active: isNodeActive(session.id) }"
+								type="button"
+								@click="selectNode(session.id)"
+							>
 									<span class="dot" aria-hidden="true"></span>
 									<span class="ntext">{{ session.label }}</span>
 									<span v-if="session.time" class="ntime">{{ session.time }}</span>
 								</button>
 							</div>
 						</div>
+						<div v-if="!group.children?.length" class="empty-group">暂无项目会话</div>
 					</template>
 
 					<template v-else>
@@ -191,7 +195,7 @@ function getIcon(id) {
 							v-for="child in group.children"
 							:key="child.id"
 							class="node kind-chat"
-							:class="{ active: activeNodeId === child.id }"
+							:class="{ active: isNodeActive(child.id) }"
 							type="button"
 							@click="selectNode(child.id)"
 						>
@@ -199,6 +203,7 @@ function getIcon(id) {
 							<span class="ntext">{{ child.label }}</span>
 							<span v-if="child.time" class="ntime">{{ child.time }}</span>
 						</button>
+						<div v-if="!group.children?.length" class="empty-group">暂无会话记录</div>
 					</template>
 				</div>
 			</section>
@@ -575,6 +580,13 @@ function getIcon(id) {
 
 .node.active .dot {
 	background: #4f73c8;
+}
+
+.empty-group {
+	padding: 9px 12px 10px 30px;
+	color: #9aa2ad;
+	font-size: 12px;
+	line-height: 1.45;
 }
 
 /* 项目目录：文件夹 */

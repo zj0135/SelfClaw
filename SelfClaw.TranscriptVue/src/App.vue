@@ -1,5 +1,5 @@
 <script setup>
-import { computed, markRaw, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, markRaw, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import AppSidebar from './components/SideBar/AppSidebar.vue';
 import WindowControls from './components/Chat/WindowControls.vue';
 import ChatView from './views/ChatView.vue';
@@ -14,11 +14,47 @@ const currentViewId = ref('chat');
 const activeViewComponent = computed(() => viewRegistry[currentViewId.value] || ChatView);
 const activeViewRef = ref(null);
 const imagePreview = ref(null);
+const sidebarConversations = ref([]);
+const selectedConversationId = ref(null);
+const lastTranscriptPayload = ref(null);
 const windowChrome = reactive({
 	isMaximized: false,
 });
 
-const navItems = [
+function toConversationNode(conversation) {
+	return {
+		id: conversation.id,
+		label: conversation.title || '未命名对话',
+		time: conversation.timestamp || '',
+		subtitle: conversation.subtitle || '',
+		type: 'conversation',
+	};
+}
+
+function hasWorkspace(conversation) {
+	return Boolean(conversation?.workspaceRootId || conversation?.workspaceRootPath || conversation?.workspaceRootName);
+}
+
+function buildProjectGroups(conversations) {
+	const groups = new Map();
+	for (const conversation of conversations.filter(hasWorkspace)) {
+		const key = conversation.workspaceRootId || conversation.workspaceRootPath || conversation.workspaceRootName || 'workspace';
+		if (!groups.has(key)) {
+			groups.set(key, {
+				id: `workspace-${key}`,
+				label: conversation.workspaceRootName || conversation.workspaceRootPath || '工作区',
+				type: 'folder',
+				children: [],
+			});
+		}
+
+		groups.get(key).children.push(toConversationNode(conversation));
+	}
+
+	return Array.from(groups.values());
+}
+
+const navItems = computed(() => [
 	{ id: 'new-chat', label: '新建对话', type: 'action' },
 	{ id: 'search', label: '搜索', type: 'action' },
 	{ id: 'plugins', label: '插件', type: 'action' },
@@ -28,16 +64,18 @@ const navItems = [
 		id: 'projects',
 		label: '项目',
 		type: 'group',
-		children: [{ id: 'project-demo-1', label: '示例项目会话', type: 'conversation' }],
+		children: buildProjectGroups(sidebarConversations.value),
 	},
 	{
 		id: 'conversations',
 		label: '对话',
 		type: 'group',
-		children: [{ id: 'conversation-demo-1', label: '示例非项目会话', type: 'conversation' }],
+		children: sidebarConversations.value.filter((conversation) => !hasWorkspace(conversation)).map(toConversationNode),
 	},
 	{ id: 'settings', label: '设置', type: 'view' },
-];
+]);
+
+const sidebarActiveId = computed(() => (currentViewId.value === 'settings' ? 'settings' : selectedConversationId.value));
 
 function post(message) {
 	window.chrome?.webview?.postMessage(message);
@@ -54,7 +92,21 @@ function handleIncomingMessage(event) {
 		return;
 	}
 
+	if (payload.type === 'replaceState') {
+		lastTranscriptPayload.value = payload;
+		sidebarConversations.value = Array.isArray(payload.conversations) ? payload.conversations : [];
+		selectedConversationId.value = payload.selectedConversationId || null;
+	}
+
 	activeViewRef.value?.handleMessage?.(payload);
+}
+
+function replayTranscriptIfNeeded() {
+	if (currentViewId.value !== 'chat' || !lastTranscriptPayload.value) {
+		return;
+	}
+
+	nextTick(() => activeViewRef.value?.handleMessage?.(lastTranscriptPayload.value));
 }
 
 function onWindowDragPointerDown(event) {
@@ -118,16 +170,33 @@ function closeImagePreview() {
 	imagePreview.value = null;
 }
 
-function onSidebarAction() {
-	// 仅前端样式占位，不触发实际功能。
+function onSidebarAction(actionId) {
+	switch (actionId) {
+		case 'new-chat':
+		case 'add-conversations':
+			currentViewId.value = 'chat';
+			selectedConversationId.value = null;
+			post({ type: 'new-chat' });
+			break;
+		default:
+			break;
+	}
 }
 
 function onSidebarSelect(id) {
-	// 仅切换顶部视图（设置），其他均为样式占位。
 	if (id in viewRegistry) {
 		currentViewId.value = id;
+		replayTranscriptIfNeeded();
+		return;
+	}
+
+	if (sidebarConversations.value.some((conversation) => conversation.id === id)) {
+		currentViewId.value = 'chat';
+		post({ type: 'select-conversation', conversationId: id });
 	}
 }
+
+watch(currentViewId, replayTranscriptIfNeeded);
 
 onMounted(() => {
 	window.chrome?.webview?.addEventListener('message', handleIncomingMessage);
@@ -144,7 +213,7 @@ onUnmounted(() => {
 
 <template>
 	<div class="app">
-		<AppSidebar :items="navItems" :active-id="currentViewId" @select="onSidebarSelect" @action="onSidebarAction" />
+		<AppSidebar :items="navItems" :active-id="sidebarActiveId" @select="onSidebarSelect" @action="onSidebarAction" />
 		<main class="main">
 			<div class="main-header">
 				<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>

@@ -15,6 +15,7 @@ using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.Options;
+using Forms = System.Windows.Forms;
 
 namespace SelfClaw.Desktop;
 
@@ -446,6 +447,20 @@ public partial class MainWindow : Window
                 case "stop-generation":
                     _viewModel.StopSelectedConversation();
                     break;
+                case "new-chat":
+                    _viewModel.StartNewConversation();
+                    break;
+                case "select-conversation":
+                {
+                    var conversationId = document.RootElement.TryGetProperty("conversationId", out var conversationIdElement)
+                        ? conversationIdElement.GetString()
+                        : null;
+                    if (Guid.TryParse(conversationId, out var parsedConversationId))
+                    {
+                        _viewModel.SelectConversation(parsedConversationId);
+                    }
+                    break;
+                }
                 case "window-drag":
                     StartWindowDrag();
                     break;
@@ -467,6 +482,38 @@ public partial class MainWindow : Window
                 case "toggle-browser":
                     ToggleBrowserTool();
                     break;
+                case "get-workspace-selection":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    var refresh = document.RootElement.TryGetProperty("refresh", out var refreshElement) &&
+                                  refreshElement.GetBoolean();
+                    await PostWorkspaceSelectionAsync(requestId, refresh);
+                    break;
+                }
+                case "select-workspace-root":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    var workspaceRootId = document.RootElement.TryGetProperty("workspaceRootId", out var workspaceRootIdElement)
+                        ? workspaceRootIdElement.GetString()
+                        : null;
+                    var rootPath = document.RootElement.TryGetProperty("rootPath", out var rootPathElement)
+                        ? rootPathElement.GetString()
+                        : null;
+                    await SelectWorkspaceRootAsync(requestId, workspaceRootId, rootPath);
+                    break;
+                }
+                case "browse-workspace-folder":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    await BrowseWorkspaceFolderAsync(requestId);
+                    break;
+                }
                 case "terminal-ready":
                     _terminalReady = true;
                     ApplyTerminalResize(document.RootElement);
@@ -616,6 +663,152 @@ public partial class MainWindow : Window
             tools = settings.Tools,
             scannedAtUtc = settings.ScannedAtUtc
         });
+
+    private async Task PostWorkspaceSelectionAsync(string? requestId, bool refresh)
+    {
+        try
+        {
+            if (refresh || _viewModel.WorkspaceRoots.Count == 0)
+            {
+                await _viewModel.ReloadWorkspaceSelectionAsync();
+            }
+
+            PostWorkspaceSelection(requestId);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            PostWorkspaceSelection(requestId, error: exception.Message);
+        }
+    }
+
+    private async Task SelectWorkspaceRootAsync(string? requestId, string? workspaceRootId, string? rootPath)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(rootPath))
+            {
+                await _viewModel.SelectOrAddWorkspaceRootAsync(rootPath);
+            }
+            else if (Guid.TryParse(workspaceRootId, out var parsedWorkspaceRootId))
+            {
+                _viewModel.SelectWorkspaceRoot(parsedWorkspaceRootId);
+            }
+            else
+            {
+                _viewModel.SelectWorkspaceRoot(null);
+            }
+
+            PostWorkspaceSelection(requestId);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            PostWorkspaceSelection(requestId, error: exception.Message);
+        }
+    }
+
+    private async Task BrowseWorkspaceFolderAsync(string? requestId)
+    {
+        try
+        {
+            var initialDirectory = ResolveInitialWorkspacePickerDirectory();
+            using var dialog = new Forms.FolderBrowserDialog
+            {
+                Description = "选择工作目录",
+                UseDescriptionForTitle = true,
+                ShowNewFolderButton = true,
+                InitialDirectory = initialDirectory
+            };
+
+            var owner = new WindowHandleWrapper(new WindowInteropHelper(this).Handle);
+            var result = dialog.ShowDialog(owner);
+            if (result == Forms.DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.SelectedPath))
+            {
+                await _viewModel.SelectOrAddWorkspaceRootAsync(dialog.SelectedPath);
+                PostWorkspaceSelection(requestId);
+                return;
+            }
+
+            PostWorkspaceSelection(requestId, cancelled: true);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            PostWorkspaceSelection(requestId, error: exception.Message);
+        }
+    }
+
+    private void PostWorkspaceSelection(string? requestId, bool? cancelled = null, string? error = null)
+    {
+        var selected = _viewModel.SelectedWorkspaceRoot;
+        var currentPath = selected?.RootPath;
+        var currentIsFallback = false;
+        if (string.IsNullOrWhiteSpace(currentPath))
+        {
+            currentPath = ResolveDefaultTerminalWorkingDirectory();
+            currentIsFallback = true;
+        }
+
+        PostWebMessage(new
+        {
+            type = "workspace-selection",
+            requestId,
+            cancelled,
+            error,
+            current = new
+            {
+                id = selected?.Id.ToString("D"),
+                name = selected?.Name ?? ResolveDirectoryDisplayName(currentPath),
+                path = currentPath,
+                isFallback = currentIsFallback
+            },
+            roots = _viewModel.WorkspaceRoots
+                .Select(root => new
+                {
+                    id = root.Id.ToString("D"),
+                    name = root.Name,
+                    path = root.RootPath,
+                    selected = selected?.Id == root.Id
+                })
+                .ToArray(),
+            commonFolders = BuildCommonWorkspaceFolders()
+        });
+    }
+
+    private object[] BuildCommonWorkspaceFolders()
+    {
+        var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        return string.IsNullOrWhiteSpace(desktopPath) || !Directory.Exists(desktopPath)
+            ? Array.Empty<object>()
+            : new object[]
+            {
+                new
+                {
+                    id = "desktop",
+                    name = "Desktop",
+                    path = desktopPath
+                }
+            };
+    }
+
+    private string ResolveInitialWorkspacePickerDirectory()
+    {
+        var selectedPath = _viewModel.SelectedWorkspaceRootPath;
+        if (!string.IsNullOrWhiteSpace(selectedPath) && Directory.Exists(selectedPath))
+        {
+            return selectedPath;
+        }
+
+        return ResolveDefaultTerminalWorkingDirectory();
+    }
+
+    private static string ResolveDirectoryDisplayName(string path)
+    {
+        var normalizedPath = Path.TrimEndingDirectorySeparator(path);
+        var name = Path.GetFileName(normalizedPath);
+        return string.IsNullOrWhiteSpace(name) ? normalizedPath : name;
+    }
 
     private async Task PostPetSettingsAsync(string? requestId)
     {
@@ -969,6 +1162,16 @@ public partial class MainWindow : Window
         public Rect RcMonitor;
         public Rect RcWork;
         public int DwFlags;
+    }
+
+    private sealed class WindowHandleWrapper : Forms.IWin32Window
+    {
+        public WindowHandleWrapper(IntPtr handle)
+        {
+            Handle = handle;
+        }
+
+        public IntPtr Handle { get; }
     }
 }
 

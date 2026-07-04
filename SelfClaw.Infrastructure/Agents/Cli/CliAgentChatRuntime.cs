@@ -259,7 +259,15 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
     private static string ResolveWorkingDirectory(WorkspaceRoot? workspaceRoot)
     {
         var root = workspaceRoot?.RootPath;
-        return string.IsNullOrWhiteSpace(root) ? Path.GetTempPath() : root;
+        if (!string.IsNullOrWhiteSpace(root))
+            return root;
+
+        var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (!string.IsNullOrWhiteSpace(desktopPath) && Directory.Exists(desktopPath))
+            return desktopPath;
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return string.IsNullOrWhiteSpace(userProfile) ? Path.GetTempPath() : userProfile;
     }
 
     /// <summary>

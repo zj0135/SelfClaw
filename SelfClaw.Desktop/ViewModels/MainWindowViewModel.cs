@@ -114,6 +114,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     public string? SelectedWorkspaceRootPath => _selectedWorkspaceRoot?.RootPath;
 
+    public WorkspaceRoot? SelectedWorkspaceRoot => _selectedWorkspaceRoot;
+
+    public IReadOnlyList<WorkspaceRoot> WorkspaceRoots => _workspaceRoots.ToArray();
+
     public ConversationRecord? SelectedConversation
     {
         get => _selectedConversation;
@@ -203,6 +207,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    public void StartNewConversation()
+        => SelectedConversation = null;
+
+    public void SelectConversation(Guid conversationId)
+    {
+        var conversation = _filteredConversations.FirstOrDefault(item => item.Id == conversationId)
+            ?? _allConversations.FirstOrDefault(item => item.Id == conversationId);
+        if (conversation is null)
+        {
+            throw new InvalidOperationException("The selected conversation no longer exists.");
+        }
+
+        SelectedConversation = conversation;
+    }
+
     #endregion
 
     #region Profile / 工作区选择与模型解析 —— 解析、规范化、切换当前 Profile / 模型 / 工作区
@@ -281,6 +300,87 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             PublishShell(false);
         }
+    }
+
+    public async Task ReloadWorkspaceSelectionAsync()
+    {
+        await ReloadWorkspaceRootsAsync();
+        ApplyWorkspaceSelectionChanged(SelectedConversation?.Id);
+    }
+
+    public void SelectWorkspaceRoot(Guid? workspaceRootId)
+    {
+        var workspaceRoot = workspaceRootId is Guid id
+            ? _workspaceRoots.FirstOrDefault(root => root.Id == id)
+            : null;
+
+        if (workspaceRootId is not null && workspaceRoot is null)
+        {
+            throw new InvalidOperationException("The selected workspace root no longer exists.");
+        }
+
+        SelectWorkspaceRoot(workspaceRoot, publishShell: false);
+        ApplyWorkspaceSelectionChanged();
+    }
+
+    public async Task<WorkspaceRoot> SelectOrAddWorkspaceRootAsync(string rootPath)
+    {
+        var normalizedPath = NormalizeWorkspaceRootPath(rootPath);
+        if (!Directory.Exists(normalizedPath))
+        {
+            throw new DirectoryNotFoundException($"The selected workspace directory does not exist: {normalizedPath}");
+        }
+
+        var existing = _workspaceRoots.FirstOrDefault(root => WorkspacePathsEqual(root.RootPath, normalizedPath));
+        if (existing is null)
+        {
+            var now = DateTimeOffset.UtcNow;
+            existing = new WorkspaceRoot(
+                Guid.NewGuid(),
+                ResolveWorkspaceRootName(normalizedPath),
+                normalizedPath,
+                now,
+                now);
+            await _conversationRepository.UpsertWorkspaceRootAsync(existing);
+            await ReloadWorkspaceRootsAsync();
+            existing = _workspaceRoots.FirstOrDefault(root => WorkspacePathsEqual(root.RootPath, normalizedPath)) ?? existing;
+        }
+
+        SelectWorkspaceRoot(existing, publishShell: false);
+        ApplyWorkspaceSelectionChanged();
+        return existing;
+    }
+
+    private void ApplyWorkspaceSelectionChanged(Guid? preferredConversationId = null)
+    {
+        if (_agents.Count == 0)
+        {
+            return;
+        }
+
+        ApplyConversationFilter(preferredConversationId);
+    }
+
+    private static string NormalizeWorkspaceRootPath(string rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath))
+        {
+            throw new ArgumentException("A workspace directory path is required.", nameof(rootPath));
+        }
+
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath.Trim()));
+    }
+
+    private static bool WorkspacePathsEqual(string left, string right)
+        => string.Equals(
+            NormalizeWorkspaceRootPath(left),
+            NormalizeWorkspaceRootPath(right),
+            StringComparison.OrdinalIgnoreCase);
+
+    private static string ResolveWorkspaceRootName(string rootPath)
+    {
+        var name = Path.GetFileName(NormalizeWorkspaceRootPath(rootPath));
+        return string.IsNullOrWhiteSpace(name) ? NormalizeWorkspaceRootPath(rootPath) : name;
     }
 
     #endregion
@@ -937,6 +1037,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IReadOnlyDictionary<Guid, ToolRunAnchor> transcriptToolRunAnchors,
         string? activityText)
     {
+        var navigationConversations = GetNavigationConversations()
+            .OrderByDescending(item => item.UpdatedAtUtc)
+            .ThenBy(item => item.CreatedAtUtc)
+            .ToArray();
         var builder = new StringBuilder();
         builder.Append(autoScroll ? '1' : '0')
             .Append('|')
@@ -946,14 +1050,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .Append('|')
             .Append(activityText)
             .Append('|')
-            .Append(_filteredConversations.Count)
+            .Append(navigationConversations.Length)
             .Append('|');
 
-        foreach (var conversation in _filteredConversations.OrderByDescending(item => item.UpdatedAtUtc).ThenBy(item => item.CreatedAtUtc))
+        foreach (var conversation in navigationConversations)
         {
             builder.Append(conversation.Id.ToString("D"))
                 .Append(':')
                 .Append(conversation.UpdatedAtUtc.UtcTicks)
+                .Append(':')
+                .Append(conversation.WorkspaceRootId?.ToString("D"))
                 .Append(':')
                 .Append(SelectedConversation?.Id == conversation.Id ? '1' : '0')
                 .Append(';');
@@ -1039,22 +1145,39 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     private TranscriptConversationItem[] BuildConversationItems()
-        => _filteredConversations
+        => GetNavigationConversations()
             .OrderByDescending(item => item.UpdatedAtUtc)
             .ThenBy(item => item.CreatedAtUtc)
             .Select(BuildConversationItem)
             .ToArray();
 
+    private IEnumerable<ConversationRecord> GetNavigationConversations()
+        => _allConversations.Where(MatchesNavigationConversation);
+
+    private bool MatchesNavigationConversation(ConversationRecord conversation)
+        => conversation.Mode == ConversationMode.Programming &&
+           string.Equals(conversation.AgentId, ResolveSelectedAgent().Id, StringComparison.OrdinalIgnoreCase);
+
     private TranscriptConversationItem BuildConversationItem(ConversationRecord conversation)
-        => new(
+    {
+        var workspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
+            ? _workspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
+            : null;
+        var agentName = ResolveConversationAgentName(conversation);
+
+        return new TranscriptConversationItem(
             conversation.Id.ToString("D"),
             conversation.Title,
             conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
             SelectedConversation?.Id == conversation.Id,
             null,
-            ResolveConversationAgentName(conversation),
+            agentName,
             conversation.AgentId,
-            ResolveConversationAgentName(conversation));
+            agentName,
+            conversation.WorkspaceRootId?.ToString("D"),
+            workspaceRoot?.Name,
+            workspaceRoot?.RootPath);
+    }
 
     private IReadOnlyList<TranscriptImageAttachment> BuildImageAttachments(MessageRecord message)
     {
