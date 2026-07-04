@@ -2,7 +2,7 @@
 
 ## Overview
 
-SelfClaw is a Windows desktop AI programming assistant built with WPF and .NET 10. The active workflow is a **direct programming agent** — the user types a prompt, the AI executes it with workspace tools, and the result renders in a WebView2-hosted Vue transcript.
+SelfClaw is a Windows desktop AI programming assistant built with WPF and .NET 10. The active workflow drives a **local coding agent CLI** (Claude Code / Codex / OpenCode) — the user types a prompt, the selected CLI executes it in the workspace as a subprocess, and its event stream renders in a WebView2-hosted Vue transcript.
 
 ## Projects
 
@@ -30,21 +30,28 @@ TranscriptVue dev: `cd SelfClaw.TranscriptVue && npm install && npm run dev`
 
 ```
 User input (WebView2)
-  → MainWindowViewModel.SubmitPromptAsync()
-  → SelfClawAgentChatRuntime.StreamTurnAsync()
-    → ProduceProgrammingTurnAsync()
-      → ChatClientAgentExecutionService.RunAsync()
-        → AI model (OpenAI / Anthropic / OpenAI-compatible)
-          → Tool calls → WorkspaceToolService (+ MCP if wired)
-            → DesktopToolApprovalHandler (for write/shell)
-  → Events back to ViewModel → TranscriptRenderState → Vue renders
+  → MainWindowViewModel.SubmitPromptAsync() → SendAsync()
+    → resolves the selected local CLI (ProgrammingAssistantSettingsService.GetSelectedCliKindAsync)
+    → DispatchingAgentChatRuntime.StreamTurnAsync() (Mode=Cli → CliAgentChatRuntime)
+      → CliSessionResolver (resume ids) + CliAgentRegistry (per-CLI definition)
+        → CliCommandResolver (PATH/PATHEXT, cmd.exe wrapping) → CliAgentProcessHost (subprocess)
+          → stdout JSONL → ClaudeStreamJsonParser / JsonEventStreamParser → AgentStreamEvents
+  → MainWindowViewModel.HandleAgentStreamEventAsync → TranscriptRenderState → Vue renders
 ```
 
-Key runtime files (partial split under `Orchestration/`):
-- `SelfClawAgentChatRuntime.cs` — DI wiring, stream entrypoint
-- `SelfClawAgentChatRuntime.Execution.cs` — direct turn execution
-- `SelfClawAgentChatRuntime.PromptMessages.cs` — prompt assembly
-- `SelfClawAgentChatRuntime.Instructions.cs` — instruction builder
+The turn runs a local coding agent CLI (Claude Code / Codex / OpenCode) as a subprocess; the CLI uses
+its own local auth/model config. Which CLI runs is the user's selection persisted by
+`ProgrammingAssistantSettingsService` (settings page 编程助手 and the composer's ModelSelector share it
+via the `get-programming-assistant-settings` / `select-programming-cli` WebView messages), carried on
+`ChatTurnRequest.CliAgent`. No selection (no CLI detected) fails the turn with guidance.
+
+Key runtime files (`Infrastructure/Agents/Cli/`):
+- `CliAgentChatRuntime.cs` — one turn: session plan → args → spawn → parse → events
+- `Definitions/` — `ClaudeAgentDefinition`, `CodexAgentDefinition`, `OpenCodeAgentDefinition`, `CliAgentRegistry`
+- `Parsers/` — `ClaudeStreamJsonParser` (stream-json), `JsonEventStreamParser` (Codex/OpenCode)
+- `Process/` — `CliCommandResolver`, `CliAgentProcessHost`, `CliAgentProcessSession` (watchdog, kill-tree)
+- `Session/` — `CliSessionResolver`, `SqliteCliAgentSessionStore` (resume id per conversation × CLI)
+- `Agents/Runtime/DispatchingAgentChatRuntime.cs` — mode dispatch (Direct reserved, fails cleanly)
 
 ### Desktop ViewModel
 
@@ -63,10 +70,9 @@ Agent markdown supports front matter: name, description, mode, tools, skills, mc
 
 ### Tool approval
 
-Write and shell tools require approval. Flow:
-1. `ToolInvocationMetadata.RequiresApproval` checked
-2. `DesktopToolApprovalHandler.RequestApprovalAsync()` emits toast + awaits `TaskCompletionSource<bool>`
-3. `RuntimeToolObserver` tracks lifecycle: Start → AwaitingApproval → Running → Completed/Failed/Cancelled
+Not active in the CLI workflow: the CLI agent applies its own permission policy, and the desktop
+approval UI was removed with the frontend rework. `DesktopToolApprovalHandler` is still registered and
+passed on `ChatTurnRequest`, but nothing subscribes to it.
 
 ### WPF shell
 
@@ -79,13 +85,15 @@ Write and shell tools require approval. Flow:
 
 Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 - Repositories: `SqliteProfileRepository`, `SqliteConversationRepository`, `SqliteAiProviderRepository`
-- Providers: `OpenAiProviderAdapter`, `AnthropicProviderAdapter`, `AiProviderRegistry`
-- Runtime: `SelfClawAgentChatRuntime`, `ChatClientAgentExecutionService`, `McpServerToolProvider`
-- Tools: `WorkspaceToolService`, `FileSystemAgentContextProviderFactory`, `RuntimeToolObserver`
+- CLI runtime: `CliCommandResolver`, `CliAgentProcessHost`, `CliAgentRegistry`, `SqliteCliAgentSessionStore`,
+  `CliSessionResolver`, `CliAgentChatRuntime`, `DispatchingAgentChatRuntime` (as `IAgentChatRuntime`)
+- Tools: `WorkspaceToolService`, `MarkdownHtmlRenderer`
 - Security: `DpapiSecretProtector`
 
 Desktop (`App.xaml.cs`):
-- `DesktopAgentStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
+- `DesktopAgentStore`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
+  `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `PetService`,
+  `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
 
 **Not registered** (retained/dead): `DesktopChannelManager`, Feishu adapters, old `DesktopSettingsStore`.
 
@@ -104,7 +112,7 @@ Desktop (`App.xaml.cs`):
 
 ### Database
 
-Schema version: **17** (in `SqliteDatabase.cs`). Tables: `profiles`, `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `workspace_roots`, `conversations`, `messages`, `message_attachments`, `tool_runs`. Backward-compatible column migration via `EnsureColumnExistsAsync`.
+Schema version: **19** (in `SqliteDatabase.cs`). Tables: `profiles`, `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `workspace_roots`, `conversations`, `messages`, `message_attachments`, `tool_runs`, `cli_agent_sessions`. Backward-compatible column migration via `EnsureColumnExistsAsync`.
 
 ### Image attachments
 
@@ -117,8 +125,9 @@ Persisted to `{AppData}\attachments\{convId}\{msgId}\`. Max 6 images, 10MB each,
 ## Dead / Retained Code (NOT active)
 
 - **Feishu channel**: fully implemented but never registered in DI
-- **Plan mode**: removed, `AgentExecutionMode` has `Direct` only
+- **Plan mode**: removed, `AgentExecutionMode` has `Direct` (reserved, no runtime) and `Cli` (active)
 - **Channel conversations**: data model retained but VM filters them out
 - **MCP server wiring**: provider exists but VM passes empty list
-- **Settings backend**: removed, Vue Settings page uses mock data
+- **Settings pages**: 编程助手 (CLI scan/select) and 宠物 are wired to the host; the other settings pages are frontend mock
+- **Profile / API key on ChatTurnRequest**: resolved and passed but unused by the CLI runtime (reserved for a future Direct runtime)
 - **RightPanel**: XAML stub, not functional

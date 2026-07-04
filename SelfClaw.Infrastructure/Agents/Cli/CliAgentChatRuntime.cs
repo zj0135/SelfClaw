@@ -60,14 +60,22 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var kind = ResolveAgentKind(request.Agent);
-        var definition = _registry.Find(kind);
+        if (request.CliAgent is not { } agentKind)
+        {
+            yield return new RunCompletedEvent(
+                RunCompletionStatus.Failed,
+                FinalText: null,
+                ErrorMessage: "No local CLI agent is selected. Install Claude Code, Codex CLI or OpenCode and select one in settings.");
+            yield break;
+        }
+
+        var definition = _registry.Find(agentKind);
         if (definition is null)
         {
             yield return new RunCompletedEvent(
                 RunCompletionStatus.Failed,
                 FinalText: null,
-                ErrorMessage: $"No CLI agent definition is registered for '{kind}'.");
+                ErrorMessage: $"No CLI agent definition is registered for '{agentKind}'.");
             yield break;
         }
 
@@ -87,7 +95,7 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
 
         var runContext = new CliRunContext
         {
-            AgentKind = kind,
+            AgentKind = agentKind,
             WorkingDirectory = ResolveWorkingDirectory(request.WorkspaceRoot),
             ResumeSessionId = sessionPlan.ResumeSessionId,
             NewSessionId = sessionPlan.NewSessionId,
@@ -124,14 +132,14 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
 
         _logger.LogInformation(
             "Starting {Kind} CLI agent. FileName={FileName}, ShellWrapped={ShellWrapped}, Args={Args}, VerbatimArgs={VerbatimArgs}, WorkingDirectory={WorkingDirectory}",
-            kind,
+            agentKind,
             invocation.FileName,
             invocation.IsShellWrapped,
             string.Join(' ', invocation.ArgumentList),
             invocation.VerbatimArguments,
             runContext.WorkingDirectory);
 
-        var parser = CreateParser(definition.StreamFormat, kind);
+        var parser = CreateParser(definition.StreamFormat, agentKind);
 
         // Launching the child can throw synchronously (e.g. a Win32Exception when the resolved target is
         // not a real executable). Surface it as a clean completion rather than letting it escape the
@@ -148,7 +156,7 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to start the {Kind} CLI agent process.", kind);
+            _logger.LogError(ex, "Failed to start the {Kind} CLI agent process.", agentKind);
             startError = ex.Message;
         }
 
@@ -175,7 +183,7 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to write the prompt to the {Kind} CLI agent.", kind);
+            _logger.LogWarning(ex, "Failed to write the prompt to the {Kind} CLI agent.", agentKind);
             writeError = ex.Message;
         }
 
@@ -185,7 +193,7 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
         {
             await foreach (var line in session.ReadOutputLinesAsync(cancellationToken).ConfigureAwait(false))
             {
-                _logger.LogDebug("{Kind} stdout: {Line}", kind, line);
+                _logger.LogDebug("{Kind} stdout: {Line}", agentKind, line);
                 // ReadOutputLinesAsync yields newline-stripped lines, but the parser splits its input on
                 // '\n' internally (it is built to accept raw stdout chunks). Re-append the terminator so
                 // each line is parsed immediately instead of being buffered until Flush() concatenates them.
@@ -217,7 +225,7 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
         var result = await session.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         _logger.LogInformation(
             "{Kind} CLI agent exited. Status={Status}, ExitCode={ExitCode}, TimedOut={TimedOut}, RunCompletedEmitted={Emitted}, StdErr={StdErr}",
-            kind,
+            agentKind,
             result.Status,
             result.ExitCode,
             result.TimedOut,
@@ -235,13 +243,6 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
                 ErrorMessage: writeError ?? BuildExitError(result));
         }
     }
-
-    /// <summary>
-    /// Resolves which CLI the agent targets. There is no UI to pick the CLI yet, so this is hardcoded.
-    /// TEMP: forced to <see cref="CliAgentKind.OpenCode"/> for manual end-to-end testing of 阶段 7; revert
-    /// to <see cref="CliAgentKind.Claude"/> (or wire agent → kind selection) afterwards.
-    /// </summary>
-    private static CliAgentKind ResolveAgentKind(AgentRuntimeDefinition agent) => CliAgentKind.OpenCode;
 
     /// <summary>The latest user message is the prompt; the CLI keeps prior turns via session resume.</summary>
     private static string? ExtractPrompt(IReadOnlyList<MessageRecord> messages)

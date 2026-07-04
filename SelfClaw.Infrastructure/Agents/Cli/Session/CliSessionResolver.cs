@@ -10,15 +10,17 @@ namespace SelfClaw.Infrastructure.Agents.Cli.Session;
 /// conversation's persisted session id into the per-turn resume / new-session ids a definition's
 /// <c>BuildArgs</c> consumes, and by persisting the id once a turn establishes it (plan.md §6, T4.5).
 /// <para>
-/// The two <see cref="ResumeStrategy"/> values differ in <em>when</em> the id is known:
+/// The two <see cref="ResumeStrategy"/> values differ in <em>who</em> mints the id:
 /// </para>
 /// <list type="bullet">
-///   <item><see cref="ResumeStrategy.Specified"/> (Claude) — we know the id before the run. On a fresh
-///         conversation we mint a UID, expose it as <see cref="CliRunContext.NewSessionId"/>, and persist
-///         it eagerly so the next turn resumes via <see cref="CliRunContext.ResumeSessionId"/>.</item>
+///   <item><see cref="ResumeStrategy.Specified"/> (Claude) — we mint a UID on a fresh conversation and
+///         pass it via <see cref="CliRunContext.NewSessionId"/>. It is persisted only once the agent's
+///         stream confirms the session exists (<see cref="RunStartedEvent.SessionId"/> from the init
+///         event); persisting before launch would leave a dead id behind when the CLI never starts,
+///         making every later turn resume a session that does not exist.</item>
 ///   <item><see cref="ResumeStrategy.CapturedFromStream"/> (Codex / OpenCode) — the agent mints its own
-///         id and reports it mid-stream. We resume with whatever we already stored and persist the id
-///         captured from <see cref="RunStartedEvent.SessionId"/> after the fact.</item>
+///         id and reports it mid-stream. We resume with whatever we already stored and persist the
+///         captured id after the fact.</item>
 /// </list>
 /// </summary>
 public sealed class CliSessionResolver
@@ -32,8 +34,8 @@ public sealed class CliSessionResolver
 
     /// <summary>
     /// Resolves the resume / new-session ids for the next turn of <paramref name="conversationId"/>.
-    /// For <see cref="ResumeStrategy.Specified"/> a UID is minted and persisted when none exists yet, so
-    /// the returned context always carries a session id the run can pin.
+    /// For <see cref="ResumeStrategy.Specified"/> a UID is minted when none is stored yet; it is not
+    /// persisted here — that happens in <see cref="CaptureAsync"/> once the stream confirms it.
     /// </summary>
     public async Task<CliSessionPlan> PrepareAsync(
         Guid conversationId,
@@ -48,18 +50,14 @@ public sealed class CliSessionResolver
         {
             case ResumeStrategy.Specified:
                 if (!string.IsNullOrEmpty(stored))
-                    return new CliSessionPlan(ResumeSessionId: stored, NewSessionId: null, PersistEagerly: false);
+                    return new CliSessionPlan(ResumeSessionId: stored, NewSessionId: null);
 
-                var minted = Guid.NewGuid().ToString("D");
-                await _sessionStore
-                    .SetSessionIdAsync(conversationId, definition.Kind, minted, cancellationToken)
-                    .ConfigureAwait(false);
-                return new CliSessionPlan(ResumeSessionId: null, NewSessionId: minted, PersistEagerly: true);
+                return new CliSessionPlan(ResumeSessionId: null, NewSessionId: Guid.NewGuid().ToString("D"));
 
             case ResumeStrategy.CapturedFromStream:
                 // Resume with whatever we captured previously; a fresh conversation starts cold and the
                 // id is persisted later via CaptureAsync once the stream reports it.
-                return new CliSessionPlan(ResumeSessionId: stored, NewSessionId: null, PersistEagerly: false);
+                return new CliSessionPlan(ResumeSessionId: stored, NewSessionId: null);
 
             default:
                 throw new ArgumentOutOfRangeException(
@@ -70,9 +68,10 @@ public sealed class CliSessionResolver
     }
 
     /// <summary>
-    /// Persists a session id reported by the agent stream (<see cref="RunStartedEvent.SessionId"/>) for a
-    /// <see cref="ResumeStrategy.CapturedFromStream"/> agent. No-op for <see cref="ResumeStrategy.Specified"/>
-    /// (already persisted eagerly) and for blank ids.
+    /// Persists the session id reported by the agent stream (<see cref="RunStartedEvent.SessionId"/>).
+    /// Applies to both strategies: for <see cref="ResumeStrategy.CapturedFromStream"/> it is the only
+    /// source of the id, and for <see cref="ResumeStrategy.Specified"/> it confirms the minted id (or a
+    /// forked id on resume) belongs to a session that actually exists. No-op for blank ids.
     /// </summary>
     public async Task CaptureAsync(
         Guid conversationId,
@@ -80,8 +79,6 @@ public sealed class CliSessionResolver
         string? streamSessionId,
         CancellationToken cancellationToken = default)
     {
-        if (definition.ResumeStrategy != ResumeStrategy.CapturedFromStream)
-            return;
         if (string.IsNullOrEmpty(streamSessionId))
             return;
 
@@ -93,10 +90,7 @@ public sealed class CliSessionResolver
 
 /// <summary>
 /// The resume / new-session ids resolved for a single turn, ready to drop into <see cref="CliRunContext"/>.
-/// <paramref name="PersistEagerly"/> records whether the id was already written to the store (true for a
-/// freshly minted <see cref="ResumeStrategy.Specified"/> id).
 /// </summary>
 public sealed record CliSessionPlan(
     string? ResumeSessionId,
-    string? NewSessionId,
-    bool PersistEagerly);
+    string? NewSessionId);

@@ -65,6 +65,37 @@ public sealed partial class ProgrammingAssistantSettingsService
 
     public string? SelectedCliId => _settings.SelectedCliId;
 
+    /// <summary>
+    /// Reads the persisted settings without ever scanning. Startup seeds them via
+    /// <see cref="GetOrInitializeAsync"/>, so readers (composer selector, settings page load,
+    /// chat turns) get the detection result from config instead of re-probing PATH.
+    /// </summary>
+    public async Task<ProgrammingAssistantSettings> GetCurrentAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureLoadedCoreAsync(cancellationToken).ConfigureAwait(false);
+            return _settings;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Resolves the <see cref="CliAgentKind"/> of the currently selected CLI, or <c>null</c> when no
+    /// detected CLI is selected. This is what a chat turn passes to the runtime as the target agent.
+    /// </summary>
+    public async Task<CliAgentKind?> GetSelectedCliKindAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await GetCurrentAsync(cancellationToken).ConfigureAwait(false);
+        return settings.Tools
+            .FirstOrDefault(tool => string.Equals(tool.Id, settings.SelectedCliId, StringComparison.OrdinalIgnoreCase))
+            ?.Kind;
+    }
+
     public async Task<ProgrammingAssistantSettings> GetOrInitializeAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

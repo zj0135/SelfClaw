@@ -9,6 +9,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services;
+using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Tools.Transcript;
 using SelfClaw.Infrastructure.Tools.Transcript.Models;
@@ -32,6 +33,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly DesktopNotificationService _desktopNotificationService;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly DesktopAgentStore _desktopAgentStore;
+    private readonly ProgrammingAssistantSettingsService _programmingAssistantSettings;
     private readonly StoragePaths _storagePaths;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly DispatcherTimer? _streamingPublishTimer;
@@ -70,6 +72,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         DesktopNotificationService desktopNotificationService,
         MarkdownHtmlRenderer markdownHtmlRenderer,
         DesktopAgentStore desktopAgentStore,
+        ProgrammingAssistantSettingsService programmingAssistantSettings,
         StoragePaths storagePaths,
         ILogger<MainWindowViewModel> logger)
     {
@@ -81,6 +84,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _desktopNotificationService = desktopNotificationService;
         _markdownHtmlRenderer = markdownHtmlRenderer;
         _desktopAgentStore = desktopAgentStore;
+        _programmingAssistantSettings = programmingAssistantSettings;
         _storagePaths = storagePaths;
         _logger = logger;
         // 工具审批 UI 已随前端重构移除；运行时仍接收 _toolApprovalHandler（见 SendAsync 的 ChatTurnRequest），
@@ -560,6 +564,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             var requestMessages = runtimeState.Messages.ToArray();
+            // The turn targets the CLI picked in settings / the composer selector; null means nothing
+            // is selected (or detected) and the runtime fails the turn with actionable guidance.
+            var selectedCliAgent = await _programmingAssistantSettings.GetSelectedCliKindAsync(cancellationToken);
             var turnState = new AgentTurnState(runtimeAgent);
 
             // Surface the assistant placeholder immediately: CLI process startup can take seconds
@@ -575,6 +582,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                                    selectedWorkspaceRoot,
                                    ConversationMode.Programming,
                                    runtimeAgent,
+                                   selectedCliAgent,
                                    selectedToolPermissionMode,
                                    _toolApprovalHandler,
                                    requestMessages),

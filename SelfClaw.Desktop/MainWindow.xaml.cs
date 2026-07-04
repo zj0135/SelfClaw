@@ -569,13 +569,13 @@ public partial class MainWindow : Window
         {
             var settings = refresh
                 ? await _programmingAssistantSettingsService.RescanAsync()
-                : await _programmingAssistantSettingsService.GetOrInitializeAsync();
+                : await _programmingAssistantSettingsService.GetCurrentAsync();
             PostProgrammingAssistantSettings(requestId, settings);
         }
         catch (Exception exception)
         {
             Debug.WriteLine(exception);
-            PostTerminalMessage(new
+            PostWebMessage(new
             {
                 type = "programming-assistant-settings",
                 requestId,
@@ -596,7 +596,7 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             Debug.WriteLine(exception);
-            PostTerminalMessage(new
+            PostWebMessage(new
             {
                 type = "programming-assistant-settings",
                 requestId,
@@ -608,7 +608,7 @@ public partial class MainWindow : Window
     }
 
     private void PostProgrammingAssistantSettings(string? requestId, ProgrammingAssistantSettings settings)
-        => PostTerminalMessage(new
+        => PostWebMessage(new
         {
             type = "programming-assistant-settings",
             requestId,
@@ -660,7 +660,7 @@ public partial class MainWindow : Window
     }
 
     private void PostPetSettings(string? requestId, PetSettings settings)
-        => PostTerminalMessage(new
+        => PostWebMessage(new
         {
             type = "pet-settings",
             requestId,
@@ -670,7 +670,7 @@ public partial class MainWindow : Window
         });
 
     private void PostPetSettingsError(string? requestId, Exception exception)
-        => PostTerminalMessage(new
+        => PostWebMessage(new
         {
             type = "pet-settings",
             requestId,
@@ -799,7 +799,25 @@ public partial class MainWindow : Window
 
     private void PostTerminalMessage(object payload)
     {
-        if (!_webViewReady || TranscriptView.CoreWebView2 is null)
+        // Push-style messages wait for the initial navigation so they are not lost on a page
+        // that has not attached listeners yet.
+        if (!_webViewReady)
+        {
+            return;
+        }
+
+        PostWebMessage(payload);
+    }
+
+    /// <summary>
+    /// Posts without the <c>_webViewReady</c> gate. Responses to a received web message must use this:
+    /// the request proves the page's script is already running (its listeners exist), and during app
+    /// startup that happens before <c>NavigationCompleted</c> flips <c>_webViewReady</c> — gating the
+    /// response would silently drop it and leave the requester waiting forever.
+    /// </summary>
+    private void PostWebMessage(object payload)
+    {
+        if (TranscriptView.CoreWebView2 is null)
         {
             return;
         }
