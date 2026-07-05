@@ -137,7 +137,16 @@ defineExpose({
 	box-shadow:
 		0 1px 2px rgba(23, 26, 31, 0.05),
 		0 8px 24px rgba(23, 26, 31, 0.04);
+	transition: border-color 0.18s, box-shadow 0.18s;
 	will-change: transform;
+}
+
+.composer-shell:focus-within {
+	border-color: #d3d9e3;
+	box-shadow:
+		0 1px 2px rgba(23, 26, 31, 0.05),
+		0 10px 28px rgba(23, 26, 31, 0.07),
+		0 0 0 3px rgba(23, 26, 31, 0.03);
 }
 
 .empty-workspace .composer-shell {

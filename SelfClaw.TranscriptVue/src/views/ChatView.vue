@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import ComposerPanel from '../components/Chat/ComposerPanel.vue';
 import TerminalPanel from '../components/Chat/TerminalPanel.vue';
 import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
@@ -53,6 +53,72 @@ const renderedMessages = computed(() =>
 	})));
 const isEmptyConversation = computed(() => (state.items || []).length === 0 && !state.isBusy);
 
+// ===== 回合执行状态（对话底部的「执行中 + 耗时」行） =====
+// CLI 非流式返回时整个回合期间消息区可能毫无变化，
+// 从 isBusy 上升沿开始计时，让用户知道回合仍在执行。
+const busyClock = reactive({ startedAt: 0, now: 0 });
+let busyTimer = null;
+
+function startBusyClock() {
+	busyClock.startedAt = Date.now();
+	busyClock.now = busyClock.startedAt;
+	if (!busyTimer) {
+		busyTimer = setInterval(() => {
+			busyClock.now = Date.now();
+		}, 1000);
+	}
+}
+
+function stopBusyClock() {
+	busyClock.startedAt = 0;
+	if (busyTimer) {
+		clearInterval(busyTimer);
+		busyTimer = null;
+	}
+}
+
+function formatElapsedTime(ms) {
+	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+	if (hours > 0) {
+		return `${hours}h ${minutes}m`;
+	}
+
+	if (minutes > 0) {
+		return `${minutes}m ${seconds}s`;
+	}
+
+	return `${seconds}s`;
+}
+
+function hasRenderableContent(item) {
+	if (Array.isArray(item?.segments) && item.segments.length > 0) {
+		return true;
+	}
+
+	return Boolean(item?.html || item?.thinkingHtml);
+}
+
+// 末条助手消息还在展示「准备中」卡片时不重复显示执行状态，避免同屏两个活动指示。
+const preparingIndicatorVisible = computed(() => {
+	const items = state.items || [];
+	const last = items[items.length - 1];
+	return Boolean(last && last.role === 'assistant' && last.isThinking && !hasRenderableContent(last));
+});
+
+const turnStatus = computed(() => {
+	if (!state.isBusy || !busyClock.startedAt || preparingIndicatorVisible.value) {
+		return null;
+	}
+
+	return {
+		label: '执行中',
+		elapsedText: formatElapsedTime(busyClock.now - busyClock.startedAt),
+	};
+});
+
 function getTranscriptScrollEl() {
 	return transcriptPanelRef.value?.getScrollEl?.() ?? null;
 }
@@ -95,6 +161,12 @@ function replaceState(payload) {
 	const scrollSnapshot = snapshotScrollPosition(transcriptEl);
 	const nextItems = Array.isArray(payload.items) ? payload.items : [];
 	const nextBusy = Boolean(payload.isBusy);
+	if (nextBusy && !state.isBusy) {
+		startBusyClock();
+	} else if (!nextBusy) {
+		stopBusyClock();
+	}
+
 	const wasEmpty = (state.items || []).length === 0 && !state.isBusy;
 	const willBeEmpty = nextItems.length === 0 && !nextBusy;
 	const previousComposerRect = wasEmpty && !willBeEmpty ? composerShellRef.value?.getShellEl()?.getBoundingClientRect() : null;
@@ -353,6 +425,10 @@ onMounted(() => {
 	requestWorkspaceSelection(false);
 });
 
+onUnmounted(() => {
+	stopBusyClock();
+});
+
 defineExpose({
 	handleMessage(payload) {
 		if (payload.type === 'replaceState') {
@@ -384,8 +460,8 @@ defineExpose({
 		'terminal-open': state.terminal.isOpen,
 	}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
 		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :messages="renderedMessages"
-			@scroll="onTranscriptScroll" @preview-image="openImagePreview" @transcript-click="onTranscriptClick"
-			@transcript-keydown="onTranscriptKeydown" />
+			:turn-status="turnStatus" @scroll="onTranscriptScroll" @preview-image="openImagePreview"
+			@transcript-click="onTranscriptClick" @transcript-keydown="onTranscriptKeydown" />
 		<section v-else class="empty-composer-stage" aria-label="新对话">
 			<div class="empty-composer-copy">
 				<h1>想聊些什么？</h1>
@@ -439,7 +515,7 @@ defineExpose({
 	align-items: flex-end;
 	justify-content: center;
 	padding: 0 28px 28px;
-	background: #ffffff;
+	background: transparent;
 }
 
 .empty-composer-copy {

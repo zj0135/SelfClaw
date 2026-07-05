@@ -148,11 +148,40 @@ function resolveToolGroupStatus(segments) {
 	return 'completed';
 }
 
+// 卡片左侧的状态图标：成功绿勾 / 失败红叉 / 取消灰杠 / 进行中转圈。
+function toolStatusIcon(status) {
+	switch (status) {
+		case 'running':
+		case 'awaitingapproval':
+			return '<span class="tool-status-icon spinning" aria-hidden="true"></span>';
+		case 'failed':
+			return '<span class="tool-status-icon failed" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5.3 5.3l5.4 5.4M10.7 5.3l-5.4 5.4" /></svg></span>';
+		case 'cancelled':
+			return '<span class="tool-status-icon cancelled" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4.6 8h6.8" /></svg></span>';
+		default:
+			return '<span class="tool-status-icon completed" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.9 8.7l2.6 2.6 5.6-6.1" /></svg></span>';
+	}
+}
+
+const thinkingSparkIcon = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.4c.55 3.3 1.95 4.9 6.6 6.6-4.65 1.7-6.05 3.3-6.6 6.6-.55-3.3-1.95-4.9-6.6-6.6 4.65-1.7 6.05-3.3 6.6-6.6Z" /></svg>';
+
+// 「动词 + 目标」两段式标签：首个空格前作为主标签（深色），其余作为副标签（浅色）。
+// 无空格（如中文短语）时整体作为主标签。
+function splitSummaryLabel(text) {
+	const value = String(text || '').trim();
+	const spaceIndex = value.indexOf(' ');
+	if (spaceIndex <= 0) {
+		return { primary: value, secondary: '' };
+	}
+
+	return { primary: value.slice(0, spaceIndex), secondary: value.slice(spaceIndex + 1) };
+}
+
 function renderPreparingIndicator(activityText) {
 	const label = String(activityText || '').trim() || '准备中...';
 	return `
       <div class="preparing-indicator" role="status">
-        <span class="thinking-dot live"></span>
+        <span class="tool-status-icon spinning" aria-hidden="true"></span>
         <span class="shimmer-text">${escapeHtml(label)}</span>
       </div>
     `;
@@ -172,12 +201,10 @@ function renderThinkingSegment(item, segment, thinkingOrdinal, index, totalSegme
 	}
 
 	const isLast = index === totalSegments - 1;
-	const label = isLive ? '思考中...' : '思考';
+	const label = isLive ? '思考中...' : '思考完毕';
 	const labelHtml = `
-          <span class="thinking-label">
-            <span class="thinking-dot ${isLive ? 'live' : ''}"></span>
-            <span class="${isLive ? 'shimmer-text' : ''}">${label}</span>
-          </span>`;
+          <span class="thinking-spark ${isLive ? 'live' : ''}" aria-hidden="true">${thinkingSparkIcon}</span>
+          <span class="thinking-label ${isLive ? 'shimmer-text' : ''}">${label}</span>`;
 
 	if (!hasContent) {
 		return `
@@ -204,6 +231,7 @@ function renderThinkingSegment(item, segment, thinkingOrdinal, index, totalSegme
 
 function renderToolCard(item, segment, index, openToolSegments, options = {}) {
 	const summaryLabel = options.summaryLabel || segment.text || '工具调用';
+	const { primary, secondary } = splitSummaryLabel(summaryLabel);
 	const status = segment.status || 'completed';
 	const id = toolSegmentId(item.id, segment, index);
 	const detailTitle = segment.detailTitle || 'Tool';
@@ -215,7 +243,9 @@ function renderToolCard(item, segment, index, openToolSegments, options = {}) {
       <section class="tool-block ${escapeHtml(status)} ${isOpen ? 'open' : ''} ${options.nested ? 'nested' : ''}" data-tool-segment-id="${escapeHtml(id)}">
         <button class="tool-summary ${options.nested ? 'nested' : ''}" type="button" data-action="toggle-tool-segment" data-tool-segment-id="${escapeHtml(id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
           <span class="tool-summary-main">
-            <span class="inline-tool-label">${escapeHtml(summaryLabel)}</span>
+            ${toolStatusIcon(status)}
+            <span class="inline-tool-label">${escapeHtml(primary || '工具调用')}</span>
+            ${secondary ? `<span class="tool-summary-detail">${escapeHtml(secondary)}</span>` : ''}
           </span>
           <span class="tool-summary-side">
             ${durationText ? `<span class="tool-summary-duration">${escapeHtml(durationText)}</span>` : ''}
@@ -243,7 +273,8 @@ export function renderToolDetails(status, detailTitle, detailText) {
 
 function renderToolSegment(item, segment, index, totalSegments, openToolSegments) {
 	const status = segment.status || 'completed';
-	const summaryLabel = buildToolActionSummary([segment]);
+	// 单条工具卡片优先展示具体目标（如 "Read TranscriptPanel.vue"），比聚合计数更有信息量。
+	const summaryLabel = segment.text || buildToolActionSummary([segment]);
 	const classes = ['tool-segment', status];
 	if (index === 0) {
 		classes.push('first');
@@ -285,6 +316,7 @@ function renderToolGroup(item, toolSegments, startIndex, endIndex, totalSegments
         <section class="tool-group-block ${escapeHtml(status)} ${isOpen ? 'open' : ''}" data-tool-group-id="${escapeHtml(id)}">
           <button class="tool-group-summary" type="button" data-action="toggle-tool-group" data-tool-group-id="${escapeHtml(id)}" aria-expanded="${isOpen ? 'true' : 'false'}">
             <span class="tool-group-summary-main">
+              ${toolStatusIcon(status)}
               <span class="tool-group-label">${escapeHtml(summaryLabel)}</span>
             </span>
             <span class="tool-group-summary-side">

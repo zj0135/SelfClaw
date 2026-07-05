@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import claudeIcon from '../../../assets/agents-icons/claude.svg';
 import codexIcon from '../../../assets/agents-icons/codex.svg';
 import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
@@ -41,6 +41,25 @@ const activeModel = ref(defaultModel);
 const open = ref(false);
 const menuOpen = ref(false);
 const rootRef = ref(null);
+const popoverRef = ref(null);
+
+// 弹层方向：'down' 贴按钮下方，'up' 贴按钮上方。
+// 对话视图中输入栏位于窗口底部，向下展开会被 main-content 的 overflow 裁剪，
+// 因此打开时按可用空间动态决定方向（空间估算 → 渲染后按实际高度校正一次）。
+const placement = ref('down');
+const estimatedPopoverHeight = 340;
+
+function updatePlacement() {
+	const rect = rootRef.value?.getBoundingClientRect();
+	if (!rect) {
+		return;
+	}
+
+	const popoverHeight = popoverRef.value?.offsetHeight || estimatedPopoverHeight;
+	const spaceBelow = window.innerHeight - rect.bottom;
+	const spaceAbove = rect.top;
+	placement.value = spaceBelow < popoverHeight + 16 && spaceAbove > spaceBelow ? 'up' : 'down';
+}
 
 const modelLabel = computed(() => {
 	if (!loaded.value) {
@@ -100,6 +119,9 @@ function togglePanel() {
 		menuOpen.value = false;
 		return;
 	}
+
+	updatePlacement();
+	nextTick(updatePlacement);
 
 	if (!loaded.value) {
 		// 自愈：挂载时的请求若丢失（宿主未就绪等），打开面板时再拉一次配置。
@@ -182,8 +204,9 @@ onBeforeUnmount(() => {
 			</svg>
 		</button>
 
-		<!-- 设置弹出面板：固定贴着触发按钮下方展开 -->
-		<div v-show="open" class="model-popover" role="dialog" aria-label="模型与代理设置">
+		<!-- 设置弹出面板：默认贴按钮下方展开；下方空间不足时自动翻转到按钮上方 -->
+		<div v-show="open" ref="popoverRef" class="model-popover" :class="`model-popover--${placement}`" role="dialog"
+			aria-label="模型与代理设置">
 			<!-- 模式 -->
 			<div class="pop-section">
 				<div class="pop-label">模式</div>
@@ -328,20 +351,42 @@ onBeforeUnmount(() => {
 .model-popover {
 	position: absolute;
 	left: 0;
-	top: calc(100% + 6px);
 	width: 236px;
 	padding: 10px;
 	border: 1px solid #e2e5eb;
 	border-radius: 12px;
 	background: #ffffff;
 	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.05), 0 12px 32px rgba(23, 26, 31, 0.12);
-	transform-origin: top left;
 	z-index: 40;
+}
+
+.model-popover--down {
+	top: calc(100% + 6px);
+	transform-origin: top left;
 	animation: pop-in-down 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+.model-popover--up {
+	bottom: calc(100% + 6px);
+	transform-origin: bottom left;
+	animation: pop-in-up 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 @keyframes pop-in-down {
 	from { opacity: 0; transform: translateY(-6px) scale(0.98); }
 	to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes pop-in-up {
+	from { opacity: 0; transform: translateY(6px) scale(0.98); }
+	to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.model-popover--down,
+	.model-popover--up {
+		animation: none;
+	}
 }
 
 .pop-label {

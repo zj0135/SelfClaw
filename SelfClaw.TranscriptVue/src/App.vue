@@ -259,6 +259,7 @@ onUnmounted(() => {
 	--panel-elevated: #ffffff;
 	--border: #e5e7eb;
 	--border-strong: #d8dde5;
+	--card-border: #e3e6ec;
 	--text: #171a1f;
 	--muted: #6b7280;
 	--muted-soft: #8a929e;
@@ -268,11 +269,12 @@ onUnmounted(() => {
 	--success: #2f855a;
 	--danger: #c24150;
 	--shadow: 0 12px 30px rgba(23, 26, 31, 0.08);
+	--card-shadow: 0 1px 2px rgba(23, 26, 31, 0.05), 0 10px 26px rgba(23, 26, 31, 0.06);
 	--font-ui: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
 	--font-display: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
 	--font-code: 'Cascadia Code', Consolas, monospace;
-	--scroll-track: rgba(23, 26, 31, 0.04);
-	--scroll-thumb: rgba(23, 26, 31, 0.14);
+	--scroll-track: transparent;
+	--scroll-thumb: rgba(23, 26, 31, 0.16);
 }
 
 * {
@@ -306,8 +308,13 @@ body {
 
 ::-webkit-scrollbar-thumb {
 	background: var(--scroll-thumb);
-	border: 2px solid var(--bg);
+	border: 3px solid transparent;
+	background-clip: padding-box;
 	border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background-color: rgba(23, 26, 31, 0.26);
 }
 
 button {
@@ -376,7 +383,10 @@ button {
 	overscroll-behavior: contain;
 	padding: 58px min(11.5vw, 104px) 32px;
 	scroll-padding-bottom: 32px;
-	background: #ffffff;
+	background: transparent;
+	/* 顶部渐隐：消息滚出可视区时柔和消失，避免在画布顶缘生硬截断 */
+	-webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 34px);
+	mask-image: linear-gradient(to bottom, transparent 0, #000 34px);
 }
 
 .message-row {
@@ -384,10 +394,82 @@ button {
 	align-items: flex-start;
 	justify-content: flex-start;
 	margin-bottom: 28px;
+	animation: message-in 340ms cubic-bezier(0.22, 0.82, 0.28, 1) both;
 }
 
-.message-row:last-child {
+@keyframes message-in {
+	from {
+		opacity: 0;
+		transform: translateY(7px);
+	}
+
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.message-row {
+		animation: none;
+	}
+}
+
+.message-row:last-child,
+.message-row:has(+ .turn-status-row) {
 	margin-bottom: 0;
+}
+
+/* ===== 回合执行状态行（对话底部：绿点 + 执行中 + 耗时） ===== */
+.turn-status-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 14px;
+	padding: 2px 0;
+	flex: none;
+}
+
+.turn-status-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: #23a566;
+	animation: turn-status-pulse 1.6s ease-out infinite;
+}
+
+@keyframes turn-status-pulse {
+	0% {
+		box-shadow: 0 0 0 0 rgba(35, 165, 102, 0.32);
+	}
+
+	70% {
+		box-shadow: 0 0 0 6px rgba(35, 165, 102, 0);
+	}
+
+	100% {
+		box-shadow: 0 0 0 0 rgba(35, 165, 102, 0);
+	}
+}
+
+.turn-status-label {
+	color: #5f6a78;
+	font-size: 12.5px;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+}
+
+.turn-status-time {
+	color: #9aa2ad;
+	font-size: 12px;
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.turn-status-dot {
+		animation: none;
+	}
 }
 
 .message-main {
@@ -425,12 +507,11 @@ button {
 
 .item.message.user {
 	padding: 0;
-	border: 1px solid #e1e4ea;
-	border-radius: 17px;
+	border: 1px solid var(--card-border);
+	/* 右下角收小：不依赖头像也能读出「这是你说的」方向感 */
+	border-radius: 16px 16px 6px 16px;
 	background: #ffffff;
-	box-shadow:
-		0 1px 2px rgba(23, 26, 31, 0.08),
-		0 8px 18px rgba(23, 26, 31, 0.05);
+	box-shadow: var(--card-shadow);
 }
 
 .item.message:hover {
@@ -571,7 +652,7 @@ pre {
 	padding: 12px 14px;
 	overflow: auto;
 	border: 1px solid var(--border);
-	border-radius: 8px;
+	border-radius: 10px;
 	background: #f6f8fb;
 	color: #1f2937;
 	font-size: 13px;
@@ -593,7 +674,7 @@ table {
 	width: 100%;
 	overflow: hidden;
 	border: 1px solid var(--border);
-	border-radius: 8px;
+	border-radius: 10px;
 	background: #ffffff;
 	border-collapse: collapse;
 }
@@ -603,6 +684,11 @@ td {
 	padding: 10px 12px;
 	border: 1px solid var(--border);
 	text-align: left;
+}
+
+th {
+	background: #f7f9fc;
+	font-weight: 650;
 }
 
 a {
@@ -726,12 +812,18 @@ a:hover {
 	font-size: 11px;
 }
 
+/* ===== 思考 / 工具调用：浅灰圆角卡片行（状态图标 + 主副标签 + 右侧箭头） ===== */
 .thinking-block {
 	margin: 0;
-	padding-top: 2px;
-	overflow: visible;
-	border: 0;
-	background: transparent;
+	overflow: hidden;
+	border: 1px solid #edeff3;
+	border-radius: 12px;
+	background: #f7f8fa;
+	transition: border-color 0.15s;
+}
+
+.thinking-block:not(.pending):hover {
+	border-color: #e0e4ea;
 }
 
 .thinking-block.last {
@@ -744,11 +836,10 @@ a:hover {
 	align-items: center;
 	justify-content: flex-start;
 	gap: 9px;
-	padding: 4px 0;
+	padding: 9px 12px;
 	border: 0;
-	border-radius: 6px;
 	background: transparent;
-	color: #65758b;
+	color: #3d4654;
 	text-align: left;
 }
 
@@ -756,33 +847,43 @@ a:hover {
 	cursor: default;
 }
 
-.thinking-summary:not(.passive):hover {
-	color: #405875;
-	background: transparent;
+.thinking-spark {
+	display: inline-grid;
+	place-items: center;
+	width: 18px;
+	height: 18px;
+	color: #707c8c;
+	flex: none;
+}
+
+.thinking-spark svg {
+	width: 13px;
+	height: 13px;
+}
+
+.thinking-spark.live {
+	color: var(--accent);
+	animation: spark-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes spark-pulse {
+	50% {
+		transform: scale(0.78);
+		opacity: 0.6;
+	}
 }
 
 .thinking-label {
-	font-size: 13px;
+	font-size: 12.5px;
 	font-weight: 600;
+	color: #22262c;
 	letter-spacing: 0.01em;
-}
-
-.thinking-dot {
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: #8fa1bc;
-	opacity: 0.95;
-}
-
-.thinking-dot.live {
-	background: var(--accent);
 }
 
 .thinking-chevron {
 	margin-left: auto;
-	color: #8a929e;
-	font-size: 13px;
+	color: #99a2b0;
+	font-size: 14px;
 	transition: transform 140ms ease;
 }
 
@@ -793,7 +894,7 @@ a:hover {
 
 .thinking-content {
 	display: none;
-	padding: 9px 0 1px;
+	padding: 0 12px 11px;
 }
 
 .thinking-block.open .thinking-content {
@@ -801,9 +902,9 @@ a:hover {
 }
 
 .thinking-markdown {
-	padding: 6px 0 6px 12px;
-	border-left: 2px solid #d5e0f1;
-	color: #8a96a7;
+	padding: 6px 0 2px 12px;
+	border-left: 2px solid #d9e2ef;
+	color: #7f8b9c;
 	font-size: 12px;
 	line-height: 1.7;
 }
@@ -819,7 +920,7 @@ a:hover {
 	align-items: center;
 	gap: 9px;
 	padding: 6px 0;
-	font-size: 13px;
+	font-size: 12.5px;
 	font-weight: 600;
 	letter-spacing: 0.01em;
 }
@@ -848,7 +949,7 @@ a:hover {
 }
 
 .tool-segment+.tool-segment {
-	margin-top: 6px;
+	margin-top: 8px;
 }
 
 .tool-segment.last {
@@ -857,10 +958,24 @@ a:hover {
 
 .tool-block,
 .tool-group-block {
-	overflow: visible;
-	border: 0;
-	background: transparent;
+	overflow: hidden;
+	border: 1px solid #edeff3;
+	border-radius: 12px;
+	background: #f7f8fa;
 	box-shadow: none;
+	transition: border-color 0.15s;
+}
+
+.tool-block:hover,
+.tool-group-block:hover {
+	border-color: #e0e4ea;
+}
+
+/* 组内嵌套的工具卡片：灰卡片里的白色子卡片 */
+.tool-block.nested {
+	border: 1px solid #e8ebf0;
+	border-radius: 9px;
+	background: #ffffff;
 }
 
 .tool-summary,
@@ -870,16 +985,15 @@ a:hover {
 	align-items: center;
 	justify-content: space-between;
 	gap: 10px;
-	padding: 5px 0;
+	padding: 9px 12px;
 	border: 0;
 	background: transparent;
-	color: #4f6580;
+	color: #3d4654;
 	text-align: left;
 }
 
-.tool-summary:hover,
-.tool-group-summary:hover {
-	color: #4f6580;
+.tool-summary.nested {
+	padding: 7px 10px;
 }
 
 .tool-summary-main,
@@ -888,28 +1002,77 @@ a:hover {
 	flex: 1 1 auto;
 	display: inline-flex;
 	align-items: center;
+	gap: 9px;
 }
 
-.tool-summary-main::before,
-.tool-group-summary-main::before {
-	content: '';
-	width: 5px;
-	height: 5px;
-	flex: 0 0 auto;
-	margin-right: 8px;
+/* 状态图标：成功绿勾 / 失败红叉 / 取消灰杠 / 进行中转圈 */
+.tool-status-icon {
+	display: inline-grid;
+	place-items: center;
+	width: 18px;
+	height: 18px;
 	border-radius: 50%;
-	background: #9aa6b5;
+	flex: none;
+}
+
+.tool-status-icon svg {
+	width: 11px;
+	height: 11px;
+}
+
+.tool-status-icon.completed {
+	background: #ddf2e7;
+	color: #178a56;
+}
+
+.tool-status-icon.failed {
+	background: #fbe7ea;
+	color: var(--danger);
+}
+
+.tool-status-icon.cancelled {
+	background: #eceff3;
+	color: #8a929e;
+}
+
+.tool-status-icon.spinning {
+	width: 13px;
+	height: 13px;
+	margin: 2.5px;
+	border: 2px solid #d5dce6;
+	border-top-color: var(--accent);
+	background: transparent;
+	animation: tool-spin 0.8s linear infinite;
+}
+
+@keyframes tool-spin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .inline-tool-label,
 .tool-group-label {
 	min-width: 0;
-	color: inherit;
-	font-size: 12px;
+	flex: 0 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: #22262c;
+	font-size: 12.5px;
 	font-weight: 600;
 	line-height: 1.4;
-	white-space: normal;
-	word-break: break-word;
+	white-space: nowrap;
+}
+
+.tool-summary-detail {
+	min-width: 0;
+	flex: 0 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: #8f99a8;
+	font-size: 12px;
+	line-height: 1.4;
 }
 
 .tool-summary-side,
@@ -918,7 +1081,7 @@ a:hover {
 	align-items: center;
 	gap: 7px;
 	flex: 0 0 auto;
-	color: #7a8797;
+	color: #99a2b0;
 }
 
 .tool-summary-duration {
@@ -929,7 +1092,7 @@ a:hover {
 .tool-summary-chevron,
 .tool-group-chevron {
 	color: inherit;
-	font-size: 13px;
+	font-size: 14px;
 	transition: transform 140ms ease;
 }
 
@@ -940,18 +1103,18 @@ a:hover {
 
 .tool-group-details {
 	display: none;
-	margin: 9px 0 4px;
-	padding-left: 14px;
-	border-left: 2px solid #dce5f4;
+	margin: 0;
+	padding: 2px 10px 10px;
 }
 
 .tool-group-block.open .tool-group-details {
-	display: block;
+	display: grid;
+	gap: 6px;
 }
 
 .tool-details {
 	display: none;
-	padding: 8px 0 12px;
+	padding: 2px 12px 12px;
 }
 
 .tool-block.open .tool-details {
@@ -968,8 +1131,13 @@ a:hover {
 }
 
 .tool-details-body {
-	border: 0;
-	border-radius: 6px;
+	border: 1px solid #e6eaf1;
+	border-radius: 8px;
+	background: #ffffff;
+}
+
+.tool-block.nested .tool-details-body {
+	border-color: #eceff3;
 	background: #f8fafc;
 }
 
@@ -979,6 +1147,7 @@ a:hover {
 	padding: 12px 13px;
 	border: 0;
 	background: transparent;
+	box-shadow: none;
 	font-size: 11.5px;
 	line-height: 1.6;
 }
