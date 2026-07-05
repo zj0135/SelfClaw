@@ -21,6 +21,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     #region 字段与构造函数 —— 依赖注入字段、运行时集合状态、流式发布定时器初始化
 
     private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(75);
+    private static readonly TimeSpan ConversationDeleteStopTimeout = TimeSpan.FromSeconds(8);
     private const int MaxPromptImageAttachments = 6;
     private const long MaxPromptImageBytes = 10 * 1024 * 1024;
     private const long MaxPromptImageTotalBytes = 30 * 1024 * 1024;
@@ -220,6 +221,60 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         SelectedConversation = conversation;
+    }
+
+    public Task DeleteConversationAsync(Guid conversationId)
+        => DeleteConversationsAsync([conversationId]);
+
+    public async Task DeleteConversationsAsync(IEnumerable<Guid> conversationIds)
+    {
+        var requestedIds = conversationIds
+            .Where(item => item != Guid.Empty)
+            .Distinct()
+            .ToHashSet();
+        if (requestedIds.Count == 0)
+        {
+            return;
+        }
+
+        var deleteIds = _allConversations
+            .Where(item => requestedIds.Contains(item.Id))
+            .Select(item => item.Id)
+            .ToArray();
+        if (deleteIds.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var conversationId in deleteIds)
+        {
+            await StopConversationForDeletionAsync(conversationId);
+        }
+
+        foreach (var conversationId in deleteIds)
+        {
+            await _conversationRepository.DeleteConversationAsync(conversationId);
+            _allConversations.RemoveAll(item => item.Id == conversationId);
+            _filteredConversations.RemoveAll(item => item.Id == conversationId);
+        }
+
+        var deletedIdSet = deleteIds.ToHashSet();
+        var preferredConversationId = SelectedConversation?.Id is Guid selectedId && !deletedIdSet.Contains(selectedId)
+            ? (Guid?)selectedId
+            : null;
+        ApplyConversationFilter(preferredConversationId);
+    }
+
+    public async Task DeleteWorkspaceRootAsync(Guid workspaceRootId)
+    {
+        if (workspaceRootId == Guid.Empty)
+        {
+            return;
+        }
+
+        await _conversationRepository.DeleteWorkspaceRootAsync(workspaceRootId);
+        await ReloadWorkspaceRootsAsync();
+        await ReloadConversationsAsync();
     }
 
     #endregion
@@ -501,6 +556,37 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _allConversations.Clear();
         _allConversations.AddRange(conversations);
         ApplyConversationFilter(selectedId);
+    }
+
+    private async Task StopConversationForDeletionAsync(Guid conversationId)
+    {
+        if (!_conversationRuntimeStates.TryGetValue(conversationId, out var runtimeState))
+        {
+            return;
+        }
+
+        if (runtimeState.IsRunning)
+        {
+            try
+            {
+                runtimeState.CancellationTokenSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The turn completed between lookup and cancellation.
+            }
+
+            var completedTask = await Task.WhenAny(
+                runtimeState.Completion,
+                Task.Delay(ConversationDeleteStopTimeout));
+            if (completedTask != runtimeState.Completion && runtimeState.IsRunning)
+            {
+                throw new TimeoutException("The conversation is still running and cannot be deleted yet.");
+            }
+        }
+
+        runtimeState.Dispose();
+        _conversationRuntimeStates.Remove(conversationId);
     }
 
     private async Task LoadConversationAsync(ConversationRecord conversation)

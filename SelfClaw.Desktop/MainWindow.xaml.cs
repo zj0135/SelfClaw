@@ -461,6 +461,43 @@ public partial class MainWindow : Window
                     }
                     break;
                 }
+                case "delete-conversation":
+                {
+                    var conversationId = document.RootElement.TryGetProperty("conversationId", out var conversationIdElement)
+                        ? conversationIdElement.GetString()
+                        : null;
+                    if (Guid.TryParse(conversationId, out var parsedConversationId))
+                    {
+                        await _viewModel.DeleteConversationAsync(parsedConversationId);
+                    }
+                    break;
+                }
+                case "clear-conversations":
+                {
+                    if (document.RootElement.TryGetProperty("conversationIds", out var conversationIdsElement) &&
+                        conversationIdsElement.ValueKind == JsonValueKind.Array)
+                    {
+                        var conversationIds = conversationIdsElement
+                            .EnumerateArray()
+                            .Select(item => item.GetString())
+                            .Where(item => Guid.TryParse(item, out _))
+                            .Select(item => Guid.Parse(item!))
+                            .ToArray();
+                        await _viewModel.DeleteConversationsAsync(conversationIds);
+                    }
+                    break;
+                }
+                case "delete-workspace-root":
+                {
+                    var workspaceRootId = document.RootElement.TryGetProperty("workspaceRootId", out var workspaceRootIdElement)
+                        ? workspaceRootIdElement.GetString()
+                        : null;
+                    if (Guid.TryParse(workspaceRootId, out var parsedWorkspaceRootId))
+                    {
+                        await _viewModel.DeleteWorkspaceRootAsync(parsedWorkspaceRootId);
+                    }
+                    break;
+                }
                 case "window-drag":
                     StartWindowDrag();
                     break;

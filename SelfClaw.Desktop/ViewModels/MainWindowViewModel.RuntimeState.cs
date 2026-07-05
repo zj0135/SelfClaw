@@ -41,6 +41,12 @@ public sealed partial class MainWindowViewModel
 
         public bool IsRunning { get; set; } = true;
 
+        public Task Completion => _completion.Task;
+
+        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void MarkCompleted() => _completion.TrySetResult();
+
         public void Dispose() => CancellationTokenSource.Dispose();
     }
 
@@ -96,6 +102,7 @@ public sealed partial class MainWindowViewModel
     private void CompleteConversationRuntimeState(ConversationRuntimeState state)
     {
         state.IsRunning = false;
+        state.MarkCompleted();
         if (IsSelectedConversation(state.ConversationId))
         {
             SyncSelectedDisplayStateFromRuntime(state);

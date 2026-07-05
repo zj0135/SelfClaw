@@ -43,6 +43,8 @@ function buildProjectGroups(conversations) {
 			groups.set(key, {
 				id: `workspace-${key}`,
 				label: conversation.workspaceRootName || conversation.workspaceRootPath || '工作区',
+				workspaceRootId: conversation.workspaceRootId || null,
+				workspaceRootPath: conversation.workspaceRootPath || '',
 				type: 'folder',
 				children: [],
 			});
@@ -170,13 +172,29 @@ function closeImagePreview() {
 	imagePreview.value = null;
 }
 
-function onSidebarAction(actionId) {
+function onSidebarAction(action) {
+	const actionId = typeof action === 'string' ? action : action?.id;
 	switch (actionId) {
 		case 'new-chat':
 		case 'add-conversations':
 			currentViewId.value = 'chat';
 			selectedConversationId.value = null;
 			post({ type: 'new-chat' });
+			break;
+		case 'delete-conversation':
+			if (action?.conversationId) {
+				post({ type: 'delete-conversation', conversationId: action.conversationId });
+			}
+			break;
+		case 'clear-conversations':
+			if (Array.isArray(action?.conversationIds) && action.conversationIds.length > 0) {
+				post({ type: 'clear-conversations', conversationIds: action.conversationIds });
+			}
+			break;
+		case 'delete-workspace-root':
+			if (action?.workspaceRootId) {
+				post({ type: 'delete-workspace-root', workspaceRootId: action.workspaceRootId });
+			}
 			break;
 		default:
 			break;

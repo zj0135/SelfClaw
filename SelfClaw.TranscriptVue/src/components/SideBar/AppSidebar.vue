@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 
 const props = defineProps({
 	items: {
@@ -16,11 +16,24 @@ const emit = defineEmits(['select', 'action']);
 
 const expandedGroups = ref(new Set(['projects', 'conversations']));
 const expandedFolders = ref(new Set());
+const contextMenu = ref({
+	open: false,
+	x: 0,
+	y: 0,
+	target: null,
+});
 
 const actionItems = computed(() => props.items.filter((i) => i.type === 'action'));
 const groupItems = computed(() => props.items.filter((i) => i.type === 'group'));
 const settingsItem = computed(() => props.items.find((i) => i.type === 'view' && i.id === 'settings'));
 const settingsActive = computed(() => props.activeId === 'settings');
+const contextMenuItems = computed(() => {
+	if (!contextMenu.value.open || !contextMenu.value.target) {
+		return [];
+	}
+
+	return sidebarMenuItems.filter((item) => item.type === 'divider' || item.id !== 'clear-conversations' || contextMenu.value.target.kind === 'folder');
+});
 
 function toggleGroup(groupId) {
 	if (expandedGroups.value.has(groupId)) {
@@ -70,6 +83,92 @@ function isNodeActive(nodeId) {
 	return props.activeId === nodeId;
 }
 
+function isContextTarget(nodeId) {
+	return contextMenu.value.open && contextMenu.value.target?.node?.id === nodeId;
+}
+
+function openConversationMenu(event, conversation) {
+	openContextMenu(event, {
+		kind: 'conversation',
+		node: conversation,
+	});
+}
+
+function openFolderMenu(event, folder) {
+	openContextMenu(event, {
+		kind: 'folder',
+		node: folder,
+	});
+}
+
+function openContextMenu(event, target) {
+	const menuWidth = 208;
+	const menuHeight = target.kind === 'folder' ? 376 : 342;
+	const padding = 8;
+	const viewportWidth = window.innerWidth || document.documentElement.clientWidth || menuWidth;
+	const viewportHeight = window.innerHeight || document.documentElement.clientHeight || menuHeight;
+	const x = Math.min(Math.max(event.clientX, padding), Math.max(padding, viewportWidth - menuWidth - padding));
+	const y = Math.min(Math.max(event.clientY, padding), Math.max(padding, viewportHeight - menuHeight - padding));
+
+	contextMenu.value = {
+		open: true,
+		x,
+		y,
+		target,
+	};
+}
+
+function closeContextMenu() {
+	contextMenu.value = {
+		open: false,
+		x: 0,
+		y: 0,
+		target: null,
+	};
+}
+
+function onContextMenuItem(item) {
+	const target = contextMenu.value.target;
+	if (!target || item.type === 'divider') {
+		return;
+	}
+
+	if (item.id === 'delete') {
+		if (target.kind === 'conversation') {
+			emit('action', {
+				id: 'delete-conversation',
+				conversationId: target.node.id,
+			});
+		} else if (target.node.workspaceRootId) {
+			emit('action', {
+				id: 'delete-workspace-root',
+				workspaceRootId: target.node.workspaceRootId,
+			});
+		}
+	} else if (item.id === 'clear-conversations' && target.kind === 'folder') {
+		emit('action', {
+			id: 'clear-conversations',
+			conversationIds: Array.isArray(target.node.children) ? target.node.children.map((child) => child.id).filter(Boolean) : [],
+		});
+	}
+
+	closeContextMenu();
+}
+
+function onDocumentClick(event) {
+	if (event.target instanceof Element && event.target.closest('.context-menu')) {
+		return;
+	}
+
+	closeContextMenu();
+}
+
+function onDocumentKeydown(event) {
+	if (event.key === 'Escape') {
+		closeContextMenu();
+	}
+}
+
 const iconMap = {
 	'new-chat': `<svg viewBox="0 0 20 20" fill="none"><path d="M10 4.5v11M4.5 10h11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`,
 	search: `<svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.7"/><path d="M14 14l3.2 3.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`,
@@ -78,6 +177,35 @@ const iconMap = {
 	automation: `<svg viewBox="0 0 20 20" fill="none"><circle cx="6" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6"/><circle cx="14" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M8.6 10h2.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`,
 };
 
+const contextIconMap = {
+	folder: `<svg viewBox="0 0 20 20" fill="none"><path d="M3 6.2A1.7 1.7 0 0 1 4.7 4.5h3.1l1.6 1.7h5.9A1.7 1.7 0 0 1 17 7.9v5.9a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 13.8V6.2Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/></svg>`,
+	rename: `<svg viewBox="0 0 20 20" fill="none"><path d="M4.2 13.8 13.6 4.4a1.8 1.8 0 0 1 2.6 2.6l-9.4 9.4-3.4.8.8-3.4Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="m12.5 5.5 2 2" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/></svg>`,
+	workingDirectory: `<svg viewBox="0 0 20 20" fill="none"><path d="M3.5 6.5h5l1.5 2h6.5v6A1.5 1.5 0 0 1 15 16H5a1.5 1.5 0 0 1-1.5-1.5v-8Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="M3.5 8.5V5A1.5 1.5 0 0 1 5 3.5h3l1.5 2H15A1.5 1.5 0 0 1 16.5 7v1.5" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/></svg>`,
+	book: `<svg viewBox="0 0 20 20" fill="none"><path d="M4 4.8A1.8 1.8 0 0 1 5.8 3h10.7v12.2H5.8A1.8 1.8 0 0 0 4 17V4.8Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="M7.5 6.5h6" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/></svg>`,
+	message: `<svg viewBox="0 0 20 20" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5v4.8a2.5 2.5 0 0 1-2.5 2.5H9l-4.1 3.1v-3.3A2.5 2.5 0 0 1 4 10.3V5.5Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/></svg>`,
+	git: `<svg viewBox="0 0 20 20" fill="none"><path d="M7 4v7.2a2.8 2.8 0 1 0 2.8 2.8V6.8" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.8 6.8h2.5A2.7 2.7 0 0 1 15 9.5V11" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/><circle cx="7" cy="4" r="1.5" stroke="currentColor" stroke-width="1.45"/><circle cx="15" cy="12.5" r="1.5" stroke="currentColor" stroke-width="1.45"/></svg>`,
+	export: `<svg viewBox="0 0 20 20" fill="none"><path d="M10 3.5v8" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/><path d="m6.8 8.7 3.2 3.2 3.2-3.2" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13.8v1.7A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-1.7" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/></svg>`,
+	clear: `<svg viewBox="0 0 20 20" fill="none"><path d="m10 3 6.5 5.4-6.5 5.4-6.5-5.4L10 3Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="M6.8 11.2 10 14l3.2-2.8" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+	pin: `<svg viewBox="0 0 20 20" fill="none"><path d="m12.8 3.5 3.7 3.7-2.2 2.2.5 3.5-1 1-3.2-3.2-4.7 4.7-.8-.8 4.7-4.7-3.2-3.2 1-1 3.5.5 1.7-2.7Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>`,
+	trash: `<svg viewBox="0 0 20 20" fill="none"><path d="M4.5 6h11" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/><path d="M8 6V4.5A1.5 1.5 0 0 1 9.5 3h1A1.5 1.5 0 0 1 12 4.5V6" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="M6.2 6.5 7 16a1.5 1.5 0 0 0 1.5 1.3h3A1.5 1.5 0 0 0 13 16l.8-9.5" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="M9 9.2v4.8M11 9.2v4.8" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/></svg>`,
+};
+
+const sidebarMenuItems = [
+	{ id: 'open-project', label: '打开项目', icon: 'folder' },
+	{ id: 'rename', label: '重命名', icon: 'rename' },
+	{ id: 'working-directory', label: '工作目录', icon: 'workingDirectory' },
+	{ id: 'divider-a', type: 'divider' },
+	{ id: 'project-docs', label: '项目档案', icon: 'book' },
+	{ id: 'chat-channel', label: '聊天频道', icon: 'message' },
+	{ id: 'git', label: 'Git', icon: 'git' },
+	{ id: 'divider-b', type: 'divider' },
+	{ id: 'export-json', label: '导出项目为 JSON', icon: 'export' },
+	{ id: 'clear-conversations', label: '清空会话列表', icon: 'clear', danger: true },
+	{ id: 'pin', label: '置顶', icon: 'pin' },
+	{ id: 'divider-c', type: 'divider' },
+	{ id: 'delete', label: '删除', icon: 'trash', danger: true },
+];
+
 const kbdMap = {
 	search: 'Ctrl K',
 };
@@ -85,6 +213,24 @@ const kbdMap = {
 function getIcon(id) {
 	return iconMap[id] || '';
 }
+
+function getContextIcon(id) {
+	return contextIconMap[id] || '';
+}
+
+onMounted(() => {
+	document.addEventListener('click', onDocumentClick);
+	document.addEventListener('keydown', onDocumentKeydown);
+	window.addEventListener('blur', closeContextMenu);
+	window.addEventListener('resize', closeContextMenu);
+});
+
+onUnmounted(() => {
+	document.removeEventListener('click', onDocumentClick);
+	document.removeEventListener('keydown', onDocumentKeydown);
+	window.removeEventListener('blur', closeContextMenu);
+	window.removeEventListener('resize', closeContextMenu);
+});
 </script>
 
 <template>
@@ -153,7 +299,13 @@ function getIcon(id) {
 					<template v-if="group.id === 'projects'">
 						<!-- 项目节点：三级结构 项目→目录→会话 -->
 						<div v-for="folder in group.children" :key="folder.id" class="subfolder" :class="{ open: isFolderOpen(folder.id) || folderHasActiveChild(folder) }">
-							<button class="project-folder" type="button" @click="toggleFolder(folder.id)">
+							<button
+								class="project-folder"
+								:class="{ 'menu-open': isContextTarget(folder.id) }"
+								type="button"
+								@click="toggleFolder(folder.id)"
+								@contextmenu.prevent.stop="openFolderMenu($event, folder)"
+							>
 								<span class="folder-ico" aria-hidden="true">
 									<svg viewBox="0 0 16 16" fill="none">
 										<path
@@ -176,9 +328,10 @@ function getIcon(id) {
 								v-for="session in folder.children"
 								:key="session.id"
 								class="node kind-chat"
-								:class="{ active: isNodeActive(session.id) }"
+								:class="{ active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
 								type="button"
 								@click="selectNode(session.id)"
+								@contextmenu.prevent.stop="openConversationMenu($event, session)"
 							>
 									<span class="dot" aria-hidden="true"></span>
 									<span class="ntext">{{ session.label }}</span>
@@ -195,9 +348,10 @@ function getIcon(id) {
 							v-for="child in group.children"
 							:key="child.id"
 							class="node kind-chat"
-							:class="{ active: isNodeActive(child.id) }"
+							:class="{ active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
 							type="button"
 							@click="selectNode(child.id)"
+							@contextmenu.prevent.stop="openConversationMenu($event, child)"
 						>
 							<span class="dot" aria-hidden="true"></span>
 							<span class="ntext">{{ child.label }}</span>
@@ -230,6 +384,30 @@ function getIcon(id) {
 					</svg>
 				</span>
 			</button>
+		</div>
+
+		<div
+			v-if="contextMenu.open"
+			class="context-menu"
+			role="menu"
+			:style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+			@click.stop
+			@contextmenu.prevent
+		>
+			<template v-for="item in contextMenuItems" :key="item.id">
+				<div v-if="item.type === 'divider'" class="context-menu-divider" role="separator"></div>
+				<button
+					v-else
+					class="context-menu-item"
+					:class="{ danger: item.danger }"
+					type="button"
+					role="menuitem"
+					@click="onContextMenuItem(item)"
+				>
+					<span class="context-menu-icon" aria-hidden="true" v-html="getContextIcon(item.icon)"></span>
+					<span class="context-menu-label">{{ item.label }}</span>
+				</button>
+			</template>
 		</div>
 	</aside>
 </template>
@@ -547,6 +725,12 @@ function getIcon(id) {
 	color: #111827;
 }
 
+.node.menu-open {
+	background: #fff;
+	color: #111827;
+	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.06);
+}
+
 .node.active {
 	background: #fff;
 	color: #111827;
@@ -611,6 +795,12 @@ function getIcon(id) {
 	color: #111827;
 }
 
+.project-folder.menu-open {
+	background: #fff;
+	color: #111827;
+	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.06);
+}
+
 .project-folder .folder-ico {
 	width: 16px;
 	height: 16px;
@@ -662,6 +852,84 @@ function getIcon(id) {
 .subfolder-body .node {
 	padding-left: 10px;
 	font-size: 12.5px;
+}
+
+.context-menu {
+	position: fixed;
+	z-index: 1000;
+	width: 208px;
+	padding: 4px 0;
+	border: 1px solid #d8dde5;
+	border-radius: 8px;
+	background: #fff;
+	box-shadow:
+		0 1px 2px rgba(23, 26, 31, 0.08),
+		0 16px 40px rgba(23, 26, 31, 0.16);
+	color: #1f2937;
+	overflow: hidden;
+}
+
+.context-menu-item {
+	width: 100%;
+	height: 34px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 0 12px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font-size: 14px;
+	font-weight: 450;
+	line-height: 1;
+	text-align: left;
+}
+
+.context-menu-item:hover {
+	background: #f3f4f6;
+	color: #111827;
+}
+
+.context-menu-item.danger {
+	color: #ef4444;
+}
+
+.context-menu-item.danger:hover {
+	background: #fff1f2;
+	color: #dc2626;
+}
+
+.context-menu-icon {
+	width: 16px;
+	height: 16px;
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: #6b7280;
+}
+
+.context-menu-item:hover .context-menu-icon,
+.context-menu-item.danger .context-menu-icon {
+	color: currentColor;
+}
+
+.context-menu-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.context-menu-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.context-menu-divider {
+	height: 1px;
+	margin: 4px 0;
+	background: #e5e7eb;
 }
 
 /* ================= 下：系统设置区 ================= */
