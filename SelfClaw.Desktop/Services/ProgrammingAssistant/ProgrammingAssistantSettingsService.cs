@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Infrastructure.Agents.Cli.Discovery;
 using SelfClaw.Infrastructure.Agents.Cli.Process;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 
@@ -13,7 +14,20 @@ namespace SelfClaw.Desktop.Services.ProgrammingAssistant;
 public sealed partial class ProgrammingAssistantSettingsService
 {
     private const string SettingsNodeName = "programming_assistant";
+
+    /// <summary>
+    /// The sentinel option meaning "let the CLI use whatever model its own config selects". Always the
+    /// first entry so the default behaviour is preserved even when a live catalogue is discovered.
+    /// </summary>
+    private const string DefaultModelOption = "Default (CLI config)";
+
     private static readonly TimeSpan VersionTimeout = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// Listing a CLI's models can be slower than a version probe (Codex builds a full model catalogue,
+    /// OpenCode may reach out to models.dev), so discovery gets its own, more generous budget.
+    /// </summary>
+    private static readonly TimeSpan ModelDiscoveryTimeout = TimeSpan.FromSeconds(8);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -31,8 +45,13 @@ public sealed partial class ProgrammingAssistantSettingsService
             Vendor: "Anthropic official CLI",
             Commands: ["claude"],
             VersionArguments: ["--version"],
-            Models: ["Default (CLI config)"],
-            ReasoningLevels: []),
+            // Claude Code has no "list models" command, so this catalogue is maintained by hand. Keep the
+            // Default sentinel first, then the stable CLI aliases (`claude --model <alias>`).
+            Models: [DefaultModelOption, "opus", "sonnet", "haiku"],
+            ReasoningLevels: [],
+            ModelListArguments: null,
+            ParseModels: null,
+            ParseReasoningLevels: null),
         new(
             Id: "codex",
             Kind: CliAgentKind.Codex,
@@ -40,8 +59,13 @@ public sealed partial class ProgrammingAssistantSettingsService
             Vendor: "OpenAI official CLI",
             Commands: ["codex"],
             VersionArguments: ["--version"],
-            Models: ["Default (CLI config)"],
-            ReasoningLevels: ["Default (CLI config)", "Low", "Medium", "High"]),
+            Models: [DefaultModelOption],
+            // Fallback only: the live list (incl. xhigh) is derived from codex debug models' per-model
+            // supported_reasoning_levels; this mirrors it for when discovery is unavailable.
+            ReasoningLevels: [DefaultModelOption, "low", "medium", "high", "xhigh"],
+            ModelListArguments: ["debug", "models"],
+            ParseModels: CliModelListParser.ParseCodexDebugModels,
+            ParseReasoningLevels: CliModelListParser.ParseCodexReasoningLevels),
         new(
             Id: "opencode",
             Kind: CliAgentKind.OpenCode,
@@ -49,8 +73,11 @@ public sealed partial class ProgrammingAssistantSettingsService
             Vendor: "Open-source agent CLI",
             Commands: ["opencode"],
             VersionArguments: ["--version"],
-            Models: ["Default (CLI config)"],
-            ReasoningLevels: []),
+            Models: [DefaultModelOption],
+            ReasoningLevels: [],
+            ModelListArguments: ["models"],
+            ParseModels: CliModelListParser.ParseOpenCodeModels,
+            ParseReasoningLevels: null),
     ];
 
     private readonly DesktopSettingsJsonStore _settingsStore;
@@ -228,6 +255,7 @@ public sealed partial class ProgrammingAssistantSettingsService
                 var invocation = resolver.Resolve(command, definition.VersionArguments);
                 var rawVersion = await ReadVersionAsync(invocation, cancellationToken).ConfigureAwait(false);
                 var version = NormalizeVersion(command, rawVersion);
+                var catalog = await DiscoverCatalogAsync(resolver, command, definition, cancellationToken).ConfigureAwait(false);
 
                 return new DetectedProgrammingCli(
                     definition.Id,
@@ -235,8 +263,8 @@ public sealed partial class ProgrammingAssistantSettingsService
                     definition.Name,
                     definition.Vendor,
                     version,
-                    definition.Models,
-                    definition.ReasoningLevels);
+                    catalog.Models,
+                    catalog.ReasoningLevels);
             }
             catch (FileNotFoundException)
             {
@@ -256,12 +284,100 @@ public sealed partial class ProgrammingAssistantSettingsService
         return null;
     }
 
+    /// <summary>
+    /// Runs the CLI's "list models" command (when it has one) and derives its model catalogue — and, for
+    /// CLIs that report it, the reasoning levels — from a single invocation, merging each list behind the
+    /// <see cref="DefaultModelOption"/> sentinel. Any failure — no discovery command, a timeout, an
+    /// unparseable response, or an empty result — falls back to the definition's static lists so a live CLI
+    /// is never left without a usable list.
+    /// </summary>
+    private static async Task<CliCatalog> DiscoverCatalogAsync(
+        CliCommandResolver resolver,
+        string command,
+        ProgrammingCliDefinition definition,
+        CancellationToken cancellationToken)
+    {
+        var fallback = new CliCatalog(definition.Models, definition.ReasoningLevels);
+        if (definition.ModelListArguments is null || definition.ParseModels is null)
+        {
+            return fallback;
+        }
+
+        try
+        {
+            var invocation = resolver.Resolve(command, definition.ModelListArguments);
+            var output = await RunProcessAsync(invocation, ModelDiscoveryTimeout, cancellationToken).ConfigureAwait(false);
+            if (output is null)
+            {
+                return fallback;
+            }
+
+            var stdout = output.Value.StandardOutput;
+
+            var discoveredModels = definition.ParseModels(stdout);
+            var models = discoveredModels.Count == 0 ? definition.Models : MergeWithDefault(discoveredModels);
+
+            var reasoningLevels = definition.ReasoningLevels;
+            if (definition.ParseReasoningLevels is not null)
+            {
+                var discoveredReasoning = definition.ParseReasoningLevels(stdout);
+                if (discoveredReasoning.Count > 0)
+                {
+                    reasoningLevels = MergeWithDefault(discoveredReasoning);
+                }
+            }
+
+            return new CliCatalog(models, reasoningLevels);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or FileNotFoundException or OperationCanceledException)
+        {
+            Debug.WriteLine(exception);
+            return fallback;
+        }
+    }
+
+    /// <summary>
+    /// Prepends the <see cref="DefaultModelOption"/> sentinel to a discovered list, dropping any duplicate
+    /// the CLI may already have emitted so the sentinel appears exactly once and first.
+    /// </summary>
+    private static IReadOnlyList<string> MergeWithDefault(IReadOnlyList<string> discovered)
+    {
+        var models = new List<string>(discovered.Count + 1) { DefaultModelOption };
+        models.AddRange(discovered.Where(model =>
+            !string.Equals(model, DefaultModelOption, StringComparison.OrdinalIgnoreCase)));
+        return models;
+    }
+
     private static async Task<string?> ReadVersionAsync(
         CommandInvocation invocation,
         CancellationToken cancellationToken)
     {
+        var output = await RunProcessAsync(invocation, VersionTimeout, cancellationToken).ConfigureAwait(false);
+        if (output is not { } result)
+        {
+            return null;
+        }
+
+        // Some CLIs print their version banner to stderr; prefer stdout but accept stderr as a fallback.
+        return string.IsNullOrWhiteSpace(result.StandardOutput) ? result.StandardError : result.StandardOutput;
+    }
+
+    /// <summary>
+    /// Starts <paramref name="invocation"/>, captures both output streams, and returns them once the
+    /// process exits, or <c>null</c> when it exceeds <paramref name="timeout"/> (the process is killed).
+    /// Shared by the version probe and model discovery so both honour the same launch/kill semantics.
+    /// </summary>
+    private static async Task<ProcessOutput?> RunProcessAsync(
+        CommandInvocation invocation,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(VersionTimeout);
+        timeoutSource.CancelAfter(timeout);
 
         var process = new Process
         {
@@ -299,7 +415,7 @@ public sealed partial class ProgrammingAssistantSettingsService
             await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
             var output = await outputTask.ConfigureAwait(false);
             var error = await errorTask.ConfigureAwait(false);
-            return string.IsNullOrWhiteSpace(output) ? error : output;
+            return new ProcessOutput(output, error);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -356,7 +472,14 @@ public sealed partial class ProgrammingAssistantSettingsService
         IReadOnlyList<string> Commands,
         IReadOnlyList<string> VersionArguments,
         IReadOnlyList<string> Models,
-        IReadOnlyList<string> ReasoningLevels);
+        IReadOnlyList<string> ReasoningLevels,
+        IReadOnlyList<string>? ModelListArguments,
+        Func<string?, IReadOnlyList<string>>? ParseModels,
+        Func<string?, IReadOnlyList<string>>? ParseReasoningLevels);
+
+    private readonly record struct ProcessOutput(string StandardOutput, string StandardError);
+
+    private readonly record struct CliCatalog(IReadOnlyList<string> Models, IReadOnlyList<string> ReasoningLevels);
 }
 
 public sealed record ProgrammingAssistantSettings
