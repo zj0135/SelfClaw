@@ -30,4 +30,16 @@ public sealed record CliRunContext
 
     /// <summary>The assembled system prompt / instructions, injected per the agent's mechanism.</summary>
     public string? SystemPrompt { get; init; }
+
+    /// <summary>
+    /// The model to launch the CLI with (each definition maps it to that CLI's own flag, e.g.
+    /// <c>--model</c>), or <c>null</c> to defer to the CLI's own configured default.
+    /// </summary>
+    public string? Model { get; init; }
+
+    /// <summary>
+    /// The reasoning effort to request (only Codex consumes it, via <c>-c model_reasoning_effort=…</c>), or
+    /// <c>null</c> to defer to the CLI's own default.
+    /// </summary>
+    public string? ReasoningEffort { get; init; }
 }

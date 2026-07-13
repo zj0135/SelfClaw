@@ -100,6 +100,8 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
             ResumeSessionId = sessionPlan.ResumeSessionId,
             NewSessionId = sessionPlan.NewSessionId,
             SystemPrompt = ComposeSystemPrompt(request.Agent),
+            Model = string.IsNullOrWhiteSpace(request.CliModel) ? null : request.CliModel,
+            ReasoningEffort = string.IsNullOrWhiteSpace(request.CliReasoningEffort) ? null : request.CliReasoningEffort,
         };
 
         // Resolve the executable up front so a missing CLI surfaces as a clean failure rather than an

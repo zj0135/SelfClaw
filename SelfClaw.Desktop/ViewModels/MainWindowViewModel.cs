@@ -750,9 +750,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             var requestMessages = runtimeState.Messages.ToArray();
-            // The turn targets the CLI picked in settings / the composer selector; null means nothing
-            // is selected (or detected) and the runtime fails the turn with actionable guidance.
-            var selectedCliAgent = await _programmingAssistantSettings.GetSelectedCliKindAsync(cancellationToken);
+            // The turn targets the CLI picked in settings / the composer selector, along with the model and
+            // reasoning effort chosen for it; a null selection means nothing is selected (or detected) and
+            // the runtime fails the turn with actionable guidance. Model/effort are null when the user left
+            // the CLI's own default, in which case no --model / -c override is passed.
+            var cliSelection = await _programmingAssistantSettings.GetSelectedInvocationAsync(cancellationToken);
             var turnState = new AgentTurnState(runtimeAgent);
 
             // Surface the assistant placeholder immediately: CLI process startup can take seconds
@@ -768,7 +770,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                                    selectedWorkspaceRoot,
                                    ConversationMode.Programming,
                                    runtimeAgent,
-                                   selectedCliAgent,
+                                   cliSelection?.Kind,
+                                   cliSelection?.Model,
+                                   cliSelection?.ReasoningEffort,
                                    selectedToolPermissionMode,
                                    _toolApprovalHandler,
                                    requestMessages),

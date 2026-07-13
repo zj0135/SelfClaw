@@ -11,7 +11,7 @@ import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
  * 选中代理通过 select-programming-cli 持久化，下一次发送回合即生效。
  */
 
-const emit = defineEmits(['update:mode', 'update:agent', 'update:model']);
+const emit = defineEmits(['update:mode', 'update:agent', 'update:model', 'update:reasoning']);
 
 // 模式：本地 CLI / 自带 Key（自带 Key 尚未接入，仅样式占位）
 const mode = ref('local');
@@ -37,9 +37,15 @@ const selectedAgent = computed(() => detectedAgents.value.find((agent) => agent.
 const models = computed(() => selectedAgent.value?.models?.length ? selectedAgent.value.models : [defaultModel]);
 const activeModel = ref(defaultModel);
 
+// 推理等级：仅部分 CLI（Codex）暴露；首项为 Default 哨兵，长度 > 1 时才展示这一行。
+const reasoningLevels = computed(() => selectedAgent.value?.reasoningLevels?.length ? selectedAgent.value.reasoningLevels : []);
+const activeReasoning = ref(defaultModel);
+const hasReasoning = computed(() => reasoningLevels.value.length > 1);
+
 // 展开状态
 const open = ref(false);
 const menuOpen = ref(false);
+const reasoningMenuOpen = ref(false);
 const rootRef = ref(null);
 const popoverRef = ref(null);
 
@@ -94,6 +100,7 @@ function applySettings(payload) {
 			id: tool.id,
 			name: tool.name || tool.id,
 			models: Array.isArray(tool.models) ? tool.models.filter((m) => typeof m === 'string' && m.trim()) : [],
+			reasoningLevels: Array.isArray(tool.reasoningLevels) ? tool.reasoningLevels.filter((r) => typeof r === 'string' && r.trim()) : [],
 			...(agentPresentation[tool.id] || { glyph: 'open', tint: '#eef0f3', ink: '#171a1f' }),
 		}));
 
@@ -106,6 +113,14 @@ function applySettings(payload) {
 		activeModel.value = persistedModel;
 	} else if (!models.value.includes(activeModel.value)) {
 		activeModel.value = models.value[0] || defaultModel;
+	}
+
+	// 同理恢复推理等级（仅 Codex 有）。
+	const persistedReasoning = typeof payload?.selectedReasoningLevel === 'string' ? payload.selectedReasoningLevel : '';
+	if (persistedReasoning && reasoningLevels.value.includes(persistedReasoning)) {
+		activeReasoning.value = persistedReasoning;
+	} else if (!reasoningLevels.value.includes(activeReasoning.value)) {
+		activeReasoning.value = reasoningLevels.value[0] || defaultModel;
 	}
 	loadError.value = payload?.error ? `CLI 设置同步失败：${payload.error}` : '';
 	loaded.value = true;
@@ -122,6 +137,7 @@ function togglePanel() {
 	open.value = !open.value;
 	if (!open.value) {
 		menuOpen.value = false;
+		reasoningMenuOpen.value = false;
 		return;
 	}
 
@@ -136,6 +152,7 @@ function togglePanel() {
 function closePanel() {
 	open.value = false;
 	menuOpen.value = false;
+	reasoningMenuOpen.value = false;
 }
 
 function pickMode(m) {
@@ -150,6 +167,7 @@ function pickAgent(agent) {
 
 	selectedCliId.value = agent.id;
 	activeModel.value = agent.models?.[0] || defaultModel;
+	activeReasoning.value = agent.reasoningLevels?.[0] || defaultModel;
 	emit('update:agent', agent.id);
 	postToHost({
 		type: 'select-programming-cli',
@@ -160,6 +178,9 @@ function pickAgent(agent) {
 
 function toggleMenu() {
 	menuOpen.value = !menuOpen.value;
+	if (menuOpen.value) {
+		reasoningMenuOpen.value = false;
+	}
 }
 function pickModel(m) {
 	activeModel.value = m;
@@ -170,6 +191,24 @@ function pickModel(m) {
 		type: 'select-programming-model',
 		requestId: `composer-model-${Date.now()}-${++requestCounter}`,
 		model: m,
+	});
+}
+
+function toggleReasoningMenu() {
+	reasoningMenuOpen.value = !reasoningMenuOpen.value;
+	if (reasoningMenuOpen.value) {
+		menuOpen.value = false;
+	}
+}
+function pickReasoning(level) {
+	activeReasoning.value = level;
+	reasoningMenuOpen.value = false;
+	emit('update:reasoning', level);
+	// 持久化到 programming_assistant.selectedReasoningLevel；Codex 回合会转成 -c model_reasoning_effort。
+	postToHost({
+		type: 'select-programming-reasoning',
+		requestId: `composer-reasoning-${Date.now()}-${++requestCounter}`,
+		reasoningLevel: level,
 	});
 }
 
@@ -284,6 +323,37 @@ onBeforeUnmount(() => {
 							@click="pickModel(m)"
 						>
 							<span>{{ m }}</span>
+							<svg class="tick" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9" /></svg>
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<!-- 推理等级：仅当选中 CLI 暴露推理档位（如 Codex）时出现 -->
+			<div v-if="hasReasoning" class="pop-section">
+				<div class="pop-label">推理等级</div>
+				<div class="model-select">
+					<button
+						type="button"
+						class="model-select-btn"
+						:aria-expanded="reasoningMenuOpen ? 'true' : 'false'"
+						aria-haspopup="listbox"
+						@click.stop="toggleReasoningMenu"
+					>
+						<span>{{ activeReasoning }}</span>
+						<svg class="caret" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4" /></svg>
+					</button>
+					<div v-show="reasoningMenuOpen" class="model-menu" role="listbox" aria-label="推理等级列表">
+						<button
+							v-for="level in reasoningLevels"
+							:key="level"
+							type="button"
+							class="model-opt"
+							role="option"
+							:aria-selected="activeReasoning === level ? 'true' : 'false'"
+							@click="pickReasoning(level)"
+						>
+							<span>{{ level }}</span>
 							<svg class="tick" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9" /></svg>
 						</button>
 					</div>

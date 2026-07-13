@@ -94,6 +94,8 @@ public sealed partial class ProgrammingAssistantSettingsService
 
     public string? SelectedModel => _settings.SelectedModel;
 
+    public string? SelectedReasoningLevel => _settings.SelectedReasoningLevel;
+
     /// <summary>
     /// Reads the persisted settings without ever scanning. Startup seeds them via
     /// <see cref="GetOrInitializeAsync"/>, so readers (composer selector, settings page load,
@@ -114,15 +116,21 @@ public sealed partial class ProgrammingAssistantSettingsService
     }
 
     /// <summary>
-    /// Resolves the <see cref="CliAgentKind"/> of the currently selected CLI, or <c>null</c> when no
-    /// detected CLI is selected. This is what a chat turn passes to the runtime as the target agent.
+    /// Resolves the currently selected CLI together with the model and reasoning effort the user picked for
+    /// it, or <c>null</c> when no detected CLI is selected. This is what a chat turn passes to the runtime.
+    /// <see cref="CliInvocationSelection.Model"/> / <see cref="CliInvocationSelection.ReasoningEffort"/> are
+    /// already <c>null</c> for "use the CLI's own default" (the persisted values collapse the Default
+    /// sentinel to null), so callers can pass them straight through to the argument builder.
     /// </summary>
-    public async Task<CliAgentKind?> GetSelectedCliKindAsync(CancellationToken cancellationToken = default)
+    public async Task<CliInvocationSelection?> GetSelectedInvocationAsync(CancellationToken cancellationToken = default)
     {
         var settings = await GetCurrentAsync(cancellationToken).ConfigureAwait(false);
-        return settings.Tools
-            .FirstOrDefault(tool => string.Equals(tool.Id, settings.SelectedCliId, StringComparison.OrdinalIgnoreCase))
-            ?.Kind;
+        var tool = settings.Tools
+            .FirstOrDefault(candidate => string.Equals(candidate.Id, settings.SelectedCliId, StringComparison.OrdinalIgnoreCase));
+
+        return tool is null
+            ? null
+            : new CliInvocationSelection(tool.Kind, settings.SelectedModel, settings.SelectedReasoningLevel);
     }
 
     public async Task<ProgrammingAssistantSettings> GetOrInitializeAsync(CancellationToken cancellationToken = default)
@@ -133,7 +141,7 @@ public sealed partial class ProgrammingAssistantSettingsService
             await EnsureLoadedCoreAsync(cancellationToken).ConfigureAwait(false);
             if (!_settings.HasScanned)
             {
-                _settings = CreateSettings(await ScanCoreAsync(cancellationToken).ConfigureAwait(false), selectedCliId: null, selectedModel: null);
+                _settings = CreateSettings(await ScanCoreAsync(cancellationToken).ConfigureAwait(false), selectedCliId: null, selectedModel: null, selectedReasoningLevel: null);
                 await SaveCoreAsync(cancellationToken).ConfigureAwait(false);
             }
 
@@ -154,7 +162,8 @@ public sealed partial class ProgrammingAssistantSettingsService
             _settings = CreateSettings(
                 await ScanCoreAsync(cancellationToken).ConfigureAwait(false),
                 _settings.SelectedCliId,
-                _settings.SelectedModel);
+                _settings.SelectedModel,
+                _settings.SelectedReasoningLevel);
             await SaveCoreAsync(cancellationToken).ConfigureAwait(false);
             return _settings;
         }
@@ -177,13 +186,16 @@ public sealed partial class ProgrammingAssistantSettingsService
                 normalized = null;
             }
 
-            // Switching CLIs invalidates the remembered model (the new CLI has a different catalogue), so
-            // drop it; re-selecting the same CLI keeps whatever model was already chosen.
-            var selectedModel = string.Equals(normalized, _settings.SelectedCliId, StringComparison.OrdinalIgnoreCase)
-                ? _settings.SelectedModel
-                : null;
+            // Switching CLIs invalidates the remembered model and reasoning effort (the new CLI has a
+            // different catalogue), so drop both; re-selecting the same CLI keeps whatever was chosen.
+            var sameCli = string.Equals(normalized, _settings.SelectedCliId, StringComparison.OrdinalIgnoreCase);
 
-            _settings = _settings with { SelectedCliId = normalized, SelectedModel = selectedModel };
+            _settings = _settings with
+            {
+                SelectedCliId = normalized,
+                SelectedModel = sameCli ? _settings.SelectedModel : null,
+                SelectedReasoningLevel = sameCli ? _settings.SelectedReasoningLevel : null,
+            };
             await SaveCoreAsync(cancellationToken).ConfigureAwait(false);
             return _settings;
         }
@@ -194,9 +206,9 @@ public sealed partial class ProgrammingAssistantSettingsService
     }
 
     /// <summary>
-    /// Persists the model the user picked for the currently selected CLI. The value is kept only when it
-    /// belongs to that CLI's discovered catalogue; anything else (blank, stale, or an unknown model) resets
-    /// to <c>null</c> so the turn falls back to the CLI's own default.
+    /// Persists the model the user picked for the currently selected CLI. Kept only when it belongs to that
+    /// CLI's discovered catalogue; blank input, the Default sentinel, a stale value, or an unknown model all
+    /// collapse to <c>null</c> so the turn falls back to the CLI's own default.
     /// </summary>
     public async Task<ProgrammingAssistantSettings> SelectModelAsync(string? model, CancellationToken cancellationToken = default)
     {
@@ -204,19 +216,7 @@ public sealed partial class ProgrammingAssistantSettingsService
         try
         {
             await EnsureLoadedCoreAsync(cancellationToken).ConfigureAwait(false);
-
-            var normalized = NormalizeModel(model);
-            if (normalized is not null)
-            {
-                var selectedTool = _settings.Tools.FirstOrDefault(tool =>
-                    string.Equals(tool.Id, _settings.SelectedCliId, StringComparison.OrdinalIgnoreCase));
-                if (selectedTool is null || !selectedTool.Models.Contains(normalized, StringComparer.Ordinal))
-                {
-                    normalized = null;
-                }
-            }
-
-            _settings = _settings with { SelectedModel = normalized };
+            _settings = _settings with { SelectedModel = ResolveCatalogSelection(model, SelectedTool()?.Models) };
             await SaveCoreAsync(cancellationToken).ConfigureAwait(false);
             return _settings;
         }
@@ -225,6 +225,30 @@ public sealed partial class ProgrammingAssistantSettingsService
             _gate.Release();
         }
     }
+
+    /// <summary>
+    /// Persists the reasoning effort the user picked for the currently selected CLI (only Codex advertises
+    /// these). Same contract as <see cref="SelectModelAsync"/>: the value is kept only when it belongs to the
+    /// CLI's reasoning catalogue, otherwise it collapses to <c>null</c> (use the CLI's own default).
+    /// </summary>
+    public async Task<ProgrammingAssistantSettings> SelectReasoningLevelAsync(string? reasoningLevel, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureLoadedCoreAsync(cancellationToken).ConfigureAwait(false);
+            _settings = _settings with { SelectedReasoningLevel = ResolveCatalogSelection(reasoningLevel, SelectedTool()?.ReasoningLevels) };
+            await SaveCoreAsync(cancellationToken).ConfigureAwait(false);
+            return _settings;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private DetectedProgrammingCli? SelectedTool() =>
+        _settings.Tools.FirstOrDefault(tool => string.Equals(tool.Id, _settings.SelectedCliId, StringComparison.OrdinalIgnoreCase));
 
     private async Task EnsureLoadedCoreAsync(CancellationToken cancellationToken)
     {
@@ -253,7 +277,8 @@ public sealed partial class ProgrammingAssistantSettingsService
     private static ProgrammingAssistantSettings CreateSettings(
         IReadOnlyList<DetectedProgrammingCli> tools,
         string? selectedCliId,
-        string? selectedModel)
+        string? selectedModel,
+        string? selectedReasoningLevel)
     {
         var normalizedSelected = NormalizeCliId(selectedCliId);
         if (normalizedSelected is null || !tools.Any(tool => string.Equals(tool.Id, normalizedSelected, StringComparison.OrdinalIgnoreCase)))
@@ -261,21 +286,17 @@ public sealed partial class ProgrammingAssistantSettingsService
             normalizedSelected = tools.FirstOrDefault()?.Id;
         }
 
-        // Keep the remembered model only when it still belongs to the resolved CLI's catalogue — a rescan
-        // may have changed the list (or the selected CLI itself), leaving the old choice invalid.
+        // Keep the remembered model / reasoning effort only when each still belongs to the resolved CLI's
+        // catalogue — a rescan may have changed the lists (or the selected CLI itself), invalidating them.
         var selectedTool = tools.FirstOrDefault(tool => string.Equals(tool.Id, normalizedSelected, StringComparison.OrdinalIgnoreCase));
-        var normalizedModel = NormalizeModel(selectedModel);
-        if (normalizedModel is not null && (selectedTool is null || !selectedTool.Models.Contains(normalizedModel, StringComparer.Ordinal)))
-        {
-            normalizedModel = null;
-        }
 
         return new ProgrammingAssistantSettings
         {
             HasScanned = true,
             ScannedAtUtc = DateTimeOffset.UtcNow,
             SelectedCliId = normalizedSelected,
-            SelectedModel = normalizedModel,
+            SelectedModel = ResolveCatalogSelection(selectedModel, selectedTool?.Models),
+            SelectedReasoningLevel = ResolveCatalogSelection(selectedReasoningLevel, selectedTool?.ReasoningLevels),
             Tools = tools
         };
     }
@@ -515,14 +536,24 @@ public sealed partial class ProgrammingAssistantSettingsService
     }
 
     /// <summary>
-    /// Trims a model selection to a stored form, collapsing blank input to <c>null</c>. Model ids are kept
-    /// case-sensitive (CLI slugs like <c>opencode/mimo-v2.5-free</c> are matched verbatim against the
-    /// discovered catalogue), unlike CLI ids which are lower-cased.
+    /// Resolves a user selection (model or reasoning level) to its stored form: <c>null</c> when blank, when
+    /// it is the <see cref="DefaultModelOption"/> sentinel ("use the CLI's own default"), or when it is not
+    /// part of <paramref name="catalog"/>; otherwise the trimmed, verbatim value. Storing <c>null</c> for the
+    /// default keeps the settings file clean and lets the argument builder treat "non-null" as "pass this
+    /// flag". Values are matched case-sensitively (CLI slugs like <c>opencode/mimo-v2.5-free</c> are verbatim).
     /// </summary>
-    private static string? NormalizeModel(string? model)
+    private static string? ResolveCatalogSelection(string? value, IReadOnlyList<string>? catalog)
     {
-        var normalized = model?.Trim();
-        return string.IsNullOrEmpty(normalized) ? null : normalized;
+        var normalized = value?.Trim();
+        if (string.IsNullOrEmpty(normalized)
+            || string.Equals(normalized, DefaultModelOption, StringComparison.OrdinalIgnoreCase)
+            || catalog is null
+            || !catalog.Contains(normalized, StringComparer.Ordinal))
+        {
+            return null;
+        }
+
+        return normalized;
     }
 
     [GeneratedRegex(@"\d+\.\d+")]
@@ -561,8 +592,21 @@ public sealed record ProgrammingAssistantSettings
     /// </summary>
     public string? SelectedModel { get; init; }
 
+    /// <summary>
+    /// The reasoning effort the user picked for <see cref="SelectedCliId"/> (only Codex advertises these), or
+    /// <c>null</c> to defer to the CLI's own default. Persisted and reset alongside <see cref="SelectedModel"/>.
+    /// </summary>
+    public string? SelectedReasoningLevel { get; init; }
+
     public IReadOnlyList<DetectedProgrammingCli> Tools { get; init; } = [];
 }
+
+/// <summary>
+/// The resolved per-turn CLI selection handed to the runtime: the target agent plus the model and reasoning
+/// effort to pass on its command line. <see cref="Model"/> / <see cref="ReasoningEffort"/> are <c>null</c>
+/// when the turn should defer to the CLI's own configured default.
+/// </summary>
+public sealed record CliInvocationSelection(CliAgentKind Kind, string? Model, string? ReasoningEffort);
 
 public sealed record DetectedProgrammingCli(
     string Id,

@@ -50,6 +50,21 @@ public static class CodexAgentDefinition
         args.Add("--json");
         args.Add("--skip-git-repo-check");
 
+        // Pin the model and reasoning effort when the composer picked them; each is omitted entirely when the
+        // user kept the CLI's own default (null). `-c key=value` takes a TOML literal, so the effort is quoted
+        // (matching Codex's own SDK); CliCommandResolver's escaping preserves the quotes to the process verbatim.
+        if (!string.IsNullOrWhiteSpace(context.Model))
+        {
+            args.Add("--model");
+            args.Add(context.Model);
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.ReasoningEffort))
+        {
+            args.Add("-c");
+            args.Add($"model_reasoning_effort=\"{context.ReasoningEffort}\"");
+        }
+
         return args;
     }
 

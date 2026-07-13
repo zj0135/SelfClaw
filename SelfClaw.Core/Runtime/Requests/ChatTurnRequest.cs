@@ -11,6 +11,8 @@ public sealed record ChatTurnRequest(
     ConversationMode Mode,
     AgentRuntimeDefinition Agent,
     CliAgentKind? CliAgent,
+    string? CliModel,
+    string? CliReasoningEffort,
     ToolPermissionMode ToolPermissionMode,
     IToolApprovalHandler? ToolApprovalHandler,
     IReadOnlyList<MessageRecord> Messages);

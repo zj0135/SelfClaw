@@ -621,6 +621,17 @@ public partial class MainWindow : Window
                     await SelectProgrammingModelAsync(requestId, model);
                     break;
                 }
+                case "select-programming-reasoning":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    var reasoningLevel = document.RootElement.TryGetProperty("reasoningLevel", out var reasoningElement)
+                        ? reasoningElement.GetString()
+                        : null;
+                    await SelectProgrammingReasoningAsync(requestId, reasoningLevel);
+                    break;
+                }
                 case "get-pet-settings":
                 {
                     var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
@@ -723,6 +734,27 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task SelectProgrammingReasoningAsync(string? requestId, string? reasoningLevel)
+    {
+        try
+        {
+            var settings = await _programmingAssistantSettingsService.SelectReasoningLevelAsync(reasoningLevel);
+            PostProgrammingAssistantSettings(requestId, settings);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            PostWebMessage(new
+            {
+                type = "programming-assistant-settings",
+                requestId,
+                tools = Array.Empty<DetectedProgrammingCli>(),
+                selectedCliId = (string?)null,
+                error = exception.Message
+            });
+        }
+    }
+
     private void PostProgrammingAssistantSettings(string? requestId, ProgrammingAssistantSettings settings)
         => PostWebMessage(new
         {
@@ -730,6 +762,7 @@ public partial class MainWindow : Window
             requestId,
             selectedCliId = settings.SelectedCliId,
             selectedModel = settings.SelectedModel,
+            selectedReasoningLevel = settings.SelectedReasoningLevel,
             tools = settings.Tools,
             scannedAtUtc = settings.ScannedAtUtc
         });

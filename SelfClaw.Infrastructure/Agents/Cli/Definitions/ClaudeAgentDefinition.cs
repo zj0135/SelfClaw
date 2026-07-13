@@ -61,6 +61,14 @@ public static class ClaudeAgentDefinition
             args.Add(context.NewSessionId);
         }
 
+        // Pin the model when the composer picked one (e.g. opus/sonnet/haiku); otherwise Claude uses its own
+        // configured default.
+        if (!string.IsNullOrWhiteSpace(context.Model))
+        {
+            args.Add("--model");
+            args.Add(context.Model);
+        }
+
         if (!string.IsNullOrWhiteSpace(context.SystemPrompt))
         {
             args.Add("--append-system-prompt");

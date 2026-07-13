@@ -44,6 +44,14 @@ public static class OpenCodeAgentDefinition
             args.Add(context.ResumeSessionId);
         }
 
+        // Pin the model (provider/model form, e.g. opencode/mimo-v2.5-free) when the composer picked one;
+        // otherwise OpenCode uses its own configured default.
+        if (!string.IsNullOrWhiteSpace(context.Model))
+        {
+            args.Add("--model");
+            args.Add(context.Model);
+        }
+
         return args;
     }
 
