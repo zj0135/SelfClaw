@@ -92,6 +92,8 @@ public sealed partial class ProgrammingAssistantSettingsService
 
     public string? SelectedCliId => _settings.SelectedCliId;
 
+    public string? SelectedModel => _settings.SelectedModel;
+
     /// <summary>
     /// Reads the persisted settings without ever scanning. Startup seeds them via
     /// <see cref="GetOrInitializeAsync"/>, so readers (composer selector, settings page load,
@@ -131,7 +133,7 @@ public sealed partial class ProgrammingAssistantSettingsService
             await EnsureLoadedCoreAsync(cancellationToken).ConfigureAwait(false);
             if (!_settings.HasScanned)
             {
-                _settings = CreateSettings(await ScanCoreAsync(cancellationToken).ConfigureAwait(false), selectedCliId: null);
+                _settings = CreateSettings(await ScanCoreAsync(cancellationToken).ConfigureAwait(false), selectedCliId: null, selectedModel: null);
                 await SaveCoreAsync(cancellationToken).ConfigureAwait(false);
             }
 
@@ -151,7 +153,8 @@ public sealed partial class ProgrammingAssistantSettingsService
             await EnsureLoadedCoreAsync(cancellationToken).ConfigureAwait(false);
             _settings = CreateSettings(
                 await ScanCoreAsync(cancellationToken).ConfigureAwait(false),
-                _settings.SelectedCliId);
+                _settings.SelectedCliId,
+                _settings.SelectedModel);
             await SaveCoreAsync(cancellationToken).ConfigureAwait(false);
             return _settings;
         }
@@ -174,7 +177,46 @@ public sealed partial class ProgrammingAssistantSettingsService
                 normalized = null;
             }
 
-            _settings = _settings with { SelectedCliId = normalized };
+            // Switching CLIs invalidates the remembered model (the new CLI has a different catalogue), so
+            // drop it; re-selecting the same CLI keeps whatever model was already chosen.
+            var selectedModel = string.Equals(normalized, _settings.SelectedCliId, StringComparison.OrdinalIgnoreCase)
+                ? _settings.SelectedModel
+                : null;
+
+            _settings = _settings with { SelectedCliId = normalized, SelectedModel = selectedModel };
+            await SaveCoreAsync(cancellationToken).ConfigureAwait(false);
+            return _settings;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Persists the model the user picked for the currently selected CLI. The value is kept only when it
+    /// belongs to that CLI's discovered catalogue; anything else (blank, stale, or an unknown model) resets
+    /// to <c>null</c> so the turn falls back to the CLI's own default.
+    /// </summary>
+    public async Task<ProgrammingAssistantSettings> SelectModelAsync(string? model, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureLoadedCoreAsync(cancellationToken).ConfigureAwait(false);
+
+            var normalized = NormalizeModel(model);
+            if (normalized is not null)
+            {
+                var selectedTool = _settings.Tools.FirstOrDefault(tool =>
+                    string.Equals(tool.Id, _settings.SelectedCliId, StringComparison.OrdinalIgnoreCase));
+                if (selectedTool is null || !selectedTool.Models.Contains(normalized, StringComparer.Ordinal))
+                {
+                    normalized = null;
+                }
+            }
+
+            _settings = _settings with { SelectedModel = normalized };
             await SaveCoreAsync(cancellationToken).ConfigureAwait(false);
             return _settings;
         }
@@ -210,7 +252,8 @@ public sealed partial class ProgrammingAssistantSettingsService
 
     private static ProgrammingAssistantSettings CreateSettings(
         IReadOnlyList<DetectedProgrammingCli> tools,
-        string? selectedCliId)
+        string? selectedCliId,
+        string? selectedModel)
     {
         var normalizedSelected = NormalizeCliId(selectedCliId);
         if (normalizedSelected is null || !tools.Any(tool => string.Equals(tool.Id, normalizedSelected, StringComparison.OrdinalIgnoreCase)))
@@ -218,11 +261,21 @@ public sealed partial class ProgrammingAssistantSettingsService
             normalizedSelected = tools.FirstOrDefault()?.Id;
         }
 
+        // Keep the remembered model only when it still belongs to the resolved CLI's catalogue — a rescan
+        // may have changed the list (or the selected CLI itself), leaving the old choice invalid.
+        var selectedTool = tools.FirstOrDefault(tool => string.Equals(tool.Id, normalizedSelected, StringComparison.OrdinalIgnoreCase));
+        var normalizedModel = NormalizeModel(selectedModel);
+        if (normalizedModel is not null && (selectedTool is null || !selectedTool.Models.Contains(normalizedModel, StringComparer.Ordinal)))
+        {
+            normalizedModel = null;
+        }
+
         return new ProgrammingAssistantSettings
         {
             HasScanned = true,
             ScannedAtUtc = DateTimeOffset.UtcNow,
             SelectedCliId = normalizedSelected,
+            SelectedModel = normalizedModel,
             Tools = tools
         };
     }
@@ -461,6 +514,17 @@ public sealed partial class ProgrammingAssistantSettingsService
         return string.IsNullOrEmpty(normalized) ? null : normalized;
     }
 
+    /// <summary>
+    /// Trims a model selection to a stored form, collapsing blank input to <c>null</c>. Model ids are kept
+    /// case-sensitive (CLI slugs like <c>opencode/mimo-v2.5-free</c> are matched verbatim against the
+    /// discovered catalogue), unlike CLI ids which are lower-cased.
+    /// </summary>
+    private static string? NormalizeModel(string? model)
+    {
+        var normalized = model?.Trim();
+        return string.IsNullOrEmpty(normalized) ? null : normalized;
+    }
+
     [GeneratedRegex(@"\d+\.\d+")]
     private static partial Regex VersionRegex();
 
@@ -489,6 +553,13 @@ public sealed record ProgrammingAssistantSettings
     public DateTimeOffset? ScannedAtUtc { get; init; }
 
     public string? SelectedCliId { get; init; }
+
+    /// <summary>
+    /// The model the user picked for <see cref="SelectedCliId"/> in the composer, or <c>null</c> to let the
+    /// CLI use its own configured default. Persisted so the choice survives a restart; reset to <c>null</c>
+    /// whenever the selected CLI changes (its catalogue no longer applies).
+    /// </summary>
+    public string? SelectedModel { get; init; }
 
     public IReadOnlyList<DetectedProgrammingCli> Tools { get; init; } = [];
 }

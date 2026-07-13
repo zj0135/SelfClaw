@@ -99,7 +99,12 @@ function applySettings(payload) {
 
 	const normalized = typeof payload?.selectedCliId === 'string' ? payload.selectedCliId.trim().toLowerCase() : '';
 	selectedCliId.value = detectedAgents.value.some((agent) => agent.id === normalized) ? normalized : '';
-	if (!models.value.includes(activeModel.value)) {
+
+	// 恢复上次持久化的模型：命中当前 CLI 的模型列表才采用，否则回落到该 CLI 的第一项（默认）。
+	const persistedModel = typeof payload?.selectedModel === 'string' ? payload.selectedModel : '';
+	if (persistedModel && models.value.includes(persistedModel)) {
+		activeModel.value = persistedModel;
+	} else if (!models.value.includes(activeModel.value)) {
 		activeModel.value = models.value[0] || defaultModel;
 	}
 	loadError.value = payload?.error ? `CLI 设置同步失败：${payload.error}` : '';
@@ -160,6 +165,12 @@ function pickModel(m) {
 	activeModel.value = m;
 	menuOpen.value = false;
 	emit('update:model', m);
+	// 持久化到宿主（desktop-settings.json 的 programming_assistant.selectedModel），下次启动默认选中。
+	postToHost({
+		type: 'select-programming-model',
+		requestId: `composer-model-${Date.now()}-${++requestCounter}`,
+		model: m,
+	});
 }
 
 function onDocClick(e) {
@@ -509,6 +520,15 @@ onBeforeUnmount(() => {
 	cursor: pointer;
 	transition: background 0.15s, border-color 0.15s;
 }
+/* 模型名过长时截断为省略号，保持单行不换行 */
+.model-select-btn > span {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-align: left;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
 .model-select-btn:hover { background: #f7f8fa; }
 /* 菜单在右侧展开，箭头指向右以示意 */
 .model-select-btn .caret {
@@ -519,20 +539,31 @@ onBeforeUnmount(() => {
 	transform: rotate(-90deg);
 }
 
-/* 模型菜单：贴着选择框右侧展开、底边对齐向上生长，避免被窗口下缘遮挡 */
+/* 模型菜单：贴着选择框右侧展开、底边对齐向上生长，避免被窗口下缘遮挡。
+   固定 320px 高度上限，模型过多时内部滚动。 */
 .model-menu {
 	position: absolute;
 	left: calc(100% + 8px);
 	bottom: 0;
+	box-sizing: border-box;
 	width: max-content;
 	min-width: 170px;
 	max-width: 240px;
+	max-height: 320px;
+	overflow-y: auto;
+	overscroll-behavior: contain;
 	padding: 4px;
 	border: 1px solid #e2e5eb;
 	border-radius: 9px;
 	background: #ffffff;
 	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.05), 0 12px 32px rgba(23, 26, 31, 0.12);
 	z-index: 3;
+}
+.model-menu::-webkit-scrollbar { width: 6px; }
+.model-menu::-webkit-scrollbar-track { background: transparent; }
+.model-menu::-webkit-scrollbar-thumb {
+	background: #dde1e7;
+	border-radius: 99px;
 }
 .model-opt {
 	display: flex;

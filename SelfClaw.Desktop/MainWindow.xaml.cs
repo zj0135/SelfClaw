@@ -610,6 +610,17 @@ public partial class MainWindow : Window
                     await SelectProgrammingCliAsync(requestId, cliId);
                     break;
                 }
+                case "select-programming-model":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    var model = document.RootElement.TryGetProperty("model", out var modelElement)
+                        ? modelElement.GetString()
+                        : null;
+                    await SelectProgrammingModelAsync(requestId, model);
+                    break;
+                }
                 case "get-pet-settings":
                 {
                     var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
@@ -691,12 +702,34 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task SelectProgrammingModelAsync(string? requestId, string? model)
+    {
+        try
+        {
+            var settings = await _programmingAssistantSettingsService.SelectModelAsync(model);
+            PostProgrammingAssistantSettings(requestId, settings);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            PostWebMessage(new
+            {
+                type = "programming-assistant-settings",
+                requestId,
+                tools = Array.Empty<DetectedProgrammingCli>(),
+                selectedCliId = (string?)null,
+                error = exception.Message
+            });
+        }
+    }
+
     private void PostProgrammingAssistantSettings(string? requestId, ProgrammingAssistantSettings settings)
         => PostWebMessage(new
         {
             type = "programming-assistant-settings",
             requestId,
             selectedCliId = settings.SelectedCliId,
+            selectedModel = settings.SelectedModel,
             tools = settings.Tools,
             scannedAtUtc = settings.ScannedAtUtc
         });
