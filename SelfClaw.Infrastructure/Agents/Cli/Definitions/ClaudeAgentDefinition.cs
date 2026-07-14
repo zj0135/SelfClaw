@@ -69,6 +69,14 @@ public static class ClaudeAgentDefinition
             args.Add(context.Model);
         }
 
+        // Session effort override (`claude --effort <level>`): low/medium/high/xhigh/max. Skipped when the
+        // composer left the sentinel selected so Claude falls back to its own configured effort.
+        if (!string.IsNullOrWhiteSpace(context.ReasoningEffort))
+        {
+            args.Add("--effort");
+            args.Add(context.ReasoningEffort);
+        }
+
         if (!string.IsNullOrWhiteSpace(context.SystemPrompt))
         {
             args.Add("--append-system-prompt");
