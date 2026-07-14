@@ -14,6 +14,25 @@ const currentViewId = ref('chat');
 const activeViewComponent = computed(() => viewRegistry[currentViewId.value] || ChatView);
 const activeViewRef = ref(null);
 const imagePreview = ref(null);
+const SIDEBAR_COLLAPSE_KEY = 'selfclaw:sidebar-collapsed';
+const sidebarCollapsed = ref(readSidebarCollapsed());
+
+function readSidebarCollapsed() {
+	try {
+		return localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === 'true';
+	} catch (_) {
+		return false;
+	}
+}
+
+function toggleSidebarCollapsed() {
+	sidebarCollapsed.value = !sidebarCollapsed.value;
+	try {
+		localStorage.setItem(SIDEBAR_COLLAPSE_KEY, String(sidebarCollapsed.value));
+	} catch (_) {
+		// 忽略持久化失败
+	}
+}
 const sidebarConversations = ref([]);
 const selectedConversationId = ref(null);
 const lastTranscriptPayload = ref(null);
@@ -230,8 +249,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<div class="app">
-		<AppSidebar :items="navItems" :active-id="sidebarActiveId" @select="onSidebarSelect" @action="onSidebarAction" />
+	<div class="app" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+		<AppSidebar
+			:items="navItems"
+			:active-id="sidebarActiveId"
+			:collapsed="sidebarCollapsed"
+			@select="onSidebarSelect"
+			@action="onSidebarAction"
+			@toggle-collapse="toggleSidebarCollapsed"
+		/>
 		<main class="main">
 			<div class="main-header">
 				<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>
@@ -328,6 +354,11 @@ button {
 	display: grid;
 	grid-template-columns: 280px 1fr;
 	background: var(--bg);
+	transition: grid-template-columns 240ms cubic-bezier(0.22, 0.82, 0.28, 1);
+}
+
+.app.sidebar-collapsed {
+	grid-template-columns: 60px 1fr;
 }
 
 .window-drag-region {
