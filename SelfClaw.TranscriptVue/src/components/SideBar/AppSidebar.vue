@@ -10,9 +10,20 @@ const props = defineProps({
 		type: String,
 		default: null,
 	},
+	collapsed: {
+		type: Boolean,
+		default: false,
+	},
 });
 
-const emit = defineEmits(['select', 'action']);
+const emit = defineEmits(['select', 'action', 'toggle-collapse']);
+
+function toggleCollapse() {
+	emit('toggle-collapse');
+}
+
+// 折叠态：图标轨对应的可操作项（去掉会话记录，仅保留功能图标）
+const railItems = computed(() => props.items.filter((i) => i.type === 'action' && i.id !== 'new-chat'));
 
 const expandedGroups = ref(new Set(['projects', 'conversations']));
 const expandedFolders = ref(new Set());
@@ -234,7 +245,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<aside class="sidebar" aria-label="主导航">
+	<aside class="sidebar" :class="{ collapsed }" aria-label="主导航">
 		<!-- 品牌行 -->
 		<div class="brand">
 			<span class="brand-mark" aria-hidden="true">
@@ -245,13 +256,56 @@ onUnmounted(() => {
 			</span>
 			<span class="brand-name">SelfClaw</span>
 			<span class="brand-spacer"></span>
-			<button class="brand-collapse" type="button" title="折叠侧栏" aria-label="折叠侧栏" @click="emit('action', 'collapse')">
+			<button
+				class="brand-collapse"
+				type="button"
+				:title="collapsed ? '展开侧栏' : '折叠侧栏'"
+				:aria-label="collapsed ? '展开侧栏' : '折叠侧栏'"
+				@click="toggleCollapse"
+			>
 				<svg viewBox="0 0 20 20" fill="none">
-					<path d="M12 5 7 10l5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-					<path d="M4.5 4.5v11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+					<rect x="3" y="4" width="14" height="12" rx="2.4" stroke="currentColor" stroke-width="1.5" />
+					<path d="M12.5 4.6v10.8" stroke="currentColor" stroke-width="1.5" />
 				</svg>
 			</button>
 		</div>
+
+		<!-- ============ 折叠态：图标轨 ============ -->
+		<nav class="rail" aria-label="折叠导航">
+			<div class="rail-scroll">
+				<button class="rail-new" type="button" title="新建对话" @click="onAction('new-chat')">
+					<svg viewBox="0 0 20 20" fill="none"><path d="M10 4.5v11M4.5 10h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+					<span class="tip">新建对话</span>
+				</button>
+
+				<span class="rail-sep" aria-hidden="true"></span>
+
+				<button
+					v-for="item in railItems"
+					:key="item.id"
+					class="rail-btn"
+					:class="{ active: activeId === item.id }"
+					type="button"
+					:title="item.label"
+					@click="onAction(item.id)"
+				>
+					<span class="ico" aria-hidden="true" v-html="getIcon(item.id)"></span>
+					<span class="tip">{{ item.label }}<span v-if="kbdMap[item.id]" class="k">{{ kbdMap[item.id] }}</span></span>
+				</button>
+			</div>
+
+			<div class="rail-bot">
+				<button class="rail-btn" :class="{ active: settingsActive }" type="button" title="系统设置" @click="selectSettings">
+					<span class="ico" aria-hidden="true">
+						<svg viewBox="0 0 20 20" fill="none">
+							<circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6" />
+							<path d="M10 2.8v2M10 15.2v2M17.2 10h-2M4.8 10h-2M14.9 5.1l-1.4 1.4M6.5 13.5l-1.4 1.4M14.9 14.9l-1.4-1.4M6.5 6.5 5.1 5.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+						</svg>
+					</span>
+					<span class="tip">系统设置</span>
+				</button>
+			</div>
+		</nav>
 
 		<!-- 上：功能按钮区 -->
 		<div class="nav-top">
@@ -479,6 +533,200 @@ onUnmounted(() => {
 .brand-collapse svg {
 	width: 16px;
 	height: 16px;
+}
+
+/* ================= 折叠态 ================= */
+/* 展开态默认隐藏图标轨；折叠态隐藏完整导航 */
+.rail {
+	display: none;
+}
+
+.sidebar.collapsed .brand {
+	padding: 16px 0 12px;
+	justify-content: center;
+}
+
+.sidebar.collapsed .brand-mark,
+.sidebar.collapsed .brand-name,
+.sidebar.collapsed .brand-spacer {
+	display: none;
+}
+
+.sidebar.collapsed .brand-collapse {
+	margin: 0 auto;
+}
+
+/* 折叠时隐藏完整导航的三段 */
+.sidebar.collapsed .nav-top,
+.sidebar.collapsed .nav-mid,
+.sidebar.collapsed .nav-bot {
+	display: none;
+}
+
+/* 折叠态图标轨 */
+.sidebar.collapsed .rail {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding: 2px 0 12px;
+}
+
+.rail-scroll {
+	flex: 1 1 auto;
+	min-height: 0;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	/* overflow 保持 visible，让右侧浮出的 tooltip 不被裁切；图标数量少无需滚动 */
+	overflow: visible;
+	padding: 2px 0;
+}
+
+/* 折叠态主操作：新建对话（accent 圆钮） */
+.rail-new {
+	position: relative;
+	width: 38px;
+	height: 38px;
+	margin-bottom: 6px;
+	display: grid;
+	place-items: center;
+	border: 0;
+	border-radius: 11px;
+	background: #4f73c8;
+	color: #fff;
+	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.1);
+	transition: background 120ms ease, transform 80ms ease;
+}
+
+.rail-new:hover {
+	background: #375fae;
+}
+
+.rail-new:active {
+	transform: translateY(1px);
+}
+
+.rail-new svg {
+	width: 20px;
+	height: 20px;
+}
+
+.rail-sep {
+	width: 26px;
+	height: 1px;
+	margin: 4px 0 6px;
+	background: #e5e7eb;
+}
+
+/* 折叠态图标钮 */
+.rail-btn {
+	position: relative;
+	width: 38px;
+	height: 38px;
+	display: grid;
+	place-items: center;
+	border: 0;
+	border-radius: 10px;
+	background: transparent;
+	color: #6b7280;
+	transition: background 110ms ease, color 110ms ease;
+}
+
+.rail-btn:hover {
+	background: #e5e7eb;
+	color: #111827;
+}
+
+.rail-btn .ico {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/* v-html 注入的 SVG 不带 scoped 属性，需用 :deep() 穿透，否则塌成 0 尺寸 */
+.rail-btn .ico :deep(svg),
+.rail-btn > svg {
+	width: 20px;
+	height: 20px;
+}
+
+/* 选中态：accent 底 + 左侧指示条 */
+.rail-btn.active {
+	background: #eaf0fb;
+	color: #375fae;
+}
+
+.rail-btn.active::before {
+	content: '';
+	position: absolute;
+	left: -11px;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 3px;
+	height: 20px;
+	border-radius: 999px;
+	background: #4f73c8;
+}
+
+/* tooltip：悬停时右侧浮出标签，保证图标可读可操作 */
+.rail-btn .tip,
+.rail-new .tip {
+	position: absolute;
+	left: calc(100% + 12px);
+	top: 50%;
+	transform: translateY(-50%) translateX(-4px);
+	padding: 5px 9px;
+	border-radius: 7px;
+	background: #22262c;
+	color: #fff;
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 1;
+	white-space: nowrap;
+	opacity: 0;
+	pointer-events: none;
+	box-shadow: 0 6px 18px rgba(23, 26, 31, 0.22);
+	transition: opacity 130ms ease, transform 130ms ease;
+	z-index: 60;
+}
+
+.rail-btn .tip::before,
+.rail-new .tip::before {
+	content: '';
+	position: absolute;
+	right: 100%;
+	top: 50%;
+	transform: translateY(-50%);
+	border: 5px solid transparent;
+	border-right-color: #22262c;
+}
+
+.rail-btn:hover .tip,
+.rail-new:hover .tip {
+	opacity: 1;
+	transform: translateY(-50%) translateX(0);
+}
+
+.rail-btn .tip .k,
+.rail-new .tip .k {
+	margin-left: 7px;
+	color: #9aa2ad;
+	font-variant-numeric: tabular-nums;
+}
+
+.rail-bot {
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	padding-top: 6px;
+	margin-top: 4px;
+	width: 100%;
 }
 
 /* ================= 上：功能按钮区 ================= */

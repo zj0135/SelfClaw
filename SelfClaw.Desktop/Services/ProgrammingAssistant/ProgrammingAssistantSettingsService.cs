@@ -48,7 +48,9 @@ public sealed partial class ProgrammingAssistantSettingsService
             // Claude Code has no "list models" command, so this catalogue is maintained by hand. Keep the
             // Default sentinel first, then the stable CLI aliases (`claude --model <alias>`).
             Models: [DefaultModelOption, "opus", "sonnet", "haiku"],
-            ReasoningLevels: [],
+            // Static list — Claude accepts these via `--effort <level>` per its `--help` output. Sentinel
+            // first so "Default (CLI config)" means "omit the flag and let the CLI decide".
+            ReasoningLevels: [DefaultModelOption, "low", "medium", "high", "xhigh", "max"],
             ModelListArguments: null,
             ParseModels: null,
             ParseReasoningLevels: null),
@@ -245,6 +247,62 @@ public sealed partial class ProgrammingAssistantSettingsService
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>
+    /// Live-probes a single CLI by rerunning its version command against PATH (same launch semantics as the
+    /// startup scan). Returns a success/version/error triple so the UI can show a real toast instead of a
+    /// hard-coded "connected" banner. Not gated by <see cref="_gate"/>: the probe is read-only and independent
+    /// of the persisted settings state, and blocking on the mutex would stall it behind an in-flight rescan.
+    /// </summary>
+    public async Task<CliTestResult> TestCliAsync(string? cliId, CancellationToken cancellationToken = default)
+    {
+        var normalized = NormalizeCliId(cliId);
+        var definition = CliDefinitions.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, normalized, StringComparison.OrdinalIgnoreCase));
+        if (definition is null)
+        {
+            return new CliTestResult(cliId ?? string.Empty, Success: false, Version: null, Error: "未识别的 CLI");
+        }
+
+        Exception? lastError = null;
+        foreach (var command in definition.Commands)
+        {
+            var resolver = new CliCommandResolver();
+            try
+            {
+                var invocation = resolver.Resolve(command, definition.VersionArguments);
+                var rawVersion = await ReadVersionAsync(invocation, cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(rawVersion))
+                {
+                    // Timed out or no output — try the next command name, otherwise fall through to the "not found" reply.
+                    continue;
+                }
+
+                return new CliTestResult(definition.Id, Success: true, Version: NormalizeVersion(command, rawVersion), Error: null);
+            }
+            catch (FileNotFoundException)
+            {
+                // This command name isn't on PATH; try the next alias.
+                continue;
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception or OperationCanceledException)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                lastError = exception;
+                Debug.WriteLine(exception);
+            }
+        }
+
+        return new CliTestResult(
+            definition.Id,
+            Success: false,
+            Version: null,
+            Error: lastError?.Message ?? "未在 PATH 中检测到该 CLI");
     }
 
     private DetectedProgrammingCli? SelectedTool() =>
@@ -616,3 +674,10 @@ public sealed record DetectedProgrammingCli(
     string Version,
     IReadOnlyList<string> Models,
     IReadOnlyList<string> ReasoningLevels);
+
+/// <summary>
+/// The outcome of a live probe of a single CLI. <see cref="Success"/> is <c>true</c> only when the version
+/// command actually ran and produced output; on failure <see cref="Error"/> carries a human-readable reason
+/// (missing binary, non-zero exit, timeout) and <see cref="Version"/> is <c>null</c>.
+/// </summary>
+public sealed record CliTestResult(string CliId, bool Success, string? Version, string? Error);

@@ -9,7 +9,8 @@ const isLoading = ref(false);
 const isRescanning = ref(false);
 const scanError = ref('');
 const selectedCliId = ref('');
-const testTimers = new Map();
+// Tracks the newest test request per CLI so late/stale replies from the host bridge are ignored.
+const activeTestRequests = new Map();
 let scanRequestId = 0;
 let activeScanRequestId = null;
 let fallbackTimer = null;
@@ -45,12 +46,10 @@ const cliRegistry = {
 const cliTools = reactive([]);
 const hasCliTools = computed(() => cliTools.length > 0);
 const scanStatusText = computed(() => {
-	if (isLoading.value) {
-		return '正在加载本地 CLI 缓存…';
-	}
-
-	if (isRescanning.value) {
-		return '正在扫描本机 PATH…';
+	// The initial-load and rescan spinners live on the "重新扫描" button; showing the same status
+	// as a bar above the CLI list would just duplicate the affordance, so we stay silent then.
+	if (isLoading.value || isRescanning.value) {
+		return '';
 	}
 
 	if (scanError.value) {
@@ -134,21 +133,59 @@ function testCli(cli) {
 		return;
 	}
 
-	const currentTimer = testTimers.get(cli.id);
-	if (currentTimer) {
-		window.clearTimeout(currentTimer);
-	}
-
+	const requestId = `cli-test-${Date.now()}-${++scanRequestId}`;
 	cli.testing = true;
 	cli.showToast = false;
+	cli.testError = '';
+	activeTestRequests.set(requestId, cli.id);
 
-	const timer = window.setTimeout(() => {
-		cli.testing = false;
-		cli.showToast = true;
-		testTimers.delete(cli.id);
-	}, 850);
+	postToHost({
+		type: 'test-programming-cli',
+		requestId,
+		cliId: cli.id,
+	});
 
-	testTimers.set(cli.id, timer);
+	// No WebView2 host in dev — fake a plausible success so the UI can still be exercised in a browser.
+	if (!window.chrome?.webview) {
+		window.setTimeout(() => {
+			handleTestResult({
+				type: 'programming-cli-test-result',
+				requestId,
+				cliId: cli.id,
+				success: true,
+				version: cli.version || '',
+				error: null,
+			});
+		}, 400);
+	}
+}
+
+function handleTestResult(payload) {
+	const requestId = typeof payload?.requestId === 'string' ? payload.requestId : '';
+	const cliId = activeTestRequests.get(requestId) || payload?.cliId;
+	activeTestRequests.delete(requestId);
+	if (!cliId) {
+		return;
+	}
+
+	const cli = cliTools.find((tool) => tool.id === cliId);
+	if (!cli) {
+		return;
+	}
+
+	cli.testing = false;
+	if (payload?.success) {
+		const version = typeof payload.version === 'string' ? payload.version.trim() : '';
+		cli.testMessage = version ? `连接正常 · ${version}` : '连接正常 · 已检测到 CLI';
+		cli.testError = '';
+	} else {
+		const detail = typeof payload?.error === 'string' && payload.error.trim().length > 0
+			? payload.error.trim()
+			: '未能连接到该 CLI';
+		cli.testMessage = `连接失败 · ${detail}`;
+		cli.testError = detail;
+	}
+	cli.showToast = true;
 }
 
 function requestProgrammingAssistantSettings({ refresh = false } = {}) {
@@ -239,6 +276,11 @@ function normalizeSelectedCliId(tools, value) {
 }
 
 function handleMessage(payload) {
+	if (payload?.type === 'programming-cli-test-result') {
+		handleTestResult(payload);
+		return;
+	}
+
 	if (payload?.type !== 'programming-assistant-settings') {
 		return;
 	}
@@ -255,8 +297,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-	testTimers.forEach((timer) => window.clearTimeout(timer));
-	testTimers.clear();
+	activeTestRequests.clear();
 
 	if (fallbackTimer) {
 		window.clearTimeout(fallbackTimer);

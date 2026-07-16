@@ -665,6 +665,17 @@ public partial class MainWindow : Window
                     await _viewModel.SelectComposerModeAsync(mode);
                     break;
                 }
+                case "test-programming-cli":
+                {
+                    var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                        ? requestIdElement.GetString()
+                        : null;
+                    var cliId = document.RootElement.TryGetProperty("cliId", out var cliIdElement)
+                        ? cliIdElement.GetString()
+                        : null;
+                    await TestProgrammingCliAsync(requestId, cliId);
+                    break;
+                }
                 case "get-pet-settings":
                 {
                     var requestId = document.RootElement.TryGetProperty("requestId", out var requestIdElement)
@@ -786,6 +797,30 @@ public partial class MainWindow : Window
                 error = exception.Message
             });
         }
+    }
+
+    private async Task TestProgrammingCliAsync(string? requestId, string? cliId)
+    {
+        CliTestResult result;
+        try
+        {
+            result = await _programmingAssistantSettingsService.TestCliAsync(cliId);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            result = new CliTestResult(cliId ?? string.Empty, Success: false, Version: null, Error: exception.Message);
+        }
+
+        PostWebMessage(new
+        {
+            type = "programming-cli-test-result",
+            requestId,
+            cliId = result.CliId,
+            success = result.Success,
+            version = result.Version,
+            error = result.Error
+        });
     }
 
     private void PostProgrammingAssistantSettings(string? requestId, ProgrammingAssistantSettings settings)
