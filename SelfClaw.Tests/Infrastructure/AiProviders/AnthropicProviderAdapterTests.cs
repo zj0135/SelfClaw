@@ -96,6 +96,7 @@ public sealed class AnthropicProviderAdapterTests
         var now = DateTimeOffset.UtcNow;
         var connection = new AiProviderConnection(
             Guid.NewGuid(),
+            "anthropic",
             "Anthropic",
             AiProviderKind.Anthropic,
             new Uri("https://api.anthropic.com/"),

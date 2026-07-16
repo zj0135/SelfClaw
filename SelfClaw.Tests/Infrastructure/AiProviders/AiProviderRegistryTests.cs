@@ -24,11 +24,11 @@ public sealed class AiProviderRegistryTests
     {
         var registry = new AiProviderRegistry([new FakeAiProviderAdapter(AiProviderKind.OpenAI)]);
 
-        var act = () => registry.GetRequiredAdapter(AiProviderKind.DeepSeek);
+        var act = () => registry.GetRequiredAdapter(AiProviderKind.GoogleGemini);
 
         act.Should()
             .Throw<KeyNotFoundException>()
-            .WithMessage("*DeepSeek*");
+            .WithMessage("*GoogleGemini*");
     }
 
     [Fact]
@@ -55,6 +55,14 @@ public sealed class AiProviderRegistryTests
         public AiProviderKind ProviderKind { get; }
 
         public bool SupportsApiFormat(AiProviderApiFormat apiFormat) => true;
+
+        public bool SupportsModelListing => true;
+
+        public Task<IReadOnlyList<AiModelDescriptor>> ListModelsAsync(
+            AiProviderConnection connection,
+            IReadOnlyDictionary<string, string> secrets,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AiModelDescriptor>>([]);
 
         public IChatClient CreateChatClient(AiProviderClientRequest request)
             => throw new NotImplementedException();

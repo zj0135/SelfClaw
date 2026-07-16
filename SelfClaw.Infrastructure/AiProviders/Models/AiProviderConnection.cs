@@ -14,6 +14,7 @@ namespace SelfClaw.Infrastructure.AiProviders.Models;
 /// </remarks>
 public sealed record AiProviderConnection(
     Guid Id,
+    string CatalogId,
     string Name,
     AiProviderKind ProviderKind,
     Uri Endpoint,

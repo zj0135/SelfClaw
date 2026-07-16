@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 19;
+    private const int CurrentSchemaVersion = 21;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -73,24 +73,9 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 );", cancellationToken);
 
             await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS profiles (
-    id TEXT NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL,
-    endpoint TEXT NOT NULL,
-    model TEXT NOT NULL,
-    temperature_enabled INTEGER NOT NULL DEFAULT 0,
-    temperature REAL NOT NULL DEFAULT 0.7,
-    top_p_enabled INTEGER NOT NULL DEFAULT 0,
-    top_p REAL NOT NULL DEFAULT 0.7,
-    api_style INTEGER NOT NULL,
-    secret_ref TEXT NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);", cancellationToken);
-
-            await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS ai_provider_connections (
     id TEXT NOT NULL PRIMARY KEY,
+    catalog_id TEXT NOT NULL DEFAULT 'custom',
     name TEXT NOT NULL,
     provider_kind INTEGER NOT NULL,
     endpoint TEXT NOT NULL,
@@ -101,6 +86,13 @@ CREATE TABLE IF NOT EXISTS ai_provider_connections (
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL
 );", cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "ai_provider_connections",
+                "catalog_id",
+                "ALTER TABLE ai_provider_connections ADD COLUMN catalog_id TEXT NOT NULL DEFAULT 'custom';",
+                cancellationToken);
 
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS ai_model_profiles (
@@ -128,34 +120,6 @@ CREATE TABLE IF NOT EXISTS ai_model_profile_selections (
     FOREIGN KEY(model_profile_id) REFERENCES ai_model_profiles(id) ON DELETE CASCADE
 );", cancellationToken);
 
-            await EnsureColumnExistsAsync(
-                connection,
-                "profiles",
-                "temperature_enabled",
-                "ALTER TABLE profiles ADD COLUMN temperature_enabled INTEGER NOT NULL DEFAULT 0;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "profiles",
-                "temperature",
-                "ALTER TABLE profiles ADD COLUMN temperature REAL NOT NULL DEFAULT 0.7;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "profiles",
-                "top_p",
-                "ALTER TABLE profiles ADD COLUMN top_p REAL NOT NULL DEFAULT 0.7;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "profiles",
-                "top_p_enabled",
-                "ALTER TABLE profiles ADD COLUMN top_p_enabled INTEGER NOT NULL DEFAULT 0;",
-                cancellationToken);
-
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS workspace_roots (
     id TEXT NOT NULL PRIMARY KEY,
@@ -169,7 +133,6 @@ CREATE TABLE IF NOT EXISTS workspace_roots (
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT NOT NULL PRIMARY KEY,
     title TEXT NOT NULL,
-    profile_id TEXT NULL,
     workspace_root_id TEXT NULL,
     mode INTEGER NOT NULL DEFAULT 0,
     tool_permission_mode INTEGER NOT NULL DEFAULT 0,
@@ -179,7 +142,6 @@ CREATE TABLE IF NOT EXISTS conversations (
     channel_display_name TEXT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE RESTRICT,
     FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
 );", cancellationToken);
 
@@ -225,10 +187,11 @@ CREATE TABLE IF NOT EXISTS conversations (
                 "ALTER TABLE conversations ADD COLUMN channel_display_name TEXT NULL;",
                 cancellationToken);
 
-            // Schema v19: CLI agents use their own local configuration, so a conversation no longer
-            // requires a profile. Relax conversations.profile_id from NOT NULL to nullable. SQLite cannot
-            // alter a column's nullability in place, so older databases are migrated by rebuilding the table.
-            await EnsureConversationProfileIdNullableAsync(connection, cancellationToken);
+            // Schema v21: provider/model selection moved to ai_model_profile_selections and the
+            // per-turn request. Rebuild old conversation tables to remove their profiles foreign key
+            // while preserving every conversation row and all dependent message/tool/session rows.
+            await EnsureConversationsWithoutProfileIdAsync(connection, cancellationToken);
+            await ExecuteAsync(connection, "DROP TABLE IF EXISTS profiles;", cancellationToken);
 
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS messages (
@@ -389,16 +352,12 @@ CREATE TABLE IF NOT EXISTS cli_agent_sessions (
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// Rebuilds the <c>conversations</c> table when its <c>profile_id</c> column is still <c>NOT NULL</c>
-    /// (databases created before schema v19), relaxing it to nullable. SQLite has no
-    /// <c>ALTER COLUMN</c>, so the standard recreate-and-copy dance is used inside the caller's transaction.
-    /// </summary>
-    private static async Task EnsureConversationProfileIdNullableAsync(
+    /// <summary>Rebuilds legacy conversation tables to remove the obsolete profile_id column.</summary>
+    private static async Task EnsureConversationsWithoutProfileIdAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
-        var profileIdNotNull = false;
+        var hasProfileId = false;
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = "PRAGMA table_info(conversations);";
@@ -408,24 +367,30 @@ CREATE TABLE IF NOT EXISTS cli_agent_sessions (
                 // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk.
                 if (string.Equals(reader.GetString(1), "profile_id", StringComparison.OrdinalIgnoreCase))
                 {
-                    profileIdNotNull = reader.GetInt32(3) != 0;
+                    hasProfileId = true;
                     break;
                 }
             }
         }
 
-        if (!profileIdNotNull)
+        if (!hasProfileId)
         {
             return;
         }
 
-        // Foreign keys must be off while the table is swapped; restored by the connection's PRAGMA on reopen.
+        // Foreign keys must be off while the table is swapped, and PRAGMA foreign_keys is a
+        // no-op inside a transaction, so toggle it around the transaction boundaries.
         await ExecuteAsync(connection, "PRAGMA foreign_keys = OFF;", cancellationToken);
-        await ExecuteAsync(connection, @"
+        // Conversations are user data: run the swap as one atomic unit so a crash mid-rebuild
+        // can never leave the database without a populated conversations table.
+        await ExecuteAsync(connection, "BEGIN IMMEDIATE;", cancellationToken);
+        try
+        {
+            await ExecuteAsync(connection, "DROP TABLE IF EXISTS conversations_new;", cancellationToken);
+            await ExecuteAsync(connection, @"
 CREATE TABLE conversations_new (
     id TEXT NOT NULL PRIMARY KEY,
     title TEXT NOT NULL,
-    profile_id TEXT NULL,
     workspace_root_id TEXT NULL,
     mode INTEGER NOT NULL DEFAULT 0,
     tool_permission_mode INTEGER NOT NULL DEFAULT 0,
@@ -435,19 +400,34 @@ CREATE TABLE conversations_new (
     channel_display_name TEXT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE RESTRICT,
     FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
 );", cancellationToken);
-        await ExecuteAsync(connection, @"
+            await ExecuteAsync(connection, @"
 INSERT INTO conversations_new(
-    id, title, profile_id, workspace_root_id, mode, tool_permission_mode, agent_id,
+    id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
     channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc)
 SELECT
-    id, title, profile_id, workspace_root_id, mode, tool_permission_mode, agent_id,
+    id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
     channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc
 FROM conversations;", cancellationToken);
-        await ExecuteAsync(connection, "DROP TABLE conversations;", cancellationToken);
-        await ExecuteAsync(connection, "ALTER TABLE conversations_new RENAME TO conversations;", cancellationToken);
+            await ExecuteAsync(connection, "DROP TABLE conversations;", cancellationToken);
+            await ExecuteAsync(connection, "ALTER TABLE conversations_new RENAME TO conversations;", cancellationToken);
+            await ExecuteAsync(connection, "COMMIT;", cancellationToken);
+        }
+        catch
+        {
+            try
+            {
+                await ExecuteAsync(connection, "ROLLBACK;", CancellationToken.None);
+            }
+            catch
+            {
+                // Initialization is already failing; surface the original error.
+            }
+
+            throw;
+        }
+
         await ExecuteAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken);
     }
 

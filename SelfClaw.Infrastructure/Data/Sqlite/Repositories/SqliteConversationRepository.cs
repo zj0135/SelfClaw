@@ -28,7 +28,7 @@ public sealed class SqliteConversationRepository : IConversationRepository
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode,
+SELECT id, title, workspace_root_id, mode, tool_permission_mode,
        agent_id, channel_kind, channel_conversation_id, channel_display_name,
        created_at_utc, updated_at_utc
 FROM conversations
@@ -48,16 +48,15 @@ LIMIT 1;";
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 INSERT INTO conversations(
-    id, title, profile_id, workspace_root_id, mode, tool_permission_mode, agent_id,
+    id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
     channel_kind, channel_conversation_id, channel_display_name,
     created_at_utc, updated_at_utc)
 VALUES(
-    $id, $title, $profileId, $workspaceRootId, $mode, $toolPermissionMode, $agentId,
+    $id, $title, $workspaceRootId, $mode, $toolPermissionMode, $agentId,
     $channelKind, $channelConversationId, $channelDisplayName,
     $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
-    profile_id = excluded.profile_id,
     workspace_root_id = excluded.workspace_root_id,
     mode = excluded.mode,
     tool_permission_mode = excluded.tool_permission_mode,
@@ -68,7 +67,6 @@ ON CONFLICT(id) DO UPDATE SET
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", conversation.Id.ToString("D"));
         command.Parameters.AddWithValue("$title", conversation.Title);
-        command.Parameters.AddWithValue("$profileId", conversation.ProfileId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$workspaceRootId", conversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$mode", (int)conversation.Mode);
         command.Parameters.AddWithValue("$toolPermissionMode", (int)conversation.ToolPermissionMode);
@@ -356,7 +354,7 @@ ON CONFLICT(id) DO UPDATE SET
     {
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, title, profile_id, workspace_root_id, mode, tool_permission_mode,
+SELECT id, title, workspace_root_id, mode, tool_permission_mode,
        agent_id, channel_kind, channel_conversation_id, channel_display_name,
        created_at_utc, updated_at_utc
 FROM conversations

@@ -9,5 +9,8 @@ public enum AiProviderKind
     OpenAI = 0,
     OpenAICompatible = 1,
     DeepSeek = 2,
-    Anthropic = 3
+    Anthropic = 3,
+    GoogleGemini = 4,
+    Ollama = 5,
+    AzureOpenAI = 6
 }

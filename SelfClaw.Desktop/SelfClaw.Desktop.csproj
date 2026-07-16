@@ -12,6 +12,7 @@
     <PackageReference Include="Serilog" />
     <PackageReference Include="Serilog.Extensions.Hosting" />
     <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="System.Drawing.Common" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" GeneratePathProperty="true" />
   </ItemGroup>
 
@@ -29,6 +30,7 @@
   <ItemGroup>
     <Using Remove="System.Drawing" />
     <Using Remove="System.Windows.Forms" />
+    <InternalsVisibleTo Include="SelfClaw.Tests" />
     <ProjectReference Include="..\SelfClaw.Core\SelfClaw.Core.csproj" />
     <ProjectReference Include="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" />
     <Resource Include="Assets\icon\icon.ico" />

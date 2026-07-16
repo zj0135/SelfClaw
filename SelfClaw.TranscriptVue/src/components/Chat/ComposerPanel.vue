@@ -16,6 +16,10 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	agentMode: {
+		type: String,
+		default: 'cli',
+	},
 });
 
 const emit = defineEmits([
@@ -88,7 +92,7 @@ defineExpose({
 		></textarea>
 		<div class="composer-toolbar">
 			<div class="composer-tools-left">
-				<ModelSelector />
+				<ModelSelector :execution-mode="agentMode" />
 				<button class="icon-btn" type="button" title="功能" aria-label="功能">
 					<svg viewBox="0 0 20 20" aria-hidden="true">
 						<path d="M3 7h3M10 7h7" />

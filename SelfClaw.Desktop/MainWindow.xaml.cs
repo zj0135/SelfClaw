@@ -11,10 +11,12 @@ using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
+using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.Options;
+using SelfClaw.Core.Runtime;
 using Forms = System.Windows.Forms;
 
 namespace SelfClaw.Desktop;
@@ -36,7 +38,10 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel;
     private readonly StoragePaths _storagePaths;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettingsService;
+    private readonly AiProviderSettingsBridge _aiProviderSettingsBridge;
     private readonly PetService _petService;
+    private readonly DesktopToolApprovalHandler _toolApprovalHandler;
+    private readonly DesktopNotificationService _desktopNotificationService;
     private TranscriptRenderState _pendingTranscript = new(
         Items: [],
         AutoScroll: false,
@@ -59,7 +64,9 @@ public partial class MainWindow : Window
     public MainWindow(
         MainWindowViewModel viewModel,
         DesktopNotificationService desktopNotificationService,
+        DesktopToolApprovalHandler toolApprovalHandler,
         ProgrammingAssistantSettingsService programmingAssistantSettingsService,
+        AiProviderSettingsBridge aiProviderSettingsBridge,
         PetService petService,
         StoragePaths storagePaths)
     {
@@ -68,7 +75,10 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         _storagePaths = storagePaths;
         _programmingAssistantSettingsService = programmingAssistantSettingsService;
+        _aiProviderSettingsBridge = aiProviderSettingsBridge;
         _petService = petService;
+        _toolApprovalHandler = toolApprovalHandler;
+        _desktopNotificationService = desktopNotificationService;
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
         SourceInitialized += OnSourceInitialized;
@@ -78,6 +88,10 @@ public partial class MainWindow : Window
         _viewModel.TranscriptChanged += OnTranscriptChanged;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         TranscriptView.NavigationCompleted += OnTranscriptNavigationCompleted;
+        _aiProviderSettingsBridge.ResponseReady += OnAiProviderBridgeResponseReady;
+        _aiProviderSettingsBridge.ModelSelectionChanged += OnModelSelectionChanged;
+        _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
+        _toolApprovalHandler.ApprovalExpired += OnToolApprovalExpired;
         desktopNotificationService.RegisterMainWindow(this);
     }
 
@@ -110,6 +124,11 @@ public partial class MainWindow : Window
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         StateChanged -= OnWindowStateChanged;
         TranscriptView.NavigationCompleted -= OnTranscriptNavigationCompleted;
+        _aiProviderSettingsBridge.ResponseReady -= OnAiProviderBridgeResponseReady;
+        _aiProviderSettingsBridge.ModelSelectionChanged -= OnModelSelectionChanged;
+        _toolApprovalHandler.ApprovalRequested -= OnToolApprovalRequested;
+        _toolApprovalHandler.ApprovalExpired -= OnToolApprovalExpired;
+        _toolApprovalHandler.RejectAll();
         StopTerminalSession();
 
         if (TranscriptView.CoreWebView2 is not null)
@@ -425,7 +444,13 @@ public partial class MainWindow : Window
                 return;
             }
 
-            switch (typeElement.GetString())
+            var type = typeElement.GetString();
+            if (type is not null && await _aiProviderSettingsBridge.TryHandleAsync(type, document.RootElement))
+            {
+                return;
+            }
+
+            switch (type)
             {
                 case "open-link":
                 {
@@ -630,6 +655,14 @@ public partial class MainWindow : Window
                         ? reasoningElement.GetString()
                         : null;
                     await SelectProgrammingReasoningAsync(requestId, reasoningLevel);
+                    break;
+                }
+                case "select-composer-mode":
+                {
+                    var mode = document.RootElement.TryGetProperty("mode", out var modeElement)
+                        ? modeElement.GetString()
+                        : null;
+                    await _viewModel.SelectComposerModeAsync(mode);
                     break;
                 }
                 case "get-pet-settings":
@@ -1125,6 +1158,86 @@ public partial class MainWindow : Window
         });
         TranscriptView.CoreWebView2.PostWebMessageAsJson(json);
     }
+
+    private void OnModelSelectionChanged(Guid? modelProfileId)
+        => _viewModel.SelectModelProfile(modelProfileId);
+
+    private void OnToolApprovalRequested(ToolApprovalRequest request)
+    {
+        var summary = BuildToolApprovalSummary(request);
+        _desktopNotificationService.ShowToolApproval(
+            request.ToolExecutionId,
+            request.ConversationId,
+            request.DisplayName,
+            summary);
+
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            _toolApprovalHandler.TryResolve(request.ToolExecutionId, approved: false);
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(() =>
+        {
+            if (!IsVisible || Visibility != Visibility.Visible || WindowState == WindowState.Minimized)
+            {
+                return;
+            }
+
+            var result = System.Windows.MessageBox.Show(
+                this,
+                summary,
+                string.IsNullOrWhiteSpace(request.DisplayName) ? "Tool approval" : request.DisplayName,
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            _toolApprovalHandler.TryResolve(
+                request.ToolExecutionId,
+                approved: result == MessageBoxResult.Yes);
+        }, DispatcherPriority.Normal);
+    }
+
+    private void OnToolApprovalExpired(ToolApprovalRequest request)
+    {
+        _desktopNotificationService.ShowToolApprovalExpired(request.DisplayName);
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(() =>
+        {
+            if (IsVisible && Visibility == Visibility.Visible && WindowState != WindowState.Minimized)
+            {
+                System.Windows.MessageBox.Show(
+                    this,
+                    "The tool call was rejected because approval timed out.",
+                    string.IsNullOrWhiteSpace(request.DisplayName) ? "Tool approval expired" : request.DisplayName,
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }, DispatcherPriority.Background);
+    }
+
+    private static string BuildToolApprovalSummary(ToolApprovalRequest request)
+    {
+        const int maxArgumentsLength = 2000;
+        var arguments = string.IsNullOrWhiteSpace(request.ArgumentsJson)
+            ? "(no arguments)"
+            : request.ArgumentsJson.Trim();
+        if (arguments.Length > maxArgumentsLength)
+        {
+            arguments = $"{arguments[..maxArgumentsLength]}…";
+        }
+
+        var description = string.IsNullOrWhiteSpace(request.Description)
+            ? request.ToolName
+            : request.Description.Trim();
+        return $"{description}{Environment.NewLine}{Environment.NewLine}Arguments:{Environment.NewLine}{arguments}";
+    }
+
+    private void OnAiProviderBridgeResponseReady(object payload)
+        => PostWebMessage(payload);
 
     private void FocusTranscriptView()
     {

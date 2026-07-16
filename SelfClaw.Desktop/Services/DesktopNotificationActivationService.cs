@@ -10,15 +10,18 @@ public sealed class DesktopNotificationActivationService
 {
     private readonly MainWindowViewModel _mainWindowViewModel;
     private readonly SystemTrayService _systemTrayService;
+    private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly ILogger<DesktopNotificationActivationService> _logger;
 
     public DesktopNotificationActivationService(
         MainWindowViewModel mainWindowViewModel,
         SystemTrayService systemTrayService,
+        DesktopToolApprovalHandler toolApprovalHandler,
         ILogger<DesktopNotificationActivationService> logger)
     {
         _mainWindowViewModel = mainWindowViewModel;
         _systemTrayService = systemTrayService;
+        _toolApprovalHandler = toolApprovalHandler;
         _logger = logger;
     }
 
@@ -45,11 +48,33 @@ public sealed class DesktopNotificationActivationService
         }
 
         _systemTrayService.ActivateMainWindow();
+
+        if (string.Equals(action, DesktopNotificationArguments.ApproveToolAction, StringComparison.Ordinal) ||
+            string.Equals(action, DesktopNotificationArguments.RejectToolAction, StringComparison.Ordinal))
+        {
+            if (!arguments.TryGetValue(DesktopNotificationArguments.ToolExecutionIdKey, out var executionIdText) ||
+                !Guid.TryParse(executionIdText, out var executionId))
+            {
+                _logger.LogWarning("Ignoring tool approval notification with an invalid execution id.");
+                return;
+            }
+
+            var approved = string.Equals(
+                action,
+                DesktopNotificationArguments.ApproveToolAction,
+                StringComparison.Ordinal);
+            if (!_toolApprovalHandler.TryResolve(executionId, approved))
+            {
+                _logger.LogDebug("Tool approval '{ToolExecutionId}' was already resolved or expired.", executionId);
+            }
+
+            return;
+        }
+
         await _mainWindowViewModel.InitializeAsync();
 
-        // 后端重构后，VM 仅保留发送→渲染主路径：打开指定会话 / 工具审批的入口方法已移除。
-        // 通知激活因此只负责把主窗口带到前台（上面的 ActivateMainWindow / InitializeAsync），
-        // OpenApp 之外的动作暂不处理，待后续按新架构重新接线。
+        // Conversation activation still only brings the app to the foreground;
+        // tool approval actions are handled above before any potentially slow initialization.
         if (!string.Equals(action, DesktopNotificationArguments.OpenAppAction, StringComparison.Ordinal))
         {
             _logger.LogDebug("Ignoring unsupported notification action '{Action}'.", action);

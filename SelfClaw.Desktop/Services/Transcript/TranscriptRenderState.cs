@@ -6,4 +6,5 @@ public sealed record TranscriptRenderState(
     IReadOnlyList<TranscriptConversationItem> Conversations,
     string? SelectedConversationId,
     bool IsBusy,
-    string? ActivityText = null);
+    string? ActivityText = null,
+    string AgentMode = "cli");

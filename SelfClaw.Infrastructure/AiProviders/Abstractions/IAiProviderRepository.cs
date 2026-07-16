@@ -23,6 +23,12 @@ public interface IAiProviderRepository
 
     Task<AiModelProfile> UpsertModelProfileAsync(AiModelProfile profile, CancellationToken cancellationToken = default);
 
+    Task SetModelProfileEnabledAsync(Guid modelProfileId, bool isEnabled, CancellationToken cancellationToken = default);
+
+    Task SetAllModelProfilesEnabledAsync(Guid providerConnectionId, bool isEnabled, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<AiModelProfile>> ListEnabledModelProfilesAsync(CancellationToken cancellationToken = default);
+
     Task DeleteModelProfileAsync(Guid modelProfileId, CancellationToken cancellationToken = default);
 
     Task<AiModelProfileSelection?> GetModelProfileSelectionAsync(string scope, CancellationToken cancellationToken = default);

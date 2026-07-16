@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
 import claudeIcon from '../../../assets/agents-icons/claude.svg';
 import codexIcon from '../../../assets/agents-icons/codex.svg';
 import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
@@ -11,10 +11,22 @@ import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
  * 选中代理通过 select-programming-cli 持久化，下一次发送回合即生效。
  */
 
-const emit = defineEmits(['update:mode', 'update:agent', 'update:model', 'update:reasoning']);
+const props = defineProps({
+	executionMode: {
+		type: String,
+		default: 'cli',
+	},
+});
 
-// 模式：本地 CLI / 自带 Key（自带 Key 尚未接入，仅样式占位）
-const mode = ref('local');
+const emit = defineEmits(['update:agent', 'update:model', 'update:reasoning']);
+
+// 模式：本地 CLI / 提供商（Direct API）。默认跟随当前 Desktop Agent 的 front matter，
+// 用户在分段控件上的选择会经 select-composer-mode 持久化为覆盖值，宿主回推后二者一致。
+const selectedMode = ref(props.executionMode === 'direct' ? 'direct' : 'cli');
+watch(() => props.executionMode, (mode) => {
+	selectedMode.value = mode === 'direct' ? 'direct' : 'cli';
+});
+const isDirect = computed(() => selectedMode.value === 'direct');
 
 const defaultModel = 'Default (CLI config)';
 
@@ -26,12 +38,17 @@ const agentPresentation = {
 };
 
 const detectedAgents = ref([]);
+const directModels = ref([]);
+const activeDirectModelProfileId = ref('');
 const selectedCliId = ref('');
 const loaded = ref(false);
 const loadError = ref('');
 let requestCounter = 0;
+let latestDirectRequestId = '';
 
 const selectedAgent = computed(() => detectedAgents.value.find((agent) => agent.id === selectedCliId.value) || null);
+const selectedDirectModel = computed(() =>
+	directModels.value.find((model) => model.modelProfileId === activeDirectModelProfileId.value) || null);
 
 // 模型下拉：来自选中 CLI 的模型列表（当前后端只提供 Default）。
 const models = computed(() => selectedAgent.value?.models?.length ? selectedAgent.value.models : [defaultModel]);
@@ -71,6 +88,11 @@ const modelLabel = computed(() => {
 	if (!loaded.value) {
 		return '加载中…';
 	}
+	if (isDirect.value) {
+		return selectedDirectModel.value
+			? `${selectedDirectModel.value.providerName} · ${selectedDirectModel.value.name}`
+			: '未选择提供商模型';
+	}
 	if (!selectedAgent.value) {
 		return '未选择 CLI';
 	}
@@ -89,6 +111,29 @@ function requestSettings() {
 
 	if (!window.chrome?.webview) {
 		loaded.value = true;
+	}
+}
+
+function requestDirectModels() {
+	const requestId = `composer-direct-${Date.now()}-${++requestCounter}`;
+	latestDirectRequestId = requestId;
+	postToHost({
+		type: 'ai-providers/list-enabled-models',
+		requestId,
+	});
+
+	if (!window.chrome?.webview) {
+		directModels.value = [];
+		loaded.value = true;
+	}
+}
+
+function requestActiveSource() {
+	loadError.value = '';
+	if (isDirect.value) {
+		requestDirectModels();
+	} else {
+		requestSettings();
 	}
 }
 
@@ -128,8 +173,36 @@ function applySettings(payload) {
 
 function onHostMessage(event) {
 	const payload = event?.data;
-	if (payload?.type === 'programming-assistant-settings') {
+	if (payload?.type === 'programming-assistant-settings' && !isDirect.value) {
 		applySettings(payload);
+		return;
+	}
+
+	if (payload?.type === 'ai-providers/list-enabled-models' && isDirect.value) {
+		if (payload.requestId && payload.requestId !== latestDirectRequestId) {
+			return;
+		}
+
+		directModels.value = (Array.isArray(payload.models) ? payload.models : [])
+			.filter((model) => model?.modelProfileId)
+			.map((model) => ({
+				modelProfileId: String(model.modelProfileId),
+				name: model.name || model.model || 'Unnamed model',
+				model: model.model || '',
+				providerName: model.providerName || 'Provider',
+			}));
+		const persistedId = payload.defaultModelProfileId ? String(payload.defaultModelProfileId) : '';
+		activeDirectModelProfileId.value = directModels.value.some((model) => model.modelProfileId === persistedId)
+			? persistedId
+			: '';
+		loadError.value = payload.error ? `模型同步失败：${payload.error}` : '';
+		loaded.value = true;
+		return;
+	}
+
+	if (payload?.type === 'ai-providers/set-default-model' && isDirect.value && payload.error) {
+		loadError.value = `默认模型保存失败：${payload.error}`;
+		requestDirectModels();
 	}
 }
 
@@ -146,7 +219,7 @@ function togglePanel() {
 
 	if (!loaded.value) {
 		// 自愈：挂载时的请求若丢失（宿主未就绪等），打开面板时再拉一次配置。
-		requestSettings();
+		requestActiveSource();
 	}
 }
 function closePanel() {
@@ -155,9 +228,17 @@ function closePanel() {
 	reasoningMenuOpen.value = false;
 }
 
-function pickMode(m) {
-	mode.value = m;
-	emit('update:mode', m);
+function pickMode(mode) {
+	if (selectedMode.value === mode) {
+		return;
+	}
+
+	selectedMode.value = mode;
+	postToHost({
+		type: 'select-composer-mode',
+		requestId: `composer-mode-${Date.now()}-${++requestCounter}`,
+		mode,
+	});
 }
 
 function pickAgent(agent) {
@@ -173,6 +254,24 @@ function pickAgent(agent) {
 		type: 'select-programming-cli',
 		requestId: `composer-cli-${Date.now()}-${++requestCounter}`,
 		cliId: agent.id,
+	});
+}
+
+function pickDirectModel(model) {
+	if (!model?.modelProfileId || model.modelProfileId === activeDirectModelProfileId.value) {
+		menuOpen.value = false;
+		return;
+	}
+
+	activeDirectModelProfileId.value = model.modelProfileId;
+	menuOpen.value = false;
+	loadError.value = '';
+	emit('update:model', model.modelProfileId);
+	postToHost({
+		type: 'ai-providers/set-default-model',
+		requestId: `composer-direct-default-${Date.now()}-${++requestCounter}`,
+		scope: 'desktop-default',
+		modelProfileId: model.modelProfileId,
 	});
 }
 
@@ -222,12 +321,19 @@ onMounted(() => {
 	document.addEventListener('click', onDocClick);
 	document.addEventListener('keydown', onKeydown);
 	window.chrome?.webview?.addEventListener('message', onHostMessage);
-	requestSettings();
+	requestActiveSource();
 });
 onBeforeUnmount(() => {
 	document.removeEventListener('click', onDocClick);
 	document.removeEventListener('keydown', onKeydown);
 	window.chrome?.webview?.removeEventListener('message', onHostMessage);
+});
+
+watch(isDirect, () => {
+	loaded.value = false;
+	menuOpen.value = false;
+	reasoningMenuOpen.value = false;
+	requestActiveSource();
 });
 </script>
 
@@ -241,8 +347,8 @@ onBeforeUnmount(() => {
 			title="模型选择"
 			@click.stop="togglePanel"
 		>
-			<span class="model-badge" :class="{ 'model-badge--brand': !!selectedAgent?.iconSrc }" aria-hidden="true">
-				<img v-if="selectedAgent?.iconSrc" class="model-badge-img" :src="selectedAgent.iconSrc" alt="" />
+			<span class="model-badge" :class="{ 'model-badge--brand': !isDirect && !!selectedAgent?.iconSrc }" aria-hidden="true">
+				<img v-if="!isDirect && selectedAgent?.iconSrc" class="model-badge-img" :src="selectedAgent.iconSrc" alt="" />
 				<svg v-else viewBox="0 0 24 24" fill="currentColor">
 					<path d="M12 2.6a3.1 3.1 0 0 1 2.83 1.84 3.1 3.1 0 0 1 3.9 3.9 3.1 3.1 0 0 1 0 5.32 3.1 3.1 0 0 1-3.9 3.9 3.1 3.1 0 0 1-5.66 0 3.1 3.1 0 0 1-3.9-3.9 3.1 3.1 0 0 1 0-5.32 3.1 3.1 0 0 1 3.9-3.9A3.1 3.1 0 0 1 12 2.6Zm0 3.4a6 6 0 1 0 0 12 6 6 0 0 0 0-12Z" />
 				</svg>
@@ -260,14 +366,22 @@ onBeforeUnmount(() => {
 			<!-- 模式 -->
 			<div class="pop-section">
 				<div class="pop-label">模式</div>
-				<div class="seg" role="group" aria-label="模式">
-					<button type="button" :aria-pressed="mode === 'local' ? 'true' : 'false'" @click="pickMode('local')">本地 CLI</button>
-					<button type="button" :aria-pressed="mode === 'key' ? 'true' : 'false'" @click="pickMode('key')">自带 Key</button>
+				<div class="seg" role="radiogroup" aria-label="执行模式">
+					<button
+						type="button"
+						:aria-pressed="!isDirect ? 'true' : 'false'"
+						@click="pickMode('cli')"
+					>本地 CLI</button>
+					<button
+						type="button"
+						:aria-pressed="isDirect ? 'true' : 'false'"
+						@click="pickMode('direct')"
+					>提供商</button>
 				</div>
 			</div>
 
 			<!-- 代理 -->
-			<div class="pop-section">
+			<div v-if="!isDirect" class="pop-section">
 				<div class="pop-label">代理</div>
 				<div v-if="!loaded" class="agent-hint">正在读取本地 CLI 配置…</div>
 				<div v-else-if="loadError" class="agent-hint agent-hint--error">{{ loadError }}</div>
@@ -301,7 +415,10 @@ onBeforeUnmount(() => {
 			<!-- 模型 -->
 			<div class="pop-section">
 				<div class="pop-label">模型</div>
-				<div class="model-select">
+				<div v-if="isDirect && loaded && !directModels.length" class="agent-hint">
+					没有已启用模型，请先在「设置 → AI 服务商」启用连接与模型。
+				</div>
+				<div v-else class="model-select">
 					<button
 						type="button"
 						class="model-select-btn"
@@ -309,10 +426,27 @@ onBeforeUnmount(() => {
 						aria-haspopup="listbox"
 						@click.stop="toggleMenu"
 					>
-						<span>{{ activeModel }}</span>
+						<span>{{ isDirect ? (selectedDirectModel?.name || '未选择模型') : activeModel }}</span>
 						<svg class="caret" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4" /></svg>
 					</button>
-					<div v-show="menuOpen" class="model-menu" role="listbox" aria-label="模型列表">
+					<div v-if="isDirect" v-show="menuOpen" class="model-menu" role="listbox" aria-label="Direct 模型列表">
+						<button
+							v-for="directModel in directModels"
+							:key="directModel.modelProfileId"
+							type="button"
+							class="model-opt"
+							role="option"
+							:aria-selected="activeDirectModelProfileId === directModel.modelProfileId ? 'true' : 'false'"
+							@click="pickDirectModel(directModel)"
+						>
+							<span class="model-opt-copy">
+								<strong>{{ directModel.name }}</strong>
+								<small>{{ directModel.providerName }} · {{ directModel.model }}</small>
+							</span>
+							<svg class="tick" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9" /></svg>
+						</button>
+					</div>
+					<div v-else v-show="menuOpen" class="model-menu" role="listbox" aria-label="模型列表">
 						<button
 							v-for="m in models"
 							:key="m"
@@ -330,7 +464,7 @@ onBeforeUnmount(() => {
 			</div>
 
 			<!-- 推理等级：仅当选中 CLI 暴露推理档位（如 Codex）时出现 -->
-			<div v-if="hasReasoning" class="pop-section">
+			<div v-if="!isDirect && hasReasoning" class="pop-section">
 				<div class="pop-label">推理等级</div>
 				<div class="model-select">
 					<button
@@ -654,4 +788,21 @@ onBeforeUnmount(() => {
 .model-opt .tick { width: 14px; height: 14px; color: #171a1f; display: none; flex: none; }
 .model-opt[aria-selected='true'] { font-weight: 600; }
 .model-opt[aria-selected='true'] .tick { display: block; }
+.model-opt-copy {
+	display: grid;
+	min-width: 0;
+	gap: 2px;
+}
+.model-opt-copy strong,
+.model-opt-copy small {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.model-opt-copy strong { font: inherit; }
+.model-opt-copy small {
+	color: #8a929e;
+	font-size: 10.5px;
+	font-weight: 500;
+}
 </style>

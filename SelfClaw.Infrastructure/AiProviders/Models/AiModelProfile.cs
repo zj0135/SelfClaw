@@ -21,4 +21,5 @@ public sealed record AiModelProfile(
     AiSamplingOptions Sampling,
     IReadOnlyDictionary<string, JsonElement> ModelOptions,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    bool IsEnabled = true);

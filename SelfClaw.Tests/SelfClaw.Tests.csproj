@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -26,10 +26,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SelfClaw.Core\SelfClaw.Core.csproj" />
+    <ProjectReference Include="..\SelfClaw.Desktop\SelfClaw.Desktop.csproj" />
     <ProjectReference Include="..\SelfClaw.Infrastructure\SelfClaw.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Infrastructure\AiProviders\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

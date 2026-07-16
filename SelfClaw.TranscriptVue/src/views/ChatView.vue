@@ -13,6 +13,7 @@ const state = reactive({
 	selectedConversationId: null,
 	autoScroll: false,
 	isBusy: false,
+	agentMode: 'cli',
 	activityText: '',
 	terminal: {
 		isOpen: false,
@@ -177,6 +178,7 @@ function replaceState(payload) {
 	state.autoScroll = Boolean(payload.autoScroll);
 	state.isBusy = nextBusy;
 	state.activityText = payload.activityText || '';
+	state.agentMode = payload.agentMode || 'cli';
 
 	nextTick(() => {
 		const composerEl = composerShellRef.value?.getShellEl();
@@ -473,6 +475,7 @@ defineExpose({
 			:busy="state.isBusy"
 			:workspace-selection="state.workspace"
 			:workspace-loading="state.workspace.isLoading"
+			:agent-mode="state.agentMode"
 			@submit="submitComposer"
 			@stop="stopGeneration"
 			@request-workspace="requestWorkspaceSelection"

@@ -1,5 +1,7 @@
 <script setup>
 import { computed, onUnmounted, reactive, ref } from 'vue';
+import AiProviderDialogs from './AiProviderDialogs.vue';
+import { useAiProviderHost } from '../../composables/useAiProviderHost.js';
 
 function mk(name, id, ctx, out, inp, outp, cacheW, cacheR) {
 	return { name, id, ctx, out, inp, outp, cacheW, cacheR, on: true };
@@ -12,7 +14,7 @@ const providers = reactive([
 		sub: 'OpenAI Chat Completions 兼容',
 		color: '#10a37f',
 		enabled: true,
-		key: 'sk-proj-aR9vK2mZ7QxL4dW8nT1pY6cE3bH0fJ5uS',
+		key: 'sk-preview-demo',
 		base: 'https://zyapi.tuluo.top:8888/v1',
 		models: [
 			mk('GPT 5.2', 'gpt-5.2', '391K', '63K', '$1.75', '$14', '$1.75', '$0.175'),
@@ -133,10 +135,49 @@ const fetchingModels = ref(false);
 const checkStatus = reactive({ visible: false, state: '', text: '' });
 const toastState = reactive({ visible: false, text: '已保存' });
 let toastTimer = null;
-let checkTimer = null;
-let fetchTimer = null;
 
 const activeProvider = computed(() => providers.find((provider) => provider.id === activeId.value) || providers[0]);
+
+const {
+	apiKeyInput,
+	loadingState,
+	mutating,
+	providerDialogOpen,
+	modelDialogOpen,
+	modelDraft,
+	availableProviderEntries,
+	pendingModelIds,
+	handleMessage,
+	selectProvider: selectProviderFromHost,
+	markApiKeyDirty,
+	saveApiKey: saveApiKeyToHost,
+	saveApiBase: saveApiBaseToHost,
+	setProviderEnabled: setProviderEnabledFromHost,
+	deleteProvider,
+	setAllModelsEnabled,
+	setModelEnabled,
+	deleteModel,
+	fetchModelList: fetchModelListFromHost,
+	checkConnectivity: checkConnectivityFromHost,
+	openProviderConsole: openProviderConsoleFromHost,
+	openProviderDialog,
+	createProvider,
+	openModelDialog,
+	createModel,
+} = useAiProviderHost({
+	providers,
+	activeId,
+	activeProvider,
+	apiKeyVisible,
+	selectedCheckModel,
+	checking,
+	fetchingModels,
+	checkStatus,
+	showToast,
+	resetCheckStatus,
+});
+
+defineExpose({ handleMessage });
 
 const providerGroups = computed(() => {
 	const term = providerSearch.value.trim().toLowerCase();
@@ -169,86 +210,11 @@ function displayEnabledCount(provider) {
 }
 
 function providerKind(provider) {
-	return provider.id.replace(/2$/, '');
+	return provider.kind || provider.catalogId || provider.id.replace(/2$/, '');
 }
 
 function providerLogo(provider) {
 	return logoSvg(providerKind(provider), provider.color);
-}
-
-function selectProvider(id) {
-	activeId.value = id;
-	apiKeyVisible.value = false;
-	modelSearch.value = '';
-	resetCheckStatus();
-
-	const provider = activeProvider.value;
-	selectedCheckModel.value = provider.models[0]?.id || '';
-}
-
-function setProviderEnabled(enabled) {
-	const provider = activeProvider.value;
-	provider.enabled = enabled;
-	showToast(enabled ? `已启用 ${provider.name}` : `已禁用 ${provider.name}`);
-}
-
-function saveApiKey() {
-	showToast('API Key 已保存');
-}
-
-function saveApiBase() {
-	showToast('代理地址已保存');
-}
-
-function enableAllModels() {
-	activeProvider.value.models.forEach((model) => {
-		model.on = true;
-	});
-	showToast('已启用全部模型');
-}
-
-function disableAllModels() {
-	activeProvider.value.models.forEach((model) => {
-		model.on = false;
-	});
-	showToast('已禁用全部模型');
-}
-
-function fetchModelList() {
-	if (fetchingModels.value) {
-		return;
-	}
-
-	fetchingModels.value = true;
-	window.clearTimeout(fetchTimer);
-	fetchTimer = window.setTimeout(() => {
-		fetchingModels.value = false;
-		showToast('模型列表已是最新');
-	}, 1100);
-}
-
-function checkConnectivity() {
-	const provider = activeProvider.value;
-	if (checking.value) {
-		return;
-	}
-
-	if (!provider.models.length) {
-		showToast('无可用模型');
-		return;
-	}
-
-	checking.value = true;
-	checkStatus.visible = true;
-	checkStatus.state = 'loading';
-	checkStatus.text = '正在检查连通性...';
-	window.clearTimeout(checkTimer);
-	checkTimer = window.setTimeout(() => {
-		const ms = 180 + Math.floor(Math.random() * 420);
-		checking.value = false;
-		checkStatus.state = 'ok';
-		checkStatus.text = `连接正常 · 延迟 ${ms}ms`;
-	}, 1300);
 }
 
 function resetCheckStatus() {
@@ -256,7 +222,6 @@ function resetCheckStatus() {
 	checkStatus.visible = false;
 	checkStatus.state = '';
 	checkStatus.text = '';
-	window.clearTimeout(checkTimer);
 }
 
 function showToast(text) {
@@ -266,18 +231,6 @@ function showToast(text) {
 	toastTimer = window.setTimeout(() => {
 		toastState.visible = false;
 	}, 1900);
-}
-
-function openProviderConsole() {
-	showToast('正在打开服务商控制台...');
-}
-
-function addProvider() {
-	showToast('添加新服务商');
-}
-
-function addModel() {
-	showToast('手动添加模型');
 }
 
 function eyeSvg(open) {
@@ -314,8 +267,6 @@ function logoSvg(kind, color) {
 
 onUnmounted(() => {
 	window.clearTimeout(toastTimer);
-	window.clearTimeout(checkTimer);
-	window.clearTimeout(fetchTimer);
 });
 </script>
 
@@ -330,7 +281,7 @@ onUnmounted(() => {
 					</svg>
 					<input v-model="providerSearch" type="text" placeholder="搜索服务商..." aria-label="搜索服务商" />
 				</div>
-				<button class="icon-btn" type="button" title="添加服务商" aria-label="添加服务商" @click="addProvider">
+				<button class="icon-btn" type="button" title="添加服务商" aria-label="添加服务商" @click="openProviderDialog">
 					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
 						<path d="M12 5v14M5 12h14" />
 					</svg>
@@ -338,7 +289,8 @@ onUnmounted(() => {
 			</div>
 
 			<div class="list-scroll scroll">
-				<template v-if="providerGroups.length">
+				<div v-if="loadingState" class="provider-empty">正在加载服务商…</div>
+				<template v-else-if="providerGroups.length">
 					<div v-for="group in providerGroups" :key="group.label" class="provider-group">
 						<div class="grp-label">{{ group.label }}</div>
 						<button
@@ -347,7 +299,7 @@ onUnmounted(() => {
 							type="button"
 							class="prov"
 							:class="{ active: provider.id === activeId, on: provider.enabled, disabled: !provider.enabled }"
-							@click="selectProvider(provider.id)"
+							@click="selectProviderFromHost(provider.id)"
 						>
 							<span class="p-logo" aria-hidden="true" v-html="providerLogo(provider)"></span>
 							<span class="p-meta">
@@ -369,12 +321,26 @@ onUnmounted(() => {
 					<h2>{{ activeProvider.name }}</h2>
 					<p>{{ activeProvider.sub }}</p>
 				</div>
+				<button
+					v-if="activeProvider.connectionId"
+					class="m-icon provider-delete"
+					type="button"
+					title="删除服务商连接"
+					aria-label="删除服务商连接"
+					:disabled="mutating"
+					@click="deleteProvider"
+				>
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+						<path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5" />
+					</svg>
+				</button>
 				<label class="switch big" title="启用此服务商">
 					<input
 						type="checkbox"
 						:checked="activeProvider.enabled"
+						:disabled="mutating"
 						aria-label="启用此服务商"
-						@change="setProviderEnabled($event.target.checked)"
+						@change="setProviderEnabledFromHost($event.target.checked)"
 					/>
 					<span class="track"></span>
 					<span class="knob"></span>
@@ -382,10 +348,10 @@ onUnmounted(() => {
 			</header>
 
 			<div class="detail-body scroll">
-				<div class="field">
+				<div v-if="activeProvider.authKind !== 1" class="field">
 					<div class="field-row">
 						<label class="fl" for="api-key">API Key</label>
-						<button class="help-link" type="button" @click="openProviderConsole">
+						<button class="help-link" type="button" :disabled="!activeProvider.getApiKeyUrl" @click="openProviderConsoleFromHost">
 							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
 								<path d="M15 3h6v6" />
 								<path d="M10 14 21 3" />
@@ -397,11 +363,13 @@ onUnmounted(() => {
 					<div class="input-wrap">
 						<input
 							id="api-key"
-							v-model="activeProvider.key"
+							v-model="apiKeyInput"
 							class="input mono"
 							:type="apiKeyVisible ? 'text' : 'password'"
 							aria-label="API Key"
-							@change="saveApiKey"
+							:placeholder="activeProvider?.keyMask || '输入 API Key'"
+							@input="markApiKeyDirty"
+							@change="saveApiKeyToHost"
 						/>
 						<button
 							class="reveal"
@@ -424,7 +392,7 @@ onUnmounted(() => {
 						class="input mono"
 						type="text"
 						aria-label="API 代理地址"
-						@change="saveApiBase"
+						@change="saveApiBaseToHost"
 					/>
 					<p class="field-hint">自定义端点，用于代理或第三方兼容服务</p>
 				</div>
@@ -437,7 +405,7 @@ onUnmounted(() => {
 						<div class="select">
 							<select id="check-model" v-model="selectedCheckModel" aria-label="选择检查模型">
 								<option v-if="!activeProvider.models.length" value="">无可用模型</option>
-								<option v-for="model in activeProvider.models" :key="model.id" :value="model.id">
+								<option v-for="model in activeProvider.models" :key="model.profileId" :value="model.profileId">
 									{{ model.name }}
 								</option>
 							</select>
@@ -445,7 +413,7 @@ onUnmounted(() => {
 								<path d="m6 9 6 6 6-6" />
 							</svg>
 						</div>
-						<button class="btn" type="button" :disabled="checking || !activeProvider.models.length" @click="checkConnectivity">
+						<button class="btn" type="button" :disabled="checking || !activeProvider.connectionId || !activeProvider.models.length" @click="checkConnectivityFromHost">
 							检查
 						</button>
 					</div>
@@ -475,16 +443,16 @@ onUnmounted(() => {
 								</svg>
 								<input v-model="modelSearch" type="text" placeholder="搜索模型..." aria-label="搜索模型" />
 							</div>
-							<button class="btn sm" type="button" :disabled="!activeProvider.models.length" @click="enableAllModels">全部启用</button>
-							<button class="btn sm" type="button" :disabled="!activeProvider.models.length" @click="disableAllModels">全部禁用</button>
-							<button class="btn sm fetch-models-btn" type="button" :disabled="fetchingModels" @click="fetchModelList">
+							<button class="btn sm" type="button" :disabled="mutating || !activeProvider.connectionId || !activeProvider.models.length" @click="setAllModelsEnabled(true)">全部启用</button>
+							<button class="btn sm" type="button" :disabled="mutating || !activeProvider.connectionId || !activeProvider.models.length" @click="setAllModelsEnabled(false)">全部禁用</button>
+							<button class="btn sm fetch-models-btn" type="button" :disabled="fetchingModels || !activeProvider.connectionId || !activeProvider.supportsModelListing" @click="fetchModelListFromHost">
 								<svg class="refresh-ico" :class="{ spinning: fetchingModels }" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
 									<path d="M21 12a9 9 0 1 1-2.64-6.36" />
 									<path d="M21 3v5h-5" />
 								</svg>
 								获取模型列表
 							</button>
-							<button class="icon-btn add-model-btn" type="button" title="添加模型" aria-label="添加模型" @click="addModel">
+							<button class="icon-btn add-model-btn" type="button" title="添加模型" aria-label="添加模型" :disabled="!activeProvider.connectionId" @click="openModelDialog">
 								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
 									<path d="M12 5v14M5 12h14" />
 								</svg>
@@ -496,7 +464,7 @@ onUnmounted(() => {
 						</div>
 						<div v-else-if="!filteredModels.length" class="model-empty">没有匹配的模型</div>
 						<div v-else class="model-list">
-							<div v-for="model in filteredModels" :key="model.id" class="model">
+							<div v-for="model in filteredModels" :key="model.profileId" class="model">
 								<div class="m-logo" aria-hidden="true" v-html="providerLogo(activeProvider)"></div>
 								<div class="m-main">
 									<div class="m-title">
@@ -540,8 +508,26 @@ onUnmounted(() => {
 											<line x1="16" y1="16" x2="16" y2="20" />
 										</svg>
 									</button>
+									<button
+										class="m-icon model-delete"
+										type="button"
+										title="删除模型"
+										aria-label="删除模型"
+										:disabled="pendingModelIds.has(model.profileId)"
+										@click="deleteModel(model)"
+									>
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+											<path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13" />
+										</svg>
+									</button>
 									<label class="switch" title="启用模型">
-										<input v-model="model.on" type="checkbox" aria-label="启用模型" />
+										<input
+											type="checkbox"
+											:checked="model.on"
+											:disabled="pendingModelIds.has(model.profileId)"
+											aria-label="启用模型"
+											@change="setModelEnabled(model, $event.target.checked)"
+										/>
 										<span class="track"></span>
 										<span class="knob"></span>
 									</label>
@@ -559,6 +545,19 @@ onUnmounted(() => {
 			</svg>
 			<span>{{ toastState.text }}</span>
 		</div>
+
+		<AiProviderDialogs
+			:provider-open="providerDialogOpen"
+			:model-open="modelDialogOpen"
+			:providers="availableProviderEntries"
+			:provider="activeProvider"
+			:model-draft="modelDraft"
+			:busy="mutating"
+			@close-provider="providerDialogOpen = false"
+			@select-provider="createProvider"
+			@close-model="modelDialogOpen = false"
+			@submit-model="createModel"
+		/>
 	</div>
 </template>
 
@@ -1102,6 +1101,21 @@ onUnmounted(() => {
 	stroke-width: 2.2;
 }
 
+.check-status.error {
+	color: oklch(55% 0.19 25);
+}
+
+.check-status.error svg {
+	width: 15px;
+	height: 15px;
+	stroke-width: 2.2;
+}
+
+.help-link:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
 .models {
 	container-type: inline-size;
 	overflow: hidden;
@@ -1310,6 +1324,22 @@ onUnmounted(() => {
 .m-icon:hover {
 	background: var(--ap-surface-2);
 	color: var(--ap-fg-soft);
+}
+
+.provider-delete,
+.model-delete {
+	color: oklch(62% 0.11 25);
+}
+
+.provider-delete:hover,
+.model-delete:hover {
+	background: oklch(96% 0.025 25);
+	color: oklch(52% 0.19 25);
+}
+
+.m-icon:disabled {
+	opacity: 0.45;
+	cursor: default;
 }
 
 .switch {

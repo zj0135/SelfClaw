@@ -5,8 +5,7 @@ namespace SelfClaw.Core.Runtime;
 
 public sealed record ChatTurnRequest(
     Guid ConversationId,
-    ProviderProfile? Profile,
-    string? ApiKey,
+    Guid? ModelProfileId,
     WorkspaceRoot? WorkspaceRoot,
     ConversationMode Mode,
     AgentRuntimeDefinition Agent,

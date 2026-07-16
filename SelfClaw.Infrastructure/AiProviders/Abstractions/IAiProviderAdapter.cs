@@ -22,6 +22,15 @@ public interface IAiProviderAdapter
     /// <summary>Returns whether this adapter can serve the given API format.</summary>
     bool SupportsApiFormat(AiProviderApiFormat apiFormat);
 
+    /// <summary>Returns whether this adapter can discover models from the provider data plane.</summary>
+    bool SupportsModelListing { get; }
+
+    /// <summary>Lists models exposed by the provider using resolved connection secrets.</summary>
+    Task<IReadOnlyList<AiModelDescriptor>> ListModelsAsync(
+        AiProviderConnection connection,
+        IReadOnlyDictionary<string, string> secrets,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Creates a Microsoft.Extensions.AI <see cref="IChatClient"/> for the request.
     /// Throws <see cref="NotSupportedException"/> when the profile's API format is

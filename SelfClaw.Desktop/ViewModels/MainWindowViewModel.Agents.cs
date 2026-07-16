@@ -42,8 +42,7 @@ public sealed partial class MainWindowViewModel
             agent.Id,
             agent.Name,
             agent.Description,
-            // 第一版只接线 CLI（plan.md §8）：所有回合都走 CLI 运行时，Direct 待后续重写。
-            AgentExecutionMode.Cli,
+            agent.Mode,
             agent.ToolPolicy,
             agent.EnabledSkills.ToArray(),
             [],

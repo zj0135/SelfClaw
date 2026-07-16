@@ -9,9 +9,11 @@ using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
+using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure;
+using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.Options;
 using Serilog;
 using Serilog.Events;
@@ -48,6 +50,7 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<DesktopNotificationService>();
             builder.Services.AddSingleton<DesktopNotificationActivationService>();
             builder.Services.AddSingleton<ProgrammingAssistantSettingsService>();
+            builder.Services.AddSingleton<AiProviderSettingsBridge>();
             builder.Services.AddSingleton<PetService>();
             builder.Services.AddSingleton<SystemTrayService>();
             builder.Services.AddSingleton<MainWindowViewModel>();
@@ -57,8 +60,8 @@ public partial class App : System.Windows.Application
             Log.Information("SelfClaw starting. LogsDirectory={LogsDirectory}", _storagePaths.LogsDirectory);
 
             await _host.StartAsync();
-            await _host.Services.GetRequiredService<IProfileRepository>().InitializeAsync();
             await _host.Services.GetRequiredService<IConversationRepository>().InitializeAsync();
+            await _host.Services.GetRequiredService<IAiProviderRepository>().InitializeAsync();
             await _host.Services.GetRequiredService<ProgrammingAssistantSettingsService>().GetOrInitializeAsync();
             RegisterToastNotifications();
 

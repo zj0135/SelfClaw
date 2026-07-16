@@ -16,7 +16,7 @@ namespace SelfClaw.Infrastructure.AiProviders.Anthropic;
 /// </summary>
 internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
 {
-    internal const string ApiKeySecretName = "api_key";
+    internal const string ApiKeySecretName = AiProviderSecrets.ApiKeySecretName;
     private const string MaxTokensKey = "max_tokens";
 
     private static readonly IReadOnlySet<string> RecognizedModelOptionKeys =
@@ -28,21 +28,33 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
     private readonly ILogger<AnthropicProviderAdapter> _logger;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IServiceProvider? _serviceProvider;
+    private readonly AnthropicModelListClient _modelListClient;
 
     public AnthropicProviderAdapter(
         ILogger<AnthropicProviderAdapter>? logger = null,
         ILoggerFactory? loggerFactory = null,
-        IServiceProvider? serviceProvider = null)
+        IServiceProvider? serviceProvider = null,
+        AnthropicModelListClient? modelListClient = null)
     {
         _logger = logger ?? NullLogger<AnthropicProviderAdapter>.Instance;
         _loggerFactory = loggerFactory;
         _serviceProvider = serviceProvider;
+        _modelListClient = modelListClient
+            ?? new AnthropicModelListClient(new Http.AiProviderHttpClientProvider());
     }
 
     public AiProviderKind ProviderKind => AiProviderKind.Anthropic;
 
     public bool SupportsApiFormat(AiProviderApiFormat apiFormat) =>
         apiFormat == AiProviderApiFormat.AnthropicMessages;
+
+    public bool SupportsModelListing => true;
+
+    public Task<IReadOnlyList<AiModelDescriptor>> ListModelsAsync(
+        AiProviderConnection connection,
+        IReadOnlyDictionary<string, string> secrets,
+        CancellationToken cancellationToken = default)
+        => _modelListClient.ListModelsAsync(connection, secrets, cancellationToken);
 
     public IChatClient CreateChatClient(AiProviderClientRequest request)
     {

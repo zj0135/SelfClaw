@@ -403,6 +403,11 @@ public sealed class DesktopAgentStore
             return AgentExecutionMode.Direct;
         }
 
+        if (string.Equals(normalized, "cli", StringComparison.OrdinalIgnoreCase))
+        {
+            return AgentExecutionMode.Cli;
+        }
+
         if (!string.IsNullOrWhiteSpace(normalized) &&
             !string.Equals(normalized, "direct", StringComparison.OrdinalIgnoreCase))
         {
@@ -413,7 +418,7 @@ public sealed class DesktopAgentStore
     }
 
     private static string ToModeId(AgentExecutionMode mode)
-        => "direct";
+        => mode == AgentExecutionMode.Cli ? "cli" : "direct";
 
     private static string NormalizeInstructions(string? instructions)
         => string.IsNullOrWhiteSpace(instructions)

@@ -4,7 +4,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using OpenAI.Responses;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using System.Text.Json;
+using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using OpenAIClientOptions = OpenAI.OpenAIClientOptions;
 
@@ -21,44 +23,59 @@ namespace SelfClaw.Infrastructure.AiProviders.OpenAi;
 /// </summary>
 /// <remarks>
 /// A single instance serves one OpenAI-family kind. The same SDK backs both the
-/// strict <see cref="AiProviderKind.OpenAI"/> endpoint and arbitrary
-/// <see cref="AiProviderKind.OpenAICompatible"/> endpoints; the kind only changes
+/// strict <see cref="AiProviderKind.OpenAI"/> endpoint, arbitrary
+/// <see cref="AiProviderKind.OpenAICompatible"/> endpoints, and DeepSeek; the kind only changes
 /// provider-specific defaults (notably the Chat Completions <c>thinking.type</c>
 /// behavior). Register one instance per supported kind.
 /// </remarks>
 internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
 {
     /// <summary>Decrypted-secret key the adapter reads the API key from.</summary>
-    internal const string ApiKeySecretName = "api_key";
+    internal const string ApiKeySecretName = AiProviderSecrets.ApiKeySecretName;
 
     private readonly AiProviderKind _providerKind;
     private readonly ILogger<OpenAiProviderAdapter> _logger;
+    private readonly OpenAiModelListClient _modelListClient;
+    private readonly AiProviderHttpClientProvider _httpClientProvider;
 
     /// <param name="providerKind">
     /// The OpenAI-family kind this instance serves. Must be
-    /// <see cref="AiProviderKind.OpenAI"/> or <see cref="AiProviderKind.OpenAICompatible"/>.
+    /// <see cref="AiProviderKind.OpenAI"/>, <see cref="AiProviderKind.OpenAICompatible"/>,
+    /// or <see cref="AiProviderKind.DeepSeek"/>.
     /// </param>
     /// <param name="logger">Optional logger; a null logger is used when omitted.</param>
     public OpenAiProviderAdapter(
         AiProviderKind providerKind = AiProviderKind.OpenAI,
-        ILogger<OpenAiProviderAdapter>? logger = null)
+        ILogger<OpenAiProviderAdapter>? logger = null,
+        OpenAiModelListClient? modelListClient = null,
+        AiProviderHttpClientProvider? httpClientProvider = null)
     {
-        if (providerKind is not (AiProviderKind.OpenAI or AiProviderKind.OpenAICompatible))
+        if (providerKind is not (AiProviderKind.OpenAI or AiProviderKind.OpenAICompatible or AiProviderKind.DeepSeek))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(providerKind),
                 providerKind,
-                "OpenAiProviderAdapter only serves the OpenAI and OpenAICompatible provider kinds.");
+                "OpenAiProviderAdapter only serves the OpenAI, OpenAICompatible, and DeepSeek provider kinds.");
         }
 
         _providerKind = providerKind;
         _logger = logger ?? NullLogger<OpenAiProviderAdapter>.Instance;
+        _httpClientProvider = httpClientProvider ?? new AiProviderHttpClientProvider();
+        _modelListClient = modelListClient ?? new OpenAiModelListClient(_httpClientProvider);
     }
 
     public AiProviderKind ProviderKind => _providerKind;
 
     public bool SupportsApiFormat(AiProviderApiFormat apiFormat) =>
         apiFormat is AiProviderApiFormat.OpenAIChatCompletions or AiProviderApiFormat.OpenAIResponses;
+
+    public bool SupportsModelListing => true;
+
+    public Task<IReadOnlyList<AiModelDescriptor>> ListModelsAsync(
+        AiProviderConnection connection,
+        IReadOnlyDictionary<string, string> secrets,
+        CancellationToken cancellationToken = default)
+        => _modelListClient.ListModelsAsync(connection, secrets, cancellationToken);
 
     public IChatClient CreateChatClient(AiProviderClientRequest request) =>
         request.Profile.ApiFormat switch
@@ -77,25 +94,25 @@ internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
         };
 
 #pragma warning disable OPENAI001
-    private static ResponsesClientOptions CreateResponsesClientOptions(AiProviderConnection connection) =>
-        new() { Endpoint = connection.Endpoint };
+    private ResponsesClientOptions CreateResponsesClientOptions(AiProviderConnection connection) =>
+        new()
+        {
+            Endpoint = connection.Endpoint,
+            Transport = new HttpClientPipelineTransport(_httpClientProvider.GetStreamingClient(connection))
+        };
 #pragma warning restore OPENAI001
 
-    private static OpenAIClientOptions CreateClientOptions(AiProviderConnection connection) =>
-       new() { Endpoint = connection.Endpoint };
+    private OpenAIClientOptions CreateClientOptions(AiProviderConnection connection) =>
+       new()
+       {
+           Endpoint = connection.Endpoint,
+           Transport = new HttpClientPipelineTransport(_httpClientProvider.GetStreamingClient(connection))
+       };
     private static ApiKeyCredential CreateCredential(AiProviderClientRequest request) =>
         new(ResolveApiKey(request));
 
     private static string ResolveApiKey(AiProviderClientRequest request)
-    {
-        if (!request.Secrets.TryGetValue(ApiKeySecretName, out var apiKey) || string.IsNullOrWhiteSpace(apiKey))
-        {
-            throw new InvalidOperationException(
-                $"AI provider connection '{request.Connection.Name}' is missing the required '{ApiKeySecretName}' secret.");
-        }
-
-        return apiKey;
-    }
+        => AiProviderSecrets.RequireApiKey(request.Connection.Name, request.Secrets);
 
     private static NotSupportedException UnsupportedFormat(AiProviderClientRequest request) =>
         new($"OpenAI provider '{request.Connection.ProviderKind}' does not support API format " +

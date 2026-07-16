@@ -7,4 +7,4 @@ namespace SelfClaw.Core.Runtime.Agent;
 public sealed record RunStartedEvent(
     string? SessionId,
     string? Model,
-    CliAgentKind AgentKind) : AgentStreamEvent;
+    CliAgentKind? AgentKind) : AgentStreamEvent;

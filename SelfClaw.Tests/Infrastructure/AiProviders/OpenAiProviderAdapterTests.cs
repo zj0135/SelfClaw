@@ -202,6 +202,7 @@ public sealed class OpenAiProviderAdapterTests
         var now = DateTimeOffset.UtcNow;
         var connection = new AiProviderConnection(
             Guid.NewGuid(),
+            "test",
             providerKind.ToString(),
             providerKind,
             new Uri("https://api.example.test/v1/"),

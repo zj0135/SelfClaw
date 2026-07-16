@@ -23,7 +23,7 @@ public sealed class SqliteAiProviderRepository : IAiProviderRepository
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc, is_enabled
+SELECT id, catalog_id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc, is_enabled
 FROM ai_provider_connections
 WHERE is_enabled != 0
 ORDER BY updated_at_utc DESC;";
@@ -44,7 +44,7 @@ ORDER BY updated_at_utc DESC;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc, is_enabled
+SELECT id, catalog_id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc, is_enabled
 FROM ai_provider_connections
 ORDER BY is_enabled DESC, updated_at_utc DESC;";
 
@@ -65,9 +65,9 @@ ORDER BY is_enabled DESC, updated_at_utc DESC;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc, is_enabled
+SELECT id, catalog_id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json, created_at_utc, updated_at_utc, is_enabled
 FROM ai_provider_connections
-WHERE id = $id AND is_enabled != 0
+WHERE id = $id
 LIMIT 1;";
         command.Parameters.AddWithValue("$id", providerConnectionId.ToString("D"));
 
@@ -85,12 +85,13 @@ LIMIT 1;";
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 INSERT INTO ai_provider_connections(
-    id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json,
+    id, catalog_id, name, provider_kind, endpoint, auth_kind, credential_refs_json, connection_options_json,
     is_enabled, created_at_utc, updated_at_utc)
 VALUES(
-    $id, $name, $providerKind, $endpoint, $authKind, $credentialRefsJson, $connectionOptionsJson,
+    $id, $catalogId, $name, $providerKind, $endpoint, $authKind, $credentialRefsJson, $connectionOptionsJson,
     $isEnabled, $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
+    catalog_id = excluded.catalog_id,
     name = excluded.name,
     provider_kind = excluded.provider_kind,
     endpoint = excluded.endpoint,
@@ -100,6 +101,7 @@ ON CONFLICT(id) DO UPDATE SET
     is_enabled = excluded.is_enabled,
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", providerConnection.Id.ToString("D"));
+        command.Parameters.AddWithValue("$catalogId", providerConnection.CatalogId);
         command.Parameters.AddWithValue("$name", providerConnection.Name);
         command.Parameters.AddWithValue("$providerKind", (int)providerConnection.ProviderKind);
         command.Parameters.AddWithValue("$endpoint", providerConnection.Endpoint.AbsoluteUri);
@@ -151,9 +153,9 @@ WHERE id = $id;";
         {
             command.CommandText = @"
 SELECT id, provider_connection_id, name, api_format, model, temperature_enabled, temperature, top_p_enabled, top_p,
-       model_options_json, created_at_utc, updated_at_utc
+       model_options_json, created_at_utc, updated_at_utc, is_enabled
 FROM ai_model_profiles
-WHERE provider_connection_id = $providerConnectionId AND is_enabled != 0
+WHERE provider_connection_id = $providerConnectionId
 ORDER BY updated_at_utc DESC;";
             command.Parameters.AddWithValue("$providerConnectionId", providerConnectionId.Value.ToString("D"));
         }
@@ -161,9 +163,8 @@ ORDER BY updated_at_utc DESC;";
         {
             command.CommandText = @"
 SELECT id, provider_connection_id, name, api_format, model, temperature_enabled, temperature, top_p_enabled, top_p,
-       model_options_json, created_at_utc, updated_at_utc
+       model_options_json, created_at_utc, updated_at_utc, is_enabled
 FROM ai_model_profiles
-WHERE is_enabled != 0
 ORDER BY updated_at_utc DESC;";
         }
 
@@ -183,9 +184,9 @@ ORDER BY updated_at_utc DESC;";
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 SELECT id, provider_connection_id, name, api_format, model, temperature_enabled, temperature, top_p_enabled, top_p,
-       model_options_json, created_at_utc, updated_at_utc
+       model_options_json, created_at_utc, updated_at_utc, is_enabled
 FROM ai_model_profiles
-WHERE id = $id AND is_enabled != 0
+WHERE id = $id
 LIMIT 1;";
         command.Parameters.AddWithValue("$id", modelProfileId.ToString("D"));
 
@@ -207,7 +208,7 @@ INSERT INTO ai_model_profiles(
     model_options_json, is_enabled, created_at_utc, updated_at_utc)
 VALUES(
     $id, $providerConnectionId, $name, $apiFormat, $model, $temperatureEnabled, $temperature, $topPEnabled, $topP,
-    $modelOptionsJson, 1, $createdAt, $updatedAt)
+    $modelOptionsJson, $isEnabled, $createdAt, $updatedAt)
 ON CONFLICT(id) DO UPDATE SET
     provider_connection_id = excluded.provider_connection_id,
     name = excluded.name,
@@ -218,7 +219,7 @@ ON CONFLICT(id) DO UPDATE SET
     top_p_enabled = excluded.top_p_enabled,
     top_p = excluded.top_p,
     model_options_json = excluded.model_options_json,
-    is_enabled = 1,
+    is_enabled = excluded.is_enabled,
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", profile.Id.ToString("D"));
         command.Parameters.AddWithValue("$providerConnectionId", profile.ProviderConnectionId.ToString("D"));
@@ -230,11 +231,73 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$topPEnabled", profile.Sampling.TopPEnabled ? 1 : 0);
         command.Parameters.AddWithValue("$topP", profile.Sampling.TopP);
         command.Parameters.AddWithValue("$modelOptionsJson", Serialize(profile.ModelOptions));
+        command.Parameters.AddWithValue("$isEnabled", profile.IsEnabled ? 1 : 0);
         command.Parameters.AddWithValue("$createdAt", profile.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", profile.UpdatedAtUtc.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken);
 
         return profile;
+    }
+
+    public async Task SetModelProfileEnabledAsync(
+        Guid modelProfileId,
+        bool isEnabled,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+UPDATE ai_model_profiles
+SET is_enabled = $isEnabled,
+    updated_at_utc = $updatedAt
+WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", modelProfileId.ToString("D"));
+        command.Parameters.AddWithValue("$isEnabled", isEnabled ? 1 : 0);
+        command.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task SetAllModelProfilesEnabledAsync(
+        Guid providerConnectionId,
+        bool isEnabled,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+UPDATE ai_model_profiles
+SET is_enabled = $isEnabled,
+    updated_at_utc = $updatedAt
+WHERE provider_connection_id = $providerConnectionId;";
+        command.Parameters.AddWithValue("$providerConnectionId", providerConnectionId.ToString("D"));
+        command.Parameters.AddWithValue("$isEnabled", isEnabled ? 1 : 0);
+        command.Parameters.AddWithValue("$updatedAt", DateTimeOffset.UtcNow.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AiModelProfile>> ListEnabledModelProfilesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+SELECT model.id, model.provider_connection_id, model.name, model.api_format, model.model,
+       model.temperature_enabled, model.temperature, model.top_p_enabled, model.top_p,
+       model.model_options_json, model.created_at_utc, model.updated_at_utc, model.is_enabled
+FROM ai_model_profiles AS model
+INNER JOIN ai_provider_connections AS provider
+    ON provider.id = model.provider_connection_id
+WHERE model.is_enabled != 0 AND provider.is_enabled != 0
+ORDER BY model.updated_at_utc DESC;";
+
+        var results = new List<AiModelProfile>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(SqliteMappings.ReadAiModelProfile(reader));
+        }
+
+        return results;
     }
 
     public async Task DeleteModelProfileAsync(Guid modelProfileId, CancellationToken cancellationToken = default)

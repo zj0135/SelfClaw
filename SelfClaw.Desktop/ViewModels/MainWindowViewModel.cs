@@ -27,14 +27,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private const long MaxPromptImageTotalBytes = 30 * 1024 * 1024;
     private const string AttachmentHostName = "attachments.selfclaw.local";
     private readonly IConversationRepository _conversationRepository;
-    private readonly IProfileRepository _profileRepository;
-    private readonly ISecretProtector _secretProtector;
     private readonly IAgentChatRuntime _agentChatRuntime;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly DesktopNotificationService _desktopNotificationService;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly DesktopAgentStore _desktopAgentStore;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettings;
+    private readonly DesktopSettingsJsonStore _settingsStore;
     private readonly StoragePaths _storagePaths;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly DispatcherTimer? _streamingPublishTimer;
@@ -42,7 +41,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly List<ConversationRecord> _allConversations = [];
     private readonly List<ConversationRecord> _filteredConversations = [];
     private readonly List<DesktopAgentDefinition> _agents = [];
-    private readonly List<ProviderProfile> _profiles = [];
     private readonly List<WorkspaceRoot> _workspaceRoots = [];
     private readonly List<MessageRecord> _messages = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
@@ -52,12 +50,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _initialized;
     private int _selectionVersion;
     private ConversationRecord? _selectedConversation;
-    private ProviderProfile? _selectedProfile;
-    private string? _selectedProfileModelOverride;
     private WorkspaceRoot? _selectedWorkspaceRoot;
     private string _selectedAgentId = DesktopAgentStore.BuildAgentId;
     private string _composerText = string.Empty;
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
+    private Guid? _selectedModelProfileId;
+    // Composer-level execution mode override ("本地 CLI" / "提供商"). Null defers to the
+    // active agent's own mode; a value forces every sent turn onto that runtime branch.
+    private AgentExecutionMode? _composerModeOverride;
     private bool _pendingStreamingPublish;
     private bool _pendingStreamingAutoScroll;
     private string? _lastPublishedShellFingerprint;
@@ -66,30 +66,26 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public MainWindowViewModel(
         IConversationRepository conversationRepository,
-        IProfileRepository profileRepository,
-        ISecretProtector secretProtector,
         IAgentChatRuntime agentChatRuntime,
         DesktopToolApprovalHandler toolApprovalHandler,
         DesktopNotificationService desktopNotificationService,
         MarkdownHtmlRenderer markdownHtmlRenderer,
         DesktopAgentStore desktopAgentStore,
         ProgrammingAssistantSettingsService programmingAssistantSettings,
+        DesktopSettingsJsonStore settingsStore,
         StoragePaths storagePaths,
         ILogger<MainWindowViewModel> logger)
     {
         _conversationRepository = conversationRepository;
-        _profileRepository = profileRepository;
-        _secretProtector = secretProtector;
         _agentChatRuntime = agentChatRuntime;
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
         _markdownHtmlRenderer = markdownHtmlRenderer;
         _desktopAgentStore = desktopAgentStore;
         _programmingAssistantSettings = programmingAssistantSettings;
+        _settingsStore = settingsStore;
         _storagePaths = storagePaths;
         _logger = logger;
-        // 工具审批 UI 已随前端重构移除；运行时仍接收 _toolApprovalHandler（见 SendAsync 的 ChatTurnRequest），
-        // 但 VM 不再订阅 ApprovalRequested，也不再弹审批通知。
         if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher)
         {
             _streamingPublishTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
@@ -146,7 +142,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// 启动时一次性加载：代理、Profile、工作区、会话列表，并发布初始 transcript。
+    /// 启动时一次性加载：代理、工作区、会话列表，并发布初始 transcript。
     /// 由宿主窗口（OnLoaded）与通知激活服务调用，是渲染路径的引导入口。
     /// </summary>
     public async Task InitializeAsync()
@@ -157,15 +153,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _initialized = true;
+        _composerModeOverride = ParseComposerMode(
+            (await _settingsStore.ReadNodeAsync<ComposerSettings>(ComposerSettingsNode))?.ExecutionMode);
         ReloadAgents();
-        await ReloadProfilesAsync();
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
-
-        if (_selectedProfile is null && _profiles.Count > 0)
-        {
-            SelectProfile(_profiles[0], publishShell: false);
-        }
 
         PublishShell(false);
     }
@@ -176,10 +168,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     public async Task SubmitPromptAsync(
         string prompt,
-        IReadOnlyList<PromptImageAttachment>? imageAttachments = null,
-        string? profileModel = null)
+        IReadOnlyList<PromptImageAttachment>? imageAttachments = null)
     {
-        ApplySelectedProfileModel(profileModel, publishShell: false);
         _composerText = prompt;
         _pendingPromptImageAttachments = imageAttachments ?? [];
         await SendAsync();
@@ -207,6 +197,54 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             // The turn finished between the IsRunning check and Cancel — nothing to stop.
         }
     }
+
+    public void SelectModelProfile(Guid? modelProfileId)
+    {
+        _selectedModelProfileId = modelProfileId;
+    }
+
+    /// <summary>
+    /// Applies the composer's mode pick ("cli" / "direct") as a persisted override on top of the
+    /// active agent's own mode, so provider models can be exercised without a Direct-mode agent.
+    /// Unknown values clear the override and fall back to the agent definition.
+    /// </summary>
+    public async Task SelectComposerModeAsync(string? mode)
+    {
+        var parsed = ParseComposerMode(mode);
+        if (_composerModeOverride == parsed)
+        {
+            return;
+        }
+
+        _composerModeOverride = parsed;
+        try
+        {
+            await _settingsStore.WriteNodeAsync(
+                ComposerSettingsNode,
+                new ComposerSettings(parsed?.ToString().ToLowerInvariant()));
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to persist the composer execution mode.");
+        }
+
+        PublishShell(false);
+    }
+
+    private AgentExecutionMode ResolveComposerExecutionMode(AgentExecutionMode agentMode)
+        => _composerModeOverride ?? agentMode;
+
+    private static AgentExecutionMode? ParseComposerMode(string? mode)
+        => mode?.Trim().ToLowerInvariant() switch
+        {
+            "cli" => AgentExecutionMode.Cli,
+            "direct" => AgentExecutionMode.Direct,
+            _ => null
+        };
+
+    private const string ComposerSettingsNode = "composer";
+
+    private sealed record ComposerSettings(string? ExecutionMode);
 
     public void StartNewConversation()
         => SelectedConversation = null;
@@ -279,68 +317,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     #endregion
 
-    #region Profile / 工作区选择与模型解析 —— 解析、规范化、切换当前 Profile / 模型 / 工作区
-
-    private void ApplySelectedProfileModel(string? profileModel, bool publishShell)
-    {
-        var normalized = NormalizeModelValue(profileModel);
-        if (_selectedProfile is null)
-        {
-            normalized = null;
-        }
-
-        if (string.Equals(_selectedProfileModelOverride, normalized, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _selectedProfileModelOverride = normalized;
-        if (publishShell)
-        {
-            PublishShell(false);
-        }
-    }
-
-    private static string? NormalizeModelValue(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        return value.Trim();
-    }
-
-    private string? ResolveSelectedProfileModel()
-    {
-        if (_selectedProfile is null)
-        {
-            return null;
-        }
-
-        if (_selectedProfileModelOverride is not null)
-        {
-            return _selectedProfileModelOverride;
-        }
-
-        var fallback = NormalizeModelValue(_selectedProfile.Model);
-        return fallback;
-    }
-
-    private void SelectProfile(ProviderProfile? profile, bool publishShell)
-    {
-        if (_selectedProfile?.Id == profile?.Id)
-        {
-            return;
-        }
-
-        _selectedProfile = profile;
-        _selectedProfileModelOverride = null;
-        if (publishShell)
-        {
-            PublishShell(false);
-        }
-    }
+    #region 工作区选择 —— 切换当前工作区
 
     private void SelectWorkspaceRoot(WorkspaceRoot? workspaceRoot, bool publishShell)
     {
@@ -525,17 +502,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     #endregion
 
-    #region 数据加载 —— 重载 Profile / 工作区 / 会话列表，并加载选中会话的消息与工具运行
-
-    private async Task ReloadProfilesAsync()
-    {
-        var selectedId = _selectedProfile?.Id;
-        var profiles = await _profileRepository.ListProfilesAsync();
-        ReplaceList(_profiles, profiles);
-        SelectProfile(
-            profiles.FirstOrDefault(profile => profile.Id == selectedId) ?? profiles.FirstOrDefault(),
-            publishShell: false);
-    }
+    #region 数据加载 —— 重载工作区 / 会话列表，并加载选中会话的消息与工具运行
 
     private async Task ReloadWorkspaceRootsAsync()
     {
@@ -634,7 +601,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        SelectProfile(_profiles.FirstOrDefault(profile => profile.Id == conversation.ProfileId) ?? _selectedProfile, publishShell: false);
         SelectWorkspaceRoot(
             conversation.WorkspaceRootId is Guid workspaceRootId
                 ? _workspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
@@ -653,13 +619,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private async Task SendAsync()
     {
-        // CLI agents use their own local configuration, so a profile is optional. When one is selected it
-        // is still persisted on the conversation, but its absence no longer blocks sending.
-        var selectedProfile = _selectedProfile;
-
         var prompt = _composerText.Trim();
         var promptImageAttachments = _pendingPromptImageAttachments.ToArray();
-        var selectedProfileModel = ResolveSelectedProfileModel();
+        var selectedModelProfileId = _selectedModelProfileId;
         var selectedWorkspaceRoot = _selectedWorkspaceRoot;
         var selectedToolPermissionMode = _selectedToolPermissionMode;
         var baseMessages = _messages.ToArray();
@@ -676,8 +638,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _composerText = string.Empty;
 
         ConversationRuntimeState? runtimeState = null;
-        ProviderProfile? requestProfile = null;
-        string? apiKey = null;
 
         try
         {
@@ -690,7 +650,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
             conversation = conversation with
             {
-                ProfileId = selectedProfile?.Id,
                 WorkspaceRootId = selectedWorkspaceRoot?.Id,
                 Mode = ConversationMode.Programming,
                 ToolPermissionMode = selectedToolPermissionMode,
@@ -699,6 +658,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             await PersistConversationAsync(conversation, preferSelection: preferConversationSelection);
 
             var runtimeAgent = ResolveRuntimeAgent(conversation.AgentId);
+            // The composer's mode pick wins over the agent front matter, so a CLI agent can run
+            // one-off turns against provider models (and vice versa) without editing the agent.
+            runtimeAgent = runtimeAgent with { Mode = ResolveComposerExecutionMode(runtimeAgent.Mode) };
 
             runtimeState = StartConversationRuntimeState(
                 conversation,
@@ -738,17 +700,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
             PublishRuntimeState(runtimeState, true);
 
-            // CLI agents use their own local configuration, so a profile is optional. When one is
-            // selected we still resolve its key/model so a future Direct runtime (or env injection) can
-            // use it; with none selected the turn runs purely on the CLI's own config.
-            if (selectedProfile is not null)
-            {
-                requestProfile = selectedProfileModel is null
-                    ? selectedProfile
-                    : selectedProfile with { Model = selectedProfileModel };
-                apiKey = await _secretProtector.RetrieveSecretAsync(requestProfile.SecretRef, cancellationToken);
-            }
-
             var requestMessages = runtimeState.Messages.ToArray();
             // The turn targets the CLI picked in settings / the composer selector, along with the model and
             // reasoning effort chosen for it; a null selection means nothing is selected (or detected) and
@@ -765,8 +716,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             await foreach (var update in _agentChatRuntime.StreamTurnAsync(
                                new ChatTurnRequest(
                                    conversation.Id,
-                                   requestProfile,
-                                   apiKey,
+                                   selectedModelProfileId,
                                    selectedWorkspaceRoot,
                                    ConversationMode.Programming,
                                    runtimeAgent,
@@ -971,12 +921,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private ConversationRecord CreateConversationRecord()
     {
-        // CLI agents use their own local configuration, so a profile is optional when starting a chat.
         var now = DateTimeOffset.UtcNow;
         return new ConversationRecord(
             Guid.NewGuid(),
             "New chat",
-            _selectedProfile?.Id,
             _selectedWorkspaceRoot?.Id,
             ConversationMode.Programming,
             _selectedToolPermissionMode,
@@ -1117,7 +1065,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             conversations,
             SelectedConversation?.Id.ToString("D"),
             isBusy,
-            activityText));
+            activityText,
+            ResolveComposerExecutionMode(ResolveSelectedAgent().Mode).ToString().ToLowerInvariant()));
     }
 
     private string BuildShellFingerprint(
@@ -1139,6 +1088,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .Append(IsSelectedConversationRunning() ? '1' : '0')
             .Append('|')
             .Append(activityText)
+            .Append('|')
+            .Append((int)ResolveComposerExecutionMode(ResolveSelectedAgent().Mode))
             .Append('|')
             .Append(navigationConversations.Length)
             .Append('|');
