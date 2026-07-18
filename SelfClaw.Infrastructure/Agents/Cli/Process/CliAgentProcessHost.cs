@@ -54,17 +54,6 @@ public sealed class CliAgentProcessHost : ICliAgentProcessHost
                 psi.ArgumentList.Add(arg);
         }
 
-        if (startInfo.Environment is { Count: > 0 })
-        {
-            foreach (var (key, value) in startInfo.Environment)
-            {
-                if (value is null)
-                    psi.Environment.Remove(key);
-                else
-                    psi.Environment[key] = value;
-            }
-        }
-
         var process = new System.Diagnostics.Process
         {
             StartInfo = psi,

@@ -10,7 +10,6 @@ using SelfClaw.Infrastructure.Agents.Cli.Parsers;
 using SelfClaw.Infrastructure.Agents.Cli.Process;
 using SelfClaw.Infrastructure.Agents.Cli.Session;
 using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
-using SelfClaw.Infrastructure.Agents.Cli.Parsers.Abstractions;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 
@@ -196,10 +195,7 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
             await foreach (var line in session.ReadOutputLinesAsync(cancellationToken).ConfigureAwait(false))
             {
                 _logger.LogDebug("{Kind} stdout: {Line}", agentKind, line);
-                // ReadOutputLinesAsync yields newline-stripped lines, but the parser splits its input on
-                // '\n' internally (it is built to accept raw stdout chunks). Re-append the terminator so
-                // each line is parsed immediately instead of being buffered until Flush() concatenates them.
-                foreach (var streamEvent in parser.Feed(line + '\n'))
+                foreach (var streamEvent in parser.ParseLine(line))
                 {
                     if (streamEvent is RunStartedEvent started)
                     {
@@ -213,14 +209,6 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
 
                     yield return streamEvent;
                 }
-            }
-
-            foreach (var streamEvent in parser.Flush())
-            {
-                if (streamEvent is RunCompletedEvent)
-                    runCompletedEmitted = true;
-
-                yield return streamEvent;
             }
         }
 
@@ -282,7 +270,7 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
         return string.IsNullOrEmpty(instructions) ? null : instructions;
     }
 
-    private static IAgentStreamParser CreateParser(CliStreamFormat format, CliAgentKind kind) => format switch
+    private static CliStreamParser CreateParser(CliStreamFormat format, CliAgentKind kind) => format switch
     {
         CliStreamFormat.ClaudeStreamJson => new ClaudeStreamJsonParser(),
         CliStreamFormat.JsonEventStream => new JsonEventStreamParser(kind),

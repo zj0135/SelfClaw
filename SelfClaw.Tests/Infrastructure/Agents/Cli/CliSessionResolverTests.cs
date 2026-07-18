@@ -94,14 +94,5 @@ public sealed class CliSessionResolverTests
             Sessions[(conversationId, agentKind)] = sessionId;
             return Task.CompletedTask;
         }
-
-        public Task ClearSessionAsync(
-            Guid conversationId,
-            CliAgentKind agentKind,
-            CancellationToken cancellationToken = default)
-        {
-            Sessions.Remove((conversationId, agentKind));
-            return Task.CompletedTask;
-        }
     }
 }

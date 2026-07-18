@@ -38,11 +38,7 @@ public sealed class DirectAgentChatRuntime : IAgentChatRuntime
         ChatTurnRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (request is null)
-        {
-            return SingleEvent(Failed("A chat turn request is required."));
-        }
-
+        ArgumentNullException.ThrowIfNull(request);
         return StreamCoreAsync(request, cancellationToken);
     }
 
@@ -317,10 +313,4 @@ public sealed class DirectAgentChatRuntime : IAgentChatRuntime
 
     private static RunCompletedEvent Failed(string message)
         => new(RunCompletionStatus.Failed, FinalText: null, ErrorMessage: message);
-
-    private static async IAsyncEnumerable<AgentStreamEvent> SingleEvent(AgentStreamEvent streamEvent)
-    {
-        await Task.CompletedTask;
-        yield return streamEvent;
-    }
 }

@@ -20,9 +20,4 @@ public interface ICliAgentSessionStore
         CliAgentKind agentKind,
         string sessionId,
         CancellationToken cancellationToken = default);
-
-    Task ClearSessionAsync(
-        Guid conversationId,
-        CliAgentKind agentKind,
-        CancellationToken cancellationToken = default);
 }

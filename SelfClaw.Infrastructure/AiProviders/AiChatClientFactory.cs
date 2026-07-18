@@ -96,7 +96,8 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
         }
 
         var selection = await _repository.GetModelProfileSelectionAsync(scope.Trim(), cancellationToken)
-            ?? throw new InvalidOperationException("请在设置中为 Direct 模式选择默认模型。");
+            ?? throw new InvalidOperationException(
+                "No default Direct model is selected. Choose a default model in the AI provider settings.");
         return await CreateAsync(selection.ModelProfileId, inputs, cancellationToken);
     }
 
@@ -121,21 +122,7 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
             throw MissingApiKey(connection);
         }
 
-        var secrets = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var credential in connection.CredentialRefs)
-        {
-            if (string.IsNullOrWhiteSpace(credential.Value))
-            {
-                continue;
-            }
-
-            var secret = await _secretProtector.RetrieveSecretAsync(credential.Value, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(secret))
-            {
-                secrets[credential.Key] = secret;
-            }
-        }
-
+        var secrets = await AiProviderSecrets.ResolveAsync(_secretProtector, connection, cancellationToken);
         if (!secrets.ContainsKey(ApiKeySecretName))
         {
             throw MissingApiKey(connection);

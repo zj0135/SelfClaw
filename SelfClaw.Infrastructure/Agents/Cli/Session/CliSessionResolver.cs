@@ -2,6 +2,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Cli.Definitions;
 using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
+using SelfClaw.Infrastructure.Agents.Cli.Session.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Session;
 
@@ -87,10 +88,3 @@ public sealed class CliSessionResolver
             .ConfigureAwait(false);
     }
 }
-
-/// <summary>
-/// The resume / new-session ids resolved for a single turn, ready to drop into <see cref="CliRunContext"/>.
-/// </summary>
-public sealed record CliSessionPlan(
-    string? ResumeSessionId,
-    string? NewSessionId);

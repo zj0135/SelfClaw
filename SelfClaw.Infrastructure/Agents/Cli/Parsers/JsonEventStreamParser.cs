@@ -1,8 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
-using SelfClaw.Infrastructure.Agents.Cli.Parsers.Abstractions;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
 
@@ -10,8 +8,8 @@ namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
 /// Parses the newline-delimited JSON event stream shared by Codex (<c>exec --json</c>) and OpenCode
 /// (<c>run --format json</c>) into <see cref="AgentStreamEvent"/>s (plan.md 阶段 7, T7.1; mirroring Open
 /// Design's <c>json-event-stream.ts</c>). A single instance handles one agent kind, selected at
-/// construction; the two agents share the line-buffering and raw-passthrough machinery but differ in the
-/// per-line dispatch (<see cref="HandleCodexEvent"/> vs <see cref="HandleOpenCodeEvent"/>).
+/// construction; the two agents share the base parser's JSON envelope but differ in the per-line dispatch
+/// (<see cref="HandleCodexEvent"/> vs <see cref="HandleOpenCodeEvent"/>).
 /// <para>
 /// Both agents mint their own session id and report it mid-stream
 /// (<see cref="Definitions.ResumeStrategy.CapturedFromStream"/>): Codex via <c>thread.started.thread_id</c>,
@@ -21,15 +19,14 @@ namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
 /// <para>
 /// Neither agent streams token-level text deltas the way Claude does under
 /// <c>--include-partial-messages</c>; each emits a full message/part on completion, which we surface as a
-/// single <see cref="AssistantTextDeltaEvent"/> / <see cref="AssistantThinkingDeltaEvent"/>. As with
-/// <see cref="ClaudeStreamJsonParser"/>, lines that are not valid JSON are surfaced verbatim as
-/// <see cref="RawOutputEvent"/> (T3.3); valid-but-unrecognised event types are ignored rather than spammed.
+/// single <see cref="AssistantTextDeltaEvent"/> / <see cref="AssistantThinkingDeltaEvent"/>. Lines that are
+/// not valid JSON are surfaced verbatim as <see cref="RawOutputEvent"/> by the base parser (T3.3);
+/// valid-but-unrecognised event types are ignored rather than spammed.
 /// </para>
 /// </summary>
-public sealed class JsonEventStreamParser : IAgentStreamParser
+public sealed class JsonEventStreamParser : CliStreamParser
 {
     private readonly CliAgentKind _kind;
-    private readonly StringBuilder _buffer = new();
 
     private bool _runStarted;
 
@@ -55,75 +52,13 @@ public sealed class JsonEventStreamParser : IAgentStreamParser
         _kind = kind;
     }
 
-    public IEnumerable<AgentStreamEvent> Feed(string chunk)
-    {
-        if (string.IsNullOrEmpty(chunk))
-            return Array.Empty<AgentStreamEvent>();
-
-        _buffer.Append(chunk);
-        return DrainCompleteLines();
-    }
-
-    public IEnumerable<AgentStreamEvent> Flush()
-    {
-        if (_buffer.Length == 0)
-            return Array.Empty<AgentStreamEvent>();
-
-        var remainder = _buffer.ToString();
-        _buffer.Clear();
-        return ParseLine(remainder);
-    }
-
-    private IEnumerable<AgentStreamEvent> DrainCompleteLines()
-    {
-        var events = new List<AgentStreamEvent>();
-
-        while (true)
+    protected override IEnumerable<AgentStreamEvent> HandleObject(JsonElement root)
+        => _kind switch
         {
-            var text = _buffer.ToString();
-            var newline = text.IndexOf('\n');
-            if (newline < 0)
-                break;
-
-            var line = text[..newline];
-            _buffer.Remove(0, newline + 1);
-            events.AddRange(ParseLine(line));
-        }
-
-        return events;
-    }
-
-    private IEnumerable<AgentStreamEvent> ParseLine(string rawLine)
-    {
-        var line = rawLine.Trim('\r', ' ', '\t');
-        if (line.Length == 0)
-            return Array.Empty<AgentStreamEvent>();
-
-        JsonDocument doc;
-        try
-        {
-            doc = JsonDocument.Parse(line);
-        }
-        catch (JsonException)
-        {
-            // T3.3: any line we cannot parse is passed through for diagnostics.
-            return new AgentStreamEvent[] { new RawOutputEvent(line) };
-        }
-
-        using (doc)
-        {
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-                return new AgentStreamEvent[] { new RawOutputEvent(line) };
-
-            return _kind switch
-            {
-                CliAgentKind.Codex => HandleCodexEvent(root),
-                CliAgentKind.OpenCode => HandleOpenCodeEvent(root),
-                _ => Array.Empty<AgentStreamEvent>(),
-            };
-        }
-    }
+            CliAgentKind.Codex => HandleCodexEvent(root),
+            CliAgentKind.OpenCode => HandleOpenCodeEvent(root),
+            _ => Array.Empty<AgentStreamEvent>(),
+        };
 
     // ---- Codex (exec --json) -------------------------------------------------------------------
 
@@ -454,34 +389,4 @@ public sealed class JsonEventStreamParser : IAgentStreamParser
     }
 
     private string? FinalTextOrNull() => _assistantText.Length > 0 ? _assistantText.ToString() : null;
-
-    private static string? BuildSummary(string? content)
-    {
-        if (string.IsNullOrEmpty(content))
-            return null;
-
-        const int maxLength = 120;
-        var firstLine = content.AsSpan();
-        var newline = firstLine.IndexOfAny('\r', '\n');
-        if (newline >= 0)
-            firstLine = firstLine[..newline];
-
-        var summary = firstLine.Trim().ToString();
-        return summary.Length > maxLength ? summary[..maxLength] + "…" : summary;
-    }
-
-    private static string? GetString(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(property, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
-
-    private static int? GetInt(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(property, out var value)
-        && value.ValueKind == JsonValueKind.Number
-        && value.TryGetInt32(out var number)
-            ? number
-            : null;
 }

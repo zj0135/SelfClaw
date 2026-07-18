@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Infrastructure.Agents.Cli.Discovery;
 using SelfClaw.Infrastructure.Agents.Cli.Process;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
@@ -634,50 +635,3 @@ public sealed partial class ProgrammingAssistantSettingsService
 
     private readonly record struct CliCatalog(IReadOnlyList<string> Models, IReadOnlyList<string> ReasoningLevels);
 }
-
-public sealed record ProgrammingAssistantSettings
-{
-    public bool HasScanned { get; init; }
-
-    public DateTimeOffset? ScannedAtUtc { get; init; }
-
-    public string? SelectedCliId { get; init; }
-
-    /// <summary>
-    /// The model the user picked for <see cref="SelectedCliId"/> in the composer, or <c>null</c> to let the
-    /// CLI use its own configured default. Persisted so the choice survives a restart; reset to <c>null</c>
-    /// whenever the selected CLI changes (its catalogue no longer applies).
-    /// </summary>
-    public string? SelectedModel { get; init; }
-
-    /// <summary>
-    /// The reasoning effort the user picked for <see cref="SelectedCliId"/> (only Codex advertises these), or
-    /// <c>null</c> to defer to the CLI's own default. Persisted and reset alongside <see cref="SelectedModel"/>.
-    /// </summary>
-    public string? SelectedReasoningLevel { get; init; }
-
-    public IReadOnlyList<DetectedProgrammingCli> Tools { get; init; } = [];
-}
-
-/// <summary>
-/// The resolved per-turn CLI selection handed to the runtime: the target agent plus the model and reasoning
-/// effort to pass on its command line. <see cref="Model"/> / <see cref="ReasoningEffort"/> are <c>null</c>
-/// when the turn should defer to the CLI's own configured default.
-/// </summary>
-public sealed record CliInvocationSelection(CliAgentKind Kind, string? Model, string? ReasoningEffort);
-
-public sealed record DetectedProgrammingCli(
-    string Id,
-    CliAgentKind Kind,
-    string Name,
-    string Vendor,
-    string Version,
-    IReadOnlyList<string> Models,
-    IReadOnlyList<string> ReasoningLevels);
-
-/// <summary>
-/// The outcome of a live probe of a single CLI. <see cref="Success"/> is <c>true</c> only when the version
-/// command actually ran and produced output; on failure <see cref="Error"/> carries a human-readable reason
-/// (missing binary, non-zero exit, timeout) and <see cref="Version"/> is <c>null</c>.
-/// </summary>
-public sealed record CliTestResult(string CliId, bool Success, string? Version, string? Error);

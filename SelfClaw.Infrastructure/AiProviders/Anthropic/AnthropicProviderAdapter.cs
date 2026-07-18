@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Anthropic;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -72,7 +71,9 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
             string.Empty,
             string.Empty,
             request.Tools.ToList(),
-            TryReadMaxTokens(request.Profile, out var maxTokens) ? maxTokens : null,
+            ModelOptionReader.ForProfile(_logger, request.Profile).TryReadInt(MaxTokensKey, out var maxTokens)
+                ? maxTokens
+                : null,
             chatClient =>
             {
                 capturedClient = chatClient;
@@ -92,21 +93,14 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
             throw UnsupportedFormat(request);
         }
 
-        var sampling = request.Profile.Sampling;
-        var options = new ChatOptions
-        {
-            Temperature = sampling.TemperatureEnabled ? (float)sampling.Temperature : null,
-            TopP = sampling.TopPEnabled ? (float)sampling.TopP : null,
-            ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
-            Tools = request.Tools.Count > 0 ? request.Tools.ToList() : null
-        };
-
-        if (TryReadMaxTokens(request.Profile, out var maxTokens))
+        var options = AiChatOptions.CreateBase(request);
+        var reader = ModelOptionReader.ForProfile(_logger, request.Profile);
+        if (reader.TryReadInt(MaxTokensKey, out var maxTokens))
         {
             options.MaxOutputTokens = maxTokens;
         }
 
-        LogUnknownOptions(request.Profile.ModelOptions, request.Profile.Name);
+        reader.LogUnknown(RecognizedModelOptionKeys);
         return options;
     }
 
@@ -122,53 +116,7 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
     }
 
     private static string ResolveApiKey(AiProviderClientRequest request)
-    {
-        if (!request.Secrets.TryGetValue(ApiKeySecretName, out var apiKey) || string.IsNullOrWhiteSpace(apiKey))
-        {
-            throw new InvalidOperationException(
-                $"AI provider connection '{request.Connection.Name}' is missing the required '{ApiKeySecretName}' secret.");
-        }
-
-        return apiKey;
-    }
-
-    private bool TryReadMaxTokens(AiModelProfile profile, out int value)
-    {
-        value = 0;
-        if (!profile.ModelOptions.TryGetValue(MaxTokensKey, out var element))
-        {
-            return false;
-        }
-
-        if (element.ValueKind != JsonValueKind.Number || !element.TryGetInt32(out value))
-        {
-            _logger.LogWarning(
-                "Ignoring model option '{Key}' for profile '{Profile}': expected an integer but got {Kind}.",
-                MaxTokensKey,
-                profile.Name,
-                element.ValueKind);
-            value = 0;
-            return false;
-        }
-
-        return true;
-    }
-
-    private void LogUnknownOptions(
-        IReadOnlyDictionary<string, JsonElement> options,
-        string profileName)
-    {
-        foreach (var key in options.Keys)
-        {
-            if (!RecognizedModelOptionKeys.Contains(key))
-            {
-                _logger.LogDebug(
-                    "Ignoring unknown model option '{Key}' for profile '{Profile}'.",
-                    key,
-                    profileName);
-            }
-        }
-    }
+        => AiProviderSecrets.RequireApiKey(request.Connection.Name, request.Secrets);
 
     private static NotSupportedException UnsupportedFormat(AiProviderClientRequest request) =>
         new($"Anthropic provider '{request.Connection.ProviderKind}' does not support API format " +

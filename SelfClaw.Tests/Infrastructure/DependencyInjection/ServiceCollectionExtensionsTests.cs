@@ -58,7 +58,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         }
 
         events.Should().ContainSingle().Which.Should().BeOfType<RunCompletedEvent>()
-            .Which.ErrorMessage.Should().Contain("Direct").And.Contain("默认模型");
+            .Which.ErrorMessage.Should().Contain("Direct").And.Contain("default");
     }
 
     [Fact]

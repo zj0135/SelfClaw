@@ -119,7 +119,7 @@ public sealed class AiChatClientFactoryTests
         var missing = () => factory.CreateForScopeAsync(
             AiModelSelectionScopes.DesktopDefault,
             new AiChatRuntimeInputs(false, []));
-        await missing.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Direct*默认模型*");
+        await missing.Should().ThrowAsync<InvalidOperationException>().WithMessage("*default Direct model*");
 
         data.Repository.Selections[AiModelSelectionScopes.DesktopDefault] = new AiModelProfileSelection(
             AiModelSelectionScopes.DesktopDefault,

@@ -64,19 +64,4 @@ ON CONFLICT(conversation_id, agent_kind) DO UPDATE SET
         command.Parameters.AddWithValue("$now", now);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
-
-    public async Task ClearSessionAsync(
-        Guid conversationId,
-        CliAgentKind agentKind,
-        CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
-DELETE FROM cli_agent_sessions
-WHERE conversation_id = $conversationId AND agent_kind = $agentKind;";
-        command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-        command.Parameters.AddWithValue("$agentKind", (int)agentKind);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
 }

@@ -38,20 +38,19 @@ internal sealed partial class OpenAiProviderAdapter
     }
 
     private ChatOptions CreateChatCompletionsOptions(AiProviderClientRequest request) =>
-        CreateSharedChatOptions(request, _ => BuildChatCompletionRawOptions(request));
+        AiChatOptions.CreateBase(request, _ => BuildChatCompletionRawOptions(request));
 
     private OpenAIChatCompletionOptions BuildChatCompletionRawOptions(AiProviderClientRequest request)
     {
 #pragma warning disable SCME0001
         var raw = new OpenAIChatCompletionOptions();
-        var options = request.Profile.ModelOptions;
-        var profileName = request.Profile.Name;
+        var options = OptionReader(request);
 
         // thinking.type is a non-standard parameter that the strict OpenAI
         // endpoint rejects, so only the OpenAI-compatible kind gets an
         // EnableReasoning-derived default. An explicit option always wins, and
         // strict OpenAI emits thinking.type only when it is explicitly configured.
-        if (TryReadString(options, ChatThinkingTypeKey, profileName, out var explicitThinking))
+        if (options.TryReadString(ChatThinkingTypeKey, out var explicitThinking))
         {
             raw.Patch.Set("$.thinking.type"u8, explicitThinking);
         }
@@ -60,22 +59,22 @@ internal sealed partial class OpenAiProviderAdapter
             raw.Patch.Set("$.thinking.type"u8, request.EnableReasoning ? "enabled" : "disabled");
         }
 
-        if (TryReadString(options, ChatReasoningEffortKey, profileName, out var reasoningEffort))
+        if (options.TryReadString(ChatReasoningEffortKey, out var reasoningEffort))
         {
             raw.Patch.Set("$.reasoning_effort"u8, reasoningEffort);
         }
 
-        if (TryReadBool(options, ChatParallelToolCallsKey, profileName, out var parallelToolCalls))
+        if (options.TryReadBool(ChatParallelToolCallsKey, out var parallelToolCalls))
         {
             raw.Patch.Set("$.parallel_tool_calls"u8, parallelToolCalls);
         }
 
-        if (TryReadBool(options, ChatStoreKey, profileName, out var store))
+        if (options.TryReadBool(ChatStoreKey, out var store))
         {
             raw.Patch.Set("$.store"u8, store);
         }
 
-        LogUnknownOptions(options, ChatCompletionRecognizedKeys, profileName);
+        options.LogUnknown(ChatCompletionRecognizedKeys);
         return raw;
 #pragma warning restore SCME0001
     }

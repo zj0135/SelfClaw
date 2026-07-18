@@ -13,7 +13,7 @@ namespace SelfClaw.Infrastructure.Agents.Runtime;
 /// </summary>
 public sealed class DispatchingAgentChatRuntime : IAgentChatRuntime
 {
-    private readonly IAgentChatRuntime _cliRuntime;
+    private readonly Cli.CliAgentChatRuntime _cliRuntime;
     private readonly DirectAgentChatRuntime _directRuntime;
 
     public DispatchingAgentChatRuntime(

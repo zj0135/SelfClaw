@@ -1,3 +1,6 @@
+using SelfClaw.Core.Interfaces;
+using SelfClaw.Infrastructure.AiProviders.Models;
+
 namespace SelfClaw.Infrastructure.AiProviders;
 
 /// <summary>
@@ -15,4 +18,32 @@ internal static class AiProviderSecrets
             ? apiKey
             : throw new InvalidOperationException(
                 $"AI provider connection '{connectionName}' is missing the required '{ApiKeySecretName}' secret.");
+
+    /// <summary>
+    /// Decrypts every credential ref on <paramref name="connection"/> into a name → plaintext map,
+    /// skipping refs that resolve to blank. This is the shared retrieval loop; callers layer their own
+    /// policy (auth-kind gating, required-key enforcement) on top.
+    /// </summary>
+    internal static async Task<Dictionary<string, string>> ResolveAsync(
+        ISecretProtector secretProtector,
+        AiProviderConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var secrets = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var credentialRef in connection.CredentialRefs)
+        {
+            if (string.IsNullOrWhiteSpace(credentialRef.Value))
+            {
+                continue;
+            }
+
+            var secret = await secretProtector.RetrieveSecretAsync(credentialRef.Value, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(secret))
+            {
+                secrets[credentialRef.Key] = secret;
+            }
+        }
+
+        return secrets;
+    }
 }

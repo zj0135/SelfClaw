@@ -31,13 +31,4 @@ public sealed class CliAgentRegistry
     /// <summary>Returns the definition for <paramref name="kind"/>, or <c>null</c> if unregistered.</summary>
     public CliAgentDefinition? Find(CliAgentKind kind) =>
         _definitions.TryGetValue(kind, out var definition) ? definition : null;
-
-    /// <summary>Returns the definition for <paramref name="kind"/>, throwing if it is not registered.</summary>
-    /// <exception cref="NotSupportedException">No definition is registered for <paramref name="kind"/>.</exception>
-    public CliAgentDefinition Get(CliAgentKind kind) =>
-        Find(kind) ?? throw new NotSupportedException(
-            $"No CLI agent definition is registered for '{kind}'.");
-
-    /// <summary>True when a definition is registered for <paramref name="kind"/>.</summary>
-    public bool Supports(CliAgentKind kind) => _definitions.ContainsKey(kind);
 }

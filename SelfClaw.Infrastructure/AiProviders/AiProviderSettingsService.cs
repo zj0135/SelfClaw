@@ -13,7 +13,6 @@ namespace SelfClaw.Infrastructure.AiProviders;
 internal sealed class AiProviderSettingsService : IAiProviderSettingsService
 {
     internal const string ApiKeySecretName = AiProviderSecrets.ApiKeySecretName;
-    internal const string DesktopDefaultScope = "desktop-default";
 
     private const string DisplayNameKey = "display.name";
     private const string ContextLengthKey = "display.contextLength";
@@ -89,7 +88,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         }
 
         var defaultSelection = await _repository.GetModelProfileSelectionAsync(
-            DesktopDefaultScope,
+            AiModelSelectionScopes.DesktopDefault,
             cancellationToken);
         return new AiProviderSettingsState(views, defaultSelection?.ModelProfileId);
     }
@@ -483,19 +482,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
     private async Task<IReadOnlyDictionary<string, string>> ResolveSecretsAsync(
         AiProviderConnection connection,
         CancellationToken cancellationToken)
-    {
-        var secrets = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var credentialRef in connection.CredentialRefs)
-        {
-            var secret = await _secretProtector.RetrieveSecretAsync(credentialRef.Value, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(secret))
-            {
-                secrets[credentialRef.Key] = secret;
-            }
-        }
-
-        return secrets;
-    }
+        => await AiProviderSecrets.ResolveAsync(_secretProtector, connection, cancellationToken);
 
     private static IReadOnlyDictionary<string, JsonElement> MergeDisplayMetadata(
         IReadOnlyDictionary<string, JsonElement> existingOptions,

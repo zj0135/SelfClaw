@@ -70,13 +70,6 @@ internal sealed class CliAgentProcessSession : ICliAgentProcessSession
         _stderrPump = Task.Run(PumpStandardErrorAsync);
     }
 
-    public async Task WriteStdinAsync(string text, CancellationToken cancellationToken = default)
-    {
-        using var linked = Link(cancellationToken);
-        await _process.StandardInput.WriteAsync(text.AsMemory(), linked.Token).ConfigureAwait(false);
-        await _process.StandardInput.FlushAsync(linked.Token).ConfigureAwait(false);
-    }
-
     public async Task WriteStdinLineAsync(string line, CancellationToken cancellationToken = default)
     {
         using var linked = Link(cancellationToken);

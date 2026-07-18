@@ -53,14 +53,7 @@ internal sealed class AzureOpenAiProviderAdapter : IAiProviderAdapter
     public ChatOptions CreateChatOptions(AiProviderClientRequest request)
     {
         EnsureSupported(request);
-        var sampling = request.Profile.Sampling;
-        return new ChatOptions
-        {
-            Temperature = sampling.TemperatureEnabled ? (float)sampling.Temperature : null,
-            TopP = sampling.TopPEnabled ? (float)sampling.TopP : null,
-            ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
-            Tools = request.Tools.Count > 0 ? request.Tools.ToList() : null
-        };
+        return AiChatOptions.CreateBase(request);
     }
 
     private AzureOpenAIClientOptions CreateClientOptions(AiProviderConnection connection)

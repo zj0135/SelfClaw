@@ -18,7 +18,7 @@ public sealed class JsonEventStreamParserTests
     {
         var parser = new JsonEventStreamParser(CliAgentKind.OpenCode);
 
-        var events = parser.Feed(OpenCodeToolUseLine + "\n").ToArray();
+        var events = parser.ParseLine(OpenCodeToolUseLine).ToArray();
 
         events.Should().HaveCount(2);
         var started = events[0].Should().BeOfType<ToolCallStartedEvent>().Subject;
@@ -41,7 +41,7 @@ public sealed class JsonEventStreamParserTests
             {"type":"tool","part":{"type":"tool","tool":"bash","callID":"call_2","state":{"status":"completed","input":{"command":"ls"},"output":"ok"}}}
             """;
 
-        var events = parser.Feed(line + "\n").ToArray();
+        var events = parser.ParseLine(line).ToArray();
 
         events.Should().HaveCount(2);
         events[0].Should().BeOfType<ToolCallStartedEvent>()
@@ -63,8 +63,8 @@ public sealed class JsonEventStreamParserTests
             {"type":"tool_use","part":{"type":"tool","tool":"read","callID":"call_3","state":{"status":"completed","input":{"filePath":"a.txt"},"output":"done"}}}
             """;
 
-        var first = parser.Feed(runningLine + "\n").ToArray();
-        var second = parser.Feed(completedLine + "\n").ToArray();
+        var first = parser.ParseLine(runningLine).ToArray();
+        var second = parser.ParseLine(completedLine).ToArray();
 
         first.Should().ContainSingle().Which.Should().BeOfType<ToolCallStartedEvent>();
         second.Should().ContainSingle().Which.Should().BeOfType<ToolCallCompletedEvent>();

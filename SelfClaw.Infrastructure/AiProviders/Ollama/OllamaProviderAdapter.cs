@@ -50,15 +50,9 @@ internal sealed class OllamaProviderAdapter : IAiProviderAdapter
             throw UnsupportedFormat(request);
         }
 
-        var sampling = request.Profile.Sampling;
-        return new ChatOptions
-        {
-            ModelId = request.Profile.Model,
-            Temperature = sampling.TemperatureEnabled ? (float)sampling.Temperature : null,
-            TopP = sampling.TopPEnabled ? (float)sampling.TopP : null,
-            ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
-            Tools = request.Tools.Count > 0 ? request.Tools.ToList() : null
-        };
+        var options = AiChatOptions.CreateBase(request);
+        options.ModelId = request.Profile.Model;
+        return options;
     }
 
     public async Task<IReadOnlyList<AiModelDescriptor>> ListModelsAsync(

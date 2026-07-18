@@ -29,8 +29,8 @@ public sealed class AiProviderSettingsServiceTests
             ModelOptions = JsonObject("{\"display.contextLength\":1048576,\"display.priceInPerMTok\":2.0}")
         };
         repository.Models[profile.Id] = profile;
-        repository.Selections[AiProviderSettingsService.DesktopDefaultScope] =
-            new AiModelProfileSelection(AiProviderSettingsService.DesktopDefaultScope, profile.Id, DateTimeOffset.UtcNow);
+        repository.Selections[AiModelSelectionScopes.DesktopDefault] =
+            new AiModelProfileSelection(AiModelSelectionScopes.DesktopDefault, profile.Id, DateTimeOffset.UtcNow);
         var service = CreateService(repository, protector, new FakeAiProviderAdapter(AiProviderKind.OpenAI));
 
         var state = await service.GetStateAsync();

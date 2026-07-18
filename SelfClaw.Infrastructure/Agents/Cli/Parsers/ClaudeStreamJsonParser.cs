@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Infrastructure.Agents.Cli.Parsers.Abstractions;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
 
@@ -23,13 +22,11 @@ namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
 /// Both delivery modes are handled: when partial streaming is on, text/thinking arrive as deltas and
 /// the matching blocks in the full <c>assistant</c> message are suppressed to avoid duplication; when
 /// it is off, the full message blocks are emitted as single deltas. Lines that are not valid JSON are
-/// surfaced verbatim as <see cref="RawOutputEvent"/> (plan.md 阶段 3, T3.3).
+/// surfaced verbatim as <see cref="RawOutputEvent"/> by the base parser (plan.md 阶段 3, T3.3).
 /// </para>
 /// </summary>
-public sealed class ClaudeStreamJsonParser : IAgentStreamParser
+public sealed class ClaudeStreamJsonParser : CliStreamParser
 {
-    private readonly StringBuilder _buffer = new();
-
     // Captured from system/init; replayed on RunStartedEvent.
     private bool _runStarted;
 
@@ -46,81 +43,17 @@ public sealed class ClaudeStreamJsonParser : IAgentStreamParser
     // Accumulated assistant text, used as the final text fallback if `result` carries none.
     private readonly StringBuilder _assistantText = new();
 
-    public IEnumerable<AgentStreamEvent> Feed(string chunk)
-    {
-        if (string.IsNullOrEmpty(chunk))
-            return Array.Empty<AgentStreamEvent>();
-
-        _buffer.Append(chunk);
-        return DrainCompleteLines();
-    }
-
-    public IEnumerable<AgentStreamEvent> Flush()
-    {
-        if (_buffer.Length == 0)
-            return Array.Empty<AgentStreamEvent>();
-
-        // Treat whatever remains (no trailing newline) as a final line.
-        var remainder = _buffer.ToString();
-        _buffer.Clear();
-        return ParseLine(remainder);
-    }
-
-    private IEnumerable<AgentStreamEvent> DrainCompleteLines()
-    {
-        var events = new List<AgentStreamEvent>();
-
-        while (true)
+    protected override IEnumerable<AgentStreamEvent> HandleObject(JsonElement root)
+        => GetString(root, "type") switch
         {
-            var text = _buffer.ToString();
-            var newline = text.IndexOf('\n');
-            if (newline < 0)
-                break;
-
-            var line = text[..newline];
-            _buffer.Remove(0, newline + 1);
-            events.AddRange(ParseLine(line));
-        }
-
-        return events;
-    }
-
-    private IEnumerable<AgentStreamEvent> ParseLine(string rawLine)
-    {
-        var line = rawLine.Trim('\r', ' ', '\t');
-        if (line.Length == 0)
-            return Array.Empty<AgentStreamEvent>();
-
-        JsonDocument doc;
-        try
-        {
-            doc = JsonDocument.Parse(line);
-        }
-        catch (JsonException)
-        {
-            // T3.3: any line we cannot parse is passed through for diagnostics.
-            return new AgentStreamEvent[] { new RawOutputEvent(line) };
-        }
-
-        using (doc)
-        {
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-                return new AgentStreamEvent[] { new RawOutputEvent(line) };
-
-            var type = GetString(root, "type");
-            return type switch
-            {
-                "system" => HandleSystem(root),
-                "stream_event" => HandleStreamEvent(root),
-                "assistant" => HandleAssistant(root),
-                "user" => HandleUser(root),
-                "result" => HandleResult(root),
-                // Unknown-but-valid types (e.g. control acks) are ignored rather than spamming raw.
-                _ => Array.Empty<AgentStreamEvent>(),
-            };
-        }
-    }
+            "system" => HandleSystem(root),
+            "stream_event" => HandleStreamEvent(root),
+            "assistant" => HandleAssistant(root),
+            "user" => HandleUser(root),
+            "result" => HandleResult(root),
+            // Unknown-but-valid types (e.g. control acks) are ignored rather than spamming raw.
+            _ => Array.Empty<AgentStreamEvent>(),
+        };
 
     private IEnumerable<AgentStreamEvent> HandleSystem(JsonElement root)
     {
@@ -377,21 +310,6 @@ public sealed class ClaudeStreamJsonParser : IAgentStreamParser
         }
     }
 
-    private static string? BuildSummary(string? content)
-    {
-        if (string.IsNullOrEmpty(content))
-            return null;
-
-        const int maxLength = 120;
-        var firstLine = content.AsSpan();
-        var newline = firstLine.IndexOfAny('\r', '\n');
-        if (newline >= 0)
-            firstLine = firstLine[..newline];
-
-        var summary = firstLine.Trim().ToString();
-        return summary.Length > maxLength ? summary[..maxLength] + "…" : summary;
-    }
-
     /// <summary>Maps a Claude Code tool name onto a coarse <see cref="ToolCallKind"/> for the transcript.</summary>
     private static ToolCallKind MapToolKind(string name) => name switch
     {
@@ -421,19 +339,4 @@ public sealed class ClaudeStreamJsonParser : IAgentStreamParser
             return messageId;
         return messageId is null ? index.ToString() : $"{messageId}:{index}";
     }
-
-    private static string? GetString(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(property, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
-
-    private static int? GetInt(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(property, out var value)
-        && value.ValueKind == JsonValueKind.Number
-        && value.TryGetInt32(out var number)
-            ? number
-            : null;
 }

@@ -51,24 +51,23 @@ internal sealed partial class OpenAiProviderAdapter
     }
 
     private ChatOptions CreateResponsesOptions(AiProviderClientRequest request) =>
-        CreateSharedChatOptions(request, _ => BuildResponseRawOptions(request));
+        AiChatOptions.CreateBase(request, _ => BuildResponseRawOptions(request));
 
     private OpenAICreateResponseOptions BuildResponseRawOptions(AiProviderClientRequest request)
     {
         var raw = new OpenAICreateResponseOptions();
-        var options = request.Profile.ModelOptions;
-        var profileName = request.Profile.Name;
+        var options = OptionReader(request);
 
         // Reasoning is explicit-only for Responses; do not inject anything from
         // EnableReasoning so unsupported models are not handed invalid params.
         OpenAIResponseReasoningOptions? reasoning = null;
-        if (TryReadString(options, ResponseReasoningEffortKey, profileName, out var effort))
+        if (options.TryReadString(ResponseReasoningEffortKey, out var effort))
         {
             reasoning ??= new OpenAIResponseReasoningOptions();
             reasoning.ReasoningEffortLevel = new OpenAIResponseReasoningEffortLevel(effort);
         }
 
-        if (TryReadString(options, ResponseReasoningSummaryKey, profileName, out var summary))
+        if (options.TryReadString(ResponseReasoningSummaryKey, out var summary))
         {
             reasoning ??= new OpenAIResponseReasoningOptions();
             reasoning.ReasoningSummaryVerbosity = new OpenAIResponseReasoningSummaryVerbosity(summary);
@@ -79,27 +78,27 @@ internal sealed partial class OpenAiProviderAdapter
             raw.ReasoningOptions = reasoning;
         }
 
-        if (TryReadBool(options, ResponseStoreKey, profileName, out var store))
+        if (options.TryReadBool(ResponseStoreKey, out var store))
         {
             raw.StoredOutputEnabled = store;
         }
 
-        if (TryReadInt(options, ResponseMaxOutputTokensKey, profileName, out var maxOutputTokens))
+        if (options.TryReadInt(ResponseMaxOutputTokensKey, out var maxOutputTokens))
         {
             raw.MaxOutputTokenCount = maxOutputTokens;
         }
 
-        if (TryReadString(options, ResponseTruncationKey, profileName, out var truncation))
+        if (options.TryReadString(ResponseTruncationKey, out var truncation))
         {
             raw.TruncationMode = new OpenAIResponseTruncationMode(truncation);
         }
 
-        if (TryReadBool(options, ResponseParallelToolCallsKey, profileName, out var parallelToolCalls))
+        if (options.TryReadBool(ResponseParallelToolCallsKey, out var parallelToolCalls))
         {
             raw.ParallelToolCallsEnabled = parallelToolCalls;
         }
 
-        LogUnknownOptions(options, ResponseRecognizedKeys, profileName);
+        options.LogUnknown(ResponseRecognizedKeys);
         return raw;
     }
 }
