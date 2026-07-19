@@ -131,6 +131,90 @@ Persisted to `{AppData}\attachments\{convId}\{msgId}\`. Max 6 images, 10MB each,
 - **Plan mode**: removed; `AgentExecutionMode.Direct` and `AgentExecutionMode.Cli` are both active
 - **Channel conversations**: data model retained but VM filters them out
 - **MCP server wiring**: provider exists but VM passes empty list
-- **Settings pages**: AI 提供商, 编程助手, and 宠物 are wired to the host; the other settings pages are frontend mock
+- **Settings pages**: AI 提供商, 编程助手, and 宠物 are wired to the host; the remaining settings pages are frontend mock
 - **Legacy provider profiles**: `ProviderProfile`, `IProfileRepository`, the `profiles` table, and `ChatTurnRequest.Profile/ApiKey` were removed; Direct turns use `ModelProfileId`
 - **RightPanel**: XAML stub, not functional
+
+## Code Style & Constraints
+
+### DTOs vs. Business Logic
+
+- **DTOs / models** are pure data carriers only — no methods, no business logic, no side effects. Use `record` types with primary constructors in `Core.Models` or `Infrastructure.AiProviders.Models`. Infrastructure-level view DTOs go in `Views/` subdirectories.
+- **Methods / business logic** live exclusively in service classes, not in DTOs. A DTO should never call a service, access a database, or perform validation beyond constructor-level input contracts.
+- Do **NOT** mix DTOs and service methods in the same file. Each file contains either one DTO or one service class — never both.
+
+### Interface & Abstraction Placement
+
+- **Domain contracts**（consumed by Core or by multiple projects） go in `SelfClaw.Core/Interfaces/<Feature>/`.
+- **Infrastructure-internal abstractions**（only consumed within Infrastructure） go in `SelfClaw.Infrastructure/<Feature>/Abstractions/`.
+- Prefer small, focused interfaces（1-5 methods）. Avoid fat interfaces that force consumers to implement unrelated concerns.
+
+### Class Design
+
+- `sealed class` on every class not deliberately designed for inheritance.
+- Dependencies are constructor-injected as private `_camelCase` fields, listed before the constructor.
+- Class layout order: fields → constructor → primary public method(s) → private helper methods.
+- `internal sealed class` for DI-registered infrastructure types that are not `public` API.
+- Extract private helper methods（`private static` where stateless） to keep public methods readable. A public method over 40-50 lines is a signal to decompose.
+
+### Naming
+
+- Async methods: always suffix `Async`.
+- Static factory/exception helpers: `PascalCase` — e.g. `CreateForScopeAsync()`, `MissingApiKey()`, `MaskApiKey()`.
+- `private static`: for stateless helper methods. `const` for compile-time constants.
+- No abbreviations in public names — prefer `Conversation` over `Conv`, `Workspace` over `Ws`.
+
+### Async & Streaming
+
+- All library code（Infrastructure）uses `ConfigureAwait(false)`. Desktop ViewModels omit it.
+- `OperationCanceledException` must always be re-thrown — never caught and converted into a failure result.
+- Streaming uses `IAsyncEnumerable<T>` + `Channel<T>` pattern.
+
+### Nullability & Safety
+
+- Nullable reference types enabled project-wide. Use `string?`, `Guid?` etc. explicitly.
+- Public methods guard with `ArgumentNullException.ThrowIfNull(...)`, not manual null checks.
+- No nullable suppression (`!`) unless immediately after a provable null check the compiler cannot track.
+
+### Code Simplicity
+
+- Favor plain flow control (`if`/`return`/`switch`) over excessive abstraction layers. Do NOT introduce generic wrappers or base classes for a single caller.
+- Use `switch` expressions for dispatch-based branching.
+- Avoid over-encapsulation: a three-line helper that is called exactly once should be inlined unless extracting it significantly improves readability of the caller.
+
+### Comments
+
+- Code should be self-explanatory. Comments are for **why**, not **what**.
+- Do NOT add redundant comments explaining obvious code paths (e.g., `// set the name` above `name = value;`).
+- Do NOT add generated XML doc comments（`/// <summary>` stubs） on private methods or trivial properties. Public API surface may carry concise XML docs where helpful.
+
+### Cleanup Rule
+
+- When adding new code, check whether the adjacent dead/retained code can be removed. If a feature fully replaces another, delete the old one — do not leave it as "retained".
+
+### Proactive Optimization
+
+- When encountering code that violates the above conventions（e.g. DTO mixed with logic, oversized method, missing `ConfigureAwait(false)`, dead code）, **proactively flag it and refactor it** — do not silently work around it.
+
+## TranscriptVue（Vue 3 Frontend） Constraints
+
+### Component Decomposition
+
+- **Single responsibility**: one component per file. Do NOT pile multiple unrelated UI sections into the same `.vue` file. If a component exceeds ~300 lines, consider extracting sub-components into `components/<Feature>/`.
+- Views（`views/`） orchestrate layout and delegate rendering to components（`components/`）. Views should be thin — move domain logic into composables（`composables/`）.
+- Pure rendering logic（HTML string generation, markdown processing） lives in `renderers/`, not inside components.
+
+### Style Isolation
+
+- All component-level styles use `<style scoped>`. Global layout/reset/theme variables belong in `App.vue`'s unscoped `<style>` only.
+- Do NOT mix scoped and unscoped `<style>` blocks in the same component file unless the unscoped block is exclusively for dynamic `v-html`-injected content that cannot be targeted by scoped selectors.
+
+### Organization
+
+- Vue file script layout: `<script setup>` → `<template>` → `<style scoped>`.
+- Composables: one concern per composable. Composable files live in `composables/`, exported as `use<Feature>()`. Do not embed composable logic directly in component `<script setup>` beyond trivial local state.
+- Async component loading: use `defineAsyncComponent` for route-level splitting（e.g. lazy-loaded settings panels）.
+
+### Proactive Cleanup
+
+- When a component grows too large, **proactively split it into smaller components**. When business logic appears inside a component file, **extract it into a composable**. When duplicate patterns appear across components, **extract into a shared composable or renderer util** — flag and refactor on sight.
