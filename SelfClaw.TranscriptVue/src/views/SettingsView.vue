@@ -74,7 +74,6 @@ const componentMap = markRaw({
 	models: defineAsyncComponent(() => import('../components/settings/ModelManagement.vue')),
 	'coding-assistant': defineAsyncComponent(() => import('../components/settings/ProgrammingAssistant.vue')),
 	plugins: defineAsyncComponent(() => import('../components/settings/Plugins.vue')),
-	mcp: defineAsyncComponent(() => import('../components/settings/MCPServers.vue')),
 	pet: defineAsyncComponent(() => import('../components/settings/Pet.vue')),
 	about: defineAsyncComponent(() => import('../components/settings/About.vue')),
 });
