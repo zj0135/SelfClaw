@@ -18,7 +18,7 @@ const navGroups = [
 		],
 	},
 	{
-		label: 'AI 能力',
+		label: 'AI',
 		items: [
 			{
 				id: 'providers',
@@ -38,17 +38,12 @@ const navGroups = [
 		],
 	},
 	{
-		label: '扩展与集成',
+		label: '扩展',
 		items: [
 			{
 				id: 'plugins',
 				label: '插件',
 				icon: 'wrench',
-			},
-			{
-				id: 'mcp',
-				label: 'MCP 服务器',
-				icon: 'network',
 			},
 			{
 				id: 'pet',
@@ -123,8 +118,13 @@ defineExpose({
 			<nav class="sb-nav">
 				<div v-for="group in navGroups" :key="group.label" class="sb-group">
 					<div class="sb-label">{{ group.label }}</div>
-					<button v-for="item in group.items" :key="item.id" class="nav-item"
-						:class="{ active: activeTarget === item.id }" @click="selectItem(item.id)">
+					<button
+						v-for="item in group.items"
+						:key="item.id"
+						class="nav-item"
+						:class="{ active: activeTarget === item.id }"
+						@click="selectItem(item.id)"
+					>
 						<span class="ni-ico-wrap" aria-hidden="true" v-html="getIcon(item.icon)"></span>
 						{{ item.label }}
 					</button>
@@ -238,7 +238,8 @@ defineExpose({
 	cursor: pointer;
 	text-align: left;
 	line-height: 1.2;
-	transition: background 0.14s cubic-bezier(0.2, 0.7, 0.3, 1),
+	transition:
+		background 0.14s cubic-bezier(0.2, 0.7, 0.3, 1),
 		color 0.14s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
@@ -277,7 +278,6 @@ defineExpose({
 .nav-item:hover .ni-ico {
 	color: var(--muted-soft, #8a929e);
 }
-
 
 /* Focus visible for keyboard navigation */
 .nav-item:focus-visible {
