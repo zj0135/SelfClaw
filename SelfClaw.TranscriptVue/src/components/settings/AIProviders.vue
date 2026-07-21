@@ -235,12 +235,9 @@ function providerKind(provider) {
 }
 
 function providerLogo(provider) {
-	const kind = providerKind(provider);
-	const src = providerLogos[kind];
-	if (src) {
-		return `<img src="${src}" alt="" class="brand-logo" draggable="false" />`;
-	}
-	return logoSvg(kind, provider.color);
+	// Unknown/custom connections fall back to the OpenAI brand logo.
+	const src = providerLogos[providerKind(provider)] || providerLogos.openai;
+	return `<img src="${src}" alt="" class="brand-logo" draggable="false" />`;
 }
 
 function resetCheckStatus() {
@@ -263,32 +260,6 @@ function eyeSvg(open) {
 	return open
 		? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68"/><path d="M6.6 6.6A13.3 13.3 0 0 0 2 11s3.5 7 10 7a9 9 0 0 0 5.4-1.6"/><path d="m2 2 20 20"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>'
 		: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
-}
-
-function logoSvg(kind, color) {
-	const c = color || 'currentColor';
-	switch (kind) {
-		case 'openai':
-			return `<svg viewBox="0 0 24 24" fill="${c}"><path d="M22.28 9.82a5.98 5.98 0 0 0-.52-4.91 6.05 6.05 0 0 0-6.5-2.9A6.06 6.06 0 0 0 4.98 4.18 5.98 5.98 0 0 0 1 7.07a6.06 6.06 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.05 6.05 0 0 0 6.5 2.9A5.98 5.98 0 0 0 13.26 24a6.06 6.06 0 0 0 5.77-4.2 5.99 5.99 0 0 0 4-2.9 6.06 6.06 0 0 0-.75-7.08zm-9 12.6a4.48 4.48 0 0 1-2.88-1.04l.14-.08 4.78-2.76a.78.78 0 0 0 .39-.68v-6.74l2.02 1.17a.07.07 0 0 1 .04.05v5.58a4.5 4.5 0 0 1-4.5 4.5zM3.6 18.7a4.48 4.48 0 0 1-.54-3.02l.14.08 4.78 2.76a.78.78 0 0 0 .78 0l5.84-3.37v2.33a.08.08 0 0 1-.03.06l-4.83 2.79a4.5 4.5 0 0 1-6.14-1.64zM2.34 8.13a4.48 4.48 0 0 1 2.34-1.97v5.68a.78.78 0 0 0 .39.68l5.81 3.35-2.02 1.17a.07.07 0 0 1-.07 0l-4.83-2.79a4.5 4.5 0 0 1-1.62-6.12zm16.6 3.86L13.1 8.6l2.02-1.16a.07.07 0 0 1 .07 0l4.83 2.78a4.5 4.5 0 0 1-.68 8.11v-5.68a.78.78 0 0 0-.39-.67zm2.01-3.02l-.14-.09-4.77-2.78a.78.78 0 0 0-.79 0L9.42 9.47V7.14a.07.07 0 0 1 .03-.06l4.83-2.79a4.5 4.5 0 0 1 6.68 4.66zM8.32 13.12L6.3 11.95a.08.08 0 0 1-.04-.06V6.31a4.5 4.5 0 0 1 7.38-3.45l-.14.08L8.72 5.7a.78.78 0 0 0-.4.68zm1.1-2.36L12 9.24l2.6 1.5v3l-2.6 1.5-2.6-1.5z"/></svg>`;
-		case 'routin':
-			return `<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="${c}" opacity=".15"/><path d="M8 16V8h4a2.5 2.5 0 0 1 0 5H8m4 0 3 3" stroke="${c}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-		case 'anthropic':
-			return `<svg viewBox="0 0 24 24" fill="${c}"><path d="M14.4 4h-2.9L17 20h2.9zM8.5 4 3 20h2.96l1.06-3.14h5.2L13.3 20h2.96L10.8 4zm-.6 10 1.85-5.46L11.5 14z"/></svg>`;
-		case 'longcat':
-			return `<svg viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8 6 4l2 3h4l2-3 2 4"/><path d="M3.5 8a8 8 0 0 0 17 0v6a4 4 0 0 1-4 4H7.5a4 4 0 0 1-4-4z" fill="${c}" fill-opacity=".12"/><circle cx="9" cy="12" r=".8" fill="${c}"/><circle cx="15" cy="12" r=".8" fill="${c}"/></svg>`;
-		case 'gemini':
-			return `<svg viewBox="0 0 24 24"><path d="M12 2c.4 5.3 4.3 9.2 9.6 9.6v.8C16.3 12.8 12.4 16.7 12 22h-.8C10.8 16.7 6.9 12.8 1.6 12.4v-.8C6.9 11.2 10.8 7.3 11.2 2z" fill="${c}"/></svg>`;
-		case 'deepseek':
-			return `<svg viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7c4-3 9 1 14-2-1 4-4 6-4 6s2 1 3 4c-3-1-5 0-8-2-2.5-1.7-4-3-5-6z" fill="${c}" fill-opacity=".12"/><circle cx="13" cy="9" r=".9" fill="${c}"/></svg>`;
-		case 'openrouter':
-			return `<svg viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-3M3 12h4l3 3"/><circle cx="14" cy="9" r="2.4"/><circle cx="14" cy="15" r="2.4"/><path d="M16.4 9H21M16.4 15H21"/></svg>`;
-		case 'ollama':
-			return `<svg viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 9C7 5 9 3 12 3s5 2 5 6"/><path d="M5 14c0-3 1-4 2-4M19 14c0-3-1-4-2-4"/><path d="M5 14c-1 3 0 6 2 7h10c2-1 3-4 2-7-1-4-4-5-7-5s-6 1-7 5z" fill="${c}" fill-opacity=".1"/><circle cx="10" cy="13" r=".8" fill="${c}"/><circle cx="14" cy="13" r=".8" fill="${c}"/></svg>`;
-		case 'azure':
-			return `<svg viewBox="0 0 24 24" fill="${c}"><path d="M13.2 3 6 19h4.2l1.3-3 4.6 4H4l9.2-16zM14 6l5 11-3 .9 3 1.1h1L14 6z" fill-opacity=".85"/></svg>`;
-		default:
-			return `<svg viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 12h6"/></svg>`;
-	}
 }
 
 onUnmounted(() => {
