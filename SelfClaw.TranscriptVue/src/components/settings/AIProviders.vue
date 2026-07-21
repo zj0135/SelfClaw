@@ -3,6 +3,26 @@ import { computed, onUnmounted, reactive, ref } from 'vue';
 import AiProviderDialogs from './AiProviderDialogs.vue';
 import { useAiProviderHost } from '../../composables/useAiProviderHost.js';
 
+// Brand logos from @lobehub/icons-static-png (color variants where available).
+import openaiLogo from '@lobehub/icons-static-png/light/openai.png';
+import anthropicLogo from '@lobehub/icons-static-png/light/claude-color.png';
+import geminiLogo from '@lobehub/icons-static-png/light/gemini-color.png';
+import deepseekLogo from '@lobehub/icons-static-png/light/deepseek-color.png';
+import openrouterLogo from '@lobehub/icons-static-png/light/openrouter.png';
+import ollamaLogo from '@lobehub/icons-static-png/light/ollama.png';
+import azureLogo from '@lobehub/icons-static-png/light/azure-color.png';
+
+// Maps a provider kind (see logoKind in useAiProviderHost) to its brand logo asset.
+const providerLogos = {
+	openai: openaiLogo,
+	anthropic: anthropicLogo,
+	gemini: geminiLogo,
+	deepseek: deepseekLogo,
+	openrouter: openrouterLogo,
+	ollama: ollamaLogo,
+	azure: azureLogo,
+};
+
 function mk(name, id, ctx, out, inp, outp, cacheW, cacheR) {
 	return { name, id, ctx, out, inp, outp, cacheW, cacheR, on: true };
 }
@@ -215,7 +235,12 @@ function providerKind(provider) {
 }
 
 function providerLogo(provider) {
-	return logoSvg(providerKind(provider), provider.color);
+	const kind = providerKind(provider);
+	const src = providerLogos[kind];
+	if (src) {
+		return `<img src="${src}" alt="" class="brand-logo" draggable="false" />`;
+	}
+	return logoSvg(kind, provider.color);
 }
 
 function resetCheckStatus() {
@@ -774,6 +799,12 @@ onUnmounted(() => {
 	height: 22px;
 }
 
+.p-logo :deep(.brand-logo) {
+	width: 24px;
+	height: 24px;
+	object-fit: contain;
+}
+
 .p-meta {
 	display: grid;
 	min-width: 0;
@@ -842,9 +873,11 @@ onUnmounted(() => {
 	background: var(--ap-surface-2);
 }
 
-.dh-logo :deep(svg) {
+.dh-logo :deep(svg),
+.dh-logo :deep(.brand-logo) {
 	width: 26px;
 	height: 26px;
+	object-fit: contain;
 }
 
 .dh-meta {
@@ -1234,6 +1267,12 @@ onUnmounted(() => {
 .m-logo :deep(svg) {
 	width: 20px;
 	height: 20px;
+}
+
+.m-logo :deep(.brand-logo) {
+	width: 22px;
+	height: 22px;
+	object-fit: contain;
 }
 
 .m-main {
