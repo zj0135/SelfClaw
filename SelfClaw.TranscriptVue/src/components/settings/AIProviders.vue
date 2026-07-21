@@ -145,7 +145,8 @@ const {
 	providerDialogOpen,
 	modelDialogOpen,
 	modelDraft,
-	availableProviderEntries,
+	customProtocols,
+	providerDraft,
 	pendingModelIds,
 	handleMessage,
 	selectProvider: selectProviderFromHost,
@@ -161,7 +162,7 @@ const {
 	checkConnectivity: checkConnectivityFromHost,
 	openProviderConsole: openProviderConsoleFromHost,
 	openProviderDialog,
-	createProvider,
+	createCustomProvider,
 	openModelDialog,
 	createModel,
 } = useAiProviderHost({
@@ -549,12 +550,13 @@ onUnmounted(() => {
 		<AiProviderDialogs
 			:provider-open="providerDialogOpen"
 			:model-open="modelDialogOpen"
-			:providers="availableProviderEntries"
+			:protocols="customProtocols"
+			:provider-draft="providerDraft"
 			:provider="activeProvider"
 			:model-draft="modelDraft"
 			:busy="mutating"
 			@close-provider="providerDialogOpen = false"
-			@select-provider="createProvider"
+			@submit-provider="createCustomProvider"
 			@close-model="modelDialogOpen = false"
 			@submit-model="createModel"
 		/>

@@ -178,13 +178,20 @@ public sealed class AiProviderSettingsBridge
             apiKeyElement.ValueKind != JsonValueKind.Null
             ? apiKeyElement.GetString()
             : null;
+        bool? enabled = payload.TryGetProperty("enabled", out var enabledElement) &&
+            enabledElement.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? enabledElement.GetBoolean()
+            : null;
         return new SaveProviderCommand(
             id,
             catalogId,
             name,
             endpoint,
             apiKey,
-            ReadJsonDictionary(payload, "connectionOptions"));
+            ReadJsonDictionary(payload, "connectionOptions"),
+            ReadOptionalEnum<AiProviderKind>(payload, "providerKind"),
+            ReadOptionalEnum<AiProviderApiFormat>(payload, "apiFormat"),
+            enabled);
     }
 
     private static UpsertModelCommand ReadUpsertModelCommand(JsonElement payload)
@@ -241,6 +248,21 @@ public sealed class AiProviderSettingsBridge
         }
 
         return result;
+    }
+
+    private static TEnum? ReadOptionalEnum<TEnum>(JsonElement payload, string propertyName)
+        where TEnum : struct, Enum
+    {
+        if (!payload.TryGetProperty(propertyName, out var element) ||
+            element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        var result = element.Deserialize<TEnum>(JsonOptions);
+        return Enum.IsDefined(result)
+            ? result
+            : throw new ArgumentException($"Property '{propertyName}' has an unsupported value.");
     }
 
     private static bool ReadRequiredBoolean(JsonElement payload, string propertyName)

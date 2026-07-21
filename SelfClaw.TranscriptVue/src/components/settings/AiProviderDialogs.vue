@@ -2,13 +2,14 @@
 defineProps({
 	providerOpen: Boolean,
 	modelOpen: Boolean,
-	providers: { type: Array, default: () => [] },
+	protocols: { type: Array, default: () => [] },
+	providerDraft: { type: Object, required: true },
 	provider: { type: Object, default: null },
 	modelDraft: { type: Object, required: true },
 	busy: Boolean,
 });
 
-const emit = defineEmits(['close-provider', 'select-provider', 'close-model', 'submit-model']);
+const emit = defineEmits(['close-provider', 'submit-provider', 'close-model', 'submit-model']);
 
 const formatNames = {
 	0: 'OpenAI Chat Completions',
@@ -22,32 +23,44 @@ const formatNames = {
 <template>
 	<Teleport to="body">
 		<div v-if="providerOpen" class="dialog-backdrop" @click.self="emit('close-provider')">
-			<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="provider-dialog-title">
+			<form class="dialog form-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-dialog-title" @submit.prevent="emit('submit-provider')">
 				<header>
 					<div>
-						<h3 id="provider-dialog-title">添加 AI 服务商</h3>
-						<p>选择一个尚未创建连接的内置目录。</p>
+						<h3 id="provider-dialog-title">添加自定义服务商</h3>
+						<p>添加一个 OpenAI 兼容或 Anthropic 协议的自定义 AI 服务商</p>
 					</div>
 					<button type="button" class="close" aria-label="关闭" @click="emit('close-provider')">×</button>
 				</header>
 
-				<div class="provider-options">
-					<button
-						v-for="entry in providers"
-						:key="entry.id"
-						type="button"
-						:disabled="busy"
-						@click="emit('select-provider', entry)"
-					>
-						<span class="accent" :style="{ background: entry.color }"></span>
-						<span><strong>{{ entry.name }}</strong><small>{{ entry.sub }}</small></span>
+				<label>
+					<span>服务商名称</span>
+					<input v-model.trim="providerDraft.name" required autocomplete="off" placeholder="我的服务商" />
+				</label>
+				<label>
+					<span>协议类型</span>
+					<select v-model="providerDraft.protocolId">
+						<option v-for="protocol in protocols" :key="protocol.id" :value="protocol.id">
+							{{ protocol.label }}
+						</option>
+					</select>
+				</label>
+				<label>
+					<span>Base URL</span>
+					<input v-model.trim="providerDraft.base" required autocomplete="off" class="mono" placeholder="https://api.example.com" />
+					<small class="hint">API 接口的基础地址</small>
+				</label>
+
+				<footer>
+					<button type="button" class="secondary" @click="emit('close-provider')">取消</button>
+					<button type="submit" class="primary" :disabled="busy || !providerDraft.name || !providerDraft.base || !providerDraft.protocolId">
+						{{ busy ? '添加中…' : '添加' }}
 					</button>
-				</div>
-			</section>
+				</footer>
+			</form>
 		</div>
 
 		<div v-if="modelOpen" class="dialog-backdrop" @click.self="emit('close-model')">
-			<form class="dialog model-dialog" role="dialog" aria-modal="true" aria-labelledby="model-dialog-title" @submit.prevent="emit('submit-model')">
+			<form class="dialog form-dialog model-dialog" role="dialog" aria-modal="true" aria-labelledby="model-dialog-title" @submit.prevent="emit('submit-model')">
 				<header>
 					<div>
 						<h3 id="model-dialog-title">手动添加模型</h3>
@@ -135,31 +148,11 @@ p { margin: 4px 0 0; color: #727985; font-size: 12.5px; line-height: 1.5; }
 }
 .close:hover { background: #f1f3f6; color: #20242b; }
 
-.provider-options { display: grid; gap: 4px; }
-.provider-options button {
-	display: flex;
-	align-items: center;
-	gap: 12px;
-	width: 100%;
-	padding: 11px 10px;
-	border: 0;
-	border-radius: 8px;
-	background: transparent;
-	text-align: left;
-	cursor: pointer;
-}
-.provider-options button:hover { background: #f4f6f8; }
-.provider-options button:disabled { opacity: .55; cursor: wait; }
-.accent { width: 9px; height: 32px; border-radius: 99px; flex: none; }
-.provider-options strong, .provider-options small { display: block; }
-.provider-options strong { font-size: 13.5px; font-weight: 650; }
-.provider-options small { margin-top: 2px; color: #7a818c; font-size: 11.5px; }
-
-.model-dialog { display: grid; gap: 14px; }
-.model-dialog header { margin-bottom: 0; }
-.model-dialog label { display: grid; gap: 6px; }
-.model-dialog label > span { font-size: 12px; font-weight: 650; color: #555d68; }
-.model-dialog input, .model-dialog select {
+.form-dialog { display: grid; gap: 14px; }
+.form-dialog header { margin-bottom: 0; }
+.form-dialog label { display: grid; gap: 6px; }
+.form-dialog label > span { font-size: 12px; font-weight: 650; color: #555d68; }
+.form-dialog input, .form-dialog select {
 	width: 100%;
 	box-sizing: border-box;
 	height: 38px;
@@ -170,7 +163,8 @@ p { margin: 4px 0 0; color: #727985; font-size: 12.5px; line-height: 1.5; }
 	color: #20242b;
 	font: inherit;
 }
-.model-dialog input:focus, .model-dialog select:focus { outline: 2px solid #85aaf5; outline-offset: 1px; }
+.form-dialog input:focus, .form-dialog select:focus { outline: 2px solid #85aaf5; outline-offset: 1px; }
+.hint { color: #7a818c; font-size: 11.5px; }
 .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important; }
 
 footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

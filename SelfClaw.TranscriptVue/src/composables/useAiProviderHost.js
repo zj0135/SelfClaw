@@ -2,6 +2,17 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 
 const requestTimeoutMs = 30000;
 
+// Browser-preview mirror of the backend's curated custom protocol options
+// (AiProviderProtocols.CustomProtocolOptions). Enum values match the C# ints:
+// providerKind — OpenAICompatible=1, Anthropic=3, Ollama=5;
+// apiFormat — OpenAIChatCompletions=0, OpenAIResponses=1, AnthropicMessages=2, OllamaNative=4.
+const fallbackProtocols = [
+	{ id: 'openai-chat', label: 'OpenAI Chat Completions 兼容', providerKind: 1, defaultApiFormat: 0, authKind: 0, supportsModelListing: true },
+	{ id: 'openai-responses', label: 'OpenAI Responses 兼容', providerKind: 1, defaultApiFormat: 1, authKind: 0, supportsModelListing: true },
+	{ id: 'anthropic', label: 'Anthropic 协议', providerKind: 3, defaultApiFormat: 2, authKind: 0, supportsModelListing: true },
+	{ id: 'ollama', label: 'Ollama 原生', providerKind: 5, defaultApiFormat: 4, authKind: 1, supportsModelListing: true },
+];
+
 export function formatTokens(value) {
 	if (typeof value === 'string' && /^(?:\d+(?:\.\d+)?)(?:K|M)$/.test(value)) return value;
 	const number = Number(value);
@@ -41,7 +52,9 @@ export function useAiProviderHost(options) {
 	const modelDialogOpen = ref(false);
 	const pendingModelIds = reactive(new Set());
 	const modelDraft = reactive({ name: '', model: '', apiFormat: 0 });
-	const availableProviderEntries = computed(() => providers.filter((provider) => !provider.isConfigured));
+	// Custom providers are added by picking a wire protocol, not a built-in catalog entry.
+	const customProtocols = reactive([]);
+	const providerDraft = reactive({ name: '', protocolId: '', base: '' });
 
 	let sequence = 0;
 	let activeStateRequestId = null;
@@ -74,7 +87,7 @@ export function useAiProviderHost(options) {
 		return promise;
 	}
 
-	async function loadState() {
+	async function loadState(preferredId = null) {
 		if (!hasWebViewHost()) {
 			prepareBrowserFallback();
 			return;
@@ -86,7 +99,7 @@ export function useAiProviderHost(options) {
 			activeStateRequestId = promise.requestId;
 			const payload = await promise;
 			if (payload.requestId !== activeStateRequestId) return;
-			applyState(payload.state);
+			applyState(payload.state, preferredId);
 		} catch (error) {
 			showToast(errorMessage(error, '加载 AI 服务商失败'));
 		} finally {
@@ -107,13 +120,18 @@ export function useAiProviderHost(options) {
 		return true;
 	}
 
-	function applyState(state) {
+	function applyState(state, preferredId = null) {
 		const rawProviders = Array.isArray(state?.providers) ? state.providers : [];
 		const previous = activeProvider.value;
 		const nextProviders = rawProviders.map(normalizeProvider);
 		providers.splice(0, providers.length, ...nextProviders);
+		customProtocols.splice(
+			0,
+			customProtocols.length,
+			...(Array.isArray(state?.customProtocols) ? state.customProtocols.map(normalizeProtocol) : []));
 
-		const selected = findMatchingProvider(previous, nextProviders)
+		const selected = (preferredId && nextProviders.find((provider) => provider.id === preferredId))
+			|| findMatchingProvider(previous, nextProviders)
 			|| nextProviders.find((provider) => provider.isConfigured)
 			|| nextProviders[0];
 		activeId.value = selected?.id || '';
@@ -122,6 +140,7 @@ export function useAiProviderHost(options) {
 
 	function prepareBrowserFallback() {
 		providers.splice(0, providers.length, ...providers.map((provider) => normalizeFallbackProvider(provider)));
+		customProtocols.splice(0, customProtocols.length, ...fallbackProtocols.map(normalizeProtocol));
 		const selected = providers.find((provider) => provider.id === activeId.value) || providers[0];
 		activeId.value = selected?.id || '';
 		syncActiveProviderInputs();
@@ -212,7 +231,7 @@ export function useAiProviderHost(options) {
 
 	async function deleteProvider() {
 		const provider = activeProvider.value;
-		if (!provider?.connectionId || !window.confirm(`删除 ${provider.name} 连接及其全部模型？`)) return;
+		if (!provider?.connectionId) return;
 		if (!hasWebViewHost()) {
 			provider.connectionId = null;
 			provider.isConfigured = false;
@@ -358,26 +377,46 @@ export function useAiProviderHost(options) {
 	}
 
 	function openProviderDialog() {
-		if (availableProviderEntries.value.length === 0) {
-			showToast('所有内置服务商都已创建连接');
-			return;
-		}
+		providerDraft.name = '';
+		providerDraft.protocolId = customProtocols[0]?.id || '';
+		providerDraft.base = '';
 		providerDialogOpen.value = true;
 	}
 
-	async function createProvider(provider) {
-		if (!provider) return;
+	async function createCustomProvider() {
+		const protocol = customProtocols.find((entry) => entry.id === providerDraft.protocolId);
+		const name = providerDraft.name.trim();
+		const base = providerDraft.base.trim();
+		if (!protocol || !name) {
+			showToast('请填写服务商名称并选择协议类型');
+			return;
+		}
+		if (!isAbsoluteUrl(base)) {
+			showToast('请输入完整的 Base URL');
+			return;
+		}
+
 		if (!hasWebViewHost()) {
-			provider.isConfigured = true;
-			provider.enabled = true;
+			showToast('自定义服务商已添加（浏览器预览）');
 			providerDialogOpen.value = false;
 			return;
 		}
 
 		await runMutation(async () => {
-			await saveProvider(provider, null);
+			const payload = await request('ai-providers/save-provider', {
+				catalogId: 'custom',
+				name,
+				base,
+				apiKey: null,
+				providerKind: protocol.providerKind,
+				apiFormat: protocol.defaultApiFormat,
+				connectionOptions: {},
+				// New connections start disabled; the user enables them after adding a key/models.
+				enabled: false,
+			});
 			providerDialogOpen.value = false;
-			showToast(`已添加 ${provider.name}`);
+			await loadState(payload.provider?.connectionId || null);
+			showToast(`已添加 ${name}`);
 		}, '添加服务商失败');
 	}
 
@@ -473,7 +512,8 @@ export function useAiProviderHost(options) {
 		providerDialogOpen,
 		modelDialogOpen,
 		modelDraft,
-		availableProviderEntries,
+		customProtocols,
+		providerDraft,
 		pendingModelIds,
 		handleMessage,
 		selectProvider,
@@ -489,7 +529,7 @@ export function useAiProviderHost(options) {
 		checkConnectivity,
 		openProviderConsole,
 		openProviderDialog,
-		createProvider,
+		createCustomProvider,
 		openModelDialog,
 		createModel,
 	};
@@ -513,6 +553,7 @@ function normalizeProvider(raw) {
 		keyMask: raw?.keyMask || '',
 		base: raw?.base || '',
 		authKind: Number(raw?.authKind ?? 0),
+		providerKind: Number(raw?.providerKind ?? 0),
 		getApiKeyUrl: raw?.getApiKeyUrl || '',
 		supportsModelListing: Boolean(raw?.supportsModelListing),
 		defaultApiFormat: Number(raw?.defaultApiFormat ?? 0),
@@ -520,6 +561,17 @@ function normalizeProvider(raw) {
 		connectionOptions: raw?.connectionOptions || {},
 		models,
 		total: Number(raw?.total ?? models.length),
+	};
+}
+
+function normalizeProtocol(raw) {
+	return {
+		id: raw?.id || '',
+		label: raw?.label || raw?.id || '',
+		providerKind: Number(raw?.providerKind ?? 0),
+		defaultApiFormat: Number(raw?.defaultApiFormat ?? 0),
+		authKind: Number(raw?.authKind ?? 0),
+		supportsModelListing: Boolean(raw?.supportsModelListing),
 	};
 }
 

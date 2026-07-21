@@ -80,8 +80,10 @@ public sealed class AiProviderSettingsServiceTests
         protector.StoreCalls.Should().BeEmpty();
         protector.DeleteCalls.Should().BeEmpty();
         repository.Connections[existing.Id].CredentialRefs["api_key"].Should().Be("secret:existing");
-        repository.Connections[existing.Id].CatalogId.Should().Be("openai");
-        repository.Connections[existing.Id].ProviderKind.Should().Be(AiProviderKind.OpenAI);
+        // Protocol and catalog membership are fixed once a connection exists: an update that
+        // carries no provider kind must not reset them, even if the command names a different catalog.
+        repository.Connections[existing.Id].CatalogId.Should().Be("custom");
+        repository.Connections[existing.Id].ProviderKind.Should().Be(AiProviderKind.OpenAICompatible);
         repository.Connections[existing.Id].AuthKind.Should().Be(AiProviderAuthKind.ApiKey);
 
         await service.SaveProviderAsync(new SaveProviderCommand(
@@ -270,7 +272,10 @@ public sealed class AiProviderSettingsServiceTests
         var service = CreateService(
             repository,
             protector,
-            new FakeAiProviderAdapter(AiProviderKind.OpenAICompatible));
+            new FakeAiProviderAdapter(AiProviderKind.OpenAICompatible)
+            {
+                Formats = [AiProviderApiFormat.OpenAIChatCompletions, AiProviderApiFormat.OpenAIResponses]
+            });
 
         var created = await service.UpsertModelAsync(new UpsertModelCommand(
             null,
@@ -387,6 +392,149 @@ public sealed class AiProviderSettingsServiceTests
         var model = state.Providers.Single(view => view.ConnectionId == connection.Id).Models.Single();
         model.ContextLength.Should().BeNull();
         model.PriceInPerMTok.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetState_exposes_curated_custom_protocol_options()
+    {
+        var repository = new InMemoryAiProviderRepository();
+        var protector = new FakeSecretProtector();
+        var service = CreateService(repository, protector, new FakeAiProviderAdapter(AiProviderKind.OpenAI));
+
+        var state = await service.GetStateAsync();
+
+        state.CustomProtocols.Should().NotBeEmpty();
+        state.CustomProtocols.Select(protocol => protocol.Id)
+            .Should().Contain(["openai-chat", "openai-responses", "anthropic", "ollama"]);
+        var ollama = state.CustomProtocols.Single(protocol => protocol.Id == "ollama");
+        ollama.ProviderKind.Should().Be(AiProviderKind.Ollama);
+        ollama.AuthKind.Should().Be(AiProviderAuthKind.None);
+        ollama.DefaultApiFormat.Should().Be(AiProviderApiFormat.OllamaNative);
+    }
+
+    [Fact]
+    public async Task SaveProvider_creates_multiple_custom_connections_with_chosen_protocol()
+    {
+        var repository = new InMemoryAiProviderRepository();
+        var protector = new FakeSecretProtector();
+        var service = CreateService(
+            repository,
+            protector,
+            new FakeAiProviderAdapter(AiProviderKind.OpenAICompatible)
+            {
+                Formats = [AiProviderApiFormat.OpenAIChatCompletions, AiProviderApiFormat.OpenAIResponses]
+            },
+            new FakeAiProviderAdapter(AiProviderKind.Anthropic)
+            {
+                Formats = [AiProviderApiFormat.AnthropicMessages]
+            });
+
+        var first = await service.SaveProviderAsync(new SaveProviderCommand(
+            null,
+            "custom",
+            "Gateway One",
+            new Uri("https://one.example/v1/"),
+            "key-one",
+            ConnectionOptions: null,
+            ProviderKind: AiProviderKind.OpenAICompatible,
+            DefaultApiFormat: AiProviderApiFormat.OpenAIChatCompletions));
+
+        var second = await service.SaveProviderAsync(new SaveProviderCommand(
+            null,
+            "custom",
+            "Gateway Two",
+            new Uri("https://two.example/v1/"),
+            "key-two",
+            ConnectionOptions: null,
+            ProviderKind: AiProviderKind.Anthropic,
+            DefaultApiFormat: AiProviderApiFormat.AnthropicMessages));
+
+        first.ConnectionId.Should().NotBeNull();
+        second.ConnectionId.Should().NotBeNull();
+        first.ConnectionId.Should().NotBe(second.ConnectionId!.Value);
+        repository.Connections.Should().HaveCount(2);
+        first.ProviderKind.Should().Be(AiProviderKind.OpenAICompatible);
+        first.DefaultApiFormat.Should().Be(AiProviderApiFormat.OpenAIChatCompletions);
+        second.ProviderKind.Should().Be(AiProviderKind.Anthropic);
+        second.DefaultApiFormat.Should().Be(AiProviderApiFormat.AnthropicMessages);
+        second.SupportedFormats.Should().ContainSingle().Which.Should().Be(AiProviderApiFormat.AnthropicMessages);
+
+        var state = await service.GetStateAsync();
+        state.Providers.Count(view => view.CatalogId == "custom" && view.IsConfigured).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task SaveProvider_keeps_the_original_protocol_when_a_later_edit_omits_it()
+    {
+        var repository = new InMemoryAiProviderRepository();
+        var protector = new FakeSecretProtector();
+        var service = CreateService(
+            repository,
+            protector,
+            new FakeAiProviderAdapter(AiProviderKind.OpenAICompatible),
+            new FakeAiProviderAdapter(AiProviderKind.Anthropic));
+
+        var created = await service.SaveProviderAsync(new SaveProviderCommand(
+            null,
+            "custom",
+            "Anthropic Gateway",
+            new Uri("https://anthropic.example/"),
+            "key",
+            ConnectionOptions: null,
+            ProviderKind: AiProviderKind.Anthropic,
+            DefaultApiFormat: AiProviderApiFormat.AnthropicMessages));
+
+        // An api-key or base-url edit carries no protocol and must not reset the connection.
+        var edited = await service.SaveProviderAsync(new SaveProviderCommand(
+            created.ConnectionId,
+            "custom",
+            "Anthropic Gateway",
+            new Uri("https://anthropic.example/v2/"),
+            ApiKey: null,
+            ConnectionOptions: null,
+            ProviderKind: AiProviderKind.OpenAICompatible,
+            DefaultApiFormat: AiProviderApiFormat.OpenAIChatCompletions));
+
+        edited.ProviderKind.Should().Be(AiProviderKind.Anthropic);
+        edited.DefaultApiFormat.Should().Be(AiProviderApiFormat.AnthropicMessages);
+        repository.Connections[created.ConnectionId!.Value].ProviderKind.Should().Be(AiProviderKind.Anthropic);
+    }
+
+    [Fact]
+    public async Task UpsertModel_accepts_any_format_the_adapter_supports_and_rejects_the_rest()
+    {
+        var repository = new InMemoryAiProviderRepository();
+        var protector = new FakeSecretProtector();
+        // A custom connection whose kind is Ollama supports OllamaNative and OpenAIChatCompletions.
+        var connection = CreateConnection("custom", AiProviderKind.Ollama, "Local");
+        repository.Connections[connection.Id] = connection;
+        var service = CreateService(
+            repository,
+            protector,
+            new FakeAiProviderAdapter(AiProviderKind.Ollama)
+            {
+                Formats = [AiProviderApiFormat.OllamaNative, AiProviderApiFormat.OpenAIChatCompletions]
+            });
+
+        var native = await service.UpsertModelAsync(new UpsertModelCommand(
+            null,
+            connection.Id,
+            "Native model",
+            AiProviderApiFormat.OllamaNative,
+            "llama3",
+            Sampling: null,
+            ModelOptions: null));
+        native.ApiFormat.Should().Be(AiProviderApiFormat.OllamaNative);
+
+        var invalid = () => service.UpsertModelAsync(new UpsertModelCommand(
+            null,
+            connection.Id,
+            "Wrong protocol",
+            AiProviderApiFormat.AnthropicMessages,
+            "llama3",
+            Sampling: null,
+            ModelOptions: null));
+        await invalid.Should().ThrowAsync<NotSupportedException>().WithMessage("*AnthropicMessages*");
     }
 
     private static AiProviderSettingsService CreateService(
@@ -644,7 +792,14 @@ public sealed class AiProviderSettingsServiceTests
         public IReadOnlyDictionary<string, string> LastSecrets { get; private set; } =
             new Dictionary<string, string>();
 
-        public bool SupportsApiFormat(AiProviderApiFormat apiFormat) => true;
+        /// <summary>
+        /// When set, restricts the formats this fake advertises. Left null the fake
+        /// supports every format (the historical behavior most tests rely on).
+        /// </summary>
+        public IReadOnlyList<AiProviderApiFormat>? Formats { get; init; }
+
+        public bool SupportsApiFormat(AiProviderApiFormat apiFormat)
+            => Formats is null || Formats.Contains(apiFormat);
 
         public Task<IReadOnlyList<AiModelDescriptor>> ListModelsAsync(
             AiProviderConnection connection,

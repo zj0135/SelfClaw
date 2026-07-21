@@ -13,4 +13,11 @@ public interface IAiProviderRegistry
     /// Throws when no adapter is registered for the kind.
     /// </summary>
     IAiProviderAdapter GetRequiredAdapter(AiProviderKind providerKind);
+
+    /// <summary>
+    /// Returns the adapter registered for <paramref name="providerKind"/>, or
+    /// <see langword="null"/> when none is registered. Used by read-only paths
+    /// (e.g. building settings views) that must not fail when a kind has no adapter.
+    /// </summary>
+    IAiProviderAdapter? TryGetAdapter(AiProviderKind providerKind);
 }

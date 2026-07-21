@@ -108,6 +108,44 @@ public sealed class AiProviderSettingsBridgeTests
     }
 
     [Fact]
+    public async Task Save_provider_parses_the_custom_protocol_kind_and_default_format()
+    {
+        var service = new RecordingSettingsService();
+        var bridge = new AiProviderSettingsBridge(service);
+        const string payload =
+            "{\"catalogId\":\"custom\",\"name\":\"My Gateway\",\"base\":\"https://api.example.com/v1/\"," +
+            "\"apiKey\":null,\"providerKind\":3,\"apiFormat\":2}";
+        using var document = JsonDocument.Parse(AddRequestId(payload, "req"));
+
+        (await bridge.TryHandleAsync("ai-providers/save-provider", document.RootElement)).Should().BeTrue();
+
+        var command = service.LastSaveCommand;
+        command.Should().NotBeNull();
+        command!.CatalogId.Should().Be("custom");
+        command.Name.Should().Be("My Gateway");
+        command.Endpoint.Should().Be(new Uri("https://api.example.com/v1/"));
+        command.ApiKey.Should().BeNull();
+        command.ProviderKind.Should().Be(AiProviderKind.Anthropic);
+        command.DefaultApiFormat.Should().Be(AiProviderApiFormat.AnthropicMessages);
+    }
+
+    [Fact]
+    public async Task Save_provider_leaves_the_protocol_unset_when_the_payload_omits_it()
+    {
+        var service = new RecordingSettingsService();
+        var bridge = new AiProviderSettingsBridge(service);
+        const string payload =
+            "{\"catalogId\":\"openai\",\"name\":\"OpenAI\",\"base\":\"https://api.openai.com/v1/\",\"apiKey\":\"sk-x\"}";
+        using var document = JsonDocument.Parse(AddRequestId(payload, "req"));
+
+        (await bridge.TryHandleAsync("ai-providers/save-provider", document.RootElement)).Should().BeTrue();
+
+        service.LastSaveCommand.Should().NotBeNull();
+        service.LastSaveCommand!.ProviderKind.Should().BeNull();
+        service.LastSaveCommand.DefaultApiFormat.Should().BeNull();
+    }
+
+    [Fact]
     public async Task TryHandleAsync_propagates_caller_cancellation_without_posting_an_error()
     {
         var service = new RecordingSettingsService { ObserveCancellation = true };
@@ -179,7 +217,7 @@ public sealed class AiProviderSettingsBridgeTests
         public Task<AiProviderSettingsState> GetStateAsync(CancellationToken cancellationToken = default)
         {
             Record("get-state", cancellationToken);
-            return Task.FromResult(new AiProviderSettingsState([], DefaultModelId));
+            return Task.FromResult(new AiProviderSettingsState([], DefaultModelId, []));
         }
 
         public Task<Guid?> GetDefaultModelAsync(string scope, CancellationToken cancellationToken = default)
@@ -188,9 +226,12 @@ public sealed class AiProviderSettingsBridgeTests
             return Task.FromResult<Guid?>(DefaultModelId);
         }
 
+        public SaveProviderCommand? LastSaveCommand { get; private set; }
+
         public Task<AiProviderView> SaveProviderAsync(SaveProviderCommand command, CancellationToken cancellationToken = default)
         {
             Record("save-provider", cancellationToken);
+            LastSaveCommand = command;
             return Task.FromResult(CreateProvider());
         }
 

@@ -41,4 +41,7 @@ internal sealed class AiProviderRegistry : IAiProviderRegistry
         throw new KeyNotFoundException(
             $"No AI provider adapter is registered for provider kind '{providerKind}'.");
     }
+
+    public IAiProviderAdapter? TryGetAdapter(AiProviderKind providerKind)
+        => _adaptersByKind.GetValueOrDefault(providerKind);
 }

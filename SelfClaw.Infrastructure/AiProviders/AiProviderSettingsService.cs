@@ -90,7 +90,10 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         var defaultSelection = await _repository.GetModelProfileSelectionAsync(
             AiModelSelectionScopes.DesktopDefault,
             cancellationToken);
-        return new AiProviderSettingsState(views, defaultSelection?.ModelProfileId);
+        return new AiProviderSettingsState(
+            views,
+            defaultSelection?.ModelProfileId,
+            AiProviderProtocols.CustomProtocolOptions);
     }
 
     public async Task<AiProviderView> SaveProviderAsync(
@@ -111,11 +114,19 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
                 ?? throw new KeyNotFoundException($"AI provider connection '{command.Id.Value}' was not found.");
         }
 
+        // The protocol (provider kind) and catalog membership are fixed once a connection
+        // exists: preserve them on update, take the command's choice on create, and fall back
+        // to the catalog default. This keeps an api-key or base-url edit (which carries no
+        // provider kind) from resetting a custom connection's protocol.
+        var providerKind = existing?.ProviderKind ?? command.ProviderKind ?? catalogEntry.ProviderKind;
+        var catalogId = existing?.CatalogId ?? catalogEntry.CatalogId;
+        var authKind = AiProviderProtocols.ResolveAuthKind(providerKind);
+
         var credentialRefs = existing?.CredentialRefs.ToDictionary(pair => pair.Key, pair => pair.Value)
             ?? new Dictionary<string, string>(StringComparer.Ordinal);
         credentialRefs.TryGetValue(ApiKeySecretName, out var existingApiKeyRef);
 
-        if (catalogEntry.AuthKind == AiProviderAuthKind.None)
+        if (authKind == AiProviderAuthKind.None)
         {
             if (!string.IsNullOrWhiteSpace(existingApiKeyRef))
             {
@@ -144,23 +155,30 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             }
         }
 
+        // On update the catalog membership can differ from the command; resolve the entry that
+        // actually backs the persisted connection so the returned view carries matching metadata.
+        var effectiveCatalog = string.Equals(catalogId, catalogEntry.CatalogId, StringComparison.OrdinalIgnoreCase)
+            ? catalogEntry
+            : AiProviderCatalog.GetRequired(catalogId);
+        var connectionOptions = ResolveConnectionOptions(command, existing, providerKind, effectiveCatalog);
+
         var now = DateTimeOffset.UtcNow;
         var connection = new AiProviderConnection(
             existing?.Id ?? command.Id ?? Guid.NewGuid(),
-            catalogEntry.CatalogId,
+            catalogId,
             command.Name.Trim(),
-            catalogEntry.ProviderKind,
+            providerKind,
             command.Endpoint,
-            catalogEntry.AuthKind,
+            authKind,
             credentialRefs,
-            command.ConnectionOptions ?? existing?.ConnectionOptions ?? EmptyJsonDictionary(),
+            connectionOptions,
             existing?.CreatedAtUtc ?? now,
             now,
-            existing?.IsEnabled ?? true);
+            existing?.IsEnabled ?? command.Enabled ?? true);
         await _repository.UpsertProviderConnectionAsync(connection, cancellationToken);
 
         var profiles = await _repository.ListModelProfilesAsync(connection.Id, cancellationToken);
-        return await CreateProviderViewAsync(connection, catalogEntry, profiles, cancellationToken);
+        return await CreateProviderViewAsync(connection, effectiveCatalog, profiles, cancellationToken);
     }
 
     public Task SetProviderEnabledAsync(
@@ -195,6 +213,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
 
         var secrets = await ResolveSecretsAsync(connection, cancellationToken);
         var remoteModels = await adapter.ListModelsAsync(connection, secrets, cancellationToken);
+        var defaultApiFormat = ResolveDefaultApiFormat(connection, catalogEntry, adapter);
         var existingModels = await _repository.ListModelProfilesAsync(connectionId, cancellationToken);
         var modelsById = existingModels
             .GroupBy(profile => profile.Model, StringComparer.Ordinal)
@@ -215,7 +234,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
                     Guid.NewGuid(),
                     connectionId,
                     descriptor.DisplayName ?? descriptor.ModelId,
-                    catalogEntry.DefaultApiFormat,
+                    defaultApiFormat,
                     descriptor.ModelId,
                     new AiSamplingOptions(false, 0.7, false, 0.7),
                     MergeDisplayMetadata(EmptyJsonDictionary(), descriptor, out _),
@@ -301,11 +320,11 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         ArgumentException.ThrowIfNullOrWhiteSpace(command.Name);
         ArgumentException.ThrowIfNullOrWhiteSpace(command.Model);
         var connection = await GetRequiredConnectionAsync(command.ProviderConnectionId, cancellationToken);
-        var catalogEntry = AiProviderCatalog.GetRequired(connection.CatalogId);
-        if (!catalogEntry.SupportedFormats.Contains(command.ApiFormat))
+        var adapter = _registry.GetRequiredAdapter(connection.ProviderKind);
+        if (!adapter.SupportsApiFormat(command.ApiFormat))
         {
             throw new NotSupportedException(
-                $"Provider catalog '{catalogEntry.CatalogId}' does not support API format '{command.ApiFormat}'.");
+                $"Provider '{connection.Name}' does not support API format '{command.ApiFormat}'.");
         }
 
         AiModelProfile? existing = null;
@@ -405,6 +424,14 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             apiKey = await _secretProtector.RetrieveSecretAsync(apiKeyRef, cancellationToken);
         }
 
+        var adapter = _registry.TryGetAdapter(connection.ProviderKind);
+        var supportedFormats = adapter is null
+            ? catalogEntry.SupportedFormats
+            : ResolveSupportedFormats(adapter);
+        var supportsModelListing = adapter?.SupportsModelListing ?? catalogEntry.SupportsModelListing;
+        var defaultApiFormat = adapter is null
+            ? catalogEntry.DefaultApiFormat
+            : ResolveDefaultApiFormat(connection, catalogEntry, adapter);
         var modelViews = profiles.Select(CreateModelView).ToArray();
         return new AiProviderView(
             connection.Id,
@@ -420,16 +447,17 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             connection.ProviderKind,
             connection.AuthKind,
             catalogEntry.GetApiKeyUrl,
-            catalogEntry.SupportsModelListing,
-            catalogEntry.DefaultApiFormat,
-            catalogEntry.SupportedFormats,
+            supportsModelListing,
+            defaultApiFormat,
+            supportedFormats,
             connection.ConnectionOptions,
             modelViews,
             modelViews.Length);
     }
 
     private static AiProviderView CreatePlaceholderView(AiProviderCatalogEntry catalogEntry)
-        => new(
+    {
+        return new AiProviderView(
             null,
             catalogEntry.CatalogId,
             catalogEntry.DisplayName,
@@ -449,6 +477,40 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             EmptyJsonDictionary(),
             [],
             0);
+    }
+
+    /// <summary>Enumerates the wire formats an adapter can serve, ordered by the enum definition.</summary>
+    private static IReadOnlyList<AiProviderApiFormat> ResolveSupportedFormats(IAiProviderAdapter adapter)
+        => Enum.GetValues<AiProviderApiFormat>()
+            .Where(adapter.SupportsApiFormat)
+            .ToArray();
+
+    /// <summary>
+    /// Resolves the default wire format for a connection: the value persisted in
+    /// connection options when present and still supported by the adapter,
+    /// otherwise the catalog default, otherwise the adapter's first supported format.
+    /// </summary>
+    private static AiProviderApiFormat ResolveDefaultApiFormat(
+        AiProviderConnection connection,
+        AiProviderCatalogEntry catalogEntry,
+        IAiProviderAdapter adapter)
+    {
+        if (connection.ConnectionOptions.TryGetValue(AiProviderProtocols.DefaultApiFormatOptionKey, out var element) &&
+            element.ValueKind == JsonValueKind.Number &&
+            element.TryGetInt32(out var raw) &&
+            Enum.IsDefined((AiProviderApiFormat)raw) &&
+            adapter.SupportsApiFormat((AiProviderApiFormat)raw))
+        {
+            return (AiProviderApiFormat)raw;
+        }
+
+        if (adapter.SupportsApiFormat(catalogEntry.DefaultApiFormat))
+        {
+            return catalogEntry.DefaultApiFormat;
+        }
+
+        return ResolveSupportedFormats(adapter)[0];
+    }
 
     private static AiModelView CreateModelView(AiModelProfile profile)
         => new(
@@ -535,6 +597,38 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         var prefix = apiKey.StartsWith("sk-", StringComparison.Ordinal) ? "sk-" : string.Empty;
         // Only echo a suffix when it reveals a small fraction of the key; short keys stay fully masked.
         return apiKey.Length >= 8 ? $"{prefix}****{apiKey[^4..]}" : $"{prefix}****";
+    }
+
+    /// <summary>
+    /// Builds the persisted connection options. Starts from the command options
+    /// (falling back to the existing connection's), then records the default wire
+    /// format on create so the UI and remote-model merge can resolve it later. The
+    /// default format is part of the connection's fixed protocol: on update the
+    /// stored value is preserved and the command's format is ignored.
+    /// </summary>
+    private static IReadOnlyDictionary<string, JsonElement> ResolveConnectionOptions(
+        SaveProviderCommand command,
+        AiProviderConnection? existing,
+        AiProviderKind providerKind,
+        AiProviderCatalogEntry catalogEntry)
+    {
+        var options = (command.ConnectionOptions ?? existing?.ConnectionOptions ?? EmptyJsonDictionary())
+            .ToDictionary(pair => pair.Key, pair => pair.Value.Clone(), StringComparer.Ordinal);
+
+        // The protocol (and its default format) is fixed once the connection exists.
+        // Only stamp the default format on create; on update keep whatever is stored.
+        if (existing is null)
+        {
+            var defaultApiFormat = command.DefaultApiFormat
+                ?? (providerKind == catalogEntry.ProviderKind ? catalogEntry.DefaultApiFormat : (AiProviderApiFormat?)null);
+            if (defaultApiFormat is { } format && Enum.IsDefined(format))
+            {
+                options[AiProviderProtocols.DefaultApiFormatOptionKey] =
+                    JsonSerializer.SerializeToElement((int)format);
+            }
+        }
+
+        return options;
     }
 
     private static IReadOnlyDictionary<string, JsonElement> EmptyJsonDictionary()
