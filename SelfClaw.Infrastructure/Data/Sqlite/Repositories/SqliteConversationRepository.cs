@@ -5,7 +5,7 @@ using SelfClaw.Infrastructure.Data.Sqlite;
 
 namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
-public sealed class SqliteConversationRepository : IConversationRepository
+public sealed class SqliteConversationRepository : IConversationRepository, ITurnFinalizationRepository
 {
     private readonly SqliteDatabase _database;
 
@@ -126,8 +126,27 @@ ORDER BY created_at_utc ASC;";
 
     public async Task<MessageRecord> UpsertMessageAsync(MessageRecord message, CancellationToken cancellationToken = default)
     {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await UpsertMessageAsync(connection, transaction: null, message, onlyIfStreaming: false, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (message.Attachments is not null)
+        {
+            await ReplaceMessageAttachmentsAsync(connection, message, cancellationToken).ConfigureAwait(false);
+        }
+
+        return message;
+    }
+
+    private static async Task<bool> UpsertMessageAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        MessageRecord message,
+        bool onlyIfStreaming,
+        CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = @"
 INSERT INTO messages(id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc, agent_id, agent_name, agent_role, input_tokens, output_tokens, duration_ms, error_message)
 VALUES($id, $conversationId, $role, $markdownContent, $status, $createdAt, $updatedAt, $agentId, $agentName, $agentRole, $inputTokens, $outputTokens, $durationMs, $errorMessage)
@@ -141,7 +160,8 @@ ON CONFLICT(id) DO UPDATE SET
     input_tokens = excluded.input_tokens,
     output_tokens = excluded.output_tokens,
     duration_ms = excluded.duration_ms,
-    error_message = excluded.error_message;";
+    error_message = excluded.error_message" +
+            (onlyIfStreaming ? " WHERE messages.status = $streamingStatus;" : ";");
         command.Parameters.AddWithValue("$id", message.Id.ToString("D"));
         command.Parameters.AddWithValue("$conversationId", message.ConversationId.ToString("D"));
         command.Parameters.AddWithValue("$role", (int)message.Role);
@@ -156,14 +176,12 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$outputTokens", message.OutputTokens ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$durationMs", message.DurationMs ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$errorMessage", message.ErrorMessage ?? (object)DBNull.Value);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-
-        if (message.Attachments is not null)
+        if (onlyIfStreaming)
         {
-            await ReplaceMessageAttachmentsAsync(connection, message, cancellationToken);
+            command.Parameters.AddWithValue("$streamingStatus", (int)MessageStatus.Streaming);
         }
 
-        return message;
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
     }
 
     private static async Task<Dictionary<Guid, IReadOnlyList<MessageAttachmentRecord>>> ReadMessageAttachmentsAsync(
@@ -268,8 +286,19 @@ ORDER BY created_at_utc ASC;";
 
     public async Task<ToolExecutionRecord> UpsertToolExecutionAsync(ToolExecutionRecord record, CancellationToken cancellationToken = default)
     {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await UpsertToolExecutionAsync(connection, transaction: null, record, cancellationToken).ConfigureAwait(false);
+        return record;
+    }
+
+    private static async Task UpsertToolExecutionAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        ToolExecutionRecord record,
+        CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = @"
 INSERT INTO tool_runs(id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index, result_content)
 VALUES($id, $conversationId, $toolName, $argumentsJson, $status, $resultSummary, $correlationId, $durationMs, $createdAt, $updatedAt, $agentId, $messageId, $afterSegmentIndex, $resultContent)
@@ -296,8 +325,41 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$messageId", record.MessageId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$afterSegmentIndex", record.AfterSegmentIndex ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$resultContent", record.ResultContent ?? (object)DBNull.Value);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-        return record;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> TryFinalizeTurnAsync(
+        TurnFinalization finalization,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(finalization);
+
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var sqliteTransaction = (SqliteTransaction)transaction;
+        var messageWritten = await UpsertMessageAsync(
+            connection,
+            sqliteTransaction,
+            finalization.AssistantMessage,
+            onlyIfStreaming: true,
+            cancellationToken).ConfigureAwait(false);
+        if (!messageWritten)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        foreach (var toolExecution in finalization.ToolExecutions)
+        {
+            await UpsertToolExecutionAsync(
+                connection,
+                sqliteTransaction,
+                toolExecution,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     public async Task<IReadOnlyList<WorkspaceRoot>> ListWorkspaceRootsAsync(CancellationToken cancellationToken = default)

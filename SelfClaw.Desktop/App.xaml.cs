@@ -12,6 +12,7 @@ using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
+using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
@@ -50,6 +51,7 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<DesktopToolApprovalHandler>();
             builder.Services.AddSingleton<DesktopNotificationService>();
             builder.Services.AddSingleton<DesktopNotificationActivationService>();
+            builder.Services.AddSingleton<DesktopTurnFinalizer>();
             builder.Services.AddSingleton<ProgrammingAssistantSettingsService>();
             builder.Services.AddSingleton<AiProviderSettingsBridge>();
             builder.Services.AddSingleton<PetService>();

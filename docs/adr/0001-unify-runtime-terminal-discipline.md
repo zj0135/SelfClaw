@@ -1,0 +1,3 @@
+# Unify runtime terminal discipline
+
+SelfClaw exposes one `IAgentChatRuntime` seam whose dispatcher guarantees exactly one final success or failure event, while Direct and CLI remain internal adapters that classify mode-specific outcomes. Cancellation propagates as control flow rather than a terminal event so Infrastructure never converts `OperationCanceledException`; Desktop finalizes cancelled messages and pending tools atomically, preserving partial output without treating it as future Direct-model context. This deliberately makes the first terminal event the result cutoff and keeps later cleanup failures diagnostic rather than allowing them to rewrite an outcome already shown to the user.

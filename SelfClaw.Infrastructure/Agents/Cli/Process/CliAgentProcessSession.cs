@@ -27,7 +27,6 @@ internal sealed class CliAgentProcessSession : ICliAgentProcessSession
     private readonly System.Diagnostics.Process _process;
     private readonly TimeSpan _inactivityTimeout;
     private readonly CancellationTokenSource _linkedCts;
-    private readonly CancellationToken _externalToken;
     private readonly Channel<string> _outputChannel;
     private readonly StringBuilder _standardError = new();
     private readonly object _stderrLock = new();
@@ -51,7 +50,6 @@ internal sealed class CliAgentProcessSession : ICliAgentProcessSession
     {
         _process = process;
         _inactivityTimeout = inactivityTimeout;
-        _externalToken = cancellationToken;
         _linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _outputChannel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
         {
@@ -175,15 +173,13 @@ internal sealed class CliAgentProcessSession : ICliAgentProcessSession
     }
 
     /// <summary>
-    /// Maps exit state to <see cref="RunCompletionStatus"/> per plan.md §5: cancellation (external or
-    /// inactivity kill) → Canceled/Failed, exit 0 → Succeeded, anything else → Failed.
+    /// Maps process exit state to a public run result. Caller cancellation is carried separately as
+    /// control flow and therefore never appears as a <see cref="RunCompletionStatus"/> value.
     /// </summary>
     private RunCompletionStatus ClassifyExit(int? exitCode)
     {
         if (_killedForInactivity)
             return RunCompletionStatus.Failed;
-        if (_externalToken.IsCancellationRequested)
-            return RunCompletionStatus.Canceled;
         if (exitCode == 0)
             return RunCompletionStatus.Succeeded;
         return RunCompletionStatus.Failed;

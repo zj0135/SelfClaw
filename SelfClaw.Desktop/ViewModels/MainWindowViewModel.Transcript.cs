@@ -29,31 +29,6 @@ public sealed partial class MainWindowViewModel
         PublishRuntimeState(runtimeState, true);
     }
 
-    private async Task FailActiveMessagesAsync(
-        ConversationRuntimeState runtimeState,
-        IEnumerable<Guid> messageIds,
-        string errorMessage)
-    {
-        foreach (var messageId in messageIds.ToArray())
-        {
-            var existing = runtimeState.Messages.FirstOrDefault(item => item.Id == messageId);
-            if (existing is null)
-            {
-                continue;
-            }
-
-            var updated = existing with
-            {
-                Status = MessageStatus.Failed,
-                UpdatedAtUtc = DateTimeOffset.UtcNow,
-                ErrorMessage = errorMessage
-            };
-
-            ReplaceMessage(runtimeState, updated);
-            await _conversationRepository.UpsertMessageAsync(updated);
-        }
-    }
-
     private ToolExecutionRecord CaptureToolRunAnchor(ConversationRuntimeState runtimeState, ToolExecutionRecord toolRun)
     {
         if (runtimeState.ToolRunAnchors.TryGetValue(toolRun.Id, out var existingAnchor))

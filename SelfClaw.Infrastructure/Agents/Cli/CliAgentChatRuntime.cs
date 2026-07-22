@@ -12,11 +12,12 @@ using SelfClaw.Infrastructure.Agents.Cli.Session;
 using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
+using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
 
 namespace SelfClaw.Infrastructure.Agents.Cli;
 
 /// <summary>
-/// The CLI-backed <see cref="IAgentChatRuntime"/> (plan.md 阶段 5, T5.1). Assembles the phase 2–4
+/// The CLI adapter used behind the external <see cref="IAgentChatRuntime"/> seam. It assembles the
 /// building blocks for a single turn and streams the agent's output as <see cref="AgentStreamEvent"/>s:
 /// <list type="number">
 ///   <item>resolve the <see cref="CliAgentDefinition"/> for the requested agent;</item>
@@ -31,7 +32,7 @@ namespace SelfClaw.Infrastructure.Agents.Cli;
 ///         ended without one.</item>
 /// </list>
 /// </summary>
-public sealed class CliAgentChatRuntime : IAgentChatRuntime
+internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
 {
     private readonly ICliAgentProcessHost _processHost;
     private readonly CliAgentRegistry _registry;
@@ -52,6 +53,8 @@ public sealed class CliAgentChatRuntime : IAgentChatRuntime
         _sessionResolver = sessionResolver;
         _logger = logger ?? NullLogger<CliAgentChatRuntime>.Instance;
     }
+
+    public AgentExecutionMode Mode => AgentExecutionMode.Cli;
 
     public async IAsyncEnumerable<AgentStreamEvent> StreamTurnAsync(
         ChatTurnRequest request,

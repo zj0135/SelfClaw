@@ -8,6 +8,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Tools.Workspace;
@@ -18,7 +19,7 @@ namespace SelfClaw.Infrastructure.Agents.Runtime;
 /// In-process Direct runtime. It translates Microsoft.Extensions.AI streaming
 /// content into the same provider-neutral event stream consumed by the desktop transcript.
 /// </summary>
-public sealed class DirectAgentChatRuntime : IAgentChatRuntime
+internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 {
     private readonly IAiChatClientFactory _chatClientFactory;
     private readonly WorkspaceAgentToolset _workspaceToolset;
@@ -33,6 +34,8 @@ public sealed class DirectAgentChatRuntime : IAgentChatRuntime
         _workspaceToolset = workspaceToolset;
         _logger = logger ?? NullLogger<DirectAgentChatRuntime>.Instance;
     }
+
+    public AgentExecutionMode Mode => AgentExecutionMode.Direct;
 
     public IAsyncEnumerable<AgentStreamEvent> StreamTurnAsync(
         ChatTurnRequest request,
@@ -84,6 +87,7 @@ public sealed class DirectAgentChatRuntime : IAgentChatRuntime
         var usageReported = false;
         var startedCalls = new HashSet<string>(StringComparer.Ordinal);
         var runCompletedEmitted = false;
+        var cancellationObserved = false;
 
         try
         {
@@ -178,18 +182,11 @@ public sealed class DirectAgentChatRuntime : IAgentChatRuntime
                 ErrorMessage: null));
             runCompletedEmitted = true;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            if (!usageReported)
-            {
-                TryWriteUsage(writer, hasInputUsage, inputTokens, hasOutputUsage, outputTokens);
-            }
-
-            writer.TryWrite(new RunCompletedEvent(
-                RunCompletionStatus.Canceled,
-                NullIfEmpty(finalText),
-                ErrorMessage: null));
-            runCompletedEmitted = true;
+            cancellationObserved = true;
+            writer.TryComplete(exception);
+            throw;
         }
         catch (Exception exception)
         {
@@ -216,7 +213,7 @@ public sealed class DirectAgentChatRuntime : IAgentChatRuntime
                 _logger.LogError(exception, "Failed to dispose the Direct AI chat client pipeline.");
             }
 
-            if (!runCompletedEmitted)
+            if (!runCompletedEmitted && !cancellationObserved)
             {
                 writer.TryWrite(Failed("The Direct AI agent turn ended without a completion status."));
             }
@@ -235,7 +232,8 @@ public sealed class DirectAgentChatRuntime : IAgentChatRuntime
 
         foreach (var message in request.Messages)
         {
-            if (message.Status == MessageStatus.Failed || string.IsNullOrEmpty(message.MarkdownContent))
+            if (message.Status is MessageStatus.Failed or MessageStatus.Cancelled ||
+                string.IsNullOrEmpty(message.MarkdownContent))
             {
                 continue;
             }

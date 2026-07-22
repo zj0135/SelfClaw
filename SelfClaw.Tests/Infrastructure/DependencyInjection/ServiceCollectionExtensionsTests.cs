@@ -79,7 +79,6 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         var registry = provider.GetRequiredService<IAiProviderRegistry>();
         var settingsService = provider.GetRequiredService<IAiProviderSettingsService>();
         var chatClientFactory = provider.GetRequiredService<IAiChatClientFactory>();
-        var directRuntime = provider.GetRequiredService<DirectAgentChatRuntime>();
 
         repository.Should().BeOfType<SqliteAiProviderRepository>();
         runtime.Should().BeOfType<DispatchingAgentChatRuntime>();
@@ -100,7 +99,6 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         registry.GetRequiredAdapter(AiProviderKind.AzureOpenAI).ProviderKind.Should().Be(AiProviderKind.AzureOpenAI);
         settingsService.Should().BeOfType<AiProviderSettingsService>();
         chatClientFactory.Should().BeOfType<AiChatClientFactory>();
-        directRuntime.Should().NotBeNull();
     }
 
     public void Dispose()

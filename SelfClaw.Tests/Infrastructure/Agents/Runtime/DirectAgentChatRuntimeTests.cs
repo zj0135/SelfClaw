@@ -85,17 +85,16 @@ public sealed class DirectAgentChatRuntimeTests
     }
 
     [Fact]
-    public async Task StreamTurnAsync_converts_cancellation_to_one_terminal_event()
+    public async Task StreamTurnAsync_propagates_cancellation_and_disposes_client()
     {
         var client = new ScriptedChatClient(
             [Update("m", new TextContent("partial"))],
             new OperationCanceledException());
         var runtime = CreateRuntime(new FakeChatClientFactory(client));
 
-        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(Guid.NewGuid())));
+        var action = () => CollectAsync(runtime.StreamTurnAsync(CreateRequest(Guid.NewGuid())));
 
-        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which
-            .Should().Be(new RunCompletedEvent(RunCompletionStatus.Canceled, "partial", null));
+        await action.Should().ThrowAsync<OperationCanceledException>();
         client.IsDisposed.Should().BeTrue();
     }
 
@@ -117,26 +116,6 @@ public sealed class DirectAgentChatRuntimeTests
             CreateRuntime(new FakeChatClientFactory(client)).StreamTurnAsync(CreateRequest(Guid.NewGuid())));
         streamEvents.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Should().Be(
             new RunCompletedEvent(RunCompletionStatus.Failed, "partial", "provider failed"));
-        client.IsDisposed.Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task StreamTurnAsync_cancels_the_producer_when_the_consumer_stops_early()
-    {
-        // An abandoned enumerator (consumer breaks out without cancelling) must still tear the
-        // provider stream down instead of leaving it running.
-        var client = new BlockingChatClient();
-        var runtime = CreateRuntime(new FakeChatClientFactory(client));
-
-        await foreach (var streamEvent in runtime.StreamTurnAsync(CreateRequest(Guid.NewGuid())))
-        {
-            if (streamEvent is RunStatusEvent)
-            {
-                break;
-            }
-        }
-
-        (await client.WaitForCancellationAsync()).Should().BeTrue();
         client.IsDisposed.Should().BeTrue();
     }
 
@@ -167,6 +146,7 @@ public sealed class DirectAgentChatRuntimeTests
                 Message(MessageRole.System, "ignored system history"),
                 Message(MessageRole.User, "user prompt"),
                 Message(MessageRole.Assistant, "failed answer", MessageStatus.Failed),
+                Message(MessageRole.Assistant, "cancelled answer", MessageStatus.Cancelled),
                 Message(MessageRole.Assistant, "prior answer")
             ]);
     }
@@ -272,42 +252,6 @@ public sealed class DirectAgentChatRuntimeTests
             }
 
             await Task.CompletedTask;
-        }
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-        public void Dispose() => IsDisposed = true;
-    }
-
-    private sealed class BlockingChatClient : IChatClient
-    {
-        private readonly TaskCompletionSource<bool> _canceled =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public bool IsDisposed { get; private set; }
-
-        public Task<bool> WaitForCancellationAsync() => _canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-        public Task<ChatResponse> GetResponseAsync(
-            IEnumerable<ChatMessage> messages,
-            ChatOptions? options = null,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-            IEnumerable<ChatMessage> messages,
-            ChatOptions? options = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            using var registration = cancellationToken.Register(() => _canceled.TrySetResult(true));
-            yield return new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("partial")]) { MessageId = "m" };
-            try
-            {
-                await Task.Delay(Timeout.Infinite, cancellationToken);
-            }
-            finally
-            {
-                _canceled.TrySetResult(true);
-            }
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;

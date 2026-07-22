@@ -11,6 +11,7 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
+using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Tools.Transcript;
 using SelfClaw.Infrastructure.Tools.Transcript.Models;
@@ -29,6 +30,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private const string AttachmentHostName = "attachments.selfclaw.local";
     private readonly IConversationRepository _conversationRepository;
     private readonly IAgentChatRuntime _agentChatRuntime;
+    private readonly DesktopTurnFinalizer _turnFinalizer;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly DesktopNotificationService _desktopNotificationService;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
@@ -68,6 +70,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public MainWindowViewModel(
         IConversationRepository conversationRepository,
         IAgentChatRuntime agentChatRuntime,
+        DesktopTurnFinalizer turnFinalizer,
         DesktopToolApprovalHandler toolApprovalHandler,
         DesktopNotificationService desktopNotificationService,
         MarkdownHtmlRenderer markdownHtmlRenderer,
@@ -79,6 +82,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _conversationRepository = conversationRepository;
         _agentChatRuntime = agentChatRuntime;
+        _turnFinalizer = turnFinalizer;
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
         _markdownHtmlRenderer = markdownHtmlRenderer;
@@ -179,7 +183,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Cancels the selected conversation's running turn (WebView "stop-generation" / Esc).
     /// The cancellation flows through <c>SendAsync</c>'s OperationCanceledException path,
-    /// which fails the active messages with "Generation stopped.".
+    /// which finalizes the active turn as cancelled.
     /// </summary>
     public void StopSelectedConversation()
     {
@@ -639,6 +643,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _composerText = string.Empty;
 
         ConversationRuntimeState? runtimeState = null;
+        AgentTurnState? turnState = null;
 
         try
         {
@@ -707,7 +712,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             // the runtime fails the turn with actionable guidance. Model/effort are null when the user left
             // the CLI's own default, in which case no --model / -c override is passed.
             var cliSelection = await _programmingAssistantSettings.GetSelectedInvocationAsync(cancellationToken);
-            var turnState = new AgentTurnState(runtimeAgent);
+            turnState = new AgentTurnState(runtimeAgent);
 
             // Surface the assistant placeholder immediately: CLI process startup can take seconds
             // before the first stream event (RunStarted) arrives, and the transcript would
@@ -736,9 +741,25 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException) when (runtimeState?.CancellationTokenSource.IsCancellationRequested == true)
         {
-            if (runtimeState is not null)
+            if (runtimeState is not null && turnState is not null)
             {
-                await FailActiveMessagesAsync(runtimeState, runtimeState.ActiveMessageIds, "Generation stopped.");
+                await FinalizeInterruptedTurnAsync(
+                    runtimeState,
+                    turnState,
+                    TurnFinalizationKind.Cancelled,
+                    "Generation stopped.");
+            }
+        }
+        catch (OperationCanceledException exception)
+        {
+            _logger.LogError(exception, "The chat runtime canceled without a user cancellation request.");
+            if (runtimeState is not null && turnState is not null)
+            {
+                await FinalizeInterruptedTurnAsync(
+                    runtimeState,
+                    turnState,
+                    TurnFinalizationKind.Failed,
+                    exception.Message);
             }
         }
         catch (Exception exception)
@@ -749,7 +770,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            await FailActiveMessagesAsync(runtimeState, runtimeState.ActiveMessageIds, exception.Message);
+            if (turnState is not null)
+            {
+                await FinalizeInterruptedTurnAsync(
+                    runtimeState,
+                    turnState,
+                    TurnFinalizationKind.Failed,
+                    exception.Message);
+            }
         }
         finally
         {
@@ -1427,9 +1455,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 false));
         }
 
-        if (message.Status == MessageStatus.Failed && !string.IsNullOrWhiteSpace(message.ErrorMessage))
+        if (message.Status is MessageStatus.Failed or MessageStatus.Cancelled &&
+            !string.IsNullOrWhiteSpace(message.ErrorMessage))
         {
-            var errorHtml = $"<p class=\"message-error\">{WebUtility.HtmlEncode(message.ErrorMessage)}</p>";
+            var statusClass = message.Status == MessageStatus.Cancelled
+                ? "message-cancelled"
+                : "message-error";
+            var errorHtml = $"<p class=\"{statusClass}\">{WebUtility.HtmlEncode(message.ErrorMessage)}</p>";
 
             if (renderSegments.Count > 0 && string.Equals(renderSegments[^1].Kind, "content", StringComparison.Ordinal))
             {

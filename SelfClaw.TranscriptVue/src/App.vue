@@ -646,6 +646,12 @@ button {
 	margin-bottom: 0;
 }
 
+.message-cancelled {
+	margin: 8px 0 0;
+	color: var(--muted);
+	font-size: 12px;
+}
+
 h1,
 h2,
 h3 {

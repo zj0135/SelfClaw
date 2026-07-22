@@ -3,10 +3,10 @@ using SelfClaw.Core.Runtime.Agent;
 namespace SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 
 /// <summary>
-/// The terminal outcome of a CLI agent turn, derived from the process exit code and cancellation
-/// state per plan.md §5: exit 0 → <see cref="RunCompletionStatus.Succeeded"/>, cancellation →
-/// <see cref="RunCompletionStatus.Canceled"/>, any other exit (or inactivity kill) →
-/// <see cref="RunCompletionStatus.Failed"/>.
+/// The terminal outcome of a CLI agent turn, derived from process exit state: exit 0 maps to
+/// <see cref="RunCompletionStatus.Succeeded"/> and any other exit (including inactivity kill) maps
+/// to <see cref="RunCompletionStatus.Failed"/>. Caller cancellation propagates separately as
+/// <see cref="OperationCanceledException"/>.
 /// </summary>
 public sealed record CliProcessResult(
     RunCompletionStatus Status,

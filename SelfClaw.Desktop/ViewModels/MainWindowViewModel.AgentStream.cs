@@ -1,7 +1,9 @@
+using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Tools.Transcript;
+using SelfClaw.Desktop.Services.Runtime;
 
 namespace SelfClaw.Desktop.ViewModels;
 
@@ -68,7 +70,7 @@ public sealed partial class MainWindowViewModel
                 break;
 
             case RunCompletedEvent completed:
-                await CompleteAssistantTurnAsync(runtimeState, turnState, completed, cancellationToken);
+                await CompleteAssistantTurnAsync(runtimeState, turnState, completed);
                 break;
 
             // RawOutputEvent / PermissionRequestedEvent carry no transcript state in v1.
@@ -80,7 +82,7 @@ public sealed partial class MainWindowViewModel
     /// <summary>
     /// Creates the streaming assistant message the turn writes into, once, on the first event that needs it.
     /// Tracked in <see cref="ConversationRuntimeState.ActiveMessageIds"/> so an exception or cancellation
-    /// mid-turn fails it via <c>FailActiveMessagesAsync</c>.
+    /// mid-turn finalizes it through the same terminal-state path.
     /// </summary>
     private void EnsureAssistantMessage(ConversationRuntimeState runtimeState, AgentTurnState turnState)
     {
@@ -167,43 +169,100 @@ public sealed partial class MainWindowViewModel
     private async Task CompleteAssistantTurnAsync(
         ConversationRuntimeState runtimeState,
         AgentTurnState turnState,
-        RunCompletedEvent completed,
-        CancellationToken cancellationToken)
+        RunCompletedEvent completed)
     {
-        // Surface a failure even when no assistant content streamed (e.g. the CLI never started).
         EnsureAssistantMessage(runtimeState, turnState);
-        turnState.Completed = true;
-        runtimeState.ActiveMessageIds.Remove(turnState.AssistantMessageId);
-
         var existing = runtimeState.Messages.FirstOrDefault(item => item.Id == turnState.AssistantMessageId);
         if (existing is null)
         {
             return;
         }
 
-        var succeeded = completed.Status == RunCompletionStatus.Succeeded;
-        var errorMessage = succeeded
+        var kind = completed.Status == RunCompletionStatus.Succeeded
+            ? TurnFinalizationKind.Succeeded
+            : TurnFinalizationKind.Failed;
+        var errorMessage = kind == TurnFinalizationKind.Succeeded
             ? null
             : completed.ErrorMessage
-                ?? (completed.Status == RunCompletionStatus.Canceled ? "Generation stopped." : "The agent run failed.");
+                ?? "The agent run failed.";
 
-        var finalMarkdown = completed.FinalText is null
-            ? existing.MarkdownContent
-            : AssistantMessageSegmenter.MergeFinalMarkdown(completed.FinalText, existing.MarkdownContent);
+        await FinalizeTurnAsync(
+            runtimeState,
+            turnState,
+            existing,
+            kind,
+            completed.FinalText,
+            errorMessage);
+    }
 
-        var updated = existing with
+    private Task FinalizeInterruptedTurnAsync(
+        ConversationRuntimeState runtimeState,
+        AgentTurnState turnState,
+        TurnFinalizationKind kind,
+        string errorMessage)
+    {
+        EnsureAssistantMessage(runtimeState, turnState);
+        var existing = runtimeState.Messages.First(item => item.Id == turnState.AssistantMessageId);
+        return FinalizeTurnAsync(
+            runtimeState,
+            turnState,
+            existing,
+            kind,
+            finalText: null,
+            errorMessage);
+    }
+
+    private async Task FinalizeTurnAsync(
+        ConversationRuntimeState runtimeState,
+        AgentTurnState turnState,
+        MessageRecord existing,
+        TurnFinalizationKind kind,
+        string? finalText,
+        string? errorMessage)
+    {
+        if (turnState.Completed)
         {
-            MarkdownContent = finalMarkdown,
-            Status = succeeded ? MessageStatus.Completed : MessageStatus.Failed,
-            InputTokens = turnState.InputTokens,
-            OutputTokens = turnState.OutputTokens,
-            DurationMs = (DateTimeOffset.UtcNow - turnState.StartedAtUtc).TotalMilliseconds,
-            ErrorMessage = errorMessage,
-            UpdatedAtUtc = DateTimeOffset.UtcNow
-        };
+            return;
+        }
 
-        ReplaceMessage(runtimeState, updated);
-        await _conversationRepository.UpsertMessageAsync(updated, cancellationToken);
+        turnState.PendingFinalization ??= new DesktopTurnFinalizationRequest(
+                existing,
+                turnState.ToolRunsByCallId.Values.ToArray(),
+                kind,
+                finalText,
+                errorMessage,
+                turnState.InputTokens,
+                turnState.OutputTokens,
+                turnState.StartedAtUtc);
+        TurnFinalization? finalization;
+        try
+        {
+            finalization = await _turnFinalizer.FinalizeAsync(turnState.PendingFinalization);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Failed to persist terminal state for turn {TurnId}.",
+                turnState.AssistantMessageId);
+            return;
+        }
+        if (finalization is null)
+        {
+            turnState.Completed = true;
+            runtimeState.ActiveMessageIds.Remove(turnState.AssistantMessageId);
+            return;
+        }
+
+        ReplaceMessage(runtimeState, finalization.AssistantMessage);
+        foreach (var toolExecution in finalization.ToolExecutions)
+        {
+            turnState.ToolRunsByCallId[toolExecution.CorrelationId ?? toolExecution.Id.ToString("D")] = toolExecution;
+            UpsertToolRun(runtimeState, toolExecution);
+        }
+
+        turnState.Completed = true;
+        runtimeState.ActiveMessageIds.Remove(turnState.AssistantMessageId);
         PublishRuntimeStateNow(runtimeState, true);
     }
 
@@ -254,6 +313,8 @@ public sealed partial class MainWindowViewModel
         public bool MessageCreated { get; set; }
 
         public bool Completed { get; set; }
+
+        public DesktopTurnFinalizationRequest? PendingFinalization { get; set; }
 
         public Dictionary<string, ToolExecutionRecord> ToolRunsByCallId { get; } = new(StringComparer.Ordinal);
     }

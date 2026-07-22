@@ -7,6 +7,5 @@ namespace SelfClaw.Core.Runtime.Agent;
 public enum RunCompletionStatus
 {
     Succeeded = 0,
-    Failed = 1,
-    Canceled = 2
+    Failed = 1
 }

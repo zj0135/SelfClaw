@@ -23,6 +23,7 @@ using SelfClaw.Infrastructure.Tools.Transcript;
 using SelfClaw.Infrastructure.Tools.Workspace;
 using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
+using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
 
 namespace SelfClaw.Infrastructure;
 
@@ -36,7 +37,11 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(storagePaths);
         services.AddSingleton<SqliteDatabase>();
-        services.AddSingleton<IConversationRepository, SqliteConversationRepository>();
+        services.AddSingleton<SqliteConversationRepository>();
+        services.AddSingleton<IConversationRepository>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteConversationRepository>());
+        services.AddSingleton<ITurnFinalizationRepository>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteConversationRepository>());
         services.AddSingleton<IAiProviderRepository, SqliteAiProviderRepository>();
         services.AddSingleton<AiProviderHttpClientProvider>();
         services.AddSingleton<OpenAiModelListClient>();
@@ -84,7 +89,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<CliSessionResolver>();
         services.AddSingleton<CliAgentChatRuntime>();
         services.AddSingleton<DirectAgentChatRuntime>();
-        services.AddSingleton<IAgentChatRuntime, DispatchingAgentChatRuntime>();
+        services.AddSingleton<IAgentRuntimeAdapter>(serviceProvider =>
+            serviceProvider.GetRequiredService<CliAgentChatRuntime>());
+        services.AddSingleton<IAgentRuntimeAdapter>(serviceProvider =>
+            serviceProvider.GetRequiredService<DirectAgentChatRuntime>());
+        services.AddSingleton<IAgentChatRuntime>(serviceProvider =>
+            new DispatchingAgentChatRuntime(
+                serviceProvider.GetServices<IAgentRuntimeAdapter>(),
+                serviceProvider.GetService<ILogger<DispatchingAgentChatRuntime>>()));
         services.AddSingleton<MarkdownHtmlRenderer>();
         return services;
     }
