@@ -2,9 +2,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Infrastructure.Agents.Cli;
-using SelfClaw.Infrastructure.Agents.Cli.Definitions;
+using SelfClaw.Infrastructure.Agents.Cli.Adapters;
+using SelfClaw.Infrastructure.Agents.Cli.Adapters.Abstractions;
 using SelfClaw.Infrastructure.Agents.Cli.Process;
 using SelfClaw.Infrastructure.Agents.Cli.Session;
+using SelfClaw.Infrastructure.Agents.Cli.Session.Abstractions;
 using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
@@ -21,7 +23,6 @@ using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Security;
 using SelfClaw.Infrastructure.Tools.Transcript;
 using SelfClaw.Infrastructure.Tools.Workspace;
-using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
 
@@ -81,12 +82,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<WorkspaceAgentToolset>();
         services.AddSingleton<CliCommandResolver>();
         services.AddSingleton<ICliAgentProcessHost, CliAgentProcessHost>();
-        // Use the parameterless constructor so the built-in definitions (Claude) are seeded. Registering
-        // the type directly would make DI pick the IEnumerable<CliAgentDefinition> constructor and resolve
-        // it to an empty set, leaving the registry without any agents.
-        services.AddSingleton(_ => new CliAgentRegistry());
+        services.AddSingleton<ICliAgentAdapter, ClaudeCliAgentAdapter>();
+        services.AddSingleton<ICliAgentAdapter, CodexCliAgentAdapter>();
+        services.AddSingleton<ICliAgentAdapter, OpenCodeCliAgentAdapter>();
+        services.AddSingleton<CliAgentAdapterRegistry>();
         services.AddSingleton<ICliAgentSessionStore, SqliteCliAgentSessionStore>();
-        services.AddSingleton<CliSessionResolver>();
         services.AddSingleton<CliAgentChatRuntime>();
         services.AddSingleton<DirectAgentChatRuntime>();
         services.AddSingleton<IAgentRuntimeAdapter>(serviceProvider =>

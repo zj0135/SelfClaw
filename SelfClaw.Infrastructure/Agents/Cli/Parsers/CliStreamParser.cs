@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
 /// <summary>
 /// Base for the CLI stdout parsers. Owns the shared per-line JSON envelope — trim, skip blank lines,
 /// parse, and surface anything that is not a JSON object verbatim as a <see cref="RawOutputEvent"/> for
-/// diagnostics (plan.md §5, T3.3) — and delegates the recognised events to <see cref="HandleObject"/>.
+/// diagnostics and delegates the recognized events to <see cref="HandleObject"/>.
 /// <para>
 /// A parser is stateful and single-use per run: subclasses track session id, block ids and tool-call ids
 /// across the stream, so create a fresh instance for each turn. Callers feed one already-split stdout line
@@ -15,7 +15,7 @@ namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
 /// complete newline-delimited lines.
 /// </para>
 /// </summary>
-public abstract class CliStreamParser
+internal abstract class CliStreamParser
 {
     /// <summary>
     /// Parses a single stdout line into the events it encodes. A blank line yields nothing; a line that is

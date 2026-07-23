@@ -2,13 +2,12 @@ using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 namespace SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 
 /// <summary>
-/// Launches a CLI agent subprocess for a single turn and exposes its stdout as a line stream.
-/// Implementations own the lifecycle described in plan.md §5: write the JSONL prompt to stdin,
-/// close stdin to signal EOF, surface stdout line-by-line for the parser, collect stderr for
-/// diagnostics, enforce the no-activity watchdog, and classify the exit code.
+/// Launches a CLI agent subprocess for a single turn and returns a process session. The session exposes
+/// stdin, stdout and the classified exit result while owning stderr collection, the inactivity watchdog
+/// and process-tree termination.
 /// <para>
-/// Abstracted behind an interface so <c>CliAgentChatRuntime</c> (阶段 5) can be wired against a
-/// fake host in tests (T8.4) without spawning real processes.
+/// Abstracted behind an interface so <c>CliAgentChatRuntime</c> can be wired against a
+/// fake host in tests without spawning real processes.
 /// </para>
 /// </summary>
 public interface ICliAgentProcessHost

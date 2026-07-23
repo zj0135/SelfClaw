@@ -53,8 +53,11 @@ Vue ChatView
 IAgentChatRuntime
   = DispatchingAgentChatRuntime
       |- CliAgentChatRuntime
-      |   |- CliAgentRegistry
-      |   |- CliSessionResolver -> ICliAgentSessionStore
+      |   |- CliAgentAdapterRegistry
+      |   |   |- ClaudeCliAgentAdapter
+      |   |   |- CodexCliAgentAdapter
+      |   |   `- OpenCodeCliAgentAdapter
+      |   |- ICliAgentSessionStore
       |   |- CliCommandResolver
       |   `- ICliAgentProcessHost
       `- DirectAgentChatRuntime
@@ -422,19 +425,19 @@ Direct adapter 只负责分类 mode-specific 结果：正常完成时产生成�
 ```text
 DispatchingAgentChatRuntime.StreamTurnAsync()
   -> CliAgentChatRuntime.StreamTurnAsync()
-       |- CliAgentRegistry.Find()
+       |- CliAgentAdapterRegistry.Find()
        |- ExtractPrompt()
-       |- CliSessionResolver.PrepareAsync()
+       |- ICliAgentSessionStore.GetSessionIdAsync()
        |- ComposeSystemPrompt()
-       |- CliAgentDefinition.BuildArgs()
+       |- ICliAgentAdapter.PrepareTurn()
        |- CliCommandResolver.Resolve()
        |- ICliAgentProcessHost.Start()
-       |- CliAgentDefinition.BuildStdinLines()
+       |- PreparedCliTurn.StandardInputLines
        |- ICliAgentProcessSession.WriteStdinLineAsync()
        |- ICliAgentProcessSession.CompleteStdinAsync()
        |- ICliAgentProcessSession.ReadOutputLinesAsync()
-       |- IAgentStreamParser.Feed()/Flush()
-       |- CliSessionResolver.CaptureAsync()
+       |- CliStreamParser.ParseLine()
+       |- ICliAgentSessionStore.SetSessionIdAsync()
        `- ICliAgentProcessSession.WaitForExitAsync()
 ```
 
@@ -443,14 +446,14 @@ DispatchingAgentChatRuntime.StreamTurnAsync()
 `CliAgentChatRuntime.StreamTurnAsync()` 依次检查：
 
 1. `request.CliAgent` 是否存在；没有已选 CLI 时直接返回可读的失败 `RunCompletedEvent`。
-2. `CliAgentRegistry.Find(agentKind)` 是否能找到定义。
+2. `CliAgentAdapterRegistry.Find(agentKind)` 是否能找到 adapter。
 3. `ExtractPrompt(request.Messages)` 是否能找到最新一条 User 消息。
 
 CLI 不重放 SelfClaw 数据库里的完整历史。`ExtractPrompt()` 只发送最新 user 文本，历史上下文由 CLI 的 resume session 维护。
 
 ### 6.3 会话恢复
 
-`CliSessionResolver.PrepareAsync()` 先调用：
+`CliAgentChatRuntime` 先调用：
 
 ```text
 ICliAgentSessionStore.GetSessionIdAsync(conversationId, agentKind)
@@ -458,37 +461,36 @@ ICliAgentSessionStore.GetSessionIdAsync(conversationId, agentKind)
 
 `SqliteCliAgentSessionStore` 使用 `cli_agent_sessions` 表，以 `(conversation_id, agent_kind)` 为联合键。同一个 SelfClaw 会话可分别保存 Claude、Codex、OpenCode session id，互不覆盖。
 
-两种 resume 策略：
+不同 CLI 的 session 参数规则由各自 adapter 持有：
 
-| CLI | `ResumeStrategy` | 新会话 | 后续会话 |
-|---|---|---|---|
-| Claude Code | `Specified` | SelfClaw 生成 GUID，作为 `NewSessionId` | 读取已存 id 作为 `ResumeSessionId` |
-| Codex | `CapturedFromStream` | CLI 自己创建 thread id | 使用流中捕获并已保存的 id |
-| OpenCode | `CapturedFromStream` | CLI 自己创建 session id | 使用流中捕获并已保存的 id |
+| CLI | 新会话 | 后续会话 |
+|---|---|---|
+| Claude Code | adapter 生成 GUID，传给 `--session-id` | 传给 `--resume <id>` |
+| Codex | 不传 session 参数，由 CLI 创建 thread id | `exec resume <thread-id>` |
+| OpenCode | 不传 session 参数，由 CLI 创建 session id | `-s <session-id>` |
 
-parser 输出 `RunStartedEvent` 后，runtime 调用：
+parser 输出带 session id 的 `RunStartedEvent` 后，runtime 调用：
 
 ```text
-CliSessionResolver.CaptureAsync()
-  -> ICliAgentSessionStore.SetSessionIdAsync()
+ICliAgentSessionStore.SetSessionIdAsync()
 ```
 
 只有 CLI 流确认 session id 后才持久化，避免启动失败留下无效 id。
 
-### 6.4 `CliRunContext` 与参数生成
+### 6.4 `CliTurnPreparation` 与参数生成
 
-runtime 构造 `CliRunContext`：
+runtime 构造 `CliTurnPreparation`，并交给 `ICliAgentAdapter.PrepareTurn()`：
 
-- `WorkingDirectory`：优先 `WorkspaceRoot.RootPath`；否则 Desktop；再否则 UserProfile/Temp。
-- `ResumeSessionId/NewSessionId`：来自 `CliSessionResolver`。
+- `Prompt`：最新一条 user 消息。
+- `StoredSessionId`：来自 `ICliAgentSessionStore`，空值表示新会话。
 - `SystemPrompt`：`ComposeSystemPrompt()` 当前只返回 `AgentRuntimeDefinition.Instructions`。
 - `Model/ReasoningEffort`：来自 `ProgrammingAssistantSettingsService`，空白归一化为 `null`。
 
-各定义实际生成：
+adapter 返回 `PreparedCliTurn`，包含 command、参数、stdin 行和对应 parser。各 adapter 实际生成：
 
 #### Claude Code
 
-`ClaudeAgentDefinition.BuildArgs()`：
+`ClaudeCliAgentAdapter`：
 
 ```text
 claude -p
@@ -502,11 +504,11 @@ claude -p
   [--append-system-prompt <instructions>]
 ```
 
-`BuildStdinLines()` 把 prompt 包成一行 Anthropic user message JSONL。
+把 prompt 包成一行 Anthropic user message JSONL。
 
 #### Codex
 
-`CodexAgentDefinition.BuildArgs()`：
+`CodexCliAgentAdapter`：
 
 ```text
 codex exec [resume <thread-id>]
@@ -516,11 +518,11 @@ codex exec [resume <thread-id>]
   [-c model_reasoning_effort="<level>"]
 ```
 
-`BuildStdinLines()` 直接返回一行纯文本 prompt。当前 Codex 定义没有把 Agent Instructions 拼进参数。
+直接返回一行纯文本 prompt。当前 Codex adapter 没有把 Agent Instructions 拼进参数。
 
 #### OpenCode
 
-`OpenCodeAgentDefinition.BuildArgs()`：
+`OpenCodeCliAgentAdapter`：
 
 ```text
 opencode run --format json
@@ -528,7 +530,7 @@ opencode run --format json
   [--model <provider/model>]
 ```
 
-`BuildStdinLines()` 直接返回一行纯文本 prompt。当前 OpenCode 不接收 reasoning 覆盖，也没有把 Agent Instructions 拼进参数。
+直接返回一行纯文本 prompt。当前 OpenCode 不接收 reasoning 覆盖，也没有把 Agent Instructions 拼进参数。
 
 ### 6.5 命令解析与子进程启动
 
@@ -553,12 +555,11 @@ opencode run --format json
 
 启动后 runtime：
 
-1. 遍历 `definition.BuildStdinLines(prompt)`，调用 `session.WriteStdinLineAsync()`。
+1. 遍历 `PreparedCliTurn.StandardInputLines`，调用 `session.WriteStdinLineAsync()`。
 2. `session.CompleteStdinAsync()` 关闭 stdin，以 EOF 表示本轮输入结束。
 3. `session.ReadOutputLinesAsync()` 持续读取 stdout 行。
-4. 每行补回 `\n`，调用 `parser.Feed(line + '\n')`，立即输出解析到的 `AgentStreamEvent`。
-5. stdout 结束后调用 `parser.Flush()` 处理残余缓冲。
-6. `session.WaitForExitAsync()` 得到 `CliProcessResult`。
+4. 每行调用 `parser.ParseLine(line)`，立即输出解析到的 `AgentStreamEvent`。
+5. `session.WaitForExitAsync()` 得到 `CliProcessResult`。
 
 `CliAgentProcessSession` 同时负责：
 
@@ -571,14 +572,17 @@ opencode run --format json
 
 ### 6.7 CLI 输出解析
 
-parser 由 `CreateParser()` 决定：
+parser 由对应 adapter 创建并放入 `PreparedCliTurn`：
 
 ```text
-ClaudeStreamJson
+ClaudeCliAgentAdapter
   -> ClaudeStreamJsonParser
 
-JsonEventStream (Codex / OpenCode)
-  -> JsonEventStreamParser(kind)
+CodexCliAgentAdapter
+  -> CodexJsonEventStreamParser
+
+OpenCodeCliAgentAdapter
+  -> OpenCodeJsonEventStreamParser
 ```
 
 #### `ClaudeStreamJsonParser`
@@ -593,16 +597,27 @@ JsonEventStream (Codex / OpenCode)
 - `result.usage` -> `UsageReportedEvent`；
 - `result` -> `RunCompletedEvent`。
 
-#### `JsonEventStreamParser`
+#### `CodexJsonEventStreamParser`
 
-Codex 主要处理 `thread.* / turn.* / item.*`；OpenCode 主要处理 `step_start / text / reasoning / tool / step_finish`。两者都会映射：
+Codex 主要处理 `thread.* / turn.* / item.*`，映射：
 
 - `RunStartedEvent`；
 - `AssistantTextDeltaEvent` / `AssistantThinkingDeltaEvent`；
 - `ToolCallStartedEvent` / `ToolCallCompletedEvent`；
 - `UsageReportedEvent`。
 
-Codex 的 `error` 事件会额外输出失败的 `RunCompletedEvent`。正常的 Codex `turn.completed` 和 OpenCode `step_finish` 只报告 usage，最终 `RunCompletedEvent` 由 `CliAgentChatRuntime` 根据进程退出结果补发。
+Codex 的 `error` 事件会额外输出失败的 `RunCompletedEvent`；正常的 `turn.completed` 只报告 usage，最终 `RunCompletedEvent` 由 `CliAgentChatRuntime` 根据进程退出结果补发。
+
+#### `OpenCodeJsonEventStreamParser`
+
+OpenCode 主要处理 `step_start / text / reasoning / tool / step_finish`，映射：
+
+- `RunStartedEvent`；
+- `AssistantTextDeltaEvent` / `AssistantThinkingDeltaEvent`；
+- `ToolCallStartedEvent` / `ToolCallCompletedEvent`；
+- `UsageReportedEvent`。
+
+`step_finish` 只报告 usage，最终 `RunCompletedEvent` 由 `CliAgentChatRuntime` 根据进程退出结果补发。
 
 非法 JSON 行会成为 `RawOutputEvent`；合法但不认识的事件类型被忽略。工具事件在 CLI 模式只是“观察记录”，实际工具由 CLI 子进程自行执行。
 
@@ -782,12 +797,14 @@ dispatcher 统一保证成功/失败路径恰好产生一个 terminal event；Di
 ### CLI
 
 - `CliAgentChatRuntime.StreamTurnAsync()`：CLI 单回合总编排。
-- `CliSessionResolver.PrepareAsync()` / `CaptureAsync()`：session 恢复与持久化。
-- `ClaudeAgentDefinition.BuildArgs()` / `BuildStdinLines()`：Claude 命令与 JSONL。
-- `CodexAgentDefinition.BuildArgs()` / `BuildStdinLines()`：Codex 命令与文本输入。
-- `OpenCodeAgentDefinition.BuildArgs()` / `BuildStdinLines()`：OpenCode 命令与文本输入。
+- `CliAgentAdapterRegistry.Find()`：按 CLI kind 选择 adapter。
+- `ClaudeCliAgentAdapter`：Claude 命令、JSONL 输入、参数 session 规则和 parser。
+- `CodexCliAgentAdapter`：Codex 命令、文本输入、resume 参数和 parser。
+- `OpenCodeCliAgentAdapter`：OpenCode 命令、文本输入、resume 参数和 parser。
+- `ICliAgentSessionStore`：按 conversation × CLI 保存 session id。
 - `CliCommandResolver.Resolve()`：PATH/PATHEXT 和 Windows batch 包装。
 - `CliAgentProcessHost.Start()`：启动重定向子进程。
 - `CliAgentProcessSession`：stdin/stdout/stderr、watchdog、kill-tree、退出分类。
-- `ClaudeStreamJsonParser.Feed()` / `Flush()`：Claude 流解析。
-- `JsonEventStreamParser.Feed()` / `Flush()`：Codex/OpenCode 流解析。
+- `ClaudeStreamJsonParser.ParseLine()`：Claude 流解析。
+- `CodexJsonEventStreamParser.ParseLine()`：Codex 流解析。
+- `OpenCodeJsonEventStreamParser.ParseLine()`：OpenCode 流解析。

@@ -4,21 +4,19 @@ using SelfClaw.Infrastructure.Agents.Cli.Parsers;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Cli;
 
-public sealed class JsonEventStreamParserTests
+public sealed class OpenCodeJsonEventStreamParserTests
 {
-    // Captured from OpenCode 1.17.13 `run --format json`: tool calls arrive with a top-level
-    // type of "tool_use" while the nested part keeps `type: "tool"`.
-    private const string OpenCodeToolUseLine =
+    private const string ToolUseLine =
         """
         {"type":"tool_use","timestamp":1783136962279,"sessionID":"ses_1","part":{"type":"tool","tool":"read","callID":"call_1","state":{"status":"completed","input":{"filePath":"sample.txt"},"output":"file content"},"id":"prt_1","sessionID":"ses_1","messageID":"msg_1"}}
         """;
 
     [Fact]
-    public void OpenCode_tool_use_event_emits_started_and_completed()
+    public void Tool_use_event_emits_started_and_completed()
     {
-        var parser = new JsonEventStreamParser(CliAgentKind.OpenCode);
+        var parser = new OpenCodeJsonEventStreamParser();
 
-        var events = parser.ParseLine(OpenCodeToolUseLine).ToArray();
+        var events = parser.ParseLine(ToolUseLine).ToArray();
 
         events.Should().HaveCount(2);
         var started = events[0].Should().BeOfType<ToolCallStartedEvent>().Subject;
@@ -33,10 +31,10 @@ public sealed class JsonEventStreamParserTests
     }
 
     [Fact]
-    public void OpenCode_legacy_tool_event_type_is_still_recognised()
+    public void Legacy_tool_event_type_is_still_recognized()
     {
-        var parser = new JsonEventStreamParser(CliAgentKind.OpenCode);
-        var line =
+        var parser = new OpenCodeJsonEventStreamParser();
+        const string line =
             """
             {"type":"tool","part":{"type":"tool","tool":"bash","callID":"call_2","state":{"status":"completed","input":{"command":"ls"},"output":"ok"}}}
             """;
@@ -51,14 +49,14 @@ public sealed class JsonEventStreamParserTests
     }
 
     [Fact]
-    public void OpenCode_running_tool_use_emits_started_once_then_completed()
+    public void Running_tool_use_emits_started_once_then_completed()
     {
-        var parser = new JsonEventStreamParser(CliAgentKind.OpenCode);
-        var runningLine =
+        var parser = new OpenCodeJsonEventStreamParser();
+        const string runningLine =
             """
             {"type":"tool_use","part":{"type":"tool","tool":"read","callID":"call_3","state":{"status":"running","input":{"filePath":"a.txt"}}}}
             """;
-        var completedLine =
+        const string completedLine =
             """
             {"type":"tool_use","part":{"type":"tool","tool":"read","callID":"call_3","state":{"status":"completed","input":{"filePath":"a.txt"},"output":"done"}}}
             """;

@@ -5,13 +5,12 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Infrastructure.Agents.Cli.Definitions;
-using SelfClaw.Infrastructure.Agents.Cli.Parsers;
+using SelfClaw.Infrastructure.Agents.Cli.Adapters;
+using SelfClaw.Infrastructure.Agents.Cli.Adapters.Models;
 using SelfClaw.Infrastructure.Agents.Cli.Process;
-using SelfClaw.Infrastructure.Agents.Cli.Session;
-using SelfClaw.Infrastructure.Agents.Cli.Definitions.Models;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
+using SelfClaw.Infrastructure.Agents.Cli.Session.Abstractions;
 using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
 
 namespace SelfClaw.Infrastructure.Agents.Cli;
@@ -20,37 +19,36 @@ namespace SelfClaw.Infrastructure.Agents.Cli;
 /// The CLI adapter used behind the external <see cref="IAgentChatRuntime"/> seam. It assembles the
 /// building blocks for a single turn and streams the agent's output as <see cref="AgentStreamEvent"/>s:
 /// <list type="number">
-///   <item>resolve the <see cref="CliAgentDefinition"/> for the requested agent;</item>
-///   <item>plan session resume / new-session ids via <see cref="CliSessionResolver"/> (plan.md §6);</item>
-///   <item>build the argument vector and resolve the executable via <see cref="CliCommandResolver"/>;</item>
-///   <item>launch the subprocess through <see cref="ICliAgentProcessHost"/>, write the JSONL prompt and
-///         close stdin to signal EOF (plan.md §5);</item>
-///   <item>feed stdout lines into the matching <see cref="IAgentStreamParser"/> and yield its events,
-///         capturing the stream-reported session id for <see cref="ResumeStrategy.CapturedFromStream"/>
-///         agents;</item>
-///   <item>synthesize a terminal <see cref="RunCompletedEvent"/> from the process exit when the stream
+///   <item>select the requested CLI adapter and prepare its command, input and parser;</item>
+///   <item>load the conversation's stored session id and let the adapter apply its resume rules;</item>
+///   <item>resolve the executable via <see cref="CliCommandResolver"/>;</item>
+///   <item>launch the subprocess through <see cref="ICliAgentProcessHost"/>, write the prepared input and
+///         close stdin to signal EOF;</item>
+///   <item>feed stdout lines into the matching <see cref="CliStreamParser"/> and yield its events,
+///         capturing the stream-reported session id for the next turn;</item>
+///   <item>synthesize a candidate terminal <see cref="RunCompletedEvent"/> from the process exit when the stream
 ///         ended without one.</item>
 /// </list>
 /// </summary>
 internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
 {
     private readonly ICliAgentProcessHost _processHost;
-    private readonly CliAgentRegistry _registry;
+    private readonly CliAgentAdapterRegistry _registry;
     private readonly CliCommandResolver _commandResolver;
-    private readonly CliSessionResolver _sessionResolver;
+    private readonly ICliAgentSessionStore _sessionStore;
     private readonly ILogger<CliAgentChatRuntime> _logger;
 
     public CliAgentChatRuntime(
         ICliAgentProcessHost processHost,
-        CliAgentRegistry registry,
+        CliAgentAdapterRegistry registry,
         CliCommandResolver commandResolver,
-        CliSessionResolver sessionResolver,
+        ICliAgentSessionStore sessionStore,
         ILogger<CliAgentChatRuntime>? logger = null)
     {
         _processHost = processHost;
         _registry = registry;
         _commandResolver = commandResolver;
-        _sessionResolver = sessionResolver;
+        _sessionStore = sessionStore;
         _logger = logger ?? NullLogger<CliAgentChatRuntime>.Instance;
     }
 
@@ -71,13 +69,13 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
             yield break;
         }
 
-        var definition = _registry.Find(agentKind);
-        if (definition is null)
+        var adapter = _registry.Find(agentKind);
+        if (adapter is null)
         {
             yield return new RunCompletedEvent(
                 RunCompletionStatus.Failed,
                 FinalText: null,
-                ErrorMessage: $"No CLI agent definition is registered for '{agentKind}'.");
+                ErrorMessage: $"No CLI agent adapter is registered for '{agentKind}'.");
             yield break;
         }
 
@@ -91,36 +89,33 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
             yield break;
         }
 
-        var sessionPlan = await _sessionResolver
-            .PrepareAsync(request.ConversationId, definition, cancellationToken)
+        var storedSessionId = await _sessionStore
+            .GetSessionIdAsync(request.ConversationId, agentKind, cancellationToken)
             .ConfigureAwait(false);
 
-        var runContext = new CliRunContext
-        {
-            AgentKind = agentKind,
-            WorkingDirectory = ResolveWorkingDirectory(request.WorkspaceRoot),
-            ResumeSessionId = sessionPlan.ResumeSessionId,
-            NewSessionId = sessionPlan.NewSessionId,
-            SystemPrompt = ComposeSystemPrompt(request.Agent),
-            Model = string.IsNullOrWhiteSpace(request.CliModel) ? null : request.CliModel,
-            ReasoningEffort = string.IsNullOrWhiteSpace(request.CliReasoningEffort) ? null : request.CliReasoningEffort,
-        };
+        var preparation = new CliTurnPreparation(
+            prompt,
+            storedSessionId,
+            ComposeSystemPrompt(request.Agent),
+            string.IsNullOrWhiteSpace(request.CliModel) ? null : request.CliModel,
+            string.IsNullOrWhiteSpace(request.CliReasoningEffort) ? null : request.CliReasoningEffort);
 
         // Resolve the executable up front so a missing CLI surfaces as a clean failure rather than an
         // exception bubbling out of the iterator.
+        PreparedCliTurn? preparedTurn = null;
         CommandInvocation? invocation = null;
         string? setupError = null;
         try
         {
-            var args = definition.BuildArgs(runContext);
-            invocation = _commandResolver.Resolve(definition.Command, args);
+            preparedTurn = adapter.PrepareTurn(preparation);
+            invocation = _commandResolver.Resolve(preparedTurn.Command, preparedTurn.Arguments);
         }
         catch (FileNotFoundException ex)
         {
             setupError = ex.Message;
         }
 
-        if (invocation is null)
+        if (preparedTurn is null || invocation is null)
         {
             yield return new RunCompletedEvent(RunCompletionStatus.Failed, FinalText: null, ErrorMessage: setupError);
             yield break;
@@ -129,7 +124,7 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
         var startInfo = new CliProcessStartInfo
         {
             Invocation = invocation,
-            WorkingDirectory = runContext.WorkingDirectory,
+            WorkingDirectory = ResolveWorkingDirectory(request.WorkspaceRoot),
             // The CLI uses its own local configuration (API key / base URL / model), so SelfClaw injects
             // nothing into the child environment. A selected profile, if any, no longer travels to the agent.
         };
@@ -141,9 +136,9 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
             invocation.IsShellWrapped,
             string.Join(' ', invocation.ArgumentList),
             invocation.VerbatimArguments,
-            runContext.WorkingDirectory);
+            startInfo.WorkingDirectory);
 
-        var parser = CreateParser(definition.StreamFormat, agentKind);
+        var parser = preparedTurn.Parser;
 
         // Launching the child can throw synchronously (e.g. a Win32Exception when the resolved target is
         // not a real executable). Surface it as a clean completion rather than letting it escape the
@@ -177,7 +172,7 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
         string? writeError = null;
         try
         {
-            foreach (var line in definition.BuildStdinLines(prompt))
+            foreach (var line in preparedTurn.StandardInputLines)
                 await session.WriteStdinLineAsync(line, cancellationToken).ConfigureAwait(false);
             await session.CompleteStdinAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -202,9 +197,12 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
                 {
                     if (streamEvent is RunStartedEvent started)
                     {
-                        await _sessionResolver
-                            .CaptureAsync(request.ConversationId, definition, started.SessionId, cancellationToken)
-                            .ConfigureAwait(false);
+                        if (!string.IsNullOrWhiteSpace(started.SessionId))
+                        {
+                            await _sessionStore
+                                .SetSessionIdAsync(request.ConversationId, agentKind, started.SessionId, cancellationToken)
+                                .ConfigureAwait(false);
+                        }
                     }
 
                     if (streamEvent is RunCompletedEvent)
@@ -227,7 +225,7 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
 
         // The parser emits RunCompletedEvent off the agent's own `result` line. When the stream ends
         // without one (crash, non-zero exit, write failure), synthesize the terminal event from the
-        // classified process outcome so the UI always sees a completion (plan.md §5).
+        // classified process outcome so the dispatcher always receives a completion candidate.
         if (!runCompletedEmitted)
         {
             yield return new RunCompletedEvent(
@@ -264,21 +262,13 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
     }
 
     /// <summary>
-    /// Assembles the system prompt injected into the agent (plan.md §8, T5.3). For now this is the
-    /// agent's own instructions; it is the seam where design-system / persona context is layered in.
+    /// Assembles the system prompt injected into the agent. For now this is the agent's own instructions.
     /// </summary>
     private static string? ComposeSystemPrompt(AgentRuntimeDefinition agent)
     {
         var instructions = agent.Instructions?.Trim();
         return string.IsNullOrEmpty(instructions) ? null : instructions;
     }
-
-    private static CliStreamParser CreateParser(CliStreamFormat format, CliAgentKind kind) => format switch
-    {
-        CliStreamFormat.ClaudeStreamJson => new ClaudeStreamJsonParser(),
-        CliStreamFormat.JsonEventStream => new JsonEventStreamParser(kind),
-        _ => throw new NotSupportedException($"No stream parser is available for '{format}'."),
-    };
 
     private static string? BuildExitError(CliProcessResult result)
     {

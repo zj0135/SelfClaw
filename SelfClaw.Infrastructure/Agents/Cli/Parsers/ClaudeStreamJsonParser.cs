@@ -22,10 +22,10 @@ namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
 /// Both delivery modes are handled: when partial streaming is on, text/thinking arrive as deltas and
 /// the matching blocks in the full <c>assistant</c> message are suppressed to avoid duplication; when
 /// it is off, the full message blocks are emitted as single deltas. Lines that are not valid JSON are
-/// surfaced verbatim as <see cref="RawOutputEvent"/> by the base parser (plan.md 阶段 3, T3.3).
+/// surfaced verbatim as <see cref="RawOutputEvent"/> by the base parser.
 /// </para>
 /// </summary>
-public sealed class ClaudeStreamJsonParser : CliStreamParser
+internal sealed class ClaudeStreamJsonParser : CliStreamParser
 {
     // Captured from system/init; replayed on RunStartedEvent.
     private bool _runStarted;
