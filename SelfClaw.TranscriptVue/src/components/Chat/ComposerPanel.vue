@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
+import { SlidersHorizontal, ArrowRight, Square } from 'lucide-vue-next';
 import ModelSelector from './ModelSelector.vue';
 import WorkspaceSelector from './WorkspaceSelector.vue';
 
@@ -92,15 +93,10 @@ defineExpose({
 		></textarea>
 		<div class="composer-toolbar">
 			<div class="composer-tools-left">
-				<ModelSelector :execution-mode="agentMode" />
-				<button class="icon-btn" type="button" title="功能" aria-label="功能">
-					<svg viewBox="0 0 20 20" aria-hidden="true">
-						<path d="M3 7h3M10 7h7" />
-						<circle cx="8" cy="7" r="2" />
-						<path d="M3 13h7M14 13h3" />
-						<circle cx="12" cy="13" r="2" />
-					</svg>
-				</button>
+			<ModelSelector :execution-mode="agentMode" />
+			<button class="icon-btn" type="button" title="功能" aria-label="功能">
+				<SlidersHorizontal :size="16" :stroke-width="1.8" aria-hidden="true" />
+			</button>
 				<WorkspaceSelector
 					:workspace-selection="workspaceSelection"
 					:loading="workspaceLoading"
@@ -111,16 +107,12 @@ defineExpose({
 				/>
 			</div>
 			<div class="composer-tools-right">
-				<button v-if="props.busy" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成" @click="stop">
-					<svg viewBox="0 0 20 20" aria-hidden="true">
-						<rect x="6" y="6" width="8" height="8" rx="1.5" fill="currentColor" stroke="none" />
-					</svg>
-				</button>
-				<button v-else class="send-btn" type="button" :disabled="!canSend" title="发送" aria-label="发送" @click="submit">
-					<svg viewBox="0 0 20 20" aria-hidden="true">
-						<path d="M5 10h10M10 5l5 5-5 5" />
-					</svg>
-				</button>
+			<button v-if="props.busy" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成" @click="stop">
+				<Square :size="13" fill="currentColor" :stroke-width="0" aria-hidden="true" />
+			</button>
+			<button v-else class="send-btn" type="button" :disabled="!canSend" title="发送" aria-label="发送" @click="submit">
+				<ArrowRight :size="17" :stroke-width="2.2" aria-hidden="true" />
+			</button>
 			</div>
 		</div>
 	</section>
@@ -135,7 +127,7 @@ defineExpose({
 	display: grid;
 	grid-template-rows: 1fr auto;
 	padding: 22px 18px 12px;
-	border: 1px solid #e2e5eb;
+	border: 1px solid rgba(19, 27, 45, 0.1);
 	border-radius: 16px;
 	background: #ffffff;
 	box-shadow:
@@ -146,11 +138,11 @@ defineExpose({
 }
 
 .composer-shell:focus-within {
-	border-color: #d3d9e3;
+	border-color: rgba(59, 91, 253, 0.45);
 	box-shadow:
 		0 1px 2px rgba(23, 26, 31, 0.05),
-		0 10px 28px rgba(23, 26, 31, 0.07),
-		0 0 0 3px rgba(23, 26, 31, 0.03);
+		0 12px 32px rgba(23, 26, 31, 0.07),
+		0 0 0 3px rgba(59, 91, 253, 0.1);
 }
 
 .empty-workspace .composer-shell {
@@ -229,16 +221,6 @@ defineExpose({
 	color: #171a1f;
 }
 
-.icon-btn svg {
-	width: 18px;
-	height: 18px;
-	fill: none;
-	stroke: currentColor;
-	stroke-width: 1.7;
-	stroke-linecap: round;
-	stroke-linejoin: round;
-}
-
 .send-btn {
 	display: inline-flex;
 	align-items: center;
@@ -247,16 +229,21 @@ defineExpose({
 	height: 36px;
 	border: 0;
 	border-radius: 50%;
-	background: #171a1f;
+	background: var(--accent, #3b5bfd);
 	color: #ffffff;
 	cursor: pointer;
+	box-shadow: 0 4px 14px rgba(59, 91, 253, 0.3);
 	transition:
+		background 0.16s,
+		box-shadow 0.16s,
 		opacity 0.15s,
-		transform 0.1s;
+		transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .send-btn:hover {
-	opacity: 0.85;
+	background: var(--accent-2, #2f49d1);
+	box-shadow: 0 8px 20px rgba(59, 91, 253, 0.36);
+	transform: translateY(-1px);
 }
 
 .send-btn:active {
@@ -264,19 +251,16 @@ defineExpose({
 }
 
 .send-btn:disabled {
-	opacity: 0.28;
+	background: #c3c9d4;
+	box-shadow: none;
+	opacity: 0.55;
 	cursor: default;
 	transform: none;
 }
 
-.send-btn svg {
-	width: 16px;
-	height: 16px;
-	fill: none;
-	stroke: currentColor;
-	stroke-width: 2;
-	stroke-linecap: round;
-	stroke-linejoin: round;
+.send-btn.stop {
+	background: #171a1f;
+	box-shadow: none;
 }
 
 @media (max-width: 960px) {

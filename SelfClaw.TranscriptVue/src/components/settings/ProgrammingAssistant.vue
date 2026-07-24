@@ -1,5 +1,6 @@
 <script setup>
 import { computed, defineExpose, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { RefreshCw, ChevronDown, Check, Zap, TerminalSquare, TriangleAlert } from 'lucide-vue-next';
 import claudeIcon from '../../../assets/agents-icons/claude.svg';
 import codexIcon from '../../../assets/agents-icons/codex.svg';
 import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
@@ -312,29 +313,36 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<section class="programming-assistant">
+	<section class="programming-assistant sc-root sc-stage">
 		<main class="assistant-main">
-			<div class="section-bar">
-				<h3>本地 CLI <span class="count">({{ cliTools.length }})</span></h3>
-				<button class="pa-btn" :class="{ 'is-rescanning': isRescanning }" type="button" :disabled="isRescanning"
+			<header class="pa-hero sc-rise" style="--i: 0">
+				<div class="pa-hero-left">
+					<div class="pa-kicker">
+						<TerminalSquare :size="13" :stroke-width="2" aria-hidden="true" />
+						LOCAL CLI RUNTIMES
+					</div>
+					<h1 class="pa-title">编程助手</h1>
+					<p class="pa-sub">检测本机安装的智能体 CLI，选择默认运行时与模型。</p>
+				</div>
+				<button class="pa-btn scan-btn" :class="{ 'is-rescanning': isRescanning }" type="button" :disabled="isRescanning"
 					@click="rescanCliTools">
-					<svg class="scan-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-						stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-						<path d="M21 3v5h-5" />
-						<path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-						<path d="M3 21v-5h5" />
-					</svg>
-					重新扫描
+					<RefreshCw :size="14" :stroke-width="2" class="scan-icon" aria-hidden="true" />
+					{{ isRescanning ? '扫描中…' : '重新扫描' }}
 				</button>
+			</header>
+
+			<div class="section-bar sc-rise" style="--i: 1">
+				<h3>本地 CLI <span class="count">[{{ String(cliTools.length).padStart(2, '0') }}]</span></h3>
+				<span class="section-line" aria-hidden="true"></span>
 			</div>
 
 			<div class="cli-list">
-				<div v-if="scanStatusText" class="scan-state" :class="{ 'scan-state--error': scanError }">
+				<div v-if="scanStatusText" class="scan-state sc-rise" style="--i: 2" :class="{ 'scan-state--error': scanError }">
+					<TriangleAlert v-if="scanError" :size="15" :stroke-width="2" aria-hidden="true" />
 					{{ scanStatusText }}
 				</div>
 
-				<article v-for="cli in cliTools" :key="cli.id" class="cli-card" :class="{ 'is-open': cli.isOpen }">
+				<article v-for="(cli, ci) in cliTools" :key="cli.id" class="cli-card sc-rise" :style="{ '--i': ci + 2 }" :class="{ 'is-open': cli.isOpen }">
 					<div class="cli-row" role="button" tabindex="0" :aria-expanded="cli.isOpen ? 'true' : 'false'"
 						@click="toggleOpen(cli)" @keydown.enter.prevent="toggleOpen(cli)"
 						@keydown.space.prevent="toggleOpen(cli)">
@@ -346,26 +354,23 @@ onUnmounted(() => {
 						<div class="cli-body">
 							<div class="cli-titleline">
 								<span class="cli-name">{{ cli.name }}</span>
-								<span v-if="cli.vendor" class="cli-vendor">· {{ cli.vendor }}</span>
-								<span v-if="selectedCliId === cli.id" class="badge badge--selected">已选择</span>
+								<span v-if="cli.vendor" class="cli-vendor">{{ cli.vendor }}</span>
+								<span v-if="selectedCliId === cli.id" class="badge badge--selected">
+									<Check :size="11" :stroke-width="3" aria-hidden="true" />
+									已选择
+								</span>
 							</div>
 
 							<div class="cli-meta">
-								<template v-if="cli.version">
-									<span class="ver">{{ cli.version }}</span>
-									<span class="label">·</span>
-								</template>
-								<span class="label">模型</span>
+								<span v-if="cli.version" class="ver">{{ cli.version }}</span>
+								<span class="label">MODEL</span>
 								<span class="model-name">{{ cli.selectedModel }}</span>
 							</div>
 						</div>
 
 						<button class="cli-expand" type="button" :aria-label="cli.isOpen ? '收起' : '展开'"
 							@click.stop="toggleOpen(cli)">
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-								stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-								<path d="m6 9 6 6 6-6" />
-							</svg>
+							<ChevronDown :size="17" :stroke-width="2" aria-hidden="true" />
 						</button>
 					</div>
 
@@ -373,7 +378,7 @@ onUnmounted(() => {
 						<div class="cli-config__inner">
 							<div class="cli-config__label">
 								模型
-								<span class="badge badge--live">来自 CLI 的实时列表</span>
+								<span class="badge badge--live">LIVE · 来自 CLI 的实时列表</span>
 							</div>
 
 							<div class="cli-config__controls">
@@ -383,11 +388,7 @@ onUnmounted(() => {
 										<option v-for="model in cli.models" :key="model" :value="model">{{ model }}
 										</option>
 									</select>
-									<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-										stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-										aria-hidden="true">
-										<path d="m6 9 6 6 6-6" />
-									</svg>
+									<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
 								</div>
 
 								<div v-if="cli.reasoningLevels.length" class="select-field">
@@ -398,20 +399,17 @@ onUnmounted(() => {
 											<option v-for="level in cli.reasoningLevels" :key="level" :value="level">{{ level }}
 											</option>
 										</select>
-										<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-											stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-											aria-hidden="true">
-											<path d="m6 9 6 6 6-6" />
-										</svg>
+										<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
 									</div>
 								</div>
 
 								<button class="pa-btn pa-btn--ghost cli-test" type="button" :disabled="cli.testing"
 									@click="testCli(cli)">
+									<Zap :size="13" :stroke-width="2" aria-hidden="true" />
 									{{ cli.testing ? '测试中…' : '测试' }}
 								</button>
 
-								<button v-if="selectedCliId !== cli.id" class="pa-btn cli-select" type="button"
+								<button v-if="selectedCliId !== cli.id" class="pa-btn pa-btn--acid cli-select" type="button"
 									:disabled="isLoading || isRescanning" @click="selectCli(cli)">
 									设为默认
 								</button>
@@ -421,11 +419,8 @@ onUnmounted(() => {
 								模型列表来自这个 CLI；选 <span class="em">“默认”</span> 会沿用 CLI 自己的设置。
 							</p>
 
-							<div class="test-toast" :class="{ show: cli.showToast }">
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-									stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-									<path d="M20 6 9 17l-5-5" />
-								</svg>
+							<div class="test-toast" :class="{ show: cli.showToast, err: cli.testError }">
+								<span class="tt-led" aria-hidden="true"></span>
 								{{ cli.testMessage }}
 							</div>
 						</div>
@@ -437,27 +432,12 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+@import './settings-console.css';
+
 .programming-assistant {
-	--pa-bg: #ffffff;
-	--pa-surface: oklch(100% 0 0);
-	--pa-surface-2: oklch(98.6% 0.003 250);
-	--pa-fg: oklch(22% 0.02 255);
-	--pa-fg-soft: oklch(38% 0.018 255);
-	--pa-muted: oklch(56% 0.014 255);
-	--pa-faint: oklch(70% 0.012 255);
-	--pa-border: oklch(91% 0.006 255);
-	--pa-border-2: oklch(86% 0.008 255);
-	--pa-accent: oklch(54% 0.13 250);
-	--pa-accent-weak: oklch(95% 0.03 250);
-	--pa-ok: oklch(55% 0.12 155);
-	--pa-ok-bg: oklch(95.5% 0.04 155);
-	--pa-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
-		"Source Han Sans SC", system-ui, sans-serif;
-	--pa-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, "Roboto Mono", Menlo, Consolas, monospace;
 	min-height: 100%;
-	background: var(--pa-bg);
-	color: var(--pa-fg);
-	font-family: var(--pa-font);
+	color: var(--sc-text);
+	font-family: var(--sc-sans);
 	font-size: 15px;
 	line-height: 1.55;
 	-webkit-font-smoothing: antialiased;
@@ -471,17 +451,59 @@ onUnmounted(() => {
 }
 
 .assistant-main {
-	max-width: 920px;
+	max-width: 940px;
 	margin: 0 auto;
-	padding: 44px 56px 64px;
+	padding: 52px 56px 72px;
 }
 
+/* ── hero ───────────────────────────────────────────────────── */
+.pa-hero {
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 24px;
+	margin-bottom: 34px;
+	padding-bottom: 26px;
+	border-bottom: 1px solid var(--sc-line);
+}
+
+.pa-kicker {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	margin-bottom: 14px;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.24em;
+}
+
+.pa-kicker svg {
+	color: var(--sc-acid);
+}
+
+.pa-title {
+	margin: 0;
+	font-family: var(--sc-display);
+	font-size: 46px;
+	font-weight: 660;
+	letter-spacing: 0.01em;
+	line-height: 1.05;
+}
+
+.pa-sub {
+	margin: 10px 0 0;
+	color: var(--sc-mute);
+	font-size: 13px;
+}
+
+/* ── section bar ────────────────────────────────────────────── */
 .section-bar {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
 	gap: 16px;
-	margin-bottom: 16px;
+	margin-bottom: 18px;
 }
 
 .section-bar h3 {
@@ -489,163 +511,199 @@ onUnmounted(() => {
 	align-items: baseline;
 	gap: 8px;
 	margin: 0;
-	color: var(--pa-fg-soft);
-	font-size: 14px;
+	color: var(--sc-soft);
+	font-size: 13px;
 	font-weight: 600;
-	line-height: 1.3;
+	letter-spacing: 0.04em;
+	white-space: nowrap;
 }
 
 .count {
-	color: var(--pa-muted);
-	font-family: var(--pa-mono);
-	font-size: 12.5px;
+	color: var(--sc-acid);
+	font-family: var(--sc-mono);
+	font-size: 12px;
 	font-weight: 500;
+	letter-spacing: 0.08em;
 }
 
+.section-line {
+	flex: 1;
+	height: 1px;
+	background: linear-gradient(90deg, var(--sc-line-2), transparent);
+}
+
+/* ── buttons ────────────────────────────────────────────────── */
 .pa-btn {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	gap: 7px;
-	min-height: 36px;
-	padding: 8px 14px;
-	border: 1px solid var(--pa-border-2);
+	min-height: 38px;
+	padding: 8px 16px;
+	border: 1px solid var(--sc-line-2);
 	border-radius: 9px;
-	background: var(--pa-surface);
-	color: var(--pa-fg-soft);
+	background: var(--sc-panel);
+	color: var(--sc-text);
 	font-family: inherit;
-	font-size: 13.5px;
-	font-weight: 540;
+	font-size: 13px;
+	font-weight: 560;
 	line-height: 1.2;
 	cursor: pointer;
 	transition:
-		background 0.14s,
-		border-color 0.14s,
-		transform 0.06s,
-		opacity 0.14s;
+		background 0.16s,
+		border-color 0.16s,
+		color 0.16s,
+		transform 0.12s var(--sc-ease-spring),
+		opacity 0.16s;
 }
 
 .pa-btn:hover {
-	border-color: var(--pa-muted);
-	background: var(--pa-surface-2);
+	border-color: var(--sc-faint);
+	background: var(--sc-hover);
+	transform: translateY(-1px);
 }
 
 .pa-btn:active {
-	transform: translateY(1px);
+	transform: translateY(0);
 }
 
 .pa-btn:disabled {
 	cursor: default;
-	opacity: 0.72;
-}
-
-.pa-btn svg {
-	width: 15px;
-	height: 15px;
+	opacity: 0.55;
+	transform: none;
 }
 
 .pa-btn--ghost {
-	border-color: var(--pa-border);
+	border-color: var(--sc-line);
 	background: transparent;
-	color: var(--pa-accent);
-	padding: 8px 16px;
+	color: var(--sc-acid);
 }
 
 .pa-btn--ghost:hover {
-	border-color: var(--pa-accent);
-	background: var(--pa-accent-weak);
+	border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
+	background: var(--sc-acid-soft);
 }
 
-.cli-select {
-	color: var(--pa-fg-soft);
+.pa-btn--acid {
+	border-color: var(--sc-acid);
+	background: var(--sc-acid);
+	color: var(--sc-acid-ink);
+	font-weight: 640;
 }
 
-.scan-icon {
-	transform-origin: center;
+.pa-btn--acid:hover {
+	border-color: var(--sc-acid);
+	background: var(--sc-acid);
+	box-shadow: 0 8px 22px rgba(59, 91, 253, 0.18);
 }
 
 .is-rescanning .scan-icon {
-	animation: scan-rotate 0.7s ease-in-out;
+	animation: sc-spin 0.8s linear infinite;
 }
 
+/* ── cli cards ──────────────────────────────────────────────── */
 .cli-list {
 	display: flex;
-	max-width: 720px;
 	flex-direction: column;
-	gap: 12px;
+	gap: 14px;
 }
 
 .scan-state {
 	display: flex;
 	align-items: center;
+	gap: 9px;
 	min-height: 64px;
 	padding: 16px 18px;
-	border: 1px dashed var(--pa-border-2);
-	border-radius: 12px;
-	background: var(--pa-surface-2);
-	color: var(--pa-muted);
+	border: 1px dashed var(--sc-line-2);
+	border-radius: 13px;
+	background: var(--sc-panel);
+	color: var(--sc-mute);
 	font-size: 13.5px;
 }
 
 .scan-state--error {
-	border-color: color-mix(in oklch, var(--pa-accent), var(--pa-border-2) 35%);
-	color: var(--pa-fg-soft);
+	border-color: color-mix(in srgb, var(--sc-err) 40%, transparent);
+	color: var(--sc-err);
 }
 
 .cli-card {
 	position: relative;
 	overflow: hidden;
-	border: 1px solid var(--pa-border);
-	border-radius: 14px;
-	background: var(--pa-surface);
+	border: 1px solid var(--sc-line);
+	border-radius: 15px;
+	background: var(--sc-panel);
 	transition:
-		border-color 0.15s,
-		box-shadow 0.15s;
+		border-color 0.18s,
+		transform 0.18s var(--sc-ease-out),
+		box-shadow 0.18s;
+}
+
+/* crosshair corner ticks */
+.cli-card::before,
+.cli-card::after {
+	position: absolute;
+	z-index: 2;
+	width: 9px;
+	height: 9px;
+	border: 0 solid var(--sc-faint);
+	content: '';
+	transition: border-color 0.18s;
+	pointer-events: none;
+}
+
+.cli-card::before {
+	top: 6px;
+	left: 6px;
+	border-top-width: 1px;
+	border-left-width: 1px;
+}
+
+.cli-card::after {
+	right: 6px;
+	bottom: 6px;
+	border-right-width: 1px;
+	border-bottom-width: 1px;
 }
 
 .cli-card:hover {
-	border-color: var(--pa-border-2);
+	border-color: var(--sc-line-2);
+	transform: translateY(-2px);
+	box-shadow: 0 16px 40px rgba(23, 26, 31, 0.08);
 }
 
 .cli-card.is-open {
-	border-color: var(--pa-border-2);
+	border-color: var(--sc-line-2);
 }
 
-.cli-card.is-open::before {
-	position: absolute;
-	z-index: 2;
-	top: 25%;
-	bottom: 25%;
-	left: 0;
-	width: 3px;
-	border-radius: 0 3px 3px 0;
-	background: var(--pa-accent);
-	content: "";
+.cli-card.is-open::before,
+.cli-card.is-open::after {
+	border-color: var(--sc-acid);
 }
 
 .cli-row {
 	display: flex;
 	align-items: flex-start;
-	gap: 15px;
-	padding: 18px 20px;
+	gap: 16px;
+	padding: 20px 22px;
 	cursor: pointer;
 	user-select: none;
 }
 
 .cli-row:focus-visible {
-	border-radius: 14px;
-	outline: 2px solid var(--pa-accent);
+	border-radius: 15px;
+	outline: 2px solid var(--sc-acid);
 	outline-offset: -2px;
 }
 
 .cli-icon {
 	display: grid;
-	width: 46px;
-	height: 46px;
+	width: 48px;
+	height: 48px;
 	flex-shrink: 0;
 	place-items: center;
 	overflow: hidden;
-	border-radius: 11px;
+	border: 1px solid var(--sc-line);
+	border-radius: 12px;
 	font-weight: 700;
 }
 
@@ -657,8 +715,8 @@ onUnmounted(() => {
 }
 
 .cli-initials {
-	color: var(--pa-fg-soft);
-	font-family: var(--pa-mono);
+	color: #6b7280;
+	font-family: var(--sc-mono);
 	font-size: 13px;
 	font-weight: 700;
 }
@@ -672,40 +730,54 @@ onUnmounted(() => {
 	display: flex;
 	align-items: center;
 	flex-wrap: wrap;
-	gap: 8px 10px;
+	gap: 8px 12px;
 }
 
 .cli-name {
-	color: var(--pa-fg);
-	font-size: 16px;
-	font-weight: 620;
-	letter-spacing: 0;
+	font-family: var(--sc-display);
+	font-size: 17px;
+	font-weight: 630;
+	letter-spacing: 0.01em;
 }
 
 .cli-vendor {
-	color: var(--pa-muted);
-	font-size: 13px;
-	font-weight: 450;
+	color: var(--sc-mute);
+	font-family: var(--sc-mono);
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: 0.03em;
 }
 
 .cli-meta {
 	display: flex;
 	align-items: center;
+	flex-wrap: wrap;
 	gap: 10px;
-	margin-top: 4px;
-	color: var(--pa-muted);
-	font-size: 13px;
+	margin-top: 6px;
+	font-size: 12px;
 }
 
 .label {
-	color: var(--pa-faint);
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 9.5px;
+	font-weight: 600;
+	letter-spacing: 0.2em;
 }
 
 .ver,
 .model-name {
-	color: var(--pa-fg-soft);
-	font-family: var(--pa-mono);
-	font-size: 12.5px;
+	color: var(--sc-soft);
+	font-family: var(--sc-mono);
+	font-size: 12px;
+}
+
+.ver {
+	padding: 2px 7px;
+	border: 1px solid var(--sc-line);
+	border-radius: 5px;
+	background: var(--sc-raise);
+	font-size: 10.5px;
 }
 
 .cli-expand {
@@ -714,79 +786,81 @@ onUnmounted(() => {
 	height: 30px;
 	flex-shrink: 0;
 	place-items: center;
-	margin-top: 6px;
+	margin-top: 8px;
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
-	color: var(--pa-muted);
+	color: var(--sc-mute);
 	cursor: pointer;
 	transition:
-		background 0.14s,
-		color 0.14s,
-		transform 0.18s ease;
+		background 0.15s,
+		color 0.15s;
 }
 
 .cli-expand:hover {
-	background: var(--pa-surface-2);
-	color: var(--pa-fg-soft);
+	background: var(--sc-hover);
+	color: var(--sc-text);
 }
 
 .cli-expand svg {
-	width: 18px;
-	height: 18px;
-	transition: transform 0.2s ease;
+	transition: transform 0.25s var(--sc-ease-out);
 }
 
 .cli-card.is-open .cli-expand svg {
 	transform: rotate(180deg);
 }
 
+/* ── badges ─────────────────────────────────────────────────── */
 .badge {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: 5px;
 	padding: 2px 9px;
 	border-radius: 999px;
-	font-size: 11.5px;
-	font-weight: 560;
+	font-size: 11px;
+	font-weight: 600;
 	line-height: 1.7;
 	white-space: nowrap;
 }
 
-.badge--live {
-	background: var(--pa-ok-bg);
-	color: var(--pa-ok);
-	font-family: var(--pa-mono);
-	font-size: 11px;
-	letter-spacing: 0;
-}
-
 .badge--selected {
-	background: var(--pa-ok-bg);
-	color: var(--pa-ok);
-	font-size: 11.5px;
+	border: 1px solid color-mix(in srgb, var(--sc-acid) 45%, transparent);
+	background: var(--sc-acid-soft);
+	color: var(--sc-acid);
 }
 
+.badge--live {
+	border: 1px solid color-mix(in srgb, var(--sc-ok) 30%, transparent);
+	background: var(--sc-ok-soft);
+	color: var(--sc-ok);
+	font-family: var(--sc-mono);
+	font-size: 9.5px;
+	font-weight: 600;
+	letter-spacing: 0.1em;
+}
+
+/* ── config area ────────────────────────────────────────────── */
 .cli-config {
 	display: none;
-	padding: 0 20px 18px 81px;
+	padding: 0 22px 20px 86px;
 }
 
 .cli-card.is-open .cli-config {
 	display: block;
+	animation: sc-rise 0.35s var(--sc-ease-out) both;
 }
 
 .cli-config__inner {
-	padding-top: 16px;
-	border-top: 1px dashed var(--pa-border-2);
+	padding-top: 18px;
+	border-top: 1px dashed var(--sc-line-2);
 }
 
 .cli-config__label {
 	display: flex;
 	align-items: center;
-	gap: 9px;
-	margin-bottom: 9px;
-	color: var(--pa-fg-soft);
+	gap: 10px;
+	margin-bottom: 11px;
+	color: var(--sc-soft);
 	font-size: 13px;
 	font-weight: 560;
 }
@@ -808,11 +882,11 @@ onUnmounted(() => {
 .select-field {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 9px;
 }
 
 .select-field__label {
-	color: var(--pa-fg-soft);
+	color: var(--sc-soft);
 	font-size: 12.5px;
 	font-weight: 560;
 	white-space: nowrap;
@@ -826,100 +900,102 @@ onUnmounted(() => {
 
 .select-wrap select {
 	width: 100%;
-	padding: 10px 38px 10px 13px;
-	border: 1px solid var(--pa-border-2);
+	padding: 11px 38px 11px 13px;
+	border: 1px solid var(--sc-line);
 	border-radius: 9px;
 	appearance: none;
-	background: var(--pa-surface-2);
-	color: var(--pa-fg);
+	background: var(--sc-panel);
+	color: var(--sc-text);
 	font-family: inherit;
-	font-size: 14px;
+	font-size: 13.5px;
 	cursor: pointer;
 	transition:
-		border-color 0.14s,
-		background 0.14s;
+		border-color 0.15s,
+		box-shadow 0.15s;
 }
 
 .select-wrap select:hover {
-	border-color: var(--pa-muted);
+	border-color: var(--sc-line-2);
 }
 
 .select-wrap select:focus {
-	border-color: var(--pa-accent);
+	border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
 	outline: none;
-	background: var(--pa-surface);
-	box-shadow: 0 0 0 3px var(--pa-accent-weak);
+	box-shadow: 0 0 0 3px var(--sc-acid-soft);
+}
+
+.select-wrap option {
+	background: var(--sc-panel);
+	color: var(--sc-text);
 }
 
 .chev {
 	position: absolute;
 	top: 50%;
 	right: 12px;
-	width: 16px;
-	height: 16px;
-	color: var(--pa-muted);
+	color: var(--sc-mute);
 	pointer-events: none;
 	transform: translateY(-50%);
 }
 
 .cli-config__hint {
-	margin: 9px 0 0;
-	color: var(--pa-muted);
+	margin: 10px 0 0;
+	color: var(--sc-mute);
 	font-size: 12.5px;
 }
 
 .em {
-	color: var(--pa-fg-soft);
+	color: var(--sc-soft);
 }
 
 .test-toast {
 	display: none;
 	align-items: center;
-	gap: 8px;
-	margin-top: 12px;
-	padding: 8px 12px;
-	border-radius: 8px;
-	background: var(--pa-ok-bg);
-	color: var(--pa-ok);
-	font-size: 13px;
+	gap: 9px;
+	margin-top: 14px;
+	padding: 9px 13px;
+	border: 1px solid color-mix(in srgb, var(--sc-ok) 30%, transparent);
+	border-radius: 9px;
+	background: var(--sc-ok-soft);
+	color: var(--sc-ok);
+	font-family: var(--sc-mono);
+	font-size: 12px;
+	letter-spacing: 0.02em;
 }
 
 .test-toast.show {
 	display: flex;
+	animation: sc-rise 0.3s var(--sc-ease-out) both;
 }
 
-.test-toast svg {
-	width: 15px;
-	height: 15px;
+.test-toast.err {
+	border-color: color-mix(in srgb, var(--sc-err) 35%, transparent);
+	background: var(--sc-err-soft);
+	color: var(--sc-err);
 }
 
-@keyframes scan-rotate {
-	from {
-		transform: rotate(0deg);
-	}
-
-	to {
-		transform: rotate(360deg);
-	}
+.tt-led {
+	width: 7px;
+	height: 7px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	background: currentColor;
+	box-shadow: 0 0 9px currentColor;
+	animation: sc-blink 1.8s ease-in-out infinite;
 }
 
 @media (max-width: 880px) {
 	.assistant-main {
-		padding: 28px 22px 48px;
+		padding: 32px 22px 52px;
+	}
+
+	.pa-hero {
+		align-items: flex-start;
+		flex-direction: column;
 	}
 
 	.cli-config {
-		padding-left: 20px;
-	}
-}
-
-@media (prefers-reduced-motion: reduce) {
-
-	.programming-assistant *,
-	.programming-assistant *::before,
-	.programming-assistant *::after {
-		animation-duration: 0.001ms !important;
-		transition-duration: 0.001ms !important;
+		padding-left: 22px;
 	}
 }
 </style>

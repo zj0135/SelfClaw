@@ -1,5 +1,17 @@
 <script setup>
 import { computed, onUnmounted, reactive, ref } from 'vue';
+import {
+	Search,
+	Plus,
+	Trash2,
+	ArrowUpRight,
+	Eye,
+	EyeOff,
+	RefreshCw,
+	Check,
+	ChevronDown,
+	SlidersHorizontal,
+} from 'lucide-vue-next';
 import AiProviderDialogs from './AiProviderDialogs.vue';
 import { useAiProviderHost } from '../../composables/useAiProviderHost.js';
 
@@ -205,8 +217,8 @@ const providerGroups = computed(() => {
 	const matched = providers.filter((provider) => !term || provider.name.toLowerCase().includes(term));
 
 	return [
-		{ label: '已启用', providers: matched.filter((provider) => provider.enabled) },
-		{ label: '已禁用', providers: matched.filter((provider) => !provider.enabled) },
+		{ label: '已启用', en: 'ONLINE', providers: matched.filter((provider) => provider.enabled) },
+		{ label: '已禁用', en: 'OFFLINE', providers: matched.filter((provider) => !provider.enabled) },
 	].filter((group) => group.providers.length > 0);
 });
 
@@ -218,6 +230,14 @@ const filteredModels = computed(() => {
 		!term || model.name.toLowerCase().includes(term) || model.id.toLowerCase().includes(term));
 });
 
+// Ghost numeral rendered behind the detail header, e.g. "01".
+const activeIndex = computed(() => {
+	const index = providers.indexOf(activeProvider.value);
+	return index >= 0 ? String(index + 1).padStart(2, '0') : '00';
+});
+
+const enabledTotal = computed(() => providers.filter((provider) => provider.enabled).length);
+
 function totalCount(provider) {
 	return provider?.total ?? provider?.models?.length ?? 0;
 }
@@ -228,6 +248,11 @@ function enabledCount(provider) {
 
 function displayEnabledCount(provider) {
 	return provider.enabled ? enabledCount(provider) : totalCount(provider);
+}
+
+function providerIndex(provider) {
+	const index = providers.indexOf(provider);
+	return index >= 0 ? String(index + 1).padStart(2, '0') : '00';
 }
 
 function providerKind(provider) {
@@ -256,48 +281,49 @@ function showToast(text) {
 	}, 1900);
 }
 
-function eyeSvg(open) {
-	return open
-		? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68"/><path d="M6.6 6.6A13.3 13.3 0 0 0 2 11s3.5 7 10 7a9 9 0 0 0 5.4-1.6"/><path d="m2 2 20 20"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>'
-		: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
-}
-
 onUnmounted(() => {
 	window.clearTimeout(toastTimer);
 });
 </script>
 
 <template>
-	<div class="ai-providers">
-		<section class="provider-list">
-			<div class="list-top">
-				<div class="search">
-					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-						<circle cx="11" cy="11" r="8" />
-						<path d="m21 21-4.3-4.3" />
-					</svg>
-					<input v-model="providerSearch" type="text" placeholder="搜索服务商..." aria-label="搜索服务商" />
+	<div class="ai-providers sc-root sc-stage">
+		<aside class="provider-list">
+			<div class="list-top sc-rise" style="--i: 0">
+				<div class="list-kicker">
+					<span>PROVIDER INDEX</span>
+					<span class="list-kicker-count">{{ enabledTotal }}/{{ providers.length }} ON</span>
 				</div>
-				<button class="icon-btn" type="button" title="添加服务商" aria-label="添加服务商" @click="openProviderDialog">
-					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-						<path d="M12 5v14M5 12h14" />
-					</svg>
-				</button>
+				<div class="list-controls">
+					<div class="search">
+						<Search :size="14" :stroke-width="2" class="search-ico" aria-hidden="true" />
+						<input v-model="providerSearch" type="text" placeholder="搜索服务商..." aria-label="搜索服务商" />
+					</div>
+					<button class="icon-btn" type="button" title="添加服务商" aria-label="添加服务商" @click="openProviderDialog">
+						<Plus :size="16" :stroke-width="2.2" />
+					</button>
+				</div>
 			</div>
 
 			<div class="list-scroll scroll">
 				<div v-if="loadingState" class="provider-empty">正在加载服务商…</div>
 				<template v-else-if="providerGroups.length">
 					<div v-for="group in providerGroups" :key="group.label" class="provider-group">
-						<div class="grp-label">{{ group.label }}</div>
+						<div class="grp-label">
+							<span class="grp-dot" :class="{ live: group.en === 'ONLINE' }" aria-hidden="true"></span>
+							<span>{{ group.label }}</span>
+							<span class="grp-en">{{ group.en }}</span>
+						</div>
 						<button
-							v-for="provider in group.providers"
+							v-for="(provider, pi) in group.providers"
 							:key="provider.id"
 							type="button"
-							class="prov"
+							class="prov sc-rise"
+							:style="{ '--i': pi + 1 }"
 							:class="{ active: provider.id === activeId, on: provider.enabled, disabled: !provider.enabled }"
 							@click="selectProviderFromHost(provider.id)"
 						>
+							<span class="p-index">{{ providerIndex(provider) }}</span>
 							<span class="p-logo" aria-hidden="true" v-html="providerLogo(provider)"></span>
 							<span class="p-meta">
 								<span class="p-name">{{ provider.name }}</span>
@@ -309,12 +335,15 @@ onUnmounted(() => {
 				</template>
 				<div v-else class="provider-empty">没有匹配的服务商</div>
 			</div>
-		</section>
+		</aside>
 
 		<main class="detail">
-			<header class="detail-head">
+			<span class="ghost-num" aria-hidden="true">{{ activeIndex }}</span>
+
+			<header class="detail-head sc-rise" style="--i: 0">
 				<div class="dh-logo" aria-hidden="true" v-html="providerLogo(activeProvider)"></div>
 				<div class="dh-meta">
+					<div class="dh-kicker">PROVIDER / {{ activeIndex }}</div>
 					<h2>{{ activeProvider.name }}</h2>
 					<p>{{ activeProvider.sub }}</p>
 				</div>
@@ -327,9 +356,7 @@ onUnmounted(() => {
 					:disabled="mutating"
 					@click="deleteProvider"
 				>
-					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-						<path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5" />
-					</svg>
+					<Trash2 :size="16" :stroke-width="1.9" />
 				</button>
 				<label class="switch big" title="启用此服务商">
 					<input
@@ -345,15 +372,11 @@ onUnmounted(() => {
 			</header>
 
 			<div class="detail-body scroll">
-				<div v-if="activeProvider.authKind !== 1" class="field">
+				<div v-if="activeProvider.authKind !== 1" class="field sc-rise" style="--i: 1">
 					<div class="field-row">
 						<label class="fl" for="api-key">API Key</label>
 						<button class="help-link" type="button" :disabled="!activeProvider.getApiKeyUrl" @click="openProviderConsoleFromHost">
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-								<path d="M15 3h6v6" />
-								<path d="M10 14 21 3" />
-								<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-							</svg>
+							<ArrowUpRight :size="13" :stroke-width="2" />
 							获取 API Key
 						</button>
 					</div>
@@ -374,12 +397,14 @@ onUnmounted(() => {
 							:aria-label="apiKeyVisible ? '隐藏密钥' : '显示密钥'"
 							:title="apiKeyVisible ? '隐藏密钥' : '显示密钥'"
 							@click="apiKeyVisible = !apiKeyVisible"
-							v-html="eyeSvg(apiKeyVisible)"
-						></button>
+						>
+							<EyeOff v-if="apiKeyVisible" :size="16" :stroke-width="1.9" />
+							<Eye v-else :size="16" :stroke-width="1.9" />
+						</button>
 					</div>
 				</div>
 
-				<div class="field">
+				<div class="field sc-rise" style="--i: 2">
 					<div class="field-row">
 						<label class="fl" for="api-base">API 代理地址</label>
 					</div>
@@ -394,7 +419,7 @@ onUnmounted(() => {
 					<p class="field-hint">自定义端点，用于代理或第三方兼容服务</p>
 				</div>
 
-				<div class="field">
+				<div class="field sc-rise" style="--i: 3">
 					<div class="field-row">
 						<label class="fl" for="check-model">连通性检查</label>
 					</div>
@@ -406,9 +431,7 @@ onUnmounted(() => {
 									{{ model.name }}
 								</option>
 							</select>
-							<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-								<path d="m6 9 6 6 6-6" />
-							</svg>
+							<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
 						</div>
 						<button class="btn" type="button" :disabled="checking || !activeProvider.connectionId || !activeProvider.models.length" @click="checkConnectivityFromHost">
 							检查
@@ -416,17 +439,17 @@ onUnmounted(() => {
 					</div>
 					<div v-if="checkStatus.visible" class="check-status show" :class="checkStatus.state">
 						<span v-if="checkStatus.state === 'loading'" class="spin" aria-hidden="true"></span>
-						<svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-							<path d="M20 6 9 17l-5-5" />
-						</svg>
+						<Check v-else-if="checkStatus.state === 'ok'" :size="14" :stroke-width="2.4" />
+						<span v-else class="err-dot" aria-hidden="true"></span>
 						{{ checkStatus.text }}
 					</div>
 				</div>
 
-				<div class="field models-field">
+				<div class="field models-field sc-rise" style="--i: 4">
 					<div class="models">
 						<div class="models-head">
 							<div>
+								<div class="mh-kicker">MODEL REGISTRY</div>
 								<h3>模型列表</h3>
 								<div class="count">共 {{ totalCount(activeProvider) }} 个模型，已启用 {{ enabledCount(activeProvider) }}</div>
 							</div>
@@ -434,25 +457,17 @@ onUnmounted(() => {
 						</div>
 						<div class="models-toolbar">
 							<div class="search">
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-									<circle cx="11" cy="11" r="8" />
-									<path d="m21 21-4.3-4.3" />
-								</svg>
+								<Search :size="14" :stroke-width="2" class="search-ico" aria-hidden="true" />
 								<input v-model="modelSearch" type="text" placeholder="搜索模型..." aria-label="搜索模型" />
 							</div>
 							<button class="btn sm" type="button" :disabled="mutating || !activeProvider.connectionId || !activeProvider.models.length" @click="setAllModelsEnabled(true)">全部启用</button>
 							<button class="btn sm" type="button" :disabled="mutating || !activeProvider.connectionId || !activeProvider.models.length" @click="setAllModelsEnabled(false)">全部禁用</button>
 							<button class="btn sm fetch-models-btn" type="button" :disabled="fetchingModels || !activeProvider.connectionId || !activeProvider.supportsModelListing" @click="fetchModelListFromHost">
-								<svg class="refresh-ico" :class="{ spinning: fetchingModels }" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-									<path d="M21 12a9 9 0 1 1-2.64-6.36" />
-									<path d="M21 3v5h-5" />
-								</svg>
+								<RefreshCw :size="13" :stroke-width="2" class="refresh-ico" :class="{ spinning: fetchingModels }" />
 								获取模型列表
 							</button>
 							<button class="icon-btn add-model-btn" type="button" title="添加模型" aria-label="添加模型" :disabled="!activeProvider.connectionId" @click="openModelDialog">
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-									<path d="M12 5v14M5 12h14" />
-								</svg>
+								<Plus :size="15" :stroke-width="2.2" />
 							</button>
 						</div>
 
@@ -469,41 +484,18 @@ onUnmounted(() => {
 										<span class="m-id">{{ model.id }}</span>
 									</div>
 									<div class="m-tags">
-										<span class="tag">
-											<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-												<path d="M4 7V4h16v3M9 20h6M12 4v16" />
-											</svg>
-											{{ model.ctx }} 上下文
-										</span>
-										<span class="tag">
-											<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-												<path d="M12 2v6m0 0 3-3m-3 3L9 5M5 12H2m20 0h-3M6 18l-2 2m16 0-2-2" />
-											</svg>
-											{{ model.out }} 输出
-										</span>
-										<span v-if="model.outp !== '—'" class="price-tag">输入 {{ model.inp }} / 输出 {{ model.outp }}</span>
-										<span v-if="model.cacheW && model.cacheR" class="price-tag">缓存 写 {{ model.cacheW }} / 读 {{ model.cacheR }}</span>
+										<span class="tag">{{ model.ctx }} 上下文</span>
+										<span class="tag">{{ model.out }} 输出</span>
+										<span v-if="model.outp !== '—'" class="price-tag">IN {{ model.inp }} / OUT {{ model.outp }}</span>
+										<span v-if="model.cacheW && model.cacheR" class="price-tag dim">CACHE W{{ model.cacheW }} / R{{ model.cacheR }}</span>
 									</div>
 								</div>
 								<div class="m-actions">
 									<button class="m-icon" type="button" title="查看详情" aria-label="查看详情">
-										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-											<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
-											<circle cx="12" cy="12" r="3" />
-										</svg>
+										<Eye :size="15" :stroke-width="1.9" />
 									</button>
 									<button class="m-icon" type="button" title="模型参数" aria-label="模型参数">
-										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true">
-											<line x1="21" y1="6" x2="14" y2="6" />
-											<line x1="10" y1="6" x2="3" y2="6" />
-											<line x1="21" y1="12" x2="12" y2="12" />
-											<line x1="8" y1="12" x2="3" y2="12" />
-											<line x1="21" y1="18" x2="16" y2="18" />
-											<line x1="12" y1="18" x2="3" y2="18" />
-											<line x1="14" y1="4" x2="14" y2="8" />
-											<line x1="8" y1="10" x2="8" y2="14" />
-											<line x1="16" y1="16" x2="16" y2="20" />
-										</svg>
+										<SlidersHorizontal :size="15" :stroke-width="1.9" />
 									</button>
 									<button
 										class="m-icon model-delete"
@@ -513,9 +505,7 @@ onUnmounted(() => {
 										:disabled="pendingModelIds.has(model.profileId)"
 										@click="deleteModel(model)"
 									>
-										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-											<path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13" />
-										</svg>
+										<Trash2 :size="15" :stroke-width="1.9" />
 									</button>
 									<label class="switch" title="启用模型">
 										<input
@@ -537,9 +527,7 @@ onUnmounted(() => {
 		</main>
 
 		<div class="toast" :class="{ show: toastState.visible }" role="status" aria-live="polite">
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-				<path d="M20 6 9 17l-5-5" />
-			</svg>
+			<Check :size="15" :stroke-width="2.4" class="toast-ico" />
 			<span>{{ toastState.text }}</span>
 		</div>
 
@@ -560,40 +548,18 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.ai-providers {
-	--ap-bg: oklch(98% 0.003 250);
-	--ap-surface: oklch(100% 0 0);
-	--ap-surface-2: oklch(97.5% 0.004 250);
-	--ap-fg: oklch(22% 0.012 255);
-	--ap-fg-soft: oklch(38% 0.012 255);
-	--ap-muted: oklch(56% 0.012 255);
-	--ap-faint: oklch(70% 0.01 255);
-	--ap-border: oklch(92.5% 0.005 255);
-	--ap-border-2: oklch(88% 0.006 255);
-	--ap-nav-bg: oklch(21% 0.014 260);
-	--ap-accent: oklch(55% 0.16 255);
-	--ap-accent-soft: oklch(96% 0.03 255);
-	--ap-ok: oklch(63% 0.15 150);
-	--ap-ok-soft: oklch(95% 0.04 150);
-	--ap-price: oklch(48% 0.12 150);
-	--ap-price-bg: oklch(95.5% 0.035 150);
-	--ap-switch-on: oklch(26% 0.015 260);
-	--ap-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
-	--ap-radius-sm: 7px;
-	--ap-radius-md: 10px;
-	--ap-radius-lg: 13px;
-	--ap-shadow-sm: 0 1px 2px oklch(20% 0.02 255 / 0.06);
-	--ap-shadow-md: 0 4px 14px oklch(20% 0.02 255 / 0.08), 0 1px 3px oklch(20% 0.02 255 / 0.05);
+@import './settings-console.css';
 
+.ai-providers {
 	position: relative;
 	display: grid;
-	grid-template-columns: 272px minmax(0, 1fr);
+	grid-template-columns: 300px minmax(0, 1fr);
 	width: 100%;
 	height: 100%;
 	min-height: 0;
 	overflow: hidden;
-	background: var(--ap-bg);
-	color: var(--ap-fg);
+	color: var(--sc-text);
+	font-family: var(--sc-sans);
 	font-size: 14px;
 	line-height: 1.5;
 }
@@ -604,7 +570,7 @@ onUnmounted(() => {
 
 .scroll {
 	scrollbar-width: thin;
-	scrollbar-color: var(--ap-border-2) transparent;
+	scrollbar-color: var(--sc-faint) transparent;
 }
 
 .scroll::-webkit-scrollbar {
@@ -613,29 +579,51 @@ onUnmounted(() => {
 }
 
 .scroll::-webkit-scrollbar-thumb {
-	background: var(--ap-border-2);
+	background: var(--sc-raise);
 	background-clip: padding-box;
 	border: 2px solid transparent;
 	border-radius: 99px;
 }
 
 .scroll::-webkit-scrollbar-thumb:hover {
-	background: var(--ap-faint);
+	background: var(--sc-faint);
 }
 
+/* ── left index ─────────────────────────────────────────────── */
 .provider-list {
 	display: flex;
 	min-height: 0;
 	flex-direction: column;
-	border-right: 1px solid var(--ap-border);
-	background: var(--ap-surface);
+	border-right: 1px solid var(--sc-line);
+	background: color-mix(in srgb, var(--sc-panel) 72%, transparent);
 }
 
 .list-top {
+	padding: 20px 16px 14px;
+	border-bottom: 1px solid var(--sc-line);
+}
+
+.list-kicker {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	margin-bottom: 14px;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.22em;
+}
+
+.list-kicker-count {
+	color: var(--sc-acid);
+	letter-spacing: 0.12em;
+}
+
+.list-controls {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 18px 16px 12px;
 }
 
 .search {
@@ -646,61 +634,59 @@ onUnmounted(() => {
 	min-width: 0;
 }
 
-.search svg {
+.search-ico {
 	position: absolute;
 	left: 11px;
-	width: 15px;
-	height: 15px;
-	color: var(--ap-faint);
-	stroke-width: 1.8;
+	color: var(--sc-faint);
+	pointer-events: none;
 }
 
 .search input {
 	width: 100%;
-	padding: 8px 10px 8px 33px;
-	border: 1px solid var(--ap-border-2);
-	border-radius: var(--ap-radius-sm);
-	background: var(--ap-surface);
-	color: var(--ap-fg);
+	padding: 9px 10px 9px 33px;
+	border: 1px solid var(--sc-line);
+	border-radius: 8px;
+	background: var(--sc-panel);
+	color: var(--sc-text);
 	font: inherit;
 	font-size: 13px;
-	transition: border-color 0.14s, box-shadow 0.14s;
+	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
 }
 
 .search input::placeholder {
-	color: var(--ap-faint);
+	color: var(--sc-faint);
 }
 
 .search input:focus {
-	border-color: var(--ap-accent);
+	border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
 	outline: none;
-	box-shadow: 0 0 0 3px var(--ap-accent-soft);
+	background: var(--sc-panel);
+	box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
 
 .icon-btn {
 	display: grid;
-	width: 34px;
-	height: 34px;
+	width: 36px;
+	height: 36px;
 	flex: 0 0 auto;
 	place-items: center;
-	border: 1px solid var(--ap-border-2);
-	border-radius: var(--ap-radius-sm);
-	background: var(--ap-surface);
-	color: var(--ap-fg-soft);
+	border: 1px solid var(--sc-line);
+	border-radius: 8px;
+	background: var(--sc-panel);
+	color: var(--sc-soft);
 	cursor: pointer;
-	transition: background 0.14s, border-color 0.14s, color 0.14s;
-}
-
-.icon-btn svg {
-	width: 17px;
-	height: 17px;
-	stroke-width: 1.9;
+	transition:
+		background 0.16s,
+		border-color 0.16s,
+		color 0.16s,
+		transform 0.12s var(--sc-ease-spring);
 }
 
 .icon-btn:hover {
-	border-color: var(--ap-accent);
-	background: var(--ap-accent);
-	color: #fff;
+	border-color: var(--sc-acid);
+	background: var(--sc-acid);
+	color: var(--sc-acid-ink);
+	transform: translateY(-1px);
 }
 
 .list-scroll {
@@ -711,11 +697,36 @@ onUnmounted(() => {
 }
 
 .grp-label {
-	padding: 14px 6px 7px;
-	color: var(--ap-muted);
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 16px 8px 8px;
+	color: var(--sc-mute);
 	font-size: 11px;
 	font-weight: 600;
-	letter-spacing: 0.04em;
+	letter-spacing: 0.05em;
+}
+
+.grp-en {
+	margin-left: auto;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 9px;
+	font-weight: 500;
+	letter-spacing: 0.2em;
+}
+
+.grp-dot {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--sc-faint);
+}
+
+.grp-dot.live {
+	background: var(--sc-ok);
+	box-shadow: 0 0 8px rgba(15, 157, 99, 0.45);
+	animation: sc-blink 2.6s ease-in-out infinite;
 }
 
 .prov {
@@ -723,56 +734,79 @@ onUnmounted(() => {
 	display: flex;
 	align-items: center;
 	width: 100%;
-	gap: 11px;
+	gap: 10px;
 	padding: 10px;
 	border: 1px solid transparent;
-	border-radius: var(--ap-radius-md);
+	border-radius: 10px;
 	background: transparent;
 	color: inherit;
 	text-align: left;
 	cursor: pointer;
 	user-select: none;
-	transition: background 0.13s, border-color 0.13s, box-shadow 0.13s;
+	transition:
+		background 0.15s,
+		border-color 0.15s,
+		transform 0.15s var(--sc-ease-out);
 }
 
 .prov:hover {
-	background: var(--ap-surface-2);
+	background: var(--sc-hover);
+	transform: translateX(2px);
 }
 
 .prov.active {
-	border-color: var(--ap-border-2);
-	background: var(--ap-surface);
-	box-shadow: var(--ap-shadow-sm);
+	border-color: var(--sc-line-2);
+	background: var(--sc-panel);
+	box-shadow: 0 2px 10px rgba(23, 26, 31, 0.05);
+}
+
+.prov.active::before {
+	position: absolute;
+	top: 50%;
+	left: -1px;
+	width: 2px;
+	height: 22px;
+	transform: translateY(-50%);
+	border-radius: 2px;
+	background: var(--sc-acid);
+	box-shadow: 0 0 10px rgba(59, 91, 253, 0.4);
+	content: '';
 }
 
 .prov.disabled .p-logo,
 .prov.disabled .p-meta {
-	opacity: 0.62;
+	opacity: 0.55;
+}
+
+.p-index {
+	width: 18px;
+	flex: 0 0 auto;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 10px;
+	letter-spacing: 0.06em;
+	transition: color 0.15s;
+}
+
+.prov.active .p-index {
+	color: var(--sc-acid);
 }
 
 .p-logo {
 	display: grid;
-	width: 36px;
-	height: 36px;
+	width: 34px;
+	height: 34px;
 	flex: 0 0 auto;
 	place-items: center;
 	overflow: hidden;
-	border: 1px solid var(--ap-border);
+	border: 1px solid var(--sc-line);
 	border-radius: 9px;
-	background: var(--ap-surface-2);
-	color: var(--ap-fg);
-	font-size: 15px;
-	font-weight: 700;
-}
-
-.p-logo :deep(svg) {
-	width: 22px;
-	height: 22px;
+	background: var(--sc-panel);
 }
 
 .p-logo :deep(.brand-logo) {
-	width: 24px;
-	height: 24px;
+	width: 22px;
+	height: 22px;
 	object-fit: contain;
 }
 
@@ -784,7 +818,7 @@ onUnmounted(() => {
 
 .p-name {
 	overflow: hidden;
-	color: var(--ap-fg);
+	color: var(--sc-text);
 	font-size: 13.5px;
 	font-weight: 560;
 	text-overflow: ellipsis;
@@ -793,61 +827,84 @@ onUnmounted(() => {
 
 .p-sub {
 	margin-top: 1px;
-	color: var(--ap-muted);
-	font-size: 11.5px;
+	color: var(--sc-mute);
+	font-family: var(--sc-mono);
+	font-size: 10.5px;
+	letter-spacing: 0.02em;
 }
 
 .dot {
-	width: 8px;
-	height: 8px;
+	width: 6px;
+	height: 6px;
 	flex: 0 0 auto;
 	border-radius: 50%;
-	background: var(--ap-border-2);
+	background: var(--sc-faint);
+	transition: background 0.18s, box-shadow 0.18s;
 }
 
 .prov.on .dot {
-	background: var(--ap-ok);
-	box-shadow: 0 0 0 3px var(--ap-ok-soft);
+	background: var(--sc-ok);
+	box-shadow: 0 0 8px rgba(15, 157, 99, 0.45);
 }
 
 .provider-empty {
 	padding: 30px 10px;
-	color: var(--ap-muted);
+	color: var(--sc-mute);
 	font-size: 13px;
 	text-align: center;
 }
 
+/* ── detail ─────────────────────────────────────────────────── */
 .detail {
+	position: relative;
 	display: flex;
 	min-width: 0;
 	min-height: 0;
 	flex-direction: column;
-	background: var(--ap-surface);
+	overflow: hidden;
+}
+
+.ghost-num {
+	position: absolute;
+	top: -30px;
+	right: 8px;
+	z-index: 0;
+	color: transparent;
+	font-family: var(--sc-mono);
+	font-size: 220px;
+	font-weight: 700;
+	letter-spacing: -0.04em;
+	line-height: 1;
+	-webkit-text-stroke: 1px rgba(19, 27, 45, 0.08);
+	pointer-events: none;
+	user-select: none;
 }
 
 .detail-head {
+	position: relative;
+	z-index: 1;
 	display: flex;
 	align-items: center;
-	gap: 14px;
-	padding: 20px 30px;
-	border-bottom: 1px solid var(--ap-border);
+	gap: 16px;
+	padding: 26px 34px 22px;
+	border-bottom: 1px solid var(--sc-line);
 }
 
 .dh-logo {
 	display: grid;
-	width: 42px;
-	height: 42px;
+	width: 52px;
+	height: 52px;
 	flex: 0 0 auto;
 	place-items: center;
-	border: 1px solid var(--ap-border);
-	border-radius: 11px;
-	background: var(--ap-surface-2);
+	border: 1px solid var(--sc-line-2);
+	border-radius: 13px;
+	background: var(--sc-panel);
+	box-shadow: 0 8px 24px rgba(23, 26, 31, 0.07);
 }
 
-.dh-logo :deep(svg),
 .dh-logo :deep(.brand-logo) {
-	width: 26px;
-	height: 26px;
+	width: 30px;
+	height: 30px;
 	object-fit: contain;
 }
 
@@ -856,31 +913,42 @@ onUnmounted(() => {
 	flex: 1;
 }
 
+.dh-kicker {
+	margin-bottom: 4px;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.24em;
+}
+
 .dh-meta h2 {
 	margin: 0;
-	color: var(--ap-fg);
-	font-size: 18px;
-	font-weight: 620;
-	letter-spacing: 0;
-	line-height: 1.25;
+	font-family: var(--sc-display);
+	font-size: 26px;
+	font-weight: 640;
+	letter-spacing: 0.01em;
+	line-height: 1.15;
 }
 
 .dh-meta p {
-	margin: 1px 0 0;
-	color: var(--ap-muted);
+	margin: 3px 0 0;
+	color: var(--sc-mute);
 	font-size: 12.5px;
 }
 
 .detail-body {
+	position: relative;
+	z-index: 1;
 	min-height: 0;
-	max-width: 860px;
+	max-width: 880px;
 	flex: 1;
 	overflow-y: auto;
-	padding: 26px 30px 60px;
+	padding: 28px 34px 72px;
 }
 
 .field {
-	margin-bottom: 26px;
+	margin-bottom: 28px;
 }
 
 .models-field {
@@ -891,14 +959,16 @@ onUnmounted(() => {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	margin-bottom: 9px;
+	margin-bottom: 10px;
 }
 
 .fl {
-	color: var(--ap-fg);
-	font-size: 13.5px;
+	color: var(--sc-soft);
+	font-family: var(--sc-mono);
+	font-size: 11px;
 	font-weight: 600;
-	letter-spacing: 0;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
 }
 
 .help-link {
@@ -908,56 +978,60 @@ onUnmounted(() => {
 	padding: 0;
 	border: 0;
 	background: transparent;
-	color: var(--ap-accent);
+	color: var(--sc-acid);
 	cursor: pointer;
 	font: inherit;
 	font-size: 12.5px;
 	font-weight: 500;
 	text-decoration: none;
-}
-
-.help-link svg {
-	width: 13px;
-	height: 13px;
-	stroke-width: 2;
+	opacity: 0.9;
+	transition: opacity 0.15s, transform 0.15s var(--sc-ease-out);
 }
 
 .help-link:hover {
-	text-decoration: underline;
+	opacity: 1;
+	transform: translateX(2px);
+}
+
+.help-link:disabled {
+	opacity: 0.35;
+	cursor: default;
+	transform: none;
 }
 
 .field-hint {
-	margin: 7px 0 0;
-	color: var(--ap-muted);
+	margin: 8px 0 0;
+	color: var(--sc-mute);
 	font-size: 12px;
 }
 
 .input {
 	width: 100%;
-	padding: 11px 13px;
-	border: 1px solid var(--ap-border-2);
-	border-radius: var(--ap-radius-md);
-	background: var(--ap-surface);
-	color: var(--ap-fg);
+	padding: 12px 14px;
+	border: 1px solid var(--sc-line);
+	border-radius: 10px;
+	background: var(--sc-panel);
+	color: var(--sc-text);
 	font: inherit;
 	font-size: 13.5px;
-	transition: border-color 0.14s, box-shadow 0.14s;
+	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
 }
 
 .input::placeholder {
-	color: var(--ap-faint);
+	color: var(--sc-faint);
 }
 
 .input:focus {
-	border-color: var(--ap-accent);
+	border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
 	outline: none;
-	box-shadow: 0 0 0 3px var(--ap-accent-soft);
+	background: var(--sc-panel);
+	box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
 
 .input.mono {
-	font-family: var(--ap-mono);
-	font-size: 13px;
-	letter-spacing: 0.01em;
+	font-family: var(--sc-mono);
+	font-size: 12.5px;
+	letter-spacing: 0.02em;
 }
 
 .input-wrap {
@@ -980,20 +1054,14 @@ onUnmounted(() => {
 	border: 0;
 	border-radius: 7px;
 	background: transparent;
-	color: var(--ap-muted);
+	color: var(--sc-mute);
 	cursor: pointer;
-	transition: background 0.14s, color 0.14s;
-}
-
-.reveal :deep(svg) {
-	width: 18px;
-	height: 18px;
-	stroke-width: 1.8;
+	transition: background 0.15s, color 0.15s;
 }
 
 .reveal:hover {
-	background: var(--ap-surface-2);
-	color: var(--ap-fg);
+	background: var(--sc-hover);
+	color: var(--sc-text);
 }
 
 .check-row {
@@ -1009,156 +1077,162 @@ onUnmounted(() => {
 
 .select select {
 	width: 100%;
-	padding: 11px 38px 11px 13px;
+	padding: 12px 38px 12px 14px;
 	appearance: none;
-	border: 1px solid var(--ap-border-2);
-	border-radius: var(--ap-radius-md);
-	background: var(--ap-surface);
-	color: var(--ap-fg);
+	border: 1px solid var(--sc-line);
+	border-radius: 10px;
+	background: var(--sc-panel);
+	color: var(--sc-text);
 	cursor: pointer;
 	font: inherit;
 	font-size: 13.5px;
-	transition: border-color 0.14s, box-shadow 0.14s;
+	transition: border-color 0.16s, box-shadow 0.16s;
 }
 
 .select select:focus {
-	border-color: var(--ap-accent);
+	border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
 	outline: none;
-	box-shadow: 0 0 0 3px var(--ap-accent-soft);
+	box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
 
 .select .chev {
 	position: absolute;
 	top: 50%;
 	right: 13px;
-	width: 16px;
-	height: 16px;
 	transform: translateY(-50%);
-	color: var(--ap-muted);
+	color: var(--sc-mute);
 	pointer-events: none;
-	stroke-width: 2;
 }
 
 .btn {
 	display: inline-flex;
 	align-items: center;
+	justify-content: center;
 	gap: 7px;
 	white-space: nowrap;
 	padding: 0 18px;
-	border: 1px solid var(--ap-border-2);
-	border-radius: var(--ap-radius-md);
-	background: var(--ap-surface);
-	color: var(--ap-fg);
+	border: 1px solid var(--sc-line-2);
+	border-radius: 10px;
+	background: var(--sc-panel);
+	color: var(--sc-text);
 	cursor: pointer;
 	font: inherit;
 	font-size: 13.5px;
 	font-weight: 560;
-	transition: background 0.14s, border-color 0.14s, color 0.14s, box-shadow 0.14s, opacity 0.14s;
-}
-
-.btn svg {
-	width: 15px;
-	height: 15px;
-	stroke-width: 1.9;
+	transition:
+		background 0.16s,
+		border-color 0.16s,
+		color 0.16s,
+		transform 0.12s var(--sc-ease-spring),
+		opacity 0.16s;
 }
 
 .btn:hover:not(:disabled) {
-	border-color: var(--ap-faint);
-	background: var(--ap-surface-2);
+	border-color: var(--sc-faint);
+	background: var(--sc-hover);
+	transform: translateY(-1px);
 }
 
 .btn:disabled,
 .icon-btn:disabled {
 	cursor: default;
-	opacity: 0.62;
+	opacity: 0.55;
+}
+
+.btn:disabled:hover {
+	transform: none;
 }
 
 .btn.sm {
-	height: 34px;
-	padding: 0 13px;
+	height: 36px;
+	padding: 0 14px;
 	font-size: 12.5px;
 }
 
 .check-status {
 	display: inline-flex;
 	align-items: center;
-	gap: 7px;
-	margin-top: 9px;
-	font-size: 12.5px;
+	gap: 8px;
+	margin-top: 10px;
+	font-family: var(--sc-mono);
+	font-size: 12px;
 	font-weight: 500;
+	letter-spacing: 0.02em;
 }
 
 .check-status .spin {
-	width: 14px;
-	height: 14px;
-	border: 2px solid var(--ap-accent-soft);
-	border-top-color: var(--ap-accent);
+	width: 13px;
+	height: 13px;
+	border: 2px solid var(--sc-acid-soft);
+	border-top-color: var(--sc-acid);
 	border-radius: 50%;
-	animation: spin 0.7s linear infinite;
+	animation: sc-spin 0.7s linear infinite;
 }
 
 .check-status.ok {
-	color: var(--ap-price);
-}
-
-.check-status.ok svg {
-	width: 15px;
-	height: 15px;
-	stroke-width: 2.2;
+	color: var(--sc-ok);
 }
 
 .check-status.error {
-	color: oklch(55% 0.19 25);
+	color: var(--sc-err);
 }
 
-.check-status.error svg {
-	width: 15px;
-	height: 15px;
-	stroke-width: 2.2;
+.err-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--sc-err);
+	box-shadow: 0 0 8px rgba(220, 69, 69, 0.4);
 }
 
-.help-link:disabled {
-	opacity: 0.45;
-	cursor: default;
-}
-
+/* ── model registry ─────────────────────────────────────────── */
 .models {
 	container-type: inline-size;
 	overflow: hidden;
-	border: 1px solid var(--ap-border);
-	border-radius: var(--ap-radius-lg);
-	background: var(--ap-surface-2);
+	border: 1px solid var(--sc-line);
+	border-radius: 14px;
+	background: var(--sc-panel);
 }
 
 .models-head {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 16px 18px;
+	padding: 18px 20px 14px;
+}
+
+.mh-kicker {
+	margin-bottom: 5px;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 9.5px;
+	font-weight: 500;
+	letter-spacing: 0.24em;
 }
 
 .models-head h3 {
 	margin: 0;
-	color: var(--ap-fg);
-	font-size: 14px;
-	font-weight: 620;
+	font-family: var(--sc-display);
+	font-size: 17px;
+	font-weight: 630;
 }
 
 .models-head .count {
-	margin-top: 2px;
-	color: var(--ap-muted);
+	margin-top: 3px;
+	color: var(--sc-mute);
 	font-size: 12px;
 }
 
 .count-pill {
-	padding: 4px 11px;
-	border: 1px solid var(--ap-border-2);
+	padding: 5px 12px;
+	border: 1px solid color-mix(in srgb, var(--sc-acid) 35%, transparent);
 	border-radius: 99px;
-	background: var(--ap-surface);
-	color: var(--ap-price);
-	font-family: var(--ap-mono);
-	font-size: 12px;
+	background: var(--sc-acid-soft);
+	color: var(--sc-acid);
+	font-family: var(--sc-mono);
+	font-size: 11.5px;
 	font-weight: 600;
+	letter-spacing: 0.04em;
 }
 
 .models-toolbar {
@@ -1166,7 +1240,7 @@ onUnmounted(() => {
 	align-items: center;
 	flex-wrap: wrap;
 	gap: 9px;
-	padding: 0 18px 16px;
+	padding: 0 20px 16px;
 }
 
 .models-toolbar .search {
@@ -1176,12 +1250,11 @@ onUnmounted(() => {
 
 .models-toolbar .btn.sm {
 	min-width: 0;
-	justify-content: center;
 }
 
 .add-model-btn {
-	width: 34px;
-	height: 34px;
+	width: 36px;
+	height: 36px;
 }
 
 @container (max-width: 620px) {
@@ -1195,29 +1268,34 @@ onUnmounted(() => {
 	}
 
 	.models-toolbar .fetch-models-btn {
-		flex-basis: calc(100% - 43px);
+		flex-basis: calc(100% - 45px);
 	}
 
 	.add-model-btn {
-		flex: 0 0 34px;
+		flex: 0 0 36px;
 	}
 }
 
 .refresh-ico.spinning {
-	animation: spin 0.8s linear infinite;
+	animation: sc-spin 0.8s linear infinite;
 }
 
 .model-list {
-	border-top: 1px solid var(--ap-border);
+	border-top: 1px solid var(--sc-line);
 }
 
 .model {
 	display: flex;
 	align-items: center;
 	gap: 14px;
-	padding: 14px 18px;
-	border-bottom: 1px solid var(--ap-border);
-	background: var(--ap-surface);
+	padding: 14px 20px;
+	border-bottom: 1px solid var(--sc-line);
+	background: transparent;
+	transition: background 0.15s;
+}
+
+.model:hover {
+	background: rgba(19, 27, 45, 0.025);
 }
 
 .model:last-child {
@@ -1226,23 +1304,18 @@ onUnmounted(() => {
 
 .m-logo {
 	display: grid;
-	width: 34px;
-	height: 34px;
+	width: 32px;
+	height: 32px;
 	flex: 0 0 auto;
 	place-items: center;
-	border: 1px solid var(--ap-border);
+	border: 1px solid var(--sc-line);
 	border-radius: 8px;
-	background: var(--ap-surface-2);
-}
-
-.m-logo :deep(svg) {
-	width: 20px;
-	height: 20px;
+	background: var(--sc-panel);
 }
 
 .m-logo :deep(.brand-logo) {
-	width: 22px;
-	height: 22px;
+	width: 20px;
+	height: 20px;
 	object-fit: contain;
 }
 
@@ -1259,19 +1332,19 @@ onUnmounted(() => {
 }
 
 .m-name {
-	color: var(--ap-fg);
 	font-size: 14px;
 	font-weight: 600;
 }
 
 .m-id {
 	padding: 2px 7px;
-	border: 1px solid var(--ap-border-2);
+	border: 1px solid var(--sc-line);
 	border-radius: 5px;
-	background: var(--ap-surface-2);
-	color: var(--ap-fg-soft);
-	font-family: var(--ap-mono);
-	font-size: 11px;
+	background: var(--sc-raise);
+	color: var(--sc-soft);
+	font-family: var(--sc-mono);
+	font-size: 10.5px;
+	letter-spacing: 0.02em;
 }
 
 .m-tags {
@@ -1283,34 +1356,34 @@ onUnmounted(() => {
 }
 
 .tag {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	color: var(--ap-muted);
-	font-size: 11.5px;
-}
-
-.tag svg {
-	width: 13px;
-	height: 13px;
-	color: var(--ap-faint);
-	stroke-width: 1.8;
+	color: var(--sc-mute);
+	font-family: var(--sc-mono);
+	font-size: 10.5px;
+	letter-spacing: 0.02em;
 }
 
 .price-tag {
 	padding: 3px 8px;
+	border: 1px solid color-mix(in srgb, var(--sc-ok) 30%, transparent);
 	border-radius: 6px;
-	background: var(--ap-price-bg);
-	color: var(--ap-price);
-	font-size: 11.5px;
+	background: var(--sc-ok-soft);
+	color: var(--sc-ok);
+	font-family: var(--sc-mono);
+	font-size: 10.5px;
 	font-weight: 560;
-	letter-spacing: 0;
+	letter-spacing: 0.02em;
+}
+
+.price-tag.dim {
+	border-color: var(--sc-line);
+	background: var(--sc-raise);
+	color: var(--sc-soft);
 }
 
 .m-actions {
 	display: flex;
 	align-items: center;
-	gap: 12px;
+	gap: 10px;
 	flex: 0 0 auto;
 }
 
@@ -1322,38 +1395,35 @@ onUnmounted(() => {
 	border: 0;
 	border-radius: 7px;
 	background: transparent;
-	color: var(--ap-faint);
+	color: var(--sc-faint);
 	cursor: pointer;
-	transition: background 0.13s, color 0.13s;
-}
-
-.m-icon svg {
-	width: 17px;
-	height: 17px;
-	stroke-width: 1.8;
+	transition: background 0.14s, color 0.14s, transform 0.14s var(--sc-ease-spring);
 }
 
 .m-icon:hover {
-	background: var(--ap-surface-2);
-	color: var(--ap-fg-soft);
+	background: var(--sc-hover);
+	color: var(--sc-soft);
+	transform: translateY(-1px);
 }
 
 .provider-delete,
 .model-delete {
-	color: oklch(62% 0.11 25);
+	color: color-mix(in srgb, var(--sc-err) 80%, var(--sc-mute));
 }
 
 .provider-delete:hover,
 .model-delete:hover {
-	background: oklch(96% 0.025 25);
-	color: oklch(52% 0.19 25);
+	background: var(--sc-err-soft);
+	color: var(--sc-err);
 }
 
 .m-icon:disabled {
-	opacity: 0.45;
+	opacity: 0.4;
 	cursor: default;
+	transform: none;
 }
 
+/* ── switches ───────────────────────────────────────────────── */
 .switch {
 	position: relative;
 	width: 42px;
@@ -1375,9 +1445,10 @@ onUnmounted(() => {
 .track {
 	position: absolute;
 	inset: 0;
+	border: 1px solid var(--sc-line-2);
 	border-radius: 99px;
-	background: var(--ap-border-2);
-	transition: background 0.18s;
+	background: var(--sc-raise);
+	transition: background 0.2s, border-color 0.2s;
 }
 
 .knob {
@@ -1388,66 +1459,71 @@ onUnmounted(() => {
 	height: 18px;
 	border-radius: 50%;
 	background: #fff;
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-	transition: transform 0.18s;
+	box-shadow: 0 1px 3px rgba(23, 26, 31, 0.22);
+	transition:
+		transform 0.22s var(--sc-ease-spring),
+		background 0.2s;
 }
 
 .switch input:checked + .track {
-	background: var(--ap-switch-on);
+	border-color: var(--sc-acid);
+	background: var(--sc-acid);
 }
 
 .switch input:checked + .track + .knob {
 	transform: translateX(18px);
+	background: #fff;
 }
 
 .switch.big {
-	width: 46px;
-	height: 26px;
+	width: 48px;
+	height: 27px;
 }
 
 .switch.big .knob {
-	width: 20px;
-	height: 20px;
+	width: 21px;
+	height: 21px;
 }
 
 .switch.big input:checked + .track + .knob {
-	transform: translateX(20px);
+	transform: translateX(21px);
 }
 
 .models-empty,
 .model-empty {
-	padding: 40px;
-	color: var(--ap-muted);
+	padding: 44px;
+	color: var(--sc-mute);
 	font-size: 13px;
 	text-align: center;
 }
 
+/* ── toast ──────────────────────────────────────────────────── */
 .toast {
 	position: absolute;
 	left: 50%;
-	bottom: 24px;
+	bottom: 26px;
 	z-index: 50;
 	display: flex;
 	align-items: center;
 	gap: 9px;
-	padding: 10px 18px;
-	transform: translateX(-50%) translateY(20px);
+	padding: 11px 18px;
+	transform: translateX(-50%) translateY(24px);
+	border: 1px solid var(--sc-line-2);
 	border-radius: 10px;
-	background: var(--ap-nav-bg);
-	color: #fff;
-	box-shadow: var(--ap-shadow-md);
+	background: var(--sc-panel);
+	color: var(--sc-text);
+	box-shadow: 0 18px 48px rgba(23, 26, 31, 0.16);
 	font-size: 13px;
 	font-weight: 500;
 	opacity: 0;
 	pointer-events: none;
-	transition: opacity 0.2s, transform 0.2s;
+	transition:
+		opacity 0.22s,
+		transform 0.28s var(--sc-ease-spring);
 }
 
-.toast svg {
-	width: 16px;
-	height: 16px;
-	color: var(--ap-ok);
-	stroke-width: 2;
+.toast-ico {
+	color: var(--sc-ok);
 }
 
 .toast.show {
@@ -1455,23 +1531,21 @@ onUnmounted(() => {
 	opacity: 1;
 }
 
-@keyframes spin {
-	to {
-		transform: rotate(360deg);
-	}
-}
-
 @media (max-width: 980px) {
 	.ai-providers {
-		grid-template-columns: 244px minmax(0, 1fr);
+		grid-template-columns: 260px minmax(0, 1fr);
 	}
 
 	.detail-body {
-		padding: 22px 22px 48px;
+		padding: 24px 24px 56px;
 	}
 
 	.models-toolbar .search {
 		flex-basis: 100%;
+	}
+
+	.ghost-num {
+		font-size: 150px;
 	}
 }
 
@@ -1484,7 +1558,7 @@ onUnmounted(() => {
 	.provider-list {
 		min-height: 280px;
 		border-right: 0;
-		border-bottom: 1px solid var(--ap-border);
+		border-bottom: 1px solid var(--sc-line);
 	}
 
 	.detail {
@@ -1492,7 +1566,7 @@ onUnmounted(() => {
 	}
 
 	.detail-head {
-		padding: 18px;
+		padding: 20px;
 	}
 
 	.check-row,
@@ -1504,15 +1578,6 @@ onUnmounted(() => {
 
 	.m-actions {
 		justify-content: flex-end;
-	}
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.ai-providers *,
-	.ai-providers *::before,
-	.ai-providers *::after {
-		animation-duration: 0.001ms !important;
-		transition-duration: 0.001ms !important;
 	}
 }
 </style>

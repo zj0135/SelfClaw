@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
+import { ChevronDown, ChevronRight, Check, Bot, Terminal } from 'lucide-vue-next';
 import claudeIcon from '../../../assets/agents-icons/claude.svg';
 import codexIcon from '../../../assets/agents-icons/codex.svg';
 import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
@@ -349,15 +350,10 @@ watch(isDirect, () => {
 		>
 			<span class="model-badge" :class="{ 'model-badge--brand': !isDirect && !!selectedAgent?.iconSrc }" aria-hidden="true">
 				<img v-if="!isDirect && selectedAgent?.iconSrc" class="model-badge-img" :src="selectedAgent.iconSrc" alt="" />
-				<svg v-else viewBox="0 0 24 24" fill="currentColor">
-					<path d="M12 2.6a3.1 3.1 0 0 1 2.83 1.84 3.1 3.1 0 0 1 3.9 3.9 3.1 3.1 0 0 1 0 5.32 3.1 3.1 0 0 1-3.9 3.9 3.1 3.1 0 0 1-5.66 0 3.1 3.1 0 0 1-3.9-3.9 3.1 3.1 0 0 1 0-5.32 3.1 3.1 0 0 1 3.9-3.9A3.1 3.1 0 0 1 12 2.6Zm0 3.4a6 6 0 1 0 0 12 6 6 0 0 0 0-12Z" />
-				</svg>
+				<Bot v-else :size="12" :stroke-width="2" />
 			</span>
 			<span class="model-name">{{ modelLabel }}</span>
-			<svg class="model-caret" viewBox="0 0 20 20" fill="none" stroke="currentColor"
-				stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-				<path d="M6 8l4 4 4-4" />
-			</svg>
+			<ChevronDown class="model-caret" :size="13" :stroke-width="2" aria-hidden="true" />
 		</button>
 
 		<!-- 设置弹出面板：默认贴按钮下方展开；下方空间不足时自动翻转到按钮上方 -->
@@ -404,10 +400,10 @@ watch(isDirect, () => {
 							aria-hidden="true"
 						>
 							<img v-if="agent.iconSrc" class="agent-glyph-img" :src="agent.iconSrc" alt="" />
-							<svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+							<Terminal v-else :size="13" :stroke-width="2" />
 						</span>
 						<span class="agent-name">{{ agent.name }}</span>
-						<svg class="agent-check" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9" /></svg>
+						<Check class="agent-check" :size="14" :stroke-width="2.4" aria-hidden="true" />
 					</button>
 				</div>
 			</div>
@@ -427,7 +423,7 @@ watch(isDirect, () => {
 						@click.stop="toggleMenu"
 					>
 						<span>{{ isDirect ? (selectedDirectModel?.name || '未选择模型') : activeModel }}</span>
-						<svg class="caret" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4" /></svg>
+						<ChevronRight class="caret" :size="13" :stroke-width="2" aria-hidden="true" />
 					</button>
 					<div v-if="isDirect" v-show="menuOpen" class="model-menu" role="listbox" aria-label="Direct 模型列表">
 						<button
@@ -443,7 +439,7 @@ watch(isDirect, () => {
 								<strong>{{ directModel.name }}</strong>
 								<small>{{ directModel.providerName }} · {{ directModel.model }}</small>
 							</span>
-							<svg class="tick" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9" /></svg>
+							<Check class="tick" :size="14" :stroke-width="2.4" aria-hidden="true" />
 						</button>
 					</div>
 					<div v-else v-show="menuOpen" class="model-menu" role="listbox" aria-label="模型列表">
@@ -457,7 +453,7 @@ watch(isDirect, () => {
 							@click="pickModel(m)"
 						>
 							<span>{{ m }}</span>
-							<svg class="tick" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9" /></svg>
+							<Check class="tick" :size="14" :stroke-width="2.4" aria-hidden="true" />
 						</button>
 					</div>
 				</div>
@@ -475,7 +471,7 @@ watch(isDirect, () => {
 						@click.stop="toggleReasoningMenu"
 					>
 						<span>{{ activeReasoning }}</span>
-						<svg class="caret" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8l4 4 4-4" /></svg>
+						<ChevronRight class="caret" :size="13" :stroke-width="2" aria-hidden="true" />
 					</button>
 					<div v-show="reasoningMenuOpen" class="model-menu" role="listbox" aria-label="推理等级列表">
 						<button
@@ -488,7 +484,7 @@ watch(isDirect, () => {
 							@click="pickReasoning(level)"
 						>
 							<span>{{ level }}</span>
-							<svg class="tick" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5l4 4 8-9" /></svg>
+							<Check class="tick" :size="14" :stroke-width="2.4" aria-hidden="true" />
 						</button>
 					</div>
 				</div>
@@ -534,7 +530,7 @@ watch(isDirect, () => {
 	width: 18px;
 	height: 18px;
 	border-radius: 6px;
-	background: #171a1f;
+	background: var(--accent, #3b5bfd);
 	color: #fff;
 	flex: none;
 }
@@ -679,8 +675,8 @@ watch(isDirect, () => {
 }
 .agent-item:hover { background: #f7f8fa; }
 .agent-item[aria-checked='true'] {
-	background: #fbeee9;
-	border-color: #f0d2c6;
+	background: var(--accent-soft, rgba(59, 91, 253, 0.08));
+	border-color: rgba(59, 91, 253, 0.3);
 }
 .agent-glyph {
 	display: inline-grid;
@@ -701,7 +697,7 @@ watch(isDirect, () => {
 .agent-check {
 	width: 14px;
 	height: 14px;
-	color: #b1502f;
+	color: var(--accent, #3b5bfd);
 	display: none;
 }
 .agent-item[aria-checked='true'] .agent-check { display: block; }
@@ -736,11 +732,8 @@ watch(isDirect, () => {
 .model-select-btn:hover { background: #f7f8fa; }
 /* 菜单在右侧展开，箭头指向右以示意 */
 .model-select-btn .caret {
-	width: 13px;
-	height: 13px;
 	color: #6b7280;
 	flex: none;
-	transform: rotate(-90deg);
 }
 
 /* 模型菜单：贴着选择框右侧展开、底边对齐向上生长，避免被窗口下缘遮挡。

@@ -466,6 +466,7 @@ defineExpose({
 			@transcript-click="onTranscriptClick" @transcript-keydown="onTranscriptKeydown" />
 		<section v-else class="empty-composer-stage" aria-label="新对话">
 			<div class="empty-composer-copy">
+				<div class="empty-kicker">SELFCLAW · READY</div>
 				<h1>想聊些什么？</h1>
 				<p>随意提问，或使用命令/工具。</p>
 			</div>
@@ -523,6 +524,28 @@ defineExpose({
 
 .empty-composer-copy {
 	text-align: center;
+	animation: empty-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes empty-rise {
+	from {
+		opacity: 0;
+		transform: translateY(14px);
+	}
+
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+.empty-kicker {
+	margin-bottom: 14px;
+	color: #9aa1ad;
+	font-family: var(--font-mono, 'Cascadia Code', ui-monospace, monospace);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.28em;
 }
 
 .empty-composer-copy h1 {

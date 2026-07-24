@@ -1,5 +1,28 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import {
+	Plus,
+	Search,
+	Puzzle,
+	Blocks,
+	Zap,
+	FolderOpen,
+	Folder,
+	Pencil,
+	FolderCog,
+	BookOpen,
+	MessageSquare,
+	GitBranch,
+	Download,
+	Eraser,
+	Pin,
+	Trash2,
+	Settings,
+	PanelLeftClose,
+	PanelLeftOpen,
+	ChevronRight,
+	PawPrint,
+} from 'lucide-vue-next';
 
 const props = defineProps({
 	items: {
@@ -180,26 +203,36 @@ function onDocumentKeydown(event) {
 	}
 }
 
+// 主导航功能图标（action 项 id → Lucide 组件）
 const iconMap = {
-	'new-chat': `<svg viewBox="0 0 20 20" fill="none"><path d="M10 4.5v11M4.5 10h11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`,
-	search: `<svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.7"/><path d="M14 14l3.2 3.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`,
-	plugins: `<svg viewBox="0 0 20 20" fill="none"><rect x="3.5" y="3.5" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.6"/><rect x="11.5" y="3.5" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.6"/><rect x="3.5" y="11.5" width="5" height="5" rx="1.2" stroke="currentColor" stroke-width="1.6"/><path d="M14 11.5v5M11.5 14h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
-	extensions: `<svg viewBox="0 0 20 20" fill="none"><path d="M10 3.2v3.4M10 13.4v3.4M3.2 10h3.4M13.4 10h3.4M5.4 5.4l2.4 2.4M12.2 12.2l2.4 2.4M14.6 5.4l-2.4 2.4M7.8 12.2l-2.4 2.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
-	automation: `<svg viewBox="0 0 20 20" fill="none"><circle cx="6" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6"/><circle cx="14" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M8.6 10h2.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`,
+	'new-chat': Plus,
+	search: Search,
+	plugins: Puzzle,
+	extensions: Blocks,
+	automation: Zap,
 };
 
+// 右键菜单图标
 const contextIconMap = {
-	folder: `<svg viewBox="0 0 20 20" fill="none"><path d="M3 6.2A1.7 1.7 0 0 1 4.7 4.5h3.1l1.6 1.7h5.9A1.7 1.7 0 0 1 17 7.9v5.9a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 13.8V6.2Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/></svg>`,
-	rename: `<svg viewBox="0 0 20 20" fill="none"><path d="M4.2 13.8 13.6 4.4a1.8 1.8 0 0 1 2.6 2.6l-9.4 9.4-3.4.8.8-3.4Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="m12.5 5.5 2 2" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/></svg>`,
-	workingDirectory: `<svg viewBox="0 0 20 20" fill="none"><path d="M3.5 6.5h5l1.5 2h6.5v6A1.5 1.5 0 0 1 15 16H5a1.5 1.5 0 0 1-1.5-1.5v-8Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="M3.5 8.5V5A1.5 1.5 0 0 1 5 3.5h3l1.5 2H15A1.5 1.5 0 0 1 16.5 7v1.5" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/></svg>`,
-	book: `<svg viewBox="0 0 20 20" fill="none"><path d="M4 4.8A1.8 1.8 0 0 1 5.8 3h10.7v12.2H5.8A1.8 1.8 0 0 0 4 17V4.8Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="M7.5 6.5h6" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/></svg>`,
-	message: `<svg viewBox="0 0 20 20" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5v4.8a2.5 2.5 0 0 1-2.5 2.5H9l-4.1 3.1v-3.3A2.5 2.5 0 0 1 4 10.3V5.5Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/></svg>`,
-	git: `<svg viewBox="0 0 20 20" fill="none"><path d="M7 4v7.2a2.8 2.8 0 1 0 2.8 2.8V6.8" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.8 6.8h2.5A2.7 2.7 0 0 1 15 9.5V11" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/><circle cx="7" cy="4" r="1.5" stroke="currentColor" stroke-width="1.45"/><circle cx="15" cy="12.5" r="1.5" stroke="currentColor" stroke-width="1.45"/></svg>`,
-	export: `<svg viewBox="0 0 20 20" fill="none"><path d="M10 3.5v8" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/><path d="m6.8 8.7 3.2 3.2 3.2-3.2" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13.8v1.7A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-1.7" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/></svg>`,
-	clear: `<svg viewBox="0 0 20 20" fill="none"><path d="m10 3 6.5 5.4-6.5 5.4-6.5-5.4L10 3Z" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="M6.8 11.2 10 14l3.2-2.8" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-	pin: `<svg viewBox="0 0 20 20" fill="none"><path d="m12.8 3.5 3.7 3.7-2.2 2.2.5 3.5-1 1-3.2-3.2-4.7 4.7-.8-.8 4.7-4.7-3.2-3.2 1-1 3.5.5 1.7-2.7Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>`,
-	trash: `<svg viewBox="0 0 20 20" fill="none"><path d="M4.5 6h11" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/><path d="M8 6V4.5A1.5 1.5 0 0 1 9.5 3h1A1.5 1.5 0 0 1 12 4.5V6" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="M6.2 6.5 7 16a1.5 1.5 0 0 0 1.5 1.3h3A1.5 1.5 0 0 0 13 16l.8-9.5" stroke="currentColor" stroke-width="1.45" stroke-linejoin="round"/><path d="M9 9.2v4.8M11 9.2v4.8" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/></svg>`,
+	folder: FolderOpen,
+	rename: Pencil,
+	workingDirectory: FolderCog,
+	book: BookOpen,
+	message: MessageSquare,
+	git: GitBranch,
+	export: Download,
+	clear: Eraser,
+	pin: Pin,
+	trash: Trash2,
 };
+
+function getIcon(id) {
+	return iconMap[id] || Blocks;
+}
+
+function getContextIcon(id) {
+	return contextIconMap[id] || Folder;
+}
 
 const sidebarMenuItems = [
 	{ id: 'open-project', label: '打开项目', icon: 'folder' },
@@ -221,14 +254,6 @@ const kbdMap = {
 	search: 'Ctrl K',
 };
 
-function getIcon(id) {
-	return iconMap[id] || '';
-}
-
-function getContextIcon(id) {
-	return contextIconMap[id] || '';
-}
-
 onMounted(() => {
 	document.addEventListener('click', onDocumentClick);
 	document.addEventListener('keydown', onDocumentKeydown);
@@ -249,12 +274,12 @@ onUnmounted(() => {
 		<!-- 品牌行 -->
 		<div class="brand">
 			<span class="brand-mark" aria-hidden="true">
-				<svg viewBox="0 0 20 20" fill="none">
-					<path d="M10 2.5 16.5 6v8L10 17.5 3.5 14V6L10 2.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-					<path d="M7 9.2 9.3 11.5 13.2 7.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-				</svg>
+				<PawPrint :size="15" :stroke-width="2.2" />
 			</span>
-			<span class="brand-name">SelfClaw</span>
+			<span class="brand-copy">
+				<span class="brand-name">SelfClaw</span>
+				<span class="brand-kicker">AGENT CONSOLE</span>
+			</span>
 			<span class="brand-spacer"></span>
 			<button
 				class="brand-collapse"
@@ -263,10 +288,8 @@ onUnmounted(() => {
 				:aria-label="collapsed ? '展开侧栏' : '折叠侧栏'"
 				@click="toggleCollapse"
 			>
-				<svg viewBox="0 0 20 20" fill="none">
-					<rect x="3" y="4" width="14" height="12" rx="2.4" stroke="currentColor" stroke-width="1.5" />
-					<path d="M12.5 4.6v10.8" stroke="currentColor" stroke-width="1.5" />
-				</svg>
+				<PanelLeftOpen v-if="collapsed" :size="16" :stroke-width="1.8" />
+				<PanelLeftClose v-else :size="16" :stroke-width="1.8" />
 			</button>
 		</div>
 
@@ -274,7 +297,7 @@ onUnmounted(() => {
 		<nav class="rail" aria-label="折叠导航">
 			<div class="rail-scroll">
 				<button class="rail-new" type="button" title="新建对话" @click="onAction('new-chat')">
-					<svg viewBox="0 0 20 20" fill="none"><path d="M10 4.5v11M4.5 10h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+					<Plus :size="17" :stroke-width="2.2" />
 					<span class="tip">新建对话</span>
 				</button>
 
@@ -289,7 +312,9 @@ onUnmounted(() => {
 					:title="item.label"
 					@click="onAction(item.id)"
 				>
-					<span class="ico" aria-hidden="true" v-html="getIcon(item.id)"></span>
+					<span class="ico" aria-hidden="true">
+						<component :is="getIcon(item.id)" :size="16" :stroke-width="1.8" />
+					</span>
 					<span class="tip">{{ item.label }}<span v-if="kbdMap[item.id]" class="k">{{ kbdMap[item.id] }}</span></span>
 				</button>
 			</div>
@@ -297,10 +322,7 @@ onUnmounted(() => {
 			<div class="rail-bot">
 				<button class="rail-btn" :class="{ active: settingsActive }" type="button" title="系统设置" @click="selectSettings">
 					<span class="ico" aria-hidden="true">
-						<svg viewBox="0 0 20 20" fill="none">
-							<circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6" />
-							<path d="M10 2.8v2M10 15.2v2M17.2 10h-2M4.8 10h-2M14.9 5.1l-1.4 1.4M6.5 13.5l-1.4 1.4M14.9 14.9l-1.4-1.4M6.5 6.5 5.1 5.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-						</svg>
+						<Settings :size="16" :stroke-width="1.8" />
 					</span>
 					<span class="tip">系统设置</span>
 				</button>
@@ -310,9 +332,7 @@ onUnmounted(() => {
 		<!-- 上：功能按钮区 -->
 		<div class="nav-top">
 			<button class="btn-primary" type="button" @click="onAction('new-chat')">
-				<svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-					<path d="M10 4.5v11M4.5 10h11" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
-				</svg>
+				<Plus :size="15" :stroke-width="2.4" aria-hidden="true" />
 				<span>新建对话</span>
 			</button>
 
@@ -324,7 +344,9 @@ onUnmounted(() => {
 					type="button"
 					@click="onAction(item.id)"
 				>
-					<span class="ico" aria-hidden="true" v-html="getIcon(item.id)"></span>
+					<span class="ico" aria-hidden="true">
+						<component :is="getIcon(item.id)" :size="15" :stroke-width="1.8" />
+					</span>
 					<span class="label">{{ item.label }}</span>
 					<span v-if="kbdMap[item.id]" class="kbd">{{ kbdMap[item.id] }}</span>
 				</button>
@@ -333,19 +355,15 @@ onUnmounted(() => {
 
 		<!-- 中：项目节点 + 对话节点 -->
 		<div class="nav-mid">
-			<section v-for="group in groupItems" :key="group.id" class="group" :class="{ open: isGroupOpen(group.id) }">
+			<section v-for="(group, gi) in groupItems" :key="group.id" class="group" :class="{ open: isGroupOpen(group.id) }">
 				<button class="group-head" type="button" @click="toggleGroup(group.id)">
 					<span class="group-chevron" aria-hidden="true">
-						<svg viewBox="0 0 16 16" fill="none">
-							<path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-						</svg>
+						<ChevronRight :size="13" :stroke-width="2" />
 					</span>
 					<span class="group-title">{{ group.label }}</span>
-					<span class="group-count">{{ group.children?.length || 0 }}</span>
+					<span class="group-count">{{ String(group.children?.length || 0).padStart(2, '0') }}</span>
 					<span class="group-add" role="button" :title="`新建${group.label}`" @click.stop="onGroupAdd(group.id)">
-						<svg viewBox="0 0 16 16" fill="none">
-							<path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-						</svg>
+						<Plus :size="13" :stroke-width="2.2" />
 					</span>
 				</button>
 
@@ -361,32 +379,24 @@ onUnmounted(() => {
 								@contextmenu.prevent.stop="openFolderMenu($event, folder)"
 							>
 								<span class="folder-ico" aria-hidden="true">
-									<svg viewBox="0 0 16 16" fill="none">
-										<path
-											d="M2 4.5A1.5 1.5 0 0 1 3.5 3H6l1.5 1.5h5A1.5 1.5 0 0 1 14 6v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V4.5Z"
-											stroke="currentColor"
-											stroke-width="1.3"
-											stroke-linejoin="round"
-										/>
-									</svg>
+									<Folder :size="14" :stroke-width="1.8" />
 								</span>
 								<span class="folder-name">{{ folder.label }}</span>
 								<span class="folder-chevron" aria-hidden="true">
-									<svg viewBox="0 0 16 16" fill="none">
-										<path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-									</svg>
+									<ChevronRight :size="13" :stroke-width="2" />
 								</span>
 							</button>
 							<div class="subfolder-body">
-							<button
-								v-for="session in folder.children"
-								:key="session.id"
-								class="node kind-chat"
-								:class="{ active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
-								type="button"
-								@click="selectNode(session.id)"
-								@contextmenu.prevent.stop="openConversationMenu($event, session)"
-							>
+								<button
+									v-for="(session, si) in folder.children"
+									:key="session.id"
+									class="node kind-chat sc-rise"
+									:style="{ '--i': si }"
+									:class="{ active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
+									type="button"
+									@click="selectNode(session.id)"
+									@contextmenu.prevent.stop="openConversationMenu($event, session)"
+								>
 									<span class="dot" aria-hidden="true"></span>
 									<span class="ntext">{{ session.label }}</span>
 									<span v-if="session.time" class="ntime">{{ session.time }}</span>
@@ -399,9 +409,10 @@ onUnmounted(() => {
 					<template v-else>
 						<!-- 普通对话节点：二级结构 -->
 						<button
-							v-for="child in group.children"
+							v-for="(child, ci) in group.children"
 							:key="child.id"
-							class="node kind-chat"
+							class="node kind-chat sc-rise"
+							:style="{ '--i': ci }"
 							:class="{ active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
 							type="button"
 							@click="selectNode(child.id)"
@@ -421,21 +432,11 @@ onUnmounted(() => {
 		<div class="nav-bot">
 			<button class="settings-btn" :class="{ active: settingsActive }" type="button" @click="selectSettings">
 				<span class="ico" aria-hidden="true">
-					<svg viewBox="0 0 20 20" fill="none">
-						<circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6" />
-						<path
-							d="M10 2.8v2M10 15.2v2M17.2 10h-2M4.8 10h-2M14.9 5.1l-1.4 1.4M6.5 13.5l-1.4 1.4M14.9 14.9l-1.4-1.4M6.5 6.5 5.1 5.1"
-							stroke="currentColor"
-							stroke-width="1.5"
-							stroke-linecap="round"
-						/>
-					</svg>
+					<Settings :size="15" :stroke-width="1.8" />
 				</span>
 				<span class="label">系统设置</span>
 				<span class="chev" aria-hidden="true">
-					<svg viewBox="0 0 16 16" fill="none">
-						<path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-					</svg>
+					<ChevronRight :size="13" :stroke-width="2" />
 				</span>
 			</button>
 		</div>
@@ -458,7 +459,9 @@ onUnmounted(() => {
 					role="menuitem"
 					@click="onContextMenuItem(item)"
 				>
-					<span class="context-menu-icon" aria-hidden="true" v-html="getContextIcon(item.icon)"></span>
+					<span class="context-menu-icon" aria-hidden="true">
+						<component :is="getContextIcon(item.icon)" :size="14" :stroke-width="1.8" />
+					</span>
 					<span class="context-menu-label">{{ item.label }}</span>
 				</button>
 			</template>
@@ -468,12 +471,46 @@ onUnmounted(() => {
 
 <style scoped>
 .sidebar {
+	--sb-bg: #fafbfd;
+	--sb-line: rgba(19, 27, 45, 0.08);
+	--sb-line-2: rgba(19, 27, 45, 0.14);
+	--sb-text: #171a1f;
+	--sb-soft: #454c59;
+	--sb-mute: #6b7280;
+	--sb-faint: #9aa1ad;
+	--sb-hover: #eef0f4;
+	--sb-raise: #f1f3f6;
+	--sb-accent: #3b5bfd;
+	--sb-accent-2: #2f49d1;
+	--sb-accent-soft: rgba(59, 91, 253, 0.08);
+	--sb-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
+	--sb-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+	--sb-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
 	height: 100%;
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
-	background: #f4f5f7;
-	border-right: 1px solid #d9dde4;
+	background: var(--sb-bg);
+	border-right: 1px solid var(--sb-line);
+	color: var(--sb-text);
+}
+
+@keyframes sb-rise {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.sc-rise {
+	animation: sb-rise 0.4s var(--sb-ease-out) both;
+	animation-delay: calc(var(--i, 0) * 30ms);
 }
 
 /* ---- 品牌行 ---- */
@@ -481,771 +518,711 @@ onUnmounted(() => {
 	flex: 0 0 auto;
 	display: flex;
 	align-items: center;
-	gap: 9px;
-	padding: 16px 16px 12px;
+	gap: 10px;
+	padding: 18px 16px 14px;
+	border-bottom: 1px solid var(--sb-line);
 }
 
 .brand-mark {
-	width: 26px;
-	height: 26px;
-	flex: 0 0 auto;
 	display: grid;
+	width: 28px;
+	height: 28px;
+	flex: 0 0 auto;
 	place-items: center;
-	border-radius: 7px;
-	background: #4f73c8;
+	border-radius: 8px;
+	background: var(--sb-accent);
 	color: #fff;
-	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.06);
+	box-shadow: 0 4px 14px rgba(59, 91, 253, 0.32);
 }
 
-.brand-mark svg {
-	width: 15px;
-	height: 15px;
+.brand-copy {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 0;
 }
 
 .brand-name {
-	font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
 	font-size: 14px;
-	font-weight: 650;
+	font-weight: 680;
 	letter-spacing: 0.01em;
-	color: #111827;
+	line-height: 1.2;
+}
+
+.brand-kicker {
+	color: var(--sb-faint);
+	font-family: var(--sb-mono);
+	font-size: 8.5px;
+	font-weight: 600;
+	letter-spacing: 0.24em;
 }
 
 .brand-spacer {
-	flex: 1 1 auto;
+	flex: 1;
 }
 
 .brand-collapse {
-	width: 26px;
-	height: 26px;
 	display: grid;
+	width: 28px;
+	height: 28px;
 	place-items: center;
-	border: 0;
-	border-radius: 6px;
+	border: 1px solid transparent;
+	border-radius: 8px;
 	background: transparent;
-	color: #6b7280;
+	color: var(--sb-mute);
+	transition:
+		background 0.15s,
+		color 0.15s,
+		border-color 0.15s;
 }
 
 .brand-collapse:hover {
-	background: #e5e7eb;
-	color: #111827;
-}
-
-.brand-collapse svg {
-	width: 16px;
-	height: 16px;
-}
-
-/* ================= 折叠态 ================= */
-/* 展开态默认隐藏图标轨；折叠态隐藏完整导航 */
-.rail {
-	display: none;
+	border-color: var(--sb-line);
+	background: var(--sb-hover);
+	color: var(--sb-text);
 }
 
 .sidebar.collapsed .brand {
-	padding: 16px 0 12px;
+	flex-direction: column;
 	justify-content: center;
+	gap: 8px;
+	padding: 14px 0 10px;
 }
 
-.sidebar.collapsed .brand-mark,
-.sidebar.collapsed .brand-name,
+.sidebar.collapsed .brand-copy,
 .sidebar.collapsed .brand-spacer {
 	display: none;
 }
 
-.sidebar.collapsed .brand-collapse {
-	margin: 0 auto;
+/* ---- 折叠态图标轨 ---- */
+.rail {
+	display: none;
 }
 
-/* 折叠时隐藏完整导航的三段 */
+.sidebar.collapsed .rail {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
+}
+
 .sidebar.collapsed .nav-top,
 .sidebar.collapsed .nav-mid,
 .sidebar.collapsed .nav-bot {
 	display: none;
 }
 
-/* 折叠态图标轨 */
-.sidebar.collapsed .rail {
-	flex: 1 1 auto;
-	min-height: 0;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	padding: 2px 0 12px;
-}
-
 .rail-scroll {
-	flex: 1 1 auto;
-	min-height: 0;
-	width: 100%;
+	flex: 1;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	gap: 4px;
-	/* overflow 保持 visible，让右侧浮出的 tooltip 不被裁切；图标数量少无需滚动 */
-	overflow: visible;
-	padding: 2px 0;
+	padding: 12px 0;
+	overflow-y: auto;
 }
 
-/* 折叠态主操作：新建对话（accent 圆钮） */
 .rail-new {
-	position: relative;
-	width: 38px;
-	height: 38px;
-	margin-bottom: 6px;
 	display: grid;
+	width: 36px;
+	height: 36px;
 	place-items: center;
 	border: 0;
-	border-radius: 11px;
-	background: #4f73c8;
+	border-radius: 10px;
+	background: var(--sb-accent);
 	color: #fff;
-	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.1);
-	transition: background 120ms ease, transform 80ms ease;
+	box-shadow: 0 4px 14px rgba(59, 91, 253, 0.3);
+	transition:
+		transform 0.14s var(--sb-ease-spring),
+		box-shadow 0.15s;
 }
 
 .rail-new:hover {
-	background: #375fae;
-}
-
-.rail-new:active {
-	transform: translateY(1px);
-}
-
-.rail-new svg {
-	width: 20px;
-	height: 20px;
+	transform: translateY(-1px);
+	box-shadow: 0 8px 20px rgba(59, 91, 253, 0.36);
 }
 
 .rail-sep {
-	width: 26px;
+	width: 20px;
 	height: 1px;
-	margin: 4px 0 6px;
-	background: #e5e7eb;
+	margin: 6px 0;
+	background: var(--sb-line-2);
 }
 
-/* 折叠态图标钮 */
 .rail-btn {
 	position: relative;
-	width: 38px;
-	height: 38px;
 	display: grid;
+	width: 36px;
+	height: 36px;
 	place-items: center;
 	border: 0;
 	border-radius: 10px;
 	background: transparent;
-	color: #6b7280;
-	transition: background 110ms ease, color 110ms ease;
+	color: var(--sb-mute);
+	transition:
+		background 0.15s,
+		color 0.15s;
 }
 
 .rail-btn:hover {
-	background: #e5e7eb;
-	color: #111827;
+	background: var(--sb-hover);
+	color: var(--sb-text);
 }
 
-.rail-btn .ico {
+.rail-btn.active {
+	background: var(--sb-accent-soft);
+	color: var(--sb-accent);
+}
+
+.rail-bot {
+	display: flex;
+	justify-content: center;
+	padding: 10px 0 14px;
+	border-top: 1px solid var(--sb-line);
+}
+
+/* 折叠态悬浮提示 */
+.tip {
+	position: absolute;
+	left: calc(100% + 10px);
+	top: 50%;
+	z-index: 90;
 	display: inline-flex;
 	align-items: center;
-	justify-content: center;
-}
-
-/* v-html 注入的 SVG 不带 scoped 属性，需用 :deep() 穿透，否则塌成 0 尺寸 */
-.rail-btn .ico :deep(svg),
-.rail-btn > svg {
-	width: 20px;
-	height: 20px;
-}
-
-/* 选中态：accent 底 + 左侧指示条 */
-.rail-btn.active {
-	background: #eaf0fb;
-	color: #375fae;
-}
-
-.rail-btn.active::before {
-	content: '';
-	position: absolute;
-	left: -11px;
-	top: 50%;
-	transform: translateY(-50%);
-	width: 3px;
-	height: 20px;
-	border-radius: 999px;
-	background: #4f73c8;
-}
-
-/* tooltip：悬停时右侧浮出标签，保证图标可读可操作 */
-.rail-btn .tip,
-.rail-new .tip {
-	position: absolute;
-	left: calc(100% + 12px);
-	top: 50%;
+	gap: 7px;
+	padding: 5px 10px;
 	transform: translateY(-50%) translateX(-4px);
-	padding: 5px 9px;
+	border: 1px solid var(--sb-line-2);
 	border-radius: 7px;
-	background: #22262c;
-	color: #fff;
-	font-size: 12px;
-	font-weight: 500;
-	line-height: 1;
+	background: #fff;
+	box-shadow: 0 8px 24px rgba(23, 26, 31, 0.12);
+	color: var(--sb-text);
+	font-size: 11.5px;
+	font-weight: 550;
 	white-space: nowrap;
 	opacity: 0;
 	pointer-events: none;
-	box-shadow: 0 6px 18px rgba(23, 26, 31, 0.22);
-	transition: opacity 130ms ease, transform 130ms ease;
-	z-index: 60;
+	transition:
+		opacity 0.14s,
+		transform 0.18s var(--sb-ease-out);
 }
 
-.rail-btn .tip::before,
-.rail-new .tip::before {
-	content: '';
-	position: absolute;
-	right: 100%;
-	top: 50%;
-	transform: translateY(-50%);
-	border: 5px solid transparent;
-	border-right-color: #22262c;
+.rail-new,
+.rail-btn {
+	position: relative;
 }
 
-.rail-btn:hover .tip,
-.rail-new:hover .tip {
+.rail-new:hover .tip,
+.rail-btn:hover .tip {
 	opacity: 1;
 	transform: translateY(-50%) translateX(0);
 }
 
-.rail-btn .tip .k,
-.rail-new .tip .k {
-	margin-left: 7px;
-	color: #9aa2ad;
-	font-variant-numeric: tabular-nums;
+.tip .k {
+	color: var(--sb-faint);
+	font-family: var(--sb-mono);
+	font-size: 10px;
 }
 
-.rail-bot {
-	flex: 0 0 auto;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 4px;
-	padding-top: 6px;
-	margin-top: 4px;
-	width: 100%;
-}
-
-/* ================= 上：功能按钮区 ================= */
+/* ---- 上：功能按钮区 ---- */
 .nav-top {
 	flex: 0 0 auto;
-	padding: 4px 12px 12px;
-	border-bottom: 1px solid #e5e7eb;
+	padding: 14px 12px 6px;
 }
 
 .btn-primary {
-	width: 100%;
 	display: inline-flex;
 	align-items: center;
-	gap: 9px;
-	padding: 10px 12px;
-	margin-bottom: 8px;
-	border: 0;
-	border-radius: 9px;
-	background: #4f73c8;
+	justify-content: center;
+	gap: 7px;
+	width: 100%;
+	height: 38px;
+	border: 1px solid var(--sb-accent);
+	border-radius: 10px;
+	background: var(--sb-accent);
 	color: #fff;
 	font-size: 13px;
-	font-weight: 600;
-	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.06);
+	font-weight: 640;
+	letter-spacing: 0.02em;
 	transition:
-		background 120ms ease,
-		transform 80ms ease;
+		transform 0.12s var(--sb-ease-spring),
+		box-shadow 0.16s,
+		background 0.16s;
 }
 
 .btn-primary:hover {
-	background: #375fae;
+	background: var(--sb-accent-2);
+	transform: translateY(-1px);
+	box-shadow: 0 10px 24px rgba(59, 91, 253, 0.28);
 }
 
 .btn-primary:active {
-	transform: translateY(1px);
-}
-
-.btn-primary svg {
-	width: 17px;
-	height: 17px;
+	transform: translateY(0);
 }
 
 .tool-list {
 	display: flex;
 	flex-direction: column;
-	gap: 2px;
+	gap: 1px;
+	margin-top: 10px;
 }
 
 .tool-btn {
-	width: 100%;
-	display: inline-flex;
+	display: flex;
 	align-items: center;
-	gap: 11px;
-	padding: 8px 11px;
-	border: 0;
+	gap: 10px;
+	width: 100%;
+	height: 33px;
+	padding: 0 9px;
+	border: 1px solid transparent;
 	border-radius: 8px;
 	background: transparent;
-	color: #374151;
-	font-size: 13px;
-	font-weight: 500;
+	color: var(--sb-mute);
+	font-size: 12.5px;
+	font-weight: 540;
 	text-align: left;
+	transition:
+		background 0.14s,
+		color 0.14s,
+		transform 0.14s var(--sb-ease-out);
 }
 
 .tool-btn:hover {
-	background: #e5e7eb;
-	color: #111827;
+	background: var(--sb-hover);
+	color: var(--sb-text);
+	transform: translateX(2px);
 }
 
 .tool-btn .ico {
-	width: 18px;
-	height: 18px;
-	flex: 0 0 auto;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	color: #6b7280;
-}
-
-.tool-btn:hover .ico {
-	color: #375fae;
-}
-
-.tool-btn .ico svg {
-	width: 18px;
-	height: 18px;
+	display: grid;
+	width: 16px;
+	height: 16px;
+	place-items: center;
+	flex: none;
 }
 
 .tool-btn .label {
-	flex: 1 1 auto;
+	flex: 1;
 	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-.tool-btn .kbd {
-	flex: 0 0 auto;
-	font-size: 10.5px;
-	color: #8a929e;
+.kbd {
+	color: var(--sb-faint);
+	font-family: var(--sb-mono);
+	font-size: 9.5px;
 	letter-spacing: 0.04em;
-	opacity: 0;
-	transition: opacity 120ms ease;
 }
 
-.tool-btn:hover .kbd {
-	opacity: 1;
-}
-
-/* ================= 中：节点区 ================= */
+/* ---- 中：分组与节点 ---- */
 .nav-mid {
-	flex: 1 1 auto;
+	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
-	overflow-x: hidden;
-	overscroll-behavior: contain;
-	padding: 10px 8px 12px;
+	padding: 6px 12px 14px;
 }
 
 .nav-mid::-webkit-scrollbar {
-	width: 10px;
+	width: 9px;
 }
 
 .nav-mid::-webkit-scrollbar-thumb {
-	background: rgba(23, 26, 31, 0.14);
-	border: 3px solid #f4f5f7;
-	border-radius: 999px;
+	background: var(--sb-raise);
+	background-clip: padding-box;
+	border: 2px solid transparent;
+	border-radius: 99px;
 }
 
 .group {
-	margin-bottom: 6px;
+	margin-top: 12px;
 }
 
 .group-head {
-	width: 100%;
 	display: flex;
 	align-items: center;
 	gap: 7px;
-	padding: 6px 8px 6px 9px;
+	width: 100%;
+	height: 28px;
+	padding: 0 7px;
 	border: 0;
 	border-radius: 7px;
 	background: transparent;
-	color: #6b7280;
-	text-align: left;
+	color: var(--sb-mute);
+	transition:
+		background 0.14s,
+		color 0.14s;
 }
 
 .group-head:hover {
-	background: #eceef2;
-	color: #374151;
+	background: var(--sb-hover);
+	color: var(--sb-soft);
 }
 
 .group-chevron {
-	width: 14px;
-	height: 14px;
-	flex: 0 0 auto;
-	color: #8a929e;
-	transition: transform 140ms ease;
+	display: grid;
+	width: 13px;
+	height: 13px;
+	place-items: center;
+	flex: none;
+	color: var(--sb-faint);
+	transition: transform 0.2s var(--sb-ease-out);
 }
 
 .group.open .group-chevron {
 	transform: rotate(90deg);
 }
 
-.group-chevron svg {
-	width: 14px;
-	height: 14px;
-}
-
 .group-title {
-	flex: 1 1 auto;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
 	font-size: 11px;
-	font-weight: 700;
-	letter-spacing: 0.07em;
-	text-transform: uppercase;
+	font-weight: 650;
+	letter-spacing: 0.05em;
+	text-align: left;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .group-count {
-	flex: 0 0 auto;
-	min-width: 18px;
-	height: 17px;
-	padding: 0 6px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	border-radius: 999px;
-	background: #f1f3f6;
-	color: #6b7280;
-	font-size: 10.5px;
-	font-weight: 600;
-	font-variant-numeric: tabular-nums;
+	color: var(--sb-faint);
+	font-family: var(--sb-mono);
+	font-size: 9.5px;
+	font-weight: 500;
+	letter-spacing: 0.08em;
 }
 
 .group-add {
-	flex: 0 0 auto;
+	display: grid;
 	width: 20px;
 	height: 20px;
 	place-items: center;
-	border: 0;
 	border-radius: 6px;
-	background: transparent;
-	color: #6b7280;
-	display: grid;
+	color: var(--sb-faint);
+	opacity: 0;
+	transition:
+		opacity 0.14s,
+		background 0.14s,
+		color 0.14s;
 }
 
-/* .group-head:hover .group-add {
-	display: grid;
-} */
+.group-head:hover .group-add {
+	opacity: 1;
+}
 
 .group-add:hover {
-	background: #e5e7eb;
-	color: #375fae;
-}
-
-.group-add svg {
-	width: 14px;
-	height: 14px;
+	background: var(--sb-accent-soft);
+	color: var(--sb-accent);
 }
 
 .group-body {
-	display: flex;
-	flex-direction: column;
-	gap: 1px;
-	padding: 2px 0 4px;
-}
-
-.group:not(.open) .group-body {
 	display: none;
+	padding: 3px 0 0 13px;
 }
 
-/* 节点项 */
-.node {
-	position: relative;
-	width: 100%;
-	display: flex;
-	align-items: center;
-	gap: 9px;
-	padding: 7px 10px 7px 14px;
-	border: 0;
-	border-radius: 7px;
-	background: transparent;
-	color: #374151;
-	font-size: 13px;
-	font-weight: 450;
-	text-align: left;
+.group.open .group-body {
+	display: block;
 }
 
-.node:hover {
-	background: #e5e7eb;
-	color: #111827;
+/* 项目目录节点 */
+.subfolder {
+	margin-top: 2px;
 }
 
-.node.menu-open {
-	background: #fff;
-	color: #111827;
-	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.06);
-}
-
-.node.active {
-	background: #fff;
-	color: #111827;
-	font-weight: 550;
-	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.06);
-}
-
-.node .ntext {
-	flex: 1 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.node .ntime {
-	flex: 0 0 auto;
-	font-size: 10.5px;
-	color: #8a929e;
-	font-variant-numeric: tabular-nums;
-}
-
-/* 对话节点圆点 */
-.node.kind-chat .dot {
-	width: 7px;
-	height: 7px;
-	flex: 0 0 auto;
-	border-radius: 50%;
-	background: #b6bdc7;
-}
-
-.node.active .dot {
-	background: #4f73c8;
-}
-
-.empty-group {
-	padding: 9px 12px 10px 30px;
-	color: #9aa2ad;
-	font-size: 12px;
-	line-height: 1.45;
-}
-
-/* 项目目录：文件夹 */
 .project-folder {
-	position: relative;
-	width: 100%;
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 7px 10px 7px 12px;
-	border: 0;
-	border-radius: 7px;
+	width: 100%;
+	height: 32px;
+	padding: 0 8px;
+	border: 1px solid transparent;
+	border-radius: 8px;
 	background: transparent;
-	color: #374151;
-	font-size: 13px;
-	font-weight: 550;
+	color: var(--sb-soft);
+	font-size: 12.5px;
+	font-weight: 560;
 	text-align: left;
+	transition:
+		background 0.14s,
+		border-color 0.14s,
+		color 0.14s;
 }
 
-.project-folder:hover {
-	background: #e5e7eb;
-	color: #111827;
-}
-
+.project-folder:hover,
 .project-folder.menu-open {
-	background: #fff;
-	color: #111827;
-	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.06);
+	background: var(--sb-hover);
+	color: var(--sb-text);
 }
 
-.project-folder .folder-ico {
+.folder-ico {
+	display: grid;
 	width: 16px;
 	height: 16px;
-	flex: 0 0 auto;
-	color: #4f73c8;
+	place-items: center;
+	flex: none;
+	color: var(--sb-faint);
 }
 
-.project-folder .folder-ico svg {
-	width: 16px;
-	height: 16px;
-}
-
-.project-folder .folder-name {
-	flex: 1 1 auto;
+.folder-name {
+	flex: 1;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.project-folder .folder-chevron {
-	width: 14px;
-	height: 14px;
-	flex: 0 0 auto;
-	color: #8a929e;
+.folder-chevron {
+	display: grid;
+	width: 13px;
+	height: 13px;
+	place-items: center;
+	flex: none;
+	color: var(--sb-faint);
+	transition: transform 0.2s var(--sb-ease-out);
 }
 
-.project-folder .folder-chevron svg {
-	width: 14px;
-	height: 14px;
-}
-
-.subfolder.open .project-folder .folder-chevron {
+.subfolder.open .folder-chevron {
 	transform: rotate(90deg);
 }
 
-/* 项目下的会话列表 */
 .subfolder-body {
-	display: flex;
-	flex-direction: column;
-	gap: 1px;
-	padding: 2px 0 4px 18px;
-}
-
-.subfolder:not(.open) .subfolder-body {
 	display: none;
+	padding: 1px 0 2px 15px;
 }
 
-.subfolder-body .node {
-	padding-left: 10px;
-	font-size: 12.5px;
+.subfolder.open .subfolder-body {
+	display: block;
 }
 
-.context-menu {
-	position: fixed;
-	z-index: 1000;
-	width: 208px;
-	padding: 4px 0;
-	border: 1px solid #d8dde5;
-	border-radius: 8px;
-	background: #fff;
-	box-shadow:
-		0 1px 2px rgba(23, 26, 31, 0.08),
-		0 16px 40px rgba(23, 26, 31, 0.16);
-	color: #1f2937;
-	overflow: hidden;
-}
-
-.context-menu-item {
-	width: 100%;
-	height: 34px;
+/* 会话节点 */
+.node {
+	position: relative;
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	padding: 0 12px;
-	border: 0;
+	gap: 8px;
+	width: 100%;
+	height: 31px;
+	padding: 0 8px;
+	border: 1px solid transparent;
+	border-radius: 8px;
 	background: transparent;
-	color: inherit;
-	font-size: 14px;
-	font-weight: 450;
-	line-height: 1;
+	color: var(--sb-mute);
+	font-size: 12.5px;
+	font-weight: 500;
 	text-align: left;
+	transition:
+		background 0.14s,
+		border-color 0.14s,
+		color 0.14s;
 }
 
-.context-menu-item:hover {
-	background: #f3f4f6;
-	color: #111827;
+.node:hover,
+.node.menu-open {
+	background: var(--sb-hover);
+	color: var(--sb-text);
 }
 
-.context-menu-item.danger {
-	color: #ef4444;
+.node .dot {
+	width: 5px;
+	height: 5px;
+	flex: none;
+	border-radius: 50%;
+	background: var(--sb-faint);
+	transition:
+		background 0.15s,
+		box-shadow 0.15s;
 }
 
-.context-menu-item.danger:hover {
-	background: #fff1f2;
-	color: #dc2626;
+.node.active {
+	border-color: var(--sb-line);
+	background: #fff;
+	color: var(--sb-text);
+	box-shadow: 0 1px 4px rgba(23, 26, 31, 0.05);
 }
 
-.context-menu-icon {
-	width: 16px;
+.node.active::before {
+	position: absolute;
+	top: 50%;
+	left: -1px;
+	width: 2px;
 	height: 16px;
-	flex: 0 0 auto;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	color: #6b7280;
+	transform: translateY(-50%);
+	border-radius: 2px;
+	background: var(--sb-accent);
+	box-shadow: 0 0 8px rgba(59, 91, 253, 0.45);
+	content: '';
 }
 
-.context-menu-item:hover .context-menu-icon,
-.context-menu-item.danger .context-menu-icon {
-	color: currentColor;
+.node.active .dot {
+	background: var(--sb-accent);
+	box-shadow: 0 0 6px rgba(59, 91, 253, 0.5);
 }
 
-.context-menu-icon svg {
-	width: 16px;
-	height: 16px;
-}
-
-.context-menu-label {
+.ntext {
+	flex: 1;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.ntime {
+	flex: none;
+	color: var(--sb-faint);
+	font-family: var(--sb-mono);
+	font-size: 9.5px;
+	letter-spacing: 0.02em;
+}
+
+.empty-group {
+	padding: 8px 8px 4px;
+	color: var(--sb-faint);
+	font-size: 11.5px;
+}
+
+/* ---- 下：设置 ---- */
+.nav-bot {
+	flex: 0 0 auto;
+	padding: 10px 12px 14px;
+	border-top: 1px solid var(--sb-line);
+}
+
+.settings-btn {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	height: 36px;
+	padding: 0 9px;
+	border: 1px solid transparent;
+	border-radius: 9px;
+	background: transparent;
+	color: var(--sb-mute);
+	font-size: 12.5px;
+	font-weight: 560;
+	transition:
+		background 0.14s,
+		border-color 0.14s,
+		color 0.14s;
+}
+
+.settings-btn:hover {
+	background: var(--sb-hover);
+	color: var(--sb-text);
+}
+
+.settings-btn.active {
+	border-color: var(--sb-line);
+	background: #fff;
+	color: var(--sb-accent);
+	box-shadow: 0 1px 4px rgba(23, 26, 31, 0.05);
+}
+
+.settings-btn .ico {
+	display: grid;
+	width: 16px;
+	height: 16px;
+	place-items: center;
+	flex: none;
+}
+
+.settings-btn .label {
+	flex: 1;
+	text-align: left;
+}
+
+.settings-btn .chev {
+	color: var(--sb-faint);
+	transition: transform 0.18s var(--sb-ease-out);
+}
+
+.settings-btn:hover .chev {
+	transform: translateX(2px);
+}
+
+/* ---- 右键菜单 ---- */
+.context-menu {
+	position: fixed;
+	z-index: 300;
+	min-width: 208px;
+	padding: 5px;
+	border: 1px solid var(--sb-line-2);
+	border-radius: 11px;
+	background: #fff;
+	box-shadow:
+		0 2px 6px rgba(23, 26, 31, 0.06),
+		0 18px 44px rgba(23, 26, 31, 0.14);
+	animation: menu-pop 0.18s var(--sb-ease-out);
+}
+
+@keyframes menu-pop {
+	from {
+		opacity: 0;
+		transform: translateY(4px) scale(0.98);
+	}
+
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+.context-menu-item {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	width: 100%;
+	height: 32px;
+	padding: 0 9px;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--sb-soft);
+	font-size: 12.5px;
+	font-weight: 530;
+	text-align: left;
+	transition:
+		background 0.12s,
+		color 0.12s;
+}
+
+.context-menu-item:hover {
+	background: var(--sb-hover);
+	color: var(--sb-text);
+}
+
+.context-menu-item.danger {
+	color: #d04545;
+}
+
+.context-menu-item.danger:hover {
+	background: rgba(220, 69, 69, 0.08);
+	color: #c23333;
+}
+
+.context-menu-icon {
+	display: grid;
+	width: 15px;
+	height: 15px;
+	place-items: center;
+	flex: none;
 }
 
 .context-menu-divider {
 	height: 1px;
-	margin: 4px 0;
-	background: #e5e7eb;
+	margin: 5px 8px;
+	background: var(--sb-line);
 }
 
-/* ================= 下：系统设置区 ================= */
-.nav-bot {
-	flex: 0 0 auto;
-	padding: 10px 12px 12px;
-	border-top: 1px solid #e5e7eb;
-	background: #f4f5f7;
-}
-
-.settings-btn {
-	width: 100%;
-	display: inline-flex;
-	align-items: center;
-	gap: 11px;
-	padding: 9px 11px;
-	border: 0;
-	border-radius: 8px;
-	background: transparent;
-	color: #374151;
-	font-size: 13px;
-	font-weight: 500;
-	text-align: left;
-}
-
-.settings-btn:hover {
-	background: #e5e7eb;
-	color: #111827;
-}
-
-.settings-btn.active {
-	background: #fff;
-	color: #111827;
-	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.06);
-}
-
-.settings-btn .ico {
-	width: 18px;
-	height: 18px;
-	flex: 0 0 auto;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	color: #6b7280;
-}
-
-.settings-btn:hover .ico,
-.settings-btn.active .ico {
-	color: #375fae;
-}
-
-.settings-btn .ico svg {
-	width: 18px;
-	height: 18px;
-}
-
-.settings-btn .label {
-	flex: 1 1 auto;
-}
-
-.settings-btn .chev {
-	width: 15px;
-	height: 15px;
-	color: #8a929e;
-}
-
-.settings-btn .chev svg {
-	width: 15px;
-	height: 15px;
+@media (prefers-reduced-motion: reduce) {
+	.sidebar *,
+	.sidebar *::before,
+	.sidebar *::after {
+		animation-duration: 0.001ms !important;
+		transition-duration: 0.001ms !important;
+	}
 }
 </style>

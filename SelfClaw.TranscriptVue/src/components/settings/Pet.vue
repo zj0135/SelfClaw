@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
+import { Eye, EyeOff, Check, ImagePlus, Globe, Sparkles } from 'lucide-vue-next'
 
 const DEFAULT_PET_ID = 'yorha-sit-2b'
 
@@ -192,9 +193,30 @@ defineExpose({
 </script>
 
 <template>
-  <main class="pet-view settings-content">
+  <main class="pet-view sc-root sc-stage">
     <div class="panel-inner">
-      <div class="tab-bar">
+      <header class="pt-hero sc-rise" style="--i: 0">
+        <div>
+          <div class="pt-kicker">DESKTOP COMPANION</div>
+          <h1 class="pt-title">宠物</h1>
+          <p class="pt-sub">驻留桌面的像素伙伴，选择一位默认出场。</p>
+        </div>
+
+        <button
+          type="button"
+          class="pet-toggle"
+          :disabled="syncPending"
+          :aria-pressed="petVisible ? 'true' : 'false'"
+          title="切换桌面宠物可见性"
+          @click="toggleVisible"
+        >
+          <Eye v-if="petVisible" :size="14" :stroke-width="2" class="pt-ico" aria-hidden="true" />
+          <EyeOff v-else :size="14" :stroke-width="2" class="pt-ico" aria-hidden="true" />
+          <span class="pt-label">{{ petVisible ? '已显示' : '显示宠物' }}</span>
+        </button>
+      </header>
+
+      <div class="tab-bar sc-rise" style="--i: 1">
         <div class="tab-strip" role="tablist" aria-label="宠物来源">
           <button
             v-for="(tab, index) in tabs"
@@ -209,42 +231,33 @@ defineExpose({
             @keydown="onTabKey($event, index)"
           >{{ tab.label }}</button>
         </div>
-
-        <button
-          type="button"
-          class="pet-toggle"
-          :disabled="syncPending"
-          :aria-pressed="petVisible ? 'true' : 'false'"
-          title="切换桌面宠物可见性"
-          @click="toggleVisible"
-        >
-          <svg class="pt-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
-          <span class="pt-label">{{ petVisible ? '已显示' : '显示宠物' }}</span>
-        </button>
+        <span class="tab-hint">{{ String(pets.length).padStart(2, '0') }} UNITS</span>
       </div>
 
       <section v-show="activeTab === 'builtin'" class="tab-panel" role="tabpanel">
-        <p class="tab-lead">从内置宠物包中选择默认桌面伙伴，资源来自 TranscriptVue 的 assets/pets。</p>
-
         <div class="pet-grid">
           <button
-            v-for="pet in pets"
+            v-for="(pet, pi) in pets"
             :key="pet.id"
             type="button"
-            class="pet-card"
+            class="pet-card sc-rise"
+            :style="{ '--i': pi + 2 }"
             :disabled="syncPending"
             :data-selected="selectedPet === pet.id ? 'true' : 'false'"
             title="点击设为默认"
             @click="selectPet(pet.id)"
           >
-            <span class="pet-avatar" aria-hidden="true">
+            <span class="pet-stage" aria-hidden="true">
               <span v-if="pet.previewSrc" class="pet-sprite" :style="previewStyle(pet)"></span>
               <span v-else class="pet-initials">{{ initials(pet.name) }}</span>
             </span>
             <span class="pet-body">
               <span class="pet-name-row">
                 <span class="pet-name">{{ pet.name }}</span>
-                <span v-if="selectedPet === pet.id" class="pet-badge">默认</span>
+                <span v-if="selectedPet === pet.id" class="pet-badge">
+                  <Check :size="10" :stroke-width="3" aria-hidden="true" />
+                  默认
+                </span>
               </span>
               <span class="pet-desc">{{ pet.desc }}</span>
               <span class="pet-meta">
@@ -260,8 +273,8 @@ defineExpose({
       <section v-show="activeTab === 'custom'" class="tab-panel" role="tabpanel">
         <p class="tab-lead">你亲手定制的宠物会在这里出现。可以从形象、动作到出场频率完全按需调整。</p>
 
-        <div class="empty-state">
-          <svg class="es-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6v12M6 12h12"/><rect x="3" y="3" width="18" height="18" rx="4"/></svg>
+        <div class="empty-state sc-rise" style="--i: 2">
+          <ImagePlus :size="34" :stroke-width="1.5" class="es-ico" aria-hidden="true" />
           <h3>还没有自定义宠物</h3>
           <p>上传形象、编写行为脚本，或从内置模板派生一个属于自己的桌面伙伴。</p>
           <div class="es-actions">
@@ -274,12 +287,15 @@ defineExpose({
       <section v-show="activeTab === 'community'" class="tab-panel" role="tabpanel">
         <p class="tab-lead">来自社区分享的宠物，稍后可以在这里浏览、试用或投稿作品。</p>
 
-        <div class="empty-state">
-          <svg class="es-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13 13 0 0 1 0 18M12 3a13 13 0 0 0 0 18"/></svg>
+        <div class="empty-state sc-rise" style="--i: 2">
+          <Globe :size="34" :stroke-width="1.5" class="es-ico" aria-hidden="true" />
           <h3>社区市场即将上线</h3>
           <p>正在打通同步与安全审核流程，稍后会在这里展示可安装的社区宠物。</p>
           <div class="es-actions">
-            <button type="button" class="btn-secondary">了解投稿方式</button>
+            <button type="button" class="btn-secondary">
+              <Sparkles :size="13" :stroke-width="2" aria-hidden="true" />
+              了解投稿方式
+            </button>
           </div>
         </div>
       </section>
@@ -288,193 +304,262 @@ defineExpose({
 </template>
 
 <style scoped>
-.pet-view {
-  --panel: #ffffff;
-  --panel-soft: #f7f8fa;
-  --panel-muted: #f1f3f6;
-  --border: #e5e7eb;
-  --border-strong: #d8dde5;
-  --text: #171a1f;
-  --muted: #6b7280;
-  --muted-soft: #8a929e;
-  --accent: #4f73c8;
-  --accent-2: #375fae;
-  --accent-soft: #eef2fb;
-  --success: #2f855a;
-  --danger: #c24150;
-  --font-display: 'Segoe UI Variable Display', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --shadow-sm: 0 1px 2px rgba(23, 26, 31, 0.06);
+@import './settings-console.css';
 
-  color: var(--text);
-  font: 13px/1.45 inherit;
+.pet-view {
+  height: 100%;
+  overflow-y: auto;
+  color: var(--sc-text);
+  font-family: var(--sc-sans);
+  font-size: 13px;
+  line-height: 1.5;
 }
 .pet-view * { box-sizing: border-box; }
 .pet-view button { cursor: pointer; font: inherit; color: inherit; }
 
-.settings-content {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  overflow-y: auto;
-  background: #ffffff;
+.pet-view::-webkit-scrollbar { width: 9px; }
+.pet-view::-webkit-scrollbar-thumb {
+  background: var(--sc-raise);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 99px;
 }
+
 .panel-inner {
-  padding: 22px 32px 36px;
+  padding: 48px 40px 72px;
   max-width: 1120px;
 }
 
-.tab-bar {
+/* ── hero ─────────────────────────────────────────────────── */
+.pt-hero {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 16px;
+  gap: 24px;
+  margin-bottom: 26px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--sc-line);
+}
+
+.pt-kicker {
   margin-bottom: 12px;
-}
-.tab-strip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel-soft);
-}
-.tab-btn {
-  padding: 5px 14px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0;
-  transition: background 0.14s, color 0.14s, box-shadow 0.14s;
-}
-.tab-btn:hover { color: var(--text); }
-.tab-btn.active {
-  background: var(--panel);
-  color: var(--text);
+  color: var(--sc-faint);
+  font-family: var(--sc-mono);
+  font-size: 10px;
   font-weight: 600;
-  box-shadow: var(--shadow-sm), 0 0 0 1px rgba(23, 26, 31, 0.04);
+  letter-spacing: 0.24em;
 }
-.tab-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+
+.pt-title {
+  margin: 0;
+  font-family: var(--sc-display);
+  font-size: 44px;
+  font-weight: 660;
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+}
+
+.pt-sub {
+  margin: 10px 0 0;
+  color: var(--sc-mute);
+  font-size: 13px;
 }
 
 .pet-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  min-height: 30px;
-  padding: 5px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  background: var(--panel);
-  color: var(--text);
-  font-size: 12px;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 16px;
+  border: 1px solid var(--sc-line-2);
+  border-radius: 9px;
+  background: var(--sc-panel);
+  color: var(--sc-text);
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.2;
-  transition: border-color 0.14s, background 0.14s, color 0.14s, transform 0.08s;
+  transition:
+    border-color 0.16s,
+    background 0.16s,
+    color 0.16s,
+    transform 0.12s var(--sc-ease-spring);
 }
 .pet-toggle:hover {
-  border-color: #cfd5df;
-  background: var(--panel-soft);
+  border-color: var(--sc-faint);
+  background: var(--sc-hover);
+  transform: translateY(-1px);
 }
 .pet-toggle:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: translateY(0);
 }
 .pet-toggle:disabled {
   cursor: default;
-  opacity: 0.58;
+  opacity: 0.55;
 }
 .pet-toggle .pt-ico {
-  width: 13px;
-  height: 13px;
-  color: var(--muted);
-  transition: color 0.14s;
+  color: var(--sc-mute);
+  transition: color 0.16s;
 }
 .pet-toggle[aria-pressed="true"] {
-  border-color: color-mix(in oklab, var(--accent) 34%, var(--border));
-  background: var(--accent-soft);
-  color: var(--accent-2);
+  border-color: color-mix(in srgb, var(--sc-acid) 45%, transparent);
+  background: var(--sc-acid-soft);
+  color: var(--sc-acid);
 }
-.pet-toggle[aria-pressed="true"] .pt-ico { color: var(--accent-2); }
+.pet-toggle[aria-pressed="true"] .pt-ico { color: var(--sc-acid); }
+
+/* ── tabs ─────────────────────────────────────────────────── */
+.tab-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.tab-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid var(--sc-line);
+  border-radius: 11px;
+  background: var(--sc-panel);
+}
+.tab-btn {
+  padding: 8px 18px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--sc-mute);
+  font-size: 13px;
+  font-weight: 540;
+  transition:
+    background 0.16s,
+    border-color 0.16s,
+    color 0.16s;
+}
+.tab-btn:hover { color: var(--sc-text); }
+.tab-btn.active {
+  border-color: var(--sc-line-2);
+  background: var(--sc-raise);
+  color: var(--sc-text);
+  box-shadow: 0 4px 16px rgba(23, 26, 31, 0.06);
+}
+.tab-btn:focus-visible {
+  outline: 2px solid var(--sc-acid);
+  outline-offset: 2px;
+}
+.tab-hint {
+  color: var(--sc-faint);
+  font-family: var(--sc-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+}
 
 .tab-lead {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-  margin-bottom: 16px;
   max-width: 68ch;
+  margin-bottom: 18px;
+  color: var(--sc-mute);
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 
+/* ── pet grid ─────────────────────────────────────────────── */
 .pet-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(238px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
 }
 .pet-card {
+  position: relative;
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  min-height: 104px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
+  align-items: center;
+  gap: 15px;
+  min-height: 116px;
+  padding: 15px;
+  overflow: hidden;
+  border: 1px solid var(--sc-line);
+  border-radius: 15px;
+  background: var(--sc-panel);
   text-align: left;
   font-size: 12px;
-  color: inherit;
-  transition: border-color 0.14s, box-shadow 0.14s, background 0.14s;
+  transition:
+    border-color 0.18s,
+    background 0.18s,
+    transform 0.18s var(--sc-ease-out),
+    box-shadow 0.18s;
 }
 .pet-card:hover {
-  border-color: var(--border-strong);
-  background: var(--panel-soft);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--sc-line-2);
+  background: var(--sc-panel);
+  transform: translateY(-3px);
+  box-shadow: 0 18px 44px rgba(23, 26, 31, 0.1);
 }
 .pet-card:disabled {
   cursor: default;
-  opacity: 0.68;
+  opacity: 0.6;
 }
 .pet-card:disabled:hover {
-  border-color: var(--border);
-  background: var(--panel);
+  border-color: var(--sc-line);
+  background: var(--sc-panel);
+  transform: none;
   box-shadow: none;
 }
 .pet-card:focus-visible {
   outline: none;
-  border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+  border-color: var(--sc-acid);
+  box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
 .pet-card[data-selected="true"] {
-  border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
-  background: var(--panel);
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 22%, transparent) inset;
+  border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
+  background:
+    radial-gradient(220px 130px at 15% 0%, rgba(59, 91, 253, 0.06), transparent 70%),
+    var(--sc-panel);
+}
+.pet-card[data-selected="true"]::after {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sc-acid);
+  box-shadow: 0 0 10px rgba(59, 91, 253, 0.5);
+  content: '';
+  animation: sc-blink 2.4s ease-in-out infinite;
 }
 
-.pet-avatar {
-  flex: 0 0 auto;
-  width: 54px;
-  height: 54px;
-  overflow: hidden;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--panel-muted);
+.pet-stage {
+  position: relative;
   display: grid;
   place-items: center;
-  color: var(--muted);
+  width: 84px;
+  height: 84px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--sc-line);
+  border-radius: 12px;
+  background:
+    radial-gradient(60px 40px at 50% 78%, rgba(59, 91, 253, 0.08), transparent 70%),
+    var(--sc-bg);
+  color: var(--sc-mute);
 }
 .pet-sprite {
   width: 100%;
   height: 100%;
   background-repeat: no-repeat;
   image-rendering: auto;
+  filter: drop-shadow(0 6px 14px rgba(23, 26, 31, 0.18));
+  transition: transform 0.25s var(--sc-ease-spring);
+}
+.pet-card:hover .pet-sprite {
+  transform: scale(1.07) translateY(-2px);
 }
 .pet-initials {
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--sc-mute);
+  font-family: var(--sc-mono);
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -483,136 +568,140 @@ defineExpose({
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 .pet-name-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .pet-name {
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
   overflow: hidden;
+  color: var(--sc-text);
+  font-size: 14px;
+  font-weight: 620;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .pet-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   flex: 0 0 auto;
-  padding: 1px 7px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--sc-acid) 45%, transparent);
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-2);
+  background: var(--sc-acid-soft);
+  color: var(--sc-acid);
   font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0;
+  font-weight: 640;
   line-height: 1.55;
 }
 .pet-desc {
-  color: var(--muted);
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--sc-mute);
   font-size: 12px;
   line-height: 1.5;
-  display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 .pet-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  color: var(--muted-soft);
-  font-size: 11px;
+  gap: 8px;
+  color: var(--sc-faint);
+  font-family: var(--sc-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
   line-height: 1.4;
 }
 
+/* ── empty states ─────────────────────────────────────────── */
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 60px 24px 68px;
+  gap: 7px;
+  padding: 68px 24px 76px;
+  border: 1px dashed var(--sc-line-2);
+  border-radius: 15px;
+  background: var(--sc-panel);
   text-align: center;
-  border: 1px dashed var(--border-strong);
-  border-radius: 8px;
-  background: var(--panel-soft);
 }
 .empty-state .es-ico {
-  width: 32px;
-  height: 32px;
-  color: var(--muted-soft);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  color: var(--sc-faint);
 }
 .empty-state h3 {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  letter-spacing: 0;
+  font-family: var(--sc-display);
+  font-size: 16px;
+  font-weight: 640;
+  color: var(--sc-text);
+  letter-spacing: 0.01em;
 }
 .empty-state p {
   margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.55;
   max-width: 46ch;
+  color: var(--sc-mute);
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 .es-actions {
-  margin-top: 12px;
   display: flex;
   gap: 10px;
+  margin-top: 14px;
 }
 .btn-primary {
-  padding: 7px 12px;
-  border: 1px solid var(--accent-2);
-  border-radius: 7px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0;
-  transition: background 0.14s;
+  padding: 9px 16px;
+  border: 1px solid var(--sc-acid);
+  border-radius: 9px;
+  background: var(--sc-acid);
+  color: var(--sc-acid-ink);
+  font-size: 12.5px;
+  font-weight: 640;
+  transition:
+    transform 0.12s var(--sc-ease-spring),
+    box-shadow 0.16s;
 }
-.btn-primary:hover { background: var(--accent-2); }
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px rgba(59, 91, 253, 0.2);
+}
 .btn-secondary {
-  padding: 7px 12px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--panel);
-  color: var(--text);
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border: 1px solid var(--sc-line-2);
+  border-radius: 9px;
+  background: var(--sc-panel);
+  color: var(--sc-soft);
+  font-size: 12.5px;
   font-weight: 600;
-  transition: border-color 0.14s, background 0.14s;
+  transition:
+    border-color 0.16s,
+    background 0.16s,
+    color 0.16s;
 }
 .btn-secondary:hover {
-  border-color: var(--border-strong);
-  background: var(--panel-soft);
-}
-
-.settings-content::-webkit-scrollbar { width: 9px; }
-.settings-content::-webkit-scrollbar-thumb {
-  background: #d7dae1;
-  border-radius: 9px;
-  border: 2px solid var(--panel-soft);
+  border-color: var(--sc-faint);
+  background: var(--sc-hover);
+  color: var(--sc-text);
 }
 
 @media (max-width: 760px) {
-  .panel-inner { padding: 22px 18px 32px; }
-  .tab-bar {
-    align-items: stretch;
+  .panel-inner { padding: 32px 20px 56px; }
+  .pt-hero {
+    align-items: flex-start;
     flex-direction: column;
   }
   .tab-strip { width: max-content; max-width: 100%; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pet-view * { transition-duration: 0.001ms !important; }
 }
 </style>

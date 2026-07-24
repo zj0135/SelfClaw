@@ -1,0 +1,105 @@
+/*
+ * SelfClaw Settings — "Console" design system (light).
+ * Shared tokens + motion primitives, imported into each settings component's
+ * scoped style block. Every settings page roots itself with the `sc-root` class.
+ */
+
+.sc-root {
+	--sc-bg: #f5f6f8;
+	--sc-panel: #ffffff;
+	--sc-raise: #f1f3f6;
+	--sc-hover: #ebeff3;
+	--sc-line: rgba(19, 27, 45, 0.08);
+	--sc-line-2: rgba(19, 27, 45, 0.14);
+	--sc-text: #171a1f;
+	--sc-soft: #454c59;
+	--sc-mute: #6b7280;
+	--sc-faint: #9aa1ad;
+	--sc-acid: #3b5bfd;
+	--sc-acid-ink: #ffffff;
+	--sc-acid-soft: rgba(59, 91, 253, 0.08);
+	--sc-ok: #0f9d63;
+	--sc-ok-soft: rgba(15, 157, 99, 0.1);
+	--sc-err: #dc4545;
+	--sc-err-soft: rgba(220, 69, 69, 0.08);
+	--sc-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
+	--sc-sans: 'Segoe UI Variable Text', 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+	--sc-display: 'Segoe UI Variable Display', 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+	--sc-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+	--sc-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Soft aurora backdrop, applied to the page root. */
+.sc-stage {
+	background-color: var(--sc-bg);
+	background-image:
+		radial-gradient(720px 420px at 88% -10%, rgba(59, 91, 253, 0.05), transparent 62%),
+		radial-gradient(900px 620px at -12% 108%, rgba(15, 157, 99, 0.04), transparent 60%);
+	background-size: 100% 100%;
+}
+
+@keyframes sc-rise {
+	from {
+		opacity: 0;
+		transform: translateY(16px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes sc-fade {
+	from {
+		opacity: 0;
+	}
+
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes sc-pop {
+	from {
+		opacity: 0;
+		transform: translateY(10px) scale(0.975);
+	}
+
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes sc-blink {
+	0%,
+	100% {
+		opacity: 1;
+	}
+
+	50% {
+		opacity: 0.2;
+	}
+}
+
+@keyframes sc-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* Staggered entrance: give children style="--i: n" */
+.sc-rise {
+	animation: sc-rise 0.55s var(--sc-ease-out) both;
+	animation-delay: calc(var(--i, 0) * 55ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.sc-root *,
+	.sc-root *::before,
+	.sc-root *::after {
+		animation-duration: 0.001ms !important;
+		transition-duration: 0.001ms !important;
+	}
+}

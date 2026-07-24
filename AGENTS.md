@@ -4,6 +4,16 @@
 
 SelfClaw is a Windows desktop AI programming assistant built with WPF and .NET 10. It supports two active execution modes selected by the current desktop agent: **Direct**, which calls configured AI providers in-process through Microsoft.Extensions.AI, and **CLI**, which runs Claude Code / Codex / OpenCode as a subprocess. Both modes emit the same event stream into a WebView2-hosted Vue transcript.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context domain docs use root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
 ## Projects
 
 | Project | Role |
@@ -208,6 +218,11 @@ Persisted to `{AppData}\attachments\{convId}\{msgId}\`. Max 6 images, 10MB each,
 
 - All component-level styles use `<style scoped>`. Global layout/reset/theme variables belong in `App.vue`'s unscoped `<style>` only.
 - Do NOT mix scoped and unscoped `<style>` blocks in the same component file unless the unscoped block is exclusively for dynamic `v-html`-injected content that cannot be targeted by scoped selectors.
+- The settings pages share the "Night Console" dark design system: tokens/keyframes live in `components/settings/settings-console.css` and are pulled into each component via `@import` inside its scoped style block (page root carries `sc-root` / `sc-stage`).
+
+### Icons
+
+- Icons come from `lucide-vue-next` components (`<Search :size="14" />`). Do NOT add emoji glyphs or hand-rolled inline SVG icon maps for new settings UI.
 
 ### Organization
 

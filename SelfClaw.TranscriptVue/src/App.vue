@@ -289,16 +289,20 @@ onUnmounted(() => {
 	--text: #171a1f;
 	--muted: #6b7280;
 	--muted-soft: #8a929e;
-	--accent: #4f73c8;
-	--accent-2: #375fae;
-	--accent-rgb: 79, 115, 200;
-	--success: #2f855a;
-	--danger: #c24150;
+	--accent: #3b5bfd;
+	--accent-2: #2f49d1;
+	--accent-rgb: 59, 91, 253;
+	--accent-soft: rgba(59, 91, 253, 0.08);
+	--success: #0f9d63;
+	--danger: #dc4545;
 	--shadow: 0 12px 30px rgba(23, 26, 31, 0.08);
 	--card-shadow: 0 1px 2px rgba(23, 26, 31, 0.05), 0 10px 26px rgba(23, 26, 31, 0.06);
 	--font-ui: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
 	--font-display: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
 	--font-code: 'Cascadia Code', Consolas, monospace;
+	--font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
+	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+	--ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 	--scroll-track: transparent;
 	--scroll-thumb: rgba(23, 26, 31, 0.16);
 }
@@ -425,7 +429,7 @@ button {
 	align-items: flex-start;
 	justify-content: flex-start;
 	margin-bottom: 28px;
-	animation: message-in 340ms cubic-bezier(0.22, 0.82, 0.28, 1) both;
+	animation: message-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes message-in {
@@ -465,21 +469,21 @@ button {
 	width: 7px;
 	height: 7px;
 	border-radius: 50%;
-	background: #23a566;
+	background: var(--success);
 	animation: turn-status-pulse 1.6s ease-out infinite;
 }
 
 @keyframes turn-status-pulse {
 	0% {
-		box-shadow: 0 0 0 0 rgba(35, 165, 102, 0.32);
+		box-shadow: 0 0 0 0 rgba(15, 157, 99, 0.32);
 	}
 
 	70% {
-		box-shadow: 0 0 0 6px rgba(35, 165, 102, 0);
+		box-shadow: 0 0 0 6px rgba(15, 157, 99, 0);
 	}
 
 	100% {
-		box-shadow: 0 0 0 0 rgba(35, 165, 102, 0);
+		box-shadow: 0 0 0 0 rgba(15, 157, 99, 0);
 	}
 }
 
@@ -492,7 +496,8 @@ button {
 
 .turn-status-time {
 	color: #9aa2ad;
-	font-size: 12px;
+	font-family: var(--font-mono);
+	font-size: 11.5px;
 	font-weight: 500;
 	font-variant-numeric: tabular-nums;
 }
@@ -583,8 +588,10 @@ button {
 .message-time {
 	opacity: 0;
 	color: #7f8a9a;
-	font-size: 11px;
+	font-family: var(--font-mono);
+	font-size: 10.5px;
 	line-height: 1.2;
+	letter-spacing: 0.02em;
 	transition: opacity 120ms ease;
 	pointer-events: none;
 }
@@ -680,7 +687,7 @@ ol {
 blockquote {
 	margin: 0;
 	padding: 0.2rem 0 0.2rem 1rem;
-	border-left: 3px solid #ccd7ee;
+	border-left: 3px solid rgba(var(--accent-rgb), 0.35);
 	color: var(--muted);
 }
 
@@ -690,13 +697,13 @@ pre {
 	overflow: auto;
 	border: 1px solid var(--border);
 	border-radius: 10px;
-	background: #f6f8fb;
+	background: #f5f7fa;
 	color: #1f2937;
 	font-size: 13px;
 }
 
 code {
-	font-family: var(--font-code);
+	font-family: var(--font-mono);
 	font-size: 13px;
 }
 
@@ -757,10 +764,10 @@ a:hover {
 	gap: 5px;
 	margin: 0 2px;
 	padding: 2px 7px 2px 6px;
-	border: 1px solid #c9d6ee;
+	border: 1px solid rgba(var(--accent-rgb), 0.3);
 	border-radius: 6px;
-	background: #f3f7ff;
-	color: #375fae;
+	background: var(--accent-soft);
+	color: var(--accent-2);
 	font-size: 13px;
 	font-weight: 600;
 	line-height: 1.35;
@@ -1058,12 +1065,12 @@ a:hover {
 }
 
 .tool-status-icon.completed {
-	background: #ddf2e7;
-	color: #178a56;
+	background: rgba(15, 157, 99, 0.12);
+	color: #0f9d63;
 }
 
 .tool-status-icon.failed {
-	background: #fbe7ea;
+	background: rgba(220, 69, 69, 0.1);
 	color: var(--danger);
 }
 
@@ -1161,9 +1168,10 @@ a:hover {
 .tool-details-header {
 	padding: 0 0 6px;
 	color: var(--muted-soft);
-	font-size: 10.5px;
+	font-family: var(--font-mono);
+	font-size: 10px;
 	font-weight: 700;
-	letter-spacing: 0.06em;
+	letter-spacing: 0.1em;
 	text-transform: uppercase;
 }
 

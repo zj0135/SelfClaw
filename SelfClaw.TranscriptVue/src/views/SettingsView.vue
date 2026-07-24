@@ -1,5 +1,15 @@
 <script setup>
 import { computed, defineAsyncComponent, markRaw, ref } from 'vue';
+import {
+	Settings2,
+	Server,
+	Layers,
+	Code2,
+	Puzzle,
+	PawPrint,
+	Info,
+	ArrowUpRight,
+} from 'lucide-vue-next';
 
 const emit = defineEmits(['navigate']);
 
@@ -9,64 +19,44 @@ const activeComponentRef = ref(null);
 const navGroups = [
 	{
 		label: '系统',
+		en: 'SYSTEM',
 		items: [
-			{
-				id: 'sys',
-				label: '系统设置',
-				icon: 'settings',
-			},
+			{ id: 'sys', label: '系统设置', en: 'GENERAL', icon: Settings2 },
 		],
 	},
 	{
 		label: 'AI',
+		en: 'INTELLIGENCE',
 		items: [
-			{
-				id: 'providers',
-				label: 'AI 服务商',
-				icon: 'server',
-			},
-			{
-				id: 'models',
-				label: '模型管理',
-				icon: 'layers',
-			},
-			{
-				id: 'coding-assistant',
-				label: '编程助手',
-				icon: 'code',
-			},
+			{ id: 'providers', label: 'AI 服务商', en: 'PROVIDERS', icon: Server },
+			{ id: 'models', label: '模型管理', en: 'MODELS', icon: Layers },
+			{ id: 'coding-assistant', label: '编程助手', en: 'ASSISTANT', icon: Code2 },
 		],
 	},
 	{
 		label: '扩展',
+		en: 'EXTENSIONS',
 		items: [
-			{
-				id: 'plugins',
-				label: '插件',
-				icon: 'wrench',
-			},
-			{
-				id: 'pet',
-				label: '宠物',
-				icon: 'paw',
-			},
+			{ id: 'plugins', label: '插件', en: 'PLUGINS', icon: Puzzle },
+			{ id: 'pet', label: '宠物', en: 'COMPANION', icon: PawPrint },
 		],
 	},
 	{
 		label: '关于',
+		en: 'INFO',
 		items: [
-			{
-				id: 'about',
-				label: '关于',
-				icon: 'info',
-			},
+			{ id: 'about', label: '关于', en: 'ABOUT', icon: Info },
 		],
 	},
 ];
 
-const activeComponent = computed(() => {
-	return componentMap[activeTarget.value] || null;
-});
+// Flat, stable index used for the mono numeric label on each nav row.
+let navSeq = 0;
+for (const group of navGroups) {
+	for (const item of group.items) {
+		item.index = String(++navSeq).padStart(2, '0');
+	}
+}
 
 const componentMap = markRaw({
 	sys: defineAsyncComponent(() => import('../components/settings/SystemSettings.vue')),
@@ -78,20 +68,15 @@ const componentMap = markRaw({
 	about: defineAsyncComponent(() => import('../components/settings/About.vue')),
 });
 
-const iconMap = {
-	settings: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`,
-	server: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>`,
-	layers: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>`,
-	wrench: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`,
-	network: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H13a2.5 2.5 0 0 1 2.5 2.5v1"/><path d="M8.5 18H13a2.5 2.5 0 0 0 2.5-2.5v-1"/></svg>`,
-	info: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`,
-	code: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
-	paw: `<svg class="ni-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="4" cy="8" r="2"/><path d="M12 22c-4 0-7-2-7-5 0-2 1.5-3.5 3-4l4 2 4-2c1.5.5 3 2 3 4 0 3-3 5-7 5z"/></svg>`,
-};
+const activeComponent = computed(() => componentMap[activeTarget.value] || null);
 
-function getIcon(id) {
-	return iconMap[id] || '';
-}
+const activeItem = computed(() => {
+	for (const group of navGroups) {
+		const hit = group.items.find((item) => item.id === activeTarget.value);
+		if (hit) return hit;
+	}
+	return null;
+});
 
 function selectItem(id) {
 	activeTarget.value = id;
@@ -106,17 +91,21 @@ defineExpose({
 </script>
 
 <template>
-	<div class="settings-layout">
+	<div class="settings-layout sc-root">
 		<!-- Left: sidebar -->
 		<aside class="settings-sidebar">
-			<div class="sb-head">
+			<div class="sb-head sc-rise" style="--i: 0">
+				<div class="sb-kicker">SELFCLAW · CONTROL DECK</div>
 				<h1>设置</h1>
-				<p>偏好与模型设置</p>
+				<p>偏好、模型与扩展的控制舱</p>
 			</div>
 
 			<nav class="sb-nav">
-				<div v-for="group in navGroups" :key="group.label" class="sb-group">
-					<div class="sb-label">{{ group.label }}</div>
+				<div v-for="(group, gi) in navGroups" :key="group.label" class="sb-group sc-rise" :style="{ '--i': gi + 1 }">
+					<div class="sb-label">
+						<span>{{ group.label }}</span>
+						<span class="sb-label-en">{{ group.en }}</span>
+					</div>
 					<button
 						v-for="item in group.items"
 						:key="item.id"
@@ -124,11 +113,18 @@ defineExpose({
 						:class="{ active: activeTarget === item.id }"
 						@click="selectItem(item.id)"
 					>
-						<span class="ni-ico-wrap" aria-hidden="true" v-html="getIcon(item.icon)"></span>
-						{{ item.label }}
+						<span class="ni-index">{{ item.index }}</span>
+						<component :is="item.icon" :size="16" :stroke-width="1.9" class="ni-ico" aria-hidden="true" />
+						<span class="ni-label">{{ item.label }}</span>
+						<ArrowUpRight :size="13" :stroke-width="2" class="ni-arrow" aria-hidden="true" />
 					</button>
 				</div>
 			</nav>
+
+			<div class="sb-foot">
+				<span class="sb-foot-dot" aria-hidden="true"></span>
+				<span class="sb-foot-text">{{ activeItem ? activeItem.en : 'READY' }}</span>
+			</div>
 		</aside>
 
 		<!-- Right: content panel -->
@@ -139,58 +135,75 @@ defineExpose({
 </template>
 
 <style scoped>
+@import '../components/settings/settings-console.css';
+
 .settings-layout {
 	display: flex;
 	width: 100%;
 	height: 100%;
-	background: var(--bg);
 	overflow: hidden;
+	background: var(--sc-bg);
+	color: var(--sc-text);
+	font-family: var(--sc-sans);
 }
 
 .settings-sidebar {
 	display: flex;
 	flex-direction: column;
-	width: 264px;
-	min-width: 264px;
+	width: 272px;
+	min-width: 272px;
 	height: 100%;
-	border-right: 1px solid var(--border);
+	border-right: 1px solid var(--sc-line);
+	background: var(--sc-panel);
 	overflow: hidden;
-	font-family: var(--font-ui);
 }
 
 .settings-content {
+	/* Keep legacy mock panels aligned with the console stage. */
+	--text: #171a1f;
+	--muted: #6b7280;
+
 	flex: 1;
 	min-width: 0;
 	height: 100%;
 	overflow-y: auto;
-	background: var(--bg);
+	background: var(--sc-bg);
 }
 
 .sb-head {
-	padding: 20px 20px 14px;
+	padding: 30px 24px 20px;
+	border-bottom: 1px solid var(--sc-line);
+}
+
+.sb-kicker {
+	margin-bottom: 14px;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.22em;
 }
 
 .sb-head h1 {
 	margin: 0;
-	font-family: var(--font-display, var(--font-ui));
-	font-size: 19px;
+	font-family: var(--sc-display);
+	font-size: 34px;
 	font-weight: 650;
-	letter-spacing: -0.01em;
-	line-height: 1.3;
-	color: var(--text);
+	letter-spacing: 0.02em;
+	line-height: 1.1;
 }
 
 .sb-head p {
-	margin: 2px 0 0;
+	margin: 8px 0 0;
+	color: var(--sc-mute);
 	font-size: 12.5px;
-	color: var(--muted);
-	line-height: 1.4;
+	line-height: 1.5;
 }
 
 .sb-nav {
 	flex: 1;
 	overflow-y: auto;
-	padding: 2px 12px 14px;
+	padding: 10px 14px 16px;
 }
 
 .sb-nav::-webkit-scrollbar {
@@ -198,96 +211,165 @@ defineExpose({
 }
 
 .sb-nav::-webkit-scrollbar-thumb {
-	background: #d7dae1;
+	background: var(--sc-raise);
+	border: 2px solid var(--sc-panel);
 	border-radius: 9px;
-	border: 2px solid var(--panel-soft, #f7f8fa);
 }
 
 .sb-group {
-	margin-top: 14px;
+	margin-top: 20px;
 }
 
 .sb-group:first-child {
-	margin-top: 0;
+	margin-top: 6px;
 }
 
 .sb-label {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	padding: 6px 10px 8px;
+	color: var(--sc-mute);
 	font-size: 11px;
 	font-weight: 600;
-	letter-spacing: 0.07em;
-	text-transform: uppercase;
-	color: var(--muted-soft, #8a929e);
-	padding: 6px 10px;
+	letter-spacing: 0.06em;
 	user-select: none;
 }
 
+.sb-label-en {
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 9px;
+	font-weight: 500;
+	letter-spacing: 0.18em;
+}
+
 .nav-item {
+	position: relative;
 	display: flex;
 	align-items: center;
-	gap: 11px;
+	gap: 10px;
 	width: 100%;
-	padding: 8px 10px;
-	border-radius: 8px;
-	border: 0;
+	padding: 9px 10px;
+	border: 1px solid transparent;
+	border-radius: 9px;
 	background: transparent;
-	color: var(--muted-soft, #8a929e);
+	color: var(--sc-mute);
+	font-family: inherit;
 	font-size: 13.5px;
 	font-weight: 500;
-	font-family: inherit;
-	cursor: pointer;
 	text-align: left;
 	line-height: 1.2;
+	cursor: pointer;
 	transition:
-		background 0.14s cubic-bezier(0.2, 0.7, 0.3, 1),
-		color 0.14s cubic-bezier(0.2, 0.7, 0.3, 1);
+		background 0.16s var(--sc-ease-out),
+		border-color 0.16s var(--sc-ease-out),
+		color 0.16s var(--sc-ease-out),
+		transform 0.16s var(--sc-ease-out);
 }
 
 .nav-item:hover {
-	background: rgba(23, 26, 31, 0.05);
-	color: var(--text);
+	background: var(--sc-hover);
+	color: var(--sc-text);
+	transform: translateX(2px);
 }
 
-.nav-item.active {
-	background: var(--pill, #1f232b);
-	color: var(--pill-fg, #ffffff);
-	font-weight: 550;
-}
-
-.nav-item.active .ni-ico {
-	color: var(--pill-fg, #ffffff);
+.ni-index {
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.08em;
+	transition: color 0.16s;
 }
 
 .ni-ico {
-	width: 17px;
-	height: 17px;
 	flex: none;
-	color: var(--muted);
-	pointer-events: none;
+	transition: color 0.16s, transform 0.2s var(--sc-ease-spring);
 }
 
-.ni-ico-wrap {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 17px;
-	height: 17px;
-	flex: 0 0 auto;
+.ni-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-.nav-item:hover .ni-ico {
-	color: var(--muted-soft, #8a929e);
+.ni-arrow {
+	flex: none;
+	opacity: 0;
+	transform: translate(-4px, 4px);
+	transition:
+		opacity 0.16s,
+		transform 0.2s var(--sc-ease-spring);
 }
 
-/* Focus visible for keyboard navigation */
+.nav-item:hover .ni-arrow {
+	opacity: 0.6;
+	transform: none;
+}
+
+.nav-item.active {
+	border-color: var(--sc-line-2);
+	background: var(--sc-raise);
+	color: var(--sc-text);
+}
+
+.nav-item.active::before {
+	position: absolute;
+	top: 50%;
+	left: -1px;
+	width: 2px;
+	height: 18px;
+	transform: translateY(-50%);
+	border-radius: 2px;
+	background: var(--sc-acid);
+	box-shadow: 0 0 12px rgba(59, 91, 253, 0.45);
+	content: '';
+}
+
+.nav-item.active .ni-index {
+	color: var(--sc-acid);
+}
+
+.nav-item.active .ni-ico {
+	color: var(--sc-acid);
+}
+
+.nav-item.active .ni-arrow {
+	opacity: 1;
+	transform: none;
+	color: var(--sc-mute);
+}
+
 .nav-item:focus-visible {
-	outline: 2px solid var(--accent);
+	outline: 2px solid var(--sc-acid);
 	outline-offset: 2px;
 }
 
-/* Reduced motion for vestibular-sensitive users */
-@media (prefers-reduced-motion: reduce) {
-	.nav-item {
-		transition-duration: 0.001ms !important;
-	}
+.sb-foot {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 14px 24px;
+	border-top: 1px solid var(--sc-line);
+}
+
+.sb-foot-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--sc-acid);
+	box-shadow: 0 0 10px rgba(59, 91, 253, 0.5);
+	animation: sc-blink 2.4s ease-in-out infinite;
+}
+
+.sb-foot-text {
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.22em;
 }
 </style>

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { Folder, X, Plus, RefreshCw } from 'lucide-vue-next';
 
 const props = defineProps({
 	workspaceSelection: {
@@ -110,39 +111,32 @@ onUnmounted(() => {
 			:aria-expanded="isOpen ? 'true' : 'false'"
 			@click.stop="toggleOpen"
 		>
-			<svg viewBox="0 0 20 20" aria-hidden="true">
-				<path d="M3 7h4.5l1.5 1.5H17v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 14.5V7Z" />
-				<path d="M3 7V5a1.5 1.5 0 0 1 1.5-1.5H8l1.5 1.5H15a1 1 0 0 1 1 1V7" />
-			</svg>
+			<Folder :size="17" :stroke-width="1.7" aria-hidden="true" />
 		</button>
 
 		<div v-if="isOpen" class="workspace-card" role="dialog" aria-label="选择工作目录">
 			<div class="workspace-card-header">
 				<h2>选择工作目录</h2>
-				<button class="workspace-close" type="button" title="关闭" aria-label="关闭" @click="close">
-					<svg viewBox="0 0 20 20" aria-hidden="true">
-						<path d="M6 6l8 8M14 6l-8 8" />
-					</svg>
-				</button>
+			<button class="workspace-close" type="button" title="关闭" aria-label="关闭" @click="close">
+				<X :size="15" :stroke-width="2" aria-hidden="true" />
+			</button>
 			</div>
 
 			<div class="workspace-current">
 				<div class="workspace-label">当前工作目录</div>
-				<div class="workspace-path-line">
-					<svg viewBox="0 0 20 20" aria-hidden="true">
-						<path d="M3 7h4.5l1.5 1.5H17v6.8a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 15.3V7Z" />
-						<path d="M3 7V5.3A1.3 1.3 0 0 1 4.3 4H8l1.4 1.4H15A1.1 1.1 0 0 1 16.1 6.5V7" />
-					</svg>
-					<span :title="currentPath">{{ currentPath }}</span>
-				</div>
+			<div class="workspace-path-line">
+				<Folder :size="15" :stroke-width="1.7" aria-hidden="true" />
+				<span :title="currentPath">{{ currentPath }}</span>
+			</div>
 			</div>
 
 			<div class="workspace-section">
 				<div class="workspace-section-head">
-					<span>桌面目录</span>
-					<button class="workspace-refresh" type="button" :disabled="loading" @click="refresh">
-						{{ loading ? 'refreshing' : 'refresh' }}
-					</button>
+				<span>桌面目录</span>
+				<button class="workspace-refresh" type="button" :disabled="loading" @click="refresh">
+					<RefreshCw :size="11" :stroke-width="2" :class="{ spinning: loading }" aria-hidden="true" />
+					{{ loading ? 'refreshing' : 'refresh' }}
+				</button>
 				</div>
 				<div class="workspace-chip-row">
 					<button
@@ -153,18 +147,13 @@ onUnmounted(() => {
 						type="button"
 						@click="selectPath(folder)"
 					>
-						<svg viewBox="0 0 20 20" aria-hidden="true">
-							<path d="M3 7h4.5l1.5 1.5H17v6.8a1.7 1.7 0 0 1-1.7 1.7H4.7A1.7 1.7 0 0 1 3 15.3V7Z" />
-							<path d="M3 7V5.3A1.3 1.3 0 0 1 4.3 4H8l1.4 1.4H15A1.1 1.1 0 0 1 16.1 6.5V7" />
-						</svg>
-						<span>{{ folder.name || 'Desktop' }}</span>
-					</button>
-					<button class="workspace-chip workspace-chip-dashed" type="button" @click="browse">
-						<svg viewBox="0 0 20 20" aria-hidden="true">
-							<path d="M10 4v12M4 10h12" />
-						</svg>
-						<span>选择其他目录</span>
-					</button>
+					<Folder :size="14" :stroke-width="1.7" aria-hidden="true" />
+					<span>{{ folder.name || 'Desktop' }}</span>
+				</button>
+				<button class="workspace-chip workspace-chip-dashed" type="button" @click="browse">
+					<Plus :size="14" :stroke-width="2" aria-hidden="true" />
+					<span>选择其他目录</span>
+				</button>
 				</div>
 			</div>
 
@@ -255,16 +244,13 @@ onUnmounted(() => {
 	color: #111827;
 }
 
-.workspace-close svg,
-.workspace-path-line svg,
+.workspace-path-line svg {
+	flex: none;
+	color: #9aa2ad;
+}
+
 .workspace-chip svg {
-	width: 16px;
-	height: 16px;
-	fill: none;
-	stroke: currentColor;
-	stroke-width: 1.7;
-	stroke-linecap: round;
-	stroke-linejoin: round;
+	flex: none;
 }
 
 .workspace-current {
@@ -312,20 +298,35 @@ onUnmounted(() => {
 }
 
 .workspace-refresh {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
 	padding: 0;
 	border: 0;
 	background: transparent;
 	color: #9aa2ad;
-	font-size: 11px;
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 10.5px;
+	letter-spacing: 0.04em;
 }
 
 .workspace-refresh:hover:not(:disabled) {
-	color: #4b5563;
+	color: var(--accent, #3b5bfd);
 }
 
 .workspace-refresh:disabled {
 	cursor: default;
 	opacity: 0.58;
+}
+
+.workspace-refresh .spinning {
+	animation: ws-spin 0.8s linear infinite;
+}
+
+@keyframes ws-spin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .workspace-chip-row {
@@ -362,11 +363,16 @@ onUnmounted(() => {
 	white-space: nowrap;
 }
 
-.workspace-chip:hover,
-.workspace-chip.selected {
+.workspace-chip:hover {
 	border-color: #9ca3af;
 	background: #f7f8fa;
 	color: #171a1f;
+}
+
+.workspace-chip.selected {
+	border-color: rgba(59, 91, 253, 0.4);
+	background: rgba(59, 91, 253, 0.07);
+	color: var(--accent-2, #2f49d1);
 }
 
 .workspace-chip-dashed {
@@ -398,10 +404,14 @@ onUnmounted(() => {
 	text-align: left;
 }
 
-.workspace-root:hover,
-.workspace-root.selected {
+.workspace-root:hover {
 	border-color: #e1e4ea;
 	background: #f7f8fa;
+}
+
+.workspace-root.selected {
+	border-color: rgba(59, 91, 253, 0.35);
+	background: rgba(59, 91, 253, 0.06);
 }
 
 .workspace-root-name {

@@ -1,24 +1,30 @@
 <script setup>
 import { computed, reactive, ref } from 'vue';
+import {
+	Puzzle,
+	Network,
+	ShieldCheck,
+	Plus,
+	Search,
+	X,
+	Eye,
+	Check,
+	UploadCloud,
+} from 'lucide-vue-next';
 
-// ── 图标：完整 SVG 字符串，模板用 v-html 注入（照 AppSidebar.vue 的写法）。
-// v-html 是运行时指令，不经过模板编译器，Vite 工程下可直接渲染。
-const iconMap = {
-	plugin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`,
-	mcp: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H13a2.5 2.5 0 0 1 2.5 2.5v1"/><path d="M8.5 18H13a2.5 2.5 0 0 0 2.5-2.5v-1"/></svg>`,
-	skill: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg>`,
+// 图标放在 reactive 之外，避免组件被包成响应式代理。
+const catIcons = {
+	plugin: Puzzle,
+	mcp: Network,
+	skill: ShieldCheck,
 };
-
-function getIcon(name) {
-	return iconMap[name] || '';
-}
 
 // ── 三类扩展数据 ────────────────────────────────────────────────
 // 实际接入时用 sendHostMessage('get-extensions') 拉取，这里给出结构与示例。
 const categories = reactive({
 	plugin: {
 		name: '插件',
-		icon: 'plugin',
+		en: 'PLUGINS',
 		sub: '扩展应用功能的能力包',
 		addType: 'import',
 		items: [
@@ -50,7 +56,7 @@ const categories = reactive({
 	},
 	mcp: {
 		name: 'MCP',
-		icon: 'mcp',
+		en: 'MCP SERVERS',
 		sub: 'Model Context Protocol 服务器连接',
 		addType: 'mcp',
 		items: [
@@ -99,7 +105,7 @@ const categories = reactive({
 	},
 	skill: {
 		name: 'SKILL',
-		icon: 'skill',
+		en: 'SKILLS',
 		sub: '可复用的专业技能与工作流',
 		addType: 'import',
 		items: [
@@ -158,8 +164,8 @@ const addLabel = computed(() => (activeCategory.value.addType === 'mcp' ? '新�
 
 const countText = computed(() => {
 	const total = activeCategory.value.items.length;
-	if (searchTerm.value.trim()) return `匹配 ${filteredItems.value.length} / ${total} 项`;
-	return `共 ${total} 项 · ${enabledCount(activeCat.value)} 已启用`;
+	if (searchTerm.value.trim()) return `MATCH ${filteredItems.value.length}/${total}`;
+	return `TOTAL ${total} · ON ${enabledCount(activeCat.value)}`;
 });
 
 // ── tab 切换 ────────────────────────────────────────────────────
@@ -305,10 +311,16 @@ defineExpose({
 </script>
 
 <template>
-	<main class="plugins-view settings-content scroll">
+	<main class="plugins-view sc-root sc-stage scroll">
 		<div class="panel">
+			<header class="pg-hero sc-rise" style="--i: 0">
+				<div class="pg-kicker">EXTENSION REGISTRY</div>
+				<h1 class="pg-title">插件</h1>
+				<p class="pg-sub">能力包、MCP 服务器与技能工作流的挂载舱。</p>
+			</header>
+
 			<!-- tab 切换 + 右侧功能按钮 -->
-			<div class="tab-bar">
+			<div class="tab-bar sc-rise" style="--i: 1">
 				<div class="tab-strip" role="tablist" aria-label="扩展类型">
 					<button
 						v-for="(cat, index) in catOrder"
@@ -322,42 +334,38 @@ defineExpose({
 						@click="selectTab(cat)"
 						@keydown="onTabKey($event, index)"
 					>
-						<span class="tab-ico" aria-hidden="true" v-html="getIcon(categories[cat].icon)"></span>
+						<component :is="catIcons[cat]" :size="15" :stroke-width="1.9" class="tab-ico" aria-hidden="true" />
 						{{ categories[cat].name }}
-						<span class="tab-n">{{ categories[cat].items.length }}</span>
+						<span class="tab-n">{{ String(categories[cat].items.length).padStart(2, '0') }}</span>
 					</button>
 				</div>
 
 				<button type="button" class="add-btn" @click="onAdd">
-					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<path d="M12 5v14M5 12h14" />
-					</svg>
+					<Plus :size="15" :stroke-width="2.2" />
 					{{ addLabel }}
 				</button>
 			</div>
 
 			<!-- 查询框 + 计数 -->
-			<div class="tool-row">
+			<div class="tool-row sc-rise" style="--i: 2">
 				<div class="search">
-					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-						<circle cx="11" cy="11" r="8" />
-						<path d="m21 21-4.3-4.3" />
-					</svg>
-					<input v-model="searchTerm" type="text" placeholder="搜索…" aria-label="搜索当前类型" />
+					<Search :size="14" :stroke-width="2" class="search-ico" aria-hidden="true" />
+					<input v-model="searchTerm" type="text" placeholder="搜索名称、id 或描述…" aria-label="搜索当前类型" />
 					<button v-show="searchTerm" type="button" class="search-clear" aria-label="清除搜索" @click="clearSearch">
-						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<path d="M18 6 6 18M6 6l12 12" />
-						</svg>
+						<X :size="14" :stroke-width="2" />
 					</button>
 				</div>
 				<div class="tool-count">{{ countText }}</div>
 			</div>
 
 			<!-- 当前 tab 的项，按列表铺开 -->
-			<div class="list" role="tabpanel">
+			<div class="list sc-rise" style="--i: 3" role="tabpanel">
 				<template v-if="filteredItems.length">
-					<div v-for="it in filteredItems" :key="it.id" class="item" :class="{ off: !it.on }">
-						<span class="item-logo" aria-hidden="true" v-html="getIcon(activeCategory.icon)"></span>
+					<div v-for="(it, ii) in filteredItems" :key="it.id" class="item" :class="{ off: !it.on }">
+						<span class="item-index">{{ String(ii + 1).padStart(2, '0') }}</span>
+						<span class="item-logo" aria-hidden="true">
+							<component :is="catIcons[activeCat]" :size="16" :stroke-width="1.8" />
+						</span>
 						<div class="item-main">
 							<div class="item-title">
 								<span class="item-name">{{ it.name }}</span>
@@ -370,10 +378,7 @@ defineExpose({
 						<div class="item-actions">
 							<span class="status-pill" :class="it.on ? 'on' : 'off'"><span class="d" />{{ it.on ? '已启用' : '已停用' }}</span>
 							<button class="icon-act" type="button" aria-label="查看详情" title="查看" @click="openDrawer(activeCat, it)">
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-									<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
-									<circle cx="12" cy="12" r="3" />
-								</svg>
+								<Eye :size="15" :stroke-width="1.9" />
 							</button>
 							<label class="switch" title="启用/停用">
 								<input type="checkbox" :checked="it.on" :aria-label="`启用 ${it.name}`" @change="toggleItem(it)" />
@@ -392,15 +397,14 @@ defineExpose({
 		<div v-if="mcpDialog.open" class="overlay show" @click.self="mcpDialog.open = false">
 			<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="mcp-title">
 				<div class="dialog-head">
-					<div class="dh-ico" aria-hidden="true" v-html="getIcon('mcp')"></div>
+					<div class="dh-ico" aria-hidden="true"><Network :size="17" :stroke-width="1.9" /></div>
 					<div>
+						<div class="dlg-kicker">MCP SERVER</div>
 						<h3 id="mcp-title">新增 MCP 服务器</h3>
 						<p>配置一个 Model Context Protocol 连接</p>
 					</div>
 					<button class="icon-act dialog-close" aria-label="关闭" @click="mcpDialog.open = false">
-						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<path d="M18 6 6 18M6 6l12 12" />
-						</svg>
+						<X :size="15" :stroke-width="2" />
 					</button>
 				</div>
 				<div class="dialog-body scroll">
@@ -452,15 +456,17 @@ defineExpose({
 		<div v-if="importDialog.open" class="overlay show" @click.self="importDialog.open = false">
 			<div class="dialog" role="dialog" aria-modal="true" aria-labelledby="import-title">
 				<div class="dialog-head">
-					<div class="dh-ico" aria-hidden="true" v-html="getIcon(importIsSkill ? 'skill' : 'plugin')"></div>
+					<div class="dh-ico" aria-hidden="true">
+						<ShieldCheck v-if="importIsSkill" :size="17" :stroke-width="1.9" />
+						<Puzzle v-else :size="17" :stroke-width="1.9" />
+					</div>
 					<div>
+						<div class="dlg-kicker">{{ importIsSkill ? 'SKILL IMPORT' : 'PLUGIN IMPORT' }}</div>
 						<h3 id="import-title">{{ importIsSkill ? '导入技能' : '导入插件' }}</h3>
 						<p>{{ importIsSkill ? '从本地文件安装技能' : '从本地文件安装插件' }}</p>
 					</div>
 					<button class="icon-act dialog-close" aria-label="关闭" @click="importDialog.open = false">
-						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<path d="M18 6 6 18M6 6l12 12" />
-						</svg>
+						<X :size="15" :stroke-width="2" />
 					</button>
 				</div>
 				<div class="dialog-body">
@@ -468,17 +474,11 @@ defineExpose({
 						<label>选择文件<span class="req">*</span></label>
 						<label class="dropzone" :class="{ 'has-file': importDialog.fileName }" @dragover.prevent @drop.prevent="onFileDrop">
 							<input type="file" hidden @change="onFilePick" />
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-								<polyline points="17 8 12 3 7 8" />
-								<line x1="12" y1="3" x2="12" y2="15" />
-							</svg>
+							<UploadCloud :size="26" :stroke-width="1.6" class="dz-ico" aria-hidden="true" />
 							<span class="dz-title">点击选择，或拖拽文件到此处</span>
 							<span class="dz-sub">{{ importIsSkill ? '支持 .zip / .odskill 包或 SKILL.md' : '支持 .zip / .odplugin 包' }}</span>
 							<span class="dz-file">
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<path d="M20 6 9 17l-5-5" />
-								</svg>
+								<Check :size="14" :stroke-width="2.4" />
 								{{ importDialog.fileName }}
 							</span>
 						</label>
@@ -500,17 +500,18 @@ defineExpose({
 			<aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-name">
 				<template v-if="drawer.item">
 					<div class="drawer-head">
-						<div class="dr-logo" aria-hidden="true" v-html="getIcon(categories[drawer.cat].icon)"></div>
+						<div class="dr-logo" aria-hidden="true">
+							<component :is="catIcons[drawer.cat]" :size="22" :stroke-width="1.8" />
+						</div>
 						<div class="dr-meta">
+							<div class="dlg-kicker">{{ categories[drawer.cat].en }}</div>
 							<h3 id="drawer-name">{{ drawer.item.name }}</h3>
 							<div class="dr-sub">
 								{{ categories[drawer.cat].name }} · {{ drawer.cat === 'mcp' ? drawer.item.version : 'v' + drawer.item.version }}
 							</div>
 						</div>
 						<button class="icon-act" aria-label="关闭" @click="closeDrawer">
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M18 6 6 18M6 6l12 12" />
-							</svg>
+							<X :size="16" :stroke-width="2" />
 						</button>
 					</div>
 					<div class="drawer-body scroll">
@@ -592,7 +593,7 @@ defineExpose({
 					</div>
 					<div class="drawer-foot">
 						<span class="status-pill grow" :class="drawer.item.on ? 'on' : 'off'"><span class="d" />{{ drawer.item.on ? '已启用' : '已停用' }}</span>
-						<button class="btn" @click="toggleItem(drawer.item)">{{ drawer.item.on ? '停用' : '启用' }}</button>
+						<button class="btn primary" @click="toggleItem(drawer.item)">{{ drawer.item.on ? '停用' : '启用' }}</button>
 					</div>
 				</template>
 			</aside>
@@ -600,46 +601,26 @@ defineExpose({
 
 		<!-- toast -->
 		<div class="toast" :class="{ show: toastState.visible }" role="status" aria-live="polite">
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+			<Check :size="15" :stroke-width="2.4" class="toast-ico" />
 			<span>{{ toastState.text }}</span>
 		</div>
 	</main>
 </template>
 
 <style scoped>
-.plugins-view {
-	--panel: #ffffff;
-	--panel-soft: #f7f8fa;
-	--panel-muted: #f1f3f6;
-	--border: #e5e7eb;
-	--border-strong: #d8dde5;
-	--text: #171a1f;
-	--muted: #6b7280;
-	--muted-soft: #8a929e;
-	--accent: #4f73c8;
-	--accent-2: #375fae;
-	--accent-soft: #eef2fb;
-	--pill: #1f232b;
-	--pill-fg: #ffffff;
-	--ok: #2f9e5f;
-	--ok-soft: #e8f6ee;
-	--danger: #c2483c;
-	--font-display: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
-	--font-mono: 'Cascadia Code', 'SF Mono', 'JetBrains Mono', ui-monospace, Consolas, monospace;
-	--radius-sm: 7px;
-	--radius-md: 10px;
-	--radius-lg: 13px;
-	--shadow-sm: 0 1px 2px rgba(23, 26, 31, 0.06);
-	--shadow-md: 0 8px 28px rgba(23, 26, 31, 0.12), 0 2px 6px rgba(23, 26, 31, 0.06);
+@import './settings-console.css';
 
+.plugins-view {
 	height: 100%;
 	overflow-y: auto;
-	background: #fff;
-	color: var(--text);
+	color: var(--sc-text);
+	font-family: var(--sc-sans);
 }
+
 .plugins-view * {
 	box-sizing: border-box;
 }
+
 .plugins-view button {
 	cursor: pointer;
 	font: inherit;
@@ -647,25 +628,57 @@ defineExpose({
 
 .scroll {
 	scrollbar-width: thin;
-	scrollbar-color: var(--border-strong) transparent;
+	scrollbar-color: var(--sc-faint) transparent;
 }
 .scroll::-webkit-scrollbar {
 	width: 9px;
 	height: 9px;
 }
 .scroll::-webkit-scrollbar-thumb {
-	background: var(--border-strong);
+	background: var(--sc-raise);
 	background-clip: padding-box;
 	border: 2px solid transparent;
 	border-radius: 99px;
 }
 .scroll::-webkit-scrollbar-thumb:hover {
-	background: var(--muted-soft);
+	background: var(--sc-faint);
 }
 
 .panel {
-	max-width: 880px;
-	padding: 30px 34px 64px;
+	max-width: 920px;
+	padding: 48px 40px 72px;
+}
+
+/* ── hero ───────────────────────────────────────────────────── */
+.pg-hero {
+	margin-bottom: 30px;
+	padding-bottom: 24px;
+	border-bottom: 1px solid var(--sc-line);
+}
+
+.pg-kicker,
+.dlg-kicker {
+	margin-bottom: 10px;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.24em;
+}
+
+.pg-title {
+	margin: 0;
+	font-family: var(--sc-display);
+	font-size: 44px;
+	font-weight: 660;
+	letter-spacing: 0.01em;
+	line-height: 1.05;
+}
+
+.pg-sub {
+	margin: 10px 0 0;
+	color: var(--sc-mute);
+	font-size: 13px;
 }
 
 /* ── tab 切换栏 ─────────────────────────────────────────────── */
@@ -674,72 +687,76 @@ defineExpose({
 	align-items: center;
 	justify-content: space-between;
 	gap: 16px;
-	margin-bottom: 14px;
+	margin-bottom: 16px;
 }
+
 .tab-strip {
 	display: inline-flex;
 	align-items: center;
-	gap: 2px;
+	gap: 3px;
 	padding: 4px;
-	border: 1px solid var(--border);
-	border-radius: 10px;
-	background: var(--panel-soft);
+	border: 1px solid var(--sc-line);
+	border-radius: 11px;
+	background: var(--sc-panel);
 }
+
 .tab-btn {
 	display: inline-flex;
 	align-items: center;
-	gap: 7px;
-	padding: 6px 14px;
-	border: 0;
-	border-radius: 7px;
+	gap: 8px;
+	padding: 8px 15px;
+	border: 1px solid transparent;
+	border-radius: 8px;
 	background: transparent;
-	color: var(--muted);
-	font-size: 12.5px;
-	font-weight: 500;
+	color: var(--sc-mute);
+	font-size: 13px;
+	font-weight: 540;
 	transition:
-		background 0.14s,
-		color 0.14s,
-		box-shadow 0.14s;
+		background 0.16s,
+		border-color 0.16s,
+		color 0.16s;
 }
+
 .tab-ico {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
+	flex: none;
 }
-.tab-btn :deep(svg) {
-	display: block;
-	width: 15px;
-	height: 15px;
-}
+
 .tab-n {
-	font-family: var(--font-mono);
-	font-size: 11px;
-	font-weight: 560;
-	padding: 0 6px;
-	height: 16px;
 	display: inline-grid;
 	place-items: center;
+	height: 17px;
+	padding: 0 6px;
 	border-radius: 99px;
-	background: var(--panel-muted);
-	color: var(--muted-soft);
-}
-.tab-btn:hover {
-	color: var(--text);
-}
-.tab-btn.active {
-	background: var(--panel);
-	color: var(--text);
+	background: var(--sc-raise);
+	color: var(--sc-mute);
+	font-family: var(--sc-mono);
+	font-size: 10px;
 	font-weight: 600;
-	box-shadow:
-		var(--shadow-sm),
-		0 0 0 1px rgba(23, 26, 31, 0.04);
+	letter-spacing: 0.04em;
 }
+
+.tab-btn:hover {
+	color: var(--sc-text);
+}
+
+.tab-btn.active {
+	border-color: var(--sc-line-2);
+	background: var(--sc-raise);
+	color: var(--sc-text);
+	box-shadow: 0 4px 16px rgba(23, 26, 31, 0.06);
+}
+
+.tab-btn.active .tab-ico {
+	color: var(--sc-acid);
+}
+
 .tab-btn.active .tab-n {
-	background: var(--accent-soft);
-	color: var(--accent-2);
+	background: var(--sc-acid-soft);
+	color: var(--sc-acid);
 }
+
 .tab-btn:focus-visible {
-	outline: 2px solid var(--accent);
+	outline: 2px solid var(--sc-acid);
 	outline-offset: 2px;
 }
 
@@ -749,47 +766,38 @@ defineExpose({
 	justify-content: center;
 	gap: 7px;
 	flex: 0 0 auto;
-	min-height: 34px;
-	padding: 6px 13px;
-	border-radius: 7px;
-	border: 1px solid var(--border-strong);
-	background: var(--panel);
-	color: var(--text);
-	font-size: 12.5px;
-	font-weight: 600;
+	min-height: 38px;
+	padding: 8px 16px;
+	border: 1px solid var(--sc-acid);
+	border-radius: 9px;
+	background: var(--sc-acid);
+	color: var(--sc-acid-ink);
+	font-size: 13px;
+	font-weight: 640;
 	line-height: 1.2;
 	white-space: nowrap;
 	transition:
-		border-color 0.14s,
-		background 0.14s,
-		color 0.14s,
-		transform 0.08s;
+		transform 0.12s var(--sc-ease-spring),
+		box-shadow 0.16s;
 }
-.add-btn svg {
-	width: 15px;
-	height: 15px;
-	stroke-width: 2;
-	color: var(--muted);
-	transition: color 0.14s;
-}
+
 .add-btn:hover {
-	border-color: #cfd5df;
-	background: var(--panel-soft);
+	transform: translateY(-1px);
+	box-shadow: 0 10px 26px rgba(59, 91, 253, 0.2);
 }
-.add-btn:hover svg {
-	color: var(--accent-2);
-}
+
 .add-btn:active {
-	transform: translateY(1px);
+	transform: translateY(0);
 }
 
 /* ── 查询框 + 计数行 ────────────────────────────────────────── */
 .tool-row {
 	display: flex;
 	align-items: center;
-	gap: 12px;
-	margin-bottom: 14px;
+	gap: 14px;
+	margin-bottom: 16px;
 }
+
 .search {
 	position: relative;
 	display: flex;
@@ -797,39 +805,43 @@ defineExpose({
 	flex: 1;
 	min-width: 0;
 }
-.search > svg {
+
+.search-ico {
 	position: absolute;
-	left: 11px;
-	width: 15px;
-	height: 15px;
-	color: var(--muted-soft);
-	stroke-width: 1.9;
+	left: 12px;
+	color: var(--sc-faint);
 	pointer-events: none;
 }
+
 .search input {
 	width: 100%;
-	padding: 8px 34px 8px 33px;
-	border: 1px solid var(--border-strong);
-	border-radius: var(--radius-sm);
-	background: var(--panel);
-	color: var(--text);
+	padding: 10px 36px 10px 35px;
+	border: 1px solid var(--sc-line);
+	border-radius: 9px;
+	background: var(--sc-panel);
+	color: var(--sc-text);
 	font: inherit;
 	font-size: 13px;
 	transition:
-		border-color 0.14s,
-		box-shadow 0.14s;
+		border-color 0.16s,
+		box-shadow 0.16s,
+		background 0.16s;
 }
+
 .search input::placeholder {
-	color: var(--muted-soft);
+	color: var(--sc-faint);
 }
+
 .search input:focus {
-	border-color: var(--accent);
+	border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
 	outline: none;
-	box-shadow: 0 0 0 3px var(--accent-soft);
+	background: var(--sc-panel);
+	box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
+
 .search-clear {
 	position: absolute;
-	right: 6px;
+	right: 7px;
 	display: grid;
 	place-items: center;
 	width: 24px;
@@ -837,143 +849,170 @@ defineExpose({
 	border: 0;
 	border-radius: 6px;
 	background: transparent;
-	color: var(--muted-soft);
+	color: var(--sc-mute);
 	transition:
-		background 0.13s,
-		color 0.13s;
+		background 0.14s,
+		color 0.14s;
 }
-.search-clear svg {
-	width: 15px;
-	height: 15px;
-}
+
 .search-clear:hover {
-	background: var(--panel-soft);
-	color: var(--text);
+	background: var(--sc-hover);
+	color: var(--sc-text);
 }
+
 .tool-count {
 	flex: 0 0 auto;
-	font-size: 12px;
-	color: var(--muted);
-	font-family: var(--font-mono);
+	color: var(--sc-mute);
+	font-family: var(--sc-mono);
+	font-size: 10.5px;
+	font-weight: 500;
+	letter-spacing: 0.14em;
 	white-space: nowrap;
 }
 
 /* ── 列表 ───────────────────────────────────────────────────── */
 .list {
-	border: 1px solid var(--border);
-	border-radius: var(--radius-lg);
-	background: var(--panel);
 	overflow: hidden;
+	border: 1px solid var(--sc-line);
+	border-radius: 14px;
+	background: var(--sc-panel);
 }
+
 .item {
 	display: flex;
 	align-items: center;
 	gap: 13px;
-	padding: 13px 16px;
-	border-bottom: 1px solid var(--border);
-	background: var(--panel);
-	transition: background 0.13s;
+	padding: 14px 18px;
+	border-bottom: 1px solid var(--sc-line);
+	transition:
+		background 0.15s,
+		transform 0.15s var(--sc-ease-out);
 }
+
 .item:hover {
-	background: var(--panel-soft);
+	background: var(--sc-hover);
 }
+
 .item:last-child {
 	border-bottom: 0;
 }
+
 .item.off .item-logo,
-.item.off .item-main {
-	opacity: 0.6;
+.item.off .item-main,
+.item.off .item-index {
+	opacity: 0.45;
 }
+
+.item-index {
+	width: 20px;
+	flex: 0 0 auto;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 10px;
+	letter-spacing: 0.06em;
+}
+
 .item-logo {
 	display: grid;
 	place-items: center;
-	width: 32px;
-	height: 32px;
+	width: 36px;
+	height: 36px;
 	flex: 0 0 auto;
-	border-radius: 8px;
-	border: 1px solid var(--border);
-	background: var(--panel-soft);
-	color: var(--accent-2);
+	border: 1px solid var(--sc-line);
+	border-radius: 9px;
+	background: var(--sc-raise);
+	color: var(--sc-acid);
 }
-.item-logo :deep(svg) {
-	width: 17px;
-	height: 17px;
-	stroke-width: 1.8;
-}
+
 .item-main {
 	flex: 1;
 	min-width: 0;
 }
+
 .item-title {
 	display: flex;
 	align-items: center;
 	flex-wrap: wrap;
-	gap: 8px;
+	gap: 9px;
 }
+
 .item-name {
-	font-size: 13.5px;
+	font-size: 14px;
 	font-weight: 600;
 }
+
 .item-tag {
 	padding: 2px 7px;
+	border: 1px solid var(--sc-line);
 	border-radius: 5px;
-	border: 1px solid var(--border);
-	background: var(--panel-soft);
-	color: var(--muted);
-	font-size: 10.5px;
-	font-family: var(--font-mono);
+	background: var(--sc-raise);
+	color: var(--sc-mute);
+	font-family: var(--sc-mono);
+	font-size: 10px;
 	font-weight: 500;
+	letter-spacing: 0.03em;
 }
+
 .item-tag.type {
-	color: var(--accent-2);
-	background: var(--accent-soft);
-	border-color: transparent;
+	border-color: color-mix(in srgb, var(--sc-acid) 35%, transparent);
+	background: var(--sc-acid-soft);
+	color: var(--sc-acid);
 }
+
 .item-desc {
-	margin-top: 3px;
-	color: var(--muted);
-	font-size: 12px;
+	margin-top: 4px;
 	overflow: hidden;
+	max-width: 52ch;
+	color: var(--sc-mute);
+	font-family: var(--sc-mono);
+	font-size: 11.5px;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	max-width: 46ch;
 }
+
 .item-actions {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	gap: 11px;
 	flex: 0 0 auto;
 }
 
 .status-pill {
 	display: inline-flex;
 	align-items: center;
-	gap: 5px;
-	padding: 3px 9px;
+	gap: 6px;
+	padding: 3px 10px;
 	border-radius: 99px;
 	font-size: 11px;
 	font-weight: 560;
 	letter-spacing: 0.01em;
 }
+
 .status-pill .d {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
 }
+
 .status-pill.on {
-	background: var(--ok-soft);
-	color: #1f7a45;
+	border: 1px solid color-mix(in srgb, var(--sc-ok) 30%, transparent);
+	background: var(--sc-ok-soft);
+	color: var(--sc-ok);
 }
+
 .status-pill.on .d {
-	background: var(--ok);
-	box-shadow: 0 0 0 3px rgba(47, 158, 95, 0.15);
+	background: var(--sc-ok);
+	box-shadow: 0 0 7px rgba(15, 157, 99, 0.4);
 }
+
 .status-pill.off {
-	background: var(--panel-muted);
-	color: var(--muted);
+	border: 1px solid var(--sc-line);
+	background: var(--sc-raise);
+	color: var(--sc-mute);
 }
+
 .status-pill.off .d {
-	background: var(--muted-soft);
+	background: var(--sc-faint);
 }
 
 .icon-act {
@@ -984,27 +1023,27 @@ defineExpose({
 	border: 0;
 	border-radius: 7px;
 	background: transparent;
-	color: var(--muted-soft);
+	color: var(--sc-mute);
 	transition:
-		background 0.13s,
-		color 0.13s;
-}
-.icon-act svg {
-	width: 17px;
-	height: 17px;
-	stroke-width: 1.8;
-}
-.icon-act:hover {
-	background: var(--panel-soft);
-	color: var(--text);
+		background 0.14s,
+		color 0.14s,
+		transform 0.14s var(--sc-ease-spring);
 }
 
+.icon-act:hover {
+	background: var(--sc-hover);
+	color: var(--sc-text);
+	transform: translateY(-1px);
+}
+
+/* ── switch ─────────────────────────────────────────────────── */
 .switch {
 	position: relative;
 	width: 42px;
 	height: 24px;
 	flex: 0 0 auto;
 }
+
 .switch input {
 	position: absolute;
 	z-index: 2;
@@ -1015,13 +1054,16 @@ defineExpose({
 	opacity: 0;
 	cursor: pointer;
 }
+
 .track {
 	position: absolute;
 	inset: 0;
+	border: 1px solid var(--sc-line-2);
 	border-radius: 99px;
-	background: var(--border-strong);
-	transition: background 0.18s;
+	background: var(--sc-raise);
+	transition: background 0.2s, border-color 0.2s;
 }
+
 .knob {
 	position: absolute;
 	top: 3px;
@@ -1030,21 +1072,27 @@ defineExpose({
 	height: 18px;
 	border-radius: 50%;
 	background: #fff;
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-	transition: transform 0.18s;
+	box-shadow: 0 1px 3px rgba(23, 26, 31, 0.22);
+	transition:
+		transform 0.22s var(--sc-ease-spring),
+		background 0.2s;
 }
+
 .switch input:checked + .track {
-	background: var(--pill);
+	border-color: var(--sc-acid);
+	background: var(--sc-acid);
 }
+
 .switch input:checked + .track + .knob {
 	transform: translateX(18px);
+	background: #fff;
 }
 
 .empty {
-	padding: 34px;
-	text-align: center;
-	color: var(--muted);
+	padding: 40px;
+	color: var(--sc-mute);
 	font-size: 13px;
+	text-align: center;
 }
 
 /* ── 弹框 ───────────────────────────────────────────────────── */
@@ -1056,201 +1104,225 @@ defineExpose({
 	align-items: center;
 	justify-content: center;
 	padding: 24px;
-	background: rgba(23, 26, 31, 0.32);
-	backdrop-filter: blur(2px);
+	background: rgba(23, 26, 31, 0.28);
+	backdrop-filter: blur(4px);
+	animation: sc-fade 0.16s ease-out;
 }
-@keyframes pop {
-	from {
-		opacity: 0;
-		transform: translateY(8px) scale(0.98);
-	}
-	to {
-		opacity: 1;
-		transform: none;
-	}
-}
+
 .dialog {
-	width: 100%;
-	max-width: 460px;
-	max-height: calc(100vh - 48px);
 	display: flex;
 	flex-direction: column;
+	width: 100%;
+	max-width: 480px;
+	max-height: calc(100vh - 48px);
 	overflow: hidden;
-	background: var(--panel);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-lg);
-	box-shadow: var(--shadow-md);
-	animation: pop 0.2s cubic-bezier(0.2, 0.7, 0.3, 1);
+	border: 1px solid var(--sc-line-2);
+	border-radius: 16px;
+	background: var(--sc-panel);
+	box-shadow: 0 32px 90px rgba(23, 26, 31, 0.2);
+	animation: sc-pop 0.24s var(--sc-ease-out);
 }
+
 .dialog-head {
 	display: flex;
 	align-items: center;
-	gap: 12px;
-	padding: 18px 20px 14px;
-	border-bottom: 1px solid var(--border);
+	gap: 13px;
+	padding: 20px 22px 16px;
+	border-bottom: 1px solid var(--sc-line);
 }
+
+.dialog-head .dlg-kicker {
+	margin-bottom: 4px;
+}
+
 .dh-ico {
 	display: grid;
 	place-items: center;
-	width: 34px;
-	height: 34px;
-	border-radius: 9px;
-	background: var(--accent-soft);
-	color: var(--accent-2);
+	width: 38px;
+	height: 38px;
 	flex: 0 0 auto;
+	border: 1px solid color-mix(in srgb, var(--sc-acid) 35%, transparent);
+	border-radius: 10px;
+	background: var(--sc-acid-soft);
+	color: var(--sc-acid);
 }
-.dh-ico :deep(svg) {
-	width: 18px;
-	height: 18px;
-	stroke-width: 1.9;
-}
+
 .dialog-head h3 {
 	margin: 0;
-	font-size: 15.5px;
+	font-family: var(--sc-display);
+	font-size: 16.5px;
 	font-weight: 640;
 }
+
 .dialog-head p {
-	margin: 1px 0 0;
+	margin: 3px 0 0;
+	color: var(--sc-mute);
 	font-size: 12px;
-	color: var(--muted);
 }
+
 .dialog-close {
 	margin-left: auto;
 }
+
 .dialog-body {
-	padding: 18px 20px;
+	padding: 20px 22px;
 	overflow-y: auto;
 }
+
 .field {
-	margin-bottom: 16px;
+	margin-bottom: 17px;
 }
+
 .field:last-child {
 	margin-bottom: 0;
 }
+
 .field label {
 	display: block;
-	margin-bottom: 6px;
-	font-size: 12.5px;
+	margin-bottom: 7px;
+	color: var(--sc-soft);
+	font-family: var(--sc-mono);
+	font-size: 10.5px;
 	font-weight: 600;
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
 }
+
 .req {
-	color: var(--danger);
+	color: var(--sc-err);
 	margin-left: 2px;
 }
+
 .hint {
-	margin: 6px 0 0;
+	margin: 7px 0 0;
+	color: var(--sc-mute);
 	font-size: 11.5px;
-	color: var(--muted);
 }
+
 .input,
 .textarea {
 	width: 100%;
-	padding: 9px 12px;
-	border: 1px solid var(--border-strong);
-	border-radius: var(--radius-sm);
-	background: var(--panel);
-	color: var(--text);
+	padding: 10px 12px;
+	border: 1px solid var(--sc-line);
+	border-radius: 9px;
+	background: var(--sc-panel);
+	color: var(--sc-text);
 	font: inherit;
 	font-size: 13px;
 	transition:
-		border-color 0.14s,
-		box-shadow 0.14s;
+		border-color 0.16s,
+		box-shadow 0.16s;
 }
+
+.input::placeholder,
+.textarea::placeholder {
+	color: var(--sc-faint);
+}
+
 .input.mono,
 .textarea.mono {
-	font-family: var(--font-mono);
-	font-size: 12.5px;
-	letter-spacing: 0.01em;
+	font-family: var(--sc-mono);
+	font-size: 12px;
+	letter-spacing: 0.02em;
 }
+
 .textarea {
+	min-height: 76px;
 	resize: vertical;
-	min-height: 72px;
 }
+
 .input:focus,
 .textarea:focus {
-	border-color: var(--accent);
+	border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
 	outline: none;
-	box-shadow: 0 0 0 3px var(--accent-soft);
+	box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
+
 .seg {
 	display: flex;
-	gap: 6px;
+	gap: 7px;
 }
+
 .seg button {
 	flex: 1;
-	padding: 8px;
-	border: 1px solid var(--border-strong);
-	border-radius: var(--radius-sm);
-	background: var(--panel);
-	color: var(--muted);
+	padding: 9px;
+	border: 1px solid var(--sc-line);
+	border-radius: 9px;
+	background: var(--sc-panel);
+	color: var(--sc-mute);
 	font-size: 12.5px;
 	font-weight: 560;
-	transition: all 0.13s;
+	transition: all 0.15s;
 }
+
+.seg button:hover {
+	color: var(--sc-text);
+	border-color: var(--sc-line-2);
+}
+
 .seg button.active {
-	background: var(--pill);
-	border-color: var(--pill);
-	color: #fff;
+	border-color: var(--sc-acid);
+	background: var(--sc-acid);
+	color: var(--sc-acid-ink);
 }
 
 .dropzone {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	gap: 8px;
-	padding: 26px 18px;
-	border: 1.5px dashed var(--border-strong);
-	border-radius: var(--radius-md);
-	background: var(--panel-soft);
+	gap: 9px;
+	padding: 30px 18px;
+	border: 1.5px dashed var(--sc-line-2);
+	border-radius: 12px;
+	background: var(--sc-raise);
 	text-align: center;
 	cursor: pointer;
 	transition:
-		border-color 0.14s,
-		background 0.14s;
+		border-color 0.16s,
+		background 0.16s;
 }
+
 .dropzone:hover {
-	border-color: var(--accent);
-	background: var(--accent-soft);
+	border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
+	background: var(--sc-acid-soft);
 }
-.dropzone > svg {
-	width: 26px;
-	height: 26px;
-	color: var(--accent-2);
-	stroke-width: 1.7;
+
+.dz-ico {
+	color: var(--sc-acid);
 }
+
 .dz-title {
+	color: var(--sc-text);
 	font-size: 13px;
 	font-weight: 560;
-	color: var(--text);
 }
+
 .dz-sub {
+	color: var(--sc-mute);
 	font-size: 11.5px;
-	color: var(--muted);
 }
+
 .dz-file {
 	display: none;
 	align-items: center;
 	gap: 8px;
 	margin-top: 4px;
-	padding: 6px 12px;
-	border-radius: 7px;
-	background: var(--panel);
-	border: 1px solid var(--border);
-	font-family: var(--font-mono);
+	padding: 7px 13px;
+	border: 1px solid color-mix(in srgb, var(--sc-ok) 35%, transparent);
+	border-radius: 8px;
+	background: var(--sc-ok-soft);
+	color: var(--sc-ok);
+	font-family: var(--sc-mono);
 	font-size: 12px;
-	color: var(--text);
 }
-.dz-file svg {
-	width: 15px;
-	height: 15px;
-	color: var(--ok);
-}
+
 .dropzone.has-file .dz-file {
 	display: inline-flex;
 }
+
 .dropzone.has-file .dz-title,
 .dropzone.has-file .dz-sub,
-.dropzone.has-file > svg {
+.dropzone.has-file .dz-ico {
 	display: none;
 }
 
@@ -1258,42 +1330,51 @@ defineExpose({
 	display: flex;
 	justify-content: flex-end;
 	gap: 9px;
-	padding: 14px 20px;
-	border-top: 1px solid var(--border);
-	background: var(--panel-soft);
+	padding: 15px 22px;
+	border-top: 1px solid var(--sc-line);
+	background: var(--sc-raise);
 }
+
 .btn {
 	display: inline-flex;
 	align-items: center;
 	gap: 7px;
-	height: 36px;
+	height: 38px;
 	padding: 0 18px;
-	border-radius: var(--radius-sm);
-	border: 1px solid var(--border-strong);
-	background: var(--panel);
-	color: var(--text);
+	border: 1px solid var(--sc-line-2);
+	border-radius: 9px;
+	background: var(--sc-panel);
+	color: var(--sc-soft);
 	font-size: 13px;
 	font-weight: 560;
 	transition:
-		background 0.14s,
-		border-color 0.14s,
-		color 0.14s,
-		opacity 0.14s;
+		background 0.15s,
+		border-color 0.15s,
+		color 0.15s,
+		opacity 0.15s,
+		transform 0.12s var(--sc-ease-spring);
 }
+
 .btn:hover {
-	background: var(--panel-soft);
-	border-color: var(--muted-soft);
+	background: var(--sc-hover);
+	color: var(--sc-text);
 }
+
 .btn.primary {
-	background: var(--pill);
-	border-color: var(--pill);
-	color: #fff;
+	border-color: var(--sc-acid);
+	background: var(--sc-acid);
+	color: var(--sc-acid-ink);
+	font-weight: 640;
 }
-.btn.primary:hover {
-	background: #2b303a;
+
+.btn.primary:hover:not(:disabled) {
+	color: var(--sc-acid-ink);
+	transform: translateY(-1px);
+	box-shadow: 0 8px 22px rgba(59, 91, 253, 0.18);
 }
+
 .btn:disabled {
-	opacity: 0.5;
+	opacity: 0.45;
 	cursor: default;
 }
 
@@ -1304,136 +1385,160 @@ defineExpose({
 	z-index: 110;
 	display: none;
 }
+
 .drawer-wrap.show {
 	display: block;
 }
+
 .drawer-scrim {
 	position: absolute;
 	inset: 0;
-	background: rgba(23, 26, 31, 0.32);
-	backdrop-filter: blur(2px);
+	background: rgba(23, 26, 31, 0.28);
+	backdrop-filter: blur(4px);
 	opacity: 0;
-	transition: opacity 0.24s;
+	transition: opacity 0.26s;
 }
+
 .drawer-wrap.show .drawer-scrim {
 	opacity: 1;
 }
+
 .drawer {
 	position: absolute;
 	top: 0;
 	right: 0;
-	height: 100%;
-	width: 420px;
-	max-width: 92vw;
 	display: flex;
 	flex-direction: column;
-	background: var(--panel);
-	border-left: 1px solid var(--border);
-	box-shadow: -12px 0 32px rgba(23, 26, 31, 0.12);
+	width: 440px;
+	max-width: 92vw;
+	height: 100%;
+	border-left: 1px solid var(--sc-line-2);
+	background: var(--sc-panel);
+	box-shadow: -24px 0 60px rgba(23, 26, 31, 0.12);
 	transform: translateX(100%);
-	transition: transform 0.28s cubic-bezier(0.2, 0.7, 0.3, 1);
+	transition: transform 0.32s var(--sc-ease-out);
 }
+
 .drawer-wrap.show .drawer {
 	transform: none;
 }
+
 .drawer-head {
 	display: flex;
 	align-items: flex-start;
-	gap: 13px;
-	padding: 22px 22px 18px;
-	border-bottom: 1px solid var(--border);
+	gap: 14px;
+	padding: 24px 24px 20px;
+	border-bottom: 1px solid var(--sc-line);
 }
+
 .dr-logo {
 	display: grid;
 	place-items: center;
-	width: 44px;
-	height: 44px;
-	border-radius: 11px;
-	border: 1px solid var(--border);
-	background: var(--panel-soft);
-	color: var(--accent-2);
+	width: 48px;
+	height: 48px;
 	flex: 0 0 auto;
+	border: 1px solid color-mix(in srgb, var(--sc-acid) 35%, transparent);
+	border-radius: 12px;
+	background: var(--sc-acid-soft);
+	color: var(--sc-acid);
 }
-.dr-logo :deep(svg) {
-	width: 24px;
-	height: 24px;
-	stroke-width: 1.8;
-}
+
 .dr-meta {
 	flex: 1;
 	min-width: 0;
 }
+
+.dr-meta .dlg-kicker {
+	margin-bottom: 5px;
+}
+
 .drawer-head h3 {
 	margin: 0;
-	font-size: 17px;
+	font-family: var(--sc-display);
+	font-size: 19px;
 	font-weight: 650;
-	letter-spacing: -0.01em;
+	letter-spacing: 0.01em;
 }
+
 .dr-sub {
-	margin-top: 3px;
-	font-size: 12.5px;
-	color: var(--muted);
-	font-family: var(--font-mono);
+	margin-top: 4px;
+	color: var(--sc-mute);
+	font-family: var(--sc-mono);
+	font-size: 11px;
+	letter-spacing: 0.03em;
 }
+
 .drawer-body {
 	flex: 1;
 	overflow-y: auto;
-	padding: 20px 22px 30px;
+	padding: 22px 24px 32px;
 }
+
 .dr-section {
-	margin-bottom: 22px;
+	margin-bottom: 24px;
 }
+
 .dr-section h4 {
-	margin: 0 0 9px;
-	font-size: 11px;
+	margin: 0 0 10px;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: 9.5px;
 	font-weight: 600;
-	letter-spacing: 0.07em;
+	letter-spacing: 0.22em;
 	text-transform: uppercase;
-	color: var(--muted-soft);
 }
+
 .dr-desc {
+	color: var(--sc-text);
 	font-size: 13px;
-	color: var(--text);
-	line-height: 1.6;
+	line-height: 1.65;
 }
+
 .kv {
 	display: grid;
-	grid-template-columns: 96px 1fr;
-	gap: 8px 14px;
-	font-size: 12.5px;
+	grid-template-columns: 88px 1fr;
+	gap: 9px 14px;
 	margin: 0;
+	font-size: 12.5px;
 }
+
 .kv dt {
-	color: var(--muted);
+	color: var(--sc-mute);
 }
+
 .kv dd {
 	margin: 0;
-	color: var(--text);
-	font-family: var(--font-mono);
-	font-size: 12px;
+	color: var(--sc-text);
+	font-family: var(--sc-mono);
+	font-size: 11.5px;
 	word-break: break-all;
 }
+
 .perm-list {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 6px;
+	gap: 7px;
 }
+
 .perm {
-	padding: 3px 9px;
-	border-radius: 6px;
-	background: var(--panel-muted);
-	color: var(--muted);
-	font-size: 11.5px;
-	font-family: var(--font-mono);
+	padding: 4px 10px;
+	border: 1px solid var(--sc-line);
+	border-radius: 7px;
+	background: var(--sc-raise);
+	color: var(--sc-soft);
+	font-family: var(--sc-mono);
+	font-size: 11px;
 }
+
 .drawer-foot {
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	padding: 14px 22px;
-	border-top: 1px solid var(--border);
-	background: var(--panel-soft);
+	padding: 15px 24px;
+	border-top: 1px solid var(--sc-line);
+	background: var(--sc-raise);
 }
+
 .drawer-foot .grow {
 	flex: 1;
 }
@@ -1447,37 +1552,48 @@ defineExpose({
 	display: flex;
 	align-items: center;
 	gap: 9px;
-	padding: 10px 18px;
-	transform: translateX(-50%) translateY(20px);
+	padding: 11px 18px;
+	transform: translateX(-50%) translateY(24px);
+	border: 1px solid var(--sc-line-2);
 	border-radius: 10px;
-	background: var(--pill);
-	color: #fff;
-	box-shadow: var(--shadow-md);
+	background: var(--sc-panel);
+	color: var(--sc-text);
+	box-shadow: 0 18px 48px rgba(23, 26, 31, 0.16);
 	font-size: 13px;
 	font-weight: 500;
 	opacity: 0;
 	pointer-events: none;
 	transition:
-		opacity 0.2s,
-		transform 0.2s;
+		opacity 0.22s,
+		transform 0.28s var(--sc-ease-spring);
 }
+
+.toast-ico {
+	color: var(--sc-ok);
+}
+
 .toast.show {
 	transform: translateX(-50%) translateY(0);
 	opacity: 1;
 }
-.toast svg {
-	width: 16px;
-	height: 16px;
-	color: #6fe0a0;
-	stroke-width: 2.2;
-}
 
-@media (prefers-reduced-motion: reduce) {
-	.plugins-view *,
-	.plugins-view *::before,
-	.plugins-view *::after {
-		transition-duration: 0.001ms !important;
-		animation-duration: 0.001ms !important;
+@media (max-width: 760px) {
+	.panel {
+		padding: 32px 20px 56px;
+	}
+
+	.tab-bar {
+		align-items: stretch;
+		flex-direction: column;
+	}
+
+	.item {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+
+	.item-actions {
+		align-self: flex-end;
 	}
 }
 </style>
