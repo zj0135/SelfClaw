@@ -1,6 +1,6 @@
 # SelfClaw 整体运行流程与 Direct / CLI 调用链
 
-> 基于 2026-07-17 当前仓库实际代码整理。本文描述运行中的真实调用关系；设计目标与实施历史分别参见 `ai-provider-system-design.md` 和 `ai-provider-implementation-progress.md`。
+> 基于 2026-07-25 当前仓库实际代码整理。本文描述运行中的真实调用关系；设计目标与实施历史分别参见 `ai-provider-system-design.md` 和 `ai-provider-implementation-progress.md`。
 
 ## 1. 核心结论
 
@@ -15,7 +15,9 @@ Vue ChatView
   -> DispatchingAgentChatRuntime.StreamTurnAsync()
        -> DirectAgentChatRuntime.StreamTurnAsync()  [Direct]
        -> CliAgentChatRuntime.StreamTurnAsync()     [CLI]
-  -> MainWindowViewModel.HandleAgentStreamEventAsync()
+  -> ConversationTurnEngine.ApplyEventAsync()
+  -> AgentActivityCoordinator.ApplyEvent()
+  -> ConversationRuntimeState.TranscriptChanged
   -> TranscriptRenderState
   -> MainWindow.PostTranscript()
   -> Vue replaceState
@@ -215,10 +217,10 @@ case "send-prompt"
 7. `PersistPromptImageAttachmentsAsync()` 把附件复制到应用附件目录并生成记录。
 8. 创建 `MessageRole.User` 的 `MessageRecord`，调用 `UpsertMessageAsync()` 落库。
 9. 新会话用 `CreateConversationTitle()` 从首条输入生成标题，再次持久化会话。
-10. `ProgrammingAssistantSettingsService.GetSelectedInvocationAsync()` 读取 CLI 选择。
-11. 创建 `AgentTurnState`，`EnsureAssistantMessage()` 立即放入 Streaming 状态的 assistant 占位消息。
-12. 构造 `ChatTurnRequest`，调用 `_agentChatRuntime.StreamTurnAsync()`。
-13. 对每个事件调用 `HandleAgentStreamEventAsync()`。
+10. 创建 `AgentTurnState`。
+11. `BuildChatTurnRequestAsync()` 按最终模式构造请求；仅 CLI 分支调用 `ProgrammingAssistantSettingsService.GetSelectedInvocationAsync()`。
+12. 调用 `ConversationTurnEngine.BeginAssistantMessage()` 立即放入 Streaming 状态的 assistant 占位消息，再调用 `_agentChatRuntime.StreamTurnAsync()`。
+13. 对每个事件调用 `ConversationTurnEngine.ApplyEventAsync()`。
 14. 流正常结束后调用 `PublishConversationCompletedNotification()`。
 15. `finally` 中执行 `CompleteConversationRuntimeState()` 并释放本轮 CTS。
 
@@ -646,26 +648,26 @@ RunCompletedEvent(
 
 ## 7. 两种模式共用的事件消费、落库与渲染
 
-### 7.1 `HandleAgentStreamEventAsync()`
+### 7.1 `ConversationTurnEngine.ApplyEventAsync()`
 
-`MainWindowViewModel.SendAsync()` 对 runtime 的每个事件调用该方法：
+`MainWindowViewModel.SendAsync()` 对 runtime 的每个事件调用该方法。`ConversationTurnEngine` 是无 WPF 依赖的 transcript reducer；它修改 `ConversationRuntimeState` 并通过 `TranscriptChanged` 通知 ViewModel 发布快照：
 
 | `AgentStreamEvent` | Desktop 处理 |
 |---|---|
-| `RunStartedEvent` | `EnsureAssistantMessage()` |
-| `AssistantTextDeltaEvent` | `ApplyAssistantDelta()` 追加 markdown |
+| `RunStartedEvent` | 确保 assistant 占位消息存在 |
+| `AssistantTextDeltaEvent` | `ConversationRuntimeState.ApplyAssistantDelta()` 追加 markdown |
 | `AssistantThinkingDeltaEvent` | `AssistantMessageSegmenter.WrapThinking()` 后追加 |
-| `ToolCallStartedEvent` | `StartToolRunAsync()` |
-| `ToolCallCompletedEvent` | `CompleteToolRunAsync()` |
+| `ToolCallStartedEvent` | `ConversationTurnEngine.StartToolRunAsync()` |
+| `ToolCallCompletedEvent` | `ConversationTurnEngine.CompleteToolRunAsync()` |
 | `UsageReportedEvent` | 更新本轮 input/output token |
 | `RunStatusEvent` | 更新 activity text 并发布 UI |
-| `RunCompletedEvent` | `CompleteAssistantTurnAsync()` |
+| `RunCompletedEvent` | `ConversationTurnEngine.CompleteAssistantTurnAsync()` |
 | `RawOutputEvent` | 当前不进入 transcript |
 | `PermissionRequestedEvent` | 当前不进入 transcript |
 
 ### 7.2 Assistant 消息
 
-`EnsureAssistantMessage()` 创建一次 `MessageStatus.Streaming` 的 assistant 消息，只在内存中更新。文本 delta 通过 `ApplyAssistantDelta()` 追加并节流发布到 UI。
+`BeginAssistantMessage()` 在进入 runtime stream 前创建一次 `MessageStatus.Streaming` 的 assistant 消息，避免 CLI 进程启动期间只有 user 消息。后续 `EnsureAssistantMessage()` 保持幂等；文本 delta 通过 `ConversationRuntimeState.ApplyAssistantDelta()` 追加并节流发布到 UI。
 
 收到终态后，Desktop turn finalizer：
 
@@ -681,14 +683,14 @@ RunCompletedEvent(
 
 ### 7.3 工具运行记录
 
-`StartToolRunAsync()`：
+`ConversationTurnEngine.StartToolRunAsync()`：
 
 1. 创建 `ToolExecutionStatus.Running` 的 `ToolExecutionRecord`。
 2. `CaptureToolRunAnchor()` 在 assistant markdown 中插入工具锚点。
 3. 以 `ToolCallId` 记录关联。
 4. `UpsertToolExecutionAsync()` 立即落库。
 
-`CompleteToolRunAsync()`：
+`ConversationTurnEngine.CompleteToolRunAsync()`：
 
 1. 按 `ToolCallId` 找到 started record。
 2. 更新完成/失败/取消状态、摘要、完整结果和 duration。
@@ -696,7 +698,13 @@ RunCompletedEvent(
 
 这套逻辑不区分 Direct 工具和 CLI 工具。
 
-### 7.4 Transcript 发布到 Vue
+### 7.4 桌面 Agent 活动投影
+
+`MainWindowViewModel.SendAsync()` 在公共编排层调用 `AgentActivityCoordinator.BeginTurn()`,并在 `ConversationTurnEngine.ApplyEventAsync()` 成功后把同一事件交给 `AgentActivityCoordinator.ApplyEvent()`。用户取消或消费侧失败没有 terminal event,对应 catch 路径调用 `CompleteInterrupted()`。
+
+`AgentActivityCoordinator` 同时监听 `DesktopToolApprovalHandler`,维护 Vue 确认栏与宠物共用的审批 FIFO。`PetActivityPresenter` 把活动快照映射为低频气泡节点和工作动画;Direct 工具审批不依赖 `AgentStreamEvent`。详细映射与优先级见 `docs/pet-system-design.md` §9。
+
+### 7.5 Transcript 发布到 Vue
 
 事件处理最终触发：
 
@@ -778,7 +786,10 @@ dispatcher 统一保证成功/失败路径恰好产生一个 terminal event；Di
 - `MainWindow.OnTranscriptWebMessageReceived()`：所有 Vue -> Desktop 消息入口。
 - `MainWindowViewModel.SubmitPromptAsync()`：prompt 入口。
 - `MainWindowViewModel.SendAsync()`：单回合总编排。
-- `MainWindowViewModel.HandleAgentStreamEventAsync()`：统一事件消费。
+- `ConversationTurnEngine.BeginAssistantMessage()`：创建本轮 streaming assistant 占位消息。
+- `ConversationTurnEngine.ApplyEventAsync()`：统一事件消费、transcript 归约与工具记录落库。
+- `AgentActivityCoordinator.BeginTurn()` / `ApplyEvent()`：投影 Agent 主要节点与审批队列。
+- `PetActivityPresenter`：把 Agent 活动快照映射为宠物气泡和工作动画状态。
 - `MainWindowViewModel.PublishShell()`：构造 `TranscriptRenderState`。
 - `MainWindow.PostTranscript()`：向 Vue 发送 `replaceState`。
 

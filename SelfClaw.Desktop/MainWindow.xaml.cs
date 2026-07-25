@@ -12,6 +12,7 @@ using Microsoft.Web.WebView2.Core;
 using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AiProviders;
+using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Terminal;
@@ -41,6 +42,8 @@ public partial class MainWindow : Window
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettingsService;
     private readonly AiProviderSettingsBridge _aiProviderSettingsBridge;
     private readonly PetService _petService;
+    private readonly PetActivityPresenter _petActivityPresenter;
+    private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly DesktopNotificationService _desktopNotificationService;
     private TranscriptRenderState _pendingTranscript = new(
@@ -61,7 +64,6 @@ public partial class MainWindow : Window
     private string _terminalWorkingDirectory = ResolveDefaultTerminalWorkingDirectory();
     private int _terminalColumns = DefaultTerminalColumns;
     private int _terminalRows = DefaultTerminalRows;
-    private readonly List<ToolApprovalRequest> _approvalQueue = new();
     private Guid? _currentApprovalId;
 
     public MainWindow(
@@ -71,6 +73,8 @@ public partial class MainWindow : Window
         ProgrammingAssistantSettingsService programmingAssistantSettingsService,
         AiProviderSettingsBridge aiProviderSettingsBridge,
         PetService petService,
+        PetActivityPresenter petActivityPresenter,
+        AgentActivityCoordinator agentActivityCoordinator,
         StoragePaths storagePaths)
     {
         InitializeComponent();
@@ -80,6 +84,8 @@ public partial class MainWindow : Window
         _programmingAssistantSettingsService = programmingAssistantSettingsService;
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
         _petService = petService;
+        _petActivityPresenter = petActivityPresenter;
+        _agentActivityCoordinator = agentActivityCoordinator;
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
         DataContext = viewModel;
@@ -95,7 +101,8 @@ public partial class MainWindow : Window
         _aiProviderSettingsBridge.ModelSelectionChanged += OnModelSelectionChanged;
         _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
         _toolApprovalHandler.ApprovalExpired += OnToolApprovalExpired;
-        _toolApprovalHandler.ApprovalCompleted += OnToolApprovalCompleted;
+        _agentActivityCoordinator.SnapshotChanged += OnAgentActivitySnapshotChanged;
+        _petActivityPresenter.ConversationActivationRequested += OnPetConversationActivationRequested;
         desktopNotificationService.RegisterMainWindow(this);
     }
 
@@ -132,7 +139,8 @@ public partial class MainWindow : Window
         _aiProviderSettingsBridge.ModelSelectionChanged -= OnModelSelectionChanged;
         _toolApprovalHandler.ApprovalRequested -= OnToolApprovalRequested;
         _toolApprovalHandler.ApprovalExpired -= OnToolApprovalExpired;
-        _toolApprovalHandler.ApprovalCompleted -= OnToolApprovalCompleted;
+        _agentActivityCoordinator.SnapshotChanged -= OnAgentActivitySnapshotChanged;
+        _petActivityPresenter.ConversationActivationRequested -= OnPetConversationActivationRequested;
         _toolApprovalHandler.RejectAll();
         StopTerminalSession();
 
@@ -215,14 +223,10 @@ public partial class MainWindow : Window
     // bar comes back rather than leaving the turn blocked with no visible way to answer.
     private void RepostCurrentApproval()
     {
-        if (_currentApprovalId is not { } currentId)
-        {
-            return;
-        }
-
-        var current = _approvalQueue.FirstOrDefault(pending => pending.ToolExecutionId == currentId);
+        var current = _agentActivityCoordinator.CurrentSnapshot.Approval;
         if (current is not null)
         {
+            _currentApprovalId = current.ToolExecutionId;
             PostToolApprovalRequest(current);
         }
     }
@@ -503,7 +507,7 @@ public partial class MainWindow : Window
                                    approvedElement.GetBoolean();
                     if (Guid.TryParse(toolExecutionId, out var parsedToolExecutionId))
                     {
-                        _toolApprovalHandler.TryResolve(parsedToolExecutionId, approved);
+                        _agentActivityCoordinator.TryResolveApproval(parsedToolExecutionId, approved);
                     }
                     break;
                 }
@@ -1234,8 +1238,6 @@ public partial class MainWindow : Window
 
     private void OnToolApprovalRequested(ToolApprovalRequest request)
     {
-        // The Windows toast stays as the fallback when the window is hidden or minimized; it can
-        // still be resolved through DesktopNotificationActivationService.
         var summary = BuildToolApprovalSummary(request);
         _desktopNotificationService.ShowToolApproval(
             request.ToolExecutionId,
@@ -1249,51 +1251,40 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Marshal onto the UI thread so the queue and the current-slot pointer are only ever touched
-        // from the dispatcher; the visible-window prompt is the inline Vue approval bar.
-        _ = Dispatcher.BeginInvoke(() =>
-        {
-            _approvalQueue.Add(request);
-            PromoteNextApprovalIfIdle();
-        }, DispatcherPriority.Normal);
     }
 
-    private void OnToolApprovalCompleted(Guid toolExecutionId)
+    private void OnAgentActivitySnapshotChanged(object? sender, AgentActivitySnapshot snapshot)
     {
         if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
         {
             return;
         }
 
-        _ = Dispatcher.BeginInvoke(() =>
+        if (Dispatcher.CheckAccess())
         {
-            _approvalQueue.RemoveAll(pending => pending.ToolExecutionId == toolExecutionId);
-            if (_currentApprovalId == toolExecutionId)
-            {
-                _currentApprovalId = null;
-                PromoteNextApprovalIfIdle();
-            }
-        }, DispatcherPriority.Normal);
+            SyncCurrentApproval();
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(new Action(SyncCurrentApproval), DispatcherPriority.Normal);
     }
 
-    // Shows the head-of-queue request in the Vue approval bar. Only one request is ever displayed;
-    // the rest wait their turn as each is resolved, cancelled, or times out.
-    private void PromoteNextApprovalIfIdle()
+    private void SyncCurrentApproval()
     {
-        if (_currentApprovalId is not null)
+        var current = _agentActivityCoordinator.CurrentSnapshot.Approval;
+        if (_currentApprovalId == current?.ToolExecutionId)
         {
             return;
         }
 
-        if (_approvalQueue.Count == 0)
+        _currentApprovalId = current?.ToolExecutionId;
+        if (current is null)
         {
             PostToolApprovalClear();
             return;
         }
 
-        var next = _approvalQueue[0];
-        _currentApprovalId = next.ToolExecutionId;
-        PostToolApprovalRequest(next);
+        PostToolApprovalRequest(current);
     }
 
     private void PostToolApprovalRequest(ToolApprovalRequest request)
@@ -1314,6 +1305,49 @@ public partial class MainWindow : Window
     {
         // Queue cleanup happens through OnToolApprovalCompleted; only surface the timeout as a toast.
         _desktopNotificationService.ShowToolApprovalExpired(request.DisplayName);
+    }
+
+    private void OnPetConversationActivationRequested(object? sender, Guid conversationId)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => ActivateConversationFromPet(conversationId),
+                DispatcherPriority.Normal);
+            return;
+        }
+
+        ActivateConversationFromPet(conversationId);
+    }
+
+    private void ActivateConversationFromPet(Guid conversationId)
+    {
+        try
+        {
+            _viewModel.SelectConversation(conversationId);
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        if (!IsVisible)
+        {
+            Show();
+        }
+
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Activate();
+        Focus();
     }
 
     private static string BuildToolApprovalSummary(ToolApprovalRequest request)

@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 
@@ -11,6 +12,11 @@ namespace SelfClaw.Desktop.Pet;
 /// </summary>
 public partial class PetWindow : Window
 {
+    internal const double PetVisualWidth = 192d;
+    internal const double PetVisualHeight = 112d;
+    internal const double PetAnchorOffsetX = 34d;
+    internal const double PetAnchorOffsetY = 120d;
+
     /// <summary>抖动过滤阈值(DIP):指针位移小于此值不视为拖动(区分点击 vs 拖动)。见 §3.3。</summary>
     private const double DragThreshold = 4d;
     private const double DragGestureMin = 14d;
@@ -25,9 +31,6 @@ public partial class PetWindow : Window
 
     /// <summary>拖拽结束且位置发生变化时触发,携带当前窗口左上角坐标(屏幕 DIP)。</summary>
     public event EventHandler<Point>? PositionCommitted;
-
-    /// <summary>被点击(按下到抬起未超过抖动阈值)时触发。阶段3 用于切换气泡。</summary>
-    public event EventHandler? Clicked;
 
     public PetWindow()
         : this(new PetViewModel())
@@ -52,6 +55,15 @@ public partial class PetWindow : Window
         }
     }
 
+    internal Point GetPetAnchorPosition()
+        => new(Left + PetAnchorOffsetX, Top + PetAnchorOffsetY);
+
+    internal void SetPetAnchorPosition(Point position)
+    {
+        Left = position.X - PetAnchorOffsetX;
+        Top = position.Y - PetAnchorOffsetY;
+    }
+
     private void OnPetMouseEnter(object sender, MouseEventArgs e)
     {
         _viewModel.PointerEntered();
@@ -70,7 +82,7 @@ public partial class PetWindow : Window
         _windowLeftAtPress = Left;
         _windowTopAtPress = Top;
         _viewModel.PointerPressed();
-        PetRoot.CaptureMouse();
+        PetSpriteRoot.CaptureMouse();
         e.Handled = true;
     }
 
@@ -174,25 +186,63 @@ public partial class PetWindow : Window
     {
         _isPressed = false;
 
-        if (PetRoot.IsMouseCaptured)
+        if (PetSpriteRoot.IsMouseCaptured)
         {
-            PetRoot.ReleaseMouseCapture();
+            PetSpriteRoot.ReleaseMouseCapture();
         }
 
         if (_isDragging)
         {
             _isDragging = false;
-            _viewModel.PointerReleased(PetRoot.IsMouseOver);
-            PositionCommitted?.Invoke(this, new Point(Left, Top));
+            _viewModel.PointerReleased(PetSpriteRoot.IsMouseOver);
+            PositionCommitted?.Invoke(this, GetPetAnchorPosition());
             return;
         }
 
-        _viewModel.PointerReleased(PetRoot.IsMouseOver);
+        _viewModel.PointerReleased(PetSpriteRoot.IsMouseOver);
         if (commitClick)
         {
             _viewModel.ToggleBubble();
-            Clicked?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    private void OnBubbleMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (FindVisualParent<Button>(e.OriginalSource as DependencyObject) is not null)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _viewModel.OpenCurrentConversation();
+    }
+
+    private void OnRejectApprovalClick(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        _viewModel.RejectCurrentApproval();
+    }
+
+    private void OnApproveApprovalClick(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        _viewModel.ApproveCurrentApproval();
+    }
+
+    private static T? FindVisualParent<T>(DependencyObject? source)
+        where T : DependencyObject
+    {
+        while (source is not null)
+        {
+            if (source is T match)
+            {
+                return match;
+            }
+
+            source = VisualTreeHelper.GetParent(source);
+        }
+
+        return null;
     }
 
     private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)

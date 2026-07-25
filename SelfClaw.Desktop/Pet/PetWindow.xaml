@@ -7,86 +7,150 @@
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
-        Width="192"
-        Height="112"
+        Width="260"
+        Height="232"
         Title="SelfClaw Pet">
-    <!--
-        阶段4:spritesheet 动画 + hover/drag/waiting/ambient 交互状态。
-        缺少 libwebp.dll 或素材加载失败时显示占位图形,避免浮窗启动崩溃。
-    -->
-    <Grid x:Name="PetRoot"
-          Width="192"
-          Height="112"
-          Background="Transparent"
-          MouseLeftButtonDown="OnPetMouseLeftButtonDown"
-          MouseMove="OnPetMouseMove"
-          MouseLeftButtonUp="OnPetMouseLeftButtonUp"
-          LostMouseCapture="OnPetLostMouseCapture"
-          MouseEnter="OnPetMouseEnter"
-          MouseLeave="OnPetMouseLeave">
-        <Image Source="{Binding CurrentFrame}"
-               Width="192"
-               Height="104"
-               Stretch="Uniform"
-               HorizontalAlignment="Center"
-               VerticalAlignment="Bottom"
-               RenderOptions.BitmapScalingMode="{Binding BitmapScalingMode}" />
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+        <Style x:Key="BubbleButtonStyle" TargetType="Button">
+            <Setter Property="MinWidth" Value="48" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+    </Window.Resources>
 
-        <Border CornerRadius="8"
-                Background="#CC2D2D3A"
-                BorderBrush="#66FFFFFF"
-                BorderThickness="1"
-                Width="160"
-                Height="88"
+    <Grid Background="Transparent">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="120" />
+            <RowDefinition Height="112" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Width="244"
+                MaxHeight="116"
+                Padding="12,9"
                 HorizontalAlignment="Center"
-                VerticalAlignment="Bottom">
+                VerticalAlignment="Bottom"
+                Background="#F7FFFFFF"
+                BorderBrush="#33000000"
+                BorderThickness="1"
+                CornerRadius="10"
+                MouseLeftButtonUp="OnBubbleMouseLeftButtonUp">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Visibility" Value="Collapsed" />
+                    <Setter Property="Cursor" Value="Arrow" />
                     <Style.Triggers>
-                        <DataTrigger Binding="{Binding CurrentFrame}" Value="{x:Null}">
+                        <DataTrigger Binding="{Binding IsBubbleVisible}" Value="True">
                             <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding CanOpenConversation}" Value="True">
+                            <Setter Property="Cursor" Value="Hand" />
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>
             </Border.Style>
             <Border.Effect>
-                <DropShadowEffect BlurRadius="8"
-                                  ShadowDepth="0"
-                                  Opacity="0.5"
+                <DropShadowEffect BlurRadius="10"
+                                  ShadowDepth="2"
+                                  Opacity="0.2"
                                   Color="#000000" />
             </Border.Effect>
-            <TextBlock Text="SC"
-                       FontSize="24"
-                       FontWeight="SemiBold"
-                       Foreground="#FFFFFFFF"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center" />
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0"
+                           Text="{Binding BubbleTitle}"
+                           Foreground="#99000000"
+                           FontSize="10"
+                           FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Row="1"
+                           Margin="0,2,0,0"
+                           Text="{Binding BubbleText}"
+                           Foreground="#E6000000"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Row="2"
+                           Margin="0,3,0,0"
+                           MaxHeight="40"
+                           Text="{Binding BubbleDetail}"
+                           Foreground="#B3000000"
+                           FontSize="10"
+                           TextWrapping="Wrap"
+                           TextTrimming="CharacterEllipsis"
+                           Visibility="{Binding HasBubbleDetail, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <StackPanel Grid.Row="3"
+                            Margin="0,7,0,0"
+                            HorizontalAlignment="Right"
+                            Orientation="Horizontal">
+                    <Button Content="拒绝"
+                            Style="{StaticResource BubbleButtonStyle}"
+                            Visibility="{Binding CanApprove, Converter={StaticResource BooleanToVisibilityConverter}}"
+                            Click="OnRejectApprovalClick" />
+                    <Button Content="允许"
+                            Style="{StaticResource BubbleButtonStyle}"
+                            Visibility="{Binding CanApprove, Converter={StaticResource BooleanToVisibilityConverter}}"
+                            Click="OnApproveApprovalClick" />
+                </StackPanel>
+            </Grid>
         </Border>
 
-        <Border IsHitTestVisible="False"
-                Background="#F2FFFFFF"
-                BorderBrush="#33000000"
-                BorderThickness="1"
-                CornerRadius="8"
-                Padding="10,4"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Top">
-            <Border.Style>
-                <Style TargetType="Border">
-                    <Setter Property="Visibility" Value="Collapsed" />
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsBubbleVisible}" Value="True">
-                            <Setter Property="Visibility" Value="Visible" />
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </Border.Style>
-            <TextBlock Text="{Binding BubbleText}"
-                       Foreground="#E6000000"
-                       FontSize="11"
-                       FontWeight="SemiBold"
-                       TextWrapping="NoWrap" />
-        </Border>
+        <Grid x:Name="PetSpriteRoot"
+              Grid.Row="1"
+              Width="192"
+              Height="112"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Bottom"
+              Background="Transparent"
+              MouseLeftButtonDown="OnPetMouseLeftButtonDown"
+              MouseMove="OnPetMouseMove"
+              MouseLeftButtonUp="OnPetMouseLeftButtonUp"
+              LostMouseCapture="OnPetLostMouseCapture"
+              MouseEnter="OnPetMouseEnter"
+              MouseLeave="OnPetMouseLeave">
+            <Image Source="{Binding CurrentFrame}"
+                   Width="192"
+                   Height="104"
+                   Stretch="Uniform"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Bottom"
+                   RenderOptions.BitmapScalingMode="{Binding BitmapScalingMode}" />
+
+            <Border Width="160"
+                    Height="88"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Background="#CC2D2D3A"
+                    BorderBrush="#66FFFFFF"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding CurrentFrame}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <TextBlock Text="SC"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           Foreground="#FFFFFFFF"
+                           FontSize="24"
+                           FontWeight="SemiBold" />
+            </Border>
+        </Grid>
     </Grid>
 </Window>

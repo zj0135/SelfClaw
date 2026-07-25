@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Windows;
 using System.Windows.Threading;
 using System.Windows.Media;
 using Microsoft.Extensions.Logging;
@@ -12,7 +13,7 @@ namespace SelfClaw.Desktop.Pet;
 public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 {
     private static readonly TimeSpan WaitingAfter = TimeSpan.FromSeconds(45);
-    private static readonly TimeSpan BubbleVisibleFor = TimeSpan.FromSeconds(4);
+    private static readonly TimeSpan DefaultBubbleVisibleFor = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan AmbientPlayMin = TimeSpan.FromMilliseconds(1400);
     private static readonly TimeSpan AmbientPlayVariance = TimeSpan.FromMilliseconds(900);
     private static readonly TimeSpan AmbientRestMin = TimeSpan.FromMilliseconds(9000);
@@ -26,6 +27,7 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     };
 
     private readonly ILogger<PetViewModel>? _logger;
+    private readonly PetActivityPresenter? _activityPresenter;
     private readonly PetStateMachine _stateMachine = new();
     private readonly DispatcherTimer _waitingTimer;
     private readonly DispatcherTimer _bubbleTimer;
@@ -36,23 +38,50 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     private BitmapScalingMode _bitmapScalingMode = BitmapScalingMode.HighQuality;
     private string? _loadError;
     private string _bubbleText = "Ready.";
+    private string _bubbleTitle = "SelfClaw";
+    private string? _bubbleDetail;
     private bool _isBubbleVisible;
+    private bool _isBubblePinned;
+    private bool _canApprove;
+    private bool _canOpenConversation;
     private bool _isAnimationRunning;
     private bool _disposed;
     private AmbientPhase _ambientPhase;
     private string? _ambientRowId;
     private string? _lastAmbientRowId;
+    private Guid? _currentApprovalId;
+    private Guid? _currentConversationId;
+    private PetWorkState _workState;
+    private PetBubbleViewState _latestBubbleState = new(
+        ConversationId: null,
+        AgentLabel: "SelfClaw",
+        Headline: "Ready.",
+        Detail: null,
+        IsVisible: false,
+        IsPinned: false,
+        ApprovalId: null,
+        AdditionalApprovalCount: 0,
+        AutoHideAfter: null,
+        WorkState: PetWorkState.None);
 
-    public PetViewModel(ILogger<PetViewModel>? logger = null)
+    public PetViewModel(
+        ILogger<PetViewModel>? logger = null,
+        PetActivityPresenter? activityPresenter = null)
     {
         _logger = logger;
+        _activityPresenter = activityPresenter;
         _stateMachine.InteractionChanged += OnInteractionChanged;
         _waitingTimer = new DispatcherTimer { Interval = WaitingAfter };
         _waitingTimer.Tick += OnWaitingTimerTick;
-        _bubbleTimer = new DispatcherTimer { Interval = BubbleVisibleFor };
+        _bubbleTimer = new DispatcherTimer { Interval = DefaultBubbleVisibleFor };
         _bubbleTimer.Tick += OnBubbleTimerTick;
         _ambientTimer = new DispatcherTimer();
         _ambientTimer.Tick += OnAmbientTimerTick;
+        if (_activityPresenter is not null)
+        {
+            _activityPresenter.StateChanged += OnActivityStateChanged;
+            ApplyBubbleState(_activityPresenter.Current);
+        }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -81,10 +110,48 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _bubbleText, value);
     }
 
+    public string BubbleTitle
+    {
+        get => _bubbleTitle;
+        private set => SetField(ref _bubbleTitle, value);
+    }
+
+    public string? BubbleDetail
+    {
+        get => _bubbleDetail;
+        private set
+        {
+            if (SetField(ref _bubbleDetail, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasBubbleDetail)));
+            }
+        }
+    }
+
+    public bool HasBubbleDetail => !string.IsNullOrWhiteSpace(BubbleDetail);
+
     public bool IsBubbleVisible
     {
         get => _isBubbleVisible;
         private set => SetField(ref _isBubbleVisible, value);
+    }
+
+    public bool IsBubblePinned
+    {
+        get => _isBubblePinned;
+        private set => SetField(ref _isBubblePinned, value);
+    }
+
+    public bool CanApprove
+    {
+        get => _canApprove;
+        private set => SetField(ref _canApprove, value);
+    }
+
+    public bool CanOpenConversation
+    {
+        get => _canOpenConversation;
+        private set => SetField(ref _canOpenConversation, value);
     }
 
     public void Load(PetSettings settings)
@@ -104,6 +171,7 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
             _animator.FrameChanged += OnFrameChanged;
             CurrentFrame = sheet.GetFrame(PetLayout.IdleRowId, 0);
             _stateMachine.Reset();
+            SetAnimationRow(ResolveEffectiveRowId());
             LoadError = null;
         }
         catch (Exception exception)
@@ -122,8 +190,12 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
         ThrowIfDisposed();
         _isAnimationRunning = true;
         _animator?.Start();
-        RestartWaitingTimer();
-        StartAmbientScheduler(initial: true);
+        SetAnimationRow(ResolveEffectiveRowId());
+        if (_workState == PetWorkState.None)
+        {
+            RestartWaitingTimer();
+            StartAmbientScheduler(initial: true);
+        }
     }
 
     public void StopAnimation()
@@ -154,6 +226,16 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 
     public void DismissBubble()
     {
+        if (IsBubblePinned)
+        {
+            return;
+        }
+
+        HideBubble();
+    }
+
+    private void HideBubble()
+    {
         _bubbleTimer.Stop();
         IsBubbleVisible = false;
     }
@@ -174,16 +256,53 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     public void ToggleBubble()
     {
         RegisterUserInteraction();
+        if (IsBubblePinned)
+        {
+            return;
+        }
+
         if (IsBubbleVisible)
         {
             DismissBubble();
             return;
         }
 
+        if (_latestBubbleState.WorkState != PetWorkState.None)
+        {
+            ApplyBubbleState(_latestBubbleState);
+            return;
+        }
+
+        BubbleTitle = "SelfClaw";
         BubbleText = "Ready.";
+        BubbleDetail = null;
         IsBubbleVisible = true;
-        _bubbleTimer.Stop();
+        _bubbleTimer.Interval = DefaultBubbleVisibleFor;
         _bubbleTimer.Start();
+    }
+
+    public void ApproveCurrentApproval()
+    {
+        if (_currentApprovalId is Guid approvalId)
+        {
+            _activityPresenter?.TryResolveApproval(approvalId, approved: true);
+        }
+    }
+
+    public void RejectCurrentApproval()
+    {
+        if (_currentApprovalId is Guid approvalId)
+        {
+            _activityPresenter?.TryResolveApproval(approvalId, approved: false);
+        }
+    }
+
+    public void OpenCurrentConversation()
+    {
+        if (_currentConversationId is Guid conversationId)
+        {
+            _activityPresenter?.RequestConversationActivation(conversationId);
+        }
     }
 
     private static PetPackage ResolvePackage(PetSettings settings)
@@ -232,8 +351,8 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     private void OnInteractionChanged(PetInteraction interaction)
     {
         CancelAmbient(resetToBaseRow: false);
-        SetAnimationRow(PetLayout.GetRowId(interaction));
-        if (interaction == PetInteraction.Idle)
+        SetAnimationRow(ResolveEffectiveRowId());
+        if (interaction == PetInteraction.Idle && _workState == PetWorkState.None)
         {
             StartAmbientScheduler(initial: true);
         }
@@ -242,19 +361,26 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     private void OnWaitingTimerTick(object? sender, EventArgs e)
     {
         _waitingTimer.Stop();
-        _stateMachine.WaitingElapsed();
+        if (_workState == PetWorkState.None)
+        {
+            _stateMachine.WaitingElapsed();
+        }
     }
 
     private void OnBubbleTimerTick(object? sender, EventArgs e)
     {
-        DismissBubble();
+        HideBubble();
+        if (_workState is PetWorkState.Succeeded or PetWorkState.Failed or PetWorkState.Cancelled)
+        {
+            SetWorkState(PetWorkState.None);
+        }
     }
 
     private void RegisterUserInteraction()
     {
         CancelAmbient(resetToBaseRow: true);
         RestartWaitingTimer();
-        if (_stateMachine.Current == PetInteraction.Idle)
+        if (_stateMachine.Current == PetInteraction.Idle && _workState == PetWorkState.None)
         {
             StartAmbientScheduler(initial: true);
         }
@@ -262,7 +388,7 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 
     private void RestartWaitingTimer()
     {
-        if (!_isAnimationRunning)
+        if (!_isAnimationRunning || _workState != PetWorkState.None)
         {
             return;
         }
@@ -274,7 +400,9 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     private void OnAmbientTimerTick(object? sender, EventArgs e)
     {
         _ambientTimer.Stop();
-        if (!_isAnimationRunning || _stateMachine.Current != PetInteraction.Idle)
+        if (!_isAnimationRunning ||
+            _stateMachine.Current != PetInteraction.Idle ||
+            _workState != PetWorkState.None)
         {
             CancelAmbient(resetToBaseRow: false);
             return;
@@ -294,7 +422,10 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 
     private void StartAmbientScheduler(bool initial)
     {
-        if (!_isAnimationRunning || _stateMachine.Current != PetInteraction.Idle || _animator is null)
+        if (!_isAnimationRunning ||
+            _stateMachine.Current != PetInteraction.Idle ||
+            _workState != PetWorkState.None ||
+            _animator is null)
         {
             return;
         }
@@ -327,7 +458,7 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     private void EndAmbientPlay()
     {
         _ambientRowId = null;
-        SetAnimationRow(PetLayout.GetRowId(_stateMachine.Current));
+        SetAnimationRow(ResolveEffectiveRowId());
         StartAmbientScheduler(initial: false);
     }
 
@@ -340,7 +471,7 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 
         if (hadAmbientRow && resetToBaseRow)
         {
-            SetAnimationRow(PetLayout.GetRowId(_stateMachine.Current));
+            SetAnimationRow(ResolveEffectiveRowId());
         }
     }
 
@@ -369,12 +500,111 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     {
         try
         {
-            _animator?.SetRow(rowId);
+            _animator?.SetRow(ResolveSupportedRowId(rowId));
         }
         catch (Exception exception)
         {
             _logger?.LogWarning(exception, "Failed to switch pet animation row to {RowId}.", rowId);
         }
+    }
+
+    private string ResolveEffectiveRowId()
+        => PetAnimationResolver.ResolveRowId(_stateMachine.Current, _workState);
+
+    private string ResolveSupportedRowId(string preferredRowId)
+    {
+        var sheet = _spriteSheet;
+        if (sheet is null || sheet.HasRow(preferredRowId))
+        {
+            return preferredRowId;
+        }
+
+        foreach (var fallback in new[]
+                 {
+                     PetLayout.ReviewRowId,
+                     PetLayout.WaitingRowId,
+                     PetLayout.IdleRowId,
+                 })
+        {
+            if (sheet.HasRow(fallback))
+            {
+                return fallback;
+            }
+        }
+
+        return preferredRowId;
+    }
+
+    private void OnActivityStateChanged(object? sender, PetBubbleViewState state)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            if (!dispatcher.HasShutdownStarted && !dispatcher.HasShutdownFinished)
+            {
+                _ = dispatcher.BeginInvoke(() => ApplyBubbleState(state));
+            }
+
+            return;
+        }
+
+        ApplyBubbleState(state);
+    }
+
+    private void ApplyBubbleState(PetBubbleViewState state)
+    {
+        _latestBubbleState = state;
+        _currentApprovalId = state.ApprovalId;
+        _currentConversationId = state.ConversationId;
+        BubbleTitle = state.AgentLabel;
+        BubbleText = state.Headline;
+        BubbleDetail = state.AdditionalApprovalCount > 0
+            ? string.IsNullOrWhiteSpace(state.Detail)
+                ? $"还有 {state.AdditionalApprovalCount} 个请求"
+                : $"{state.Detail} · 还有 {state.AdditionalApprovalCount} 个请求"
+            : state.Detail;
+        IsBubblePinned = state.IsPinned;
+        CanApprove = state.ApprovalId is not null;
+        CanOpenConversation = state.ConversationId is not null;
+        SetWorkState(state.WorkState);
+
+        _bubbleTimer.Stop();
+        IsBubbleVisible = state.IsVisible;
+        if (state.IsVisible && state.AutoHideAfter is TimeSpan autoHideAfter)
+        {
+            _bubbleTimer.Interval = autoHideAfter;
+            _bubbleTimer.Start();
+        }
+    }
+
+    private void SetWorkState(PetWorkState workState)
+    {
+        if (_workState == workState)
+        {
+            return;
+        }
+
+        _workState = workState;
+        if (workState != PetWorkState.None && _stateMachine.Current == PetInteraction.Waiting)
+        {
+            _stateMachine.Reset();
+        }
+
+        if (workState == PetWorkState.None)
+        {
+            SetAnimationRow(ResolveEffectiveRowId());
+            RestartWaitingTimer();
+            if (_stateMachine.Current == PetInteraction.Idle)
+            {
+                StartAmbientScheduler(initial: true);
+            }
+
+            return;
+        }
+
+        _waitingTimer.Stop();
+        CancelAmbient(resetToBaseRow: false);
+        SetAnimationRow(ResolveEffectiveRowId());
     }
 
     private static TimeSpan RandomDelay(TimeSpan minimum, TimeSpan variance)
@@ -408,6 +638,10 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 
         _disposed = true;
         _stateMachine.InteractionChanged -= OnInteractionChanged;
+        if (_activityPresenter is not null)
+        {
+            _activityPresenter.StateChanged -= OnActivityStateChanged;
+        }
         _waitingTimer.Stop();
         _waitingTimer.Tick -= OnWaitingTimerTick;
         _bubbleTimer.Stop();

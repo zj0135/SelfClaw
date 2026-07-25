@@ -32,6 +32,7 @@ public sealed class PetService : IDisposable
     private readonly DesktopSettingsJsonStore _settingsStore;
     private readonly ILogger<PetService> _logger;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly PetActivityPresenter _activityPresenter;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     private PetSettings _settings = new();
@@ -45,11 +46,13 @@ public sealed class PetService : IDisposable
     public PetService(
         DesktopSettingsJsonStore settingsStore,
         ILogger<PetService> logger,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        PetActivityPresenter activityPresenter)
     {
         _settingsStore = settingsStore;
         _logger = logger;
         _loggerFactory = loggerFactory;
+        _activityPresenter = activityPresenter;
     }
 
     /// <summary>宠物当前是否可见。</summary>
@@ -225,7 +228,9 @@ public sealed class PetService : IDisposable
             return;
         }
 
-        _window = new PetWindow(new PetViewModel(_loggerFactory.CreateLogger<PetViewModel>()));
+        _window = new PetWindow(new PetViewModel(
+            _loggerFactory.CreateLogger<PetViewModel>(),
+            _activityPresenter));
         _window.PositionCommitted += OnPositionCommitted;
         _window.Closed += OnWindowClosed;
     }
@@ -257,30 +262,32 @@ public sealed class PetService : IDisposable
         var workArea = screen.WorkingArea; // 物理像素
         var (waLeft, waTop, waWidth, waHeight) = PhysicalWorkAreaToDip(workArea);
 
-        var windowWidth = _window.Width;
-        var windowHeight = _window.Height;
-
-        double left;
-        double top;
+        double anchorLeft;
+        double anchorTop;
 
         if (_settings.OffsetX is double offsetX && _settings.OffsetY is double offsetY)
         {
-            left = waLeft + offsetX;
-            top = waTop + offsetY;
+            anchorLeft = waLeft + offsetX;
+            anchorTop = waTop + offsetY;
         }
         else
         {
             // 默认位置:工作区右下角,留 24 DIP 边距。
-            left = waLeft + waWidth - windowWidth - 24d;
-            top = waTop + waHeight - windowHeight - 24d;
+            anchorLeft = waLeft + waWidth - PetWindow.PetVisualWidth - 24d;
+            anchorTop = waTop + waHeight - PetWindow.PetVisualHeight - 24d;
         }
 
         // clamp 进工作区,避免屏幕数量/分辨率变化后落到不可见区域。
-        left = Math.Clamp(left, waLeft, Math.Max(waLeft, waLeft + waWidth - windowWidth));
-        top = Math.Clamp(top, waTop, Math.Max(waTop, waTop + waHeight - windowHeight));
+        anchorLeft = Math.Clamp(
+            anchorLeft,
+            waLeft,
+            Math.Max(waLeft, waLeft + waWidth - PetWindow.PetVisualWidth));
+        anchorTop = Math.Clamp(
+            anchorTop,
+            waTop,
+            Math.Max(waTop, waTop + waHeight - PetWindow.PetVisualHeight));
 
-        _window.Left = left;
-        _window.Top = top;
+        _window.SetPetAnchorPosition(new Point(anchorLeft, anchorTop));
     }
 
     private void OnPositionCommitted(object? sender, Point position)

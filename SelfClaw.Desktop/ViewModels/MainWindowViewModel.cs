@@ -9,6 +9,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services;
+using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Runtime;
@@ -31,6 +32,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IConversationRepository _conversationRepository;
     private readonly IAgentChatRuntime _agentChatRuntime;
     private readonly ConversationTurnEngine _turnEngine;
+    private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly DesktopNotificationService _desktopNotificationService;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
@@ -71,6 +73,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IConversationRepository conversationRepository,
         IAgentChatRuntime agentChatRuntime,
         ConversationTurnEngine turnEngine,
+        AgentActivityCoordinator agentActivityCoordinator,
         DesktopToolApprovalHandler toolApprovalHandler,
         DesktopNotificationService desktopNotificationService,
         MarkdownHtmlRenderer markdownHtmlRenderer,
@@ -83,6 +86,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _conversationRepository = conversationRepository;
         _agentChatRuntime = agentChatRuntime;
         _turnEngine = turnEngine;
+        _agentActivityCoordinator = agentActivityCoordinator;
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
         _markdownHtmlRenderer = markdownHtmlRenderer;
@@ -129,6 +133,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 return;
             }
+
+            _agentActivityCoordinator.SetSelectedConversation(value?.Id);
 
             if (value is not null)
             {
@@ -644,6 +650,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         ConversationRuntimeState? runtimeState = null;
         AgentTurnState? turnState = null;
+        var activityStarted = false;
 
         try
         {
@@ -708,6 +715,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
             var requestMessages = runtimeState.Messages.ToArray();
             turnState = new AgentTurnState(runtimeAgent);
+            _agentActivityCoordinator.BeginTurn(new AgentActivityContext(
+                turnState.AssistantMessageId,
+                conversation.Id,
+                conversation.Title,
+                runtimeAgent.Id,
+                runtimeAgent.Name,
+                runtimeAgent.Mode,
+                turnState.StartedAtUtc));
+            activityStarted = true;
 
             // Build only the mode's own request shape: a Direct turn never resolves the CLI selection, and a
             // CLI turn never carries the provider model / approval fields. The composer's resolved mode decides.
@@ -728,6 +744,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             await foreach (var update in _agentChatRuntime.StreamTurnAsync(request, cancellationToken))
             {
                 await _turnEngine.ApplyEventAsync(runtimeState, turnState, update, cancellationToken);
+                _agentActivityCoordinator.ApplyEvent(turnState.AssistantMessageId, update);
             }
 
             PublishConversationCompletedNotification(conversation, runtimeState.Messages);
@@ -741,6 +758,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     turnState,
                     TurnFinalizationKind.Cancelled,
                     "Generation stopped.");
+                _agentActivityCoordinator.CompleteInterrupted(
+                    turnState.AssistantMessageId,
+                    AgentActivityOutcome.Cancelled,
+                    "Generation stopped.");
             }
         }
         catch (OperationCanceledException exception)
@@ -752,6 +773,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     runtimeState,
                     turnState,
                     TurnFinalizationKind.Failed,
+                    exception.Message);
+                _agentActivityCoordinator.CompleteInterrupted(
+                    turnState.AssistantMessageId,
+                    AgentActivityOutcome.Failed,
                     exception.Message);
             }
         }
@@ -770,6 +795,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     turnState,
                     TurnFinalizationKind.Failed,
                     exception.Message);
+                _agentActivityCoordinator.CompleteInterrupted(
+                    turnState.AssistantMessageId,
+                    AgentActivityOutcome.Failed,
+                    exception.Message);
             }
         }
         finally
@@ -778,6 +807,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 CompleteConversationRuntimeState(runtimeState);
                 runtimeState.CancellationTokenSource.Dispose();
+            }
+
+            if (activityStarted && turnState is not null && !turnState.Completed)
+            {
+                _agentActivityCoordinator.CompleteInterrupted(
+                    turnState.AssistantMessageId,
+                    AgentActivityOutcome.Failed,
+                    "Agent stream ended before the turn reached a terminal state.");
             }
         }
     }
@@ -1001,6 +1038,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (preferSelection || SelectedConversation?.Id == conversation.Id)
         {
             _selectedConversation = conversation;
+            _agentActivityCoordinator.SetSelectedConversation(conversation.Id);
             OnPropertyChanged(nameof(SelectedConversation));
         }
 

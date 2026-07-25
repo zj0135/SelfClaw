@@ -11,6 +11,7 @@ public static class PetLayout
     public const string RunningLeftRowId = "running-left";
     public const string RunningRowId = "running";
     public const string JumpingRowId = "jumping";
+    public const string FailedRowId = "failed";
     public const string ReviewRowId = "review";
     public const string WaitingRowId = "waiting";
 
