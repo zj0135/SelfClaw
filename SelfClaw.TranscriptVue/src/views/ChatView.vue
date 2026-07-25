@@ -3,8 +3,8 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import ComposerPanel from '../components/Chat/ComposerPanel.vue';
 import TerminalPanel from '../components/Chat/TerminalPanel.vue';
 import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
-import { renderMessageBody } from '../renderers';
 import { useHostBridge } from '../composables/hostBridge.js';
+import { useTranscriptCollapse } from '../composables/useTranscriptCollapse.js';
 
 const emit = defineEmits(['preview-image']);
 
@@ -36,21 +36,14 @@ const state = reactive({
 const transcriptPanelRef = ref(null);
 const terminalPanelRef = ref(null);
 const composerShellRef = ref(null);
-const openThoughts = ref(new Set());
-const openToolSegments = ref(new Set());
-const openToolGroups = ref(new Set());
+// 折叠状态的单一载体：在此顶层创建，一路传入每个 MessageContent。
+// 跨会话切换、流式重建都存活；按稳定 id 记忆哪些块展开。
+const collapse = useTranscriptCollapse();
 const scrollFollowState = {
 	transcript: true,
 	transcriptPausedUntil: 0,
 };
 let workspaceRequestSequence = 0;
-const renderedMessages = computed(() =>
-	(state.items || []).map((item) => ({
-		id: item.id,
-		role: item.role,
-		status: item.status,
-		html: renderMessageBody(item, openThoughts.value, openToolSegments.value, openToolGroups.value, state.activityText),
-	})));
 const isEmptyConversation = computed(() => (state.items || []).length === 0 && !state.isBusy);
 
 // ===== 回合执行状态（对话底部的「执行中 + 耗时」行） =====
@@ -318,66 +311,6 @@ function applyWorkspaceSelection(payload) {
 	state.workspace.isLoading = false;
 }
 
-function toggleSetEntry(source, id) {
-	const next = new Set(source.value);
-	if (next.has(id)) {
-		next.delete(id);
-	} else {
-		next.add(id);
-	}
-
-	source.value = next;
-}
-
-function handleTranscriptAction(target) {
-	const actionElement = target instanceof Element ? target.closest('[data-action]') : null;
-	if (!actionElement) {
-		return false;
-	}
-
-	switch (actionElement.getAttribute('data-action')) {
-		case 'toggle-thinking': {
-			const id = actionElement.getAttribute('data-thinking-id');
-			if (id) {
-				toggleSetEntry(openThoughts, id);
-			}
-			return true;
-		}
-		case 'toggle-tool-segment': {
-			const id = actionElement.getAttribute('data-tool-segment-id');
-			if (id) {
-				toggleSetEntry(openToolSegments, id);
-			}
-			return true;
-		}
-		case 'toggle-tool-group': {
-			const id = actionElement.getAttribute('data-tool-group-id');
-			if (id) {
-				toggleSetEntry(openToolGroups, id);
-			}
-			return true;
-		}
-		default:
-			return false;
-	}
-}
-
-function onTranscriptClick(event) {
-	if (handleTranscriptAction(event.target)) {
-		event.preventDefault();
-	}
-}
-
-function onTranscriptKeydown(event) {
-	if (event.key !== 'Enter' && event.key !== ' ') {
-		return;
-	}
-
-	if (handleTranscriptAction(event.target)) {
-		event.preventDefault();
-	}
-}
-
 function onWorkspacePointerDown(event) {
 	if (event.target instanceof Element && event.target.closest('.terminal-panel')) {
 		return;
@@ -488,9 +421,9 @@ onUnmounted(() => {
 		'empty-workspace': isEmptyConversation,
 		'terminal-open': state.terminal.isOpen,
 	}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
-		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :messages="renderedMessages"
-			:turn-status="turnStatus" @scroll="onTranscriptScroll" @preview-image="openImagePreview"
-			@transcript-click="onTranscriptClick" @transcript-keydown="onTranscriptKeydown" />
+		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :items="state.items"
+			:collapse="collapse" :activity-text="state.activityText" :turn-status="turnStatus"
+			@scroll="onTranscriptScroll" @preview-image="openImagePreview" />
 		<section v-else class="empty-composer-stage" aria-label="新对话">
 			<div class="empty-composer-copy">
 				<div class="empty-kicker">SELFCLAW · READY</div>
