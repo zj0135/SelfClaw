@@ -366,19 +366,13 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
     /// </summary>
     private static string ResolveBundledRipgrep()
     {
-        var executableName = OperatingSystem.IsWindows() ? "rg.exe" : "rg";
+        var executableName = "rg.exe";
         var baseDirectory = AppContext.BaseDirectory;
 
-        // Native asset layout produced by the .NET SDK (runtimes/<rid>/native). The
-        // process may be running under any of these rids, so probe each, then allow
-        // the binary to sit directly beside the executable.
-        foreach (var rid in new[] { "win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64" })
+        var candidate = Path.Combine(baseDirectory, "runtimes", "win-x64", "native", executableName);
+        if (File.Exists(candidate))
         {
-            var candidate = Path.Combine(baseDirectory, "runtimes", rid, "native", executableName);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
+            return candidate;
         }
 
         var beside = Path.Combine(baseDirectory, executableName);

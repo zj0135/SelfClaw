@@ -304,14 +304,20 @@ ToolPermissionMode.RequireApproval
   -> DesktopToolApprovalHandler.RequestApprovalAsync()
   -> ApprovalRequested 事件
   -> MainWindow.OnToolApprovalRequested()
-       |- 始终发送 Windows toast
-       `- 窗口可见且非最小化时显示 WPF Yes/No 对话框
-  -> DesktopToolApprovalHandler.TryResolve()
+       |- 始终发送 Windows toast（窗口隐藏/最小化时的回退）
+       `- 入队 _approvalQueue，队首请求经 PostToolApprovalRequest()
+          以 toolApprovalRequest 消息发到 Vue，在输入框上方渲染确认栏
+  -> 用户在 Vue 确认栏点「允许/拒绝」
+       -> post({ type: "resolve-tool-approval", toolExecutionId, approved })
+       -> MainWindow.OnTranscriptWebMessageReceived()
+       -> DesktopToolApprovalHandler.TryResolve()
   -> 允许：调用 WorkspaceToolService
   -> 拒绝/超时：返回 "User denied this tool call."
 ```
 
-审批默认 5 分钟超时；取消、订阅处理异常或窗口关闭均不会无限等待。窗口隐藏时依靠 toast 的 Confirm/Cancel，由 `DesktopNotificationActivationService.HandleActivationAsync()` 调用 `TryResolve()`。
+`DesktopToolApprovalHandler` 额外暴露 `ApprovalCompleted` 事件：无论请求以何种方式离开待决队列（用户确认、toast 确认、取消、超时、`RejectAll()`），都会触发一次。`MainWindow.OnToolApprovalCompleted()` 据此把该 id 移出 `_approvalQueue`；若离开的是当前队首，则清空 `_currentApprovalId` 并 `PromoteNextApprovalIfIdle()` 把下一条推给 Vue（队列空时发送 `toolApprovalClear`）。因此确认栏任何时刻只显示队首一条，多个并行 function call 依次排队。队列与 `_currentApprovalId` 只在 UI 线程访问；WebView 重新导航后 `OnTranscriptNavigationCompleted()` 会重放当前队首，确认栏不会因页面刷新丢失。
+
+审批默认 5 分钟超时；取消、订阅处理异常或窗口关闭均不会无限等待。窗口隐藏时依靠 toast 的 Confirm/Cancel，由 `DesktopNotificationActivationService.HandleActivationAsync()` 调用 `TryResolve()`；`TryResolve()` 幂等，Vue 确认栏与 toast 之间的竞态是安全的。
 
 ### 5.3 模型 client 创建
 
