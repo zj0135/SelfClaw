@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { SlidersHorizontal, ArrowRight, Square } from 'lucide-vue-next';
+import { SlidersHorizontal, ArrowRight, Square, ShieldAlert, Check, X } from 'lucide-vue-next';
 import ModelSelector from './ModelSelector.vue';
 import WorkspaceSelector from './WorkspaceSelector.vue';
 
@@ -21,6 +21,10 @@ const props = defineProps({
 		type: String,
 		default: 'cli',
 	},
+	pendingApproval: {
+		type: Object,
+		default: null,
+	},
 });
 
 const emit = defineEmits([
@@ -30,7 +34,49 @@ const emit = defineEmits([
 	'select-workspace-root',
 	'select-workspace-path',
 	'browse-workspace-folder',
+	'approve-tool',
+	'reject-tool',
 ]);
+
+const approvalTitle = computed(() => {
+	const approval = props.pendingApproval;
+	if (!approval) {
+		return '';
+	}
+
+	return approval.displayName || approval.toolName || '工具调用';
+});
+
+// 参数原文可能很长，状态栏里只给一行预览，展开细节仍留在对话流的工具卡片里。
+const approvalDetail = computed(() => {
+	const approval = props.pendingApproval;
+	if (!approval) {
+		return '';
+	}
+
+	const raw = (approval.argumentsJson || approval.description || '').replace(/\s+/g, ' ').trim();
+	if (raw.length <= 120) {
+		return raw;
+	}
+
+	return `${raw.slice(0, 120)}…`;
+});
+
+function approveTool() {
+	if (!props.pendingApproval) {
+		return;
+	}
+
+	emit('approve-tool', props.pendingApproval.toolExecutionId);
+}
+
+function rejectTool() {
+	if (!props.pendingApproval) {
+		return;
+	}
+
+	emit('reject-tool', props.pendingApproval.toolExecutionId);
+}
 
 const composerText = ref('');
 const shellRef = ref(null);
@@ -82,16 +128,40 @@ defineExpose({
 </script>
 
 <template>
-	<section ref="shellRef" class="composer-shell" aria-label="消息输入">
-		<div class="composer-grip" aria-hidden="true"></div>
-		<textarea
-			v-model="composerText"
-			class="composer-input"
-			rows="3"
-			placeholder="让助手帮你处理项目..."
-			@keydown="onKeydown"
-		></textarea>
-		<div class="composer-toolbar">
+	<div class="composer-stack">
+		<transition name="approval-bar">
+			<div v-if="props.pendingApproval" class="tool-approval-bar" role="alertdialog" aria-label="工具调用确认">
+				<span class="tool-approval-icon" aria-hidden="true">
+					<ShieldAlert :size="16" :stroke-width="1.9" />
+				</span>
+				<div class="tool-approval-copy">
+					<span class="tool-approval-title">
+						请求执行 <strong>{{ approvalTitle }}</strong>
+					</span>
+					<span v-if="approvalDetail" class="tool-approval-detail" :title="approvalDetail">{{ approvalDetail }}</span>
+				</div>
+				<div class="tool-approval-actions">
+					<button class="tool-approval-btn reject" type="button" title="拒绝" @click="rejectTool">
+						<X :size="14" :stroke-width="2.2" aria-hidden="true" />
+						拒绝
+					</button>
+					<button class="tool-approval-btn approve" type="button" title="允许" @click="approveTool">
+						<Check :size="14" :stroke-width="2.4" aria-hidden="true" />
+						允许
+					</button>
+				</div>
+			</div>
+		</transition>
+		<section ref="shellRef" class="composer-shell" aria-label="消息输入">
+			<div class="composer-grip" aria-hidden="true"></div>
+			<textarea
+				v-model="composerText"
+				class="composer-input"
+				rows="3"
+				placeholder="让助手帮你处理项目..."
+				@keydown="onKeydown"
+			></textarea>
+			<div class="composer-toolbar">
 			<div class="composer-tools-left">
 			<ModelSelector :execution-mode="agentMode" />
 			<button class="icon-btn" type="button" title="功能" aria-label="功能">
@@ -115,15 +185,25 @@ defineExpose({
 			</button>
 			</div>
 		</div>
-	</section>
+		</section>
+	</div>
 </template>
 
 <style>
+.composer-stack {
+	width: min(calc(100% - 72px), 728px);
+	margin: 0 auto 16px;
+}
+
+.empty-workspace .composer-stack {
+	width: min(calc(100% - 72px), 680px);
+	margin-bottom: 0;
+}
+
 .composer-shell {
 	position: relative;
-	width: min(calc(100% - 72px), 728px);
+	width: 100%;
 	min-height: 138px;
-	margin: 0 auto 16px;
 	display: grid;
 	grid-template-rows: 1fr auto;
 	padding: 22px 18px 12px;
@@ -146,9 +226,7 @@ defineExpose({
 }
 
 .empty-workspace .composer-shell {
-	width: min(calc(100% - 72px), 680px);
 	min-height: 132px;
-	margin-bottom: 0;
 }
 
 .composer-grip {
@@ -160,6 +238,115 @@ defineExpose({
 	border-radius: 99px;
 	background: #dde1e7;
 	transform: translateX(-50%);
+}
+
+/* ===== 工具调用确认栏（输入框上方，需要用户允许/拒绝 Direct 写操作时出现） ===== */
+.tool-approval-bar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 10px;
+	padding: 9px 10px 9px 12px;
+	border: 1px solid rgba(200, 122, 20, 0.32);
+	border-radius: 11px;
+	background: rgba(251, 191, 84, 0.12);
+}
+
+.tool-approval-icon {
+	display: inline-grid;
+	place-items: center;
+	width: 26px;
+	height: 26px;
+	flex: none;
+	border-radius: 8px;
+	color: #b26a09;
+	background: rgba(240, 165, 60, 0.2);
+}
+
+.tool-approval-copy {
+	min-width: 0;
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.tool-approval-title {
+	max-width: 100%;
+	overflow: hidden;
+	color: #4a3410;
+	font-size: 12.5px;
+	line-height: 1.4;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tool-approval-title strong {
+	font-weight: 650;
+	color: #33240a;
+}
+
+.tool-approval-detail {
+	max-width: 100%;
+	overflow: hidden;
+	color: #8a7343;
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 11px;
+	line-height: 1.35;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tool-approval-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex: none;
+}
+
+.tool-approval-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 30px;
+	padding: 0 12px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	font-size: 12.5px;
+	font-weight: 600;
+	line-height: 1;
+	transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.tool-approval-btn.reject {
+	border-color: #d9dde4;
+	background: #ffffff;
+	color: #5f6a78;
+}
+
+.tool-approval-btn.reject:hover {
+	border-color: #c7ccd5;
+	color: #3d4654;
+}
+
+.tool-approval-btn.approve {
+	background: #b26a09;
+	color: #ffffff;
+}
+
+.tool-approval-btn.approve:hover {
+	background: #9a5a06;
+}
+
+.approval-bar-enter-active,
+.approval-bar-leave-active {
+	transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.approval-bar-enter-from,
+.approval-bar-leave-to {
+	opacity: 0;
+	transform: translateY(4px);
 }
 
 .composer-input {
@@ -264,11 +451,11 @@ defineExpose({
 }
 
 @media (max-width: 960px) {
-	.composer-shell {
+	.composer-stack {
 		width: calc(100% - 28px);
 	}
 
-	.empty-workspace .composer-shell {
+	.empty-workspace .composer-stack {
 		width: calc(100% - 28px);
 	}
 }

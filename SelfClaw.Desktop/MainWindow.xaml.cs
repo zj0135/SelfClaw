@@ -61,6 +61,8 @@ public partial class MainWindow : Window
     private string _terminalWorkingDirectory = ResolveDefaultTerminalWorkingDirectory();
     private int _terminalColumns = DefaultTerminalColumns;
     private int _terminalRows = DefaultTerminalRows;
+    private readonly List<ToolApprovalRequest> _approvalQueue = new();
+    private Guid? _currentApprovalId;
 
     public MainWindow(
         MainWindowViewModel viewModel,
@@ -93,6 +95,7 @@ public partial class MainWindow : Window
         _aiProviderSettingsBridge.ModelSelectionChanged += OnModelSelectionChanged;
         _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
         _toolApprovalHandler.ApprovalExpired += OnToolApprovalExpired;
+        _toolApprovalHandler.ApprovalCompleted += OnToolApprovalCompleted;
         desktopNotificationService.RegisterMainWindow(this);
     }
 
@@ -129,6 +132,7 @@ public partial class MainWindow : Window
         _aiProviderSettingsBridge.ModelSelectionChanged -= OnModelSelectionChanged;
         _toolApprovalHandler.ApprovalRequested -= OnToolApprovalRequested;
         _toolApprovalHandler.ApprovalExpired -= OnToolApprovalExpired;
+        _toolApprovalHandler.ApprovalCompleted -= OnToolApprovalCompleted;
         _toolApprovalHandler.RejectAll();
         StopTerminalSession();
 
@@ -204,6 +208,23 @@ public partial class MainWindow : Window
         PostTranscript(_pendingTranscript);
         PostTerminalState();
         PostWindowState();
+        RepostCurrentApproval();
+    }
+
+    // A WebView reload drops the inline approval bar; re-send the request that is still pending so the
+    // bar comes back rather than leaving the turn blocked with no visible way to answer.
+    private void RepostCurrentApproval()
+    {
+        if (_currentApprovalId is not { } currentId)
+        {
+            return;
+        }
+
+        var current = _approvalQueue.FirstOrDefault(pending => pending.ToolExecutionId == currentId);
+        if (current is not null)
+        {
+            PostToolApprovalRequest(current);
+        }
     }
 
     private void OnTranscriptChanged(object? sender, TranscriptRenderState state)
@@ -473,6 +494,19 @@ public partial class MainWindow : Window
                 case "stop-generation":
                     _viewModel.StopSelectedConversation();
                     break;
+                case "resolve-tool-approval":
+                {
+                    var toolExecutionId = document.RootElement.TryGetProperty("toolExecutionId", out var toolExecutionIdElement)
+                        ? toolExecutionIdElement.GetString()
+                        : null;
+                    var approved = document.RootElement.TryGetProperty("approved", out var approvedElement) &&
+                                   approvedElement.GetBoolean();
+                    if (Guid.TryParse(toolExecutionId, out var parsedToolExecutionId))
+                    {
+                        _toolApprovalHandler.TryResolve(parsedToolExecutionId, approved);
+                    }
+                    break;
+                }
                 case "new-chat":
                     _viewModel.StartNewConversation();
                     break;
@@ -1200,6 +1234,8 @@ public partial class MainWindow : Window
 
     private void OnToolApprovalRequested(ToolApprovalRequest request)
     {
+        // The Windows toast stays as the fallback when the window is hidden or minimized; it can
+        // still be resolved through DesktopNotificationActivationService.
         var summary = BuildToolApprovalSummary(request);
         _desktopNotificationService.ShowToolApproval(
             request.ToolExecutionId,
@@ -1213,29 +1249,17 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Marshal onto the UI thread so the queue and the current-slot pointer are only ever touched
+        // from the dispatcher; the visible-window prompt is the inline Vue approval bar.
         _ = Dispatcher.BeginInvoke(() =>
         {
-            if (!IsVisible || Visibility != Visibility.Visible || WindowState == WindowState.Minimized)
-            {
-                return;
-            }
-
-            var result = System.Windows.MessageBox.Show(
-                this,
-                summary,
-                string.IsNullOrWhiteSpace(request.DisplayName) ? "Tool approval" : request.DisplayName,
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning,
-                MessageBoxResult.No);
-            _toolApprovalHandler.TryResolve(
-                request.ToolExecutionId,
-                approved: result == MessageBoxResult.Yes);
+            _approvalQueue.Add(request);
+            PromoteNextApprovalIfIdle();
         }, DispatcherPriority.Normal);
     }
 
-    private void OnToolApprovalExpired(ToolApprovalRequest request)
+    private void OnToolApprovalCompleted(Guid toolExecutionId)
     {
-        _desktopNotificationService.ShowToolApprovalExpired(request.DisplayName);
         if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
         {
             return;
@@ -1243,16 +1267,53 @@ public partial class MainWindow : Window
 
         _ = Dispatcher.BeginInvoke(() =>
         {
-            if (IsVisible && Visibility == Visibility.Visible && WindowState != WindowState.Minimized)
+            _approvalQueue.RemoveAll(pending => pending.ToolExecutionId == toolExecutionId);
+            if (_currentApprovalId == toolExecutionId)
             {
-                System.Windows.MessageBox.Show(
-                    this,
-                    "The tool call was rejected because approval timed out.",
-                    string.IsNullOrWhiteSpace(request.DisplayName) ? "Tool approval expired" : request.DisplayName,
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                _currentApprovalId = null;
+                PromoteNextApprovalIfIdle();
             }
-        }, DispatcherPriority.Background);
+        }, DispatcherPriority.Normal);
+    }
+
+    // Shows the head-of-queue request in the Vue approval bar. Only one request is ever displayed;
+    // the rest wait their turn as each is resolved, cancelled, or times out.
+    private void PromoteNextApprovalIfIdle()
+    {
+        if (_currentApprovalId is not null)
+        {
+            return;
+        }
+
+        if (_approvalQueue.Count == 0)
+        {
+            PostToolApprovalClear();
+            return;
+        }
+
+        var next = _approvalQueue[0];
+        _currentApprovalId = next.ToolExecutionId;
+        PostToolApprovalRequest(next);
+    }
+
+    private void PostToolApprovalRequest(ToolApprovalRequest request)
+        => PostWebMessage(new
+        {
+            type = "toolApprovalRequest",
+            toolExecutionId = request.ToolExecutionId.ToString(),
+            toolName = request.ToolName,
+            displayName = request.DisplayName,
+            description = request.Description,
+            argumentsJson = request.ArgumentsJson
+        });
+
+    private void PostToolApprovalClear()
+        => PostWebMessage(new { type = "toolApprovalClear" });
+
+    private void OnToolApprovalExpired(ToolApprovalRequest request)
+    {
+        // Queue cleanup happens through OnToolApprovalCompleted; only surface the timeout as a toast.
+        _desktopNotificationService.ShowToolApprovalExpired(request.DisplayName);
     }
 
     private static string BuildToolApprovalSummary(ToolApprovalRequest request)

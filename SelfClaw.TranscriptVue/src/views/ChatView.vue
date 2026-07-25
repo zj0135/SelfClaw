@@ -15,6 +15,7 @@ const state = reactive({
 	isBusy: false,
 	agentMode: 'cli',
 	activityText: '',
+	pendingApproval: null,
 	terminal: {
 		isOpen: false,
 		isRunning: false,
@@ -242,6 +243,20 @@ function stopGeneration() {
 	post({ type: 'stop-generation' });
 }
 
+function resolveToolApproval(toolExecutionId, approved) {
+	if (!toolExecutionId) {
+		return;
+	}
+
+	// 乐观清除：C# 侧解析后会再发一次 toolApprovalClear 或下一条 toolApprovalRequest，
+	// 这里先隐藏当前栏，避免按钮点击到状态回传之间的空档里重复点击。
+	if (state.pendingApproval?.toolExecutionId === toolExecutionId) {
+		state.pendingApproval = null;
+	}
+
+	post({ type: 'resolve-tool-approval', toolExecutionId, approved });
+}
+
 function nextWorkspaceRequestId(prefix) {
 	workspaceRequestSequence += 1;
 	return `${prefix}-${Date.now()}-${workspaceRequestSequence}`;
@@ -451,6 +466,16 @@ defineExpose({
 			nextTick(() => terminalPanelRef.value?.focus?.());
 		} else if (payload.type === 'workspace-selection') {
 			applyWorkspaceSelection(payload);
+		} else if (payload.type === 'toolApprovalRequest') {
+			state.pendingApproval = {
+				toolExecutionId: payload.toolExecutionId,
+				toolName: payload.toolName || '',
+				displayName: payload.displayName || '',
+				description: payload.description || '',
+				argumentsJson: payload.argumentsJson || '',
+			};
+		} else if (payload.type === 'toolApprovalClear') {
+			state.pendingApproval = null;
 		}
 	},
 });
@@ -477,12 +502,15 @@ defineExpose({
 			:workspace-selection="state.workspace"
 			:workspace-loading="state.workspace.isLoading"
 			:agent-mode="state.agentMode"
+			:pending-approval="state.pendingApproval"
 			@submit="submitComposer"
 			@stop="stopGeneration"
 			@request-workspace="requestWorkspaceSelection"
 			@select-workspace-root="selectWorkspaceRoot"
 			@select-workspace-path="selectWorkspacePath"
 			@browse-workspace-folder="browseWorkspaceFolder"
+			@approve-tool="(id) => resolveToolApproval(id, true)"
+			@reject-tool="(id) => resolveToolApproval(id, false)"
 		/>
 		<TerminalPanel ref="terminalPanelRef" :is-open="state.terminal.isOpen" :is-running="state.terminal.isRunning"
 			:cwd="state.terminal.cwd" @ready="onTerminalReady" @input="onTerminalInput" @resize="onTerminalResize"

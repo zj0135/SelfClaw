@@ -27,6 +27,13 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
     public event Action<ToolApprovalRequest>? ApprovalRequested;
     public event Action<ToolApprovalRequest>? ApprovalExpired;
 
+    /// <summary>
+    /// Raised whenever a pending approval leaves the queue for any reason (resolved, cancelled,
+    /// timed out, or rejected in bulk). Lets the UI advance a single-slot approval indicator without
+    /// caring how the request was closed.
+    /// </summary>
+    public event Action<Guid>? ApprovalCompleted;
+
     public Task<bool> RequestApprovalAsync(
         ToolApprovalRequest request,
         CancellationToken cancellationToken = default)
@@ -46,6 +53,7 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
                 {
                     pending.CompletionSource.TrySetCanceled(cancellationToken);
                     DisposeRegistrations(pending);
+                    RaiseApprovalCompleted(request.ToolExecutionId);
                 }
             });
         }
@@ -102,7 +110,9 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
         }
 
         DisposeRegistrations(pending);
-        return pending.CompletionSource.TrySetResult(approved);
+        var resolved = pending.CompletionSource.TrySetResult(approved);
+        RaiseApprovalCompleted(toolExecutionId);
+        return resolved;
     }
 
     public void RejectAll()
@@ -122,9 +132,21 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
 
         pending.CompletionSource.TrySetResult(false);
         DisposeRegistrations(pending);
+        RaiseApprovalCompleted(toolExecutionId);
         try
         {
             ApprovalExpired?.Invoke(pending.Request);
+        }
+        catch
+        {
+        }
+    }
+
+    private void RaiseApprovalCompleted(Guid toolExecutionId)
+    {
+        try
+        {
+            ApprovalCompleted?.Invoke(toolExecutionId);
         }
         catch
         {
