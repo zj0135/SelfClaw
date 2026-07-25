@@ -41,42 +41,6 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
         "target", "vendor"
     };
 
-    /// <summary>
-    /// Extensions known to be binary — skip without opening.
-    /// </summary>
-    private static readonly HashSet<string> BinaryExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".exe", ".dll", ".pdb", ".so", ".dylib",
-        ".zip", ".gz", ".tar", ".7z", ".rar", ".nupkg",
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg",
-        ".mp3", ".mp4", ".avi", ".mov", ".wav", ".flac",
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".woff", ".woff2", ".ttf", ".eot", ".otf",
-        ".class", ".pyc", ".o", ".obj", ".lib", ".a",
-        ".db", ".sqlite", ".mdb", ".ldf", ".mdf",
-        ".snk", ".pfx", ".cer"
-    };
-
-    /// <summary>
-    /// Extensions known to be text — skip binary detection.
-    /// </summary>
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".cs", ".csx", ".fs", ".fsx", ".vb",
-        ".java", ".kt", ".scala", ".groovy",
-        ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".vue", ".svelte",
-        ".py", ".rb", ".php", ".go", ".rs", ".swift", ".c", ".h", ".cpp", ".hpp", ".cc",
-        ".html", ".htm", ".css", ".scss", ".sass", ".less",
-        ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
-        ".md", ".txt", ".rst", ".log", ".csv", ".tsv",
-        ".sh", ".bash", ".zsh", ".ps1", ".psm1", ".psd1", ".bat", ".cmd",
-        ".sql", ".graphql", ".gql",
-        ".sln", ".slnx", ".csproj", ".fsproj", ".vbproj", ".props", ".targets",
-        ".razor", ".cshtml", ".xaml", ".axaml",
-        ".dockerfile", ".dockerignore", ".gitignore", ".editorconfig",
-        ".env", ".lock", ".config"
-    };
-
     public WorkspaceToolService(ILogger<WorkspaceToolService>? logger = null)
     {
         _logger = logger ?? NullLogger<WorkspaceToolService>.Instance;
