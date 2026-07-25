@@ -14,7 +14,6 @@ import {
 const emit = defineEmits(['navigate']);
 
 const activeTarget = ref('sys');
-const activeComponentRef = ref(null);
 
 const navGroups = [
 	{
@@ -82,12 +81,6 @@ function selectItem(id) {
 	activeTarget.value = id;
 	emit('navigate', id);
 }
-
-defineExpose({
-	handleMessage(payload) {
-		activeComponentRef.value?.handleMessage?.(payload);
-	},
-});
 </script>
 
 <template>
@@ -129,7 +122,7 @@ defineExpose({
 
 		<!-- Right: content panel -->
 		<main class="settings-content">
-			<component :is="activeComponent" ref="activeComponentRef" />
+			<component :is="activeComponent" />
 		</main>
 	</div>
 </template>

@@ -302,12 +302,6 @@ function toast(text) {
 		toastState.visible = false;
 	}, 1900);
 }
-
-defineExpose({
-	handleMessage() {
-		// 预留：接入宿主返回的扩展列表 / 启用状态时在此处理。
-	},
-});
 </script>
 
 <template>

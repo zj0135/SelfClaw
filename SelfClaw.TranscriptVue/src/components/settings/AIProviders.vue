@@ -180,7 +180,6 @@ const {
 	customProtocols,
 	providerDraft,
 	pendingModelIds,
-	handleMessage,
 	selectProvider: selectProviderFromHost,
 	markApiKeyDirty,
 	saveApiKey: saveApiKeyToHost,
@@ -209,8 +208,6 @@ const {
 	showToast,
 	resetCheckStatus,
 });
-
-defineExpose({ handleMessage });
 
 const providerGroups = computed(() => {
 	const term = providerSearch.value.trim().toLowerCase();

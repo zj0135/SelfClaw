@@ -4,8 +4,11 @@ import ComposerPanel from '../components/Chat/ComposerPanel.vue';
 import TerminalPanel from '../components/Chat/TerminalPanel.vue';
 import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
 import { renderMessageBody } from '../renderers';
+import { useHostBridge } from '../composables/hostBridge.js';
 
 const emit = defineEmits(['preview-image']);
+
+const { on, post } = useHostBridge();
 
 const state = reactive({
 	items: [],
@@ -41,11 +44,6 @@ const scrollFollowState = {
 	transcriptPausedUntil: 0,
 };
 let workspaceRequestSequence = 0;
-
-function post(message) {
-	window.chrome?.webview?.postMessage(message);
-}
-
 const renderedMessages = computed(() =>
 	(state.items || []).map((item) => ({
 		id: item.id,
@@ -270,10 +268,6 @@ function setWorkspaceLoading(isLoading) {
 }
 
 function requestWorkspaceSelection(refresh = false) {
-	if (!window.chrome?.webview) {
-		return;
-	}
-
 	setWorkspaceLoading(true);
 	post({
 		type: 'get-workspace-selection',
@@ -438,46 +432,54 @@ function onTerminalFocusChange(isFocused) {
 	});
 }
 
+// replaceState 带 replayLast：从设置页切回时本视图重新挂载，靠缓存的最近一份
+// 快照立即回放，避免对话区空白等待下一次推送。
+on('replaceState', replaceState, { replayLast: true });
+
+on('terminal-state', (payload) => {
+	state.terminal.isOpen = Boolean(payload.isOpen);
+	state.terminal.isRunning = Boolean(payload.isRunning);
+	state.terminal.cwd = payload.cwd || '';
+	nextTick(() => {
+		terminalPanelRef.value?.fit?.();
+		terminalPanelRef.value?.focus?.();
+	});
+});
+
+on('terminal-output', (payload) => {
+	terminalPanelRef.value?.write?.(payload.data || '');
+});
+
+on('terminal-clear', () => {
+	terminalPanelRef.value?.clear?.();
+});
+
+on('terminal-focus', () => {
+	nextTick(() => terminalPanelRef.value?.focus?.());
+});
+
+on('workspace-selection', applyWorkspaceSelection);
+
+on('toolApprovalRequest', (payload) => {
+	state.pendingApproval = {
+		toolExecutionId: payload.toolExecutionId,
+		toolName: payload.toolName || '',
+		displayName: payload.displayName || '',
+		description: payload.description || '',
+		argumentsJson: payload.argumentsJson || '',
+	};
+});
+
+on('toolApprovalClear', () => {
+	state.pendingApproval = null;
+});
+
 onMounted(() => {
 	requestWorkspaceSelection(false);
 });
 
 onUnmounted(() => {
 	stopBusyClock();
-});
-
-defineExpose({
-	handleMessage(payload) {
-		if (payload.type === 'replaceState') {
-			replaceState(payload);
-		} else if (payload.type === 'terminal-state') {
-			state.terminal.isOpen = Boolean(payload.isOpen);
-			state.terminal.isRunning = Boolean(payload.isRunning);
-			state.terminal.cwd = payload.cwd || '';
-			nextTick(() => {
-				terminalPanelRef.value?.fit?.();
-				terminalPanelRef.value?.focus?.();
-			});
-		} else if (payload.type === 'terminal-output') {
-			terminalPanelRef.value?.write?.(payload.data || '');
-		} else if (payload.type === 'terminal-clear') {
-			terminalPanelRef.value?.clear?.();
-		} else if (payload.type === 'terminal-focus') {
-			nextTick(() => terminalPanelRef.value?.focus?.());
-		} else if (payload.type === 'workspace-selection') {
-			applyWorkspaceSelection(payload);
-		} else if (payload.type === 'toolApprovalRequest') {
-			state.pendingApproval = {
-				toolExecutionId: payload.toolExecutionId,
-				toolName: payload.toolName || '',
-				displayName: payload.displayName || '',
-				description: payload.description || '',
-				argumentsJson: payload.argumentsJson || '',
-			};
-		} else if (payload.type === 'toolApprovalClear') {
-			state.pendingApproval = null;
-		}
-	},
 });
 </script>
 

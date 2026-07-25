@@ -1,20 +1,18 @@
 <script setup>
-import { computed, defineExpose, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { RefreshCw, ChevronDown, Check, Zap, TerminalSquare, TriangleAlert } from 'lucide-vue-next';
 import claudeIcon from '../../../assets/agents-icons/claude.svg';
 import codexIcon from '../../../assets/agents-icons/codex.svg';
 import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
+import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js';
+
+const { request, requestLatest } = useHostBridge();
 
 const defaultModel = 'Default (CLI config)';
 const isLoading = ref(false);
 const isRescanning = ref(false);
 const scanError = ref('');
 const selectedCliId = ref('');
-// Tracks the newest test request per CLI so late/stale replies from the host bridge are ignored.
-const activeTestRequests = new Map();
-let scanRequestId = 0;
-let activeScanRequestId = null;
-let fallbackTimer = null;
 
 const cliRegistry = {
 	claude: {
@@ -59,10 +57,6 @@ const scanStatusText = computed(() => {
 
 	return hasCliTools.value ? '' : '还没有检测到 Claude Code、Codex CLI 或 OpenCode。';
 });
-
-function postToHost(message) {
-	window.chrome?.webview?.postMessage(message);
-}
 
 function createCliTool(rawTool, index) {
 	const base = cliRegistry[rawTool?.id] || {};
@@ -129,51 +123,26 @@ function onModelChange(cli) {
 	cli.showToast = false;
 }
 
-function testCli(cli) {
+async function testCli(cli) {
 	if (cli.testing) {
 		return;
 	}
 
-	const requestId = `cli-test-${Date.now()}-${++scanRequestId}`;
 	cli.testing = true;
 	cli.showToast = false;
 	cli.testError = '';
-	activeTestRequests.set(requestId, cli.id);
 
-	postToHost({
-		type: 'test-programming-cli',
-		requestId,
-		cliId: cli.id,
-	});
-
-	// No WebView2 host in dev — fake a plausible success so the UI can still be exercised in a browser.
-	if (!window.chrome?.webview) {
-		window.setTimeout(() => {
-			handleTestResult({
-				type: 'programming-cli-test-result',
-				requestId,
-				cliId: cli.id,
-				success: true,
-				version: cli.version || '',
-				error: null,
-			});
-		}, 400);
+	try {
+		// per-CLI latest-wins：同一 CLI 连点测试时只认最新一次回包。
+		const payload = await requestLatest(`cli-test:${cli.id}`, 'test-programming-cli', { cliId: cli.id });
+		applyTestResult(cli, payload);
+	} catch (error) {
+		if (isSuperseded(error)) return;
+		applyTestResult(cli, { success: false, error: error?.message });
 	}
 }
 
-function handleTestResult(payload) {
-	const requestId = typeof payload?.requestId === 'string' ? payload.requestId : '';
-	const cliId = activeTestRequests.get(requestId) || payload?.cliId;
-	activeTestRequests.delete(requestId);
-	if (!cliId) {
-		return;
-	}
-
-	const cli = cliTools.find((tool) => tool.id === cliId);
-	if (!cli) {
-		return;
-	}
-
+function applyTestResult(cli, payload) {
 	cli.testing = false;
 	if (payload?.success) {
 		const version = typeof payload.version === 'string' ? payload.version.trim() : '';
@@ -189,26 +158,29 @@ function handleTestResult(payload) {
 	cli.showToast = true;
 }
 
-function requestProgrammingAssistantSettings({ refresh = false } = {}) {
+async function requestProgrammingAssistantSettings({ refresh = false } = {}) {
 	if (isLoading.value || isRescanning.value) {
 		return;
 	}
 
-	const requestId = `cli-scan-${Date.now()}-${++scanRequestId}`;
-	activeScanRequestId = requestId;
 	isLoading.value = !refresh;
 	isRescanning.value = refresh;
 	scanError.value = '';
 
-	postToHost({
-		type: refresh ? 'scan-programming-clis' : 'get-programming-assistant-settings',
-		requestId,
-	});
-
-	if (!window.chrome?.webview) {
-		fallbackTimer = window.setTimeout(() => {
-			applySettingsResult({ tools: [], selectedCliId: null }, requestId);
-		}, 250);
+	try {
+		// scan / get / select 共用 cli-scan 这个 key：三者都会重写整份 CLI 列表，
+		// 连续触发时只有最新一次的回包生效。
+		const payload = await requestLatest(
+			'cli-scan',
+			refresh ? 'scan-programming-clis' : 'get-programming-assistant-settings',
+		);
+		applySettingsResult(payload);
+	} catch (error) {
+		if (isSuperseded(error)) return;
+		scanError.value = `本地 CLI 设置同步失败：${error?.message || error}`;
+	} finally {
+		isLoading.value = false;
+		isRescanning.value = false;
 	}
 }
 
@@ -216,34 +188,24 @@ function rescanCliTools() {
 	requestProgrammingAssistantSettings({ refresh: true });
 }
 
-function selectCli(cli) {
+async function selectCli(cli) {
 	if (!cli?.id || selectedCliId.value === cli.id || isLoading.value || isRescanning.value) {
 		return;
 	}
 
-	const requestId = `cli-select-${Date.now()}-${++scanRequestId}`;
-	activeScanRequestId = requestId;
 	selectedCliId.value = cli.id;
 	scanError.value = '';
 
-	postToHost({
-		type: 'select-programming-cli',
-		requestId,
-		cliId: cli.id,
-	});
-
-	if (!window.chrome?.webview) {
-		fallbackTimer = window.setTimeout(() => {
-			applySettingsResult({ tools: cliTools, selectedCliId: cli.id }, requestId);
-		}, 250);
+	try {
+		const payload = await requestLatest('cli-scan', 'select-programming-cli', { cliId: cli.id });
+		applySettingsResult(payload);
+	} catch (error) {
+		if (isSuperseded(error)) return;
+		scanError.value = `本地 CLI 设置同步失败：${error?.message || error}`;
 	}
 }
 
-function applySettingsResult(payload, requestId) {
-	if (requestId && activeScanRequestId && requestId !== activeScanRequestId) {
-		return;
-	}
-
+function applySettingsResult(payload) {
 	const rawTools = Array.isArray(payload?.tools) ? payload.tools : [];
 	const normalizedSelected = normalizeSelectedCliId(rawTools, payload?.selectedCliId);
 	const nextTools = rawTools
@@ -257,14 +219,6 @@ function applySettingsResult(payload, requestId) {
 	cliTools.splice(0, cliTools.length, ...nextTools);
 	selectedCliId.value = normalizedSelected || '';
 	scanError.value = payload?.error ? `本地 CLI 设置同步失败：${payload.error}` : '';
-	isLoading.value = false;
-	isRescanning.value = false;
-	activeScanRequestId = null;
-
-	if (fallbackTimer) {
-		window.clearTimeout(fallbackTimer);
-		fallbackTimer = null;
-	}
 }
 
 function normalizeSelectedCliId(tools, value) {
@@ -276,39 +230,8 @@ function normalizeSelectedCliId(tools, value) {
 	return tools[0]?.id || '';
 }
 
-function handleMessage(payload) {
-	if (payload?.type === 'programming-cli-test-result') {
-		handleTestResult(payload);
-		return;
-	}
-
-	if (payload?.type !== 'programming-assistant-settings') {
-		return;
-	}
-
-	applySettingsResult(payload, payload.requestId);
-}
-
-defineExpose({
-	handleMessage,
-});
-
 onMounted(() => {
 	requestProgrammingAssistantSettings({ refresh: false });
-});
-
-onUnmounted(() => {
-	activeTestRequests.clear();
-
-	if (fallbackTimer) {
-		window.clearTimeout(fallbackTimer);
-	}
-
-	if (isLoading.value || isRescanning.value) {
-		isLoading.value = false;
-		isRescanning.value = false;
-		activeScanRequestId = null;
-	}
 });
 </script>
 

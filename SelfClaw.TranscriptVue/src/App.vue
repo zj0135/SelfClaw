@@ -1,9 +1,12 @@
 <script setup>
-import { computed, markRaw, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, markRaw, onMounted, onUnmounted, reactive, ref } from 'vue';
 import AppSidebar from './components/SideBar/AppSidebar.vue';
 import WindowControls from './components/Chat/WindowControls.vue';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
+import { useHostBridge } from './composables/hostBridge.js';
+
+const { on, post } = useHostBridge();
 
 const viewRegistry = {
 	chat: markRaw(ChatView),
@@ -12,7 +15,6 @@ const viewRegistry = {
 
 const currentViewId = ref('chat');
 const activeViewComponent = computed(() => viewRegistry[currentViewId.value] || ChatView);
-const activeViewRef = ref(null);
 const imagePreview = ref(null);
 const SIDEBAR_COLLAPSE_KEY = 'selfclaw:sidebar-collapsed';
 const sidebarCollapsed = ref(readSidebarCollapsed());
@@ -35,7 +37,6 @@ function toggleSidebarCollapsed() {
 }
 const sidebarConversations = ref([]);
 const selectedConversationId = ref(null);
-const lastTranscriptPayload = ref(null);
 const windowChrome = reactive({
 	isMaximized: false,
 });
@@ -98,37 +99,17 @@ const navItems = computed(() => [
 
 const sidebarActiveId = computed(() => (currentViewId.value === 'settings' ? 'settings' : selectedConversationId.value));
 
-function post(message) {
-	window.chrome?.webview?.postMessage(message);
-}
+// window-state 与 replaceState 都是宿主持续广播的状态型 push；订阅即可，
+// 侧边栏只从 replaceState 里取会话列表。ChatView 单独订阅 replaceState
+// 渲染对话，故这里两处订阅者共存。
+on('window-state', (payload) => {
+	windowChrome.isMaximized = Boolean(payload.isMaximized);
+});
 
-function handleIncomingMessage(event) {
-	const payload = event?.data;
-	if (!payload || typeof payload !== 'object') {
-		return;
-	}
-
-	if (payload.type === 'window-state') {
-		windowChrome.isMaximized = Boolean(payload.isMaximized);
-		return;
-	}
-
-	if (payload.type === 'replaceState') {
-		lastTranscriptPayload.value = payload;
-		sidebarConversations.value = Array.isArray(payload.conversations) ? payload.conversations : [];
-		selectedConversationId.value = payload.selectedConversationId || null;
-	}
-
-	activeViewRef.value?.handleMessage?.(payload);
-}
-
-function replayTranscriptIfNeeded() {
-	if (currentViewId.value !== 'chat' || !lastTranscriptPayload.value) {
-		return;
-	}
-
-	nextTick(() => activeViewRef.value?.handleMessage?.(lastTranscriptPayload.value));
-}
+on('replaceState', (payload) => {
+	sidebarConversations.value = Array.isArray(payload.conversations) ? payload.conversations : [];
+	selectedConversationId.value = payload.selectedConversationId || null;
+});
 
 function onWindowDragPointerDown(event) {
 	if (event.button !== 0) {
@@ -223,7 +204,6 @@ function onSidebarAction(action) {
 function onSidebarSelect(id) {
 	if (id in viewRegistry) {
 		currentViewId.value = id;
-		replayTranscriptIfNeeded();
 		return;
 	}
 
@@ -233,16 +213,12 @@ function onSidebarSelect(id) {
 	}
 }
 
-watch(currentViewId, replayTranscriptIfNeeded);
-
 onMounted(() => {
-	window.chrome?.webview?.addEventListener('message', handleIncomingMessage);
 	document.addEventListener('click', handleDocumentClick);
 	document.addEventListener('keydown', onDocumentKeydown);
 });
 
 onUnmounted(() => {
-	window.chrome?.webview?.removeEventListener('message', handleIncomingMessage);
 	document.removeEventListener('click', handleDocumentClick);
 	document.removeEventListener('keydown', onDocumentKeydown);
 });
@@ -264,7 +240,7 @@ onUnmounted(() => {
 				<WindowControls :is-maximized="windowChrome.isMaximized" @action="onWindowControlAction" />
 			</div>
 			<div class="main-content">
-				<component :is="activeViewComponent" ref="activeViewRef" @preview-image="openImagePreview" />
+				<component :is="activeViewComponent" @preview-image="openImagePreview" />
 			</div>
 		</main>
 		<div v-if="imagePreview" class="image-preview-backdrop" @click.self="closeImagePreview">

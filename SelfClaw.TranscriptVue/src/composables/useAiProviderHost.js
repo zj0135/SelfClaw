@@ -1,17 +1,5 @@
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
-
-const requestTimeoutMs = 30000;
-
-// Browser-preview mirror of the backend's curated custom protocol options
-// (AiProviderProtocols.CustomProtocolOptions). Enum values match the C# ints:
-// providerKind — OpenAICompatible=1, Anthropic=3, Ollama=5;
-// apiFormat — OpenAIChatCompletions=0, OpenAIResponses=1, AnthropicMessages=2, OllamaNative=4.
-const fallbackProtocols = [
-	{ id: 'openai-chat', label: 'OpenAI Chat Completions 兼容', providerKind: 1, defaultApiFormat: 0, authKind: 0, supportsModelListing: true },
-	{ id: 'openai-responses', label: 'OpenAI Responses 兼容', providerKind: 1, defaultApiFormat: 1, authKind: 0, supportsModelListing: true },
-	{ id: 'anthropic', label: 'Anthropic 协议', providerKind: 3, defaultApiFormat: 2, authKind: 0, supportsModelListing: true },
-	{ id: 'ollama', label: 'Ollama 原生', providerKind: 5, defaultApiFormat: 4, authKind: 1, supportsModelListing: true },
-];
+import { onMounted, reactive, ref } from 'vue';
+import { useHostBridge, isSuperseded } from './hostBridge.js';
 
 export function formatTokens(value) {
 	if (typeof value === 'string' && /^(?:\d+(?:\.\d+)?)(?:K|M)$/.test(value)) return value;
@@ -44,6 +32,8 @@ export function useAiProviderHost(options) {
 		resetCheckStatus,
 	} = options;
 
+	const { request, requestLatest, post } = useHostBridge();
+
 	const apiKeyInput = ref('');
 	const apiKeyDirty = ref(false);
 	const loadingState = ref(false);
@@ -56,68 +46,18 @@ export function useAiProviderHost(options) {
 	const customProtocols = reactive([]);
 	const providerDraft = reactive({ name: '', protocolId: '', base: '' });
 
-	let sequence = 0;
-	let activeStateRequestId = null;
-	const pendingRequests = new Map();
-
-	function hasWebViewHost() {
-		return Boolean(window.chrome?.webview);
-	}
-
-	function postToHost(message) {
-		window.chrome?.webview?.postMessage(message);
-	}
-
-	function request(type, payload = {}) {
-		if (!hasWebViewHost()) {
-			return Promise.reject(new Error('WebView host is unavailable.'));
-		}
-
-		const requestId = `ai-provider-${Date.now()}-${++sequence}`;
-		const promise = new Promise((resolve, reject) => {
-			const timer = window.setTimeout(() => {
-				pendingRequests.delete(requestId);
-				reject(new Error('请求超时，请稍后重试。'));
-			}, requestTimeoutMs);
-
-			pendingRequests.set(requestId, { type, resolve, reject, timer });
-			postToHost({ type, requestId, ...payload });
-		});
-		promise.requestId = requestId;
-		return promise;
-	}
-
 	async function loadState(preferredId = null) {
-		if (!hasWebViewHost()) {
-			prepareBrowserFallback();
-			return;
-		}
-
 		loadingState.value = true;
 		try {
-			const promise = request('ai-providers/get-state');
-			activeStateRequestId = promise.requestId;
-			const payload = await promise;
-			if (payload.requestId !== activeStateRequestId) return;
+			// requestLatest：连续触发的加载（如新增服务商后重载）只认最新一次的回包。
+			const payload = await requestLatest('ai-providers/get-state', 'ai-providers/get-state');
 			applyState(payload.state, preferredId);
 		} catch (error) {
+			if (isSuperseded(error)) return;
 			showToast(errorMessage(error, '加载 AI 服务商失败'));
 		} finally {
 			loadingState.value = false;
-			activeStateRequestId = null;
 		}
-	}
-
-	function handleMessage(payload) {
-		if (!payload?.type?.startsWith('ai-providers/')) return false;
-		const pending = pendingRequests.get(payload.requestId);
-		if (!pending || pending.type !== payload.type) return true;
-
-		window.clearTimeout(pending.timer);
-		pendingRequests.delete(payload.requestId);
-		if (payload.error) pending.reject(new Error(payload.error));
-		else pending.resolve(payload);
-		return true;
 	}
 
 	function applyState(state, preferredId = null) {
@@ -134,14 +74,6 @@ export function useAiProviderHost(options) {
 			|| findMatchingProvider(previous, nextProviders)
 			|| nextProviders.find((provider) => provider.isConfigured)
 			|| nextProviders[0];
-		activeId.value = selected?.id || '';
-		syncActiveProviderInputs();
-	}
-
-	function prepareBrowserFallback() {
-		providers.splice(0, providers.length, ...providers.map((provider) => normalizeFallbackProvider(provider)));
-		customProtocols.splice(0, customProtocols.length, ...fallbackProtocols.map(normalizeProtocol));
-		const selected = providers.find((provider) => provider.id === activeId.value) || providers[0];
 		activeId.value = selected?.id || '';
 		syncActiveProviderInputs();
 	}
@@ -169,13 +101,6 @@ export function useAiProviderHost(options) {
 	async function saveApiKey() {
 		const provider = activeProvider.value;
 		if (!provider || !apiKeyDirty.value) return;
-		if (!hasWebViewHost()) {
-			provider.keyMask = apiKeyInput.value ? `****${apiKeyInput.value.slice(-4)}` : '';
-			apiKeyInput.value = '';
-			apiKeyDirty.value = false;
-			showToast('API Key 已保存（浏览器预览）');
-			return;
-		}
 
 		await runMutation(async () => {
 			await saveProvider(provider, apiKeyInput.value);
@@ -194,11 +119,6 @@ export function useAiProviderHost(options) {
 			return;
 		}
 
-		if (!hasWebViewHost()) {
-			showToast('代理地址已保存（浏览器预览）');
-			return;
-		}
-
 		await runMutation(async () => {
 			await saveProvider(provider, null);
 			showToast('代理地址已保存');
@@ -208,11 +128,6 @@ export function useAiProviderHost(options) {
 	async function setProviderEnabled(enabled) {
 		const provider = activeProvider.value;
 		if (!provider) return;
-		if (!hasWebViewHost()) {
-			provider.enabled = enabled;
-			showToast(enabled ? `已启用 ${provider.name}` : `已禁用 ${provider.name}`);
-			return;
-		}
 
 		await runMutation(async () => {
 			if (!provider.connectionId) {
@@ -232,14 +147,6 @@ export function useAiProviderHost(options) {
 	async function deleteProvider() {
 		const provider = activeProvider.value;
 		if (!provider?.connectionId) return;
-		if (!hasWebViewHost()) {
-			provider.connectionId = null;
-			provider.isConfigured = false;
-			provider.enabled = false;
-			provider.models = [];
-			provider.total = 0;
-			return;
-		}
 
 		await runMutation(async () => {
 			await request('ai-providers/delete-provider', { providerId: provider.connectionId });
@@ -251,10 +158,6 @@ export function useAiProviderHost(options) {
 	async function setAllModelsEnabled(enabled) {
 		const provider = activeProvider.value;
 		if (!provider?.connectionId || provider.models.length === 0) return;
-		if (!hasWebViewHost()) {
-			provider.models.forEach((model) => { model.on = enabled; });
-			return;
-		}
 
 		await runMutation(async () => {
 			await request('ai-providers/set-all-models-enabled', {
@@ -268,10 +171,6 @@ export function useAiProviderHost(options) {
 
 	async function setModelEnabled(model, enabled) {
 		if (!model?.profileId || pendingModelIds.has(model.profileId)) return;
-		if (!hasWebViewHost()) {
-			model.on = enabled;
-			return;
-		}
 
 		pendingModelIds.add(model.profileId);
 		try {
@@ -290,11 +189,6 @@ export function useAiProviderHost(options) {
 	async function deleteModel(model) {
 		const provider = activeProvider.value;
 		if (!provider?.connectionId || !model?.profileId || !window.confirm(`删除模型 ${model.name}？`)) return;
-		if (!hasWebViewHost()) {
-			provider.models = provider.models.filter((item) => item.profileId !== model.profileId);
-			provider.total = provider.models.length;
-			return;
-		}
 
 		pendingModelIds.add(model.profileId);
 		try {
@@ -315,10 +209,6 @@ export function useAiProviderHost(options) {
 	async function fetchModelList() {
 		const provider = activeProvider.value;
 		if (!provider?.connectionId || !provider.supportsModelListing || fetchingModels.value) return;
-		if (!hasWebViewHost()) {
-			showToast('模型列表已是最新（浏览器预览）');
-			return;
-		}
 
 		fetchingModels.value = true;
 		try {
@@ -337,12 +227,6 @@ export function useAiProviderHost(options) {
 	async function checkConnectivity() {
 		const provider = activeProvider.value;
 		if (!provider?.connectionId || !selectedCheckModel.value || checking.value) return;
-		if (!hasWebViewHost()) {
-			checkStatus.visible = true;
-			checkStatus.state = 'ok';
-			checkStatus.text = '连接正常 · 浏览器预览';
-			return;
-		}
 
 		checking.value = true;
 		checkStatus.visible = true;
@@ -372,8 +256,7 @@ export function useAiProviderHost(options) {
 			return;
 		}
 
-		if (hasWebViewHost()) postToHost({ type: 'open-link', href });
-		else window.open(href, '_blank', 'noopener,noreferrer');
+		post({ type: 'open-link', href });
 	}
 
 	function openProviderDialog() {
@@ -393,12 +276,6 @@ export function useAiProviderHost(options) {
 		}
 		if (!isAbsoluteUrl(base)) {
 			showToast('请输入完整的 Base URL');
-			return;
-		}
-
-		if (!hasWebViewHost()) {
-			showToast('自定义服务商已添加（浏览器预览）');
-			providerDialogOpen.value = false;
 			return;
 		}
 
@@ -435,17 +312,6 @@ export function useAiProviderHost(options) {
 	async function createModel() {
 		const provider = activeProvider.value;
 		if (!provider?.connectionId || !modelDraft.name.trim() || !modelDraft.model.trim()) return;
-		if (!hasWebViewHost()) {
-			provider.models.push(normalizeModel({
-				modelProfileId: `preview-${Date.now()}`,
-				name: modelDraft.name,
-				model: modelDraft.model,
-				apiFormat: modelDraft.apiFormat,
-				enabled: true,
-			}));
-			modelDialogOpen.value = false;
-			return;
-		}
 
 		await runMutation(async () => {
 			const payload = await request('ai-providers/upsert-model', {
@@ -499,10 +365,6 @@ export function useAiProviderHost(options) {
 	}
 
 	onMounted(loadState);
-	onUnmounted(() => {
-		pendingRequests.forEach((pending) => window.clearTimeout(pending.timer));
-		pendingRequests.clear();
-	});
 
 	return {
 		apiKeyInput,
@@ -515,7 +377,6 @@ export function useAiProviderHost(options) {
 		customProtocols,
 		providerDraft,
 		pendingModelIds,
-		handleMessage,
 		selectProvider,
 		markApiKeyDirty,
 		saveApiKey,
@@ -592,22 +453,6 @@ function normalizeModel(raw) {
 	};
 }
 
-function normalizeFallbackProvider(provider) {
-	const catalogId = fallbackCatalogId(provider.id);
-	return normalizeProvider({
-		...provider,
-		connectionId: `preview-${provider.id}`,
-		catalogId,
-		isConfigured: true,
-		keyMask: provider.key || '',
-		authKind: catalogId === 'ollama' ? 1 : 0,
-		getApiKeyUrl: '',
-		supportsModelListing: catalogId !== 'azure-openai',
-		defaultApiFormat: fallbackApiFormat(catalogId),
-		supportedFormats: [fallbackApiFormat(catalogId)],
-	});
-}
-
 function findMatchingProvider(previous, candidates) {
 	if (!previous) return null;
 	return candidates.find((provider) => previous.connectionId && provider.connectionId === previous.connectionId)
@@ -642,18 +487,4 @@ function logoKind(catalogId) {
 	if (catalogId === 'google-gemini') return 'gemini';
 	if (catalogId === 'azure-openai') return 'azure';
 	return catalogId;
-}
-
-function fallbackCatalogId(id) {
-	if (id === 'gemini') return 'google-gemini';
-	if (id === 'azure') return 'azure-openai';
-	if (['openai', 'anthropic', 'deepseek', 'openrouter', 'ollama'].includes(id)) return id;
-	return 'custom';
-}
-
-function fallbackApiFormat(catalogId) {
-	if (catalogId === 'anthropic') return 2;
-	if (catalogId === 'google-gemini') return 0;
-	if (catalogId === 'ollama') return 4;
-	return catalogId === 'openai' ? 1 : 0;
 }

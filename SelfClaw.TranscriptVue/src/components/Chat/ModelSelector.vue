@@ -4,6 +4,9 @@ import { ChevronDown, ChevronRight, Check, Bot, Terminal } from 'lucide-vue-next
 import claudeIcon from '../../../assets/agents-icons/claude.svg';
 import codexIcon from '../../../assets/agents-icons/codex.svg';
 import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
+import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js';
+
+const { request, requestLatest, post } = useHostBridge();
 
 /**
  * 模型选择器（药丸按钮 + 设置弹出面板）
@@ -44,8 +47,6 @@ const activeDirectModelProfileId = ref('');
 const selectedCliId = ref('');
 const loaded = ref(false);
 const loadError = ref('');
-let requestCounter = 0;
-let latestDirectRequestId = '';
 
 const selectedAgent = computed(() => detectedAgents.value.find((agent) => agent.id === selectedCliId.value) || null);
 const selectedDirectModel = computed(() =>
@@ -100,31 +101,26 @@ const modelLabel = computed(() => {
 	return activeModel.value === defaultModel ? selectedAgent.value.name : activeModel.value;
 });
 
-function postToHost(message) {
-	window.chrome?.webview?.postMessage(message);
-}
-
-function requestSettings() {
-	postToHost({
-		type: 'get-programming-assistant-settings',
-		requestId: `composer-cli-${Date.now()}-${++requestCounter}`,
-	});
-
-	if (!window.chrome?.webview) {
+// CLI 与 Direct 两种来源共用 composer-source 这个 key：切换模式会重新拉取，
+// 上一模式尚未返回的请求被 requestLatest 作废，回包不会串到新模式上。
+async function requestSettings() {
+	try {
+		const payload = await requestLatest('composer-source', 'get-programming-assistant-settings');
+		applySettings(payload);
+	} catch (error) {
+		if (isSuperseded(error)) return;
+		loadError.value = `CLI 设置同步失败：${error?.message || error}`;
 		loaded.value = true;
 	}
 }
 
-function requestDirectModels() {
-	const requestId = `composer-direct-${Date.now()}-${++requestCounter}`;
-	latestDirectRequestId = requestId;
-	postToHost({
-		type: 'ai-providers/list-enabled-models',
-		requestId,
-	});
-
-	if (!window.chrome?.webview) {
-		directModels.value = [];
+async function requestDirectModels() {
+	try {
+		const payload = await requestLatest('composer-source', 'ai-providers/list-enabled-models');
+		applyDirectModels(payload);
+	} catch (error) {
+		if (isSuperseded(error)) return;
+		loadError.value = `模型同步失败：${error?.message || error}`;
 		loaded.value = true;
 	}
 }
@@ -172,39 +168,21 @@ function applySettings(payload) {
 	loaded.value = true;
 }
 
-function onHostMessage(event) {
-	const payload = event?.data;
-	if (payload?.type === 'programming-assistant-settings' && !isDirect.value) {
-		applySettings(payload);
-		return;
-	}
-
-	if (payload?.type === 'ai-providers/list-enabled-models' && isDirect.value) {
-		if (payload.requestId && payload.requestId !== latestDirectRequestId) {
-			return;
-		}
-
-		directModels.value = (Array.isArray(payload.models) ? payload.models : [])
-			.filter((model) => model?.modelProfileId)
-			.map((model) => ({
-				modelProfileId: String(model.modelProfileId),
-				name: model.name || model.model || 'Unnamed model',
-				model: model.model || '',
-				providerName: model.providerName || 'Provider',
-			}));
-		const persistedId = payload.defaultModelProfileId ? String(payload.defaultModelProfileId) : '';
-		activeDirectModelProfileId.value = directModels.value.some((model) => model.modelProfileId === persistedId)
-			? persistedId
-			: '';
-		loadError.value = payload.error ? `模型同步失败：${payload.error}` : '';
-		loaded.value = true;
-		return;
-	}
-
-	if (payload?.type === 'ai-providers/set-default-model' && isDirect.value && payload.error) {
-		loadError.value = `默认模型保存失败：${payload.error}`;
-		requestDirectModels();
-	}
+function applyDirectModels(payload) {
+	directModels.value = (Array.isArray(payload.models) ? payload.models : [])
+		.filter((model) => model?.modelProfileId)
+		.map((model) => ({
+			modelProfileId: String(model.modelProfileId),
+			name: model.name || model.model || 'Unnamed model',
+			model: model.model || '',
+			providerName: model.providerName || 'Provider',
+		}));
+	const persistedId = payload.defaultModelProfileId ? String(payload.defaultModelProfileId) : '';
+	activeDirectModelProfileId.value = directModels.value.some((model) => model.modelProfileId === persistedId)
+		? persistedId
+		: '';
+	loadError.value = payload.error ? `模型同步失败：${payload.error}` : '';
+	loaded.value = true;
 }
 
 function togglePanel() {
@@ -235,11 +213,7 @@ function pickMode(mode) {
 	}
 
 	selectedMode.value = mode;
-	postToHost({
-		type: 'select-composer-mode',
-		requestId: `composer-mode-${Date.now()}-${++requestCounter}`,
-		mode,
-	});
+	post({ type: 'select-composer-mode', mode });
 }
 
 function pickAgent(agent) {
@@ -251,14 +225,10 @@ function pickAgent(agent) {
 	activeModel.value = agent.models?.[0] || defaultModel;
 	activeReasoning.value = agent.reasoningLevels?.[0] || defaultModel;
 	emit('update:agent', agent.id);
-	postToHost({
-		type: 'select-programming-cli',
-		requestId: `composer-cli-${Date.now()}-${++requestCounter}`,
-		cliId: agent.id,
-	});
+	post({ type: 'select-programming-cli', cliId: agent.id });
 }
 
-function pickDirectModel(model) {
+async function pickDirectModel(model) {
 	if (!model?.modelProfileId || model.modelProfileId === activeDirectModelProfileId.value) {
 		menuOpen.value = false;
 		return;
@@ -268,12 +238,17 @@ function pickDirectModel(model) {
 	menuOpen.value = false;
 	loadError.value = '';
 	emit('update:model', model.modelProfileId);
-	postToHost({
-		type: 'ai-providers/set-default-model',
-		requestId: `composer-direct-default-${Date.now()}-${++requestCounter}`,
-		scope: 'desktop-default',
-		modelProfileId: model.modelProfileId,
-	});
+	try {
+		await request('ai-providers/set-default-model', {
+			scope: 'desktop-default',
+			modelProfileId: model.modelProfileId,
+		});
+	} catch (error) {
+		if (isSuperseded(error)) return;
+		// 保存失败：提示并重新拉取，把选中态回滚到宿主的真实值。
+		loadError.value = `默认模型保存失败：${error?.message || error}`;
+		requestDirectModels();
+	}
 }
 
 function toggleMenu() {
@@ -287,11 +262,7 @@ function pickModel(m) {
 	menuOpen.value = false;
 	emit('update:model', m);
 	// 持久化到宿主（desktop-settings.json 的 programming_assistant.selectedModel），下次启动默认选中。
-	postToHost({
-		type: 'select-programming-model',
-		requestId: `composer-model-${Date.now()}-${++requestCounter}`,
-		model: m,
-	});
+	post({ type: 'select-programming-model', model: m });
 }
 
 function toggleReasoningMenu() {
@@ -305,11 +276,7 @@ function pickReasoning(level) {
 	reasoningMenuOpen.value = false;
 	emit('update:reasoning', level);
 	// 持久化到 programming_assistant.selectedReasoningLevel；Codex 回合会转成 -c model_reasoning_effort。
-	postToHost({
-		type: 'select-programming-reasoning',
-		requestId: `composer-reasoning-${Date.now()}-${++requestCounter}`,
-		reasoningLevel: level,
-	});
+	post({ type: 'select-programming-reasoning', reasoningLevel: level });
 }
 
 function onDocClick(e) {
@@ -321,13 +288,11 @@ function onKeydown(e) {
 onMounted(() => {
 	document.addEventListener('click', onDocClick);
 	document.addEventListener('keydown', onKeydown);
-	window.chrome?.webview?.addEventListener('message', onHostMessage);
 	requestActiveSource();
 });
 onBeforeUnmount(() => {
 	document.removeEventListener('click', onDocClick);
 	document.removeEventListener('keydown', onKeydown);
-	window.chrome?.webview?.removeEventListener('message', onHostMessage);
 });
 
 watch(isDirect, () => {

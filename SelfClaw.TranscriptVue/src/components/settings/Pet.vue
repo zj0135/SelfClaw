@@ -1,6 +1,9 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { Eye, EyeOff, Check, ImagePlus, Globe, Sparkles } from 'lucide-vue-next'
+import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js'
+
+const { requestLatest } = useHostBridge()
 
 const DEFAULT_PET_ID = 'yorha-sit-2b'
 
@@ -44,8 +47,6 @@ const petVisible = ref(false)
 const selectedPet = ref(defaultPetId)
 const syncPending = ref(false)
 const syncError = ref('')
-const pendingRequests = new Set()
-let requestSeq = 0
 
 function buildBuiltinPets() {
   return Object.entries(manifestModules)
@@ -127,68 +128,39 @@ function onTabKey(event, index) {
 }
 
 function toggleVisible() {
-  const next = !petVisible.value
-  syncError.value = ''
-  sendHostMessage('set-pet-visible', { enabled: next })
+  syncPetSettings('set-pet-visible', { enabled: !petVisible.value })
 }
 
 function selectPet(id) {
   const next = normalizePetId(id)
   if (selectedPet.value === next) return
 
-  syncError.value = ''
-  sendHostMessage('select-builtin-pet', { petId: next })
+  syncPetSettings('select-builtin-pet', { petId: next })
 }
 
-function sendHostMessage(type, payload = {}) {
-  const webview = window.chrome?.webview
-  if (!webview) {
-    syncError.value = '需要在桌面应用中读取 desktop-settings.json'
-    return null
-  }
-
-  const requestId = `pet-${Date.now()}-${++requestSeq}`
-  pendingRequests.add(requestId)
+// 三种操作（读取 / 显隐 / 选宠）都以 pet-settings 回包收尾，故共用一段请求逻辑。
+// 用 pet 这个固定 key 走 requestLatest：连续操作只认最新一次回包。
+async function syncPetSettings(type, payload = {}) {
+  syncError.value = ''
   syncPending.value = true
-  webview.postMessage({ type, requestId, ...payload })
-  return requestId
-}
-
-function requestHostSettings() {
-  sendHostMessage('get-pet-settings')
-}
-
-function applyHostSettings(payload) {
-  const requestId = payload?.requestId
-  if (requestId && pendingRequests.size > 0 && !pendingRequests.has(requestId)) {
-    return
+  try {
+    const result = await requestLatest('pet', type, payload)
+    if (result?.error) {
+      syncError.value = result.error
+    } else {
+      petVisible.value = Boolean(result?.enabled)
+      selectedPet.value = normalizePetId(result?.selectedPetId)
+    }
+  } catch (error) {
+    // 被更新的请求取代：让那次请求继续持有 syncPending，这里静默退出。
+    if (isSuperseded(error)) return
+    syncError.value = error?.message || '与桌面应用同步失败'
   }
-
-  if (requestId) {
-    pendingRequests.delete(requestId)
-  }
-  syncPending.value = pendingRequests.size > 0
-
-  if (payload?.error) {
-    syncError.value = payload.error
-    return
-  }
-
-  syncError.value = ''
-  petVisible.value = Boolean(payload?.enabled)
-  selectedPet.value = normalizePetId(payload?.selectedPetId)
+  syncPending.value = false
 }
 
 onMounted(() => {
-  requestHostSettings()
-})
-
-defineExpose({
-  handleMessage(payload) {
-    if (payload?.type === 'pet-settings') {
-      applyHostSettings(payload)
-    }
-  },
+  syncPetSettings('get-pet-settings')
 })
 </script>
 
