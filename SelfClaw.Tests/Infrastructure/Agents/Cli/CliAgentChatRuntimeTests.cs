@@ -178,18 +178,14 @@ public sealed class CliAgentChatRuntimeTests
             [],
             instructions);
 
-        return new ChatTurnRequest(
+        return new CliChatTurnRequest(
             conversationId,
-            ModelProfileId: null,
             WorkspaceRoot: null,
-            ConversationMode.Programming,
             agent,
+            [message],
             kind,
             model,
-            reasoningEffort,
-            ToolPermissionMode.FullAccess,
-            ToolApprovalHandler: null,
-            [message]);
+            reasoningEffort);
     }
 
     private static async Task<List<AgentStreamEvent>> CollectAsync(IAsyncEnumerable<AgentStreamEvent> source)

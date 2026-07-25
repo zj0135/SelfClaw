@@ -42,11 +42,15 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return StreamCoreAsync(request, cancellationToken);
+        // The dispatcher routes by Mode, so a Direct turn always arrives as a DirectChatTurnRequest.
+        var directRequest = request as DirectChatTurnRequest
+            ?? throw new ArgumentException(
+                $"The Direct runtime requires a {nameof(DirectChatTurnRequest)}.", nameof(request));
+        return StreamCoreAsync(directRequest, cancellationToken);
     }
 
     private async IAsyncEnumerable<AgentStreamEvent> StreamCoreAsync(
-        ChatTurnRequest request,
+        DirectChatTurnRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var channel = Channel.CreateUnbounded<AgentStreamEvent>(new UnboundedChannelOptions
@@ -74,7 +78,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     }
 
     private async Task ProduceEventsAsync(
-        ChatTurnRequest request,
+        DirectChatTurnRequest request,
         ChannelWriter<AgentStreamEvent> writer,
         CancellationToken cancellationToken)
     {
@@ -222,7 +226,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         }
     }
 
-    private static IReadOnlyList<ChatMessage> BuildMessages(ChatTurnRequest request)
+    private static IReadOnlyList<ChatMessage> BuildMessages(DirectChatTurnRequest request)
     {
         var messages = new List<ChatMessage>();
         if (!string.IsNullOrWhiteSpace(request.Agent.Instructions))

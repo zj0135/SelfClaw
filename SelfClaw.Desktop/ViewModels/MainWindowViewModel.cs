@@ -30,7 +30,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private const string AttachmentHostName = "attachments.selfclaw.local";
     private readonly IConversationRepository _conversationRepository;
     private readonly IAgentChatRuntime _agentChatRuntime;
-    private readonly DesktopTurnFinalizer _turnFinalizer;
+    private readonly ConversationTurnEngine _turnEngine;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly DesktopNotificationService _desktopNotificationService;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
@@ -70,7 +70,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public MainWindowViewModel(
         IConversationRepository conversationRepository,
         IAgentChatRuntime agentChatRuntime,
-        DesktopTurnFinalizer turnFinalizer,
+        ConversationTurnEngine turnEngine,
         DesktopToolApprovalHandler toolApprovalHandler,
         DesktopNotificationService desktopNotificationService,
         MarkdownHtmlRenderer markdownHtmlRenderer,
@@ -82,7 +82,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _conversationRepository = conversationRepository;
         _agentChatRuntime = agentChatRuntime;
-        _turnFinalizer = turnFinalizer;
+        _turnEngine = turnEngine;
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
         _markdownHtmlRenderer = markdownHtmlRenderer;
@@ -691,7 +691,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow,
                 Attachments: userAttachments);
-            ReplaceMessage(runtimeState, userMessage);
+            runtimeState.ReplaceMessage(userMessage);
             await _conversationRepository.UpsertMessageAsync(userMessage);
 
             if (conversation.Title == "New chat")
@@ -707,34 +707,27 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             PublishRuntimeState(runtimeState, true);
 
             var requestMessages = runtimeState.Messages.ToArray();
-            // The turn targets the CLI picked in settings / the composer selector, along with the model and
-            // reasoning effort chosen for it; a null selection means nothing is selected (or detected) and
-            // the runtime fails the turn with actionable guidance. Model/effort are null when the user left
-            // the CLI's own default, in which case no --model / -c override is passed.
-            var cliSelection = await _programmingAssistantSettings.GetSelectedInvocationAsync(cancellationToken);
             turnState = new AgentTurnState(runtimeAgent);
+
+            // Build only the mode's own request shape: a Direct turn never resolves the CLI selection, and a
+            // CLI turn never carries the provider model / approval fields. The composer's resolved mode decides.
+            var request = await BuildChatTurnRequestAsync(
+                runtimeAgent,
+                conversation.Id,
+                selectedModelProfileId,
+                selectedWorkspaceRoot,
+                selectedToolPermissionMode,
+                requestMessages,
+                cancellationToken);
 
             // Surface the assistant placeholder immediately: CLI process startup can take seconds
             // before the first stream event (RunStarted) arrives, and the transcript would
             // otherwise show nothing but the user message.
-            EnsureAssistantMessage(runtimeState, turnState);
+            _turnEngine.BeginAssistantMessage(runtimeState, turnState);
 
-            await foreach (var update in _agentChatRuntime.StreamTurnAsync(
-                               new ChatTurnRequest(
-                                   conversation.Id,
-                                   selectedModelProfileId,
-                                   selectedWorkspaceRoot,
-                                   ConversationMode.Programming,
-                                   runtimeAgent,
-                                   cliSelection?.Kind,
-                                   cliSelection?.Model,
-                                   cliSelection?.ReasoningEffort,
-                                   selectedToolPermissionMode,
-                                   _toolApprovalHandler,
-                                   requestMessages),
-                               cancellationToken))
+            await foreach (var update in _agentChatRuntime.StreamTurnAsync(request, cancellationToken))
             {
-                await HandleAgentStreamEventAsync(runtimeState, turnState, update, cancellationToken);
+                await _turnEngine.ApplyEventAsync(runtimeState, turnState, update, cancellationToken);
             }
 
             PublishConversationCompletedNotification(conversation, runtimeState.Messages);
@@ -743,7 +736,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             if (runtimeState is not null && turnState is not null)
             {
-                await FinalizeInterruptedTurnAsync(
+                await _turnEngine.FinalizeInterruptedAsync(
                     runtimeState,
                     turnState,
                     TurnFinalizationKind.Cancelled,
@@ -755,7 +748,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _logger.LogError(exception, "The chat runtime canceled without a user cancellation request.");
             if (runtimeState is not null && turnState is not null)
             {
-                await FinalizeInterruptedTurnAsync(
+                await _turnEngine.FinalizeInterruptedAsync(
                     runtimeState,
                     turnState,
                     TurnFinalizationKind.Failed,
@@ -772,7 +765,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (turnState is not null)
             {
-                await FinalizeInterruptedTurnAsync(
+                await _turnEngine.FinalizeInterruptedAsync(
                     runtimeState,
                     turnState,
                     TurnFinalizationKind.Failed,
@@ -787,6 +780,45 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 runtimeState.CancellationTokenSource.Dispose();
             }
         }
+    }
+
+    /// <summary>
+    /// Builds the request shape for the resolved mode: a Direct turn carries the model profile, permission mode
+    /// and approval handler; a CLI turn resolves the selected CLI / model / reasoning effort and carries none of
+    /// the provider fields. Only the CLI branch reads <see cref="ProgrammingAssistantSettingsService"/>.
+    /// </summary>
+    private async Task<ChatTurnRequest> BuildChatTurnRequestAsync(
+        AgentRuntimeDefinition runtimeAgent,
+        Guid conversationId,
+        Guid? selectedModelProfileId,
+        WorkspaceRoot? selectedWorkspaceRoot,
+        ToolPermissionMode selectedToolPermissionMode,
+        IReadOnlyList<MessageRecord> requestMessages,
+        CancellationToken cancellationToken)
+    {
+        if (runtimeAgent.Mode == AgentExecutionMode.Cli)
+        {
+            // A null selection means nothing is selected (or detected); the CLI runtime fails the turn with
+            // actionable guidance. Model / effort are null when the user left the CLI's own default.
+            var cliSelection = await _programmingAssistantSettings.GetSelectedInvocationAsync(cancellationToken);
+            return new CliChatTurnRequest(
+                conversationId,
+                selectedWorkspaceRoot,
+                runtimeAgent,
+                requestMessages,
+                cliSelection?.Kind,
+                cliSelection?.Model,
+                cliSelection?.ReasoningEffort);
+        }
+
+        return new DirectChatTurnRequest(
+            conversationId,
+            selectedWorkspaceRoot,
+            runtimeAgent,
+            requestMessages,
+            selectedModelProfileId,
+            selectedToolPermissionMode,
+            _toolApprovalHandler);
     }
 
     public void Dispose()

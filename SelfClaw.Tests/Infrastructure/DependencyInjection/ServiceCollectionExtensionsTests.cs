@@ -36,20 +36,16 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         using var provider = services.BuildServiceProvider();
         await provider.GetRequiredService<IAiProviderRepository>().InitializeAsync();
         var runtime = provider.GetRequiredService<IAgentChatRuntime>();
-        var request = new ChatTurnRequest(
+        var request = new DirectChatTurnRequest(
             Guid.NewGuid(),
-            ModelProfileId: null,
             WorkspaceRoot: null,
-            ConversationMode.Programming,
             new AgentRuntimeDefinition(
                 "direct", "Direct", "test", AgentExecutionMode.Direct,
                 AgentRuntimeDefinition.SystemToolPolicy, [], [], [], ""),
-            CliAgent: null,
-            CliModel: null,
-            CliReasoningEffort: null,
+            Messages: [],
+            ModelProfileId: null,
             ToolPermissionMode.RequireApproval,
-            ToolApprovalHandler: null,
-            Messages: []);
+            ToolApprovalHandler: null);
 
         var events = new List<AgentStreamEvent>();
         await foreach (var streamEvent in runtime.StreamTurnAsync(request))

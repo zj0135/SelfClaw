@@ -129,26 +129,22 @@ public sealed class DirectAgentChatRuntimeTests
         MessageRecord Message(MessageRole role, string text, MessageStatus status = MessageStatus.Completed)
             => new(Guid.NewGuid(), conversationId, role, text, status, now, now);
 
-        return new ChatTurnRequest(
+        return new DirectChatTurnRequest(
             conversationId,
-            modelProfileId,
             workspace,
-            ConversationMode.Programming,
             new AgentRuntimeDefinition(
                 "direct-test", "Direct", "test", AgentExecutionMode.Direct,
                 AgentRuntimeDefinition.SystemToolPolicy, [], [], [], "Follow project instructions."),
-            CliAgent: null,
-            CliModel: null,
-            CliReasoningEffort: null,
-            ToolPermissionMode.FullAccess,
-            ToolApprovalHandler: null,
             [
                 Message(MessageRole.System, "ignored system history"),
                 Message(MessageRole.User, "user prompt"),
                 Message(MessageRole.Assistant, "failed answer", MessageStatus.Failed),
                 Message(MessageRole.Assistant, "cancelled answer", MessageStatus.Cancelled),
                 Message(MessageRole.Assistant, "prior answer")
-            ]);
+            ],
+            modelProfileId,
+            ToolPermissionMode.FullAccess,
+            ToolApprovalHandler: null);
     }
 
     private static WorkspaceRoot CreateWorkspace()

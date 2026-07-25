@@ -77,3 +77,7 @@ SelfClaw.Desktop/Assets/TranscriptVue/
 CLAUDE.md
 Properties/
 *.md
+!CONTEXT.md
+!CONTEXT-MAP.md
+!docs/agents/*.md
+!docs/adr/*.md

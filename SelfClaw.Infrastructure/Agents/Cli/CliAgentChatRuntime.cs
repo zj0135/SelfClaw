@@ -59,8 +59,12 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        // The dispatcher routes by Mode, so a CLI turn always arrives as a CliChatTurnRequest.
+        var cliRequest = request as CliChatTurnRequest
+            ?? throw new ArgumentException(
+                $"The CLI runtime requires a {nameof(CliChatTurnRequest)}.", nameof(request));
 
-        if (request.CliAgent is not { } agentKind)
+        if (cliRequest.CliAgent is not { } agentKind)
         {
             yield return new RunCompletedEvent(
                 RunCompletionStatus.Failed,
@@ -79,7 +83,7 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
             yield break;
         }
 
-        var prompt = ExtractPrompt(request.Messages);
+        var prompt = ExtractPrompt(cliRequest.Messages);
         if (string.IsNullOrWhiteSpace(prompt))
         {
             yield return new RunCompletedEvent(
@@ -90,15 +94,15 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
         }
 
         var storedSessionId = await _sessionStore
-            .GetSessionIdAsync(request.ConversationId, agentKind, cancellationToken)
+            .GetSessionIdAsync(cliRequest.ConversationId, agentKind, cancellationToken)
             .ConfigureAwait(false);
 
         var preparation = new CliTurnPreparation(
             prompt,
             storedSessionId,
-            ComposeSystemPrompt(request.Agent),
-            string.IsNullOrWhiteSpace(request.CliModel) ? null : request.CliModel,
-            string.IsNullOrWhiteSpace(request.CliReasoningEffort) ? null : request.CliReasoningEffort);
+            ComposeSystemPrompt(cliRequest.Agent),
+            string.IsNullOrWhiteSpace(cliRequest.CliModel) ? null : cliRequest.CliModel,
+            string.IsNullOrWhiteSpace(cliRequest.CliReasoningEffort) ? null : cliRequest.CliReasoningEffort);
 
         // Resolve the executable up front so a missing CLI surfaces as a clean failure rather than an
         // exception bubbling out of the iterator.
@@ -124,7 +128,7 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
         var startInfo = new CliProcessStartInfo
         {
             Invocation = invocation,
-            WorkingDirectory = ResolveWorkingDirectory(request.WorkspaceRoot),
+            WorkingDirectory = ResolveWorkingDirectory(cliRequest.WorkspaceRoot),
             // The CLI uses its own local configuration (API key / base URL / model), so SelfClaw injects
             // nothing into the child environment. A selected profile, if any, no longer travels to the agent.
         };
@@ -200,7 +204,7 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
                         if (!string.IsNullOrWhiteSpace(started.SessionId))
                         {
                             await _sessionStore
-                                .SetSessionIdAsync(request.ConversationId, agentKind, started.SessionId, cancellationToken)
+                                .SetSessionIdAsync(cliRequest.ConversationId, agentKind, started.SessionId, cancellationToken)
                                 .ConfigureAwait(false);
                         }
                     }

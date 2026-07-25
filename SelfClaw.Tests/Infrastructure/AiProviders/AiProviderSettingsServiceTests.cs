@@ -35,7 +35,7 @@ public sealed class AiProviderSettingsServiceTests
 
         var state = await service.GetStateAsync();
 
-        state.Providers.Should().HaveCount(8);
+        state.Providers.Should().HaveCount(4);
         state.DefaultModelProfileId.Should().Be(profile.Id);
         var openAi = state.Providers.Single(provider => provider.CatalogId == "openai");
         openAi.ConnectionId.Should().Be(connection.Id);

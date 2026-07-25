@@ -29,9 +29,9 @@ public sealed class DispatchingAgentChatRuntime : IAgentChatRuntime
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        return _adapters.TryGetValue(request.Agent.Mode, out var adapter)
+        return _adapters.TryGetValue(request.Mode, out var adapter)
             ? EnforceProtocolAsync(adapter, request, cancellationToken)
-            : UnsupportedMode(request.Agent.Mode, cancellationToken);
+            : UnsupportedMode(request.Mode, cancellationToken);
     }
 
     private async IAsyncEnumerable<AgentStreamEvent> EnforceProtocolAsync(

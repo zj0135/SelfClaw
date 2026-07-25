@@ -52,6 +52,7 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<DesktopNotificationService>();
             builder.Services.AddSingleton<DesktopNotificationActivationService>();
             builder.Services.AddSingleton<DesktopTurnFinalizer>();
+            builder.Services.AddSingleton<ConversationTurnEngine>();
             builder.Services.AddSingleton<ProgrammingAssistantSettingsService>();
             builder.Services.AddSingleton<AiProviderSettingsBridge>();
             builder.Services.AddSingleton<PetService>();

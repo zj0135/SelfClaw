@@ -153,20 +153,28 @@ public sealed class DispatchingAgentChatRuntimeTests
         => new(adapters);
 
     private static ChatTurnRequest CreateRequest(AgentExecutionMode mode)
-        => new(
-            Guid.NewGuid(),
-            ModelProfileId: null,
-            WorkspaceRoot: null,
-            ConversationMode.Programming,
-            new AgentRuntimeDefinition(
-                "test", "Test", "test", mode,
-                AgentRuntimeDefinition.SystemToolPolicy, [], [], [], ""),
-            CliAgent: null,
-            CliModel: null,
-            CliReasoningEffort: null,
-            ToolPermissionMode.RequireApproval,
-            ToolApprovalHandler: null,
-            Messages: []);
+    {
+        var agent = new AgentRuntimeDefinition(
+            "test", "Test", "test", mode,
+            AgentRuntimeDefinition.SystemToolPolicy, [], [], [], "");
+        return mode == AgentExecutionMode.Cli
+            ? new CliChatTurnRequest(
+                Guid.NewGuid(),
+                WorkspaceRoot: null,
+                agent,
+                Messages: [],
+                CliAgent: null,
+                CliModel: null,
+                CliReasoningEffort: null)
+            : new DirectChatTurnRequest(
+                Guid.NewGuid(),
+                WorkspaceRoot: null,
+                agent,
+                Messages: [],
+                ModelProfileId: null,
+                ToolPermissionMode.RequireApproval,
+                ToolApprovalHandler: null);
+    }
 
     private static async Task<List<AgentStreamEvent>> CollectAsync(IAsyncEnumerable<AgentStreamEvent> events)
     {

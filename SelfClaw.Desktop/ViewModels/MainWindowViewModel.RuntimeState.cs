@@ -1,55 +1,11 @@
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services;
+using SelfClaw.Desktop.Services.Runtime;
 
 namespace SelfClaw.Desktop.ViewModels;
 
 public sealed partial class MainWindowViewModel
 {
-    private sealed class ConversationRuntimeState : IDisposable
-    {
-        public ConversationRuntimeState(
-            ConversationRecord conversation,
-            IEnumerable<MessageRecord> messages,
-            IEnumerable<ToolExecutionRecord> toolRuns,
-            IReadOnlyDictionary<Guid, ToolRunAnchor> toolRunAnchors)
-        {
-            Conversation = conversation;
-            Messages.AddRange(messages);
-            ToolRuns.AddRange(toolRuns);
-            foreach (var item in toolRunAnchors)
-            {
-                ToolRunAnchors[item.Key] = item.Value;
-            }
-        }
-
-        public ConversationRecord Conversation { get; set; }
-
-        public Guid ConversationId => Conversation.Id;
-
-        public List<MessageRecord> Messages { get; } = [];
-
-        public List<ToolExecutionRecord> ToolRuns { get; } = [];
-
-        public Dictionary<Guid, ToolRunAnchor> ToolRunAnchors { get; } = [];
-
-        public HashSet<Guid> ActiveMessageIds { get; } = [];
-
-        /// <summary>Latest RunStatusEvent text, shown while the streaming message has no content yet.</summary>
-        public string? ActivityText { get; set; }
-
-        public CancellationTokenSource CancellationTokenSource { get; } = new();
-
-        public bool IsRunning { get; set; } = true;
-
-        public Task Completion => _completion.Task;
-
-        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public void MarkCompleted() => _completion.TrySetResult();
-
-        public void Dispose() => CancellationTokenSource.Dispose();
-    }
-
     private ConversationRuntimeState? GetSelectedRuntimeState()
         => SelectedConversation is { } conversation &&
            _conversationRuntimeStates.TryGetValue(conversation.Id, out var state)
@@ -87,6 +43,19 @@ public sealed partial class MainWindowViewModel
             sourceState?.Messages ?? messages ?? _messages,
             sourceState?.ToolRuns ?? toolRuns ?? _toolRuns,
             sourceState?.ToolRunAnchors ?? toolRunAnchors ?? _toolRunAnchors);
+        // The turn engine reduces stream events into this state and signals here; the ViewModel owns the
+        // WPF-side publish, throttling streaming ticks and flushing the terminal snapshot immediately.
+        state.TranscriptChanged += immediate =>
+        {
+            if (immediate)
+            {
+                PublishRuntimeStateNow(state, true);
+            }
+            else
+            {
+                PublishRuntimeState(state, true);
+            }
+        };
 
         _conversationRuntimeStates[conversation.Id] = state;
 
