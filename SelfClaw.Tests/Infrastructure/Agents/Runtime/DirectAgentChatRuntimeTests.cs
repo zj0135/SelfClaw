@@ -50,7 +50,7 @@ public sealed class DirectAgentChatRuntimeTests
         events.OfType<ToolCallStartedEvent>().Should().ContainSingle().Which.Kind.Should().Be(ToolCallKind.Read);
         events.OfType<ToolCallCompletedEvent>().Should().ContainSingle().Which.Should().Match<ToolCallCompletedEvent>(item =>
             item.ToolCallId == "call-1" && item.Status == ToolCallStatus.Completed &&
-            item.ResultSummary == "Read README.md." && item.ResultContent == "body");
+            item.ResultSummary == "Read README.md." && item.ResultContent == "1\tbody");
         events.OfType<UsageReportedEvent>().Should().ContainSingle().Which
             .Should().Be(new UsageReportedEvent(13, 6));
         events.Last().Should().Be(new RunCompletedEvent(RunCompletionStatus.Succeeded, "Hello world", null));
@@ -80,7 +80,7 @@ public sealed class DirectAgentChatRuntimeTests
 
         factory.ScopeCalls.Should().Equal(AiModelSelectionScopes.DesktopDefault);
         factory.LastInputs!.Tools.Select(tool => tool.Name).Should().Equal(
-            "list_files", "search_text", "read_file", "write_file", "run_shell_command");
+            "list_files", "glob_files", "search_text", "read_file", "write_file", "edit_file", "run_shell_command");
         events.Last().Should().Be(new RunCompletedEvent(RunCompletionStatus.Succeeded, "", null));
     }
 
@@ -257,9 +257,11 @@ public sealed class DirectAgentChatRuntimeTests
     private sealed class NoOpWorkspaceTools : IWorkspaceToolService
     {
         public Task<IReadOnlyList<WorkspaceFileEntry>> ListFilesAsync(string root, string? path, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>([]);
-        public Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(string root, string query, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WorkspaceSearchHit>>([]);
-        public Task<WorkspaceFileContent> ReadFileAsync(string root, string path, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<WorkspaceFileEntry>> GlobFilesAsync(string root, string pattern, string? path = null, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>([]);
+        public Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(string root, string query, WorkspaceSearchOptions? options = null, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WorkspaceSearchHit>>([]);
+        public Task<WorkspaceFileContent> ReadFileAsync(string root, string path, int? startLine = null, int? lineCount = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WorkspaceFileWriteResult> WriteFileAsync(string root, string path, string content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<WorkspaceFileWriteResult> EditFileAsync(string root, string path, string oldText, string newText, bool replaceAll = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ShellCommandResult> RunShellCommandAsync(string root, string command, int timeout, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

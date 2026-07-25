@@ -11,7 +11,7 @@ namespace SelfClaw.Tests.Infrastructure.Agents.Runtime;
 public sealed class WorkspaceAgentToolsetTests
 {
     [Fact]
-    public void CreateTools_exposes_the_five_bound_workspace_functions()
+    public void CreateTools_exposes_the_bound_workspace_functions()
     {
         var tools = CreateToolset(new FakeWorkspaceToolService()).CreateTools(
             CreateWorkspace(),
@@ -22,9 +22,11 @@ public sealed class WorkspaceAgentToolsetTests
         tools.Should().AllBeAssignableTo<AIFunction>();
         tools.Cast<AIFunction>().Select(tool => tool.Name).Should().Equal(
             "list_files",
+            "glob_files",
             "search_text",
             "read_file",
             "write_file",
+            "edit_file",
             "run_shell_command");
         tools.Cast<AIFunction>().Should().OnlyContain(tool => !string.IsNullOrWhiteSpace(tool.Description));
     }
@@ -109,6 +111,58 @@ public sealed class WorkspaceAgentToolsetTests
         service.ShellCalls.Should().ContainSingle().Which.Should().Be((workspace.RootPath, "dotnet test", 90));
     }
 
+    [Fact]
+    public async Task Approved_edit_executes_and_forwards_snippets()
+    {
+        var service = new FakeWorkspaceToolService();
+        var approval = new FakeApprovalHandler { Approved = true };
+        var workspace = CreateWorkspace();
+        var function = FindFunction(
+            CreateToolset(service).CreateTools(
+                workspace,
+                Guid.NewGuid(),
+                ToolPermissionMode.RequireApproval,
+                approval),
+            "edit_file");
+
+        await function.InvokeAsync(new AIFunctionArguments
+        {
+            ["relativePath"] = "src/app.cs",
+            ["oldText"] = "var x = 1;",
+            ["newText"] = "var x = 2;",
+            ["replaceAll"] = false
+        });
+
+        approval.Requests.Should().ContainSingle().Which.ToolName.Should().Be("edit_file");
+        service.EditCalls.Should().ContainSingle()
+            .Which.Should().Be((workspace.RootPath, "src/app.cs", "var x = 1;", "var x = 2;", false));
+    }
+
+    [Fact]
+    public async Task Rejected_edit_does_not_execute()
+    {
+        var service = new FakeWorkspaceToolService();
+        var approval = new FakeApprovalHandler { Approved = false };
+        var function = FindFunction(
+            CreateToolset(service).CreateTools(
+                CreateWorkspace(),
+                Guid.NewGuid(),
+                ToolPermissionMode.RequireApproval,
+                approval),
+            "edit_file");
+
+        var result = await function.InvokeAsync(new AIFunctionArguments
+        {
+            ["relativePath"] = "src/app.cs",
+            ["oldText"] = "a",
+            ["newText"] = "b",
+            ["replaceAll"] = false
+        });
+
+        service.EditCalls.Should().BeEmpty();
+        result.Should().BeOfType<JsonElement>().Which.GetString().Should().Be(WorkspaceAgentToolset.DeniedResult);
+    }
+
     private static WorkspaceAgentToolset CreateToolset(FakeWorkspaceToolService service) => new(service);
 
     private static WorkspaceRoot CreateWorkspace()
@@ -137,6 +191,7 @@ public sealed class WorkspaceAgentToolsetTests
     private sealed class FakeWorkspaceToolService : IWorkspaceToolService
     {
         public List<(string Root, string Path, string Content)> WriteCalls { get; } = [];
+        public List<(string Root, string Path, string OldText, string NewText, bool ReplaceAll)> EditCalls { get; } = [];
         public List<(string Root, string Command, int Timeout)> ShellCalls { get; } = [];
 
         public Task<IReadOnlyList<WorkspaceFileEntry>> ListFilesAsync(
@@ -145,17 +200,39 @@ public sealed class WorkspaceAgentToolsetTests
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>([]);
 
+        public Task<IReadOnlyList<WorkspaceFileEntry>> GlobFilesAsync(
+            string root,
+            string pattern,
+            string? relativePath = null,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>([]);
+
         public Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(
             string root,
             string query,
+            WorkspaceSearchOptions? options = null,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<WorkspaceSearchHit>>([]);
 
         public Task<WorkspaceFileContent> ReadFileAsync(
             string root,
             string relativePath,
+            int? startLine = null,
+            int? lineCount = null,
             CancellationToken cancellationToken = default)
             => Task.FromResult(new WorkspaceFileContent(relativePath, "content", false));
+
+        public Task<WorkspaceFileWriteResult> EditFileAsync(
+            string root,
+            string relativePath,
+            string oldText,
+            string newText,
+            bool replaceAll = false,
+            CancellationToken cancellationToken = default)
+        {
+            EditCalls.Add((root, relativePath, oldText, newText, replaceAll));
+            return Task.FromResult(new WorkspaceFileWriteResult(relativePath, true, true, newText.Length, "edited"));
+        }
 
         public Task<WorkspaceFileWriteResult> WriteFileAsync(
             string root,

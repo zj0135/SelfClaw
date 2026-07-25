@@ -292,9 +292,11 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     {
         "read_file" => ToolCallKind.Read,
         "write_file" => ToolCallKind.Edit,
+        "edit_file" => ToolCallKind.Edit,
         "run_shell_command" => ToolCallKind.Run,
         "search_text" => ToolCallKind.Search,
         "list_files" => ToolCallKind.List,
+        "glob_files" => ToolCallKind.List,
         _ => ToolCallKind.Other
     };
 

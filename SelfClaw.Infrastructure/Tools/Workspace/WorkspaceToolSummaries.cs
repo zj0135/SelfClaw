@@ -13,9 +13,17 @@ internal static class WorkspaceToolSummaries
         => $"Found {hits.Count} matching lines.";
 
     public static string Summarize(WorkspaceFileContent content)
-        => content.Truncated
-            ? $"Read {content.RelativePath} (truncated)."
-            : $"Read {content.RelativePath}.";
+    {
+        // Report the line window when the read was paged (EndLine set), so the
+        // model can see what slice of a large file it received.
+        var range = content.EndLine > 0 && content.TotalLines > 0
+            ? $" (lines {content.StartLine}-{content.EndLine} of {content.TotalLines})"
+            : string.Empty;
+
+        return content.Truncated
+            ? $"Read {content.RelativePath}{range} (truncated)."
+            : $"Read {content.RelativePath}{range}.";
+    }
 
     public static string Summarize(WorkspaceFileWriteResult result)
         => !result.Applied
@@ -62,16 +70,44 @@ internal static class WorkspaceToolSummaries
 
     public static string Describe(WorkspaceFileContent content)
     {
-        if (!content.Truncated)
+        // Render cat -n style line numbers anchored to the actual start line so the
+        // numbers line up with search hits and let the model page precisely.
+        var builder = new StringBuilder(content.Content.Length + 128);
+        var startLine = content.StartLine < 1 ? 1 : content.StartLine;
+        var lines = content.Content.Length == 0
+            ? []
+            : content.Content.Split('\n');
+
+        // A trailing newline yields a final empty element that is not a real line.
+        var lineCount = lines.Length;
+        if (lineCount > 0 && lines[^1].Length == 0 && content.Content.EndsWith('\n'))
         {
-            return content.Content;
+            lineCount--;
         }
 
-        var builder = new StringBuilder(content.Content.Length + 64);
-        builder.Append(content.Content.TrimEnd());
-        builder.AppendLine();
-        builder.AppendLine();
-        builder.Append("[truncated]");
+        var width = (startLine + Math.Max(lineCount - 1, 0)).ToString().Length;
+        for (var index = 0; index < lineCount; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(Environment.NewLine);
+            }
+
+            var number = (startLine + index).ToString().PadLeft(width);
+            builder.Append(number);
+            builder.Append('\t');
+            builder.Append(lines[index].TrimEnd('\r'));
+        }
+
+        if (content.Truncated)
+        {
+            builder.Append(Environment.NewLine);
+            builder.Append(Environment.NewLine);
+            builder.Append(content.TotalLines > 0
+                ? $"[truncated — showing lines {startLine}-{content.EndLine} of {content.TotalLines}]"
+                : "[truncated]");
+        }
+
         return builder.ToString();
     }
 
