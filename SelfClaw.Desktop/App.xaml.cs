@@ -11,6 +11,8 @@ using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Extensions;
+using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Runtime;
@@ -47,7 +49,7 @@ public partial class App : System.Windows.Application
             builder.Logging.ClearProviders();
             builder.Services.AddSerilog(Log.Logger, dispose: false);
             builder.Services.AddSelfClawInfrastructure(_storagePaths);
-            builder.Services.AddSingleton<DesktopAgentStore>();
+            builder.Services.AddSingleton<DesktopAgentDefinitionService>();
             builder.Services.AddSingleton<DesktopSettingsJsonStore>();
             builder.Services.AddSingleton<DesktopToolApprovalHandler>();
             builder.Services.AddSingleton<AgentActivityCoordinator>();
@@ -57,6 +59,8 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<ConversationTurnEngine>();
             builder.Services.AddSingleton<ProgrammingAssistantSettingsService>();
             builder.Services.AddSingleton<AiProviderSettingsBridge>();
+            builder.Services.AddSingleton<ExtensionSettingsBridge>();
+            builder.Services.AddSingleton<IExtensionPackagePicker, ExtensionPackagePicker>();
             builder.Services.AddSingleton<PetPackageCatalog>();
             builder.Services.AddSingleton<PetActivityPresenter>();
             builder.Services.AddSingleton<IPetSettingsRepository, DesktopPetSettingsRepository>();
@@ -76,6 +80,8 @@ public partial class App : System.Windows.Application
             await _host.StartAsync();
             await _host.Services.GetRequiredService<IConversationRepository>().InitializeAsync();
             await _host.Services.GetRequiredService<IAiProviderRepository>().InitializeAsync();
+            await _host.Services.GetRequiredService<IExtensionPackageRepository>().InitializeAsync();
+            await _host.Services.GetRequiredService<IExtensionCatalogReconciler>().ReconcileAsync();
             await _host.Services.GetRequiredService<ProgrammingAssistantSettingsService>().GetOrInitializeAsync();
             RegisterToastNotifications();
 

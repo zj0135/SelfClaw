@@ -137,7 +137,11 @@ public sealed class AgentActivityCoordinator : IDisposable
 
             case RunStatusEvent status:
                 var (phase, headline) = MapRunStatus(status.Status);
-                return turn.SetPhase(phase, headline, turn.Detail, toolKind: null);
+                return turn.SetPhase(
+                    phase,
+                    headline,
+                    string.IsNullOrWhiteSpace(status.Detail) ? turn.Detail : status.Detail,
+                    toolKind: null);
 
             case AssistantThinkingDeltaEvent:
                 return turn.ActiveToolCalls.Count == 0 &&
@@ -431,7 +435,9 @@ public sealed class AgentActivityCoordinator : IDisposable
         var value = string.IsNullOrWhiteSpace(request.ArgumentsJson)
             ? request.Description
             : request.ArgumentsJson;
-        return TrimDetail(value?.ReplaceLineEndings(" "));
+        var source = string.IsNullOrWhiteSpace(request.SourceId) ? null : $"{request.SourceKind}: {request.SourceId}";
+        return TrimDetail(string.Join(" · ", new[] { source, value?.ReplaceLineEndings(" ") }
+            .Where(item => !string.IsNullOrWhiteSpace(item))));
     }
 
     private static ToolCallKind ToolKindForApproval(string toolName)

@@ -6,4 +6,8 @@ public sealed record ToolApprovalRequest(
     string DisplayName,
     string Description,
     string ArgumentsJson,
-    Guid? ConversationId = null);
+    Guid? ConversationId = null,
+    Agent.ToolSourceKind? SourceKind = null,
+    string? SourceId = null,
+    string? TransportSummary = null,
+    string? AnnotationsJson = null);

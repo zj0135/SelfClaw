@@ -62,7 +62,7 @@ const componentMap = markRaw({
 	providers: defineAsyncComponent(() => import('../components/settings/AIProviders.vue')),
 	models: defineAsyncComponent(() => import('../components/settings/ModelManagement.vue')),
 	'coding-assistant': defineAsyncComponent(() => import('../components/settings/ProgrammingAssistant.vue')),
-	plugins: defineAsyncComponent(() => import('../components/settings/Plugins.vue')),
+	plugins: defineAsyncComponent(() => import('../components/settings/extensions/ExtensionSettingsPanel.vue')),
 	pet: defineAsyncComponent(() => import('../components/settings/Pet.vue')),
 	about: defineAsyncComponent(() => import('../components/settings/About.vue')),
 });
@@ -152,7 +152,7 @@ function selectItem(id) {
 }
 
 .settings-content {
-	/* Keep legacy mock panels aligned with the console stage. */
+	/* Compatibility tokens for settings panels that have not moved to the shared console surface. */
 	--text: #171a1f;
 	--muted: #6b7280;
 

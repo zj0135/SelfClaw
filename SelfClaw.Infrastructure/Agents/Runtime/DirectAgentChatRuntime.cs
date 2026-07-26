@@ -11,6 +11,10 @@ using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
+using SelfClaw.Infrastructure.Extensions.Abstractions;
+using SelfClaw.Infrastructure.Extensions.Runtime;
+using SelfClaw.Infrastructure.Extensions.Mcp;
+using SelfClaw.Infrastructure.Extensions.Runtime.Models;
 using SelfClaw.Infrastructure.Tools.Workspace;
 
 namespace SelfClaw.Infrastructure.Agents.Runtime;
@@ -22,16 +26,19 @@ namespace SelfClaw.Infrastructure.Agents.Runtime;
 internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 {
     private readonly IAiChatClientFactory _chatClientFactory;
-    private readonly WorkspaceAgentToolset _workspaceToolset;
+    private readonly IDirectTurnCapabilityResolver _capabilityResolver;
+    private readonly DirectPromptComposer _promptComposer;
     private readonly ILogger<DirectAgentChatRuntime> _logger;
 
     public DirectAgentChatRuntime(
         IAiChatClientFactory chatClientFactory,
-        WorkspaceAgentToolset workspaceToolset,
+        IDirectTurnCapabilityResolver capabilityResolver,
+        DirectPromptComposer promptComposer,
         ILogger<DirectAgentChatRuntime>? logger = null)
     {
         _chatClientFactory = chatClientFactory;
-        _workspaceToolset = workspaceToolset;
+        _capabilityResolver = capabilityResolver;
+        _promptComposer = promptComposer;
         _logger = logger ?? NullLogger<DirectAgentChatRuntime>.Instance;
     }
 
@@ -82,7 +89,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         ChannelWriter<AgentStreamEvent> writer,
         CancellationToken cancellationToken)
     {
-        AiChatClientLease? lease = null;
+        DirectTurnCapabilityLease? capabilityLease = null;
+        AiChatClientLease? providerLease = null;
         var finalText = new System.Text.StringBuilder();
         long inputTokens = 0;
         long outputTokens = 0;
@@ -90,20 +98,21 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         var hasOutputUsage = false;
         var usageReported = false;
         var startedCalls = new HashSet<string>(StringComparer.Ordinal);
+        var startedDescriptors = new Dictionary<string, DirectToolDescriptor>(StringComparer.Ordinal);
         var runCompletedEmitted = false;
         var cancellationObserved = false;
 
         try
         {
-            var tools = request.WorkspaceRoot is null
-                ? Array.Empty<AITool>()
-                : _workspaceToolset.CreateTools(
-                    request.WorkspaceRoot,
-                    request.ConversationId,
-                    request.ToolPermissionMode,
-                    request.ToolApprovalHandler).ToArray();
-            var inputs = new AiChatRuntimeInputs(EnableReasoning: false, tools);
-            lease = request.ModelProfileId is Guid modelProfileId
+            capabilityLease = await _capabilityResolver.ResolveAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+            foreach (var diagnostic in capabilityLease.Diagnostics)
+            {
+                writer.TryWrite(new RunStatusEvent(AgentRunStatus.Initializing, diagnostic));
+            }
+
+            var inputs = new AiChatRuntimeInputs(EnableReasoning: false, capabilityLease.Tools);
+            providerLease = request.ModelProfileId is Guid modelProfileId
                 ? await _chatClientFactory.CreateAsync(modelProfileId, inputs, cancellationToken)
                 : await _chatClientFactory.CreateForScopeAsync(
                     AiModelSelectionScopes.DesktopDefault,
@@ -112,14 +121,18 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
             writer.TryWrite(new RunStartedEvent(
                 $"direct-{Guid.NewGuid():N}",
-                lease.Profile.Model,
+                providerLease.Profile.Model,
                 AgentKind: null));
             writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
 
-            var messages = BuildMessages(request);
-            await foreach (var update in lease.Client.GetStreamingResponseAsync(
+            var messages = _promptComposer.BuildMessages(
+                request.Messages,
+                request.Agent.Instructions,
+                capabilityLease.SystemInstructions,
+                capabilityLease.MessageAdjustments);
+            await foreach (var update in providerLease.Client.GetStreamingResponseAsync(
                                messages,
-                               lease.Options,
+                               providerLease.Options,
                                cancellationToken))
             {
                 var blockId = string.IsNullOrWhiteSpace(update.MessageId)
@@ -140,15 +153,30 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                             break;
 
                         case FunctionCallContent call when startedCalls.Add(call.CallId):
+                            capabilityLease.ToolDescriptors.TryGetValue(call.Name, out var descriptor);
+                            var toolKind = descriptor?.Kind ?? ToolCallKind.Other;
+                            if (descriptor is not null)
+                            {
+                                startedDescriptors[call.CallId] = descriptor;
+                            }
+
                             writer.TryWrite(new ToolCallStartedEvent(
                                 call.CallId,
                                 call.Name,
                                 JsonSerializer.Serialize(call.Arguments),
-                                MapToolKind(call.Name)));
+                                toolKind,
+                                descriptor?.SourceKind ?? ToolSourceKind.BuiltIn,
+                                descriptor?.SourceId,
+                                descriptor?.DisplayName));
                             break;
 
                         case FunctionResultContent result:
-                            var (status, summary, detail) = DescribeToolResult(result);
+                            var (status, summary, detail) =
+                                result.Exception is null &&
+                                startedDescriptors.TryGetValue(result.CallId, out var resultDescriptor) &&
+                                resultDescriptor.SourceKind == ToolSourceKind.Mcp
+                                    ? McpToolAdapter.DescribeResult(result.Result)
+                                    : DescribeToolResult(result);
                             writer.TryWrite(new ToolCallCompletedEvent(result.CallId, status, summary, detail));
                             break;
 
@@ -210,11 +238,23 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         {
             try
             {
-                lease?.Dispose();
+                providerLease?.Dispose();
             }
             catch (Exception exception)
             {
                 _logger.LogError(exception, "Failed to dispose the Direct AI chat client pipeline.");
+            }
+
+            if (capabilityLease is not null)
+            {
+                try
+                {
+                    await capabilityLease.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogError(exception, "Failed to dispose the Direct turn capability lease.");
+                }
             }
 
             if (!runCompletedEmitted && !cancellationObserved)
@@ -224,37 +264,6 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
             writer.TryComplete();
         }
-    }
-
-    private static IReadOnlyList<ChatMessage> BuildMessages(DirectChatTurnRequest request)
-    {
-        var messages = new List<ChatMessage>();
-        if (!string.IsNullOrWhiteSpace(request.Agent.Instructions))
-        {
-            messages.Add(new ChatMessage(ChatRole.System, request.Agent.Instructions));
-        }
-
-        foreach (var message in request.Messages)
-        {
-            if (message.Status is MessageStatus.Failed or MessageStatus.Cancelled ||
-                string.IsNullOrEmpty(message.MarkdownContent))
-            {
-                continue;
-            }
-
-            ChatRole? role = message.Role switch
-            {
-                MessageRole.User => ChatRole.User,
-                MessageRole.Assistant => ChatRole.Assistant,
-                _ => null
-            };
-            if (role is ChatRole chatRole)
-            {
-                messages.Add(new ChatMessage(chatRole, message.MarkdownContent));
-            }
-        }
-
-        return messages;
     }
 
     private static (ToolCallStatus Status, string? Summary, string? Detail) DescribeToolResult(
@@ -287,18 +296,6 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
     private static string JsonElementText(JsonElement element)
         => element.ValueKind == JsonValueKind.String ? element.GetString() ?? string.Empty : element.GetRawText();
-
-    private static ToolCallKind MapToolKind(string name) => name.ToLowerInvariant() switch
-    {
-        "read_file" => ToolCallKind.Read,
-        "write_file" => ToolCallKind.Edit,
-        "edit_file" => ToolCallKind.Edit,
-        "run_shell_command" => ToolCallKind.Run,
-        "search_text" => ToolCallKind.Search,
-        "list_files" => ToolCallKind.List,
-        "glob_files" => ToolCallKind.List,
-        _ => ToolCallKind.Other
-    };
 
     private static int ClampTokens(long tokens) => (int)Math.Clamp(tokens, 0, int.MaxValue);
 

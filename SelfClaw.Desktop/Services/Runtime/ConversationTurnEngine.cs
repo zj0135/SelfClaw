@@ -166,7 +166,10 @@ public sealed class ConversationTurnEngine
             CreatedAtUtc: now,
             UpdatedAtUtc: now,
             MessageId: turn.AssistantMessageId,
-            AfterSegmentIndex: null);
+            AfterSegmentIndex: null,
+            SourceKind: toolStarted.SourceKind,
+            SourceId: toolStarted.SourceId,
+            DisplayName: toolStarted.DisplayName);
 
         var anchored = session.CaptureToolRunAnchor(record);
         turn.ToolRunsByCallId[toolStarted.ToolCallId] = anchored;

@@ -58,7 +58,7 @@ function createHostBridge() {
 			return false;
 		}
 
-		window.clearTimeout(pending.timer);
+		if (pending.timer !== null) window.clearTimeout(pending.timer);
 		pendingRequests.delete(requestId);
 		settle(pending);
 		return true;
@@ -71,9 +71,11 @@ function createHostBridge() {
 
 		const requestId = nextRequestId();
 		const promise = new Promise((resolve, reject) => {
-			const timer = window.setTimeout(() => {
-				settlePending(requestId, (pending) => pending.reject(new Error('请求超时，请稍后重试。')));
-			}, timeout);
+			const timer = timeout > 0
+				? window.setTimeout(() => {
+					settlePending(requestId, (pending) => pending.reject(new Error('请求超时，请稍后重试。')));
+				}, timeout)
+				: null;
 
 			pendingRequests.set(requestId, { type, resolve, reject, timer });
 			post({ type, requestId, ...payload });

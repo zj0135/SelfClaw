@@ -13,6 +13,7 @@ using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Terminal;
@@ -41,6 +42,7 @@ public partial class MainWindow : Window
     private readonly StoragePaths _storagePaths;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettingsService;
     private readonly AiProviderSettingsBridge _aiProviderSettingsBridge;
+    private readonly ExtensionSettingsBridge _extensionSettingsBridge;
     private readonly PetHost _petHost;
     private readonly PetActivityPresenter _petActivityPresenter;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
@@ -72,6 +74,7 @@ public partial class MainWindow : Window
         DesktopToolApprovalHandler toolApprovalHandler,
         ProgrammingAssistantSettingsService programmingAssistantSettingsService,
         AiProviderSettingsBridge aiProviderSettingsBridge,
+        ExtensionSettingsBridge extensionSettingsBridge,
         PetHost petHost,
         PetActivityPresenter petActivityPresenter,
         AgentActivityCoordinator agentActivityCoordinator,
@@ -83,6 +86,7 @@ public partial class MainWindow : Window
         _storagePaths = storagePaths;
         _programmingAssistantSettingsService = programmingAssistantSettingsService;
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
+        _extensionSettingsBridge = extensionSettingsBridge;
         _petHost = petHost;
         _petActivityPresenter = petActivityPresenter;
         _agentActivityCoordinator = agentActivityCoordinator;
@@ -99,6 +103,8 @@ public partial class MainWindow : Window
         TranscriptView.NavigationCompleted += OnTranscriptNavigationCompleted;
         _aiProviderSettingsBridge.ResponseReady += OnAiProviderBridgeResponseReady;
         _aiProviderSettingsBridge.ModelSelectionChanged += OnModelSelectionChanged;
+        _extensionSettingsBridge.ResponseReady += OnExtensionBridgeResponseReady;
+        _extensionSettingsBridge.StateChanged += OnExtensionStateChanged;
         _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
         _toolApprovalHandler.ApprovalExpired += OnToolApprovalExpired;
         _agentActivityCoordinator.SnapshotChanged += OnAgentActivitySnapshotChanged;
@@ -137,6 +143,8 @@ public partial class MainWindow : Window
         TranscriptView.NavigationCompleted -= OnTranscriptNavigationCompleted;
         _aiProviderSettingsBridge.ResponseReady -= OnAiProviderBridgeResponseReady;
         _aiProviderSettingsBridge.ModelSelectionChanged -= OnModelSelectionChanged;
+        _extensionSettingsBridge.ResponseReady -= OnExtensionBridgeResponseReady;
+        _extensionSettingsBridge.StateChanged -= OnExtensionStateChanged;
         _toolApprovalHandler.ApprovalRequested -= OnToolApprovalRequested;
         _toolApprovalHandler.ApprovalExpired -= OnToolApprovalExpired;
         _agentActivityCoordinator.SnapshotChanged -= OnAgentActivitySnapshotChanged;
@@ -252,7 +260,11 @@ public partial class MainWindow : Window
             conversations = state.Conversations,
             selectedConversationId = state.SelectedConversationId,
             isBusy = state.IsBusy,
-            activityText = state.ActivityText
+            activityText = state.ActivityText,
+            agentMode = state.AgentMode,
+            selectedAgentId = state.SelectedAgentId,
+            selectedAgentName = state.SelectedAgentName,
+            capabilityRevision = state.CapabilityRevision
         }, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -472,6 +484,12 @@ public partial class MainWindow : Window
 
             var type = typeElement.GetString();
             if (type is not null && await _aiProviderSettingsBridge.TryHandleAsync(type, document.RootElement))
+            {
+                return;
+            }
+
+            _extensionSettingsBridge.SetActiveAgent(_viewModel.SelectedAgentId);
+            if (type is not null && await _extensionSettingsBridge.TryHandleAsync(type, document.RootElement))
             {
                 return;
             }
@@ -1325,7 +1343,11 @@ public partial class MainWindow : Window
             toolName = request.ToolName,
             displayName = request.DisplayName,
             description = request.Description,
-            argumentsJson = request.ArgumentsJson
+            argumentsJson = request.ArgumentsJson,
+            sourceKind = request.SourceKind,
+            sourceId = request.SourceId,
+            transportSummary = request.TransportSummary,
+            annotationsJson = request.AnnotationsJson
         });
 
     private void PostToolApprovalClear()
@@ -1394,11 +1416,29 @@ public partial class MainWindow : Window
         var description = string.IsNullOrWhiteSpace(request.Description)
             ? request.ToolName
             : request.Description.Trim();
-        return $"{description}{Environment.NewLine}{Environment.NewLine}Arguments:{Environment.NewLine}{arguments}";
+        var source = string.IsNullOrWhiteSpace(request.SourceId)
+            ? string.Empty
+            : $"{Environment.NewLine}Source: {request.SourceId}";
+        return $"{description}{source}{Environment.NewLine}{Environment.NewLine}Arguments:{Environment.NewLine}{arguments}";
     }
 
     private void OnAiProviderBridgeResponseReady(object payload)
         => PostWebMessage(payload);
+
+    private void OnExtensionBridgeResponseReady(object payload)
+        => PostWebMessage(payload);
+
+    private void OnExtensionStateChanged(long revision)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() => OnExtensionStateChanged(revision));
+            return;
+        }
+
+        _viewModel.UpdateCapabilityRevision(revision);
+        PostTerminalMessage(new { type = "extensions/state-changed", revision });
+    }
 
     private void FocusTranscriptView()
     {

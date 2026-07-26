@@ -9,7 +9,7 @@ public sealed partial class MainWindowViewModel
     private void ReloadAgents()
     {
         _agents.Clear();
-        _agents.AddRange(_desktopAgentStore.LoadAll());
+        _agents.AddRange(_desktopAgentDefinitionService.LoadAll());
         SelectAgentCore(null);
     }
 
@@ -20,7 +20,7 @@ public sealed partial class MainWindowViewModel
     {
         var normalizedAgentId = NormalizeAgentId(agentId);
         return _agents.FirstOrDefault(item => string.Equals(item.Id, normalizedAgentId, StringComparison.OrdinalIgnoreCase))
-               ?? _agents.FirstOrDefault(item => string.Equals(item.Id, DesktopAgentStore.BuildAgentId, StringComparison.OrdinalIgnoreCase))
+               ?? _agents.FirstOrDefault(item => string.Equals(item.Id, DesktopAgentDefinitionService.BuildAgentId, StringComparison.OrdinalIgnoreCase))
                ?? _agents.First();
     }
 
@@ -44,9 +44,9 @@ public sealed partial class MainWindowViewModel
             agent.Description,
             agent.Mode,
             agent.ToolPolicy,
-            agent.EnabledSkills.ToArray(),
-            [],
-            [],
+            agent.PluginIds.ToArray(),
+            agent.SkillIds.ToArray(),
+            agent.McpServerIds.ToArray(),
             agent.Instructions);
     }
 

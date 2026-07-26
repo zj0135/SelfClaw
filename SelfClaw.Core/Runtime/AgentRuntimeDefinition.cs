@@ -6,9 +6,9 @@ public sealed record AgentRuntimeDefinition(
     string Description,
     AgentExecutionMode Mode,
     string ToolPolicy,
-    IReadOnlyList<string> Skills,
-    IReadOnlyList<string> McpServers,
-    IReadOnlyList<AgentMcpServerDefinition> ConfiguredMcpServers,
+    IReadOnlyList<string> PluginIds,
+    IReadOnlyList<string> SkillIds,
+    IReadOnlyList<string> McpServerIds,
     string Instructions)
 {
     public const string SystemToolPolicy = "system";

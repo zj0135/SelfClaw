@@ -151,7 +151,7 @@ public sealed class AiProviderSettingsBridge
                     break;
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             throw;
         }

@@ -34,7 +34,18 @@ public sealed class ConversationTurnEngineTests
 
         await engine.ApplyEventAsync(session, turn, new RunStartedEvent("s1", "model", null), default);
         await engine.ApplyEventAsync(session, turn, new AssistantTextDeltaEvent("b", "hello "), default);
-        await engine.ApplyEventAsync(session, turn, new ToolCallStartedEvent("call-1", "read_file", "{}", ToolCallKind.Read), default);
+        await engine.ApplyEventAsync(
+            session,
+            turn,
+            new ToolCallStartedEvent(
+                "call-1",
+                "mcp__git__status",
+                "{}",
+                ToolCallKind.Read,
+                ToolSourceKind.Mcp,
+                "git",
+                "status"),
+            default);
         await engine.ApplyEventAsync(session, turn, new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "read 1 file", "contents"), default);
         await engine.ApplyEventAsync(session, turn, new AssistantTextDeltaEvent("b", "world"), default);
         await engine.ApplyEventAsync(session, turn, new UsageReportedEvent(11, 7), default);
@@ -51,6 +62,9 @@ public sealed class ConversationTurnEngineTests
 
         session.ToolRuns.Should().ContainSingle()
             .Which.Status.Should().Be(ToolExecutionStatus.Completed);
+        session.ToolRuns[0].SourceKind.Should().Be(ToolSourceKind.Mcp);
+        session.ToolRuns[0].SourceId.Should().Be("git");
+        session.ToolRuns[0].DisplayName.Should().Be("status");
         session.ToolRunAnchors.Should().ContainKey(session.ToolRuns[0].Id);
         session.ActiveMessageIds.Should().BeEmpty();
 

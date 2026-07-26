@@ -79,9 +79,8 @@ Key runtime files:
 
 ### Agent definitions
 
-`DesktopAgentStore` loads `.md` files from `{AppData}\agents\`. Built-in agent id: `build`.
-Agent markdown supports front matter: name, description, mode, tools, skills, mcpServers.
-**Important**: MCP servers are defined in markdown but `MainWindowViewModel.Agents.cs` passes an empty list — configured MCP servers are always empty at runtime.
+`DesktopAgentDefinitionService` loads and atomically updates `.md` files from `{AppData}\agents\`. Built-in agent id: `build`.
+Agent markdown supports front matter: name, description, mode, tools, plugins, skills, mcpServers. Direct turns resolve those ids against the enabled extension catalog; CLI turns keep their existing subprocess behavior.
 
 ### Tool approval
 
@@ -97,14 +96,16 @@ Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandle
 ### DI Registration
 
 Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
-- Repositories: `SqliteConversationRepository`, `SqliteAiProviderRepository`
+- Repositories: `SqliteConversationRepository`, `SqliteAiProviderRepository`, `SqliteExtensionRepository`
 - AI providers: catalog/registry, provider adapters, `AiProviderHttpClientProvider`, `AiProviderSettingsService`, `AiChatClientFactory`
 - Runtimes: CLI process/session services, `CliAgentChatRuntime`, `DirectAgentChatRuntime`, `DispatchingAgentChatRuntime` (as `IAgentChatRuntime`)
+- Extensions: `ExtensionCatalog`, `ExtensionPackageInstaller`, `ExtensionSettingsService`, `ExtensionStateChangeNotifier`, `DirectTurnCapabilityResolver`, Skill readers/runtime tools
+- MCP: configuration/transport factories, pooled `McpClientManager`, SDK connection factory, `McpToolAdapter`
 - Tools: `WorkspaceToolService`, `WorkspaceAgentToolset`, `MarkdownHtmlRenderer`
 - Security: `DpapiSecretProtector`
 
 Desktop (`App.xaml.cs`):
-- `DesktopAgentStore`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
+- `DesktopAgentDefinitionService`, `ExtensionSettingsBridge`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
   `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `AiProviderSettingsBridge`,
   `PetPackageCatalog`, `PetActivityPresenter`, `PetHost`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
 
@@ -125,7 +126,7 @@ Desktop (`App.xaml.cs`):
 
 ### Database
 
-Schema version: **21** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `workspace_roots`, `conversations`, `messages`, `message_attachments`, `tool_runs`, `cli_agent_sessions`. The obsolete `profiles` table and `conversations.profile_id` column are removed by the v21 migration while conversation-dependent rows are preserved. Backward-compatible additive migration still uses `EnsureColumnExistsAsync` where appropriate.
+Schema version: **22** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `conversations`, `messages`, `message_attachments`, `tool_runs`, `cli_agent_sessions`. The v22 migration adds extension state and tool provenance while preserving existing conversations/messages/tool runs. Backward-compatible additive migration still uses `EnsureColumnExistsAsync` where appropriate.
 
 ### Image attachments
 
@@ -140,8 +141,7 @@ Persisted to `{AppData}\attachments\{convId}\{msgId}\`. Max 6 images, 10MB each,
 - **Feishu channel**: fully implemented but never registered in DI
 - **Plan mode**: removed; `AgentExecutionMode.Direct` and `AgentExecutionMode.Cli` are both active
 - **Channel conversations**: data model retained but VM filters them out
-- **MCP server wiring**: provider exists but VM passes empty list
-- **Settings pages**: AI 提供商, 编程助手, and 宠物 are wired to the host; the remaining settings pages are frontend mock
+- **Settings pages**: AI 提供商, 编程助手, 扩展, and 宠物 are wired to the host; the remaining settings pages are frontend mock
 - **Legacy provider profiles**: `ProviderProfile`, `IProfileRepository`, the `profiles` table, and `ChatTurnRequest.Profile/ApiKey` were removed; Direct turns use `ModelProfileId`
 - **RightPanel**: XAML stub, not functional
 

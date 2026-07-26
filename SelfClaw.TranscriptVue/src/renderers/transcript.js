@@ -67,13 +67,15 @@ function resolveToolName(segment) {
 		case 'shell':
 			return 'run_shell_command';
 		case 'write file':
-			return 'write_workspace_file';
+			return 'write_file';
+		case 'edit file':
+			return 'edit_file';
 		case 'read file':
-			return 'read_workspace_file';
+			return 'read_file';
 		case 'search results':
-			return 'search_workspace_text';
+			return 'search_text';
 		case 'workspace entries':
-			return 'list_workspace_files';
+			return 'list_files';
 		default:
 			break;
 	}
@@ -86,19 +88,19 @@ function resolveToolName(segment) {
 	}
 
 	if (summaryText.startsWith('write ') || summaryText.startsWith('create ')) {
-		return 'write_workspace_file';
+		return 'write_file';
 	}
 
 	if (summaryText.startsWith('read ')) {
-		return 'read_workspace_file';
+		return 'read_file';
 	}
 
 	if (summaryText.startsWith('search ')) {
-		return 'search_workspace_text';
+		return 'search_text';
 	}
 
 	if (summaryText.startsWith('list ')) {
-		return 'list_workspace_files';
+		return 'list_files';
 	}
 
 	return '';
@@ -109,13 +111,15 @@ function resolveToolAction(segment) {
 	switch (toolName) {
 		case 'run_shell_command':
 			return 'run';
-		case 'write_workspace_file':
+		case 'write_file':
+		case 'edit_file':
 			return 'edit';
-		case 'read_workspace_file':
+		case 'read_file':
 			return 'read';
-		case 'search_workspace_text':
+		case 'search_text':
 			return 'search';
-		case 'list_workspace_files':
+		case 'list_files':
+		case 'glob_files':
 			return 'list';
 		default:
 			return 'tool';

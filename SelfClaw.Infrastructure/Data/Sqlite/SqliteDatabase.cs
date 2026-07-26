@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 21;
+    private const int CurrentSchemaVersion = 22;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -262,6 +262,9 @@ CREATE TABLE IF NOT EXISTS tool_runs (
     agent_id TEXT NULL,
     message_id TEXT NULL,
     after_segment_index INTEGER NULL,
+    source_kind INTEGER NULL,
+    source_id TEXT NULL,
+    display_name TEXT NULL,
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken);
 
@@ -292,6 +295,64 @@ CREATE TABLE IF NOT EXISTS tool_runs (
                 "after_segment_index",
                 "ALTER TABLE tool_runs ADD COLUMN after_segment_index INTEGER NULL;",
                 cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "tool_runs",
+                "source_kind",
+                "ALTER TABLE tool_runs ADD COLUMN source_kind INTEGER NULL;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "tool_runs",
+                "source_id",
+                "ALTER TABLE tool_runs ADD COLUMN source_id TEXT NULL;",
+                cancellationToken);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "tool_runs",
+                "display_name",
+                "ALTER TABLE tool_runs ADD COLUMN display_name TEXT NULL;",
+                cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS extension_packages (
+    kind INTEGER NOT NULL,
+    id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    description TEXT NOT NULL,
+    install_path TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    source_plugin_id TEXT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 0,
+    acknowledged_permissions_json TEXT NULL,
+    acknowledged_at_utc TEXT NULL,
+    installed_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    PRIMARY KEY(kind, id)
+);", cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS mcp_server_configs (
+    id TEXT NOT NULL PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    transport INTEGER NOT NULL,
+    settings_json TEXT NOT NULL,
+    credential_refs_json TEXT NOT NULL,
+    source_plugin_id TEXT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 0,
+    config_revision INTEGER NOT NULL DEFAULT 1,
+    discovered_tools_json TEXT NOT NULL DEFAULT '[]',
+    last_status INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NULL,
+    last_checked_at_utc TEXT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);", cancellationToken);
 
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS cli_agent_sessions (

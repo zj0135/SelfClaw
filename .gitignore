@@ -81,3 +81,5 @@ Properties/
 !CONTEXT-MAP.md
 !docs/agents/*.md
 !docs/adr/*.md
+!docs/direct-extensions-system-design.md
+!docs/direct-extensions-implementation-tasks.md

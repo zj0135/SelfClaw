@@ -36,7 +36,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly DesktopNotificationService _desktopNotificationService;
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
-    private readonly DesktopAgentStore _desktopAgentStore;
+    private readonly DesktopAgentDefinitionService _desktopAgentDefinitionService;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettings;
     private readonly DesktopSettingsJsonStore _settingsStore;
     private readonly StoragePaths _storagePaths;
@@ -56,7 +56,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private int _selectionVersion;
     private ConversationRecord? _selectedConversation;
     private WorkspaceRoot? _selectedWorkspaceRoot;
-    private string _selectedAgentId = DesktopAgentStore.BuildAgentId;
+    private string _selectedAgentId = DesktopAgentDefinitionService.BuildAgentId;
     private string _composerText = string.Empty;
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
     private Guid? _selectedModelProfileId;
@@ -68,6 +68,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private string? _lastPublishedShellFingerprint;
     private DateTimeOffset _lastStreamingPublishAtUtc = DateTimeOffset.MinValue;
     private int _disposeStarted;
+    private long _capabilityRevision;
 
     public MainWindowViewModel(
         IConversationRepository conversationRepository,
@@ -77,7 +78,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         DesktopToolApprovalHandler toolApprovalHandler,
         DesktopNotificationService desktopNotificationService,
         MarkdownHtmlRenderer markdownHtmlRenderer,
-        DesktopAgentStore desktopAgentStore,
+        DesktopAgentDefinitionService desktopAgentDefinitionService,
         ProgrammingAssistantSettingsService programmingAssistantSettings,
         DesktopSettingsJsonStore settingsStore,
         StoragePaths storagePaths,
@@ -90,7 +91,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
         _markdownHtmlRenderer = markdownHtmlRenderer;
-        _desktopAgentStore = desktopAgentStore;
+        _desktopAgentDefinitionService = desktopAgentDefinitionService;
         _programmingAssistantSettings = programmingAssistantSettings;
         _settingsStore = settingsStore;
         _storagePaths = storagePaths;
@@ -122,7 +123,23 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public WorkspaceRoot? SelectedWorkspaceRoot => _selectedWorkspaceRoot;
 
+    public string SelectedAgentId => _selectedAgentId;
+
+    public long CapabilityRevision => _capabilityRevision;
+
     public IReadOnlyList<WorkspaceRoot> WorkspaceRoots => _workspaceRoots.ToArray();
+
+    public void UpdateCapabilityRevision(long revision)
+    {
+        if (revision <= _capabilityRevision)
+        {
+            return;
+        }
+
+        _capabilityRevision = revision;
+        _lastPublishedShellFingerprint = null;
+        PublishShell(false);
+    }
 
     public ConversationRecord? SelectedConversation
     {
@@ -1157,6 +1174,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .ToArray();
 
         var conversations = BuildConversationItems();
+        var selectedAgent = ResolveSelectedAgent();
 
         TranscriptChanged?.Invoke(this, new TranscriptRenderState(
             orderedItems,
@@ -1165,7 +1183,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             SelectedConversation?.Id.ToString("D"),
             isBusy,
             activityText,
-            ResolveComposerExecutionMode(ResolveSelectedAgent().Mode).ToString().ToLowerInvariant()));
+            ResolveComposerExecutionMode(selectedAgent.Mode).ToString().ToLowerInvariant(),
+            selectedAgent.Id,
+            selectedAgent.Name,
+            _capabilityRevision));
     }
 
     private string BuildShellFingerprint(
@@ -1189,6 +1210,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .Append(activityText)
             .Append('|')
             .Append((int)ResolveComposerExecutionMode(ResolveSelectedAgent().Mode))
+            .Append('|')
+            .Append(_selectedAgentId)
+            .Append('|')
+            .Append(_capabilityRevision)
             .Append('|')
             .Append(navigationConversations.Length)
             .Append('|');

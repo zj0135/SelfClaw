@@ -4,6 +4,8 @@ using Microsoft.Extensions.AI;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Infrastructure.Extensions.Runtime;
 
 namespace SelfClaw.Infrastructure.Agents.Runtime;
 
@@ -27,10 +29,22 @@ public sealed class WorkspaceAgentToolset
         ArgumentNullException.ThrowIfNull(workspaceRoot);
         var bound = new BoundWorkspaceTools(
             _workspaceTools,
-            workspaceRoot.RootPath,
-            conversationId,
-            permissionMode,
-            approvalHandler);
+            workspaceRoot.RootPath);
+
+        var writeFile = AIFunctionFactory.Create(
+            (Func<string, string, CancellationToken, Task<object>>)bound.WriteFileAsync,
+            "write_file",
+            "Create or overwrite a UTF-8 text file inside the current workspace.");
+        var editFile = AIFunctionFactory.Create(
+            bound.EditFileAsync,
+            "edit_file",
+            "Edit an existing text file by replacing an exact oldText snippet with newText, without rewriting "
+                + "the whole file. oldText must match exactly once unless replaceAll is set. Prefer this over "
+                + "write_file for changes to large files.");
+        var runShellCommand = AIFunctionFactory.Create(
+            (Func<string, int, CancellationToken, Task<object>>)bound.RunShellCommandAsync,
+            "run_shell_command",
+            "Run a PowerShell command with the current workspace as its working directory.");
 
         return
         [
@@ -55,43 +69,37 @@ public sealed class WorkspaceAgentToolset
                 "Read a UTF-8 text file inside the current workspace. Omit startLine/lineCount to read from the "
                     + "top, or supply them to page through a large file by line range. The result reports the "
                     + "line range returned and the file's total line count."),
-            AIFunctionFactory.Create(
-                (Func<string, string, CancellationToken, Task<object>>)bound.WriteFileAsync,
-                "write_file",
-                "Create or overwrite a UTF-8 text file inside the current workspace."),
-            AIFunctionFactory.Create(
-                bound.EditFileAsync,
-                "edit_file",
-                "Edit an existing text file by replacing an exact oldText snippet with newText, without rewriting "
-                    + "the whole file. oldText must match exactly once unless replaceAll is set. Prefer this over "
-                    + "write_file for changes to large files."),
-            AIFunctionFactory.Create(
-                (Func<string, int, CancellationToken, Task<object>>)bound.RunShellCommandAsync,
-                "run_shell_command",
-                "Run a PowerShell command with the current workspace as its working directory.")
+            WrapApproval(writeFile, conversationId, permissionMode, approvalHandler, "Write workspace file"),
+            WrapApproval(editFile, conversationId, permissionMode, approvalHandler, "Edit workspace file"),
+            WrapApproval(runShellCommand, conversationId, permissionMode, approvalHandler, "Run workspace shell command")
         ];
     }
+
+    private static ApprovedAIFunction WrapApproval(
+        AIFunction function,
+        Guid conversationId,
+        ToolPermissionMode permissionMode,
+        IToolApprovalHandler? approvalHandler,
+        string displayName)
+        => new(
+            function,
+            conversationId,
+            permissionMode,
+            approvalHandler,
+            displayName,
+            ToolSourceKind.BuiltIn);
 
     private sealed class BoundWorkspaceTools
     {
         private readonly IWorkspaceToolService _workspaceTools;
         private readonly string _workspaceRootPath;
-        private readonly Guid _conversationId;
-        private readonly ToolPermissionMode _permissionMode;
-        private readonly IToolApprovalHandler? _approvalHandler;
 
         public BoundWorkspaceTools(
             IWorkspaceToolService workspaceTools,
-            string workspaceRootPath,
-            Guid conversationId,
-            ToolPermissionMode permissionMode,
-            IToolApprovalHandler? approvalHandler)
+            string workspaceRootPath)
         {
             _workspaceTools = workspaceTools;
             _workspaceRootPath = workspaceRootPath;
-            _conversationId = conversationId;
-            _permissionMode = permissionMode;
-            _approvalHandler = approvalHandler;
         }
 
         public Task<IReadOnlyList<WorkspaceFileEntry>> ListFilesAsync(
@@ -136,17 +144,6 @@ public sealed class WorkspaceAgentToolset
             [Description("Complete UTF-8 text content to write to the file.")] string content,
             CancellationToken cancellationToken)
         {
-            var argumentsJson = JsonSerializer.Serialize(new { relativePath, content });
-            if (!await IsApprovedAsync(
-                    "write_file",
-                    "Write workspace file",
-                    "Create or overwrite a text file in the current workspace.",
-                    argumentsJson,
-                    cancellationToken))
-            {
-                return DeniedResult;
-            }
-
             return await _workspaceTools.WriteFileAsync(
                 _workspaceRootPath,
                 relativePath,
@@ -161,17 +158,6 @@ public sealed class WorkspaceAgentToolset
             [Description("Replace every occurrence of oldText. When false, oldText must match exactly one location.")] bool replaceAll,
             CancellationToken cancellationToken)
         {
-            var argumentsJson = JsonSerializer.Serialize(new { relativePath, oldText, newText, replaceAll });
-            if (!await IsApprovedAsync(
-                    "edit_file",
-                    "Edit workspace file",
-                    "Replace text in an existing file in the current workspace.",
-                    argumentsJson,
-                    cancellationToken))
-            {
-                return DeniedResult;
-            }
-
             return await _workspaceTools.EditFileAsync(
                 _workspaceRootPath,
                 relativePath,
@@ -186,17 +172,6 @@ public sealed class WorkspaceAgentToolset
             [Description("Maximum execution time in seconds, from 1 to 600.")] int timeoutSeconds,
             CancellationToken cancellationToken)
         {
-            var argumentsJson = JsonSerializer.Serialize(new { command, timeoutSeconds });
-            if (!await IsApprovedAsync(
-                    "run_shell_command",
-                    "Run workspace shell command",
-                    "Execute a PowerShell command in the current workspace.",
-                    argumentsJson,
-                    cancellationToken))
-            {
-                return DeniedResult;
-            }
-
             return await _workspaceTools.RunShellCommandAsync(
                 _workspaceRootPath,
                 command,
@@ -204,32 +179,5 @@ public sealed class WorkspaceAgentToolset
                 cancellationToken);
         }
 
-        private async Task<bool> IsApprovedAsync(
-            string toolName,
-            string displayName,
-            string description,
-            string argumentsJson,
-            CancellationToken cancellationToken)
-        {
-            if (_permissionMode == ToolPermissionMode.FullAccess)
-            {
-                return true;
-            }
-
-            if (_approvalHandler is null)
-            {
-                return false;
-            }
-
-            return await _approvalHandler.RequestApprovalAsync(
-                new ToolApprovalRequest(
-                    Guid.NewGuid(),
-                    toolName,
-                    displayName,
-                    description,
-                    argumentsJson,
-                    _conversationId),
-                cancellationToken);
-        }
     }
 }

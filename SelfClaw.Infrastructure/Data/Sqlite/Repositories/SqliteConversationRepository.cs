@@ -268,7 +268,7 @@ VALUES($id, $messageId, $kind, $fileName, $mediaType, $storagePath, $byteLength,
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index, result_content
+SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index, result_content, source_kind, source_id, display_name
 FROM tool_runs
 WHERE conversation_id = $conversationId
 ORDER BY created_at_utc ASC;";
@@ -300,8 +300,8 @@ ORDER BY created_at_utc ASC;";
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = @"
-INSERT INTO tool_runs(id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index, result_content)
-VALUES($id, $conversationId, $toolName, $argumentsJson, $status, $resultSummary, $correlationId, $durationMs, $createdAt, $updatedAt, $agentId, $messageId, $afterSegmentIndex, $resultContent)
+INSERT INTO tool_runs(id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index, result_content, source_kind, source_id, display_name)
+VALUES($id, $conversationId, $toolName, $argumentsJson, $status, $resultSummary, $correlationId, $durationMs, $createdAt, $updatedAt, $agentId, $messageId, $afterSegmentIndex, $resultContent, $sourceKind, $sourceId, $displayName)
 ON CONFLICT(id) DO UPDATE SET
     status = excluded.status,
     result_summary = excluded.result_summary,
@@ -310,6 +310,9 @@ ON CONFLICT(id) DO UPDATE SET
     agent_id = COALESCE(excluded.agent_id, tool_runs.agent_id),
     message_id = COALESCE(excluded.message_id, tool_runs.message_id),
     after_segment_index = COALESCE(excluded.after_segment_index, tool_runs.after_segment_index),
+    source_kind = COALESCE(excluded.source_kind, tool_runs.source_kind),
+    source_id = COALESCE(excluded.source_id, tool_runs.source_id),
+    display_name = COALESCE(excluded.display_name, tool_runs.display_name),
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", record.Id.ToString("D"));
         command.Parameters.AddWithValue("$conversationId", record.ConversationId.ToString("D"));
@@ -325,6 +328,9 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$messageId", record.MessageId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$afterSegmentIndex", record.AfterSegmentIndex ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$resultContent", record.ResultContent ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$sourceKind", record.SourceKind is null ? DBNull.Value : (int)record.SourceKind.Value);
+        command.Parameters.AddWithValue("$sourceId", record.SourceId ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$displayName", record.DisplayName ?? (object)DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime.Agent;
 
 namespace SelfClaw.Desktop.Services;
 
@@ -141,7 +142,11 @@ internal static class TranscriptToolRunPresenter
             toolRun.Id.ToString("D"),
             FormatInlineToolDuration(toolRun),
             BuildToolDetailTitle(toolRun),
-            BuildToolDetailText(toolRun));
+            BuildToolDetailText(toolRun),
+            toolRun.ToolName,
+            toolRun.SourceKind?.ToString().ToLowerInvariant(),
+            toolRun.SourceId,
+            toolRun.DisplayName);
 
     private static int ResolveInsertionIndex(int? anchoredIndex, IReadOnlyList<int> candidateIndexes, int fallbackCursor)
     {
@@ -168,15 +173,21 @@ internal static class TranscriptToolRunPresenter
 
     private static string BuildInlineToolSummary(ToolExecutionRecord toolRun)
     {
+        if (toolRun.SourceKind is ToolSourceKind.Mcp or ToolSourceKind.Skill or ToolSourceKind.Plugin)
+        {
+            return HumanizeToolName(toolRun.DisplayName ?? toolRun.ToolName);
+        }
+
         using var arguments = ParseJsonObject(toolRun.ArgumentsJson);
 
         return toolRun.ToolName switch
         {
-            "read_workspace_file" => $"Read {ReadArgument(arguments, "relativePath", "file")}",
-            "write_workspace_file" => $"{ResolveWriteVerb(toolRun)} {ReadArgument(arguments, "relativePath", "file")}",
+            "read_file" => $"Read {ReadArgument(arguments, "relativePath", "file")}",
+            "write_file" => $"{ResolveWriteVerb(toolRun)} {ReadArgument(arguments, "relativePath", "file")}",
+            "edit_file" => $"Edit {ReadArgument(arguments, "relativePath", "file")}",
             "run_shell_command" => $"Run {ReadArgument(arguments, "command", "command", maxLength: 44)}",
-            "list_workspace_files" => BuildListSummary(arguments),
-            "search_workspace_text" => $"Search {Quote(ReadArgument(arguments, "query", "text", maxLength: 28))}",
+            "list_files" or "glob_files" => BuildListSummary(arguments),
+            "search_text" => $"Search {Quote(ReadArgument(arguments, "query", "text", maxLength: 28))}",
             _ => HumanizeToolName(toolRun.ToolName)
         };
     }
@@ -258,13 +269,16 @@ internal static class TranscriptToolRunPresenter
     }
 
     private static string BuildToolDetailTitle(ToolExecutionRecord toolRun)
-        => toolRun.ToolName switch
+        => toolRun.SourceKind is ToolSourceKind.Mcp or ToolSourceKind.Skill or ToolSourceKind.Plugin
+            ? toolRun.DisplayName ?? HumanizeToolName(toolRun.ToolName)
+            : toolRun.ToolName switch
         {
             "run_shell_command" => "Shell",
-            "read_workspace_file" => "Read File",
-            "search_workspace_text" => "Search Results",
-            "list_workspace_files" => "Workspace Entries",
-            "write_workspace_file" => "Write File",
+            "read_file" => "Read File",
+            "search_text" => "Search Results",
+            "list_files" or "glob_files" => "Workspace Entries",
+            "write_file" => "Write File",
+            "edit_file" => "Edit File",
             _ => HumanizeToolName(toolRun.ToolName)
         };
 
@@ -280,10 +294,10 @@ internal static class TranscriptToolRunPresenter
         return toolRun.ToolName switch
         {
             "run_shell_command" => BuildShellRequestDetails(arguments),
-            "read_workspace_file" => ReadArgument(arguments, "relativePath", "No file path provided."),
-            "search_workspace_text" => $"Query: {ReadArgument(arguments, "query", string.Empty)}",
-            "list_workspace_files" => BuildListRequestDetails(arguments),
-            "write_workspace_file" => BuildWriteRequestDetails(arguments),
+            "read_file" => ReadArgument(arguments, "relativePath", "No file path provided."),
+            "search_text" => $"Query: {ReadArgument(arguments, "query", string.Empty)}",
+            "list_files" or "glob_files" => BuildListRequestDetails(arguments),
+            "write_file" or "edit_file" => BuildWriteRequestDetails(arguments),
             _ => toolRun.ResultSummary ?? PrettyPrintJson(toolRun.ArgumentsJson)
         };
     }

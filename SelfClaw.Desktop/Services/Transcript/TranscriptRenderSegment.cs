@@ -9,4 +9,8 @@ public sealed record TranscriptRenderSegment(
     string? SegmentId = null,
     string? DurationText = null,
     string? DetailTitle = null,
-    string? DetailText = null);
+    string? DetailText = null,
+    string? ToolName = null,
+    string? SourceKind = null,
+    string? SourceId = null,
+    string? DisplayName = null);

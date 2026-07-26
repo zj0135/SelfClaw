@@ -19,6 +19,11 @@ const label = computed(() => splitSummaryLabel(props.summaryLabel || props.segme
 const detailTitle = computed(() => props.segment.detailTitle || 'Tool');
 const detailText = computed(() => props.segment.detailText || '暂无可展示的执行结果。');
 const durationText = computed(() => props.segment.durationText || '');
+const sourceText = computed(() => {
+	if (!props.segment.sourceId) return '';
+	const labels = { mcp: 'MCP', skill: 'Skill', plugin: 'Plugin' };
+	return `${labels[props.segment.sourceKind] || 'Extension'} · ${props.segment.sourceId}`;
+});
 </script>
 
 <template>
@@ -45,7 +50,10 @@ const durationText = computed(() => props.segment.durationText || '');
 			</span>
 		</button>
 		<div v-if="open" class="tool-details">
-			<div class="tool-details-header">{{ detailTitle }}</div>
+			<div class="tool-details-header">
+				<span>{{ detailTitle }}</span>
+				<small v-if="sourceText" class="tool-source">{{ sourceText }}</small>
+			</div>
 			<div class="tool-details-body">
 				<pre class="tool-details-pre"><code>{{ detailText }}</code></pre>
 			</div>
@@ -55,3 +63,8 @@ const durationText = computed(() => props.segment.durationText || '');
 		</div>
 	</section>
 </template>
+
+<style scoped>
+.tool-details-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tool-source { color: var(--text-muted); font-size: 10px; font-weight: 500; letter-spacing: 0; }
+</style>

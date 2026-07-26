@@ -17,6 +17,9 @@ const state = reactive({
 	autoScroll: false,
 	isBusy: false,
 	agentMode: 'cli',
+	selectedAgentId: '',
+	selectedAgentName: '',
+	capabilityRevision: 0,
 	activityText: '',
 	pendingApproval: null,
 	terminal: {
@@ -171,6 +174,9 @@ function replaceState(payload) {
 	state.isBusy = nextBusy;
 	state.activityText = payload.activityText || '';
 	state.agentMode = payload.agentMode || 'cli';
+	state.selectedAgentId = payload.selectedAgentId || '';
+	state.selectedAgentName = payload.selectedAgentName || '';
+	state.capabilityRevision = Number(payload.capabilityRevision) || 0;
 
 	nextTick(() => {
 		const composerEl = composerShellRef.value?.getShellEl();
@@ -400,6 +406,10 @@ on('toolApprovalRequest', (payload) => {
 		displayName: payload.displayName || '',
 		description: payload.description || '',
 		argumentsJson: payload.argumentsJson || '',
+		sourceKind: payload.sourceKind,
+		sourceId: payload.sourceId || '',
+		transportSummary: payload.transportSummary || '',
+		annotationsJson: payload.annotationsJson || '',
 	};
 });
 
@@ -437,6 +447,9 @@ onUnmounted(() => {
 			:workspace-selection="state.workspace"
 			:workspace-loading="state.workspace.isLoading"
 			:agent-mode="state.agentMode"
+			:selected-agent-id="state.selectedAgentId"
+			:selected-agent-name="state.selectedAgentName"
+			:capability-revision="state.capabilityRevision"
 			:pending-approval="state.pendingApproval"
 			@submit="submitComposer"
 			@stop="stopGeneration"

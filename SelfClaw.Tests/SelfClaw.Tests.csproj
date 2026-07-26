@@ -36,5 +36,6 @@
 
   <ItemGroup>
     <None Update="Infrastructure\AiProviders\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Infrastructure\Extensions\Fixtures\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

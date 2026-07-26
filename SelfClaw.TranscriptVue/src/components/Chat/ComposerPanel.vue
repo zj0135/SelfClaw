@@ -1,8 +1,9 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { SlidersHorizontal, ArrowRight, Square, ShieldAlert, Check, X } from 'lucide-vue-next';
 import ModelSelector from './ModelSelector.vue';
 import WorkspaceSelector from './WorkspaceSelector.vue';
+import SkillPicker from './SkillPicker.vue';
 
 const props = defineProps({
 	busy: {
@@ -21,6 +22,9 @@ const props = defineProps({
 		type: String,
 		default: 'cli',
 	},
+	selectedAgentId: { type: String, default: '' },
+	selectedAgentName: { type: String, default: '' },
+	capabilityRevision: { type: Number, default: 0 },
 	pendingApproval: {
 		type: Object,
 		default: null,
@@ -62,6 +66,16 @@ const approvalDetail = computed(() => {
 	return `${raw.slice(0, 120)}…`;
 });
 
+const approvalSource = computed(() => {
+	const approval = props.pendingApproval;
+	if (!approval?.sourceId) return '';
+	const numericLabels = { 1: 'MCP', 2: 'Skill', 3: 'Plugin' };
+	const kind = typeof approval.sourceKind === 'string'
+		? approval.sourceKind
+		: numericLabels[approval.sourceKind] || '扩展';
+	return `${kind.toUpperCase()} · ${approval.sourceId}${approval.transportSummary ? ` · ${approval.transportSummary}` : ''}`;
+});
+
 function approveTool() {
 	if (!props.pendingApproval) {
 		return;
@@ -80,6 +94,7 @@ function rejectTool() {
 
 const composerText = ref('');
 const shellRef = ref(null);
+const textareaRef = ref(null);
 
 const canSend = computed(() => composerText.value.trim().length > 0 && !props.busy);
 
@@ -122,6 +137,17 @@ function onKeydown(event) {
 	submit();
 }
 
+async function insertSkillToken(skillId) {
+	const textarea = textareaRef.value;
+	const start = textarea?.selectionStart ?? composerText.value.length;
+	const end = textarea?.selectionEnd ?? start;
+	const token = `[/${skillId}] `;
+	composerText.value = composerText.value.slice(0, start) + token + composerText.value.slice(end);
+	await nextTick();
+	textareaRef.value?.focus();
+	textareaRef.value?.setSelectionRange(start + token.length, start + token.length);
+}
+
 defineExpose({
 	getShellEl: () => shellRef.value,
 });
@@ -138,6 +164,7 @@ defineExpose({
 					<span class="tool-approval-title">
 						请求执行 <strong>{{ approvalTitle }}</strong>
 					</span>
+					<span v-if="approvalSource" class="tool-approval-source">{{ approvalSource }}</span>
 					<span v-if="approvalDetail" class="tool-approval-detail" :title="approvalDetail">{{ approvalDetail }}</span>
 				</div>
 				<div class="tool-approval-actions">
@@ -155,6 +182,7 @@ defineExpose({
 		<section ref="shellRef" class="composer-shell" aria-label="消息输入">
 			<div class="composer-grip" aria-hidden="true"></div>
 			<textarea
+				ref="textareaRef"
 				v-model="composerText"
 				class="composer-input"
 				rows="3"
@@ -164,6 +192,13 @@ defineExpose({
 			<div class="composer-toolbar">
 			<div class="composer-tools-left">
 			<ModelSelector :execution-mode="agentMode" />
+			<SkillPicker
+				v-if="agentMode === 'direct'"
+				:agent-id="selectedAgentId"
+				:agent-name="selectedAgentName"
+				:capability-revision="capabilityRevision"
+				@select="insertSkillToken"
+			/>
 			<button class="icon-btn" type="button" title="功能" aria-label="功能">
 				<SlidersHorizontal :size="16" :stroke-width="1.8" aria-hidden="true" />
 			</button>
@@ -189,13 +224,13 @@ defineExpose({
 	</div>
 </template>
 
-<style>
+<style scoped>
 .composer-stack {
 	width: min(calc(100% - 72px), 728px);
 	margin: 0 auto 16px;
 }
 
-.empty-workspace .composer-stack {
+:global(.empty-workspace) .composer-stack {
 	width: min(calc(100% - 72px), 680px);
 	margin-bottom: 0;
 }
@@ -225,7 +260,7 @@ defineExpose({
 		0 0 0 3px rgba(59, 91, 253, 0.1);
 }
 
-.empty-workspace .composer-shell {
+:global(.empty-workspace) .composer-shell {
 	min-height: 132px;
 }
 
@@ -295,6 +330,12 @@ defineExpose({
 	line-height: 1.35;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.tool-approval-source {
+	color: #6f5b2e;
+	font-size: 10px;
+	font-weight: 600;
 }
 
 .tool-approval-actions {
@@ -455,7 +496,7 @@ defineExpose({
 		width: calc(100% - 28px);
 	}
 
-	.empty-workspace .composer-stack {
+	:global(.empty-workspace) .composer-stack {
 		width: calc(100% - 28px);
 	}
 }

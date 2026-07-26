@@ -33,7 +33,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         var services = new ServiceCollection();
         services.AddSelfClawInfrastructure(storagePaths);
 
-        using var provider = services.BuildServiceProvider();
+        await using var provider = services.BuildServiceProvider();
         await provider.GetRequiredService<IAiProviderRepository>().InitializeAsync();
         var runtime = provider.GetRequiredService<IAgentChatRuntime>();
         var request = new DirectChatTurnRequest(
@@ -58,7 +58,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void AddSelfClawInfrastructure_registers_repository_and_runtime_services()
+    public async Task AddSelfClawInfrastructure_registers_repository_and_runtime_services()
     {
         var storagePaths = new StoragePaths(
             _rootPath,
@@ -68,8 +68,11 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
 
         services.AddSelfClawInfrastructure(storagePaths);
 
-        using var provider = services.BuildServiceProvider();
+        await using var provider = services.BuildServiceProvider();
         var repository = provider.GetRequiredService<IAiProviderRepository>();
+        var packageRepository = provider.GetRequiredService<IExtensionPackageRepository>();
+        var mcpServerRepository = provider.GetRequiredService<IMcpServerRepository>();
+        var extensionSettingsService = provider.GetRequiredService<IExtensionSettingsService>();
         var runtime = provider.GetRequiredService<IAgentChatRuntime>();
         var adapters = provider.GetServices<IAiProviderAdapter>().ToArray();
         var registry = provider.GetRequiredService<IAiProviderRegistry>();
@@ -77,6 +80,9 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         var chatClientFactory = provider.GetRequiredService<IAiChatClientFactory>();
 
         repository.Should().BeOfType<SqliteAiProviderRepository>();
+        packageRepository.Should().BeOfType<SqliteExtensionRepository>();
+        mcpServerRepository.Should().BeSameAs(packageRepository);
+        extensionSettingsService.Should().NotBeNull();
         runtime.Should().BeOfType<DispatchingAgentChatRuntime>();
         adapters.Select(adapter => adapter.ProviderKind).Should().BeEquivalentTo(new[]
         {

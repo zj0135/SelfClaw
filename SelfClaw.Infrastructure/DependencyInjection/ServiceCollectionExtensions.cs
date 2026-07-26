@@ -19,6 +19,13 @@ using SelfClaw.Infrastructure.AiProviders.OpenAi;
 using SelfClaw.Infrastructure.AiProviders.Ollama;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
+using SelfClaw.Infrastructure.Extensions;
+using SelfClaw.Infrastructure.Extensions.Models;
+using SelfClaw.Infrastructure.Extensions.Skills;
+using SelfClaw.Infrastructure.Extensions.Abstractions;
+using SelfClaw.Infrastructure.Extensions.Runtime;
+using SelfClaw.Infrastructure.Extensions.Mcp;
+using SelfClaw.Infrastructure.Extensions.Plugins;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Security;
 using SelfClaw.Infrastructure.Tools.Transcript;
@@ -44,6 +51,42 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITurnFinalizationRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
         services.AddSingleton<IAiProviderRepository, SqliteAiProviderRepository>();
+        services.AddSingleton<SqliteExtensionRepository>();
+        services.AddSingleton<IExtensionPackageRepository>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteExtensionRepository>());
+        services.AddSingleton<IMcpServerRepository>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteExtensionRepository>());
+        services.AddSingleton(new ExtensionPackageLimits(
+            100L * 1024 * 1024,
+            300L * 1024 * 1024,
+            5000,
+            50L * 1024 * 1024,
+            256L * 1024));
+        services.AddSingleton<SkillPackageReader>();
+        services.AddSingleton<PluginManifestReader>();
+        services.AddSingleton<PluginVersionLeaseManager>();
+        services.AddSingleton<IPluginVersionLeaseManager>(serviceProvider =>
+            serviceProvider.GetRequiredService<PluginVersionLeaseManager>());
+        services.AddSingleton<SkillTokenParser>();
+        services.AddSingleton<SkillRuntimeToolset>();
+        services.AddSingleton<McpToolAdapter>();
+        services.AddSingleton<PluginContributionService>();
+        services.AddSingleton<ExtensionStateChangeNotifier>();
+        services.AddSingleton<IExtensionStateChangeNotifier>(serviceProvider =>
+            serviceProvider.GetRequiredService<ExtensionStateChangeNotifier>());
+        services.AddSingleton<ExtensionPackageInstaller>();
+        services.AddSingleton<ExtensionCatalog>();
+        services.AddSingleton<IExtensionCatalogReconciler>(serviceProvider =>
+            serviceProvider.GetRequiredService<ExtensionCatalog>());
+        services.AddSingleton<McpConfigurationResolver>();
+        services.AddSingleton<McpTransportFactory>();
+        services.AddSingleton<IMcpClientConnectionFactory, SdkMcpClientConnectionFactory>();
+        services.AddSingleton<McpClientManager>();
+        services.AddSingleton<IMcpClientManager>(serviceProvider =>
+            serviceProvider.GetRequiredService<McpClientManager>());
+        services.AddSingleton<IExtensionSettingsService, ExtensionSettingsService>();
+        services.AddSingleton<DirectPromptComposer>();
+        services.AddSingleton<IDirectTurnCapabilityResolver, DirectTurnCapabilityResolver>();
         services.AddSingleton<AiProviderHttpClientProvider>();
         services.AddSingleton<OpenAiModelListClient>();
         services.AddSingleton<AnthropicModelListClient>();

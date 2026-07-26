@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
 
@@ -102,7 +103,10 @@ internal static class SqliteMappings
             reader.IsDBNull(10) ? null : ReadGuid(reader, 10),
             reader.IsDBNull(11) ? null : ReadGuid(reader, 11),
             reader.IsDBNull(12) ? null : reader.GetInt32(12),
-            reader.IsDBNull(13) ? null : reader.GetString(13));
+            reader.IsDBNull(13) ? null : reader.GetString(13),
+            reader.IsDBNull(14) ? null : (ToolSourceKind)reader.GetInt32(14),
+            reader.IsDBNull(15) ? null : reader.GetString(15),
+            reader.IsDBNull(16) ? null : reader.GetString(16));
 
     public static WorkspaceRoot ReadWorkspaceRoot(SqliteDataReader reader)
         => new(
@@ -111,6 +115,40 @@ internal static class SqliteMappings
             reader.GetString(2),
             ReadDateTimeOffset(reader, 3),
             ReadDateTimeOffset(reader, 4));
+
+    public static ExtensionPackageRecord ReadExtensionPackage(SqliteDataReader reader)
+        => new(
+            (ExtensionKind)reader.GetInt32(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetString(6),
+            reader.GetString(7),
+            reader.IsDBNull(8) ? null : reader.GetString(8),
+            !reader.IsDBNull(9) && reader.GetInt32(9) != 0,
+            reader.IsDBNull(10) ? null : reader.GetString(10),
+            reader.IsDBNull(11) ? null : ReadDateTimeOffset(reader, 11),
+            ReadDateTimeOffset(reader, 12),
+            ReadDateTimeOffset(reader, 13));
+
+    public static McpServerConfigRecord ReadMcpServerConfig(SqliteDataReader reader)
+        => new(
+            reader.GetString(0),
+            reader.GetString(1),
+            (McpTransportKind)reader.GetInt32(2),
+            reader.GetString(3),
+            ReadStringDictionary(reader, 4),
+            reader.IsDBNull(5) ? null : reader.GetString(5),
+            !reader.IsDBNull(6) && reader.GetInt32(6) != 0,
+            reader.GetInt64(7),
+            ReadStringArray(reader, 8),
+            (McpServerHealthStatus)reader.GetInt32(9),
+            reader.IsDBNull(10) ? null : reader.GetString(10),
+            reader.IsDBNull(11) ? null : ReadDateTimeOffset(reader, 11),
+            ReadDateTimeOffset(reader, 12),
+            ReadDateTimeOffset(reader, 13));
 
     private static Guid ReadGuid(SqliteDataReader reader, int ordinal)
         => Guid.Parse(reader.GetString(ordinal));
@@ -123,4 +161,7 @@ internal static class SqliteMappings
 
     private static IReadOnlyDictionary<string, JsonElement> ReadJsonElementDictionary(SqliteDataReader reader, int ordinal)
         => JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(reader.GetString(ordinal)) ?? [];
+
+    private static IReadOnlyList<string> ReadStringArray(SqliteDataReader reader, int ordinal)
+        => JsonSerializer.Deserialize<string[]>(reader.GetString(ordinal)) ?? [];
 }

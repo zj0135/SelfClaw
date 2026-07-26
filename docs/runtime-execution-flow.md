@@ -39,11 +39,12 @@ Vue ChatView
 2. `ConfigureLogging()` 创建 Serilog 文件日志。
 3. `Host.CreateApplicationBuilder()` 创建 Generic Host。
 4. `AddSelfClawInfrastructure()` 注册数据库、提供商、工具和两套运行时。
-5. Desktop 层注册 `DesktopAgentStore`、`ProgrammingAssistantSettingsService`、`AiProviderSettingsBridge`、`DesktopToolApprovalHandler`、`MainWindowViewModel`、`MainWindow` 等单例。
+5. Desktop 层注册 `DesktopAgentDefinitionService`、`ExtensionSettingsBridge`、`ProgrammingAssistantSettingsService`、`AiProviderSettingsBridge`、`DesktopToolApprovalHandler`、`MainWindowViewModel`、`MainWindow` 等单例。
 6. `_host.StartAsync()` 启动容器。
 7. 依次执行：
    - `IConversationRepository.InitializeAsync()`；
    - `IAiProviderRepository.InitializeAsync()`；
+   - `IExtensionCatalogReconciler.ReconcileAsync()`，清理扩展 staging 与无引用 Plugin 旧版本；
    - `ProgrammingAssistantSettingsService.GetOrInitializeAsync()`，首次启动时扫描本机 CLI 并保存结果。
 8. 解析并显示 `MainWindow`。
 
@@ -67,7 +68,11 @@ IAgentChatRuntime
           |   |- IAiProviderRepository
           |   |- IAiProviderRegistry -> IAiProviderAdapter[]
           |   `- ISecretProtector
-          `- WorkspaceAgentToolset -> IWorkspaceToolService
+          |- IDirectTurnCapabilityResolver
+          |   |- ExtensionCatalog / PluginManifestReader / SkillPackageReader
+          |   |- WorkspaceAgentToolset -> IWorkspaceToolService
+          |   `- McpClientManager -> stdio / HTTP MCP transport
+          `- DirectPromptComposer
 ```
 
 `DispatchingAgentChatRuntime` 是 Desktop 唯一注入的 `IAgentChatRuntime` 实现。Desktop 不直接选择具体运行时。
@@ -83,11 +88,15 @@ IAgentChatRuntime
    - 加载工作区和会话列表；
    - `PublishShell(false)` 发布首个 transcript 快照。
 
+### 2.4 扩展设置消息族
+
+`ExtensionSettingsBridge` 处理 `extensions/*` WebView2 请求：读取聚合 state、导入 Skill/Plugin、启停与删除、保存/测试 MCP、确认 Plugin 权限、修改 Agent 绑定，以及列出 composer 的有效 Skills。设置 mutation 与 Direct 回合期 MCP health 更新共用单例 `IExtensionStateChangeNotifier`；revision 变化后发布 `extensions/state-changed`，`MainWindowViewModel` 切回 WPF Dispatcher 更新 `capabilityRevision`，打开中的扩展页重新加载，SkillPicker 的缓存随之失效。通知订阅者彼此隔离，UI 订阅异常不会反向中断已完成的 mutation 或 Direct 回合。MCP secret 在 bridge state 中只返回是否已配置，不返回 SecretRef 或明文。
+
 ## 3. 模式、模型与 Agent 如何确定
 
 ### 3.1 Agent 自带模式
 
-`DesktopAgentStore` 从 Agent markdown front matter 的 `mode` 读取：
+`DesktopAgentDefinitionService` 从 Agent markdown front matter 的 `mode` 读取：
 
 ```yaml
 mode: direct
@@ -95,16 +104,7 @@ mode: direct
 mode: cli
 ```
 
-`MainWindowViewModel.ResolveRuntimeAgent()` 把 `DesktopAgentDefinition` 转换为 `AgentRuntimeDefinition`，保留 `agent.Mode`、Instructions、Skills 和 ToolPolicy。
-
-当前该方法明确传入：
-
-```csharp
-McpServers: [],
-ConfiguredMcpServers: []
-```
-
-因此 markdown 中声明的 MCP server 目前不会进入实际运行时。
+`MainWindowViewModel.ResolveRuntimeAgent()` 把 `DesktopAgentDefinition` 转换为 `AgentRuntimeDefinition`，保留 `agent.Mode`、Instructions、ToolPolicy，以及 `PluginIds` / `SkillIds` / `McpServerIds`。Direct runtime 每回合再把这些绑定与全局启用状态求交；配置和密钥不会进入 Core 请求 DTO。
 
 ### 3.2 Composer 模式覆盖优先
 
@@ -267,10 +267,14 @@ DispatchingAgentChatRuntime.StreamTurnAsync()
   -> DirectAgentChatRuntime.StreamCoreAsync()
        -> Channel<AgentStreamEvent>
        -> DirectAgentChatRuntime.ProduceEventsAsync()
-            |- WorkspaceAgentToolset.CreateTools()
+            |- IDirectTurnCapabilityResolver.ResolveAsync()
+            |    |- workspace tools + unified approval wrapper
+            |    |- acknowledged Plugin instructions / contributed Skills / MCP
+            |    |- standalone Skills + explicit token adjustments
+            |    `- standalone MCP leases + source descriptors
             |- IAiChatClientFactory.CreateAsync(modelProfileId)
             |    或 CreateForScopeAsync("desktop-default")
-            |- DirectAgentChatRuntime.BuildMessages()
+            |- DirectPromptComposer.BuildMessages()
             |- IChatClient.GetStreamingResponseAsync()
             `- 把 ChatResponseUpdate.Contents 转为 AgentStreamEvent
 ```
@@ -279,24 +283,26 @@ DispatchingAgentChatRuntime.StreamTurnAsync()
 
 ### 5.2 工作区工具创建
 
-`ProduceEventsAsync()` 先判断 `request.WorkspaceRoot`：
+capability resolver 先判断 `request.WorkspaceRoot`：
 
 - 无工作区：`tools = Array.Empty<AITool>()`，Direct 模型没有 SelfClaw 工作区工具。
-- 有工作区：调用 `WorkspaceAgentToolset.CreateTools()` 创建 5 个 M.E.AI function tools：
+- 有工作区：调用 `WorkspaceAgentToolset.CreateTools()` 创建 7 个 M.E.AI function tools：
 
 | 工具 | 绑定方法 | 审批 |
 |---|---|---|
 | `list_files` | `BoundWorkspaceTools.ListFilesAsync()` | 不需要 |
+| `glob_files` | `BoundWorkspaceTools.GlobFilesAsync()` | 不需要 |
 | `search_text` | `BoundWorkspaceTools.SearchTextAsync()` | 不需要 |
 | `read_file` | `BoundWorkspaceTools.ReadFileAsync()` | 不需要 |
 | `write_file` | `BoundWorkspaceTools.WriteFileAsync()` | `RequireApproval` 时需要 |
+| `edit_file` | `BoundWorkspaceTools.EditFileAsync()` | `RequireApproval` 时需要 |
 | `run_shell_command` | `BoundWorkspaceTools.RunShellCommandAsync()` | `RequireApproval` 时需要 |
 
 底层全部进入 `WorkspaceToolService`，其中路径操作通过 `NormalizeRoot()` / `ResolvePath()` 限制在 workspace 内。
 
 #### 工具审批链
 
-`write_file` 和 `run_shell_command` 调用 `BoundWorkspaceTools.IsApprovedAsync()`：
+`write_file`、`edit_file` 和 `run_shell_command` 统一通过 `ApprovedAIFunction`：
 
 ```text
 ToolPermissionMode.FullAccess
@@ -378,10 +384,11 @@ var inputs = new AiChatRuntimeInputs(
 
 ### 5.5 消息构造与模型请求
 
-`DirectAgentChatRuntime.BuildMessages()`：
+`DirectPromptComposer.BuildMessages()`：
 
-1. `request.Agent.Instructions` 非空时添加 `ChatRole.System`。
-2. 遍历 `request.Messages`：
+1. 按稳定顺序拼接 Agent instructions、capability policy、Plugin instructions、显式 Skill、Skill compact catalog 和能力降级摘要。
+2. 应用 `MessageAdjustments` 剥离本轮已消费的 Skill token。
+3. 遍历 `request.Messages`：
    - 跳过 `MessageStatus.Failed`；
    - 跳过空文本；
    - User -> `ChatRole.User`；
@@ -411,8 +418,8 @@ RunStatusEvent(Requesting)
 |---|---|
 | `TextContent` | `AssistantTextDeltaEvent`，同时累积 `finalText` |
 | `TextReasoningContent` | `AssistantThinkingDeltaEvent` |
-| `FunctionCallContent` | 去重后输出 `ToolCallStartedEvent` |
-| `FunctionResultContent` | `DescribeToolResult()` -> `ToolCallCompletedEvent` |
+| `FunctionCallContent` | 依据 `DirectToolDescriptor` 去重后输出带来源字段的 `ToolCallStartedEvent` |
+| `FunctionResultContent` | 内建结果或 MCP 专用结果映射 -> `ToolCallCompletedEvent` |
 | `UsageContent` | 累加 input/output tokens，流末输出 `UsageReportedEvent` |
 
 正常结束输出：
@@ -766,11 +773,11 @@ dispatcher 统一保证成功/失败路径恰好产生一个 terminal event；Di
 
 以下是当前代码的实际行为，排查问题时需要特别注意：
 
-1. **MCP 尚未接线**：`ResolveRuntimeAgent()` 把两类 MCP 列表都传为空；Direct 和 CLI 都不会从 Agent markdown 获得 MCP 配置。
-2. **图片尚未进入当前 WebView 对话主链**：`SubmitPromptAsync()` 虽支持可选图片，当前 `MainWindow` 处理 `send-prompt` 时只传 prompt。即使其他调用方传入图片，`SendAsync()` 也只会持久化和展示附件；`DirectAgentChatRuntime.BuildMessages()` 只创建文本 `ChatMessage`，CLI 的 `ExtractPrompt()` 也只取文本。
+1. **扩展只接入 Direct**：`ResolveRuntimeAgent()` 会传递 Agent markdown 的 Plugin、Skill 与 MCP id；`DirectTurnCapabilityResolver` 每回合将绑定与全局启用状态求交并取得资源 lease。CLI 仍由子进程拥有自己的扩展与权限配置，不消费 SelfClaw 的 Direct 扩展目录。
+2. **图片尚未进入当前 WebView 对话主链**：`SubmitPromptAsync()` 虽支持可选图片，当前 `MainWindow` 处理 `send-prompt` 时只传 prompt。即使其他调用方传入图片，`SendAsync()` 也只会持久化和展示附件；`DirectPromptComposer.BuildMessages()` 只创建文本 `ChatMessage`，CLI 的 `ExtractPrompt()` 也只取文本。
 3. **Direct reasoning 开关固定关闭**：`AiChatRuntimeInputs.EnableReasoning` 当前为 `false`。若 provider 流仍返回 `TextReasoningContent`，runtime 可以显示，但本轮不会主动启用 adapter reasoning options。
-4. **Direct 工具依赖 workspace**：未选工作区时完全不创建 `AITool`。
-5. **Agent ToolPolicy/Skills 当前不参与 runtime 组装**：字段被保留在 `AgentRuntimeDefinition`，但 Direct 的工具集合只由 workspace 和权限决定；CLI 只使用 Instructions（且仅 Claude 定义实际注入）。
+4. **工作区工具依赖 workspace**：未选工作区时不创建内建 workspace `AITool`；不要求 workspace 的 Skill/MCP 能力仍可进入 Direct 回合。
+5. **Agent ToolPolicy 仍是固定基线**：Direct 会消费 Agent 的 Plugin/Skill/MCP 绑定；CLI 只使用 Instructions（且仅 Claude 定义实际注入），不消费这些 Direct 扩展绑定。
 6. **CLI 不使用 Direct provider 配置**：不会读取 `ModelProfileId`、provider connection 或 DPAPI 密钥，也不会注入到子进程环境。
 7. **Direct 每轮读取当前档案**：client lease 不跨回合缓存，因此连接、模型启用状态和密钥变更会在下一轮生效。
 8. **CLI session 按会话和 CLI 隔离**：切换 CLI 不会复用另一个 CLI 的 session；切回原 CLI 时仍可恢复其旧 session。
@@ -805,10 +812,12 @@ dispatcher 统一保证成功/失败路径恰好产生一个 terminal event；Di
 
 - `DirectAgentChatRuntime.StreamTurnAsync()` / `StreamCoreAsync()`：Direct 事件枚举入口。
 - `DirectAgentChatRuntime.ProduceEventsAsync()`：client、请求、内容翻译和终态。
-- `DirectAgentChatRuntime.BuildMessages()`：组装 system + 历史消息。
+- `DirectPromptComposer.BuildMessages()`：组装 Agent/扩展 system sections + 调整后的历史消息。
 - `AiChatClientFactory.CreateForScopeAsync()`：从 `desktop-default` 找模型。
 - `AiChatClientFactory.CreateAsync()`：验证档案/连接、解密、adapter 和 M.E.AI pipeline。
-- `WorkspaceAgentToolset.CreateTools()`：绑定 5 个工作区函数。
+- `WorkspaceAgentToolset.CreateTools()`：绑定 7 个工作区函数。
+- `DirectTurnCapabilityResolver.ResolveAsync()`：求解本轮 Plugin/Skill/MCP/工作区能力快照与 lease。
+- `ExtensionSettingsBridge.TryHandleAsync()`：处理 `extensions/*` 设置消息族与 revision 推送。
 - `DesktopToolApprovalHandler.RequestApprovalAsync()`：Direct 写操作审批。
 
 ### CLI

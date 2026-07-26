@@ -9,4 +9,7 @@ public sealed record ToolCallStartedEvent(
     string ToolCallId,
     string ToolName,
     string ArgumentsJson,
-    ToolCallKind Kind) : AgentStreamEvent;
+    ToolCallKind Kind,
+    ToolSourceKind? SourceKind = null,
+    string? SourceId = null,
+    string? DisplayName = null) : AgentStreamEvent;
