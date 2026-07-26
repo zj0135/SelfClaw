@@ -105,8 +105,8 @@ Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 
 Desktop (`App.xaml.cs`):
 - `DesktopAgentStore`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
-  `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `AiProviderSettingsBridge`, `PetService`,
-  `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
+  `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `AiProviderSettingsBridge`,
+  `PetPackageCatalog`, `PetActivityPresenter`, `PetHost`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
 
 **Not registered** (retained/dead): `DesktopChannelManager`, Feishu adapters, old `DesktopSettingsStore`.
 
