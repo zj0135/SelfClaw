@@ -53,6 +53,18 @@ public sealed class SpriteAnimator : IDisposable
         ConfigureTimer();
     }
 
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _timer.Stop();
+        _timer.Tick -= OnTick;
+    }
+
     private void OnTick(object? sender, EventArgs e)
     {
         var row = _spriteSheet.GetRow(_rowId);
@@ -89,15 +101,4 @@ public sealed class SpriteAnimator : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        _timer.Stop();
-        _timer.Tick -= OnTick;
-    }
 }

@@ -29,6 +29,8 @@ public sealed class SpriteSheet
 
     public int CellHeight { get; }
 
+    public IReadOnlyCollection<string> RowIds => _rowsById.Keys;
+
     public static SpriteSheet Create(BitmapSource source, GridConfig? gridOverride)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -142,5 +144,3 @@ public sealed class SpriteSheet
         return imageSize / count;
     }
 }
-
-public sealed record SpriteSheetRow(string Id, int Index, int Frames, int Fps);

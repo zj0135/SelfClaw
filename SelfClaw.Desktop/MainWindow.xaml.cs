@@ -41,7 +41,7 @@ public partial class MainWindow : Window
     private readonly StoragePaths _storagePaths;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettingsService;
     private readonly AiProviderSettingsBridge _aiProviderSettingsBridge;
-    private readonly PetService _petService;
+    private readonly PetHost _petHost;
     private readonly PetActivityPresenter _petActivityPresenter;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
@@ -72,7 +72,7 @@ public partial class MainWindow : Window
         DesktopToolApprovalHandler toolApprovalHandler,
         ProgrammingAssistantSettingsService programmingAssistantSettingsService,
         AiProviderSettingsBridge aiProviderSettingsBridge,
-        PetService petService,
+        PetHost petHost,
         PetActivityPresenter petActivityPresenter,
         AgentActivityCoordinator agentActivityCoordinator,
         StoragePaths storagePaths)
@@ -83,7 +83,7 @@ public partial class MainWindow : Window
         _storagePaths = storagePaths;
         _programmingAssistantSettingsService = programmingAssistantSettingsService;
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
-        _petService = petService;
+        _petHost = petHost;
         _petActivityPresenter = petActivityPresenter;
         _agentActivityCoordinator = agentActivityCoordinator;
         _toolApprovalHandler = toolApprovalHandler;
@@ -1024,8 +1024,12 @@ public partial class MainWindow : Window
     {
         try
         {
-            var settings = await _petService.GetSettingsAsync();
-            PostPetSettings(requestId, settings);
+            var state = await _petHost.GetStateAsync();
+            PostPetSettings(requestId, state);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -1038,8 +1042,14 @@ public partial class MainWindow : Window
     {
         try
         {
-            var settings = await _petService.SetEnabledAsync(enabled);
-            PostPetSettings(requestId, settings);
+            var command = new PetHostCommand(
+                enabled ? PetHostCommandKind.Show : PetHostCommandKind.Hide);
+            var state = await _petHost.ExecuteAsync(command);
+            PostPetSettings(requestId, state);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -1052,8 +1062,13 @@ public partial class MainWindow : Window
     {
         try
         {
-            var settings = await _petService.SelectBuiltInPetAsync(petId);
-            PostPetSettings(requestId, settings);
+            var state = await _petHost.ExecuteAsync(
+                new PetHostCommand(PetHostCommandKind.SelectBuiltInPet, petId));
+            PostPetSettings(requestId, state);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -1062,15 +1077,30 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PostPetSettings(string? requestId, PetSettings settings)
-        => PostWebMessage(new
+    private void PostPetSettings(string? requestId, PetHostState state)
+    {
+        PostWebMessage(new
         {
             type = "pet-settings",
             requestId,
-            enabled = settings.Enabled,
-            selectedPetId = PetAssetPaths.ResolveSelectedBuiltInPetId(settings.SpriteSheetPath),
-            spriteSheetPath = settings.SpriteSheetPath
+            enabled = state.Settings.Enabled,
+            selectedPetId = state.SelectedBuiltInPetId,
+            spriteSheetPath = state.Settings.SpriteSheetPath,
+            pets = state.BuiltInPackages.Select(package => new
+            {
+                package.Id,
+                package.DisplayName,
+                package.Description,
+                package.Author,
+                package.Tags,
+                package.Source,
+                package.SourceUrl,
+                previewSrc = $"https://{AssetsHostName}/{package.PreviewAssetPath}",
+                cols = package.Columns,
+                rows = package.Rows,
+            }).ToArray(),
         });
+    }
 
     private void PostPetSettingsError(string? requestId, Exception exception)
         => PostWebMessage(new
@@ -1078,7 +1108,7 @@ public partial class MainWindow : Window
             type = "pet-settings",
             requestId,
             enabled = false,
-            selectedPetId = PetAssetPaths.DefaultBuiltInPetId,
+            selectedPetId = (string?)null,
             spriteSheetPath = (string?)null,
             error = exception.Message
         });

@@ -10,7 +10,7 @@ namespace SelfClaw.Desktop.Pet;
 /// <summary>
 /// Runtime WebP decoder backed by libwebp. It does not rely on system WIC WebP support.
 /// </summary>
-public sealed class WebpSpriteLoader
+internal sealed class WebpSpriteLoader : IPetSpriteDecoder
 {
     private const string NativeLibraryName = "libwebp";
     private const int MaxDimension = 8192;

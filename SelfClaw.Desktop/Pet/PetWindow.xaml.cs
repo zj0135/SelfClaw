@@ -10,7 +10,7 @@ namespace SelfClaw.Desktop.Pet;
 /// 负责窗口几何与指针交互(拖拽、点击/拖拽区分),并把交互转发给 ViewModel 状态机。
 /// 详见 docs/pet-system-design.md §6.3 / §7。
 /// </summary>
-public partial class PetWindow : Window
+public sealed partial class PetWindow : Window
 {
     internal const double PetVisualWidth = 192d;
     internal const double PetVisualHeight = 112d;

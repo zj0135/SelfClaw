@@ -5,93 +5,35 @@ import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js'
 
 const { requestLatest } = useHostBridge()
 
-const DEFAULT_PET_ID = 'yorha-sit-2b'
-
-const manifestModules = import.meta.glob('../../../assets/pets/*/pet.json', {
-  eager: true,
-  import: 'default',
-})
-const spriteModules = import.meta.glob('../../../assets/pets/*/spritesheet.webp', {
-  eager: true,
-  import: 'default',
-  query: '?url',
-})
-
 const tabs = [
   { id: 'builtin', label: '内置' },
   { id: 'custom', label: '自定义' },
   { id: 'community', label: '社区' },
 ]
-const builtinOrder = [
-  'yorha-sit-2b',
-  'yelling-dario',
-  'tux',
-  'slavik',
-  'nyako-shigure',
-  'dentist',
-  'dario',
-  'clippit',
-]
-const legacyPetIds = {
-  'yorha-si': 'yorha-sit-2b',
-  clippy: 'clippit',
-}
-
-const pets = buildBuiltinPets()
-const defaultPetId = pets.some((pet) => pet.id === DEFAULT_PET_ID)
-  ? DEFAULT_PET_ID
-  : pets[0]?.id || DEFAULT_PET_ID
-
 const activeTab = ref('builtin')
 const petVisible = ref(false)
-const selectedPet = ref(defaultPetId)
+const selectedPet = ref('')
+const pets = ref([])
 const syncPending = ref(false)
 const syncError = ref('')
 
-function buildBuiltinPets() {
-  return Object.entries(manifestModules)
-    .map(([path, manifest]) => {
-      const packageId = getPackageId(path)
-      const id = normalizeString(manifest?.id) || packageId
-      const spritePath = path.replace('/pet.json', '/spritesheet.webp')
-      const grid = manifest?.grid || {}
-
-      return {
-        id,
-        packageId,
-        name: normalizeString(manifest?.displayName) || id,
-        desc: normalizeString(manifest?.description) || '内置桌面宠物包。',
-        author: normalizeString(manifest?.author),
-        tags: Array.isArray(manifest?.tags) ? manifest.tags.filter(Boolean) : [],
-        previewSrc: spriteModules[spritePath] || '',
-        cols: Number(grid.cols) > 0 ? Number(grid.cols) : 8,
-        rows: Number(grid.rows) > 0 ? Number(grid.rows) : 9,
-      }
-    })
-    .sort((a, b) => {
-      const ai = builtinOrder.indexOf(a.id)
-      const bi = builtinOrder.indexOf(b.id)
-      if (ai !== -1 || bi !== -1) {
-        return (ai === -1 ? Number.MAX_SAFE_INTEGER : ai) -
-          (bi === -1 ? Number.MAX_SAFE_INTEGER : bi)
-      }
-
-      return a.name.localeCompare(b.name)
-    })
-}
-
-function normalizeString(value) {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-function getPackageId(path) {
-  const match = path.match(/\/assets\/pets\/([^/]+)\/pet\.json$/)
-  return match?.[1] || ''
-}
-
 function normalizePetId(id) {
-  const normalized = legacyPetIds[id] || id
-  return pets.some((pet) => pet.id === normalized) ? normalized : defaultPetId
+  if (pets.value.some((pet) => pet.id === id)) return id
+  return pets.value[0]?.id || ''
+}
+
+function applyPetPackages(value) {
+  if (!Array.isArray(value)) return
+  pets.value = value.map((pet) => ({
+    id: String(pet?.id || ''),
+    name: String(pet?.displayName || pet?.id || ''),
+    desc: String(pet?.description || ''),
+    author: String(pet?.author || ''),
+    tags: Array.isArray(pet?.tags) ? pet.tags.filter(Boolean) : [],
+    previewSrc: String(pet?.previewSrc || ''),
+    cols: Math.max(1, Number(pet?.cols) || 1),
+    rows: Math.max(1, Number(pet?.rows) || 1),
+  })).filter((pet) => pet.id)
 }
 
 function previewStyle(pet) {
@@ -148,6 +90,7 @@ async function syncPetSettings(type, payload = {}) {
     if (result?.error) {
       syncError.value = result.error
     } else {
+      applyPetPackages(result?.pets)
       petVisible.value = Boolean(result?.enabled)
       selectedPet.value = normalizePetId(result?.selectedPetId)
     }

@@ -14,7 +14,7 @@ public sealed class SystemTrayService : IDisposable
     private static readonly Uri IconUri = new("pack://application:,,,/Assets/icon/icon.ico", UriKind.Absolute);
 
     private readonly ILogger<SystemTrayService> _logger;
-    private readonly PetService _petService;
+    private readonly PetHost _petHost;
     private readonly Forms.NotifyIcon? _notifyIcon;
     private readonly Forms.ContextMenuStrip? _contextMenu;
     private readonly Forms.ToolStripMenuItem? _openMenuItem;
@@ -22,10 +22,10 @@ public sealed class SystemTrayService : IDisposable
     private readonly Forms.ToolStripMenuItem? _exitMenuItem;
     private Window? _mainWindow;
 
-    public SystemTrayService(ILogger<SystemTrayService> logger, PetService petService)
+    public SystemTrayService(ILogger<SystemTrayService> logger, PetHost petHost)
     {
         _logger = logger;
-        _petService = petService;
+        _petHost = petHost;
 
         try
         {
@@ -70,35 +70,54 @@ public sealed class SystemTrayService : IDisposable
         ActivateMainWindow();
     }
 
-    private void OnContextMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
+    private async void OnContextMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        SyncPetMenuItem();
+        await RefreshPetMenuItemAsync();
     }
 
     private async void OnPetMenuItemClick(object? sender, EventArgs e)
     {
         try
         {
-            await _petService.ToggleAsync();
-            SyncPetMenuItem();
+            var state = await _petHost.ExecuteAsync(new PetHostCommand(PetHostCommandKind.Toggle));
+            SyncPetMenuItem(state);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "Failed to toggle the desktop pet.");
-            SyncPetMenuItem();
+            await RefreshPetMenuItemAsync();
         }
     }
 
-    private void SyncPetMenuItem()
+    private async Task RefreshPetMenuItemAsync()
+    {
+        try
+        {
+            SyncPetMenuItem(await _petHost.GetStateAsync());
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to read the desktop pet state.");
+        }
+    }
+
+    private void SyncPetMenuItem(PetHostState state)
     {
         if (_petMenuItem is null)
         {
             return;
         }
 
-        var isVisible = _petService.IsVisible;
-        _petMenuItem.Checked = isVisible;
-        _petMenuItem.Text = isVisible ? "Hide Pet" : "Show Pet";
+        _petMenuItem.Checked = state.IsVisible;
+        _petMenuItem.Text = state.IsVisible ? "Hide Pet" : "Show Pet";
     }
 
     private void OnExitMenuItemClick(object? sender, EventArgs e)

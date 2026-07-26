@@ -8,6 +8,4 @@ public sealed record PetBubbleViewState(
     bool IsVisible,
     bool IsPinned,
     Guid? ApprovalId,
-    int AdditionalApprovalCount,
-    TimeSpan? AutoHideAfter,
     PetWorkState WorkState);
