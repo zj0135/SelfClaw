@@ -224,11 +224,11 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
             : [];
         var acknowledged = ReadAcknowledgedPermissions(package.AcknowledgedPermissionsJson);
         var unacknowledged = permissions.Except(acknowledged, StringComparer.Ordinal).ToArray();
-        var status = !Directory.Exists(package.InstallPath)
-            ? "broken"
-            : package.IsEnabled && unacknowledged.Length > 0
+        var status = IsInstallationIntact(package)
+            ? package.IsEnabled && unacknowledged.Length > 0
                 ? "needs-permission"
-                : package.IsEnabled ? "ready" : "disabled";
+                : package.IsEnabled ? "ready" : "disabled"
+            : "broken";
         return new ExtensionPackageView(
             package.Kind,
             package.Id,
@@ -242,6 +242,13 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
             permissions,
             unacknowledged);
     }
+
+    // A Skill whose SKILL.md is gone must not surface as "ready": the capability resolver treats it as
+    // broken and fails the turn when a token names it, so the settings page and SkillPicker have to agree.
+    private static bool IsInstallationIntact(ExtensionPackageRecord package)
+        => Directory.Exists(package.InstallPath) &&
+            (package.Kind != ExtensionKind.Skill ||
+                File.Exists(Path.Combine(package.InstallPath, "SKILL.md")));
 
     internal static IReadOnlyList<string> ReadAcknowledgedPermissions(string? json)
     {

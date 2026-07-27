@@ -127,6 +127,9 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         var now = DateTimeOffset.UtcNow;
         var installedPath = Path.Combine(_rootPath, "skills", "review");
         Directory.CreateDirectory(installedPath);
+        await File.WriteAllTextAsync(
+            Path.Combine(installedPath, "SKILL.md"),
+            "---\nname: Review\ndescription: Reviews changes\n---\nReview instructions.");
         await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
             ExtensionKind.Skill,
             "review",
@@ -172,6 +175,34 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
 
         await context.Service.DeleteAsync(new ExtensionItemKey(ExtensionKind.Skill, "review"));
         (await context.Service.GetStateAsync()).Revision.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetState_reports_a_skill_without_its_entry_file_as_broken()
+    {
+        var context = CreateContext();
+        var now = DateTimeOffset.UtcNow;
+        var installedPath = Path.Combine(_rootPath, "skills", "review");
+        Directory.CreateDirectory(installedPath);
+        await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
+            ExtensionKind.Skill,
+            "review",
+            "Review",
+            "1.0.0",
+            "Reviews changes",
+            installedPath,
+            "sha256:review",
+            "{}",
+            null,
+            true,
+            null,
+            null,
+            now,
+            now));
+
+        var state = await context.Service.GetStateAsync();
+
+        state.Skills.Should().ContainSingle().Which.Status.Should().Be("broken");
     }
 
     [Fact]
