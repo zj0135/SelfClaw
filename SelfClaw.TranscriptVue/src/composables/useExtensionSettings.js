@@ -73,9 +73,9 @@ export function useExtensionSettings() {
 			request('extensions/set-enabled', { kind, id: item.id, enabled }),
 		);
 		if (!response) return false;
-		item.enabled = enabled;
-		item.status = enabled ? (item.status === 'broken' ? 'broken' : 'ready') : 'disabled';
-		state.value.revision = response.revision;
+		// set-enabled 只回 { ok, revision }：status 与未确认权限由 catalog 判定（可能是
+		// broken / needs-permission），本地猜 ready 会与能力解析结果不一致。
+		await load();
 		return true;
 	}
 
@@ -87,8 +87,7 @@ export function useExtensionSettings() {
 			}),
 		);
 		if (!response) return false;
-		item.unacknowledgedPermissions = [];
-		state.value.revision = response.revision;
+		await load();
 		return true;
 	}
 
@@ -146,8 +145,10 @@ export function useExtensionSettings() {
 		return response;
 	}
 
+	// 只有更新的 revision 才值得重拉：mutation 自身已经 load() 过，宿主随后推送的同号
+	// state-changed 若也触发一次，等于每次改动都打两个来回。
 	on('extensions/state-changed', (payload) => {
-		if ((payload.revision || 0) >= state.value.revision) load();
+		if ((payload.revision || 0) > state.value.revision) load();
 	});
 
 	onMounted(load);
