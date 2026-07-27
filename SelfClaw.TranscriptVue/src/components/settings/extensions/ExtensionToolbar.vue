@@ -20,8 +20,8 @@ defineEmits(['update:modelValue', 'refresh', 'add-mcp', 'import-package']);
 		<button type="button" class="icon-button" title="刷新" :disabled="loading" @click="$emit('refresh')">
 			<RefreshCw :size="15" :class="{ spin: loading }" aria-hidden="true" />
 		</button>
-		<button v-if="category === 'skill'" type="button" class="primary" @click="$emit('import-package')">
-			<PackageOpen :size="15" aria-hidden="true" />导入技能
+		<button v-if="category !== 'mcpServer'" type="button" class="primary" @click="$emit('import-package')">
+			<PackageOpen :size="15" aria-hidden="true" />{{ category === 'plugin' ? '导入插件' : '导入技能' }}
 		</button>
 		<button v-if="category === 'mcpServer'" type="button" class="primary" @click="$emit('add-mcp')">
 			<Plus :size="15" aria-hidden="true" />新增服务器

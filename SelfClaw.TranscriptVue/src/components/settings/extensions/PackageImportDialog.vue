@@ -15,7 +15,7 @@ defineEmits(['close']);
 				<div class="success"><CheckCircle2 :size="18" aria-hidden="true" /></div>
 				<div>
 					<span>IMPORT COMPLETE</span>
-					<h2 id="package-import-title">{{ result.package?.name || '技能已导入' }}</h2>
+					<h2 id="package-import-title">{{ result.package?.name || '导入完成' }}</h2>
 				</div>
 				<button type="button" class="icon-button" title="关闭" @click="$emit('close')">
 					<X :size="16" aria-hidden="true" />
