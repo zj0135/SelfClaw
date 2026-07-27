@@ -261,6 +261,15 @@ internal sealed class PluginManifestReader
             throw new InvalidDataException($"{fieldName} contains an unsupported template variable.");
         }
 
+        // The DLL ban applies to every value, not just ${pluginRoot}-prefixed ones: a bare relative
+        // "server/entry.dll" is the same declaration with the prefix omitted.
+        if (string.Equals(Path.GetExtension(value.TrimEnd()), ".dll", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Plugin DLL entry points are not supported.");
+        }
+
+        // Existence is only checkable for package-relative values; a bare command such as "node" is
+        // resolved from PATH at launch and must stay legal.
         if (value.Contains("${pluginRoot}", StringComparison.Ordinal))
         {
             var relative = value.Replace("${pluginRoot}", string.Empty, StringComparison.Ordinal)
@@ -269,11 +278,6 @@ internal sealed class PluginManifestReader
             if (!File.Exists(path) && !Directory.Exists(path))
             {
                 throw new InvalidDataException($"{fieldName} references a missing package entry.");
-            }
-
-            if (string.Equals(Path.GetExtension(path), ".dll", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException("Plugin DLL entry points are not supported.");
             }
         }
     }

@@ -95,15 +95,30 @@ public sealed class PluginManifestReaderTests : IDisposable
         await action.Should().ThrowAsync<InvalidDataException>().WithMessage(error);
     }
 
-    [Fact]
-    public async Task ReadAsync_rejects_dll_entry_points()
+    [Theory]
+    [InlineData("server/entry.dll")]
+    [InlineData("${pluginRoot}/server/entry.dll")]
+    public async Task ReadAsync_rejects_dll_entry_points_with_or_without_the_plugin_root_template(string argument)
     {
-        await CreatePackageAsync(ValidManifest.Replace("server/index.js", "server/entry.dll", StringComparison.Ordinal));
+        await CreatePackageAsync(ValidManifest.Replace(
+            "${pluginRoot}/server/index.js",
+            argument,
+            StringComparison.Ordinal));
         await File.WriteAllTextAsync(Path.Combine(_rootPath, "server", "entry.dll"), "not an assembly");
 
         var action = () => CreateReader().ReadAsync(Path.Combine(_rootPath, "plugin.json"));
 
         await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*DLL entry*");
+    }
+
+    [Fact]
+    public async Task ReadAsync_allows_a_bare_command_resolved_from_path()
+    {
+        await CreatePackageAsync(ValidManifest);
+
+        var manifest = await CreateReader().ReadAsync(Path.Combine(_rootPath, "plugin.json"));
+
+        manifest.Contributions.McpServers.Should().ContainSingle().Which.Command.Should().Be("node");
     }
 
     [Theory]
