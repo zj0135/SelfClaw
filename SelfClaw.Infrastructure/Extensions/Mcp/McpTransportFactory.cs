@@ -45,7 +45,8 @@ internal sealed class McpTransportFactory
         ResolvedMcpServerConfiguration configuration,
         BoundedDiagnosticBuffer diagnostics)
     {
-        var environment = CreateWindowsBaselineEnvironment();
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var entry in configuration.Environment)
         {
             environment[entry.Key] = entry.Value;
@@ -55,10 +56,9 @@ internal sealed class McpTransportFactory
         {
             Name = configuration.DisplayName,
             Command = configuration.Command!,
-            Arguments = configuration.Arguments.ToArray(),
+            Arguments = [.. configuration.Arguments],
             WorkingDirectory = configuration.WorkingDirectory,
-            InheritEnvironmentVariables = false,
-            EnvironmentVariables = environment,
+            EnvironmentVariables = environment.Count == 0 ? null : environment,
             StandardErrorLines = diagnostics.Append
         };
     }
@@ -79,26 +79,4 @@ internal sealed class McpTransportFactory
             ConnectionTimeout = configuration.ConnectionTimeout ?? TimeSpan.FromSeconds(30)
         };
 
-    internal static Dictionary<string, string?> CreateWindowsBaselineEnvironment()
-    {
-        var systemRoot = Environment.GetEnvironmentVariable("SystemRoot")
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-        var system32 = Path.Combine(systemRoot, "System32");
-        var path = string.Join(Path.PathSeparator,
-            system32,
-            systemRoot,
-            Path.Combine(system32, "Wbem"),
-            Path.Combine(system32, "WindowsPowerShell", "v1.0"));
-
-        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["SystemRoot"] = systemRoot,
-            ["windir"] = systemRoot,
-            ["ComSpec"] = Environment.GetEnvironmentVariable("ComSpec") ?? Path.Combine(system32, "cmd.exe"),
-            ["PATHEXT"] = Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD",
-            ["TEMP"] = Path.GetTempPath(),
-            ["TMP"] = Path.GetTempPath(),
-            ["PATH"] = path
-        };
-    }
 }
