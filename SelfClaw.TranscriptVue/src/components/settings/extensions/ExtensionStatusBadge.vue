@@ -5,14 +5,13 @@ const props = defineProps({
 	status: { type: String, default: 'broken' },
 });
 
+// Mirrors SelfClaw.Core ExtensionStatus, serialized kebab-case by ExtensionStatusJsonConverter.
 const labels = {
 	ready: '可用',
 	disabled: '已停用',
 	'needs-config': '待配置',
 	'needs-permission': '待授权',
 	broken: '异常',
-	connecting: '连接中',
-	degraded: '受限',
 };
 
 const label = computed(() => labels[props.status] || props.status);
@@ -30,5 +29,4 @@ const label = computed(() => labels[props.status] || props.status);
 .status.disabled { color: var(--sc-faint); }
 .status.needs-config, .status.needs-permission { color: #b7791f; }
 .status.broken { color: var(--sc-err); }
-.status.connecting { color: var(--sc-acid); }
 </style>

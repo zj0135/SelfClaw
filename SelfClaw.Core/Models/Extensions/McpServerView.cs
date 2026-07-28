@@ -7,7 +7,7 @@ public sealed record McpServerView(
     bool Enabled,
     string? SourcePluginId,
     IReadOnlyList<string> AssignedAgentIds,
-    string Status,
+    ExtensionStatus Status,
     string? LastError,
     IReadOnlyList<string> Tools,
     string? Command,

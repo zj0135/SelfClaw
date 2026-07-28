@@ -61,8 +61,7 @@ internal sealed partial class SkillPackageReader
             description.Trim(),
             string.IsNullOrWhiteSpace(version) ? DefaultVersion : Unquote(version),
             values.Triggers,
-            markdown,
-            markdown[match.Length..]);
+            markdown);
     }
 
     public static string NormalizeSkillId(string skillId)

@@ -99,7 +99,7 @@ Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 - Repositories: `SqliteConversationRepository`, `SqliteAiProviderRepository`, `SqliteExtensionRepository`
 - AI providers: catalog/registry, provider adapters, `AiProviderHttpClientProvider`, `AiProviderSettingsService`, `AiChatClientFactory`
 - Runtimes: CLI process/session services, `CliAgentChatRuntime`, `DirectAgentChatRuntime`, `DispatchingAgentChatRuntime` (as `IAgentChatRuntime`)
-- Extensions: `ExtensionCatalog`, `ExtensionPackageInstaller`, `ExtensionSettingsService`, `ExtensionStateChangeNotifier`, `DirectTurnCapabilityResolver`, Skill readers/runtime tools
+- Extensions: `ExtensionCatalog`, `ExtensionPackageInstaller`, `ExtensionSettingsService`, `ExtensionStateChangeNotifier`, `DirectTurnCapabilityResolver` plus its `SkillCapabilitySource` / `PluginCapabilitySource` / `McpCapabilitySource`, Skill readers/runtime tools
 - MCP: configuration/transport factories, pooled `McpClientManager`, SDK connection factory, `McpToolAdapter`
 - Tools: `WorkspaceToolService`, `WorkspaceAgentToolset`, `MarkdownHtmlRenderer`
 - Security: `DpapiSecretProtector`

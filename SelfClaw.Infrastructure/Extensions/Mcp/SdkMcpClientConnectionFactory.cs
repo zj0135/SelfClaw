@@ -34,7 +34,7 @@ internal sealed class SdkMcpClientConnectionFactory : IMcpClientConnectionFactor
         try
         {
             var tools = await client.ListToolsAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-            return new SdkMcpClientConnection(client, tools.ToArray(), diagnostics);
+            return new SdkMcpClientConnection(client, tools.ToArray());
         }
         catch
         {

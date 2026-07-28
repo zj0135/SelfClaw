@@ -6,5 +6,4 @@ internal sealed record SkillPackageMetadata(
     string Description,
     string Version,
     IReadOnlyList<string> Triggers,
-    string Content,
-    string Body);
+    string Content);

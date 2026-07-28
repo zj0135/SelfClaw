@@ -39,8 +39,8 @@ internal sealed class McpConfigurationResolver
             return Unavailable(record, UnavailableConfiguration, workspacePath);
         }
 
-        var environment = new Dictionary<string, string>(settings.Environment, StringComparer.OrdinalIgnoreCase);
-        var headers = new Dictionary<string, string>(settings.Headers, StringComparer.OrdinalIgnoreCase);
+        var environment = McpSettingPath.CreateResolvedEnvironment(settings.Environment);
+        var headers = McpSettingPath.CreateHeaders(settings.Headers);
         try
         {
             foreach (var credential in record.CredentialRefs)
@@ -139,7 +139,7 @@ internal sealed class McpConfigurationResolver
             null,
             null,
             null,
-            new Dictionary<string, string>(),
+            McpSettingPath.CreateHeaders(),
             workspacePath);
     }
 
@@ -189,21 +189,21 @@ internal sealed class McpConfigurationResolver
         IDictionary<string, string> environment,
         IDictionary<string, string> headers)
     {
-        const string environmentPrefix = "environment.";
-        const string headersPrefix = "headers.";
-        if (path.StartsWith(environmentPrefix, StringComparison.Ordinal) && path.Length > environmentPrefix.Length)
+        if (!McpSettingPath.TryParse(path, out var isEnvironment, out var key))
         {
-            environment[path[environmentPrefix.Length..]] = value;
-            return true;
+            return false;
         }
 
-        if (path.StartsWith(headersPrefix, StringComparison.Ordinal) && path.Length > headersPrefix.Length)
+        if (isEnvironment)
         {
-            headers[path[headersPrefix.Length..]] = value;
-            return true;
+            environment[key] = value;
+        }
+        else
+        {
+            headers[key] = value;
         }
 
-        return false;
+        return true;
     }
 
     private static bool HasRequiredSettings(
@@ -214,25 +214,14 @@ internal sealed class McpConfigurationResolver
     {
         foreach (var path in settings.RequiredFieldNames ?? [])
         {
-            if (path.StartsWith("environment.", StringComparison.Ordinal))
+            if (!McpSettingPath.TryParse(path, out var isEnvironment, out var key))
             {
-                var key = path["environment.".Length..];
-                if ((!environment.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value)) &&
-                    !credentialRefs.ContainsKey(path))
-                {
-                    return false;
-                }
+                return false;
             }
-            else if (path.StartsWith("headers.", StringComparison.Ordinal))
-            {
-                var key = path["headers.".Length..];
-                if ((!headers.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value)) &&
-                    !credentialRefs.ContainsKey(path))
-                {
-                    return false;
-                }
-            }
-            else
+
+            var values = isEnvironment ? environment : headers;
+            if ((!values.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value)) &&
+                !credentialRefs.ContainsKey(path))
             {
                 return false;
             }

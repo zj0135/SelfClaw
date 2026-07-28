@@ -196,20 +196,10 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
 
     private ValueTask ReleaseAsync(PoolEntry entry)
     {
-        var disposeNow = false;
+        bool disposeNow;
         lock (_sync)
         {
-            if (entry.Release() == 0)
-            {
-                if (entry.IsDraining || Volatile.Read(ref _disposed) != 0)
-                {
-                    disposeNow = true;
-                }
-                else
-                {
-                    entry.ScheduleIdle(_idleTimeout);
-                }
-            }
+            disposeNow = entry.Release(_idleTimeout, IsDisposed);
         }
 
         return disposeNow ? new ValueTask(DisposeEntryAsync(entry)) : ValueTask.CompletedTask;
@@ -219,34 +209,25 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
     {
         lock (_sync)
         {
-            entry.Release();
-            entry.MarkDraining();
+            entry.ReleaseAndDrain();
         }
 
         await DisposeEntryAsync(entry).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Same decision as <see cref="ReleaseAsync"/>, but a cancelled acquire has no caller left to await
+    /// the teardown, so a dispose that becomes due runs detached.
+    /// </summary>
     private void ReleaseCanceledAcquire(PoolEntry entry)
     {
-        var disposeInBackground = false;
+        bool disposeNow;
         lock (_sync)
         {
-            if (entry.Release() != 0)
-            {
-                return;
-            }
-
-            if (entry.IsDraining || Volatile.Read(ref _disposed) != 0)
-            {
-                disposeInBackground = true;
-            }
-            else
-            {
-                entry.ScheduleIdle(_idleTimeout);
-            }
+            disposeNow = entry.Release(_idleTimeout, IsDisposed);
         }
 
-        if (disposeInBackground)
+        if (disposeNow)
         {
             _ = DisposeEntryAsync(entry);
         }
@@ -256,12 +237,10 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
     {
         lock (_sync)
         {
-            if (entry.ReferenceCount != 0 || entry.IsDraining)
+            if (!entry.TryBeginIdleDispose())
             {
                 return;
             }
-
-            entry.MarkDraining();
         }
 
         await DisposeEntryAsync(entry).ConfigureAwait(false);
@@ -308,8 +287,10 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
         return sanitized.Length <= 2048 ? sanitized : sanitized[..2048];
     }
 
+    private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
     private void ThrowIfDisposed()
-        => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        => ObjectDisposedException.ThrowIf(IsDisposed, this);
 
     public async ValueTask DisposeAsync()
     {
@@ -364,26 +345,62 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
 
         public void Acquire()
         {
-            _idleCancellation?.Cancel();
-            _idleCancellation?.Dispose();
-            _idleCancellation = null;
+            CancelIdleTimer();
             ReferenceCount++;
         }
 
-        public int Release() => --ReferenceCount;
+        /// <summary>
+        /// Drops one reference and answers the only question callers have: does this entry now need to be
+        /// disposed? A still-referenced entry stays live, and an unreferenced one either starts its idle
+        /// timer or becomes due for teardown because it is draining or the pool is shutting down.
+        /// </summary>
+        public bool Release(TimeSpan idleTimeout, bool poolDisposed)
+        {
+            if (--ReferenceCount != 0)
+            {
+                return false;
+            }
+
+            if (IsDraining || poolDisposed)
+            {
+                return true;
+            }
+
+            ScheduleIdle(idleTimeout);
+            return false;
+        }
+
+        /// <summary>A failed acquire leaves no usable connection behind, so the entry never goes idle.</summary>
+        public void ReleaseAndDrain()
+        {
+            ReferenceCount--;
+            MarkDraining();
+        }
+
+        /// <summary>
+        /// The idle timer fires outside the lock, so re-check under it: a new acquire or an explicit drain
+        /// may have won the race.
+        /// </summary>
+        public bool TryBeginIdleDispose()
+        {
+            if (ReferenceCount != 0 || IsDraining)
+            {
+                return false;
+            }
+
+            MarkDraining();
+            return true;
+        }
 
         public void MarkDraining()
         {
             IsDraining = true;
-            _idleCancellation?.Cancel();
-            _idleCancellation?.Dispose();
-            _idleCancellation = null;
+            CancelIdleTimer();
         }
 
-        public void ScheduleIdle(TimeSpan timeout)
+        private void ScheduleIdle(TimeSpan timeout)
         {
-            _idleCancellation?.Cancel();
-            _idleCancellation?.Dispose();
+            CancelIdleTimer();
             _idleCancellation = new CancellationTokenSource();
             _ = RunIdleTimerAsync(timeout, _idleCancellation.Token);
         }
@@ -393,6 +410,13 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
             _idleCancellation?.Dispose();
             _idleCancellation = null;
             _drained.TrySetResult();
+        }
+
+        private void CancelIdleTimer()
+        {
+            _idleCancellation?.Cancel();
+            _idleCancellation?.Dispose();
+            _idleCancellation = null;
         }
 
         private async Task RunIdleTimerAsync(TimeSpan timeout, CancellationToken cancellationToken)

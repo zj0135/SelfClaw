@@ -86,6 +86,9 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<McpClientManager>());
         services.AddSingleton<IExtensionSettingsService, ExtensionSettingsService>();
         services.AddSingleton<DirectPromptComposer>();
+        services.AddSingleton<SkillCapabilitySource>();
+        services.AddSingleton<PluginCapabilitySource>();
+        services.AddSingleton<McpCapabilitySource>();
         services.AddSingleton<IDirectTurnCapabilityResolver, DirectTurnCapabilityResolver>();
         services.AddSingleton<AiProviderHttpClientProvider>();
         services.AddSingleton<OpenAiModelListClient>();

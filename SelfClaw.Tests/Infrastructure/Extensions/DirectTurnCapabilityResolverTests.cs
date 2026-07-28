@@ -187,21 +187,9 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var notifier = new ExtensionStateChangeNotifier();
         var revisions = new List<long>();
         notifier.StateChanged += revisions.Add;
-        var storagePaths = new StoragePaths(
-            _rootPath,
-            Path.Combine(_rootPath, "selfclaw.db"),
-            Path.Combine(_rootPath, "secrets"));
-        var resolver = new DirectTurnCapabilityResolver(
-            new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
+        var resolver = CreateResolver(
             new PackageRepository([]),
-            new SkillPackageReader(CreateLimits()),
-            new SkillTokenParser(),
-            new SkillRuntimeToolset(),
-            servers,
-            new McpConfigurationResolver(new NoOpSecretProtector(), storagePaths),
-            manager,
-            new McpToolAdapter(),
-            stateChangeNotifier: notifier);
+            CreateMcpSource(servers, manager, notifier));
         var request = CreateRequest([], "plain prompt", mcpServerIds: ["failing", "healthy"]);
 
         await using var lease = await resolver.ResolveAsync(request);
@@ -223,20 +211,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var manager = new RecordingMcpClientManager(
             string.Empty,
             [CreateMcpTool("a.b"), CreateMcpTool("a_b")]);
-        var storagePaths = new StoragePaths(
-            _rootPath,
-            Path.Combine(_rootPath, "selfclaw.db"),
-            Path.Combine(_rootPath, "secrets"));
-        var resolver = new DirectTurnCapabilityResolver(
-            new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
-            new PackageRepository([]),
-            new SkillPackageReader(CreateLimits()),
-            new SkillTokenParser(),
-            new SkillRuntimeToolset(),
-            servers,
-            new McpConfigurationResolver(new NoOpSecretProtector(), storagePaths),
-            manager,
-            new McpToolAdapter());
+        var resolver = CreateResolver(new PackageRepository([]), CreateMcpSource(servers, manager));
 
         var action = () => resolver.ResolveAsync(
             CreateRequest([], "plain prompt", mcpServerIds: ["fixture"]));
@@ -258,31 +233,48 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         IExtensionPackageRepository repository,
         PluginManifestReader? pluginManifestReader = null,
         PluginVersionLeaseManager? pluginVersionLeaseManager = null)
+        => CreateResolver(
+            repository,
+            CreateMcpSource(new McpRepository([]), new RecordingMcpClientManager(string.Empty)),
+            pluginManifestReader,
+            pluginVersionLeaseManager);
+
+    private DirectTurnCapabilityResolver CreateResolver(
+        IExtensionPackageRepository repository,
+        McpCapabilitySource mcpSource,
+        PluginManifestReader? pluginManifestReader = null,
+        PluginVersionLeaseManager? pluginVersionLeaseManager = null)
     {
         var limits = CreateLimits();
-        if (pluginManifestReader is not null)
-        {
-            return new DirectTurnCapabilityResolver(
-                new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
-                repository,
-                new SkillPackageReader(limits),
-                new SkillTokenParser(),
-                new SkillRuntimeToolset(),
-                null,
-                null,
-                null,
-                null,
-                pluginManifestReader,
-                pluginVersionLeaseManager);
-        }
-
         return new DirectTurnCapabilityResolver(
             new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
             repository,
-            new SkillPackageReader(limits),
-            new SkillTokenParser(),
-            new SkillRuntimeToolset());
+            new SkillCapabilitySource(
+                new SkillPackageReader(limits),
+                new SkillTokenParser(),
+                new SkillRuntimeToolset()),
+            new PluginCapabilitySource(
+                pluginManifestReader ?? new PluginManifestReader(limits),
+                new SkillPackageReader(limits),
+                pluginVersionLeaseManager ?? new PluginVersionLeaseManager()),
+            mcpSource);
     }
+
+    private McpCapabilitySource CreateMcpSource(
+        McpRepository servers,
+        IMcpClientManager clientManager,
+        IExtensionStateChangeNotifier? stateChangeNotifier = null)
+        => new(
+            servers,
+            new McpConfigurationResolver(
+                new NoOpSecretProtector(),
+                new StoragePaths(
+                    _rootPath,
+                    Path.Combine(_rootPath, "selfclaw.db"),
+                    Path.Combine(_rootPath, "secrets"))),
+            clientManager,
+            new McpToolAdapter(),
+            stateChangeNotifier ?? new ExtensionStateChangeNotifier());
 
     private static ExtensionPackageLimits CreateLimits()
         => new(1024 * 1024, 1024 * 1024, 100, 512 * 1024, 256 * 1024);

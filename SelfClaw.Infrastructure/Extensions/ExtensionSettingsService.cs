@@ -248,13 +248,13 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
             ?? new Dictionary<string, string>(StringComparer.Ordinal);
         var refsToDelete = new HashSet<string>(StringComparer.Ordinal);
         var seenPaths = new HashSet<string>(StringComparer.Ordinal);
-        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
-        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var environment = McpSettingPath.CreateEnvironment();
+        var headers = McpSettingPath.CreateHeaders();
         var secretFields = new HashSet<string>(StringComparer.Ordinal);
 
         await ApplyEntriesAsync(
             command.Environment,
-            "environment",
+            McpSettingPath.EnvironmentPrefix,
             nextCredentialRefs,
             environment,
             secretFields,
@@ -263,7 +263,7 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
             cancellationToken).ConfigureAwait(false);
         await ApplyEntriesAsync(
             command.Headers,
-            "headers",
+            McpSettingPath.HeaderPrefix,
             nextCredentialRefs,
             headers,
             secretFields,
@@ -415,7 +415,7 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         ArgumentNullException.ThrowIfNull(command.Headers);
         foreach (var entry in command.Environment)
         {
-            if (!IsValidEnvironmentKey(entry.Key))
+            if (!McpSettingPath.IsValidEnvironmentKey(entry.Key))
             {
                 throw new ArgumentException($"Environment key '{entry.Key}' is invalid.", nameof(command));
             }
@@ -423,7 +423,7 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
 
         foreach (var entry in command.Headers)
         {
-            if (!IsValidHeaderName(entry.Key))
+            if (!McpSettingPath.IsValidHeaderName(entry.Key))
             {
                 throw new ArgumentException($"HTTP header name '{entry.Key}' is invalid.", nameof(command));
             }
@@ -487,11 +487,11 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
             throw new InvalidOperationException("Plugin-managed MCP structure cannot be changed independently.");
         }
 
-        ValidateEntries(command.Environment, "environment", settings);
-        ValidateEntries(command.Headers, "headers", settings);
+        ValidateEntries(command.Environment, McpSettingPath.EnvironmentPrefix, settings);
+        ValidateEntries(command.Headers, McpSettingPath.HeaderPrefix, settings);
         var expectedPaths = settings.RequiredFieldNames?.OrderBy(path => path, StringComparer.Ordinal).ToArray() ?? [];
-        var actualPaths = command.Environment.Select(entry => $"environment.{entry.Key.Trim()}")
-            .Concat(command.Headers.Select(entry => $"headers.{entry.Key.Trim()}"))
+        var actualPaths = command.Environment.Select(entry => McpSettingPath.ForEnvironment(entry.Key.Trim()))
+            .Concat(command.Headers.Select(entry => McpSettingPath.ForHeader(entry.Key.Trim())))
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
         if (!actualPaths.SequenceEqual(expectedPaths, StringComparer.Ordinal))
@@ -509,8 +509,13 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         foreach (var entry in entries)
         {
             var key = entry.Key.Trim();
-            var validKey = prefix == "environment" ? IsValidEnvironmentKey(key) : IsValidHeaderName(key);
-            var path = $"{prefix}.{key}";
+            var isEnvironment = prefix == McpSettingPath.EnvironmentPrefix;
+            var validKey = isEnvironment
+                ? McpSettingPath.IsValidEnvironmentKey(key)
+                : McpSettingPath.IsValidHeaderName(key);
+            var path = isEnvironment
+                ? McpSettingPath.ForEnvironment(key)
+                : McpSettingPath.ForHeader(key);
             if (!validKey || !seen.Add(key) ||
                 entry.IsSecret != settings.SecretFieldNames.Contains(path, StringComparer.Ordinal))
             {
@@ -614,17 +619,4 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         return normalized;
     }
 
-    private static bool IsValidEnvironmentKey(string? key)
-    {
-        if (string.IsNullOrWhiteSpace(key) || !(char.IsAsciiLetter(key[0]) || key[0] == '_'))
-        {
-            return false;
-        }
-
-        return key.Skip(1).All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
-    }
-
-    private static bool IsValidHeaderName(string? name)
-        => !string.IsNullOrWhiteSpace(name) && name.All(character =>
-            char.IsAsciiLetterOrDigit(character) || character is '!' or '#' or '$' or '%' or '&' or '\'' or '*' or '+' or '-' or '.' or '^' or '_' or '`' or '|' or '~');
 }

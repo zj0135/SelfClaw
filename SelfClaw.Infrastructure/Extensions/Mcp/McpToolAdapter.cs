@@ -61,10 +61,7 @@ internal sealed class McpToolAdapter
             kind,
             ToolSourceKind.Mcp,
             configuration.Id,
-            displayName,
-            originalName,
-            transportSummary,
-            annotationsJson);
+            displayName);
         return (approved, descriptor);
     }
 

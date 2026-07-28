@@ -17,7 +17,9 @@ public sealed class SkillPackageReaderTests : IDisposable
         Directory.CreateDirectory(_rootPath);
         var path = Path.Combine(_rootPath, "SKILL.md");
         const string body = "# Review\r\n\r\nKeep this body unchanged.\r\n";
-        await File.WriteAllTextAsync(path, """
+        // ReplaceLineEndings normalizes first, so this stays correct whether the raw string literal is
+        // checked out with LF or CRLF.
+        var markdown = """
             ---
             name: Code/Review
             description: >-
@@ -28,7 +30,8 @@ public sealed class SkillPackageReaderTests : IDisposable
               - review
               - "check diff"
             ---
-            """.Replace("\n", "\r\n", StringComparison.Ordinal) + body);
+            """.ReplaceLineEndings("\r\n") + "\r\n" + body;
+        await File.WriteAllTextAsync(path, markdown);
         var reader = new SkillPackageReader(CreateLimits());
 
         var result = await reader.ReadAsync(path);
@@ -38,7 +41,7 @@ public sealed class SkillPackageReaderTests : IDisposable
         result.Description.Should().Be("Reviews changes before commit.");
         result.Version.Should().Be("1.2.3");
         result.Triggers.Should().Equal("review", "check diff");
-        result.Body.Should().Be(body);
+        result.Content.Should().Be(markdown);
     }
 
     [Theory]

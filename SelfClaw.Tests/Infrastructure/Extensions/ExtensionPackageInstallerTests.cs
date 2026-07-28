@@ -226,7 +226,7 @@ public sealed class ExtensionPackageInstallerTests : IDisposable
 
         Directory.Exists(orphanPath).Should().BeFalse();
         (await catalog.ListPackageViewsAsync(ExtensionKind.Skill))
-            .Should().ContainSingle().Which.Status.Should().Be("broken");
+            .Should().ContainSingle().Which.Status.Should().Be(ExtensionStatus.Broken);
     }
 
     [Fact]

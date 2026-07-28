@@ -45,27 +45,25 @@ internal sealed class PluginContributionService
             expectedIds.Add(id);
             existingServers.TryGetValue(id, out var existing);
             var requiredFields = contribution.RequiredSettings
-                .Select(setting => $"{(setting.Target == "env" ? "environment" : "headers")}.{setting.Key}")
+                .Select(setting => McpSettingPath.ForManifestTarget(setting.Target, setting.Key))
                 .OrderBy(path => path, StringComparer.Ordinal)
                 .ToArray();
             var secretFields = contribution.RequiredSettings
                 .Where(setting => setting.Secret)
-                .Select(setting => $"{(setting.Target == "env" ? "environment" : "headers")}.{setting.Key}")
+                .Select(setting => McpSettingPath.ForManifestTarget(setting.Target, setting.Key))
                 .OrderBy(path => path, StringComparer.Ordinal)
                 .ToArray();
             var previousSettings = TryDeserializeSettings(existing?.SettingsJson);
-            var environment = contribution.RequiredSettings
+            var environment = McpSettingPath.CreateEnvironment(contribution.RequiredSettings
                 .Where(setting => setting.Target == "env" && !setting.Secret)
-                .ToDictionary(
-                    setting => setting.Key,
-                    setting => previousSettings?.Environment.GetValueOrDefault(setting.Key) ?? string.Empty,
-                    StringComparer.Ordinal);
-            var headers = contribution.RequiredSettings
+                .Select(setting => KeyValuePair.Create(
+                    setting.Key,
+                    previousSettings?.Environment.GetValueOrDefault(setting.Key) ?? string.Empty)));
+            var headers = McpSettingPath.CreateHeaders(contribution.RequiredSettings
                 .Where(setting => setting.Target == "header" && !setting.Secret)
-                .ToDictionary(
-                    setting => setting.Key,
-                    setting => previousSettings?.Headers.GetValueOrDefault(setting.Key) ?? string.Empty,
-                    StringComparer.OrdinalIgnoreCase);
+                .Select(setting => KeyValuePair.Create(
+                    setting.Key,
+                    previousSettings?.Headers.GetValueOrDefault(setting.Key) ?? string.Empty)));
             var transport = contribution.Transport == "stdio"
                 ? McpTransportKind.Stdio
                 : McpTransportKind.Http;
@@ -80,7 +78,7 @@ internal sealed class PluginContributionService
                     null,
                     null,
                     null,
-                    new Dictionary<string, string>(),
+                    McpSettingPath.CreateHeaders(),
                     secretFields,
                     requiredFields)
                 : new McpServerSettings(
@@ -88,7 +86,7 @@ internal sealed class PluginContributionService
                     [],
                     null,
                     contribution.RequiresWorkspace,
-                    new Dictionary<string, string>(),
+                    McpSettingPath.CreateEnvironment(),
                     contribution.Endpoint,
                     contribution.TransportMode ?? "auto",
                     contribution.ConnectionTimeoutSeconds ?? 30,
@@ -252,7 +250,7 @@ internal sealed class PluginContributionService
         IReadOnlyDictionary<string, string>? credentialRefs,
         IReadOnlyList<string> secretFields)
         => credentialRefs is null
-            ? new Dictionary<string, string>()
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
             : credentialRefs
                 .Where(pair => secretFields.Contains(pair.Key, StringComparer.Ordinal))
                 .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);

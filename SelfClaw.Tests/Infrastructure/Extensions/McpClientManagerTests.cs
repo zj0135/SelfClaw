@@ -223,7 +223,6 @@ public sealed class McpClientManagerTests
         private int _disposeCount;
 
         public IReadOnlyList<McpClientTool> Tools { get; } = [];
-        public string? Diagnostics => null;
         public int DisposeCount => Volatile.Read(ref _disposeCount);
 
         public Task PingAsync(CancellationToken cancellationToken = default)

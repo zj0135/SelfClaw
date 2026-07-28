@@ -6,7 +6,5 @@ internal interface IMcpClientConnection : IAsyncDisposable
 {
     IReadOnlyList<McpClientTool> Tools { get; }
 
-    string? Diagnostics { get; }
-
     Task PingAsync(CancellationToken cancellationToken = default);
 }

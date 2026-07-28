@@ -7,7 +7,4 @@ internal sealed record DirectToolDescriptor(
     ToolCallKind Kind,
     ToolSourceKind? SourceKind = null,
     string? SourceId = null,
-    string? DisplayName = null,
-    string? OriginalName = null,
-    string? TransportSummary = null,
-    string? AnnotationsJson = null);
+    string? DisplayName = null);

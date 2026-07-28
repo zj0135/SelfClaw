@@ -210,7 +210,7 @@ public sealed class ExtensionSettingsBridge
         var state = await _settingsService.GetStateAsync(cancellationToken);
         var skills = state.Skills
             .Where(skill => skill.Enabled &&
-                            string.Equals(skill.Status, "ready", StringComparison.Ordinal) &&
+                            skill.Status == ExtensionStatus.Ready &&
                             (string.IsNullOrWhiteSpace(skill.SourcePluginId)
                                 ? agent.SkillIds.Contains(skill.Id, StringComparer.OrdinalIgnoreCase)
                                 : agent.PluginIds.Contains(skill.SourcePluginId, StringComparer.OrdinalIgnoreCase)))

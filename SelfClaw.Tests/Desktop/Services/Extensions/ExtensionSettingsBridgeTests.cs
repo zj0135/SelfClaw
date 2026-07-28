@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
@@ -157,6 +157,25 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
     }
 
     [Fact]
+    public async Task GetState_serializes_extension_status_as_kebab_case_for_the_settings_page()
+    {
+        var bridge = CreateBridge(new RecordingExtensionSettingsService());
+        object? response = null;
+        bridge.ResponseReady += value => response = value;
+        using var document = JsonDocument.Parse("{}");
+
+        await bridge.TryHandleAsync("extensions/get-state", document.RootElement);
+
+        // MainWindow.PostWebMessage() registers no enum converter, so every other enum reaches the
+        // WebView numerically. ExtensionStatus must stay a kebab-case string because the settings badge
+        // and the SkillPicker filter branch on those exact values.
+        var json = JsonDocument.Parse(JsonSerializer.Serialize(response, HostJsonOptions)).RootElement;
+        var state = json.GetProperty("state");
+        state.GetProperty("skills")[0].GetProperty("status").GetString().Should().Be("ready");
+        state.GetProperty("mcpServers")[0].GetProperty("status").GetString().Should().Be("needs-config");
+    }
+
+    [Fact]
     public async Task TryHandleAsync_propagates_caller_cancellation_without_posting_an_error()
     {
         var service = new RecordingExtensionSettingsService { ObserveCancellation = true };
@@ -254,6 +273,17 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
+    /// <summary>
+    /// MainWindow.PostWebMessage() serializes with camelCase names and no enum converter, so any enum that
+    /// must reach Vue as text has to carry its own [JsonConverter]. Mirroring those exact options here is
+    /// what makes the ExtensionStatus wire-format test meaningful.
+    /// </summary>
+    private static readonly JsonSerializerOptions HostJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
     private sealed class RecordingExtensionSettingsService : IExtensionSettingsService
     {
         private long _revision = 3;
@@ -277,7 +307,7 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
                     true,
                     null,
                     [],
-                    "ready",
+                    ExtensionStatus.Ready,
                     [],
                     [])],
                 [CreateMcpView()]));
@@ -355,7 +385,7 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
                 true,
                 null,
                 [],
-                "ready",
+                ExtensionStatus.NeedsConfig,
                 null,
                 [],
                 "node",

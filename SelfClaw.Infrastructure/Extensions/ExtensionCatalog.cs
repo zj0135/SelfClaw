@@ -2,6 +2,7 @@ using System.Text.Json;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Options;
+using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Plugins;
 
 namespace SelfClaw.Infrastructure.Extensions;
@@ -50,7 +51,7 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
                 try
                 {
                     _ = await _pluginManifestReader.ReadAsync(
-                            Path.Combine(package.InstallPath, "plugin.json"),
+                            ExtensionInstallation.PluginManifestPath(package),
                             cancellationToken)
                         .ConfigureAwait(false);
                 }
@@ -60,7 +61,7 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
                 }
                 catch
                 {
-                    views[index] = views[index] with { Status = "broken" };
+                    views[index] = views[index] with { Status = ExtensionStatus.Broken };
                 }
             }
         }
@@ -87,7 +88,7 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
             try
             {
                 var manifest = await _pluginManifestReader!.ReadAsync(
-                        Path.Combine(plugin.InstallPath, "plugin.json"),
+                        ExtensionInstallation.PluginManifestPath(plugin),
                         cancellationToken)
                     .ConfigureAwait(false);
                 var pluginView = CreatePackageView(plugin);
@@ -174,18 +175,20 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
     public McpServerView CreateMcpServerView(McpServerConfigRecord server)
     {
         McpServerSettings settings;
-        string status;
+        ExtensionStatus status;
         try
         {
             settings = DeserializeSettings(server.SettingsJson);
-            status = server.IsEnabled
-                ? IsConfigurationComplete(server.Transport, settings) ? "ready" : "needs-config"
-                : "disabled";
+            status = !server.IsEnabled
+                ? ExtensionStatus.Disabled
+                : IsConfigurationComplete(server.Transport, settings)
+                    ? ExtensionStatus.Ready
+                    : ExtensionStatus.NeedsConfig;
         }
         catch (JsonException)
         {
             settings = EmptySettings();
-            status = "broken";
+            status = ExtensionStatus.Broken;
         }
 
         return new McpServerView(
@@ -202,11 +205,19 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
             settings.Arguments,
             settings.WorkingDirectoryMode,
             settings.RequiresWorkspace,
-            CreateEntryViews("environment", settings.Environment, settings.SecretFieldNames, server.CredentialRefs),
+            CreateEntryViews(
+                McpSettingPath.EnvironmentPrefix,
+                settings.Environment,
+                settings.SecretFieldNames,
+                server.CredentialRefs),
             settings.Endpoint,
             settings.TransportMode,
             settings.ConnectionTimeoutSeconds,
-            CreateEntryViews("headers", settings.Headers, settings.SecretFieldNames, server.CredentialRefs),
+            CreateEntryViews(
+                McpSettingPath.HeaderPrefix,
+                settings.Headers,
+                settings.SecretFieldNames,
+                server.CredentialRefs),
             server.LastCheckedAtUtc);
     }
 
@@ -224,11 +235,13 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
             : [];
         var acknowledged = ReadAcknowledgedPermissions(package.AcknowledgedPermissionsJson);
         var unacknowledged = permissions.Except(acknowledged, StringComparer.Ordinal).ToArray();
-        var status = IsInstallationIntact(package)
-            ? package.IsEnabled && unacknowledged.Length > 0
-                ? "needs-permission"
-                : package.IsEnabled ? "ready" : "disabled"
-            : "broken";
+        var status = !ExtensionInstallation.IsIntact(package)
+            ? ExtensionStatus.Broken
+            : !package.IsEnabled
+                ? ExtensionStatus.Disabled
+                : unacknowledged.Length > 0
+                    ? ExtensionStatus.NeedsPermission
+                    : ExtensionStatus.Ready;
         return new ExtensionPackageView(
             package.Kind,
             package.Id,
@@ -242,13 +255,6 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
             permissions,
             unacknowledged);
     }
-
-    // A Skill whose SKILL.md is gone must not surface as "ready": the capability resolver treats it as
-    // broken and fails the turn when a token names it, so the settings page and SkillPicker have to agree.
-    private static bool IsInstallationIntact(ExtensionPackageRecord package)
-        => Directory.Exists(package.InstallPath) &&
-            (package.Kind != ExtensionKind.Skill ||
-                File.Exists(Path.Combine(package.InstallPath, "SKILL.md")));
 
     internal static IReadOnlyList<string> ReadAcknowledgedPermissions(string? json)
     {
@@ -299,10 +305,7 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
         IReadOnlyList<string> secretFieldNames,
         IReadOnlyDictionary<string, string> credentialRefs)
     {
-        var secretKeys = secretFieldNames
-            .Where(path => path.StartsWith(prefix + ".", StringComparison.Ordinal))
-            .Select(path => path[(prefix.Length + 1)..])
-            .ToHashSet(StringComparer.Ordinal);
+        var secretKeys = McpSettingPath.KeysUnder(secretFieldNames, prefix).ToHashSet(StringComparer.Ordinal);
         return plainValues.Keys
             .Concat(secretKeys)
             .Distinct(StringComparer.Ordinal)

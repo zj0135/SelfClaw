@@ -9,6 +9,6 @@ public sealed record ExtensionPackageView(
     bool Enabled,
     string? SourcePluginId,
     IReadOnlyList<string> AssignedAgentIds,
-    string Status,
+    ExtensionStatus Status,
     IReadOnlyList<string> Permissions,
     IReadOnlyList<string> UnacknowledgedPermissions);

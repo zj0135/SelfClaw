@@ -14,8 +14,8 @@ namespace SelfClaw.Infrastructure.Extensions;
 
 internal sealed class ExtensionPackageInstaller
 {
-    private const string SkillManifestName = "SKILL.md";
-    private const string PluginManifestName = "plugin.json";
+    private const string SkillManifestName = ExtensionInstallation.SkillManifestName;
+    private const string PluginManifestName = ExtensionInstallation.PluginManifestName;
     private static readonly HashSet<string> ReservedFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "CON", "PRN", "AUX", "NUL",

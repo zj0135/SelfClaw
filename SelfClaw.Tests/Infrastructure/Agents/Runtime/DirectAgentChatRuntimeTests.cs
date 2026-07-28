@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
@@ -10,10 +10,15 @@ using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
+using SelfClaw.Infrastructure.Extensions.Mcp;
+using SelfClaw.Infrastructure.Extensions.Mcp.Models;
 using SelfClaw.Infrastructure.Extensions.Runtime;
 using SelfClaw.Infrastructure.Extensions.Runtime.Models;
 using SelfClaw.Infrastructure.Extensions.Models;
+using SelfClaw.Infrastructure.Extensions.Plugins;
 using SelfClaw.Infrastructure.Extensions.Skills;
+using SelfClaw.Infrastructure.Extensions;
+using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Runtime;
 
@@ -196,18 +201,36 @@ public sealed class DirectAgentChatRuntimeTests
         IDirectTurnCapabilityResolver? capabilityResolver = null)
         => new(
             factory,
-            capabilityResolver ?? new DirectTurnCapabilityResolver(
-                new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
-                new EmptyExtensionPackageRepository(),
-                new SkillPackageReader(new ExtensionPackageLimits(
-                    1024 * 1024,
-                    1024 * 1024,
-                    100,
-                    512 * 1024,
-                    256 * 1024)),
-                new SkillTokenParser(),
-                new SkillRuntimeToolset()),
+            capabilityResolver ?? CreateCapabilityResolver(),
             new DirectPromptComposer());
+
+    /// <summary>
+    /// The real resolver over empty repositories: these tests assert how the runtime projects a resolved
+    /// turn, and only the workspace tool wiring has to be genuine.
+    /// </summary>
+    private static DirectTurnCapabilityResolver CreateCapabilityResolver()
+    {
+        var limits = new ExtensionPackageLimits(1024 * 1024, 1024 * 1024, 100, 512 * 1024, 256 * 1024);
+        var skillPackageReader = new SkillPackageReader(limits);
+        var storagePaths = new StoragePaths(
+            Path.Combine(Path.GetTempPath(), "SelfClawTests"),
+            Path.Combine(Path.GetTempPath(), "SelfClawTests", "selfclaw.db"),
+            Path.Combine(Path.GetTempPath(), "SelfClawTests", "secrets"));
+        return new DirectTurnCapabilityResolver(
+            new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
+            new EmptyExtensionPackageRepository(),
+            new SkillCapabilitySource(skillPackageReader, new SkillTokenParser(), new SkillRuntimeToolset()),
+            new PluginCapabilitySource(
+                new PluginManifestReader(limits),
+                skillPackageReader,
+                new PluginVersionLeaseManager()),
+            new McpCapabilitySource(
+                new EmptyMcpServerRepository(),
+                new McpConfigurationResolver(new UnusedSecretProtector(), storagePaths),
+                new UnusedMcpClientManager(),
+                new McpToolAdapter(),
+                new ExtensionStateChangeNotifier()));
+    }
 
     private static ChatTurnRequest CreateRequest(Guid? modelProfileId, WorkspaceRoot? workspace = null)
     {
@@ -392,6 +415,67 @@ public sealed class DirectAgentChatRuntimeTests
         public Task<WorkspaceFileWriteResult> WriteFileAsync(string root, string path, string content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WorkspaceFileWriteResult> EditFileAsync(string root, string path, string oldText, string newText, bool replaceAll = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ShellCommandResult> RunShellCommandAsync(string root, string command, int timeout, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class EmptyMcpServerRepository : IMcpServerRepository
+    {
+        public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<McpServerConfigRecord>> ListMcpServersAsync(
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<McpServerConfigRecord>>([]);
+
+        public Task<McpServerConfigRecord?> GetMcpServerAsync(
+            string id,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<McpServerConfigRecord?>(null);
+
+        public Task<McpServerConfigRecord> UpsertMcpServerAsync(
+            McpServerConfigRecord server,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(server);
+
+        public Task SetMcpServerEnabledAsync(
+            string id,
+            bool enabled,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task DeleteMcpServerAsync(string id, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
+    private sealed class UnusedMcpClientManager : IMcpClientManager
+    {
+        public Task<McpClientLease> AcquireAsync(
+            ResolvedMcpServerConfiguration configuration,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<McpHealthResult> TestAsync(
+            ResolvedMcpServerConfiguration configuration,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task DrainAsync(string serverId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
+    private sealed class UnusedSecretProtector : ISecretProtector
+    {
+        public Task<string> StoreSecretAsync(
+            string secret,
+            string? existingSecretRef = null,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<string?> RetrieveSecretAsync(
+            string secretRef,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<string?>(null);
+
+        public Task DeleteSecretAsync(string secretRef, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class EmptyExtensionPackageRepository : IExtensionPackageRepository

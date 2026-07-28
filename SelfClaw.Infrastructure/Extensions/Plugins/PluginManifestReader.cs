@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Models;
 using SelfClaw.Infrastructure.Extensions.Plugins.Models;
 
@@ -206,12 +207,14 @@ internal sealed class PluginManifestReader
                         (transport == "stdio" ? "environment variables." : "HTTP headers."));
                 }
 
-                if (setting.Target == "env" ? !IsValidEnvironmentKey(key) : !IsValidHeaderName(key))
+                if (setting.Target == "env"
+                        ? !McpSettingPath.IsValidEnvironmentKey(key)
+                        : !McpSettingPath.IsValidHeaderName(key))
                 {
                     throw new InvalidDataException($"Plugin MCP '{server.Id}' required setting key '{key}' is invalid.");
                 }
 
-                if (!requiredSettingPaths.Add($"{setting.Target}.{key}"))
+                if (!requiredSettingPaths.Add(McpSettingPath.ForManifestTarget(setting.Target, key)))
                 {
                     throw new InvalidDataException($"Plugin MCP '{server.Id}' required settings contain duplicates.");
                 }
@@ -312,14 +315,4 @@ internal sealed class PluginManifestReader
             throw new InvalidDataException($"{fieldName} must use lowercase ASCII letters, digits, and '-'.");
         }
     }
-
-    private static bool IsValidEnvironmentKey(string key)
-        => (char.IsAsciiLetter(key[0]) || key[0] == '_') &&
-           key.Skip(1).All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
-
-    private static bool IsValidHeaderName(string name)
-        => name.All(character =>
-            char.IsAsciiLetterOrDigit(character) ||
-            character is '!' or '#' or '$' or '%' or '&' or '\'' or '*' or '+' or '-' or '.' or '^' or '_' or '`' or '|' or '~');
-
 }

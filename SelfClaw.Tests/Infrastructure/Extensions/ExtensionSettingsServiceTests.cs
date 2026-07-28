@@ -117,7 +117,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
             DisplayName = "Local HTTP",
             Endpoint = "http://localhost:4312/mcp"
         };
-        (await context.Service.SaveMcpServerAsync(loopback)).Status.Should().Be("disabled");
+        (await context.Service.SaveMcpServerAsync(loopback)).Status.Should().Be(ExtensionStatus.Disabled);
     }
 
     [Fact]
@@ -163,15 +163,15 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
 
         var initial = await context.Service.GetStateAsync();
         initial.Revision.Should().Be(0);
-        initial.Skills.Should().ContainSingle().Which.Status.Should().Be("ready");
-        initial.Plugins.Should().ContainSingle().Which.Status.Should().Be("broken");
+        initial.Skills.Should().ContainSingle().Which.Status.Should().Be(ExtensionStatus.Ready);
+        initial.Plugins.Should().ContainSingle().Which.Status.Should().Be(ExtensionStatus.Broken);
 
         await context.Service.SetEnabledAsync(
             new ExtensionItemKey(ExtensionKind.Skill, "review"),
             false);
         var updated = await context.Service.GetStateAsync();
         updated.Revision.Should().Be(1);
-        updated.Skills.Should().ContainSingle().Which.Status.Should().Be("disabled");
+        updated.Skills.Should().ContainSingle().Which.Status.Should().Be(ExtensionStatus.Disabled);
 
         await context.Service.DeleteAsync(new ExtensionItemKey(ExtensionKind.Skill, "review"));
         (await context.Service.GetStateAsync()).Revision.Should().Be(2);
@@ -202,7 +202,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
 
         var state = await context.Service.GetStateAsync();
 
-        state.Skills.Should().ContainSingle().Which.Status.Should().Be("broken");
+        state.Skills.Should().ContainSingle().Which.Status.Should().Be(ExtensionStatus.Broken);
     }
 
     [Fact]
@@ -259,7 +259,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         await context.Repository.UpsertPackageAsync(upgraded);
 
         var state = await context.Service.GetStateAsync();
-        state.Plugins.Single().Status.Should().Be("needs-permission");
+        state.Plugins.Single().Status.Should().Be(ExtensionStatus.NeedsPermission);
         state.Plugins.Single().UnacknowledgedPermissions.Should().Equal("process.execute");
         await unconfirmed.Should().ThrowAsync<InvalidOperationException>().WithMessage("*process.execute*");
     }
