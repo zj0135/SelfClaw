@@ -13,7 +13,7 @@ const viewRegistry = {
 	settings: markRaw(SettingsView),
 };
 
-const currentViewId = ref('chat');
+const currentViewId = ref('settings'); // TEMP-SHOT: revert to 'chat'
 const activeViewComponent = computed(() => viewRegistry[currentViewId.value] || ChatView);
 const imagePreview = ref(null);
 const SIDEBAR_COLLAPSE_KEY = 'selfclaw:sidebar-collapsed';

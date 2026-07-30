@@ -166,19 +166,19 @@ internal sealed class McpCapabilitySource
                 .ConfigureAwait(false);
             foreach (var mcpTool in lease.Tools)
             {
-                var adapted = _toolAdapter.Create(
+                var (Tool, Descriptor) = _toolAdapter.Create(
                     mcpTool,
                     configuration,
                     request.ConversationId,
                     request.ToolPermissionMode,
                     request.ToolApprovalHandler);
-                if (!descriptors.TryAdd(adapted.Descriptor.ProviderName, adapted.Descriptor))
+                if (!descriptors.TryAdd(Descriptor.ProviderName, Descriptor))
                 {
                     throw new InvalidDataException(
-                        $"MCP tool name collision for '{adapted.Descriptor.ProviderName}'.");
+                        $"MCP tool name collision for '{Descriptor.ProviderName}'.");
                 }
 
-                tools.Add(adapted.Tool);
+                tools.Add(Tool);
             }
 
             return lease;

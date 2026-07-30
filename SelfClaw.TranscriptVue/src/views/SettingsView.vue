@@ -13,7 +13,7 @@ import {
 
 const emit = defineEmits(['navigate']);
 
-const activeTarget = ref('sys');
+const activeTarget = ref('about');
 
 const navGroups = [
 	{
@@ -152,10 +152,6 @@ function selectItem(id) {
 }
 
 .settings-content {
-	/* Compatibility tokens for settings panels that have not moved to the shared console surface. */
-	--text: #171a1f;
-	--muted: #6b7280;
-
 	flex: 1;
 	min-width: 0;
 	height: 100%;

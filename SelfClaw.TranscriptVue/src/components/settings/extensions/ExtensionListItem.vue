@@ -34,7 +34,7 @@ defineEmits(['select', 'toggle']);
 @import '../settings-console.css';
 .row { display: grid; grid-template-columns: minmax(0, 1fr) 38px 20px; align-items: center; min-height: 88px; border-top: 1px solid var(--sc-line); transition: background 140ms var(--sc-ease-out); }
 .row:last-child { border-bottom: 1px solid var(--sc-line); }
-.row:hover, .row.selected { background: var(--sc-panel); }
+.row:hover, .row.selected { background: var(--sc-raise); }
 .row.selected { box-shadow: inset 2px 0 var(--sc-acid); }
 .row.pending { opacity: 0.7; }
 .main { min-width: 0; height: 100%; padding: 13px 16px; border: 0; background: transparent; color: inherit; text-align: left; }

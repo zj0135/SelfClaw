@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
-import { RefreshCw, ChevronDown, Check, Zap, TerminalSquare, TriangleAlert } from 'lucide-vue-next';
+import { RefreshCw, ChevronDown, Check, Zap, TriangleAlert } from 'lucide-vue-next';
 import claudeIcon from '../../../assets/agents-icons/claude.svg';
 import codexIcon from '../../../assets/agents-icons/codex.svg';
 import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
@@ -236,24 +236,22 @@ onMounted(() => {
 </script>
 
 <template>
-	<section class="programming-assistant sc-root sc-stage">
-		<main class="assistant-main">
-			<header class="pa-hero sc-rise" style="--i: 0">
-				<div class="pa-hero-left">
-					<div class="pa-kicker">
-						<TerminalSquare :size="13" :stroke-width="2" aria-hidden="true" />
-						LOCAL CLI RUNTIMES
-					</div>
-					<h1 class="pa-title">编程助手</h1>
-					<p class="pa-sub">检测本机安装的智能体 CLI，选择默认运行时与模型。</p>
-				</div>
-				<button class="pa-btn scan-btn" :class="{ 'is-rescanning': isRescanning }" type="button" :disabled="isRescanning"
-					@click="rescanCliTools">
-					<RefreshCw :size="14" :stroke-width="2" class="scan-icon" aria-hidden="true" />
-					{{ isRescanning ? '扫描中…' : '重新扫描' }}
-				</button>
-			</header>
+	<section class="programming-assistant sc-root sc-stage sc-page">
+		<header class="sc-page-head sc-rise" style="--i: 0">
+			<span class="sc-page-ghost" aria-hidden="true">Assistant</span>
+			<div>
+				<span class="sc-page-kicker">LOCAL CLI RUNTIMES</span>
+				<h1 class="sc-page-title">编程助手</h1>
+				<p class="sc-page-sub">检测本机安装的智能体 CLI，选择默认运行时与模型。</p>
+			</div>
+			<button class="pa-btn scan-btn" :class="{ 'is-rescanning': isRescanning }" type="button" :disabled="isRescanning"
+				@click="rescanCliTools">
+				<RefreshCw :size="14" :stroke-width="2" class="scan-icon" aria-hidden="true" />
+				{{ isRescanning ? '扫描中…' : '重新扫描' }}
+			</button>
+		</header>
 
+		<main class="sc-page-body">
 			<div class="section-bar sc-rise" style="--i: 1">
 				<h3>本地 CLI <span class="count">[{{ String(cliTools.length).padStart(2, '0') }}]</span></h3>
 				<span class="section-line" aria-hidden="true"></span>
@@ -348,8 +346,8 @@ onMounted(() => {
 							</div>
 						</div>
 					</div>
-				</article>
-			</div>
+			</article>
+		</div>
 		</main>
 	</section>
 </template>
@@ -357,76 +355,17 @@ onMounted(() => {
 <style scoped>
 @import './settings-console.css';
 
-.programming-assistant {
-	min-height: 100%;
-	color: var(--sc-text);
-	font-family: var(--sc-sans);
-	font-size: 15px;
-	line-height: 1.55;
-	-webkit-font-smoothing: antialiased;
-	-moz-osx-font-smoothing: grayscale;
-}
-
 .programming-assistant *,
 .programming-assistant *::before,
 .programming-assistant *::after {
 	box-sizing: border-box;
 }
 
-.assistant-main {
-	max-width: 940px;
-	margin: 0 auto;
-	padding: 52px 56px 72px;
-}
-
-/* ── hero ───────────────────────────────────────────────────── */
-.pa-hero {
-	display: flex;
-	align-items: flex-end;
-	justify-content: space-between;
-	gap: 24px;
-	margin-bottom: 34px;
-	padding-bottom: 26px;
-	border-bottom: 1px solid var(--sc-line);
-}
-
-.pa-kicker {
-	display: inline-flex;
-	align-items: center;
-	gap: 7px;
-	margin-bottom: 14px;
-	color: var(--sc-faint);
-	font-family: var(--sc-mono);
-	font-size: 10px;
-	font-weight: 600;
-	letter-spacing: 0.24em;
-}
-
-.pa-kicker svg {
-	color: var(--sc-acid);
-}
-
-.pa-title {
-	margin: 0;
-	font-family: var(--sc-display);
-	font-size: 46px;
-	font-weight: 660;
-	letter-spacing: 0.01em;
-	line-height: 1.05;
-}
-
-.pa-sub {
-	margin: 10px 0 0;
-	color: var(--sc-mute);
-	font-size: 13px;
-}
-
-/* ── section bar ────────────────────────────────────────────── */
-.section-bar {
-	display: flex;
-	align-items: center;
-	gap: 16px;
-	margin-bottom: 18px;
+.programming-assistant .sc-page-body {
+	font-size: 15px;
+	line-height: 1.55;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
 }
 
 .section-bar h3 {
@@ -539,7 +478,7 @@ onMounted(() => {
 	padding: 16px 18px;
 	border: 1px dashed var(--sc-line-2);
 	border-radius: 13px;
-	background: var(--sc-panel);
+	background: var(--sc-raise);
 	color: var(--sc-mute);
 	font-size: 13.5px;
 }
@@ -555,6 +494,7 @@ onMounted(() => {
 	border: 1px solid var(--sc-line);
 	border-radius: 15px;
 	background: var(--sc-panel);
+	box-shadow: 0 1px 3px rgba(23, 26, 31, 0.05);
 	transition:
 		border-color 0.18s,
 		transform 0.18s var(--sc-ease-out),
@@ -908,15 +848,6 @@ onMounted(() => {
 }
 
 @media (max-width: 880px) {
-	.assistant-main {
-		padding: 32px 22px 52px;
-	}
-
-	.pa-hero {
-		align-items: flex-start;
-		flex-direction: column;
-	}
-
 	.cli-config {
 		padding-left: 22px;
 	}

@@ -111,8 +111,9 @@ async function confirmPermissions() {
 </script>
 
 <template>
-	<main class="extensions-page sc-root sc-stage">
-		<header class="page-head sc-rise" style="--i: 0">
+	<main class="extensions-page sc-root sc-stage sc-page">
+		<header class="sc-page-head page-head sc-rise" style="--i: 0">
+			<span class="sc-page-ghost" aria-hidden="true">Registry</span>
 			<div>
 				<span>EXTENSION REGISTRY</span>
 				<h1>扩展</h1>
@@ -186,21 +187,19 @@ async function confirmPermissions() {
 
 <style scoped>
 @import '../settings-console.css';
-.extensions-page { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; overflow: hidden; color: var(--sc-text); font-family: var(--sc-sans); }
-.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 24px 28px 18px; }
-.page-head span { color: var(--sc-faint); font-family: var(--sc-mono); font-size: 9px; font-weight: 650; }
-h1 { margin: 5px 0 3px; font-size: 25px; font-weight: 650; letter-spacing: 0; }
+.page-head span { display: inline-flex; align-items: center; gap: 7px; color: var(--sc-faint); font-family: var(--sc-mono); font-size: 9px; font-weight: 650; }
+.page-head span::before { width: 14px; height: 1px; background: var(--sc-acid); content: ''; }
+.page-head h1 { margin: 5px 0 3px; font-size: 25px; font-weight: 650; letter-spacing: 0; }
 .page-head p { margin: 0; color: var(--sc-mute); font-size: 12px; }
 .page-head code { color: var(--sc-faint); font-family: var(--sc-mono); font-size: 9px; }
 .extensions-page > :deep(.tabs) { padding: 0 14px; }
 .error-bar { display: flex; align-items: center; gap: 8px; margin: 10px 28px 0; padding: 9px 11px; border: 1px solid rgba(220,69,69,.2); border-radius: 5px; background: var(--sc-err-soft); color: var(--sc-err); font-size: 11px; }
-.workspace { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; flex: 1; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; flex: 1; background: linear-gradient(to bottom, rgba(245,246,248,.9), rgba(245,246,248,0) 44px), var(--sc-panel); }
 .workspace.inspecting { grid-template-columns: minmax(360px, 1fr) minmax(260px, 34%); }
 .registry { min-width: 0; overflow-y: auto; padding: 0 28px 24px; }
 @media (max-width: 780px) {
 	.workspace.inspecting { grid-template-columns: 1fr; }
 	.workspace.inspecting .registry { display: none; }
-	.page-head { padding-inline: 18px; }
 	.registry { padding-inline: 18px; }
 }
 </style>

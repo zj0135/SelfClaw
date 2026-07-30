@@ -218,7 +218,7 @@ Persisted to `{AppData}\attachments\{convId}\{msgId}\`. Max 6 images, 10MB each,
 
 - All component-level styles use `<style scoped>`. Global layout/reset/theme variables belong in `App.vue`'s unscoped `<style>` only.
 - Do NOT mix scoped and unscoped `<style>` blocks in the same component file unless the unscoped block is exclusively for dynamic `v-html`-injected content that cannot be targeted by scoped selectors.
-- The settings pages share the "Night Console" dark design system: tokens/keyframes live in `components/settings/settings-console.css` and are pulled into each component via `@import` inside its scoped style block (page root carries `sc-root` / `sc-stage`).
+- The settings pages share the light "Console" design system: tokens/keyframes plus the shared page scaffold (`sc-page` / `sc-page-head` / `sc-page-body` — fixed gray header over a white scrolling body) live in `components/settings/settings-console.css` and are pulled into each component via `@import` inside its scoped style block (page root carries `sc-root` / `sc-stage`).
 
 ### Icons
 

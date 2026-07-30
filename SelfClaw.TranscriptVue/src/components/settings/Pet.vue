@@ -108,29 +108,30 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="pet-view sc-root sc-stage">
-    <div class="panel-inner">
-      <header class="pt-hero sc-rise" style="--i: 0">
-        <div>
-          <div class="pt-kicker">DESKTOP COMPANION</div>
-          <h1 class="pt-title">宠物</h1>
-          <p class="pt-sub">驻留桌面的像素伙伴，选择一位默认出场。</p>
-        </div>
+  <main class="pet-view sc-root sc-stage sc-page">
+    <header class="sc-page-head sc-rise" style="--i: 0">
+      <span class="sc-page-ghost" aria-hidden="true">Companion</span>
+      <div>
+        <span class="sc-page-kicker">DESKTOP COMPANION</span>
+        <h1 class="sc-page-title">宠物</h1>
+        <p class="sc-page-sub">驻留桌面的像素伙伴，选择一位默认出场。</p>
+      </div>
 
-        <button
-          type="button"
-          class="pet-toggle"
-          :disabled="syncPending"
-          :aria-pressed="petVisible ? 'true' : 'false'"
-          title="切换桌面宠物可见性"
-          @click="toggleVisible"
-        >
-          <Eye v-if="petVisible" :size="14" :stroke-width="2" class="pt-ico" aria-hidden="true" />
-          <EyeOff v-else :size="14" :stroke-width="2" class="pt-ico" aria-hidden="true" />
-          <span class="pt-label">{{ petVisible ? '已显示' : '显示宠物' }}</span>
-        </button>
-      </header>
+      <button
+        type="button"
+        class="pet-toggle"
+        :disabled="syncPending"
+        :aria-pressed="petVisible ? 'true' : 'false'"
+        title="切换桌面宠物可见性"
+        @click="toggleVisible"
+      >
+        <Eye v-if="petVisible" :size="14" :stroke-width="2" class="pt-ico" aria-hidden="true" />
+        <EyeOff v-else :size="14" :stroke-width="2" class="pt-ico" aria-hidden="true" />
+        <span class="pt-label">{{ petVisible ? '已显示' : '显示宠物' }}</span>
+      </button>
+    </header>
 
+    <div class="sc-page-body">
       <div class="tab-bar sc-rise" style="--i: 1">
         <div class="tab-strip" role="tablist" aria-label="宠物来源">
           <button
@@ -221,63 +222,20 @@ onMounted(() => {
 <style scoped>
 @import './settings-console.css';
 
-.pet-view {
-  height: 100%;
-  overflow-y: auto;
-  color: var(--sc-text);
-  font-family: var(--sc-sans);
-  font-size: 13px;
-  line-height: 1.5;
-}
 .pet-view * { box-sizing: border-box; }
 .pet-view button { cursor: pointer; font: inherit; color: inherit; }
 
-.pet-view::-webkit-scrollbar { width: 9px; }
-.pet-view::-webkit-scrollbar-thumb {
+.pet-view .sc-page-body {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pet-view .sc-page-body::-webkit-scrollbar { width: 9px; }
+.pet-view .sc-page-body::-webkit-scrollbar-thumb {
   background: var(--sc-raise);
   background-clip: padding-box;
   border: 2px solid transparent;
   border-radius: 99px;
-}
-
-.panel-inner {
-  padding: 48px 40px 72px;
-  max-width: 1120px;
-}
-
-/* ── hero ─────────────────────────────────────────────────── */
-.pt-hero {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 26px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid var(--sc-line);
-}
-
-.pt-kicker {
-  margin-bottom: 12px;
-  color: var(--sc-faint);
-  font-family: var(--sc-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.24em;
-}
-
-.pt-title {
-  margin: 0;
-  font-family: var(--sc-display);
-  font-size: 44px;
-  font-weight: 660;
-  letter-spacing: 0.01em;
-  line-height: 1.05;
-}
-
-.pt-sub {
-  margin: 10px 0 0;
-  color: var(--sc-mute);
-  font-size: 13px;
 }
 
 .pet-toggle {
@@ -397,6 +355,7 @@ onMounted(() => {
   border: 1px solid var(--sc-line);
   border-radius: 15px;
   background: var(--sc-panel);
+  box-shadow: 0 1px 3px rgba(23, 26, 31, 0.05);
   text-align: left;
   font-size: 12px;
   transition:
@@ -546,7 +505,7 @@ onMounted(() => {
   padding: 68px 24px 76px;
   border: 1px dashed var(--sc-line-2);
   border-radius: 15px;
-  background: var(--sc-panel);
+  background: var(--sc-raise);
   text-align: center;
 }
 .empty-state .es-ico {
@@ -612,11 +571,6 @@ onMounted(() => {
 }
 
 @media (max-width: 760px) {
-  .panel-inner { padding: 32px 20px 56px; }
-  .pt-hero {
-    align-items: flex-start;
-    flex-direction: column;
-  }
   .tab-strip { width: max-content; max-width: 100%; }
 }
 </style>
