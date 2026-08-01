@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { AlertCircle } from 'lucide-vue-next';
 import { useExtensionSettings } from '../../../composables/useExtensionSettings';
+import { useToast } from '../../../composables/useToast';
 import ExtensionCategoryTabs from './ExtensionCategoryTabs.vue';
 import ExtensionDetailDrawer from './ExtensionDetailDrawer.vue';
 import ExtensionList from './ExtensionList.vue';
@@ -25,6 +26,8 @@ const {
 	testMcp,
 	importPackage,
 } = useExtensionSettings();
+
+const { showToast } = useToast();
 
 const activeCategory = ref('plugin');
 const search = ref('');
@@ -72,9 +75,11 @@ async function handleSaveMcp(command, testAfterSave = false) {
 
 async function handleDelete() {
 	const item = selectedItem.value;
-	if (!item || !window.confirm('确定删除此扩展？此操作会移除已保存的配置。')) return;
-	await deleteItem(activeCategory.value, item);
-	selectedId.value = null;
+	if (!item) return;
+	if (await deleteItem(activeCategory.value, item)) {
+		selectedId.value = null;
+		showToast(`${item.name} 已删除`);
+	}
 }
 
 async function handleImport() {

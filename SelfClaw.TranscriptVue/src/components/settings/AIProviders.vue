@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onUnmounted, reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import {
 	Search,
 	Plus,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-vue-next';
 import AiProviderDialogs from './AiProviderDialogs.vue';
 import { useAiProviderHost } from '../../composables/useAiProviderHost.js';
+import { useToast } from '../../composables/useToast.js';
 
 // Brand logos from @lobehub/icons-static-png (color variants where available).
 import openaiLogo from '@lobehub/icons-static-png/light/openai.png';
@@ -165,8 +166,7 @@ const selectedCheckModel = ref('gpt-5.2');
 const checking = ref(false);
 const fetchingModels = ref(false);
 const checkStatus = reactive({ visible: false, state: '', text: '' });
-const toastState = reactive({ visible: false, text: '已保存' });
-let toastTimer = null;
+const { showToast } = useToast();
 
 const activeProvider = computed(() => providers.find((provider) => provider.id === activeId.value) || providers[0]);
 
@@ -268,19 +268,6 @@ function resetCheckStatus() {
 	checkStatus.state = '';
 	checkStatus.text = '';
 }
-
-function showToast(text) {
-	toastState.text = text;
-	toastState.visible = true;
-	window.clearTimeout(toastTimer);
-	toastTimer = window.setTimeout(() => {
-		toastState.visible = false;
-	}, 1900);
-}
-
-onUnmounted(() => {
-	window.clearTimeout(toastTimer);
-});
 </script>
 
 <template>
@@ -522,11 +509,6 @@ onUnmounted(() => {
 				</div>
 			</div>
 		</main>
-
-		<div class="toast" :class="{ show: toastState.visible }" role="status" aria-live="polite">
-			<Check :size="15" :stroke-width="2.4" class="toast-ico" />
-			<span>{{ toastState.text }}</span>
-		</div>
 
 		<AiProviderDialogs
 			:provider-open="providerDialogOpen"
@@ -1492,40 +1474,6 @@ onUnmounted(() => {
 	color: var(--sc-mute);
 	font-size: 13px;
 	text-align: center;
-}
-
-/* ── toast ──────────────────────────────────────────────────── */
-.toast {
-	position: absolute;
-	left: 50%;
-	bottom: 26px;
-	z-index: 50;
-	display: flex;
-	align-items: center;
-	gap: 9px;
-	padding: 11px 18px;
-	transform: translateX(-50%) translateY(24px);
-	border: 1px solid var(--sc-line-2);
-	border-radius: 10px;
-	background: var(--sc-panel);
-	color: var(--sc-text);
-	box-shadow: 0 18px 48px rgba(23, 26, 31, 0.16);
-	font-size: 13px;
-	font-weight: 500;
-	opacity: 0;
-	pointer-events: none;
-	transition:
-		opacity 0.22s,
-		transform 0.28s var(--sc-ease-spring);
-}
-
-.toast-ico {
-	color: var(--sc-ok);
-}
-
-.toast.show {
-	transform: translateX(-50%) translateY(0);
-	opacity: 1;
 }
 
 @media (max-width: 980px) {
