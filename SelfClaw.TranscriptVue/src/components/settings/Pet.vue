@@ -1,16 +1,10 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { Eye, EyeOff, Check, ImagePlus, Globe, Sparkles } from 'lucide-vue-next'
+import { Eye, EyeOff, Check } from 'lucide-vue-next'
 import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js'
 
 const { requestLatest } = useHostBridge()
 
-const tabs = [
-  { id: 'builtin', label: '内置' },
-  { id: 'custom', label: '自定义' },
-  { id: 'community', label: '社区' },
-]
-const activeTab = ref('builtin')
 const petVisible = ref(false)
 const selectedPet = ref('')
 const pets = ref([])
@@ -52,21 +46,6 @@ function initials(name) {
     .slice(0, 2)
     .map((part) => part.charAt(0).toUpperCase())
     .join('') || '?'
-}
-
-function selectTab(id) {
-  activeTab.value = id
-}
-
-function onTabKey(event, index) {
-  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-  event.preventDefault()
-  const next = event.key === 'ArrowRight'
-    ? (index + 1) % tabs.length
-    : (index - 1 + tabs.length) % tabs.length
-  selectTab(tabs[next].id)
-  const buttons = document.querySelectorAll('.pet-view .tab-btn')
-  buttons[next]?.focus()
 }
 
 function toggleVisible() {
@@ -132,89 +111,38 @@ onMounted(() => {
     </header>
 
     <div class="sc-page-body">
-      <div class="tab-bar sc-rise" style="--i: 1">
-        <div class="tab-strip" role="tablist" aria-label="宠物来源">
-          <button
-            v-for="(tab, index) in tabs"
-            :key="tab.id"
-            type="button"
-            class="tab-btn"
-            :class="{ active: activeTab === tab.id }"
-            role="tab"
-            :aria-selected="activeTab === tab.id ? 'true' : 'false'"
-            :tabindex="activeTab === tab.id ? 0 : -1"
-            @click="selectTab(tab.id)"
-            @keydown="onTabKey($event, index)"
-          >{{ tab.label }}</button>
-        </div>
-        <span class="tab-hint">{{ String(pets.length).padStart(2, '0') }} UNITS</span>
+      <div class="pet-grid">
+        <button
+          v-for="(pet, pi) in pets"
+          :key="pet.id"
+          type="button"
+          class="pet-card sc-rise"
+          :style="{ '--i': pi + 1 }"
+          :disabled="syncPending"
+          :data-selected="selectedPet === pet.id ? 'true' : 'false'"
+          title="点击设为默认"
+          @click="selectPet(pet.id)"
+        >
+          <span class="pet-stage" aria-hidden="true">
+            <span v-if="pet.previewSrc" class="pet-sprite" :style="previewStyle(pet)"></span>
+            <span v-else class="pet-initials">{{ initials(pet.name) }}</span>
+          </span>
+          <span class="pet-body">
+            <span class="pet-name-row">
+              <span class="pet-name">{{ pet.name }}</span>
+              <span v-if="selectedPet === pet.id" class="pet-badge">
+                <Check :size="10" :stroke-width="3" aria-hidden="true" />
+                默认
+              </span>
+            </span>
+            <span class="pet-desc">{{ pet.desc }}</span>
+            <span class="pet-meta">
+              <span>{{ pet.id }}</span>
+              <span v-if="pet.author">by {{ pet.author }}</span>
+            </span>
+          </span>
+        </button>
       </div>
-
-      <section v-show="activeTab === 'builtin'" class="tab-panel" role="tabpanel">
-        <div class="pet-grid">
-          <button
-            v-for="(pet, pi) in pets"
-            :key="pet.id"
-            type="button"
-            class="pet-card sc-rise"
-            :style="{ '--i': pi + 2 }"
-            :disabled="syncPending"
-            :data-selected="selectedPet === pet.id ? 'true' : 'false'"
-            title="点击设为默认"
-            @click="selectPet(pet.id)"
-          >
-            <span class="pet-stage" aria-hidden="true">
-              <span v-if="pet.previewSrc" class="pet-sprite" :style="previewStyle(pet)"></span>
-              <span v-else class="pet-initials">{{ initials(pet.name) }}</span>
-            </span>
-            <span class="pet-body">
-              <span class="pet-name-row">
-                <span class="pet-name">{{ pet.name }}</span>
-                <span v-if="selectedPet === pet.id" class="pet-badge">
-                  <Check :size="10" :stroke-width="3" aria-hidden="true" />
-                  默认
-                </span>
-              </span>
-              <span class="pet-desc">{{ pet.desc }}</span>
-              <span class="pet-meta">
-                <span>{{ pet.id }}</span>
-                <span v-if="pet.author">by {{ pet.author }}</span>
-              </span>
-            </span>
-          </button>
-        </div>
-
-      </section>
-
-      <section v-show="activeTab === 'custom'" class="tab-panel" role="tabpanel">
-        <p class="tab-lead">你亲手定制的宠物会在这里出现。可以从形象、动作到出场频率完全按需调整。</p>
-
-        <div class="empty-state sc-rise" style="--i: 2">
-          <ImagePlus :size="34" :stroke-width="1.5" class="es-ico" aria-hidden="true" />
-          <h3>还没有自定义宠物</h3>
-          <p>上传形象、编写行为脚本，或从内置模板派生一个属于自己的桌面伙伴。</p>
-          <div class="es-actions">
-            <button type="button" class="btn-primary">新建自定义宠物</button>
-            <button type="button" class="btn-secondary">从内置派生</button>
-          </div>
-        </div>
-      </section>
-
-      <section v-show="activeTab === 'community'" class="tab-panel" role="tabpanel">
-        <p class="tab-lead">来自社区分享的宠物，稍后可以在这里浏览、试用或投稿作品。</p>
-
-        <div class="empty-state sc-rise" style="--i: 2">
-          <Globe :size="34" :stroke-width="1.5" class="es-ico" aria-hidden="true" />
-          <h3>社区市场即将上线</h3>
-          <p>正在打通同步与安全审核流程，稍后会在这里展示可安装的社区宠物。</p>
-          <div class="es-actions">
-            <button type="button" class="btn-secondary">
-              <Sparkles :size="13" :stroke-width="2" aria-hidden="true" />
-              了解投稿方式
-            </button>
-          </div>
-        </div>
-      </section>
     </div>
   </main>
 </template>
@@ -280,63 +208,6 @@ onMounted(() => {
   color: var(--sc-acid);
 }
 .pet-toggle[aria-pressed="true"] .pt-ico { color: var(--sc-acid); }
-
-/* ── tabs ─────────────────────────────────────────────────── */
-.tab-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 22px;
-}
-.tab-strip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 4px;
-  border: 1px solid var(--sc-line);
-  border-radius: 11px;
-  background: var(--sc-panel);
-}
-.tab-btn {
-  padding: 8px 18px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--sc-mute);
-  font-size: 13px;
-  font-weight: 540;
-  transition:
-    background 0.16s,
-    border-color 0.16s,
-    color 0.16s;
-}
-.tab-btn:hover { color: var(--sc-text); }
-.tab-btn.active {
-  border-color: var(--sc-line-2);
-  background: var(--sc-raise);
-  color: var(--sc-text);
-  box-shadow: 0 4px 16px rgba(23, 26, 31, 0.06);
-}
-.tab-btn:focus-visible {
-  outline: 2px solid var(--sc-acid);
-  outline-offset: 2px;
-}
-.tab-hint {
-  color: var(--sc-faint);
-  font-family: var(--sc-mono);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.2em;
-}
-
-.tab-lead {
-  max-width: 68ch;
-  margin-bottom: 18px;
-  color: var(--sc-mute);
-  font-size: 12.5px;
-  line-height: 1.6;
-}
 
 /* ── pet grid ─────────────────────────────────────────────── */
 .pet-grid {
@@ -493,84 +364,5 @@ onMounted(() => {
   font-size: 10px;
   letter-spacing: 0.03em;
   line-height: 1.4;
-}
-
-/* ── empty states ─────────────────────────────────────────── */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 68px 24px 76px;
-  border: 1px dashed var(--sc-line-2);
-  border-radius: 15px;
-  background: var(--sc-raise);
-  text-align: center;
-}
-.empty-state .es-ico {
-  margin-bottom: 8px;
-  color: var(--sc-faint);
-}
-.empty-state h3 {
-  margin: 0;
-  font-family: var(--sc-display);
-  font-size: 16px;
-  font-weight: 640;
-  color: var(--sc-text);
-  letter-spacing: 0.01em;
-}
-.empty-state p {
-  margin: 0;
-  max-width: 46ch;
-  color: var(--sc-mute);
-  font-size: 12.5px;
-  line-height: 1.6;
-}
-.es-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 14px;
-}
-.btn-primary {
-  padding: 9px 16px;
-  border: 1px solid var(--sc-acid);
-  border-radius: 9px;
-  background: var(--sc-acid);
-  color: var(--sc-acid-ink);
-  font-size: 12.5px;
-  font-weight: 640;
-  transition:
-    transform 0.12s var(--sc-ease-spring),
-    box-shadow 0.16s;
-}
-.btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 26px rgba(59, 91, 253, 0.2);
-}
-.btn-secondary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 9px 16px;
-  border: 1px solid var(--sc-line-2);
-  border-radius: 9px;
-  background: var(--sc-panel);
-  color: var(--sc-soft);
-  font-size: 12.5px;
-  font-weight: 600;
-  transition:
-    border-color 0.16s,
-    background 0.16s,
-    color 0.16s;
-}
-.btn-secondary:hover {
-  border-color: var(--sc-faint);
-  background: var(--sc-hover);
-  color: var(--sc-text);
-}
-
-@media (max-width: 760px) {
-  .tab-strip { width: max-content; max-width: 100%; }
 }
 </style>
