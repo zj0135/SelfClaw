@@ -21,7 +21,6 @@ import {
 	PanelLeftClose,
 	PanelLeftOpen,
 	ChevronRight,
-	PawPrint,
 } from 'lucide-vue-next';
 
 const props = defineProps({
@@ -42,7 +41,32 @@ const props = defineProps({
 const emit = defineEmits(['select', 'action', 'toggle-collapse']);
 
 function toggleCollapse() {
+	hideRailTip();
 	emit('toggle-collapse');
+}
+
+// 折叠态悬浮提示：fixed 定位 + 视口坐标，逃逸 rail-scroll 的 overflow 裁剪
+const railTip = ref({
+	open: false,
+	label: '',
+	kbd: '',
+	top: 0,
+	left: 0,
+});
+
+function showRailTip(event, label, kbd) {
+	const rect = event.currentTarget.getBoundingClientRect();
+	railTip.value = {
+		open: true,
+		label,
+		kbd: kbd || '',
+		top: rect.top + rect.height / 2,
+		left: rect.right + 10,
+	};
+}
+
+function hideRailTip() {
+	railTip.value = { ...railTip.value, open: false };
 }
 
 // 折叠态：图标轨对应的可操作项（去掉会话记录，仅保留功能图标）
@@ -259,6 +283,8 @@ onMounted(() => {
 	document.addEventListener('keydown', onDocumentKeydown);
 	window.addEventListener('blur', closeContextMenu);
 	window.addEventListener('resize', closeContextMenu);
+	window.addEventListener('blur', hideRailTip);
+	window.addEventListener('resize', hideRailTip);
 });
 
 onUnmounted(() => {
@@ -266,28 +292,23 @@ onUnmounted(() => {
 	document.removeEventListener('keydown', onDocumentKeydown);
 	window.removeEventListener('blur', closeContextMenu);
 	window.removeEventListener('resize', closeContextMenu);
+	window.removeEventListener('blur', hideRailTip);
+	window.removeEventListener('resize', hideRailTip);
 });
 </script>
 
 <template>
 	<aside class="sidebar" :class="{ collapsed }" aria-label="主导航">
-		<!-- 品牌行 -->
-		<div class="brand">
-			<span class="brand-mark" aria-hidden="true">
-				<PawPrint :size="15" :stroke-width="2.2" />
-			</span>
-			<span class="brand-copy">
-				<span class="brand-name">SelfClaw</span>
-				<span class="brand-kicker">AGENT CONSOLE</span>
-			</span>
-			<span class="brand-spacer"></span>
-			<button
-				class="brand-collapse"
-				type="button"
-				:title="collapsed ? '展开侧栏' : '折叠侧栏'"
-				:aria-label="collapsed ? '展开侧栏' : '折叠侧栏'"
-				@click="toggleCollapse"
-			>
+		<!-- 顶栏：新建对话 + 折叠 -->
+		<div class="head">
+			<button class="head-new" type="button" @click="onAction('new-chat')">
+				<span class="ico" aria-hidden="true">
+					<Plus :size="14" :stroke-width="2.2" />
+				</span>
+				<span>新建对话</span>
+			</button>
+			<button class="head-collapse" type="button" :title="collapsed ? '展开侧栏' : '折叠侧栏'"
+				:aria-label="collapsed ? '展开侧栏' : '折叠侧栏'" @click="toggleCollapse">
 				<PanelLeftOpen v-if="collapsed" :size="16" :stroke-width="1.8" />
 				<PanelLeftClose v-else :size="16" :stroke-width="1.8" />
 			</button>
@@ -295,55 +316,48 @@ onUnmounted(() => {
 
 		<!-- ============ 折叠态：图标轨 ============ -->
 		<nav class="rail" aria-label="折叠导航">
-			<div class="rail-scroll">
-				<button class="rail-new" type="button" title="新建对话" @click="onAction('new-chat')">
-					<Plus :size="17" :stroke-width="2.2" />
-					<span class="tip">新建对话</span>
+			<div class="rail-scroll" @scroll.passive="hideRailTip">
+				<button class="rail-new" type="button" :aria-label="'新建对话'"
+					@mouseenter="showRailTip($event, '新建对话')" @mouseleave="hideRailTip"
+					@click="onAction('new-chat')">
+					<Plus :size="17" :stroke-width="2.2" aria-hidden="true" />
 				</button>
 
 				<span class="rail-sep" aria-hidden="true"></span>
 
-				<button
-					v-for="item in railItems"
-					:key="item.id"
-					class="rail-btn"
-					:class="{ active: activeId === item.id }"
-					type="button"
-					:title="item.label"
-					@click="onAction(item.id)"
-				>
+				<button v-for="item in railItems" :key="item.id" class="rail-btn"
+					:class="{ active: activeId === item.id }" type="button" :aria-label="item.label"
+					@mouseenter="showRailTip($event, item.label, kbdMap[item.id])" @mouseleave="hideRailTip"
+					@click="onAction(item.id)">
 					<span class="ico" aria-hidden="true">
 						<component :is="getIcon(item.id)" :size="16" :stroke-width="1.8" />
 					</span>
-					<span class="tip">{{ item.label }}<span v-if="kbdMap[item.id]" class="k">{{ kbdMap[item.id] }}</span></span>
 				</button>
 			</div>
 
 			<div class="rail-bot">
-				<button class="rail-btn" :class="{ active: settingsActive }" type="button" title="系统设置" @click="selectSettings">
+				<button class="rail-btn" :class="{ active: settingsActive }" type="button" :aria-label="'系统设置'"
+					@mouseenter="showRailTip($event, '系统设置')" @mouseleave="hideRailTip" @click="selectSettings">
 					<span class="ico" aria-hidden="true">
 						<Settings :size="16" :stroke-width="1.8" />
 					</span>
-					<span class="tip">系统设置</span>
 				</button>
 			</div>
 		</nav>
 
+		<!-- 折叠态悬浮提示（fixed，脱离滚动容器裁剪） -->
+		<transition name="rail-tip">
+			<div v-if="railTip.open" class="rail-tip" :style="{ top: `${railTip.top}px`, left: `${railTip.left}px` }"
+				aria-hidden="true">
+				{{ railTip.label }}<span v-if="railTip.kbd" class="k">{{ railTip.kbd }}</span>
+			</div>
+		</transition>
+
 		<!-- 上：功能按钮区 -->
 		<div class="nav-top">
-			<button class="btn-primary" type="button" @click="onAction('new-chat')">
-				<Plus :size="15" :stroke-width="2.4" aria-hidden="true" />
-				<span>新建对话</span>
-			</button>
-
 			<div class="tool-list">
-				<button
-					v-for="item in actionItems.filter((a) => a.id !== 'new-chat')"
-					:key="item.id"
-					class="tool-btn"
-					type="button"
-					@click="onAction(item.id)"
-				>
+				<button v-for="item in actionItems.filter((a) => a.id !== 'new-chat')" :key="item.id" class="tool-btn"
+					type="button" @click="onAction(item.id)">
 					<span class="ico" aria-hidden="true">
 						<component :is="getIcon(item.id)" :size="15" :stroke-width="1.8" />
 					</span>
@@ -355,14 +369,16 @@ onUnmounted(() => {
 
 		<!-- 中：项目节点 + 对话节点 -->
 		<div class="nav-mid">
-			<section v-for="(group, gi) in groupItems" :key="group.id" class="group" :class="{ open: isGroupOpen(group.id) }">
+			<section v-for="(group, gi) in groupItems" :key="group.id" class="group"
+				:class="{ open: isGroupOpen(group.id) }">
 				<button class="group-head" type="button" @click="toggleGroup(group.id)">
 					<span class="group-chevron" aria-hidden="true">
 						<ChevronRight :size="13" :stroke-width="2" />
 					</span>
 					<span class="group-title">{{ group.label }}</span>
 					<span class="group-count">{{ String(group.children?.length || 0).padStart(2, '0') }}</span>
-					<span class="group-add" role="button" :title="`新建${group.label}`" @click.stop="onGroupAdd(group.id)">
+					<span class="group-add" role="button" :title="`新建${group.label}`"
+						@click.stop="onGroupAdd(group.id)">
 						<Plus :size="13" :stroke-width="2.2" />
 					</span>
 				</button>
@@ -370,14 +386,11 @@ onUnmounted(() => {
 				<div class="group-body">
 					<template v-if="group.id === 'projects'">
 						<!-- 项目节点：三级结构 项目→目录→会话 -->
-						<div v-for="folder in group.children" :key="folder.id" class="subfolder" :class="{ open: isFolderOpen(folder.id) || folderHasActiveChild(folder) }">
-							<button
-								class="project-folder"
-								:class="{ 'menu-open': isContextTarget(folder.id) }"
-								type="button"
-								@click="toggleFolder(folder.id)"
-								@contextmenu.prevent.stop="openFolderMenu($event, folder)"
-							>
+						<div v-for="folder in group.children" :key="folder.id" class="subfolder"
+							:class="{ open: isFolderOpen(folder.id) || folderHasActiveChild(folder) }">
+							<button class="project-folder" :class="{ 'menu-open': isContextTarget(folder.id) }"
+								type="button" @click="toggleFolder(folder.id)"
+								@contextmenu.prevent.stop="openFolderMenu($event, folder)">
 								<span class="folder-ico" aria-hidden="true">
 									<Folder :size="14" :stroke-width="1.8" />
 								</span>
@@ -387,16 +400,11 @@ onUnmounted(() => {
 								</span>
 							</button>
 							<div class="subfolder-body">
-								<button
-									v-for="(session, si) in folder.children"
-									:key="session.id"
-									class="node kind-chat sc-rise"
-									:style="{ '--i': si }"
+								<button v-for="(session, si) in folder.children" :key="session.id"
+									class="node kind-chat sc-rise" :style="{ '--i': si }"
 									:class="{ active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
-									type="button"
-									@click="selectNode(session.id)"
-									@contextmenu.prevent.stop="openConversationMenu($event, session)"
-								>
+									type="button" @click="selectNode(session.id)"
+									@contextmenu.prevent.stop="openConversationMenu($event, session)">
 									<span class="dot" aria-hidden="true"></span>
 									<span class="ntext">{{ session.label }}</span>
 									<span v-if="session.time" class="ntime">{{ session.time }}</span>
@@ -408,16 +416,11 @@ onUnmounted(() => {
 
 					<template v-else>
 						<!-- 普通对话节点：二级结构 -->
-						<button
-							v-for="(child, ci) in group.children"
-							:key="child.id"
-							class="node kind-chat sc-rise"
+						<button v-for="(child, ci) in group.children" :key="child.id" class="node kind-chat sc-rise"
 							:style="{ '--i': ci }"
 							:class="{ active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
-							type="button"
-							@click="selectNode(child.id)"
-							@contextmenu.prevent.stop="openConversationMenu($event, child)"
-						>
+							type="button" @click="selectNode(child.id)"
+							@contextmenu.prevent.stop="openConversationMenu($event, child)">
 							<span class="dot" aria-hidden="true"></span>
 							<span class="ntext">{{ child.label }}</span>
 							<span v-if="child.time" class="ntime">{{ child.time }}</span>
@@ -441,24 +444,12 @@ onUnmounted(() => {
 			</button>
 		</div>
 
-		<div
-			v-if="contextMenu.open"
-			class="context-menu"
-			role="menu"
-			:style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
-			@click.stop
-			@contextmenu.prevent
-		>
+		<div v-if="contextMenu.open" class="context-menu" role="menu"
+			:style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @click.stop @contextmenu.prevent>
 			<template v-for="item in contextMenuItems" :key="item.id">
 				<div v-if="item.type === 'divider'" class="context-menu-divider" role="separator"></div>
-				<button
-					v-else
-					class="context-menu-item"
-					:class="{ danger: item.danger }"
-					type="button"
-					role="menuitem"
-					@click="onContextMenuItem(item)"
-				>
+				<button v-else class="context-menu-item" :class="{ danger: item.danger }" type="button" role="menuitem"
+					@click="onContextMenuItem(item)">
 					<span class="context-menu-icon" aria-hidden="true">
 						<component :is="getContextIcon(item.icon)" :size="14" :stroke-width="1.8" />
 					</span>
@@ -481,7 +472,6 @@ onUnmounted(() => {
 	--sb-hover: #eef0f4;
 	--sb-raise: #f1f3f6;
 	--sb-accent: #3b5bfd;
-	--sb-accent-2: #2f49d1;
 	--sb-accent-soft: rgba(59, 91, 253, 0.08);
 	--sb-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
 	--sb-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -513,58 +503,65 @@ onUnmounted(() => {
 	animation-delay: calc(var(--i, 0) * 30ms);
 }
 
-/* ---- 品牌行 ---- */
-.brand {
+/* ---- 顶栏：新建对话 + 折叠 ---- */
+.head {
 	flex: 0 0 auto;
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	padding: 18px 16px 14px;
-	border-bottom: 1px solid var(--sb-line);
+	gap: 8px;
+	padding: 16px 12px 0;
 }
 
-.brand-mark {
-	display: grid;
-	width: 28px;
-	height: 28px;
-	flex: 0 0 auto;
-	place-items: center;
-	border-radius: 8px;
-	background: var(--sb-accent);
-	color: #fff;
-	box-shadow: 0 4px 14px rgba(59, 91, 253, 0.32);
-}
-
-.brand-copy {
+.head-new {
 	display: flex;
-	flex-direction: column;
-	gap: 1px;
-	min-width: 0;
-}
-
-.brand-name {
-	font-size: 14px;
-	font-weight: 680;
-	letter-spacing: 0.01em;
-	line-height: 1.2;
-}
-
-.brand-kicker {
-	color: var(--sb-faint);
-	font-family: var(--sb-mono);
-	font-size: 8.5px;
-	font-weight: 600;
-	letter-spacing: 0.24em;
-}
-
-.brand-spacer {
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
 	flex: 1;
+	min-width: 0;
+	height: 34px;
+	border: 1px solid var(--sb-line);
+	border-radius: 9px;
+	background: #fff;
+	color: var(--sb-text);
+	font-size: 12.5px;
+	font-weight: 620;
+	box-shadow: 0 1px 3px rgba(23, 26, 31, 0.04);
+	transition:
+		border-color 0.14s,
+		box-shadow 0.16s,
+		transform 0.12s var(--sb-ease-spring);
 }
 
-.brand-collapse {
+.head-new:hover {
+	border-color: var(--sb-line-2);
+	box-shadow: 0 4px 12px rgba(23, 26, 31, 0.07);
+	transform: translateY(-1px);
+}
+
+.head-new:active {
+	transform: translateY(0);
+}
+
+.head-new .ico {
 	display: grid;
-	width: 28px;
-	height: 28px;
+	width: 16px;
+	height: 16px;
+	place-items: center;
+	flex: none;
+	color: var(--sb-mute);
+	transition: color 0.14s;
+}
+
+.head-new:hover .ico {
+	color: var(--sb-accent);
+}
+
+.head-collapse {
+	display: grid;
+	width: 32px;
+	height: 32px;
+	flex: 0 0 auto;
 	place-items: center;
 	border: 1px solid transparent;
 	border-radius: 8px;
@@ -576,21 +573,18 @@ onUnmounted(() => {
 		border-color 0.15s;
 }
 
-.brand-collapse:hover {
+.head-collapse:hover {
 	border-color: var(--sb-line);
 	background: var(--sb-hover);
 	color: var(--sb-text);
 }
 
-.sidebar.collapsed .brand {
-	flex-direction: column;
+.sidebar.collapsed .head {
 	justify-content: center;
-	gap: 8px;
 	padding: 14px 0 10px;
 }
 
-.sidebar.collapsed .brand-copy,
-.sidebar.collapsed .brand-spacer {
+.sidebar.collapsed .head-new {
 	display: none;
 }
 
@@ -620,6 +614,7 @@ onUnmounted(() => {
 	gap: 4px;
 	padding: 12px 0;
 	overflow-y: auto;
+	overflow-x: hidden;
 }
 
 .rail-new {
@@ -627,19 +622,20 @@ onUnmounted(() => {
 	width: 36px;
 	height: 36px;
 	place-items: center;
-	border: 0;
+	border: 1px solid var(--sb-line);
 	border-radius: 10px;
-	background: var(--sb-accent);
-	color: #fff;
-	box-shadow: 0 4px 14px rgba(59, 91, 253, 0.3);
+	background: #fff;
+	color: var(--sb-soft);
 	transition:
-		transform 0.14s var(--sb-ease-spring),
-		box-shadow 0.15s;
+		background 0.15s,
+		border-color 0.15s,
+		color 0.15s;
 }
 
 .rail-new:hover {
-	transform: translateY(-1px);
-	box-shadow: 0 8px 20px rgba(59, 91, 253, 0.36);
+	border-color: var(--sb-line-2);
+	background: var(--sb-hover);
+	color: var(--sb-accent);
 }
 
 .rail-sep {
@@ -681,17 +677,15 @@ onUnmounted(() => {
 	border-top: 1px solid var(--sb-line);
 }
 
-/* 折叠态悬浮提示 */
-.tip {
-	position: absolute;
-	left: calc(100% + 10px);
-	top: 50%;
-	z-index: 90;
+/* 折叠态悬浮提示：fixed 定位，不受 rail-scroll 的 overflow 裁剪 */
+.rail-tip {
+	position: fixed;
+	z-index: 400;
 	display: inline-flex;
 	align-items: center;
 	gap: 7px;
 	padding: 5px 10px;
-	transform: translateY(-50%) translateX(-4px);
+	transform: translateY(-50%);
 	border: 1px solid var(--sb-line-2);
 	border-radius: 7px;
 	background: #fff;
@@ -700,71 +694,38 @@ onUnmounted(() => {
 	font-size: 11.5px;
 	font-weight: 550;
 	white-space: nowrap;
-	opacity: 0;
 	pointer-events: none;
-	transition:
-		opacity 0.14s,
-		transform 0.18s var(--sb-ease-out);
 }
 
-.rail-new,
-.rail-btn {
-	position: relative;
-}
-
-.rail-new:hover .tip,
-.rail-btn:hover .tip {
-	opacity: 1;
-	transform: translateY(-50%) translateX(0);
-}
-
-.tip .k {
+.rail-tip .k {
 	color: var(--sb-faint);
 	font-family: var(--sb-mono);
 	font-size: 10px;
 }
 
+.rail-tip-enter-active,
+.rail-tip-leave-active {
+	transition:
+		opacity 0.14s,
+		transform 0.18s var(--sb-ease-out);
+}
+
+.rail-tip-enter-from,
+.rail-tip-leave-to {
+	opacity: 0;
+	transform: translateY(-50%) translateX(-4px);
+}
+
 /* ---- 上：功能按钮区 ---- */
 .nav-top {
 	flex: 0 0 auto;
-	padding: 14px 12px 6px;
-}
-
-.btn-primary {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: 7px;
-	width: 100%;
-	height: 38px;
-	border: 1px solid var(--sb-accent);
-	border-radius: 10px;
-	background: var(--sb-accent);
-	color: #fff;
-	font-size: 13px;
-	font-weight: 640;
-	letter-spacing: 0.02em;
-	transition:
-		transform 0.12s var(--sb-ease-spring),
-		box-shadow 0.16s,
-		background 0.16s;
-}
-
-.btn-primary:hover {
-	background: var(--sb-accent-2);
-	transform: translateY(-1px);
-	box-shadow: 0 10px 24px rgba(59, 91, 253, 0.28);
-}
-
-.btn-primary:active {
-	transform: translateY(0);
+	padding: 10px 12px 6px;
 }
 
 .tool-list {
 	display: flex;
 	flex-direction: column;
 	gap: 1px;
-	margin-top: 10px;
 }
 
 .tool-btn {
@@ -1218,6 +1179,7 @@ onUnmounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
 	.sidebar *,
 	.sidebar *::before,
 	.sidebar *::after {

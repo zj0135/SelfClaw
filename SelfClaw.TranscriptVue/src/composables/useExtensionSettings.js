@@ -95,10 +95,11 @@ export function useExtensionSettings() {
 		const response = await mutate(kind, item.id, () =>
 			request('extensions/delete', { kind, id: item.id }),
 		);
-		if (!response) return;
+		if (!response) return false;
 		const collection = kindCollections[kind];
 		state.value[collection] = state.value[collection].filter((candidate) => candidate.id !== item.id);
 		state.value.revision = response.revision;
+		return true;
 	}
 
 	async function setAgentBinding(kind, item, agentId, enabled) {

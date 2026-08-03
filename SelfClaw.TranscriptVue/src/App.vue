@@ -1,6 +1,7 @@
 <script setup>
 import { computed, markRaw, onMounted, onUnmounted, reactive, ref } from 'vue';
 import AppSidebar from './components/SideBar/AppSidebar.vue';
+import AppToast from './components/common/AppToast.vue';
 import WindowControls from './components/Chat/WindowControls.vue';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
@@ -247,6 +248,7 @@ onUnmounted(() => {
 				<img :src="imagePreview.src" :alt="imagePreview.alt || 'Preview image'" />
 			</div>
 		</div>
+		<AppToast />
 	</div>
 </template>
 
