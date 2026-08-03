@@ -7,10 +7,11 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
+using SelfClaw.Desktop.Services.Terminal.Abstractions;
 
 namespace SelfClaw.Desktop.Services.Terminal;
 
-public sealed class ConPtyTerminalSession : IDisposable
+public sealed class ConPtyTerminalSession : ITerminalSession
 {
     private const int ProcThreadAttributePseudoConsole = 0x00020016;
     private const uint ExtendedStartupInfoPresent = 0x00080000;

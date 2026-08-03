@@ -3,22 +3,8 @@ import { escapeHtml, toolStatusLabel } from './shared';
 export { toolStatusLabel };
 
 // ── segment 归一化 ────────────────────────────────────────────────
-// 优先用后端的 segments 数组；旧消息只带 thinkingHtml/html 时拼出等价片段（legacy 兼容）。
 export function getMessageSegments(item) {
-	if (Array.isArray(item.segments) && item.segments.length > 0) {
-		return item.segments;
-	}
-
-	const legacySegments = [];
-	if (item.thinkingHtml) {
-		legacySegments.push({ kind: 'thinking', html: item.thinkingHtml, isPending: false });
-	}
-
-	if (item.html) {
-		legacySegments.push({ kind: 'content', html: item.html, isPending: false });
-	}
-
-	return legacySegments;
+	return Array.isArray(item.segments) ? item.segments : [];
 }
 
 // ── 稳定 id 派生 ──────────────────────────────────────────────────

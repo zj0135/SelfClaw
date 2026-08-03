@@ -33,10 +33,7 @@ public sealed class DesktopTurnFinalizer
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var now = _timeProvider.GetUtcNow();
-        var finalization = new TurnFinalization(
-            BuildAssistantMessage(request, now),
-            BuildToolExecutions(request, now));
+        var finalization = CreateFinalization(request);
         using var cancellation = new CancellationTokenSource(PersistenceTimeout);
 
         for (var attempt = 1; attempt <= 2; attempt++)
@@ -69,6 +66,16 @@ public sealed class DesktopTurnFinalizer
         }
 
         throw new InvalidOperationException("Turn finalization retry ended without a result.");
+    }
+
+    internal TurnFinalization CreateFinalization(DesktopTurnFinalizationRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = _timeProvider.GetUtcNow();
+        return new TurnFinalization(
+            BuildAssistantMessage(request, now),
+            BuildToolExecutions(request, now));
     }
 
     private static MessageRecord BuildAssistantMessage(

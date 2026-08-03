@@ -40,8 +40,6 @@ internal sealed class ConversationRuntimeState : IDisposable
 
     public Dictionary<Guid, ToolRunAnchor> ToolRunAnchors { get; } = [];
 
-    public HashSet<Guid> ActiveMessageIds { get; } = [];
-
     /// <summary>Latest RunStatusEvent text, shown while the streaming message has no content yet.</summary>
     public string? ActivityText { get; set; }
 

@@ -15,7 +15,14 @@ using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
+using SelfClaw.Desktop.Services.Pet;
 using SelfClaw.Desktop.Services.Runtime;
+using SelfClaw.Desktop.Services.Terminal;
+using SelfClaw.Desktop.Services.Terminal.Abstractions;
+using SelfClaw.Desktop.Services.Transcript;
+using SelfClaw.Desktop.Services.WebView;
+using SelfClaw.Desktop.Services.Workspace;
+using SelfClaw.Desktop.Services.Workspace.Abstractions;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
@@ -57,7 +64,17 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<DesktopNotificationActivationService>();
             builder.Services.AddSingleton<DesktopTurnFinalizer>();
             builder.Services.AddSingleton<ConversationTurnEngine>();
+            builder.Services.AddSingleton<ConversationSessionCoordinator>();
+            builder.Services.AddSingleton<TranscriptProjection>();
+            builder.Services.AddSingleton<WebViewHostChannel>();
+            builder.Services.AddSingleton<ITerminalSessionFactory, ConPtyTerminalSessionFactory>();
+            builder.Services.AddSingleton(services => new TerminalHostController(
+                services.GetRequiredService<ITerminalSessionFactory>(),
+                services.GetRequiredService<WebViewHostChannel>(),
+                Dispatcher));
+            builder.Services.AddSingleton<IWorkspaceFolderPicker, WpfWorkspaceFolderPicker>();
             builder.Services.AddSingleton<ProgrammingAssistantSettingsService>();
+            builder.Services.AddSingleton<ProgrammingAssistantSettingsBridge>();
             builder.Services.AddSingleton<AiProviderSettingsBridge>();
             builder.Services.AddSingleton<ExtensionSettingsBridge>();
             builder.Services.AddSingleton<IExtensionPackagePicker, ExtensionPackagePicker>();
@@ -70,8 +87,12 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<IPetWindowAdapter>(),
                 services.GetRequiredService<PetPackageCatalog>(),
                 services.GetRequiredService<ILogger<PetHost>>()));
+            builder.Services.AddSingleton<PetSettingsBridge>();
             builder.Services.AddSingleton<SystemTrayService>();
             builder.Services.AddSingleton<MainWindowViewModel>();
+            builder.Services.AddSingleton<IWorkspaceSelectionController>(services =>
+                services.GetRequiredService<MainWindowViewModel>());
+            builder.Services.AddSingleton<WorkspaceSelectionBridge>();
             builder.Services.AddSingleton<MainWindow>();
             _host = builder.Build();
 

@@ -118,8 +118,6 @@ public sealed class ConversationTurnEngine
 
     /// <summary>
     /// Creates the streaming assistant message the turn writes into, once, on the first event that needs it.
-    /// Tracked in <see cref="ConversationRuntimeState.ActiveMessageIds"/> so an exception or cancellation mid-turn
-    /// finalizes it through the same terminal-state path.
     /// </summary>
     private static void EnsureAssistantMessage(ConversationRuntimeState session, AgentTurnState turn)
     {
@@ -137,11 +135,10 @@ public sealed class ConversationTurnEngine
             MessageStatus.Streaming,
             now,
             now,
-            turn.AgentId,
+            null,
             turn.AgentName,
             turn.AgentRole);
 
-        session.ActiveMessageIds.Add(turn.AssistantMessageId);
         session.ReplaceMessage(message);
         turn.MessageCreated = true;
         session.RaiseTranscriptChanged(false);
@@ -255,22 +252,63 @@ public sealed class ConversationTurnEngine
         {
             finalization = await _turnFinalizer.FinalizeAsync(turn.PendingFinalization);
         }
+        catch (OperationCanceledException exception)
+        {
+            ApplyUnpersistedTerminalFailure(session, turn, exception);
+            throw;
+        }
         catch (Exception exception)
         {
             _logger.LogError(
                 exception,
                 "Failed to persist terminal state for turn {TurnId}.",
                 turn.AssistantMessageId);
-            return;
+            ApplyUnpersistedTerminalFailure(session, turn, exception);
+            throw;
         }
 
         if (finalization is null)
         {
             turn.Completed = true;
-            session.ActiveMessageIds.Remove(turn.AssistantMessageId);
             return;
         }
 
+        ApplyFinalization(session, turn, finalization, persisted: true);
+    }
+
+    private void ApplyUnpersistedTerminalFailure(
+        ConversationRuntimeState session,
+        AgentTurnState turn,
+        Exception exception)
+    {
+        var pending = turn.PendingFinalization
+            ?? throw new InvalidOperationException("The turn has no pending terminal state.");
+        var fallbackKind = pending.Kind == TurnFinalizationKind.Succeeded
+            ? TurnFinalizationKind.Failed
+            : pending.Kind;
+        var fallbackError = pending.Kind == TurnFinalizationKind.Succeeded
+            ? $"Failed to persist terminal state: {exception.Message}"
+            : pending.ErrorMessage ?? exception.Message;
+        turn.PendingFinalization = pending with
+        {
+            Kind = fallbackKind,
+            FinalText = null,
+            ErrorMessage = fallbackError
+        };
+
+        ApplyFinalization(
+            session,
+            turn,
+            _turnFinalizer.CreateFinalization(turn.PendingFinalization),
+            persisted: false);
+    }
+
+    private static void ApplyFinalization(
+        ConversationRuntimeState session,
+        AgentTurnState turn,
+        TurnFinalization finalization,
+        bool persisted)
+    {
         session.ReplaceMessage(finalization.AssistantMessage);
         foreach (var toolExecution in finalization.ToolExecutions)
         {
@@ -278,8 +316,11 @@ public sealed class ConversationTurnEngine
             session.UpsertToolRun(toolExecution);
         }
 
-        turn.Completed = true;
-        session.ActiveMessageIds.Remove(turn.AssistantMessageId);
+        if (persisted)
+        {
+            turn.Completed = true;
+        }
+
         session.RaiseTranscriptChanged(true);
     }
 

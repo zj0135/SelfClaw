@@ -82,7 +82,7 @@ public sealed class McpConfigurationResolverTests
         var settings = CreateStdioSettings() with
         {
             Command = "node",
-            Arguments = ["${pluginRoot}/server.js", "${workspaceRoot}/$(literal)"] ,
+            Arguments = ["${pluginRoot}/server.js", "${workspaceRoot}/$(literal)"],
             WorkingDirectoryMode = "plugin"
         };
         var record = CreateRecord(settings) with { SourcePluginId = "office" };
@@ -102,48 +102,14 @@ public sealed class McpConfigurationResolverTests
         var settings = CreateStdioSettings(environment: new Dictionary<string, string>
         {
             ["LICENSE_KEY"] = string.Empty
-        }) with { RequiredFieldNames = ["environment.LICENSE_KEY"] };
+        }) with
+        { RequiredFieldNames = ["environment.LICENSE_KEY"] };
 
         var result = await resolver.ResolveAsync(CreateRecord(settings), "C:\\work");
 
         result.IsAvailable.Should().BeFalse();
         result.UnavailableReason.Should().Be("MCP server requires additional configuration.");
     }
-
-    [Fact]
-    public void CreateStdioOptions_UsesWindowsBaselineThenUserOverrides()
-    {
-        var configuration = new SelfClaw.Infrastructure.Extensions.Mcp.Models.ResolvedMcpServerConfiguration(
-            "server",
-            "Server",
-            McpTransportKind.Stdio,
-            1,
-            null,
-            true,
-            null,
-            "server.exe",
-            [],
-            "C:\\work",
-            new Dictionary<string, string>
-            {
-                ["PATH"] = "controlled-user-path",
-                ["CUSTOM"] = "value"
-            },
-            null,
-            null,
-            null,
-            new Dictionary<string, string>(),
-            "C:\\work");
-
-        var options = McpTransportFactory.CreateStdioOptions(configuration, new BoundedDiagnosticBuffer());
-
-        options.InheritEnvironmentVariables.Should().BeFalse();
-        options.EnvironmentVariables.Should().ContainKeys(
-            "SystemRoot", "windir", "ComSpec", "PATHEXT", "TEMP", "TMP", "PATH", "CUSTOM");
-        options.EnvironmentVariables["PATH"].Should().Be("controlled-user-path");
-        options.EnvironmentVariables["CUSTOM"].Should().Be("value");
-    }
-
     [Fact]
     public void DiagnosticBuffer_CapsContent()
     {

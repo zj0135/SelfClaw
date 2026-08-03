@@ -22,7 +22,7 @@ public sealed partial class MainWindowViewModel
             return;
         }
 
-        messages ??= _messages;
+        messages ??= _conversationSessions.SelectedMessages;
         var title = ResolveNotificationTitle(conversation.Id, conversation.Title, messages);
         var message = BuildConversationCompletedMessage(messages);
         _desktopNotificationService.ShowConversationCompleted(
@@ -71,7 +71,7 @@ public sealed partial class MainWindowViewModel
         string? fallbackTitle,
         IReadOnlyList<MessageRecord>? messages = null)
     {
-        messages ??= _messages;
+        messages ??= _conversationSessions.SelectedMessages;
         var latestPrompt = messages
             .Where(message => message.Status == MessageStatus.Completed && message.Role == MessageRole.User)
             .OrderByDescending(message => message.CreatedAtUtc)

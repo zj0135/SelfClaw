@@ -3,12 +3,12 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import ComposerPanel from '../components/Chat/ComposerPanel.vue';
 import TerminalPanel from '../components/Chat/TerminalPanel.vue';
 import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
-import { useHostBridge } from '../composables/hostBridge.js';
+import { isSuperseded, useHostBridge } from '../composables/hostBridge.js';
 import { useTranscriptCollapse } from '../composables/useTranscriptCollapse.js';
 
 const emit = defineEmits(['preview-image']);
 
-const { on, post } = useHostBridge();
+const { on, post, requestLatest } = useHostBridge();
 
 const state = reactive({
 	items: [],
@@ -46,7 +46,6 @@ const scrollFollowState = {
 	transcript: true,
 	transcriptPausedUntil: 0,
 };
-let workspaceRequestSequence = 0;
 const isEmptyConversation = computed(() => (state.items || []).length === 0 && !state.isBusy);
 
 // ===== 回合执行状态（对话底部的「执行中 + 耗时」行） =====
@@ -90,11 +89,7 @@ function formatElapsedTime(ms) {
 }
 
 function hasRenderableContent(item) {
-	if (Array.isArray(item?.segments) && item.segments.length > 0) {
-		return true;
-	}
-
-	return Boolean(item?.html || item?.thinkingHtml);
+	return Array.isArray(item?.segments) && item.segments.length > 0;
 }
 
 // 末条助手消息还在展示「准备中」卡片时不重复显示执行状态，避免同屏两个活动指示。
@@ -254,11 +249,6 @@ function resolveToolApproval(toolExecutionId, approved) {
 	post({ type: 'resolve-tool-approval', toolExecutionId, approved });
 }
 
-function nextWorkspaceRequestId(prefix) {
-	workspaceRequestSequence += 1;
-	return `${prefix}-${Date.now()}-${workspaceRequestSequence}`;
-}
-
 function setWorkspaceLoading(isLoading) {
 	state.workspace.isLoading = isLoading;
 	if (isLoading) {
@@ -266,13 +256,23 @@ function setWorkspaceLoading(isLoading) {
 	}
 }
 
-function requestWorkspaceSelection(refresh = false) {
+async function applyWorkspaceRequest(type, payload = {}) {
 	setWorkspaceLoading(true);
-	post({
-		type: 'get-workspace-selection',
-		requestId: nextWorkspaceRequestId(refresh ? 'workspace-refresh' : 'workspace-get'),
-		refresh: Boolean(refresh),
-	});
+	try {
+		const response = await requestLatest('workspace-selection', type, payload);
+		applyWorkspaceSelection(response);
+	} catch (error) {
+		if (isSuperseded(error)) {
+			return;
+		}
+
+		state.workspace.error = error?.message || '工作区请求失败。';
+		state.workspace.isLoading = false;
+	}
+}
+
+function requestWorkspaceSelection(refresh = false) {
+	return applyWorkspaceRequest('get-workspace-selection', { refresh: Boolean(refresh) });
 }
 
 function selectWorkspaceRoot(workspaceRootId) {
@@ -280,12 +280,7 @@ function selectWorkspaceRoot(workspaceRootId) {
 		return;
 	}
 
-	setWorkspaceLoading(true);
-	post({
-		type: 'select-workspace-root',
-		requestId: nextWorkspaceRequestId('workspace-root'),
-		workspaceRootId,
-	});
+	return applyWorkspaceRequest('select-workspace-root', { workspaceRootId });
 }
 
 function selectWorkspacePath(rootPath) {
@@ -293,20 +288,11 @@ function selectWorkspacePath(rootPath) {
 		return;
 	}
 
-	setWorkspaceLoading(true);
-	post({
-		type: 'select-workspace-root',
-		requestId: nextWorkspaceRequestId('workspace-path'),
-		rootPath,
-	});
+	return applyWorkspaceRequest('select-workspace-root', { rootPath });
 }
 
 function browseWorkspaceFolder() {
-	setWorkspaceLoading(true);
-	post({
-		type: 'browse-workspace-folder',
-		requestId: nextWorkspaceRequestId('workspace-browse'),
-	});
+	return applyWorkspaceRequest('browse-workspace-folder');
 }
 
 function applyWorkspaceSelection(payload) {
@@ -396,8 +382,6 @@ on('terminal-clear', () => {
 on('terminal-focus', () => {
 	nextTick(() => terminalPanelRef.value?.focus?.());
 });
-
-on('workspace-selection', applyWorkspaceSelection);
 
 on('toolApprovalRequest', (payload) => {
 	state.pendingApproval = {

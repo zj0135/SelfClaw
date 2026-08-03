@@ -66,7 +66,6 @@ public sealed class ConversationTurnEngineTests
         session.ToolRuns[0].SourceId.Should().Be("git");
         session.ToolRuns[0].DisplayName.Should().Be("status");
         session.ToolRunAnchors.Should().ContainKey(session.ToolRuns[0].Id);
-        session.ActiveMessageIds.Should().BeEmpty();
 
         // Running tool starts / completes are persisted as they arrive (2 upserts here); the terminal
         // assistant + tool state goes through the atomic finalizer, not the streaming repository path.
@@ -113,7 +112,6 @@ public sealed class ConversationTurnEngineTests
         assistant.ErrorMessage.Should().Be("Generation stopped.");
         session.ToolRuns.Should().ContainSingle()
             .Which.Status.Should().Be(ToolExecutionStatus.Cancelled);
-        session.ActiveMessageIds.Should().BeEmpty();
     }
 
     [Fact]
@@ -132,10 +130,35 @@ public sealed class ConversationTurnEngineTests
             .Status.Should().Be(MessageStatus.Completed);
     }
 
-    private static ConversationTurnEngine CreateEngine(IConversationRepository repository)
+    [Fact]
+    public async Task ApplyEventAsync_propagates_terminal_persistence_cancellation_and_projects_failure()
+    {
+        var engine = CreateEngine(
+            new FakeConversationRepository(),
+            new CancellingFinalizationRepository());
+        var session = CreateSession();
+        var turn = new AgentTurnState(CreateAgent());
+
+        await engine.ApplyEventAsync(session, turn, new RunStartedEvent(null, null, null), default);
+        var action = () => engine.ApplyEventAsync(
+            session,
+            turn,
+            new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"),
+            default);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+        turn.Completed.Should().BeFalse();
+        var assistant = session.Messages.Single(item => item.Id == turn.AssistantMessageId);
+        assistant.Status.Should().Be(MessageStatus.Failed);
+        assistant.ErrorMessage.Should().Contain("Failed to persist terminal state");
+    }
+
+    private static ConversationTurnEngine CreateEngine(
+        IConversationRepository repository,
+        ITurnFinalizationRepository? finalizationRepository = null)
     {
         var finalizer = new DesktopTurnFinalizer(
-            new NoOpFinalizationRepository(),
+            finalizationRepository ?? new NoOpFinalizationRepository(),
             NullLogger<DesktopTurnFinalizer>.Instance);
         return new ConversationTurnEngine(repository, finalizer, NullLogger<ConversationTurnEngine>.Instance);
     }
@@ -213,5 +236,13 @@ public sealed class ConversationTurnEngineTests
     {
         public Task<bool> TryFinalizeTurnAsync(TurnFinalization finalization, CancellationToken cancellationToken = default)
             => Task.FromResult(true);
+    }
+
+    private sealed class CancellingFinalizationRepository : ITurnFinalizationRepository
+    {
+        public Task<bool> TryFinalizeTurnAsync(
+            TurnFinalization finalization,
+            CancellationToken cancellationToken = default)
+            => Task.FromException<bool>(new OperationCanceledException("database timeout"));
     }
 }

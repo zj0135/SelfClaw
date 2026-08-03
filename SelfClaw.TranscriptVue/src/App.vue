@@ -13,7 +13,7 @@ const viewRegistry = {
 	settings: markRaw(SettingsView),
 };
 
-const currentViewId = ref('settings'); // TEMP-SHOT: revert to 'chat'
+const currentViewId = ref('chat');
 const activeViewComponent = computed(() => viewRegistry[currentViewId.value] || ChatView);
 const imagePreview = ref(null);
 const SIDEBAR_COLLAPSE_KEY = 'selfclaw:sidebar-collapsed';
@@ -46,7 +46,6 @@ function toConversationNode(conversation) {
 		id: conversation.id,
 		label: conversation.title || '未命名对话',
 		time: conversation.timestamp || '',
-		subtitle: conversation.subtitle || '',
 		type: 'conversation',
 	};
 }

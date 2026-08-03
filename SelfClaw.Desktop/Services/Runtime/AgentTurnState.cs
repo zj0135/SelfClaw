@@ -15,8 +15,6 @@ internal sealed class AgentTurnState
 
     public Guid AssistantMessageId { get; }
 
-    public Guid? AgentId => null;
-
     public string AgentName { get; }
 
     public string AgentRole { get; }
