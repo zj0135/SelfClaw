@@ -283,14 +283,6 @@ function selectWorkspaceRoot(workspaceRootId) {
 	return applyWorkspaceRequest('select-workspace-root', { workspaceRootId });
 }
 
-function selectWorkspacePath(rootPath) {
-	if (!rootPath) {
-		return;
-	}
-
-	return applyWorkspaceRequest('select-workspace-root', { rootPath });
-}
-
 function browseWorkspaceFolder() {
 	return applyWorkspaceRequest('browse-workspace-folder');
 }
@@ -429,7 +421,6 @@ onUnmounted(() => {
 			ref="composerShellRef"
 			:busy="state.isBusy"
 			:workspace-selection="state.workspace"
-			:workspace-loading="state.workspace.isLoading"
 			:agent-mode="state.agentMode"
 			:selected-agent-id="state.selectedAgentId"
 			:selected-agent-name="state.selectedAgentName"
@@ -439,7 +430,6 @@ onUnmounted(() => {
 			@stop="stopGeneration"
 			@request-workspace="requestWorkspaceSelection"
 			@select-workspace-root="selectWorkspaceRoot"
-			@select-workspace-path="selectWorkspacePath"
 			@browse-workspace-folder="browseWorkspaceFolder"
 			@approve-tool="(id) => resolveToolApproval(id, true)"
 			@reject-tool="(id) => resolveToolApproval(id, false)"

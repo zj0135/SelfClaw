@@ -1,8 +1,8 @@
 <script setup>
 import { computed, nextTick, ref } from 'vue';
 import { SlidersHorizontal, ArrowRight, Square, ShieldAlert, Check, X } from 'lucide-vue-next';
+import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
-import WorkspaceSelector from './WorkspaceSelector.vue';
 import SkillPicker from './SkillPicker.vue';
 
 const props = defineProps({
@@ -13,10 +13,6 @@ const props = defineProps({
 	workspaceSelection: {
 		type: Object,
 		default: () => ({}),
-	},
-	workspaceLoading: {
-		type: Boolean,
-		default: false,
 	},
 	agentMode: {
 		type: String,
@@ -36,7 +32,6 @@ const emit = defineEmits([
 	'stop',
 	'request-workspace',
 	'select-workspace-root',
-	'select-workspace-path',
 	'browse-workspace-folder',
 	'approve-tool',
 	'reject-tool',
@@ -120,10 +115,6 @@ function selectWorkspaceRoot(rootId) {
 	emit('select-workspace-root', rootId);
 }
 
-function selectWorkspacePath(rootPath) {
-	emit('select-workspace-path', rootPath);
-}
-
 function browseWorkspaceFolder() {
 	emit('browse-workspace-folder');
 }
@@ -154,7 +145,7 @@ defineExpose({
 </script>
 
 <template>
-	<div class="composer-stack">
+	<div ref="shellRef" class="composer-stack">
 		<transition name="approval-bar">
 			<div v-if="props.pendingApproval" class="tool-approval-bar" role="alertdialog" aria-label="工具调用确认">
 				<span class="tool-approval-icon" aria-hidden="true">
@@ -179,7 +170,7 @@ defineExpose({
 				</div>
 			</div>
 		</transition>
-		<section ref="shellRef" class="composer-shell" aria-label="消息输入">
+		<section class="composer-shell" aria-label="消息输入">
 			<div class="composer-grip" aria-hidden="true"></div>
 			<textarea
 				ref="textareaRef"
@@ -202,14 +193,6 @@ defineExpose({
 			<button class="icon-btn" type="button" title="功能" aria-label="功能">
 				<SlidersHorizontal :size="16" :stroke-width="1.8" aria-hidden="true" />
 			</button>
-				<WorkspaceSelector
-					:workspace-selection="workspaceSelection"
-					:loading="workspaceLoading"
-					@refresh="requestWorkspace"
-					@select-root="selectWorkspaceRoot"
-					@select-path="selectWorkspacePath"
-					@browse="browseWorkspaceFolder"
-				/>
 			</div>
 			<div class="composer-tools-right">
 			<button v-if="props.busy" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成" @click="stop">
@@ -221,13 +204,22 @@ defineExpose({
 			</div>
 		</div>
 		</section>
+		<ComposerStatusBar
+			:workspace-selection="workspaceSelection"
+			@refresh="requestWorkspace"
+			@select-root="selectWorkspaceRoot"
+			@browse="browseWorkspaceFolder"
+		/>
 	</div>
 </template>
 
 <style scoped>
 .composer-stack {
+	/* relative：状态栏项目下拉的定位锚点 */
+	position: relative;
 	width: min(calc(100% - 72px), 728px);
 	margin: 0 auto 16px;
+	will-change: transform;
 }
 
 :global(.empty-workspace) .composer-stack {
@@ -243,13 +235,12 @@ defineExpose({
 	grid-template-rows: 1fr auto;
 	padding: 22px 18px 12px;
 	border: 1px solid rgba(19, 27, 45, 0.1);
-	border-radius: 16px;
+	border-radius: 16px 16px 0 0;
 	background: #ffffff;
 	box-shadow:
 		0 1px 2px rgba(23, 26, 31, 0.05),
 		0 8px 24px rgba(23, 26, 31, 0.04);
 	transition: border-color 0.18s, box-shadow 0.18s;
-	will-change: transform;
 }
 
 .composer-shell:focus-within {
