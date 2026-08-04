@@ -4,7 +4,7 @@ using SelfClaw.Desktop.Services.Workspace.Abstractions;
 
 namespace SelfClaw.Desktop.Services.Workspace;
 
-public sealed class WorkspaceSelectionBridge
+internal sealed class WorkspaceSelectionBridge
 {
     private readonly IWorkspaceSelectionController _selectionController;
     private readonly IWorkspaceFolderPicker _folderPicker;
@@ -17,9 +17,7 @@ public sealed class WorkspaceSelectionBridge
         _folderPicker = folderPicker;
     }
 
-    public event Action<object>? ResponseReady;
-
-    public async Task<bool> TryHandleAsync(
+    public async Task<object?> TryHandleAsync(
         string type,
         JsonElement payload,
         nint ownerHandle,
@@ -27,7 +25,7 @@ public sealed class WorkspaceSelectionBridge
     {
         if (type is not ("get-workspace-selection" or "select-workspace-root" or "browse-workspace-folder"))
         {
-            return false;
+            return null;
         }
 
         var requestId = ReadOptionalString(payload, "requestId");
@@ -49,8 +47,7 @@ public sealed class WorkspaceSelectionBridge
                     var selectedPath = _folderPicker.PickFolder(ownerHandle, ResolveInitialPickerDirectory());
                     if (string.IsNullOrWhiteSpace(selectedPath))
                     {
-                        PostState(requestId, cancelled: true);
-                        return true;
+                        return BuildStateResponse(requestId, cancelled: true);
                     }
 
                     await _selectionController.SelectOrAddWorkspaceRootAsync(selectedPath);
@@ -59,7 +56,7 @@ public sealed class WorkspaceSelectionBridge
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            PostState(requestId);
+            return BuildStateResponse(requestId);
         }
         catch (OperationCanceledException)
         {
@@ -67,10 +64,8 @@ public sealed class WorkspaceSelectionBridge
         }
         catch (Exception exception)
         {
-            PostState(requestId, error: exception.Message);
+            return BuildStateResponse(requestId, error: exception.Message);
         }
-
-        return true;
     }
 
     private async Task SelectWorkspaceRootAsync(JsonElement payload)
@@ -89,7 +84,7 @@ public sealed class WorkspaceSelectionBridge
                 : null);
     }
 
-    private void PostState(string? requestId, bool? cancelled = null, string? error = null)
+    private object BuildStateResponse(string? requestId, bool? cancelled = null, string? error = null)
     {
         var selected = _selectionController.SelectedWorkspaceRoot;
         var currentPath = selected?.RootPath;
@@ -100,7 +95,7 @@ public sealed class WorkspaceSelectionBridge
             currentIsFallback = true;
         }
 
-        Post(new
+        return new
         {
             type = "workspace-selection",
             requestId,
@@ -121,7 +116,7 @@ public sealed class WorkspaceSelectionBridge
                 selected = selected?.Id == root.Id
             }).ToArray(),
             commonFolders = BuildCommonFolders()
-        });
+        };
     }
 
     private string ResolveInitialPickerDirectory()
@@ -185,6 +180,4 @@ public sealed class WorkspaceSelectionBridge
         var value = element.GetString();
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
-
-    private void Post(object payload) => ResponseReady?.Invoke(payload);
 }

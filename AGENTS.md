@@ -40,18 +40,26 @@ TranscriptVue dev: `cd SelfClaw.TranscriptVue && npm install && npm run dev`
 
 ```
 User input (WebView2)
-  → MainWindowViewModel.SubmitPromptAsync() → SendAsync()
-    → resolves DesktopAgentDefinition.mode and builds ChatTurnRequest
-    → DispatchingAgentChatRuntime.StreamTurnAsync()
-      ├─ Mode=Direct → DirectAgentChatRuntime
-      │   → AiChatClientFactory (selected/default model profile + protected credential)
-      │   → provider IChatClient + WorkspaceAgentToolset + desktop approval
-      │   → M.E.AI updates → AgentStreamEvents
-      └─ Mode=Cli → CliAgentChatRuntime
-          → CliSessionResolver + CliAgentRegistry
-          → CliCommandResolver → CliAgentProcessHost (subprocess)
-          → stdout JSONL → ClaudeStreamJsonParser / JsonEventStreamParser → AgentStreamEvents
-  → MainWindowViewModel.HandleAgentStreamEventAsync → TranscriptRenderState → Vue renders
+  → WebViewMessageRouter.RouteAsync()
+    ├─ settings request → feature bridge → correlated WebView response
+    ├─ shell command → MainWindow applies window-only behavior
+    └─ conversation intent → MainWindowViewModel
+      → SubmitPromptAsync() captures the current UI selection
+      → ConversationTurnEngine.ExecuteAsync()
+        → admits the turn and persists the conversation + user message
+        → builds the Direct/CLI ChatTurnRequest
+        → DispatchingAgentChatRuntime.StreamTurnAsync()
+          ├─ Mode=Direct → DirectAgentChatRuntime
+          │   → AiChatClientFactory (selected/default model profile + protected credential)
+          │   → provider IChatClient + WorkspaceAgentToolset + desktop approval
+          │   → M.E.AI updates → AgentStreamEvents
+          └─ Mode=Cli → CliAgentChatRuntime
+              → CliSessionResolver + CliAgentRegistry
+              → CliCommandResolver → CliAgentProcessHost (subprocess)
+              → stdout JSONL → ClaudeStreamJsonParser / JsonEventStreamParser → AgentStreamEvents
+        → DesktopTurnFinalizer persists the terminal state
+  → ConversationSessionCoordinator → ITranscriptChangeSink → TranscriptPublisher
+    → TranscriptRenderState → WebViewHostChannel replay → Vue renders
 ```
 
 Direct mode uses the enabled model selected in the composer, or the `desktop.default` model profile when no explicit id is carried by `ChatTurnRequest.ModelProfileId`. Provider credentials are decrypted only inside Infrastructure. CLI mode uses the local CLI selection persisted by `ProgrammingAssistantSettingsService`; the CLI continues to own its local authentication and model configuration. No detected CLI selection fails a CLI turn with guidance.
@@ -70,12 +78,13 @@ Key runtime files:
 
 ### Desktop ViewModel
 
-`MainWindowViewModel` (split into partial files) owns the programming workflow:
-- `MainWindowViewModel.cs` — entry, submission, image attachments, theme following
+`MainWindowViewModel` owns UI selection, navigation state, and shell projection; deeper workflow modules own execution and publication:
+- `MainWindowViewModel.cs` — prompt snapshots, conversation navigation, workspace selection, and transcript request construction
 - `MainWindowViewModel.Agents.cs` — preserves each `DesktopAgentDefinition`'s Direct/CLI mode in `AgentRuntimeDefinition`
-- `MainWindowViewModel.Transcript.cs` — delta streaming, markdown merge, tool anchors
-- `MainWindowViewModel.Notifications.cs` — toast notifications
-- `MainWindowViewModel.RuntimeState.cs` — running conversation tracking
+- `ConversationTurnEngine.cs` — turn admission, conversation/message persistence, request construction, runtime dispatch, event reduction, terminal finalization, and completion notification
+- `ConversationSessionCoordinator.cs` — running conversation state, cancellation, selected transcript synchronization, and direct presentation signaling
+- `TranscriptPublisher.cs` — dispatcher marshaling, stream coalescing, projection dedupe, invalidation, and WebView replay publication
+- `WebViewMessageRouter.cs` — frontend request routing, bridge responses, shell intents, and host-only commands
 
 ### Agent definitions
 
@@ -107,6 +116,7 @@ Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 Desktop (`App.xaml.cs`):
 - `DesktopAgentDefinitionService`, `ExtensionSettingsBridge`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
   `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `AiProviderSettingsBridge`,
+  `ConversationTurnEngine`, `ConversationSessionCoordinator`, `TranscriptPublisher`, `WebViewMessageRouter`,
   `PetPackageCatalog`, `PetActivityPresenter`, `PetHost`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
 
 **Not registered** (retained/dead): `DesktopChannelManager`, Feishu adapters, old `DesktopSettingsStore`.

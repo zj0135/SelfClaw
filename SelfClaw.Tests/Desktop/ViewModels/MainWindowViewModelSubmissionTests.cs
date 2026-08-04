@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Windows.Threading;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
@@ -10,6 +11,7 @@ using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Transcript;
+using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Tools.Transcript;
@@ -43,50 +45,53 @@ public sealed class MainWindowViewModelSubmissionTests
             var turnFinalizer = new DesktopTurnFinalizer(
                 new NoOpTurnFinalizationRepository(),
                 NullLogger<DesktopTurnFinalizer>.Instance);
-            var turnEngine = new ConversationTurnEngine(
+            var projection = new TranscriptProjection(new MarkdownHtmlRenderer(), storagePaths);
+            using var transcriptPublisher = new TranscriptPublisher(
+                projection,
+                new WebViewHostChannel(),
+                Dispatcher.CurrentDispatcher);
+            using var sessions = new ConversationSessionCoordinator(repository, transcriptPublisher);
+            using var turnEngine = new ConversationTurnEngine(
                 repository,
                 turnFinalizer,
-                NullLogger<ConversationTurnEngine>.Instance);
-            var sessions = new ConversationSessionCoordinator(repository);
-            var projection = new TranscriptProjection(new MarkdownHtmlRenderer(), storagePaths);
-            var vm = new MainWindowViewModel(
-                repository,
                 runtime,
-                turnEngine,
                 sessions,
                 activityCoordinator,
                 toolApprovalHandler,
-                notificationService,
-                projection,
-                new DesktopAgentDefinitionService(storagePaths),
                 new ProgrammingAssistantSettingsService(settingsStore),
+                new ConversationCompletionNotifier(notificationService),
+                NullLogger<ConversationTurnEngine>.Instance);
+            var vm = new MainWindowViewModel(
+                repository,
+                turnEngine,
+                sessions,
+                activityCoordinator,
+                transcriptPublisher,
+                new DesktopAgentDefinitionService(storagePaths),
                 settingsStore,
                 NullLogger<MainWindowViewModel>.Instance);
 
-            using (vm)
-            {
-                await vm.InitializeAsync();
-                var selection = vm.SelectConversationAsync(conversation.Id);
-                await repository.MessagesRequested.Task;
+            await vm.InitializeAsync();
+            var selection = vm.SelectConversationAsync(conversation.Id);
+            await repository.MessagesRequested.Task;
 
-                var firstSubmission = vm.SubmitPromptAsync("first prompt");
-                var secondSubmission = vm.SubmitPromptAsync("second prompt");
+            var firstSubmission = vm.SubmitPromptAsync("first prompt");
+            var secondSubmission = vm.SubmitPromptAsync("second prompt");
 
-                repository.CompleteMessages(conversation.Id, []);
-                repository.CompleteToolRuns(conversation.Id, []);
-                await runtime.Requested.Task;
-                await secondSubmission;
+            repository.CompleteMessages(conversation.Id, []);
+            repository.CompleteToolRuns(conversation.Id, []);
+            await runtime.Requested.Task;
+            await secondSubmission;
 
-                runtime.Requests.Should().ContainSingle();
-                runtime.Requests[0].Messages
-                    .Should().ContainSingle(message => message.MarkdownContent == "first prompt");
-                repository.UpsertedMessages
-                    .Should().ContainSingle(message => message.MarkdownContent == "first prompt");
+            runtime.Requests.Should().ContainSingle();
+            runtime.Requests[0].Messages
+                .Should().ContainSingle(message => message.MarkdownContent == "first prompt");
+            repository.UpsertedMessages
+                .Should().ContainSingle(message => message.MarkdownContent == "first prompt");
 
-                runtime.Release();
-                await firstSubmission;
-                await selection;
-            }
+            runtime.Release();
+            await firstSubmission;
+            await selection;
         }
         finally
         {

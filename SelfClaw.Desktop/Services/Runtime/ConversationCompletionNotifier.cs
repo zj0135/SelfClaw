@@ -1,110 +1,96 @@
 using System.Text;
-using System.Windows;
-using System.Windows.Threading;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Desktop.Services.Runtime.Abstractions;
 
-namespace SelfClaw.Desktop.ViewModels;
+namespace SelfClaw.Desktop.Services.Runtime;
 
-public sealed partial class MainWindowViewModel
+internal sealed class ConversationCompletionNotifier : IConversationCompletionNotifier
 {
-    private const string NotificationToolAnchorPrefix = "<!--selfclaw:tool:";
+    private const string ToolAnchorPrefix = "<!--selfclaw:tool:";
+    private readonly DesktopNotificationService _notificationService;
 
-    /// <summary>
-    /// 回合结束后弹出"对话完成"系统通知。由 <c>SendAsync</c> 在流式结束时调用，是发送→渲染主路径的一部分。
-    /// </summary>
-    private void PublishConversationCompletedNotification(
-        ConversationRecord conversation,
-        IReadOnlyList<MessageRecord>? messages = null)
+    public ConversationCompletionNotifier(DesktopNotificationService notificationService)
     {
+        _notificationService = notificationService;
+    }
+
+    public void Notify(ConversationRecord conversation, IReadOnlyList<MessageRecord> messages)
+    {
+        ArgumentNullException.ThrowIfNull(conversation);
+        ArgumentNullException.ThrowIfNull(messages);
+
         if (conversation.Mode != ConversationMode.Programming)
         {
             return;
         }
 
-        messages ??= _conversationSessions.SelectedMessages;
-        var title = ResolveNotificationTitle(conversation.Id, conversation.Title, messages);
-        var message = BuildConversationCompletedMessage(messages);
-        _desktopNotificationService.ShowConversationCompleted(
+        _notificationService.ShowConversationCompleted(
             conversation.Id,
-            title,
-            message);
+            ResolveTitle(conversation.Title, messages),
+            BuildMessage(messages));
     }
 
-    private static string BuildConversationCompletedMessage(IReadOnlyList<MessageRecord> messages)
+    private static string BuildMessage(IReadOnlyList<MessageRecord> messages)
     {
         const string modeMessage = "Programming session completed.";
-        var preview = BuildConversationPreview(messages);
-
+        var preview = BuildPreview(messages);
         return string.IsNullOrWhiteSpace(preview)
             ? modeMessage
             : $"{modeMessage}\n{preview}";
     }
 
-    private static string BuildConversationPreview(IReadOnlyList<MessageRecord> messages)
+    private static string BuildPreview(IReadOnlyList<MessageRecord> messages)
     {
         var latestMessage = messages
             .Where(message => message.Status == MessageStatus.Completed && message.Role == MessageRole.Assistant)
             .OrderByDescending(message => message.CreatedAtUtc)
             .FirstOrDefault()
             ?? messages
-            .Where(message => message.Status == MessageStatus.Completed && message.Role is MessageRole.Assistant or MessageRole.System)
-            .OrderByDescending(message => message.CreatedAtUtc)
-            .FirstOrDefault();
-
+                .Where(message => message.Status == MessageStatus.Completed &&
+                                  message.Role is MessageRole.Assistant or MessageRole.System)
+                .OrderByDescending(message => message.CreatedAtUtc)
+                .FirstOrDefault();
         if (latestMessage is null)
         {
             return string.Empty;
         }
 
-        var preview = NormalizeNotificationText(latestMessage.MarkdownContent);
+        var preview = NormalizeText(latestMessage.MarkdownContent);
         if (string.IsNullOrWhiteSpace(preview) && !string.IsNullOrWhiteSpace(latestMessage.ErrorMessage))
         {
-            preview = NormalizeNotificationText(latestMessage.ErrorMessage);
+            preview = NormalizeText(latestMessage.ErrorMessage);
         }
 
         return preview.Length > 140 ? preview[..140] + "..." : preview;
     }
 
-    private string ResolveNotificationTitle(
-        Guid? conversationId,
-        string? fallbackTitle,
-        IReadOnlyList<MessageRecord>? messages = null)
+    private static string ResolveTitle(string? fallbackTitle, IReadOnlyList<MessageRecord> messages)
     {
-        messages ??= _conversationSessions.SelectedMessages;
         var latestPrompt = messages
             .Where(message => message.Status == MessageStatus.Completed && message.Role == MessageRole.User)
             .OrderByDescending(message => message.CreatedAtUtc)
-            .Select(message => NormalizeNotificationText(message.MarkdownContent))
+            .Select(message => NormalizeText(message.MarkdownContent))
             .FirstOrDefault(prompt => !string.IsNullOrWhiteSpace(prompt));
-
         if (!string.IsNullOrWhiteSpace(latestPrompt))
         {
             return latestPrompt.Length > 64 ? latestPrompt[..64] + "..." : latestPrompt;
         }
 
-        var conversationTitle = conversationId is Guid id
-            ? _allConversations.FirstOrDefault(item => item.Id == id)?.Title
-            : null;
-        var resolved = string.IsNullOrWhiteSpace(conversationTitle)
-            ? fallbackTitle
-            : conversationTitle;
-
-        resolved = string.IsNullOrWhiteSpace(resolved) ? "SelfClaw" : resolved.Trim();
+        var resolved = string.IsNullOrWhiteSpace(fallbackTitle) ? "SelfClaw" : fallbackTitle.Trim();
         return resolved.Length > 64 ? resolved[..64] + "..." : resolved;
     }
 
-    private static string NormalizeNotificationText(string? text)
+    private static string NormalizeText(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
             return string.Empty;
         }
 
-        var sanitized = RemoveNotificationMetadata(text);
-        var builder = new StringBuilder(text.Length);
+        var sanitized = RemoveMetadata(text);
+        var builder = new StringBuilder(sanitized.Length);
         var previousWhitespace = false;
-
         foreach (var character in sanitized)
         {
             var normalized = character switch
@@ -113,15 +99,13 @@ public sealed partial class MainWindowViewModel
                 '`' or '#' or '*' or '>' or '_' => ' ',
                 _ => character
             };
-
             if (char.IsWhiteSpace(normalized))
             {
-                if (previousWhitespace)
+                if (!previousWhitespace)
                 {
-                    continue;
+                    builder.Append(' ');
                 }
 
-                builder.Append(' ');
                 previousWhitespace = true;
                 continue;
             }
@@ -133,9 +117,9 @@ public sealed partial class MainWindowViewModel
         return builder.ToString().Trim();
     }
 
-    private static string RemoveNotificationMetadata(string text)
+    private static string RemoveMetadata(string text)
     {
-        var startIndex = text.IndexOf(NotificationToolAnchorPrefix, StringComparison.Ordinal);
+        var startIndex = text.IndexOf(ToolAnchorPrefix, StringComparison.Ordinal);
         if (startIndex < 0)
         {
             return text;
@@ -143,7 +127,6 @@ public sealed partial class MainWindowViewModel
 
         var builder = new StringBuilder(text.Length);
         var segmentStart = 0;
-
         while (startIndex >= 0)
         {
             if (startIndex > segmentStart)
@@ -158,7 +141,7 @@ public sealed partial class MainWindowViewModel
             }
 
             segmentStart = endIndex + 3;
-            startIndex = text.IndexOf(NotificationToolAnchorPrefix, segmentStart, StringComparison.Ordinal);
+            startIndex = text.IndexOf(ToolAnchorPrefix, segmentStart, StringComparison.Ordinal);
         }
 
         if (segmentStart < text.Length)

@@ -6,7 +6,7 @@ using SelfClaw.Infrastructure.AiProviders.Models.Views;
 
 namespace SelfClaw.Desktop.Services.AiProviders;
 
-public sealed class AiProviderSettingsBridge
+internal sealed class AiProviderSettingsBridge
 {
     private const string MessagePrefix = "ai-providers/";
 
@@ -23,28 +23,28 @@ public sealed class AiProviderSettingsBridge
         _settingsService = settingsService;
     }
 
-    public event Action<object>? ResponseReady;
     public event Action<Guid?>? ModelSelectionChanged;
 
-    public async Task<bool> TryHandleAsync(
+    public async Task<object?> TryHandleAsync(
         string type,
         JsonElement payload,
         CancellationToken cancellationToken = default)
     {
         if (!type.StartsWith(MessagePrefix, StringComparison.Ordinal))
         {
-            return false;
+            return null;
         }
 
         var requestId = ReadOptionalString(payload, "requestId");
         try
         {
+            object response;
             switch (type)
             {
                 case "ai-providers/get-state":
                 {
                     var state = await _settingsService.GetStateAsync(cancellationToken);
-                    Post(new { type, requestId, state });
+                    response = new { type, requestId, state };
                     break;
                 }
                 case "ai-providers/save-provider":
@@ -52,7 +52,7 @@ public sealed class AiProviderSettingsBridge
                     var provider = await _settingsService.SaveProviderAsync(
                         ReadSaveProviderCommand(payload),
                         cancellationToken);
-                    Post(new { type, requestId, provider });
+                    response = new { type, requestId, provider };
                     break;
                 }
                 case "ai-providers/set-provider-enabled":
@@ -60,20 +60,20 @@ public sealed class AiProviderSettingsBridge
                         ReadRequiredGuid(payload, "id", "providerId", "connectionId"),
                         ReadRequiredBoolean(payload, "enabled"),
                         cancellationToken);
-                    Post(new { type, requestId, ok = true });
+                    response = new { type, requestId, ok = true };
                     break;
                 case "ai-providers/delete-provider":
                     await _settingsService.DeleteProviderAsync(
                         ReadRequiredGuid(payload, "id", "providerId", "connectionId"),
                         cancellationToken);
-                    Post(new { type, requestId, ok = true });
+                    response = new { type, requestId, ok = true };
                     break;
                 case "ai-providers/fetch-models":
                 {
                     var models = await _settingsService.FetchAndMergeRemoteModelsAsync(
                         ReadRequiredGuid(payload, "providerId", "connectionId", "id"),
                         cancellationToken);
-                    Post(new { type, requestId, models });
+                    response = new { type, requestId, models };
                     break;
                 }
                 case "ai-providers/check":
@@ -82,14 +82,14 @@ public sealed class AiProviderSettingsBridge
                         ReadRequiredGuid(payload, "providerId", "connectionId"),
                         ReadRequiredGuid(payload, "modelProfileId"),
                         cancellationToken);
-                    Post(new
+                    response = new
                     {
                         type,
                         requestId,
                         ok = result.Ok,
                         latencyMs = result.LatencyMs,
                         error = result.ErrorMessage
-                    });
+                    };
                     break;
                 }
                 case "ai-providers/upsert-model":
@@ -97,7 +97,7 @@ public sealed class AiProviderSettingsBridge
                     var model = await _settingsService.UpsertModelAsync(
                         ReadUpsertModelCommand(payload),
                         cancellationToken);
-                    Post(new { type, requestId, model });
+                    response = new { type, requestId, model };
                     break;
                 }
                 case "ai-providers/set-model-enabled":
@@ -105,20 +105,20 @@ public sealed class AiProviderSettingsBridge
                         ReadRequiredGuid(payload, "modelProfileId", "id"),
                         ReadRequiredBoolean(payload, "enabled"),
                         cancellationToken);
-                    Post(new { type, requestId, ok = true });
+                    response = new { type, requestId, ok = true };
                     break;
                 case "ai-providers/set-all-models-enabled":
                     await _settingsService.SetAllModelsEnabledAsync(
                         ReadRequiredGuid(payload, "providerId", "connectionId"),
                         ReadRequiredBoolean(payload, "enabled"),
                         cancellationToken);
-                    Post(new { type, requestId, ok = true });
+                    response = new { type, requestId, ok = true };
                     break;
                 case "ai-providers/delete-model":
                     await _settingsService.DeleteModelAsync(
                         ReadRequiredGuid(payload, "modelProfileId", "id"),
                         cancellationToken);
-                    Post(new { type, requestId, ok = true });
+                    response = new { type, requestId, ok = true };
                     break;
                 case "ai-providers/set-default-model":
                 {
@@ -133,7 +133,7 @@ public sealed class AiProviderSettingsBridge
                         ModelSelectionChanged?.Invoke(modelProfileId);
                     }
 
-                    Post(new { type, requestId, ok = true });
+                    response = new { type, requestId, ok = true };
                     break;
                 }
                 case "ai-providers/list-enabled-models":
@@ -143,13 +143,15 @@ public sealed class AiProviderSettingsBridge
                         AiModelSelectionScopes.DesktopDefault,
                         cancellationToken);
                     ModelSelectionChanged?.Invoke(defaultModelProfileId);
-                    Post(new { type, requestId, models, defaultModelProfileId });
+                    response = new { type, requestId, models, defaultModelProfileId };
                     break;
                 }
                 default:
-                    Post(new { type, requestId, error = $"Unsupported AI provider message type '{type}'." });
+                    response = new { type, requestId, error = $"Unsupported AI provider message type '{type}'." };
                     break;
             }
+
+            return response;
         }
         catch (OperationCanceledException)
         {
@@ -157,10 +159,8 @@ public sealed class AiProviderSettingsBridge
         }
         catch (Exception exception)
         {
-            Post(new { type, requestId, error = exception.Message });
+            return new { type, requestId, error = exception.Message };
         }
-
-        return true;
     }
 
     private static SaveProviderCommand ReadSaveProviderCommand(JsonElement payload)
@@ -309,6 +309,4 @@ public sealed class AiProviderSettingsBridge
         var value = element.GetString();
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
-
-    private void Post(object payload) => ResponseReady?.Invoke(payload);
 }

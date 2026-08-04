@@ -813,11 +813,11 @@ Agent 绑定涉及 AppData Agent markdown，由 Desktop 的 `DesktopAgentDefinit
 - 原样回显 `requestId`；
 - `OperationCanceledException` 重抛；
 - 其他异常转换为 `{ type, requestId, error }`；
-- `ResponseReady` 由 `MainWindow` 统一调用 `PostWebMessage()`。
+- bridge 直接返回带 `requestId` 的响应对象，由 `WebViewMessageRouter` 统一调用 `WebViewHostChannel.PostResponse()`。
 
-集成点：`MainWindow.OnTranscriptWebMessageReceived()` 中现有的 `_aiProviderSettingsBridge.TryHandleAsync()` 早退判断旁并列一个 `_extensionSettingsBridge.TryHandleAsync()`，其余 case 不动，不把 extensions message 塞进大 switch。
+集成点：`WebViewMessageRouter.RouteAsync()` 按固定顺序调用各 feature bridge；bridge 返回非空响应后立即回包，不把 extensions message 塞进 shell intent switch。
 
-除 request/response 外，bridge 还暴露一个 `StateChanged(revision)` 事件（对应 `AiProviderSettingsBridge.ModelSelectionChanged` 的既有模式）：任何成功 mutation、以及回合期 health 变化（§10.3）都会触发。`MainWindow` 订阅后做两件事——向 Vue 推送 `extensions/state-changed`（打开中的设置页据此刷新，而不是靠轮询），并通知 `MainWindowViewModel` 更新 `capabilityRevision` 后重新 `PublishShell()`（composer 的 SkillPicker 缓存据此失效，§12.6）。
+除 request/response 外，任何成功 mutation、以及回合期 health 变化（§10.3）都会通过 `IExtensionStateChangeNotifier.StateChanged(revision)` 发布。`WebViewMessageRouter` 直接订阅该 notifier 后做两件事——向 Vue 推送 `extensions/state-changed`（打开中的设置页据此刷新，而不是靠轮询），并通知 `MainWindowViewModel` 更新 `capabilityRevision` 后重新发布 transcript（composer 的 SkillPicker 缓存据此失效，§12.6）。
 
 导入不能依赖 WebView `<input type=file>` 暴露绝对路径，也不应把大文件 base64 塞进 JSON。`extensions/import-package` 由 Desktop 打开原生 `OpenFileDialog`，将用户选择的本地路径直接交给 installer。
 
@@ -1131,8 +1131,8 @@ App.xaml.cs（Desktop）：
   OnStartup: 在 IAiProviderRepository.InitializeAsync() 之后追加
     IExtensionPackageRepository.InitializeAsync()（v22 迁移随现有 schema 管道执行）
     ExtensionCatalog.ReconcileAsync()（§6.3 的启动 reconcile，轻量、可容错）
-  DI: 注册 ExtensionSettingsBridge（singleton），MainWindow 构造注入并订阅其
-    ResponseReady / StateChanged（同 AiProviderSettingsBridge 的接线方式）
+  DI: 注册 ExtensionSettingsBridge 与 WebViewMessageRouter（singleton），router 负责 bridge 调用、
+    响应回包以及 StateChanged / ModelSelectionChanged 订阅
   OnExit: 无需新增代码——Generic Host DisposeAsync 会释放实现 IAsyncDisposable 的
     McpClientManager singleton，由它执行 §9.2 的 graceful shutdown + 进程树终止
 ```

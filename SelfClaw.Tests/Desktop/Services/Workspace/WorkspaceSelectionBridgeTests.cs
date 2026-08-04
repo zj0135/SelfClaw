@@ -13,8 +13,6 @@ public sealed class WorkspaceSelectionBridgeTests
     {
         var controller = new FakeWorkspaceSelectionController();
         var bridge = new WorkspaceSelectionBridge(controller, new FakeWorkspaceFolderPicker(null));
-        object? response = null;
-        bridge.ResponseReady += payload => response = payload;
         using var request = JsonDocument.Parse("""
             {
               "type": "select-workspace-root",
@@ -23,12 +21,12 @@ public sealed class WorkspaceSelectionBridgeTests
             }
             """);
 
-        var handled = await bridge.TryHandleAsync(
+        var response = await bridge.TryHandleAsync(
             "select-workspace-root",
             request.RootElement,
             ownerHandle: 0);
 
-        handled.Should().BeTrue();
+        response.Should().NotBeNull();
         controller.SelectedPath.Should().Be("E:\\git_repo\\SelfClaw");
         using var result = JsonDocument.Parse(JsonSerializer.Serialize(response));
         result.RootElement.GetProperty("requestId").GetString().Should().Be("workspace-1");

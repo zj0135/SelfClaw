@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -10,14 +9,9 @@ using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
-using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.AgentActivity;
-using SelfClaw.Desktop.Services.Extensions;
-using SelfClaw.Desktop.Services.Pet;
-using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.WebView;
-using SelfClaw.Desktop.Services.Workspace;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Core.Runtime;
@@ -38,16 +32,12 @@ public partial class MainWindow : Window
 
     private readonly MainWindowViewModel _viewModel;
     private readonly StoragePaths _storagePaths;
-    private readonly ProgrammingAssistantSettingsBridge _programmingAssistantSettingsBridge;
-    private readonly AiProviderSettingsBridge _aiProviderSettingsBridge;
-    private readonly ExtensionSettingsBridge _extensionSettingsBridge;
-    private readonly PetSettingsBridge _petSettingsBridge;
     private readonly PetActivityPresenter _petActivityPresenter;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly DesktopNotificationService _desktopNotificationService;
     private readonly WebViewHostChannel _webViewHostChannel;
-    private readonly WorkspaceSelectionBridge _workspaceSelectionBridge;
+    private readonly WebViewMessageRouter _webViewMessageRouter;
     private readonly TerminalHostController _terminalHostController;
     private bool _isRightPanelOpen;
     private bool _isSystemSettingsOpen;
@@ -55,18 +45,14 @@ public partial class MainWindow : Window
     private DispatcherTimer? _rightPanelAnimationTimer;
     private Guid? _currentApprovalId;
 
-    public MainWindow(
+    internal MainWindow(
         MainWindowViewModel viewModel,
         DesktopNotificationService desktopNotificationService,
         DesktopToolApprovalHandler toolApprovalHandler,
-        ProgrammingAssistantSettingsBridge programmingAssistantSettingsBridge,
-        AiProviderSettingsBridge aiProviderSettingsBridge,
-        ExtensionSettingsBridge extensionSettingsBridge,
-        PetSettingsBridge petSettingsBridge,
         PetActivityPresenter petActivityPresenter,
         AgentActivityCoordinator agentActivityCoordinator,
         WebViewHostChannel webViewHostChannel,
-        WorkspaceSelectionBridge workspaceSelectionBridge,
+        WebViewMessageRouter webViewMessageRouter,
         TerminalHostController terminalHostController,
         StoragePaths storagePaths)
     {
@@ -74,14 +60,10 @@ public partial class MainWindow : Window
         ApplyAdaptiveStartupSize();
         _viewModel = viewModel;
         _storagePaths = storagePaths;
-        _programmingAssistantSettingsBridge = programmingAssistantSettingsBridge;
-        _aiProviderSettingsBridge = aiProviderSettingsBridge;
-        _extensionSettingsBridge = extensionSettingsBridge;
-        _petSettingsBridge = petSettingsBridge;
         _petActivityPresenter = petActivityPresenter;
         _agentActivityCoordinator = agentActivityCoordinator;
         _webViewHostChannel = webViewHostChannel;
-        _workspaceSelectionBridge = workspaceSelectionBridge;
+        _webViewMessageRouter = webViewMessageRouter;
         _terminalHostController = terminalHostController;
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
@@ -91,17 +73,9 @@ public partial class MainWindow : Window
         StateChanged += OnWindowStateChanged;
         PreviewKeyDown += HandlePreviewKeyDown;
         Closed += OnClosed;
-        _viewModel.TranscriptChanged += OnTranscriptChanged;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         TranscriptView.NavigationCompleted += OnTranscriptNavigationCompleted;
         TranscriptView.NavigationStarting += OnTranscriptNavigationStarting;
-        _aiProviderSettingsBridge.ResponseReady += OnAiProviderBridgeResponseReady;
-        _programmingAssistantSettingsBridge.ResponseReady += OnProgrammingAssistantBridgeResponseReady;
-        _petSettingsBridge.ResponseReady += OnPetSettingsBridgeResponseReady;
-        _workspaceSelectionBridge.ResponseReady += OnWorkspaceSelectionBridgeResponseReady;
-        _aiProviderSettingsBridge.ModelSelectionChanged += OnModelSelectionChanged;
-        _extensionSettingsBridge.ResponseReady += OnExtensionBridgeResponseReady;
-        _extensionSettingsBridge.StateChanged += OnExtensionStateChanged;
         _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
         _toolApprovalHandler.ApprovalExpired += OnToolApprovalExpired;
         _agentActivityCoordinator.SnapshotChanged += OnAgentActivitySnapshotChanged;
@@ -134,18 +108,10 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
-        _viewModel.TranscriptChanged -= OnTranscriptChanged;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         StateChanged -= OnWindowStateChanged;
         TranscriptView.NavigationCompleted -= OnTranscriptNavigationCompleted;
         TranscriptView.NavigationStarting -= OnTranscriptNavigationStarting;
-        _aiProviderSettingsBridge.ResponseReady -= OnAiProviderBridgeResponseReady;
-        _programmingAssistantSettingsBridge.ResponseReady -= OnProgrammingAssistantBridgeResponseReady;
-        _petSettingsBridge.ResponseReady -= OnPetSettingsBridgeResponseReady;
-        _workspaceSelectionBridge.ResponseReady -= OnWorkspaceSelectionBridgeResponseReady;
-        _aiProviderSettingsBridge.ModelSelectionChanged -= OnModelSelectionChanged;
-        _extensionSettingsBridge.ResponseReady -= OnExtensionBridgeResponseReady;
-        _extensionSettingsBridge.StateChanged -= OnExtensionStateChanged;
         _toolApprovalHandler.ApprovalRequested -= OnToolApprovalRequested;
         _toolApprovalHandler.ApprovalExpired -= OnToolApprovalExpired;
         _agentActivityCoordinator.SnapshotChanged -= OnAgentActivitySnapshotChanged;
@@ -244,9 +210,6 @@ public partial class MainWindow : Window
             PostToolApprovalRequest(current);
         }
     }
-
-    private void OnTranscriptChanged(object? sender, TranscriptRenderState state)
-        => _webViewHostChannel.PublishTranscript(state);
 
     private void HandlePreviewKeyDown(object sender, KeyEventArgs e)
     {
@@ -423,166 +386,10 @@ public partial class MainWindow : Window
     {
         try
         {
-            using var document = JsonDocument.Parse(e.WebMessageAsJson);
-            if (!document.RootElement.TryGetProperty("type", out var typeElement))
-            {
-                return;
-            }
-
-            var type = typeElement.GetString();
-            if (type is not null && await _aiProviderSettingsBridge.TryHandleAsync(type, document.RootElement))
-            {
-                return;
-            }
-
-            _extensionSettingsBridge.SetActiveAgent(_viewModel.SelectedAgentId);
-            if (type is not null && await _extensionSettingsBridge.TryHandleAsync(type, document.RootElement))
-            {
-                return;
-            }
-
-            if (type is not null && await _programmingAssistantSettingsBridge.TryHandleAsync(type, document.RootElement))
-            {
-                return;
-            }
-
-            if (type is not null && await _petSettingsBridge.TryHandleAsync(type, document.RootElement))
-            {
-                return;
-            }
-
-            if (type is not null && await _workspaceSelectionBridge.TryHandleAsync(
-                    type,
-                    document.RootElement,
-                    new WindowInteropHelper(this).Handle))
-            {
-                return;
-            }
-
-            if (type is not null && _terminalHostController.TryHandleMessage(type, document.RootElement))
-            {
-                return;
-            }
-
-            switch (type)
-            {
-                case "open-link":
-                {
-                    var href = document.RootElement.GetProperty("href").GetString();
-                    if (!string.IsNullOrWhiteSpace(href))
-                    {
-                        Process.Start(new ProcessStartInfo(href) { UseShellExecute = true });
-                    }
-                    break;
-                }
-                case "send-prompt":
-                {
-                    var prompt = document.RootElement.TryGetProperty("prompt", out var promptElement)
-                        ? promptElement.GetString() ?? string.Empty
-                        : string.Empty;
-                    await _viewModel.SubmitPromptAsync(prompt);
-                    break;
-                }
-                case "stop-generation":
-                    _viewModel.StopSelectedConversation();
-                    break;
-                case "resolve-tool-approval":
-                {
-                    var toolExecutionId = document.RootElement.TryGetProperty("toolExecutionId", out var toolExecutionIdElement)
-                        ? toolExecutionIdElement.GetString()
-                        : null;
-                    var approved = document.RootElement.TryGetProperty("approved", out var approvedElement) &&
-                                   approvedElement.GetBoolean();
-                    if (Guid.TryParse(toolExecutionId, out var parsedToolExecutionId))
-                    {
-                        _agentActivityCoordinator.TryResolveApproval(parsedToolExecutionId, approved);
-                    }
-                    break;
-                }
-                case "new-chat":
-                    await _viewModel.StartNewConversationAsync();
-                    break;
-                case "select-conversation":
-                {
-                    var conversationId = document.RootElement.TryGetProperty("conversationId", out var conversationIdElement)
-                        ? conversationIdElement.GetString()
-                        : null;
-                    if (Guid.TryParse(conversationId, out var parsedConversationId))
-                    {
-                        await _viewModel.SelectConversationAsync(parsedConversationId);
-                    }
-                    break;
-                }
-                case "delete-conversation":
-                {
-                    var conversationId = document.RootElement.TryGetProperty("conversationId", out var conversationIdElement)
-                        ? conversationIdElement.GetString()
-                        : null;
-                    if (Guid.TryParse(conversationId, out var parsedConversationId))
-                    {
-                        await _viewModel.DeleteConversationAsync(parsedConversationId);
-                    }
-                    break;
-                }
-                case "clear-conversations":
-                {
-                    if (document.RootElement.TryGetProperty("conversationIds", out var conversationIdsElement) &&
-                        conversationIdsElement.ValueKind == JsonValueKind.Array)
-                    {
-                        var conversationIds = conversationIdsElement
-                            .EnumerateArray()
-                            .Select(item => item.GetString())
-                            .Where(item => Guid.TryParse(item, out _))
-                            .Select(item => Guid.Parse(item!))
-                            .ToArray();
-                        await _viewModel.DeleteConversationsAsync(conversationIds);
-                    }
-                    break;
-                }
-                case "delete-workspace-root":
-                {
-                    var workspaceRootId = document.RootElement.TryGetProperty("workspaceRootId", out var workspaceRootIdElement)
-                        ? workspaceRootIdElement.GetString()
-                        : null;
-                    if (Guid.TryParse(workspaceRootId, out var parsedWorkspaceRootId))
-                    {
-                        await _viewModel.DeleteWorkspaceRootAsync(parsedWorkspaceRootId);
-                    }
-                    break;
-                }
-                case "window-drag":
-                    StartWindowDrag();
-                    break;
-                case "window-minimize":
-                    WindowState = WindowState.Minimized;
-                    break;
-                case "window-toggle-maximize":
-                    ToggleWindowState();
-                    break;
-                case "window-close":
-                    Close();
-                    break;
-                case "toggle-terminal":
-                    ToggleTerminalTool();
-                    break;
-                case "toggle-files":
-                    ToggleFileManagerTool();
-                    break;
-                case "toggle-browser":
-                    ToggleBrowserTool();
-                    break;
-                case "settings-closed":
-                    OnSettingsClosedFromWebView();
-                    break;
-                case "select-composer-mode":
-                {
-                    var mode = document.RootElement.TryGetProperty("mode", out var modeElement)
-                        ? modeElement.GetString()
-                        : null;
-                    await _viewModel.SelectComposerModeAsync(mode);
-                    break;
-                }
-            }
+            var command = await _webViewMessageRouter.RouteAsync(
+                e.WebMessageAsJson,
+                new WindowInteropHelper(this).Handle);
+            ApplyWebViewHostCommand(command);
         }
         catch (OperationCanceledException)
         {
@@ -594,8 +401,49 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnModelSelectionChanged(Guid? modelProfileId)
-        => _viewModel.SelectModelProfile(modelProfileId);
+    private void ApplyWebViewHostCommand(WebViewHostCommand? command)
+    {
+        if (command is null)
+        {
+            return;
+        }
+
+        switch (command.Kind)
+        {
+            case WebViewHostCommandKind.OpenLink:
+                if (!string.IsNullOrWhiteSpace(command.Value))
+                {
+                    Process.Start(new ProcessStartInfo(command.Value) { UseShellExecute = true });
+                }
+                break;
+            case WebViewHostCommandKind.StartWindowDrag:
+                StartWindowDrag();
+                break;
+            case WebViewHostCommandKind.MinimizeWindow:
+                WindowState = WindowState.Minimized;
+                break;
+            case WebViewHostCommandKind.ToggleMaximizeWindow:
+                ToggleWindowState();
+                break;
+            case WebViewHostCommandKind.CloseWindow:
+                Close();
+                break;
+            case WebViewHostCommandKind.ToggleTerminal:
+                ToggleTerminalTool();
+                break;
+            case WebViewHostCommandKind.ToggleFiles:
+                ToggleFileManagerTool();
+                break;
+            case WebViewHostCommandKind.ToggleBrowser:
+                ToggleBrowserTool();
+                break;
+            case WebViewHostCommandKind.SettingsClosed:
+                OnSettingsClosedFromWebView();
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(command), command.Kind, "Unsupported WebView host command.");
+        }
+    }
 
     private void OnToolApprovalRequested(ToolApprovalRequest request)
     {
@@ -733,33 +581,6 @@ public partial class MainWindow : Window
             ? string.Empty
             : $"{Environment.NewLine}Source: {request.SourceId}";
         return $"{description}{source}{Environment.NewLine}{Environment.NewLine}Arguments:{Environment.NewLine}{arguments}";
-    }
-
-    private void OnAiProviderBridgeResponseReady(object payload)
-        => _webViewHostChannel.PostResponse(payload);
-
-    private void OnProgrammingAssistantBridgeResponseReady(object payload)
-        => _webViewHostChannel.PostResponse(payload);
-
-    private void OnPetSettingsBridgeResponseReady(object payload)
-        => _webViewHostChannel.PostResponse(payload);
-
-    private void OnWorkspaceSelectionBridgeResponseReady(object payload)
-        => _webViewHostChannel.PostResponse(payload);
-
-    private void OnExtensionBridgeResponseReady(object payload)
-        => _webViewHostChannel.PostResponse(payload);
-
-    private void OnExtensionStateChanged(long revision)
-    {
-        if (!Dispatcher.CheckAccess())
-        {
-            _ = Dispatcher.BeginInvoke(() => OnExtensionStateChanged(revision));
-            return;
-        }
-
-        _viewModel.UpdateCapabilityRevision(revision);
-        _webViewHostChannel.PostPush(new { type = "extensions/state-changed", revision });
     }
 
     private void FocusTranscriptView()

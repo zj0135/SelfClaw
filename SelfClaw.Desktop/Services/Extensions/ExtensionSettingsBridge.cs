@@ -7,7 +7,7 @@ using SelfClaw.Desktop.Services.Extensions.Abstractions;
 
 namespace SelfClaw.Desktop.Services.Extensions;
 
-public sealed class ExtensionSettingsBridge
+internal sealed class ExtensionSettingsBridge
 {
     private const string MessagePrefix = "extensions/";
 
@@ -22,7 +22,6 @@ public sealed class ExtensionSettingsBridge
     private readonly DesktopAgentDefinitionService _agentDefinitionService;
     private readonly IExtensionPackagePicker _packagePicker;
     private readonly IExtensionStateChangeNotifier _stateChangeNotifier;
-    private string? _activeAgentId;
 
     public ExtensionSettingsBridge(
         IExtensionSettingsService settingsService,
@@ -38,31 +37,21 @@ public sealed class ExtensionSettingsBridge
         _stateChangeNotifier = stateChangeNotifier;
     }
 
-    public event Action<object>? ResponseReady;
-    public event Action<long>? StateChanged
-    {
-        add => _stateChangeNotifier.StateChanged += value;
-        remove => _stateChangeNotifier.StateChanged -= value;
-    }
-
-    public void SetActiveAgent(string? agentId)
-    {
-        _activeAgentId = agentId;
-    }
-
-    public async Task<bool> TryHandleAsync(
+    public async Task<object?> TryHandleAsync(
         string type,
         JsonElement payload,
+        string? activeAgentId = null,
         CancellationToken cancellationToken = default)
     {
         if (!type.StartsWith(MessagePrefix, StringComparison.Ordinal))
         {
-            return false;
+            return null;
         }
 
         var requestId = ReadOptionalString(payload, "requestId");
         try
         {
+            object response;
             switch (type)
             {
                 case "extensions/import-package":
@@ -71,7 +60,7 @@ public sealed class ExtensionSettingsBridge
                     var selectedPath = _packagePicker.PickPackage(kind);
                     if (selectedPath is null)
                     {
-                        Post(new { type, requestId, ok = false, cancelled = true });
+                        response = new { type, requestId, ok = false, cancelled = true };
                         break;
                     }
 
@@ -80,7 +69,7 @@ public sealed class ExtensionSettingsBridge
                         ?? throw new InvalidOperationException("Imported package was not persisted.");
                     using var manifestDocument = JsonDocument.Parse(record.ManifestJson);
                     var revision = await AdvanceMutationRevisionAsync(cancellationToken);
-                    Post(new
+                    response = new
                     {
                         type,
                         requestId,
@@ -93,21 +82,22 @@ public sealed class ExtensionSettingsBridge
                             contentHash = record.ContentHash,
                             fileCount = CountPackageFiles(record.InstallPath)
                         }
-                    });
+                    };
                     break;
                 }
                 case "extensions/get-state":
                 {
-                    var state = await GetStateAsync(cancellationToken);
-                    Post(new { type, requestId, state });
+                    var state = await GetStateAsync(activeAgentId, cancellationToken);
+                    response = new { type, requestId, state };
                     break;
                 }
                 case "extensions/list-effective-skills":
                 {
                     var (agent, skills, revision) = await ListEffectiveSkillsAsync(
                         ReadOptionalString(payload, "agentId"),
+                        activeAgentId,
                         cancellationToken);
-                    Post(new { type, requestId, agentId = agent.Id, skills, revision });
+                    response = new { type, requestId, agentId = agent.Id, skills, revision };
                     break;
                 }
                 case "extensions/set-enabled":
@@ -115,18 +105,18 @@ public sealed class ExtensionSettingsBridge
                         ReadItemKey(payload),
                         ReadRequiredBoolean(payload, "enabled"),
                         cancellationToken);
-                    await PostMutationAsync(type, requestId, cancellationToken);
+                    response = await BuildMutationResponseAsync(type, requestId, cancellationToken);
                     break;
                 case "extensions/acknowledge-plugin-permissions":
                     await _settingsService.AcknowledgePluginPermissionsAsync(
                         ReadRequiredString(payload, "id"),
                         ReadStringArray(payload, "permissions"),
                         cancellationToken);
-                    await PostMutationAsync(type, requestId, cancellationToken);
+                    response = await BuildMutationResponseAsync(type, requestId, cancellationToken);
                     break;
                 case "extensions/delete":
                     await _settingsService.DeleteAsync(ReadItemKey(payload), cancellationToken);
-                    await PostMutationAsync(type, requestId, cancellationToken);
+                    response = await BuildMutationResponseAsync(type, requestId, cancellationToken);
                     break;
                 case "extensions/save-mcp":
                 {
@@ -134,7 +124,7 @@ public sealed class ExtensionSettingsBridge
                         ReadSaveMcpServerCommand(payload),
                         cancellationToken);
                     var revision = await AdvanceMutationRevisionAsync(cancellationToken);
-                    Post(new { type, requestId, server, revision });
+                    response = new { type, requestId, server, revision };
                     break;
                 }
                 case "extensions/test-mcp":
@@ -143,7 +133,7 @@ public sealed class ExtensionSettingsBridge
                         ReadRequiredString(payload, "id"),
                         cancellationToken);
                     var revision = await AdvanceMutationRevisionAsync(cancellationToken);
-                    Post(new { type, requestId, result, revision });
+                    response = new { type, requestId, result, revision };
                     break;
                 }
                 case "extensions/set-agent-binding":
@@ -156,20 +146,22 @@ public sealed class ExtensionSettingsBridge
                         key,
                         ReadRequiredBoolean(payload, "enabled"));
                     var revision = _stateChangeNotifier.Advance();
-                    Post(new
+                    response = new
                     {
                         type,
                         requestId,
                         ok = true,
                         revision,
                         agent = CreateAgentView(agent)
-                    });
+                    };
                     break;
                 }
                 default:
-                    Post(new { type, requestId, error = $"Unsupported extension message type '{type}'." });
+                    response = new { type, requestId, error = $"Unsupported extension message type '{type}'." };
                     break;
             }
+
+            return response;
         }
         catch (OperationCanceledException)
         {
@@ -177,13 +169,13 @@ public sealed class ExtensionSettingsBridge
         }
         catch (Exception exception)
         {
-            Post(new { type, requestId, error = exception.Message });
+            return new { type, requestId, error = exception.Message };
         }
-
-        return true;
     }
 
-    private async Task<ExtensionSettingsState> GetStateAsync(CancellationToken cancellationToken)
+    private async Task<ExtensionSettingsState> GetStateAsync(
+        string? activeAgentId,
+        CancellationToken cancellationToken)
     {
         var state = await _settingsService.GetStateAsync(cancellationToken);
         var agents = _agentDefinitionService.LoadAll().Select(CreateAgentView).ToArray();
@@ -191,7 +183,7 @@ public sealed class ExtensionSettingsBridge
         return state with
         {
             Revision = revision,
-            ActiveAgentId = ResolveActiveAgentId(agents),
+            ActiveAgentId = ResolveActiveAgentId(agents, activeAgentId),
             Agents = agents,
             Plugins = AddAssignments(state.Plugins, agents, agent => agent.PluginIds),
             Skills = AddManagedAssignments(state.Skills, agents, agent => agent.SkillIds),
@@ -200,10 +192,13 @@ public sealed class ExtensionSettingsBridge
     }
 
     private async Task<(ExtensionAgentView Agent, IReadOnlyList<ExtensionPackageView> Skills, long Revision)>
-        ListEffectiveSkillsAsync(string? requestedAgentId, CancellationToken cancellationToken)
+        ListEffectiveSkillsAsync(
+            string? requestedAgentId,
+            string? activeAgentId,
+            CancellationToken cancellationToken)
     {
         var agents = _agentDefinitionService.LoadAll().Select(CreateAgentView).ToArray();
-        var agentId = requestedAgentId ?? ResolveActiveAgentId(agents)
+        var agentId = requestedAgentId ?? ResolveActiveAgentId(agents, activeAgentId)
             ?? throw new InvalidOperationException("No active Agent is available.");
         var agent = agents.FirstOrDefault(candidate => IdEquals(candidate.Id, agentId))
             ?? throw new KeyNotFoundException($"Agent '{agentId}' was not found.");
@@ -219,13 +214,13 @@ public sealed class ExtensionSettingsBridge
         return (agent, skills, _stateChangeNotifier.AdvanceTo(state.Revision));
     }
 
-    private async Task PostMutationAsync(
+    private async Task<object> BuildMutationResponseAsync(
         string type,
         string? requestId,
         CancellationToken cancellationToken)
     {
         var revision = await AdvanceMutationRevisionAsync(cancellationToken);
-        Post(new { type, requestId, ok = true, revision });
+        return new { type, requestId, ok = true, revision };
     }
 
     private async Task<long> AdvanceMutationRevisionAsync(CancellationToken cancellationToken)
@@ -234,9 +229,11 @@ public sealed class ExtensionSettingsBridge
         return _stateChangeNotifier.AdvanceTo(state.Revision);
     }
 
-    private string? ResolveActiveAgentId(IReadOnlyList<ExtensionAgentView> agents)
-        => agents.Any(agent => string.Equals(agent.Id, _activeAgentId, StringComparison.OrdinalIgnoreCase))
-            ? _activeAgentId
+    private static string? ResolveActiveAgentId(
+        IReadOnlyList<ExtensionAgentView> agents,
+        string? activeAgentId)
+        => agents.Any(agent => string.Equals(agent.Id, activeAgentId, StringComparison.OrdinalIgnoreCase))
+            ? activeAgentId
             : agents.FirstOrDefault(agent => string.Equals(
                 agent.Id,
                 DesktopAgentDefinitionService.BuildAgentId,
@@ -417,7 +414,4 @@ public sealed class ExtensionSettingsBridge
         => Directory.Exists(installPath)
             ? Directory.EnumerateFiles(installPath, "*", SearchOption.AllDirectories).Count()
             : 0;
-
-    private void Post(object payload)
-        => ResponseReady?.Invoke(payload);
 }

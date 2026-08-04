@@ -3,7 +3,7 @@ using SelfClaw.Desktop.Pet;
 
 namespace SelfClaw.Desktop.Services.Pet;
 
-public sealed class PetSettingsBridge
+internal sealed class PetSettingsBridge
 {
     private const string AssetsHostName = "appassets.selfclaw.local";
     private readonly PetHost _petHost;
@@ -13,16 +13,14 @@ public sealed class PetSettingsBridge
         _petHost = petHost;
     }
 
-    public event Action<object>? ResponseReady;
-
-    public async Task<bool> TryHandleAsync(
+    public async Task<object?> TryHandleAsync(
         string type,
         JsonElement payload,
         CancellationToken cancellationToken = default)
     {
         if (type is not ("get-pet-settings" or "set-pet-visible" or "select-builtin-pet"))
         {
-            return false;
+            return null;
         }
 
         var requestId = ReadOptionalString(payload, "requestId");
@@ -44,7 +42,7 @@ public sealed class PetSettingsBridge
                     cancellationToken),
                 _ => throw new InvalidOperationException($"Unsupported pet settings message type '{type}'.")
             };
-            PostState(requestId, state);
+            return BuildStateResponse(requestId, state);
         }
         catch (OperationCanceledException)
         {
@@ -52,7 +50,7 @@ public sealed class PetSettingsBridge
         }
         catch (Exception exception)
         {
-            Post(new
+            return new
             {
                 type = "pet-settings",
                 requestId,
@@ -60,10 +58,8 @@ public sealed class PetSettingsBridge
                 selectedPetId = (string?)null,
                 spriteSheetPath = (string?)null,
                 error = exception.Message
-            });
+            };
         }
-
-        return true;
     }
 
     private static bool ReadBoolean(JsonElement payload, string propertyName)
@@ -82,8 +78,8 @@ public sealed class PetSettingsBridge
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
-    private void PostState(string? requestId, PetHostState state)
-        => Post(new
+    private static object BuildStateResponse(string? requestId, PetHostState state)
+        => new
         {
             type = "pet-settings",
             requestId,
@@ -103,7 +99,5 @@ public sealed class PetSettingsBridge
                 cols = package.Columns,
                 rows = package.Rows
             }).ToArray()
-        });
-
-    private void Post(object payload) => ResponseReady?.Invoke(payload);
+        };
 }

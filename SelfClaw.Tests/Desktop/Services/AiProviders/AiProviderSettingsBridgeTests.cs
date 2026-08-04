@@ -35,13 +35,11 @@ public sealed class AiProviderSettingsBridgeTests
     {
         var service = new RecordingSettingsService();
         var bridge = new AiProviderSettingsBridge(service);
-        object? response = null;
-        bridge.ResponseReady += value => response = value;
         using var document = JsonDocument.Parse(AddRequestId(payloadJson, "request-42"));
 
-        var handled = await bridge.TryHandleAsync(type, document.RootElement);
+        var response = await bridge.TryHandleAsync(type, document.RootElement);
 
-        handled.Should().BeTrue();
+        response.Should().NotBeNull();
         service.Calls.Should().Contain(expectedCall);
         var responseJson = SerializeResponse(response);
         responseJson.GetProperty("type").GetString().Should().Be(type);
@@ -54,14 +52,11 @@ public sealed class AiProviderSettingsBridgeTests
     {
         var service = new RecordingSettingsService();
         var bridge = new AiProviderSettingsBridge(service);
-        var responseCount = 0;
-        bridge.ResponseReady += _ => responseCount++;
         using var document = JsonDocument.Parse("{}");
 
-        (await bridge.TryHandleAsync("send-prompt", document.RootElement)).Should().BeFalse();
+        (await bridge.TryHandleAsync("send-prompt", document.RootElement)).Should().BeNull();
 
         service.Calls.Should().BeEmpty();
-        responseCount.Should().Be(0);
     }
 
     [Theory]
@@ -70,11 +65,10 @@ public sealed class AiProviderSettingsBridgeTests
     public async Task TryHandleAsync_returns_correlated_errors(string type, string payloadJson, string errorFragment)
     {
         var bridge = new AiProviderSettingsBridge(new RecordingSettingsService());
-        object? response = null;
-        bridge.ResponseReady += value => response = value;
         using var document = JsonDocument.Parse(AddRequestId(payloadJson, "bad-request"));
 
-        (await bridge.TryHandleAsync(type, document.RootElement)).Should().BeTrue();
+        var response = await bridge.TryHandleAsync(type, document.RootElement);
+        response.Should().NotBeNull();
 
         var responseJson = SerializeResponse(response);
         responseJson.GetProperty("requestId").GetString().Should().Be("bad-request");
@@ -117,7 +111,7 @@ public sealed class AiProviderSettingsBridgeTests
             "\"apiKey\":null,\"providerKind\":3,\"apiFormat\":2}";
         using var document = JsonDocument.Parse(AddRequestId(payload, "req"));
 
-        (await bridge.TryHandleAsync("ai-providers/save-provider", document.RootElement)).Should().BeTrue();
+        (await bridge.TryHandleAsync("ai-providers/save-provider", document.RootElement)).Should().NotBeNull();
 
         var command = service.LastSaveCommand;
         command.Should().NotBeNull();
@@ -138,7 +132,7 @@ public sealed class AiProviderSettingsBridgeTests
             "{\"catalogId\":\"openai\",\"name\":\"OpenAI\",\"base\":\"https://api.openai.com/v1/\",\"apiKey\":\"sk-x\"}";
         using var document = JsonDocument.Parse(AddRequestId(payload, "req"));
 
-        (await bridge.TryHandleAsync("ai-providers/save-provider", document.RootElement)).Should().BeTrue();
+        (await bridge.TryHandleAsync("ai-providers/save-provider", document.RootElement)).Should().NotBeNull();
 
         service.LastSaveCommand.Should().NotBeNull();
         service.LastSaveCommand!.ProviderKind.Should().BeNull();
@@ -146,12 +140,10 @@ public sealed class AiProviderSettingsBridgeTests
     }
 
     [Fact]
-    public async Task TryHandleAsync_propagates_caller_cancellation_without_posting_an_error()
+    public async Task TryHandleAsync_propagates_caller_cancellation()
     {
         var service = new RecordingSettingsService { ObserveCancellation = true };
         var bridge = new AiProviderSettingsBridge(service);
-        var responseCount = 0;
-        bridge.ResponseReady += _ => responseCount++;
         using var cancellationSource = new CancellationTokenSource();
         cancellationSource.Cancel();
         using var document = JsonDocument.Parse("{}");
@@ -162,7 +154,6 @@ public sealed class AiProviderSettingsBridgeTests
             cancellationSource.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
-        responseCount.Should().Be(0);
     }
 
     private static JsonElement SerializeResponse(object? response)

@@ -1,12 +1,14 @@
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Desktop.Services.Transcript.Abstractions;
 using SelfClaw.Infrastructure.Tools.Transcript.Models;
 
 namespace SelfClaw.Desktop.Services.Runtime;
 
-public sealed class ConversationSessionCoordinator : IDisposable
+internal sealed class ConversationSessionCoordinator : IDisposable
 {
     private readonly IConversationRepository _conversationRepository;
+    private readonly ITranscriptChangeSink _transcriptChangeSink;
     private readonly Dictionary<Guid, ConversationRuntimeState> _runtimeStates = [];
     private readonly Dictionary<Guid, Task<ConversationTranscriptSnapshot>> _transcriptLoads = [];
     private readonly List<MessageRecord> _selectedMessages = [];
@@ -17,12 +19,13 @@ public sealed class ConversationSessionCoordinator : IDisposable
     private int _selectionVersion;
     private int _disposeStarted;
 
-    public ConversationSessionCoordinator(IConversationRepository conversationRepository)
+    public ConversationSessionCoordinator(
+        IConversationRepository conversationRepository,
+        ITranscriptChangeSink transcriptChangeSink)
     {
         _conversationRepository = conversationRepository;
+        _transcriptChangeSink = transcriptChangeSink;
     }
-
-    internal event Action<bool>? SelectedTranscriptChanged;
 
     internal IReadOnlyList<MessageRecord> SelectedMessages
         => GetSelectedRuntimeState()?.Messages ?? _selectedMessages;
@@ -47,6 +50,7 @@ public sealed class ConversationSessionCoordinator : IDisposable
         var version = ++_selectionVersion;
         _selectedConversationId = conversationId;
         ClearSelectedTranscript();
+        _transcriptChangeSink.PublishNow(false);
 
         if (conversationId is not Guid selectedId || _runtimeStates.ContainsKey(selectedId))
         {
@@ -63,6 +67,7 @@ public sealed class ConversationSessionCoordinator : IDisposable
         }
 
         ReplaceSelectedTranscript(snapshot);
+        _transcriptChangeSink.PublishNow(false);
     }
 
     internal async Task<ConversationRuntimeState> StartTurnAsync(
@@ -95,7 +100,7 @@ public sealed class ConversationSessionCoordinator : IDisposable
             {
                 if (IsSelected(state.ConversationId))
                 {
-                    SelectedTranscriptChanged?.Invoke(immediate);
+                    PublishSelectedTranscriptChange(immediate);
                 }
             };
             _runtimeStates[conversation.Id] = state;
@@ -124,7 +129,7 @@ public sealed class ConversationSessionCoordinator : IDisposable
 
         if (IsSelected(state.ConversationId))
         {
-            SelectedTranscriptChanged?.Invoke(true);
+            _transcriptChangeSink.PublishNow(true);
         }
     }
 
@@ -211,6 +216,17 @@ public sealed class ConversationSessionCoordinator : IDisposable
            _runtimeStates.TryGetValue(conversationId, out var state)
             ? state
             : null;
+
+    private void PublishSelectedTranscriptChange(bool immediate)
+    {
+        if (immediate)
+        {
+            _transcriptChangeSink.PublishNow(true);
+            return;
+        }
+
+        _transcriptChangeSink.RequestStreamingPublish(true);
+    }
 
     private void ReplaceSelectedTranscript(ConversationRuntimeState state)
     {

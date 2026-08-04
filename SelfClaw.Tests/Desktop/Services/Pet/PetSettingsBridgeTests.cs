@@ -23,15 +23,13 @@ public sealed class PetSettingsBridgeTests
             catalog,
             NullLogger<PetHost>.Instance);
         var bridge = new PetSettingsBridge(host);
-        object? response = null;
-        bridge.ResponseReady += payload => response = payload;
         using var request = JsonDocument.Parse("""
             { "type": "get-pet-settings", "requestId": "pet-1" }
             """);
 
-        var handled = await bridge.TryHandleAsync("get-pet-settings", request.RootElement);
+        var response = await bridge.TryHandleAsync("get-pet-settings", request.RootElement);
 
-        handled.Should().BeTrue();
+        response.Should().NotBeNull();
         using var result = JsonDocument.Parse(JsonSerializer.Serialize(response));
         result.RootElement.GetProperty("requestId").GetString().Should().Be("pet-1");
         result.RootElement.GetProperty("type").GetString().Should().Be("pet-settings");

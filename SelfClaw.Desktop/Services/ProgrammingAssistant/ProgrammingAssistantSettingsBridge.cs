@@ -3,7 +3,7 @@ using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 
 namespace SelfClaw.Desktop.Services.ProgrammingAssistant;
 
-public sealed class ProgrammingAssistantSettingsBridge
+internal sealed class ProgrammingAssistantSettingsBridge
 {
     private readonly ProgrammingAssistantSettingsService _settingsService;
 
@@ -12,52 +12,43 @@ public sealed class ProgrammingAssistantSettingsBridge
         _settingsService = settingsService;
     }
 
-    public event Action<object>? ResponseReady;
-
-    public async Task<bool> TryHandleAsync(
+    public async Task<object?> TryHandleAsync(
         string type,
         JsonElement payload,
         CancellationToken cancellationToken = default)
     {
         if (!IsSupported(type))
         {
-            return false;
+            return null;
         }
 
         var requestId = ReadOptionalString(payload, "requestId");
         try
         {
-            switch (type)
+            return type switch
             {
-                case "scan-programming-clis":
-                    PostSettings(requestId, await _settingsService.RescanAsync(cancellationToken));
-                    break;
-                case "get-programming-assistant-settings":
-                    PostSettings(requestId, await _settingsService.GetCurrentAsync(cancellationToken));
-                    break;
-                case "select-programming-cli":
-                    PostSettings(
+                "scan-programming-clis" => BuildSettingsResponse(
+                    requestId,
+                    await _settingsService.RescanAsync(cancellationToken)),
+                "get-programming-assistant-settings" => BuildSettingsResponse(
+                    requestId,
+                    await _settingsService.GetCurrentAsync(cancellationToken)),
+                "select-programming-cli" => BuildSettingsResponse(
                         requestId,
-                        await _settingsService.SelectCliAsync(ReadOptionalString(payload, "cliId"), cancellationToken));
-                    break;
-                case "select-programming-model":
-                    PostSettings(
+                        await _settingsService.SelectCliAsync(ReadOptionalString(payload, "cliId"), cancellationToken)),
+                "select-programming-model" => BuildSettingsResponse(
                         requestId,
-                        await _settingsService.SelectModelAsync(ReadOptionalString(payload, "model"), cancellationToken));
-                    break;
-                case "select-programming-reasoning":
-                    PostSettings(
+                        await _settingsService.SelectModelAsync(ReadOptionalString(payload, "model"), cancellationToken)),
+                "select-programming-reasoning" => BuildSettingsResponse(
                         requestId,
                         await _settingsService.SelectReasoningLevelAsync(
                             ReadOptionalString(payload, "reasoningLevel"),
-                            cancellationToken));
-                    break;
-                case "test-programming-cli":
-                    PostTestResult(
+                            cancellationToken)),
+                "test-programming-cli" => BuildTestResultResponse(
                         requestId,
-                        await _settingsService.TestCliAsync(ReadOptionalString(payload, "cliId"), cancellationToken));
-                    break;
-            }
+                        await _settingsService.TestCliAsync(ReadOptionalString(payload, "cliId"), cancellationToken)),
+                _ => throw new InvalidOperationException($"Unsupported programming assistant message type '{type}'.")
+            };
         }
         catch (OperationCanceledException)
         {
@@ -67,7 +58,7 @@ public sealed class ProgrammingAssistantSettingsBridge
         {
             if (string.Equals(type, "test-programming-cli", StringComparison.Ordinal))
             {
-                PostTestResult(
+                return BuildTestResultResponse(
                     requestId,
                     new CliTestResult(
                         ReadOptionalString(payload, "cliId") ?? string.Empty,
@@ -75,20 +66,16 @@ public sealed class ProgrammingAssistantSettingsBridge
                         null,
                         exception.Message));
             }
-            else
-            {
-                Post(new
-                {
-                    type = "programming-assistant-settings",
-                    requestId,
-                    tools = Array.Empty<DetectedProgrammingCli>(),
-                    selectedCliId = (string?)null,
-                    error = exception.Message
-                });
-            }
-        }
 
-        return true;
+            return new
+            {
+                type = "programming-assistant-settings",
+                requestId,
+                tools = Array.Empty<DetectedProgrammingCli>(),
+                selectedCliId = (string?)null,
+                error = exception.Message
+            };
+        }
     }
 
     private static bool IsSupported(string type)
@@ -111,8 +98,8 @@ public sealed class ProgrammingAssistantSettingsBridge
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
-    private void PostSettings(string? requestId, ProgrammingAssistantSettings settings)
-        => Post(new
+    private static object BuildSettingsResponse(string? requestId, ProgrammingAssistantSettings settings)
+        => new
         {
             type = "programming-assistant-settings",
             requestId,
@@ -121,10 +108,10 @@ public sealed class ProgrammingAssistantSettingsBridge
             settings.SelectedReasoningLevel,
             settings.Tools,
             settings.ScannedAtUtc
-        });
+        };
 
-    private void PostTestResult(string? requestId, CliTestResult result)
-        => Post(new
+    private static object BuildTestResultResponse(string? requestId, CliTestResult result)
+        => new
         {
             type = "programming-cli-test-result",
             requestId,
@@ -132,7 +119,5 @@ public sealed class ProgrammingAssistantSettingsBridge
             success = result.Success,
             version = result.Version,
             error = result.Error
-        });
-
-    private void Post(object payload) => ResponseReady?.Invoke(payload);
+        };
 }

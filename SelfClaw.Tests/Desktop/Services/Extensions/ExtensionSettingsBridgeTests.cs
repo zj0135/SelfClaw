@@ -34,11 +34,10 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
         string payloadJson)
     {
         var bridge = CreateBridge(new RecordingExtensionSettingsService());
-        object? response = null;
-        bridge.ResponseReady += value => response = value;
         using var document = JsonDocument.Parse(AddRequestId(payloadJson, "request-42"));
 
-        (await bridge.TryHandleAsync(type, document.RootElement)).Should().BeTrue();
+        var response = await bridge.TryHandleAsync(type, document.RootElement);
+        response.Should().NotBeNull();
 
         var json = SerializeResponse(response);
         json.GetProperty("type").GetString().Should().Be(type);
@@ -56,12 +55,9 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
             new ExtensionItemKey(ExtensionKind.Skill, "review"),
             true);
         var bridge = CreateBridge(new RecordingExtensionSettingsService(), agentService);
-        bridge.SetActiveAgent("build");
-        object? response = null;
-        bridge.ResponseReady += value => response = value;
         using var document = JsonDocument.Parse("{\"requestId\":\"state-request\"}");
 
-        await bridge.TryHandleAsync("extensions/get-state", document.RootElement);
+        var response = await bridge.TryHandleAsync("extensions/get-state", document.RootElement, "build");
 
         var jsonText = JsonSerializer.Serialize(response, ResponseJsonOptions);
         var json = JsonDocument.Parse(jsonText).RootElement;
@@ -79,15 +75,14 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
     {
         var agentService = CreateAgentService();
         agentService.LoadAll();
-        var bridge = CreateBridge(new RecordingExtensionSettingsService(), agentService);
-        object? response = null;
+        var stateChangeNotifier = new ExtensionStateChangeNotifier();
+        var bridge = CreateBridge(new RecordingExtensionSettingsService(), agentService, stateChangeNotifier);
         var revisions = new List<long>();
-        bridge.ResponseReady += value => response = value;
-        bridge.StateChanged += revisions.Add;
+        stateChangeNotifier.StateChanged += revisions.Add;
         using var document = JsonDocument.Parse(
             "{\"requestId\":\"bind-request\",\"agentId\":\"build\",\"kind\":\"skill\",\"id\":\"review\",\"enabled\":true}");
 
-        await bridge.TryHandleAsync("extensions/set-agent-binding", document.RootElement);
+        var response = await bridge.TryHandleAsync("extensions/set-agent-binding", document.RootElement);
 
         agentService.LoadAll().Single().SkillIds.Should().Equal("review");
         revisions.Should().ContainSingle().Which.Should().BeGreaterThan(0);
@@ -106,11 +101,9 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
             new ExtensionItemKey(ExtensionKind.Skill, "review"),
             true);
         var bridge = CreateBridge(new RecordingExtensionSettingsService(), agentService);
-        object? response = null;
-        bridge.ResponseReady += value => response = value;
         using var document = JsonDocument.Parse("{\"requestId\":\"skills-request\",\"agentId\":\"build\"}");
 
-        await bridge.TryHandleAsync("extensions/list-effective-skills", document.RootElement);
+        var response = await bridge.TryHandleAsync("extensions/list-effective-skills", document.RootElement);
 
         var json = SerializeResponse(response);
         json.GetProperty("agentId").GetString().Should().Be("build");
@@ -127,11 +120,10 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
         string errorFragment)
     {
         var bridge = CreateBridge(new RecordingExtensionSettingsService());
-        object? response = null;
-        bridge.ResponseReady += value => response = value;
         using var document = JsonDocument.Parse(AddRequestId(payloadJson, "bad-request"));
 
-        (await bridge.TryHandleAsync(type, document.RootElement)).Should().BeTrue();
+        var response = await bridge.TryHandleAsync(type, document.RootElement);
+        response.Should().NotBeNull();
 
         var json = SerializeResponse(response);
         json.GetProperty("requestId").GetString().Should().Be("bad-request");
@@ -141,14 +133,13 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
     [Fact]
     public async Task TestMcp_returns_health_and_publishes_state_changed()
     {
-        var bridge = CreateBridge(new RecordingExtensionSettingsService());
-        object? response = null;
+        var stateChangeNotifier = new ExtensionStateChangeNotifier();
+        var bridge = CreateBridge(new RecordingExtensionSettingsService(), stateChangeNotifier: stateChangeNotifier);
         var revisions = new List<long>();
-        bridge.ResponseReady += value => response = value;
-        bridge.StateChanged += revisions.Add;
+        stateChangeNotifier.StateChanged += revisions.Add;
         using var document = JsonDocument.Parse("{\"requestId\":\"test-request\",\"id\":\"local\"}");
 
-        await bridge.TryHandleAsync("extensions/test-mcp", document.RootElement);
+        var response = await bridge.TryHandleAsync("extensions/test-mcp", document.RootElement);
 
         var json = SerializeResponse(response);
         json.GetProperty("result").GetProperty("status").GetString().Should().Be("ready");
@@ -160,11 +151,9 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
     public async Task GetState_serializes_extension_status_as_kebab_case_for_the_settings_page()
     {
         var bridge = CreateBridge(new RecordingExtensionSettingsService());
-        object? response = null;
-        bridge.ResponseReady += value => response = value;
         using var document = JsonDocument.Parse("{}");
 
-        await bridge.TryHandleAsync("extensions/get-state", document.RootElement);
+        var response = await bridge.TryHandleAsync("extensions/get-state", document.RootElement);
 
         // MainWindow.PostWebMessage() registers no enum converter, so every other enum reaches the
         // WebView numerically. ExtensionStatus must stay a kebab-case string because the settings badge
@@ -176,12 +165,10 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
     }
 
     [Fact]
-    public async Task TryHandleAsync_propagates_caller_cancellation_without_posting_an_error()
+    public async Task TryHandleAsync_propagates_caller_cancellation()
     {
         var service = new RecordingExtensionSettingsService { ObserveCancellation = true };
         var bridge = CreateBridge(service);
-        var responseCount = 0;
-        bridge.ResponseReady += _ => responseCount++;
         using var source = new CancellationTokenSource();
         source.Cancel();
         using var document = JsonDocument.Parse("{}");
@@ -189,21 +176,18 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
         var action = () => bridge.TryHandleAsync(
             "extensions/get-state",
             document.RootElement,
-            source.Token);
+            cancellationToken: source.Token);
 
         await action.Should().ThrowAsync<OperationCanceledException>();
-        responseCount.Should().Be(0);
     }
 
     [Fact]
     public async Task ImportPackage_returns_a_correlated_cancelled_result_when_picker_is_cancelled()
     {
         var bridge = CreateBridge(new RecordingExtensionSettingsService());
-        object? response = null;
-        bridge.ResponseReady += value => response = value;
         using var document = JsonDocument.Parse("{\"requestId\":\"import-request\",\"kind\":\"skill\"}");
 
-        await bridge.TryHandleAsync("extensions/import-package", document.RootElement);
+        var response = await bridge.TryHandleAsync("extensions/import-package", document.RootElement);
 
         var json = SerializeResponse(response);
         json.GetProperty("requestId").GetString().Should().Be("import-request");
@@ -229,17 +213,17 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
 
     private ExtensionSettingsBridge CreateBridge(
         IExtensionSettingsService settingsService,
-        DesktopAgentDefinitionService? agentDefinitionService = null)
+        DesktopAgentDefinitionService? agentDefinitionService = null,
+        IExtensionStateChangeNotifier? stateChangeNotifier = null)
     {
         var storagePaths = CreateStoragePaths();
         var repository = new SqliteExtensionRepository(new SqliteDatabase(storagePaths));
-        var stateChangeNotifier = new ExtensionStateChangeNotifier();
         return new ExtensionSettingsBridge(
             settingsService,
             repository,
             agentDefinitionService ?? CreateAgentService(),
             new CancelledPackagePicker(),
-            stateChangeNotifier);
+            stateChangeNotifier ?? new ExtensionStateChangeNotifier());
     }
 
     private DesktopAgentDefinitionService CreateAgentService()

@@ -2,6 +2,7 @@ using FluentAssertions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Runtime;
+using SelfClaw.Desktop.Services.Transcript.Abstractions;
 
 namespace SelfClaw.Tests.Desktop.Services.Runtime;
 
@@ -15,7 +16,7 @@ public sealed class ConversationSessionCoordinatorTests
         var repository = new ControlledConversationRepository();
         repository.CompleteMessages(firstConversationId, [CreateMessage(firstConversationId, "first")]);
         repository.CompleteToolRuns(firstConversationId, []);
-        var coordinator = new ConversationSessionCoordinator(repository);
+        var coordinator = CreateCoordinator(repository);
 
         await coordinator.SelectAsync(firstConversationId);
         var secondSelection = coordinator.SelectAsync(secondConversationId);
@@ -40,7 +41,7 @@ public sealed class ConversationSessionCoordinatorTests
         repository.CompleteToolRuns(firstConversationId, []);
         repository.CompleteMessages(secondConversationId, [CreateMessage(secondConversationId, "second")]);
         repository.CompleteToolRuns(secondConversationId, []);
-        var coordinator = new ConversationSessionCoordinator(repository);
+        var coordinator = CreateCoordinator(repository);
 
         await coordinator.SelectAsync(firstConversationId);
         await coordinator.SelectAsync(secondConversationId);
@@ -58,7 +59,7 @@ public sealed class ConversationSessionCoordinatorTests
         var repository = new ControlledConversationRepository();
         repository.CompleteMessages(conversation.Id, []);
         repository.CompleteToolRuns(conversation.Id, []);
-        var coordinator = new ConversationSessionCoordinator(repository);
+        var coordinator = CreateCoordinator(repository);
         await coordinator.SelectAsync(conversation.Id);
         await coordinator.StartTurnAsync(conversation);
 
@@ -73,7 +74,7 @@ public sealed class ConversationSessionCoordinatorTests
         var submittedConversationId = Guid.NewGuid();
         var selectedConversationId = Guid.NewGuid();
         var repository = new ControlledConversationRepository();
-        var coordinator = new ConversationSessionCoordinator(repository);
+        var coordinator = CreateCoordinator(repository);
 
         var submittedSelection = coordinator.SelectAsync(submittedConversationId);
         var startTurn = coordinator.StartTurnAsync(CreateConversation(submittedConversationId));
@@ -104,7 +105,7 @@ public sealed class ConversationSessionCoordinatorTests
     {
         var conversation = CreateConversation(Guid.NewGuid());
         var repository = new ControlledConversationRepository();
-        var coordinator = new ConversationSessionCoordinator(repository);
+        var coordinator = CreateCoordinator(repository);
         var selection = coordinator.SelectAsync(conversation.Id);
         var startTurn = coordinator.StartTurnAsync(conversation);
 
@@ -120,6 +121,27 @@ public sealed class ConversationSessionCoordinatorTests
         coordinator.IsRunning(conversation.Id).Should().BeFalse();
     }
 
+    [Fact]
+    public async Task Selected_runtime_changes_publish_directly_through_the_transcript_sink()
+    {
+        var conversation = CreateConversation(Guid.NewGuid());
+        var repository = new ControlledConversationRepository();
+        repository.CompleteMessages(conversation.Id, []);
+        repository.CompleteToolRuns(conversation.Id, []);
+        var sink = new RecordingTranscriptChangeSink();
+        var coordinator = new ConversationSessionCoordinator(repository, sink);
+
+        await coordinator.SelectAsync(conversation.Id);
+        var state = await coordinator.StartTurnAsync(conversation);
+        sink.ImmediatePublishes.Clear();
+
+        state.RaiseTranscriptChanged(false);
+        state.RaiseTranscriptChanged(true);
+
+        sink.StreamingPublishes.Should().Equal(true);
+        sink.ImmediatePublishes.Should().Equal(true);
+    }
+
     private static ConversationRecord CreateConversation(Guid id)
     {
         var now = DateTimeOffset.UtcNow;
@@ -131,6 +153,22 @@ public sealed class ConversationSessionCoordinatorTests
             "build",
             now,
             now);
+    }
+
+    private static ConversationSessionCoordinator CreateCoordinator(IConversationRepository repository)
+        => new(repository, new RecordingTranscriptChangeSink());
+
+    private sealed class RecordingTranscriptChangeSink : ITranscriptChangeSink
+    {
+        public List<bool> StreamingPublishes { get; } = [];
+
+        public List<bool> ImmediatePublishes { get; } = [];
+
+        public void RequestStreamingPublish(bool autoScroll)
+            => StreamingPublishes.Add(autoScroll);
+
+        public void PublishNow(bool autoScroll)
+            => ImmediatePublishes.Add(autoScroll);
     }
 
     private static MessageRecord CreateMessage(Guid conversationId, string content)

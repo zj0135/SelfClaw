@@ -1,0 +1,458 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Windows.Threading;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
+using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Desktop.Pet;
+using SelfClaw.Desktop.Services;
+using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.AiProviders;
+using SelfClaw.Desktop.Services.Extensions;
+using SelfClaw.Desktop.Services.Extensions.Abstractions;
+using SelfClaw.Desktop.Services.Pet;
+using SelfClaw.Desktop.Services.ProgrammingAssistant;
+using SelfClaw.Desktop.Services.Runtime;
+using SelfClaw.Desktop.Services.Runtime.Abstractions;
+using SelfClaw.Desktop.Services.Terminal;
+using SelfClaw.Desktop.Services.Terminal.Abstractions;
+using SelfClaw.Desktop.Services.Transcript;
+using SelfClaw.Desktop.Services.WebView;
+using SelfClaw.Desktop.Services.Workspace;
+using SelfClaw.Desktop.Services.Workspace.Abstractions;
+using SelfClaw.Desktop.ViewModels;
+using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Models.Views;
+using SelfClaw.Infrastructure.Options;
+using SelfClaw.Infrastructure.Tools.Transcript;
+
+namespace SelfClaw.Tests.Desktop.Services.WebView;
+
+public sealed class WebViewMessageRouterTests
+{
+    [Fact]
+    public async Task RouteAsync_posts_one_correlated_bridge_response()
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.Router.RouteAsync(
+            """{"type":"get-programming-assistant-settings","requestId":"request-1"}""",
+            ownerHandle: 0);
+
+        command.Should().BeNull();
+        context.PostedJson.Should().ContainSingle();
+        using var response = JsonDocument.Parse(context.PostedJson[0]);
+        response.RootElement.GetProperty("type").GetString().Should().Be("programming-assistant-settings");
+        response.RootElement.GetProperty("requestId").GetString().Should().Be("request-1");
+    }
+
+    [Fact]
+    public async Task RouteAsync_dispatches_shell_intent_to_the_view_model()
+    {
+        using var context = new RouterTestContext();
+        var workspaceRootId = Guid.NewGuid();
+
+        await context.Router.RouteAsync(
+            $$"""{"type":"delete-workspace-root","workspaceRootId":"{{workspaceRootId:D}}"}""",
+            ownerHandle: 0);
+
+        context.ConversationRepository.DeletedWorkspaceRootIds.Should().Equal(workspaceRootId);
+    }
+
+    [Fact]
+    public async Task RouteAsync_returns_window_command_to_the_host()
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.Router.RouteAsync(
+            """{"type":"open-link","href":"https://example.com/docs"}""",
+            ownerHandle: 0);
+
+        command.Should().Be(new WebViewHostCommand(
+            WebViewHostCommandKind.OpenLink,
+            "https://example.com/docs"));
+        context.PostedJson.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("{")]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("\"message\"")]
+    [InlineData("{}")]
+    [InlineData("{\"type\":42}")]
+    [InlineData("{\"type\":\"unknown\"}")]
+    public async Task RouteAsync_ignores_malformed_and_unknown_messages(string messageJson)
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.Router.RouteAsync(messageJson, ownerHandle: 0);
+
+        command.Should().BeNull();
+        context.PostedJson.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Extension_state_changes_are_pushed_through_the_host_channel()
+    {
+        using var context = new RouterTestContext();
+        context.HostChannel.MarkReady();
+
+        var revision = context.ExtensionStateChangeNotifier.Advance();
+
+        var stateChangedJson = context.PostedJson
+            .Single(json => json.Contains("\"type\":\"extensions/state-changed\"", StringComparison.Ordinal));
+        using var message = JsonDocument.Parse(stateChangedJson);
+        message.RootElement.GetProperty("revision").GetInt64().Should().Be(revision);
+    }
+
+    [Fact]
+    public async Task Model_selection_event_changes_the_next_turn_routed_through_the_view_model()
+    {
+        using var context = new RouterTestContext();
+
+        await context.Router.RouteAsync(
+            """{"type":"ai-providers/list-enabled-models","requestId":"models-1"}""",
+            ownerHandle: 0);
+        await context.Router.RouteAsync(
+            """{"type":"send-prompt","prompt":"use selected model"}""",
+            ownerHandle: 0);
+
+        var request = context.AgentRuntime.Requests.Should().ContainSingle().Which;
+        request.Should().BeOfType<DirectChatTurnRequest>()
+            .Which.ModelProfileId.Should().Be(RouterAiProviderSettingsService.DefaultModelId);
+    }
+
+    private sealed class RouterTestContext : IDisposable
+    {
+        private readonly string _storageRoot;
+        private readonly TranscriptPublisher _transcriptPublisher;
+        private readonly AgentActivityCoordinator _activityCoordinator;
+        private readonly TerminalHostController _terminalHostController;
+        private readonly ConversationSessionCoordinator _sessions;
+        private readonly ConversationTurnEngine _turnEngine;
+
+        public RouterTestContext()
+        {
+            _storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
+            var storagePaths = new StoragePaths(
+                _storageRoot,
+                Path.Combine(_storageRoot, "selfclaw.db"),
+                Path.Combine(_storageRoot, "secrets"));
+            var settingsStore = new DesktopSettingsJsonStore(storagePaths);
+            ConversationRepository = new RecordingConversationRepository();
+            var approvalHandler = new DesktopToolApprovalHandler();
+            _activityCoordinator = new AgentActivityCoordinator(
+                approvalHandler,
+                NullLogger<AgentActivityCoordinator>.Instance);
+            HostChannel = new WebViewHostChannel();
+            HostChannel.Attach(PostedJson.Add);
+            _transcriptPublisher = new TranscriptPublisher(
+                new TranscriptProjection(new MarkdownHtmlRenderer(), storagePaths),
+                HostChannel,
+                Dispatcher.CurrentDispatcher);
+            _sessions = new ConversationSessionCoordinator(ConversationRepository, _transcriptPublisher);
+            var programmingSettings = new ProgrammingAssistantSettingsService(settingsStore);
+            AgentRuntime = new RecordingAgentChatRuntime();
+            _turnEngine = new ConversationTurnEngine(
+                ConversationRepository,
+                new DesktopTurnFinalizer(
+                    new NoOpTurnFinalizationRepository(),
+                    NullLogger<DesktopTurnFinalizer>.Instance),
+                AgentRuntime,
+                _sessions,
+                _activityCoordinator,
+                approvalHandler,
+                programmingSettings,
+                new NoOpCompletionNotifier(),
+                NullLogger<ConversationTurnEngine>.Instance);
+
+            var agentDefinitions = new DesktopAgentDefinitionService(storagePaths);
+            var viewModel = new MainWindowViewModel(
+                ConversationRepository,
+                _turnEngine,
+                _sessions,
+                _activityCoordinator,
+                _transcriptPublisher,
+                agentDefinitions,
+                settingsStore,
+                NullLogger<MainWindowViewModel>.Instance);
+            viewModel.InitializeAsync().GetAwaiter().GetResult();
+
+            var aiProviderBridge = new AiProviderSettingsBridge(new RouterAiProviderSettingsService());
+            ExtensionStateChangeNotifier = new RecordingExtensionStateChangeNotifier();
+            var extensionBridge = new ExtensionSettingsBridge(
+                Unused<IExtensionSettingsService>(),
+                Unused<IExtensionPackageRepository>(),
+                agentDefinitions,
+                Unused<IExtensionPackagePicker>(),
+                ExtensionStateChangeNotifier);
+            var petHost = new PetHost(
+                new NoOpPetSettingsRepository(),
+                new NoOpPetWindowAdapter(),
+                new PetPackageCatalog(NullLogger<PetPackageCatalog>.Instance),
+                NullLogger<PetHost>.Instance);
+            _terminalHostController = new TerminalHostController(
+                Unused<ITerminalSessionFactory>(),
+                HostChannel,
+                Dispatcher.CurrentDispatcher);
+            Router = new WebViewMessageRouter(
+                aiProviderBridge,
+                extensionBridge,
+                ExtensionStateChangeNotifier,
+                new ProgrammingAssistantSettingsBridge(programmingSettings),
+                new PetSettingsBridge(petHost),
+                new WorkspaceSelectionBridge(viewModel, Unused<IWorkspaceFolderPicker>()),
+                _terminalHostController,
+                viewModel,
+                _activityCoordinator,
+                HostChannel,
+                Dispatcher.CurrentDispatcher);
+        }
+
+        public RecordingConversationRepository ConversationRepository { get; }
+
+        public RecordingAgentChatRuntime AgentRuntime { get; }
+
+        public RecordingExtensionStateChangeNotifier ExtensionStateChangeNotifier { get; }
+
+        public WebViewHostChannel HostChannel { get; }
+
+        public List<string> PostedJson { get; } = [];
+
+        public WebViewMessageRouter Router { get; }
+
+        public void Dispose()
+        {
+            Router.Dispose();
+            _turnEngine.Dispose();
+            _sessions.Dispose();
+            _terminalHostController.Dispose();
+            _activityCoordinator.Dispose();
+            _transcriptPublisher.Dispose();
+        }
+    }
+
+    private static T Unused<T>() where T : class
+        => DispatchProxy.Create<T, UnusedDependencyProxy>();
+
+    private class UnusedDependencyProxy : DispatchProxy
+    {
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? arguments)
+            => throw new InvalidOperationException(
+                $"Unexpected call to test dependency '{targetMethod?.DeclaringType?.Name}.{targetMethod?.Name}'.");
+    }
+
+    private sealed class RecordingAgentChatRuntime : IAgentChatRuntime
+    {
+        public List<ChatTurnRequest> Requests { get; } = [];
+
+        public async IAsyncEnumerable<AgentStreamEvent> StreamTurnAsync(
+            ChatTurnRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            await Task.CompletedTask;
+            yield return new RunCompletedEvent(RunCompletionStatus.Succeeded, "done");
+        }
+    }
+
+    private sealed class RouterAiProviderSettingsService : IAiProviderSettingsService
+    {
+        public static readonly Guid DefaultModelId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+        public Task<Guid?> GetDefaultModelAsync(string scope, CancellationToken cancellationToken = default)
+            => Task.FromResult<Guid?>(DefaultModelId);
+
+        public Task<IReadOnlyList<EnabledModelView>> ListEnabledModelsAsync(
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<EnabledModelView>>(
+                [new EnabledModelView(DefaultModelId, "Model", "model", "Provider")]);
+
+        public Task<AiProviderSettingsState> GetStateAsync(CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        public Task<AiProviderView> SaveProviderAsync(
+            SaveProviderCommand command,
+            CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        public Task SetProviderEnabledAsync(
+            Guid connectionId,
+            bool enabled,
+            CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        public Task DeleteProviderAsync(Guid connectionId, CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        public Task<IReadOnlyList<AiModelView>> FetchAndMergeRemoteModelsAsync(
+            Guid connectionId,
+            CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        public Task<ConnectivityCheckResult> CheckConnectivityAsync(
+            Guid connectionId,
+            Guid modelProfileId,
+            CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        public Task<AiModelView> UpsertModelAsync(
+            UpsertModelCommand command,
+            CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        public Task SetModelEnabledAsync(
+            Guid modelProfileId,
+            bool enabled,
+            CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        public Task SetAllModelsEnabledAsync(
+            Guid connectionId,
+            bool enabled,
+            CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        public Task DeleteModelAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        public Task SetDefaultModelAsync(
+            string scope,
+            Guid modelProfileId,
+            CancellationToken cancellationToken = default)
+            => throw Unsupported();
+
+        private static NotSupportedException Unsupported()
+            => new("This AI provider operation is not used by the router test.");
+    }
+
+    private sealed class RecordingConversationRepository : IConversationRepository
+    {
+        public List<Guid> DeletedWorkspaceRootIds { get; } = [];
+
+        public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<ConversationRecord>> ListConversationsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ConversationRecord>>([]);
+
+        public Task<ConversationRecord?> GetConversationAsync(
+            Guid conversationId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<ConversationRecord?>(null);
+
+        public Task<ConversationRecord> UpsertConversationAsync(
+            ConversationRecord conversation,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(conversation);
+
+        public Task DeleteConversationAsync(Guid conversationId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<IReadOnlyList<MessageRecord>> ListMessagesAsync(
+            Guid conversationId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<MessageRecord>>([]);
+
+        public Task<MessageRecord> UpsertMessageAsync(
+            MessageRecord message,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(message);
+
+        public Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(
+            Guid conversationId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ToolExecutionRecord>>([]);
+
+        public Task<ToolExecutionRecord> UpsertToolExecutionAsync(
+            ToolExecutionRecord record,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(record);
+
+        public Task<IReadOnlyList<WorkspaceRoot>> ListWorkspaceRootsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<WorkspaceRoot>>([]);
+
+        public Task<WorkspaceRoot> UpsertWorkspaceRootAsync(
+            WorkspaceRoot workspaceRoot,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(workspaceRoot);
+
+        public Task DeleteWorkspaceRootAsync(Guid workspaceRootId, CancellationToken cancellationToken = default)
+        {
+            DeletedWorkspaceRootIds.Add(workspaceRootId);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingExtensionStateChangeNotifier : IExtensionStateChangeNotifier
+    {
+        public long CurrentRevision { get; private set; }
+
+        public event Action<long>? StateChanged;
+
+        public long Advance() => AdvanceTo(CurrentRevision + 1);
+
+        public long AdvanceTo(long revision)
+        {
+            if (revision <= CurrentRevision)
+            {
+                return CurrentRevision;
+            }
+
+            CurrentRevision = revision;
+            StateChanged?.Invoke(revision);
+            return revision;
+        }
+    }
+
+    private sealed class NoOpTurnFinalizationRepository : ITurnFinalizationRepository
+    {
+        public Task<bool> TryFinalizeTurnAsync(
+            TurnFinalization finalization,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+    }
+
+    private sealed class NoOpCompletionNotifier : IConversationCompletionNotifier
+    {
+        public void Notify(ConversationRecord conversation, IReadOnlyList<MessageRecord> messages)
+        {
+        }
+    }
+
+    private sealed class NoOpPetSettingsRepository : IPetSettingsRepository
+    {
+        public Task<PetSettings> LoadAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new PetSettings());
+
+        public Task SaveAsync(PetSettings settings, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
+    private sealed class NoOpPetWindowAdapter : IPetWindowAdapter
+    {
+        public event EventHandler<PetPlacement>? PlacementCommitted
+        {
+            add { }
+            remove { }
+        }
+
+        public Task<bool> GetIsVisibleAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
+
+        public Task ShowAsync(PetSettings settings, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task HideAsync(CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task ReloadAsync(PetSettings settings, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+}

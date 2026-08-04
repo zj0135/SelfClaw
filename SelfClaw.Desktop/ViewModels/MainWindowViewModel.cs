@@ -1,6 +1,4 @@
 using System.IO;
-using System.Windows;
-using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
@@ -16,26 +14,19 @@ using SelfClaw.Desktop.Services.Workspace.Abstractions;
 
 namespace SelfClaw.Desktop.ViewModels;
 
-public sealed partial class MainWindowViewModel : ObservableObject, IDisposable, IWorkspaceSelectionController
+public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSelectionController
 {
     #region 字段与构造函数 —— 依赖注入字段、运行时集合状态、流式发布定时器初始化
 
-    private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(75);
     private static readonly TimeSpan ConversationDeleteStopTimeout = TimeSpan.FromSeconds(8);
     private readonly IConversationRepository _conversationRepository;
-    private readonly IAgentChatRuntime _agentChatRuntime;
     private readonly ConversationTurnEngine _turnEngine;
     private readonly ConversationSessionCoordinator _conversationSessions;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
-    private readonly DesktopToolApprovalHandler _toolApprovalHandler;
-    private readonly DesktopNotificationService _desktopNotificationService;
-    private readonly TranscriptProjection _transcriptProjection;
+    private readonly TranscriptPublisher _transcriptPublisher;
     private readonly DesktopAgentDefinitionService _desktopAgentDefinitionService;
-    private readonly ProgrammingAssistantSettingsService _programmingAssistantSettings;
     private readonly DesktopSettingsJsonStore _settingsStore;
     private readonly ILogger<MainWindowViewModel> _logger;
-    private readonly DispatcherTimer? _streamingPublishTimer;
-    private readonly SemaphoreSlim _turnAdmissionGate = new(1, 1);
 
     private readonly List<ConversationRecord> _allConversations = [];
     private readonly List<ConversationRecord> _filteredConversations = [];
@@ -52,57 +43,32 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     // Composer-level execution mode override ("本地 CLI" / "提供商"). Null defers to the
     // active agent's own mode; a value forces every sent turn onto that runtime branch.
     private AgentExecutionMode? _composerModeOverride;
-    private bool _pendingStreamingPublish;
-    private bool _pendingStreamingAutoScroll;
-    private DateTimeOffset _lastStreamingPublishAtUtc = DateTimeOffset.MinValue;
-    private int _disposeStarted;
     private long _capabilityRevision;
 
-    public MainWindowViewModel(
+    internal MainWindowViewModel(
         IConversationRepository conversationRepository,
-        IAgentChatRuntime agentChatRuntime,
         ConversationTurnEngine turnEngine,
         ConversationSessionCoordinator conversationSessions,
         AgentActivityCoordinator agentActivityCoordinator,
-        DesktopToolApprovalHandler toolApprovalHandler,
-        DesktopNotificationService desktopNotificationService,
-        TranscriptProjection transcriptProjection,
+        TranscriptPublisher transcriptPublisher,
         DesktopAgentDefinitionService desktopAgentDefinitionService,
-        ProgrammingAssistantSettingsService programmingAssistantSettings,
         DesktopSettingsJsonStore settingsStore,
         ILogger<MainWindowViewModel> logger)
     {
         _conversationRepository = conversationRepository;
-        _agentChatRuntime = agentChatRuntime;
         _turnEngine = turnEngine;
         _conversationSessions = conversationSessions;
         _agentActivityCoordinator = agentActivityCoordinator;
-        _toolApprovalHandler = toolApprovalHandler;
-        _desktopNotificationService = desktopNotificationService;
-        _transcriptProjection = transcriptProjection;
+        _transcriptPublisher = transcriptPublisher;
         _desktopAgentDefinitionService = desktopAgentDefinitionService;
-        _programmingAssistantSettings = programmingAssistantSettings;
         _settingsStore = settingsStore;
         _logger = logger;
-        _conversationSessions.SelectedTranscriptChanged += OnSelectedTranscriptChanged;
-        if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher)
-        {
-            _streamingPublishTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
-            {
-                Interval = StreamingPublishInterval
-            };
-            _streamingPublishTimer.Tick += OnStreamingPublishTimerTick;
-        }
+        _transcriptPublisher.Attach(BuildTranscriptProjectionRequest);
     }
 
     #endregion
 
-    #region 公开入口与属性 —— 暴露给宿主窗口 / WebView 的事件、选中会话属性与发送入口
-
-    /// 渲染输出：每次 transcript（消息 / 工具运行 / 会话列表）变化时携带完整快照触发，
-    /// 由宿主窗口推送给 Vue 前端。属于发送→渲染主路径的出口。
-    public event EventHandler<TranscriptRenderState>? TranscriptChanged;
-
+    #region 公开入口与属性
     /// <summary>
     /// 当前选中工作区根目录路径。供宿主窗口解析终端工作目录使用。
     /// </summary>
@@ -111,8 +77,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     public WorkspaceRoot? SelectedWorkspaceRoot => _selectedWorkspaceRoot;
 
     public string SelectedAgentId => _selectedAgentId;
-
-    public long CapabilityRevision => _capabilityRevision;
 
     public IReadOnlyList<WorkspaceRoot> WorkspaceRoots => _workspaceRoots.ToArray();
 
@@ -124,11 +88,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
 
         _capabilityRevision = revision;
-        _transcriptProjection.Invalidate();
+        _transcriptPublisher.Invalidate();
         PublishShell(false);
     }
 
-    public ConversationRecord? SelectedConversation => _selectedConversation;
+    private ConversationRecord? SelectedConversation => _selectedConversation;
 
     /// <summary>
     /// 启动时一次性加载：代理、工作区、会话列表，并发布初始 transcript。
@@ -153,8 +117,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     }
 
     /// <summary>
-    /// 前端唯一保留的入口：WebView 的 "send-prompt" 消息最终落到这里，触发一次发送回合。
-    /// 其余前端交互（窗口、终端、面板、设置）都在宿主窗口内处理，不经过 VM。
+    /// WebView 的 "send-prompt" 消息经宿主路由后落到这里，触发一次发送回合。
     /// </summary>
     public Task SubmitPromptAsync(string prompt)
     {
@@ -179,8 +142,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     /// <summary>
     /// Cancels the selected conversation's running turn (WebView "stop-generation" / Esc).
-    /// The cancellation flows through <c>SendAsync</c>'s OperationCanceledException path,
-    /// which finalizes the active turn as cancelled.
+    /// The turn engine observes the cancellation and persists the cancelled terminal state.
     /// </summary>
     public void StopSelectedConversation()
         => _conversationSessions.StopSelected();
@@ -402,91 +364,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     #endregion
 
-    #region 流式发布调度 —— 通过定时器节流向前端推送 transcript 快照（节流 / 立即 / 定时回调）
-
-    private void RequestStreamingShellPublish(bool autoScroll)
-    {
-        if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
-        {
-            _ = dispatcher.BeginInvoke(new Action(() => RequestStreamingShellPublish(autoScroll)), DispatcherPriority.Background);
-            return;
-        }
-
-        if (_streamingPublishTimer is null)
-        {
-            PublishShell(autoScroll);
-            return;
-        }
-
-        _pendingStreamingPublish = true;
-        _pendingStreamingAutoScroll |= autoScroll;
-
-        var elapsed = DateTimeOffset.UtcNow - _lastStreamingPublishAtUtc;
-        if (!_streamingPublishTimer.IsEnabled && elapsed >= StreamingPublishInterval)
-        {
-            FlushStreamingShellPublish();
-            return;
-        }
-
-        if (_streamingPublishTimer.IsEnabled)
-        {
-            return;
-        }
-
-        var delay = elapsed >= StreamingPublishInterval
-            ? StreamingPublishInterval
-            : StreamingPublishInterval - elapsed;
-        if (delay < TimeSpan.Zero)
-        {
-            delay = TimeSpan.Zero;
-        }
-
-        _streamingPublishTimer.Interval = delay;
-        _streamingPublishTimer.Start();
-    }
-
-    private void FlushStreamingShellPublish()
-    {
-        if (_streamingPublishTimer?.IsEnabled == true)
-        {
-            _streamingPublishTimer.Stop();
-        }
-
-        if (!_pendingStreamingPublish)
-        {
-            return;
-        }
-
-        var autoScroll = _pendingStreamingAutoScroll;
-        _pendingStreamingPublish = false;
-        _pendingStreamingAutoScroll = false;
-        _lastStreamingPublishAtUtc = DateTimeOffset.UtcNow;
-        PublishShell(autoScroll);
-    }
-
-    private void PublishShellNow(bool autoScroll)
-    {
-        if (System.Windows.Application.Current?.Dispatcher is Dispatcher dispatcher && !dispatcher.CheckAccess())
-        {
-            _ = dispatcher.BeginInvoke(new Action(() => PublishShellNow(autoScroll)), DispatcherPriority.Background);
-            return;
-        }
-
-        if (_pendingStreamingPublish)
-        {
-            _pendingStreamingAutoScroll |= autoScroll;
-            FlushStreamingShellPublish();
-            return;
-        }
-
-        PublishShell(autoScroll);
-    }
-
-    private void OnStreamingPublishTimerTick(object? sender, EventArgs e)
-        => FlushStreamingShellPublish();
-
-    #endregion
-
     #region 数据加载 —— 重载工作区 / 会话列表，并加载选中会话的消息与工具运行
 
     private async Task ReloadWorkspaceRootsAsync()
@@ -569,279 +446,54 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     #endregion
 
-    #region 发送回合与释放 —— 组织一次发送（建会话→落用户消息→流式回合），以及 VM 释放
+    #region 回合意图与释放
 
     private async Task SendAsync(PromptSubmissionSnapshot submission)
     {
-        ConversationRuntimeState? runtimeState = null;
-        AgentTurnState? turnState = null;
-        var activityStarted = false;
-
-        try
-        {
-            var preparation = await TryStartTurnAsync(submission);
-            if (preparation is null)
-            {
-                return;
-            }
-
-            var (conversation, runtimeAgent, startedRuntimeState) = preparation.Value;
-            runtimeState = startedRuntimeState;
-            var preferConversationSelection = SelectedConversation is null ||
-                                              _conversationSessions.IsSelected(conversation.Id);
-
-            var cancellationToken = runtimeState.CancellationTokenSource.Token;
-            var userMessageId = Guid.NewGuid();
-            var userMessage = new MessageRecord(
-                userMessageId,
-                conversation.Id,
-                MessageRole.User,
-                submission.Prompt,
-                MessageStatus.Completed,
-                DateTimeOffset.UtcNow,
-                DateTimeOffset.UtcNow);
-            runtimeState.ReplaceMessage(userMessage);
-            await _conversationRepository.UpsertMessageAsync(userMessage);
-
-            if (conversation.Title == "New chat")
-            {
-                conversation = conversation with
-                {
-                    Title = CreateConversationTitle(submission.Prompt),
-                    UpdatedAtUtc = DateTimeOffset.UtcNow
-                };
-                runtimeState.Conversation = conversation;
-                await PersistConversationAsync(conversation, preferSelection: preferConversationSelection);
-            }
-            runtimeState.RaiseTranscriptChanged(false);
-
-            var requestMessages = runtimeState.Messages.ToArray();
-            turnState = new AgentTurnState(runtimeAgent);
-            _agentActivityCoordinator.BeginTurn(new AgentActivityContext(
-                turnState.AssistantMessageId,
-                conversation.Id,
-                conversation.Title,
-                runtimeAgent.Id,
-                runtimeAgent.Name,
-                runtimeAgent.Mode,
-                turnState.StartedAtUtc));
-            activityStarted = true;
-
-            // Build only the mode's own request shape: a Direct turn never resolves the CLI selection, and a
-            // CLI turn never carries the provider model / approval fields. The composer's resolved mode decides.
-            var request = await BuildChatTurnRequestAsync(
-                runtimeAgent,
-                conversation.Id,
-                submission.ModelProfileId,
-                submission.WorkspaceRoot,
-                submission.ToolPermissionMode,
-                requestMessages,
-                cancellationToken);
-
-            // Surface the assistant placeholder immediately: CLI process startup can take seconds
-            // before the first stream event (RunStarted) arrives, and the transcript would
-            // otherwise show nothing but the user message.
-            _turnEngine.BeginAssistantMessage(runtimeState, turnState);
-
-            await foreach (var update in _agentChatRuntime.StreamTurnAsync(request, cancellationToken))
-            {
-                await _turnEngine.ApplyEventAsync(runtimeState, turnState, update, cancellationToken);
-                _agentActivityCoordinator.ApplyEvent(turnState.AssistantMessageId, update);
-            }
-
-            if (turnState.Completed)
-            {
-                PublishConversationCompletedNotification(conversation, runtimeState.Messages);
-            }
-        }
-        catch (OperationCanceledException) when (runtimeState?.CancellationTokenSource.IsCancellationRequested == true)
-        {
-            if (runtimeState is not null && turnState is not null)
-            {
-                await _turnEngine.FinalizeInterruptedAsync(
-                    runtimeState,
-                    turnState,
-                    TurnFinalizationKind.Cancelled,
-                    "Generation stopped.");
-                _agentActivityCoordinator.CompleteInterrupted(
-                    turnState.AssistantMessageId,
-                    AgentActivityOutcome.Cancelled,
-                    "Generation stopped.");
-            }
-        }
-        catch (OperationCanceledException exception)
-        {
-            _logger.LogError(exception, "The chat runtime canceled without a user cancellation request.");
-            if (runtimeState is not null && turnState is not null)
-            {
-                await _turnEngine.FinalizeInterruptedAsync(
-                    runtimeState,
-                    turnState,
-                    TurnFinalizationKind.Failed,
-                    exception.Message);
-                _agentActivityCoordinator.CompleteInterrupted(
-                    turnState.AssistantMessageId,
-                    AgentActivityOutcome.Failed,
-                    exception.Message);
-            }
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "Chat turn failed.");
-            if (runtimeState is null)
-            {
-                return;
-            }
-
-            if (turnState is not null)
-            {
-                await _turnEngine.FinalizeInterruptedAsync(
-                    runtimeState,
-                    turnState,
-                    TurnFinalizationKind.Failed,
-                    exception.Message);
-                _agentActivityCoordinator.CompleteInterrupted(
-                    turnState.AssistantMessageId,
-                    AgentActivityOutcome.Failed,
-                    exception.Message);
-            }
-        }
-        finally
-        {
-            if (runtimeState is not null)
-            {
-                _conversationSessions.CompleteTurn(runtimeState);
-            }
-
-            if (activityStarted && turnState is not null && !turnState.Completed)
-            {
-                _agentActivityCoordinator.CompleteInterrupted(
-                    turnState.AssistantMessageId,
-                    AgentActivityOutcome.Failed,
-                    "Agent stream ended before the turn reached a terminal state.");
-            }
-        }
-    }
-
-    private async Task<(
-        ConversationRecord Conversation,
-        AgentRuntimeDefinition Agent,
-        ConversationRuntimeState RuntimeState)?> TryStartTurnAsync(PromptSubmissionSnapshot submission)
-    {
-        await _turnAdmissionGate.WaitAsync();
         try
         {
             if (submission.SelectionVersion != _selectionVersion)
             {
-                return null;
+                return;
             }
 
-            var conversation = submission.Conversation ?? CreateConversationRecord(submission);
+            var conversation = submission.Conversation;
             var preferConversationSelection = SelectedConversation is null ||
+                                               conversation is not null &&
                                                _conversationSessions.IsSelected(conversation.Id);
-            if (_conversationSessions.IsRunning(conversation.Id))
+            var runtimeAgent = ResolveRuntimeAgent(conversation?.AgentId ?? submission.AgentId);
+            runtimeAgent = runtimeAgent with { Mode = submission.ExecutionModeOverride ?? runtimeAgent.Mode };
+            var admission = await _turnEngine.TryAdmitAsync(new DesktopConversationTurnRequest(
+                conversation,
+                runtimeAgent,
+                submission.Prompt,
+                submission.ModelProfileId,
+                submission.WorkspaceRoot,
+                submission.ToolPermissionMode));
+            if (admission is null)
             {
-                return null;
+                return;
             }
 
-            conversation = conversation with
-            {
-                WorkspaceRootId = submission.WorkspaceRoot?.Id,
-                Mode = ConversationMode.Programming,
-                ToolPermissionMode = submission.ToolPermissionMode,
-                UpdatedAtUtc = DateTimeOffset.UtcNow
-            };
-            await PersistConversationAsync(conversation, preferSelection: preferConversationSelection);
-
-            var runtimeAgent = ResolveRuntimeAgent(conversation.AgentId);
-            runtimeAgent = runtimeAgent with { Mode = submission.ExecutionModeOverride ?? runtimeAgent.Mode };
-            var runtimeState = await _conversationSessions.StartTurnAsync(conversation);
-            return (conversation, runtimeAgent, runtimeState);
+            ApplyAdmittedConversation(admission.Conversation, preferConversationSelection);
+            await _turnEngine.ExecuteAsync(admission);
         }
-        finally
+        catch (OperationCanceledException)
         {
-            _turnAdmissionGate.Release();
+            throw;
         }
-    }
-
-    /// <summary>
-    /// Builds the request shape for the resolved mode: a Direct turn carries the model profile, permission mode
-    /// and approval handler; a CLI turn resolves the selected CLI / model / reasoning effort and carries none of
-    /// the provider fields. Only the CLI branch reads <see cref="ProgrammingAssistantSettingsService"/>.
-    /// </summary>
-    private async Task<ChatTurnRequest> BuildChatTurnRequestAsync(
-        AgentRuntimeDefinition runtimeAgent,
-        Guid conversationId,
-        Guid? selectedModelProfileId,
-        WorkspaceRoot? selectedWorkspaceRoot,
-        ToolPermissionMode selectedToolPermissionMode,
-        IReadOnlyList<MessageRecord> requestMessages,
-        CancellationToken cancellationToken)
-    {
-        if (runtimeAgent.Mode == AgentExecutionMode.Cli)
+        catch (Exception exception)
         {
-            // A null selection means nothing is selected (or detected); the CLI runtime fails the turn with
-            // actionable guidance. Model / effort are null when the user left the CLI's own default.
-            var cliSelection = await _programmingAssistantSettings.GetSelectedInvocationAsync(cancellationToken);
-            return new CliChatTurnRequest(
-                conversationId,
-                selectedWorkspaceRoot,
-                runtimeAgent,
-                requestMessages,
-                cliSelection?.Kind,
-                cliSelection?.Model,
-                cliSelection?.ReasoningEffort);
+            _logger.LogError(exception, "Failed to prepare the chat turn.");
         }
-
-        return new DirectChatTurnRequest(
-            conversationId,
-            selectedWorkspaceRoot,
-            runtimeAgent,
-            requestMessages,
-            selectedModelProfileId,
-            selectedToolPermissionMode,
-            _toolApprovalHandler);
-    }
-
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
-        {
-            return;
-        }
-
-        if (_streamingPublishTimer is not null)
-        {
-            _streamingPublishTimer.Stop();
-            _streamingPublishTimer.Tick -= OnStreamingPublishTimerTick;
-        }
-
-        _conversationSessions.SelectedTranscriptChanged -= OnSelectedTranscriptChanged;
-        _conversationSessions.Dispose();
-        _turnAdmissionGate.Dispose();
     }
 
     #endregion
 
-    #region 会话创建 / 持久化 / 过滤 —— 新建会话记录、落盘并同步选中、维护会话列表与可见性过滤
+    #region 会话导航状态与过滤
 
-    private static ConversationRecord CreateConversationRecord(PromptSubmissionSnapshot submission)
+    private void ApplyAdmittedConversation(ConversationRecord conversation, bool preferSelection)
     {
-        var now = DateTimeOffset.UtcNow;
-        return new ConversationRecord(
-            Guid.NewGuid(),
-            "New chat",
-            submission.WorkspaceRoot?.Id,
-            ConversationMode.Programming,
-            submission.ToolPermissionMode,
-            submission.AgentId,
-            now,
-            now);
-    }
-
-    private async Task PersistConversationAsync(ConversationRecord conversation, bool preferSelection = true)
-    {
-        await _conversationRepository.UpsertConversationAsync(conversation);
         var shouldPreferSelection = preferSelection &&
                                     (SelectedConversation is null || SelectedConversation.Id == conversation.Id);
         UpsertConversation(conversation, shouldPreferSelection);
@@ -912,14 +564,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     #endregion
 
-    #region Transcript 渲染构建 —— 计算快照指纹去重后，把消息 / 工具运行 / 附件构建成前端渲染项并触发 TranscriptChanged
+    #region Transcript 发布
 
     private void PublishShell(bool autoScroll)
+        => _transcriptPublisher.PublishNow(autoScroll);
+
+    private TranscriptProjectionRequest BuildTranscriptProjectionRequest(bool autoScroll)
     {
         var selectedAgent = ResolveSelectedAgent();
         var isBusy = _conversationSessions.IsSelectedRunning;
         var activityText = isBusy ? _conversationSessions.SelectedActivityText : null;
-        var state = _transcriptProjection.Build(new TranscriptProjectionRequest(
+        return new TranscriptProjectionRequest(
             _conversationSessions.SelectedMessages,
             _conversationSessions.SelectedToolRuns,
             _conversationSessions.SelectedToolRunAnchors,
@@ -932,13 +587,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             ResolveComposerExecutionMode(selectedAgent.Mode).ToString().ToLowerInvariant(),
             selectedAgent.Id,
             selectedAgent.Name,
-            _capabilityRevision));
-        if (state is null)
-        {
-            return;
-        }
-
-        TranscriptChanged?.Invoke(this, state);
+            _capabilityRevision);
     }
 
     private IEnumerable<ConversationRecord> GetNavigationConversations()
@@ -947,12 +596,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     private bool MatchesNavigationConversation(ConversationRecord conversation)
         => conversation.Mode == ConversationMode.Programming &&
            string.Equals(conversation.AgentId, ResolveSelectedAgent().Id, StringComparison.OrdinalIgnoreCase);
-
-    private static string CreateConversationTitle(string text)
-    {
-        var normalized = text.ReplaceLineEndings(" ").Trim();
-        return normalized.Length > 48 ? normalized[..48] + "..." : normalized;
-    }
 
     #endregion
 

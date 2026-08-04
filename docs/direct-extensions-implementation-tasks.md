@@ -175,14 +175,14 @@
 **改动文件**
 
 - `SelfClaw.Desktop\Services\Extensions\ExtensionSettingsBridge.cs`：新建，逐条对照 `AiProviderSettingsBridge`（前缀守卫、requestId 回显、`OperationCanceledException` 重抛、异常 → `{ type, requestId, error }`）
-- `SelfClaw.Desktop\MainWindow.xaml.cs`：⚠ 在现有 `_aiProviderSettingsBridge.TryHandleAsync()` 早退（约 :474）旁并列 `_extensionSettingsBridge.TryHandleAsync()`；订阅 `ResponseReady` → `PostWebMessage()`
+- `SelfClaw.Desktop\Services\WebView\WebViewMessageRouter.cs`：按固定顺序调用 `_extensionSettingsBridge.TryHandleAsync()`；非空响应通过 `WebViewHostChannel.PostResponse()` 回包
 - `SelfClaw.Desktop\App.xaml.cs`：注册 bridge 单例；启动序列在 `IAiProviderRepository.InitializeAsync()` 之后追加扩展仓储 `InitializeAsync()`（§1.4.7；reconcile 在 T9 加）
 
 **步骤**
 
 1. 本阶段实现消息：`get-state` / `set-enabled` / `delete` / `save-mcp` / `set-agent-binding`；`test-mcp` 转发服务层 `NotSupportedException` 为可读错误；`import-package` / `list-effective-skills` 留 T9 / T13。
 2. `set-agent-binding` 由 bridge 协调 `IExtensionSettingsService`（校验目标存在）与 `DesktopAgentDefinitionService`（原子写 markdown），Infrastructure 不反向依赖 Desktop（§11.1）。
-3. `StateChanged(revision)` 事件：任何成功 mutation 触发；`MainWindow` 订阅后 (a) `PostWebMessage({ type: "extensions/state-changed", revision })`，(b) 通知 `MainWindowViewModel` 记录 `capabilityRevision`（replaceState 字段在 T13 才加，先存字段）。（§11.2）
+3. `IExtensionStateChangeNotifier.StateChanged(revision)` 事件：任何成功 mutation 触发；`WebViewMessageRouter` 直接订阅 notifier 后 (a) 推送 `{ type: "extensions/state-changed", revision }`，(b) 通知 `MainWindowViewModel` 记录 `capabilityRevision`。（§11.2）
 
 **测试**：`SelfClaw.Tests\Desktop\Services\Extensions\ExtensionSettingsBridgeTests.cs`（对齐 `AiProviderSettingsBridgeTests`）：每消息 requestId 回显、错误 shape、secret 不出现在响应、set-agent-binding 写通 markdown、StateChanged 触发。
 
