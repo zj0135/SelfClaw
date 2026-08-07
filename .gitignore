@@ -83,3 +83,4 @@ Properties/
 !docs/adr/*.md
 !docs/direct-extensions-system-design.md
 !docs/direct-extensions-implementation-tasks.md
+!docs/direct-subagent-system-design.md
