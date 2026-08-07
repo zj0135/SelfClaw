@@ -69,7 +69,7 @@ public sealed class DesktopAgentDefinitionServiceTests : IDisposable
     }
 
     [Fact]
-    public void Save_writes_only_non_empty_binding_lists_and_round_trips_nested_skill_ids()
+    public void Save_writes_only_non_empty_binding_lists_and_round_trips_normalized_ids()
     {
         var service = CreateService();
         var definition = new DesktopAgentDefinition(
@@ -81,6 +81,7 @@ public sealed class DesktopAgentDefinitionServiceTests : IDisposable
             [],
             ["engineering/code-review"],
             [],
+            ["Reviewer", "test-runner", "REVIEWER"],
             "Review the current change.",
             string.Empty,
             false,
@@ -91,11 +92,41 @@ public sealed class DesktopAgentDefinitionServiceTests : IDisposable
         var loaded = service.LoadAll().Single(item => item.Id == "review");
 
         markdown.Should().Contain("skills:\n  - engineering/code-review");
+        markdown.Should().Contain("subagents:\n  - reviewer\n  - test-runner");
         markdown.Should().NotContain("plugins:");
         markdown.Should().NotContain("mcpServers:");
         markdown.Should().NotContain("disabledSkills:");
         markdown.Should().NotContain("disabledMcpServers:");
         loaded.SkillIds.Should().Equal("engineering/code-review");
+        loaded.SubagentIds.Should().Equal("reviewer", "test-runner");
+    }
+
+    [Fact]
+    public void LoadAll_warns_when_a_cli_agent_declares_subagents_and_ignores_invalid_ids()
+    {
+        var service = CreateService();
+        Directory.CreateDirectory(service.AgentsDirectory);
+        File.WriteAllText(
+            Path.Combine(service.AgentsDirectory, "cli.md"),
+            """
+            ---
+            name: CLI
+            description: CLI agent
+            mode: cli
+            tools: system
+            subagents:
+              - Reviewer
+              - nested/reviewer
+            ---
+            Use the configured CLI.
+            """,
+            new UTF8Encoding(false));
+
+        var agent = service.LoadAll().Single(item => item.Id == "cli");
+
+        agent.SubagentIds.Should().Equal("reviewer");
+        agent.Warnings.Should().Contain(item => item.Contains("invalid Subagent id", StringComparison.Ordinal));
+        agent.Warnings.Should().Contain(item => item.Contains("CLI agents cannot delegate", StringComparison.Ordinal));
     }
 
     [Fact]

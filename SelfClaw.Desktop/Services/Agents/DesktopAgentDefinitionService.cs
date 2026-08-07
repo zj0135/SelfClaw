@@ -12,6 +12,7 @@ public sealed class DesktopAgentDefinitionService
 
     private static readonly UTF8Encoding Utf8WithoutBom = new(false);
     private readonly string _agentsDirectory;
+    private readonly AgentMarkdownDocumentParser _documentParser = new();
     private readonly object _syncRoot = new();
 
     public DesktopAgentDefinitionService(StoragePaths storagePaths)
@@ -135,7 +136,7 @@ public sealed class DesktopAgentDefinitionService
             return CreateInvalidDefinition(agentId, filePath, exception.Message);
         }
 
-        var parsed = ParseAgentMarkdown(agentId, markdown);
+        var parsed = MapAgentDocument(agentId, _documentParser.Parse(markdown));
         return new DesktopAgentDefinition(
             agentId,
             parsed.Name,
@@ -145,6 +146,7 @@ public sealed class DesktopAgentDefinitionService
             parsed.PluginIds,
             ExceptDisabled(parsed.SkillIds, parsed.DisabledSkillIds),
             ExceptDisabled(parsed.McpServerIds, parsed.DisabledMcpServerIds),
+            parsed.SubagentIds,
             parsed.Instructions,
             filePath,
             IsBuiltInAgentId(agentId),
@@ -166,6 +168,7 @@ public sealed class DesktopAgentDefinitionService
             "通用代理（默认）",
             AgentExecutionMode.Direct,
             AgentRuntimeDefinition.SystemToolPolicy,
+            [],
             [],
             [],
             [],
@@ -217,6 +220,7 @@ public sealed class DesktopAgentDefinitionService
         AppendList(builder, "plugins", definition.PluginIds);
         AppendList(builder, "skills", definition.SkillIds);
         AppendList(builder, "mcpServers", definition.McpServerIds);
+        AppendList(builder, "subagents", definition.SubagentIds);
         builder.AppendLine("---");
         builder.AppendLine();
         builder.Append(NormalizeInstructions(definition.Instructions));
@@ -238,97 +242,51 @@ public sealed class DesktopAgentDefinitionService
         }
     }
 
-    private static AgentParseResult ParseAgentMarkdown(string agentId, string markdown)
+    private static AgentParseResult MapAgentDocument(
+        string agentId,
+        MarkdownDefinitionDocument document)
     {
-        if (string.IsNullOrWhiteSpace(markdown))
+        var warnings = new List<string>(document.Diagnostics);
+        var knownFields = new HashSet<string>(StringComparer.Ordinal)
         {
-            return CreateEmptyParseResult(agentId, string.Empty, "Agent file is empty; using default values.");
+            "name",
+            "description",
+            "mode",
+            "tools",
+            "plugins",
+            "skills",
+            "disabledSkills",
+            "mcpServers",
+            "disabledMcpServers",
+            "subagents"
+        };
+        foreach (var field in document.Scalars.Keys.Concat(document.Lists.Keys))
+        {
+            if (!knownFields.Contains(field))
+            {
+                warnings.Add($"Ignoring unsupported front matter key '{field}'.");
+            }
         }
 
-        var normalized = markdown.ReplaceLineEndings("\n");
-        if (!normalized.StartsWith("---\n", StringComparison.Ordinal))
+        var name = ReadScalar(document, "name", agentId, warnings);
+        var description = ReadScalar(document, "description", string.Empty, warnings);
+        var mode = ParseMode(ReadScalar(document, "mode", "direct", warnings), warnings);
+        var toolPolicy = ParseToolPolicy(
+            ReadScalar(document, "tools", AgentRuntimeDefinition.SystemToolPolicy, warnings),
+            warnings);
+        var pluginIds = NormalizeIdentifiers(ReadList(document, "plugins", warnings), NormalizeExtensionId);
+        var skillIds = NormalizeIdentifiers(ReadList(document, "skills", warnings), NormalizeSkillId);
+        var disabledSkillIds = NormalizeIdentifiers(
+            ReadList(document, "disabledSkills", warnings),
+            NormalizeSkillId);
+        var mcpServerIds = NormalizeIdentifiers(ReadList(document, "mcpServers", warnings), NormalizeExtensionId);
+        var disabledMcpServerIds = NormalizeIdentifiers(
+            ReadList(document, "disabledMcpServers", warnings),
+            NormalizeExtensionId);
+        var subagentIds = NormalizeSubagentIds(ReadList(document, "subagents", warnings), warnings);
+        if (mode == AgentExecutionMode.Cli && subagentIds.Count > 0)
         {
-            return CreateEmptyParseResult(agentId, normalized.Trim(), "Front matter is missing; using default metadata.");
-        }
-
-        var endIndex = normalized.IndexOf("\n---\n", 4, StringComparison.Ordinal);
-        if (endIndex < 0)
-        {
-            return CreateEmptyParseResult(agentId, normalized.Trim(), "Front matter is incomplete; using default metadata.");
-        }
-
-        var metadataBlock = normalized[4..endIndex];
-        var instructions = normalized[(endIndex + 5)..].Trim();
-        var warnings = new List<string>();
-        var name = agentId;
-        var description = string.Empty;
-        var mode = AgentExecutionMode.Direct;
-        var toolPolicy = AgentRuntimeDefinition.SystemToolPolicy;
-        var pluginIds = new List<string>();
-        var skillIds = new List<string>();
-        var disabledSkillIds = new List<string>();
-        var mcpServerIds = new List<string>();
-        var disabledMcpServerIds = new List<string>();
-        string? currentList = null;
-
-        foreach (var rawLine in metadataBlock.Split('\n'))
-        {
-            var line = rawLine.TrimEnd();
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
-
-            var trimmed = line.TrimStart();
-            if (trimmed.StartsWith("- ", StringComparison.Ordinal))
-            {
-                AddListItem(
-                    currentList,
-                    Unquote(trimmed[2..].Trim()),
-                    pluginIds,
-                    skillIds,
-                    disabledSkillIds,
-                    mcpServerIds,
-                    disabledMcpServerIds,
-                    warnings);
-                continue;
-            }
-
-            currentList = null;
-            var separatorIndex = line.IndexOf(':');
-            if (separatorIndex <= 0)
-            {
-                warnings.Add($"Ignoring malformed front matter line '{line}'.");
-                continue;
-            }
-
-            var key = line[..separatorIndex].Trim();
-            var value = line[(separatorIndex + 1)..].Trim();
-            switch (key)
-            {
-                case "name":
-                    name = string.IsNullOrWhiteSpace(value) ? agentId : Unquote(value);
-                    break;
-                case "description":
-                    description = Unquote(value);
-                    break;
-                case "mode":
-                    mode = ParseMode(value, warnings);
-                    break;
-                case "tools":
-                    toolPolicy = ParseToolPolicy(value, warnings);
-                    break;
-                case "plugins":
-                case "skills":
-                case "disabledSkills":
-                case "mcpServers":
-                case "disabledMcpServers":
-                    currentList = key;
-                    break;
-                default:
-                    warnings.Add($"Ignoring unsupported front matter key '{key}'.");
-                    break;
-            }
+            warnings.Add("CLI agents cannot delegate to Subagents; the configured allowlist will not be exposed.");
         }
 
         return new AgentParseResult(
@@ -336,41 +294,63 @@ public sealed class DesktopAgentDefinitionService
             description.Trim(),
             mode,
             toolPolicy,
-            NormalizeIdentifiers(pluginIds, NormalizeExtensionId),
-            NormalizeIdentifiers(skillIds, NormalizeSkillId),
-            NormalizeIdentifiers(disabledSkillIds, NormalizeSkillId),
-            NormalizeIdentifiers(mcpServerIds, NormalizeExtensionId),
-            NormalizeIdentifiers(disabledMcpServerIds, NormalizeExtensionId),
-            NormalizeInstructions(instructions),
+            pluginIds,
+            skillIds,
+            disabledSkillIds,
+            mcpServerIds,
+            disabledMcpServerIds,
+            subagentIds,
+            NormalizeInstructions(document.Body),
             warnings);
     }
 
-    private static void AddListItem(
-        string? currentList,
-        string value,
-        ICollection<string> pluginIds,
-        ICollection<string> skillIds,
-        ICollection<string> disabledSkillIds,
-        ICollection<string> mcpServerIds,
-        ICollection<string> disabledMcpServerIds,
+    private static string ReadScalar(
+        MarkdownDefinitionDocument document,
+        string field,
+        string defaultValue,
         ICollection<string> warnings)
     {
-        var target = currentList switch
+        if (document.Lists.ContainsKey(field))
         {
-            "plugins" => pluginIds,
-            "skills" => skillIds,
-            "disabledSkills" => disabledSkillIds,
-            "mcpServers" => mcpServerIds,
-            "disabledMcpServers" => disabledMcpServerIds,
-            _ => null
-        };
-        if (target is null)
-        {
-            warnings.Add($"Ignoring list item '- {value}' because it is not attached to a known key.");
-            return;
+            warnings.Add($"Front matter field '{field}' must be a scalar; using its default value.");
+            return defaultValue;
         }
 
-        target.Add(value);
+        return document.Scalars.TryGetValue(field, out var value) ? value : defaultValue;
+    }
+
+    private static IReadOnlyList<string> ReadList(
+        MarkdownDefinitionDocument document,
+        string field,
+        ICollection<string> warnings)
+    {
+        if (document.Scalars.ContainsKey(field))
+        {
+            warnings.Add($"Front matter field '{field}' must be a list; ignoring its value.");
+            return [];
+        }
+
+        return document.Lists.TryGetValue(field, out var values) ? values : [];
+    }
+
+    private static IReadOnlyList<string> NormalizeSubagentIds(
+        IEnumerable<string> values,
+        ICollection<string> warnings)
+    {
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in values)
+        {
+            var normalized = NormalizeAgentId(value);
+            if (!IsValidAgentId(normalized))
+            {
+                warnings.Add($"Ignoring invalid Subagent id '{value}'.");
+                continue;
+            }
+
+            results.Add(normalized);
+        }
+
+        return results.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
     private static string ParseToolPolicy(string value, ICollection<string> warnings)
@@ -387,7 +367,7 @@ public sealed class DesktopAgentDefinitionService
 
     private static AgentExecutionMode ParseMode(string value, ICollection<string> warnings)
     {
-        var normalized = Unquote(value).Trim();
+        var normalized = value.Trim();
         if (string.Equals(normalized, "plan", StringComparison.OrdinalIgnoreCase))
         {
             warnings.Add("Mode 'plan' is no longer supported. Using 'direct'.");
@@ -417,6 +397,7 @@ public sealed class DesktopAgentDefinitionService
             PluginIds = NormalizeIdentifiers(definition.PluginIds, NormalizeExtensionId),
             SkillIds = NormalizeIdentifiers(definition.SkillIds, NormalizeSkillId),
             McpServerIds = NormalizeIdentifiers(definition.McpServerIds, NormalizeExtensionId),
+            SubagentIds = NormalizeSubagentIds(definition.SubagentIds, new List<string>()),
             Instructions = NormalizeInstructions(definition.Instructions)
         };
 
@@ -468,28 +449,12 @@ public sealed class DesktopAgentDefinitionService
             [],
             [],
             [],
+            [],
             string.Empty,
             filePath,
             false,
             [$"Unable to load agent file: {error}"]);
     }
-
-    private static AgentParseResult CreateEmptyParseResult(
-        string agentId,
-        string instructions,
-        string warning)
-        => new(
-            agentId,
-            string.Empty,
-            AgentExecutionMode.Direct,
-            AgentRuntimeDefinition.SystemToolPolicy,
-            [],
-            [],
-            [],
-            [],
-            [],
-            instructions,
-            [warning]);
 
     private string GetAgentFilePath(string agentId)
         => Path.Combine(_agentsDirectory, $"{agentId}.md");
@@ -538,18 +503,5 @@ public sealed class DesktopAgentDefinitionService
     private static bool IsValidAgentId(string agentId)
         => !string.IsNullOrWhiteSpace(agentId) &&
            agentId.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
-
-    private static string Unquote(string value)
-    {
-        if (value.Length >= 2 &&
-            ((value[0] == '"' && value[^1] == '"') || (value[0] == '\'' && value[^1] == '\'')))
-        {
-            return value[1..^1]
-                .Replace("\\\"", "\"")
-                .Replace("\\\\", "\\");
-        }
-
-        return value;
-    }
 
 }

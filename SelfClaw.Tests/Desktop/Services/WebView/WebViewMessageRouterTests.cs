@@ -165,6 +165,9 @@ public sealed class WebViewMessageRouterTests
                 new DesktopTurnFinalizer(
                     new NoOpTurnFinalizationRepository(),
                     NullLogger<DesktopTurnFinalizer>.Instance),
+                new ConversationTurnRecorder(
+                    ConversationRepository,
+                    NullLogger<ConversationTurnRecorder>.Instance),
                 AgentRuntime,
                 _sessions,
                 _activityCoordinator,

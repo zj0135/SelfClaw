@@ -1188,21 +1188,39 @@ Desktop 拥有 turn admission、WPF approval、notification 和当前进程 back
 
 ## 16. 分阶段实施
 
-### P0：共享 turn id 与 recorder
+### P0：共享 turn id 与 recorder（已完成）
 
-- 给 request 增加稳定 `TurnId`；
-- 抽取 `ConversationTurnRecorder`；
-- 让现有 interactive Direct/CLI tests 通过共享 recorder；
-- 不引入 Subagent 行为。
+- [x] 给 request 增加稳定 `TurnId`；
+- [x] 抽取 `ConversationTurnRecorder`；
+- [x] 让现有 interactive Direct/CLI tests 通过共享 recorder；
+- [x] 不引入 Subagent 行为。
 
-### P1：定义、Core 契约与 schema v23
+完成记录：
 
-- 共用 markdown parser；
-- normal Agent `SubagentIds` 和 Subagent catalog；
-- conversation kind/parent；
-- task/delivery tables、models、repository 与 migration tests。
+- `ChatTurnRequest`、`DirectChatTurnRequest` 和 `CliChatTurnRequest` 已统一携带稳定 `TurnId`；interactive turn 使用预生成的 assistant message id。
+- `ConversationTurnRecorder` 已集中处理 assistant text/thinking、tool event、usage 和 terminal reduction；`IRecordedTurnCommitter` 将归约与最终提交分离。
+- interactive Direct/CLI 已切换到共享 recorder，原 `DesktopTurnFinalizationRequest` 被统一的 `RecordedTurnFinalizationRequest` 替代。
+- 本阶段没有增加 Subagent tool、后台任务、child execution 或 continuation 行为。
 
-### P2：durable task 与 child execution
+### P1：定义、Core 契约与 schema v23（已完成）
+
+- [x] 共用 markdown parser；
+- [x] normal Agent `SubagentIds` 和 Subagent catalog；
+- [x] conversation kind/parent；
+- [x] task/delivery tables、models、repository 与 schema tests。
+
+完成记录：
+
+- `AgentMarkdownDocumentParser` 已成为 normal Agent 与 Subagent definition 的共享语法解析内核；normal Agent 保持宽松 warning，`SubagentDefinitionCatalog` 对固定字段、GUID、tool policy、timeout 和 instructions 执行严格校验。
+- normal Agent 已支持 `subagents` 的解析、归一化、序列化和 CLI warning；`AgentRuntimeDefinition.SubagentIds` 已贯穿 Desktop 到 runtime request。
+- Core 已加入 `ISubagentTaskCoordinator`、task/delivery 状态与 view/request DTO、completion envelope、`DirectTurnExecutionContext` 和 capability ceiling 数据契约，但尚未注册 coordinator 实现或暴露委派工具。
+- `ConversationRecord` 已加入 `ConversationKind` 与 `ParentConversationId`；普通 conversation list 在 repository 内过滤 hidden child，按 id 仍可读取 child conversation。
+- SQLite schema 已更新到 v23，新增 ownership CHECK、自引用 cascade、`subagent_tasks`、`subagent_deliveries` 及调度索引。
+- `SqliteSubagentTaskRepository` 当前提供 P1 所需的原子 task acceptance 与 owner-scoped read：同一事务创建 child conversation、精确 task user message 和 Queued task，并执行单 parent turn 最多 8 个 task 的限制。
+- 按当前实施决策，不提供 v22 到 v23 的旧数据兼容迁移；运行 v23 前需删除旧 `selfclaw.db`，由应用创建新库。
+- 全量测试通过：463/463；覆盖共享 parser、严格 catalog、隐藏 child、ownership、事务回滚、task 上限、cascade、schema CHECK/UNIQUE 和 DI 注册。
+
+### P2：durable task 与 child execution（待实施）
 
 - coordinator 四方法；
 - 四个 Direct tools 和 runtime-level no-nesting；
@@ -1210,14 +1228,14 @@ Desktop 拥有 turn admission、WPF approval、notification 和当前进程 back
 - scheduler、limits、timeout、cancel、recovery；
 - child transcript 和 completion envelope。
 
-### P3：mailbox continuation
+### P3：mailbox continuation（待实施）
 
 - lease/coalescing；
 - transient completion batch；
 - user-priority admission；
 - success commit、retry、DeadLetter 和通知。
 
-### P4：收尾
+### P4：收尾（待实施）
 
 - conversation delete integration；
 - runtime execution flow 文档更新；

@@ -11,6 +11,7 @@ public sealed record DesktopAgentDefinition(
     IReadOnlyList<string> PluginIds,
     IReadOnlyList<string> SkillIds,
     IReadOnlyList<string> McpServerIds,
+    IReadOnlyList<string> SubagentIds,
     string Instructions,
     string FilePath,
     bool IsBuiltIn,

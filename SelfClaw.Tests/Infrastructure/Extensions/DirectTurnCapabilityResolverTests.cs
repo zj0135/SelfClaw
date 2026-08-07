@@ -335,15 +335,17 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             Guid.NewGuid(), conversationId, MessageRole.User, latestPrompt,
             MessageStatus.Completed, now, now));
         return new DirectChatTurnRequest(
+            Guid.NewGuid(),
             conversationId,
             null,
             new AgentRuntimeDefinition(
                 "build", "Build", "", AgentExecutionMode.Direct,
-                AgentRuntimeDefinition.SystemToolPolicy, pluginIds ?? [], skillIds, mcpServerIds ?? [], "Agent instructions"),
+                AgentRuntimeDefinition.SystemToolPolicy, pluginIds ?? [], skillIds, mcpServerIds ?? [], [], "Agent instructions"),
             messages,
             Guid.NewGuid(),
             ToolPermissionMode.FullAccess,
-            null);
+            null,
+            new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));
     }
 
     private static McpServerConfigRecord CreateMcpRecord(string id)

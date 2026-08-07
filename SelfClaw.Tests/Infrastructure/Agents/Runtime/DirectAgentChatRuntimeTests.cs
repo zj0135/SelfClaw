@@ -240,11 +240,12 @@ public sealed class DirectAgentChatRuntimeTests
             => new(Guid.NewGuid(), conversationId, role, text, status, now, now);
 
         return new DirectChatTurnRequest(
+            Guid.NewGuid(),
             conversationId,
             workspace,
             new AgentRuntimeDefinition(
                 "direct-test", "Direct", "test", AgentExecutionMode.Direct,
-                AgentRuntimeDefinition.SystemToolPolicy, [], [], [], "Follow project instructions."),
+                AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], "Follow project instructions."),
             [
                 Message(MessageRole.System, "ignored system history"),
                 Message(MessageRole.User, "user prompt"),
@@ -254,7 +255,8 @@ public sealed class DirectAgentChatRuntimeTests
             ],
             modelProfileId,
             ToolPermissionMode.FullAccess,
-            ToolApprovalHandler: null);
+            ToolApprovalHandler: null,
+            new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));
     }
 
     private static WorkspaceRoot CreateWorkspace()

@@ -32,6 +32,8 @@ using SelfClaw.Infrastructure.Tools.Transcript;
 using SelfClaw.Infrastructure.Tools.Workspace;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
+using SelfClaw.Infrastructure.Agents.Subagents.Abstractions;
+using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 
 namespace SelfClaw.Infrastructure;
 
@@ -50,6 +52,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
         services.AddSingleton<ITurnFinalizationRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
+        services.AddSingleton<ISubagentTaskRepository, SqliteSubagentTaskRepository>();
         services.AddSingleton<IAiProviderRepository, SqliteAiProviderRepository>();
         services.AddSingleton<SqliteExtensionRepository>();
         services.AddSingleton<IExtensionPackageRepository>(serviceProvider =>

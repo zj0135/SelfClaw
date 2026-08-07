@@ -59,6 +59,7 @@ public sealed class ConversationTurnEngineTests
         assistant.MarkdownContent.Should().Contain("hello ").And.Contain("world").And.Contain("selfclaw:tool:");
         assistant.InputTokens.Should().Be(11);
         assistant.OutputTokens.Should().Be(7);
+        runtime.Requests.Single().TurnId.Should().Be(assistant.Id);
         finalization.ToolExecutions.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Completed);
         finalization.ToolExecutions[0].SourceKind.Should().Be(ToolSourceKind.Mcp);
         finalization.ToolExecutions[0].SourceId.Should().Be("git");
@@ -179,7 +180,10 @@ public sealed class ConversationTurnEngineTests
 
         await context.ExecuteAsync(CreateRequest(mode: AgentExecutionMode.Cli));
 
-        runtime.Requests.Should().ContainSingle().Which.Should().BeOfType<CliChatTurnRequest>();
+        var chatRequest = runtime.Requests.Should().ContainSingle().Which;
+        chatRequest.Should().BeOfType<CliChatTurnRequest>();
+        chatRequest.TurnId.Should().Be(
+            context.FinalizationRepository.Finalizations.Single().AssistantMessage.Id);
     }
 
     [Fact]
@@ -249,6 +253,7 @@ public sealed class ConversationTurnEngineTests
             [],
             [],
             [],
+            [],
             "");
 
     private sealed class EngineTestContext : IDisposable
@@ -279,6 +284,9 @@ public sealed class ConversationTurnEngineTests
                 new DesktopTurnFinalizer(
                     finalizationRepository ?? FinalizationRepository,
                     NullLogger<DesktopTurnFinalizer>.Instance),
+                new ConversationTurnRecorder(
+                    repository,
+                    NullLogger<ConversationTurnRecorder>.Instance),
                 runtime,
                 _sessions,
                 _activityCoordinator,

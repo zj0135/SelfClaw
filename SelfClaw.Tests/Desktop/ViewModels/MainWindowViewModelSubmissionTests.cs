@@ -54,6 +54,9 @@ public sealed class MainWindowViewModelSubmissionTests
             using var turnEngine = new ConversationTurnEngine(
                 repository,
                 turnFinalizer,
+                new ConversationTurnRecorder(
+                    repository,
+                    NullLogger<ConversationTurnRecorder>.Instance),
                 runtime,
                 sessions,
                 activityCoordinator,

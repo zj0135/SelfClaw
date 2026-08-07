@@ -9,11 +9,17 @@ namespace SelfClaw.Core.Runtime;
 /// in fields the chosen runtime ignores. <see cref="Mode"/> selects the runtime adapter.
 /// </summary>
 public abstract record ChatTurnRequest(
+    Guid TurnId,
     Guid ConversationId,
     WorkspaceRoot? WorkspaceRoot,
     AgentRuntimeDefinition Agent,
     IReadOnlyList<MessageRecord> Messages)
 {
+    /// <summary>The stable identifier for this turn; it is also the assistant message identifier.</summary>
+    public Guid TurnId { get; } = TurnId != Guid.Empty
+        ? TurnId
+        : throw new ArgumentException("Turn id cannot be empty.", nameof(TurnId));
+
     /// <summary>The runtime branch this request targets; used by the dispatcher to pick an adapter.</summary>
     public abstract AgentExecutionMode Mode { get; }
 }

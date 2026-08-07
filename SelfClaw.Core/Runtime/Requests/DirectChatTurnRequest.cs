@@ -7,14 +7,16 @@ namespace SelfClaw.Core.Runtime;
 /// approval policy; the CLI agent / session inputs do not apply here and are absent by construction.
 /// </summary>
 public sealed record DirectChatTurnRequest(
+    Guid TurnId,
     Guid ConversationId,
     WorkspaceRoot? WorkspaceRoot,
     AgentRuntimeDefinition Agent,
     IReadOnlyList<MessageRecord> Messages,
     Guid? ModelProfileId,
     ToolPermissionMode ToolPermissionMode,
-    IToolApprovalHandler? ToolApprovalHandler)
-    : ChatTurnRequest(ConversationId, WorkspaceRoot, Agent, Messages)
+    IToolApprovalHandler? ToolApprovalHandler,
+    DirectTurnExecutionContext ExecutionContext)
+    : ChatTurnRequest(TurnId, ConversationId, WorkspaceRoot, Agent, Messages)
 {
     public override AgentExecutionMode Mode => AgentExecutionMode.Direct;
 }

@@ -6,14 +6,21 @@ namespace SelfClaw.Desktop.Services.Runtime;
 /// <summary>Per-turn reduction state shared across the events of a single <c>StreamTurnAsync</c> call.</summary>
 internal sealed class AgentTurnState
 {
-    public AgentTurnState(AgentRuntimeDefinition agent)
+    public AgentTurnState(Guid turnId, AgentRuntimeDefinition agent)
     {
-        AssistantMessageId = Guid.NewGuid();
+        ArgumentNullException.ThrowIfNull(agent);
+
+        if (turnId == Guid.Empty)
+        {
+            throw new ArgumentException("Turn id cannot be empty.", nameof(turnId));
+        }
+
+        TurnId = turnId;
         AgentName = agent.Name;
         AgentRole = "Agent";
     }
 
-    public Guid AssistantMessageId { get; }
+    public Guid TurnId { get; }
 
     public string AgentName { get; }
 
@@ -29,7 +36,7 @@ internal sealed class AgentTurnState
 
     public bool Completed { get; set; }
 
-    public DesktopTurnFinalizationRequest? PendingFinalization { get; set; }
+    public RecordedTurnFinalizationRequest? PendingFinalization { get; set; }
 
     public Dictionary<string, ToolExecutionRecord> ToolRunsByCallId { get; } = new(StringComparer.Ordinal);
 }

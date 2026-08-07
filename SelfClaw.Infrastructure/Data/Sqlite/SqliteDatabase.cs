@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 22;
+    private const int CurrentSchemaVersion = 23;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -142,7 +142,11 @@ CREATE TABLE IF NOT EXISTS conversations (
     channel_display_name TEXT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
+    kind INTEGER NOT NULL DEFAULT 0,
+    parent_conversation_id TEXT NULL,
+    CHECK((kind = 0 AND parent_conversation_id IS NULL) OR (kind = 1 AND parent_conversation_id IS NOT NULL)),
+    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL,
+    FOREIGN KEY(parent_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken);
 
             await EnsureColumnExistsAsync(
@@ -365,6 +369,62 @@ CREATE TABLE IF NOT EXISTS cli_agent_sessions (
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken);
 
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS subagent_tasks (
+    id TEXT NOT NULL PRIMARY KEY,
+    parent_conversation_id TEXT NOT NULL,
+    parent_turn_id TEXT NOT NULL,
+    child_conversation_id TEXT NOT NULL UNIQUE,
+    child_turn_id TEXT NOT NULL UNIQUE,
+    subagent_id TEXT NOT NULL,
+    subagent_name TEXT NOT NULL,
+    task_text TEXT NOT NULL,
+    status INTEGER NOT NULL CHECK(status BETWEEN 0 AND 5),
+    attempt INTEGER NOT NULL DEFAULT 1 CHECK(attempt >= 1),
+    retry_of_task_id TEXT NULL,
+    definition_snapshot_json TEXT NOT NULL,
+    parent_execution_snapshot_json TEXT NOT NULL,
+    resolved_model_profile_id TEXT NULL,
+    max_run_seconds INTEGER NOT NULL CHECK(max_run_seconds BETWEEN 30 AND 3600),
+    final_text TEXT NULL,
+    input_tokens INTEGER NULL,
+    output_tokens INTEGER NULL,
+    error_code TEXT NULL,
+    error_message TEXT NULL,
+    cancel_requested_at_utc TEXT NULL,
+    queued_at_utc TEXT NOT NULL,
+    started_at_utc TEXT NULL,
+    completed_at_utc TEXT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    FOREIGN KEY(parent_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY(child_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY(retry_of_task_id) REFERENCES subagent_tasks(id) ON DELETE SET NULL
+);", cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS subagent_deliveries (
+    id TEXT NOT NULL PRIMARY KEY,
+    task_id TEXT NOT NULL UNIQUE,
+    parent_conversation_id TEXT NOT NULL,
+    parent_turn_id TEXT NOT NULL,
+    status INTEGER NOT NULL CHECK(status BETWEEN 0 AND 3),
+    envelope_json TEXT NOT NULL,
+    envelope_bytes INTEGER NOT NULL CHECK(envelope_bytes BETWEEN 0 AND 32768),
+    lease_token TEXT NULL,
+    leased_until_utc TEXT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count BETWEEN 0 AND 3),
+    next_attempt_at_utc TEXT NOT NULL,
+    continuation_turn_id TEXT NULL,
+    last_error TEXT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    delivered_at_utc TEXT NULL,
+    dead_lettered_at_utc TEXT NULL,
+    FOREIGN KEY(task_id) REFERENCES subagent_tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY(parent_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);", cancellationToken);
+
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_conversations_updated ON conversations(updated_at_utc DESC);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_message_attachments_message ON message_attachments(message_id, created_at_utc);", cancellationToken);
@@ -372,6 +432,12 @@ CREATE TABLE IF NOT EXISTS cli_agent_sessions (
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_ai_provider_connections_kind ON ai_provider_connections(provider_kind);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_ai_model_profiles_connection ON ai_model_profiles(provider_connection_id);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_ai_model_profiles_updated ON ai_model_profiles(updated_at_utc DESC);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_tasks_queue ON subagent_tasks(status, queued_at_utc, id);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_tasks_parent_status ON subagent_tasks(parent_conversation_id, status);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_tasks_parent_turn ON subagent_tasks(parent_turn_id, created_at_utc);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_deliveries_ready ON subagent_deliveries(status, next_attempt_at_utc, created_at_utc);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_deliveries_parent_turn ON subagent_deliveries(parent_conversation_id, parent_turn_id, status, created_at_utc);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_deliveries_lease ON subagent_deliveries(status, leased_until_utc);", cancellationToken);
             for (var version = 1; version <= CurrentSchemaVersion; version++)
             {
                 await ExecuteAsync(
@@ -461,15 +527,21 @@ CREATE TABLE conversations_new (
     channel_display_name TEXT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
+    kind INTEGER NOT NULL DEFAULT 0,
+    parent_conversation_id TEXT NULL,
+    CHECK((kind = 0 AND parent_conversation_id IS NULL) OR (kind = 1 AND parent_conversation_id IS NOT NULL)),
+    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL,
+    FOREIGN KEY(parent_conversation_id) REFERENCES conversations_new(id) ON DELETE CASCADE
 );", cancellationToken);
             await ExecuteAsync(connection, @"
 INSERT INTO conversations_new(
     id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
-    channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc)
+    channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc,
+    kind, parent_conversation_id)
 SELECT
     id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
-    channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc
+    channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc,
+    0, NULL
 FROM conversations;", cancellationToken);
             await ExecuteAsync(connection, "DROP TABLE conversations;", cancellationToken);
             await ExecuteAsync(connection, "ALTER TABLE conversations_new RENAME TO conversations;", cancellationToken);

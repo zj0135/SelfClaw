@@ -11,7 +11,9 @@ public sealed record ConversationRecord(
     DateTimeOffset UpdatedAtUtc,
     string? ChannelKind = null,
     string? ChannelConversationId = null,
-    string? ChannelDisplayName = null)
+    string? ChannelDisplayName = null,
+    ConversationKind Kind = ConversationKind.Interactive,
+    Guid? ParentConversationId = null)
 {
     public ConversationRecord(
         Guid id,

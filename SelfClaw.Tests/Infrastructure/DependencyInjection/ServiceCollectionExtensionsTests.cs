@@ -6,6 +6,8 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure;
 using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Infrastructure.Agents.Subagents.Abstractions;
+using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
@@ -38,14 +40,16 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         var runtime = provider.GetRequiredService<IAgentChatRuntime>();
         var request = new DirectChatTurnRequest(
             Guid.NewGuid(),
+            Guid.NewGuid(),
             WorkspaceRoot: null,
             new AgentRuntimeDefinition(
                 "direct", "Direct", "test", AgentExecutionMode.Direct,
-                AgentRuntimeDefinition.SystemToolPolicy, [], [], [], ""),
+                AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], ""),
             Messages: [],
             ModelProfileId: null,
             ToolPermissionMode.RequireApproval,
-            ToolApprovalHandler: null);
+            ToolApprovalHandler: null,
+            new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));
 
         var events = new List<AgentStreamEvent>();
         await foreach (var streamEvent in runtime.StreamTurnAsync(request))
@@ -73,6 +77,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         var packageRepository = provider.GetRequiredService<IExtensionPackageRepository>();
         var mcpServerRepository = provider.GetRequiredService<IMcpServerRepository>();
         var extensionSettingsService = provider.GetRequiredService<IExtensionSettingsService>();
+        var subagentTaskRepository = provider.GetRequiredService<ISubagentTaskRepository>();
         var runtime = provider.GetRequiredService<IAgentChatRuntime>();
         var adapters = provider.GetServices<IAiProviderAdapter>().ToArray();
         var registry = provider.GetRequiredService<IAiProviderRegistry>();
@@ -83,6 +88,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         packageRepository.Should().BeOfType<SqliteExtensionRepository>();
         mcpServerRepository.Should().BeSameAs(packageRepository);
         extensionSettingsService.Should().NotBeNull();
+        subagentTaskRepository.Should().BeOfType<SqliteSubagentTaskRepository>();
         runtime.Should().BeOfType<DispatchingAgentChatRuntime>();
         adapters.Select(adapter => adapter.ProviderKind).Should().BeEquivalentTo(new[]
         {

@@ -47,6 +47,7 @@ public sealed partial class MainWindowViewModel
             agent.PluginIds.ToArray(),
             agent.SkillIds.ToArray(),
             agent.McpServerIds.ToArray(),
+            agent.SubagentIds.ToArray(),
             agent.Instructions);
     }
 

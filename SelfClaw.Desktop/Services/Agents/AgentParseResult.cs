@@ -12,5 +12,6 @@ internal sealed record AgentParseResult(
     IReadOnlyList<string> DisabledSkillIds,
     IReadOnlyList<string> McpServerIds,
     IReadOnlyList<string> DisabledMcpServerIds,
+    IReadOnlyList<string> SubagentIds,
     string Instructions,
     IReadOnlyList<string> Warnings);

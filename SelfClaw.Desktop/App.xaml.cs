@@ -60,12 +60,14 @@ public partial class App : System.Windows.Application
             builder.Services.AddSerilog(Log.Logger, dispose: false);
             builder.Services.AddSelfClawInfrastructure(_storagePaths);
             builder.Services.AddSingleton<DesktopAgentDefinitionService>();
+            builder.Services.AddSingleton<SubagentDefinitionCatalog>();
             builder.Services.AddSingleton<DesktopSettingsJsonStore>();
             builder.Services.AddSingleton<DesktopToolApprovalHandler>();
             builder.Services.AddSingleton<AgentActivityCoordinator>();
             builder.Services.AddSingleton<DesktopNotificationService>();
             builder.Services.AddSingleton<DesktopNotificationActivationService>();
             builder.Services.AddSingleton<DesktopTurnFinalizer>();
+            builder.Services.AddSingleton<ConversationTurnRecorder>();
             builder.Services.AddSingleton<IConversationCompletionNotifier, ConversationCompletionNotifier>();
             builder.Services.AddSingleton<ConversationTurnEngine>();
             builder.Services.AddSingleton<TranscriptProjection>();

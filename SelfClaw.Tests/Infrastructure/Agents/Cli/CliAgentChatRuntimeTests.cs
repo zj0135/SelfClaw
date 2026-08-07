@@ -176,9 +176,11 @@ public sealed class CliAgentChatRuntimeTests
             [],
             [],
             [],
+            [],
             instructions);
 
         return new CliChatTurnRequest(
+            Guid.NewGuid(),
             conversationId,
             WorkspaceRoot: null,
             agent,

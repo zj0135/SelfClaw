@@ -9,6 +9,7 @@ namespace SelfClaw.Core.Runtime;
 /// permissions) and are absent by construction.
 /// </summary>
 public sealed record CliChatTurnRequest(
+    Guid TurnId,
     Guid ConversationId,
     WorkspaceRoot? WorkspaceRoot,
     AgentRuntimeDefinition Agent,
@@ -16,7 +17,7 @@ public sealed record CliChatTurnRequest(
     CliAgentKind? CliAgent,
     string? CliModel,
     string? CliReasoningEffort)
-    : ChatTurnRequest(ConversationId, WorkspaceRoot, Agent, Messages)
+    : ChatTurnRequest(TurnId, ConversationId, WorkspaceRoot, Agent, Messages)
 {
     public override AgentExecutionMode Mode => AgentExecutionMode.Cli;
 }

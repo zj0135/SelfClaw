@@ -58,7 +58,9 @@ internal static class SqliteMappings
             ReadDateTimeOffset(reader, 10),
             reader.IsDBNull(6) ? null : reader.GetString(6),
             reader.IsDBNull(7) ? null : reader.GetString(7),
-            reader.IsDBNull(8) ? null : reader.GetString(8));
+            reader.IsDBNull(8) ? null : reader.GetString(8),
+            (ConversationKind)reader.GetInt32(11),
+            reader.IsDBNull(12) ? null : ReadGuid(reader, 12));
 
     public static MessageRecord ReadMessage(SqliteDataReader reader)
         => new(

@@ -156,9 +156,10 @@ public sealed class DispatchingAgentChatRuntimeTests
     {
         var agent = new AgentRuntimeDefinition(
             "test", "Test", "test", mode,
-            AgentRuntimeDefinition.SystemToolPolicy, [], [], [], "");
+            AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], "");
         return mode == AgentExecutionMode.Cli
             ? new CliChatTurnRequest(
+                Guid.NewGuid(),
                 Guid.NewGuid(),
                 WorkspaceRoot: null,
                 agent,
@@ -168,12 +169,14 @@ public sealed class DispatchingAgentChatRuntimeTests
                 CliReasoningEffort: null)
             : new DirectChatTurnRequest(
                 Guid.NewGuid(),
+                Guid.NewGuid(),
                 WorkspaceRoot: null,
                 agent,
                 Messages: [],
                 ModelProfileId: null,
                 ToolPermissionMode.RequireApproval,
-                ToolApprovalHandler: null);
+                ToolApprovalHandler: null,
+                new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));
     }
 
     private static async Task<List<AgentStreamEvent>> CollectAsync(IAsyncEnumerable<AgentStreamEvent> events)

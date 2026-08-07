@@ -19,42 +19,45 @@ public sealed class SqliteConversationRepository : IConversationRepository, ITur
 
     public async Task<IReadOnlyList<ConversationRecord>> ListConversationsAsync(CancellationToken cancellationToken = default)
     {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
-        return await ReadConversationsAsync(connection, cancellationToken);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadConversationsAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<ConversationRecord?> GetConversationAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 SELECT id, title, workspace_root_id, mode, tool_permission_mode,
        agent_id, channel_kind, channel_conversation_id, channel_display_name,
-       created_at_utc, updated_at_utc
+       created_at_utc, updated_at_utc, kind, parent_conversation_id
 FROM conversations
 WHERE id = $id
 LIMIT 1;";
         command.Parameters.AddWithValue("$id", conversationId.ToString("D"));
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken)
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
             ? SqliteMappings.ReadConversation(reader)
             : null;
     }
 
     public async Task<ConversationRecord> UpsertConversationAsync(ConversationRecord conversation, CancellationToken cancellationToken = default)
     {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        ArgumentNullException.ThrowIfNull(conversation);
+        ValidateConversationOwnership(conversation);
+
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 INSERT INTO conversations(
     id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
     channel_kind, channel_conversation_id, channel_display_name,
-    created_at_utc, updated_at_utc)
+    created_at_utc, updated_at_utc, kind, parent_conversation_id)
 VALUES(
     $id, $title, $workspaceRootId, $mode, $toolPermissionMode, $agentId,
     $channelKind, $channelConversationId, $channelDisplayName,
-    $createdAt, $updatedAt)
+    $createdAt, $updatedAt, $kind, $parentConversationId)
 ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     workspace_root_id = excluded.workspace_root_id,
@@ -64,6 +67,8 @@ ON CONFLICT(id) DO UPDATE SET
     channel_kind = excluded.channel_kind,
     channel_conversation_id = excluded.channel_conversation_id,
     channel_display_name = excluded.channel_display_name,
+    kind = excluded.kind,
+    parent_conversation_id = excluded.parent_conversation_id,
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", conversation.Id.ToString("D"));
         command.Parameters.AddWithValue("$title", conversation.Title);
@@ -76,7 +81,11 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$channelDisplayName", conversation.ChannelDisplayName ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$createdAt", conversation.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", conversation.UpdatedAtUtc.ToString("O"));
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        command.Parameters.AddWithValue("$kind", (int)conversation.Kind);
+        command.Parameters.AddWithValue(
+            "$parentConversationId",
+            conversation.ParentConversationId?.ToString("D") ?? (object)DBNull.Value);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         return conversation;
     }
 
@@ -424,17 +433,35 @@ ON CONFLICT(id) DO UPDATE SET
         command.CommandText = @"
 SELECT id, title, workspace_root_id, mode, tool_permission_mode,
        agent_id, channel_kind, channel_conversation_id, channel_display_name,
-       created_at_utc, updated_at_utc
+       created_at_utc, updated_at_utc, kind, parent_conversation_id
 FROM conversations
+WHERE kind = $interactiveKind
 ORDER BY updated_at_utc DESC;";
+        command.Parameters.AddWithValue("$interactiveKind", (int)ConversationKind.Interactive);
 
         var results = new List<ConversationRecord>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             results.Add(SqliteMappings.ReadConversation(reader));
         }
 
         return results;
+    }
+
+    private static void ValidateConversationOwnership(ConversationRecord conversation)
+    {
+        var valid = conversation.Kind switch
+        {
+            ConversationKind.Interactive => conversation.ParentConversationId is null,
+            ConversationKind.Subagent => conversation.ParentConversationId is not null,
+            _ => false
+        };
+        if (!valid)
+        {
+            throw new ArgumentException(
+                "Interactive conversations cannot have a parent and Subagent conversations require one.",
+                nameof(conversation));
+        }
     }
 }
