@@ -1,19 +1,26 @@
 using Microsoft.Data.Sqlite;
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
-using SelfClaw.Infrastructure.Agents.Subagents.Abstractions;
-using SelfClaw.Infrastructure.Agents.Subagents.Models;
+using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
+using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
 namespace SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 
-internal sealed class SqliteSubagentTaskRepository : ISubagentTaskRepository
+internal sealed class SqliteSubagentTaskRepository : ISubagentTaskStore, ISubagentTaskExecutionStore
 {
     private const int MaxTasksPerParentTurn = 8;
+    private const int MaxRunningTasks = 4;
+    private const int MaxRunningTasksPerParent = 3;
     private readonly SqliteDatabase _database;
+    private readonly SubagentCompletionEnvelopeFactory _envelopeFactory;
 
-    public SqliteSubagentTaskRepository(SqliteDatabase database)
+    public SqliteSubagentTaskRepository(
+        SqliteDatabase database,
+        SubagentCompletionEnvelopeFactory envelopeFactory)
     {
         _database = database;
+        _envelopeFactory = envelopeFactory;
     }
 
     public Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -27,8 +34,7 @@ internal sealed class SqliteSubagentTaskRepository : ISubagentTaskRepository
         ValidateCreation(creation);
 
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        var sqliteTransaction = (SqliteTransaction)transaction;
+        await using var sqliteTransaction = connection.BeginTransaction(deferred: false);
         try
         {
             await EnsureInteractiveParentExistsAsync(
@@ -41,6 +47,11 @@ internal sealed class SqliteSubagentTaskRepository : ISubagentTaskRepository
                 sqliteTransaction,
                 creation.Task.ParentConversationId,
                 creation.Task.ParentTurnId,
+                cancellationToken).ConfigureAwait(false);
+            await ValidateRetryLineageAsync(
+                connection,
+                sqliteTransaction,
+                creation.Task,
                 cancellationToken).ConfigureAwait(false);
             await InsertChildConversationAsync(
                 connection,
@@ -57,12 +68,47 @@ internal sealed class SqliteSubagentTaskRepository : ISubagentTaskRepository
                 sqliteTransaction,
                 creation.Task,
                 cancellationToken).ConfigureAwait(false);
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            return creation.Task;
+            var createdTask = creation.Task;
+            if (creation.InitialCompletion is SubagentTaskCompletion initialCompletion)
+            {
+                ValidateCompletion(initialCompletion, SubagentTaskStatus.Queued);
+                ValidateFinalizationOwnership(creation.Task, initialCompletion.TurnFinalization);
+                if (!await SqliteTurnFinalizationWriter.TryWriteAsync(
+                        connection,
+                        sqliteTransaction,
+                        initialCompletion.TurnFinalization,
+                        cancellationToken)
+                    .ConfigureAwait(false))
+                {
+                    throw new InvalidOperationException("The initial Subagent terminal state could not be recorded.");
+                }
+
+                createdTask = CreateTerminalTask(creation.Task, initialCompletion);
+                if (!await TryUpdateTerminalTaskAsync(
+                        connection,
+                        sqliteTransaction,
+                        createdTask,
+                        SubagentTaskStatus.Queued,
+                        cancellationToken)
+                    .ConfigureAwait(false))
+                {
+                    throw new InvalidOperationException("The initial Subagent terminal state was not accepted.");
+                }
+
+                await InsertDeliveryAsync(
+                        connection,
+                        sqliteTransaction,
+                        _envelopeFactory.Create(createdTask),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            await sqliteTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return createdTask;
         }
         catch
         {
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            await sqliteTransaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
     }
@@ -99,6 +145,24 @@ internal sealed class SqliteSubagentTaskRepository : ISubagentTaskRepository
         return tasks;
     }
 
+    public async Task<IReadOnlyList<SubagentTaskRecord>> ListByStatusAsync(
+        SubagentTaskStatus status,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = CreateTaskSelectCommand(connection);
+        command.CommandText += " WHERE status = $status ORDER BY queued_at_utc, id;";
+        command.Parameters.AddWithValue("$status", (int)status);
+        var tasks = new List<SubagentTaskRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            tasks.Add(ReadTask(reader));
+        }
+
+        return tasks;
+    }
+
     public async Task<SubagentDeliveryRecord?> GetDeliveryAsync(
         Guid parentConversationId,
         Guid taskId,
@@ -117,6 +181,143 @@ LIMIT 1;";
         command.Parameters.AddWithValue("$taskId", taskId.ToString("D"));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadDelivery(reader) : null;
+    }
+
+    public async Task<SubagentTaskRecord?> TryClaimNextAsync(
+        DateTimeOffset startedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var task = await ReadClaimCandidateAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        if (task is null)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = @"
+UPDATE subagent_tasks
+SET status = $running, started_at_utc = $startedAt, updated_at_utc = $startedAt
+WHERE id = $taskId AND status = $queued;";
+        command.Parameters.AddWithValue("$running", (int)SubagentTaskStatus.Running);
+        command.Parameters.AddWithValue("$startedAt", startedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$taskId", task.Id.ToString("D"));
+        command.Parameters.AddWithValue("$queued", (int)SubagentTaskStatus.Queued);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return task with
+        {
+            Status = SubagentTaskStatus.Running,
+            StartedAtUtc = startedAtUtc,
+            UpdatedAtUtc = startedAtUtc
+        };
+    }
+
+    public async Task<SubagentTaskRecord?> RequestCancellationAsync(
+        Guid parentConversationId,
+        Guid taskId,
+        DateTimeOffset requestedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var task = await ReadTaskAsync(
+                connection,
+                transaction,
+                parentConversationId,
+                taskId,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (task is null || task.Status != SubagentTaskStatus.Running)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return task;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = @"
+UPDATE subagent_tasks
+SET cancel_requested_at_utc = COALESCE(cancel_requested_at_utc, $requestedAt),
+    updated_at_utc = $requestedAt
+WHERE id = $taskId AND status = $running;";
+        command.Parameters.AddWithValue("$requestedAt", requestedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$taskId", taskId.ToString("D"));
+        command.Parameters.AddWithValue("$running", (int)SubagentTaskStatus.Running);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return task with
+        {
+            CancelRequestedAtUtc = task.CancelRequestedAtUtc ?? requestedAtUtc,
+            UpdatedAtUtc = requestedAtUtc
+        };
+    }
+
+    public async Task<SubagentTaskRecord?> TryCompleteAsync(
+        Guid taskId,
+        SubagentTaskStatus expectedStatus,
+        SubagentTaskCompletion completion,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(completion);
+        ValidateCompletion(completion, expectedStatus);
+
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var task = await ReadTaskAsync(connection, transaction, taskId, cancellationToken).ConfigureAwait(false);
+        if (task is null || task.Status != expectedStatus)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        ValidateFinalizationOwnership(task, completion.TurnFinalization);
+        var finalizationWritten = await SqliteTurnFinalizationWriter.TryWriteAsync(
+                connection,
+                transaction,
+                completion.TurnFinalization,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (!finalizationWritten)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        var terminal = CreateTerminalTask(task, completion);
+        if (!await TryUpdateTerminalTaskAsync(
+                connection,
+                transaction,
+                terminal,
+                expectedStatus,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        await InsertDeliveryAsync(
+                connection,
+                transaction,
+                _envelopeFactory.Create(terminal),
+                cancellationToken)
+            .ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return terminal;
     }
 
     private static void ValidateCreation(SubagentTaskCreation creation)
@@ -177,6 +378,45 @@ WHERE parent_conversation_id = $parentConversationId AND parent_turn_id = $paren
         if (count >= MaxTasksPerParentTurn)
         {
             throw new InvalidOperationException("A parent turn cannot create more than 8 Subagent tasks.");
+        }
+    }
+
+    private static async Task ValidateRetryLineageAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        SubagentTaskRecord task,
+        CancellationToken cancellationToken)
+    {
+        if (task.RetryOfTaskId is not Guid retryOfTaskId)
+        {
+            if (task.Attempt != 1)
+            {
+                throw new InvalidOperationException("An initial Subagent task must use attempt 1.");
+            }
+
+            return;
+        }
+
+        var previous = await ReadTaskAsync(connection, transaction, retryOfTaskId, cancellationToken)
+            .ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The retried Subagent task does not exist.");
+        var valid = IsTerminal(previous.Status) &&
+                    task.ParentConversationId == previous.ParentConversationId &&
+                    task.Attempt == previous.Attempt + 1 &&
+                    string.Equals(task.SubagentId, previous.SubagentId, StringComparison.Ordinal) &&
+                    string.Equals(task.SubagentName, previous.SubagentName, StringComparison.Ordinal) &&
+                    string.Equals(task.TaskText, previous.TaskText, StringComparison.Ordinal) &&
+                    string.Equals(task.DefinitionSnapshotJson, previous.DefinitionSnapshotJson, StringComparison.Ordinal) &&
+                    string.Equals(
+                        task.ParentExecutionSnapshotJson,
+                        previous.ParentExecutionSnapshotJson,
+                        StringComparison.Ordinal) &&
+                    task.ResolvedModelProfileId == previous.ResolvedModelProfileId &&
+                    task.MaxRunSeconds == previous.MaxRunSeconds;
+        if (!valid)
+        {
+            throw new InvalidOperationException(
+                "A Subagent retry must copy the terminal task's ownership, snapshots, model and task text.");
         }
     }
 
@@ -272,9 +512,199 @@ VALUES(
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static SqliteCommand CreateTaskSelectCommand(SqliteConnection connection)
+    private static async Task<SubagentTaskRecord?> ReadClaimCandidateAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = CreateTaskSelectCommand(connection, transaction);
+        command.CommandText += @"
+ WHERE status = $queued
+   AND (SELECT COUNT(*) FROM subagent_tasks WHERE status = $running) < $globalLimit
+   AND (
+       SELECT COUNT(*)
+       FROM subagent_tasks running_tasks
+       WHERE running_tasks.status = $running
+         AND running_tasks.parent_conversation_id = subagent_tasks.parent_conversation_id
+   ) < $parentLimit
+ ORDER BY queued_at_utc, id
+ LIMIT 1;";
+        command.Parameters.AddWithValue("$queued", (int)SubagentTaskStatus.Queued);
+        command.Parameters.AddWithValue("$running", (int)SubagentTaskStatus.Running);
+        command.Parameters.AddWithValue("$globalLimit", MaxRunningTasks);
+        command.Parameters.AddWithValue("$parentLimit", MaxRunningTasksPerParent);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadTask(reader) : null;
+    }
+
+    private static async Task<SubagentTaskRecord?> ReadTaskAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid taskId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = CreateTaskSelectCommand(connection, transaction);
+        command.CommandText += " WHERE id = $taskId LIMIT 1;";
+        command.Parameters.AddWithValue("$taskId", taskId.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadTask(reader) : null;
+    }
+
+    private static async Task<SubagentTaskRecord?> ReadTaskAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid parentConversationId,
+        Guid taskId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = CreateTaskSelectCommand(connection, transaction);
+        command.CommandText += " WHERE parent_conversation_id = $parentConversationId AND id = $taskId LIMIT 1;";
+        command.Parameters.AddWithValue("$parentConversationId", parentConversationId.ToString("D"));
+        command.Parameters.AddWithValue("$taskId", taskId.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadTask(reader) : null;
+    }
+
+    private static async Task<bool> TryUpdateTerminalTaskAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        SubagentTaskRecord task,
+        SubagentTaskStatus expectedStatus,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = @"
+UPDATE subagent_tasks
+SET status = $status,
+    final_text = $finalText,
+    input_tokens = $inputTokens,
+    output_tokens = $outputTokens,
+    error_code = $errorCode,
+    error_message = $errorMessage,
+    completed_at_utc = $completedAt,
+    updated_at_utc = $updatedAt
+WHERE id = $taskId AND status = $expectedStatus;";
+        command.Parameters.AddWithValue("$status", (int)task.Status);
+        command.Parameters.AddWithValue("$finalText", task.FinalText ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$inputTokens", task.InputTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$outputTokens", task.OutputTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$errorCode", task.ErrorCode ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$errorMessage", task.ErrorMessage ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$completedAt", task.CompletedAtUtc?.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$updatedAt", task.UpdatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$taskId", task.Id.ToString("D"));
+        command.Parameters.AddWithValue("$expectedStatus", (int)expectedStatus);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
+    }
+
+    private static async Task InsertDeliveryAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        SubagentDeliveryRecord delivery,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = @"
+INSERT INTO subagent_deliveries(
+    id, task_id, parent_conversation_id, parent_turn_id, status, envelope_json, envelope_bytes,
+    lease_token, leased_until_utc, attempt_count, next_attempt_at_utc, continuation_turn_id,
+    last_error, created_at_utc, updated_at_utc, delivered_at_utc, dead_lettered_at_utc)
+VALUES(
+    $id, $taskId, $parentConversationId, $parentTurnId, $status, $envelopeJson, $envelopeBytes,
+    $leaseToken, $leasedUntil, $attemptCount, $nextAttemptAt, $continuationTurnId,
+    $lastError, $createdAt, $updatedAt, $deliveredAt, $deadLetteredAt);";
+        command.Parameters.AddWithValue("$id", delivery.Id.ToString("D"));
+        command.Parameters.AddWithValue("$taskId", delivery.TaskId.ToString("D"));
+        command.Parameters.AddWithValue("$parentConversationId", delivery.ParentConversationId.ToString("D"));
+        command.Parameters.AddWithValue("$parentTurnId", delivery.ParentTurnId.ToString("D"));
+        command.Parameters.AddWithValue("$status", (int)delivery.Status);
+        command.Parameters.AddWithValue("$envelopeJson", delivery.EnvelopeJson);
+        command.Parameters.AddWithValue("$envelopeBytes", delivery.EnvelopeBytes);
+        command.Parameters.AddWithValue("$leaseToken", delivery.LeaseToken?.ToString("D") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$leasedUntil", delivery.LeasedUntilUtc?.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$attemptCount", delivery.AttemptCount);
+        command.Parameters.AddWithValue("$nextAttemptAt", delivery.NextAttemptAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$continuationTurnId", delivery.ContinuationTurnId?.ToString("D") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$lastError", delivery.LastError ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$createdAt", delivery.CreatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$updatedAt", delivery.UpdatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$deliveredAt", delivery.DeliveredAtUtc?.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$deadLetteredAt", delivery.DeadLetteredAtUtc?.ToString("O") ?? (object)DBNull.Value);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static SubagentTaskRecord CreateTerminalTask(
+        SubagentTaskRecord task,
+        SubagentTaskCompletion completion)
+        => task with
+        {
+            Status = completion.Status,
+            FinalText = completion.FinalText,
+            InputTokens = completion.TurnFinalization.AssistantMessage.InputTokens,
+            OutputTokens = completion.TurnFinalization.AssistantMessage.OutputTokens,
+            ErrorCode = completion.ErrorCode,
+            ErrorMessage = completion.ErrorMessage,
+            CompletedAtUtc = completion.CompletedAtUtc,
+            UpdatedAtUtc = completion.CompletedAtUtc
+        };
+
+    private static void ValidateCompletion(
+        SubagentTaskCompletion completion,
+        SubagentTaskStatus expectedStatus)
+    {
+        if (expectedStatus is not (SubagentTaskStatus.Queued or SubagentTaskStatus.Running))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(expectedStatus),
+                expectedStatus,
+                "Only an active Subagent task can be completed.");
+        }
+
+        if (completion.Status is not (SubagentTaskStatus.Succeeded
+            or SubagentTaskStatus.Failed
+            or SubagentTaskStatus.Cancelled
+            or SubagentTaskStatus.Interrupted))
+        {
+            throw new ArgumentException("A task completion requires a terminal status.", nameof(completion));
+        }
+
+        var expectedMessageStatus = completion.Status switch
+        {
+            SubagentTaskStatus.Succeeded => MessageStatus.Completed,
+            SubagentTaskStatus.Cancelled => MessageStatus.Cancelled,
+            SubagentTaskStatus.Failed or SubagentTaskStatus.Interrupted => MessageStatus.Failed,
+            _ => throw new ArgumentOutOfRangeException(nameof(completion), completion.Status, null)
+        };
+        if (completion.TurnFinalization.AssistantMessage.Status != expectedMessageStatus)
+        {
+            throw new ArgumentException(
+                "The Subagent task status and assistant terminal status are inconsistent.",
+                nameof(completion));
+        }
+    }
+
+    private static void ValidateFinalizationOwnership(
+        SubagentTaskRecord task,
+        TurnFinalization finalization)
+    {
+        if (finalization.AssistantMessage.Id != task.ChildTurnId ||
+            finalization.AssistantMessage.ConversationId != task.ChildConversationId ||
+            finalization.ToolExecutions.Any(tool => tool.ConversationId != task.ChildConversationId))
+        {
+            throw new ArgumentException(
+                "The turn finalization does not belong to the Subagent task.",
+                nameof(finalization));
+        }
+    }
+
+    private static SqliteCommand CreateTaskSelectCommand(
+        SqliteConnection connection,
+        SqliteTransaction? transaction = null)
     {
         var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = @"
 SELECT id, parent_conversation_id, parent_turn_id, child_conversation_id, child_turn_id,
        subagent_id, subagent_name, task_text, status, attempt, retry_of_task_id,
@@ -386,4 +816,10 @@ FROM subagent_tasks";
 
     private static DateTimeOffset? ReadNullableDateTimeOffset(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : ReadDateTimeOffset(reader, ordinal);
+
+    private static bool IsTerminal(SubagentTaskStatus status)
+        => status is SubagentTaskStatus.Succeeded
+            or SubagentTaskStatus.Failed
+            or SubagentTaskStatus.Cancelled
+            or SubagentTaskStatus.Interrupted;
 }

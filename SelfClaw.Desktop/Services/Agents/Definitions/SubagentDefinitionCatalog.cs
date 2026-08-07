@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Text;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop.Services;
@@ -8,6 +9,8 @@ internal sealed class SubagentDefinitionCatalog
 {
     internal const int DefaultMaxRunSeconds = 900;
     internal const string DefaultToolPolicy = "read-only";
+    private const int MaximumNameBytes = 256;
+    private const int MaximumDescriptionBytes = 4096;
 
     private static readonly HashSet<string> AllowedFields = new(StringComparer.Ordinal)
     {
@@ -90,6 +93,8 @@ internal sealed class SubagentDefinitionCatalog
 
         var name = ReadRequiredScalar(document, "name", diagnostics);
         var description = ReadRequiredScalar(document, "description", diagnostics);
+        ValidateUtf8Length(name, "name", MaximumNameBytes, diagnostics);
+        ValidateUtf8Length(description, "description", MaximumDescriptionBytes, diagnostics);
         var modelProfileId = ParseModelProfileId(document, diagnostics);
         var toolPolicy = ParseToolPolicy(document, diagnostics);
         var pluginIds = ReadIdentifierList(document, "plugins", NormalizeExtensionId, diagnostics);
@@ -286,6 +291,18 @@ internal sealed class SubagentDefinitionCatalog
         => string.IsNullOrWhiteSpace(instructions)
             ? string.Empty
             : instructions.ReplaceLineEndings("\n").Trim();
+
+    private static void ValidateUtf8Length(
+        string value,
+        string field,
+        int maximumBytes,
+        ICollection<string> diagnostics)
+    {
+        if (Encoding.UTF8.GetByteCount(value) > maximumBytes)
+        {
+            diagnostics.Add($"Subagent field '{field}' cannot exceed {maximumBytes} UTF-8 bytes.");
+        }
+    }
 
     private static bool IsValidDefinitionId(string definitionId)
         => definitionId.Length > 0 &&

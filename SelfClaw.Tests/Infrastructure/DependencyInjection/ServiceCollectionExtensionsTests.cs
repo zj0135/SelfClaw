@@ -6,7 +6,6 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure;
 using SelfClaw.Infrastructure.Agents.Runtime;
-using SelfClaw.Infrastructure.Agents.Subagents.Abstractions;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
@@ -77,7 +76,8 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         var packageRepository = provider.GetRequiredService<IExtensionPackageRepository>();
         var mcpServerRepository = provider.GetRequiredService<IMcpServerRepository>();
         var extensionSettingsService = provider.GetRequiredService<IExtensionSettingsService>();
-        var subagentTaskRepository = provider.GetRequiredService<ISubagentTaskRepository>();
+        var subagentTaskRepository = provider.GetRequiredService<ISubagentTaskStore>();
+        var subagentTaskExecutionStore = provider.GetRequiredService<ISubagentTaskExecutionStore>();
         var runtime = provider.GetRequiredService<IAgentChatRuntime>();
         var adapters = provider.GetServices<IAiProviderAdapter>().ToArray();
         var registry = provider.GetRequiredService<IAiProviderRegistry>();
@@ -89,6 +89,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         mcpServerRepository.Should().BeSameAs(packageRepository);
         extensionSettingsService.Should().NotBeNull();
         subagentTaskRepository.Should().BeOfType<SqliteSubagentTaskRepository>();
+        subagentTaskExecutionStore.Should().BeSameAs(subagentTaskRepository);
         runtime.Should().BeOfType<DispatchingAgentChatRuntime>();
         adapters.Select(adapter => adapter.ProviderKind).Should().BeEquivalentTo(new[]
         {

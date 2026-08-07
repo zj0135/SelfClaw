@@ -229,7 +229,8 @@ public sealed class DirectAgentChatRuntimeTests
                 new McpConfigurationResolver(new UnusedSecretProtector(), storagePaths),
                 new UnusedMcpClientManager(),
                 new McpToolAdapter(),
-                new ExtensionStateChangeNotifier()));
+                new ExtensionStateChangeNotifier()),
+            new SelfClaw.Infrastructure.Agents.Subagents.Runtime.SubagentCapabilitySource(null));
     }
 
     private static ChatTurnRequest CreateRequest(Guid? modelProfileId, WorkspaceRoot? workspace = null)

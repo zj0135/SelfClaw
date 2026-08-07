@@ -32,8 +32,8 @@ using SelfClaw.Infrastructure.Tools.Transcript;
 using SelfClaw.Infrastructure.Tools.Workspace;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
-using SelfClaw.Infrastructure.Agents.Subagents.Abstractions;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
+using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 
 namespace SelfClaw.Infrastructure;
 
@@ -52,7 +52,12 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
         services.AddSingleton<ITurnFinalizationRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
-        services.AddSingleton<ISubagentTaskRepository, SqliteSubagentTaskRepository>();
+        services.AddSingleton<SubagentCompletionEnvelopeFactory>();
+        services.AddSingleton<SqliteSubagentTaskRepository>();
+        services.AddSingleton<ISubagentTaskStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteSubagentTaskRepository>());
+        services.AddSingleton<ISubagentTaskExecutionStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteSubagentTaskRepository>());
         services.AddSingleton<IAiProviderRepository, SqliteAiProviderRepository>();
         services.AddSingleton<SqliteExtensionRepository>();
         services.AddSingleton<IExtensionPackageRepository>(serviceProvider =>
@@ -92,6 +97,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SkillCapabilitySource>();
         services.AddSingleton<PluginCapabilitySource>();
         services.AddSingleton<McpCapabilitySource>();
+        services.AddSingleton(serviceProvider => new SubagentCapabilitySource(
+            serviceProvider.GetService<ISubagentTaskCoordinator>()));
         services.AddSingleton<IDirectTurnCapabilityResolver, DirectTurnCapabilityResolver>();
         services.AddSingleton<AiProviderHttpClientProvider>();
         services.AddSingleton<OpenAiModelListClient>();

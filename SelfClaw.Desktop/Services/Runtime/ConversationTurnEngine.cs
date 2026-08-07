@@ -6,6 +6,8 @@ using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Desktop.Services.Runtime;
 
@@ -23,6 +25,7 @@ internal sealed class ConversationTurnEngine : IDisposable
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettings;
+    private readonly IAiProviderSettingsService _aiProviderSettings;
     private readonly IConversationCompletionNotifier _completionNotifier;
     private readonly ILogger<ConversationTurnEngine> _logger;
     private readonly SemaphoreSlim _turnAdmissionGate = new(1, 1);
@@ -37,6 +40,7 @@ internal sealed class ConversationTurnEngine : IDisposable
         AgentActivityCoordinator agentActivityCoordinator,
         DesktopToolApprovalHandler toolApprovalHandler,
         ProgrammingAssistantSettingsService programmingAssistantSettings,
+        IAiProviderSettingsService aiProviderSettings,
         IConversationCompletionNotifier completionNotifier,
         ILogger<ConversationTurnEngine> logger)
     {
@@ -48,6 +52,7 @@ internal sealed class ConversationTurnEngine : IDisposable
         _agentActivityCoordinator = agentActivityCoordinator;
         _toolApprovalHandler = toolApprovalHandler;
         _programmingAssistantSettings = programmingAssistantSettings;
+        _aiProviderSettings = aiProviderSettings;
         _completionNotifier = completionNotifier;
         _logger = logger;
     }
@@ -299,13 +304,19 @@ internal sealed class ConversationTurnEngine : IDisposable
                 cliSelection?.ReasoningEffort);
         }
 
+        var modelProfileId = request.ModelProfileId
+            ?? await _aiProviderSettings.GetDefaultModelAsync(
+                AiModelSelectionScopes.DesktopDefault,
+                cancellationToken)
+            ?? throw new InvalidOperationException(
+                "No default Direct model is selected. Choose a default model in the AI provider settings.");
         return new DirectChatTurnRequest(
             turnId,
             admission.Conversation.Id,
             request.WorkspaceRoot,
             request.Agent,
             messages,
-            request.ModelProfileId,
+            modelProfileId,
             request.ToolPermissionMode,
             _toolApprovalHandler,
             new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));

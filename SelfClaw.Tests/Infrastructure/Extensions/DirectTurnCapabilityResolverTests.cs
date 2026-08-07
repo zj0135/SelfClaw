@@ -83,6 +83,48 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         lease.MessageAdjustments.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("read-only", 4)]
+    [InlineData("none", 0)]
+    public async Task ResolveAsync_applies_child_tool_policy_and_never_adds_delegation_tools(
+        string toolPolicy,
+        int expectedToolCount)
+    {
+        var resolver = CreateResolver(new PackageRepository([]));
+        var now = DateTimeOffset.UtcNow;
+        var request = CreateRequest([], "isolated task") with
+        {
+            WorkspaceRoot = new WorkspaceRoot(Guid.NewGuid(), "Workspace", _rootPath, now, now),
+            Agent = CreateRequest([], "isolated task").Agent with
+            {
+                ToolPolicy = toolPolicy,
+                SubagentIds = ["nested"]
+            },
+            ExecutionContext = new DirectTurnExecutionContext(
+                DirectTurnOrigin.Subagent,
+                new DirectCapabilityCeiling(
+                    AgentRuntimeDefinition.SystemToolPolicy,
+                    [],
+                    [],
+                    [],
+                    ["nested"]),
+                null)
+        };
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        lease.Tools.Should().HaveCount(expectedToolCount);
+        lease.Tools.Select(tool => tool.Name).Should().NotContain(name => name.Contains("subagent"));
+        if (toolPolicy == "read-only")
+        {
+            lease.Tools.Select(tool => tool.Name).Should().Equal(
+                "list_files",
+                "glob_files",
+                "search_text",
+                "read_file");
+        }
+    }
+
     [Fact]
     public async Task ResolveAsync_expands_acknowledged_plugin_instructions_and_namespaced_skills()
     {
@@ -257,7 +299,8 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
                 pluginManifestReader ?? new PluginManifestReader(limits),
                 new SkillPackageReader(limits),
                 pluginVersionLeaseManager ?? new PluginVersionLeaseManager()),
-            mcpSource);
+            mcpSource,
+            new SelfClaw.Infrastructure.Agents.Subagents.Runtime.SubagentCapabilitySource(null));
     }
 
     private McpCapabilitySource CreateMcpSource(

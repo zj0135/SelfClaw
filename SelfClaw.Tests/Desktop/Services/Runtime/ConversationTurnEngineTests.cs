@@ -292,6 +292,7 @@ public sealed class ConversationTurnEngineTests
                 _activityCoordinator,
                 approvalHandler,
                 new ProgrammingAssistantSettingsService(settingsStore),
+                new SelfClaw.Tests.TestDoubles.StubAiProviderSettingsService(),
                 Notifier,
                 NullLogger<ConversationTurnEngine>.Instance);
         }

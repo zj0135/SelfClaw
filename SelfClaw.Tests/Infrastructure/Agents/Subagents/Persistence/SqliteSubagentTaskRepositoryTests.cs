@@ -1,8 +1,8 @@
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
-using SelfClaw.Infrastructure.Agents.Subagents.Models;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
+using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
@@ -148,6 +148,149 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         await action.Should().ThrowAsync<ArgumentException>();
     }
 
+    [Fact]
+    public async Task TryClaimNextAsync_enforces_fifo_global_and_parent_limits()
+    {
+        var context = await CreateContextAsync();
+        var firstParent = CreateParentConversation();
+        var secondParent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(firstParent);
+        await context.Conversations.UpsertConversationAsync(secondParent);
+        var firstParentTasks = new List<SubagentTaskRecord>();
+        for (var index = 0; index < 5; index++)
+        {
+            firstParentTasks.Add(await context.Tasks.CreateAsync(
+                CreateTaskCreation(firstParent, Guid.NewGuid(), $"First {index}")));
+        }
+
+        var secondParentTask = await context.Tasks.CreateAsync(
+            CreateTaskCreation(secondParent, Guid.NewGuid(), "Second"));
+
+        var firstClaim = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
+        var secondClaim = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
+        var thirdClaim = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
+        var fourthClaim = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
+        var blocked = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
+
+        new[] { firstClaim!.Id, secondClaim!.Id, thirdClaim!.Id }
+            .Should().Equal(firstParentTasks.Take(3).Select(task => task.Id));
+        fourthClaim!.Id.Should().Be(secondParentTask.Id);
+        blocked.Should().BeNull("the global running limit is four");
+    }
+
+    [Fact]
+    public async Task TryCompleteAsync_atomically_finalizes_child_task_and_pending_delivery()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var queued = await context.Tasks.CreateAsync(
+            CreateTaskCreation(parent, Guid.NewGuid(), "Review completion."));
+        var running = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
+        var completion = CreateCompletion(
+            running!,
+            SubagentTaskStatus.Succeeded,
+            "pure provider final",
+            "<thinking>private</thinking>pure provider final");
+
+        var terminal = await context.Tasks.TryCompleteAsync(
+            running!.Id,
+            SubagentTaskStatus.Running,
+            completion);
+
+        terminal.Should().NotBeNull();
+        terminal!.Status.Should().Be(SubagentTaskStatus.Succeeded);
+        terminal.FinalText.Should().Be("pure provider final");
+        (await context.Conversations.ListMessagesAsync(queued.ChildConversationId))
+            .Single(message => message.Role == MessageRole.Assistant)
+            .MarkdownContent.Should().Contain("private");
+        var delivery = await context.Tasks.GetDeliveryAsync(parent.Id, queued.Id);
+        delivery.Should().NotBeNull();
+        delivery!.Status.Should().Be(SubagentDeliveryStatus.Pending);
+        delivery.EnvelopeJson.Should().Contain("pure provider final").And.NotContain("private");
+        (await context.Tasks.TryCompleteAsync(
+            running.Id,
+            SubagentTaskStatus.Running,
+            completion)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateAsync_can_atomically_accept_an_initial_failed_task()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var creation = CreateTaskCreation(parent, Guid.NewGuid(), "Missing definition.");
+        creation = creation with
+        {
+            InitialCompletion = CreateCompletion(
+                creation.Task,
+                SubagentTaskStatus.Failed,
+                finalText: null,
+                assistantMarkdown: string.Empty,
+                "DefinitionMissing")
+        };
+
+        var created = await context.Tasks.CreateAsync(creation);
+
+        created.Status.Should().Be(SubagentTaskStatus.Failed);
+        created.ErrorCode.Should().Be("DefinitionMissing");
+        (await context.Tasks.GetDeliveryAsync(parent.Id, created.Id)).Should().NotBeNull();
+        (await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateAsync_rejects_retry_that_changes_the_frozen_snapshot()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var original = await context.Tasks.CreateAsync(
+            CreateTaskCreation(parent, Guid.NewGuid(), "Original." ) with
+            {
+                InitialCompletion = null
+            });
+        var claimed = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
+        _ = await context.Tasks.TryCompleteAsync(
+            claimed!.Id,
+            SubagentTaskStatus.Running,
+            CreateCompletion(claimed, SubagentTaskStatus.Succeeded, "done", "done"));
+        var retry = CreateTaskCreation(parent, Guid.NewGuid(), original.TaskText);
+        retry = retry with
+        {
+            Task = retry.Task with
+            {
+                Attempt = 2,
+                RetryOfTaskId = original.Id,
+                DefinitionSnapshotJson = "{\"changed\":true}"
+            }
+        };
+
+        var action = () => context.Tasks.CreateAsync(retry);
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*must copy*");
+    }
+
+    [Fact]
+    public async Task RequestCancellationAsync_marks_only_an_owned_running_task()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        var other = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        await context.Conversations.UpsertConversationAsync(other);
+        var task = await context.Tasks.CreateAsync(CreateTaskCreation(parent, Guid.NewGuid(), "Cancel me."));
+        _ = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
+        var requestedAt = DateTimeOffset.UtcNow;
+
+        (await context.Tasks.RequestCancellationAsync(other.Id, task.Id, requestedAt)).Should().BeNull();
+        var requested = await context.Tasks.RequestCancellationAsync(parent.Id, task.Id, requestedAt);
+
+        requested.Should().NotBeNull();
+        requested!.Status.Should().Be(SubagentTaskStatus.Running);
+        requested.CancelRequestedAtUtc.Should().Be(requestedAt);
+    }
+
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))
@@ -172,7 +315,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
             Path.Combine(_rootPath, "secrets"));
         var database = new SqliteDatabase(storagePaths);
         var conversations = new SqliteConversationRepository(database);
-        var tasks = new SqliteSubagentTaskRepository(database);
+        var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
         await tasks.InitializeAsync();
         return new TestContext(database, conversations, tasks);
     }
@@ -245,6 +388,40 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
             CreatedAtUtc: now,
             UpdatedAtUtc: now);
         return new SubagentTaskCreation(child, message, task);
+    }
+
+    private static SubagentTaskCompletion CreateCompletion(
+        SubagentTaskRecord task,
+        SubagentTaskStatus status,
+        string? finalText,
+        string assistantMarkdown,
+        string? errorCode = null)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var messageStatus = status switch
+        {
+            SubagentTaskStatus.Succeeded => MessageStatus.Completed,
+            SubagentTaskStatus.Cancelled => MessageStatus.Cancelled,
+            _ => MessageStatus.Failed
+        };
+        var assistant = new MessageRecord(
+            task.ChildTurnId,
+            task.ChildConversationId,
+            MessageRole.Assistant,
+            assistantMarkdown,
+            messageStatus,
+            now,
+            now,
+            InputTokens: 5,
+            OutputTokens: 3,
+            ErrorMessage: errorCode);
+        return new SubagentTaskCompletion(
+            status,
+            new TurnFinalization(assistant, []),
+            finalText,
+            errorCode,
+            errorCode,
+            now);
     }
 
     private static async Task InsertDeliveryAsync(SqliteDatabase database, SubagentTaskRecord task)

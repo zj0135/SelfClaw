@@ -15,7 +15,7 @@ public sealed class DesktopTurnFinalizerTests
         var finalizer = CreateFinalizer(repository);
         var finalization = CreateFinalization();
 
-        var written = await finalizer.TryCommitAsync(finalization);
+        var written = await CommitAsync(finalizer, finalization);
 
         written.Should().BeTrue();
         repository.Calls.Should().ContainSingle().Which.Should().BeSameAs(finalization);
@@ -27,7 +27,7 @@ public sealed class DesktopTurnFinalizerTests
         var repository = new RecordingRepository(failuresBeforeSuccess: 1);
         var finalizer = CreateFinalizer(repository);
 
-        var written = await finalizer.TryCommitAsync(CreateFinalization());
+        var written = await CommitAsync(finalizer, CreateFinalization());
 
         written.Should().BeTrue();
         repository.Attempts.Should().Be(2);
@@ -40,8 +40,8 @@ public sealed class DesktopTurnFinalizerTests
         var finalizer = CreateFinalizer(repository);
         var finalization = CreateFinalization();
 
-        var first = await finalizer.TryCommitAsync(finalization);
-        var second = await finalizer.TryCommitAsync(finalization);
+        var first = await CommitAsync(finalizer, finalization);
+        var second = await CommitAsync(finalizer, finalization);
 
         first.Should().BeTrue();
         second.Should().BeFalse();
@@ -50,6 +50,15 @@ public sealed class DesktopTurnFinalizerTests
 
     private static DesktopTurnFinalizer CreateFinalizer(ITurnFinalizationRepository repository)
         => new(repository, NullLogger<DesktopTurnFinalizer>.Instance);
+
+    private static Task<bool> CommitAsync(
+        DesktopTurnFinalizer finalizer,
+        TurnFinalization finalization)
+        => finalizer.TryCommitAsync(new RecordedTurnCommit(
+            finalization,
+            TurnFinalizationKind.Succeeded,
+            finalization.AssistantMessage.MarkdownContent,
+            ErrorMessage: null));
 
     private static TurnFinalization CreateFinalization()
     {

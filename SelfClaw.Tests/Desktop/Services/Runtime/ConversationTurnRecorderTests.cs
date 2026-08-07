@@ -95,6 +95,45 @@ public sealed class ConversationTurnRecorderTests
         context.Session.Messages.Single().Status.Should().Be(MessageStatus.Completed);
     }
 
+    [Fact]
+    public async Task ApplyEventAsync_reloads_the_persisted_terminal_state_when_the_commit_loses_its_cas()
+    {
+        var context = CreateContext();
+        var now = DateTimeOffset.UtcNow;
+        var persistedMessage = new MessageRecord(
+            context.TurnId,
+            context.Session.ConversationId,
+            MessageRole.Assistant,
+            "persisted winner",
+            MessageStatus.Failed,
+            now,
+            now,
+            ErrorMessage: "already finalized");
+        var persistedTool = new ToolExecutionRecord(
+            Guid.NewGuid(),
+            context.Session.ConversationId,
+            "read_file",
+            "{}",
+            ToolExecutionStatus.Failed,
+            "already finalized",
+            "call-1",
+            1,
+            now,
+            now,
+            MessageId: context.TurnId);
+        context.Repository.MessagesToRead = [persistedMessage];
+        context.Repository.ToolExecutionsToRead = [persistedTool];
+        context.Committer.WriteResult = false;
+
+        context.Recorder.BeginTurn(context.Session, context.Turn);
+        await context.ApplyAsync(new AssistantTextDeltaEvent("text", "losing candidate"));
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "losing candidate"));
+
+        context.Session.Messages.Should().ContainSingle().Which.Should().Be(persistedMessage);
+        context.Session.ToolRuns.Should().ContainSingle().Which.Should().Be(persistedTool);
+        context.Turn.Completed.Should().BeTrue();
+    }
+
     private static RecorderTestContext CreateContext()
     {
         var now = DateTimeOffset.UtcNow;
@@ -158,16 +197,22 @@ public sealed class ConversationTurnRecorderTests
     {
         public List<TurnFinalization> Finalizations { get; } = [];
 
-        public Task<bool> TryCommitAsync(TurnFinalization finalization)
+        public bool WriteResult { get; set; } = true;
+
+        public Task<bool> TryCommitAsync(RecordedTurnCommit commit)
         {
-            Finalizations.Add(finalization);
-            return Task.FromResult(true);
+            Finalizations.Add(commit.Finalization);
+            return Task.FromResult(WriteResult);
         }
     }
 
     private sealed class RecordingConversationRepository : IConversationRepository
     {
         public List<ToolExecutionRecord> ToolUpserts { get; } = [];
+
+        public IReadOnlyList<MessageRecord> MessagesToRead { get; set; } = [];
+
+        public IReadOnlyList<ToolExecutionRecord> ToolExecutionsToRead { get; set; } = [];
 
         public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -193,7 +238,7 @@ public sealed class ConversationTurnRecorderTests
         public Task<IReadOnlyList<MessageRecord>> ListMessagesAsync(
             Guid conversationId,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<MessageRecord>>([]);
+            => Task.FromResult(MessagesToRead);
 
         public Task<MessageRecord> UpsertMessageAsync(
             MessageRecord message,
@@ -203,7 +248,7 @@ public sealed class ConversationTurnRecorderTests
         public Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(
             Guid conversationId,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<ToolExecutionRecord>>([]);
+            => Task.FromResult(ToolExecutionsToRead);
 
         public Task<ToolExecutionRecord> UpsertToolExecutionAsync(
             ToolExecutionRecord record,

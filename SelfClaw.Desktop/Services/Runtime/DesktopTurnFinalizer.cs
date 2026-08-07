@@ -18,9 +18,10 @@ internal sealed class DesktopTurnFinalizer : IRecordedTurnCommitter
         _logger = logger;
     }
 
-    public async Task<bool> TryCommitAsync(TurnFinalization finalization)
+    public async Task<bool> TryCommitAsync(RecordedTurnCommit commit)
     {
-        ArgumentNullException.ThrowIfNull(finalization);
+        ArgumentNullException.ThrowIfNull(commit);
+        var finalization = commit.Finalization;
 
         using var cancellation = new CancellationTokenSource(PersistenceTimeout);
 

@@ -35,7 +35,7 @@ internal sealed class McpCapabilitySource
         _stateChangeNotifier = stateChangeNotifier;
     }
 
-    public async Task<IReadOnlyList<McpClientLease>> AddToolsAsync(
+    public async Task<McpCapabilities> AddToolsAsync(
         DirectChatTurnRequest request,
         ICollection<AITool> tools,
         IDictionary<string, DirectToolDescriptor> descriptors,
@@ -45,7 +45,7 @@ internal sealed class McpCapabilitySource
     {
         if (request.Agent.McpServerIds.Count == 0 && effectivePluginRoots.Count == 0)
         {
-            return [];
+            return new McpCapabilities([], []);
         }
 
         var servers = await _serverRepository.ListMcpServersAsync(cancellationToken).ConfigureAwait(false);
@@ -57,6 +57,7 @@ internal sealed class McpCapabilitySource
             .OrderBy(server => server.Id, StringComparer.Ordinal)
             .ToArray();
         var leases = new List<McpClientLease>();
+        var capabilities = new List<DirectMcpCapability>();
         try
         {
             foreach (var server in effectiveServers)
@@ -73,10 +74,11 @@ internal sealed class McpCapabilitySource
                 if (lease is not null)
                 {
                     leases.Add(lease);
+                    capabilities.Add(new DirectMcpCapability(server.Id, server.ConfigRevision));
                 }
             }
 
-            return leases;
+            return new McpCapabilities(leases, capabilities);
         }
         catch
         {

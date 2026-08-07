@@ -19,6 +19,7 @@ using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Pet;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
+using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.Terminal.Abstractions;
 using SelfClaw.Desktop.Services.Transcript;
@@ -68,6 +69,17 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<DesktopNotificationActivationService>();
             builder.Services.AddSingleton<DesktopTurnFinalizer>();
             builder.Services.AddSingleton<ConversationTurnRecorder>();
+            builder.Services.AddSingleton<SubagentTaskSnapshotSerializer>();
+            builder.Services.AddSingleton<SubagentTaskPreflight>();
+            builder.Services.AddSingleton<SubagentTaskWakeSignal>();
+            builder.Services.AddSingleton<SubagentTaskExecutionRegistry>();
+            builder.Services.AddSingleton<SubagentTaskCoordinator>();
+            builder.Services.AddSingleton<ISubagentTaskCoordinator>(services =>
+                services.GetRequiredService<SubagentTaskCoordinator>());
+            builder.Services.AddSingleton<SubagentTaskExecutor>();
+            builder.Services.AddSingleton<SubagentTaskBackgroundHost>();
+            builder.Services.AddHostedService(services =>
+                services.GetRequiredService<SubagentTaskBackgroundHost>());
             builder.Services.AddSingleton<IConversationCompletionNotifier, ConversationCompletionNotifier>();
             builder.Services.AddSingleton<ConversationTurnEngine>();
             builder.Services.AddSingleton<TranscriptProjection>();
@@ -139,15 +151,14 @@ public partial class App : System.Windows.Application
 
             Log.Information("SelfClaw starting. LogsDirectory={LogsDirectory}", _storagePaths.LogsDirectory);
 
-            await _host.StartAsync();
             await _host.Services.GetRequiredService<IConversationRepository>().InitializeAsync();
             await _host.Services.GetRequiredService<IAiProviderRepository>().InitializeAsync();
             await _host.Services.GetRequiredService<IExtensionPackageRepository>().InitializeAsync();
             await _host.Services.GetRequiredService<IExtensionCatalogReconciler>().ReconcileAsync();
             await _host.Services.GetRequiredService<ProgrammingAssistantSettingsService>().GetOrInitializeAsync();
-            RegisterToastNotifications();
-
             var mainWindow = _host.Services.GetRequiredService<MainWindow>();
+            RegisterToastNotifications();
+            await _host.StartAsync();
             var systemTrayService = _host.Services.GetRequiredService<SystemTrayService>();
             systemTrayService.RegisterMainWindow(mainWindow);
             MainWindow = mainWindow;

@@ -1,8 +1,6 @@
-using SelfClaw.Core.Models;
+namespace SelfClaw.Core.Models;
 
-namespace SelfClaw.Infrastructure.Agents.Subagents.Models;
-
-internal sealed record SubagentTaskRecord(
+public sealed record SubagentTaskRecord(
     Guid Id,
     Guid ParentConversationId,
     Guid ParentTurnId,

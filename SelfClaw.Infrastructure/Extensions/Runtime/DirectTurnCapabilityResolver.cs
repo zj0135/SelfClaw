@@ -4,6 +4,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
 using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Runtime.Models;
@@ -35,19 +36,22 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
     private readonly SkillCapabilitySource _skillSource;
     private readonly PluginCapabilitySource _pluginSource;
     private readonly McpCapabilitySource _mcpSource;
+    private readonly SubagentCapabilitySource _subagentSource;
 
     public DirectTurnCapabilityResolver(
         WorkspaceAgentToolset workspaceToolset,
         IExtensionPackageRepository packageRepository,
         SkillCapabilitySource skillSource,
         PluginCapabilitySource pluginSource,
-        McpCapabilitySource mcpSource)
+        McpCapabilitySource mcpSource,
+        SubagentCapabilitySource subagentSource)
     {
         _workspaceToolset = workspaceToolset;
         _packageRepository = packageRepository;
         _skillSource = skillSource;
         _pluginSource = pluginSource;
         _mcpSource = mcpSource;
+        _subagentSource = subagentSource;
     }
 
     public async Task<DirectTurnCapabilityLease> ResolveAsync(
@@ -76,6 +80,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         var diagnostics = new TurnDiagnostics();
         var (tools, descriptors) = CreateWorkspaceCapabilities(request, diagnostics);
         var packages = await _packageRepository.ListPackagesAsync(cancellationToken).ConfigureAwait(false);
+        ValidateCapturedPackageCeiling(request, packages);
         var installedSkills = packages
             .Where(package => package.Kind == ExtensionKind.Skill)
             .ToDictionary(package => package.Id, StringComparer.OrdinalIgnoreCase);
@@ -109,7 +114,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         var systemInstructions = new List<string>();
         systemInstructions.AddRange(plugins.Instructions);
         systemInstructions.AddRange(skills.Instructions);
-        var mcpLeases = await _mcpSource.AddToolsAsync(
+        var mcpCapabilities = await _mcpSource.AddToolsAsync(
                 request,
                 tools,
                 descriptors,
@@ -117,13 +122,27 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
                 plugins.PluginRoots,
                 cancellationToken)
             .ConfigureAwait(false);
+        EnsureRequiredCapabilitiesResolved(request, plugins, skills, mcpCapabilities);
+        var effectiveCeiling = CreateEffectiveCeiling(
+            request,
+            packages,
+            plugins,
+            skills,
+            mcpCapabilities);
+        foreach (var (tool, descriptor) in _subagentSource.CreateTools(request, effectiveCeiling))
+        {
+            tools.Add(tool);
+            descriptors.Add(descriptor.ProviderName, descriptor);
+        }
+
+        ApplyExecutionToolPolicy(request, tools, descriptors);
         if (diagnostics.Degradations.Count > 0)
         {
             systemInstructions.Add(CapabilitySections.Degradation(diagnostics.Degradations));
         }
 
         // The policy only earns its tokens once something extension-provided is actually in play.
-        if (systemInstructions.Count > 0 || mcpLeases.Count > 0)
+        if (systemInstructions.Count > 0 || mcpCapabilities.Leases.Count > 0)
         {
             systemInstructions.Insert(0, CapabilitySections.Policy);
         }
@@ -134,16 +153,14 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             descriptors,
             skills.MessageAdjustments,
             diagnostics.Messages,
-            () => DisposeCapabilityLeasesAsync(mcpLeases, pluginLeases));
+            () => DisposeCapabilityLeasesAsync(mcpCapabilities.Leases, pluginLeases));
     }
 
     private (List<AITool> Tools, Dictionary<string, DirectToolDescriptor> Descriptors) CreateWorkspaceCapabilities(
         DirectChatTurnRequest request,
         TurnDiagnostics diagnostics)
     {
-        // v1 accepts only the "system" policy; anything else is reported and treated as "system" rather
-        // than silently narrowing the tool set.
-        if (!string.Equals(
+        if (request.ExecutionContext.Origin == DirectTurnOrigin.Interactive && !string.Equals(
                 request.Agent.ToolPolicy,
                 AgentRuntimeDefinition.SystemToolPolicy,
                 StringComparison.Ordinal))
@@ -164,6 +181,195 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             StringComparer.Ordinal);
         return (tools, descriptors);
     }
+
+    private static void ValidateCapturedPackageCeiling(
+        DirectChatTurnRequest request,
+        IReadOnlyList<ExtensionPackageRecord> packages)
+    {
+        if (request.ExecutionContext.Origin == DirectTurnOrigin.Interactive)
+        {
+            return;
+        }
+
+        var ceiling = request.ExecutionContext.CapabilityCeiling
+            ?? throw new InvalidDataException("A non-interactive Direct turn requires a capability ceiling.");
+        if (ToolPolicyRank(request.Agent.ToolPolicy) > ToolPolicyRank(ceiling.ToolPolicy))
+        {
+            throw new InvalidDataException("The requested tool policy exceeds the captured capability ceiling.");
+        }
+
+        foreach (var pluginId in request.Agent.PluginIds)
+        {
+            ValidatePackageCapability(packages, ExtensionKind.Plugin, pluginId, ceiling.Plugins);
+        }
+
+        foreach (var skillId in request.Agent.SkillIds.Where(id => !id.Contains('/')))
+        {
+            ValidatePackageCapability(packages, ExtensionKind.Skill, skillId, ceiling.Skills);
+        }
+    }
+
+    private static void ValidatePackageCapability(
+        IReadOnlyList<ExtensionPackageRecord> packages,
+        ExtensionKind kind,
+        string id,
+        IReadOnlyList<DirectExtensionCapability> ceiling)
+    {
+        var captured = ceiling.FirstOrDefault(capability =>
+            string.Equals(capability.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (captured is null)
+        {
+            throw new InvalidDataException($"Capability '{id}' is not authorized by the captured ceiling.");
+        }
+
+        var package = packages.FirstOrDefault(item =>
+            item.Kind == kind && string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
+        if (package is null ||
+            !package.IsEnabled ||
+            !ExtensionInstallation.IsIntact(package) ||
+            !string.Equals(package.Version, captured.Version, StringComparison.Ordinal) ||
+            !string.Equals(package.ContentHash, captured.ContentHash, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException($"Capability '{id}' is unavailable or changed after task acceptance.");
+        }
+    }
+
+    private static void EnsureRequiredCapabilitiesResolved(
+        DirectChatTurnRequest request,
+        PluginCapabilities plugins,
+        SkillCapabilities skills,
+        McpCapabilities mcpCapabilities)
+    {
+        if (request.ExecutionContext.Origin != DirectTurnOrigin.Subagent)
+        {
+            return;
+        }
+
+        var missingPlugin = request.Agent.PluginIds.FirstOrDefault(id =>
+            !plugins.PluginRoots.ContainsKey(id));
+        if (missingPlugin is not null)
+        {
+            throw new InvalidDataException($"Required Plugin '{missingPlugin}' could not be loaded.");
+        }
+
+        var missingSkill = request.Agent.SkillIds.FirstOrDefault(id =>
+            !skills.ResolvedSkillIds.Contains(id, StringComparer.OrdinalIgnoreCase));
+        if (missingSkill is not null)
+        {
+            throw new InvalidDataException($"Required Skill '{missingSkill}' could not be loaded.");
+        }
+
+        var missingMcp = request.Agent.McpServerIds.FirstOrDefault(id =>
+            !mcpCapabilities.Capabilities.Any(capability =>
+                string.Equals(capability.Id, id, StringComparison.OrdinalIgnoreCase)));
+        if (missingMcp is not null)
+        {
+            throw new InvalidDataException($"Required MCP server '{missingMcp}' could not be loaded.");
+        }
+    }
+
+    private static DirectCapabilityCeiling CreateEffectiveCeiling(
+        DirectChatTurnRequest request,
+        IReadOnlyList<ExtensionPackageRecord> packages,
+        PluginCapabilities plugins,
+        SkillCapabilities skills,
+        McpCapabilities mcpCapabilities)
+    {
+        var pluginCapabilities = plugins.PluginRoots.Keys
+            .Select(id => CreatePackageCapability(packages, ExtensionKind.Plugin, id))
+            .Where(capability => capability is not null)
+            .Cast<DirectExtensionCapability>()
+            .ToArray();
+        var skillCapabilities = skills.ResolvedSkillIds
+            .Select(id => CreateSkillCapability(packages, id, pluginCapabilities))
+            .Where(capability => capability is not null)
+            .Cast<DirectExtensionCapability>()
+            .ToArray();
+        var capturedSubagents = request.ExecutionContext.CapabilityCeiling?.SubagentIds;
+        var subagentIds = capturedSubagents is null
+            ? request.Agent.SubagentIds.ToArray()
+            : request.Agent.SubagentIds
+                .Where(id => capturedSubagents.Contains(id, StringComparer.OrdinalIgnoreCase))
+                .ToArray();
+        return new DirectCapabilityCeiling(
+            request.ExecutionContext.CapabilityCeiling?.ToolPolicy ?? request.Agent.ToolPolicy,
+            pluginCapabilities,
+            skillCapabilities,
+            mcpCapabilities.Capabilities,
+            subagentIds);
+    }
+
+    private static DirectExtensionCapability? CreatePackageCapability(
+        IReadOnlyList<ExtensionPackageRecord> packages,
+        ExtensionKind kind,
+        string id)
+    {
+        var package = packages.FirstOrDefault(item =>
+            item.Kind == kind && string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
+        return package is null
+            ? null
+            : new DirectExtensionCapability(id, package.Version, package.ContentHash);
+    }
+
+    private static DirectExtensionCapability? CreateSkillCapability(
+        IReadOnlyList<ExtensionPackageRecord> packages,
+        string skillId,
+        IReadOnlyList<DirectExtensionCapability> pluginCapabilities)
+    {
+        var standalone = CreatePackageCapability(packages, ExtensionKind.Skill, skillId);
+        if (standalone is not null)
+        {
+            return standalone;
+        }
+
+        var separatorIndex = skillId.IndexOf('/');
+        var pluginId = separatorIndex > 0 ? skillId[..separatorIndex] : string.Empty;
+        var plugin = pluginCapabilities.FirstOrDefault(item =>
+            string.Equals(item.Id, pluginId, StringComparison.OrdinalIgnoreCase));
+        return plugin is null
+            ? null
+            : new DirectExtensionCapability(skillId, plugin.Version, plugin.ContentHash);
+    }
+
+    private static void ApplyExecutionToolPolicy(
+        DirectChatTurnRequest request,
+        List<AITool> tools,
+        Dictionary<string, DirectToolDescriptor> descriptors)
+    {
+        if (request.ExecutionContext.Origin == DirectTurnOrigin.Interactive)
+        {
+            return;
+        }
+
+        var policy = request.Agent.ToolPolicy;
+        var allowedNames = descriptors.Values
+            .Where(descriptor => IsAllowedByPolicy(descriptor.Kind, policy))
+            .Select(descriptor => descriptor.ProviderName)
+            .ToHashSet(StringComparer.Ordinal);
+        tools.RemoveAll(tool => !allowedNames.Contains(tool.Name));
+        foreach (var name in descriptors.Keys.Where(name => !allowedNames.Contains(name)).ToArray())
+        {
+            descriptors.Remove(name);
+        }
+    }
+
+    private static bool IsAllowedByPolicy(ToolCallKind kind, string policy)
+        => policy switch
+        {
+            "none" => false,
+            "read-only" => kind is ToolCallKind.List or ToolCallKind.Search or ToolCallKind.Read,
+            AgentRuntimeDefinition.SystemToolPolicy => true,
+            _ => false
+        };
+
+    private static int ToolPolicyRank(string policy)
+        => policy switch
+        {
+            "none" => 0,
+            "read-only" => 1,
+            AgentRuntimeDefinition.SystemToolPolicy => 2,
+            _ => int.MaxValue
+        };
 
     private static async ValueTask DisposePluginLeasesAsync(IEnumerable<PluginVersionLease> leases)
     {

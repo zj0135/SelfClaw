@@ -1220,13 +1220,26 @@ Desktop 拥有 turn admission、WPF approval、notification 和当前进程 back
 - 按当前实施决策，不提供 v22 到 v23 的旧数据兼容迁移；运行 v23 前需删除旧 `selfclaw.db`，由应用创建新库。
 - 全量测试通过：463/463；覆盖共享 parser、严格 catalog、隐藏 child、ownership、事务回滚、task 上限、cascade、schema CHECK/UNIQUE 和 DI 注册。
 
-### P2：durable task 与 child execution（待实施）
+### P2：durable task 与 child execution（已完成）
 
-- coordinator 四方法；
-- 四个 Direct tools 和 runtime-level no-nesting；
-- child context isolation；
-- scheduler、limits、timeout、cancel、recovery；
-- child transcript 和 completion envelope。
+- [x] coordinator 四方法；
+- [x] 四个 Direct tools 和 runtime-level no-nesting；
+- [x] child context isolation；
+- [x] scheduler、limits、timeout、cancel、recovery；
+- [x] child transcript 和 completion envelope。
+
+完成记录：
+
+- `ISubagentTaskCoordinator` 保持为 Core 对外深接口；持久化能力拆分为 Core 的 `ISubagentTaskStore` 与 worker 专用的 `ISubagentTaskExecutionStore`，Desktop 不接触 SQLite transaction、claim 或 delivery 细节。
+- `SqliteSubagentTaskRepository` 已实现 `BEGIN IMMEDIATE` acceptance/claim、全局 4/单 parent 3/单 turn 8 限制、FIFO、Queued/Running cancel、retry lineage 校验，以及 child terminal + task terminal + 唯一 Pending delivery 的原子提交。
+- completion envelope 按 UTF-8 精确执行 32 KiB 上限，并按 Unicode Rune 安全截断；所有 terminal task 都生成稳定 error code 与至多一条 delivery。
+- interactive Direct turn 在构建能力工具前把默认模型解析为具体 profile id；resolver 捕获实际成功解析的 capability ceiling，并对 child 严格校验 tool policy、Plugin、Skill、MCP 与 Subagent allowlist。
+- 已接入 `delegate_to_subagent`、`get_subagent_task`、`cancel_subagent_task`、`retry_subagent_task`；Subagent origin 不暴露委派工具，child request 只包含精确 task user message 与自身 instructions，不复制 parent history。
+- child executor 复用 `ConversationTurnRecorder` 的全部 `AgentStreamEvent` 归约与终态纪律，同时与交互会话、Vue transcript publication、桌面完成通知完全隔离；recorder committer 现在保留 provider 原始 `FinalText`，CAS 失败时重载已持久化终态。
+- background host 在数据库和 catalogs 初始化完成、桌面审批订阅就绪后启动；它周期扫描 durable queue，启动时把旧 Running 收敛为 Interrupted 且不重放 provider 请求，并继续执行 Queued task。
+- timeout、父级取消、应用关闭、runtime 自发取消、preflight/snapshot/provider failure 均按稳定状态和 error code 收敛；即使 child runtime 装载失败，也会尝试写入最小失败 transcript、task 终态与 delivery。
+- P2 只把完成结果写为 `Pending` delivery；mailbox lease、coalescing 与 parent continuation 未启用，仍由 P3 实施。
+- 全量测试通过：483/483；覆盖 capability/no-nesting、原子 claim/terminal/delivery、UTF-8 envelope、隔离 child stream、Running cancel、Interrupted recovery、Queued restart 和 terminal CAS reload。
 
 ### P3：mailbox continuation（待实施）
 

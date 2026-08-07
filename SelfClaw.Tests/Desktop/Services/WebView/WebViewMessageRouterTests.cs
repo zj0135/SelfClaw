@@ -173,6 +173,7 @@ public sealed class WebViewMessageRouterTests
                 _activityCoordinator,
                 approvalHandler,
                 programmingSettings,
+                new SelfClaw.Tests.TestDoubles.StubAiProviderSettingsService(),
                 new NoOpCompletionNotifier(),
                 NullLogger<ConversationTurnEngine>.Instance);
 

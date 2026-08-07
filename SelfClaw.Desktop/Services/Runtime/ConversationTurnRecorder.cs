@@ -257,7 +257,11 @@ internal sealed class ConversationTurnRecorder
         bool written;
         try
         {
-            written = await committer.TryCommitAsync(finalization);
+            written = await committer.TryCommitAsync(new RecordedTurnCommit(
+                finalization,
+                turn.PendingFinalization.Kind,
+                turn.PendingFinalization.FinalText,
+                turn.PendingFinalization.ErrorMessage));
         }
         catch (OperationCanceledException exception)
         {
@@ -276,11 +280,33 @@ internal sealed class ConversationTurnRecorder
 
         if (!written)
         {
+            await ReloadCommittedTurnAsync(session, turn);
             turn.Completed = true;
             return;
         }
 
         ApplyFinalization(session, turn, finalization, persisted: true);
+    }
+
+    private async Task ReloadCommittedTurnAsync(
+        ConversationRuntimeState session,
+        AgentTurnState turn)
+    {
+        var messages = await _conversationRepository.ListMessagesAsync(session.ConversationId);
+        var persistedMessage = messages.FirstOrDefault(message => message.Id == turn.TurnId);
+        if (persistedMessage is not null)
+        {
+            session.ReplaceMessage(persistedMessage);
+        }
+
+        var toolExecutions = await _conversationRepository.ListToolExecutionsAsync(session.ConversationId);
+        foreach (var toolExecution in toolExecutions.Where(tool => tool.MessageId == turn.TurnId))
+        {
+            turn.ToolRunsByCallId[toolExecution.CorrelationId ?? toolExecution.Id.ToString("D")] = toolExecution;
+            session.UpsertToolRun(toolExecution);
+        }
+
+        session.RaiseTranscriptChanged(true);
     }
 
     private TurnFinalization CreateFinalization(RecordedTurnFinalizationRequest request)
