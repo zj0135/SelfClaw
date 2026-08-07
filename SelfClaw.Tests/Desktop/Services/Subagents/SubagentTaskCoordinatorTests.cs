@@ -85,6 +85,23 @@ public sealed class SubagentTaskCoordinatorTests : IDisposable
         retryRecord.ParentExecutionSnapshotJson.Should().Be(originalRecord.ParentExecutionSnapshotJson);
     }
 
+    [Fact]
+    public async Task CancelAndWaitAsync_times_out_until_a_running_child_reaches_terminal_state()
+    {
+        var context = await CreateContextAsync(createDefinition: true);
+        var queued = await context.Coordinator.StartAsync(CreateRequest(context));
+        _ = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
+
+        var action = () => context.Coordinator.CancelAndWaitAsync(
+            context.Parent.Id,
+            TimeSpan.FromMilliseconds(50));
+
+        await action.Should().ThrowAsync<TimeoutException>();
+        var running = await context.Tasks.GetAsync(context.Parent.Id, queued.TaskId);
+        running!.Status.Should().Be(SubagentTaskStatus.Running);
+        running.CancelRequestedAtUtc.Should().NotBeNull();
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_rootPath))

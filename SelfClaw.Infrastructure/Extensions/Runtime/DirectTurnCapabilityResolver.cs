@@ -78,19 +78,20 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
     {
         cancellationToken.ThrowIfCancellationRequested();
         var diagnostics = new TurnDiagnostics();
-        var (tools, descriptors) = CreateWorkspaceCapabilities(request, diagnostics);
         var packages = await _packageRepository.ListPackagesAsync(cancellationToken).ConfigureAwait(false);
-        ValidateCapturedPackageCeiling(request, packages);
+        var effectiveRequest = CreateEffectiveRequest(request, packages, diagnostics);
+        var (tools, descriptors) = CreateWorkspaceCapabilities(effectiveRequest, diagnostics);
+        ValidateCapturedPackageCeiling(effectiveRequest, packages);
         var installedSkills = packages
             .Where(package => package.Kind == ExtensionKind.Skill)
             .ToDictionary(package => package.Id, StringComparer.OrdinalIgnoreCase);
         var effectiveSkills = installedSkills.Values
             .Where(package => package.IsEnabled &&
                               ExtensionInstallation.IsIntact(package) &&
-                              request.Agent.SkillIds.Contains(package.Id, StringComparer.OrdinalIgnoreCase))
+                              effectiveRequest.Agent.SkillIds.Contains(package.Id, StringComparer.OrdinalIgnoreCase))
             .ToDictionary(package => package.Id, StringComparer.OrdinalIgnoreCase);
         var plugins = await _pluginSource.ResolveAsync(
-                request.Agent,
+                effectiveRequest.Agent,
                 packages,
                 effectiveSkills,
                 diagnostics,
@@ -98,7 +99,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
                 cancellationToken)
             .ConfigureAwait(false);
         var skills = await _skillSource.ResolveAsync(
-                request,
+                effectiveRequest,
                 installedSkills,
                 effectiveSkills,
                 plugins.Skills,
@@ -115,27 +116,27 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         systemInstructions.AddRange(plugins.Instructions);
         systemInstructions.AddRange(skills.Instructions);
         var mcpCapabilities = await _mcpSource.AddToolsAsync(
-                request,
+                effectiveRequest,
                 tools,
                 descriptors,
                 diagnostics,
                 plugins.PluginRoots,
                 cancellationToken)
             .ConfigureAwait(false);
-        EnsureRequiredCapabilitiesResolved(request, plugins, skills, mcpCapabilities);
+        EnsureRequiredCapabilitiesResolved(effectiveRequest, plugins, skills, mcpCapabilities);
         var effectiveCeiling = CreateEffectiveCeiling(
-            request,
+            effectiveRequest,
             packages,
             plugins,
             skills,
             mcpCapabilities);
-        foreach (var (tool, descriptor) in _subagentSource.CreateTools(request, effectiveCeiling))
+        foreach (var (tool, descriptor) in _subagentSource.CreateTools(effectiveRequest, effectiveCeiling))
         {
             tools.Add(tool);
             descriptors.Add(descriptor.ProviderName, descriptor);
         }
 
-        ApplyExecutionToolPolicy(request, tools, descriptors);
+        ApplyExecutionToolPolicy(effectiveRequest, tools, descriptors);
         if (diagnostics.Degradations.Count > 0)
         {
             systemInstructions.Add(CapabilitySections.Degradation(diagnostics.Degradations));
@@ -186,7 +187,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         DirectChatTurnRequest request,
         IReadOnlyList<ExtensionPackageRecord> packages)
     {
-        if (request.ExecutionContext.Origin == DirectTurnOrigin.Interactive)
+        if (request.ExecutionContext.Origin != DirectTurnOrigin.Subagent)
         {
             return;
         }
@@ -208,6 +209,134 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             ValidatePackageCapability(packages, ExtensionKind.Skill, skillId, ceiling.Skills);
         }
     }
+
+    private static DirectChatTurnRequest CreateEffectiveRequest(
+        DirectChatTurnRequest request,
+        IReadOnlyList<ExtensionPackageRecord> packages,
+        TurnDiagnostics diagnostics)
+    {
+        if (request.ExecutionContext.Origin != DirectTurnOrigin.Continuation)
+        {
+            return request;
+        }
+
+        var ceiling = request.ExecutionContext.CapabilityCeiling
+            ?? throw new InvalidDataException("A continuation Direct turn requires a capability ceiling.");
+        var pluginIds = FilterContinuationPackages(
+            request.Agent.PluginIds,
+            ExtensionKind.Plugin,
+            ceiling.Plugins,
+            packages,
+            diagnostics,
+            "Plugin");
+        var skillIds = request.Agent.SkillIds
+            .Where(skillId => IsContinuationSkillAvailable(
+                skillId,
+                ceiling.Skills,
+                packages,
+                diagnostics))
+            .ToArray();
+        var mcpServerIds = request.Agent.McpServerIds
+            .Where(id => Contains(ceiling.McpServers.Select(capability => capability.Id), id))
+            .ToArray();
+        foreach (var removed in request.Agent.McpServerIds.Except(mcpServerIds, StringComparer.OrdinalIgnoreCase))
+        {
+            diagnostics.Degrade($"MCP server '{removed}' was removed by the captured capability ceiling.");
+        }
+
+        var subagentIds = request.Agent.SubagentIds
+            .Where(id => Contains(ceiling.SubagentIds, id))
+            .ToArray();
+        var toolPolicy = ToolPolicyRank(request.Agent.ToolPolicy) <= ToolPolicyRank(ceiling.ToolPolicy)
+            ? request.Agent.ToolPolicy
+            : ceiling.ToolPolicy;
+        return request with
+        {
+            Agent = request.Agent with
+            {
+                ToolPolicy = toolPolicy,
+                PluginIds = pluginIds,
+                SkillIds = skillIds,
+                McpServerIds = mcpServerIds,
+                SubagentIds = subagentIds
+            }
+        };
+    }
+
+    private static IReadOnlyList<string> FilterContinuationPackages(
+        IReadOnlyList<string> requestedIds,
+        ExtensionKind kind,
+        IReadOnlyList<DirectExtensionCapability> ceiling,
+        IReadOnlyList<ExtensionPackageRecord> packages,
+        TurnDiagnostics diagnostics,
+        string displayKind)
+    {
+        var effective = new List<string>();
+        foreach (var id in requestedIds)
+        {
+            var captured = ceiling.FirstOrDefault(capability =>
+                string.Equals(capability.Id, id, StringComparison.OrdinalIgnoreCase));
+            var package = packages.FirstOrDefault(item =>
+                item.Kind == kind && string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
+            if (captured is not null && IsCapturedPackageCurrent(package, captured))
+            {
+                effective.Add(id);
+            }
+            else
+            {
+                diagnostics.Degrade(
+                    $"{displayKind} '{id}' was removed because it is unavailable or changed since delegation.");
+            }
+        }
+
+        return effective;
+    }
+
+    private static bool IsContinuationSkillAvailable(
+        string skillId,
+        IReadOnlyList<DirectExtensionCapability> ceiling,
+        IReadOnlyList<ExtensionPackageRecord> packages,
+        TurnDiagnostics diagnostics)
+    {
+        var captured = ceiling.FirstOrDefault(capability =>
+            string.Equals(capability.Id, skillId, StringComparison.OrdinalIgnoreCase));
+        ExtensionPackageRecord? package;
+        var separatorIndex = skillId.IndexOf('/');
+        if (separatorIndex > 0)
+        {
+            var pluginId = skillId[..separatorIndex];
+            package = packages.FirstOrDefault(item =>
+                item.Kind == ExtensionKind.Plugin &&
+                string.Equals(item.Id, pluginId, StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            package = packages.FirstOrDefault(item =>
+                item.Kind == ExtensionKind.Skill &&
+                string.Equals(item.Id, skillId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (captured is not null && IsCapturedPackageCurrent(package, captured))
+        {
+            return true;
+        }
+
+        diagnostics.Degrade(
+            $"Skill '{skillId}' was removed because it is unavailable or changed since delegation.");
+        return false;
+    }
+
+    private static bool IsCapturedPackageCurrent(
+        ExtensionPackageRecord? package,
+        DirectExtensionCapability captured)
+        => package is not null &&
+           package.IsEnabled &&
+           ExtensionInstallation.IsIntact(package) &&
+           string.Equals(package.Version, captured.Version, StringComparison.Ordinal) &&
+           string.Equals(package.ContentHash, captured.ContentHash, StringComparison.Ordinal);
+
+    private static bool Contains(IEnumerable<string> values, string value)
+        => values.Contains(value, StringComparer.OrdinalIgnoreCase);
 
     private static void ValidatePackageCapability(
         IReadOnlyList<ExtensionPackageRecord> packages,

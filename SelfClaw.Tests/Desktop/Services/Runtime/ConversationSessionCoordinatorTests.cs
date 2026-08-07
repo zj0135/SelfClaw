@@ -142,6 +142,30 @@ public sealed class ConversationSessionCoordinatorTests
         sink.ImmediatePublishes.Should().Equal(true);
     }
 
+    [Fact]
+    public async Task Detached_turn_does_not_publish_or_replace_the_selected_transcript()
+    {
+        var conversation = CreateConversation(Guid.NewGuid());
+        var repository = new ControlledConversationRepository();
+        repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "existing")]);
+        repository.CompleteToolRuns(conversation.Id, []);
+        var sink = new RecordingTranscriptChangeSink();
+        using var coordinator = new ConversationSessionCoordinator(repository, sink);
+
+        await coordinator.SelectAsync(conversation.Id);
+        var selectedBefore = coordinator.SelectedMessages.ToArray();
+        sink.ImmediatePublishes.Clear();
+        var detached = await coordinator.StartDetachedTurnAsync(conversation);
+        detached.ReplaceMessage(CreateMessage(conversation.Id, "detached assistant"));
+        detached.RaiseTranscriptChanged(immediate: true);
+
+        coordinator.SelectedMessages.Should().Equal(selectedBefore);
+        sink.StreamingPublishes.Should().BeEmpty();
+        sink.ImmediatePublishes.Should().BeEmpty();
+        coordinator.IsSelected(conversation.Id).Should().BeTrue();
+        coordinator.AbandonTurn(detached);
+    }
+
     private static ConversationRecord CreateConversation(Guid id)
     {
         var now = DateTimeOffset.UtcNow;

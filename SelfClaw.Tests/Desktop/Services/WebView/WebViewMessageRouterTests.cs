@@ -186,6 +186,7 @@ public sealed class WebViewMessageRouterTests
                 _transcriptPublisher,
                 agentDefinitions,
                 settingsStore,
+                new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(),
                 NullLogger<MainWindowViewModel>.Instance);
             viewModel.InitializeAsync().GetAwaiter().GetResult();
 

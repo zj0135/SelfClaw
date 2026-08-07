@@ -9,6 +9,7 @@ using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Runtime;
+using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.Workspace.Abstractions;
 
@@ -26,6 +27,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     private readonly TranscriptPublisher _transcriptPublisher;
     private readonly DesktopAgentDefinitionService _desktopAgentDefinitionService;
     private readonly DesktopSettingsJsonStore _settingsStore;
+    private readonly ISubagentConversationLifecycle _subagentConversationLifecycle;
     private readonly ILogger<MainWindowViewModel> _logger;
 
     private readonly List<ConversationRecord> _allConversations = [];
@@ -53,6 +55,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         TranscriptPublisher transcriptPublisher,
         DesktopAgentDefinitionService desktopAgentDefinitionService,
         DesktopSettingsJsonStore settingsStore,
+        ISubagentConversationLifecycle subagentConversationLifecycle,
         ILogger<MainWindowViewModel> logger)
     {
         _conversationRepository = conversationRepository;
@@ -62,6 +65,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         _transcriptPublisher = transcriptPublisher;
         _desktopAgentDefinitionService = desktopAgentDefinitionService;
         _settingsStore = settingsStore;
+        _subagentConversationLifecycle = subagentConversationLifecycle;
         _logger = logger;
         _transcriptPublisher.Attach(BuildTranscriptProjectionRequest);
     }
@@ -200,7 +204,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     {
         var conversation = _filteredConversations.FirstOrDefault(item => item.Id == conversationId)
             ?? _allConversations.FirstOrDefault(item => item.Id == conversationId);
-        if (conversation is null)
+        if (conversation is null || conversation.Kind != ConversationKind.Interactive)
         {
             throw new InvalidOperationException("The selected conversation no longer exists.");
         }
@@ -233,14 +237,44 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
         foreach (var conversationId in deleteIds)
         {
-            await StopConversationForDeletionAsync(conversationId);
+            _turnEngine.BeginConversationDeletion(conversationId);
         }
 
-        foreach (var conversationId in deleteIds)
+        try
         {
-            await _conversationRepository.DeleteConversationAsync(conversationId);
-            _allConversations.RemoveAll(item => item.Id == conversationId);
-            _filteredConversations.RemoveAll(item => item.Id == conversationId);
+            foreach (var conversationId in deleteIds)
+            {
+                await StopConversationForDeletionAsync(conversationId);
+                try
+                {
+                    await _subagentConversationLifecycle.CancelAndWaitAsync(
+                        conversationId,
+                        ConversationDeleteStopTimeout);
+                }
+                catch (TimeoutException exception)
+                {
+                    _logger.LogWarning(
+                        exception,
+                        "Conversation deletion stopped because Subagent tasks did not terminate. ConversationId={ConversationId} TimeoutSeconds={TimeoutSeconds}",
+                        conversationId,
+                        ConversationDeleteStopTimeout.TotalSeconds);
+                    throw;
+                }
+            }
+
+            foreach (var conversationId in deleteIds)
+            {
+                await _conversationRepository.DeleteConversationAsync(conversationId);
+                _allConversations.RemoveAll(item => item.Id == conversationId);
+                _filteredConversations.RemoveAll(item => item.Id == conversationId);
+            }
+        }
+        finally
+        {
+            foreach (var conversationId in deleteIds)
+            {
+                _turnEngine.EndConversationDeletion(conversationId);
+            }
         }
 
         var deletedIdSet = deleteIds.ToHashSet();
@@ -383,7 +417,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         var selectedId = SelectedConversation?.Id;
         var conversations = await _conversationRepository.ListConversationsAsync();
         _allConversations.Clear();
-        _allConversations.AddRange(conversations);
+        _allConversations.AddRange(conversations.Where(conversation =>
+            conversation.Kind == ConversationKind.Interactive));
         ApplyConversationFilter(selectedId);
     }
 
@@ -541,7 +576,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     private bool MatchesConversationFilter(ConversationRecord conversation)
     {
-        if (conversation.Mode != ConversationMode.Programming)
+        if (conversation.Kind != ConversationKind.Interactive ||
+            conversation.Mode != ConversationMode.Programming)
         {
             return false;
         }

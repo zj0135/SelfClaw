@@ -13,6 +13,10 @@ public interface ISubagentTaskStore
         Guid taskId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<SubagentTaskRecord>> ListAsync(
+        Guid parentConversationId,
+        CancellationToken cancellationToken = default);
+
     Task<SubagentTaskRecord?> RequestCancellationAsync(
         Guid parentConversationId,
         Guid taskId,

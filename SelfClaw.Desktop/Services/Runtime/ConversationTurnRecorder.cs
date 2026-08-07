@@ -44,6 +44,35 @@ internal sealed class ConversationTurnRecorder
         AgentStreamEvent streamEvent,
         IRecordedTurnCommitter committer,
         CancellationToken cancellationToken)
+        => await ApplyEventCoreAsync(
+            session,
+            turn,
+            streamEvent,
+            committer,
+            persistToolProgress: true,
+            cancellationToken);
+
+    internal async Task ApplyDetachedEventAsync(
+        ConversationRuntimeState session,
+        AgentTurnState turn,
+        AgentStreamEvent streamEvent,
+        IRecordedTurnCommitter committer,
+        CancellationToken cancellationToken)
+        => await ApplyEventCoreAsync(
+            session,
+            turn,
+            streamEvent,
+            committer,
+            persistToolProgress: false,
+            cancellationToken);
+
+    private async Task ApplyEventCoreAsync(
+        ConversationRuntimeState session,
+        AgentTurnState turn,
+        AgentStreamEvent streamEvent,
+        IRecordedTurnCommitter committer,
+        bool persistToolProgress,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(turn);
@@ -78,11 +107,21 @@ internal sealed class ConversationTurnRecorder
 
             case ToolCallStartedEvent toolStarted:
                 EnsureAssistantMessage(session, turn);
-                await StartToolRunAsync(session, turn, toolStarted, cancellationToken);
+                await StartToolRunAsync(
+                    session,
+                    turn,
+                    toolStarted,
+                    persistToolProgress,
+                    cancellationToken);
                 break;
 
             case ToolCallCompletedEvent toolCompleted:
-                await CompleteToolRunAsync(session, turn, toolCompleted, cancellationToken);
+                await CompleteToolRunAsync(
+                    session,
+                    turn,
+                    toolCompleted,
+                    persistToolProgress,
+                    cancellationToken);
                 break;
 
             case UsageReportedEvent usage:
@@ -152,6 +191,7 @@ internal sealed class ConversationTurnRecorder
         ConversationRuntimeState session,
         AgentTurnState turn,
         ToolCallStartedEvent toolStarted,
+        bool persistProgress,
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
@@ -175,7 +215,11 @@ internal sealed class ConversationTurnRecorder
         var anchored = session.CaptureToolRunAnchor(record);
         turn.ToolRunsByCallId[toolStarted.ToolCallId] = anchored;
         session.UpsertToolRun(anchored);
-        await _conversationRepository.UpsertToolExecutionAsync(anchored, cancellationToken);
+        if (persistProgress)
+        {
+            await _conversationRepository.UpsertToolExecutionAsync(anchored, cancellationToken);
+        }
+
         session.RaiseTranscriptChanged(false);
     }
 
@@ -183,6 +227,7 @@ internal sealed class ConversationTurnRecorder
         ConversationRuntimeState session,
         AgentTurnState turn,
         ToolCallCompletedEvent toolCompleted,
+        bool persistProgress,
         CancellationToken cancellationToken)
     {
         if (!turn.ToolRunsByCallId.TryGetValue(toolCompleted.ToolCallId, out var startedRecord))
@@ -203,7 +248,11 @@ internal sealed class ConversationTurnRecorder
         var anchored = session.CaptureToolRunAnchor(updated);
         turn.ToolRunsByCallId[toolCompleted.ToolCallId] = anchored;
         session.UpsertToolRun(anchored);
-        await _conversationRepository.UpsertToolExecutionAsync(anchored, cancellationToken);
+        if (persistProgress)
+        {
+            await _conversationRepository.UpsertToolExecutionAsync(anchored, cancellationToken);
+        }
+
         session.RaiseTranscriptChanged(false);
     }
 

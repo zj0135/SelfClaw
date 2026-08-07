@@ -73,6 +73,7 @@ public sealed class MainWindowViewModelSubmissionTests
                 transcriptPublisher,
                 new DesktopAgentDefinitionService(storagePaths),
                 settingsStore,
+                new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(),
                 NullLogger<MainWindowViewModel>.Instance);
 
             await vm.InitializeAsync();

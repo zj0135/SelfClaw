@@ -211,6 +211,30 @@ public sealed class ConversationTurnEngineTests
     }
 
     [Fact]
+    public async Task TryAdmitContinuationAsync_yields_to_a_pending_interactive_admission()
+    {
+        var conversation = new ConversationRecord(
+            Guid.NewGuid(),
+            "Conversation",
+            null,
+            ToolPermissionMode.RequireApproval,
+            "build",
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
+        var repository = new FakeConversationRepository { BlockTranscriptLoads = true };
+        using var context = new EngineTestContext(repository, new RecordingAgentChatRuntime());
+
+        var interactiveAdmission = context.Engine.TryAdmitAsync(CreateRequest(conversation));
+        await repository.TranscriptRequested.Task;
+
+        var continuation = await context.Engine.TryAdmitContinuationAsync(conversation, CancellationToken.None);
+
+        continuation.Should().BeNull();
+        repository.ReleaseTranscript();
+        (await interactiveAdmission).Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_propagates_terminal_persistence_cancellation_and_projects_failure()
     {
         var runtime = new RecordingAgentChatRuntime
@@ -400,7 +424,15 @@ public sealed class ConversationTurnEngineTests
 
     private sealed class FakeConversationRepository : IConversationRepository
     {
+        private readonly TaskCompletionSource<IReadOnlyList<MessageRecord>> _blockedMessages =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int ToolUpserts { get; private set; }
+
+        public bool BlockTranscriptLoads { get; init; }
+
+        public TaskCompletionSource TranscriptRequested { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public List<ConversationRecord> ConversationUpserts { get; } = [];
 
@@ -424,7 +456,18 @@ public sealed class ConversationTurnEngineTests
             => Task.CompletedTask;
 
         public Task<IReadOnlyList<MessageRecord>> ListMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<MessageRecord>>([]);
+        {
+            if (!BlockTranscriptLoads)
+            {
+                return Task.FromResult<IReadOnlyList<MessageRecord>>([]);
+            }
+
+            TranscriptRequested.TrySetResult();
+            return _blockedMessages.Task.WaitAsync(cancellationToken);
+        }
+
+        public void ReleaseTranscript()
+            => _blockedMessages.TrySetResult([]);
 
         public Task<MessageRecord> UpsertMessageAsync(MessageRecord message, CancellationToken cancellationToken = default)
         {

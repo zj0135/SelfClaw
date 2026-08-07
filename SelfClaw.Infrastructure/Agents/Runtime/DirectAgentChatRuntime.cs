@@ -129,7 +129,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 request.Messages,
                 request.Agent.Instructions,
                 capabilityLease.SystemInstructions,
-                capabilityLease.MessageAdjustments);
+                capabilityLease.MessageAdjustments,
+                request.ExecutionContext);
             await foreach (var update in providerLease.Client.GetStreamingResponseAsync(
                                messages,
                                providerLease.Options,

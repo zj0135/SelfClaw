@@ -60,6 +60,11 @@ User input (WebView2)
         → DesktopTurnFinalizer persists the terminal state
   → ConversationSessionCoordinator → ITranscriptChangeSink → TranscriptPublisher
     → TranscriptRenderState → WebViewHostChannel replay → Vue renders
+
+Background SubagentDeliveryDispatcher (when durable child results are pending)
+  → parent-priority admission/lease/coalescing
+  → detached Direct continuation with transient completion batch
+  → atomic parent terminal + Delivered, bounded retry or DeadLetter notification
 ```
 
 Direct mode uses the enabled model selected in the composer, or the `desktop.default` model profile when no explicit id is carried by `ChatTurnRequest.ModelProfileId`. Provider credentials are decrypted only inside Infrastructure. CLI mode uses the local CLI selection persisted by `ProgrammingAssistantSettingsService`; the CLI continues to own its local authentication and model configuration. No detected CLI selection fails a CLI turn with guidance.
@@ -75,6 +80,10 @@ Key runtime files:
 - `Parsers/` — `ClaudeStreamJsonParser` (stream-json), `JsonEventStreamParser` (Codex/OpenCode)
 - `Process/` — `CliCommandResolver`, `CliAgentProcessHost`, `CliAgentProcessSession` (watchdog, kill-tree)
 - `Session/` — `CliSessionResolver`, `SqliteCliAgentSessionStore` (resume id per conversation × CLI)
+- `Agents/Subagents/Persistence/SqliteSubagentDeliveryRepository.cs` — snapshot-aware mailbox lease, heartbeat, atomic resolution and expired-lease recovery
+- `Services/Subagents/SubagentDeliveryDispatcher.cs` — coalescing, user-priority continuation dispatch and restart recovery
+- `Services/Subagents/SubagentContinuationExecutor.cs` — detached continuation runtime and lease heartbeat
+- `Services/Subagents/SubagentTaskCoordinator.cs` — durable child lifecycle, cancellation and bounded delete wait
 
 ### Desktop ViewModel
 
@@ -85,6 +94,7 @@ Key runtime files:
 - `ConversationSessionCoordinator.cs` — running conversation state, cancellation, selected transcript synchronization, and direct presentation signaling
 - `TranscriptPublisher.cs` — dispatcher marshaling, stream coalescing, projection dedupe, invalidation, and WebView replay publication
 - `WebViewMessageRouter.cs` — frontend request routing, bridge responses, shell intents, and host-only commands
+- `ConversationTurnEngine.cs` — shared admission gate, deletion tombstones and detached continuation admission
 
 ### Agent definitions
 
@@ -106,6 +116,7 @@ Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandle
 
 Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 - Repositories: `SqliteConversationRepository`, `SqliteAiProviderRepository`, `SqliteExtensionRepository`
+- Subagents: `SqliteSubagentTaskRepository` (`ISubagentTaskStore`/`ISubagentTaskExecutionStore`) and `SqliteSubagentDeliveryRepository` (`ISubagentDeliveryStore`)
 - AI providers: catalog/registry, provider adapters, `AiProviderHttpClientProvider`, `AiProviderSettingsService`, `AiChatClientFactory`
 - Runtimes: CLI process/session services, `CliAgentChatRuntime`, `DirectAgentChatRuntime`, `DispatchingAgentChatRuntime` (as `IAgentChatRuntime`)
 - Extensions: `ExtensionCatalog`, `ExtensionPackageInstaller`, `ExtensionSettingsService`, `ExtensionStateChangeNotifier`, `DirectTurnCapabilityResolver` plus its `SkillCapabilitySource` / `PluginCapabilitySource` / `McpCapabilitySource`, Skill readers/runtime tools
@@ -117,6 +128,7 @@ Desktop (`App.xaml.cs`):
 - `DesktopAgentDefinitionService`, `ExtensionSettingsBridge`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
   `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `AiProviderSettingsBridge`,
   `ConversationTurnEngine`, `ConversationSessionCoordinator`, `TranscriptPublisher`, `WebViewMessageRouter`,
+  `SubagentTaskCoordinator` (`ISubagentTaskCoordinator` and `ISubagentConversationLifecycle`), `SubagentTaskBackgroundHost`, and `SubagentDeliveryDispatcher` hosted services,
   `PetPackageCatalog`, `PetActivityPresenter`, `PetHost`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
 
 **Not registered** (retained/dead): `DesktopChannelManager`, Feishu adapters, old `DesktopSettingsStore`.
@@ -136,7 +148,7 @@ Desktop (`App.xaml.cs`):
 
 ### Database
 
-Schema version: **22** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `conversations`, `messages`, `message_attachments`, `tool_runs`, `cli_agent_sessions`. The v22 migration adds extension state and tool provenance while preserving existing conversations/messages/tool runs. Backward-compatible additive migration still uses `EnsureColumnExistsAsync` where appropriate.
+Schema version: **23** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `conversations`, `messages`, `message_attachments`, `tool_runs`, `cli_agent_sessions`, `subagent_tasks`, and `subagent_deliveries`. The v22→v23 migration atomically rebuilds `conversations` when legacy `profile_id`, `kind`, or `parent_conversation_id` columns require it, preserves existing data, and defaults old rows to interactive ownership. Subagent deliveries use snapshot-aware FIFO batching, 45-second leases with 15-second heartbeat, and atomic Delivered/DeadLetter resolution.
 
 ### Image attachments
 
@@ -145,6 +157,11 @@ Persisted to `{AppData}\attachments\{convId}\{msgId}\`. Max 6 images, 10MB each,
 ### Transient state
 
 `TranscriptRenderState` is the DTO published to the Vue frontend. The segmenter (`AssistantMessageSegmenter`) parses `<thinking>` blocks and tool anchors for rendering.
+Continuation turns use detached `ConversationRuntimeState`; their transient completion batch is prompt-only and is never persisted as a parent user message or streamed into the selected transcript before atomic terminal commit.
+
+### Conversation deletion
+
+Deleting an interactive parent first marks a deletion tombstone, stops its active turn, cancels and bounded-waits all queued/running child tasks through `ISubagentConversationLifecycle`, and only then applies SQLite cascade. A timeout aborts deletion. Conversation list/navigation also defensively accept only `ConversationKind.Interactive`, so crafted child rows cannot enter the normal Vue workflow.
 
 ## Dead / Retained Code (NOT active)
 

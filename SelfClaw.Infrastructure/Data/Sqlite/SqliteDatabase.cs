@@ -479,12 +479,12 @@ CREATE TABLE IF NOT EXISTS subagent_deliveries (
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>Rebuilds legacy conversation tables to remove the obsolete profile_id column.</summary>
+    /// <summary>Rebuilds legacy conversation tables into the v23 ownership shape.</summary>
     private static async Task EnsureConversationsWithoutProfileIdAsync(
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
-        var hasProfileId = false;
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = "PRAGMA table_info(conversations);";
@@ -492,18 +492,20 @@ CREATE TABLE IF NOT EXISTS subagent_deliveries (
             while (await reader.ReadAsync(cancellationToken))
             {
                 // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk.
-                if (string.Equals(reader.GetString(1), "profile_id", StringComparison.OrdinalIgnoreCase))
-                {
-                    hasProfileId = true;
-                    break;
-                }
+                columns.Add(reader.GetString(1));
             }
         }
 
-        if (!hasProfileId)
+        var hasProfileId = columns.Contains("profile_id");
+        var hasKind = columns.Contains("kind");
+        var hasParentConversationId = columns.Contains("parent_conversation_id");
+        if (!hasProfileId && hasKind && hasParentConversationId)
         {
             return;
         }
+
+        var kindExpression = hasKind ? "kind" : "0";
+        var parentExpression = hasParentConversationId ? "parent_conversation_id" : "NULL";
 
         // Foreign keys must be off while the table is swapped, and PRAGMA foreign_keys is a
         // no-op inside a transaction, so toggle it around the transaction boundaries.
@@ -533,7 +535,7 @@ CREATE TABLE conversations_new (
     FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL,
     FOREIGN KEY(parent_conversation_id) REFERENCES conversations_new(id) ON DELETE CASCADE
 );", cancellationToken);
-            await ExecuteAsync(connection, @"
+            await ExecuteAsync(connection, $@"
 INSERT INTO conversations_new(
     id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
     channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc,
@@ -541,7 +543,7 @@ INSERT INTO conversations_new(
 SELECT
     id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
     channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc,
-    0, NULL
+    {kindExpression}, {parentExpression}
 FROM conversations;", cancellationToken);
             await ExecuteAsync(connection, "DROP TABLE conversations;", cancellationToken);
             await ExecuteAsync(connection, "ALTER TABLE conversations_new RENAME TO conversations;", cancellationToken);

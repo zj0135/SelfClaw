@@ -907,24 +907,29 @@ CREATE INDEX ix_subagent_deliveries_lease
 新增聚焦 repository，而不是继续扩大 `IConversationRepository`：
 
 ```text
-ISubagentTaskRepository
-  |- create/claim/transition task
+ISubagentTaskStore
+  |- create/transition task
   |- query owner-scoped task
-  |- atomically terminalize task + create delivery
-  |- lease/commit/release/dead-letter delivery batch
-  `- startup recovery
+  `- atomically terminalize task + create delivery
+
+ISubagentTaskExecutionStore
+  `- FIFO claim, cancellation and startup recovery
+
+ISubagentDeliveryStore
+  `- peek/lease/renew/resolve/recover mailbox batch
 ```
 
-这是 Infrastructure-internal abstraction，放在 `SelfClaw.Infrastructure/Agents/Subagents/Abstractions/`。Core 的 `ISubagentTaskCoordinator` 不暴露 SQL transaction、lease token 或 worker claim 方法。
+这些是 Core 的聚焦内部 seam，SQLite adapter 放在 `SelfClaw.Infrastructure/Agents/Subagents/Persistence/`。Core 的 `ISubagentTaskCoordinator` 不暴露 SQL transaction、lease token 或 worker claim 方法。
 
 关键事务：
 
 1. Start：检查 parent turn task count < 8，创建 child conversation/user message/task。
 2. Claim：`Queued -> Running`，同时验证全局 4、单 parent 3。
 3. Complete：child finalization + task terminal + delivery Pending。
-4. Delivery claim：一批 `Pending -> Leased`，写同一 token/continuation id。
-5. Delivery commit：匹配 token 的 parent finalization + `Leased -> Delivered`。
-6. Recovery：所有旧 `Running -> Interrupted` 并创建唯一 delivery；过期 lease 重新排队或 DeadLetter。
+4. Delivery claim：一批 `Pending -> Leased`，写同一 token/continuation id，并绑定冻结 parent snapshot。
+5. Delivery heartbeat：15 秒续租，整批 CAS 不匹配时 rollback，避免部分 renewal 造成重复执行。
+6. Delivery commit：匹配 token 的 parent finalization + `Leased -> Delivered`。
+7. Recovery：所有旧 `Running -> Interrupted` 并创建唯一 delivery；过期 lease 无工具时重新排队，有已记录工具或尝试耗尽时 DeadLetter 并收敛 terminal rows。
 
 ---
 
@@ -1037,6 +1042,8 @@ Queued task 自动继续。旧 Running task绝不自动重跑，因为 provider/
 SelfClaw.Core/
   Interfaces/Subagents/
     ISubagentTaskCoordinator.cs
+    ISubagentTaskStore.cs
+    ISubagentDeliveryStore.cs
   Models/Subagents/
     ConversationKind.cs
     SubagentTaskStatus.cs
@@ -1060,8 +1067,9 @@ SelfClaw.Core/
 ```text
 SelfClaw.Infrastructure/
   Agents/Subagents/
-    Abstractions/ISubagentTaskRepository.cs
+    Persistence/SqliteSubagentDeliveryRepository.cs
     Persistence/SqliteSubagentTaskRepository.cs
+    Persistence/SubagentDeliveryMetrics.cs
     Runtime/SubagentCapabilitySource.cs
     Runtime/SubagentCompletionEnvelopeFactory.cs
   Data/Sqlite/
@@ -1090,14 +1098,17 @@ SelfClaw.Desktop/Services/
     SubagentTaskCoordinator.cs
     SubagentTaskBackgroundHost.cs
     SubagentTaskExecutor.cs
+    SubagentContinuationExecutor.cs
+    SubagentContinuationTurnCommitter.cs
     SubagentDeliveryDispatcher.cs
+    ISubagentConversationLifecycle.cs
 ```
 
 Desktop 拥有 turn admission、WPF approval、notification 和当前进程 background lifecycle，因此 coordinator facade 与 host 编排放在 Desktop。Infrastructure 的 delegation tools 只依赖 Core interface。
 
 ### DI 与启动
 
-1. Infrastructure 注册 `ISubagentTaskRepository` 和 `SubagentCapabilitySource`。
+1. Infrastructure 注册 task stores、`ISubagentDeliveryStore` 和 `SubagentCapabilitySource`。
 2. Desktop 注册 `SubagentDefinitionCatalog`、`ConversationTurnRecorder`、`SubagentTaskCoordinator`，并把它映射为 `ISubagentTaskCoordinator`。
 3. `SubagentTaskBackgroundHost` 和 `SubagentDeliveryDispatcher` 作为 hosted services 注册。
 4. hosted service 必须在 repository initialize/recovery 后执行工作。若继续由 `App.OnStartup()` 手动初始化，应增加显式 `InitializeAsync()` gate，不能依赖 DI 构造顺序。
@@ -1174,7 +1185,10 @@ Desktop 拥有 turn admission、WPF approval、notification 和当前进程 back
 - pre-side-effect failure 按 2/10/30 秒重试；
 - 已开始工具的失败直接 DeadLetter；
 - attempt 耗尽通知桌面；
-- app restart 恢复 Pending/expired Leased delivery 保持幂等。
+- app restart 恢复 Pending/expired Leased delivery 保持幂等；过期 lease 若已有 tool row 必须 DeadLetter 并收敛 parent/tool terminal；
+- lease heartbeat 的整批 CAS renewal、同 parent 并发 lease 只有一个 winner；
+- detached continuation 不改变 selected transcript，删除 tombstone 和 `CancelAndWaitAsync` 超时阻止 cascade；
+- v22 库在缺少 ownership 列时升级到 v23 且保留 message/tool/session 数据。
 
 ### 15.7 回归
 
@@ -1217,7 +1231,7 @@ Desktop 拥有 turn admission、WPF approval、notification 和当前进程 back
 - `ConversationRecord` 已加入 `ConversationKind` 与 `ParentConversationId`；普通 conversation list 在 repository 内过滤 hidden child，按 id 仍可读取 child conversation。
 - SQLite schema 已更新到 v23，新增 ownership CHECK、自引用 cascade、`subagent_tasks`、`subagent_deliveries` 及调度索引。
 - `SqliteSubagentTaskRepository` 当前提供 P1 所需的原子 task acceptance 与 owner-scoped read：同一事务创建 child conversation、精确 task user message 和 Queued task，并执行单 parent turn 最多 8 个 task 的限制。
-- 按当前实施决策，不提供 v22 到 v23 的旧数据兼容迁移；运行 v23 前需删除旧 `selfclaw.db`，由应用创建新库。
+- 已提供 v22 到 v23 的真实兼容迁移：当 `profile_id`、`kind` 或 `parent_conversation_id` 任一旧列形状存在时，SQLite 在事务内重建 conversations，保留已有 ownership 字段，旧行默认 Interactive，并保留 message/tool/session 数据。
 - 全量测试通过：463/463；覆盖共享 parser、严格 catalog、隐藏 child、ownership、事务回滚、task 上限、cascade、schema CHECK/UNIQUE 和 DI 注册。
 
 ### P2：durable task 与 child execution（已完成）
@@ -1241,20 +1255,35 @@ Desktop 拥有 turn admission、WPF approval、notification 和当前进程 back
 - P2 只把完成结果写为 `Pending` delivery；mailbox lease、coalescing 与 parent continuation 未启用，仍由 P3 实施。
 - 全量测试通过：483/483；覆盖 capability/no-nesting、原子 claim/terminal/delivery、UTF-8 envelope、隔离 child stream、Running cancel、Interrupted recovery、Queued restart 和 terminal CAS reload。
 
-### P3：mailbox continuation（待实施）
+### P3：mailbox continuation（已完成）
 
-- lease/coalescing；
-- transient completion batch；
-- user-priority admission；
-- success commit、retry、DeadLetter 和通知。
+- [x] lease/coalescing；
+- [x] transient completion batch；
+- [x] user-priority admission；
+- [x] success commit、retry、DeadLetter 和通知。
 
-### P4：收尾（待实施）
+完成记录：
 
-- conversation delete integration；
-- runtime execution flow 文档更新；
-- load/soak tests；
-- 日志字段、指标和故障诊断；
-- 确认无 child conversation 泄漏到现有 Vue 列表。
+- `ISubagentDeliveryStore` 是 Core 的聚焦持久化 seam；SQLite adapter 在 `BEGIN IMMEDIATE` 内按 parent conversation、parent turn 和冻结的 `ParentExecutionSnapshotJson` 分组，按 UTF-8 wrapper/comma 精确执行 64 KiB batch 上限和 FIFO。
+- `SubagentDeliveryDispatcher` 以 250 ms coalescing/scan、最多 4 个 continuation 和 45 秒 lease 运行；`SubagentContinuationExecutor` 每 15 秒整批 heartbeat 续租，续租不完整时整批回滚并放弃本次状态。
+- continuation 通过 detached `ConversationRuntimeState` 和 transient `<selfclaw-subagent-results>` user message 执行，不写入伪造的 parent user message，也不在运行中发布 parent transcript 或增量 tool row。
+- 成功时 parent assistant/tool terminal 与全部 delivery `Delivered` 在同一事务提交；无工具失败按 10 秒、30 秒退避后第三次 DeadLetter 且不写 parent failed message；产生工具副作用的失败原子写入失败 parent/tool terminal、DeadLetter 并通知桌面。
+- admission gate 维护 pending interactive 计数，用户新回合优先于 continuation；parent busy、删除 tombstone、lease 竞争和 stale commit 不消耗 attempt，也不会重复投递。
+
+### P4：收尾（已完成）
+
+- [x] conversation delete integration；
+- [x] runtime execution flow 文档更新；
+- [x] load/soak tests；
+- [x] 日志字段、指标和故障诊断；
+- [x] 确认无 child conversation 泄漏到现有 Vue 列表。
+
+完成记录：
+
+- 删除 parent 时先设置 admission tombstone、停止 parent turn，再由 `ISubagentConversationLifecycle.CancelAndWaitAsync` 取消并有界等待所有 queued/running child；超时会阻止 SQLite cascade，避免仍在执行的 child 写入已删除 parent。
+- `MainWindowViewModel` 和 repository 双重过滤 `ConversationKind.Interactive`，显式选择 child 也会被拒绝；cascade 只在 child 已达终态后执行。
+- v22 到 v23 迁移、结构化 lease/retry/delivered/deadletter/recovery 日志和 `SelfClaw.Subagents` Meter 已落地；并发竞争测试验证同一 parent mailbox 只有一个 lease winner。
+- 全量测试通过：496/496；其中 Subagent 定向测试 50/50，覆盖 batch/lease/recovery、transient prompt、detached transcript、用户优先、删除等待和 v22→v23 数据保留。
 
 每阶段都应可独立合并。P0/P1 不改变用户行为；P2 可以先只提供 task API 测试；P3 才开启自动 continuation。
 

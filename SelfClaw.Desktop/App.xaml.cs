@@ -70,16 +70,23 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<DesktopTurnFinalizer>();
             builder.Services.AddSingleton<ConversationTurnRecorder>();
             builder.Services.AddSingleton<SubagentTaskSnapshotSerializer>();
+            builder.Services.AddSingleton<SubagentCompletionBatchSerializer>();
             builder.Services.AddSingleton<SubagentTaskPreflight>();
             builder.Services.AddSingleton<SubagentTaskWakeSignal>();
             builder.Services.AddSingleton<SubagentTaskExecutionRegistry>();
             builder.Services.AddSingleton<SubagentTaskCoordinator>();
             builder.Services.AddSingleton<ISubagentTaskCoordinator>(services =>
                 services.GetRequiredService<SubagentTaskCoordinator>());
+            builder.Services.AddSingleton<ISubagentConversationLifecycle>(services =>
+                services.GetRequiredService<SubagentTaskCoordinator>());
             builder.Services.AddSingleton<SubagentTaskExecutor>();
             builder.Services.AddSingleton<SubagentTaskBackgroundHost>();
             builder.Services.AddHostedService(services =>
                 services.GetRequiredService<SubagentTaskBackgroundHost>());
+            builder.Services.AddSingleton<SubagentContinuationExecutor>();
+            builder.Services.AddSingleton<SubagentDeliveryDispatcher>();
+            builder.Services.AddHostedService(services =>
+                services.GetRequiredService<SubagentDeliveryDispatcher>());
             builder.Services.AddSingleton<IConversationCompletionNotifier, ConversationCompletionNotifier>();
             builder.Services.AddSingleton<ConversationTurnEngine>();
             builder.Services.AddSingleton<TranscriptProjection>();
@@ -121,6 +128,7 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<TranscriptPublisher>(),
                 services.GetRequiredService<DesktopAgentDefinitionService>(),
                 services.GetRequiredService<DesktopSettingsJsonStore>(),
+                services.GetRequiredService<ISubagentConversationLifecycle>(),
                 services.GetRequiredService<ILogger<MainWindowViewModel>>()));
             builder.Services.AddSingleton<IWorkspaceSelectionController>(services =>
                 services.GetRequiredService<MainWindowViewModel>());

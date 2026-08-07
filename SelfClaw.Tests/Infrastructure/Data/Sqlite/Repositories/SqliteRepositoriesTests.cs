@@ -651,6 +651,92 @@ VALUES($conversationId, 'Recovered chat', $profileId, 0, 0, 'build', $createdAt,
     }
 
     [Fact]
+    public async Task Initialize_v22_adds_conversation_ownership_without_losing_data()
+    {
+        var storagePaths = new StoragePaths(
+            _rootPath,
+            Path.Combine(_rootPath, "selfclaw.db"),
+            Path.Combine(_rootPath, "secrets"));
+        Directory.CreateDirectory(_rootPath);
+        var conversationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+
+        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+CREATE TABLE schema_versions (version INTEGER NOT NULL PRIMARY KEY, applied_at_utc TEXT NOT NULL);
+INSERT INTO schema_versions(version, applied_at_utc) VALUES(22, '2026-01-01T00:00:00.0000000+00:00');
+
+CREATE TABLE conversations (
+    id TEXT NOT NULL PRIMARY KEY,
+    title TEXT NOT NULL,
+    workspace_root_id TEXT NULL,
+    mode INTEGER NOT NULL DEFAULT 0,
+    tool_permission_mode INTEGER NOT NULL DEFAULT 0,
+    agent_id TEXT NOT NULL DEFAULT 'build',
+    channel_kind TEXT NULL,
+    channel_conversation_id TEXT NULL,
+    channel_display_name TEXT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+
+CREATE TABLE messages (
+    id TEXT NOT NULL PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    role INTEGER NOT NULL,
+    markdown_content TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    agent_id TEXT NULL,
+    agent_name TEXT NULL,
+    agent_role TEXT NULL,
+    input_tokens INTEGER NULL,
+    output_tokens INTEGER NULL,
+    duration_ms REAL NULL,
+    error_message TEXT NULL,
+    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
+
+INSERT INTO conversations(
+    id, title, mode, tool_permission_mode, agent_id, created_at_utc, updated_at_utc)
+VALUES($conversationId, 'Version 22 chat', 0, 1, 'build', $createdAt, $createdAt);
+INSERT INTO messages(
+    id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc)
+VALUES($messageId, $conversationId, 0, 'Preserved v22 message', 1, $createdAt, $createdAt);";
+            command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
+            command.Parameters.AddWithValue("$messageId", messageId.ToString("D"));
+            command.Parameters.AddWithValue("$createdAt", "2026-01-01T00:00:00.0000000+00:00");
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var repository = new SqliteConversationRepository(new SqliteDatabase(storagePaths));
+        await repository.InitializeAsync();
+
+        var conversation = await repository.GetConversationAsync(conversationId);
+        conversation.Should().NotBeNull();
+        conversation!.Kind.Should().Be(ConversationKind.Interactive);
+        conversation.ParentConversationId.Should().BeNull();
+        (await repository.ListMessagesAsync(conversationId)).Should().ContainSingle(message =>
+            message.Id == messageId && message.MarkdownContent == "Preserved v22 message");
+
+        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
+        await verification.OpenAsync();
+        (await ReadTableColumnNamesAsync(verification, "conversations"))
+            .Should().Contain(["kind", "parent_conversation_id"]);
+        await using var versionCommand = verification.CreateCommand();
+        versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(23L);
+        await using var foreignKeyCheck = verification.CreateCommand();
+        foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
+        await using var foreignKeyReader = await foreignKeyCheck.ExecuteReaderAsync();
+        (await foreignKeyReader.ReadAsync()).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Initialize_adds_tool_anchor_columns_to_legacy_tool_runs_table()
     {
         var storagePaths = new StoragePaths(

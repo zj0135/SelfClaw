@@ -7,7 +7,7 @@ using SelfClaw.Desktop.Services.Subagents.Models;
 
 namespace SelfClaw.Desktop.Services.Subagents;
 
-internal sealed class SubagentTaskCoordinator : ISubagentTaskCoordinator
+internal sealed class SubagentTaskCoordinator : ISubagentTaskCoordinator, ISubagentConversationLifecycle
 {
     private const int MaximumTaskBytes = 32 * 1024;
     private const int MaximumErrorMessageLength = 2048;
@@ -202,6 +202,55 @@ internal sealed class SubagentTaskCoordinator : ISubagentTaskCoordinator
         var created = await _taskStore.CreateAsync(creation, cancellationToken);
         _wakeSignal.Signal();
         return ToView(created);
+    }
+
+    public async Task CancelAndWaitAsync(
+        Guid parentConversationId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        if (parentConversationId == Guid.Empty)
+        {
+            throw new ArgumentException("A parent conversation id is required.", nameof(parentConversationId));
+        }
+
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+        }
+
+        var active = (await _taskStore.ListAsync(parentConversationId, cancellationToken))
+            .Where(task => !IsTerminal(task.Status))
+            .ToArray();
+        foreach (var task in active)
+        {
+            await CancelAsync(
+                new SubagentTaskCommand(parentConversationId, task.Id),
+                cancellationToken);
+        }
+
+        var deadline = _timeProvider.GetUtcNow() + timeout;
+        while (true)
+        {
+            var remaining = (await _taskStore.ListAsync(parentConversationId, cancellationToken))
+                .Where(task => !IsTerminal(task.Status))
+                .ToArray();
+            if (remaining.Length == 0)
+            {
+                return;
+            }
+
+            var delay = deadline - _timeProvider.GetUtcNow();
+            if (delay <= TimeSpan.Zero)
+            {
+                throw new TimeoutException("Active Subagent tasks did not stop before conversation deletion.");
+            }
+
+            await Task.Delay(
+                delay < TimeSpan.FromMilliseconds(100) ? delay : TimeSpan.FromMilliseconds(100),
+                _timeProvider,
+                cancellationToken);
+        }
     }
 
     private string ValidateStartRequest(SubagentTaskStartRequest request)

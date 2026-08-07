@@ -33,6 +33,23 @@ public sealed class DesktopNotificationService : IDisposable
         });
     }
 
+    public void ShowSubagentContinuationFailed(Guid conversationId, string title, string message)
+    {
+        var openArguments = DesktopNotificationArguments.Build(
+            (DesktopNotificationArguments.ActionKey, DesktopNotificationArguments.OpenConversationAction),
+            (DesktopNotificationArguments.ConversationIdKey, conversationId.ToString()));
+
+        ShowCore(builder =>
+        {
+            AddRootConversationArguments(builder, conversationId);
+            AddNotificationText(
+                builder,
+                string.IsNullOrWhiteSpace(title) ? "Subagent continuation failed" : title,
+                message);
+            builder.AddButton(new ToastButton("Open", openArguments));
+        });
+    }
+
     public void ShowToolApproval(Guid toolExecutionId, Guid? conversationId, string title, string message)
     {
         ShowCore(builder =>

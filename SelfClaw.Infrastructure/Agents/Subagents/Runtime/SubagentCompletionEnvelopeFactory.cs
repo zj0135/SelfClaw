@@ -8,6 +8,7 @@ namespace SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 internal sealed class SubagentCompletionEnvelopeFactory
 {
     internal const int MaximumEnvelopeBytes = 32 * 1024;
+    private static readonly TimeSpan InitialDeliveryDelay = TimeSpan.FromSeconds(2);
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
@@ -56,7 +57,7 @@ internal sealed class SubagentCompletionEnvelopeFactory
             LeaseToken: null,
             LeasedUntilUtc: null,
             AttemptCount: 0,
-            NextAttemptAtUtc: now,
+            NextAttemptAtUtc: now + InitialDeliveryDelay,
             ContinuationTurnId: null,
             LastError: null,
             CreatedAtUtc: now,

@@ -19,9 +19,11 @@ internal sealed class ConversationRuntimeState : IDisposable
         ConversationRecord conversation,
         IEnumerable<MessageRecord> messages,
         IEnumerable<ToolExecutionRecord> toolRuns,
-        IReadOnlyDictionary<Guid, ToolRunAnchor> toolRunAnchors)
+        IReadOnlyDictionary<Guid, ToolRunAnchor> toolRunAnchors,
+        bool isDetached = false)
     {
         Conversation = conversation;
+        IsDetached = isDetached;
         Messages.AddRange(messages);
         ToolRuns.AddRange(toolRuns);
         foreach (var item in toolRunAnchors)
@@ -33,6 +35,8 @@ internal sealed class ConversationRuntimeState : IDisposable
     public ConversationRecord Conversation { get; set; }
 
     public Guid ConversationId => Conversation.Id;
+
+    public bool IsDetached { get; }
 
     public List<MessageRecord> Messages { get; } = [];
 

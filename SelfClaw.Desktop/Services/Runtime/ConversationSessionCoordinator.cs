@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
@@ -9,8 +10,8 @@ internal sealed class ConversationSessionCoordinator : IDisposable
 {
     private readonly IConversationRepository _conversationRepository;
     private readonly ITranscriptChangeSink _transcriptChangeSink;
-    private readonly Dictionary<Guid, ConversationRuntimeState> _runtimeStates = [];
-    private readonly Dictionary<Guid, Task<ConversationTranscriptSnapshot>> _transcriptLoads = [];
+    private readonly ConcurrentDictionary<Guid, ConversationRuntimeState> _runtimeStates = [];
+    private readonly ConcurrentDictionary<Guid, Task<ConversationTranscriptSnapshot>> _transcriptLoads = [];
     private readonly List<MessageRecord> _selectedMessages = [];
     private readonly List<ToolExecutionRecord> _selectedToolRuns = [];
     private readonly Dictionary<Guid, ToolRunAnchor> _selectedToolRunAnchors = [];
@@ -52,7 +53,8 @@ internal sealed class ConversationSessionCoordinator : IDisposable
         ClearSelectedTranscript();
         _transcriptChangeSink.PublishNow(false);
 
-        if (conversationId is not Guid selectedId || _runtimeStates.ContainsKey(selectedId))
+        if (conversationId is not Guid selectedId ||
+            (_runtimeStates.TryGetValue(selectedId, out var runtimeState) && !runtimeState.IsDetached))
         {
             return;
         }
@@ -73,6 +75,17 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     internal async Task<ConversationRuntimeState> StartTurnAsync(
         ConversationRecord conversation,
         CancellationToken cancellationToken = default)
+        => await StartTurnCoreAsync(conversation, isDetached: false, cancellationToken);
+
+    internal async Task<ConversationRuntimeState> StartDetachedTurnAsync(
+        ConversationRecord conversation,
+        CancellationToken cancellationToken = default)
+        => await StartTurnCoreAsync(conversation, isDetached: true, cancellationToken);
+
+    private async Task<ConversationRuntimeState> StartTurnCoreAsync(
+        ConversationRecord conversation,
+        bool isDetached,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(conversation);
 
@@ -88,21 +101,26 @@ internal sealed class ConversationSessionCoordinator : IDisposable
                 }
 
                 existing.Dispose();
-                _runtimeStates.Remove(conversation.Id);
+                _runtimeStates.TryRemove(conversation.Id, out _);
             }
 
             var state = new ConversationRuntimeState(
                 conversation,
                 snapshot.Messages,
                 snapshot.ToolRuns,
-                snapshot.ToolRunAnchors);
-            state.TranscriptChanged += immediate =>
+                snapshot.ToolRunAnchors,
+                isDetached);
+            if (!isDetached)
             {
-                if (IsSelected(state.ConversationId))
+                state.TranscriptChanged += immediate =>
                 {
-                    PublishSelectedTranscriptChange(immediate);
-                }
-            };
+                    if (IsSelected(state.ConversationId))
+                    {
+                        PublishSelectedTranscriptChange(immediate);
+                    }
+                };
+            }
+
             _runtimeStates[conversation.Id] = state;
             return state;
         }
@@ -124,12 +142,27 @@ internal sealed class ConversationSessionCoordinator : IDisposable
             ReplaceSelectedTranscript(state);
         }
 
-        _runtimeStates.Remove(state.ConversationId);
+        _runtimeStates.TryRemove(state.ConversationId, out _);
         state.Dispose();
 
         if (IsSelected(state.ConversationId))
         {
             _transcriptChangeSink.PublishNow(true);
+        }
+    }
+
+    internal void AbandonTurn(ConversationRuntimeState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        state.IsRunning = false;
+        state.MarkCompleted();
+        if (_runtimeStates.TryRemove(state.ConversationId, out var registered))
+        {
+            registered.Dispose();
+        }
+        else
+        {
+            state.Dispose();
         }
     }
 
@@ -158,7 +191,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     {
         if (!_runtimeStates.TryGetValue(conversationId, out var state))
         {
-            _transcriptLoads.Remove(conversationId);
+            _transcriptLoads.TryRemove(conversationId, out _);
             return;
         }
 
@@ -181,12 +214,12 @@ internal sealed class ConversationSessionCoordinator : IDisposable
             }
         }
 
-        if (_runtimeStates.Remove(conversationId, out var remainingState))
+        if (_runtimeStates.TryRemove(conversationId, out var remainingState))
         {
             remainingState.Dispose();
         }
 
-        _transcriptLoads.Remove(conversationId);
+        _transcriptLoads.TryRemove(conversationId, out _);
     }
 
     public void Dispose()
@@ -213,7 +246,8 @@ internal sealed class ConversationSessionCoordinator : IDisposable
 
     private ConversationRuntimeState? GetSelectedRuntimeState()
         => _selectedConversationId is Guid conversationId &&
-           _runtimeStates.TryGetValue(conversationId, out var state)
+           _runtimeStates.TryGetValue(conversationId, out var state) &&
+           !state.IsDetached
             ? state
             : null;
 

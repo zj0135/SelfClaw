@@ -58,6 +58,9 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<SqliteSubagentTaskRepository>());
         services.AddSingleton<ISubagentTaskExecutionStore>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteSubagentTaskRepository>());
+        services.AddSingleton<SqliteSubagentDeliveryRepository>();
+        services.AddSingleton<ISubagentDeliveryStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteSubagentDeliveryRepository>());
         services.AddSingleton<IAiProviderRepository, SqliteAiProviderRepository>();
         services.AddSingleton<SqliteExtensionRepository>();
         services.AddSingleton<IExtensionPackageRepository>(serviceProvider =>

@@ -291,6 +291,277 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         requested.CancelRequestedAtUtc.Should().Be(requestedAt);
     }
 
+    [Fact]
+    public async Task Delivery_lease_batches_fifo_within_the_exact_utf8_limit_and_snapshot()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        var parentTurnId = Guid.NewGuid();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var first = await CompleteTaskAsync(context, CreateTaskCreation(parent, parentTurnId, "First"), new string('a', 24_000));
+        var second = await CompleteTaskAsync(context, CreateTaskCreation(parent, parentTurnId, "Second"), new string('b', 24_000));
+        _ = await CompleteTaskAsync(context, CreateTaskCreation(parent, parentTurnId, "Third"), new string('c', 24_000));
+        var differentSnapshot = CreateTaskCreation(parent, parentTurnId, "Different snapshot");
+        differentSnapshot = differentSnapshot with
+        {
+            Task = differentSnapshot.Task with { ParentExecutionSnapshotJson = "{\"snapshot\":2}" }
+        };
+        _ = await CompleteTaskAsync(context, differentSnapshot, "different");
+        var now = DateTimeOffset.UtcNow.AddSeconds(3);
+        var mailbox = await context.Deliveries.PeekReadyMailboxAsync(now, now);
+
+        var lease = await context.Deliveries.TryLeaseBatchAsync(
+            mailbox!,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            now,
+            now.AddSeconds(45),
+            64 * 1024);
+
+        lease.Should().NotBeNull();
+        lease!.Deliveries.Select(delivery => delivery.TaskId).Should().Equal(first.Id, second.Id);
+        var exactBytes = System.Text.Encoding.UTF8.GetByteCount("{\"deliveries\":[" +
+            string.Join(',', lease.Deliveries.Select(delivery => delivery.EnvelopeJson)) + "]}");
+        exactBytes.Should().BeLessThanOrEqualTo(64 * 1024);
+        lease.Deliveries.Should().OnlyContain(delivery => delivery.AttemptCount == 1);
+    }
+
+    [Fact]
+    public async Task Delivery_success_atomically_commits_parent_turn_and_rejects_a_stale_lease()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var task = await CompleteTaskAsync(
+            context,
+            CreateTaskCreation(parent, Guid.NewGuid(), "Complete parent."),
+            "child result");
+        var now = DateTimeOffset.UtcNow.AddSeconds(3);
+        var lease = await LeaseNextAsync(context, now);
+        var assistant = new MessageRecord(
+            lease.ContinuationTurnId,
+            parent.Id,
+            MessageRole.Assistant,
+            "parent continuation",
+            MessageStatus.Completed,
+            now,
+            now);
+        var resolution = new SubagentDeliveryResolution(
+            SubagentDeliveryResolutionKind.Succeeded,
+            new TurnFinalization(assistant, []),
+            Error: null,
+            now);
+
+        var committed = await context.Deliveries.TryResolveAsync(lease, resolution);
+        var repeated = await context.Deliveries.TryResolveAsync(lease, resolution);
+
+        committed.LeaseMatched.Should().BeTrue();
+        committed.DeliveredDeliveryIds.Should().Equal(lease.Deliveries[0].Id);
+        repeated.LeaseMatched.Should().BeFalse();
+        (await context.Deliveries.GetAsync(parent.Id, task.Id))!.Status
+            .Should().Be(SubagentDeliveryStatus.Delivered);
+        (await context.Conversations.ListMessagesAsync(parent.Id))
+            .Should().ContainSingle().Which.Should().Be(assistant);
+    }
+
+    [Fact]
+    public async Task Delivery_retry_uses_ten_and_thirty_second_backoff_then_dead_letters_without_parent_message()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var task = await CompleteTaskAsync(
+            context,
+            CreateTaskCreation(parent, Guid.NewGuid(), "Retry continuation."),
+            "child result");
+        var firstAt = DateTimeOffset.UtcNow.AddSeconds(3);
+        var firstLease = await LeaseNextAsync(context, firstAt);
+
+        var first = await context.Deliveries.TryResolveAsync(
+            firstLease,
+            RetryableFailure(firstAt, "first failure"));
+        var firstPending = await context.Deliveries.GetAsync(parent.Id, task.Id);
+        var secondAt = firstAt.AddSeconds(11);
+        var secondLease = await LeaseNextAsync(context, secondAt);
+        var second = await context.Deliveries.TryResolveAsync(
+            secondLease,
+            RetryableFailure(secondAt, "second failure"));
+        var secondPending = await context.Deliveries.GetAsync(parent.Id, task.Id);
+        var thirdAt = secondAt.AddSeconds(31);
+        var thirdLease = await LeaseNextAsync(context, thirdAt);
+        var third = await context.Deliveries.TryResolveAsync(
+            thirdLease,
+            RetryableFailure(thirdAt, "third failure"));
+
+        first.PendingDeliveryIds.Should().ContainSingle();
+        firstPending!.NextAttemptAtUtc.Should().Be(firstAt.AddSeconds(10));
+        second.PendingDeliveryIds.Should().ContainSingle();
+        secondPending!.NextAttemptAtUtc.Should().Be(secondAt.AddSeconds(30));
+        third.DeadLetteredDeliveryIds.Should().ContainSingle();
+        (await context.Deliveries.GetAsync(parent.Id, task.Id))!.Status
+            .Should().Be(SubagentDeliveryStatus.DeadLetter);
+        (await context.Conversations.ListMessagesAsync(parent.Id)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Delivery_unsafe_failure_atomically_persists_failed_parent_turn_and_dead_letter()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var task = await CompleteTaskAsync(
+            context,
+            CreateTaskCreation(parent, Guid.NewGuid(), "Unsafe continuation."),
+            "child result");
+        var now = DateTimeOffset.UtcNow.AddSeconds(3);
+        var lease = await LeaseNextAsync(context, now);
+        var assistant = new MessageRecord(
+            lease.ContinuationTurnId,
+            parent.Id,
+            MessageRole.Assistant,
+            "partial",
+            MessageStatus.Failed,
+            now,
+            now,
+            ErrorMessage: "provider failed after a tool call");
+        var tool = new ToolExecutionRecord(
+            Guid.NewGuid(),
+            parent.Id,
+            "write_file",
+            "{}",
+            ToolExecutionStatus.Failed,
+            "provider failed",
+            "call-1",
+            10,
+            now,
+            now,
+            MessageId: lease.ContinuationTurnId);
+
+        var resolved = await context.Deliveries.TryResolveAsync(
+            lease,
+            new SubagentDeliveryResolution(
+                SubagentDeliveryResolutionKind.UnsafeFailure,
+                new TurnFinalization(assistant, [tool]),
+                assistant.ErrorMessage,
+                now));
+
+        resolved.DeadLetteredDeliveryIds.Should().ContainSingle();
+        (await context.Deliveries.GetAsync(parent.Id, task.Id))!.Status
+            .Should().Be(SubagentDeliveryStatus.DeadLetter);
+        (await context.Conversations.ListMessagesAsync(parent.Id)).Should().ContainSingle().Which.Should().Be(assistant);
+        (await context.Conversations.ListToolExecutionsAsync(parent.Id)).Should().ContainSingle().Which.Should().Be(tool);
+    }
+
+    [Fact]
+    public async Task Delivery_lease_renewal_is_atomic_and_rejects_a_mismatched_batch()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        var parentTurnId = Guid.NewGuid();
+        await context.Conversations.UpsertConversationAsync(parent);
+        _ = await CompleteTaskAsync(context, CreateTaskCreation(parent, parentTurnId, "First"), "first");
+        _ = await CompleteTaskAsync(context, CreateTaskCreation(parent, parentTurnId, "Second"), "second");
+        var leasedAt = DateTimeOffset.UtcNow.AddSeconds(3);
+        var lease = await LeaseNextAsync(context, leasedAt);
+        lease.Deliveries.Should().HaveCount(2);
+        var firstRenewal = leasedAt.AddSeconds(15);
+
+        (await context.Deliveries.TryRenewLeaseAsync(
+            lease,
+            firstRenewal,
+            firstRenewal.AddSeconds(45))).Should().BeTrue();
+
+        var mismatched = lease with
+        {
+            Deliveries =
+            [
+                lease.Deliveries[0],
+                lease.Deliveries[1] with { Id = Guid.NewGuid() }
+            ]
+        };
+        var rejectedRenewal = firstRenewal.AddSeconds(15);
+        (await context.Deliveries.TryRenewLeaseAsync(
+            mismatched,
+            rejectedRenewal,
+            rejectedRenewal.AddSeconds(45))).Should().BeFalse();
+
+        foreach (var delivery in lease.Deliveries)
+        {
+            (await context.Deliveries.GetAsync(parent.Id, delivery.TaskId))!.LeasedUntilUtc
+                .Should().Be(firstRenewal.AddSeconds(45));
+        }
+    }
+
+    [Fact]
+    public async Task Delivery_expired_lease_retries_without_tools_and_dead_letters_a_recorded_tool_turn()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var task = await CompleteTaskAsync(
+            context,
+            CreateTaskCreation(parent, Guid.NewGuid(), "Recover continuation."),
+            "child result");
+        var firstAt = DateTimeOffset.UtcNow.AddSeconds(3);
+        var firstLease = await LeaseNextAsync(context, firstAt);
+
+        (await context.Deliveries.RecoverExpiredLeasesAsync(firstAt.AddSeconds(46)))
+            .Should().BeEmpty();
+        (await context.Deliveries.GetAsync(parent.Id, task.Id))!.Status
+            .Should().Be(SubagentDeliveryStatus.Pending);
+
+        var secondAt = firstAt.AddSeconds(47);
+        var secondLease = await LeaseNextAsync(context, secondAt);
+        var tool = new ToolExecutionRecord(
+            Guid.NewGuid(),
+            parent.Id,
+            "write_file",
+            "{}",
+            ToolExecutionStatus.Running,
+            ResultSummary: null,
+            "call-recovery",
+            DurationMs: null,
+            secondAt,
+            secondAt,
+            MessageId: secondLease.ContinuationTurnId);
+        await context.Conversations.UpsertToolExecutionAsync(tool);
+
+        var deadLetters = await context.Deliveries.RecoverExpiredLeasesAsync(secondAt.AddSeconds(46));
+
+        deadLetters.Should().ContainSingle().Which.Id.Should().Be(secondLease.Deliveries[0].Id);
+        (await context.Deliveries.GetAsync(parent.Id, task.Id))!.Status
+            .Should().Be(SubagentDeliveryStatus.DeadLetter);
+        (await context.Conversations.ListMessagesAsync(parent.Id)).Should().ContainSingle(message =>
+            message.Id == secondLease.ContinuationTurnId && message.Status == MessageStatus.Failed);
+        (await context.Conversations.ListToolExecutionsAsync(parent.Id)).Should().ContainSingle(record =>
+            record.Id == tool.Id && record.Status == ToolExecutionStatus.Failed);
+    }
+
+    [Fact]
+    public async Task Delivery_competing_leases_have_a_single_winner_per_parent()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        _ = await CompleteTaskAsync(
+            context,
+            CreateTaskCreation(parent, Guid.NewGuid(), "Compete for mailbox."),
+            "child result");
+        var now = DateTimeOffset.UtcNow.AddSeconds(3);
+        var mailbox = await context.Deliveries.PeekReadyMailboxAsync(now, now);
+
+        var attempts = Enumerable.Range(0, 8).Select(_ => context.Deliveries.TryLeaseBatchAsync(
+            mailbox!,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            now,
+            now.AddSeconds(45),
+            64 * 1024));
+        var leases = await Task.WhenAll(attempts);
+
+        leases.Should().ContainSingle(candidate => candidate != null);
+    }
+
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))
@@ -316,8 +587,9 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         var database = new SqliteDatabase(storagePaths);
         var conversations = new SqliteConversationRepository(database);
         var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
+        var deliveries = new SqliteSubagentDeliveryRepository(database);
         await tasks.InitializeAsync();
-        return new TestContext(database, conversations, tasks);
+        return new TestContext(database, conversations, tasks, deliveries);
     }
 
     private static ConversationRecord CreateParentConversation()
@@ -448,6 +720,38 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         await command.ExecuteNonQueryAsync();
     }
 
+    private static async Task<SubagentTaskRecord> CompleteTaskAsync(
+        TestContext context,
+        SubagentTaskCreation creation,
+        string finalText)
+    {
+        await context.Tasks.CreateAsync(creation);
+        var running = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow)
+            ?? throw new InvalidOperationException("The fixture task could not be claimed.");
+        return await context.Tasks.TryCompleteAsync(
+            running.Id,
+            SubagentTaskStatus.Running,
+            CreateCompletion(running, SubagentTaskStatus.Succeeded, finalText, finalText))
+            ?? throw new InvalidOperationException("The fixture task could not be completed.");
+    }
+
+    private static async Task<SubagentDeliveryLease> LeaseNextAsync(TestContext context, DateTimeOffset now)
+    {
+        var mailbox = await context.Deliveries.PeekReadyMailboxAsync(now, now)
+            ?? throw new InvalidOperationException("The fixture mailbox is not ready.");
+        return await context.Deliveries.TryLeaseBatchAsync(
+            mailbox,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            now,
+            now.AddSeconds(45),
+            64 * 1024)
+            ?? throw new InvalidOperationException("The fixture mailbox could not be leased.");
+    }
+
+    private static SubagentDeliveryResolution RetryableFailure(DateTimeOffset occurredAtUtc, string error)
+        => new(SubagentDeliveryResolutionKind.RetryableFailure, null, error, occurredAtUtc);
+
     private static async Task<long> CountAsync(SqliteConnection connection, string tableName)
     {
         await using var command = connection.CreateCommand();
@@ -458,5 +762,6 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
     private sealed record TestContext(
         SqliteDatabase Database,
         SqliteConversationRepository Conversations,
-        SqliteSubagentTaskRepository Tasks);
+        SqliteSubagentTaskRepository Tasks,
+        SqliteSubagentDeliveryRepository Deliveries);
 }

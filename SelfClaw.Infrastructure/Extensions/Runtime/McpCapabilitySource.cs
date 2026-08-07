@@ -53,7 +53,8 @@ internal sealed class McpCapabilitySource
             .Where(server => server.IsEnabled &&
                              (string.IsNullOrWhiteSpace(server.SourcePluginId)
                                  ? request.Agent.McpServerIds.Contains(server.Id, StringComparer.OrdinalIgnoreCase)
-                                 : effectivePluginRoots.ContainsKey(server.SourcePluginId)))
+                                 : effectivePluginRoots.ContainsKey(server.SourcePluginId)) &&
+                             IsAllowedByCapturedCeiling(request, server, diagnostics))
             .OrderBy(server => server.Id, StringComparer.Ordinal)
             .ToArray();
         var leases = new List<McpClientLease>();
@@ -85,6 +86,32 @@ internal sealed class McpCapabilitySource
             await DisposeLeasesAsync(leases).ConfigureAwait(false);
             throw;
         }
+    }
+
+    private static bool IsAllowedByCapturedCeiling(
+        DirectChatTurnRequest request,
+        McpServerConfigRecord server,
+        TurnDiagnostics diagnostics)
+    {
+        if (request.ExecutionContext.Origin == DirectTurnOrigin.Interactive)
+        {
+            return true;
+        }
+
+        var captured = request.ExecutionContext.CapabilityCeiling?.McpServers.FirstOrDefault(capability =>
+            string.Equals(capability.Id, server.Id, StringComparison.OrdinalIgnoreCase));
+        if (captured is not null && captured.ConfigRevision == server.ConfigRevision)
+        {
+            return true;
+        }
+
+        if (request.ExecutionContext.Origin == DirectTurnOrigin.Continuation)
+        {
+            diagnostics.Degrade(
+                $"MCP server '{server.Id}' was removed because it changed since delegation.");
+        }
+
+        return false;
     }
 
     public static async ValueTask DisposeLeasesAsync(IReadOnlyList<McpClientLease> leases)

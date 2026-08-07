@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
@@ -29,6 +30,8 @@ internal sealed class ConversationTurnEngine : IDisposable
     private readonly IConversationCompletionNotifier _completionNotifier;
     private readonly ILogger<ConversationTurnEngine> _logger;
     private readonly SemaphoreSlim _turnAdmissionGate = new(1, 1);
+    private readonly ConcurrentDictionary<Guid, byte> _deletingConversations = new();
+    private int _pendingInteractiveAdmissions;
     private int _disposeStarted;
 
     public ConversationTurnEngine(
@@ -60,25 +63,100 @@ internal sealed class ConversationTurnEngine : IDisposable
     internal async Task<AdmittedConversationTurn?> TryAdmitAsync(DesktopConversationTurnRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-
-        await _turnAdmissionGate.WaitAsync();
+        Interlocked.Increment(ref _pendingInteractiveAdmissions);
         try
         {
-            var conversation = CreateConversation(request);
-            if (_conversationSessions.IsRunning(conversation.Id))
+            await _turnAdmissionGate.WaitAsync();
+            try
+            {
+                var conversation = CreateConversation(request);
+                if (_deletingConversations.ContainsKey(conversation.Id) ||
+                    _conversationSessions.IsRunning(conversation.Id))
+                {
+                    return null;
+                }
+
+                conversation = await _conversationRepository.UpsertConversationAsync(conversation);
+                var runtimeState = await _conversationSessions.StartTurnAsync(conversation);
+                return new AdmittedConversationTurn(request, conversation, runtimeState);
+            }
+            finally
+            {
+                _turnAdmissionGate.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _pendingInteractiveAdmissions);
+        }
+    }
+
+    internal async Task<ConversationRuntimeState?> TryAdmitContinuationAsync(
+        ConversationRecord conversation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(conversation);
+        if (conversation.Kind != ConversationKind.Interactive ||
+            Volatile.Read(ref _pendingInteractiveAdmissions) != 0 ||
+            _deletingConversations.ContainsKey(conversation.Id))
+        {
+            return null;
+        }
+
+        await _turnAdmissionGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (Volatile.Read(ref _pendingInteractiveAdmissions) != 0 ||
+                _deletingConversations.ContainsKey(conversation.Id) ||
+                _conversationSessions.IsRunning(conversation.Id))
             {
                 return null;
             }
 
-            conversation = await _conversationRepository.UpsertConversationAsync(conversation);
-            var runtimeState = await _conversationSessions.StartTurnAsync(conversation);
-            return new AdmittedConversationTurn(request, conversation, runtimeState);
+            return await _conversationSessions.StartDetachedTurnAsync(conversation, cancellationToken);
         }
         finally
         {
             _turnAdmissionGate.Release();
         }
     }
+
+    internal async Task CompleteContinuationAsync(
+        ConversationRuntimeState runtimeState,
+        bool publishPersistedTurn,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(runtimeState);
+        await _turnAdmissionGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (publishPersistedTurn)
+            {
+                _conversationSessions.CompleteTurn(runtimeState);
+            }
+            else
+            {
+                _conversationSessions.AbandonTurn(runtimeState);
+            }
+        }
+        finally
+        {
+            _turnAdmissionGate.Release();
+        }
+    }
+
+    internal void BeginConversationDeletion(Guid conversationId)
+    {
+        if (conversationId == Guid.Empty)
+        {
+            throw new ArgumentException("A conversation deletion requires a non-empty id.", nameof(conversationId));
+        }
+
+        _deletingConversations[conversationId] = 0;
+    }
+
+    internal void EndConversationDeletion(Guid conversationId)
+        => _deletingConversations.TryRemove(conversationId, out _);
 
     internal async Task ExecuteAsync(AdmittedConversationTurn admission)
     {
