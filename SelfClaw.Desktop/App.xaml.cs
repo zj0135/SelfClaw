@@ -30,6 +30,7 @@ using SelfClaw.Desktop.Services.Workspace.Abstractions;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.Extensions.Discovery;
 using SelfClaw.Infrastructure.Options;
 using Serilog;
 using Serilog.Events;
@@ -163,6 +164,7 @@ public partial class App : System.Windows.Application
             await _host.Services.GetRequiredService<IAiProviderRepository>().InitializeAsync();
             await _host.Services.GetRequiredService<IExtensionPackageRepository>().InitializeAsync();
             await _host.Services.GetRequiredService<IExtensionCatalogReconciler>().ReconcileAsync();
+            await _host.Services.GetRequiredService<UserSkillDiscoveryService>().DiscoverAndRegisterAsync();
             await _host.Services.GetRequiredService<ProgrammingAssistantSettingsService>().GetOrInitializeAsync();
             var mainWindow = _host.Services.GetRequiredService<MainWindow>();
             RegisterToastNotifications();

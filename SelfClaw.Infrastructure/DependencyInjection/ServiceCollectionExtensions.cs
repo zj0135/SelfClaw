@@ -20,6 +20,7 @@ using SelfClaw.Infrastructure.AiProviders.Ollama;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Extensions;
+using SelfClaw.Infrastructure.Extensions.Discovery;
 using SelfClaw.Infrastructure.Extensions.Models;
 using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
@@ -89,6 +90,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ExtensionCatalog>();
         services.AddSingleton<IExtensionCatalogReconciler>(serviceProvider =>
             serviceProvider.GetRequiredService<ExtensionCatalog>());
+        services.AddSingleton<UserSkillDiscoveryService>(serviceProvider =>
+            new UserSkillDiscoveryService(
+                UserSkillDiscoveryService.DefaultUserSkillsRoot,
+                serviceProvider.GetRequiredService<IExtensionPackageRepository>(),
+                serviceProvider.GetRequiredService<SkillPackageReader>(),
+                serviceProvider.GetRequiredService<ILogger<UserSkillDiscoveryService>>()));
         services.AddSingleton<McpConfigurationResolver>();
         services.AddSingleton<McpTransportFactory>();
         services.AddSingleton<IMcpClientConnectionFactory, SdkMcpClientConnectionFactory>();
