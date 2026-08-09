@@ -19,150 +19,25 @@ import { useToast } from '../../composables/useToast.js';
 // Brand logos from @lobehub/icons-static-png (color variants where available).
 import openaiLogo from '@lobehub/icons-static-png/light/openai.png';
 import anthropicLogo from '@lobehub/icons-static-png/light/claude-color.png';
-import geminiLogo from '@lobehub/icons-static-png/light/gemini-color.png';
-import deepseekLogo from '@lobehub/icons-static-png/light/deepseek-color.png';
-import openrouterLogo from '@lobehub/icons-static-png/light/openrouter.png';
 import ollamaLogo from '@lobehub/icons-static-png/light/ollama.png';
-import azureLogo from '@lobehub/icons-static-png/light/azure-color.png';
 
-// Maps a provider kind (see logoKind in useAiProviderHost) to its brand logo asset.
+// Maps a catalog id to its brand logo asset. Custom connections fall back to OpenAI.
 const providerLogos = {
 	openai: openaiLogo,
 	anthropic: anthropicLogo,
-	gemini: geminiLogo,
-	deepseek: deepseekLogo,
-	openrouter: openrouterLogo,
 	ollama: ollamaLogo,
-	azure: azureLogo,
 };
 
-function mk(name, id, ctx, out, inp, outp, cacheW, cacheR) {
-	return { name, id, ctx, out, inp, outp, cacheW, cacheR, on: true };
-}
+// Filled by applyState in useAiProviderHost on mount; empty until the host replies,
+// so the detail pane is guarded by v-if="activeProvider".
+const providers = reactive([]);
 
-const providers = reactive([
-	{
-		id: 'openai',
-		name: 'OpenAI',
-		sub: 'OpenAI Chat Completions 兼容',
-		color: '#10a37f',
-		enabled: true,
-		key: 'sk-preview-demo',
-		base: 'https://zyapi.tuluo.top:8888/v1',
-		models: [
-			mk('GPT 5.2', 'gpt-5.2', '391K', '63K', '$1.75', '$14', '$1.75', '$0.175'),
-			mk('GPT-5.1', 'gpt-5.1', '391K', '63K', '$1.25', '$10', '$1.25', '$0.125'),
-			mk('GPT-5', 'gpt-5', '391K', '63K', '$1.25', '$10', '$1.25', '$0.125'),
-			mk('GPT-4.1', 'gpt-4.1', '1M', '32K', '$2.00', '$8', '$2.00', '$0.50'),
-			mk('GPT-4o', 'gpt-4o', '128K', '16K', '$2.50', '$10', '$2.50', '$1.25'),
-			mk('o4-mini', 'o4-mini', '200K', '100K', '$1.10', '$4.40', '$1.10', '$0.275'),
-			mk('text-embedding-3-large', 'text-embedding-3-large', '8K', '—', '$0.13', '—', null, null),
-		],
-	},
-	{
-		id: 'routin',
-		name: 'Routin AI',
-		sub: '聚合路由 · 多模型转发',
-		color: '#e0721b',
-		enabled: false,
-		models: Array.from({ length: 7 }, (_, i) =>
-			mk(`Routin ${i + 1}`, `routin-${i + 1}`, '128K', '8K', '$0.40', '$1.20', null, null)),
-		total: 87,
-	},
-	{
-		id: 'routin2',
-		name: 'Routin AI（套餐）',
-		sub: '包月套餐 · 固定额度',
-		color: '#e0721b',
-		enabled: false,
-		models: Array.from({ length: 5 }, (_, i) =>
-			mk(`Routin Pack ${i + 1}`, `routin-pk-${i + 1}`, '128K', '8K', '$0.30', '$0.90', null, null)),
-		total: 20,
-	},
-	{
-		id: 'anthropic',
-		name: 'Anthropic',
-		sub: 'Claude Messages API',
-		color: '#c9682a',
-		enabled: false,
-		models: [
-			mk('Claude Opus 4.5', 'claude-opus-4-5', '200K', '64K', '$15.00', '$75', '$18.75', '$1.50'),
-			mk('Claude Sonnet 4.5', 'claude-sonnet-4-5', '200K', '64K', '$3.00', '$15', '$3.75', '$0.30'),
-			mk('Claude Haiku 4', 'claude-haiku-4', '200K', '32K', '$0.80', '$4', '$1.00', '$0.08'),
-		],
-		total: 10,
-	},
-	{
-		id: 'longcat',
-		name: 'LongCat',
-		sub: '长上下文优化模型',
-		color: '#6b5bd2',
-		enabled: false,
-		models: Array.from({ length: 6 }, (_, i) =>
-			mk(`LongCat ${i + 1}`, `longcat-${i + 1}`, '512K', '32K', '$0.50', '$1.50', null, null)),
-		total: 6,
-	},
-	{
-		id: 'gemini',
-		name: 'Google Gemini',
-		sub: 'Gemini API · v1beta',
-		color: '#1a73e8',
-		enabled: false,
-		models: [
-			mk('Gemini 2.5 Pro', 'gemini-2.5-pro', '2M', '64K', '$1.25', '$10', null, null),
-			mk('Gemini 2.5 Flash', 'gemini-2.5-flash', '1M', '64K', '$0.30', '$2.50', null, null),
-			mk('Gemini 2.0 Flash', 'gemini-2.0-flash', '1M', '8K', '$0.10', '$0.40', null, null),
-		],
-		total: 13,
-	},
-	{
-		id: 'deepseek',
-		name: 'DeepSeek',
-		sub: 'DeepSeek OpenAI 兼容',
-		color: '#4d6bfe',
-		enabled: false,
-		models: [
-			mk('DeepSeek V3.2', 'deepseek-chat', '128K', '8K', '$0.27', '$1.10', '$0.27', '$0.07'),
-			mk('DeepSeek R1', 'deepseek-reasoner', '128K', '32K', '$0.55', '$2.19', '$0.55', '$0.14'),
-		],
-		total: 4,
-	},
-	{
-		id: 'openrouter',
-		name: 'OpenRouter',
-		sub: '统一多供应商网关',
-		color: '#3b3f46',
-		enabled: false,
-		models: Array.from({ length: 6 }, (_, i) =>
-			mk(`Router Model ${i + 1}`, `or-model-${i + 1}`, '128K', '8K', '$0.60', '$1.80', null, null)),
-		total: 54,
-	},
-	{
-		id: 'ollama',
-		name: 'Ollama',
-		sub: '本地模型运行时',
-		color: '#3a3a3a',
-		enabled: false,
-		models: [],
-		total: 0,
-	},
-	{
-		id: 'azure',
-		name: 'Azure OpenAI',
-		sub: 'Azure 部署端点',
-		color: '#0078d4',
-		enabled: false,
-		models: Array.from({ length: 5 }, (_, i) =>
-			mk(`Azure GPT ${i + 1}`, `azure-gpt-${i + 1}`, '128K', '16K', '$2.50', '$10', null, null)),
-		total: 27,
-	},
-]);
-
-const activeId = ref('openai');
+const activeId = ref('');
 const providerSearch = ref('');
 const modelSearch = ref('');
 const apiKeyVisible = ref(false);
-const selectedCheckModel = ref('gpt-5.2');
+// Set from the active provider's first profile once host state loads.
+const selectedCheckModel = ref('');
 const checking = ref(false);
 const fetchingModels = ref(false);
 const checkStatus = reactive({ visible: false, state: '', text: '' });
@@ -322,6 +197,11 @@ function resetCheckStatus() {
 		</aside>
 
 		<main class="detail">
+			<div v-if="!activeProvider" class="detail-empty">
+				{{ loadingState ? '正在加载服务商…' : '没有可用的服务商' }}
+			</div>
+
+			<template v-else>
 			<span class="ghost-num" aria-hidden="true">{{ activeIndex }}</span>
 
 			<header class="detail-head sc-rise" style="--i: 0">
@@ -508,6 +388,7 @@ function resetCheckStatus() {
 					</div>
 				</div>
 			</div>
+			</template>
 		</main>
 
 		<AiProviderDialogs
@@ -831,6 +712,14 @@ function resetCheckStatus() {
 	color: var(--sc-mute);
 	font-size: 13px;
 	text-align: center;
+}
+
+.detail-empty {
+	display: grid;
+	place-items: center;
+	height: 100%;
+	color: var(--sc-mute);
+	font-size: 13px;
 }
 
 /* ── detail ─────────────────────────────────────────────────── */

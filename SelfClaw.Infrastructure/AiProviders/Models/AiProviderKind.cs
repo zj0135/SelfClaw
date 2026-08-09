@@ -4,13 +4,14 @@ namespace SelfClaw.Infrastructure.AiProviders.Models;
 /// Identifies a concrete AI provider implementation. The kind selects which
 /// <c>IAiProviderAdapter</c> handles client creation and option mapping.
 /// </summary>
+/// <remarks>
+/// The numeric values are persisted in SQLite (see <c>SqliteMappings</c>) and are
+/// therefore stable: retired kinds leave a gap rather than renumbering the rest.
+/// </remarks>
 public enum AiProviderKind
 {
     OpenAI = 0,
     OpenAICompatible = 1,
-    DeepSeek = 2,
     Anthropic = 3,
-    GoogleGemini = 4,
-    Ollama = 5,
-    AzureOpenAI = 6
+    Ollama = 5
 }

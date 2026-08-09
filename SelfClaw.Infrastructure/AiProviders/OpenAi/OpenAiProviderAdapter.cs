@@ -22,8 +22,8 @@ namespace SelfClaw.Infrastructure.AiProviders.OpenAi;
 /// </summary>
 /// <remarks>
 /// A single instance serves one OpenAI-family kind. The same SDK backs both the
-/// strict <see cref="AiProviderKind.OpenAI"/> endpoint, arbitrary
-/// <see cref="AiProviderKind.OpenAICompatible"/> endpoints, and DeepSeek; the kind only changes
+/// strict <see cref="AiProviderKind.OpenAI"/> endpoint and arbitrary
+/// <see cref="AiProviderKind.OpenAICompatible"/> endpoints; the kind only changes
 /// provider-specific defaults (notably the Chat Completions <c>thinking.type</c>
 /// behavior). Register one instance per supported kind.
 /// </remarks>
@@ -39,8 +39,7 @@ internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
 
     /// <param name="providerKind">
     /// The OpenAI-family kind this instance serves. Must be
-    /// <see cref="AiProviderKind.OpenAI"/>, <see cref="AiProviderKind.OpenAICompatible"/>,
-    /// or <see cref="AiProviderKind.DeepSeek"/>.
+    /// <see cref="AiProviderKind.OpenAI"/> or <see cref="AiProviderKind.OpenAICompatible"/>.
     /// </param>
     /// <param name="logger">Optional logger; a null logger is used when omitted.</param>
     public OpenAiProviderAdapter(
@@ -49,12 +48,12 @@ internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
         OpenAiModelListClient? modelListClient = null,
         AiProviderHttpClientProvider? httpClientProvider = null)
     {
-        if (providerKind is not (AiProviderKind.OpenAI or AiProviderKind.OpenAICompatible or AiProviderKind.DeepSeek))
+        if (providerKind is not (AiProviderKind.OpenAI or AiProviderKind.OpenAICompatible))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(providerKind),
                 providerKind,
-                "OpenAiProviderAdapter only serves the OpenAI, OpenAICompatible, and DeepSeek provider kinds.");
+                "OpenAiProviderAdapter only serves the OpenAI and OpenAICompatible provider kinds.");
         }
 
         _providerKind = providerKind;

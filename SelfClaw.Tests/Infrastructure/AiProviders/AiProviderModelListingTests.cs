@@ -11,19 +11,19 @@ namespace SelfClaw.Tests.Infrastructure.AiProviders;
 public sealed class AiProviderModelListingTests
 {
     [Theory]
-    [InlineData(AiProviderKind.OpenAI, "openai-models.json", "gpt-4.1,gpt-4o-mini")]
-    [InlineData(AiProviderKind.DeepSeek, "deepseek-models.json", "deepseek-chat,deepseek-reasoner")]
+    [InlineData(AiProviderKind.OpenAI, "openai", "gpt-4.1,gpt-4o-mini")]
+    [InlineData(AiProviderKind.OpenAICompatible, "custom", "gpt-4.1,gpt-4o-mini")]
     public async Task OpenAi_family_adapter_lists_models_with_bearer_authentication(
         AiProviderKind providerKind,
-        string fixtureName,
+        string catalogId,
         string expectedModelIds)
     {
-        var handler = new RecordingHttpMessageHandler(ReadFixture(fixtureName));
+        var handler = new RecordingHttpMessageHandler(ReadFixture("openai-models.json"));
         var adapter = new OpenAiProviderAdapter(
             providerKind,
             modelListClient: new OpenAiModelListClient(new HttpClient(handler)));
         var connection = CreateConnection(
-            providerKind == AiProviderKind.OpenAI ? "openai" : "deepseek",
+            catalogId,
             providerKind,
             new Uri("https://api.example.test/v1/"));
 

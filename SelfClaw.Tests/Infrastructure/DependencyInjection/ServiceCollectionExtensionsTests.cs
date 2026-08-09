@@ -95,17 +95,14 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         {
             AiProviderKind.OpenAI,
             AiProviderKind.OpenAICompatible,
-            AiProviderKind.DeepSeek,
             AiProviderKind.Anthropic,
-            AiProviderKind.Ollama,
-            AiProviderKind.GoogleGemini,
-            AiProviderKind.AzureOpenAI
+            AiProviderKind.Ollama
         });
-        registry.GetRequiredAdapter(AiProviderKind.DeepSeek).ProviderKind.Should().Be(AiProviderKind.DeepSeek);
+        registry.GetRequiredAdapter(AiProviderKind.OpenAI).ProviderKind.Should().Be(AiProviderKind.OpenAI);
+        registry.GetRequiredAdapter(AiProviderKind.OpenAICompatible).ProviderKind.Should()
+            .Be(AiProviderKind.OpenAICompatible);
         registry.GetRequiredAdapter(AiProviderKind.Anthropic).ProviderKind.Should().Be(AiProviderKind.Anthropic);
         registry.GetRequiredAdapter(AiProviderKind.Ollama).ProviderKind.Should().Be(AiProviderKind.Ollama);
-        registry.GetRequiredAdapter(AiProviderKind.GoogleGemini).ProviderKind.Should().Be(AiProviderKind.GoogleGemini);
-        registry.GetRequiredAdapter(AiProviderKind.AzureOpenAI).ProviderKind.Should().Be(AiProviderKind.AzureOpenAI);
         settingsService.Should().BeOfType<AiProviderSettingsService>();
         chatClientFactory.Should().BeOfType<AiChatClientFactory>();
     }

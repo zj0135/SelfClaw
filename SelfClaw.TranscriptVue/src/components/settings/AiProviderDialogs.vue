@@ -13,11 +13,11 @@ defineProps({
 
 const emit = defineEmits(['close-provider', 'submit-provider', 'close-model', 'submit-model']);
 
+// Keys mirror the AiProviderApiFormat enum; 3 is retired and intentionally absent.
 const formatNames = {
 	0: 'OpenAI Chat Completions',
 	1: 'OpenAI Responses',
 	2: 'Anthropic Messages',
-	3: 'Gemini generateContent',
 	4: 'Ollama Native',
 };
 </script>

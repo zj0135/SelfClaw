@@ -405,7 +405,7 @@ function normalizeProvider(raw) {
 		id: connectionId || `catalog:${catalogId}`,
 		connectionId,
 		catalogId,
-		kind: logoKind(catalogId),
+		kind: catalogId,
 		name: raw?.name || catalogId,
 		sub: raw?.sub || '',
 		color: raw?.color || '#6B7280',
@@ -481,10 +481,4 @@ function isAbsoluteUrl(value) {
 
 function errorMessage(error, fallback) {
 	return error?.message ? `${fallback}：${error.message}` : fallback;
-}
-
-function logoKind(catalogId) {
-	if (catalogId === 'google-gemini') return 'gemini';
-	if (catalogId === 'azure-openai') return 'azure';
-	return catalogId;
 }

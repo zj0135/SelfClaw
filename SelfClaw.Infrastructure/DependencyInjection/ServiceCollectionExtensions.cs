@@ -11,9 +11,7 @@ using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Anthropic;
-using SelfClaw.Infrastructure.AiProviders.Azure;
 using SelfClaw.Infrastructure.AiProviders.Http;
-using SelfClaw.Infrastructure.AiProviders.Gemini;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.AiProviders.OpenAi;
 using SelfClaw.Infrastructure.AiProviders.Ollama;
@@ -126,20 +124,12 @@ public static class ServiceCollectionExtensions
                 serviceProvider.GetRequiredService<OpenAiModelListClient>(),
                 serviceProvider.GetRequiredService<AiProviderHttpClientProvider>()));
         services.AddSingleton<IAiProviderAdapter>(serviceProvider =>
-            new OpenAiProviderAdapter(
-                AiProviderKind.DeepSeek,
-                serviceProvider.GetService<ILogger<OpenAiProviderAdapter>>(),
-                serviceProvider.GetRequiredService<OpenAiModelListClient>(),
-                serviceProvider.GetRequiredService<AiProviderHttpClientProvider>()));
-        services.AddSingleton<IAiProviderAdapter>(serviceProvider =>
             new AnthropicProviderAdapter(
                 serviceProvider.GetService<ILogger<AnthropicProviderAdapter>>(),
                 serviceProvider.GetService<ILoggerFactory>(),
                 serviceProvider,
                 serviceProvider.GetRequiredService<AnthropicModelListClient>()));
         services.AddSingleton<IAiProviderAdapter, OllamaProviderAdapter>();
-        services.AddSingleton<IAiProviderAdapter, GeminiProviderAdapter>();
-        services.AddSingleton<IAiProviderAdapter, AzureOpenAiProviderAdapter>();
         services.AddSingleton<IAiProviderRegistry, AiProviderRegistry>();
         services.AddSingleton<IAiProviderSettingsService, AiProviderSettingsService>();
         services.AddSingleton<IAiChatClientFactory, AiChatClientFactory>();

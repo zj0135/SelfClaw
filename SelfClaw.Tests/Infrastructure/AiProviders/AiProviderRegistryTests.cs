@@ -24,11 +24,11 @@ public sealed class AiProviderRegistryTests
     {
         var registry = new AiProviderRegistry([new FakeAiProviderAdapter(AiProviderKind.OpenAI)]);
 
-        var act = () => registry.GetRequiredAdapter(AiProviderKind.GoogleGemini);
+        var act = () => registry.GetRequiredAdapter(AiProviderKind.Anthropic);
 
         act.Should()
             .Throw<KeyNotFoundException>()
-            .WithMessage("*GoogleGemini*");
+            .WithMessage("*Anthropic*");
     }
 
     [Fact]
