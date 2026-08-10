@@ -401,11 +401,20 @@ button {
 	mask-image: linear-gradient(to bottom, transparent 0, #000 34px);
 }
 
+.transcript-content {
+	display: flex;
+	min-width: 0;
+	flex: 0 0 auto;
+	flex-direction: column;
+}
+
 .message-row {
 	display: flex;
 	align-items: flex-start;
 	justify-content: flex-start;
 	margin-bottom: 28px;
+	content-visibility: auto;
+	contain-intrinsic-size: auto 180px;
 	animation: message-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 

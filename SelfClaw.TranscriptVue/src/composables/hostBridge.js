@@ -39,6 +39,9 @@ function createHostBridge() {
 	// 标记为 replayLast 的 type -> 最近一次 payload
 	const stickyPayloads = new Map();
 	const stickyTypes = new Set();
+	let transcriptState = null;
+	let transcriptAckFrame = null;
+	let pendingTranscriptRevision = 0;
 
 	function hasHost() {
 		return Boolean(webview);
@@ -125,6 +128,71 @@ function createHostBridge() {
 		}
 	}
 
+	function reduceTranscriptPush(payload) {
+		if (payload.type === 'replaceState') {
+			transcriptState = { ...payload, type: 'replaceState' };
+			return transcriptState;
+		}
+
+		if (payload.type !== 'patchState' || !transcriptState) {
+			return null;
+		}
+
+		const itemsById = new Map(
+			(Array.isArray(transcriptState.items) ? transcriptState.items : [])
+				.map((item) => [item.id, item]),
+		);
+		for (const itemId of payload.removedItemIds || []) {
+			itemsById.delete(itemId);
+		}
+
+		for (const item of payload.upsertItems || []) {
+			itemsById.set(item.id, item);
+		}
+
+		const itemOrder = Array.isArray(payload.itemOrder)
+			? payload.itemOrder
+			: Array.from(itemsById.keys());
+		const items = itemOrder
+			.map((itemId) => itemsById.get(itemId))
+			.filter(Boolean);
+
+		transcriptState = {
+			...transcriptState,
+			...payload,
+			type: 'replaceState',
+			items,
+			conversations: Array.isArray(payload.conversations)
+				? payload.conversations
+				: transcriptState.conversations,
+		};
+		delete transcriptState.upsertItems;
+		delete transcriptState.removedItemIds;
+		delete transcriptState.itemOrder;
+		return transcriptState;
+	}
+
+	function scheduleTranscriptAcknowledgement(revision) {
+		if (!Number.isSafeInteger(revision) || revision <= 0) {
+			return;
+		}
+
+		pendingTranscriptRevision = Math.max(pendingTranscriptRevision, revision);
+		if (transcriptAckFrame !== null) {
+			return;
+		}
+
+		const schedule = typeof window.requestAnimationFrame === 'function'
+			? window.requestAnimationFrame.bind(window)
+			: (callback) => window.setTimeout(callback, 0);
+		transcriptAckFrame = schedule(() => {
+			transcriptAckFrame = null;
+			const acknowledgedRevision = pendingTranscriptRevision;
+			pendingTranscriptRevision = 0;
+			post({ type: 'transcript-rendered', revision: acknowledgedRevision });
+		});
+	}
+
 	function on(type, handler, { replayLast = false } = {}) {
 		let handlers = subscribers.get(type);
 		if (!handlers) {
@@ -174,6 +242,15 @@ function createHostBridge() {
 					pending.resolve(payload);
 				}
 			});
+			return;
+		}
+
+		if (payload.type === 'replaceState' || payload.type === 'patchState') {
+			const reduced = reduceTranscriptPush(payload);
+			if (reduced) {
+				dispatchPush(reduced);
+				scheduleTranscriptAcknowledgement(payload.revision);
+			}
 			return;
 		}
 

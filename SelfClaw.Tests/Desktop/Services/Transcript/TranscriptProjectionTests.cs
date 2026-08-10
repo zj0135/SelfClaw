@@ -107,6 +107,42 @@ public sealed class TranscriptProjectionTests
     }
 
     [Fact]
+    public void Build_limits_tool_details_in_the_wire_projection()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var message = new MessageRecord(
+            Guid.NewGuid(),
+            conversationId,
+            MessageRole.Assistant,
+            "answer",
+            MessageStatus.Completed,
+            now,
+            now);
+        var toolRun = new ToolExecutionRecord(
+            Guid.NewGuid(),
+            conversationId,
+            "read_file",
+            "{}",
+            ToolExecutionStatus.Completed,
+            "Read file",
+            "call-1",
+            12,
+            now,
+            now,
+            MessageId: message.Id,
+            AfterSegmentIndex: 0,
+            ResultContent: new string('x', TranscriptToolResultLimiter.MaximumDisplayedCharacters + 1_000));
+
+        var state = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: [toolRun]));
+
+        state.Should().NotBeNull();
+        state!.Items.Single().Segments.Single(segment => segment.Kind == "tool").DetailText
+            .Should().HaveLength(TranscriptToolResultLimiter.MaximumDisplayedCharacters)
+            .And.EndWith("[SelfClaw truncated the displayed tool result at 24 KiB.]");
+    }
+
+    [Fact]
     public void Build_projects_messages_tools_attachments_and_conversations()
     {
         var now = DateTimeOffset.UtcNow;

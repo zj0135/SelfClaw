@@ -100,6 +100,12 @@ internal sealed class WebViewMessageRouter : IDisposable
             return null;
         }
 
+        if (string.Equals(type, "transcript-rendered", StringComparison.Ordinal))
+        {
+            AcknowledgeTranscript(payload);
+            return null;
+        }
+
         var response = await _aiProviderSettingsBridge.TryHandleAsync(
             type,
             payload,
@@ -222,6 +228,15 @@ internal sealed class WebViewMessageRouter : IDisposable
                 return new WebViewHostCommand(WebViewHostCommandKind.SettingsClosed);
             default:
                 return null;
+        }
+    }
+
+    private void AcknowledgeTranscript(JsonElement payload)
+    {
+        if (payload.TryGetProperty("revision", out var revisionElement) &&
+            revisionElement.TryGetInt64(out var revision))
+        {
+            _hostChannel.AcknowledgeTranscript(revision);
         }
     }
 

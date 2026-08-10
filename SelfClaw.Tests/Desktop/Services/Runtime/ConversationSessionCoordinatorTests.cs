@@ -32,6 +32,21 @@ public sealed class ConversationSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task SelectAsync_requests_bottom_alignment_for_the_selected_conversation()
+    {
+        var conversationId = Guid.NewGuid();
+        var repository = new ControlledConversationRepository();
+        repository.CompleteMessages(conversationId, [CreateMessage(conversationId, "history")]);
+        repository.CompleteToolRuns(conversationId, []);
+        var sink = new RecordingTranscriptChangeSink();
+        using var coordinator = new ConversationSessionCoordinator(repository, sink);
+
+        await coordinator.SelectAsync(conversationId);
+
+        sink.ImmediatePublishes.Should().Equal(true, true);
+    }
+
+    [Fact]
     public async Task StartTurnAsync_uses_only_the_selected_conversations_loaded_history()
     {
         var firstConversationId = Guid.NewGuid();

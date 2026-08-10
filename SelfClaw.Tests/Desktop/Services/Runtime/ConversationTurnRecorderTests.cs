@@ -6,6 +6,7 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Runtime;
+using SelfClaw.Desktop.Services.Transcript;
 
 namespace SelfClaw.Tests.Desktop.Services.Runtime;
 
@@ -50,6 +51,40 @@ public sealed class ConversationTurnRecorderTests
         finalization.ToolExecutions[0].ResultContent.Should().Be("contents");
         context.Repository.ToolUpserts.Should().HaveCount(2);
         context.Session.ActivityText.Should().Be("正在思考...");
+    }
+
+    [Fact]
+    public async Task ApplyEventAsync_coalesces_consecutive_thinking_deltas_into_one_internal_block()
+    {
+        var context = CreateContext();
+
+        context.Recorder.BeginTurn(context.Session, context.Turn);
+        await context.ApplyAsync(new AssistantThinkingDeltaEvent("thinking", "first "));
+        await context.ApplyAsync(new AssistantThinkingDeltaEvent("thinking", "second"));
+
+        var markdown = context.Session.Messages.Single().MarkdownContent;
+        CountOccurrences(markdown, "<!--selfclaw:think:start-->").Should().Be(1);
+        CountOccurrences(markdown, "<!--selfclaw:think:end-->").Should().Be(1);
+        markdown.Should().Contain("first second");
+    }
+
+    [Fact]
+    public async Task ApplyEventAsync_limits_tool_result_content_before_persistence()
+    {
+        var context = CreateContext();
+        var content = new string('x', TranscriptToolResultLimiter.MaximumStoredCharacters + 1_000);
+
+        context.Recorder.BeginTurn(context.Session, context.Turn);
+        await context.ApplyAsync(new ToolCallStartedEvent("call-1", "read_file", "{}", ToolCallKind.Read));
+        await context.ApplyAsync(new ToolCallCompletedEvent(
+            "call-1",
+            ToolCallStatus.Completed,
+            "read file",
+            content));
+
+        context.Session.ToolRuns.Should().ContainSingle()
+            .Which.ResultContent.Should().HaveLength(TranscriptToolResultLimiter.MaximumStoredCharacters)
+            .And.EndWith("[SelfClaw truncated the stored tool result at 64 KiB.]");
     }
 
     [Fact]
@@ -175,6 +210,9 @@ public sealed class ConversationTurnRecorderTests
             recorder,
             new RecordingCommitter());
     }
+
+    private static int CountOccurrences(string value, string search)
+        => value.Split(search, StringSplitOptions.None).Length - 1;
 
     private sealed record RecorderTestContext(
         Guid TurnId,

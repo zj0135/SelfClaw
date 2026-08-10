@@ -13,36 +13,79 @@ public sealed class WebViewHostChannel
 
     private Action<string>? _postJson;
     private TranscriptRenderState? _latestTranscript;
+    private TranscriptRenderState? _pendingTranscript;
+    private TranscriptRenderState? _inFlightTranscript;
+    private TranscriptRenderState? _acknowledgedTranscript;
+    private long? _inFlightTranscriptRevision;
+    private long _nextTranscriptRevision;
     private bool _isReady;
 
     public void Attach(Action<string> postJson)
     {
         ArgumentNullException.ThrowIfNull(postJson);
         _postJson = postJson;
+        ResetTranscriptDelivery();
     }
 
     public void Detach()
     {
         _postJson = null;
         _isReady = false;
+        ResetTranscriptDelivery();
     }
 
     public void MarkReady()
     {
         _isReady = true;
-        if (_latestTranscript is not null)
+        if (_latestTranscript is not null && _inFlightTranscriptRevision is null)
         {
-            PostPush(CreateTranscriptPayload(_latestTranscript));
+            SendTranscript(_latestTranscript);
         }
     }
 
-    public void MarkNotReady() => _isReady = false;
+    public void MarkNotReady()
+    {
+        _isReady = false;
+        ResetTranscriptDelivery();
+    }
 
     public void PublishTranscript(TranscriptRenderState state)
     {
         ArgumentNullException.ThrowIfNull(state);
         _latestTranscript = state;
-        PostPush(CreateTranscriptPayload(state));
+        if (!_isReady)
+        {
+            return;
+        }
+
+        if (_inFlightTranscriptRevision is not null)
+        {
+            _pendingTranscript = state;
+            return;
+        }
+
+        SendTranscript(state);
+    }
+
+    public bool AcknowledgeTranscript(long revision)
+    {
+        if (_inFlightTranscriptRevision != revision || _inFlightTranscript is null)
+        {
+            return false;
+        }
+
+        _acknowledgedTranscript = _inFlightTranscript;
+        _inFlightTranscript = null;
+        _inFlightTranscriptRevision = null;
+
+        var pending = _pendingTranscript;
+        _pendingTranscript = null;
+        if (_isReady && pending is not null && !ReferenceEquals(pending, _acknowledgedTranscript))
+        {
+            SendTranscript(pending);
+        }
+
+        return true;
     }
 
     public bool PostPush(object payload)
@@ -68,10 +111,34 @@ public sealed class WebViewHostChannel
         return true;
     }
 
-    private static object CreateTranscriptPayload(TranscriptRenderState state)
+    private void SendTranscript(TranscriptRenderState state)
+    {
+        var revision = checked(++_nextTranscriptRevision);
+        var payload = _acknowledgedTranscript is null
+            ? CreateTranscriptPayload(state, revision)
+            : CreateTranscriptPatch(_acknowledgedTranscript, state, revision);
+        if (!PostPush(payload))
+        {
+            return;
+        }
+
+        _inFlightTranscript = state;
+        _inFlightTranscriptRevision = revision;
+    }
+
+    private void ResetTranscriptDelivery()
+    {
+        _pendingTranscript = null;
+        _inFlightTranscript = null;
+        _acknowledgedTranscript = null;
+        _inFlightTranscriptRevision = null;
+    }
+
+    private static object CreateTranscriptPayload(TranscriptRenderState state, long revision)
         => new
         {
             type = "replaceState",
+            revision,
             state.AutoScroll,
             state.Items,
             state.Conversations,
@@ -83,4 +150,50 @@ public sealed class WebViewHostChannel
             state.SelectedAgentName,
             state.CapabilityRevision
         };
+
+    private static object CreateTranscriptPatch(
+        TranscriptRenderState previous,
+        TranscriptRenderState current,
+        long revision)
+    {
+        var previousItems = previous.Items.ToDictionary(item => item.Id, StringComparer.Ordinal);
+        var currentItemIds = current.Items.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+        var upsertItems = current.Items
+            .Where(item => !previousItems.TryGetValue(item.Id, out var oldItem) || !ReferenceEquals(oldItem, item))
+            .ToArray();
+        var removedItemIds = previous.Items
+            .Where(item => !currentItemIds.Contains(item.Id))
+            .Select(item => item.Id)
+            .ToArray();
+        var itemOrder = HaveSameItemOrder(previous.Items, current.Items)
+            ? null
+            : current.Items.Select(item => item.Id).ToArray();
+        var conversations = previous.Conversations.SequenceEqual(current.Conversations)
+            ? null
+            : current.Conversations;
+
+        return new
+        {
+            type = "patchState",
+            revision,
+            current.AutoScroll,
+            UpsertItems = upsertItems,
+            RemovedItemIds = removedItemIds,
+            ItemOrder = itemOrder,
+            Conversations = conversations,
+            current.SelectedConversationId,
+            current.IsBusy,
+            current.ActivityText,
+            current.AgentMode,
+            current.SelectedAgentId,
+            current.SelectedAgentName,
+            current.CapabilityRevision
+        };
+    }
+
+    private static bool HaveSameItemOrder(
+        IReadOnlyList<TranscriptRenderItem> previous,
+        IReadOnlyList<TranscriptRenderItem> current)
+        => previous.Count == current.Count &&
+           previous.Select(item => item.Id).SequenceEqual(current.Select(item => item.Id), StringComparer.Ordinal);
 }

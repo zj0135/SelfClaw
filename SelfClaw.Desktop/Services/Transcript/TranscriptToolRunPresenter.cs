@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Desktop.Services.Transcript;
 
 namespace SelfClaw.Desktop.Services;
 
@@ -77,7 +78,10 @@ internal static class TranscriptToolRunPresenter
         }
     }
 
-    public static void InsertToolSegments(List<TranscriptRenderSegment> renderSegments, IReadOnlyList<ToolRunPlacement> toolRuns)
+    public static void InsertToolSegments(
+        List<TranscriptRenderSegment> renderSegments,
+        IReadOnlyList<ToolRunPlacement> toolRuns,
+        Func<ToolExecutionRecord, TranscriptRenderSegment> buildToolSegment)
     {
         if (toolRuns.Count == 0)
         {
@@ -87,7 +91,7 @@ internal static class TranscriptToolRunPresenter
         var baseSegments = renderSegments.ToArray();
         if (baseSegments.Length == 0)
         {
-            renderSegments.AddRange(toolRuns.Select(item => BuildToolSegment(item.Record)));
+            renderSegments.AddRange(toolRuns.Select(item => buildToolSegment(item.Record)));
             return;
         }
 
@@ -112,7 +116,7 @@ internal static class TranscriptToolRunPresenter
                 buckets[afterSegmentIndex] = bucket;
             }
 
-            bucket.Add(BuildToolSegment(placement.Record));
+            bucket.Add(buildToolSegment(placement.Record));
         }
 
         renderSegments.Clear();
@@ -272,26 +276,26 @@ internal static class TranscriptToolRunPresenter
         => toolRun.SourceKind is ToolSourceKind.Mcp or ToolSourceKind.Skill or ToolSourceKind.Plugin
             ? toolRun.DisplayName ?? HumanizeToolName(toolRun.ToolName)
             : toolRun.ToolName switch
-        {
-            "run_shell_command" => "Shell",
-            "read_file" => "Read File",
-            "search_text" => "Search Results",
-            "list_files" or "glob_files" => "Workspace Entries",
-            "write_file" => "Write File",
-            "edit_file" => "Edit File",
-            _ => HumanizeToolName(toolRun.ToolName)
-        };
+            {
+                "run_shell_command" => "Shell",
+                "read_file" => "Read File",
+                "search_text" => "Search Results",
+                "list_files" or "glob_files" => "Workspace Entries",
+                "write_file" => "Write File",
+                "edit_file" => "Edit File",
+                _ => HumanizeToolName(toolRun.ToolName)
+            };
 
     private static string BuildToolDetailText(ToolExecutionRecord toolRun)
     {
         if (!string.IsNullOrWhiteSpace(toolRun.ResultContent))
         {
-            return toolRun.ResultContent;
+            return TranscriptToolResultLimiter.LimitDisplayed(toolRun.ResultContent);
         }
 
         using var arguments = ParseJsonObject(toolRun.ArgumentsJson);
 
-        return toolRun.ToolName switch
+        var detail = toolRun.ToolName switch
         {
             "run_shell_command" => BuildShellRequestDetails(arguments),
             "read_file" => ReadArgument(arguments, "relativePath", "No file path provided."),
@@ -300,6 +304,7 @@ internal static class TranscriptToolRunPresenter
             "write_file" or "edit_file" => BuildWriteRequestDetails(arguments),
             _ => toolRun.ResultSummary ?? PrettyPrintJson(toolRun.ArgumentsJson)
         };
+        return TranscriptToolResultLimiter.LimitDisplayed(detail);
     }
 
     private static string ResolveWriteVerb(ToolExecutionRecord toolRun)

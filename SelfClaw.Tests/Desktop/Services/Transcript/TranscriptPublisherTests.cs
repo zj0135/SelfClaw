@@ -30,6 +30,7 @@ public sealed class TranscriptPublisherTests
         publisher.Attach(autoScroll => CreateRequest(agentName, autoScroll));
 
         publisher.RequestStreamingPublish(false);
+        channel.AcknowledgeTranscript(ReadRevision(hostMessages[^1])).Should().BeTrue();
         agentName = "latest";
         publisher.RequestStreamingPublish(false);
         publisher.PublishNow(true);
@@ -82,4 +83,10 @@ public sealed class TranscriptPublisherTests
             "build",
             agentName,
             0);
+
+    private static long ReadRevision(string message)
+    {
+        using var payload = JsonDocument.Parse(message);
+        return payload.RootElement.GetProperty("revision").GetInt64();
+    }
 }

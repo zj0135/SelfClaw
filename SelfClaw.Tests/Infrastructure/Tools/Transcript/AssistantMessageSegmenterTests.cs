@@ -192,6 +192,35 @@ public sealed class AssistantMessageSegmenterTests
             new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "After"));
     }
 
+    [Theory]
+    [InlineData("Before<!--selfclaw:tool:not-a-guid-->After")]
+    [InlineData("Before<!--selfclaw:tool:After")]
+    public void Split_treats_malformed_tool_anchors_as_visible_content(string markdown)
+    {
+        var result = AssistantMessageSegmenter.Split(markdown);
+
+        result.ContentMarkdown.Should().Be(markdown);
+        result.Segments.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(
+                new AssistantMessageSegment(AssistantMessageSegmentKind.Content, markdown));
+    }
+
+    [Fact]
+    public void Split_recovers_a_valid_tool_anchor_after_a_malformed_anchor()
+    {
+        var toolExecutionId = Guid.NewGuid();
+        var malformed = "Before<!--selfclaw:tool:not-a-guid-->";
+        var markdown = AssistantMessageSegmenter.AppendToolAnchor(malformed, toolExecutionId) + "After";
+
+        var result = AssistantMessageSegmenter.Split(markdown);
+
+        result.ContentMarkdown.Should().Be(malformed + "After");
+        result.Segments.Should().Equal(
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, malformed),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.ToolAnchor, string.Empty, false, toolExecutionId),
+            new AssistantMessageSegment(AssistantMessageSegmentKind.Content, "After"));
+    }
+
     [Fact]
     public void Split_repairs_tool_anchor_inserted_inside_a_closing_think_tag()
     {

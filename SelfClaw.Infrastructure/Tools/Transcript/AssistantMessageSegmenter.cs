@@ -170,6 +170,31 @@ public static class AssistantMessageSegmenter
                 break;
             }
 
+            if (nextSpecialIndex == cursor)
+            {
+                var nextValidBoundary = FindNextSpecialIndex(
+                    source,
+                    cursor + ToolAnchorPrefix.Length,
+                    hasThinkBlock);
+                if (nextValidBoundary < 0)
+                {
+                    AppendContentSegment(
+                        segments,
+                        visibleContent,
+                        source[cursor..],
+                        mergeWithPrevious: true);
+                    break;
+                }
+
+                AppendContentSegment(
+                    segments,
+                    visibleContent,
+                    source.Substring(cursor, nextValidBoundary - cursor),
+                    mergeWithPrevious: true);
+                cursor = nextValidBoundary;
+                continue;
+            }
+
             var betweenSegments = source.Substring(cursor, nextSpecialIndex - cursor);
             if (hasThinkBlock &&
                 segments.LastOrDefault()?.Kind == AssistantMessageSegmentKind.Thinking &&
@@ -202,9 +227,10 @@ public static class AssistantMessageSegmenter
     }
 
     private static void AppendContentSegment(
-        ICollection<AssistantMessageSegment> segments,
+        List<AssistantMessageSegment> segments,
         StringBuilder visibleContent,
-        string segment)
+        string segment,
+        bool mergeWithPrevious = false)
     {
         if (string.IsNullOrEmpty(segment))
         {
@@ -216,6 +242,13 @@ public static class AssistantMessageSegmenter
         var normalized = NormalizeContentMarkdown(segment);
         if (string.IsNullOrWhiteSpace(normalized))
         {
+            return;
+        }
+
+        if (mergeWithPrevious &&
+            segments.LastOrDefault() is { Kind: AssistantMessageSegmentKind.Content } previousContent)
+        {
+            segments[^1] = previousContent with { Markdown = previousContent.Markdown + normalized };
             return;
         }
 

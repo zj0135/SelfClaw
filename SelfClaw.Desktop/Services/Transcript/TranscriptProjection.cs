@@ -14,7 +14,11 @@ public sealed class TranscriptProjection
     private const string AttachmentHostName = "attachments.selfclaw.local";
     private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly StoragePaths _storagePaths;
-    private readonly Dictionary<Guid, (string Fingerprint, TranscriptRenderItem Item)> _messageCache = [];
+    private readonly Dictionary<Guid, (
+        string Fingerprint,
+        TranscriptRenderItem Item,
+        IReadOnlyList<(AssistantMessageSegmentKind Kind, string Markdown, string Html)> MarkdownSegments)> _messageCache = [];
+    private readonly Dictionary<Guid, (ToolExecutionRecord Record, TranscriptRenderSegment Segment)> _toolSegmentCache = [];
     private string? _lastFingerprint;
 
     public TranscriptProjection(MarkdownHtmlRenderer markdownHtmlRenderer, StoragePaths storagePaths)
@@ -39,6 +43,7 @@ public sealed class TranscriptProjection
             request.ToolRuns,
             request.ToolRunAnchors);
         PruneMessageCache(request.Messages);
+        PruneToolSegmentCache(request.ToolRuns);
         var items = request.Messages
             .OrderBy(message => message.CreatedAtUtc)
             .Select(message => BuildMessageItemCached(
@@ -180,8 +185,11 @@ public sealed class TranscriptProjection
             return cached.Item;
         }
 
-        var item = BuildMessageItem(message, toolRuns);
-        _messageCache[message.Id] = (fingerprint, item);
+        var previousMarkdownSegments = _messageCache.TryGetValue(message.Id, out var previous)
+            ? previous.MarkdownSegments
+            : [];
+        var (item, markdownSegments) = BuildMessageItem(message, toolRuns, previousMarkdownSegments);
+        _messageCache[message.Id] = (fingerprint, item, markdownSegments);
         return item;
     }
 
@@ -196,6 +204,20 @@ public sealed class TranscriptProjection
         foreach (var staleId in _messageCache.Keys.Where(id => !liveIds.Contains(id)).ToArray())
         {
             _messageCache.Remove(staleId);
+        }
+    }
+
+    private void PruneToolSegmentCache(IReadOnlyList<ToolExecutionRecord> toolRuns)
+    {
+        if (_toolSegmentCache.Count == 0)
+        {
+            return;
+        }
+
+        var liveIds = toolRuns.Select(toolRun => toolRun.Id).ToHashSet();
+        foreach (var staleId in _toolSegmentCache.Keys.Where(id => !liveIds.Contains(id)).ToArray())
+        {
+            _toolSegmentCache.Remove(staleId);
         }
     }
 
@@ -218,11 +240,16 @@ public sealed class TranscriptProjection
         return builder.ToString();
     }
 
-    private TranscriptRenderItem BuildMessageItem(
+    private (
+        TranscriptRenderItem Item,
+        IReadOnlyList<(AssistantMessageSegmentKind Kind, string Markdown, string Html)> MarkdownSegments)
+        BuildMessageItem(
         MessageRecord message,
-        IReadOnlyList<ToolRunPlacement> toolRuns)
+        IReadOnlyList<ToolRunPlacement> toolRuns,
+        IReadOnlyList<(AssistantMessageSegmentKind Kind, string Markdown, string Html)> previousMarkdownSegments)
     {
         var renderSegments = new List<TranscriptRenderSegment>();
+        var markdownSegments = new List<(AssistantMessageSegmentKind Kind, string Markdown, string Html)>();
         if (message.Role == MessageRole.Assistant)
         {
             var segments = AssistantMessageSegmenter.Split(message.MarkdownContent);
@@ -237,15 +264,18 @@ public sealed class TranscriptProjection
                         toolRunsById.TryGetValue(toolExecutionId, out var placement) &&
                         consumedToolRunIds.Add(toolExecutionId))
                     {
-                        renderSegments.Add(TranscriptToolRunPresenter.BuildToolSegment(placement.Record));
+                        renderSegments.Add(BuildToolSegmentCached(placement.Record));
                     }
 
                     continue;
                 }
 
-                var html = string.IsNullOrWhiteSpace(segment.Markdown)
-                    ? string.Empty
-                    : _markdownHtmlRenderer.ToHtml(segment.Markdown);
+                var html = RenderMarkdownSegment(
+                    segment.Kind,
+                    segment.Markdown,
+                    markdownSegments.Count,
+                    previousMarkdownSegments);
+                markdownSegments.Add((segment.Kind, segment.Markdown, html));
                 renderSegments.Add(new TranscriptRenderSegment(
                     segment.Kind == AssistantMessageSegmentKind.Thinking ? "thinking" : "content",
                     html,
@@ -258,9 +288,15 @@ public sealed class TranscriptProjection
         }
         else if (!string.IsNullOrWhiteSpace(message.MarkdownContent))
         {
+            var html = RenderMarkdownSegment(
+                AssistantMessageSegmentKind.Content,
+                message.MarkdownContent,
+                0,
+                previousMarkdownSegments);
+            markdownSegments.Add((AssistantMessageSegmentKind.Content, message.MarkdownContent, html));
             renderSegments.Add(new TranscriptRenderSegment(
                 "content",
-                _markdownHtmlRenderer.ToHtml(message.MarkdownContent),
+                html,
                 false));
         }
 
@@ -284,10 +320,10 @@ public sealed class TranscriptProjection
 
         if (message.Role == MessageRole.Assistant && toolRuns.Count > 0)
         {
-            TranscriptToolRunPresenter.InsertToolSegments(renderSegments, toolRuns);
+            TranscriptToolRunPresenter.InsertToolSegments(renderSegments, toolRuns, BuildToolSegmentCached);
         }
 
-        return new TranscriptRenderItem(
+        return (new TranscriptRenderItem(
             message.Id.ToString("D"),
             "message",
             message.Role.ToString().ToLowerInvariant(),
@@ -295,7 +331,39 @@ public sealed class TranscriptProjection
             renderSegments,
             message.Role == MessageRole.Assistant && message.Status == MessageStatus.Streaming,
             message.CreatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
-            BuildImageAttachments(message));
+            BuildImageAttachments(message)), markdownSegments);
+    }
+
+    private string RenderMarkdownSegment(
+        AssistantMessageSegmentKind kind,
+        string markdown,
+        int index,
+        IReadOnlyList<(AssistantMessageSegmentKind Kind, string Markdown, string Html)> previousSegments)
+    {
+        if (index < previousSegments.Count)
+        {
+            var previous = previousSegments[index];
+            if (previous.Kind == kind && string.Equals(previous.Markdown, markdown, StringComparison.Ordinal))
+            {
+                return previous.Html;
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(markdown)
+            ? string.Empty
+            : _markdownHtmlRenderer.ToHtml(markdown);
+    }
+
+    private TranscriptRenderSegment BuildToolSegmentCached(ToolExecutionRecord toolRun)
+    {
+        if (_toolSegmentCache.TryGetValue(toolRun.Id, out var cached) && ReferenceEquals(cached.Record, toolRun))
+        {
+            return cached.Segment;
+        }
+
+        var segment = TranscriptToolRunPresenter.BuildToolSegment(toolRun);
+        _toolSegmentCache[toolRun.Id] = (toolRun, segment);
+        return segment;
     }
 
     private IReadOnlyList<TranscriptImageAttachment> BuildImageAttachments(MessageRecord message)
@@ -381,7 +449,7 @@ public sealed class TranscriptProjection
             .Append(':')
             .Append(message.UpdatedAtUtc.UtcTicks)
             .Append(':');
-        AppendTextFingerprint(builder, message.MarkdownContent);
+        AppendTextLength(builder, message.MarkdownContent);
         AppendTextFingerprint(builder, message.ErrorMessage);
         AppendAttachments(builder, message.Attachments);
     }
@@ -405,9 +473,9 @@ public sealed class TranscriptProjection
             .Append(toolRun.SourceKind)
             .Append(':');
         AppendTextFingerprint(builder, toolRun.ToolName);
-        AppendTextFingerprint(builder, toolRun.ArgumentsJson);
+        AppendTextLength(builder, toolRun.ArgumentsJson);
         AppendTextFingerprint(builder, toolRun.ResultSummary);
-        AppendTextFingerprint(builder, toolRun.ResultContent);
+        AppendTextLength(builder, toolRun.ResultContent);
         AppendTextFingerprint(builder, toolRun.SourceId);
         AppendTextFingerprint(builder, toolRun.DisplayName);
     }
@@ -425,4 +493,7 @@ public sealed class TranscriptProjection
             .Append(StringComparer.Ordinal.GetHashCode(value))
             .Append(':');
     }
+
+    private static void AppendTextLength(StringBuilder builder, string? value)
+        => builder.Append(value?.Length ?? -1).Append(':');
 }

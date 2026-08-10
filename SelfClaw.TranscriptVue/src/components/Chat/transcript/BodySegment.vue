@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue';
+import { useDeferredHtml } from '../../../composables/useDeferredHtml.js';
 import { renderSkillTokensInUserHtml } from '../../../renderers/transcript.js';
 import { resolvePreviewImage } from './previewImage.js';
 
@@ -13,8 +14,10 @@ const props = defineProps({
 const emit = defineEmits(['preview-image']);
 
 // 正文富文本是后端渲染好的 HTML，只能 v-html 注入；用户消息再叠一层 skill-token → chip 替换。
-const html = computed(() =>
+const sourceHtml = computed(() =>
 	props.item.role === 'user' ? renderSkillTokensInUserHtml(props.segment.html) : props.segment.html);
+const shouldDeferHtml = computed(() => props.item.role === 'assistant' && props.item.isThinking);
+const html = useDeferredHtml(sourceHtml, shouldDeferHtml);
 
 // v-html 里的 <img> 不是组件元素，点击预览靠委托命中。
 function onClick(event) {

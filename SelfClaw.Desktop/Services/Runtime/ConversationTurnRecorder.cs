@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Infrastructure.Tools.Transcript;
 
 namespace SelfClaw.Desktop.Services.Runtime;
@@ -96,9 +97,7 @@ internal sealed class ConversationTurnRecorder
 
             case AssistantThinkingDeltaEvent thinkingDelta:
                 EnsureAssistantMessage(session, turn);
-                if (session.ApplyAssistantDelta(
-                        turn.TurnId,
-                        AssistantMessageSegmenter.WrapThinking(thinkingDelta.Delta)))
+                if (session.ApplyAssistantThinkingDelta(turn.TurnId, thinkingDelta.Delta))
                 {
                     session.RaiseTranscriptChanged(false);
                 }
@@ -158,6 +157,7 @@ internal sealed class ConversationTurnRecorder
         ArgumentNullException.ThrowIfNull(committer);
 
         EnsureAssistantMessage(session, turn);
+        session.CompleteAssistantStream(turn.TurnId);
         var existing = session.Messages.First(item => item.Id == turn.TurnId);
         return FinalizeTurnAsync(session, turn, existing, kind, finalText: null, errorMessage, committer);
     }
@@ -240,7 +240,9 @@ internal sealed class ConversationTurnRecorder
         {
             Status = MapToolStatus(toolCompleted.Status),
             ResultSummary = toolCompleted.ResultSummary ?? startedRecord.ResultSummary,
-            ResultContent = toolCompleted.ResultContent ?? startedRecord.ResultContent,
+            ResultContent = toolCompleted.ResultContent is null
+                ? startedRecord.ResultContent
+                : TranscriptToolResultLimiter.LimitStored(toolCompleted.ResultContent),
             DurationMs = (DateTimeOffset.UtcNow - startedRecord.CreatedAtUtc).TotalMilliseconds,
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
@@ -263,6 +265,7 @@ internal sealed class ConversationTurnRecorder
         IRecordedTurnCommitter committer)
     {
         EnsureAssistantMessage(session, turn);
+        session.CompleteAssistantStream(turn.TurnId);
         var existing = session.Messages.FirstOrDefault(item => item.Id == turn.TurnId);
         if (existing is null)
         {

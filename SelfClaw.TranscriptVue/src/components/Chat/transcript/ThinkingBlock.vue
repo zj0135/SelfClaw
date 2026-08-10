@@ -1,5 +1,7 @@
 <script setup>
+import { computed } from 'vue';
 import { Sparkles, ChevronRight } from 'lucide-vue-next';
+import { useDeferredHtml } from '../../../composables/useDeferredHtml.js';
 import { resolvePreviewImage } from './previewImage.js';
 
 const props = defineProps({
@@ -18,8 +20,10 @@ const isLive = () => isPending() && props.item.isThinking;
 const hasContent = () => Boolean(props.segment.html);
 const shouldRender = () => hasContent() || isLive();
 const label = () => (isLive() ? '思考中...' : '思考完毕');
-const contentHtml = () =>
-	props.segment.html || '<p class="thinking-placeholder">Thinking content is streaming.</p>';
+const sourceHtml = computed(() =>
+	props.segment.html || '<p class="thinking-placeholder">Thinking content is streaming.</p>');
+const shouldDeferHtml = computed(() => isLive());
+const contentHtml = useDeferredHtml(sourceHtml, shouldDeferHtml);
 
 function onContentClick(event) {
 	const preview = resolvePreviewImage(event.target);
@@ -57,7 +61,7 @@ function onContentClick(event) {
 			<span class="thinking-label" :class="{ 'shimmer-text': isLive() }">{{ label() }}</span>
 		</div>
 		<div v-if="hasContent() && open" class="thinking-content" @click="onContentClick">
-			<div class="thinking-markdown" v-html="contentHtml()"></div>
+			<div class="thinking-markdown" v-html="contentHtml"></div>
 		</div>
 	</section>
 </template>

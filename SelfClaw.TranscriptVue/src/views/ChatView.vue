@@ -5,6 +5,7 @@ import TerminalPanel from '../components/Chat/TerminalPanel.vue';
 import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
 import { isSuperseded, useHostBridge } from '../composables/hostBridge.js';
 import { useTranscriptCollapse } from '../composables/useTranscriptCollapse.js';
+import { useTranscriptScroll } from '../composables/useTranscriptScroll.js';
 
 const emit = defineEmits(['preview-image']);
 
@@ -42,10 +43,7 @@ const composerShellRef = ref(null);
 // 折叠状态的单一载体：在此顶层创建，一路传入每个 MessageContent。
 // 跨会话切换、流式重建都存活；按稳定 id 记忆哪些块展开。
 const collapse = useTranscriptCollapse();
-const scrollFollowState = {
-	transcript: true,
-	transcriptPausedUntil: 0,
-};
+const transcriptScroll = useTranscriptScroll(getTranscriptScrollEl);
 const isEmptyConversation = computed(() => (state.items || []).length === 0 && !state.isBusy);
 
 // ===== 回合执行状态（对话底部的「执行中 + 耗时」行） =====
@@ -114,44 +112,12 @@ function getTranscriptScrollEl() {
 	return transcriptPanelRef.value?.getScrollEl?.() ?? null;
 }
 
-function snapshotScrollPosition(element) {
-	return element ? { top: element.scrollTop, nearBottom: element.scrollHeight - element.scrollTop - element.clientHeight < 40 } : null;
-}
-
-function restoreScrollPosition(element, snapshot) {
-	if (!element || !snapshot || snapshot.nearBottom || shouldFollowTranscript()) {
-		scrollTranscriptToBottom();
-		return;
-	}
-
-	element.scrollTop = snapshot.top;
-}
-
-function scrollTranscriptToBottom() {
-	const element = getTranscriptScrollEl();
-	if (element) {
-		element.scrollTop = element.scrollHeight;
-	}
-}
-
-function pauseTranscriptFollow(durationMs = 1200) {
-	scrollFollowState.transcript = false;
-	scrollFollowState.transcriptPausedUntil = Date.now() + durationMs;
-}
-
-function shouldFollowTranscript() {
-	if (Date.now() < scrollFollowState.transcriptPausedUntil) {
-		return false;
-	}
-
-	return scrollFollowState.transcript;
-}
-
 function replaceState(payload) {
-	const transcriptEl = getTranscriptScrollEl();
-	const scrollSnapshot = snapshotScrollPosition(transcriptEl);
 	const nextItems = Array.isArray(payload.items) ? payload.items : [];
 	const nextBusy = Boolean(payload.isBusy);
+	const nextConversationId = payload.selectedConversationId || null;
+	const nextAutoScroll = Boolean(payload.autoScroll);
+	const scrollSnapshot = transcriptScroll.captureBeforeUpdate(nextConversationId);
 	if (nextBusy && !state.isBusy) {
 		startBusyClock();
 	} else if (!nextBusy) {
@@ -164,8 +130,8 @@ function replaceState(payload) {
 
 	state.items = nextItems;
 	state.conversations = Array.isArray(payload.conversations) ? payload.conversations : [];
-	state.selectedConversationId = payload.selectedConversationId || null;
-	state.autoScroll = Boolean(payload.autoScroll);
+	state.selectedConversationId = nextConversationId;
+	state.autoScroll = nextAutoScroll;
 	state.isBusy = nextBusy;
 	state.activityText = payload.activityText || '';
 	state.agentMode = payload.agentMode || 'cli';
@@ -187,29 +153,8 @@ function replaceState(payload) {
 			}
 		}
 
-		const currentTranscriptEl = getTranscriptScrollEl();
-		// autoScroll 只表达“这是一次允许跟随的流式更新”；是否真的滚到底部由用户
-		// 的滚动状态决定，避免用户上翻阅读历史时被每次发布强制拽回底部。
-		if (state.autoScroll && shouldFollowTranscript()) {
-			scrollTranscriptToBottom();
-			return;
-		}
-
-		restoreScrollPosition(currentTranscriptEl, scrollSnapshot);
+		transcriptScroll.settleAfterUpdate(nextAutoScroll, scrollSnapshot);
 	});
-}
-
-function onTranscriptScroll(event) {
-	const target = event.target instanceof HTMLElement ? event.target : null;
-	if (!target) {
-		return;
-	}
-
-	const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 40;
-	scrollFollowState.transcript = nearBottom;
-	if (!nearBottom) {
-		pauseTranscriptFollow();
-	}
 }
 
 function openImagePreview(preview) {
@@ -222,8 +167,7 @@ function submitComposer(prompt) {
 	}
 
 	// 发送自己的消息时重新开启跟随，让新回合从底部开始。
-	scrollFollowState.transcript = true;
-	scrollFollowState.transcriptPausedUntil = 0;
+	transcriptScroll.resumeFollow();
 	post({ type: 'send-prompt', prompt });
 }
 
@@ -409,7 +353,8 @@ onUnmounted(() => {
 	}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
 		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :items="state.items"
 			:collapse="collapse" :activity-text="state.activityText" :turn-status="turnStatus"
-			@scroll="onTranscriptScroll" @preview-image="openImagePreview" />
+			@content-resize="transcriptScroll.onContentResize" @scroll="transcriptScroll.onScroll"
+			@preview-image="openImagePreview" />
 		<section v-else class="empty-composer-stage" aria-label="新对话">
 			<div class="empty-composer-copy">
 				<div class="empty-kicker">SELFCLAW · READY</div>

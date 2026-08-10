@@ -51,7 +51,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
         var version = ++_selectionVersion;
         _selectedConversationId = conversationId;
         ClearSelectedTranscript();
-        _transcriptChangeSink.PublishNow(false);
+        _transcriptChangeSink.PublishNow(conversationId is not null);
 
         if (conversationId is not Guid selectedId ||
             (_runtimeStates.TryGetValue(selectedId, out var runtimeState) && !runtimeState.IsDetached))
@@ -69,7 +69,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
         }
 
         ReplaceSelectedTranscript(snapshot);
-        _transcriptChangeSink.PublishNow(false);
+        _transcriptChangeSink.PublishNow(true);
     }
 
     internal async Task<ConversationRuntimeState> StartTurnAsync(

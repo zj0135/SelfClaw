@@ -6,7 +6,7 @@ namespace SelfClaw.Desktop.Services.Transcript;
 
 internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
 {
-    private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(75);
+    private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(120);
 
     private readonly TranscriptProjection _projection;
     private readonly WebViewHostChannel _hostChannel;
