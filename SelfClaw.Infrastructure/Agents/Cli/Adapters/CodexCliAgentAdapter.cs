@@ -22,6 +22,7 @@ internal sealed class CodexCliAgentAdapter : ICliAgentAdapter
 
         arguments.Add("--json");
         arguments.Add("--skip-git-repo-check");
+        arguments.Add("--dangerously-bypass-approvals-and-sandbox");
 
         if (!string.IsNullOrWhiteSpace(preparation.Model))
         {

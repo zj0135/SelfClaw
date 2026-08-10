@@ -39,6 +39,7 @@ public sealed class CliAgentChatRuntimeTests
         Path.GetFileName(startInfo.Invocation.FileName).Should().Be("claude");
         startInfo.Invocation.ArgumentList.Should().Contain("--input-format");
         startInfo.Invocation.ArgumentList.Should().Contain("--include-partial-messages");
+        startInfo.Invocation.ArgumentList.Should().Contain("--dangerously-skip-permissions");
         startInfo.Invocation.ArgumentList.Should().ContainInOrder("--model", "sonnet");
         startInfo.Invocation.ArgumentList.Should().ContainInOrder("--effort", "high");
         startInfo.Invocation.ArgumentList.Should().ContainInOrder(
@@ -81,6 +82,7 @@ public sealed class CliAgentChatRuntimeTests
         Path.GetFileName(startInfo.Invocation.FileName).Should().Be("codex");
         startInfo.Invocation.ArgumentList.Should().ContainInOrder("exec", "resume", "stored-thread");
         startInfo.Invocation.ArgumentList.Should().Contain("--json");
+        startInfo.Invocation.ArgumentList.Should().Contain("--dangerously-bypass-approvals-and-sandbox");
         startInfo.Invocation.ArgumentList.Should().ContainInOrder("--model", "gpt-5");
         startInfo.Invocation.ArgumentList.Should().ContainInOrder(
             "-c",
@@ -117,7 +119,7 @@ public sealed class CliAgentChatRuntimeTests
 
         var startInfo = host.StartInfo ?? throw new InvalidOperationException("The process was not started.");
         Path.GetFileName(startInfo.Invocation.FileName).Should().Be("opencode");
-        startInfo.Invocation.ArgumentList.Should().ContainInOrder("run", "--format", "json");
+        startInfo.Invocation.ArgumentList.Should().ContainInOrder("run", "--format", "json", "--auto");
         startInfo.Invocation.ArgumentList.Should().ContainInOrder("-s", "stored-session");
         startInfo.Invocation.ArgumentList.Should().ContainInOrder("--model", "opencode/model");
         startInfo.Invocation.ArgumentList.Should().NotContain("ignored");

@@ -31,6 +31,7 @@ internal sealed class ClaudeCliAgentAdapter : ICliAgentAdapter
             "--output-format", "stream-json",
             "--verbose",
             "--include-partial-messages",
+            "--dangerously-skip-permissions",
         };
 
         if (!string.IsNullOrEmpty(preparation.StoredSessionId))

@@ -13,7 +13,7 @@ internal sealed class OpenCodeCliAgentAdapter : ICliAgentAdapter
     {
         ArgumentNullException.ThrowIfNull(preparation);
 
-        var arguments = new List<string> { "run", "--format", "json" };
+        var arguments = new List<string> { "run", "--format", "json", "--auto" };
         if (!string.IsNullOrEmpty(preparation.StoredSessionId))
         {
             arguments.Add("-s");
