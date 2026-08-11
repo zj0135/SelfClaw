@@ -1,15 +1,13 @@
 <script setup>
 import { Pencil, Trash2, X } from 'lucide-vue-next';
-import AgentBindingsEditor from './AgentBindingsEditor.vue';
 import ExtensionStatusBadge from './ExtensionStatusBadge.vue';
 
 defineProps({
 	item: { type: Object, required: true },
 	kind: { type: String, required: true },
-	agents: { type: Array, required: true },
 	pending: { type: Boolean, default: false },
 });
-defineEmits(['close', 'delete', 'edit', 'binding']);
+defineEmits(['close', 'delete', 'edit']);
 </script>
 
 <template>
@@ -33,15 +31,6 @@ defineEmits(['close', 'delete', 'edit', 'binding']);
 			<template v-if="item.tools?.length"><dt>工具</dt><dd>{{ item.tools.join(', ') }}</dd></template>
 			<template v-if="item.permissions?.length"><dt>权限</dt><dd>{{ item.permissions.join(', ') }}</dd></template>
 		</dl>
-
-		<AgentBindingsEditor
-			v-if="!item.sourcePluginId"
-			:agents="agents"
-			:assigned-agent-ids="item.assignedAgentIds"
-			:disabled="pending"
-			@change="(agentId, enabled) => $emit('binding', agentId, enabled)"
-		/>
-		<p v-else class="managed">绑定继承自插件 {{ item.sourcePluginId }}，请在插件页调整。</p>
 
 		<footer v-if="kind === 'mcpServer' || !item.sourcePluginId">
 			<button v-if="kind === 'mcpServer'" type="button" class="secondary" :disabled="pending" @click="$emit('edit')">
@@ -67,7 +56,6 @@ dt, dd { margin: 0; padding: 9px 0; border-bottom: 1px solid var(--sc-line); fon
 dt { color: var(--sc-faint); }
 dd { overflow-wrap: anywhere; color: var(--sc-soft); }
 dd.error { color: var(--sc-err); }
-.managed { margin: 0; padding: 10px 0; border-top: 1px solid var(--sc-line); border-bottom: 1px solid var(--sc-line); color: var(--sc-faint); font-size: 11px; line-height: 1.55; }
 footer { display: flex; gap: 8px; margin-top: auto; padding-top: 20px; }
 footer button { display: inline-flex; align-items: center; justify-content: center; flex: 1; height: 34px; gap: 6px; border: 1px solid var(--sc-line-2); border-radius: 6px; background: transparent; color: var(--sc-soft); }
 footer .danger { color: var(--sc-err); }

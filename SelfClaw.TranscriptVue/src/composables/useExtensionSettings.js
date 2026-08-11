@@ -102,19 +102,6 @@ export function useExtensionSettings() {
 		return true;
 	}
 
-	async function setAgentBinding(kind, item, agentId, enabled) {
-		const response = await mutate(kind, item.id, () =>
-			request('extensions/set-agent-binding', {
-				kind,
-				id: item.id,
-				agentId,
-				enabled,
-			}),
-		);
-		if (!response) return;
-		await load();
-	}
-
 	async function saveMcp(command) {
 		const id = command.id || 'new';
 		const response = await mutate('mcpServer', id, () =>
@@ -164,7 +151,6 @@ export function useExtensionSettings() {
 		setEnabled,
 		acknowledgePluginPermissions,
 		deleteItem,
-		setAgentBinding,
 		saveMcp,
 		testMcp,
 		importPackage,

@@ -16,6 +16,7 @@ internal sealed class WebViewMessageRouter : IDisposable
 {
     private readonly AiProviderSettingsBridge _aiProviderSettingsBridge;
     private readonly ExtensionSettingsBridge _extensionSettingsBridge;
+    private readonly AgentSettingsBridge _agentSettingsBridge;
     private readonly IExtensionStateChangeNotifier _extensionStateChangeNotifier;
     private readonly ProgrammingAssistantSettingsBridge _programmingAssistantSettingsBridge;
     private readonly PetSettingsBridge _petSettingsBridge;
@@ -30,6 +31,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     public WebViewMessageRouter(
         AiProviderSettingsBridge aiProviderSettingsBridge,
         ExtensionSettingsBridge extensionSettingsBridge,
+        AgentSettingsBridge agentSettingsBridge,
         IExtensionStateChangeNotifier extensionStateChangeNotifier,
         ProgrammingAssistantSettingsBridge programmingAssistantSettingsBridge,
         PetSettingsBridge petSettingsBridge,
@@ -42,6 +44,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     {
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
         _extensionSettingsBridge = extensionSettingsBridge;
+        _agentSettingsBridge = agentSettingsBridge;
         _extensionStateChangeNotifier = extensionStateChangeNotifier;
         _programmingAssistantSettingsBridge = programmingAssistantSettingsBridge;
         _petSettingsBridge = petSettingsBridge;
@@ -53,6 +56,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _dispatcher = dispatcher;
 
         _aiProviderSettingsBridge.ModelSelectionChanged += OnModelSelectionChanged;
+        _agentSettingsBridge.AgentsChanged += OnAgentsChanged;
         _extensionStateChangeNotifier.StateChanged += OnExtensionStateChanged;
     }
 
@@ -127,6 +131,16 @@ internal sealed class WebViewMessageRouter : IDisposable
             return null;
         }
 
+        response = await _agentSettingsBridge.TryHandleAsync(
+            type,
+            payload,
+            cancellationToken);
+        if (response is not null)
+        {
+            _hostChannel.PostResponse(response);
+            return null;
+        }
+
         response = await _programmingAssistantSettingsBridge.TryHandleAsync(
             type,
             payload,
@@ -174,6 +188,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         }
 
         _aiProviderSettingsBridge.ModelSelectionChanged -= OnModelSelectionChanged;
+        _agentSettingsBridge.AgentsChanged -= OnAgentsChanged;
         _extensionStateChangeNotifier.StateChanged -= OnExtensionStateChanged;
     }
 
@@ -295,6 +310,10 @@ internal sealed class WebViewMessageRouter : IDisposable
 
     private void OnModelSelectionChanged(Guid? modelProfileId)
         => RunOnDispatcher(() => _viewModel.SelectModelProfile(modelProfileId));
+
+    // Agent 定义文件已落盘：先刷新 VM 的 Agent 缓存，随后的 revision 推进会带着新定义重绘 transcript。
+    private void OnAgentsChanged()
+        => RunOnDispatcher(() => _viewModel.ReloadAgents());
 
     private void OnExtensionStateChanged(long revision)
         => RunOnDispatcher(() =>

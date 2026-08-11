@@ -136,26 +136,6 @@ internal sealed class ExtensionSettingsBridge
                     response = new { type, requestId, result, revision };
                     break;
                 }
-                case "extensions/set-agent-binding":
-                {
-                    var key = ReadItemKey(payload);
-                    var serviceState = await _settingsService.GetStateAsync(cancellationToken);
-                    EnsureItemExists(serviceState, key);
-                    var agent = _agentDefinitionService.SetExtensionBinding(
-                        ReadRequiredString(payload, "agentId"),
-                        key,
-                        ReadRequiredBoolean(payload, "enabled"));
-                    var revision = _stateChangeNotifier.Advance();
-                    response = new
-                    {
-                        type,
-                        requestId,
-                        ok = true,
-                        revision,
-                        agent = CreateAgentView(agent)
-                    };
-                    break;
-                }
                 default:
                     response = new { type, requestId, error = $"Unsupported extension message type '{type}'." };
                     break;
@@ -280,21 +260,6 @@ internal sealed class ExtensionSettingsBridge
 
     private static ExtensionAgentView CreateAgentView(DesktopAgentDefinition agent)
         => new(agent.Id, agent.Name, agent.PluginIds, agent.SkillIds, agent.McpServerIds);
-
-    private static void EnsureItemExists(ExtensionSettingsState state, ExtensionItemKey key)
-    {
-        var exists = key.Kind switch
-        {
-            ExtensionKind.Plugin => state.Plugins.Any(item => IdEquals(item.Id, key.Id)),
-            ExtensionKind.Skill => state.Skills.Any(item => IdEquals(item.Id, key.Id)),
-            ExtensionKind.McpServer => state.McpServers.Any(item => IdEquals(item.Id, key.Id)),
-            _ => false
-        };
-        if (!exists)
-        {
-            throw new KeyNotFoundException($"{key.Kind} extension '{key.Id}' was not found.");
-        }
-    }
 
     private static SaveMcpServerCommand ReadSaveMcpServerCommand(JsonElement payload)
         => new(

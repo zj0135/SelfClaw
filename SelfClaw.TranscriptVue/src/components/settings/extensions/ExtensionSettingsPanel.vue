@@ -21,7 +21,6 @@ const {
 	setEnabled,
 	acknowledgePluginPermissions,
 	deleteItem,
-	setAgentBinding,
 	saveMcp,
 	testMcp,
 	importPackage,
@@ -159,12 +158,10 @@ async function confirmPermissions() {
 				v-if="selectedItem"
 				:item="selectedItem"
 				:kind="activeCategory"
-				:agents="state.agents"
 				:pending="isPending(activeCategory, selectedItem.id)"
 				@close="selectedId = null"
 				@delete="handleDelete"
 				@edit="openMcp(selectedItem)"
-				@binding="(agentId, enabled) => setAgentBinding(activeCategory, selectedItem, agentId, enabled)"
 			/>
 		</div>
 

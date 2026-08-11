@@ -9,8 +9,12 @@ internal sealed class SubagentDefinitionCatalog
 {
     internal const int DefaultMaxRunSeconds = 900;
     internal const string DefaultToolPolicy = "read-only";
+    internal const int MinimumMaxRunSeconds = 30;
+    internal const int MaximumMaxRunSeconds = 3600;
     private const int MaximumNameBytes = 256;
     private const int MaximumDescriptionBytes = 4096;
+
+    private static readonly UTF8Encoding Utf8WithoutBom = new(false);
 
     private static readonly HashSet<string> AllowedFields = new(StringComparer.Ordinal)
     {
@@ -61,6 +65,71 @@ internal sealed class SubagentDefinitionCatalog
         {
             var filePath = Path.Combine(_subagentsDirectory, $"{normalizedId}.md");
             return File.Exists(filePath) ? LoadFile(filePath) : null;
+        }
+    }
+
+    internal SubagentDefinition Save(SubagentDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        var definitionId = NormalizeDefinitionId(definition.Id);
+        if (!IsValidDefinitionId(definitionId))
+        {
+            throw new ArgumentException("Subagent id is invalid.", nameof(definition));
+        }
+
+        var name = definition.Name.Trim();
+        var description = definition.Description.Trim();
+        var instructions = NormalizeInstructions(definition.Instructions);
+        if (name.Length == 0)
+        {
+            throw new ArgumentException("Subagent name is required.", nameof(definition));
+        }
+
+        if (description.Length == 0)
+        {
+            throw new ArgumentException("Subagent description is required.", nameof(definition));
+        }
+
+        if (instructions.Length == 0)
+        {
+            throw new ArgumentException("Subagent instructions are required.", nameof(definition));
+        }
+
+        if (Encoding.UTF8.GetByteCount(name) > MaximumNameBytes)
+        {
+            throw new ArgumentException($"Subagent name cannot exceed {MaximumNameBytes} UTF-8 bytes.", nameof(definition));
+        }
+
+        if (Encoding.UTF8.GetByteCount(description) > MaximumDescriptionBytes)
+        {
+            throw new ArgumentException($"Subagent description cannot exceed {MaximumDescriptionBytes} UTF-8 bytes.", nameof(definition));
+        }
+
+        var toolPolicy = NormalizeToolPolicyForSave(definition.ToolPolicy);
+        if (definition.MaxRunSeconds is < MinimumMaxRunSeconds or > MaximumMaxRunSeconds)
+        {
+            throw new ArgumentException(
+                $"Subagent maxRunSeconds must be between {MinimumMaxRunSeconds} and {MaximumMaxRunSeconds}.",
+                nameof(definition));
+        }
+
+        lock (_syncRoot)
+        {
+            var filePath = Path.Combine(_subagentsDirectory, $"{definitionId}.md");
+            WriteDefinitionFile(definition with
+            {
+                Id = definitionId,
+                Name = name,
+                Description = description,
+                ToolPolicy = toolPolicy,
+                PluginIds = NormalizeIdentifiers(definition.PluginIds, NormalizeExtensionId),
+                SkillIds = NormalizeIdentifiers(definition.SkillIds, NormalizeSkillId),
+                McpServerIds = NormalizeIdentifiers(definition.McpServerIds, NormalizeExtensionId),
+                Instructions = instructions,
+                FilePath = filePath
+            });
+            // 回读以获得与加载路径一致的 IsValid / Diagnostics。
+            return LoadFile(filePath);
         }
     }
 
@@ -307,4 +376,90 @@ internal sealed class SubagentDefinitionCatalog
     private static bool IsValidDefinitionId(string definitionId)
         => definitionId.Length > 0 &&
            definitionId.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
+
+    private void WriteDefinitionFile(SubagentDefinition definition)
+    {
+        Directory.CreateDirectory(_subagentsDirectory);
+        var destinationPath = Path.Combine(_subagentsDirectory, $"{definition.Id}.md");
+        var temporaryPath = Path.Combine(
+            _subagentsDirectory,
+            $".{definition.Id}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(temporaryPath, SerializeSubagentMarkdown(definition), Utf8WithoutBom);
+            if (File.Exists(destinationPath))
+            {
+                File.Replace(temporaryPath, destinationPath, destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(temporaryPath, destinationPath);
+            }
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
+
+    private static string SerializeSubagentMarkdown(SubagentDefinition definition)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("---");
+        builder.AppendLine($"name: {EscapeScalar(definition.Name)}");
+        builder.AppendLine($"description: {EscapeScalar(definition.Description)}");
+        if (definition.ModelProfileId is Guid modelProfileId)
+        {
+            builder.AppendLine($"modelProfileId: {modelProfileId:D}");
+        }
+
+        builder.AppendLine($"tools: {definition.ToolPolicy}");
+        AppendList(builder, "plugins", definition.PluginIds);
+        AppendList(builder, "skills", definition.SkillIds);
+        AppendList(builder, "mcpServers", definition.McpServerIds);
+        builder.AppendLine($"maxRunSeconds: {definition.MaxRunSeconds}");
+        builder.AppendLine("---");
+        builder.AppendLine();
+        builder.Append(definition.Instructions);
+        builder.AppendLine();
+        return builder.ToString();
+    }
+
+    private static void AppendList(StringBuilder builder, string key, IReadOnlyList<string> values)
+    {
+        if (values.Count == 0)
+        {
+            return;
+        }
+
+        builder.AppendLine($"{key}:");
+        foreach (var value in values)
+        {
+            builder.AppendLine($"  - {value}");
+        }
+    }
+
+    private static string EscapeScalar(string? value)
+        => $"\"{(value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
+
+    private static string NormalizeToolPolicyForSave(string? toolPolicy)
+    {
+        var normalized = toolPolicy?.Trim().ToLowerInvariant();
+        return normalized is "none" or DefaultToolPolicy or "system"
+            ? normalized
+            : throw new ArgumentException($"Subagent tools value '{toolPolicy}' is invalid.", nameof(toolPolicy));
+    }
+
+    private static IReadOnlyList<string> NormalizeIdentifiers(
+        IEnumerable<string> values,
+        Func<string?, string> normalize)
+        => values
+            .Select(normalize)
+            .Where(item => item.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 }
