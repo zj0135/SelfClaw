@@ -44,7 +44,7 @@ User input (WebView2)
     ├─ settings request → feature bridge → correlated WebView response
     ├─ shell command → MainWindow applies window-only behavior
     └─ conversation intent → MainWindowViewModel
-      → SubmitPromptAsync() captures the current UI selection
+      → SubmitPromptAsync() captures the current UI selection and provisions a managed Git worktree when requested
       → ConversationTurnEngine.ExecuteAsync()
         → admits the turn and persists the conversation + user message
         → builds the Direct/CLI ChatTurnRequest
@@ -148,7 +148,7 @@ Desktop (`App.xaml.cs`):
 
 ### Database
 
-Schema version: **23** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `conversations`, `messages`, `message_attachments`, `tool_runs`, `cli_agent_sessions`, `subagent_tasks`, and `subagent_deliveries`. The v22→v23 migration atomically rebuilds `conversations` when legacy `profile_id`, `kind`, or `parent_conversation_id` columns require it, preserves existing data, and defaults old rows to interactive ownership. Subagent deliveries use snapshot-aware FIFO batching, 45-second leases with 15-second heartbeat, and atomic Delivered/DeadLetter resolution.
+Schema version: **24** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `git_repositories`, `git_checkouts`, `conversations`, `messages`, `message_attachments`, `tool_runs`, `cli_agent_sessions`, `subagent_tasks`, and `subagent_deliveries`. The v22→v23 migration atomically rebuilds `conversations` when legacy `profile_id`, `kind`, or `parent_conversation_id` columns require it, preserves existing data, and defaults old rows to interactive ownership. Schema v24 adds repository identity and checkout ownership without changing the physical Workspace Root execution contract. Subagent deliveries use snapshot-aware FIFO batching, 45-second leases with 15-second heartbeat, and atomic Delivered/DeadLetter resolution.
 
 ### Image attachments
 

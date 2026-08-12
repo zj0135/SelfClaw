@@ -223,7 +223,7 @@ internal sealed class ConversationTurnEngine : IDisposable
     {
         var now = DateTimeOffset.UtcNow;
         var conversation = request.Conversation ?? new ConversationRecord(
-            Guid.NewGuid(),
+            request.ConversationId ?? Guid.NewGuid(),
             "New chat",
             request.WorkspaceRoot?.Id,
             ConversationMode.Programming,

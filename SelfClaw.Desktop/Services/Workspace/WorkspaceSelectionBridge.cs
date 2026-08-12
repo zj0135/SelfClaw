@@ -1,5 +1,7 @@
 using System.IO;
 using System.Text.Json;
+using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Workspace.Abstractions;
 
 namespace SelfClaw.Desktop.Services.Workspace;
@@ -8,13 +10,16 @@ internal sealed class WorkspaceSelectionBridge
 {
     private readonly IWorkspaceSelectionController _selectionController;
     private readonly IWorkspaceFolderPicker _folderPicker;
+    private readonly IGitWorkspaceQuery? _gitWorkspaceQuery;
 
     public WorkspaceSelectionBridge(
         IWorkspaceSelectionController selectionController,
-        IWorkspaceFolderPicker folderPicker)
+        IWorkspaceFolderPicker folderPicker,
+        IGitWorkspaceQuery? gitWorkspaceQuery = null)
     {
         _selectionController = selectionController;
         _folderPicker = folderPicker;
+        _gitWorkspaceQuery = gitWorkspaceQuery;
     }
 
     public async Task<object?> TryHandleAsync(
@@ -47,7 +52,10 @@ internal sealed class WorkspaceSelectionBridge
                     var selectedPath = _folderPicker.PickFolder(ownerHandle, ResolveInitialPickerDirectory());
                     if (string.IsNullOrWhiteSpace(selectedPath))
                     {
-                        return BuildStateResponse(requestId, cancelled: true);
+                        return await BuildStateResponseAsync(
+                            requestId,
+                            cancelled: true,
+                            cancellationToken: cancellationToken).ConfigureAwait(false);
                     }
 
                     await _selectionController.SelectOrAddWorkspaceRootAsync(selectedPath);
@@ -56,7 +64,7 @@ internal sealed class WorkspaceSelectionBridge
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            return BuildStateResponse(requestId);
+            return await BuildStateResponseAsync(requestId, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -64,7 +72,7 @@ internal sealed class WorkspaceSelectionBridge
         }
         catch (Exception exception)
         {
-            return BuildStateResponse(requestId, error: exception.Message);
+            return await BuildStateResponseAsync(requestId, error: exception.Message, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -84,9 +92,19 @@ internal sealed class WorkspaceSelectionBridge
                 : null);
     }
 
-    private object BuildStateResponse(string? requestId, bool? cancelled = null, string? error = null)
+    private async Task<object> BuildStateResponseAsync(
+        string? requestId,
+        bool? cancelled = null,
+        string? error = null,
+        CancellationToken cancellationToken = default)
     {
         var selected = _selectionController.SelectedWorkspaceRoot;
+        GitWorkspaceState? gitState = null;
+        if (selected is not null && _gitWorkspaceQuery is not null)
+        {
+            gitState = await _gitWorkspaceQuery.GetStateAsync(selected, cancellationToken).ConfigureAwait(false);
+        }
+
         var currentPath = selected?.RootPath;
         var currentIsFallback = false;
         if (string.IsNullOrWhiteSpace(currentPath))
@@ -106,14 +124,26 @@ internal sealed class WorkspaceSelectionBridge
                 id = selected?.Id.ToString("D"),
                 name = selected?.Name ?? ResolveDirectoryDisplayName(currentPath),
                 path = currentPath,
-                isFallback = currentIsFallback
+                isFallback = currentIsFallback,
+                git = gitState,
+                repositoryName = gitState?.RepositoryName ?? selected?.GitRepositoryName,
+                branchName = gitState?.BranchName ?? selected?.GitBranchName,
+                isGitRepository = gitState?.IsRepository == true || selected?.GitRepositoryId is not null,
+                isManagedWorktree = gitState?.IsManagedWorktree == true || selected?.IsManagedWorktree == true,
+                isDirty = gitState?.IsDirty == true,
+                hasMergeConflicts = gitState?.HasMergeConflicts == true
             },
             roots = _selectionController.WorkspaceRoots.Select(root => new
             {
                 id = root.Id.ToString("D"),
                 root.Name,
                 path = root.RootPath,
-                selected = selected?.Id == root.Id
+                selected = selected?.Id == root.Id,
+                repositoryId = root.GitRepositoryId?.ToString("D"),
+                repositoryName = root.GitRepositoryName,
+                branchName = root.GitBranchName,
+                isManagedWorktree = root.IsManagedWorktree,
+                managedConversationId = root.ManagedConversationId?.ToString("D")
             }).ToArray(),
             commonFolders = BuildCommonFolders()
         };

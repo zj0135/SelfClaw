@@ -7,6 +7,8 @@ public sealed record StoragePaths(
 {
     public string LogsDirectory => Path.Combine(AppContext.BaseDirectory, "logs");
 
+    public string WorktreesDirectory => Path.Combine(AppDataDirectory, "worktrees");
+
     public static StoragePaths CreateDefault()
     {
         var root = Path.Combine(

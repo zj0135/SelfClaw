@@ -13,6 +13,7 @@ using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.Extensions;
+using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
@@ -130,10 +131,14 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<DesktopAgentDefinitionService>(),
                 services.GetRequiredService<DesktopSettingsJsonStore>(),
                 services.GetRequiredService<ISubagentConversationLifecycle>(),
-                services.GetRequiredService<ILogger<MainWindowViewModel>>()));
+                services.GetRequiredService<ILogger<MainWindowViewModel>>(),
+                services.GetRequiredService<IGitWorkspaceManager>(),
+                services.GetRequiredService<IGitWorkspaceQuery>(),
+                services.GetRequiredService<IGitWorkspaceStore>()));
             builder.Services.AddSingleton<IWorkspaceSelectionController>(services =>
                 services.GetRequiredService<MainWindowViewModel>());
             builder.Services.AddSingleton<WorkspaceSelectionBridge>();
+            builder.Services.AddSingleton<GitWorkspaceBridge>();
             builder.Services.AddSingleton(services => new WebViewMessageRouter(
                 services.GetRequiredService<AiProviderSettingsBridge>(),
                 services.GetRequiredService<ExtensionSettingsBridge>(),
@@ -145,7 +150,8 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<MainWindowViewModel>(),
                 services.GetRequiredService<AgentActivityCoordinator>(),
                 services.GetRequiredService<WebViewHostChannel>(),
-                Dispatcher));
+                Dispatcher,
+                services.GetRequiredService<GitWorkspaceBridge>()));
             builder.Services.AddSingleton(services => new MainWindow(
                 services.GetRequiredService<MainWindowViewModel>(),
                 services.GetRequiredService<DesktopNotificationService>(),

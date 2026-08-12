@@ -4,6 +4,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Extensions;
+using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.Pet;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Terminal;
@@ -20,6 +21,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly ProgrammingAssistantSettingsBridge _programmingAssistantSettingsBridge;
     private readonly PetSettingsBridge _petSettingsBridge;
     private readonly WorkspaceSelectionBridge _workspaceSelectionBridge;
+    private readonly GitWorkspaceBridge? _gitWorkspaceBridge;
     private readonly TerminalHostController _terminalHostController;
     private readonly MainWindowViewModel _viewModel;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
@@ -38,7 +40,8 @@ internal sealed class WebViewMessageRouter : IDisposable
         MainWindowViewModel viewModel,
         AgentActivityCoordinator agentActivityCoordinator,
         WebViewHostChannel hostChannel,
-        Dispatcher dispatcher)
+        Dispatcher dispatcher,
+        GitWorkspaceBridge? gitWorkspaceBridge = null)
     {
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
         _extensionSettingsBridge = extensionSettingsBridge;
@@ -46,6 +49,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _programmingAssistantSettingsBridge = programmingAssistantSettingsBridge;
         _petSettingsBridge = petSettingsBridge;
         _workspaceSelectionBridge = workspaceSelectionBridge;
+        _gitWorkspaceBridge = gitWorkspaceBridge;
         _terminalHostController = terminalHostController;
         _viewModel = viewModel;
         _agentActivityCoordinator = agentActivityCoordinator;
@@ -116,6 +120,16 @@ internal sealed class WebViewMessageRouter : IDisposable
             return null;
         }
 
+        if (_gitWorkspaceBridge is not null)
+        {
+            response = await _gitWorkspaceBridge.TryHandleAsync(type, payload, cancellationToken);
+            if (response is not null)
+            {
+                _hostChannel.PostResponse(response);
+                return null;
+            }
+        }
+
         response = await _extensionSettingsBridge.TryHandleAsync(
             type,
             payload,
@@ -182,8 +196,24 @@ internal sealed class WebViewMessageRouter : IDisposable
         switch (type)
         {
             case "send-prompt":
-                await _viewModel.SubmitPromptAsync(ReadOptionalString(payload, "prompt") ?? string.Empty);
+            {
+                var result = await _viewModel.SubmitPromptAsync(
+                    ReadOptionalString(payload, "prompt") ?? string.Empty,
+                    ReadOptionalString(payload, "workspaceMode"));
+                var requestId = ReadOptionalString(payload, "requestId");
+                if (requestId is not null)
+                {
+                    _hostChannel.PostResponse(new
+                    {
+                        type = "prompt-submission",
+                        requestId,
+                        result.Accepted,
+                        result.Error
+                    });
+                }
+
                 return null;
+            }
             case "stop-generation":
                 _viewModel.StopSelectedConversation();
                 return null;
@@ -264,7 +294,9 @@ internal sealed class WebViewMessageRouter : IDisposable
     {
         if (Guid.TryParse(ReadOptionalString(payload, "conversationId"), out var conversationId))
         {
-            await _viewModel.DeleteConversationAsync(conversationId);
+            await _viewModel.DeleteConversationAsync(
+                conversationId,
+                ReadBoolean(payload, "removeManagedWorktree"));
         }
     }
 
@@ -329,4 +361,9 @@ internal sealed class WebViewMessageRouter : IDisposable
         var value = element.GetString();
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
+
+    private static bool ReadBoolean(JsonElement payload, string propertyName)
+        => payload.TryGetProperty(propertyName, out var element) &&
+           element.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+           element.GetBoolean();
 }

@@ -116,7 +116,13 @@ internal static class SqliteMappings
             reader.GetString(1),
             reader.GetString(2),
             ReadDateTimeOffset(reader, 3),
-            ReadDateTimeOffset(reader, 4));
+            ReadDateTimeOffset(reader, 4),
+            reader.IsDBNull(5) ? null : ReadGuid(reader, 5),
+            reader.IsDBNull(6) ? null : reader.GetString(6),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            !reader.IsDBNull(8) && reader.GetInt32(8) != 0,
+            reader.IsDBNull(9) ? null : ReadGuid(reader, 9),
+            reader.IsDBNull(10) ? null : reader.GetString(10));
 
     public static ExtensionPackageRecord ReadExtensionPackage(SqliteDataReader reader)
         => new(

@@ -9,7 +9,7 @@ import { useTranscriptScroll } from '../composables/useTranscriptScroll.js';
 
 const emit = defineEmits(['preview-image']);
 
-const { on, post, requestLatest } = useHostBridge();
+const { on, post, request, requestLatest } = useHostBridge();
 
 const state = reactive({
 	items: [],
@@ -17,6 +17,8 @@ const state = reactive({
 	selectedConversationId: null,
 	autoScroll: false,
 	isBusy: false,
+	isSubmitting: false,
+	submitError: '',
 	agentMode: 'cli',
 	selectedAgentId: '',
 	selectedAgentName: '',
@@ -34,6 +36,8 @@ const state = reactive({
 		commonFolders: [],
 		isLoading: false,
 		error: '',
+		gitLoading: false,
+		gitError: '',
 	},
 });
 
@@ -161,14 +165,32 @@ function openImagePreview(preview) {
 	emit('preview-image', preview);
 }
 
-function submitComposer(prompt) {
-	if (!prompt || state.isBusy) {
+async function submitComposer(submission) {
+	const prompt = submission?.prompt?.trim();
+	if (!prompt || state.isBusy || state.isSubmitting) {
 		return;
 	}
 
-	// 发送自己的消息时重新开启跟随，让新回合从底部开始。
-	transcriptScroll.resumeFollow();
-	post({ type: 'send-prompt', prompt });
+	state.isSubmitting = true;
+	state.submitError = '';
+	try {
+		const response = await request(
+			'send-prompt',
+			{ prompt, workspaceMode: submission.workspaceMode || 'local' },
+			{ timeout: 120000 },
+		);
+		if (!response?.accepted) {
+			throw new Error(response?.error || '发送请求未被接受。');
+		}
+
+		transcriptScroll.resumeFollow();
+		submission.accept?.();
+		await requestWorkspaceSelection(true);
+	} catch (error) {
+		state.submitError = error?.message || '发送失败，请重试。';
+	} finally {
+		state.isSubmitting = false;
+	}
 }
 
 function stopGeneration() {
@@ -236,7 +258,42 @@ function applyWorkspaceSelection(payload) {
 	state.workspace.roots = Array.isArray(payload.roots) ? payload.roots : [];
 	state.workspace.commonFolders = Array.isArray(payload.commonFolders) ? payload.commonFolders : [];
 	state.workspace.error = payload.error || '';
+	state.workspace.gitError = '';
 	state.workspace.isLoading = false;
+}
+
+async function handleGitAction(action) {
+	const types = {
+		refresh: 'get-git-state',
+		'create-branch': 'git-create-branch',
+		'switch-branch': 'git-switch-branch',
+		'delete-branch': 'git-delete-branch',
+		merge: 'git-merge',
+		'abort-merge': 'git-abort-merge',
+	};
+	const type = types[action?.type];
+	if (!type || state.workspace.gitLoading) return;
+
+	state.workspace.gitLoading = true;
+	state.workspace.gitError = '';
+	try {
+		const response = await request(type, {
+			branchName: action.branchName,
+			startPoint: action.startPoint,
+		});
+		if (response?.state && state.workspace.current) {
+			state.workspace.current.git = response.state;
+			state.workspace.current.branchName = response.state.branchName || '';
+			state.workspace.current.isDirty = Boolean(response.state.isDirty);
+			state.workspace.current.hasMergeConflicts = Boolean(response.state.hasMergeConflicts);
+		}
+
+		if (action.type !== 'refresh') await requestWorkspaceSelection(true);
+	} catch (error) {
+		state.workspace.gitError = error?.message || 'Git 操作失败。';
+	} finally {
+		state.workspace.gitLoading = false;
+	}
 }
 
 function onWorkspacePointerDown(event) {
@@ -364,8 +421,11 @@ onUnmounted(() => {
 		</section>
 		<ComposerPanel
 			ref="composerShellRef"
-			:busy="state.isBusy"
+			:busy="state.isBusy || state.isSubmitting"
 			:workspace-selection="state.workspace"
+			:git-loading="state.workspace.gitLoading"
+			:git-error="state.workspace.gitError"
+			:submit-error="state.submitError"
 			:agent-mode="state.agentMode"
 			:selected-agent-id="state.selectedAgentId"
 			:selected-agent-name="state.selectedAgentName"
@@ -376,6 +436,7 @@ onUnmounted(() => {
 			@request-workspace="requestWorkspaceSelection"
 			@select-workspace-root="selectWorkspaceRoot"
 			@browse-workspace-folder="browseWorkspaceFolder"
+			@git-action="handleGitAction"
 			@approve-tool="(id) => resolveToolApproval(id, true)"
 			@reject-tool="(id) => resolveToolApproval(id, false)"
 		/>

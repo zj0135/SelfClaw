@@ -28,6 +28,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     private readonly DesktopAgentDefinitionService _desktopAgentDefinitionService;
     private readonly DesktopSettingsJsonStore _settingsStore;
     private readonly ISubagentConversationLifecycle _subagentConversationLifecycle;
+    private readonly IGitWorkspaceManager? _gitWorkspaceManager;
+    private readonly IGitWorkspaceQuery? _gitWorkspaceQuery;
+    private readonly IGitWorkspaceStore? _gitWorkspaceStore;
     private readonly ILogger<MainWindowViewModel> _logger;
 
     private readonly List<ConversationRecord> _allConversations = [];
@@ -56,7 +59,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         DesktopAgentDefinitionService desktopAgentDefinitionService,
         DesktopSettingsJsonStore settingsStore,
         ISubagentConversationLifecycle subagentConversationLifecycle,
-        ILogger<MainWindowViewModel> logger)
+        ILogger<MainWindowViewModel> logger,
+        IGitWorkspaceManager? gitWorkspaceManager = null,
+        IGitWorkspaceQuery? gitWorkspaceQuery = null,
+        IGitWorkspaceStore? gitWorkspaceStore = null)
     {
         _conversationRepository = conversationRepository;
         _turnEngine = turnEngine;
@@ -66,6 +72,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         _desktopAgentDefinitionService = desktopAgentDefinitionService;
         _settingsStore = settingsStore;
         _subagentConversationLifecycle = subagentConversationLifecycle;
+        _gitWorkspaceManager = gitWorkspaceManager;
+        _gitWorkspaceQuery = gitWorkspaceQuery;
+        _gitWorkspaceStore = gitWorkspaceStore;
         _logger = logger;
         _transcriptPublisher.Attach(BuildTranscriptProjectionRequest);
     }
@@ -123,14 +132,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     /// <summary>
     /// WebView 的 "send-prompt" 消息经宿主路由后落到这里，触发一次发送回合。
     /// </summary>
-    public Task SubmitPromptAsync(string prompt)
+    public Task<PromptSubmissionResult> SubmitPromptAsync(string prompt, string? workspaceMode = null)
     {
         ArgumentNullException.ThrowIfNull(prompt);
 
         var normalizedPrompt = prompt.Trim();
         if (normalizedPrompt.Length == 0)
         {
-            return Task.CompletedTask;
+            return Task.FromResult(new PromptSubmissionResult(false));
         }
 
         return SendAsync(new PromptSubmissionSnapshot(
@@ -141,6 +150,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
             _selectedModelProfileId,
             _selectedAgentId,
             _composerModeOverride,
+            ParseWorkspaceMode(workspaceMode),
             _selectionVersion));
     }
 
@@ -195,6 +205,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
             _ => null
         };
 
+    private static GitWorkspaceMode ParseWorkspaceMode(string? mode)
+        => mode?.Trim().ToLowerInvariant() switch
+        {
+            "worktree" or "managed-worktree" => GitWorkspaceMode.ManagedWorktree,
+            _ => GitWorkspaceMode.Local
+        };
+
     private const string ComposerSettingsNode = "composer";
 
     public Task StartNewConversationAsync()
@@ -212,10 +229,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         return SelectConversationCoreAsync(conversation);
     }
 
-    public Task DeleteConversationAsync(Guid conversationId)
-        => DeleteConversationsAsync([conversationId]);
+    public Task DeleteConversationAsync(Guid conversationId, bool removeManagedWorktree = false)
+        => DeleteConversationsAsync([conversationId], removeManagedWorktree);
 
-    public async Task DeleteConversationsAsync(IEnumerable<Guid> conversationIds)
+    public async Task DeleteConversationsAsync(IEnumerable<Guid> conversationIds, bool removeManagedWorktree = false)
     {
         var requestedIds = conversationIds
             .Where(item => item != Guid.Empty)
@@ -264,6 +281,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
             foreach (var conversationId in deleteIds)
             {
+                await ReleaseConversationWorkspaceAsync(conversationId, removeManagedWorktree);
                 await _conversationRepository.DeleteConversationAsync(conversationId);
                 _allConversations.RemoveAll(item => item.Id == conversationId);
                 _filteredConversations.RemoveAll(item => item.Id == conversationId);
@@ -304,6 +322,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     {
         if (_selectedWorkspaceRoot?.Id == workspaceRoot?.Id)
         {
+            if (!ReferenceEquals(_selectedWorkspaceRoot, workspaceRoot))
+            {
+                _selectedWorkspaceRoot = workspaceRoot;
+                OnPropertyChanged(nameof(SelectedWorkspaceRootPath));
+            }
+
             return;
         }
 
@@ -404,6 +428,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     {
         var selectedId = _selectedWorkspaceRoot?.Id;
         var workspaceRoots = await _conversationRepository.ListWorkspaceRootsAsync();
+        if (_gitWorkspaceQuery is not null)
+        {
+            foreach (var workspaceRoot in workspaceRoots)
+            {
+                await _gitWorkspaceQuery.GetStateAsync(workspaceRoot).ConfigureAwait(false);
+            }
+
+            workspaceRoots = await _conversationRepository.ListWorkspaceRootsAsync().ConfigureAwait(false);
+        }
+
         ReplaceList(_workspaceRoots, workspaceRoots);
         SelectWorkspaceRoot(
             selectedId is Guid id
@@ -483,13 +517,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     #region 回合意图与释放
 
-    private async Task SendAsync(PromptSubmissionSnapshot submission)
+    private async Task<PromptSubmissionResult> SendAsync(PromptSubmissionSnapshot submission)
     {
+        WorkspaceRoot? provisionedWorkspaceRoot = null;
         try
         {
             if (submission.SelectionVersion != _selectionVersion)
             {
-                return;
+                return new PromptSubmissionResult(false, "当前选择已改变，请重试。");
             }
 
             var conversation = submission.Conversation;
@@ -498,20 +533,65 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
                                                _conversationSessions.IsSelected(conversation.Id);
             var runtimeAgent = ResolveRuntimeAgent(conversation?.AgentId ?? submission.AgentId);
             runtimeAgent = runtimeAgent with { Mode = submission.ExecutionModeOverride ?? runtimeAgent.Mode };
+            var workspaceRoot = submission.WorkspaceRoot;
+            Guid? conversationId = conversation?.Id;
+            if (conversation is null && workspaceRoot?.IsManagedWorktree == true)
+            {
+                return new PromptSubmissionResult(false, "该工作树已绑定其他会话，请选择基础工作目录后新建会话。");
+            }
+
+            if (submission.WorkspaceMode == GitWorkspaceMode.ManagedWorktree)
+            {
+                if (workspaceRoot is null)
+                {
+                    return new PromptSubmissionResult(false, "请先选择一个 Git 工作目录。");
+                }
+
+                if (conversation is not null)
+                {
+                    if (!workspaceRoot.IsManagedWorktree)
+                    {
+                        return new PromptSubmissionResult(false, "现有本地会话不能切换为工作树，请新建会话。");
+                    }
+                }
+                else
+                {
+                    if (_gitWorkspaceManager is null)
+                    {
+                        return new PromptSubmissionResult(false, "Git 工作树功能当前不可用。");
+                    }
+
+                    conversationId = Guid.NewGuid();
+                    var creation = await _gitWorkspaceManager.CreateManagedWorktreeAsync(
+                        workspaceRoot,
+                        conversationId.Value,
+                        submission.Prompt).ConfigureAwait(false);
+                    workspaceRoot = creation.WorkspaceRoot;
+                    provisionedWorkspaceRoot = workspaceRoot;
+                    await ReloadWorkspaceRootsAsync().ConfigureAwait(false);
+                    SelectWorkspaceRoot(
+                        _workspaceRoots.FirstOrDefault(item => item.Id == workspaceRoot.Id) ?? workspaceRoot,
+                        publishShell: false);
+                }
+            }
+
             var admission = await _turnEngine.TryAdmitAsync(new DesktopConversationTurnRequest(
                 conversation,
                 runtimeAgent,
                 submission.Prompt,
                 submission.ModelProfileId,
-                submission.WorkspaceRoot,
-                submission.ToolPermissionMode));
+                workspaceRoot,
+                submission.ToolPermissionMode,
+                conversationId));
             if (admission is null)
             {
-                return;
+                await CleanupProvisionedWorkspaceAsync(provisionedWorkspaceRoot).ConfigureAwait(false);
+                return new PromptSubmissionResult(false, "当前会话正在执行，请稍候。");
             }
 
             ApplyAdmittedConversation(admission.Conversation, preferConversationSelection);
-            await _turnEngine.ExecuteAsync(admission);
+            _ = ExecuteAcceptedTurnAsync(admission);
+            return new PromptSubmissionResult(true);
         }
         catch (OperationCanceledException)
         {
@@ -520,7 +600,67 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         catch (Exception exception)
         {
             _logger.LogError(exception, "Failed to prepare the chat turn.");
+            await CleanupProvisionedWorkspaceAsync(provisionedWorkspaceRoot).ConfigureAwait(false);
+            return new PromptSubmissionResult(false, exception.Message);
         }
+    }
+
+    private async Task ExecuteAcceptedTurnAsync(AdmittedConversationTurn admission)
+    {
+        try
+        {
+            await _turnEngine.ExecuteAsync(admission).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Accepted chat turn failed outside the turn engine.");
+        }
+    }
+
+    private async Task CleanupProvisionedWorkspaceAsync(WorkspaceRoot? workspaceRoot)
+    {
+        if (workspaceRoot is null || _gitWorkspaceManager is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _gitWorkspaceManager.RemoveManagedWorktreeAsync(workspaceRoot).ConfigureAwait(false);
+            await _conversationRepository.DeleteWorkspaceRootAsync(workspaceRoot.Id).ConfigureAwait(false);
+        }
+        catch (Exception cleanupException)
+        {
+            _logger.LogWarning(cleanupException, "Failed to clean up a provisioned Git worktree {WorkspaceRootId}.", workspaceRoot.Id);
+        }
+    }
+
+    private async Task ReleaseConversationWorkspaceAsync(Guid conversationId, bool removeManagedWorktree)
+    {
+        if (_gitWorkspaceStore is null)
+        {
+            return;
+        }
+
+        var checkout = await _gitWorkspaceStore.GetConversationCheckoutAsync(conversationId).ConfigureAwait(false);
+        if (checkout is null)
+        {
+            return;
+        }
+
+        if (removeManagedWorktree)
+        {
+            var root = _workspaceRoots.FirstOrDefault(item => item.Id == checkout.WorkspaceRootId);
+            if (root is not null && _gitWorkspaceManager is not null)
+            {
+                await _gitWorkspaceManager.RemoveManagedWorktreeAsync(root).ConfigureAwait(false);
+                await _conversationRepository.DeleteWorkspaceRootAsync(root.Id).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        await _gitWorkspaceStore.ReleaseConversationAsync(conversationId).ConfigureAwait(false);
     }
 
     #endregion

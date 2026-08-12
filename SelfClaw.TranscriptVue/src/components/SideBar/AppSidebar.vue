@@ -196,6 +196,7 @@ function onContextMenuItem(item) {
 			emit('action', {
 				id: 'delete-conversation',
 				conversationId: target.node.id,
+				isManagedWorktree: Boolean(target.node.isManagedWorktree),
 			});
 		} else if (target.node.workspaceRootId) {
 			emit('action', {

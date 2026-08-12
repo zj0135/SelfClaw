@@ -26,6 +26,7 @@ using SelfClaw.Infrastructure.Extensions.Runtime;
 using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Plugins;
 using SelfClaw.Infrastructure.Options;
+using SelfClaw.Infrastructure.Git;
 using SelfClaw.Infrastructure.Security;
 using SelfClaw.Infrastructure.Tools.Transcript;
 using SelfClaw.Infrastructure.Tools.Workspace;
@@ -51,6 +52,16 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
         services.AddSingleton<ITurnFinalizationRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
+        services.AddSingleton<SqliteGitWorkspaceRepository>();
+        services.AddSingleton<IGitWorkspaceStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteGitWorkspaceRepository>());
+        services.AddSingleton<GitCommandRunner>();
+        services.AddSingleton<GitWorkspaceService>();
+        services.AddSingleton<IGitWorkspaceQuery>(serviceProvider =>
+            serviceProvider.GetRequiredService<GitWorkspaceService>());
+        services.AddSingleton<IGitWorkspaceManager>(serviceProvider =>
+            serviceProvider.GetRequiredService<GitWorkspaceService>());
+        services.AddSingleton<IGitMergeManager, GitMergeService>();
         services.AddSingleton<SubagentCompletionEnvelopeFactory>();
         services.AddSingleton<SqliteSubagentTaskRepository>();
         services.AddSingleton<ISubagentTaskStore>(serviceProvider =>

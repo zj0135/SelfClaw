@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { SlidersHorizontal, ArrowRight, Square, ShieldAlert, Check, X } from 'lucide-vue-next';
 import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
@@ -25,6 +25,9 @@ const props = defineProps({
 		type: Object,
 		default: null,
 	},
+	gitLoading: { type: Boolean, default: false },
+	gitError: { type: String, default: '' },
+	submitError: { type: String, default: '' },
 });
 
 const emit = defineEmits([
@@ -33,6 +36,7 @@ const emit = defineEmits([
 	'request-workspace',
 	'select-workspace-root',
 	'browse-workspace-folder',
+	'git-action',
 	'approve-tool',
 	'reject-tool',
 ]);
@@ -88,6 +92,7 @@ function rejectTool() {
 }
 
 const composerText = ref('');
+const workspaceMode = ref('local');
 const shellRef = ref(null);
 const textareaRef = ref(null);
 
@@ -99,9 +104,26 @@ function submit() {
 		return;
 	}
 
-	emit('submit', prompt);
-	composerText.value = '';
+	emit('submit', {
+		prompt,
+		workspaceMode: workspaceMode.value,
+		accept() {
+			if (composerText.value.trim() === prompt) composerText.value = '';
+		},
+	});
 }
+
+watch(
+	() => [props.workspaceSelection?.current?.id, Boolean(props.workspaceSelection?.current?.isManagedWorktree)],
+	([, isManaged], previous = []) => {
+		if (isManaged) {
+			workspaceMode.value = 'worktree';
+		} else if (previous[0] !== props.workspaceSelection?.current?.id) {
+			workspaceMode.value = 'local';
+		}
+	},
+	{ immediate: true },
+);
 
 function stop() {
 	emit('stop');
@@ -180,6 +202,7 @@ defineExpose({
 				placeholder="让助手帮你处理项目..."
 				@keydown="onKeydown"
 			></textarea>
+			<p v-if="submitError" class="composer-error" role="alert">{{ submitError }}</p>
 			<div class="composer-toolbar">
 			<div class="composer-tools-left">
 			<ModelSelector :execution-mode="agentMode" />
@@ -206,9 +229,14 @@ defineExpose({
 		</section>
 		<ComposerStatusBar
 			:workspace-selection="workspaceSelection"
+			:workspace-mode="workspaceMode"
+			:git-loading="gitLoading"
+			:git-error="gitError"
+			@update:workspace-mode="workspaceMode = $event"
 			@refresh="requestWorkspace"
 			@select-root="selectWorkspaceRoot"
 			@browse="browseWorkspaceFolder"
+			@git-action="emit('git-action', $event)"
 		/>
 	</div>
 </template>
@@ -264,6 +292,14 @@ defineExpose({
 	border-radius: 99px;
 	background: #dde1e7;
 	transform: translateX(-50%);
+}
+
+.composer-error {
+	align-self: end;
+	margin: 2px 2px 7px;
+	color: #b04438;
+	font-size: 11.5px;
+	line-height: 1.35;
 }
 
 /* ===== 工具调用确认栏（输入框上方，需要用户允许/拒绝 Direct 写操作时出现） ===== */

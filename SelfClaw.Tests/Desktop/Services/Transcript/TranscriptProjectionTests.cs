@@ -254,9 +254,13 @@ public sealed class TranscriptProjectionTests
                 "Id",
                 "Title",
                 "Timestamp",
-                "WorkspaceRootId",
-                "WorkspaceRootName",
-                "WorkspaceRootPath");
+            "WorkspaceRootId",
+            "WorkspaceRootName",
+            "WorkspaceRootPath",
+            "GitRepositoryId",
+            "GitRepositoryName",
+            "GitBranchName",
+            "IsManagedWorktree");
     }
 
     private static TranscriptProjection CreateProjection()

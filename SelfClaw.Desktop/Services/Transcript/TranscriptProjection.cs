@@ -115,6 +115,10 @@ public sealed class TranscriptProjection
                 .Append(':');
             AppendTextFingerprint(builder, workspaceRoot.Name);
             AppendTextFingerprint(builder, workspaceRoot.RootPath);
+            AppendTextFingerprint(builder, workspaceRoot.GitRepositoryId?.ToString("D"));
+            AppendTextFingerprint(builder, workspaceRoot.GitRepositoryName);
+            AppendTextFingerprint(builder, workspaceRoot.GitBranchName);
+            builder.Append(workspaceRoot.IsManagedWorktree ? '1' : '0');
             builder.Append(';');
         }
 
@@ -171,7 +175,11 @@ public sealed class TranscriptProjection
             conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
             conversation.WorkspaceRootId?.ToString("D"),
             workspaceRoot?.Name,
-            workspaceRoot?.RootPath);
+            workspaceRoot?.RootPath,
+            workspaceRoot?.GitRepositoryId?.ToString("D"),
+            workspaceRoot?.GitRepositoryName,
+            workspaceRoot?.GitBranchName,
+            workspaceRoot?.IsManagedWorktree == true);
     }
 
     private TranscriptRenderItem BuildMessageItemCached(

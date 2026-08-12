@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 23;
+    private const int CurrentSchemaVersion = 24;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -147,6 +147,32 @@ CREATE TABLE IF NOT EXISTS conversations (
     CHECK((kind = 0 AND parent_conversation_id IS NULL) OR (kind = 1 AND parent_conversation_id IS NOT NULL)),
     FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL,
     FOREIGN KEY(parent_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);", cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS git_repositories (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    common_directory TEXT NOT NULL UNIQUE,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);", cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS git_checkouts (
+    workspace_root_id TEXT NOT NULL PRIMARY KEY,
+    repository_id TEXT NOT NULL,
+    is_managed INTEGER NOT NULL DEFAULT 0,
+    owner_conversation_id TEXT NULL,
+    source_workspace_root_id TEXT NULL,
+    branch_name TEXT NOT NULL,
+    base_branch_name TEXT NULL,
+    base_commit_sha TEXT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE CASCADE,
+    FOREIGN KEY(repository_id) REFERENCES git_repositories(id) ON DELETE CASCADE,
+    FOREIGN KEY(source_workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
 );", cancellationToken);
 
             await EnsureColumnExistsAsync(
@@ -438,6 +464,8 @@ CREATE TABLE IF NOT EXISTS subagent_deliveries (
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_deliveries_ready ON subagent_deliveries(status, next_attempt_at_utc, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_deliveries_parent_turn ON subagent_deliveries(parent_conversation_id, parent_turn_id, status, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_deliveries_lease ON subagent_deliveries(status, leased_until_utc);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_git_checkouts_repository ON git_checkouts(repository_id);", cancellationToken);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_git_checkouts_owner ON git_checkouts(owner_conversation_id);", cancellationToken);
             for (var version = 1; version <= CurrentSchemaVersion; version++)
             {
                 await ExecuteAsync(

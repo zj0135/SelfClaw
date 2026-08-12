@@ -48,6 +48,8 @@ function toConversationNode(conversation) {
 		label: conversation.title || '未命名对话',
 		time: conversation.timestamp || '',
 		type: 'conversation',
+		isManagedWorktree: Boolean(conversation.isManagedWorktree),
+		workspaceRootId: conversation.workspaceRootId || null,
 	};
 }
 
@@ -58,13 +60,14 @@ function hasWorkspace(conversation) {
 function buildProjectGroups(conversations) {
 	const groups = new Map();
 	for (const conversation of conversations.filter(hasWorkspace)) {
-		const key = conversation.workspaceRootId || conversation.workspaceRootPath || conversation.workspaceRootName || 'workspace';
+		const key = conversation.gitRepositoryId || conversation.workspaceRootId || conversation.workspaceRootPath || conversation.workspaceRootName || 'workspace';
 		if (!groups.has(key)) {
 			groups.set(key, {
 				id: `workspace-${key}`,
-				label: conversation.workspaceRootName || conversation.workspaceRootPath || '工作区',
+				label: conversation.gitRepositoryName || conversation.workspaceRootName || conversation.workspaceRootPath || '工作区',
 				workspaceRootId: conversation.workspaceRootId || null,
 				workspaceRootPath: conversation.workspaceRootPath || '',
+				gitRepositoryId: conversation.gitRepositoryId || null,
 				type: 'folder',
 				children: [],
 			});
@@ -183,7 +186,17 @@ function onSidebarAction(action) {
 			break;
 		case 'delete-conversation':
 			if (action?.conversationId) {
-				post({ type: 'delete-conversation', conversationId: action.conversationId });
+				let removeManagedWorktree = false;
+				if (action.isManagedWorktree) {
+					if (!window.confirm('确认删除该会话？工作树可以继续保留。')) break;
+					removeManagedWorktree = window.confirm('是否同时安全移除工作树？仅已合并且无未提交更改时可移除。');
+				}
+
+				post({
+					type: 'delete-conversation',
+					conversationId: action.conversationId,
+					removeManagedWorktree,
+				});
 			}
 			break;
 		case 'clear-conversations':

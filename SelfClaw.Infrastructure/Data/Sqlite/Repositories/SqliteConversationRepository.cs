@@ -294,9 +294,13 @@ ORDER BY created_at_utc ASC;";
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, name, root_path, created_at_utc, updated_at_utc
-FROM workspace_roots
-ORDER BY updated_at_utc DESC;";
+SELECT w.id, w.name, w.root_path, w.created_at_utc, w.updated_at_utc,
+       c.repository_id, r.name, c.branch_name, c.is_managed,
+       c.owner_conversation_id, c.base_branch_name
+FROM workspace_roots AS w
+LEFT JOIN git_checkouts AS c ON c.workspace_root_id = w.id
+LEFT JOIN git_repositories AS r ON r.id = c.repository_id
+ORDER BY w.updated_at_utc DESC;";
 
         var results = new List<WorkspaceRoot>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
