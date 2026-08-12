@@ -115,6 +115,86 @@ public sealed class SubagentDefinitionCatalogTests : IDisposable
         }
     };
 
+    [Fact]
+    public void Save_writes_a_definition_that_round_trips_through_load()
+    {
+        var modelProfileId = Guid.NewGuid();
+        var catalog = CreateCatalog();
+
+        var saved = catalog.Save(CreateDefinition() with
+        {
+            Id = "Reviewer",
+            Name = "Code reviewer",
+            ModelProfileId = modelProfileId,
+            ToolPolicy = "system",
+            PluginIds = ["engineering-workflows"],
+            SkillIds = ["code-review"],
+            McpServerIds = ["github-readonly"],
+            MaxRunSeconds = 600,
+            Instructions = "Review only the delegated task."
+        });
+
+        saved.Id.Should().Be("reviewer");
+        saved.IsValid.Should().BeTrue();
+        saved.Diagnostics.Should().BeEmpty();
+
+        var reloaded = catalog.Get("reviewer");
+        reloaded.Should().NotBeNull();
+        reloaded!.Name.Should().Be("Code reviewer");
+        reloaded.Description.Should().Be("Reviews changes.");
+        reloaded.ModelProfileId.Should().Be(modelProfileId);
+        reloaded.ToolPolicy.Should().Be("system");
+        reloaded.PluginIds.Should().Equal("engineering-workflows");
+        reloaded.SkillIds.Should().Equal("code-review");
+        reloaded.McpServerIds.Should().Equal("github-readonly");
+        reloaded.MaxRunSeconds.Should().Be(600);
+        reloaded.Instructions.Should().Be("Review only the delegated task.");
+    }
+
+    [Fact]
+    public void Save_normalizes_identifiers_and_omits_empty_optional_fields()
+    {
+        var catalog = CreateCatalog();
+
+        var saved = catalog.Save(CreateDefinition() with
+        {
+            PluginIds = ["beta-plugin", "Alpha-Plugin", "beta-plugin"],
+            SkillIds = [],
+            McpServerIds = []
+        });
+
+        saved.PluginIds.Should().Equal("Alpha-Plugin", "beta-plugin");
+        var markdown = File.ReadAllText(saved.FilePath);
+        markdown.Should().NotContain("modelProfileId");
+        markdown.Should().NotContain("skills:");
+        markdown.Should().NotContain("mcpServers:");
+    }
+
+    [Theory]
+    [InlineData("name", "name is required")]
+    [InlineData("description", "description is required")]
+    [InlineData("instructions", "instructions are required")]
+    [InlineData("toolPolicy", "tools value 'write-only' is invalid")]
+    [InlineData("tooShort", "must be between 30 and 3600")]
+    [InlineData("tooLong", "must be between 30 and 3600")]
+    public void Save_rejects_invalid_definitions(string violation, string error)
+    {
+        var catalog = CreateCatalog();
+        var definition = violation switch
+        {
+            "name" => CreateDefinition() with { Name = " " },
+            "description" => CreateDefinition() with { Description = "" },
+            "instructions" => CreateDefinition() with { Instructions = "  " },
+            "toolPolicy" => CreateDefinition() with { ToolPolicy = "write-only" },
+            "tooShort" => CreateDefinition() with { MaxRunSeconds = 29 },
+            _ => CreateDefinition() with { MaxRunSeconds = 3601 }
+        };
+
+        Action act = () => catalog.Save(definition);
+
+        act.Should().Throw<ArgumentException>().WithMessage($"*{error}*");
+    }
+
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))
@@ -130,6 +210,22 @@ public sealed class SubagentDefinitionCatalogTests : IDisposable
         {
         }
     }
+
+    private static SubagentDefinition CreateDefinition()
+        => new(
+            "reviewer",
+            "Reviewer",
+            "Reviews changes.",
+            null,
+            SubagentDefinitionCatalog.DefaultToolPolicy,
+            [],
+            [],
+            [],
+            SubagentDefinitionCatalog.DefaultMaxRunSeconds,
+            "Review the task.",
+            string.Empty,
+            false,
+            []);
 
     private SubagentDefinitionCatalog CreateCatalog()
         => new(new StoragePaths(

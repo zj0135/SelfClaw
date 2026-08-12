@@ -99,7 +99,9 @@ Key runtime files:
 ### Agent definitions
 
 `DesktopAgentDefinitionService` loads and atomically updates `.md` files from `{AppData}\agents\`. Built-in agent id: `build`.
-Agent markdown supports front matter: name, description, mode, tools, plugins, skills, mcpServers. Direct turns resolve those ids against the enabled extension catalog; CLI turns keep their existing subprocess behavior.
+Agent markdown supports front matter: name, description, mode, tools, plugins, skills, mcpServers, subagents. Direct turns resolve those ids against the enabled extension catalog; CLI turns keep their existing subprocess behavior.
+Subagent definitions live in `{AppData}\subagents\` via `SubagentDefinitionCatalog` (name, description, modelProfileId, tools, plugins, skills, mcpServers, maxRunSeconds); `Save()` writes them atomically with the same strict validation as load.
+The 代理助手 settings page talks to `AgentSettingsBridge` (prefix `agents/`): `get-state`, `save-agent`, `set-binding`, `set-subagent-binding`, `save-subagent`, `set-subagent-extension-binding`. Every mutation raises `AgentsChanged` (router reloads the VM agent cache) and advances the shared extension revision.
 
 ### Tool approval
 
@@ -109,7 +111,7 @@ Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandle
 
 - `MainWindow.xaml` — custom chrome, title bar buttons, two-column layout (WebView2 + RightPanel stub)
 - `LeftSidebar.xaml` — sidebar with Settings entry
-- Settings view: AI 提供商, 编程助手, and 宠物 are connected to the desktop host; remaining pages are frontend placeholders/mock
+- Settings view: AI 提供商, 编程助手, 代理助手, 插件, and 宠物 are connected to the desktop host; remaining pages are frontend placeholders/mock
 - RightPanel is a placeholder (width=0, collapsed by default)
 
 ### DI Registration
@@ -125,7 +127,7 @@ Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 - Security: `DpapiSecretProtector`
 
 Desktop (`App.xaml.cs`):
-- `DesktopAgentDefinitionService`, `ExtensionSettingsBridge`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
+- `DesktopAgentDefinitionService`, `SubagentDefinitionCatalog`, `ExtensionSettingsBridge`, `AgentSettingsBridge`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
   `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `AiProviderSettingsBridge`,
   `ConversationTurnEngine`, `ConversationSessionCoordinator`, `TranscriptPublisher`, `WebViewMessageRouter`,
   `SubagentTaskCoordinator` (`ISubagentTaskCoordinator` and `ISubagentConversationLifecycle`), `SubagentTaskBackgroundHost`, and `SubagentDeliveryDispatcher` hosted services,
@@ -168,7 +170,7 @@ Deleting an interactive parent first marks a deletion tombstone, stops its activ
 - **Feishu channel**: fully implemented but never registered in DI
 - **Plan mode**: removed; `AgentExecutionMode.Direct` and `AgentExecutionMode.Cli` are both active
 - **Channel conversations**: data model retained but VM filters them out
-- **Settings pages**: AI 提供商, 编程助手, 扩展, and 宠物 are wired to the host; the remaining settings pages are frontend mock
+- **Settings pages**: AI 提供商, 编程助手, 代理助手, 插件, and 宠物 are wired to the host; the remaining settings pages are frontend mock
 - **Legacy provider profiles**: `ProviderProfile`, `IProfileRepository`, the `profiles` table, and `ChatTurnRequest.Profile/ApiKey` were removed; Direct turns use `ModelProfileId`
 - **RightPanel**: XAML stub, not functional
 

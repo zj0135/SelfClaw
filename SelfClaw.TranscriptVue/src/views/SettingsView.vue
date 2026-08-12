@@ -5,6 +5,7 @@ import {
 	Server,
 	Layers,
 	Code2,
+	Bot,
 	Puzzle,
 	PawPrint,
 	Info,
@@ -30,6 +31,7 @@ const navGroups = [
 			{ id: 'providers', label: 'AI 服务商', en: 'PROVIDERS', icon: Server },
 			{ id: 'models', label: '模型管理', en: 'MODELS', icon: Layers },
 			{ id: 'coding-assistant', label: '编程助手', en: 'ASSISTANT', icon: Code2 },
+			{ id: 'agents', label: '代理助手', en: 'AGENTS', icon: Bot },
 		],
 	},
 	{
@@ -62,6 +64,7 @@ const componentMap = markRaw({
 	providers: defineAsyncComponent(() => import('../components/settings/AIProviders.vue')),
 	models: defineAsyncComponent(() => import('../components/settings/ModelManagement.vue')),
 	'coding-assistant': defineAsyncComponent(() => import('../components/settings/ProgrammingAssistant.vue')),
+	agents: defineAsyncComponent(() => import('../components/settings/agents/AgentSettingsPanel.vue')),
 	plugins: defineAsyncComponent(() => import('../components/settings/extensions/ExtensionSettingsPanel.vue')),
 	pet: defineAsyncComponent(() => import('../components/settings/Pet.vue')),
 	about: defineAsyncComponent(() => import('../components/settings/About.vue')),

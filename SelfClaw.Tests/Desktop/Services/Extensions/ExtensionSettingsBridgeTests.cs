@@ -71,27 +71,6 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
     }
 
     [Fact]
-    public async Task SetAgentBinding_writes_markdown_and_publishes_state_changed()
-    {
-        var agentService = CreateAgentService();
-        agentService.LoadAll();
-        var stateChangeNotifier = new ExtensionStateChangeNotifier();
-        var bridge = CreateBridge(new RecordingExtensionSettingsService(), agentService, stateChangeNotifier);
-        var revisions = new List<long>();
-        stateChangeNotifier.StateChanged += revisions.Add;
-        using var document = JsonDocument.Parse(
-            "{\"requestId\":\"bind-request\",\"agentId\":\"build\",\"kind\":\"skill\",\"id\":\"review\",\"enabled\":true}");
-
-        var response = await bridge.TryHandleAsync("extensions/set-agent-binding", document.RootElement);
-
-        agentService.LoadAll().Single().SkillIds.Should().Equal("review");
-        revisions.Should().ContainSingle().Which.Should().BeGreaterThan(0);
-        var json = SerializeResponse(response);
-        json.GetProperty("ok").GetBoolean().Should().BeTrue();
-        json.GetProperty("revision").GetInt64().Should().Be(revisions[0]);
-    }
-
-    [Fact]
     public async Task ListEffectiveSkills_returns_only_skills_bound_to_the_requested_agent()
     {
         var agentService = CreateAgentService();

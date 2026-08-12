@@ -6,7 +6,8 @@ namespace SelfClaw.Desktop.ViewModels;
 
 public sealed partial class MainWindowViewModel
 {
-    private void ReloadAgents()
+    // internal：AgentSettingsBridge 落盘 Agent 定义后由 WebViewMessageRouter 回调刷新缓存。
+    internal void ReloadAgents()
     {
         _agents.Clear();
         _agents.AddRange(_desktopAgentDefinitionService.LoadAll());

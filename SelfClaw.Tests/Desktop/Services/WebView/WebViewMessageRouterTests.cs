@@ -210,6 +210,11 @@ public sealed class WebViewMessageRouterTests
             Router = new WebViewMessageRouter(
                 aiProviderBridge,
                 extensionBridge,
+                new AgentSettingsBridge(
+                    agentDefinitions,
+                    new SubagentDefinitionCatalog(storagePaths),
+                    Unused<IExtensionSettingsService>(),
+                    ExtensionStateChangeNotifier),
                 ExtensionStateChangeNotifier,
                 new ProgrammingAssistantSettingsBridge(programmingSettings),
                 new PetSettingsBridge(petHost),

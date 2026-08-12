@@ -110,6 +110,7 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<ProgrammingAssistantSettingsBridge>();
             builder.Services.AddSingleton<AiProviderSettingsBridge>();
             builder.Services.AddSingleton<ExtensionSettingsBridge>();
+            builder.Services.AddSingleton<AgentSettingsBridge>();
             builder.Services.AddSingleton<IExtensionPackagePicker, ExtensionPackagePicker>();
             builder.Services.AddSingleton<PetPackageCatalog>();
             builder.Services.AddSingleton<PetActivityPresenter>();
@@ -142,6 +143,7 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton(services => new WebViewMessageRouter(
                 services.GetRequiredService<AiProviderSettingsBridge>(),
                 services.GetRequiredService<ExtensionSettingsBridge>(),
+                services.GetRequiredService<AgentSettingsBridge>(),
                 services.GetRequiredService<IExtensionStateChangeNotifier>(),
                 services.GetRequiredService<ProgrammingAssistantSettingsBridge>(),
                 services.GetRequiredService<PetSettingsBridge>(),
