@@ -190,10 +190,9 @@ function submit() {
 			<div class="dh-meta">
 				<div class="dh-kicker">SUBAGENT / {{ index }}</div>
 				<div class="dh-title">
-					<h2>{{ subagent.name }}</h2>
-					<code class="dh-id">{{ subagent.id }}</code>
+					<h2 :title="subagent.name">{{ subagent.name }}</h2>
 				</div>
-				<p>{{ subagent.description || '暂无描述' }}</p>
+				<p :title="subagent.description || '暂无描述'">{{ subagent.description || '暂无描述' }}</p>
 			</div>
 			<span class="mode-badge">{{ subagent.toolPolicy }}</span>
 			<span v-if="!subagent.isValid" class="invalid-badge">需修复</span>

@@ -30,6 +30,7 @@
 	position: relative;
 	z-index: 1;
 	display: flex;
+	flex: 0 0 auto;
 	align-items: center;
 	gap: 16px;
 	padding: 26px 34px 22px;
@@ -66,34 +67,30 @@
 .dh-title {
 	display: flex;
 	align-items: center;
-	flex-wrap: wrap;
 	gap: 10px;
+	max-width: 100%;
 }
 
 .dh-title h2 {
 	margin: 0;
+	min-width: 0;
+	overflow: hidden;
 	font-family: var(--sc-display);
 	font-size: 26px;
 	font-weight: 640;
 	letter-spacing: 0.01em;
 	line-height: 1.15;
-}
-
-.dh-id {
-	padding: 3px 8px;
-	border: 1px solid var(--sc-line);
-	border-radius: 6px;
-	background: var(--sc-raise);
-	color: var(--sc-soft);
-	font-family: var(--sc-mono);
-	font-size: 11px;
-	letter-spacing: 0.02em;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .dh-meta p {
 	margin: 5px 0 0;
+	overflow: hidden;
 	color: var(--sc-mute);
 	font-size: 12.5px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .mode-badge {

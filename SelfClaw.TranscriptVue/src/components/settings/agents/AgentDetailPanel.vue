@@ -179,10 +179,9 @@ function submit() {
 			<div class="dh-meta">
 				<div class="dh-kicker">AGENT / {{ index }}</div>
 				<div class="dh-title">
-					<h2>{{ agent.name }}</h2>
-					<code class="dh-id">{{ agent.id }}</code>
+					<h2 :title="agent.name">{{ agent.name }}</h2>
 				</div>
-				<p>{{ agent.description || '暂无描述' }}</p>
+				<p :title="agent.description || '暂无描述'">{{ agent.description || '暂无描述' }}</p>
 			</div>
 			<span class="mode-badge" :class="agent.mode">{{ agent.mode === 'cli' ? 'CLI' : 'DIRECT' }}</span>
 			<span v-if="agent.isBuiltIn" class="builtin-badge">内置</span>
