@@ -18,7 +18,6 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 			<div>
 				<div class="card-kicker">CAPABILITIES</div>
 				<h3>能力绑定</h3>
-				<div class="card-count">点击数量标签，在弹出框中勾选要绑定的项</div>
 			</div>
 		</div>
 
@@ -64,7 +63,7 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 18px 20px 14px;
+	padding: 14px 18px;
 }
 
 .card-kicker {
@@ -97,8 +96,8 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 	display: flex;
 	align-items: center;
 	width: 100%;
-	gap: 13px;
-	padding: 13px 20px;
+	gap: 12px;
+	padding: 9px 18px;
 	border: 0;
 	border-bottom: 1px solid var(--sc-line);
 	background: transparent;
@@ -124,12 +123,12 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 
 .cap-icon {
 	display: grid;
-	width: 34px;
-	height: 34px;
+	width: 30px;
+	height: 30px;
 	flex: 0 0 auto;
 	place-items: center;
 	border: 1px solid var(--sc-line);
-	border-radius: 9px;
+	border-radius: 8px;
 	background: var(--sc-panel);
 	color: var(--sc-soft);
 	transition: color 0.15s, border-color 0.15s;
@@ -174,13 +173,13 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 
 .count-pill {
 	flex: 0 0 auto;
-	padding: 5px 12px;
+	padding: 3px 10px;
 	border: 1px solid color-mix(in srgb, var(--sc-acid) 35%, transparent);
 	border-radius: 99px;
 	background: var(--sc-acid-soft);
 	color: var(--sc-acid);
 	font-family: var(--sc-mono);
-	font-size: 11.5px;
+	font-size: 11px;
 	font-weight: 600;
 	letter-spacing: 0.04em;
 	transition: transform 0.14s var(--sc-ease-spring), box-shadow 0.15s;
