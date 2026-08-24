@@ -253,6 +253,9 @@ internal sealed class WebViewMessageRouter : IDisposable
             case "select-composer-mode":
                 await _viewModel.SelectComposerModeAsync(ReadOptionalString(payload, "mode"));
                 return null;
+            case "select-tool-permission-mode":
+                await _viewModel.SelectToolPermissionModeAsync(ReadOptionalString(payload, "mode"));
+                return null;
             case "open-link":
                 return new WebViewHostCommand(WebViewHostCommandKind.OpenLink, ReadOptionalString(payload, "href"));
             case "window-drag":

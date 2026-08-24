@@ -194,6 +194,39 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         PublishShell(false);
     }
 
+    /// <summary>
+    /// Applies the composer's tool permission pick ("require-approval" / "full-access") as the mode for
+    /// the next admitted turn. The conversation record itself is the persistence unit: the turn engine
+    /// writes this mode onto the conversation, and loading a conversation resyncs this field.
+    /// </summary>
+    public Task SelectToolPermissionModeAsync(string? mode)
+    {
+        var parsed = ParseToolPermissionMode(mode);
+        if (parsed is null || parsed == _selectedToolPermissionMode)
+        {
+            return Task.CompletedTask;
+        }
+
+        _selectedToolPermissionMode = parsed.Value;
+        PublishShell(false);
+        return Task.CompletedTask;
+    }
+
+    private static ToolPermissionMode? ParseToolPermissionMode(string? mode)
+        => mode?.Trim().ToLowerInvariant() switch
+        {
+            "require-approval" => ToolPermissionMode.RequireApproval,
+            "full-access" => ToolPermissionMode.FullAccess,
+            _ => null
+        };
+
+    private static string ToToolPermissionModeWire(ToolPermissionMode mode)
+        => mode switch
+        {
+            ToolPermissionMode.FullAccess => "full-access",
+            _ => "require-approval"
+        };
+
     private AgentExecutionMode ResolveComposerExecutionMode(AgentExecutionMode agentMode)
         => _composerModeOverride ?? agentMode;
 
@@ -763,7 +796,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
             ResolveComposerExecutionMode(selectedAgent.Mode).ToString().ToLowerInvariant(),
             selectedAgent.Id,
             selectedAgent.Name,
-            _capabilityRevision);
+            _capabilityRevision,
+            ToToolPermissionModeWire(_selectedToolPermissionMode));
     }
 
     private IEnumerable<ConversationRecord> GetNavigationConversations()

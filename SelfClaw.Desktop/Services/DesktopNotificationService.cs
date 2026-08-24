@@ -134,6 +134,11 @@ public sealed class DesktopNotificationService : IDisposable
             return true;
         }
 
+        if (!mainWindow.Dispatcher.CheckAccess())
+        {
+            return mainWindow.Dispatcher.Invoke(ShouldShowNotification);
+        }
+
         return !mainWindow.IsVisible ||
                mainWindow.Visibility != Visibility.Visible ||
                mainWindow.WindowState == WindowState.Minimized;

@@ -10,4 +10,5 @@ public sealed record TranscriptRenderState(
     string AgentMode = "cli",
     string? SelectedAgentId = null,
     string? SelectedAgentName = null,
-    long CapabilityRevision = 0);
+    long CapabilityRevision = 0,
+    string ToolPermissionMode = "require-approval");

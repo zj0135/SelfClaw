@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { SlidersHorizontal, ArrowRight, Square, ShieldAlert, Check, X } from 'lucide-vue-next';
 import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
+import PermissionSelector from './PermissionSelector.vue';
 import SkillPicker from './SkillPicker.vue';
 
 const props = defineProps({
@@ -25,6 +26,10 @@ const props = defineProps({
 		type: Object,
 		default: null,
 	},
+	toolPermissionMode: {
+		type: String,
+		default: 'require-approval',
+	},
 	gitLoading: { type: Boolean, default: false },
 	gitError: { type: String, default: '' },
 	submitError: { type: String, default: '' },
@@ -39,6 +44,7 @@ const emit = defineEmits([
 	'git-action',
 	'approve-tool',
 	'reject-tool',
+	'select-permission-mode',
 ]);
 
 const approvalTitle = computed(() => {
@@ -216,6 +222,7 @@ defineExpose({
 			<button class="icon-btn" type="button" title="功能" aria-label="功能">
 				<SlidersHorizontal :size="16" :stroke-width="1.8" aria-hidden="true" />
 			</button>
+			<PermissionSelector :mode="toolPermissionMode" @select="emit('select-permission-mode', $event)" />
 			</div>
 			<div class="composer-tools-right">
 			<button v-if="props.busy" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成" @click="stop">

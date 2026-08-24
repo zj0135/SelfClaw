@@ -61,7 +61,8 @@ public sealed class TranscriptProjection
             request.AgentMode,
             request.SelectedAgentId,
             request.SelectedAgentName,
-            request.CapabilityRevision);
+            request.CapabilityRevision,
+            request.ToolPermissionMode);
     }
 
     internal void Invalidate() => _lastFingerprint = null;
@@ -88,6 +89,8 @@ public sealed class TranscriptProjection
             .Append(request.SelectedAgentName)
             .Append('|')
             .Append(request.CapabilityRevision)
+            .Append('|')
+            .Append(request.ToolPermissionMode)
             .Append('|')
             .Append(conversations.Length)
             .Append('|');

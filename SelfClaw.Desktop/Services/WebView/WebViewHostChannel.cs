@@ -148,7 +148,8 @@ public sealed class WebViewHostChannel
             state.AgentMode,
             state.SelectedAgentId,
             state.SelectedAgentName,
-            state.CapabilityRevision
+            state.CapabilityRevision,
+            state.ToolPermissionMode
         };
 
     private static object CreateTranscriptPatch(
@@ -187,7 +188,8 @@ public sealed class WebViewHostChannel
             current.AgentMode,
             current.SelectedAgentId,
             current.SelectedAgentName,
-            current.CapabilityRevision
+            current.CapabilityRevision,
+            current.ToolPermissionMode
         };
     }
 

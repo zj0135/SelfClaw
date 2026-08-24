@@ -25,6 +25,7 @@ const state = reactive({
 	capabilityRevision: 0,
 	activityText: '',
 	pendingApproval: null,
+	toolPermissionMode: 'require-approval',
 	terminal: {
 		isOpen: false,
 		isRunning: false,
@@ -142,6 +143,7 @@ function replaceState(payload) {
 	state.selectedAgentId = payload.selectedAgentId || '';
 	state.selectedAgentName = payload.selectedAgentName || '';
 	state.capabilityRevision = Number(payload.capabilityRevision) || 0;
+	state.toolPermissionMode = payload.toolPermissionMode || 'require-approval';
 
 	nextTick(() => {
 		const composerEl = composerShellRef.value?.getShellEl();
@@ -199,6 +201,14 @@ function stopGeneration() {
 	}
 
 	post({ type: 'stop-generation' });
+}
+
+function selectPermissionMode(mode) {
+	if (!mode) {
+		return;
+	}
+
+	post({ type: 'select-tool-permission-mode', mode });
 }
 
 function resolveToolApproval(toolExecutionId, approved) {
@@ -429,16 +439,18 @@ onUnmounted(() => {
 			:agent-mode="state.agentMode"
 			:selected-agent-id="state.selectedAgentId"
 			:selected-agent-name="state.selectedAgentName"
-			:capability-revision="state.capabilityRevision"
-			:pending-approval="state.pendingApproval"
-			@submit="submitComposer"
-			@stop="stopGeneration"
-			@request-workspace="requestWorkspaceSelection"
-			@select-workspace-root="selectWorkspaceRoot"
-			@browse-workspace-folder="browseWorkspaceFolder"
-			@git-action="handleGitAction"
-			@approve-tool="(id) => resolveToolApproval(id, true)"
-			@reject-tool="(id) => resolveToolApproval(id, false)"
+		:capability-revision="state.capabilityRevision"
+		:pending-approval="state.pendingApproval"
+		:tool-permission-mode="state.toolPermissionMode"
+		@submit="submitComposer"
+		@stop="stopGeneration"
+		@request-workspace="requestWorkspaceSelection"
+		@select-workspace-root="selectWorkspaceRoot"
+		@browse-workspace-folder="browseWorkspaceFolder"
+		@git-action="handleGitAction"
+		@approve-tool="(id) => resolveToolApproval(id, true)"
+		@reject-tool="(id) => resolveToolApproval(id, false)"
+		@select-permission-mode="selectPermissionMode"
 		/>
 		<TerminalPanel ref="terminalPanelRef" :is-open="state.terminal.isOpen" :is-running="state.terminal.isRunning"
 			:cwd="state.terminal.cwd" @ready="onTerminalReady" @input="onTerminalInput" @resize="onTerminalResize"
