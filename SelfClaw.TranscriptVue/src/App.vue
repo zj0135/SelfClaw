@@ -1,5 +1,5 @@
 <script setup>
-import { computed, markRaw, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, markRaw, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import AppSidebar from './components/SideBar/AppSidebar.vue';
 import AppToast from './components/common/AppToast.vue';
 import WindowControls from './components/Chat/WindowControls.vue';
@@ -16,6 +16,7 @@ const viewRegistry = {
 
 const currentViewId = ref('chat');
 const activeViewComponent = computed(() => viewRegistry[currentViewId.value] || ChatView);
+const chatViewRef = ref(null);
 const imagePreview = ref(null);
 const SIDEBAR_COLLAPSE_KEY = 'selfclaw:sidebar-collapsed';
 const sidebarCollapsed = ref(readSidebarCollapsed());
@@ -184,6 +185,10 @@ function onSidebarAction(action) {
 			selectedConversationId.value = null;
 			post({ type: 'new-chat' });
 			break;
+		case 'add-projects':
+			currentViewId.value = 'chat';
+			nextTick(() => chatViewRef.value?.browseWorkspaceFolder());
+			break;
 		case 'delete-conversation':
 			if (action?.conversationId) {
 				let removeManagedWorktree = false;
@@ -253,7 +258,7 @@ onUnmounted(() => {
 				<WindowControls :is-maximized="windowChrome.isMaximized" @action="onWindowControlAction" />
 			</div>
 			<div class="main-content">
-				<component :is="activeViewComponent" @preview-image="openImagePreview" />
+				<component :is="activeViewComponent" ref="chatViewRef" @preview-image="openImagePreview" />
 			</div>
 		</main>
 		<div v-if="imagePreview" class="image-preview-backdrop" @click.self="closeImagePreview">

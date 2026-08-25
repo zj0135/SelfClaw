@@ -166,6 +166,10 @@ function createHostBridge() {
 				? payload.conversations
 				: transcriptState.conversations,
 		};
+		// 后端 DefaultIgnoreCondition=WhenWritingNull 会把 null 标量字段整个省略，
+		// 扩展运算符因此不会覆盖旧值。这里显式以 payload 为准重置，保证「取消选中」
+		// 这类 null 广播能真正生效。
+		transcriptState.selectedConversationId = payload.selectedConversationId ?? null;
 		delete transcriptState.upsertItems;
 		delete transcriptState.removedItemIds;
 		delete transcriptState.itemOrder;

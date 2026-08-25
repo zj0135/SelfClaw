@@ -117,11 +117,21 @@ function getTranscriptScrollEl() {
 	return transcriptPanelRef.value?.getScrollEl?.() ?? null;
 }
 
+const lastSyncedWorkspaceConversationId = { current: null };
+
 function replaceState(payload) {
 	const nextItems = Array.isArray(payload.items) ? payload.items : [];
 	const nextBusy = Boolean(payload.isBusy);
 	const nextConversationId = payload.selectedConversationId || null;
 	const nextAutoScroll = Boolean(payload.autoScroll);
+
+	// 切换会话时 shell 不携带工作区信息（WorkspaceSelectionBridge 独立管理），
+	// 这里在会话变化时主动拉取一次工作区选择，让 ComposerStatusBar 立即同步。
+	if (nextConversationId !== lastSyncedWorkspaceConversationId.current) {
+		lastSyncedWorkspaceConversationId.current = nextConversationId;
+		requestWorkspaceSelection();
+	}
+
 	const scrollSnapshot = transcriptScroll.captureBeforeUpdate(nextConversationId);
 	if (nextBusy && !state.isBusy) {
 		startBusyClock();
@@ -261,6 +271,21 @@ function selectWorkspaceRoot(workspaceRootId) {
 
 function browseWorkspaceFolder() {
 	return applyWorkspaceRequest('browse-workspace-folder');
+}
+
+async function deleteWorkspaceRoot(workspaceRootId) {
+	if (!workspaceRootId) {
+		return;
+	}
+
+	// delete-workspace-root 由 WorkspaceSelectionBridge 处理，响应即最新工作区状态。
+	try {
+		const response = await requestLatest('workspace-selection', 'delete-workspace-root', { workspaceRootId });
+		applyWorkspaceSelection(response);
+	} catch (error) {
+		if (isSuperseded(error)) return;
+		state.workspace.error = error?.message || '删除工作目录失败。';
+	}
 }
 
 function applyWorkspaceSelection(payload) {
@@ -404,6 +429,10 @@ on('toolApprovalClear', () => {
 	state.pendingApproval = null;
 });
 
+defineExpose({
+	browseWorkspaceFolder,
+});
+
 onMounted(() => {
 	requestWorkspaceSelection(false);
 });
@@ -446,6 +475,7 @@ onUnmounted(() => {
 		@stop="stopGeneration"
 		@request-workspace="requestWorkspaceSelection"
 		@select-workspace-root="selectWorkspaceRoot"
+		@delete-workspace-root="deleteWorkspaceRoot"
 		@browse-workspace-folder="browseWorkspaceFolder"
 		@git-action="handleGitAction"
 		@approve-tool="(id) => resolveToolApproval(id, true)"

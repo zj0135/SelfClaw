@@ -247,9 +247,6 @@ internal sealed class WebViewMessageRouter : IDisposable
             case "clear-conversations":
                 await DeleteConversationsAsync(payload);
                 return null;
-            case "delete-workspace-root":
-                await DeleteWorkspaceRootAsync(payload);
-                return null;
             case "select-composer-mode":
                 await _viewModel.SelectComposerModeAsync(ReadOptionalString(payload, "mode"));
                 return null;
@@ -333,14 +330,6 @@ internal sealed class WebViewMessageRouter : IDisposable
             .Select(conversationId => conversationId.GetValueOrDefault())
             .ToArray();
         await _viewModel.DeleteConversationsAsync(conversationIds);
-    }
-
-    private async Task DeleteWorkspaceRootAsync(JsonElement payload)
-    {
-        if (Guid.TryParse(ReadOptionalString(payload, "workspaceRootId"), out var workspaceRootId))
-        {
-            await _viewModel.DeleteWorkspaceRootAsync(workspaceRootId);
-        }
     }
 
     private void OnModelSelectionChanged(Guid? modelProfileId)

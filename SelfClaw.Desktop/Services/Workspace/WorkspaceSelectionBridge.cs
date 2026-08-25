@@ -28,7 +28,7 @@ internal sealed class WorkspaceSelectionBridge
         nint ownerHandle,
         CancellationToken cancellationToken = default)
     {
-        if (type is not ("get-workspace-selection" or "select-workspace-root" or "browse-workspace-folder"))
+        if (type is not ("get-workspace-selection" or "select-workspace-root" or "browse-workspace-folder" or "delete-workspace-root"))
         {
             return null;
         }
@@ -59,6 +59,16 @@ internal sealed class WorkspaceSelectionBridge
                     }
 
                     await _selectionController.SelectOrAddWorkspaceRootAsync(selectedPath);
+                    break;
+                }
+                case "delete-workspace-root":
+                {
+                    var workspaceRootId = ReadOptionalString(payload, "workspaceRootId");
+                    if (Guid.TryParse(workspaceRootId, out var parsedId) && parsedId != Guid.Empty)
+                    {
+                        await _selectionController.DeleteWorkspaceRootAsync(parsedId);
+                    }
+
                     break;
                 }
             }

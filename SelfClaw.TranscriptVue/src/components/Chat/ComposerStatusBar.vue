@@ -15,6 +15,7 @@ const emit = defineEmits([
 	'refresh',
 	'select-root',
 	'browse',
+	'delete-root',
 	'update:workspace-mode',
 	'git-action',
 ]);
@@ -37,6 +38,7 @@ function setWorkspaceMode(mode) {
 			@refresh="emit('refresh', $event)"
 			@select-root="emit('select-root', $event)"
 			@browse="emit('browse')"
+			@delete-root="emit('delete-root', $event)"
 		/>
 
 		<div v-if="isGitRepository" class="workspace-mode" aria-label="工作区模式">

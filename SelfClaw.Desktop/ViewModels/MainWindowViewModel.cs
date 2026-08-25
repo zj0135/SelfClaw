@@ -496,6 +496,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     private Task SelectConversationCoreAsync(ConversationRecord? conversation)
     {
+        if (conversation is null)
+        {
+            SelectWorkspaceRoot(null, publishShell: false);
+        }
+
         if (_selectedConversation?.Id == conversation?.Id)
         {
             SetProperty(ref _selectedConversation, conversation, nameof(SelectedConversation));

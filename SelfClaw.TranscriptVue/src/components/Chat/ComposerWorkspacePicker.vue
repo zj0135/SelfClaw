@@ -1,16 +1,17 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
-import { Check, ChevronDown, ChevronRight, Folder, Search } from 'lucide-vue-next';
+import { Check, ChevronDown, ChevronRight, Folder, Search, Trash2 } from 'lucide-vue-next';
 
 const props = defineProps({
 	workspaceSelection: { type: Object, default: () => ({}) },
 });
 
-const emit = defineEmits(['refresh', 'select-root', 'browse']);
+const emit = defineEmits(['refresh', 'select-root', 'browse', 'delete-root']);
 const isOpen = ref(false);
 const searchText = ref('');
 const rootRef = ref(null);
 const searchInputRef = ref(null);
+const hoverRootId = ref(null);
 const current = computed(() => props.workspaceSelection?.current || null);
 const roots = computed(() => Array.isArray(props.workspaceSelection?.roots) ? props.workspaceSelection.roots : []);
 const filteredRoots = computed(() => {
@@ -38,6 +39,11 @@ function selectRoot(root) {
 function browse() {
 	emit('browse');
 	isOpen.value = false;
+}
+
+function requestDelete(root, event) {
+	event.stopPropagation();
+	emit('delete-root', root.id);
 }
 
 function onDocumentPointerDown(event) {
@@ -73,14 +79,27 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 					v-for="root in filteredRoots"
 					:key="root.id"
 					class="workspace-row"
-					:class="{ selected: root.id === current?.id }"
+					:class="{ selected: root.id === current?.id, 'is-managed': root.isManagedWorktree }"
 					type="button"
 					:title="root.path"
+					@mousemove="hoverRootId = root.id"
+					@mouseleave="hoverRootId = null"
 					@click="selectRoot(root)"
 				>
 					<Folder :size="14" :stroke-width="1.7" aria-hidden="true" />
 					<span>{{ root.name }}</span>
-					<Check v-if="root.id === current?.id" :size="14" :stroke-width="2.2" aria-hidden="true" />
+					<Check
+						v-if="root.id === current?.id && !(hoverRootId === root.id && !root.isManagedWorktree)"
+						:size="14" :stroke-width="2.2" aria-hidden="true" />
+					<Trash2
+						v-if="hoverRootId === root.id && !root.isManagedWorktree"
+						class="row-delete"
+						:size="14" :stroke-width="2"
+						role="button"
+						aria-hidden="true"
+						title="删除目录记录"
+						@click.stop="requestDelete(root, $event)"
+					/>
 				</button>
 				<p v-if="filteredRoots.length === 0" class="empty-row">没有匹配的工作目录</p>
 			</div>
@@ -176,7 +195,8 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 .workspace-list {
 	max-height: 220px;
 	margin-top: 7px;
-	overflow: auto;
+	overflow-y: auto;
+	overscroll-behavior: contain;
 }
 
 .workspace-row {
@@ -212,6 +232,15 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 .workspace-row svg {
 	flex: none;
 	color: #8c95a2;
+}
+
+.row-delete {
+	color: #929aa6;
+	transition: color 0.15s ease;
+}
+
+.row-delete:hover {
+	color: #dc4545;
 }
 
 .browse-row {

@@ -13,4 +13,6 @@ public interface IWorkspaceSelectionController
     void SelectWorkspaceRoot(Guid? workspaceRootId);
 
     Task<WorkspaceRoot> SelectOrAddWorkspaceRootAsync(string rootPath);
+
+    Task DeleteWorkspaceRootAsync(Guid workspaceRootId);
 }

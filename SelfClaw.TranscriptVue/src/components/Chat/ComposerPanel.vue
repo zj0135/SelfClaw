@@ -40,6 +40,7 @@ const emit = defineEmits([
 	'stop',
 	'request-workspace',
 	'select-workspace-root',
+	'delete-workspace-root',
 	'browse-workspace-folder',
 	'git-action',
 	'approve-tool',
@@ -147,6 +148,10 @@ function browseWorkspaceFolder() {
 	emit('browse-workspace-folder');
 }
 
+function deleteWorkspaceRoot(workspaceRootId) {
+	emit('delete-workspace-root', workspaceRootId);
+}
+
 function onKeydown(event) {
 	if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
 		return;
@@ -242,6 +247,7 @@ defineExpose({
 			@update:workspace-mode="workspaceMode = $event"
 			@refresh="requestWorkspace"
 			@select-root="selectWorkspaceRoot"
+			@delete-root="deleteWorkspaceRoot"
 			@browse="browseWorkspaceFolder"
 			@git-action="emit('git-action', $event)"
 		/>
