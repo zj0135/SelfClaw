@@ -23,5 +23,5 @@
 </template>
 
 <style scoped>
-@import './settings-console.css';
+@import '../../styles/settings-console.css';
 </style>

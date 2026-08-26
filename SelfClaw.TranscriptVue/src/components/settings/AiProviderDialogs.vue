@@ -106,7 +106,7 @@ const formatNames = {
 </template>
 
 <style scoped>
-@import './settings-console.css';
+@import '../../styles/settings-console.css';
 
 .dialog-backdrop {
 	position: fixed;

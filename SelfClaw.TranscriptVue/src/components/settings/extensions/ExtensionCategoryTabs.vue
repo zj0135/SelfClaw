@@ -31,7 +31,7 @@ const categories = [
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--sc-line); }
 button { position: relative; display: inline-flex; align-items: center; gap: 8px; min-width: 104px; height: 42px; padding: 0 14px; border: 0; background: transparent; color: var(--sc-mute); font-size: 13px; }
 button::after { position: absolute; right: 12px; bottom: -1px; left: 12px; height: 2px; background: transparent; content: ''; }

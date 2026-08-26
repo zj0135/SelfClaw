@@ -143,7 +143,7 @@ function itemHealthy(item) {
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 
 .list-col {
 	display: flex;

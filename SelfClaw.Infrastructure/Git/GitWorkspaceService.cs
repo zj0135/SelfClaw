@@ -499,7 +499,7 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
     {
         var result = await RunGitAsync(
             workingDirectory,
-            ["for-each-ref", $"--format=%(refname)%x1f%(refname:short)%x1f%(objectname)%x1f%(upstream:short)%x1f%(HEAD)%x1e", "refs/heads/", "refs/remotes/"],
+            ["for-each-ref", $"--format=%(refname)%1f%(refname:short)%1f%(objectname)%1f%(upstream:short)%1f%(HEAD)%1e", "refs/heads/", "refs/remotes/"],
             cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded)
         {

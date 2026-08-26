@@ -188,7 +188,7 @@ async function confirmPermissions() {
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 .page-head span { display: inline-flex; align-items: center; gap: 7px; color: var(--sc-faint); font-family: var(--sc-mono); font-size: 9px; font-weight: 650; }
 .page-head span::before { width: 14px; height: 1px; background: var(--sc-acid); content: ''; }
 .page-head h1 { margin: 5px 0 3px; font-size: 25px; font-weight: 650; letter-spacing: 0; }

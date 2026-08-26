@@ -353,7 +353,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-@import './settings-console.css';
+@import '../../styles/settings-console.css';
 
 .programming-assistant *,
 .programming-assistant *::before,

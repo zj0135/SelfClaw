@@ -44,7 +44,7 @@ defineEmits(['close', 'delete', 'edit']);
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 .drawer { display: flex; flex-direction: column; min-width: 0; height: 100%; padding: 18px; border-left: 1px solid var(--sc-line); background: var(--sc-bg); animation: sc-fade 160ms ease-out both; }
 header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 h2 { margin: 7px 0 2px; overflow-wrap: anywhere; color: var(--sc-text); font-size: 18px; letter-spacing: 0; }

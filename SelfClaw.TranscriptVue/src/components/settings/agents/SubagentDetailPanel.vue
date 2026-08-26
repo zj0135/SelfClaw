@@ -307,8 +307,8 @@ function submit() {
 </template>
 
 <style scoped>
-@import '../settings-console.css';
-@import './agent-detail-shared.css';
+@import '../../../styles/settings-console.css';
+@import '../../../styles/agent-detail-shared.css';
 
 .invalid-badge {
 	flex: 0 0 auto;

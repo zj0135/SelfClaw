@@ -148,7 +148,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-@import './settings-console.css';
+@import '../../styles/settings-console.css';
 
 .pet-view * { box-sizing: border-box; }
 .pet-view button { cursor: pointer; font: inherit; color: inherit; }

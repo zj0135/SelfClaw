@@ -30,6 +30,7 @@ public sealed class GitWorkspaceServiceTests
             await File.WriteAllTextAsync(Path.Combine(repositoryPath, "README.md"), "base\n");
             await RunGitAsync(repositoryPath, "add", "README.md");
             await RunGitAsync(repositoryPath, "commit", "-m", "initial");
+            await RunGitAsync(repositoryPath, "branch", "feature/ui");
 
             var database = new SelfClaw.Infrastructure.Data.Sqlite.SqliteDatabase(storagePaths);
             var conversations = new SqliteConversationRepository(database);
@@ -47,6 +48,10 @@ public sealed class GitWorkspaceServiceTests
             sourceState.IsRepository.Should().BeTrue();
             sourceState.BranchName.Should().Be("main");
             sourceState.IsDirty.Should().BeFalse();
+            sourceState.Branches.Should().Contain(item =>
+                item.Name == "main" && !item.IsRemote && item.IsCurrent);
+            sourceState.Branches.Should().Contain(item =>
+                item.Name == "feature/ui" && !item.IsRemote);
 
             var conversationId = Guid.NewGuid();
             var creation = await service.CreateManagedWorktreeAsync(sourceWorkspace, conversationId, "Add parser tests");

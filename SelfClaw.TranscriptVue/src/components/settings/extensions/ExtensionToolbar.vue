@@ -30,7 +30,7 @@ defineEmits(['update:modelValue', 'refresh', 'add-mcp', 'import-package']);
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 .toolbar { display: flex; align-items: center; gap: 8px; padding: 14px 0; }
 .search { display: flex; align-items: center; flex: 1; height: 36px; gap: 8px; padding: 0 10px; border: 1px solid var(--sc-line-2); border-radius: 6px; background: var(--sc-panel); color: var(--sc-faint); }
 input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--sc-text); font: inherit; font-size: 12.5px; }

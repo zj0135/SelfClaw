@@ -408,7 +408,7 @@ function resetCheckStatus() {
 </template>
 
 <style scoped>
-@import './settings-console.css';
+@import '../../styles/settings-console.css';
 
 .ai-providers {
 	position: relative;

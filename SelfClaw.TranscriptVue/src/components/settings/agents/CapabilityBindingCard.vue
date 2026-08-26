@@ -50,7 +50,7 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 
 .card {
 	overflow: hidden;

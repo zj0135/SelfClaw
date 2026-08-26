@@ -30,7 +30,7 @@ defineEmits(['select', 'toggle']);
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 .list { min-height: 0; }
 .empty { display: grid; place-items: center; align-content: center; min-height: 280px; gap: 8px; color: var(--sc-faint); text-align: center; }
 .empty strong { color: var(--sc-soft); font-size: 13px; }

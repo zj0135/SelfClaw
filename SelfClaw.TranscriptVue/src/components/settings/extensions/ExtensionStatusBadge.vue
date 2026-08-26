@@ -22,7 +22,7 @@ const label = computed(() => labels[props.status] || props.status);
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 .status { display: inline-flex; align-items: center; gap: 6px; min-height: 22px; color: var(--sc-mute); font-size: 11px; font-weight: 650; white-space: nowrap; }
 .status span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .status.ready { color: var(--sc-ok); }

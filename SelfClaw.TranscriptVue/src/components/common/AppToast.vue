@@ -16,7 +16,7 @@ const { toastState } = useToast();
 </template>
 
 <style scoped>
-@import '../settings/settings-console.css';
+@import '../../styles/settings-console.css';
 
 .app-toast {
 	position: fixed;

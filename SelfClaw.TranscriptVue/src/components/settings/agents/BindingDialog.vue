@@ -99,7 +99,7 @@ const boundCount = computed(() => props.items.filter((item) => item.bound).lengt
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 
 .dialog-backdrop {
 	position: fixed;

@@ -48,7 +48,7 @@ defineEmits(['close', 'confirm']);
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 .backdrop { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 20px; background: rgba(3, 5, 8, .76); animation: sc-fade 140ms ease-out both; }
 .dialog { width: min(500px, 100%); border: 1px solid var(--sc-line-2); border-radius: 7px; background: var(--sc-panel); box-shadow: 0 24px 70px rgba(0, 0, 0, .42); color: var(--sc-text); }
 header { display: grid; grid-template-columns: 34px minmax(0, 1fr) 32px; align-items: center; gap: 10px; padding: 18px 20px; border-bottom: 1px solid var(--sc-line-1); }

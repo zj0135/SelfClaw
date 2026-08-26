@@ -34,7 +34,7 @@ defineEmits(['add', 'remove']);
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 section { display: grid; gap: 8px; }
 .section-head { display: flex; align-items: center; justify-content: space-between; }
 .section-head div { display: flex; align-items: center; gap: 7px; color: var(--sc-soft); }

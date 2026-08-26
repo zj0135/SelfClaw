@@ -136,7 +136,7 @@ async function onToggleSubagentBinding(kind, id, enabled) {
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 
 .agent-settings {
 	position: relative;

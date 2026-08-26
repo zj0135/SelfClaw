@@ -152,7 +152,7 @@ function submit(testAfterSave = false) {
 </template>
 
 <style scoped>
-@import '../settings-console.css';
+@import '../../../styles/settings-console.css';
 .backdrop { position: fixed; inset: 0; z-index: 800; display: grid; place-items: center; padding: 22px; background: rgba(18, 22, 30, .38); backdrop-filter: blur(6px); }
 .dialog { display: flex; flex-direction: column; width: min(720px, 96vw); max-height: min(820px, 92vh); overflow: hidden; border: 1px solid var(--sc-line-2); border-radius: 8px; background: var(--sc-bg); box-shadow: 0 24px 70px rgba(18,22,30,.24); animation: sc-pop 180ms var(--sc-ease-out) both; }
 header, footer { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; background: var(--sc-panel); }

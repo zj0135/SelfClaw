@@ -131,7 +131,7 @@ function selectItem(id) {
 </template>
 
 <style scoped>
-@import '../components/settings/settings-console.css';
+@import '../styles/settings-console.css';
 
 .settings-layout {
 	display: flex;
