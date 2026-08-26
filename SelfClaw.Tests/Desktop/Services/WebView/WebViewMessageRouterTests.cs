@@ -154,7 +154,7 @@ public sealed class WebViewMessageRouterTests
             HostChannel = new WebViewHostChannel();
             HostChannel.Attach(PostedJson.Add);
             _transcriptPublisher = new TranscriptPublisher(
-                new TranscriptProjection(new MarkdownHtmlRenderer(), storagePaths),
+                new TranscriptProjection(storagePaths),
                 HostChannel,
                 Dispatcher.CurrentDispatcher);
             _sessions = new ConversationSessionCoordinator(ConversationRepository, _transcriptPublisher);

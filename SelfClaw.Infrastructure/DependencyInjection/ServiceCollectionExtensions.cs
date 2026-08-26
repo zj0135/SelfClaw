@@ -164,7 +164,6 @@ public static class ServiceCollectionExtensions
             new DispatchingAgentChatRuntime(
                 serviceProvider.GetServices<IAgentRuntimeAdapter>(),
                 serviceProvider.GetService<ILogger<DispatchingAgentChatRuntime>>()));
-        services.AddSingleton<MarkdownHtmlRenderer>();
         return services;
     }
 }

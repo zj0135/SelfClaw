@@ -5,7 +5,7 @@ export function resolvePreviewImage(target) {
 		return null;
 	}
 
-	const image = target.closest('.message-attachment-image, .body.body-segment img, .thinking-markdown img');
+	const image = target.closest('.message-attachment-image, .markdown-content img');
 	if (!(image instanceof HTMLImageElement)) {
 		return null;
 	}

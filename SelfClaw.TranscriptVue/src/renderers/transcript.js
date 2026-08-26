@@ -1,4 +1,4 @@
-import { escapeHtml, toolStatusLabel } from './shared';
+import { toolStatusLabel } from './shared';
 
 export { toolStatusLabel };
 
@@ -177,11 +177,12 @@ export function formatAttachmentSize(byteLength) {
 }
 
 // ── skill-token 后处理（用户消息正文里的 [/xx] → chip） ────────────
-const skillTokenPattern = /\[\/([^\]\r\n]{1,80})\]/g;
-const skillTokenSkipTags = new Set(['A', 'CODE', 'KBD', 'PRE', 'SAMP', 'SCRIPT', 'STYLE']);
+/* skill tokens are rendered by the shared Markdown renderer. */
+/* legacy HTML post-processing intentionally removed. */
+/*
 
-function renderSkillChipHtml(name) {
-	const safeName = escapeHtml(name);
+function renderSkillChip(name) {
+	const safeName = escapeText(name);
 	return `<span class="composer-inline-skill message-skill-chip" role="text"><span class="composer-inline-skill-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M8 1.8 13 4.6v6.8L8 14.2l-5-2.8V4.6L8 1.8Z"></path><path d="M3.2 4.8 8 7.5l4.8-2.7"></path><path d="M8 7.5v6.2"></path></svg></span><span class="composer-inline-skill-name">${safeName}</span></span>`;
 }
 
@@ -191,12 +192,12 @@ function renderSkillTokensInText(text) {
 	let match;
 	skillTokenPattern.lastIndex = 0;
 	while ((match = skillTokenPattern.exec(text || '')) !== null) {
-		html += escapeHtml(text.slice(lastIndex, match.index));
-		html += renderSkillChipHtml(match[1]);
+		html += escapeText(text.slice(lastIndex, match.index));
+		html += renderSkillChip(match[1]);
 		lastIndex = match.index + match[0].length;
 	}
 
-	return html + escapeHtml(String(text || '').slice(lastIndex));
+	return html + escapeText(String(text || '').slice(lastIndex));
 }
 
 function shouldSkipSkillTokenRendering(node) {
@@ -213,15 +214,15 @@ function shouldSkipSkillTokenRendering(node) {
 }
 
 // 用户消息的 HTML 在会话内不变，缓存 token 替换结果避免每次重渲染都做 DOM 解析。
-const skillTokenHtmlCache = new Map();
-const skillTokenHtmlCacheLimit = 200;
+const skillTokenCache = new Map();
+const skillTokenCacheLimit = 200;
 
-export function renderSkillTokensInUserHtml(html) {
+export function renderSkillTokensInLegacy(html) {
 	if (!html || !html.includes('[/') || typeof document === 'undefined') {
 		return html;
 	}
 
-	const cached = skillTokenHtmlCache.get(html);
+	const cached = skillTokenCache.get(html);
 	if (cached !== undefined) {
 		return cached;
 	}
@@ -250,13 +251,14 @@ export function renderSkillTokensInUserHtml(html) {
 	}
 
 	const result = template.innerHTML;
-	if (skillTokenHtmlCache.size >= skillTokenHtmlCacheLimit) {
-		skillTokenHtmlCache.clear();
+	if (skillTokenCache.size >= skillTokenCacheLimit) {
+		skillTokenCache.clear();
 	}
 
-	skillTokenHtmlCache.set(html, result);
+	skillTokenCache.set(html, result);
 	return result;
 }
+*/
 
 // ── 编排：raw segments → 有序渲染块 ──────────────────────────────
 // 等价于旧 renderMessageContent 的 for 循环，但产出数据而非 HTML 串：

@@ -1,5 +1,4 @@
 using System.IO;
-using System.Net;
 using System.Text;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services;
@@ -12,18 +11,13 @@ namespace SelfClaw.Desktop.Services.Transcript;
 public sealed class TranscriptProjection
 {
     private const string AttachmentHostName = "attachments.selfclaw.local";
-    private readonly MarkdownHtmlRenderer _markdownHtmlRenderer;
     private readonly StoragePaths _storagePaths;
-    private readonly Dictionary<Guid, (
-        string Fingerprint,
-        TranscriptRenderItem Item,
-        IReadOnlyList<(AssistantMessageSegmentKind Kind, string Markdown, string Html)> MarkdownSegments)> _messageCache = [];
+    private readonly Dictionary<Guid, (string Fingerprint, TranscriptRenderItem Item)> _messageCache = [];
     private readonly Dictionary<Guid, (ToolExecutionRecord Record, TranscriptRenderSegment Segment)> _toolSegmentCache = [];
     private string? _lastFingerprint;
 
-    public TranscriptProjection(MarkdownHtmlRenderer markdownHtmlRenderer, StoragePaths storagePaths)
+    public TranscriptProjection(StoragePaths storagePaths)
     {
-        _markdownHtmlRenderer = markdownHtmlRenderer;
         _storagePaths = storagePaths;
     }
 
@@ -196,11 +190,8 @@ public sealed class TranscriptProjection
             return cached.Item;
         }
 
-        var previousMarkdownSegments = _messageCache.TryGetValue(message.Id, out var previous)
-            ? previous.MarkdownSegments
-            : [];
-        var (item, markdownSegments) = BuildMessageItem(message, toolRuns, previousMarkdownSegments);
-        _messageCache[message.Id] = (fingerprint, item, markdownSegments);
+        var item = BuildMessageItem(message, toolRuns);
+        _messageCache[message.Id] = (fingerprint, item);
         return item;
     }
 
@@ -251,16 +242,11 @@ public sealed class TranscriptProjection
         return builder.ToString();
     }
 
-    private (
-        TranscriptRenderItem Item,
-        IReadOnlyList<(AssistantMessageSegmentKind Kind, string Markdown, string Html)> MarkdownSegments)
-        BuildMessageItem(
+    private TranscriptRenderItem BuildMessageItem(
         MessageRecord message,
-        IReadOnlyList<ToolRunPlacement> toolRuns,
-        IReadOnlyList<(AssistantMessageSegmentKind Kind, string Markdown, string Html)> previousMarkdownSegments)
+        IReadOnlyList<ToolRunPlacement> toolRuns)
     {
         var renderSegments = new List<TranscriptRenderSegment>();
-        var markdownSegments = new List<(AssistantMessageSegmentKind Kind, string Markdown, string Html)>();
         if (message.Role == MessageRole.Assistant)
         {
             var segments = AssistantMessageSegmenter.Split(message.MarkdownContent);
@@ -281,15 +267,9 @@ public sealed class TranscriptProjection
                     continue;
                 }
 
-                var html = RenderMarkdownSegment(
-                    segment.Kind,
-                    segment.Markdown,
-                    markdownSegments.Count,
-                    previousMarkdownSegments);
-                markdownSegments.Add((segment.Kind, segment.Markdown, html));
                 renderSegments.Add(new TranscriptRenderSegment(
                     segment.Kind == AssistantMessageSegmentKind.Thinking ? "thinking" : "content",
-                    html,
+                    segment.Markdown,
                     segment.IsPending));
             }
 
@@ -299,34 +279,10 @@ public sealed class TranscriptProjection
         }
         else if (!string.IsNullOrWhiteSpace(message.MarkdownContent))
         {
-            var html = RenderMarkdownSegment(
-                AssistantMessageSegmentKind.Content,
-                message.MarkdownContent,
-                0,
-                previousMarkdownSegments);
-            markdownSegments.Add((AssistantMessageSegmentKind.Content, message.MarkdownContent, html));
             renderSegments.Add(new TranscriptRenderSegment(
                 "content",
-                html,
+                message.MarkdownContent,
                 false));
-        }
-
-        if (message.Status is MessageStatus.Failed or MessageStatus.Cancelled &&
-            !string.IsNullOrWhiteSpace(message.ErrorMessage))
-        {
-            var statusClass = message.Status == MessageStatus.Cancelled
-                ? "message-cancelled"
-                : "message-error";
-            var errorHtml = $"<p class=\"{statusClass}\">{WebUtility.HtmlEncode(message.ErrorMessage)}</p>";
-            if (renderSegments.Count > 0 &&
-                string.Equals(renderSegments[^1].Kind, "content", StringComparison.Ordinal))
-            {
-                renderSegments[^1] = renderSegments[^1] with { Html = renderSegments[^1].Html + errorHtml };
-            }
-            else
-            {
-                renderSegments.Add(new TranscriptRenderSegment("content", errorHtml, false));
-            }
         }
 
         if (message.Role == MessageRole.Assistant && toolRuns.Count > 0)
@@ -334,7 +290,7 @@ public sealed class TranscriptProjection
             TranscriptToolRunPresenter.InsertToolSegments(renderSegments, toolRuns, BuildToolSegmentCached);
         }
 
-        return (new TranscriptRenderItem(
+        return new TranscriptRenderItem(
             message.Id.ToString("D"),
             "message",
             message.Role.ToString().ToLowerInvariant(),
@@ -342,27 +298,8 @@ public sealed class TranscriptProjection
             renderSegments,
             message.Role == MessageRole.Assistant && message.Status == MessageStatus.Streaming,
             message.CreatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
-            BuildImageAttachments(message)), markdownSegments);
-    }
-
-    private string RenderMarkdownSegment(
-        AssistantMessageSegmentKind kind,
-        string markdown,
-        int index,
-        IReadOnlyList<(AssistantMessageSegmentKind Kind, string Markdown, string Html)> previousSegments)
-    {
-        if (index < previousSegments.Count)
-        {
-            var previous = previousSegments[index];
-            if (previous.Kind == kind && string.Equals(previous.Markdown, markdown, StringComparison.Ordinal))
-            {
-                return previous.Html;
-            }
-        }
-
-        return string.IsNullOrWhiteSpace(markdown)
-            ? string.Empty
-            : _markdownHtmlRenderer.ToHtml(markdown);
+            BuildImageAttachments(message),
+            message.Status is MessageStatus.Failed or MessageStatus.Cancelled ? message.ErrorMessage : null);
     }
 
     private TranscriptRenderSegment BuildToolSegmentCached(ToolExecutionRecord toolRun)

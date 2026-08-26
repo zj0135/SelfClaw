@@ -213,7 +213,7 @@ public sealed class TranscriptProjectionTests
         state.Should().NotBeNull();
         state!.Items.Should().HaveCount(2);
         state.Items[0].Segments.Should().ContainSingle()
-            .Which.Html.Should().Contain("<strong>question</strong>");
+            .Which.Markdown.Should().Be("**question**");
         state.Items[0].Attachments.Should().ContainSingle()
             .Which.Should().BeEquivalentTo(new
             {
@@ -248,7 +248,8 @@ public sealed class TranscriptProjectionTests
                 "Segments",
                 "IsThinking",
                 "Timestamp",
-                "Attachments");
+                "Attachments",
+                "ErrorMessage");
         typeof(TranscriptConversationItem).GetProperties().Select(property => property.Name)
             .Should().BeEquivalentTo(
                 "Id",
@@ -267,7 +268,6 @@ public sealed class TranscriptProjectionTests
     {
         var root = Path.Combine(Path.GetTempPath(), "SelfClawProjectionTests");
         return new TranscriptProjection(
-            new MarkdownHtmlRenderer(),
             new StoragePaths(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets")));
     }
 
@@ -290,5 +290,6 @@ public sealed class TranscriptProjectionTests
             "direct",
             "build",
             "Build",
-            1);
+            1,
+            "requireApproval");
 }

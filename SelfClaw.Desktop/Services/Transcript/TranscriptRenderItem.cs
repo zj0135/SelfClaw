@@ -8,4 +8,5 @@ public sealed record TranscriptRenderItem(
     IReadOnlyList<TranscriptRenderSegment> Segments,
     bool IsThinking,
     string Timestamp,
-    IReadOnlyList<TranscriptImageAttachment>? Attachments = null);
+    IReadOnlyList<TranscriptImageAttachment>? Attachments = null,
+    string? ErrorMessage = null);

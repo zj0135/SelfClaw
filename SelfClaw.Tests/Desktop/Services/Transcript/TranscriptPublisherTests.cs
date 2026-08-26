@@ -20,7 +20,6 @@ public sealed class TranscriptPublisherTests
         channel.MarkReady();
         var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         var projection = new TranscriptProjection(
-            new MarkdownHtmlRenderer(),
             new StoragePaths(
                 storageRoot,
                 Path.Combine(storageRoot, "selfclaw.db"),
@@ -49,7 +48,6 @@ public sealed class TranscriptPublisherTests
         channel.Attach(hostMessages.Add);
         var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         var projection = new TranscriptProjection(
-            new MarkdownHtmlRenderer(),
             new StoragePaths(
                 storageRoot,
                 Path.Combine(storageRoot, "selfclaw.db"),
@@ -82,7 +80,8 @@ public sealed class TranscriptPublisherTests
             "direct",
             "build",
             agentName,
-            0);
+            0,
+            "requireApproval");
 
     private static long ReadRevision(string message)
     {

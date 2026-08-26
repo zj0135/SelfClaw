@@ -45,7 +45,7 @@ public sealed class MainWindowViewModelSubmissionTests
             var turnFinalizer = new DesktopTurnFinalizer(
                 new NoOpTurnFinalizationRepository(),
                 NullLogger<DesktopTurnFinalizer>.Instance);
-            var projection = new TranscriptProjection(new MarkdownHtmlRenderer(), storagePaths);
+            var projection = new TranscriptProjection(storagePaths);
             using var transcriptPublisher = new TranscriptPublisher(
                 projection,
                 new WebViewHostChannel(),

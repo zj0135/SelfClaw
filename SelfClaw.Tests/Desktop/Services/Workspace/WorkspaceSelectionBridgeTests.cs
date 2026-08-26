@@ -77,6 +77,17 @@ public sealed class WorkspaceSelectionBridgeTests
             SelectedWorkspaceRoot = root;
             return Task.FromResult(root);
         }
+
+        public Task DeleteWorkspaceRootAsync(Guid workspaceRootId)
+        {
+            _workspaceRoots.RemoveAll(root => root.Id == workspaceRootId);
+            if (SelectedWorkspaceRoot?.Id == workspaceRootId)
+            {
+                SelectedWorkspaceRoot = null;
+            }
+
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeWorkspaceFolderPicker(string? selectedPath) : IWorkspaceFolderPicker

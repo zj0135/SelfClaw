@@ -28,7 +28,7 @@ const attachments = computed(() => {
 		}));
 });
 
-const hasContent = computed(() => blocks.value.length > 0);
+const hasContent = computed(() => blocks.value.length > 0 || Boolean(props.item.errorMessage));
 const isPreparing = computed(() => props.item.role === 'assistant' && props.item.isThinking && !hasContent.value);
 const preparingLabel = computed(() => String(props.activityText || '').trim() || '准备中...');
 </script>
@@ -99,6 +99,11 @@ const preparingLabel = computed(() => String(props.activityText || '').trim() ||
 						@preview-image="emit('preview-image', $event)"
 					/>
 				</template>
+				<p
+					v-if="item.errorMessage"
+					class="message-error"
+					:class="{ 'message-cancelled': item.status === 'cancelled' }"
+				>{{ item.errorMessage }}</p>
 			</div>
 		</article>
 	</div>

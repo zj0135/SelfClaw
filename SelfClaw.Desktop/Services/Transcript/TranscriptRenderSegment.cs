@@ -2,7 +2,7 @@ namespace SelfClaw.Desktop.Services;
 
 public sealed record TranscriptRenderSegment(
     string Kind,
-    string Html,
+    string Markdown,
     bool IsPending,
     string? Text = null,
     string? Status = null,
