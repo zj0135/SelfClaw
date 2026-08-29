@@ -7,6 +7,11 @@ namespace SelfClaw.Infrastructure.Extensions.Plugins;
 
 internal sealed class PluginManifestReader
 {
+    private const int MaximumPanelTitleLength = 40;
+    private const int MinimumPanelWidth = 280;
+    private const int MaximumPanelWidth = 720;
+    private const int FallbackPanelWidth = 360;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -70,19 +75,12 @@ internal sealed class PluginManifestReader
             "directInstructions");
         var skills = ValidateSkills(packageRoot, contributions.Skills ?? []);
         var mcpServers = ValidateMcpServers(packageRoot, contributions.McpServers ?? []);
-        var permissions = (raw.Permissions ?? [])
-            .Select(permission => permission?.Trim() ?? string.Empty)
-            .ToArray();
-        if (permissions.Any(permission => string.IsNullOrWhiteSpace(permission) ||
-                                          permission.Any(character =>
-                                              !char.IsAsciiLetterOrDigit(character) && character is not '.' and not '-')))
+        var panels = ValidatePanels(raw.Id, packageRoot, contributions.Panels ?? []);
+        var permissions = PluginPermissions.Validate(raw.Permissions);
+        if (panels.Count > 0 && !PluginPermissions.Grants(permissions, PluginPermissions.Panel))
         {
-            throw new InvalidDataException("Plugin permissions contain an invalid value.");
-        }
-
-        if (permissions.Distinct(StringComparer.Ordinal).Count() != permissions.Length)
-        {
-            throw new InvalidDataException("Plugin permissions must be unique.");
+            throw new InvalidDataException(
+                $"Plugin declares panels, so it must also declare the '{PluginPermissions.Panel}' permission.");
         }
 
         return new PluginManifest(
@@ -92,8 +90,79 @@ internal sealed class PluginManifestReader
             raw.Version.Trim(),
             raw.Description?.Trim() ?? string.Empty,
             raw.Publisher?.Trim(),
-            permissions.OrderBy(permission => permission, StringComparer.Ordinal).ToArray(),
-            new PluginContributions(directInstructions, skills, mcpServers));
+            permissions,
+            new PluginContributions(directInstructions, skills, mcpServers, panels));
+    }
+
+    private static IReadOnlyList<PluginPanelContribution> ValidatePanels(
+        string pluginId,
+        string packageRoot,
+        IReadOnlyList<RawPluginPanelContribution> panels)
+    {
+        if (panels.Count == 0)
+        {
+            return [];
+        }
+
+        // Caught here rather than at open time: the panel origin is derived from the Plugin id, so an id
+        // that is a legal package id but not a legal DNS label would otherwise install cleanly and then
+        // fail to resolve the first time a user opens the tab.
+        if (!PluginPanelOrigin.IsValidPluginLabel(pluginId))
+        {
+            throw new InvalidDataException(
+                $"Plugin id '{pluginId}' cannot host panels: it must be at most 63 characters and must not start or end with '-'.");
+        }
+
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var results = new List<PluginPanelContribution>();
+        foreach (var panel in panels)
+        {
+            ValidateId(panel.Id, "Plugin panel id");
+            if (!ids.Add(panel.Id!))
+            {
+                throw new InvalidDataException($"Duplicate Plugin panel id '{panel.Id}'.");
+            }
+
+            var title = panel.Title?.Trim();
+            if (string.IsNullOrWhiteSpace(title) ||
+                title.Length > MaximumPanelTitleLength ||
+                title.Any(char.IsControl))
+            {
+                throw new InvalidDataException($"Plugin panel '{panel.Id}' title is invalid.");
+            }
+
+            if (string.IsNullOrWhiteSpace(panel.Entry))
+            {
+                throw new InvalidDataException($"Plugin panel '{panel.Id}' must declare an entry.");
+            }
+
+            var entryPath = ResolvePackagePath(packageRoot, panel.Entry, "Panel entry");
+            if (!File.Exists(entryPath))
+            {
+                throw new InvalidDataException($"Plugin panel '{panel.Id}' entry file does not exist.");
+            }
+
+            if (!Path.GetExtension(entryPath).Equals(".html", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"Plugin panel '{panel.Id}' entry must be an .html file.");
+            }
+
+            var width = panel.DefaultWidth ?? FallbackPanelWidth;
+            if (width is < MinimumPanelWidth or > MaximumPanelWidth)
+            {
+                throw new InvalidDataException(
+                    $"Plugin panel '{panel.Id}' defaultWidth must be between {MinimumPanelWidth} and {MaximumPanelWidth}.");
+            }
+
+            results.Add(new PluginPanelContribution(
+                panel.Id!,
+                title,
+                PluginPanelIcons.Resolve(panel.Icon),
+                NormalizeRelativePath(packageRoot, entryPath),
+                width));
+        }
+
+        return results;
     }
 
     private static IReadOnlyList<PluginSkillContribution> ValidateSkills(

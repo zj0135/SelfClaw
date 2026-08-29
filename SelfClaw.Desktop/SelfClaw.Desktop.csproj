@@ -39,6 +39,9 @@
     <None Update="Assets\skills\*;Assets\skills\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Assets\plugin-sdk.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="..\SelfClaw.TranscriptVue\assets\pets\**\*">
       <Link>Assets\pets\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

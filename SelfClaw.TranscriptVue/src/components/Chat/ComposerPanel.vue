@@ -161,19 +161,23 @@ function onKeydown(event) {
 	submit();
 }
 
-async function insertSkillToken(skillId) {
+async function insertAtCursor(text) {
 	const textarea = textareaRef.value;
 	const start = textarea?.selectionStart ?? composerText.value.length;
 	const end = textarea?.selectionEnd ?? start;
-	const token = `[/${skillId}] `;
-	composerText.value = composerText.value.slice(0, start) + token + composerText.value.slice(end);
+	composerText.value = composerText.value.slice(0, start) + text + composerText.value.slice(end);
 	await nextTick();
 	textareaRef.value?.focus();
-	textareaRef.value?.setSelectionRange(start + token.length, start + token.length);
+	textareaRef.value?.setSelectionRange(start + text.length, start + text.length);
+}
+
+function insertSkillToken(skillId) {
+	return insertAtCursor(`[/${skillId}] `);
 }
 
 defineExpose({
 	getShellEl: () => shellRef.value,
+	insertText: insertAtCursor,
 });
 </script>
 

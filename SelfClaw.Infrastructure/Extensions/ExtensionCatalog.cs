@@ -4,6 +4,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Plugins;
+using SelfClaw.Infrastructure.Extensions.Plugins.Models;
 
 namespace SelfClaw.Infrastructure.Extensions;
 
@@ -118,6 +119,69 @@ internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Panels are projected from the Plugin manifest rather than stored separately: the manifest is
+    /// already the durable record, and a second copy could disagree with the files a lease is pinned to.
+    /// A Plugin whose manifest no longer reads contributes no panels instead of failing the whole state.
+    /// </summary>
+    public async Task<IReadOnlyList<PluginPanelView>> ListPluginPanelViewsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (_pluginManifestReader is null)
+        {
+            return [];
+        }
+
+        var packages = await _packageRepository.ListPackagesAsync(cancellationToken).ConfigureAwait(false);
+        var results = new List<PluginPanelView>();
+        foreach (var plugin in packages
+                     .Where(package => package.Kind == ExtensionKind.Plugin)
+                     .OrderBy(package => package.Id, StringComparer.Ordinal))
+        {
+            PluginManifest manifest;
+            try
+            {
+                manifest = await _pluginManifestReader
+                    .ReadAsync(ExtensionInstallation.PluginManifestPath(plugin), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (manifest.Contributions.Panels.Count == 0)
+            {
+                continue;
+            }
+
+            var status = CreatePackageView(plugin).Status;
+            var origin = PluginPanelOrigin.ForPlugin(plugin.Id);
+            var networkOrigins = PluginPermissions.ReadNetworkOrigins(manifest.Permissions);
+            results.AddRange(manifest.Contributions.Panels.Select(panel => new PluginPanelView(
+                $"{plugin.Id}/{panel.Id}",
+                plugin.Id,
+                panel.Id,
+                panel.Title,
+                panel.Icon,
+                origin,
+                $"{origin}/{panel.Entry}",
+                panel.DefaultWidth,
+                plugin.IsEnabled,
+                status,
+                manifest.Permissions,
+                networkOrigins)));
+        }
+
+        return results
+            .OrderBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     public async Task<IReadOnlyList<McpServerView>> ListMcpServerViewsAsync(

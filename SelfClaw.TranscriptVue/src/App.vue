@@ -2,10 +2,13 @@
 import { computed, markRaw, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import AppSidebar from './components/SideBar/AppSidebar.vue';
 import AppToast from './components/common/AppToast.vue';
+import PluginLauncher from './components/Plugins/PluginLauncher.vue';
+import PluginPanelHost from './components/Plugins/PluginPanelHost.vue';
 import WindowControls from './components/Chat/WindowControls.vue';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
 import { useHostBridge } from './composables/hostBridge.js';
+import { usePluginPanels } from './composables/usePluginPanels.js';
 
 const { on, post } = useHostBridge();
 
@@ -42,6 +45,64 @@ const selectedConversationId = ref(null);
 const windowChrome = reactive({
 	isMaximized: false,
 });
+
+// ===== 插件面板（右侧栏） =====
+const panels = usePluginPanels();
+const launcherOpen = ref(false);
+const PANEL_WIDTH_KEY = 'selfclaw:panel-width';
+const panelWidth = ref(readPanelWidth());
+const resizing = ref(false);
+
+function readPanelWidth() {
+	const stored = Number(localStorage.getItem(PANEL_WIDTH_KEY));
+	return Number.isFinite(stored) && stored >= 280 ? Math.min(stored, 720) : 380;
+}
+
+function startPanelResize(event) {
+	if (event.button !== 0) return;
+	resizing.value = true;
+	const startX = event.clientX;
+	const startWidth = panelWidth.value;
+
+	function onMove(moveEvent) {
+		panelWidth.value = Math.min(720, Math.max(280, startWidth + (startX - moveEvent.clientX)));
+	}
+
+	function onUp() {
+		resizing.value = false;
+		window.removeEventListener('pointermove', onMove);
+		window.removeEventListener('pointerup', onUp);
+		try {
+			localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(panelWidth.value)));
+		} catch (_) {
+			// 忽略持久化失败
+		}
+	}
+
+	window.addEventListener('pointermove', onMove);
+	window.addEventListener('pointerup', onUp);
+	event.preventDefault();
+}
+
+const openPanelKeys = computed(() => panels.tabs.value.map((tab) => tab.key));
+
+async function openPanel(key) {
+	launcherOpen.value = false;
+	await panels.open(key);
+}
+
+function openPluginSettings() {
+	launcherOpen.value = false;
+	currentViewId.value = 'settings';
+}
+
+// 面板上下文由宿主推送（plugin-host/context），usePluginPanels 自行订阅。外壳这里只转发
+// transcript：它本来就是外壳收到的负载，没有第二个来源可以跟它对不上。
+on('replaceState', (payload) => {
+	panels.publishTranscript({ items: payload.items || [] });
+});
+
+panels.onInsertPrompt.value = (text) => chatViewRef.value?.insertPrompt?.(text);
 
 function toConversationNode(conversation) {
 	return {
@@ -129,12 +190,6 @@ function onWindowControlAction(action) {
 		case 'terminal':
 			post({ type: 'toggle-terminal' });
 			break;
-		case 'files':
-			post({ type: 'toggle-files' });
-			break;
-		case 'browser':
-			post({ type: 'toggle-browser' });
-			break;
 		case 'minimize':
 			post({ type: 'window-minimize' });
 			break;
@@ -188,6 +243,9 @@ function onSidebarAction(action) {
 		case 'add-projects':
 			currentViewId.value = 'chat';
 			nextTick(() => chatViewRef.value?.browseWorkspaceFolder());
+			break;
+		case 'plugins':
+			launcherOpen.value = true;
 			break;
 		case 'delete-conversation':
 			if (action?.conversationId) {
@@ -243,7 +301,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<div class="app" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+	<div
+		class="app"
+		:class="{ 'sidebar-collapsed': sidebarCollapsed, 'panels-open': panels.isOpen.value, resizing }"
+		:style="{ '--panel-width': `${panelWidth}px` }"
+	>
 		<AppSidebar
 			:items="navItems"
 			:active-id="sidebarActiveId"
@@ -261,6 +323,33 @@ onUnmounted(() => {
 				<component :is="activeViewComponent" ref="chatViewRef" @preview-image="openImagePreview" />
 			</div>
 		</main>
+		<div
+			v-if="panels.isOpen.value"
+			class="panel-resizer"
+			role="separator"
+			aria-orientation="vertical"
+			aria-label="调整面板宽度"
+			@pointerdown="startPanelResize"
+		></div>
+		<PluginPanelHost
+			v-if="panels.isOpen.value"
+			:tabs="panels.tabs.value"
+			:active-key="panels.activeKey.value"
+			:error="panels.error.value"
+			:can-add="panels.available.value.length > 0"
+			@activate="(key) => (panels.activeKey.value = key)"
+			@close="panels.close"
+			@add="launcherOpen = true"
+			@register="panels.registerFrame"
+		/>
+		<PluginLauncher
+			:open="launcherOpen"
+			:panels="panels.available.value"
+			:open-keys="openPanelKeys"
+			@close="launcherOpen = false"
+			@select="openPanel"
+			@manage="openPluginSettings"
+		/>
 		<div v-if="imagePreview" class="image-preview-backdrop" @click.self="closeImagePreview">
 			<div class="image-preview-dialog">
 				<img :src="imagePreview.src" :alt="imagePreview.alt || 'Preview image'" />
@@ -358,6 +447,45 @@ button {
 
 .app.sidebar-collapsed {
 	grid-template-columns: 60px 1fr;
+}
+
+/* 面板列由拖拽分隔条控制，宽度动画在拖动期间关掉，否则每一帧都会追着指针补间。 */
+.app.panels-open {
+	grid-template-columns: 280px minmax(0, 1fr) 4px var(--panel-width, 380px);
+}
+
+.app.sidebar-collapsed.panels-open {
+	grid-template-columns: 60px minmax(0, 1fr) 4px var(--panel-width, 380px);
+}
+
+.app.resizing {
+	cursor: col-resize;
+	transition: none;
+	user-select: none;
+}
+
+.app.resizing iframe {
+	pointer-events: none;
+}
+
+.panel-resizer {
+	position: relative;
+	background: var(--border, #e5e7eb);
+	cursor: col-resize;
+	transition: background 0.14s;
+}
+
+.panel-resizer::after {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: -3px;
+	width: 10px;
+	content: '';
+}
+
+.panel-resizer:hover {
+	background: var(--accent, #3b5bfd);
 }
 
 .window-drag-region {

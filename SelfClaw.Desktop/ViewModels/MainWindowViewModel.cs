@@ -6,6 +6,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Runtime;
@@ -15,7 +16,7 @@ using SelfClaw.Desktop.Services.Workspace.Abstractions;
 
 namespace SelfClaw.Desktop.ViewModels;
 
-public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSelectionController
+public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSelectionController, IPluginPanelContextSource
 {
     #region 字段与构造函数 —— 依赖注入字段、运行时集合状态、流式发布定时器初始化
 
@@ -782,6 +783,26 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     private void PublishShell(bool autoScroll)
         => _transcriptPublisher.PublishNow(autoScroll);
+
+    /// <summary>
+    /// The context handed to right-hand plugin panels, for both <c>getContext()</c> and the
+    /// <c>context-changed</c> push. It is captured from the same values as
+    /// <see cref="BuildTranscriptProjectionRequest"/>, so what a panel reads always matches what the
+    /// shell is showing, and the workspace root it reports is the one workspace tool calls resolve
+    /// against. Anything added here becomes visible to every panel holding <c>host.context.read</c>.
+    /// </summary>
+    PluginPanelContext IPluginPanelContextSource.CaptureContext()
+    {
+        var selectedAgent = ResolveSelectedAgent();
+        return new PluginPanelContext(
+            SelectedConversation?.Id.ToString("D"),
+            selectedAgent.Id,
+            selectedAgent.Name,
+            ResolveComposerExecutionMode(selectedAgent.Mode).ToString().ToLowerInvariant(),
+            _conversationSessions.IsSelectedRunning,
+            SelectedWorkspaceRootPath,
+            _selectedWorkspaceRoot?.Name);
+    }
 
     private TranscriptProjectionRequest BuildTranscriptProjectionRequest(bool autoScroll)
     {

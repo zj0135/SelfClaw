@@ -431,6 +431,7 @@ on('toolApprovalClear', () => {
 
 defineExpose({
 	browseWorkspaceFolder,
+	insertPrompt: (text) => composerShellRef.value?.insertText?.(text),
 });
 
 onMounted(() => {

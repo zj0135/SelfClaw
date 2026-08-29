@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh">
+<head>
+	<meta charset="utf-8" />
+	<title>Panel Demo</title>
+	<style>
+		body { margin: 0; padding: 16px; font: 13px/1.6 'Segoe UI', sans-serif; color: #171a1f; }
+		h1 { margin: 0 0 4px; font-size: 15px; }
+		p.sub { margin: 0 0 16px; color: #6b7280; font-size: 11.5px; }
+		section { margin-bottom: 14px; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 9px; }
+		h2 { margin: 0 0 7px; color: #6b7280; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+		pre { margin: 0; overflow-x: auto; font: 11px/1.5 'Cascadia Code', monospace; white-space: pre-wrap; word-break: break-all; }
+		button { height: 28px; padding: 0 11px; border: 1px solid #d8dde5; border-radius: 7px; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
+		button:hover { border-color: #3b5bfd; color: #3b5bfd; }
+		.row { display: flex; gap: 7px; flex-wrap: wrap; }
+		.ok { color: #0f9d63; }
+		.err { color: #dc4545; }
+	</style>
+</head>
+<body>
+	<h1>面板演示</h1>
+	<p class="sub" id="key"></p>
+
+	<section>
+		<h2>上下文</h2>
+		<pre id="context">读取中…</pre>
+	</section>
+
+	<section>
+		<h2>工作区</h2>
+		<div class="row">
+			<button id="list">列出根目录</button>
+			<button id="insert">插入到输入框</button>
+		</div>
+		<pre id="workspace" style="margin-top:9px"></pre>
+	</section>
+
+	<section>
+		<h2>网络边界</h2>
+		<p style="margin:0 0 8px;color:#6b7280;font-size:11.5px">
+			本插件未声明任何 network.fetch，下面这次请求应当被 CSP 拦下。
+		</p>
+		<div class="row"><button id="fetch">尝试访问 example.com</button></div>
+		<pre id="net" style="margin-top:9px"></pre>
+	</section>
+
+	<script>
+		const show = (id, value) => { document.getElementById(id).textContent = value; };
+
+		document.getElementById('key').textContent = 'panelKey: ' + (selfclaw.panelKey || '(未知)');
+
+		// 先拉一次再订阅：推送只在上下文变化时发出，空闲会话里可能长时间没有下一次。
+		// 两条路径给的是同一个记录，所以下面这个 render 不需要区分来源。
+		const renderContext = (context) => show('context', JSON.stringify(context, null, 2));
+		selfclaw.getContext()
+			.then(renderContext)
+			.catch((error) => show('context', '失败：' + error.message));
+
+		selfclaw.on('context-changed', renderContext);
+
+		document.getElementById('list').addEventListener('click', () => {
+			selfclaw.workspace.list({})
+				.then((entries) => show('workspace', entries.map((e) => (e.isDirectory ? '📁 ' : '📄 ') + e.relativePath).join('\n')))
+				.catch((error) => show('workspace', '失败：' + error.message));
+		});
+
+		document.getElementById('insert').addEventListener('click', () => {
+			selfclaw.insertPrompt('来自面板演示插件的一段文字。')
+				.then(() => show('workspace', '已插入到输入框。'))
+				.catch((error) => show('workspace', '失败：' + error.message));
+		});
+
+		document.getElementById('fetch').addEventListener('click', () => {
+			fetch('https://example.com/')
+				.then(() => { const el = document.getElementById('net'); el.className = 'err'; el.textContent = '请求竟然成功了 —— CSP 边界失效！'; })
+				.catch((error) => { const el = document.getElementById('net'); el.className = 'ok'; el.textContent = '已被拦下：' + error.message; });
+		});
+
+		selfclaw.ready();
+	</script>
+</body>
+</html>

@@ -103,16 +103,54 @@ Agent markdown supports front matter: name, description, mode, tools, plugins, s
 Subagent definitions live in `{AppData}\subagents\` via `SubagentDefinitionCatalog` (name, description, modelProfileId, tools, plugins, skills, mcpServers, maxRunSeconds); `Save()` writes them atomically with the same strict validation as load.
 The 代理助手 settings page talks to `AgentSettingsBridge` (prefix `agents/`): `get-state`, `save-agent`, `set-binding`, `set-subagent-binding`, `save-subagent`, `set-subagent-extension-binding`. Every mutation raises `AgentsChanged` (router reloads the VM agent cache) and advances the shared extension revision.
 
+### 插件面板 (Plugin panels)
+
+A Plugin package may contribute right-hand UI panels through `contributes.panels` in `plugin.json`
+(alongside `directInstructions` / `skills` / `mcpServers`). Panels render as browser-style tabs in a Vue
+column, not in WPF.
+
+Each panel is served from its own origin, `https://<plugin-id>.plugin.selfclaw.local`. That is load
+bearing: the distinct origin gives every Plugin its own renderer process, its own storage partition, and
+an `event.origin` the shell treats as unforgeable identity. A Plugin whose id is not a legal DNS label is
+rejected at install time rather than failing when a user first opens the tab.
+
+Three layers, outermost first:
+- `WebViewMessageRouter.RouteAsync` drops any message whose `CoreWebView2WebMessageReceivedEventArgs.Source`
+  is not the application origin, before `type` is read. This is the load-bearing check, and it holds
+  whether or not WebView2 exposes `chrome.webview` inside iframes.
+- `PluginPanelHost.vue` / `usePluginPanels.js` own the iframes and derive panel identity from
+  `event.origin` plus an `event.source === iframe.contentWindow` match. A `pluginId` in a payload is never
+  trusted.
+- The panel runs sandboxed under a host-issued CSP. `allow-same-origin` is required (without it the origin
+  is opaque and both identity and storage are lost); it is safe here only because the plugin host differs
+  from the app host.
+
+Host-side pieces:
+- `Services/Plugins/PluginPanelHostController.cs` — virtual host mappings, `WebResourceRequested` serving
+  with CSP/nosniff headers, version leases, `plugin-host/*` messages, tab persistence; implements
+  `IPluginPanelSessionRegistry` so disable/delete evicts panels before draining a version directory
+- `Services/Plugins/PluginPanelBridge.cs` — `plugin-host/api` ops; resolves permissions from host state
+  (never from the payload) and pins the workspace root to the current selection
+- `Services/Plugins/PluginPanelContextPublisher.cs` — the only producer of `PluginPanelContext`. It both
+  answers `getContext()` and pushes `plugin-host/context`, so the pulled and pushed shapes cannot drift.
+  Captured by `MainWindowViewModel.CaptureContext()`; deduplicated by record value, except on panel open
+- `Assets/plugin-sdk.js` — injected into every document via `AddScriptToExecuteOnDocumentCreatedAsync`
+
+Permissions are a disclosure list, so unknown bare tokens stay legal. `network.fetch:<origin>` is parsed
+strictly and widens only that panel's `connect-src`; a Plugin declaring none is fully offline. Panel
+definitions live in the existing `extension_packages.manifest_json` and open tabs in
+`desktop-settings.json`, so this added no schema version.
+
 ### Tool approval
 
 Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandler` when the conversation is in `RequireApproval` mode. A visible window shows a WPF Yes/No prompt; a hidden/minimized window sends a Windows toast with Confirm/Cancel actions. Pending approvals default to rejection on timeout, subscriber failure, or window close. CLI mode continues to use the CLI's own permission policy.
 
 ### WPF shell
 
-- `MainWindow.xaml` — custom chrome, title bar buttons, two-column layout (WebView2 + RightPanel stub)
+- `MainWindow.xaml` — custom chrome, title bar buttons, single WebView2 host
 - `LeftSidebar.xaml` — sidebar with Settings entry
 - Settings view: AI 提供商, 编程助手, 代理助手, 插件, and 宠物 are connected to the desktop host; remaining pages are frontend placeholders/mock
-- RightPanel is a placeholder (width=0, collapsed by default)
+- The right-hand plugin panel column lives in the Vue app, not in WPF (see 插件面板)
 
 ### DI Registration
 
@@ -130,6 +168,7 @@ Desktop (`App.xaml.cs`):
 - `DesktopAgentDefinitionService`, `SubagentDefinitionCatalog`, `ExtensionSettingsBridge`, `AgentSettingsBridge`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
   `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `AiProviderSettingsBridge`,
   `ConversationTurnEngine`, `ConversationSessionCoordinator`, `TranscriptPublisher`, `WebViewMessageRouter`,
+  `PluginPanelHostController` (also `IPluginPanelSessionRegistry`), `PluginPanelContextPublisher`, `PluginPanelBridge`,
   `SubagentTaskCoordinator` (`ISubagentTaskCoordinator` and `ISubagentConversationLifecycle`), `SubagentTaskBackgroundHost`, and `SubagentDeliveryDispatcher` hosted services,
   `PetPackageCatalog`, `PetActivityPresenter`, `PetHost`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
 
@@ -172,7 +211,6 @@ Deleting an interactive parent first marks a deletion tombstone, stops its activ
 - **Channel conversations**: data model retained but VM filters them out
 - **Settings pages**: AI 提供商, 编程助手, 代理助手, 插件, and 宠物 are wired to the host; the remaining settings pages are frontend mock
 - **Legacy provider profiles**: `ProviderProfile`, `IProfileRepository`, the `profiles` table, and `ChatTurnRequest.Profile/ApiKey` were removed; Direct turns use `ModelProfileId`
-- **RightPanel**: XAML stub, not functional
 
 ## Code Style & Constraints
 

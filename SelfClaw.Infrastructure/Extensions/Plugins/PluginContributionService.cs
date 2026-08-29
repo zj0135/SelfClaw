@@ -177,13 +177,9 @@ internal sealed class PluginContributionService
             var permissions = element.EnumerateArray()
                 .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : null)
                 .ToArray();
-            if (permissions.Any(string.IsNullOrWhiteSpace) ||
-                permissions.Distinct(StringComparer.Ordinal).Count() != permissions.Length)
-            {
-                throw new InvalidDataException("Plugin permissions are invalid.");
-            }
-
-            return permissions.Select(item => item!).OrderBy(item => item, StringComparer.Ordinal).ToArray();
+            // Same validator the manifest reader uses. If the two normalized differently, an updated
+            // Plugin could never satisfy "acknowledged ⊇ declared" and would be stuck unenablable.
+            return PluginPermissions.Validate(permissions);
         }
         catch (JsonException exception)
         {

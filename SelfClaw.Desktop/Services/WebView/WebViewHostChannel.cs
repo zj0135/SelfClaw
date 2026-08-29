@@ -49,10 +49,18 @@ public sealed class WebViewHostChannel
         ResetTranscriptDelivery();
     }
 
+    /// <summary>
+    /// Raised whenever new shell state arrives, delivered or not. It is the one funnel every conversation,
+    /// agent and busy change already flows through, which is what the plugin context publisher listens to
+    /// rather than trying to observe each of those changes separately.
+    /// </summary>
+    public event Action? TranscriptPublished;
+
     public void PublishTranscript(TranscriptRenderState state)
     {
         ArgumentNullException.ThrowIfNull(state);
         _latestTranscript = state;
+        TranscriptPublished?.Invoke();
         if (!_isReady)
         {
             return;

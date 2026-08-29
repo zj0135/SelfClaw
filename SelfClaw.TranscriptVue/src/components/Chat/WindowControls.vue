@@ -1,5 +1,5 @@
 <script setup>
-import { SquareTerminal, Folder, Globe, Minus, Square, Copy, X } from 'lucide-vue-next';
+import { SquareTerminal, Minus, Square, Copy, X } from 'lucide-vue-next';
 
 const props = defineProps({
 	isMaximized: {
@@ -20,12 +20,6 @@ function send(action) {
 		<div class="window-tool-group" aria-label="Workspace tools">
 			<button class="chrome-button tool-button" type="button" title="Terminal" aria-label="Terminal" @click="send('terminal')">
 				<SquareTerminal :size="15" :stroke-width="1.7" />
-			</button>
-			<button class="chrome-button tool-button" type="button" title="Files" aria-label="Files" @click="send('files')">
-				<Folder :size="15" :stroke-width="1.7" />
-			</button>
-			<button class="chrome-button tool-button" type="button" title="Browser" aria-label="Browser" @click="send('browser')">
-				<Globe :size="15" :stroke-width="1.7" />
 			</button>
 		</div>
 

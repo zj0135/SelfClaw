@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "panel-demo",
+  "name": "Panel Demo",
+  "version": "1.0.0",
+  "description": "Verifies the right-hand panel host: context, workspace reads and the CSP boundary.",
+  "publisher": "selfclaw",
+  "permissions": [
+    "ui.panel",
+    "host.context.read",
+    "host.transcript.read",
+    "host.composer.write",
+    "host.workspace.read"
+  ],
+  "contributes": {
+    "panels": [
+      {
+        "id": "inspector",
+        "title": "面板演示",
+        "icon": "layout-grid",
+        "entry": "ui/inspector.html",
+        "defaultWidth": 400
+      }
+    ]
+  }
+}

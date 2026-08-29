@@ -8,7 +8,5 @@ internal enum WebViewHostCommandKind
     ToggleMaximizeWindow,
     CloseWindow,
     ToggleTerminal,
-    ToggleFiles,
-    ToggleBrowser,
     SettingsClosed
 }

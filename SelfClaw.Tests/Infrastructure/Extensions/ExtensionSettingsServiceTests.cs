@@ -206,6 +206,115 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetState_projects_plugin_panels_onto_a_per_plugin_origin()
+    {
+        var context = CreateContext();
+        var pluginPath = await CreatePanelPluginAsync("git-inspector");
+        var now = DateTimeOffset.UtcNow;
+        await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
+            ExtensionKind.Plugin,
+            "git-inspector",
+            "Git Inspector",
+            "1.0.0",
+            "Inspects git",
+            pluginPath,
+            "sha256:v1",
+            await File.ReadAllTextAsync(Path.Combine(pluginPath, "plugin.json")),
+            null,
+            true,
+            """["network.fetch:https://api.github.com","ui.panel"]""",
+            now,
+            now,
+            now));
+
+        var state = await context.Service.GetStateAsync();
+
+        var panel = state.Panels.Should().ContainSingle().Subject;
+        panel.Key.Should().Be("git-inspector/changes");
+        panel.Origin.Should().Be("https://git-inspector.plugin.selfclaw.local");
+        panel.Url.Should().Be("https://git-inspector.plugin.selfclaw.local/ui/index.html");
+        panel.Title.Should().Be("变更");
+        panel.Enabled.Should().BeTrue();
+        panel.Status.Should().Be(ExtensionStatus.Ready);
+        panel.NetworkOrigins.Should().Equal("https://api.github.com");
+    }
+
+    // A Plugin whose manifest stopped parsing must not take the whole settings state down with it: the
+    // user still needs the page to load in order to see it as broken and remove it.
+    [Fact]
+    public async Task GetState_drops_panels_from_a_plugin_whose_manifest_no_longer_reads()
+    {
+        var context = CreateContext();
+        var pluginPath = await CreatePanelPluginAsync("git-inspector");
+        var manifest = await File.ReadAllTextAsync(Path.Combine(pluginPath, "plugin.json"));
+        var now = DateTimeOffset.UtcNow;
+        await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
+            ExtensionKind.Plugin,
+            "git-inspector",
+            "Git Inspector",
+            "1.0.0",
+            "Inspects git",
+            pluginPath,
+            "sha256:v1",
+            manifest,
+            null,
+            true,
+            """["network.fetch:https://api.github.com","ui.panel"]""",
+            now,
+            now,
+            now));
+        await File.WriteAllTextAsync(Path.Combine(pluginPath, "plugin.json"), "{ not json");
+
+        var state = await context.Service.GetStateAsync();
+
+        state.Panels.Should().BeEmpty();
+        state.Plugins.Should().ContainSingle().Which.Status.Should().Be(ExtensionStatus.Broken);
+    }
+
+    // Deleting a Plugin drains its version directories, and an open panel holds a lease on one. If the
+    // panels were not closed first the drain would wait on a lease only the UI can release, and the
+    // settings mutation would never return.
+    [Fact]
+    public async Task Disabling_or_deleting_a_plugin_closes_its_open_panels_before_draining()
+    {
+        var context = CreateContext();
+        var pluginPath = await CreatePanelPluginAsync("git-inspector");
+        var now = DateTimeOffset.UtcNow;
+        await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
+            ExtensionKind.Plugin,
+            "git-inspector",
+            "Git Inspector",
+            "1.0.0",
+            "Inspects git",
+            pluginPath,
+            "sha256:v1",
+            await File.ReadAllTextAsync(Path.Combine(pluginPath, "plugin.json")),
+            null,
+            true,
+            """["network.fetch:https://api.github.com","ui.panel"]""",
+            now,
+            now,
+            now));
+        var key = new ExtensionItemKey(ExtensionKind.Plugin, "git-inspector");
+
+        await context.Service.SetEnabledAsync(key, false);
+        context.PanelSessions.ClosedPluginIds.Should().Equal("git-inspector");
+
+        // A held lease would block DeleteAsync forever if panels were not evicted first.
+        await using var lease = context.PluginVersionLeaseManager.Acquire(pluginPath);
+        var release = Task.Run(async () =>
+        {
+            await Task.Delay(50);
+            await lease.DisposeAsync();
+        });
+        await context.Service.DeleteAsync(key);
+        await release;
+
+        context.PanelSessions.ClosedPluginIds.Should().Equal("git-inspector", "git-inspector");
+        (await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "git-inspector")).Should().BeNull();
+    }
+
+    [Fact]
     public async Task Plugin_enable_requires_current_manifest_permissions_to_be_acknowledged()
     {
         var context = CreateContext();
@@ -473,6 +582,21 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         }
     }
 
+    private async Task<string> CreatePanelPluginAsync(string pluginId)
+    {
+        var pluginPath = Path.Combine(_rootPath, "plugins", pluginId, "versions", "v1");
+        Directory.CreateDirectory(Path.Combine(pluginPath, "ui"));
+        var manifest = $$$"""
+            {"schemaVersion":1,"id":"{{{pluginId}}}","name":"Git Inspector","version":"1.0.0",
+             "permissions":["ui.panel","network.fetch:https://api.github.com"],
+             "contributes":{"panels":[
+               {"id":"changes","title":"变更","icon":"git-branch","entry":"ui/index.html"}]}}
+            """;
+        await File.WriteAllTextAsync(Path.Combine(pluginPath, "plugin.json"), manifest);
+        await File.WriteAllTextAsync(Path.Combine(pluginPath, "ui", "index.html"), "<!doctype html>");
+        return pluginPath;
+    }
+
     private TestContext CreateContext()
     {
         var storagePaths = new StoragePaths(
@@ -499,6 +623,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
             mcpClientManager,
             pluginReader);
         var stateChangeNotifier = new ExtensionStateChangeNotifier();
+        var panelSessions = new RecordingPanelSessionRegistry();
         return new TestContext(
             new ExtensionSettingsService(
                 repository,
@@ -510,11 +635,13 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
                 mcpClientManager,
                 pluginContributionService,
                 stateChangeNotifier,
-                pluginVersionLeaseManager),
+                pluginVersionLeaseManager,
+                panelSessions),
             repository,
             protector,
             mcpClientManager,
-            pluginVersionLeaseManager);
+            pluginVersionLeaseManager,
+            panelSessions);
     }
 
     private static SaveMcpServerCommand CreateStdioCommand(
@@ -539,7 +666,19 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         SqliteExtensionRepository Repository,
         FakeSecretProtector SecretProtector,
         FakeMcpClientManager McpClientManager,
-        PluginVersionLeaseManager PluginVersionLeaseManager);
+        PluginVersionLeaseManager PluginVersionLeaseManager,
+        RecordingPanelSessionRegistry PanelSessions);
+
+    private sealed class RecordingPanelSessionRegistry : IPluginPanelSessionRegistry
+    {
+        public List<string> ClosedPluginIds { get; } = [];
+
+        public Task CloseAsync(string pluginId, CancellationToken cancellationToken = default)
+        {
+            ClosedPluginIds.Add(pluginId);
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class FakeMcpClientManager : IMcpClientManager
     {

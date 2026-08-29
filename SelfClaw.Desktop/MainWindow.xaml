@@ -5,7 +5,6 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:webview2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
-        xmlns:local="clr-namespace:SelfClaw.Desktop.Controls"
         mc:Ignorable="d"
         Title="SelfClaw"
         Width="1280"
@@ -155,44 +154,25 @@
                 <Border Background="#FFFFFF"/>
 
                 <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"
-                                          MinWidth="600"/>
-                        <ColumnDefinition x:Name="RightPanelColumn"
-                                          Width="0"
-                                          MinWidth="0"
-                                          MaxWidth="480"/>
-                    </Grid.ColumnDefinitions>
+                    <webview2:WebView2 x:Name="TranscriptView"
+                                       Margin="0"/>
 
-                    <Grid Grid.Column="0">
-                        <webview2:WebView2 x:Name="TranscriptView"
-                                           Margin="0"/>
-
-                        <Border x:Name="WebViewFallback"
-                                Background="#FFFFFF"
-                                Visibility="Collapsed">
-                            <StackPanel HorizontalAlignment="Center"
-                                        VerticalAlignment="Center">
-                                <TextBlock TextAlignment="Center"
-                                           FontSize="18"
-                                           Foreground="#8A929E"
-                                           Text="WebView2 runtime is required to render SelfClaw.&#10;Install Microsoft Edge WebView2 Runtime and restart the app."/>
-                                <Button Width="96"
-                                        Height="34"
-                                        Margin="0,18,0,0"
-                                        HorizontalAlignment="Center"
-                                        Content="Close"
-                                        Click="OnFallbackCloseButtonClick"/>
-                            </StackPanel>
-                        </Border>
-                    </Grid>
-
-                    <Border x:Name="RightPanelHost"
-                            Grid.Column="1"
-                            BorderBrush="#E5E7EB"
-                            BorderThickness="1,0,0,0"
+                    <Border x:Name="WebViewFallback"
+                            Background="#FFFFFF"
                             Visibility="Collapsed">
-                        <local:RightPanel/>
+                        <StackPanel HorizontalAlignment="Center"
+                                    VerticalAlignment="Center">
+                            <TextBlock TextAlignment="Center"
+                                       FontSize="18"
+                                       Foreground="#8A929E"
+                                       Text="WebView2 runtime is required to render SelfClaw.&#10;Install Microsoft Edge WebView2 Runtime and restart the app."/>
+                            <Button Width="96"
+                                    Height="34"
+                                    Margin="0,18,0,0"
+                                    HorizontalAlignment="Center"
+                                    Content="Close"
+                                    Click="OnFallbackCloseButtonClick"/>
+                        </StackPanel>
                     </Border>
                 </Grid>
             </Grid>

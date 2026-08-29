@@ -273,7 +273,8 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
                     ExtensionStatus.Ready,
                     [],
                     [])],
-                [CreateMcpView()]));
+                [CreateMcpView()],
+                []));
         }
 
         public Task<ExtensionPackageView> ImportPackageAsync(

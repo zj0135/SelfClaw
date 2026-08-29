@@ -259,7 +259,8 @@ public sealed class AgentSettingsBridgeTests : IDisposable
                     null,
                     null,
                     null,
-                    [])]));
+                    [])],
+                []));
 
         public Task<ExtensionPackageView> ImportPackageAsync(
             ExtensionKind kind,

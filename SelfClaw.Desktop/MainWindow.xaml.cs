@@ -10,6 +10,7 @@ using Microsoft.Web.WebView2.Core;
 using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Desktop.ViewModels;
@@ -20,8 +21,6 @@ namespace SelfClaw.Desktop;
 
 public partial class MainWindow : Window
 {
-    private const double ExpandedRightPanelWidth = 320d;
-    private static readonly Duration DrawerAnimationDuration = TimeSpan.FromMilliseconds(180);
     private const string AssetsHostName = "appassets.selfclaw.local";
     private const string AttachmentHostName = "attachments.selfclaw.local";
     private const int WmGetMinMaxInfo = 0x0024;
@@ -39,10 +38,8 @@ public partial class MainWindow : Window
     private readonly WebViewHostChannel _webViewHostChannel;
     private readonly WebViewMessageRouter _webViewMessageRouter;
     private readonly TerminalHostController _terminalHostController;
-    private bool _isRightPanelOpen;
+    private readonly PluginPanelHostController _pluginPanelHostController;
     private bool _isSystemSettingsOpen;
-    private string? _activeRightPanelTool;
-    private DispatcherTimer? _rightPanelAnimationTimer;
     private Guid? _currentApprovalId;
 
     internal MainWindow(
@@ -54,6 +51,7 @@ public partial class MainWindow : Window
         WebViewHostChannel webViewHostChannel,
         WebViewMessageRouter webViewMessageRouter,
         TerminalHostController terminalHostController,
+        PluginPanelHostController pluginPanelHostController,
         StoragePaths storagePaths)
     {
         InitializeComponent();
@@ -65,6 +63,7 @@ public partial class MainWindow : Window
         _webViewHostChannel = webViewHostChannel;
         _webViewMessageRouter = webViewMessageRouter;
         _terminalHostController = terminalHostController;
+        _pluginPanelHostController = pluginPanelHostController;
         _toolApprovalHandler = toolApprovalHandler;
         _desktopNotificationService = desktopNotificationService;
         DataContext = viewModel;
@@ -118,6 +117,7 @@ public partial class MainWindow : Window
         _petActivityPresenter.ConversationActivationRequested -= OnPetConversationActivationRequested;
         _toolApprovalHandler.RejectAll();
         _terminalHostController.Dispose();
+        _pluginPanelHostController.Dispose();
 
         if (TranscriptView.CoreWebView2 is not null)
         {
@@ -153,6 +153,7 @@ public partial class MainWindow : Window
             TranscriptView.CoreWebView2.Settings.IsStatusBarEnabled = false;
             TranscriptView.CoreWebView2.WebMessageReceived += OnTranscriptWebMessageReceived;
             _webViewHostChannel.Attach(TranscriptView.CoreWebView2.PostWebMessageAsJson);
+            _pluginPanelHostController.Attach(TranscriptView.CoreWebView2);
 
             var assetsRootPath = Path.Combine(AppContext.BaseDirectory, "Assets");
             var vueTranscriptPath = Path.Combine(assetsRootPath, "TranscriptVue", "index.html");
@@ -160,6 +161,15 @@ public partial class MainWindow : Window
             if (!File.Exists(vueTranscriptPath))
             {
                 throw new FileNotFoundException("Unable to locate the Vue transcript host page.", vueTranscriptPath);
+            }
+
+            // Injected into every document, so a plugin panel has window.selfclaw before its own script
+            // runs and never has to ship a copy of the SDK. The script no-ops in the top frame.
+            var pluginSdkPath = Path.Combine(assetsRootPath, "plugin-sdk.js");
+            if (File.Exists(pluginSdkPath))
+            {
+                await TranscriptView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                    await File.ReadAllTextAsync(pluginSdkPath));
             }
 
             TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(
@@ -235,20 +245,6 @@ public partial class MainWindow : Window
         SetTerminalDrawerOpen(!_terminalHostController.IsOpen);
     }
 
-    private void ToggleFileManagerTool()
-    {
-        SetSystemSettingsOpen(false);
-        ToggleRightPanelTool("files");
-        SetTerminalDrawerOpen(false);
-    }
-
-    private void ToggleBrowserTool()
-    {
-        SetSystemSettingsOpen(false);
-        ToggleRightPanelTool("browser");
-        SetTerminalDrawerOpen(false);
-    }
-
     private void SetSystemSettingsOpen(bool isOpen)
     {
         _isSystemSettingsOpen = isOpen;
@@ -273,71 +269,6 @@ public partial class MainWindow : Window
         {
             FocusTranscriptView();
         }
-    }
-
-    private void ToggleRightPanelTool(string toolId)
-    {
-        var shouldClose = _isRightPanelOpen && string.Equals(_activeRightPanelTool, toolId, StringComparison.Ordinal);
-        SetRightPanelOpen(!shouldClose, shouldClose ? null : toolId);
-    }
-
-    private void SetRightPanelOpen(bool isOpen, string? activeToolId = null)
-    {
-        _isRightPanelOpen = isOpen;
-        _activeRightPanelTool = isOpen ? activeToolId : null;
-        if (isOpen)
-        {
-            RightPanelHost.Visibility = Visibility.Visible;
-        }
-
-        AnimateGridLength(
-            ref _rightPanelAnimationTimer,
-            RightPanelColumn.Width.Value,
-            isOpen ? ExpandedRightPanelWidth : 0,
-            value => RightPanelColumn.Width = new GridLength(value),
-            isOpen ? null : () => RightPanelHost.Visibility = Visibility.Collapsed);
-    }
-
-    private void AnimateGridLength(
-        ref DispatcherTimer? timer,
-        double from,
-        double to,
-        Action<double> applyValue,
-        Action? completed)
-    {
-        timer?.Stop();
-
-        if (Math.Abs(from - to) < 0.5d)
-        {
-            applyValue(to);
-            completed?.Invoke();
-            return;
-        }
-
-        var stopwatch = Stopwatch.StartNew();
-        var animationTimer = new DispatcherTimer(DispatcherPriority.Render)
-        {
-            Interval = TimeSpan.FromMilliseconds(16)
-        };
-
-        animationTimer.Tick += (_, _) =>
-        {
-            var rawProgress = Math.Min(1d, stopwatch.Elapsed.TotalMilliseconds / DrawerAnimationDuration.TimeSpan.TotalMilliseconds);
-            var easedProgress = 1d - Math.Pow(1d - rawProgress, 2d);
-            applyValue(from + ((to - from) * easedProgress));
-
-            if (rawProgress < 1d)
-            {
-                return;
-            }
-
-            animationTimer.Stop();
-            applyValue(to);
-            completed?.Invoke();
-        };
-
-        timer = animationTimer;
-        animationTimer.Start();
     }
 
     private void ToggleWindowState()
@@ -388,7 +319,8 @@ public partial class MainWindow : Window
         {
             var command = await _webViewMessageRouter.RouteAsync(
                 e.WebMessageAsJson,
-                new WindowInteropHelper(this).Handle);
+                new WindowInteropHelper(this).Handle,
+                e.Source);
             ApplyWebViewHostCommand(command);
         }
         catch (OperationCanceledException)
@@ -430,12 +362,6 @@ public partial class MainWindow : Window
                 break;
             case WebViewHostCommandKind.ToggleTerminal:
                 ToggleTerminalTool();
-                break;
-            case WebViewHostCommandKind.ToggleFiles:
-                ToggleFileManagerTool();
-                break;
-            case WebViewHostCommandKind.ToggleBrowser:
-                ToggleBrowserTool();
                 break;
             case WebViewHostCommandKind.SettingsClosed:
                 OnSettingsClosedFromWebView();

@@ -6,6 +6,7 @@ using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.Pet;
+using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.Workspace;
@@ -15,6 +16,8 @@ namespace SelfClaw.Desktop.Services.WebView;
 
 internal sealed class WebViewMessageRouter : IDisposable
 {
+    public const string ApplicationHostName = "appassets.selfclaw.local";
+
     private readonly AiProviderSettingsBridge _aiProviderSettingsBridge;
     private readonly ExtensionSettingsBridge _extensionSettingsBridge;
     private readonly AgentSettingsBridge _agentSettingsBridge;
@@ -24,6 +27,8 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly WorkspaceSelectionBridge _workspaceSelectionBridge;
     private readonly GitWorkspaceBridge? _gitWorkspaceBridge;
     private readonly TerminalHostController _terminalHostController;
+    private readonly PluginPanelHostController _pluginPanelHostController;
+    private readonly PluginPanelBridge _pluginPanelBridge;
     private readonly MainWindowViewModel _viewModel;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly WebViewHostChannel _hostChannel;
@@ -39,6 +44,8 @@ internal sealed class WebViewMessageRouter : IDisposable
         PetSettingsBridge petSettingsBridge,
         WorkspaceSelectionBridge workspaceSelectionBridge,
         TerminalHostController terminalHostController,
+        PluginPanelHostController pluginPanelHostController,
+        PluginPanelBridge pluginPanelBridge,
         MainWindowViewModel viewModel,
         AgentActivityCoordinator agentActivityCoordinator,
         WebViewHostChannel hostChannel,
@@ -54,6 +61,8 @@ internal sealed class WebViewMessageRouter : IDisposable
         _workspaceSelectionBridge = workspaceSelectionBridge;
         _gitWorkspaceBridge = gitWorkspaceBridge;
         _terminalHostController = terminalHostController;
+        _pluginPanelHostController = pluginPanelHostController;
+        _pluginPanelBridge = pluginPanelBridge;
         _viewModel = viewModel;
         _agentActivityCoordinator = agentActivityCoordinator;
         _hostChannel = hostChannel;
@@ -67,9 +76,10 @@ internal sealed class WebViewMessageRouter : IDisposable
     public async Task<WebViewHostCommand?> RouteAsync(
         string messageJson,
         nint ownerHandle,
+        string? sourceUri = null,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(messageJson))
+        if (string.IsNullOrWhiteSpace(messageJson) || !IsApplicationOrigin(sourceUri))
         {
             return null;
         }
@@ -89,6 +99,17 @@ internal sealed class WebViewMessageRouter : IDisposable
             return await RouteDocumentAsync(document.RootElement, ownerHandle, cancellationToken);
         }
     }
+
+    // Every message type below acts on the user's behalf — sending prompts, deleting extensions, closing
+    // the window. Plugin panels run in cross-origin iframes inside the same WebView2, so the router
+    // cannot assume a message came from the application shell. Identity is the frame's own origin, which
+    // the page cannot forge; anything else is dropped before `type` is even read. This holds regardless
+    // of whether WebView2 exposes chrome.webview inside iframes.
+    public static bool IsApplicationOrigin(string? sourceUri)
+        => sourceUri is not null &&
+           Uri.TryCreate(sourceUri, UriKind.Absolute, out var uri) &&
+           uri.Scheme == Uri.UriSchemeHttps &&
+           string.Equals(uri.Host, ApplicationHostName, StringComparison.OrdinalIgnoreCase);
 
     private async Task<WebViewHostCommand?> RouteDocumentAsync(
         JsonElement payload,
@@ -191,6 +212,20 @@ internal sealed class WebViewMessageRouter : IDisposable
             return null;
         }
 
+        response = await _pluginPanelHostController.TryHandleAsync(type, payload, cancellationToken);
+        if (response is not null)
+        {
+            _hostChannel.PostResponse(response);
+            return null;
+        }
+
+        response = await _pluginPanelBridge.TryHandleAsync(type, payload, cancellationToken);
+        if (response is not null)
+        {
+            _hostChannel.PostResponse(response);
+            return null;
+        }
+
         return await RouteShellIntentAsync(type, payload);
     }
 
@@ -265,10 +300,6 @@ internal sealed class WebViewMessageRouter : IDisposable
                 return new WebViewHostCommand(WebViewHostCommandKind.CloseWindow);
             case "toggle-terminal":
                 return new WebViewHostCommand(WebViewHostCommandKind.ToggleTerminal);
-            case "toggle-files":
-                return new WebViewHostCommand(WebViewHostCommandKind.ToggleFiles);
-            case "toggle-browser":
-                return new WebViewHostCommand(WebViewHostCommandKind.ToggleBrowser);
             case "settings-closed":
                 return new WebViewHostCommand(WebViewHostCommandKind.SettingsClosed);
             default:

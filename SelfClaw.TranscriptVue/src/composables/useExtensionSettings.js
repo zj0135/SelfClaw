@@ -8,6 +8,7 @@ const emptyState = () => ({
 	plugins: [],
 	skills: [],
 	mcpServers: [],
+	panels: [],
 });
 
 const kindCollections = {

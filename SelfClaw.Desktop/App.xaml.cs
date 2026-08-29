@@ -18,6 +18,7 @@ using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Pet;
+using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
 using SelfClaw.Desktop.Services.Subagents;
@@ -31,6 +32,8 @@ using SelfClaw.Desktop.Services.Workspace.Abstractions;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.Extensions;
+using SelfClaw.Infrastructure.Extensions.Abstractions;
 using SelfClaw.Infrastructure.Extensions.Discovery;
 using SelfClaw.Infrastructure.Options;
 using Serilog;
@@ -106,6 +109,21 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<WebViewHostChannel>(),
                 Dispatcher));
             builder.Services.AddSingleton<IWorkspaceFolderPicker, WpfWorkspaceFolderPicker>();
+            builder.Services.AddSingleton(services => new PluginPanelHostController(
+                services.GetRequiredService<ExtensionCatalog>(),
+                services.GetRequiredService<IExtensionPackageRepository>(),
+                services.GetRequiredService<IPluginVersionLeaseManager>(),
+                services.GetRequiredService<DesktopSettingsJsonStore>(),
+                services.GetRequiredService<WebViewHostChannel>(),
+                Dispatcher));
+            builder.Services.AddSingleton<IPluginPanelSessionRegistry>(services =>
+                services.GetRequiredService<PluginPanelHostController>());
+            builder.Services.AddSingleton(services => new PluginPanelContextPublisher(
+                services.GetRequiredService<IPluginPanelContextSource>(),
+                services.GetRequiredService<WebViewHostChannel>(),
+                services.GetRequiredService<PluginPanelHostController>(),
+                Dispatcher));
+            builder.Services.AddSingleton<PluginPanelBridge>();
             builder.Services.AddSingleton<ProgrammingAssistantSettingsService>();
             builder.Services.AddSingleton<ProgrammingAssistantSettingsBridge>();
             builder.Services.AddSingleton<AiProviderSettingsBridge>();
@@ -138,6 +156,8 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<IGitWorkspaceStore>()));
             builder.Services.AddSingleton<IWorkspaceSelectionController>(services =>
                 services.GetRequiredService<MainWindowViewModel>());
+            builder.Services.AddSingleton<IPluginPanelContextSource>(services =>
+                services.GetRequiredService<MainWindowViewModel>());
             builder.Services.AddSingleton<WorkspaceSelectionBridge>();
             builder.Services.AddSingleton<GitWorkspaceBridge>();
             builder.Services.AddSingleton(services => new WebViewMessageRouter(
@@ -149,6 +169,8 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<PetSettingsBridge>(),
                 services.GetRequiredService<WorkspaceSelectionBridge>(),
                 services.GetRequiredService<TerminalHostController>(),
+                services.GetRequiredService<PluginPanelHostController>(),
+                services.GetRequiredService<PluginPanelBridge>(),
                 services.GetRequiredService<MainWindowViewModel>(),
                 services.GetRequiredService<AgentActivityCoordinator>(),
                 services.GetRequiredService<WebViewHostChannel>(),
@@ -163,6 +185,7 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<WebViewHostChannel>(),
                 services.GetRequiredService<WebViewMessageRouter>(),
                 services.GetRequiredService<TerminalHostController>(),
+                services.GetRequiredService<PluginPanelHostController>(),
                 services.GetRequiredService<StoragePaths>()));
             _host = builder.Build();
 

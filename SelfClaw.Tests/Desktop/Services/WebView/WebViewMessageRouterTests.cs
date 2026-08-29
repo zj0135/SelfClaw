@@ -15,6 +15,7 @@ using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Desktop.Services.Pet;
+using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
@@ -27,6 +28,8 @@ using SelfClaw.Desktop.Services.Workspace.Abstractions;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models.Views;
+using SelfClaw.Infrastructure.Extensions;
+using SelfClaw.Infrastructure.Extensions.Abstractions;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Tools.Transcript;
 
@@ -34,14 +37,16 @@ namespace SelfClaw.Tests.Desktop.Services.WebView;
 
 public sealed class WebViewMessageRouterTests
 {
+    private const string ApplicationOrigin = "https://appassets.selfclaw.local/TranscriptVue/index.html";
+    private const string PluginOrigin = "https://git-inspector.plugin.selfclaw.local/ui/index.html";
+
     [Fact]
     public async Task RouteAsync_posts_one_correlated_bridge_response()
     {
         using var context = new RouterTestContext();
 
-        var command = await context.Router.RouteAsync(
-            """{"type":"get-programming-assistant-settings","requestId":"request-1"}""",
-            ownerHandle: 0);
+        var command = await context.RouteAsync(
+            """{"type":"get-programming-assistant-settings","requestId":"request-1"}""");
 
         command.Should().BeNull();
         context.PostedJson.Should().ContainSingle();
@@ -50,15 +55,50 @@ public sealed class WebViewMessageRouterTests
         response.RootElement.GetProperty("requestId").GetString().Should().Be("request-1");
     }
 
+    // Plugin panels are cross-origin iframes inside the same WebView2. Every type below acts on the
+    // user's behalf, so identity has to be the sending frame's own origin — not anything in the payload.
+    [Theory]
+    [InlineData("""{"type":"window-close"}""")]
+    [InlineData("""{"type":"send-prompt","prompt":"exfiltrate"}""")]
+    [InlineData("""{"type":"extensions/delete","kind":"plugin","id":"rival"}""")]
+    [InlineData("""{"type":"delete-workspace-root","workspaceRootId":"11111111-1111-1111-1111-111111111111"}""")]
+    [InlineData("""{"type":"open-link","href":"https://example.com"}""")]
+    [InlineData("""{"type":"get-programming-assistant-settings","requestId":"request-1"}""")]
+    public async Task RouteAsync_drops_messages_that_do_not_come_from_the_application_origin(string messageJson)
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.RouteAsync(messageJson, PluginOrigin);
+
+        command.Should().BeNull();
+        context.PostedJson.Should().BeEmpty();
+        context.ConversationRepository.DeletedWorkspaceRootIds.Should().BeEmpty();
+        context.AgentRuntime.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("http://appassets.selfclaw.local/index.html")]
+    [InlineData("https://appassets.selfclaw.local.evil.example/index.html")]
+    [InlineData("https://evil.appassets.selfclaw.local/index.html")]
+    public async Task RouteAsync_drops_messages_from_a_missing_or_lookalike_origin(string? sourceUri)
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.RouteAsync("""{"type":"window-close"}""", sourceUri);
+
+        command.Should().BeNull();
+    }
+
     [Fact]
     public async Task RouteAsync_dispatches_shell_intent_to_the_view_model()
     {
         using var context = new RouterTestContext();
         var workspaceRootId = Guid.NewGuid();
 
-        await context.Router.RouteAsync(
-            $$"""{"type":"delete-workspace-root","workspaceRootId":"{{workspaceRootId:D}}"}""",
-            ownerHandle: 0);
+        await context.RouteAsync(
+            $$"""{"type":"delete-workspace-root","workspaceRootId":"{{workspaceRootId:D}}"}""");
 
         context.ConversationRepository.DeletedWorkspaceRootIds.Should().Equal(workspaceRootId);
     }
@@ -68,9 +108,8 @@ public sealed class WebViewMessageRouterTests
     {
         using var context = new RouterTestContext();
 
-        var command = await context.Router.RouteAsync(
-            """{"type":"open-link","href":"https://example.com/docs"}""",
-            ownerHandle: 0);
+        var command = await context.RouteAsync(
+            """{"type":"open-link","href":"https://example.com/docs"}""");
 
         command.Should().Be(new WebViewHostCommand(
             WebViewHostCommandKind.OpenLink,
@@ -92,7 +131,7 @@ public sealed class WebViewMessageRouterTests
     {
         using var context = new RouterTestContext();
 
-        var command = await context.Router.RouteAsync(messageJson, ownerHandle: 0);
+        var command = await context.RouteAsync(messageJson);
 
         command.Should().BeNull();
         context.PostedJson.Should().BeEmpty();
@@ -117,12 +156,8 @@ public sealed class WebViewMessageRouterTests
     {
         using var context = new RouterTestContext();
 
-        await context.Router.RouteAsync(
-            """{"type":"ai-providers/list-enabled-models","requestId":"models-1"}""",
-            ownerHandle: 0);
-        await context.Router.RouteAsync(
-            """{"type":"send-prompt","prompt":"use selected model"}""",
-            ownerHandle: 0);
+        await context.RouteAsync("""{"type":"ai-providers/list-enabled-models","requestId":"models-1"}""");
+        await context.RouteAsync("""{"type":"send-prompt","prompt":"use selected model"}""");
 
         var request = context.AgentRuntime.Requests.Should().ContainSingle().Which;
         request.Should().BeOfType<DirectChatTurnRequest>()
@@ -135,6 +170,7 @@ public sealed class WebViewMessageRouterTests
         private readonly TranscriptPublisher _transcriptPublisher;
         private readonly AgentActivityCoordinator _activityCoordinator;
         private readonly TerminalHostController _terminalHostController;
+        private readonly PluginPanelHostController _pluginPanelHostController;
         private readonly ConversationSessionCoordinator _sessions;
         private readonly ConversationTurnEngine _turnEngine;
 
@@ -207,6 +243,14 @@ public sealed class WebViewMessageRouterTests
                 Unused<ITerminalSessionFactory>(),
                 HostChannel,
                 Dispatcher.CurrentDispatcher);
+            var packageRepository = new SelfClaw.Tests.TestDoubles.EmptyExtensionPackageRepository();
+            _pluginPanelHostController = new PluginPanelHostController(
+                new ExtensionCatalog(packageRepository, Unused<IMcpServerRepository>(), storagePaths),
+                packageRepository,
+                Unused<IPluginVersionLeaseManager>(),
+                settingsStore,
+                HostChannel,
+                Dispatcher.CurrentDispatcher);
             Router = new WebViewMessageRouter(
                 aiProviderBridge,
                 extensionBridge,
@@ -220,11 +264,26 @@ public sealed class WebViewMessageRouterTests
                 new PetSettingsBridge(petHost),
                 new WorkspaceSelectionBridge(viewModel, Unused<IWorkspaceFolderPicker>()),
                 _terminalHostController,
+                _pluginPanelHostController,
+                new PluginPanelBridge(
+                    Unused<IWorkspaceToolService>(),
+                    _pluginPanelHostController,
+                    new PluginPanelContextPublisher(
+                        viewModel,
+                        HostChannel,
+                        _pluginPanelHostController,
+                        Dispatcher.CurrentDispatcher)),
                 viewModel,
                 _activityCoordinator,
                 HostChannel,
                 Dispatcher.CurrentDispatcher);
         }
+
+        /// <summary>
+        /// Mirrors the production caller, which always hands the router the sending document's origin.
+        /// </summary>
+        public Task<WebViewHostCommand?> RouteAsync(string messageJson, string? sourceUri = ApplicationOrigin)
+            => Router.RouteAsync(messageJson, ownerHandle: 0, sourceUri);
 
         public RecordingConversationRepository ConversationRepository { get; }
 
@@ -244,6 +303,7 @@ public sealed class WebViewMessageRouterTests
             _turnEngine.Dispose();
             _sessions.Dispose();
             _terminalHostController.Dispose();
+            _pluginPanelHostController.Dispose();
             _activityCoordinator.Dispose();
             _transcriptPublisher.Dispose();
         }

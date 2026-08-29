@@ -51,6 +51,12 @@ const filteredItems = computed(() => {
 	);
 });
 const selectedItem = computed(() => activeItems.value.find((item) => item.id === selectedId.value) || null);
+// 面板不是独立安装项，由所属插件管理，因此只在插件详情里出现，不单开一个分类页。
+const selectedPanels = computed(() =>
+	activeCategory.value === 'plugin' && selectedItem.value
+		? (state.value.panels || []).filter((panel) => panel.pluginId === selectedItem.value.id)
+		: [],
+);
 
 function changeCategory(category) {
 	activeCategory.value = category;
@@ -158,6 +164,7 @@ async function confirmPermissions() {
 				v-if="selectedItem"
 				:item="selectedItem"
 				:kind="activeCategory"
+				:panels="selectedPanels"
 				:pending="isPending(activeCategory, selectedItem.id)"
 				@close="selectedId = null"
 				@delete="handleDelete"
