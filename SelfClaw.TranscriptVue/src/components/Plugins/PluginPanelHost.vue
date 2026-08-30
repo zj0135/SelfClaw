@@ -7,16 +7,15 @@ defineProps({
 	tabs: { type: Array, required: true },
 	activeKey: { type: String, default: '' },
 	error: { type: String, default: '' },
-	canAdd: { type: Boolean, default: false },
 });
 
-defineEmits(['activate', 'close', 'add', 'register']);
+defineEmits(['activate', 'close', 'hide', 'register']);
 </script>
 
 <template>
 	<section class="plugin-panel-host" aria-label="插件面板">
-		<PluginTabBar :tabs="tabs" :active-key="activeKey" :can-add="canAdd" @activate="$emit('activate', $event)"
-			@close="$emit('close', $event)" @add="$emit('add')" />
+		<PluginTabBar :tabs="tabs" :active-key="activeKey" @activate="$emit('activate', $event)"
+			@close="$emit('close', $event)" @hide="$emit('hide')" />
 		<div v-if="error" class="panel-error">
 			<AlertCircle :size="14" />{{ error }}
 		</div>

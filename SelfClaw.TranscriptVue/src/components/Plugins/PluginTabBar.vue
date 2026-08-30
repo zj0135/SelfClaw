@@ -1,14 +1,14 @@
 <script setup>
-import { Plus } from 'lucide-vue-next';
+import { Minus } from 'lucide-vue-next';
 import PluginTab from './PluginTab.vue';
 
 defineProps({
 	tabs: { type: Array, required: true },
 	activeKey: { type: String, default: '' },
-	canAdd: { type: Boolean, default: false },
 });
 
-defineEmits(['activate', 'close', 'add']);
+// 打开面板统一走左侧导航；这里只留隐藏。隐藏不关闭标签，iframe 继续活着。
+defineEmits(['activate', 'close', 'hide']);
 </script>
 
 <template>
@@ -17,8 +17,8 @@ defineEmits(['activate', 'close', 'add']);
 			<PluginTab v-for="tab in tabs" :key="tab.key" :tab="tab" :active="tab.key === activeKey"
 				@activate="$emit('activate', $event)" @close="$emit('close', $event)" />
 		</div>
-		<button v-if="canAdd" class="tab-add" type="button" aria-label="打开面板" title="打开面板" @click="$emit('add')">
-			<Plus :size="14" :stroke-width="2" />
+		<button class="tab-hide" type="button" aria-label="隐藏面板" title="隐藏面板" @click="$emit('hide')">
+			<Minus :size="13" :stroke-width="2" />
 		</button>
 	</div>
 </template>
@@ -51,21 +51,33 @@ defineEmits(['activate', 'close', 'add']);
 	display: none;
 }
 
-.tab-add {
+/* 静息态就画出边框与底色：这颗按钮是右栏唯一的出口，靠 hover 才显形的话找不到它。 */
+.tab-hide {
 	display: grid;
-	width: 26px;
-	height: 26px;
+	width: 22px;
+	height: 22px;
 	flex: none;
 	place-items: center;
-	border: 0;
-	border-radius: 999px;
-	background: transparent;
+	/* 项目没有全局 button reset，UA 默认的 padding（Chromium 是 1px 6px）在这个尺寸下会把
+	   字形顶偏。place-items 居中的是 grid 区域而不是 padding 盒内的内容，纠不回来。
+	   box-sizing 让 22px 连边框一起算，否则实际盒子是 24px。 */
+	padding: 0;
+	box-sizing: border-box;
+	border: 1px solid var(--border-strong, #d8dde5);
+	border-radius: 6px;
+	background: #ffffff;
 	color: #6b7280;
-	transition: background 0.14s, color 0.14s;
+	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.05);
+	transition: background 0.14s, border-color 0.14s, color 0.14s;
 }
 
-.tab-add:hover {
+.tab-hide:hover {
+	border-color: var(--accent, #3b5bfd);
 	background: #eef0f4;
 	color: var(--accent, #3b5bfd);
+}
+
+.tab-hide:active {
+	background: #e3e6ec;
 }
 </style>

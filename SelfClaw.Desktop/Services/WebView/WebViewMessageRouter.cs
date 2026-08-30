@@ -212,14 +212,18 @@ internal sealed class WebViewMessageRouter : IDisposable
             return null;
         }
 
-        response = await _pluginPanelHostController.TryHandleAsync(type, payload, cancellationToken);
+        // The bridge must be offered `plugin-host/*` before the host controller. The controller claims the
+        // whole prefix and answers anything it does not recognise with an "unsupported type" error rather
+        // than null, so placing it first would swallow `plugin-host/api` before the bridge ever sees it.
+        // Any future `plugin-host/*` handler has to be chained above the controller for the same reason.
+        response = await _pluginPanelBridge.TryHandleAsync(type, payload, cancellationToken);
         if (response is not null)
         {
             _hostChannel.PostResponse(response);
             return null;
         }
 
-        response = await _pluginPanelBridge.TryHandleAsync(type, payload, cancellationToken);
+        response = await _pluginPanelHostController.TryHandleAsync(type, payload, cancellationToken);
         if (response is not null)
         {
             _hostChannel.PostResponse(response);

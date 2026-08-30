@@ -1,8 +1,13 @@
 <script setup>
-import { SquareTerminal, Minus, Square, Copy, X } from 'lucide-vue-next';
+import { PanelRight, SquareTerminal, Minus, Square, Copy, X } from 'lucide-vue-next';
 
 const props = defineProps({
 	isMaximized: {
+		type: Boolean,
+		default: false,
+	},
+	// 右栏当前是否可见。按下时是「收起」，抬起时是「展开」，同一个按钮两个方向。
+	panelVisible: {
 		type: Boolean,
 		default: false,
 	},
@@ -21,6 +26,12 @@ function send(action) {
 			<button class="chrome-button tool-button" type="button" title="命令行" aria-label="Terminal"
 				@click="send('terminal')">
 				<SquareTerminal :size="15" :stroke-width="1.7" />
+			</button>
+			<button class="chrome-button tool-button" :class="{ on: props.panelVisible }" type="button"
+				:title="props.panelVisible ? '收起插件面板' : '展开插件面板'"
+				:aria-label="props.panelVisible ? '收起插件面板' : '展开插件面板'" :aria-pressed="props.panelVisible"
+				@click="send('toggle-panel')">
+				<PanelRight :size="15" :stroke-width="1.7" />
 			</button>
 		</div>
 
@@ -96,6 +107,16 @@ function send(action) {
 
 .tool-button:hover {
 	color: var(--accent, #3b5bfd);
+}
+
+/* 右栏开着的时候按钮自己就是状态指示，不用等 hover。 */
+.tool-button.on {
+	background: rgba(59, 91, 253, 0.1);
+	color: var(--accent, #3b5bfd);
+}
+
+.tool-button.on:hover {
+	background: rgba(59, 91, 253, 0.16);
 }
 
 .caption-button {

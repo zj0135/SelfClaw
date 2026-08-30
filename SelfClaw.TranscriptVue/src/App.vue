@@ -50,12 +50,35 @@ const windowChrome = reactive({
 const panels = usePluginPanels();
 const launcherOpen = ref(false);
 const PANEL_WIDTH_KEY = 'selfclaw:panel-width';
+const PANEL_HIDDEN_KEY = 'selfclaw:panel-hidden';
 const panelWidth = ref(readPanelWidth());
+const panelHidden = ref(readPanelHidden());
 const resizing = ref(false);
+
+// 隐藏是外壳的视图状态，不是面板的生命周期：标签与租约都留着，只是这一列不占位置。
+// 因此右栏可见 = 有标签 且 没被隐藏。
+const panelVisible = computed(() => panels.isOpen.value && !panelHidden.value);
 
 function readPanelWidth() {
 	const stored = Number(localStorage.getItem(PANEL_WIDTH_KEY));
 	return Number.isFinite(stored) && stored >= 280 ? Math.min(stored, 720) : 380;
+}
+
+function readPanelHidden() {
+	try {
+		return localStorage.getItem(PANEL_HIDDEN_KEY) === 'true';
+	} catch (_) {
+		return false;
+	}
+}
+
+function setPanelHidden(hidden) {
+	panelHidden.value = hidden;
+	try {
+		localStorage.setItem(PANEL_HIDDEN_KEY, String(hidden));
+	} catch (_) {
+		// 忽略持久化失败
+	}
 }
 
 function startPanelResize(event) {
@@ -86,9 +109,32 @@ function startPanelResize(event) {
 
 const openPanelKeys = computed(() => panels.tabs.value.map((tab) => tab.key));
 
+// 从左侧导航打开就是要看见它。已经打开过的面板走这条路只是重新激活并取消隐藏，
+// 所以启动器里的条目在隐藏态下必须仍然可点——否则面板全开时右栏就没有出路了。
 async function openPanel(key) {
 	launcherOpen.value = false;
+	setPanelHidden(false);
 	await panels.open(key);
+}
+
+function hidePanels() {
+	setPanelHidden(true);
+}
+
+// 标题栏那个按钮是纯粹的显隐开关，但一个标签都没有时「展开」没有东西可展开——
+// 那种情况下退回启动器，让用户先挑一个面板，否则点了会毫无反应。
+function togglePanels() {
+	if (panelVisible.value) {
+		setPanelHidden(true);
+		return;
+	}
+
+	if (panels.isOpen.value) {
+		setPanelHidden(false);
+		return;
+	}
+
+	launcherOpen.value = true;
 }
 
 function openPluginSettings() {
@@ -201,6 +247,10 @@ function onWindowControlAction(action) {
 	switch (action) {
 		case 'terminal':
 			post({ type: 'toggle-terminal' });
+			break;
+		// 右栏显隐全在前端，不必往宿主跑一趟。
+		case 'toggle-panel':
+			togglePanels();
 			break;
 		case 'minimize':
 			post({ type: 'window-minimize' });
@@ -320,18 +370,22 @@ onUnmounted(() => {
 		<main class="main">
 			<div class="main-header">
 				<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>
-				<WindowControls :is-maximized="windowChrome.isMaximized" @action="onWindowControlAction" />
+				<WindowControls :is-maximized="windowChrome.isMaximized" :panel-visible="panelVisible"
+					@action="onWindowControlAction" />
 			</div>
 			<div class="main-body">
 				<div class="main-content">
 					<component :is="activeViewComponent" ref="chatViewRef" @preview-image="openImagePreview" />
 				</div>
-				<div v-if="panels.isOpen.value" class="panel-resizer" role="separator" aria-orientation="vertical"
+				<div v-if="panelVisible" class="panel-resizer" role="separator" aria-orientation="vertical"
 					aria-label="调整面板宽度" @pointerdown="startPanelResize"></div>
-				<PluginPanelHost v-if="panels.isOpen.value" :tabs="panels.tabs.value"
+				<!-- v-show 而非 v-if：隐藏不该卸载 iframe，否则每次收起都要让插件重新加载并重走
+					 握手，收起再展开就不再是一个廉价动作。没有标签时 panelVisible 同样为假，
+					 这一列就只是个不占位的空壳。 -->
+				<PluginPanelHost v-show="panelVisible" :tabs="panels.tabs.value"
 					:active-key="panels.activeKey.value" :error="panels.error.value"
-					:can-add="panels.available.value.length > 0" @activate="(key) => (panels.activeKey.value = key)"
-					@close="panels.close" @add="launcherOpen = true" @register="panels.registerFrame" />
+					@activate="(key) => (panels.activeKey.value = key)" @close="panels.close" @hide="hidePanels"
+					@register="panels.registerFrame" />
 			</div>
 		</main>
 		<PluginLauncher :open="launcherOpen" :panels="panels.available.value" :open-keys="openPanelKeys"
@@ -351,7 +405,8 @@ onUnmounted(() => {
 			<div class="resize-edge resize-top-left" @pointerdown="onResizePointerDown($event, 'top-left')"></div>
 			<div class="resize-edge resize-top-right" @pointerdown="onResizePointerDown($event, 'top-right')"></div>
 			<div class="resize-edge resize-bottom-left" @pointerdown="onResizePointerDown($event, 'bottom-left')"></div>
-			<div class="resize-edge resize-bottom-right" @pointerdown="onResizePointerDown($event, 'bottom-right')"></div>
+			<div class="resize-edge resize-bottom-right" @pointerdown="onResizePointerDown($event, 'bottom-right')">
+			</div>
 		</template>
 	</div>
 </template>
@@ -386,6 +441,7 @@ onUnmounted(() => {
 	--ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 	--scroll-track: transparent;
 	--scroll-thumb: rgba(23, 26, 31, 0.16);
+	--resize-edge: 6px;
 }
 
 * {
@@ -1374,13 +1430,6 @@ a:hover {
 	.transcript-scroll {
 		padding-inline: 24px;
 	}
-}
-
-/* 窗口缩放热区。WPF 侧留白为 0，边缘的鼠标全部落在 WebView2 上，命中判定只能在这里做。
-   宽度只由这一个变量控制——改它就同时改八个方向，不需要再跟 WPF 那边的数值对齐。
-   z-index 要压过图片预览遮罩（1000），否则遮罩打开时边缘就拖不动了。 */
-:root {
-	--resize-edge: 6px;
 }
 
 .resize-edge {

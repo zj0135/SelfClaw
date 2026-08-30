@@ -18,9 +18,11 @@ defineEmits(['close', 'select', 'manage']);
 				<span>插件面板</span>
 			</header>
 
+			<!-- 已打开的条目照样可点：面板被隐藏时，重新选它就是把右栏叫回来的那条路。
+				 若在这里 disabled，面板全部打开又全部隐藏时右栏就再也回不来了。 -->
 			<ul v-if="panels.length" class="panel-list">
 				<li v-for="panel in panels" :key="panel.key">
-					<button type="button" :disabled="openKeys.includes(panel.key)" @click="$emit('select', panel.key)">
+					<button type="button" @click="$emit('select', panel.key)">
 						<span class="panel-title">{{ panel.title }}</span>
 						<code>{{ panel.pluginId }}</code>
 						<span v-if="openKeys.includes(panel.key)" class="panel-state">已打开</span>
@@ -108,13 +110,8 @@ header {
 	transition: background 0.12s;
 }
 
-.panel-list button:hover:not(:disabled) {
+.panel-list button:hover {
 	background: #f1f3f6;
-}
-
-.panel-list button:disabled {
-	cursor: default;
-	opacity: 0.55;
 }
 
 .panel-title {

@@ -137,6 +137,39 @@ public sealed class WebViewMessageRouterTests
         context.PostedJson.Should().BeEmpty();
     }
 
+    // The host controller claims the whole `plugin-host/` prefix and answers unrecognised types with an
+    // error instead of null, so it has to be chained below the bridge. Ordered the other way this reached
+    // the panel as "Unsupported plugin panel message type 'plugin-host/api'" and every SDK call failed.
+    [Fact]
+    public async Task RouteAsync_routes_plugin_host_api_to_the_panel_bridge()
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.RouteAsync(
+            """{"type":"plugin-host/api","requestId":"api-1","panelKey":"git-inspector/changes","op":"context.get"}""");
+
+        command.Should().BeNull();
+        using var response = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        response.RootElement.GetProperty("type").GetString().Should().Be("plugin-host/api");
+        response.RootElement.GetProperty("requestId").GetString().Should().Be("api-1");
+        // No panel is open in this fixture, so the bridge refuses on identity — the point is that the
+        // refusal comes from the bridge's permission check rather than from an unsupported-type error.
+        response.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        response.RootElement.GetProperty("error").GetString().Should().Be("The calling panel is not open.");
+    }
+
+    [Fact]
+    public async Task RouteAsync_still_reports_unknown_plugin_host_types()
+    {
+        using var context = new RouterTestContext();
+
+        await context.RouteAsync("""{"type":"plugin-host/nonsense","requestId":"bogus-1"}""");
+
+        using var response = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        response.RootElement.GetProperty("error").GetString().Should()
+            .Be("Unsupported plugin panel message type 'plugin-host/nonsense'.");
+    }
+
     [Fact]
     public void Extension_state_changes_are_pushed_through_the_host_channel()
     {

@@ -1,4 +1,4 @@
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue';
 import { hostBridge, useHostBridge } from './hostBridge';
 
 // 面板与宿主之间的中转。插件永远不直接跟宿主说话：它 postMessage 给外壳，外壳凭
@@ -42,9 +42,22 @@ export function usePluginPanels() {
 		return null;
 	}
 
+	// postMessage 走的是结构化克隆，而克隆不接受 Proxy。tabs 是个 ref，所以 tabs.value[i]
+	// 及其嵌套字段读出来都是响应式代理，直接塞进消息会抛 DataCloneError（握手里的
+	// permissions 数组就是这么炸的）。toRaw 只脱一层，嵌套的代理还在，因此这里按整棵树脱。
+	// 出站消息只有这一个出口，把它挡在这里就不用在每个调用点各记一次。
+	function toPlain(value) {
+		if (Array.isArray(value)) return value.map(toPlain);
+		if (value === null || typeof value !== 'object') return value;
+		const raw = toRaw(value);
+		// Date/Map/Set 这类内置类型克隆本来就支持，拆成普通对象反而会丢掉语义。
+		if (raw instanceof Date || raw instanceof Map || raw instanceof Set) return raw;
+		return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, toPlain(item)]));
+	}
+
 	function sendToFrame(tab, message) {
 		const frame = frames.get(tab.key);
-		frame?.contentWindow?.postMessage({ __selfclaw: 1, ...message }, tab.panel.origin);
+		frame?.contentWindow?.postMessage(toPlain({ __selfclaw: 1, ...message }), tab.panel.origin);
 	}
 
 	function grants(tab, permission) {
