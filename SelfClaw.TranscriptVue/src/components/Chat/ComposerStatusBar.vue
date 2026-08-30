@@ -33,32 +33,18 @@ function setWorkspaceMode(mode) {
 
 <template>
 	<div class="composer-statusbar" aria-label="工作区上下文">
-		<ComposerWorkspacePicker
-			:workspace-selection="workspaceSelection"
-			@refresh="emit('refresh', $event)"
-			@select-root="emit('select-root', $event)"
-			@browse="emit('browse')"
-			@delete-root="emit('delete-root', $event)"
-		/>
+		<ComposerWorkspacePicker :workspace-selection="workspaceSelection" @refresh="emit('refresh', $event)"
+			@select-root="emit('select-root', $event)" @browse="emit('browse')"
+			@delete-root="emit('delete-root', $event)" />
 
 		<div v-if="isGitRepository" class="workspace-mode" aria-label="工作区模式">
-			<button
-				class="mode-option"
-				:class="{ active: effectiveMode === 'local' }"
-				type="button"
-				:disabled="isManagedWorktree"
-				@click="setWorkspaceMode('local')"
-			>
+			<button class="mode-option" :class="{ active: effectiveMode === 'local' }" type="button"
+				:disabled="isManagedWorktree" @click="setWorkspaceMode('local')">
 				<Monitor :size="12" :stroke-width="1.9" aria-hidden="true" />
 				本地
 			</button>
-			<button
-				class="mode-option"
-				:class="{ active: effectiveMode === 'worktree' }"
-				type="button"
-				:disabled="isManagedWorktree"
-				@click="setWorkspaceMode('worktree')"
-			>
+			<button class="mode-option" :class="{ active: effectiveMode === 'worktree' }" type="button"
+				:disabled="isManagedWorktree" @click="setWorkspaceMode('worktree')">
 				<Waypoints :size="12" :stroke-width="1.9" aria-hidden="true" />
 				工作树
 			</button>
@@ -68,13 +54,8 @@ function setWorkspaceMode(mode) {
 			本地目录
 		</span>
 
-		<GitWorkspaceControl
-			v-if="isGitRepository"
-			:state="gitState"
-			:loading="gitLoading"
-			:error="gitError"
-			@action="emit('git-action', $event)"
-		/>
+		<GitWorkspaceControl v-if="isGitRepository" :state="gitState" :loading="gitLoading" :error="gitError"
+			@action="emit('git-action', $event)" />
 	</div>
 
 	<p v-if="effectiveMode === 'worktree' && gitState?.isDirty && !isManagedWorktree" class="dirty-warning">

@@ -175,15 +175,8 @@ defineExpose({
 </script>
 
 <template>
-	<section
-		class="terminal-panel"
-		:class="{ open: isOpen }"
-		aria-label="Terminal"
-		@mousedown="focusTerminal"
-		@click="focusTerminal"
-		@focusin="handleFocusIn"
-		@focusout="handleFocusOut"
-	>
+	<section class="terminal-panel" :class="{ open: isOpen }" aria-label="Terminal" @mousedown="focusTerminal"
+		@click="focusTerminal" @focusin="handleFocusIn" @focusout="handleFocusOut">
 		<header class="terminal-header">
 			<div class="terminal-title">
 				<span class="terminal-icon" aria-hidden="true">
@@ -196,12 +189,9 @@ defineExpose({
 				<span>Terminal</span>
 			</div>
 			<div class="terminal-cwd" :title="cwd">{{ cwd || 'Desktop' }}</div>
-			<div
-				class="terminal-status"
-				:class="{ running: isRunning }"
+			<div class="terminal-status" :class="{ running: isRunning }"
 				:title="isRunning ? 'PowerShell running' : 'PowerShell stopped'"
-				:aria-label="isRunning ? 'PowerShell running' : 'PowerShell stopped'"
-			>
+				:aria-label="isRunning ? 'PowerShell running' : 'PowerShell stopped'">
 				<svg v-if="isRunning" viewBox="0 0 20 20" aria-hidden="true">
 					<path d="M4.5 10.4 8.1 14 15.5 6"></path>
 				</svg>
@@ -210,12 +200,12 @@ defineExpose({
 					<path d="M14 6 6 14"></path>
 				</svg>
 			</div>
-			<button class="terminal-action" type="button" aria-label="Restart terminal" title="Restart" @click="handleRestart">
+			<button class="terminal-action" type="button" aria-label="Restart terminal" title="Restart"
+				@click="handleRestart">
 				<svg viewBox="0 0 1024 1024" aria-hidden="true">
-					<path
-						fill="currentColor"
-						d="M771.776 794.88A384 384 0 0 1 128 512h64a320 320 0 0 0 555.712 216.448H654.72a32 32 0 1 1 0-64h149.056a32 32 0 0 1 32 32v148.928a32 32 0 1 1-64 0v-50.56zM276.288 295.616h92.992a32 32 0 0 1 0 64H220.16a32 32 0 0 1-32-32V178.56a32 32 0 0 1 64 0v50.56A384 384 0 0 1 896.128 512h-64a320 320 0 0 0-555.776-216.384z"
-					></path>
+					<path fill="currentColor"
+						d="M771.776 794.88A384 384 0 0 1 128 512h64a320 320 0 0 0 555.712 216.448H654.72a32 32 0 1 1 0-64h149.056a32 32 0 0 1 32 32v148.928a32 32 0 1 1-64 0v-50.56zM276.288 295.616h92.992a32 32 0 0 1 0 64H220.16a32 32 0 0 1-32-32V178.56a32 32 0 0 1 64 0v50.56A384 384 0 0 1 896.128 512h-64a320 320 0 0 0-555.776-216.384z">
+					</path>
 				</svg>
 			</button>
 			<button class="terminal-close" type="button" aria-label="Close terminal" title="Close" @click="handleClose">

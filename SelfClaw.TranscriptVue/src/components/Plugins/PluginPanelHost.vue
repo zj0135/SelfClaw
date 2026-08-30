@@ -15,23 +15,14 @@ defineEmits(['activate', 'close', 'add', 'register']);
 
 <template>
 	<section class="plugin-panel-host" aria-label="插件面板">
-		<PluginTabBar
-			:tabs="tabs"
-			:active-key="activeKey"
-			:can-add="canAdd"
-			@activate="$emit('activate', $event)"
-			@close="$emit('close', $event)"
-			@add="$emit('add')"
-		/>
-		<div v-if="error" class="panel-error"><AlertCircle :size="14" />{{ error }}</div>
+		<PluginTabBar :tabs="tabs" :active-key="activeKey" :can-add="canAdd" @activate="$emit('activate', $event)"
+			@close="$emit('close', $event)" @add="$emit('add')" />
+		<div v-if="error" class="panel-error">
+			<AlertCircle :size="14" />{{ error }}
+		</div>
 		<div class="frames">
-			<PluginFrame
-				v-for="tab in tabs"
-				:key="tab.key"
-				:tab="tab"
-				:active="tab.key === activeKey"
-				@register="(key, element) => $emit('register', key, element)"
-			/>
+			<PluginFrame v-for="tab in tabs" :key="tab.key" :tab="tab" :active="tab.key === activeKey"
+				@register="(key, element) => $emit('register', key, element)" />
 		</div>
 	</section>
 </template>
@@ -43,7 +34,6 @@ defineEmits(['activate', 'close', 'add', 'register']);
 	min-width: 0;
 	height: 100%;
 	overflow: hidden;
-	border-left: 1px solid var(--border, #e5e7eb);
 	background: #ffffff;
 }
 

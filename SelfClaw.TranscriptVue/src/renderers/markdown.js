@@ -64,7 +64,9 @@ const allowedLanguages = new Set(Object.keys(languages));
 const skillTokenPattern = /^\[\/([^\]\r\n]{1,80})\]/;
 
 function highlightCode(code, language) {
-	const normalized = String(language || '').trim().toLowerCase();
+	const normalized = String(language || '')
+		.trim()
+		.toLowerCase();
 	const canonical = languageAliases[normalized] || normalized;
 	if (!allowedLanguages.has(canonical)) {
 		return '';
@@ -128,13 +130,36 @@ markdownIt.renderer.rules.image = (tokens, index, options, env, self) => {
 
 const sanitizeOptions = {
 	ALLOWED_TAGS: [
-		'p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li',
-		'blockquote', 'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-		'a', 'img', 'em', 'strong', 'del', 'span', 'div',
+		'p',
+		'br',
+		'hr',
+		'h1',
+		'h2',
+		'h3',
+		'h4',
+		'h5',
+		'h6',
+		'ul',
+		'ol',
+		'li',
+		'blockquote',
+		'pre',
+		'code',
+		'table',
+		'thead',
+		'tbody',
+		'tr',
+		'th',
+		'td',
+		'a',
+		'img',
+		'em',
+		'strong',
+		'del',
+		'span',
+		'div',
 	],
-	ALLOWED_ATTR: [
-		'class', 'href', 'src', 'alt', 'title', 'loading', 'rel', 'target', 'role',
-	],
+	ALLOWED_ATTR: ['class', 'href', 'src', 'alt', 'title', 'loading', 'rel', 'target', 'role'],
 	FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'textarea'],
 	FORBID_ATTR: [/^on/i],
 	ALLOW_UNKNOWN_PROTOCOLS: false,

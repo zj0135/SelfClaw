@@ -14,9 +14,7 @@ export function useTranscriptScroll(getScrollElement) {
 
 	function captureBeforeUpdate(nextConversationId) {
 		const element = getScrollElement();
-		const snapshot = element
-			? { top: element.scrollTop, nearBottom: isNearBottom(element) }
-			: null;
+		const snapshot = element ? { top: element.scrollTop, nearBottom: isNearBottom(element) } : null;
 
 		if (nextConversationId !== selectedConversationId) {
 			selectedConversationId = nextConversationId;

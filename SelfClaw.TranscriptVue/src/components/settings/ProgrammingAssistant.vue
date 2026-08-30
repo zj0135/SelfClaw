@@ -244,8 +244,8 @@ onMounted(() => {
 				<h1 class="sc-page-title">编程助手</h1>
 				<p class="sc-page-sub">检测本机安装的智能体 CLI，选择默认运行时与模型。</p>
 			</div>
-			<button class="pa-btn scan-btn" :class="{ 'is-rescanning': isRescanning }" type="button" :disabled="isRescanning"
-				@click="rescanCliTools">
+			<button class="pa-btn scan-btn" :class="{ 'is-rescanning': isRescanning }" type="button"
+				:disabled="isRescanning" @click="rescanCliTools">
 				<RefreshCw :size="14" :stroke-width="2" class="scan-icon" aria-hidden="true" />
 				{{ isRescanning ? '扫描中…' : '重新扫描' }}
 			</button>
@@ -258,12 +258,14 @@ onMounted(() => {
 			</div>
 
 			<div class="cli-list">
-				<div v-if="scanStatusText" class="scan-state sc-rise" style="--i: 2" :class="{ 'scan-state--error': scanError }">
+				<div v-if="scanStatusText" class="scan-state sc-rise" style="--i: 2"
+					:class="{ 'scan-state--error': scanError }">
 					<TriangleAlert v-if="scanError" :size="15" :stroke-width="2" aria-hidden="true" />
 					{{ scanStatusText }}
 				</div>
 
-				<article v-for="(cli, ci) in cliTools" :key="cli.id" class="cli-card sc-rise" :style="{ '--i': ci + 2 }" :class="{ 'is-open': cli.isOpen }">
+				<article v-for="(cli, ci) in cliTools" :key="cli.id" class="cli-card sc-rise" :style="{ '--i': ci + 2 }"
+					:class="{ 'is-open': cli.isOpen }">
 					<div class="cli-row" role="button" tabindex="0" :aria-expanded="cli.isOpen ? 'true' : 'false'"
 						@click="toggleOpen(cli)" @keydown.enter.prevent="toggleOpen(cli)"
 						@keydown.space.prevent="toggleOpen(cli)">
@@ -317,7 +319,8 @@ onMounted(() => {
 									<div class="select-wrap select-wrap--reasoning">
 										<select :id="`reasoning-${cli.id}`" v-model="cli.selectedReasoningLevel"
 											:aria-label="`${cli.name} 推理等级选择`" @change="onModelChange(cli)">
-											<option v-for="level in cli.reasoningLevels" :key="level" :value="level">{{ level }}
+											<option v-for="level in cli.reasoningLevels" :key="level" :value="level">{{
+												level }}
 											</option>
 										</select>
 										<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
@@ -330,8 +333,8 @@ onMounted(() => {
 									{{ cli.testing ? '测试中…' : '测试' }}
 								</button>
 
-								<button v-if="selectedCliId !== cli.id" class="pa-btn pa-btn--acid cli-select" type="button"
-									:disabled="isLoading || isRescanning" @click="selectCli(cli)">
+								<button v-if="selectedCliId !== cli.id" class="pa-btn pa-btn--acid cli-select"
+									type="button" :disabled="isLoading || isRescanning" @click="selectCli(cli)">
 									设为默认
 								</button>
 							</div>
@@ -346,8 +349,8 @@ onMounted(() => {
 							</div>
 						</div>
 					</div>
-			</article>
-		</div>
+				</article>
+			</div>
 		</main>
 	</section>
 </template>

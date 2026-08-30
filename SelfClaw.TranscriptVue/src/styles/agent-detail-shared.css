@@ -222,7 +222,10 @@
 	color: var(--sc-text);
 	font: inherit;
 	font-size: 13.5px;
-	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
+	transition:
+		border-color 0.16s,
+		box-shadow 0.16s,
+		background 0.16s;
 }
 
 .input::placeholder {
@@ -263,7 +266,9 @@
 	cursor: pointer;
 	font: inherit;
 	font-size: 13.5px;
-	transition: border-color 0.16s, box-shadow 0.16s;
+	transition:
+		border-color 0.16s,
+		box-shadow 0.16s;
 }
 
 .select select:focus {

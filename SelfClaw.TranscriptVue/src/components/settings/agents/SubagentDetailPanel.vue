@@ -186,7 +186,9 @@ function submit() {
 		<span class="ghost-num" aria-hidden="true">{{ index }}</span>
 
 		<header class="detail-head sc-rise" style="--i: 0">
-			<div class="dh-icon" aria-hidden="true"><Workflow :size="26" :stroke-width="1.7" /></div>
+			<div class="dh-icon" aria-hidden="true">
+				<Workflow :size="26" :stroke-width="1.7" />
+			</div>
 			<div class="dh-meta">
 				<div class="dh-kicker">SUBAGENT / {{ index }}</div>
 				<div class="dh-title">
@@ -214,7 +216,8 @@ function submit() {
 						<h3>基本信息</h3>
 					</div>
 					<button class="btn save-btn" type="button" :disabled="!canSubmit" @click="submit">
-						<LoaderCircle v-if="saving" :size="14" :stroke-width="2.2" class="spin-ico" aria-hidden="true" />
+						<LoaderCircle v-if="saving" :size="14" :stroke-width="2.2" class="spin-ico"
+							aria-hidden="true" />
 						<Check v-else :size="14" :stroke-width="2.4" aria-hidden="true" />
 						{{ saving ? '保存中…' : '保存' }}
 					</button>
@@ -230,7 +233,8 @@ function submit() {
 						<div class="select">
 							<select id="subagent-model" v-model="form.modelProfileId" aria-label="模型配置">
 								<option value="">继承父级 Agent 的模型</option>
-								<option v-for="model in enabledModels" :key="model.modelProfileId" :value="model.modelProfileId">
+								<option v-for="model in enabledModels" :key="model.modelProfileId"
+									:value="model.modelProfileId">
 									{{ model.name }} · {{ model.providerName }}
 								</option>
 							</select>
@@ -239,13 +243,8 @@ function submit() {
 					</div>
 					<div class="field span-2">
 						<label class="fl" for="subagent-desc">描述</label>
-						<input
-							id="subagent-desc"
-							v-model="form.description"
-							class="input"
-							type="text"
-							placeholder="一句话说明该子代理的职责"
-						/>
+						<input id="subagent-desc" v-model="form.description" class="input" type="text"
+							placeholder="一句话说明该子代理的职责" />
 					</div>
 					<div class="field">
 						<label class="fl" for="subagent-tools">工具策略</label>
@@ -260,49 +259,26 @@ function submit() {
 					</div>
 					<div class="field">
 						<label class="fl" for="subagent-max-run">最长运行时间（秒）</label>
-						<input
-							id="subagent-max-run"
-							v-model="form.maxRunSeconds"
-							class="input mono"
-							type="number"
-							min="30"
-							max="3600"
-							step="30"
-						/>
+						<input id="subagent-max-run" v-model="form.maxRunSeconds" class="input mono" type="number"
+							min="30" max="3600" step="30" />
 						<p v-if="!maxRunValid" class="field-error">取值需在 30 到 3600 秒之间。</p>
 					</div>
 					<div class="field span-2">
 						<label class="fl" for="subagent-instructions">系统指令（Instructions）</label>
-						<textarea
-							id="subagent-instructions"
-							v-model="form.instructions"
-							class="input mono instructions"
-							rows="8"
-							placeholder="写入该子代理执行任务时使用的系统提示"
-						></textarea>
+						<textarea id="subagent-instructions" v-model="form.instructions" class="input mono instructions"
+							rows="8" placeholder="写入该子代理执行任务时使用的系统提示"></textarea>
 					</div>
 				</div>
 			</section>
 
-			<CapabilityBindingCard
-				class="sc-rise"
-				style="--i: 3"
-				:sections="sections"
-				@open="(section) => (openSectionKey = section.key)"
-			/>
+			<CapabilityBindingCard class="sc-rise" style="--i: 3" :sections="sections"
+				@open="(section) => (openSectionKey = section.key)" />
 		</div>
 
-		<BindingDialog
-			:open="Boolean(openSection)"
-			:kicker="openSection?.kicker || ''"
-			:title="openSection ? `绑定${openSection.title}` : ''"
-			:hint="openSection?.hint || ''"
-			:items="openSection?.items || []"
-			:empty-text="openSection?.emptyText || ''"
-			:pending="dialogPending"
-			@close="openSectionKey = ''"
-			@toggle="onDialogToggle"
-		/>
+		<BindingDialog :open="Boolean(openSection)" :kicker="openSection?.kicker || ''"
+			:title="openSection ? `绑定${openSection.title}` : ''" :hint="openSection?.hint || ''"
+			:items="openSection?.items || []" :empty-text="openSection?.emptyText || ''" :pending="dialogPending"
+			@close="openSectionKey = ''" @toggle="onDialogToggle" />
 	</main>
 </template>
 

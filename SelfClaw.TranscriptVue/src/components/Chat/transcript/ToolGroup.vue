@@ -12,17 +12,11 @@ const props = defineProps({
 </script>
 
 <template>
-	<section
-		class="tool-group-block"
-		:class="[block.status, { open: collapse.isToolGroupOpen(block.id) }]"
-		:data-tool-group-id="block.id"
-	>
-		<button
-			class="tool-group-summary"
-			type="button"
+	<section class="tool-group-block" :class="[block.status, { open: collapse.isToolGroupOpen(block.id) }]"
+		:data-tool-group-id="block.id">
+		<button class="tool-group-summary" type="button"
 			:aria-expanded="collapse.isToolGroupOpen(block.id) ? 'true' : 'false'"
-			@click="collapse.toggleToolGroup(block.id)"
-		>
+			@click="collapse.toggleToolGroup(block.id)">
 			<span class="tool-group-summary-main">
 				<ToolStatusIcon :status="block.status" />
 				<span class="tool-group-label">{{ block.summaryLabel }}</span>
@@ -32,15 +26,8 @@ const props = defineProps({
 			</span>
 		</button>
 		<div v-if="collapse.isToolGroupOpen(block.id)" class="tool-group-details">
-			<ToolCard
-				v-for="member in block.members"
-				:key="member.id"
-				:id="member.id"
-				:segment="member.segment"
-				nested
-				:open="collapse.isToolOpen(member.id)"
-				@toggle="collapse.toggleTool(member.id)"
-			/>
+			<ToolCard v-for="member in block.members" :key="member.id" :id="member.id" :segment="member.segment" nested
+				:open="collapse.isToolOpen(member.id)" @toggle="collapse.toggleTool(member.id)" />
 		</div>
 	</section>
 </template>

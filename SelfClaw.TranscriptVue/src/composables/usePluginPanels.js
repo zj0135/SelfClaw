@@ -60,8 +60,7 @@ export function usePluginPanels() {
 	}
 
 	async function handleFrameRequest(tab, message) {
-		const respond = (ok, body) =>
-			sendToFrame(tab, { kind: 'response', id: message.id, ok, ...body });
+		const respond = (ok, body) => sendToFrame(tab, { kind: 'response', id: message.id, ok, ...body });
 		try {
 			// composer.insert 不需要往返宿主：外壳自己就持有输入框。
 			if (message.op === 'composer.insert') {

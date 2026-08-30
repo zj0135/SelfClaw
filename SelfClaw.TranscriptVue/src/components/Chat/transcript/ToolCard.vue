@@ -27,18 +27,9 @@ const sourceText = computed(() => {
 </script>
 
 <template>
-	<section
-		class="tool-block"
-		:class="[status, { open, nested }]"
-		:data-tool-segment-id="id"
-	>
-		<button
-			class="tool-summary"
-			:class="{ nested }"
-			type="button"
-			:aria-expanded="open ? 'true' : 'false'"
-			@click="emit('toggle')"
-		>
+	<section class="tool-block" :class="[status, { open, nested }]" :data-tool-segment-id="id">
+		<button class="tool-summary" :class="{ nested }" type="button" :aria-expanded="open ? 'true' : 'false'"
+			@click="emit('toggle')">
 			<span class="tool-summary-main">
 				<ToolStatusIcon :status="status" />
 				<span class="inline-tool-label">{{ label.primary || '工具调用' }}</span>
@@ -65,6 +56,17 @@ const sourceText = computed(() => {
 </template>
 
 <style scoped>
-.tool-details-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.tool-source { color: var(--text-muted); font-size: 10px; font-weight: 500; letter-spacing: 0; }
+.tool-details-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.tool-source {
+	color: var(--text-muted);
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0;
+}
 </style>

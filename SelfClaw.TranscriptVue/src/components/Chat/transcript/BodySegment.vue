@@ -31,10 +31,6 @@ function onClick(event) {
 </script>
 
 <template>
-	<div
-		class="body body-segment markdown-content"
-		:class="{ first: isFirst, last: isLast }"
-		@click="onClick"
-		v-html="html"
-	></div>
+	<div class="body body-segment markdown-content" :class="{ first: isFirst, last: isLast }" @click="onClick"
+		v-html="html"></div>
 </template>

@@ -57,19 +57,10 @@ defineExpose({
 			<div ref="contentEl" class="transcript-content">
 				<!-- 每条消息是独立的 keyed 节点：流式更新时只有内容变化的那条会重渲，
 				     其余消息的 DOM（文本选区、图片、动画）保持不动。展开折叠块只重渲该块。 -->
-				<div
-					v-for="item in items"
-					:key="item.id"
-					class="message-row"
-					:class="[item.role, item.status]"
-					:data-message-id="item.id"
-				>
-					<MessageContent
-						:item="item"
-						:activity-text="activityText"
-						:collapse="collapse"
-						@preview-image="emit('preview-image', $event)"
-					/>
+				<div v-for="item in items" :key="item.id" class="message-row" :class="[item.role, item.status]"
+					:data-message-id="item.id">
+					<MessageContent :item="item" :activity-text="activityText" :collapse="collapse"
+						@preview-image="emit('preview-image', $event)" />
 				</div>
 				<div v-if="turnStatus" class="turn-status-row" role="status" aria-live="polite">
 					<span class="turn-status-dot" aria-hidden="true"></span>

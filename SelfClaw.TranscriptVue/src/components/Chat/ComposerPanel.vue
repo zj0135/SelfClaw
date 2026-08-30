@@ -193,7 +193,8 @@ defineExpose({
 						请求执行 <strong>{{ approvalTitle }}</strong>
 					</span>
 					<span v-if="approvalSource" class="tool-approval-source">{{ approvalSource }}</span>
-					<span v-if="approvalDetail" class="tool-approval-detail" :title="approvalDetail">{{ approvalDetail }}</span>
+					<span v-if="approvalDetail" class="tool-approval-detail" :title="approvalDetail">{{ approvalDetail
+						}}</span>
 				</div>
 				<div class="tool-approval-actions">
 					<button class="tool-approval-btn reject" type="button" title="拒绝" @click="rejectTool">
@@ -209,52 +210,36 @@ defineExpose({
 		</transition>
 		<section class="composer-shell" aria-label="消息输入">
 			<div class="composer-grip" aria-hidden="true"></div>
-			<textarea
-				ref="textareaRef"
-				v-model="composerText"
-				class="composer-input"
-				rows="3"
-				placeholder="让助手帮你处理项目..."
-				@keydown="onKeydown"
-			></textarea>
+			<textarea ref="textareaRef" v-model="composerText" class="composer-input" rows="3"
+				placeholder="让助手帮你处理项目..." @keydown="onKeydown"></textarea>
 			<p v-if="submitError" class="composer-error" role="alert">{{ submitError }}</p>
 			<div class="composer-toolbar">
-			<div class="composer-tools-left">
-			<ModelSelector :execution-mode="agentMode" />
-			<SkillPicker
-				v-if="agentMode === 'direct'"
-				:agent-id="selectedAgentId"
-				:agent-name="selectedAgentName"
-				:capability-revision="capabilityRevision"
-				@select="insertSkillToken"
-			/>
-			<button class="icon-btn" type="button" title="功能" aria-label="功能">
-				<SlidersHorizontal :size="16" :stroke-width="1.8" aria-hidden="true" />
-			</button>
-			<PermissionSelector :mode="toolPermissionMode" @select="emit('select-permission-mode', $event)" />
+				<div class="composer-tools-left">
+					<ModelSelector :execution-mode="agentMode" />
+					<SkillPicker v-if="agentMode === 'direct'" :agent-id="selectedAgentId"
+						:agent-name="selectedAgentName" :capability-revision="capabilityRevision"
+						@select="insertSkillToken" />
+					<button class="icon-btn" type="button" title="功能" aria-label="功能">
+						<SlidersHorizontal :size="16" :stroke-width="1.8" aria-hidden="true" />
+					</button>
+					<PermissionSelector :mode="toolPermissionMode" @select="emit('select-permission-mode', $event)" />
+				</div>
+				<div class="composer-tools-right">
+					<button v-if="props.busy" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成"
+						@click="stop">
+						<Square :size="13" fill="currentColor" :stroke-width="0" aria-hidden="true" />
+					</button>
+					<button v-else class="send-btn" type="button" :disabled="!canSend" title="发送" aria-label="发送"
+						@click="submit">
+						<ArrowRight :size="17" :stroke-width="2.2" aria-hidden="true" />
+					</button>
+				</div>
 			</div>
-			<div class="composer-tools-right">
-			<button v-if="props.busy" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成" @click="stop">
-				<Square :size="13" fill="currentColor" :stroke-width="0" aria-hidden="true" />
-			</button>
-			<button v-else class="send-btn" type="button" :disabled="!canSend" title="发送" aria-label="发送" @click="submit">
-				<ArrowRight :size="17" :stroke-width="2.2" aria-hidden="true" />
-			</button>
-			</div>
-		</div>
 		</section>
-		<ComposerStatusBar
-			:workspace-selection="workspaceSelection"
-			:workspace-mode="workspaceMode"
-			:git-loading="gitLoading"
-			:git-error="gitError"
-			@update:workspace-mode="workspaceMode = $event"
-			@refresh="requestWorkspace"
-			@select-root="selectWorkspaceRoot"
-			@delete-root="deleteWorkspaceRoot"
-			@browse="browseWorkspaceFolder"
-			@git-action="emit('git-action', $event)"
-		/>
+		<ComposerStatusBar :workspace-selection="workspaceSelection" :workspace-mode="workspaceMode"
+			:git-loading="gitLoading" :git-error="gitError" @update:workspace-mode="workspaceMode = $event"
+			@refresh="requestWorkspace" @select-root="selectWorkspaceRoot" @delete-root="deleteWorkspaceRoot"
+			@browse="browseWorkspaceFolder" @git-action="emit('git-action', $event)" />
 	</div>
 </template>
 

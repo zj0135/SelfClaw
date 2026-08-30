@@ -448,8 +448,8 @@ onUnmounted(() => {
 		'empty-workspace': isEmptyConversation,
 		'terminal-open': state.terminal.isOpen,
 	}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
-		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :items="state.items"
-			:collapse="collapse" :activity-text="state.activityText" :turn-status="turnStatus"
+		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :items="state.items" :collapse="collapse"
+			:activity-text="state.activityText" :turn-status="turnStatus"
 			@content-resize="transcriptScroll.onContentResize" @scroll="transcriptScroll.onScroll"
 			@preview-image="openImagePreview" />
 		<section v-else class="empty-composer-stage" aria-label="新对话">
@@ -459,30 +459,16 @@ onUnmounted(() => {
 				<p>随意提问，或使用命令/工具。</p>
 			</div>
 		</section>
-		<ComposerPanel
-			ref="composerShellRef"
-			:busy="state.isBusy || state.isSubmitting"
-			:workspace-selection="state.workspace"
-			:git-loading="state.workspace.gitLoading"
-			:git-error="state.workspace.gitError"
-			:submit-error="state.submitError"
-			:agent-mode="state.agentMode"
-			:selected-agent-id="state.selectedAgentId"
-			:selected-agent-name="state.selectedAgentName"
-		:capability-revision="state.capabilityRevision"
-		:pending-approval="state.pendingApproval"
-		:tool-permission-mode="state.toolPermissionMode"
-		@submit="submitComposer"
-		@stop="stopGeneration"
-		@request-workspace="requestWorkspaceSelection"
-		@select-workspace-root="selectWorkspaceRoot"
-		@delete-workspace-root="deleteWorkspaceRoot"
-		@browse-workspace-folder="browseWorkspaceFolder"
-		@git-action="handleGitAction"
-		@approve-tool="(id) => resolveToolApproval(id, true)"
-		@reject-tool="(id) => resolveToolApproval(id, false)"
-		@select-permission-mode="selectPermissionMode"
-		/>
+		<ComposerPanel ref="composerShellRef" :busy="state.isBusy || state.isSubmitting"
+			:workspace-selection="state.workspace" :git-loading="state.workspace.gitLoading"
+			:git-error="state.workspace.gitError" :submit-error="state.submitError" :agent-mode="state.agentMode"
+			:selected-agent-id="state.selectedAgentId" :selected-agent-name="state.selectedAgentName"
+			:capability-revision="state.capabilityRevision" :pending-approval="state.pendingApproval"
+			:tool-permission-mode="state.toolPermissionMode" @submit="submitComposer" @stop="stopGeneration"
+			@request-workspace="requestWorkspaceSelection" @select-workspace-root="selectWorkspaceRoot"
+			@delete-workspace-root="deleteWorkspaceRoot" @browse-workspace-folder="browseWorkspaceFolder"
+			@git-action="handleGitAction" @approve-tool="(id) => resolveToolApproval(id, true)"
+			@reject-tool="(id) => resolveToolApproval(id, false)" @select-permission-mode="selectPermissionMode" />
 		<TerminalPanel ref="terminalPanelRef" :is-open="state.terminal.isOpen" :is-running="state.terminal.isRunning"
 			:cwd="state.terminal.cwd" @ready="onTerminalReady" @input="onTerminalInput" @resize="onTerminalResize"
 			@close="onTerminalClose" @restart="onTerminalRestart" @focus-change="onTerminalFocusChange" />

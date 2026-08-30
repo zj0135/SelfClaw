@@ -4,6 +4,7 @@ internal enum WebViewHostCommandKind
 {
     OpenLink,
     StartWindowDrag,
+    StartWindowResize,
     MinimizeWindow,
     ToggleMaximizeWindow,
     CloseWindow,

@@ -19,15 +19,9 @@ onBeforeUnmount(() => emit('register', props.tab.key, null));
 
 <template>
 	<div class="plugin-frame" :class="{ active }" :aria-hidden="!active">
-		<iframe
-			ref="frameRef"
-			:src="tab.url"
-			:title="tab.panel.title"
-			sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
-			allow=""
-			referrerpolicy="no-referrer"
-			loading="eager"
-		></iframe>
+		<iframe ref="frameRef" :src="tab.url" :title="tab.panel.title"
+			sandbox="allow-scripts allow-same-origin allow-forms allow-modals" allow="" referrerpolicy="no-referrer"
+			loading="eager"></iframe>
 	</div>
 </template>
 

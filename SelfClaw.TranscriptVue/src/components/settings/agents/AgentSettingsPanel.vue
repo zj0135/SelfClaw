@@ -86,14 +86,8 @@ async function onToggleSubagentBinding(kind, id, enabled) {
 
 <template>
 	<div class="agent-settings sc-root sc-stage">
-		<AgentListColumn
-			v-model:active-kind="activeKind"
-			:agents="state.agents"
-			:subagents="state.subagents"
-			:selected-id="selectedId"
-			:loading="loading"
-			@select="onSelect"
-		/>
+		<AgentListColumn v-model:active-kind="activeKind" :agents="state.agents" :subagents="state.subagents"
+			:selected-id="selectedId" :loading="loading" @select="onSelect" />
 
 		<div class="detail-wrap">
 			<div v-if="error" class="error-bar">
@@ -101,33 +95,15 @@ async function onToggleSubagentBinding(kind, id, enabled) {
 				<span>{{ error }}</span>
 			</div>
 
-			<AgentDetailPanel
-				v-if="activeKind === 'agent' && activeAgent"
-				:agent="activeAgent"
-				:index="activeIndex"
-				:plugins="state.plugins"
-				:skills="state.skills"
-				:mcp-servers="state.mcpServers"
-				:subagents="state.subagents"
-				:saving="isAgentSaving(activeAgent.id)"
-				:binding-pending="agentBindingPending"
-				:allowance-pending="allowancePending"
-				@save="onSaveAgent"
-				@toggle-binding="onToggleAgentBinding"
-				@toggle-subagent="onToggleSubagentAllowance"
-			/>
-			<SubagentDetailPanel
-				v-else-if="activeKind === 'subagent' && activeSubagent"
-				:subagent="activeSubagent"
-				:index="activeIndex"
-				:plugins="state.plugins"
-				:skills="state.skills"
-				:mcp-servers="state.mcpServers"
-				:saving="isSubagentSaving(activeSubagent.id)"
-				:binding-pending="subagentBindingPending"
-				@save="onSaveSubagent"
-				@toggle-binding="onToggleSubagentBinding"
-			/>
+			<AgentDetailPanel v-if="activeKind === 'agent' && activeAgent" :agent="activeAgent" :index="activeIndex"
+				:plugins="state.plugins" :skills="state.skills" :mcp-servers="state.mcpServers"
+				:subagents="state.subagents" :saving="isAgentSaving(activeAgent.id)"
+				:binding-pending="agentBindingPending" :allowance-pending="allowancePending" @save="onSaveAgent"
+				@toggle-binding="onToggleAgentBinding" @toggle-subagent="onToggleSubagentAllowance" />
+			<SubagentDetailPanel v-else-if="activeKind === 'subagent' && activeSubagent" :subagent="activeSubagent"
+				:index="activeIndex" :plugins="state.plugins" :skills="state.skills" :mcp-servers="state.mcpServers"
+				:saving="isSubagentSaving(activeSubagent.id)" :binding-pending="subagentBindingPending"
+				@save="onSaveSubagent" @toggle-binding="onToggleSubagentBinding" />
 			<div v-else class="detail-empty">
 				{{ loading ? '正在加载定义…' : '从左侧选择一个定义查看配置' }}
 			</div>

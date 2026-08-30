@@ -318,9 +318,8 @@ onUnmounted(() => {
 		<!-- ============ 折叠态：图标轨 ============ -->
 		<nav class="rail" aria-label="折叠导航">
 			<div class="rail-scroll" @scroll.passive="hideRailTip">
-				<button class="rail-new" type="button" :aria-label="'新建对话'"
-					@mouseenter="showRailTip($event, '新建对话')" @mouseleave="hideRailTip"
-					@click="onAction('new-chat')">
+				<button class="rail-new" type="button" :aria-label="'新建对话'" @mouseenter="showRailTip($event, '新建对话')"
+					@mouseleave="hideRailTip" @click="onAction('new-chat')">
 					<Plus :size="17" :stroke-width="2.2" aria-hidden="true" />
 				</button>
 

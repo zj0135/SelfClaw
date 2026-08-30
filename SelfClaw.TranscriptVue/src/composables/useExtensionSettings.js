@@ -70,9 +70,7 @@ export function useExtensionSettings() {
 	}
 
 	async function setEnabled(kind, item, enabled) {
-		const response = await mutate(kind, item.id, () =>
-			request('extensions/set-enabled', { kind, id: item.id, enabled }),
-		);
+		const response = await mutate(kind, item.id, () => request('extensions/set-enabled', { kind, id: item.id, enabled }));
 		if (!response) return false;
 		// set-enabled 只回 { ok, revision }：status 与未确认权限由 catalog 判定（可能是
 		// broken / needs-permission），本地猜 ready 会与能力解析结果不一致。
@@ -85,7 +83,7 @@ export function useExtensionSettings() {
 			request('extensions/acknowledge-plugin-permissions', {
 				id: item.id,
 				permissions: item.permissions || [],
-			}),
+			})
 		);
 		if (!response) return false;
 		await load();
@@ -93,9 +91,7 @@ export function useExtensionSettings() {
 	}
 
 	async function deleteItem(kind, item) {
-		const response = await mutate(kind, item.id, () =>
-			request('extensions/delete', { kind, id: item.id }),
-		);
+		const response = await mutate(kind, item.id, () => request('extensions/delete', { kind, id: item.id }));
 		if (!response) return false;
 		const collection = kindCollections[kind];
 		state.value[collection] = state.value[collection].filter((candidate) => candidate.id !== item.id);
@@ -105,9 +101,7 @@ export function useExtensionSettings() {
 
 	async function saveMcp(command) {
 		const id = command.id || 'new';
-		const response = await mutate('mcpServer', id, () =>
-			request('extensions/save-mcp', command),
-		);
+		const response = await mutate('mcpServer', id, () => request('extensions/save-mcp', command));
 		if (!response) return null;
 		const index = state.value.mcpServers.findIndex((server) => server.id === response.server.id);
 		if (index >= 0) state.value.mcpServers[index] = response.server;
@@ -117,18 +111,14 @@ export function useExtensionSettings() {
 	}
 
 	async function testMcp(id) {
-		const response = await mutate('mcpServer', id, () =>
-			request('extensions/test-mcp', { id }, { timeout: 0 }),
-		);
+		const response = await mutate('mcpServer', id, () => request('extensions/test-mcp', { id }, { timeout: 0 }));
 		if (!response) return null;
 		await load();
 		return response.result;
 	}
 
 	async function importPackage(kind) {
-		const response = await mutate(kind, 'import', () =>
-			request('extensions/import-package', { kind }, { timeout: 0 }),
-		);
+		const response = await mutate(kind, 'import', () => request('extensions/import-package', { kind }, { timeout: 0 }));
 		if (!response || response.cancelled) return null;
 		await load();
 		return response;

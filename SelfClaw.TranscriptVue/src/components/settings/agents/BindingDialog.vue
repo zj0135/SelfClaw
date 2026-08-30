@@ -50,7 +50,8 @@ const boundCount = computed(() => props.items.filter((item) => item.bound).lengt
 						<h3>{{ title }}</h3>
 						<p v-if="hint">{{ hint }}</p>
 					</div>
-					<span class="count-pill" :class="{ off: boundCount === 0 }">{{ boundCount }} / {{ items.length }}</span>
+					<span class="count-pill" :class="{ off: boundCount === 0 }">{{ boundCount }} / {{ items.length
+					}}</span>
 					<button type="button" class="close" aria-label="关闭" @click="emit('close')">
 						<X :size="16" :stroke-width="2" />
 					</button>
@@ -64,19 +65,11 @@ const boundCount = computed(() => props.items.filter((item) => item.bound).lengt
 				<div class="list">
 					<div v-if="!items.length" class="empty">{{ emptyText }}</div>
 					<div v-else-if="!filtered.length" class="empty">没有匹配项</div>
-					<label
-						v-for="item in filtered"
-						:key="item.id"
-						class="row"
-						:class="{ bound: item.bound, locked: Boolean(item.managedBy) }"
-					>
-						<input
-							type="checkbox"
-							:checked="item.bound"
-							:disabled="Boolean(item.managedBy) || pending(item.id)"
-							:aria-label="`绑定 ${item.name}`"
-							@change="emit('toggle', item, $event.target.checked)"
-						/>
+					<label v-for="item in filtered" :key="item.id" class="row"
+						:class="{ bound: item.bound, locked: Boolean(item.managedBy) }">
+						<input type="checkbox" :checked="item.bound"
+							:disabled="Boolean(item.managedBy) || pending(item.id)" :aria-label="`绑定 ${item.name}`"
+							@change="emit('toggle', item, $event.target.checked)" />
 						<span class="r-main">
 							<span class="r-title">
 								<span class="r-name">{{ item.name }}</span>
@@ -86,7 +79,8 @@ const boundCount = computed(() => props.items.filter((item) => item.bound).lengt
 							<span v-if="item.description" class="r-desc">{{ item.description }}</span>
 							<span v-if="item.managedBy" class="r-managed">随插件 {{ item.managedBy }} 的绑定自动生效</span>
 						</span>
-						<LoaderCircle v-if="pending(item.id)" :size="15" :stroke-width="2.2" class="spin" aria-hidden="true" />
+						<LoaderCircle v-if="pending(item.id)" :size="15" :stroke-width="2.2" class="spin"
+							aria-hidden="true" />
 					</label>
 				</div>
 
@@ -392,6 +386,7 @@ footer .primary:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
 	.dialog-backdrop,
 	.dialog {
 		animation-duration: 0.001ms;

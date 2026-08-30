@@ -18,26 +18,24 @@ function send(action) {
 <template>
 	<div class="window-controls" aria-label="Window controls">
 		<div class="window-tool-group" aria-label="Workspace tools">
-			<button class="chrome-button tool-button" type="button" title="Terminal" aria-label="Terminal" @click="send('terminal')">
+			<button class="chrome-button tool-button" type="button" title="命令行" aria-label="Terminal"
+				@click="send('terminal')">
 				<SquareTerminal :size="15" :stroke-width="1.7" />
 			</button>
 		</div>
 
 		<div class="caption-group" aria-label="Window actions">
-			<button class="chrome-button caption-button" type="button" title="Minimize" aria-label="Minimize" @click="send('minimize')">
+			<button class="chrome-button caption-button" type="button" title="最小化" aria-label="Minimize"
+				@click="send('minimize')">
 				<Minus :size="15" :stroke-width="1.8" />
 			</button>
-			<button
-				class="chrome-button caption-button"
-				type="button"
-				:title="props.isMaximized ? 'Restore' : 'Maximize'"
-				:aria-label="props.isMaximized ? 'Restore' : 'Maximize'"
-				@click="send('toggle-maximize')"
-			>
+			<button class="chrome-button caption-button" type="button" :title="props.isMaximized ? '还原' : '最大化'"
+				:aria-label="props.isMaximized ? '还原' : '最大化'" @click="send('toggle-maximize')">
 				<Copy v-if="props.isMaximized" :size="13" :stroke-width="1.8" />
 				<Square v-else :size="13" :stroke-width="1.8" />
 			</button>
-			<button class="chrome-button caption-button close-button" type="button" title="Close" aria-label="Close" @click="send('close')">
+			<button class="chrome-button caption-button close-button" type="button" title="关闭" aria-label="Close"
+				@click="send('close')">
 				<X :size="16" :stroke-width="1.8" />
 			</button>
 		</div>

@@ -97,18 +97,14 @@ function selectItem(id) {
 			</div>
 
 			<nav class="sb-nav">
-				<div v-for="(group, gi) in navGroups" :key="group.label" class="sb-group sc-rise" :style="{ '--i': gi + 1 }">
+				<div v-for="(group, gi) in navGroups" :key="group.label" class="sb-group sc-rise"
+					:style="{ '--i': gi + 1 }">
 					<div class="sb-label">
 						<span>{{ group.label }}</span>
 						<span class="sb-label-en">{{ group.en }}</span>
 					</div>
-					<button
-						v-for="item in group.items"
-						:key="item.id"
-						class="nav-item"
-						:class="{ active: activeTarget === item.id }"
-						@click="selectItem(item.id)"
-					>
+					<button v-for="item in group.items" :key="item.id" class="nav-item"
+						:class="{ active: activeTarget === item.id }" @click="selectItem(item.id)">
 						<span class="ni-index">{{ item.index }}</span>
 						<component :is="item.icon" :size="16" :stroke-width="1.9" class="ni-ico" aria-hidden="true" />
 						<span class="ni-label">{{ item.label }}</span>

@@ -72,35 +72,21 @@ function itemHealthy(item) {
 				<span class="list-kicker-count">{{ totalCount }} 项</span>
 			</div>
 			<div class="seg" role="tablist" aria-label="定义类型">
-				<button
-					type="button"
-					role="tab"
-					:aria-selected="activeKind === 'agent'"
-					:class="{ active: activeKind === 'agent' }"
-					@click="emit('update:activeKind', 'agent')"
-				>
+				<button type="button" role="tab" :aria-selected="activeKind === 'agent'"
+					:class="{ active: activeKind === 'agent' }" @click="emit('update:activeKind', 'agent')">
 					<Bot :size="13" :stroke-width="2.1" aria-hidden="true" />
 					代理
 				</button>
-				<button
-					type="button"
-					role="tab"
-					:aria-selected="activeKind === 'subagent'"
-					:class="{ active: activeKind === 'subagent' }"
-					@click="emit('update:activeKind', 'subagent')"
-				>
+				<button type="button" role="tab" :aria-selected="activeKind === 'subagent'"
+					:class="{ active: activeKind === 'subagent' }" @click="emit('update:activeKind', 'subagent')">
 					<Workflow :size="13" :stroke-width="2.1" aria-hidden="true" />
 					子代理
 				</button>
 			</div>
 			<div class="search">
 				<Search :size="14" :stroke-width="2" class="search-ico" aria-hidden="true" />
-				<input
-					v-model="term"
-					type="text"
-					:placeholder="activeKind === 'agent' ? '搜索代理...' : '搜索子代理...'"
-					:aria-label="activeKind === 'agent' ? '搜索代理' : '搜索子代理'"
-				/>
+				<input v-model="term" type="text" :placeholder="activeKind === 'agent' ? '搜索代理...' : '搜索子代理...'"
+					:aria-label="activeKind === 'agent' ? '搜索代理' : '搜索子代理'" />
 			</div>
 		</div>
 
@@ -113,15 +99,9 @@ function itemHealthy(item) {
 						<span>{{ group.label }}</span>
 						<span class="grp-en">{{ group.en }}</span>
 					</div>
-					<button
-						v-for="(item, index) in group.items"
-						:key="item.id"
-						type="button"
-						class="entry sc-rise"
-						:style="{ '--i': index + 1 }"
-						:class="{ active: item.id === selectedId }"
-						@click="emit('select', item.id)"
-					>
+					<button v-for="(item, index) in group.items" :key="item.id" type="button" class="entry sc-rise"
+						:style="{ '--i': index + 1 }" :class="{ active: item.id === selectedId }"
+						@click="emit('select', item.id)">
 						<span class="e-index">{{ itemIndex(item) }}</span>
 						<span class="e-icon" aria-hidden="true">
 							<Bot v-if="activeKind === 'agent'" :size="17" :stroke-width="1.9" />

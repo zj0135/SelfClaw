@@ -173,20 +173,16 @@ function resetCheckStatus() {
 							<span>{{ group.label }}</span>
 							<span class="grp-en">{{ group.en }}</span>
 						</div>
-						<button
-							v-for="(provider, pi) in group.providers"
-							:key="provider.id"
-							type="button"
-							class="prov sc-rise"
-							:style="{ '--i': pi + 1 }"
+						<button v-for="(provider, pi) in group.providers" :key="provider.id" type="button"
+							class="prov sc-rise" :style="{ '--i': pi + 1 }"
 							:class="{ active: provider.id === activeId, on: provider.enabled, disabled: !provider.enabled }"
-							@click="selectProviderFromHost(provider.id)"
-						>
+							@click="selectProviderFromHost(provider.id)">
 							<span class="p-index">{{ providerIndex(provider) }}</span>
 							<span class="p-logo" aria-hidden="true" v-html="providerLogo(provider)"></span>
 							<span class="p-meta">
 								<span class="p-name">{{ provider.name }}</span>
-								<span class="p-sub">{{ displayEnabledCount(provider) }}/{{ totalCount(provider) }} 模型</span>
+								<span class="p-sub">{{ displayEnabledCount(provider) }}/{{ totalCount(provider) }}
+									模型</span>
 							</span>
 							<span class="dot" aria-hidden="true"></span>
 						</button>
@@ -202,208 +198,178 @@ function resetCheckStatus() {
 			</div>
 
 			<template v-else>
-			<span class="ghost-num" aria-hidden="true">{{ activeIndex }}</span>
+				<span class="ghost-num" aria-hidden="true">{{ activeIndex }}</span>
 
-			<header class="detail-head sc-rise" style="--i: 0">
-				<div class="dh-logo" aria-hidden="true" v-html="providerLogo(activeProvider)"></div>
-				<div class="dh-meta">
-					<div class="dh-kicker">PROVIDER / {{ activeIndex }}</div>
-					<h2>{{ activeProvider.name }}</h2>
-					<p>{{ activeProvider.sub }}</p>
-				</div>
-				<button
-					v-if="activeProvider.connectionId"
-					class="m-icon provider-delete"
-					type="button"
-					title="删除服务商连接"
-					aria-label="删除服务商连接"
-					:disabled="mutating"
-					@click="deleteProvider"
-				>
-					<Trash2 :size="16" :stroke-width="1.9" />
-				</button>
-				<label class="switch big" title="启用此服务商">
-					<input
-						type="checkbox"
-						:checked="activeProvider.enabled"
-						:disabled="mutating"
-						aria-label="启用此服务商"
-						@change="setProviderEnabledFromHost($event.target.checked)"
-					/>
-					<span class="track"></span>
-					<span class="knob"></span>
-				</label>
-			</header>
+				<header class="detail-head sc-rise" style="--i: 0">
+					<div class="dh-logo" aria-hidden="true" v-html="providerLogo(activeProvider)"></div>
+					<div class="dh-meta">
+						<div class="dh-kicker">PROVIDER / {{ activeIndex }}</div>
+						<h2>{{ activeProvider.name }}</h2>
+						<p>{{ activeProvider.sub }}</p>
+					</div>
+					<button v-if="activeProvider.connectionId" class="m-icon provider-delete" type="button"
+						title="删除服务商连接" aria-label="删除服务商连接" :disabled="mutating" @click="deleteProvider">
+						<Trash2 :size="16" :stroke-width="1.9" />
+					</button>
+					<label class="switch big" title="启用此服务商">
+						<input type="checkbox" :checked="activeProvider.enabled" :disabled="mutating"
+							aria-label="启用此服务商" @change="setProviderEnabledFromHost($event.target.checked)" />
+						<span class="track"></span>
+						<span class="knob"></span>
+					</label>
+				</header>
 
-			<div class="detail-body scroll">
-				<div v-if="activeProvider.authKind !== 1" class="field sc-rise" style="--i: 1">
-					<div class="field-row">
-						<label class="fl" for="api-key">API Key</label>
-						<button class="help-link" type="button" :disabled="!activeProvider.getApiKeyUrl" @click="openProviderConsoleFromHost">
-							<ArrowUpRight :size="13" :stroke-width="2" />
-							获取 API Key
-						</button>
-					</div>
-					<div class="input-wrap">
-						<input
-							id="api-key"
-							v-model="apiKeyInput"
-							class="input mono"
-							:type="apiKeyVisible ? 'text' : 'password'"
-							aria-label="API Key"
-							:placeholder="activeProvider?.keyMask || '输入 API Key'"
-							@input="markApiKeyDirty"
-							@change="saveApiKeyToHost"
-						/>
-						<button
-							class="reveal"
-							type="button"
-							:aria-label="apiKeyVisible ? '隐藏密钥' : '显示密钥'"
-							:title="apiKeyVisible ? '隐藏密钥' : '显示密钥'"
-							@click="apiKeyVisible = !apiKeyVisible"
-						>
-							<EyeOff v-if="apiKeyVisible" :size="16" :stroke-width="1.9" />
-							<Eye v-else :size="16" :stroke-width="1.9" />
-						</button>
-					</div>
-				</div>
-
-				<div class="field sc-rise" style="--i: 2">
-					<div class="field-row">
-						<label class="fl" for="api-base">API 代理地址</label>
-					</div>
-					<input
-						id="api-base"
-						v-model="activeProvider.base"
-						class="input mono"
-						type="text"
-						aria-label="API 代理地址"
-						@change="saveApiBaseToHost"
-					/>
-					<p class="field-hint">自定义端点，用于代理或第三方兼容服务</p>
-				</div>
-
-				<div class="field sc-rise" style="--i: 3">
-					<div class="field-row">
-						<label class="fl" for="check-model">连通性检查</label>
-					</div>
-					<div class="check-row">
-						<div class="select">
-							<select id="check-model" v-model="selectedCheckModel" aria-label="选择检查模型">
-								<option v-if="!activeProvider.models.length" value="">无可用模型</option>
-								<option v-for="model in activeProvider.models" :key="model.profileId" :value="model.profileId">
-									{{ model.name }}
-								</option>
-							</select>
-							<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
-						</div>
-						<button class="btn" type="button" :disabled="checking || !activeProvider.connectionId || !activeProvider.models.length" @click="checkConnectivityFromHost">
-							检查
-						</button>
-					</div>
-					<div v-if="checkStatus.visible" class="check-status show" :class="checkStatus.state">
-						<span v-if="checkStatus.state === 'loading'" class="spin" aria-hidden="true"></span>
-						<Check v-else-if="checkStatus.state === 'ok'" :size="14" :stroke-width="2.4" />
-						<span v-else class="err-dot" aria-hidden="true"></span>
-						{{ checkStatus.text }}
-					</div>
-				</div>
-
-				<div class="field models-field sc-rise" style="--i: 4">
-					<div class="models">
-						<div class="models-head">
-							<div>
-								<div class="mh-kicker">MODEL REGISTRY</div>
-								<h3>模型列表</h3>
-								<div class="count">共 {{ totalCount(activeProvider) }} 个模型，已启用 {{ enabledCount(activeProvider) }}</div>
-							</div>
-							<span class="count-pill">{{ enabledCount(activeProvider) }} / {{ totalCount(activeProvider) }}</span>
-						</div>
-						<div class="models-toolbar">
-							<div class="search">
-								<Search :size="14" :stroke-width="2" class="search-ico" aria-hidden="true" />
-								<input v-model="modelSearch" type="text" placeholder="搜索模型..." aria-label="搜索模型" />
-							</div>
-							<button class="btn sm" type="button" :disabled="mutating || !activeProvider.connectionId || !activeProvider.models.length" @click="setAllModelsEnabled(true)">全部启用</button>
-							<button class="btn sm" type="button" :disabled="mutating || !activeProvider.connectionId || !activeProvider.models.length" @click="setAllModelsEnabled(false)">全部禁用</button>
-							<button class="btn sm fetch-models-btn" type="button" :disabled="fetchingModels || !activeProvider.connectionId || !activeProvider.supportsModelListing" @click="fetchModelListFromHost">
-								<RefreshCw :size="13" :stroke-width="2" class="refresh-ico" :class="{ spinning: fetchingModels }" />
-								获取模型列表
-							</button>
-							<button class="icon-btn add-model-btn" type="button" title="添加模型" aria-label="添加模型" :disabled="!activeProvider.connectionId" @click="openModelDialog">
-								<Plus :size="15" :stroke-width="2.2" />
+				<div class="detail-body scroll">
+					<div v-if="activeProvider.authKind !== 1" class="field sc-rise" style="--i: 1">
+						<div class="field-row">
+							<label class="fl" for="api-key">API Key</label>
+							<button class="help-link" type="button" :disabled="!activeProvider.getApiKeyUrl"
+								@click="openProviderConsoleFromHost">
+								<ArrowUpRight :size="13" :stroke-width="2" />
+								获取 API Key
 							</button>
 						</div>
-
-						<div v-if="!activeProvider.models.length" class="model-list">
-							<div class="models-empty">尚未获取模型，点击“获取模型列表”加载</div>
+						<div class="input-wrap">
+							<input id="api-key" v-model="apiKeyInput" class="input mono"
+								:type="apiKeyVisible ? 'text' : 'password'" aria-label="API Key"
+								:placeholder="activeProvider?.keyMask || '输入 API Key'" @input="markApiKeyDirty"
+								@change="saveApiKeyToHost" />
+							<button class="reveal" type="button" :aria-label="apiKeyVisible ? '隐藏密钥' : '显示密钥'"
+								:title="apiKeyVisible ? '隐藏密钥' : '显示密钥'" @click="apiKeyVisible = !apiKeyVisible">
+								<EyeOff v-if="apiKeyVisible" :size="16" :stroke-width="1.9" />
+								<Eye v-else :size="16" :stroke-width="1.9" />
+							</button>
 						</div>
-						<div v-else-if="!filteredModels.length" class="model-empty">没有匹配的模型</div>
-						<div v-else class="model-list">
-							<div v-for="model in filteredModels" :key="model.profileId" class="model">
-								<div class="m-logo" aria-hidden="true" v-html="providerLogo(activeProvider)"></div>
-								<div class="m-main">
-									<div class="m-title">
-										<span class="m-name">{{ model.name }}</span>
-										<span class="m-id">{{ model.id }}</span>
-									</div>
-									<div class="m-tags">
-										<span class="tag">{{ model.ctx }} 上下文</span>
-										<span class="tag">{{ model.out }} 输出</span>
-										<span v-if="model.outp !== '—'" class="price-tag">IN {{ model.inp }} / OUT {{ model.outp }}</span>
-										<span v-if="model.cacheW && model.cacheR" class="price-tag dim">CACHE W{{ model.cacheW }} / R{{ model.cacheR }}</span>
-									</div>
+					</div>
+
+					<div class="field sc-rise" style="--i: 2">
+						<div class="field-row">
+							<label class="fl" for="api-base">API 代理地址</label>
+						</div>
+						<input id="api-base" v-model="activeProvider.base" class="input mono" type="text"
+							aria-label="API 代理地址" @change="saveApiBaseToHost" />
+						<p class="field-hint">自定义端点，用于代理或第三方兼容服务</p>
+					</div>
+
+					<div class="field sc-rise" style="--i: 3">
+						<div class="field-row">
+							<label class="fl" for="check-model">连通性检查</label>
+						</div>
+						<div class="check-row">
+							<div class="select">
+								<select id="check-model" v-model="selectedCheckModel" aria-label="选择检查模型">
+									<option v-if="!activeProvider.models.length" value="">无可用模型</option>
+									<option v-for="model in activeProvider.models" :key="model.profileId"
+										:value="model.profileId">
+										{{ model.name }}
+									</option>
+								</select>
+								<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
+							</div>
+							<button class="btn" type="button"
+								:disabled="checking || !activeProvider.connectionId || !activeProvider.models.length"
+								@click="checkConnectivityFromHost">
+								检查
+							</button>
+						</div>
+						<div v-if="checkStatus.visible" class="check-status show" :class="checkStatus.state">
+							<span v-if="checkStatus.state === 'loading'" class="spin" aria-hidden="true"></span>
+							<Check v-else-if="checkStatus.state === 'ok'" :size="14" :stroke-width="2.4" />
+							<span v-else class="err-dot" aria-hidden="true"></span>
+							{{ checkStatus.text }}
+						</div>
+					</div>
+
+					<div class="field models-field sc-rise" style="--i: 4">
+						<div class="models">
+							<div class="models-head">
+								<div>
+									<div class="mh-kicker">MODEL REGISTRY</div>
+									<h3>模型列表</h3>
+									<div class="count">共 {{ totalCount(activeProvider) }} 个模型，已启用 {{
+										enabledCount(activeProvider) }}</div>
 								</div>
-								<div class="m-actions">
-									<button class="m-icon" type="button" title="查看详情" aria-label="查看详情">
-										<Eye :size="15" :stroke-width="1.9" />
-									</button>
-									<button class="m-icon" type="button" title="模型参数" aria-label="模型参数">
-										<SlidersHorizontal :size="15" :stroke-width="1.9" />
-									</button>
-									<button
-										class="m-icon model-delete"
-										type="button"
-										title="删除模型"
-										aria-label="删除模型"
-										:disabled="pendingModelIds.has(model.profileId)"
-										@click="deleteModel(model)"
-									>
-										<Trash2 :size="15" :stroke-width="1.9" />
-									</button>
-									<label class="switch" title="启用模型">
-										<input
-											type="checkbox"
-											:checked="model.on"
+								<span class="count-pill">{{ enabledCount(activeProvider) }} / {{
+									totalCount(activeProvider) }}</span>
+							</div>
+							<div class="models-toolbar">
+								<div class="search">
+									<Search :size="14" :stroke-width="2" class="search-ico" aria-hidden="true" />
+									<input v-model="modelSearch" type="text" placeholder="搜索模型..." aria-label="搜索模型" />
+								</div>
+								<button class="btn sm" type="button"
+									:disabled="mutating || !activeProvider.connectionId || !activeProvider.models.length"
+									@click="setAllModelsEnabled(true)">全部启用</button>
+								<button class="btn sm" type="button"
+									:disabled="mutating || !activeProvider.connectionId || !activeProvider.models.length"
+									@click="setAllModelsEnabled(false)">全部禁用</button>
+								<button class="btn sm fetch-models-btn" type="button"
+									:disabled="fetchingModels || !activeProvider.connectionId || !activeProvider.supportsModelListing"
+									@click="fetchModelListFromHost">
+									<RefreshCw :size="13" :stroke-width="2" class="refresh-ico"
+										:class="{ spinning: fetchingModels }" />
+									获取模型列表
+								</button>
+								<button class="icon-btn add-model-btn" type="button" title="添加模型" aria-label="添加模型"
+									:disabled="!activeProvider.connectionId" @click="openModelDialog">
+									<Plus :size="15" :stroke-width="2.2" />
+								</button>
+							</div>
+
+							<div v-if="!activeProvider.models.length" class="model-list">
+								<div class="models-empty">尚未获取模型，点击“获取模型列表”加载</div>
+							</div>
+							<div v-else-if="!filteredModels.length" class="model-empty">没有匹配的模型</div>
+							<div v-else class="model-list">
+								<div v-for="model in filteredModels" :key="model.profileId" class="model">
+									<div class="m-logo" aria-hidden="true" v-html="providerLogo(activeProvider)"></div>
+									<div class="m-main">
+										<div class="m-title">
+											<span class="m-name">{{ model.name }}</span>
+											<span class="m-id">{{ model.id }}</span>
+										</div>
+										<div class="m-tags">
+											<span class="tag">{{ model.ctx }} 上下文</span>
+											<span class="tag">{{ model.out }} 输出</span>
+											<span v-if="model.outp !== '—'" class="price-tag">IN {{ model.inp }} / OUT
+												{{ model.outp }}</span>
+											<span v-if="model.cacheW && model.cacheR" class="price-tag dim">CACHE W{{
+												model.cacheW }} / R{{ model.cacheR }}</span>
+										</div>
+									</div>
+									<div class="m-actions">
+										<button class="m-icon" type="button" title="查看详情" aria-label="查看详情">
+											<Eye :size="15" :stroke-width="1.9" />
+										</button>
+										<button class="m-icon" type="button" title="模型参数" aria-label="模型参数">
+											<SlidersHorizontal :size="15" :stroke-width="1.9" />
+										</button>
+										<button class="m-icon model-delete" type="button" title="删除模型" aria-label="删除模型"
 											:disabled="pendingModelIds.has(model.profileId)"
-											aria-label="启用模型"
-											@change="setModelEnabled(model, $event.target.checked)"
-										/>
-										<span class="track"></span>
-										<span class="knob"></span>
-									</label>
+											@click="deleteModel(model)">
+											<Trash2 :size="15" :stroke-width="1.9" />
+										</button>
+										<label class="switch" title="启用模型">
+											<input type="checkbox" :checked="model.on"
+												:disabled="pendingModelIds.has(model.profileId)" aria-label="启用模型"
+												@change="setModelEnabled(model, $event.target.checked)" />
+											<span class="track"></span>
+											<span class="knob"></span>
+										</label>
+									</div>
 								</div>
 							</div>
 						</div>
 					</div>
 				</div>
-			</div>
 			</template>
 		</main>
 
-		<AiProviderDialogs
-			:provider-open="providerDialogOpen"
-			:model-open="modelDialogOpen"
-			:protocols="customProtocols"
-			:provider-draft="providerDraft"
-			:provider="activeProvider"
-			:model-draft="modelDraft"
-			:busy="mutating"
-			@close-provider="providerDialogOpen = false"
-			@submit-provider="createCustomProvider"
-			@close-model="modelDialogOpen = false"
-			@submit-model="createModel"
-		/>
+		<AiProviderDialogs :provider-open="providerDialogOpen" :model-open="modelDialogOpen"
+			:protocols="customProtocols" :provider-draft="providerDraft" :provider="activeProvider"
+			:model-draft="modelDraft" :busy="mutating" @close-provider="providerDialogOpen = false"
+			@submit-provider="createCustomProvider" @close-model="modelDialogOpen = false"
+			@submit-model="createModel" />
 	</div>
 </template>
 
@@ -1333,12 +1299,12 @@ function resetCheckStatus() {
 		background 0.2s;
 }
 
-.switch input:checked + .track {
+.switch input:checked+.track {
 	border-color: var(--sc-acid);
 	background: var(--sc-acid);
 }
 
-.switch input:checked + .track + .knob {
+.switch input:checked+.track+.knob {
 	transform: translateX(18px);
 	background: #fff;
 }
@@ -1353,7 +1319,7 @@ function resetCheckStatus() {
 	height: 21px;
 }
 
-.switch.big input:checked + .track + .knob {
+.switch.big input:checked+.track+.knob {
 	transform: translateX(21px);
 }
 

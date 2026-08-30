@@ -22,14 +22,8 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 		</div>
 
 		<div class="rows">
-			<button
-				v-for="section in sections"
-				:key="section.key"
-				type="button"
-				class="cap-row"
-				:disabled="!section.items.length"
-				@click="emit('open', section)"
-			>
+			<button v-for="section in sections" :key="section.key" type="button" class="cap-row"
+				:disabled="!section.items.length" @click="emit('open', section)">
 				<span class="cap-icon" aria-hidden="true">
 					<component :is="section.icon" :size="16" :stroke-width="1.9" />
 				</span>

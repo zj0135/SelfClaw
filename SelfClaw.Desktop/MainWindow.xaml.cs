@@ -25,6 +25,15 @@ public partial class MainWindow : Window
     private const string AttachmentHostName = "attachments.selfclaw.local";
     private const int WmGetMinMaxInfo = 0x0024;
     private const int WmNcLButtonDown = 0x00A1;
+    private const int HtLeft = 10;
+    private const int HtRight = 11;
+    private const int HtTop = 12;
+    private const int HtTopLeft = 13;
+    private const int HtTopRight = 14;
+    private const int HtBottom = 15;
+    private const int HtBottomLeft = 16;
+    private const int HtBottomRight = 17;
+
     private const uint MonitorDefaultToNearest = 2;
     private const double StartupWorkAreaMargin = 48d;
     private static readonly IntPtr HtCaption = new(2);
@@ -295,6 +304,44 @@ public partial class MainWindow : Window
         SendMessage(hwnd, WmNcLButtonDown, HtCaption, IntPtr.Zero);
     }
 
+    // 缩放热区做在网页四周而不是 WPF 侧：WebView2 铺满整个窗口，它是独立的子 HWND，鼠标消息直接进子
+    // 窗口，父窗口在边缘既画不了东西也收不到输入。方位名到 HT* 码的映射留在宿主这边，网页只报方位。
+    private void StartWindowResize(string? edge)
+    {
+        if (WindowState != WindowState.Normal
+            || ResizeMode is not (ResizeMode.CanResize or ResizeMode.CanResizeWithGrip))
+        {
+            return;
+        }
+
+        var hitTest = edge switch
+        {
+            "left" => HtLeft,
+            "right" => HtRight,
+            "top" => HtTop,
+            "bottom" => HtBottom,
+            "top-left" => HtTopLeft,
+            "top-right" => HtTopRight,
+            "bottom-left" => HtBottomLeft,
+            "bottom-right" => HtBottomRight,
+            _ => 0,
+        };
+
+        if (hitTest == 0)
+        {
+            return;
+        }
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        ReleaseCapture();
+        SendMessage(hwnd, WmNcLButtonDown, new IntPtr(hitTest), IntPtr.Zero);
+    }
+
     private void OnWindowStateChanged(object? sender, EventArgs e)
         => PostWindowState();
 
@@ -350,6 +397,9 @@ public partial class MainWindow : Window
                 break;
             case WebViewHostCommandKind.StartWindowDrag:
                 StartWindowDrag();
+                break;
+            case WebViewHostCommandKind.StartWindowResize:
+                StartWindowResize(command.Value);
                 break;
             case WebViewHostCommandKind.MinimizeWindow:
                 WindowState = WindowState.Minimized;
@@ -551,11 +601,13 @@ public partial class MainWindow : Window
         var monitorArea = monitorInfo.RcMonitor;
         var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);
 
+        // 只约束「最大化」这一个状态：位置与尺寸对齐工作区，避免盖住任务栏。
+        // ptMaxTrackSize 是用户拖拽的尺寸上限，而 WM_GETMINMAXINFO 在每次改变尺寸前都会到达，
+        // 包括拖边框那一刻——在这里跟着写工作区大小，会把手动拖拽也一并钉死。留默认值。
         minMaxInfo.PtMaxPosition.X = Math.Abs(workArea.Left - monitorArea.Left);
         minMaxInfo.PtMaxPosition.Y = Math.Abs(workArea.Top - monitorArea.Top);
         minMaxInfo.PtMaxSize.X = Math.Abs(workArea.Right - workArea.Left);
         minMaxInfo.PtMaxSize.Y = Math.Abs(workArea.Bottom - workArea.Top);
-        minMaxInfo.PtMaxTrackSize = minMaxInfo.PtMaxSize;
 
         Marshal.StructureToPtr(minMaxInfo, lParam, true);
     }

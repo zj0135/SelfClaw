@@ -305,16 +305,12 @@ watch(isDirect, () => {
 
 <template>
 	<div ref="rootRef" class="model-wrap">
-		<button
-			class="composer-model"
-			type="button"
-			:aria-expanded="open ? 'true' : 'false'"
-			aria-haspopup="true"
-			title="模型选择"
-			@click.stop="togglePanel"
-		>
-			<span class="model-badge" :class="{ 'model-badge--brand': !isDirect && !!selectedAgent?.iconSrc }" aria-hidden="true">
-				<img v-if="!isDirect && selectedAgent?.iconSrc" class="model-badge-img" :src="selectedAgent.iconSrc" alt="" />
+		<button class="composer-model" type="button" :aria-expanded="open ? 'true' : 'false'" aria-haspopup="true"
+			title="模型选择" @click.stop="togglePanel">
+			<span class="model-badge" :class="{ 'model-badge--brand': !isDirect && !!selectedAgent?.iconSrc }"
+				aria-hidden="true">
+				<img v-if="!isDirect && selectedAgent?.iconSrc" class="model-badge-img" :src="selectedAgent.iconSrc"
+					alt="" />
 				<Bot v-else :size="12" :stroke-width="2" />
 			</span>
 			<span class="model-name">{{ modelLabel }}</span>
@@ -328,16 +324,10 @@ watch(isDirect, () => {
 			<div class="pop-section">
 				<div class="pop-label">模式</div>
 				<div class="seg" role="radiogroup" aria-label="执行模式">
-					<button
-						type="button"
-						:aria-pressed="!isDirect ? 'true' : 'false'"
-						@click="pickMode('cli')"
-					>本地 CLI</button>
-					<button
-						type="button"
-						:aria-pressed="isDirect ? 'true' : 'false'"
-						@click="pickMode('direct')"
-					>提供商</button>
+					<button type="button" :aria-pressed="!isDirect ? 'true' : 'false'" @click="pickMode('cli')">本地
+						CLI</button>
+					<button type="button" :aria-pressed="isDirect ? 'true' : 'false'"
+						@click="pickMode('direct')">提供商</button>
 				</div>
 			</div>
 
@@ -350,20 +340,12 @@ watch(isDirect, () => {
 					未检测到本地 CLI，请安装 Claude Code / Codex CLI / OpenCode 后在「设置 → 编程助手」重新扫描。
 				</div>
 				<div class="agent-list" role="radiogroup" aria-label="代理">
-					<button
-						v-for="agent in detectedAgents"
-						:key="agent.id"
-						type="button"
-						class="agent-item"
-						role="radio"
-						:aria-checked="selectedCliId === agent.id ? 'true' : 'false'"
-						@click="pickAgent(agent)"
-					>
-						<span
-							class="agent-glyph"
+					<button v-for="agent in detectedAgents" :key="agent.id" type="button" class="agent-item"
+						role="radio" :aria-checked="selectedCliId === agent.id ? 'true' : 'false'"
+						@click="pickAgent(agent)">
+						<span class="agent-glyph"
 							:style="{ background: agent.iconBackground || agent.tint, color: agent.ink }"
-							aria-hidden="true"
-						>
+							aria-hidden="true">
 							<img v-if="agent.iconSrc" class="agent-glyph-img" :src="agent.iconSrc" alt="" />
 							<Terminal v-else :size="13" :stroke-width="2" />
 						</span>
@@ -380,26 +362,16 @@ watch(isDirect, () => {
 					没有已启用模型，请先在「设置 → AI 服务商」启用连接与模型。
 				</div>
 				<div v-else class="model-select">
-					<button
-						type="button"
-						class="model-select-btn"
-						:aria-expanded="menuOpen ? 'true' : 'false'"
-						aria-haspopup="listbox"
-						@click.stop="toggleMenu"
-					>
+					<button type="button" class="model-select-btn" :aria-expanded="menuOpen ? 'true' : 'false'"
+						aria-haspopup="listbox" @click.stop="toggleMenu">
 						<span>{{ isDirect ? (selectedDirectModel?.name || '未选择模型') : activeModel }}</span>
 						<ChevronRight class="caret" :size="13" :stroke-width="2" aria-hidden="true" />
 					</button>
 					<div v-if="isDirect" v-show="menuOpen" class="model-menu" role="listbox" aria-label="Direct 模型列表">
-						<button
-							v-for="directModel in directModels"
-							:key="directModel.modelProfileId"
-							type="button"
-							class="model-opt"
-							role="option"
+						<button v-for="directModel in directModels" :key="directModel.modelProfileId" type="button"
+							class="model-opt" role="option"
 							:aria-selected="activeDirectModelProfileId === directModel.modelProfileId ? 'true' : 'false'"
-							@click="pickDirectModel(directModel)"
-						>
+							@click="pickDirectModel(directModel)">
 							<span class="model-opt-copy">
 								<strong>{{ directModel.name }}</strong>
 								<small>{{ directModel.providerName }} · {{ directModel.model }}</small>
@@ -408,15 +380,8 @@ watch(isDirect, () => {
 						</button>
 					</div>
 					<div v-else v-show="menuOpen" class="model-menu" role="listbox" aria-label="模型列表">
-						<button
-							v-for="m in models"
-							:key="m"
-							type="button"
-							class="model-opt"
-							role="option"
-							:aria-selected="activeModel === m ? 'true' : 'false'"
-							@click="pickModel(m)"
-						>
+						<button v-for="m in models" :key="m" type="button" class="model-opt" role="option"
+							:aria-selected="activeModel === m ? 'true' : 'false'" @click="pickModel(m)">
 							<span>{{ m }}</span>
 							<Check class="tick" :size="14" :stroke-width="2.4" aria-hidden="true" />
 						</button>
@@ -428,26 +393,15 @@ watch(isDirect, () => {
 			<div v-if="!isDirect && hasReasoning" class="pop-section">
 				<div class="pop-label">推理等级</div>
 				<div class="model-select">
-					<button
-						type="button"
-						class="model-select-btn"
-						:aria-expanded="reasoningMenuOpen ? 'true' : 'false'"
-						aria-haspopup="listbox"
-						@click.stop="toggleReasoningMenu"
-					>
+					<button type="button" class="model-select-btn" :aria-expanded="reasoningMenuOpen ? 'true' : 'false'"
+						aria-haspopup="listbox" @click.stop="toggleReasoningMenu">
 						<span>{{ activeReasoning }}</span>
 						<ChevronRight class="caret" :size="13" :stroke-width="2" aria-hidden="true" />
 					</button>
 					<div v-show="reasoningMenuOpen" class="model-menu" role="listbox" aria-label="推理等级列表">
-						<button
-							v-for="level in reasoningLevels"
-							:key="level"
-							type="button"
-							class="model-opt"
-							role="option"
-							:aria-selected="activeReasoning === level ? 'true' : 'false'"
-							@click="pickReasoning(level)"
-						>
+						<button v-for="level in reasoningLevels" :key="level" type="button" class="model-opt"
+							role="option" :aria-selected="activeReasoning === level ? 'true' : 'false'"
+							@click="pickReasoning(level)">
 							<span>{{ level }}</span>
 							<Check class="tick" :size="14" :stroke-width="2.4" aria-hidden="true" />
 						</button>
@@ -482,7 +436,11 @@ watch(isDirect, () => {
 	cursor: pointer;
 	transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
-.composer-model:hover { background: #f7f8fa; }
+
+.composer-model:hover {
+	background: #f7f8fa;
+}
+
 .composer-model[aria-expanded='true'] {
 	background: #f7f8fa;
 	border-color: #d6dae1;
@@ -499,9 +457,17 @@ watch(isDirect, () => {
 	color: #fff;
 	flex: none;
 }
-.model-badge svg { width: 12px; height: 12px; }
+
+.model-badge svg {
+	width: 12px;
+	height: 12px;
+}
+
 /* 选中 CLI 后徽标显示品牌图标：去掉深色底，让图标以自身配色呈现 */
-.model-badge--brand { background: transparent; }
+.model-badge--brand {
+	background: transparent;
+}
+
 .model-badge-img {
 	display: block;
 	width: 15px;
@@ -514,6 +480,7 @@ watch(isDirect, () => {
 	text-overflow: ellipsis;
 	max-width: 180px;
 }
+
 .model-caret {
 	width: 13px;
 	height: 13px;
@@ -521,7 +488,10 @@ watch(isDirect, () => {
 	flex: none;
 	transition: transform 0.18s ease;
 }
-.composer-model[aria-expanded='true'] .model-caret { transform: rotate(180deg); }
+
+.composer-model[aria-expanded='true'] .model-caret {
+	transform: rotate(180deg);
+}
 
 /* ===== 设置弹出面板 ===== */
 .model-popover {
@@ -549,16 +519,31 @@ watch(isDirect, () => {
 }
 
 @keyframes pop-in-down {
-	from { opacity: 0; transform: translateY(-6px) scale(0.98); }
-	to   { opacity: 1; transform: translateY(0) scale(1); }
+	from {
+		opacity: 0;
+		transform: translateY(-6px) scale(0.98);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
 }
 
 @keyframes pop-in-up {
-	from { opacity: 0; transform: translateY(6px) scale(0.98); }
-	to   { opacity: 1; transform: translateY(0) scale(1); }
+	from {
+		opacity: 0;
+		transform: translateY(6px) scale(0.98);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {
+
 	.model-popover--down,
 	.model-popover--up {
 		animation: none;
@@ -572,7 +557,10 @@ watch(isDirect, () => {
 	color: #6b7280;
 	margin: 2px 2px 6px;
 }
-.pop-section + .pop-section { margin-top: 11px; }
+
+.pop-section+.pop-section {
+	margin-top: 11px;
+}
 
 .agent-hint {
 	margin: 0 2px 6px;
@@ -580,7 +568,10 @@ watch(isDirect, () => {
 	font-size: 11.5px;
 	line-height: 1.55;
 }
-.agent-hint--error { color: #c24150; }
+
+.agent-hint--error {
+	color: #c24150;
+}
 
 /* 模式分段控件 */
 .seg {
@@ -592,6 +583,7 @@ watch(isDirect, () => {
 	border-radius: 9px;
 	background: #f7f8fa;
 }
+
 .seg button {
 	height: 26px;
 	border: 0;
@@ -602,6 +594,7 @@ watch(isDirect, () => {
 	cursor: pointer;
 	transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
+
 .seg button[aria-pressed='true'] {
 	background: #ffffff;
 	color: #171a1f;
@@ -617,12 +610,20 @@ watch(isDirect, () => {
 	overscroll-behavior: contain;
 	padding-right: 2px;
 }
-.agent-list::-webkit-scrollbar { width: 6px; }
-.agent-list::-webkit-scrollbar-track { background: transparent; }
+
+.agent-list::-webkit-scrollbar {
+	width: 6px;
+}
+
+.agent-list::-webkit-scrollbar-track {
+	background: transparent;
+}
+
 .agent-list::-webkit-scrollbar-thumb {
 	background: #dde1e7;
 	border-radius: 99px;
 }
+
 .agent-item {
 	display: flex;
 	align-items: center;
@@ -638,11 +639,16 @@ watch(isDirect, () => {
 	cursor: pointer;
 	transition: background 0.15s, border-color 0.15s;
 }
-.agent-item:hover { background: #f7f8fa; }
+
+.agent-item:hover {
+	background: #f7f8fa;
+}
+
 .agent-item[aria-checked='true'] {
 	background: var(--accent-soft, rgba(59, 91, 253, 0.08));
 	border-color: rgba(59, 91, 253, 0.3);
 }
+
 .agent-glyph {
 	display: inline-grid;
 	place-items: center;
@@ -651,24 +657,40 @@ watch(isDirect, () => {
 	border-radius: 5px;
 	flex: none;
 }
-.agent-glyph svg { width: 13px; height: 13px; }
+
+.agent-glyph svg {
+	width: 13px;
+	height: 13px;
+}
+
 .agent-glyph-img {
 	display: block;
 	width: 14px;
 	height: 14px;
 	object-fit: contain;
 }
-.agent-name { flex: 1; min-width: 0; }
+
+.agent-name {
+	flex: 1;
+	min-width: 0;
+}
+
 .agent-check {
 	width: 14px;
 	height: 14px;
 	color: var(--accent, #3b5bfd);
 	display: none;
 }
-.agent-item[aria-checked='true'] .agent-check { display: block; }
+
+.agent-item[aria-checked='true'] .agent-check {
+	display: block;
+}
 
 /* 模型下拉 */
-.model-select { position: relative; }
+.model-select {
+	position: relative;
+}
+
 .model-select-btn {
 	display: flex;
 	align-items: center;
@@ -685,8 +707,9 @@ watch(isDirect, () => {
 	cursor: pointer;
 	transition: background 0.15s, border-color 0.15s;
 }
+
 /* 模型名过长时截断为省略号，保持单行不换行 */
-.model-select-btn > span {
+.model-select-btn>span {
 	flex: 1;
 	min-width: 0;
 	overflow: hidden;
@@ -694,7 +717,11 @@ watch(isDirect, () => {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.model-select-btn:hover { background: #f7f8fa; }
+
+.model-select-btn:hover {
+	background: #f7f8fa;
+}
+
 /* 菜单在右侧展开，箭头指向右以示意 */
 .model-select-btn .caret {
 	color: #6b7280;
@@ -721,12 +748,20 @@ watch(isDirect, () => {
 	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.05), 0 12px 32px rgba(23, 26, 31, 0.12);
 	z-index: 3;
 }
-.model-menu::-webkit-scrollbar { width: 6px; }
-.model-menu::-webkit-scrollbar-track { background: transparent; }
+
+.model-menu::-webkit-scrollbar {
+	width: 6px;
+}
+
+.model-menu::-webkit-scrollbar-track {
+	background: transparent;
+}
+
 .model-menu::-webkit-scrollbar-thumb {
 	background: #dde1e7;
 	border-radius: 99px;
 }
+
 .model-opt {
 	display: flex;
 	align-items: center;
@@ -742,22 +777,44 @@ watch(isDirect, () => {
 	text-align: left;
 	cursor: pointer;
 }
-.model-opt:hover { background: #f7f8fa; }
-.model-opt .tick { width: 14px; height: 14px; color: #171a1f; display: none; flex: none; }
-.model-opt[aria-selected='true'] { font-weight: 600; }
-.model-opt[aria-selected='true'] .tick { display: block; }
+
+.model-opt:hover {
+	background: #f7f8fa;
+}
+
+.model-opt .tick {
+	width: 14px;
+	height: 14px;
+	color: #171a1f;
+	display: none;
+	flex: none;
+}
+
+.model-opt[aria-selected='true'] {
+	font-weight: 600;
+}
+
+.model-opt[aria-selected='true'] .tick {
+	display: block;
+}
+
 .model-opt-copy {
 	display: grid;
 	min-width: 0;
 	gap: 2px;
 }
+
 .model-opt-copy strong,
 .model-opt-copy small {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.model-opt-copy strong { font: inherit; }
+
+.model-opt-copy strong {
+	font: inherit;
+}
+
 .model-opt-copy small {
 	color: #8a929e;
 	font-size: 10.5px;

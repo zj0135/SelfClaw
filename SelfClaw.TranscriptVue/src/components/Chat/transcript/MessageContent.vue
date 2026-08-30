@@ -50,14 +50,9 @@ const preparingLabel = computed(() => String(props.activityText || '').trim() ||
 			<div v-else-if="hasContent || attachments.length" class="message-flow">
 				<div v-if="attachments.length" class="message-attachments">
 					<figure v-for="(attachment, index) in attachments" :key="index" class="message-attachment">
-						<img
-							v-if="attachment.sourceUrl"
-							class="message-attachment-image"
-							:src="attachment.sourceUrl"
-							:alt="attachment.fileName"
-							loading="lazy"
-							@click="emit('preview-image', { src: attachment.sourceUrl, alt: attachment.fileName })"
-						/>
+						<img v-if="attachment.sourceUrl" class="message-attachment-image" :src="attachment.sourceUrl"
+							:alt="attachment.fileName" loading="lazy"
+							@click="emit('preview-image', { src: attachment.sourceUrl, alt: attachment.fileName })" />
 						<div v-else class="message-attachment-image missing" aria-hidden="true"></div>
 						<figcaption>
 							<span class="message-attachment-name">{{ attachment.fileName }}</span>
@@ -67,43 +62,20 @@ const preparingLabel = computed(() => String(props.activityText || '').trim() ||
 				</div>
 
 				<template v-for="block in blocks" :key="block.key">
-					<ThinkingBlock
-						v-if="block.type === 'thinking'"
-						:item="item"
-						:segment="block.segment"
-						:is-last="block.isLast"
-						:open="collapse.isThinkingOpen(block.id)"
-						@toggle="collapse.toggleThinking(block.id)"
-						@preview-image="emit('preview-image', $event)"
-					/>
-					<ToolGroup
-						v-else-if="block.type === 'tool-group'"
-						:item="item"
-						:block="block"
-						:collapse="collapse"
-					/>
-					<ToolCard
-						v-else-if="block.type === 'tool'"
-						:id="block.id"
-						:segment="block.segment"
-						:summary-label="block.summaryLabel"
-						:open="collapse.isToolOpen(block.id)"
-						@toggle="collapse.toggleTool(block.id)"
-					/>
-					<BodySegment
-						v-else
-						:item="item"
-						:segment="block.segment"
-						:is-first="block.isFirst"
-						:is-last="block.isLast"
-						@preview-image="emit('preview-image', $event)"
-					/>
+					<ThinkingBlock v-if="block.type === 'thinking'" :item="item" :segment="block.segment"
+						:is-last="block.isLast" :open="collapse.isThinkingOpen(block.id)"
+						@toggle="collapse.toggleThinking(block.id)" @preview-image="emit('preview-image', $event)" />
+					<ToolGroup v-else-if="block.type === 'tool-group'" :item="item" :block="block"
+						:collapse="collapse" />
+					<ToolCard v-else-if="block.type === 'tool'" :id="block.id" :segment="block.segment"
+						:summary-label="block.summaryLabel" :open="collapse.isToolOpen(block.id)"
+						@toggle="collapse.toggleTool(block.id)" />
+					<BodySegment v-else :item="item" :segment="block.segment" :is-first="block.isFirst"
+						:is-last="block.isLast" @preview-image="emit('preview-image', $event)" />
 				</template>
-				<p
-					v-if="item.errorMessage"
-					class="message-error"
-					:class="{ 'message-cancelled': item.status === 'cancelled' }"
-				>{{ item.errorMessage }}</p>
+				<p v-if="item.errorMessage" class="message-error"
+					:class="{ 'message-cancelled': item.status === 'cancelled' }">{{
+						item.errorMessage }}</p>
 			</div>
 		</article>
 	</div>

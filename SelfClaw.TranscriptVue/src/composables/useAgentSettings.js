@@ -32,11 +32,9 @@ export function useAgentSettings() {
 
 	const isAgentSaving = (agentId) => pendingKeys.value.has(agentSaveKey(agentId));
 	const isAgentBindingPending = (agentId, kind, id) => pendingKeys.value.has(agentBindingKey(agentId, kind, id));
-	const isSubagentAllowancePending = (agentId, subagentId) =>
-		pendingKeys.value.has(agentSubagentKey(agentId, subagentId));
+	const isSubagentAllowancePending = (agentId, subagentId) => pendingKeys.value.has(agentSubagentKey(agentId, subagentId));
 	const isSubagentSaving = (subagentId) => pendingKeys.value.has(subagentSaveKey(subagentId));
-	const isSubagentBindingPending = (subagentId, kind, id) =>
-		pendingKeys.value.has(subagentBindingKey(subagentId, kind, id));
+	const isSubagentBindingPending = (subagentId, kind, id) => pendingKeys.value.has(subagentBindingKey(subagentId, kind, id));
 
 	async function load() {
 		loading.value = true;
@@ -78,18 +76,14 @@ export function useAgentSettings() {
 	}
 
 	async function saveAgent(agentId, form) {
-		const response = await mutate(agentSaveKey(agentId), () =>
-			request('agents/save-agent', { id: agentId, ...form }),
-		);
+		const response = await mutate(agentSaveKey(agentId), () => request('agents/save-agent', { id: agentId, ...form }));
 		if (!response) return false;
 		applyAgent(response.agent, response.revision);
 		return true;
 	}
 
 	async function setAgentBinding(agentId, kind, id, enabled) {
-		const response = await mutate(agentBindingKey(agentId, kind, id), () =>
-			request('agents/set-binding', { agentId, kind, id, enabled }),
-		);
+		const response = await mutate(agentBindingKey(agentId, kind, id), () => request('agents/set-binding', { agentId, kind, id, enabled }));
 		if (!response) return false;
 		applyAgent(response.agent, response.revision);
 		return true;
@@ -97,7 +91,7 @@ export function useAgentSettings() {
 
 	async function setSubagentAllowance(agentId, subagentId, enabled) {
 		const response = await mutate(agentSubagentKey(agentId, subagentId), () =>
-			request('agents/set-subagent-binding', { agentId, subagentId, enabled }),
+			request('agents/set-subagent-binding', { agentId, subagentId, enabled })
 		);
 		if (!response) return false;
 		applyAgent(response.agent, response.revision);
@@ -105,9 +99,7 @@ export function useAgentSettings() {
 	}
 
 	async function saveSubagent(subagentId, form) {
-		const response = await mutate(subagentSaveKey(subagentId), () =>
-			request('agents/save-subagent', { id: subagentId, ...form }),
-		);
+		const response = await mutate(subagentSaveKey(subagentId), () => request('agents/save-subagent', { id: subagentId, ...form }));
 		if (!response) return false;
 		applySubagent(response.subagent, response.revision);
 		return true;
@@ -115,7 +107,7 @@ export function useAgentSettings() {
 
 	async function setSubagentBinding(subagentId, kind, id, enabled) {
 		const response = await mutate(subagentBindingKey(subagentId, kind, id), () =>
-			request('agents/set-subagent-extension-binding', { subagentId, kind, id, enabled }),
+			request('agents/set-subagent-extension-binding', { subagentId, kind, id, enabled })
 		);
 		if (!response) return false;
 		applySubagent(response.subagent, response.revision);

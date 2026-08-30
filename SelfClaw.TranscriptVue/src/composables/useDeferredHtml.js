@@ -31,7 +31,7 @@ export function useDeferredHtml(source, shouldDefer, delayMs = 160) {
 				html.value = pendingHtml;
 			}, delayMs);
 		},
-		{ immediate: true },
+		{ immediate: true }
 	);
 
 	onUnmounted(clearTimer);

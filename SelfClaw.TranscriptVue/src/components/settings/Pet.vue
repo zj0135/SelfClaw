@@ -96,14 +96,8 @@ onMounted(() => {
         <p class="sc-page-sub">驻留桌面的像素伙伴，选择一位默认出场。</p>
       </div>
 
-      <button
-        type="button"
-        class="pet-toggle"
-        :disabled="syncPending"
-        :aria-pressed="petVisible ? 'true' : 'false'"
-        title="切换桌面宠物可见性"
-        @click="toggleVisible"
-      >
+      <button type="button" class="pet-toggle" :disabled="syncPending" :aria-pressed="petVisible ? 'true' : 'false'"
+        title="切换桌面宠物可见性" @click="toggleVisible">
         <Eye v-if="petVisible" :size="14" :stroke-width="2" class="pt-ico" aria-hidden="true" />
         <EyeOff v-else :size="14" :stroke-width="2" class="pt-ico" aria-hidden="true" />
         <span class="pt-label">{{ petVisible ? '已显示' : '显示宠物' }}</span>
@@ -112,17 +106,9 @@ onMounted(() => {
 
     <div class="sc-page-body">
       <div class="pet-grid">
-        <button
-          v-for="(pet, pi) in pets"
-          :key="pet.id"
-          type="button"
-          class="pet-card sc-rise"
-          :style="{ '--i': pi + 1 }"
-          :disabled="syncPending"
-          :data-selected="selectedPet === pet.id ? 'true' : 'false'"
-          title="点击设为默认"
-          @click="selectPet(pet.id)"
-        >
+        <button v-for="(pet, pi) in pets" :key="pet.id" type="button" class="pet-card sc-rise"
+          :style="{ '--i': pi + 1 }" :disabled="syncPending" :data-selected="selectedPet === pet.id ? 'true' : 'false'"
+          title="点击设为默认" @click="selectPet(pet.id)">
           <span class="pet-stage" aria-hidden="true">
             <span v-if="pet.previewSrc" class="pet-sprite" :style="previewStyle(pet)"></span>
             <span v-else class="pet-initials">{{ initials(pet.name) }}</span>
@@ -150,15 +136,25 @@ onMounted(() => {
 <style scoped>
 @import '../../styles/settings-console.css';
 
-.pet-view * { box-sizing: border-box; }
-.pet-view button { cursor: pointer; font: inherit; color: inherit; }
+.pet-view * {
+  box-sizing: border-box;
+}
+
+.pet-view button {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
 
 .pet-view .sc-page-body {
   font-size: 13px;
   line-height: 1.5;
 }
 
-.pet-view .sc-page-body::-webkit-scrollbar { width: 9px; }
+.pet-view .sc-page-body::-webkit-scrollbar {
+  width: 9px;
+}
+
 .pet-view .sc-page-body::-webkit-scrollbar-thumb {
   background: var(--sc-raise);
   background-clip: padding-box;
@@ -186,28 +182,36 @@ onMounted(() => {
     color 0.16s,
     transform 0.12s var(--sc-ease-spring);
 }
+
 .pet-toggle:hover {
   border-color: var(--sc-faint);
   background: var(--sc-hover);
   transform: translateY(-1px);
 }
+
 .pet-toggle:active:not(:disabled) {
   transform: translateY(0);
 }
+
 .pet-toggle:disabled {
   cursor: default;
   opacity: 0.55;
 }
+
 .pet-toggle .pt-ico {
   color: var(--sc-mute);
   transition: color 0.16s;
 }
+
 .pet-toggle[aria-pressed="true"] {
   border-color: color-mix(in srgb, var(--sc-acid) 45%, transparent);
   background: var(--sc-acid-soft);
   color: var(--sc-acid);
 }
-.pet-toggle[aria-pressed="true"] .pt-ico { color: var(--sc-acid); }
+
+.pet-toggle[aria-pressed="true"] .pt-ico {
+  color: var(--sc-acid);
+}
 
 /* ── pet grid ─────────────────────────────────────────────── */
 .pet-grid {
@@ -215,6 +219,7 @@ onMounted(() => {
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 14px;
 }
+
 .pet-card {
   position: relative;
   display: flex;
@@ -235,33 +240,39 @@ onMounted(() => {
     transform 0.18s var(--sc-ease-out),
     box-shadow 0.18s;
 }
+
 .pet-card:hover {
   border-color: var(--sc-line-2);
   background: var(--sc-panel);
   transform: translateY(-3px);
   box-shadow: 0 18px 44px rgba(23, 26, 31, 0.1);
 }
+
 .pet-card:disabled {
   cursor: default;
   opacity: 0.6;
 }
+
 .pet-card:disabled:hover {
   border-color: var(--sc-line);
   background: var(--sc-panel);
   transform: none;
   box-shadow: none;
 }
+
 .pet-card:focus-visible {
   outline: none;
   border-color: var(--sc-acid);
   box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
+
 .pet-card[data-selected="true"] {
   border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
   background:
     radial-gradient(220px 130px at 15% 0%, rgba(59, 91, 253, 0.06), transparent 70%),
     var(--sc-panel);
 }
+
 .pet-card[data-selected="true"]::after {
   position: absolute;
   top: 10px;
@@ -290,6 +301,7 @@ onMounted(() => {
     var(--sc-bg);
   color: var(--sc-mute);
 }
+
 .pet-sprite {
   width: 100%;
   height: 100%;
@@ -298,9 +310,11 @@ onMounted(() => {
   filter: drop-shadow(0 6px 14px rgba(23, 26, 31, 0.18));
   transition: transform 0.25s var(--sc-ease-spring);
 }
+
 .pet-card:hover .pet-sprite {
   transform: scale(1.07) translateY(-2px);
 }
+
 .pet-initials {
   color: var(--sc-mute);
   font-family: var(--sc-mono);
@@ -315,12 +329,14 @@ onMounted(() => {
   flex-direction: column;
   gap: 4px;
 }
+
 .pet-name-row {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
+
 .pet-name {
   flex: 1 1 auto;
   min-width: 0;
@@ -332,6 +348,7 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .pet-badge {
   display: inline-flex;
   align-items: center;
@@ -346,6 +363,7 @@ onMounted(() => {
   font-weight: 640;
   line-height: 1.55;
 }
+
 .pet-desc {
   display: -webkit-box;
   overflow: hidden;
@@ -355,6 +373,7 @@ onMounted(() => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+
 .pet-meta {
   display: flex;
   flex-wrap: wrap;

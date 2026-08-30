@@ -185,6 +185,18 @@ function onWindowDragPointerDown(event) {
 	post({ type: event.detail > 1 ? 'window-toggle-maximize' : 'window-drag' });
 }
 
+// 缩放热区做在网页里：WPF 侧留白已归零，WebView2 铺满整个窗口，父窗口在它上面收不到鼠标。
+// 落到边缘的 pointerdown 交给宿主发 WM_NCLBUTTONDOWN + 方位码，走系统自己的 resize 循环——
+// 与标题栏拖动同一条路。指针要在按下瞬间就交给系统，所以不做 setPointerCapture。
+function onResizePointerDown(event, edge) {
+	if (event.button !== 0) {
+		return;
+	}
+
+	event.preventDefault();
+	post({ type: 'window-resize', edge });
+}
+
 function onWindowControlAction(action) {
 	switch (action) {
 		case 'terminal':
@@ -301,61 +313,46 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<div
-		class="app"
-		:class="{ 'sidebar-collapsed': sidebarCollapsed, 'panels-open': panels.isOpen.value, resizing }"
-		:style="{ '--panel-width': `${panelWidth}px` }"
-	>
-		<AppSidebar
-			:items="navItems"
-			:active-id="sidebarActiveId"
-			:collapsed="sidebarCollapsed"
-			@select="onSidebarSelect"
-			@action="onSidebarAction"
-			@toggle-collapse="toggleSidebarCollapsed"
-		/>
+	<div class="app" :class="{ 'sidebar-collapsed': sidebarCollapsed, resizing }"
+		:style="{ '--panel-width': `${panelWidth}px` }">
+		<AppSidebar :items="navItems" :active-id="sidebarActiveId" :collapsed="sidebarCollapsed"
+			@select="onSidebarSelect" @action="onSidebarAction" @toggle-collapse="toggleSidebarCollapsed" />
 		<main class="main">
 			<div class="main-header">
 				<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>
 				<WindowControls :is-maximized="windowChrome.isMaximized" @action="onWindowControlAction" />
 			</div>
-			<div class="main-content">
-				<component :is="activeViewComponent" ref="chatViewRef" @preview-image="openImagePreview" />
+			<div class="main-body">
+				<div class="main-content">
+					<component :is="activeViewComponent" ref="chatViewRef" @preview-image="openImagePreview" />
+				</div>
+				<div v-if="panels.isOpen.value" class="panel-resizer" role="separator" aria-orientation="vertical"
+					aria-label="调整面板宽度" @pointerdown="startPanelResize"></div>
+				<PluginPanelHost v-if="panels.isOpen.value" :tabs="panels.tabs.value"
+					:active-key="panels.activeKey.value" :error="panels.error.value"
+					:can-add="panels.available.value.length > 0" @activate="(key) => (panels.activeKey.value = key)"
+					@close="panels.close" @add="launcherOpen = true" @register="panels.registerFrame" />
 			</div>
 		</main>
-		<div
-			v-if="panels.isOpen.value"
-			class="panel-resizer"
-			role="separator"
-			aria-orientation="vertical"
-			aria-label="调整面板宽度"
-			@pointerdown="startPanelResize"
-		></div>
-		<PluginPanelHost
-			v-if="panels.isOpen.value"
-			:tabs="panels.tabs.value"
-			:active-key="panels.activeKey.value"
-			:error="panels.error.value"
-			:can-add="panels.available.value.length > 0"
-			@activate="(key) => (panels.activeKey.value = key)"
-			@close="panels.close"
-			@add="launcherOpen = true"
-			@register="panels.registerFrame"
-		/>
-		<PluginLauncher
-			:open="launcherOpen"
-			:panels="panels.available.value"
-			:open-keys="openPanelKeys"
-			@close="launcherOpen = false"
-			@select="openPanel"
-			@manage="openPluginSettings"
-		/>
+		<PluginLauncher :open="launcherOpen" :panels="panels.available.value" :open-keys="openPanelKeys"
+			@close="launcherOpen = false" @select="openPanel" @manage="openPluginSettings" />
 		<div v-if="imagePreview" class="image-preview-backdrop" @click.self="closeImagePreview">
 			<div class="image-preview-dialog">
 				<img :src="imagePreview.src" :alt="imagePreview.alt || 'Preview image'" />
 			</div>
 		</div>
 		<AppToast />
+		<!-- 最大化时窗口贴满工作区，边缘不该再能拖，所以整组热区连同 DOM 一起摘掉。 -->
+		<template v-if="!windowChrome.isMaximized">
+			<div class="resize-edge resize-top" @pointerdown="onResizePointerDown($event, 'top')"></div>
+			<div class="resize-edge resize-bottom" @pointerdown="onResizePointerDown($event, 'bottom')"></div>
+			<div class="resize-edge resize-left" @pointerdown="onResizePointerDown($event, 'left')"></div>
+			<div class="resize-edge resize-right" @pointerdown="onResizePointerDown($event, 'right')"></div>
+			<div class="resize-edge resize-top-left" @pointerdown="onResizePointerDown($event, 'top-left')"></div>
+			<div class="resize-edge resize-top-right" @pointerdown="onResizePointerDown($event, 'top-right')"></div>
+			<div class="resize-edge resize-bottom-left" @pointerdown="onResizePointerDown($event, 'bottom-left')"></div>
+			<div class="resize-edge resize-bottom-right" @pointerdown="onResizePointerDown($event, 'bottom-right')"></div>
+		</template>
 	</div>
 </template>
 
@@ -449,15 +446,6 @@ button {
 	grid-template-columns: 60px 1fr;
 }
 
-/* 面板列由拖拽分隔条控制，宽度动画在拖动期间关掉，否则每一帧都会追着指针补间。 */
-.app.panels-open {
-	grid-template-columns: 280px minmax(0, 1fr) 4px var(--panel-width, 380px);
-}
-
-.app.sidebar-collapsed.panels-open {
-	grid-template-columns: 60px minmax(0, 1fr) 4px var(--panel-width, 380px);
-}
-
 .app.resizing {
 	cursor: col-resize;
 	transition: none;
@@ -468,8 +456,11 @@ button {
 	pointer-events: none;
 }
 
+/* 视觉上就是一条 1px 分割线，与侧栏那条对齐；命中区靠 ::after 向两侧各撑出几像素。 */
 .panel-resizer {
 	position: relative;
+	width: 1px;
+	flex: none;
 	background: var(--border, #e5e7eb);
 	cursor: col-resize;
 	transition: background 0.14s;
@@ -479,8 +470,8 @@ button {
 	position: absolute;
 	top: 0;
 	bottom: 0;
-	left: -3px;
-	width: 10px;
+	left: -4px;
+	width: 9px;
 	content: '';
 }
 
@@ -510,13 +501,27 @@ button {
 	position: relative;
 	flex: 0 0 46px;
 	height: 46px;
+	border-bottom: 1px solid var(--border);
+}
+
+/* 标题栏之下才分左右：面板与对话区并排，窗口按钮那一行横贯整个主区。 */
+.main-body {
+	display: flex;
+	min-height: 0;
+	flex: 1 1 auto;
 }
 
 .main-content {
 	position: relative;
+	min-width: 0;
 	min-height: 0;
 	flex: 1 1 auto;
 	overflow: hidden;
+}
+
+.main-body>.plugin-panel-host {
+	width: var(--panel-width, 380px);
+	flex: none;
 }
 
 .panel,
@@ -1369,5 +1374,83 @@ a:hover {
 	.transcript-scroll {
 		padding-inline: 24px;
 	}
+}
+
+/* 窗口缩放热区。WPF 侧留白为 0，边缘的鼠标全部落在 WebView2 上，命中判定只能在这里做。
+   宽度只由这一个变量控制——改它就同时改八个方向，不需要再跟 WPF 那边的数值对齐。
+   z-index 要压过图片预览遮罩（1000），否则遮罩打开时边缘就拖不动了。 */
+:root {
+	--resize-edge: 6px;
+}
+
+.resize-edge {
+	position: fixed;
+	z-index: 9999;
+}
+
+/* 四条边从角上让开一个角区的宽度，避免和斜向热区互相抢命中。 */
+.resize-top,
+.resize-bottom {
+	left: 12px;
+	right: 12px;
+	height: var(--resize-edge);
+	cursor: ns-resize;
+}
+
+.resize-top {
+	top: 0;
+}
+
+.resize-bottom {
+	bottom: 0;
+}
+
+.resize-left,
+.resize-right {
+	top: 12px;
+	bottom: 12px;
+	width: var(--resize-edge);
+	cursor: ew-resize;
+}
+
+.resize-left {
+	left: 0;
+}
+
+.resize-right {
+	right: 0;
+}
+
+/* 角区做成 12×12 的方块，比边宽一些，斜向拖动才好点中。 */
+.resize-top-left,
+.resize-top-right,
+.resize-bottom-left,
+.resize-bottom-right {
+	width: 12px;
+	height: 12px;
+}
+
+.resize-top-left {
+	top: 0;
+	left: 0;
+	cursor: nwse-resize;
+}
+
+.resize-top-right {
+	top: 0;
+	right: 0;
+	cursor: nesw-resize;
+}
+
+.resize-bottom-left {
+	bottom: 0;
+	left: 0;
+	cursor: nesw-resize;
+}
+
+.resize-bottom-right {
+	bottom: 0;
+	right: 0;
+	cursor: nwse-resize;
 }
 </style>

@@ -56,14 +56,8 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 
 <template>
 	<div ref="rootRef" class="workspace-picker">
-		<button
-			class="workspace-trigger"
-			:class="{ active: isOpen }"
-			type="button"
-			:title="current?.path || current?.name"
-			:aria-expanded="isOpen"
-			@click.stop="toggle"
-		>
+		<button class="workspace-trigger" :class="{ active: isOpen }" type="button"
+			:title="current?.path || current?.name" :aria-expanded="isOpen" @click.stop="toggle">
 			<Folder :size="13" :stroke-width="1.8" aria-hidden="true" />
 			<span>{{ current?.name || '未选择工作目录' }}</span>
 			<ChevronDown :class="{ open: isOpen }" :size="12" :stroke-width="2" aria-hidden="true" />
@@ -75,31 +69,17 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 				<input ref="searchInputRef" v-model="searchText" type="text" placeholder="搜索工作目录" />
 			</label>
 			<div class="workspace-list">
-				<button
-					v-for="root in filteredRoots"
-					:key="root.id"
-					class="workspace-row"
-					:class="{ selected: root.id === current?.id, 'is-managed': root.isManagedWorktree }"
-					type="button"
-					:title="root.path"
-					@mousemove="hoverRootId = root.id"
-					@mouseleave="hoverRootId = null"
-					@click="selectRoot(root)"
-				>
+				<button v-for="root in filteredRoots" :key="root.id" class="workspace-row"
+					:class="{ selected: root.id === current?.id, 'is-managed': root.isManagedWorktree }" type="button"
+					:title="root.path" @mousemove="hoverRootId = root.id" @mouseleave="hoverRootId = null"
+					@click="selectRoot(root)">
 					<Folder :size="14" :stroke-width="1.7" aria-hidden="true" />
 					<span>{{ root.name }}</span>
-					<Check
-						v-if="root.id === current?.id && !(hoverRootId === root.id && !root.isManagedWorktree)"
+					<Check v-if="root.id === current?.id && !(hoverRootId === root.id && !root.isManagedWorktree)"
 						:size="14" :stroke-width="2.2" aria-hidden="true" />
-					<Trash2
-						v-if="hoverRootId === root.id && !root.isManagedWorktree"
-						class="row-delete"
-						:size="14" :stroke-width="2"
-						role="button"
-						aria-hidden="true"
-						title="删除目录记录"
-						@click.stop="requestDelete(root, $event)"
-					/>
+					<Trash2 v-if="hoverRootId === root.id && !root.isManagedWorktree" class="row-delete" :size="14"
+						:stroke-width="2" role="button" aria-hidden="true" title="删除目录记录"
+						@click.stop="requestDelete(root, $event)" />
 				</button>
 				<p v-if="filteredRoots.length === 0" class="empty-row">没有匹配的工作目录</p>
 			</div>

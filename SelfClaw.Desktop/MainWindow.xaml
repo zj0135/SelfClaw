@@ -9,8 +9,8 @@
         Title="SelfClaw"
         Width="1280"
         Height="800"
-        MinWidth="1240"
-        MinHeight="760"
+        MinWidth="900"
+        MinHeight="600"
         WindowStartupLocation="CenterScreen"
         Icon="pack://application:,,,/Assets/icon/icon.ico"
         WindowStyle="None"
@@ -21,7 +21,7 @@
         <shell:WindowChrome CaptionHeight="0"
                             CornerRadius="20"
                             GlassFrameThickness="0"
-                            ResizeBorderThickness="8"
+                            ResizeBorderThickness="0"
                             UseAeroCaptionButtons="False"/>
     </shell:WindowChrome.WindowChrome>
 
@@ -127,29 +127,11 @@
     </Window.Resources>
 
     <Grid Background="Transparent">
+        <!-- 留白为 0：WebView2 铺满整个窗口，没有属于父窗口的边缘。缩放热区因此做在网页里（App.vue 的
+             .resize-edge），按下时 post window-resize，宿主再发 WM_NCLBUTTONDOWN + 方位码。 -->
         <Border x:Name="WindowFrame"
-                Margin="0"
-                CornerRadius="22"
                 BorderThickness="0"
                 BorderBrush="Transparent">
-            <Border.Style>
-                <Style TargetType="Border">
-                    <Setter Property="Margin"
-                            Value="12"/>
-                    <Setter Property="CornerRadius"
-                            Value="22"/>
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=WindowState}"
-                                     Value="Maximized">
-                            <Setter Property="Margin"
-                                    Value="0"/>
-                            <Setter Property="CornerRadius"
-                                    Value="0"/>
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </Border.Style>
-
             <Grid ClipToBounds="True">
                 <Border Background="#FFFFFF"/>
 

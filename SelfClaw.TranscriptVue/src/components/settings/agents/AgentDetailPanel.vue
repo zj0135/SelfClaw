@@ -175,7 +175,9 @@ function submit() {
 		<span class="ghost-num" aria-hidden="true">{{ index }}</span>
 
 		<header class="detail-head sc-rise" style="--i: 0">
-			<div class="dh-icon" aria-hidden="true"><Bot :size="26" :stroke-width="1.7" /></div>
+			<div class="dh-icon" aria-hidden="true">
+				<Bot :size="26" :stroke-width="1.7" />
+			</div>
 			<div class="dh-meta">
 				<div class="dh-kicker">AGENT / {{ index }}</div>
 				<div class="dh-title">
@@ -203,7 +205,8 @@ function submit() {
 						<h3>基本信息</h3>
 					</div>
 					<button class="btn save-btn" type="button" :disabled="!isDirty || saving" @click="submit">
-						<LoaderCircle v-if="saving" :size="14" :stroke-width="2.2" class="spin-ico" aria-hidden="true" />
+						<LoaderCircle v-if="saving" :size="14" :stroke-width="2.2" class="spin-ico"
+							aria-hidden="true" />
 						<Check v-else :size="14" :stroke-width="2.4" aria-hidden="true" />
 						{{ saving ? '保存中…' : '保存' }}
 					</button>
@@ -226,35 +229,20 @@ function submit() {
 					</div>
 					<div class="field span-2">
 						<label class="fl" for="agent-desc">描述</label>
-						<input
-							id="agent-desc"
-							v-model="form.description"
-							class="input"
-							type="text"
-							placeholder="一句话说明该代理的职责"
-						/>
+						<input id="agent-desc" v-model="form.description" class="input" type="text"
+							placeholder="一句话说明该代理的职责" />
 					</div>
 					<div class="field span-2">
 						<label class="fl" for="agent-instructions">系统指令（Instructions）</label>
-						<textarea
-							id="agent-instructions"
-							v-model="form.instructions"
-							class="input mono instructions"
-							rows="8"
-							placeholder="写入该代理的系统提示，Direct 模式注入系统消息，CLI 模式作为附加系统提示"
-						></textarea>
+						<textarea id="agent-instructions" v-model="form.instructions" class="input mono instructions"
+							rows="8" placeholder="写入该代理的系统提示，Direct 模式注入系统消息，CLI 模式作为附加系统提示"></textarea>
 					</div>
 				</div>
 				<p v-if="form.mode !== agent.mode" class="field-hint">运行模式修改将在保存后生效。</p>
 			</section>
 
-			<CapabilityBindingCard
-				v-if="agent.mode === 'direct'"
-				class="sc-rise"
-				style="--i: 3"
-				:sections="sections"
-				@open="(section) => (openSectionKey = section.key)"
-			/>
+			<CapabilityBindingCard v-if="agent.mode === 'direct'" class="sc-rise" style="--i: 3" :sections="sections"
+				@open="(section) => (openSectionKey = section.key)" />
 
 			<div v-else class="notice info sc-rise" style="--i: 3">
 				<Bot :size="15" :stroke-width="2" aria-hidden="true" />
@@ -265,17 +253,10 @@ function submit() {
 			</div>
 		</div>
 
-		<BindingDialog
-			:open="Boolean(openSection)"
-			:kicker="openSection?.kicker || ''"
-			:title="openSection ? `绑定${openSection.title}` : ''"
-			:hint="openSection?.hint || ''"
-			:items="openSection?.items || []"
-			:empty-text="openSection?.emptyText || ''"
-			:pending="dialogPending"
-			@close="openSectionKey = ''"
-			@toggle="onDialogToggle"
-		/>
+		<BindingDialog :open="Boolean(openSection)" :kicker="openSection?.kicker || ''"
+			:title="openSection ? `绑定${openSection.title}` : ''" :hint="openSection?.hint || ''"
+			:items="openSection?.items || []" :empty-text="openSection?.emptyText || ''" :pending="dialogPending"
+			@close="openSectionKey = ''" @toggle="onDialogToggle" />
 	</main>
 </template>
 

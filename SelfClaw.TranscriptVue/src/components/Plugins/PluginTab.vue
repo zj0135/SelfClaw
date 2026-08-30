@@ -33,12 +33,16 @@ const icon = computed(() => iconMap[props.tab.panel.icon] || Puzzle);
 <template>
 	<div class="tab" :class="{ active }" role="tab" :aria-selected="active">
 		<button class="tab-main" type="button" :title="tab.panel.title" @click="$emit('activate', tab.key)">
-			<span class="tab-icon" aria-hidden="true"><component :is="icon" :size="13" :stroke-width="1.8" /></span>
+			<span class="tab-icon" aria-hidden="true">
+				<component :is="icon" :size="13" :stroke-width="1.8" />
+			</span>
 			<span class="tab-title">{{ tab.panel.title }}</span>
 		</button>
-		<button class="tab-close" type="button" :aria-label="`关闭 ${tab.panel.title}`" @click.stop="$emit('close', tab.key)">
+		<button class="tab-close" type="button" :aria-label="`关闭 ${tab.panel.title}`"
+			@click.stop="$emit('close', tab.key)">
 			<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
-				<path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none" />
+				<path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
+					fill="none" />
 			</svg>
 		</button>
 	</div>
@@ -51,10 +55,10 @@ const icon = computed(() => iconMap[props.tab.panel.icon] || Puzzle);
 	align-items: center;
 	max-width: 168px;
 	min-width: 0;
-	height: 30px;
+	height: 24px;
 	flex: 0 1 auto;
-	padding-right: 2px;
-	border-radius: 8px 8px 0 0;
+	padding-right: 3px;
+	border-radius: 999px;
 	color: #6b7280;
 	transition: background 0.14s, color 0.14s;
 }
@@ -65,20 +69,8 @@ const icon = computed(() => iconMap[props.tab.panel.icon] || Puzzle);
 }
 
 .tab.active {
-	background: #ffffff;
+	background: #eef0f4;
 	color: #171a1f;
-	box-shadow: inset 0 -1px 0 #ffffff;
-}
-
-.tab.active::after {
-	position: absolute;
-	top: 0;
-	right: 8px;
-	left: 8px;
-	height: 2px;
-	border-radius: 0 0 2px 2px;
-	background: var(--accent, #3b5bfd);
-	content: '';
 }
 
 .tab-main {

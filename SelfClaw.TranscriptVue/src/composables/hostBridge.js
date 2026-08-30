@@ -74,11 +74,12 @@ function createHostBridge() {
 
 		const requestId = nextRequestId();
 		const promise = new Promise((resolve, reject) => {
-			const timer = timeout > 0
-				? window.setTimeout(() => {
-					settlePending(requestId, (pending) => pending.reject(new Error('请求超时，请稍后重试。')));
-				}, timeout)
-				: null;
+			const timer =
+				timeout > 0
+					? window.setTimeout(() => {
+							settlePending(requestId, (pending) => pending.reject(new Error('请求超时，请稍后重试。')));
+						}, timeout)
+					: null;
 
 			pendingRequests.set(requestId, { type, resolve, reject, timer });
 			post({ type, requestId, ...payload });
@@ -138,10 +139,7 @@ function createHostBridge() {
 			return null;
 		}
 
-		const itemsById = new Map(
-			(Array.isArray(transcriptState.items) ? transcriptState.items : [])
-				.map((item) => [item.id, item]),
-		);
+		const itemsById = new Map((Array.isArray(transcriptState.items) ? transcriptState.items : []).map((item) => [item.id, item]));
 		for (const itemId of payload.removedItemIds || []) {
 			itemsById.delete(itemId);
 		}
@@ -150,21 +148,15 @@ function createHostBridge() {
 			itemsById.set(item.id, item);
 		}
 
-		const itemOrder = Array.isArray(payload.itemOrder)
-			? payload.itemOrder
-			: Array.from(itemsById.keys());
-		const items = itemOrder
-			.map((itemId) => itemsById.get(itemId))
-			.filter(Boolean);
+		const itemOrder = Array.isArray(payload.itemOrder) ? payload.itemOrder : Array.from(itemsById.keys());
+		const items = itemOrder.map((itemId) => itemsById.get(itemId)).filter(Boolean);
 
 		transcriptState = {
 			...transcriptState,
 			...payload,
 			type: 'replaceState',
 			items,
-			conversations: Array.isArray(payload.conversations)
-				? payload.conversations
-				: transcriptState.conversations,
+			conversations: Array.isArray(payload.conversations) ? payload.conversations : transcriptState.conversations,
 		};
 		// 后端 DefaultIgnoreCondition=WhenWritingNull 会把 null 标量字段整个省略，
 		// 扩展运算符因此不会覆盖旧值。这里显式以 payload 为准重置，保证「取消选中」
@@ -186,9 +178,8 @@ function createHostBridge() {
 			return;
 		}
 
-		const schedule = typeof window.requestAnimationFrame === 'function'
-			? window.requestAnimationFrame.bind(window)
-			: (callback) => window.setTimeout(callback, 0);
+		const schedule =
+			typeof window.requestAnimationFrame === 'function' ? window.requestAnimationFrame.bind(window) : (callback) => window.setTimeout(callback, 0);
 		transcriptAckFrame = schedule(() => {
 			transcriptAckFrame = null;
 			const acknowledgedRevision = pendingTranscriptRevision;

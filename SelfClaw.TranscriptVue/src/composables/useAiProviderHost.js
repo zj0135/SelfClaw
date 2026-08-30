@@ -65,15 +65,13 @@ export function useAiProviderHost(options) {
 		const previous = activeProvider.value;
 		const nextProviders = rawProviders.map(normalizeProvider);
 		providers.splice(0, providers.length, ...nextProviders);
-		customProtocols.splice(
-			0,
-			customProtocols.length,
-			...(Array.isArray(state?.customProtocols) ? state.customProtocols.map(normalizeProtocol) : []));
+		customProtocols.splice(0, customProtocols.length, ...(Array.isArray(state?.customProtocols) ? state.customProtocols.map(normalizeProtocol) : []));
 
-		const selected = (preferredId && nextProviders.find((provider) => provider.id === preferredId))
-			|| findMatchingProvider(previous, nextProviders)
-			|| nextProviders.find((provider) => provider.isConfigured)
-			|| nextProviders[0];
+		const selected =
+			(preferredId && nextProviders.find((provider) => provider.id === preferredId)) ||
+			findMatchingProvider(previous, nextProviders) ||
+			nextProviders.find((provider) => provider.isConfigured) ||
+			nextProviders[0];
 		activeId.value = selected?.id || '';
 		syncActiveProviderInputs();
 	}
@@ -129,19 +127,22 @@ export function useAiProviderHost(options) {
 		const provider = activeProvider.value;
 		if (!provider) return;
 
-		await runMutation(async () => {
-			if (!provider.connectionId) {
-				if (!enabled) return;
-				await saveProvider(provider, null);
-			} else {
-				await request('ai-providers/set-provider-enabled', {
-					providerId: provider.connectionId,
-					enabled,
-				});
-				provider.enabled = enabled;
-			}
-			showToast(enabled ? `已启用 ${provider.name}` : `已禁用 ${provider.name}`);
-		}, enabled ? '启用服务商失败' : '禁用服务商失败');
+		await runMutation(
+			async () => {
+				if (!provider.connectionId) {
+					if (!enabled) return;
+					await saveProvider(provider, null);
+				} else {
+					await request('ai-providers/set-provider-enabled', {
+						providerId: provider.connectionId,
+						enabled,
+					});
+					provider.enabled = enabled;
+				}
+				showToast(enabled ? `已启用 ${provider.name}` : `已禁用 ${provider.name}`);
+			},
+			enabled ? '启用服务商失败' : '禁用服务商失败'
+		);
 	}
 
 	async function deleteProvider() {
@@ -164,7 +165,9 @@ export function useAiProviderHost(options) {
 				providerId: provider.connectionId,
 				enabled,
 			});
-			provider.models.forEach((model) => { model.on = enabled; });
+			provider.models.forEach((model) => {
+				model.on = enabled;
+			});
 			showToast(enabled ? '已启用全部模型' : '已禁用全部模型');
 		}, '更新模型状态失败');
 	}
@@ -238,9 +241,7 @@ export function useAiProviderHost(options) {
 				modelProfileId: selectedCheckModel.value,
 			});
 			checkStatus.state = payload.ok ? 'ok' : 'error';
-			checkStatus.text = payload.ok
-				? `连接正常 · 延迟 ${payload.latencyMs}ms`
-				: (payload.error || '连接检查失败');
+			checkStatus.text = payload.ok ? `连接正常 · 延迟 ${payload.latencyMs}ms` : payload.error || '连接检查失败';
 		} catch (error) {
 			checkStatus.state = 'error';
 			checkStatus.text = errorMessage(error, '连接检查失败');
@@ -455,8 +456,10 @@ function normalizeModel(raw) {
 
 function findMatchingProvider(previous, candidates) {
 	if (!previous) return null;
-	return candidates.find((provider) => previous.connectionId && provider.connectionId === previous.connectionId)
-		|| candidates.find((provider) => provider.catalogId === previous.catalogId);
+	return (
+		candidates.find((provider) => previous.connectionId && provider.connectionId === previous.connectionId) ||
+		candidates.find((provider) => provider.catalogId === previous.catalogId)
+	);
 }
 
 function nullablePrice(value) {

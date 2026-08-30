@@ -37,19 +37,11 @@ function onContentClick(event) {
 </script>
 
 <template>
-	<section
-		v-if="shouldRender()"
-		class="thinking-block"
+	<section v-if="shouldRender()" class="thinking-block"
 		:class="[{ open, pending: isPending(), last: isLast, 'no-content': !hasContent() }]"
-		:data-thinking-id="hasContent() ? id : null"
-	>
-		<button
-			v-if="hasContent()"
-			class="thinking-summary"
-			type="button"
-			:aria-expanded="open ? 'true' : 'false'"
-			@click="emit('toggle')"
-		>
+		:data-thinking-id="hasContent() ? id : null">
+		<button v-if="hasContent()" class="thinking-summary" type="button" :aria-expanded="open ? 'true' : 'false'"
+			@click="emit('toggle')">
 			<span class="thinking-spark" :class="{ live: isLive() }" aria-hidden="true">
 				<Sparkles :size="13" :stroke-width="2" />
 			</span>

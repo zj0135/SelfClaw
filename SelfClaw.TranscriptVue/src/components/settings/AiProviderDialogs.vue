@@ -25,7 +25,8 @@ const formatNames = {
 <template>
 	<Teleport to="body">
 		<div v-if="providerOpen" class="dialog-backdrop sc-root" @click.self="emit('close-provider')">
-			<form class="dialog form-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-dialog-title" @submit.prevent="emit('submit-provider')">
+			<form class="dialog form-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-dialog-title"
+				@submit.prevent="emit('submit-provider')">
 				<header>
 					<div>
 						<div class="dlg-kicker">NEW CONNECTION</div>
@@ -51,13 +52,15 @@ const formatNames = {
 				</label>
 				<label>
 					<span>Base URL</span>
-					<input v-model.trim="providerDraft.base" required autocomplete="off" class="mono" placeholder="https://api.example.com" />
+					<input v-model.trim="providerDraft.base" required autocomplete="off" class="mono"
+						placeholder="https://api.example.com" />
 					<small class="hint">API 接口的基础地址</small>
 				</label>
 
 				<footer>
 					<button type="button" class="secondary" @click="emit('close-provider')">取消</button>
-					<button type="submit" class="primary" :disabled="busy || !providerDraft.name || !providerDraft.base || !providerDraft.protocolId">
+					<button type="submit" class="primary"
+						:disabled="busy || !providerDraft.name || !providerDraft.base || !providerDraft.protocolId">
 						{{ busy ? '添加中…' : '添加' }}
 					</button>
 				</footer>
@@ -65,7 +68,8 @@ const formatNames = {
 		</div>
 
 		<div v-if="modelOpen" class="dialog-backdrop sc-root" @click.self="emit('close-model')">
-			<form class="dialog form-dialog model-dialog" role="dialog" aria-modal="true" aria-labelledby="model-dialog-title" @submit.prevent="emit('submit-model')">
+			<form class="dialog form-dialog model-dialog" role="dialog" aria-modal="true"
+				aria-labelledby="model-dialog-title" @submit.prevent="emit('submit-model')">
 				<header>
 					<div>
 						<div class="dlg-kicker">NEW MODEL</div>
@@ -83,7 +87,8 @@ const formatNames = {
 				</label>
 				<label>
 					<span>模型 id / deployment</span>
-					<input v-model.trim="modelDraft.model" required autocomplete="off" class="mono" placeholder="例如 gpt-4.1" />
+					<input v-model.trim="modelDraft.model" required autocomplete="off" class="mono"
+						placeholder="例如 gpt-4.1" />
 				</label>
 				<label>
 					<span>API 协议</span>
@@ -200,7 +205,7 @@ p {
 	gap: 7px;
 }
 
-.form-dialog label > span {
+.form-dialog label>span {
 	color: var(--sc-soft);
 	font-family: var(--sc-mono);
 	font-size: 10.5px;
@@ -301,6 +306,7 @@ footer button {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
 	.dialog-backdrop,
 	.dialog {
 		animation-duration: 0.001ms;

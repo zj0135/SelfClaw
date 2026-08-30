@@ -12,15 +12,9 @@ defineEmits(['select', 'toggle']);
 
 <template>
 	<div v-if="items.length" class="list">
-		<ExtensionListItem
-			v-for="item in items"
-			:key="item.id"
-			:item="item"
-			:selected="item.id === selectedId"
-			:pending="isPending(kind, item.id)"
-			@select="$emit('select', item)"
-			@toggle="$emit('toggle', item, $event)"
-		/>
+		<ExtensionListItem v-for="item in items" :key="item.id" :item="item" :selected="item.id === selectedId"
+			:pending="isPending(kind, item.id)" @select="$emit('select', item)"
+			@toggle="$emit('toggle', item, $event)" />
 	</div>
 	<div v-else class="empty">
 		<Inbox :size="22" aria-hidden="true" />
@@ -31,8 +25,27 @@ defineEmits(['select', 'toggle']);
 
 <style scoped>
 @import '../../../styles/settings-console.css';
-.list { min-height: 0; }
-.empty { display: grid; place-items: center; align-content: center; min-height: 280px; gap: 8px; color: var(--sc-faint); text-align: center; }
-.empty strong { color: var(--sc-soft); font-size: 13px; }
-.empty span { font-size: 12px; }
+
+.list {
+	min-height: 0;
+}
+
+.empty {
+	display: grid;
+	place-items: center;
+	align-content: center;
+	min-height: 280px;
+	gap: 8px;
+	color: var(--sc-faint);
+	text-align: center;
+}
+
+.empty strong {
+	color: var(--sc-soft);
+	font-size: 13px;
+}
+
+.empty span {
+	font-size: 12px;
+}
 </style>

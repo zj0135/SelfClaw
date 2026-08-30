@@ -292,6 +292,12 @@ internal sealed class WebViewMessageRouter : IDisposable
                 return new WebViewHostCommand(WebViewHostCommandKind.OpenLink, ReadOptionalString(payload, "href"));
             case "window-drag":
                 return new WebViewHostCommand(WebViewHostCommandKind.StartWindowDrag);
+            // 缩放热区在网页四周（WebView2 铺满整个窗口，父窗口拿不到边缘的鼠标消息）。
+            // edge 是方位名，宿主侧再映射到 HT* 码；这里不校验，交给宿主的白名单。
+            case "window-resize":
+                return new WebViewHostCommand(
+                    WebViewHostCommandKind.StartWindowResize,
+                    ReadOptionalString(payload, "edge"));
             case "window-minimize":
                 return new WebViewHostCommand(WebViewHostCommandKind.MinimizeWindow);
             case "window-toggle-maximize":

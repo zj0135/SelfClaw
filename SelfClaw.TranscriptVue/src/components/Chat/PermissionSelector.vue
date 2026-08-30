@@ -92,34 +92,15 @@ onBeforeUnmount(() => {
 
 <template>
 	<div ref="rootRef" class="perm-wrap">
-		<button
-			class="icon-btn"
-			type="button"
-			:aria-expanded="open ? 'true' : 'false'"
-			aria-haspopup="menu"
-			:title="`工具权限：${current.label}`"
-			@click.stop="toggle"
-		>
+		<button class="icon-btn" type="button" :aria-expanded="open ? 'true' : 'false'" aria-haspopup="menu"
+			:title="`工具权限：${current.label}`" @click.stop="toggle">
 			<component :is="current.icon" :size="16" :stroke-width="1.8" aria-hidden="true" />
 		</button>
 
-		<div
-			v-show="open"
-			ref="menuRef"
-			class="perm-menu"
-			:class="`perm-menu--${placement}`"
-			role="listbox"
-			aria-label="工具权限"
-		>
-			<button
-				v-for="mode in MODES"
-				:key="mode.id"
-				type="button"
-				class="perm-opt"
-				role="option"
-				:aria-selected="current.id === mode.id ? 'true' : 'false'"
-				@click="pick(mode.id)"
-			>
+		<div v-show="open" ref="menuRef" class="perm-menu" :class="`perm-menu--${placement}`" role="listbox"
+			aria-label="工具权限">
+			<button v-for="mode in MODES" :key="mode.id" type="button" class="perm-opt" role="option"
+				:aria-selected="current.id === mode.id ? 'true' : 'false'" @click="pick(mode.id)">
 				<span class="perm-opt-icon" :class="`perm-opt-icon--${mode.id}`" aria-hidden="true">
 					<component :is="mode.icon" :size="14" :stroke-width="2" />
 				</span>
@@ -154,10 +135,12 @@ onBeforeUnmount(() => {
 	cursor: pointer;
 	transition: background 0.15s, color 0.15s;
 }
+
 .icon-btn:hover {
 	background: #f3f4f6;
 	color: #171a1f;
 }
+
 .icon-btn[aria-expanded='true'] {
 	background: #f3f4f6;
 	color: #171a1f;
@@ -189,16 +172,31 @@ onBeforeUnmount(() => {
 }
 
 @keyframes menu-in-down {
-	from { opacity: 0; transform: translateY(-6px) scale(0.98); }
-	to   { opacity: 1; transform: translateY(0) scale(1); }
+	from {
+		opacity: 0;
+		transform: translateY(-6px) scale(0.98);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
 }
 
 @keyframes menu-in-up {
-	from { opacity: 0; transform: translateY(6px) scale(0.98); }
-	to   { opacity: 1; transform: translateY(0) scale(1); }
+	from {
+		opacity: 0;
+		transform: translateY(6px) scale(0.98);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {
+
 	.perm-menu--down,
 	.perm-menu--up {
 		animation: none;
@@ -219,9 +217,11 @@ onBeforeUnmount(() => {
 	cursor: pointer;
 	transition: background 0.15s;
 }
+
 .perm-opt:hover {
 	background: #f5f6f8;
 }
+
 .perm-opt[aria-selected='true'] {
 	background: var(--accent-soft, rgba(59, 91, 253, 0.08));
 }
@@ -234,14 +234,17 @@ onBeforeUnmount(() => {
 	border-radius: 6px;
 	flex: none;
 }
+
 .perm-opt-icon svg {
 	width: 14px;
 	height: 14px;
 }
+
 .perm-opt-icon--require-approval {
 	background: rgba(200, 122, 20, 0.14);
 	color: #b26a09;
 }
+
 .perm-opt-icon--full-access {
 	background: rgba(34, 139, 87, 0.14);
 	color: #1f7a4d;
@@ -253,11 +256,13 @@ onBeforeUnmount(() => {
 	min-width: 0;
 	flex: 1;
 }
+
 .perm-opt-copy strong {
 	font: inherit;
 	font-weight: 600;
 	font-size: 12.5px;
 }
+
 .perm-opt-copy small {
 	overflow: hidden;
 	color: #8a929e;
@@ -275,6 +280,7 @@ onBeforeUnmount(() => {
 	flex: none;
 	display: none;
 }
+
 .perm-opt[aria-selected='true'] .perm-opt-check {
 	display: block;
 }
