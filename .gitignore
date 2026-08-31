@@ -76,11 +76,6 @@ SelfClaw.Desktop/Assets/TranscriptVue/
 架构.md
 CLAUDE.md
 Properties/
-*.md
 !CONTEXT.md
 !CONTEXT-MAP.md
-!docs/agents/*.md
-!docs/adr/*.md
-!docs/direct-extensions-system-design.md
-!docs/direct-extensions-implementation-tasks.md
-!docs/direct-subagent-system-design.md
+
