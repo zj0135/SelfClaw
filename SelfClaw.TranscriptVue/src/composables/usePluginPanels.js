@@ -1,5 +1,6 @@
 import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue';
 import { hostBridge, useHostBridge } from './hostBridge';
+import { useAppearance } from './useAppearance.js';
 
 // 面板与宿主之间的中转。插件永远不直接跟宿主说话：它 postMessage 给外壳，外壳凭
 // event.origin + event.source 认出是哪个面板，再用自己的 hostBridge 转发。
@@ -10,8 +11,23 @@ const SHELL_ORIGIN = 'https://appassets.selfclaw.local';
 const MAX_TABS = 8;
 const SAVE_DEBOUNCE_MS = 400;
 
+// 面板是跨源 iframe，CSS 变量继承不进去。外壳只告诉它「现在是什么外观」，
+// 不下发一整套解析后的实色：那等于把外壳的 token 表变成插件 API，往后每次
+// 增删颜色都成了破坏性变更。面板自己订阅 appearance-changed 决定怎么画。
+function readAppearanceFacts(appearance) {
+	return {
+		theme: appearance.resolvedTheme.value,
+		mode: appearance.state.mode,
+		uiFontFamily: appearance.state.uiFontFamily,
+		uiFontScale: appearance.state.uiFontScale,
+		codeFontFamily: appearance.state.codeFontFamily,
+		codeFontScale: appearance.state.codeFontScale,
+	};
+}
+
 export function usePluginPanels() {
 	const { request, on } = useHostBridge();
+	const appearance = useAppearance();
 	const available = ref([]);
 	const tabs = ref([]);
 	const activeKey = ref('');
@@ -104,10 +120,16 @@ export function usePluginPanels() {
 		if (!tab) return;
 
 		if (event.data.kind === 'hello') {
+			// 外观放在 handshake 里，不做权限门：它是「你被嵌在什么样的外壳里」这个
+			// 事实，跟会话内容无关，任何面板都该能画得跟外壳一致。
 			sendToFrame(tab, {
 				kind: 'event',
 				type: 'handshake',
-				payload: { panelKey: tab.key, permissions: tab.panel.permissions || [] },
+				payload: {
+					panelKey: tab.key,
+					permissions: tab.panel.permissions || [],
+					appearance: readAppearanceFacts(appearance),
+				},
 			});
 			// 一个刚打开的面板没有历史可听。把最近一次状态补给它，否则在空闲会话里
 			// 它要一直等到下一次变化才能画出第一屏。
@@ -240,6 +262,12 @@ export function usePluginPanels() {
 	});
 
 	watch(activeKey, scheduleSave);
+
+	// revision 覆盖了外观的每一项改动，包括「跟随系统」时系统自己翻明暗。
+	// 不带权限：与 handshake 里同一份事实，同一个理由。
+	watch(appearance.revision, () => {
+		broadcast('appearance-changed', readAppearanceFacts(appearance));
+	});
 
 	onMounted(async () => {
 		window.addEventListener('message', onWindowMessage);

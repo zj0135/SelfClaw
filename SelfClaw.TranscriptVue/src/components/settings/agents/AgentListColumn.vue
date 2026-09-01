@@ -145,7 +145,7 @@ function itemHealthy(item) {
 	margin-bottom: 14px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 	font-weight: 600;
 	letter-spacing: 0.22em;
 }
@@ -178,7 +178,7 @@ function itemHealthy(item) {
 	color: var(--sc-mute);
 	cursor: pointer;
 	font: inherit;
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 560;
 	transition:
 		background 0.16s var(--sc-ease-out),
@@ -193,7 +193,7 @@ function itemHealthy(item) {
 .seg button.active {
 	background: var(--sc-panel);
 	color: var(--sc-acid);
-	box-shadow: 0 2px 8px rgba(23, 26, 31, 0.08);
+	box-shadow: 0 2px 8px rgba(var(--shadow-ink), 0.08);
 }
 
 .search {
@@ -219,7 +219,7 @@ function itemHealthy(item) {
 	background: var(--sc-panel);
 	color: var(--sc-text);
 	font: inherit;
-	font-size: 13px;
+	font-size: var(--fs-13);
 	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
 }
 
@@ -264,7 +264,7 @@ function itemHealthy(item) {
 	gap: 7px;
 	padding: 16px 8px 8px;
 	color: var(--sc-mute);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 600;
 	letter-spacing: 0.05em;
 }
@@ -273,7 +273,7 @@ function itemHealthy(item) {
 	margin-left: auto;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 	font-weight: 500;
 	letter-spacing: 0.2em;
 }
@@ -287,7 +287,7 @@ function itemHealthy(item) {
 
 .grp-dot.live {
 	background: var(--sc-ok);
-	box-shadow: 0 0 8px rgba(15, 157, 99, 0.45);
+	box-shadow: 0 0 8px color-mix(in srgb, var(--success) 45%, transparent);
 	animation: sc-blink 2.6s ease-in-out infinite;
 }
 
@@ -319,7 +319,7 @@ function itemHealthy(item) {
 .entry.active {
 	border-color: var(--sc-line-2);
 	background: var(--sc-panel);
-	box-shadow: 0 2px 10px rgba(23, 26, 31, 0.05);
+	box-shadow: 0 2px 10px rgba(var(--shadow-ink), 0.05);
 }
 
 .entry.active::before {
@@ -331,7 +331,7 @@ function itemHealthy(item) {
 	transform: translateY(-50%);
 	border-radius: 2px;
 	background: var(--sc-acid);
-	box-shadow: 0 0 10px rgba(59, 91, 253, 0.4);
+	box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
 	content: '';
 }
 
@@ -340,7 +340,7 @@ function itemHealthy(item) {
 	flex: 0 0 auto;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 	letter-spacing: 0.06em;
 	transition: color 0.15s;
 }
@@ -376,7 +376,7 @@ function itemHealthy(item) {
 .e-name {
 	overflow: hidden;
 	color: var(--sc-text);
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 	font-weight: 560;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -387,7 +387,7 @@ function itemHealthy(item) {
 	overflow: hidden;
 	color: var(--sc-mute);
 	font-family: var(--sc-mono);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 	letter-spacing: 0.02em;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -399,19 +399,19 @@ function itemHealthy(item) {
 	flex: 0 0 auto;
 	border-radius: 50%;
 	background: var(--sc-ok);
-	box-shadow: 0 0 8px rgba(15, 157, 99, 0.45);
+	box-shadow: 0 0 8px color-mix(in srgb, var(--success) 45%, transparent);
 	transition: background 0.18s, box-shadow 0.18s;
 }
 
 .dot.bad {
 	background: var(--sc-err);
-	box-shadow: 0 0 8px rgba(220, 69, 69, 0.4);
+	box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 .list-empty {
 	padding: 30px 10px;
 	color: var(--sc-mute);
-	font-size: 13px;
+	font-size: var(--fs-13);
 	text-align: center;
 }
 

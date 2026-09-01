@@ -33,7 +33,7 @@ defineEmits(['activate', 'close', 'hide', 'register']);
 	min-width: 0;
 	height: 100%;
 	overflow: hidden;
-	background: #ffffff;
+	background: var(--panel);
 }
 
 .panel-error {
@@ -42,9 +42,9 @@ defineEmits(['activate', 'close', 'hide', 'register']);
 	gap: 7px;
 	flex: none;
 	padding: 8px 12px;
-	background: rgba(220, 69, 69, 0.07);
-	color: var(--danger, #dc4545);
-	font-size: 11.5px;
+	background: color-mix(in srgb, var(--danger) 7%, transparent);
+	color: var(--danger);
+	font-size: var(--fs-115);
 }
 
 .frames {

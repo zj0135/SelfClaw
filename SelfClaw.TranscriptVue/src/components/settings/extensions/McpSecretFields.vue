@@ -57,7 +57,7 @@ section {
 }
 
 strong {
-	font-size: 11.5px;
+	font-size: var(--fs-115);
 }
 
 button {
@@ -94,7 +94,7 @@ label {
 	align-items: center;
 	gap: 4px;
 	color: var(--sc-mute);
-	font-size: 10px;
+	font-size: var(--fs-10);
 	white-space: nowrap;
 }
 
@@ -110,7 +110,7 @@ label input {
 .error {
 	margin: 0;
 	color: var(--sc-err);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 }
 
 @media (max-width: 760px) {

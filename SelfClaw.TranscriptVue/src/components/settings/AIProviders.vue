@@ -386,7 +386,7 @@ function resetCheckStatus() {
 	overflow: hidden;
 	color: var(--sc-text);
 	font-family: var(--sc-sans);
-	font-size: 14px;
+	font-size: var(--fs-14);
 	line-height: 1.5;
 }
 
@@ -436,7 +436,7 @@ function resetCheckStatus() {
 	margin-bottom: 14px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 	font-weight: 600;
 	letter-spacing: 0.22em;
 }
@@ -475,7 +475,7 @@ function resetCheckStatus() {
 	background: var(--sc-panel);
 	color: var(--sc-text);
 	font: inherit;
-	font-size: 13px;
+	font-size: var(--fs-13);
 	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
 }
 
@@ -528,7 +528,7 @@ function resetCheckStatus() {
 	gap: 7px;
 	padding: 16px 8px 8px;
 	color: var(--sc-mute);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 600;
 	letter-spacing: 0.05em;
 }
@@ -537,7 +537,7 @@ function resetCheckStatus() {
 	margin-left: auto;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 	font-weight: 500;
 	letter-spacing: 0.2em;
 }
@@ -551,7 +551,7 @@ function resetCheckStatus() {
 
 .grp-dot.live {
 	background: var(--sc-ok);
-	box-shadow: 0 0 8px rgba(15, 157, 99, 0.45);
+	box-shadow: 0 0 8px color-mix(in srgb, var(--success) 45%, transparent);
 	animation: sc-blink 2.6s ease-in-out infinite;
 }
 
@@ -583,7 +583,7 @@ function resetCheckStatus() {
 .prov.active {
 	border-color: var(--sc-line-2);
 	background: var(--sc-panel);
-	box-shadow: 0 2px 10px rgba(23, 26, 31, 0.05);
+	box-shadow: 0 2px 10px rgba(var(--shadow-ink), 0.05);
 }
 
 .prov.active::before {
@@ -595,7 +595,7 @@ function resetCheckStatus() {
 	transform: translateY(-50%);
 	border-radius: 2px;
 	background: var(--sc-acid);
-	box-shadow: 0 0 10px rgba(59, 91, 253, 0.4);
+	box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
 	content: '';
 }
 
@@ -609,7 +609,7 @@ function resetCheckStatus() {
 	flex: 0 0 auto;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 	letter-spacing: 0.06em;
 	transition: color 0.15s;
 }
@@ -645,7 +645,7 @@ function resetCheckStatus() {
 .p-name {
 	overflow: hidden;
 	color: var(--sc-text);
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 	font-weight: 560;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -655,7 +655,7 @@ function resetCheckStatus() {
 	margin-top: 1px;
 	color: var(--sc-mute);
 	font-family: var(--sc-mono);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 	letter-spacing: 0.02em;
 }
 
@@ -670,13 +670,13 @@ function resetCheckStatus() {
 
 .prov.on .dot {
 	background: var(--sc-ok);
-	box-shadow: 0 0 8px rgba(15, 157, 99, 0.45);
+	box-shadow: 0 0 8px color-mix(in srgb, var(--success) 45%, transparent);
 }
 
 .provider-empty {
 	padding: 30px 10px;
 	color: var(--sc-mute);
-	font-size: 13px;
+	font-size: var(--fs-13);
 	text-align: center;
 }
 
@@ -685,7 +685,7 @@ function resetCheckStatus() {
 	place-items: center;
 	height: 100%;
 	color: var(--sc-mute);
-	font-size: 13px;
+	font-size: var(--fs-13);
 }
 
 /* ── detail ─────────────────────────────────────────────────── */
@@ -709,7 +709,7 @@ function resetCheckStatus() {
 	font-weight: 700;
 	letter-spacing: -0.04em;
 	line-height: 1;
-	-webkit-text-stroke: 1px rgba(19, 27, 45, 0.08);
+	-webkit-text-stroke: 1px var(--line-1);
 	pointer-events: none;
 	user-select: none;
 }
@@ -733,7 +733,7 @@ function resetCheckStatus() {
 	border: 1px solid var(--sc-line-2);
 	border-radius: 13px;
 	background: var(--sc-panel);
-	box-shadow: 0 8px 24px rgba(23, 26, 31, 0.07);
+	box-shadow: 0 8px 24px rgba(var(--shadow-ink), 0.07);
 }
 
 .dh-logo :deep(.brand-logo) {
@@ -751,7 +751,7 @@ function resetCheckStatus() {
 	margin-bottom: 4px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 	font-weight: 500;
 	letter-spacing: 0.24em;
 }
@@ -759,7 +759,7 @@ function resetCheckStatus() {
 .dh-meta h2 {
 	margin: 0;
 	font-family: var(--sc-display);
-	font-size: 26px;
+	font-size: var(--fs-26);
 	font-weight: 640;
 	letter-spacing: 0.01em;
 	line-height: 1.15;
@@ -768,7 +768,7 @@ function resetCheckStatus() {
 .dh-meta p {
 	margin: 3px 0 0;
 	color: var(--sc-mute);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 }
 
 .detail-body {
@@ -799,7 +799,7 @@ function resetCheckStatus() {
 .fl {
 	color: var(--sc-soft);
 	font-family: var(--sc-mono);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 600;
 	letter-spacing: 0.18em;
 	text-transform: uppercase;
@@ -815,7 +815,7 @@ function resetCheckStatus() {
 	color: var(--sc-acid);
 	cursor: pointer;
 	font: inherit;
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 500;
 	text-decoration: none;
 	opacity: 0.9;
@@ -836,7 +836,7 @@ function resetCheckStatus() {
 .field-hint {
 	margin: 8px 0 0;
 	color: var(--sc-mute);
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 
 .input {
@@ -847,7 +847,7 @@ function resetCheckStatus() {
 	background: var(--sc-panel);
 	color: var(--sc-text);
 	font: inherit;
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
 }
 
@@ -864,7 +864,7 @@ function resetCheckStatus() {
 
 .input.mono {
 	font-family: var(--sc-mono);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	letter-spacing: 0.02em;
 }
 
@@ -919,7 +919,7 @@ function resetCheckStatus() {
 	color: var(--sc-text);
 	cursor: pointer;
 	font: inherit;
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 	transition: border-color 0.16s, box-shadow 0.16s;
 }
 
@@ -951,7 +951,7 @@ function resetCheckStatus() {
 	color: var(--sc-text);
 	cursor: pointer;
 	font: inherit;
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 	font-weight: 560;
 	transition:
 		background 0.16s,
@@ -980,7 +980,7 @@ function resetCheckStatus() {
 .btn.sm {
 	height: 36px;
 	padding: 0 14px;
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 }
 
 .check-status {
@@ -989,7 +989,7 @@ function resetCheckStatus() {
 	gap: 8px;
 	margin-top: 10px;
 	font-family: var(--sc-mono);
-	font-size: 12px;
+	font-size: var(--fs-12);
 	font-weight: 500;
 	letter-spacing: 0.02em;
 }
@@ -1016,7 +1016,7 @@ function resetCheckStatus() {
 	height: 7px;
 	border-radius: 50%;
 	background: var(--sc-err);
-	box-shadow: 0 0 8px rgba(220, 69, 69, 0.4);
+	box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 /* ── model registry ─────────────────────────────────────────── */
@@ -1039,7 +1039,7 @@ function resetCheckStatus() {
 	margin-bottom: 5px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9.5px;
+	font-size: var(--fs-95);
 	font-weight: 500;
 	letter-spacing: 0.24em;
 }
@@ -1047,14 +1047,14 @@ function resetCheckStatus() {
 .models-head h3 {
 	margin: 0;
 	font-family: var(--sc-display);
-	font-size: 17px;
+	font-size: var(--fs-17);
 	font-weight: 630;
 }
 
 .models-head .count {
 	margin-top: 3px;
 	color: var(--sc-mute);
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 
 .count-pill {
@@ -1064,7 +1064,7 @@ function resetCheckStatus() {
 	background: var(--sc-acid-soft);
 	color: var(--sc-acid);
 	font-family: var(--sc-mono);
-	font-size: 11.5px;
+	font-size: var(--fs-115);
 	font-weight: 600;
 	letter-spacing: 0.04em;
 }
@@ -1129,7 +1129,7 @@ function resetCheckStatus() {
 }
 
 .model:hover {
-	background: rgba(19, 27, 45, 0.025);
+	background: color-mix(in srgb, var(--text) 2.5%, transparent);
 }
 
 .model:last-child {
@@ -1166,7 +1166,7 @@ function resetCheckStatus() {
 }
 
 .m-name {
-	font-size: 14px;
+	font-size: var(--fs-14);
 	font-weight: 600;
 }
 
@@ -1177,7 +1177,7 @@ function resetCheckStatus() {
 	background: var(--sc-raise);
 	color: var(--sc-soft);
 	font-family: var(--sc-mono);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 	letter-spacing: 0.02em;
 }
 
@@ -1192,7 +1192,7 @@ function resetCheckStatus() {
 .tag {
 	color: var(--sc-mute);
 	font-family: var(--sc-mono);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 	letter-spacing: 0.02em;
 }
 
@@ -1203,7 +1203,7 @@ function resetCheckStatus() {
 	background: var(--sc-ok-soft);
 	color: var(--sc-ok);
 	font-family: var(--sc-mono);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 	font-weight: 560;
 	letter-spacing: 0.02em;
 }
@@ -1292,8 +1292,8 @@ function resetCheckStatus() {
 	width: 18px;
 	height: 18px;
 	border-radius: 50%;
-	background: #fff;
-	box-shadow: 0 1px 3px rgba(23, 26, 31, 0.22);
+	background: var(--panel);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.22);
 	transition:
 		transform 0.22s var(--sc-ease-spring),
 		background 0.2s;
@@ -1306,7 +1306,7 @@ function resetCheckStatus() {
 
 .switch input:checked+.track+.knob {
 	transform: translateX(18px);
-	background: #fff;
+	background: var(--panel);
 }
 
 .switch.big {
@@ -1327,7 +1327,7 @@ function resetCheckStatus() {
 .model-empty {
 	padding: 44px;
 	color: var(--sc-mute);
-	font-size: 13px;
+	font-size: var(--fs-13);
 	text-align: center;
 }
 

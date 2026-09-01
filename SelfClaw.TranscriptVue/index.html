@@ -4,6 +4,24 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>SelfClaw</title>
+		<script>
+			// 深色用户冷启动时，body 的背景会在 main.js 执行之前就画出来 —— 不先定住
+			// data-theme 就会闪一下白底。这里只解决这一件事：其余外观项由
+			// useAppearance 在 mount 之前应用，那时还没有任何内容上屏。
+			// 与 useAppearance 的 STORAGE_KEY / 取值逻辑保持一致。
+			(function () {
+				try {
+					var raw = localStorage.getItem('selfclaw:appearance');
+					var mode = raw ? JSON.parse(raw).mode : 'system';
+					var dark =
+						mode === 'dark' ||
+						(mode !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+					document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+				} catch (_) {
+					document.documentElement.dataset.theme = 'light';
+				}
+			})();
+		</script>
 	</head>
 	<body>
 		<div id="app"></div>

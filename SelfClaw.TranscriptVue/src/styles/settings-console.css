@@ -1,40 +1,21 @@
 /*
- * SelfClaw Settings — "Console" design system (light).
- * Shared tokens + motion primitives, imported into each settings component's
- * scoped style block. Every settings page roots itself with the `sc-root` class.
+ * SelfClaw Settings — "Console" design system.
+ * Shared page scaffold + motion primitives, imported into each settings
+ * component's scoped style block. Every settings page roots itself with the
+ * `sc-root` class.
+ *
+ * The `--sc-*` tokens themselves live in styles/tokens.css (alias layer) so they
+ * follow the active theme; they must NOT be redeclared here — this file is
+ * @imported into scoped blocks, so its selectors gain a [data-v-x] attribute and
+ * would out-specify the global definitions.
  */
-
-.sc-root {
-	--sc-bg: #f5f6f8;
-	--sc-panel: #ffffff;
-	--sc-raise: #f1f3f6;
-	--sc-hover: #ebeff3;
-	--sc-line: rgba(19, 27, 45, 0.08);
-	--sc-line-2: rgba(19, 27, 45, 0.14);
-	--sc-text: #171a1f;
-	--sc-soft: #454c59;
-	--sc-mute: #6b7280;
-	--sc-faint: #9aa1ad;
-	--sc-acid: #3b5bfd;
-	--sc-acid-ink: #ffffff;
-	--sc-acid-soft: rgba(59, 91, 253, 0.08);
-	--sc-ok: #0f9d63;
-	--sc-ok-soft: rgba(15, 157, 99, 0.1);
-	--sc-err: #dc4545;
-	--sc-err-soft: rgba(220, 69, 69, 0.08);
-	--sc-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
-	--sc-sans: 'Segoe UI Variable Text', 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
-	--sc-display: 'Segoe UI Variable Display', 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-	--sc-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-	--sc-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-}
 
 /* Soft aurora backdrop, applied to the page root. */
 .sc-stage {
 	background-color: var(--sc-bg);
 	background-image:
-		radial-gradient(720px 420px at 88% -10%, rgba(59, 91, 253, 0.05), transparent 62%),
-		radial-gradient(900px 620px at -12% 108%, rgba(15, 157, 99, 0.04), transparent 60%);
+		radial-gradient(720px 420px at 88% -10%, color-mix(in srgb, var(--sc-acid) 5%, transparent), transparent 62%),
+		radial-gradient(900px 620px at -12% 108%, color-mix(in srgb, var(--sc-ok) 4%, transparent), transparent 60%);
 	background-size: 100% 100%;
 }
 
@@ -100,7 +81,7 @@
 	z-index: 0;
 	margin: 0;
 	transform: translateY(-52%);
-	color: rgba(19, 27, 45, 0.045);
+	color: color-mix(in srgb, var(--sc-text) 5%, transparent);
 	font-family: var(--sc-display);
 	font-size: 58px;
 	font-weight: 700;
@@ -124,7 +105,7 @@
 	gap: 7px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 	font-weight: 650;
 }
 
@@ -138,7 +119,7 @@
 
 .sc-page-title {
 	margin: 5px 0 3px;
-	font-size: 25px;
+	font-size: var(--fs-25);
 	font-weight: 650;
 	letter-spacing: 0;
 }
@@ -146,7 +127,7 @@
 .sc-page-sub {
 	margin: 0;
 	color: var(--sc-mute);
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 
 .sc-page-body {
@@ -156,7 +137,7 @@
 	overflow-y: auto;
 	border-top: 1px solid var(--sc-line);
 	/* A short gray-to-white fade softens the seam with the header. */
-	background: linear-gradient(to bottom, rgba(245, 246, 248, 0.9), rgba(245, 246, 248, 0) 44px), var(--sc-panel);
+	background: linear-gradient(to bottom, color-mix(in srgb, var(--sc-bg) 90%, transparent), transparent 44px), var(--sc-panel);
 }
 
 /*
@@ -206,7 +187,7 @@
 	gap: 7px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 	font-weight: 650;
 	letter-spacing: 0.22em;
 }
@@ -234,7 +215,7 @@
 	margin: 0;
 	max-width: 42ch;
 	color: var(--sc-mute);
-	font-size: 12px;
+	font-size: var(--fs-12);
 	line-height: 1.7;
 }
 
@@ -245,7 +226,7 @@
 	margin-top: 4px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 	font-weight: 500;
 	letter-spacing: 0.22em;
 }
@@ -255,7 +236,7 @@
 	height: 5px;
 	border-radius: 50%;
 	background: var(--sc-acid);
-	box-shadow: 0 0 8px rgba(59, 91, 253, 0.5);
+	box-shadow: 0 0 8px color-mix(in srgb, var(--sc-acid) 50%, transparent);
 	content: '';
 	animation: sc-blink 2.4s ease-in-out infinite;
 }

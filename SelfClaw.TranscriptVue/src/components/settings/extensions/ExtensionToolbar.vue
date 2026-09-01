@@ -61,7 +61,7 @@ input {
 	background: transparent;
 	color: var(--sc-text);
 	font: inherit;
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 }
 
 button {

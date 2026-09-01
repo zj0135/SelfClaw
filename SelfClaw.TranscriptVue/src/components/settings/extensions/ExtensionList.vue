@@ -42,10 +42,10 @@ defineEmits(['select', 'toggle']);
 
 .empty strong {
 	color: var(--sc-soft);
-	font-size: 13px;
+	font-size: var(--fs-13);
 }
 
 .empty span {
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 </style>

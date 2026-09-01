@@ -412,37 +412,7 @@ onUnmounted(() => {
 </template>
 
 <style>
-:root {
-	color-scheme: light;
-	--bg: #ffffff;
-	--panel: #ffffff;
-	--panel-soft: #f7f8fa;
-	--panel-muted: #f1f3f6;
-	--panel-elevated: #ffffff;
-	--border: #e5e7eb;
-	--border-strong: #d8dde5;
-	--card-border: #e3e6ec;
-	--text: #171a1f;
-	--muted: #6b7280;
-	--muted-soft: #8a929e;
-	--accent: #3b5bfd;
-	--accent-2: #2f49d1;
-	--accent-rgb: 59, 91, 253;
-	--accent-soft: rgba(59, 91, 253, 0.08);
-	--success: #0f9d63;
-	--danger: #dc4545;
-	--shadow: 0 12px 30px rgba(23, 26, 31, 0.08);
-	--card-shadow: 0 1px 2px rgba(23, 26, 31, 0.05), 0 10px 26px rgba(23, 26, 31, 0.06);
-	--font-ui: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
-	--font-display: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
-	--font-code: 'Cascadia Code', Consolas, monospace;
-	--font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
-	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-	--ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-	--scroll-track: transparent;
-	--scroll-thumb: rgba(23, 26, 31, 0.16);
-	--resize-edge: 6px;
-}
+/* 全局 token（原 :root 块）已移入 styles/tokens.css，由 main.js 引入。 */
 
 * {
 	box-sizing: border-box;
@@ -481,7 +451,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-	background-color: rgba(23, 26, 31, 0.26);
+	background-color: var(--scroll-thumb-hover);
 }
 
 button {
@@ -517,7 +487,7 @@ button {
 	position: relative;
 	width: 1px;
 	flex: none;
-	background: var(--border, #e5e7eb);
+	background: var(--border);
 	cursor: col-resize;
 	transition: background 0.14s;
 }
@@ -532,7 +502,7 @@ button {
 }
 
 .panel-resizer:hover {
-	background: var(--accent, #3b5bfd);
+	background: var(--accent);
 }
 
 .window-drag-region {
@@ -668,29 +638,29 @@ button {
 
 @keyframes turn-status-pulse {
 	0% {
-		box-shadow: 0 0 0 0 rgba(15, 157, 99, 0.32);
+		box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 32%, transparent);
 	}
 
 	70% {
-		box-shadow: 0 0 0 6px rgba(15, 157, 99, 0);
+		box-shadow: 0 0 0 6px transparent;
 	}
 
 	100% {
-		box-shadow: 0 0 0 0 rgba(15, 157, 99, 0);
+		box-shadow: 0 0 0 0 transparent;
 	}
 }
 
 .turn-status-label {
-	color: #5f6a78;
-	font-size: 12.5px;
+	color: var(--muted);
+	font-size: var(--fs-125);
 	font-weight: 600;
 	letter-spacing: 0.01em;
 }
 
 .turn-status-time {
-	color: #9aa2ad;
+	color: var(--faint);
 	font-family: var(--font-mono);
-	font-size: 11.5px;
+	font-size: var(--fs-115);
 	font-weight: 500;
 	font-variant-numeric: tabular-nums;
 }
@@ -739,7 +709,7 @@ button {
 	border: 1px solid var(--card-border);
 	/* 右下角收小：不依赖头像也能读出「这是你说的」方向感 */
 	border-radius: 16px 16px 6px 16px;
-	background: #ffffff;
+	background: var(--panel);
 	box-shadow: var(--card-shadow);
 }
 
@@ -748,7 +718,7 @@ button {
 }
 
 .item.message.user:hover {
-	border-color: #d8dde5;
+	border-color: var(--border-strong);
 }
 
 .header {
@@ -758,7 +728,7 @@ button {
 	gap: 12px;
 	padding: 0 0 7px;
 	color: var(--muted-soft);
-	font-size: 12px;
+	font-size: var(--fs-12);
 	line-height: 1.4;
 }
 
@@ -780,9 +750,9 @@ button {
 
 .message-time {
 	opacity: 0;
-	color: #7f8a9a;
+	color: var(--muted-soft);
 	font-family: var(--font-mono);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 	line-height: 1.2;
 	letter-spacing: 0.02em;
 	transition: opacity 120ms ease;
@@ -799,13 +769,13 @@ button {
 	min-height: 32px;
 	padding: 12px 16px 16px;
 	color: var(--text);
-	font-size: 14px;
+	font-size: var(--fs-14);
 	line-height: 1.72;
 }
 
 .body.body-segment {
 	padding: 0 0 12px;
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 }
 
 .body.body-segment.first {
@@ -818,8 +788,8 @@ button {
 
 .message-row.user .body.body-segment {
 	padding: 13px 16px;
-	color: #05070a;
-	font-size: 14px;
+	color: var(--text-strong);
+	font-size: var(--fs-14);
 	line-height: 1.6;
 }
 
@@ -849,7 +819,7 @@ button {
 .message-cancelled {
 	margin: 8px 0 0;
 	color: var(--muted);
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 
 h1,
@@ -860,16 +830,18 @@ h3 {
 	line-height: 1.2;
 }
 
+/* 消息正文里的标题属于阅读内容，跟随界面字号缩放。保留 rem 基数是为了不改动
+   既有比例，只在外面套一层 scale。 */
 h1 {
-	font-size: 1.5rem;
+	font-size: calc(1.5rem * var(--ui-font-scale));
 }
 
 h2 {
-	font-size: 1.22rem;
+	font-size: calc(1.22rem * var(--ui-font-scale));
 }
 
 h3 {
-	font-size: 1.05rem;
+	font-size: calc(1.05rem * var(--ui-font-scale));
 }
 
 ul,
@@ -880,7 +852,7 @@ ol {
 blockquote {
 	margin: 0;
 	padding: 0.2rem 0 0.2rem 1rem;
-	border-left: 3px solid rgba(var(--accent-rgb), 0.35);
+	border-left: 3px solid color-mix(in srgb, var(--accent) 35%, transparent);
 	color: var(--muted);
 }
 
@@ -890,21 +862,21 @@ pre {
 	overflow: auto;
 	border: 1px solid var(--border);
 	border-radius: 10px;
-	background: #f5f7fa;
-	color: #1f2937;
-	font-size: 13px;
+	background: var(--data-surface);
+	color: var(--data-ink);
+	font-size: var(--fs-13);
 }
 
 code {
 	font-family: var(--font-mono);
-	font-size: 13px;
+	font-size: var(--fs-13);
 }
 
 :not(pre)>code {
 	padding: 2px 6px;
 	border-radius: 5px;
-	background: #eef2f7;
-	color: #263142;
+	background: var(--data-inline-surface);
+	color: var(--data-inline-ink);
 }
 
 table {
@@ -912,7 +884,7 @@ table {
 	overflow: hidden;
 	border: 1px solid var(--border);
 	border-radius: 10px;
-	background: #ffffff;
+	background: var(--panel);
 	border-collapse: collapse;
 }
 
@@ -924,7 +896,7 @@ td {
 }
 
 th {
-	background: #f7f9fc;
+	background: var(--panel-soft);
 	font-weight: 650;
 }
 
@@ -957,11 +929,11 @@ a:hover {
 	gap: 5px;
 	margin: 0 2px;
 	padding: 2px 7px 2px 6px;
-	border: 1px solid rgba(var(--accent-rgb), 0.3);
+	border: 1px solid var(--accent-line);
 	border-radius: 6px;
 	background: var(--accent-soft);
 	color: var(--accent-2);
-	font-size: 13px;
+	font-size: var(--fs-13);
 	font-weight: 600;
 	line-height: 1.35;
 	user-select: all;
@@ -999,7 +971,7 @@ a:hover {
 	overflow: hidden;
 	border: 1px solid var(--border);
 	border-radius: 8px;
-	background: #ffffff;
+	background: var(--panel);
 }
 
 .message-attachment-image {
@@ -1040,27 +1012,27 @@ a:hover {
 
 .message-attachment-name {
 	color: var(--text);
-	font-size: 12px;
+	font-size: var(--fs-12);
 	font-weight: 650;
 }
 
 .message-attachment-size {
 	color: var(--muted);
-	font-size: 11px;
+	font-size: var(--fs-11);
 }
 
 /* ===== 思考 / 工具调用：浅灰圆角卡片行（状态图标 + 主副标签 + 右侧箭头） ===== */
 .thinking-block {
 	margin: 0;
 	overflow: hidden;
-	border: 1px solid #edeff3;
+	border: 1px solid var(--card-line);
 	border-radius: 12px;
-	background: #f7f8fa;
+	background: var(--card-surface);
 	transition: border-color 0.15s;
 }
 
 .thinking-block:not(.pending):hover {
-	border-color: #e0e4ea;
+	border-color: var(--card-line-hover);
 }
 
 .thinking-block.last {
@@ -1076,7 +1048,7 @@ a:hover {
 	padding: 9px 12px;
 	border: 0;
 	background: transparent;
-	color: #3d4654;
+	color: var(--text-soft);
 	text-align: left;
 }
 
@@ -1089,7 +1061,7 @@ a:hover {
 	place-items: center;
 	width: 18px;
 	height: 18px;
-	color: #707c8c;
+	color: var(--muted);
 	flex: none;
 }
 
@@ -1111,16 +1083,16 @@ a:hover {
 }
 
 .thinking-label {
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 600;
-	color: #22262c;
+	color: var(--text-strong);
 	letter-spacing: 0.01em;
 }
 
 .thinking-chevron {
 	margin-left: auto;
-	color: #99a2b0;
-	font-size: 14px;
+	color: var(--faint);
+	font-size: var(--fs-14);
 	transition: transform 140ms ease;
 }
 
@@ -1140,16 +1112,16 @@ a:hover {
 
 .thinking-markdown {
 	padding: 6px 0 2px 12px;
-	border-left: 2px solid #d9e2ef;
-	color: #7f8b9c;
-	font-size: 12px;
+	border-left: 2px solid var(--quote-line);
+	color: var(--muted);
+	font-size: var(--fs-12);
 	line-height: 1.7;
 }
 
 .thinking-placeholder {
 	margin: 0;
 	color: var(--muted-soft);
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 
 .preparing-indicator {
@@ -1157,13 +1129,13 @@ a:hover {
 	align-items: center;
 	gap: 9px;
 	padding: 6px 0;
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 600;
 	letter-spacing: 0.01em;
 }
 
 .shimmer-text {
-	background: linear-gradient(90deg, #93a3bb 25%, #33465f 50%, #93a3bb 75%);
+	background: linear-gradient(90deg, var(--shimmer-dim) 25%, var(--shimmer-bright) 50%, var(--shimmer-dim) 75%);
 	background-size: 200% 100%;
 	-webkit-background-clip: text;
 	background-clip: text;
@@ -1196,23 +1168,23 @@ a:hover {
 .tool-block,
 .tool-group-block {
 	overflow: hidden;
-	border: 1px solid #edeff3;
+	border: 1px solid var(--card-line);
 	border-radius: 12px;
-	background: #f7f8fa;
+	background: var(--card-surface);
 	box-shadow: none;
 	transition: border-color 0.15s;
 }
 
 .tool-block:hover,
 .tool-group-block:hover {
-	border-color: #e0e4ea;
+	border-color: var(--card-line-hover);
 }
 
-/* 组内嵌套的工具卡片：灰卡片里的白色子卡片 */
+/* 组内嵌套的工具卡片：比外层卡片再浮起一档 */
 .tool-block.nested {
-	border: 1px solid #e8ebf0;
+	border: 1px solid var(--card-nested-line);
 	border-radius: 9px;
-	background: #ffffff;
+	background: var(--card-nested-surface);
 }
 
 .tool-summary,
@@ -1225,7 +1197,7 @@ a:hover {
 	padding: 9px 12px;
 	border: 0;
 	background: transparent;
-	color: #3d4654;
+	color: var(--text-soft);
 	text-align: left;
 }
 
@@ -1258,25 +1230,25 @@ a:hover {
 }
 
 .tool-status-icon.completed {
-	background: rgba(15, 157, 99, 0.12);
-	color: #0f9d63;
+	background: color-mix(in srgb, var(--success) 12%, transparent);
+	color: var(--success);
 }
 
 .tool-status-icon.failed {
-	background: rgba(220, 69, 69, 0.1);
+	background: color-mix(in srgb, var(--danger) 10%, transparent);
 	color: var(--danger);
 }
 
 .tool-status-icon.cancelled {
-	background: #eceff3;
-	color: #8a929e;
+	background: var(--panel-muted);
+	color: var(--muted-soft);
 }
 
 .tool-status-icon.spinning {
 	width: 13px;
 	height: 13px;
 	margin: 2.5px;
-	border: 2px solid #d5dce6;
+	border: 2px solid var(--spinner-track);
 	border-top-color: var(--accent);
 	background: transparent;
 	animation: tool-spin 0.8s linear infinite;
@@ -1294,8 +1266,8 @@ a:hover {
 	flex: 0 1 auto;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	color: #22262c;
-	font-size: 12.5px;
+	color: var(--text-strong);
+	font-size: var(--fs-125);
 	font-weight: 600;
 	line-height: 1.4;
 	white-space: nowrap;
@@ -1307,8 +1279,8 @@ a:hover {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	color: #8f99a8;
-	font-size: 12px;
+	color: var(--muted-soft);
+	font-size: var(--fs-12);
 	line-height: 1.4;
 }
 
@@ -1318,18 +1290,18 @@ a:hover {
 	align-items: center;
 	gap: 7px;
 	flex: 0 0 auto;
-	color: #99a2b0;
+	color: var(--faint);
 }
 
 .tool-summary-duration {
-	font-size: 11px;
+	font-size: var(--fs-11);
 	color: inherit;
 }
 
 .tool-summary-chevron,
 .tool-group-chevron {
 	color: inherit;
-	font-size: 14px;
+	font-size: var(--fs-14);
 	transition: transform 140ms ease;
 }
 
@@ -1362,21 +1334,21 @@ a:hover {
 	padding: 0 0 6px;
 	color: var(--muted-soft);
 	font-family: var(--font-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 	font-weight: 700;
 	letter-spacing: 0.1em;
 	text-transform: uppercase;
 }
 
 .tool-details-body {
-	border: 1px solid #e6eaf1;
+	border: 1px solid var(--card-nested-line);
 	border-radius: 8px;
-	background: #ffffff;
+	background: var(--card-nested-surface);
 }
 
 .tool-block.nested .tool-details-body {
-	border-color: #eceff3;
-	background: #f8fafc;
+	border-color: var(--card-line);
+	background: var(--panel-soft);
 }
 
 .tool-details-pre {
@@ -1386,7 +1358,7 @@ a:hover {
 	border: 0;
 	background: transparent;
 	box-shadow: none;
-	font-size: 11.5px;
+	font-size: var(--fs-115);
 	line-height: 1.6;
 }
 
@@ -1396,7 +1368,7 @@ a:hover {
 }
 
 .tool-details-status {
-	font-size: 11px;
+	font-size: var(--fs-11);
 }
 
 .image-preview-backdrop {
@@ -1407,7 +1379,7 @@ a:hover {
 	align-items: center;
 	justify-content: center;
 	padding: 24px;
-	background: rgba(23, 26, 31, 0.42);
+	background: var(--overlay-strong);
 	backdrop-filter: blur(8px);
 }
 
@@ -1416,7 +1388,7 @@ a:hover {
 	max-width: min(96vw, 1600px);
 	max-height: 92vh;
 	border-radius: 8px;
-	box-shadow: 0 24px 80px rgba(23, 26, 31, 0.28);
+	box-shadow: 0 24px 80px var(--overlay-shadow);
 }
 
 @media (max-width: 960px) {

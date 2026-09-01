@@ -1,0 +1,404 @@
+/*
+ * SelfClaw 设计 token —— 全局唯一定义处。
+ *
+ * 三层结构，只允许自上而下引用：
+ *
+ *   1. 基元层：调色板与排版刻度。浅色写在 :root 作为默认值，深色只在
+ *      html[data-theme='dark'] 覆盖同名 token。这个方向很关键——缺失 data-theme
+ *      时自动落在浅色，首屏内联脚本失败也不会拿到一堆未定义变量。
+ *
+ *   2. 语义层：把基元命名成用途（--text / --panel / --line）。用户可改的项走
+ *      var(--user-x, <默认>) 空槽：--user-* 只在用户显式设置时由 useAppearance
+ *      写到 <html> 的 inline style 上，没设就是未定义、自动回落主题值。因此切换
+ *      主题时用户的自定义仍然生效，二者不会互相打架。
+ *
+ *   3. 别名层：.sc-root / .sidebar 两套历史 token 改为指向语义层，让既有 500+ 个
+ *      var() 调用点原地跟随主题，无需改动组件。
+ *
+ * 新增颜色或字号一律加在本文件；组件里不应再出现颜色字面量或裸 px 字号。
+ */
+
+:root {
+	color-scheme: light;
+
+	/* ═══ 1 · 墨色阶：数字越小越重 ═══ */
+	--ink-1: #171a1f;
+	--ink-2: #454c59;
+	--ink-3: #6b7280;
+	--ink-4: #8a929e;
+	--ink-5: #9aa1ad;
+
+	/* ═══ 1 · 表面阶：canvas 是凹下去的底，base 是浮起来的面板 ═══ */
+	--surface-canvas: #f5f6f8;
+	--surface-base: #ffffff;
+	--surface-soft: #f7f8fa;
+	--surface-muted: #f1f3f6;
+	--surface-hover: #eef0f4;
+	--surface-sidebar: #fafbfd;
+
+	/* ═══ 1 · 描边：alpha 两档用于叠加，solid 三档用于实色边框 ═══ */
+	--line-1: rgba(19, 27, 45, 0.08);
+	--line-2: rgba(19, 27, 45, 0.14);
+	--line-solid: #e5e7eb;
+	--line-solid-strong: #d8dde5;
+	--line-card: #e3e6ec;
+
+	/* ═══ 1 · 强调色与状态色 ═══ */
+	--accent-base: #3b5bfd;
+	--accent-base-strong: #2f49d1;
+	--accent-ink: #ffffff;
+	--ok-base: #0f9d63;
+	--err-base: #dc4545;
+	--warn-base: #8a6d1d;
+	--err-text: #b42318;
+
+	/*
+	 * ═══ 1 · caution 琥珀族 ═══
+	 * 工具审批卡、权限复核对话框、needs-config 徽标共用的一套「需要你确认」语义色。
+	 * 与 --danger 分开：前者是等待决定，后者是已经失败，两种语气不该同色。
+	 * -text-* 是叠在琥珀底上的文字，深色下必须整组翻成浅色。
+	 */
+	--caution: #b7791f;
+	--caution-icon: #d29a48;
+	--caution-fill: #b26a09;
+	--caution-fill-hover: #9a5a06;
+	--caution-fill-ink: #ffffff;
+	--caution-tint: rgba(251, 191, 84, 0.12);
+	--caution-line: rgba(200, 122, 20, 0.32);
+	--caution-icon-bg: rgba(240, 165, 60, 0.2);
+	--caution-text: #4a3410;
+	--caution-text-strong: #33240a;
+	--caution-text-soft: #8a7343;
+	--caution-text-faint: #6f5b2e;
+
+	/* ═══ 1 · 阴影墨色：作为 rgba() 的前三位使用 ═══ */
+	--shadow-ink: 23, 26, 31;
+
+	/* ═══ 1 · 代码块：浅色主题下代码块也保持深底，这是刻意的对比 ═══ */
+	--code-surface: #171a22;
+	--code-ink: #e7eaf3;
+	--code-scroll-track: #2a303c;
+	--code-scroll-thumb: #69758d;
+	--code-scroll-thumb-hover: #9aa7bd;
+	--syntax-comment: #8b93a7;
+	--syntax-keyword: #c792ea;
+	--syntax-string: #addb67;
+	--syntax-number: #f78c6c;
+	--syntax-type: #82aaff;
+
+	/* ═══ 1 · 数据块：工具详情里的 JSON/纯文本，与代码块相反走浅底 ═══ */
+	--data-surface: #f5f7fa;
+	--data-ink: #1f2937;
+	--data-inline-surface: #eef2f7;
+	--data-inline-ink: #263142;
+
+	/* ═══ 1 · 组件面：对话区的思考块 / 工具卡片 / 遮罩 / 微光 ═══ */
+	--card-surface: #f7f8fa;
+	--card-line: #edeff3;
+	--card-line-hover: #e0e4ea;
+	--card-nested-surface: #ffffff;
+	--card-nested-line: #e8ebf0;
+	--spinner-track: #d5dce6;
+	--quote-line: #d9e2ef;
+	/* 中性主按钮（合并、确认这类）。深色下必须反过来变浅，否则深底上的深按钮看不见。 */
+	--fill-strong: #303741;
+	--fill-strong-ink: #ffffff;
+	--shimmer-dim: #93a3bb;
+	--shimmer-bright: #33465f;
+	/* 三档压暗：对话框 / 图片灯箱 / 扩展类对话框（后者刻意用重得多的遮罩）。 */
+	--overlay: rgba(23, 26, 31, 0.28);
+	--overlay-strong: rgba(23, 26, 31, 0.42);
+	--overlay-heavy: rgba(3, 5, 8, 0.74);
+	--overlay-shadow: rgba(23, 26, 31, 0.28);
+
+	/*
+	 * ═══ 1 · 终端 ANSI 调色板 ═══
+	 * xterm.js 自己解析颜色并画到 canvas，读不到 var()。TerminalPanel 用
+	 * getComputedStyle 把这 20 个值读成真实色串再交给它，主题切换时重读一次。
+	 * 所以这一组必须是完整的实色，不能是 color-mix() 之类的计算式。
+	 */
+	--term-bg: #ffffff;
+	--term-fg: #171a1f;
+	--term-cursor: #171a1f;
+	--term-selection: #dbeafe;
+	--term-black: #171a1f;
+	--term-red: #b42318;
+	--term-green: #1f7a4d;
+	--term-yellow: #9a6400;
+	--term-blue: #315fb8;
+	--term-magenta: #7c3aa8;
+	--term-cyan: #0f766e;
+	--term-white: #f7f8fa;
+	--term-bright-black: #6b7280;
+	--term-bright-red: #d92d20;
+	--term-bright-green: #2f855a;
+	--term-bright-yellow: #b7791f;
+	--term-bright-blue: #4f73c8;
+	--term-bright-magenta: #9333ea;
+	--term-bright-cyan: #0e9488;
+	--term-bright-white: #ffffff;
+
+	/* ═══ 1 · 字体栈 ═══ */
+	--font-ui-default: 'Segoe UI Variable Text', 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+	--font-display-default: 'Segoe UI Variable Display', 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+	--font-code-default: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
+
+	/*
+	 * ═══ 1 · 字号刻度 ═══
+	 * token 名即基准 px 值（--fs-125 = 12.5px），scale=1 时与改造前逐像素一致。
+	 * 刻度是「现有值的收敛」而非重新推导的等比数列——重新推导会改掉既有排版节奏。
+	 * 装饰性大字号（ghost word 58px、empty-word clamp、页头 25px）刻意不进刻度：
+	 * AGENTS.md 要求各设置页头高度严格一致，缩放它们会破坏这个约定。
+	 */
+	--ui-font-scale: 1;
+	--fs-9: calc(9px * var(--ui-font-scale));
+	--fs-95: calc(9.5px * var(--ui-font-scale));
+	--fs-10: calc(10px * var(--ui-font-scale));
+	--fs-105: calc(10.5px * var(--ui-font-scale));
+	--fs-11: calc(11px * var(--ui-font-scale));
+	--fs-115: calc(11.5px * var(--ui-font-scale));
+	--fs-12: calc(12px * var(--ui-font-scale));
+	--fs-125: calc(12.5px * var(--ui-font-scale));
+	--fs-13: calc(13px * var(--ui-font-scale));
+	--fs-135: calc(13.5px * var(--ui-font-scale));
+	--fs-14: calc(14px * var(--ui-font-scale));
+	--fs-15: calc(15px * var(--ui-font-scale));
+	--fs-17: calc(17px * var(--ui-font-scale));
+	--fs-18: calc(18px * var(--ui-font-scale));
+	--fs-19: calc(19px * var(--ui-font-scale));
+	/* 标题档：页头 / 抽屉 / 设置侧栏。这三处是有阅读功能的标题而非装饰，
+	   且 sc-page-head 是内容驱动高度，一起缩放不破坏各页头一致的约定。 */
+	--fs-25: calc(25px * var(--ui-font-scale));
+	--fs-26: calc(26px * var(--ui-font-scale));
+	--fs-34: calc(34px * var(--ui-font-scale));
+
+	/* 代码字号独立于界面字号：两条 scale 互不影响，这是设置页里分开的两项。 */
+	--code-font-scale: 1;
+	--code-fs-base: 12.5px;
+
+	/* ═══ 1 · 动效曲线 ═══ */
+	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+	--ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/*
+ * ═══ 1 · 深色调色板 ═══
+ * 只覆盖基元层同名 token，语义层与别名层因为按名引用而自动跟随。
+ * 字体栈、字号刻度、动效曲线与明暗无关，不在这里重复。
+ */
+html[data-theme='dark'] {
+	color-scheme: dark;
+
+	--ink-1: #e9ebf0;
+	--ink-2: #b9c0cc;
+	--ink-3: #8d95a4;
+	--ink-4: #757d8c;
+	--ink-5: #666e7d;
+
+	--surface-canvas: #0f1115;
+	--surface-base: #16191f;
+	--surface-soft: #1a1e25;
+	--surface-muted: #20242c;
+	--surface-hover: #262b34;
+	--surface-sidebar: #121419;
+
+	--line-1: rgba(233, 235, 240, 0.09);
+	--line-2: rgba(233, 235, 240, 0.15);
+	--line-solid: #262b34;
+	--line-solid-strong: #343a45;
+	--line-card: #23272f;
+
+	/* 浅色下 strong 比 base 更深（链接、hover），深色下方向相反：更亮才更突出。 */
+	--accent-base: #6d86ff;
+	--accent-base-strong: #93a5ff;
+	--accent-ink: #0d1016;
+	--ok-base: #34d399;
+	--err-base: #f87171;
+	--warn-base: #d9b25f;
+	--err-text: #fca5a5;
+
+	--caution: #e0a33f;
+	--caution-icon: #edb862;
+	--caution-fill: #c9871c;
+	--caution-fill-hover: #dd9a2c;
+	/* 琥珀填充在两个主题下都足够深，白字始终是对的 —— 不要换成 --accent-ink，
+	   那个值深色下接近纯黑。 */
+	--caution-fill-ink: #ffffff;
+	--caution-tint: rgba(224, 163, 63, 0.12);
+	--caution-line: rgba(224, 163, 63, 0.32);
+	--caution-icon-bg: rgba(224, 163, 63, 0.18);
+	--caution-text: #f0dcb8;
+	--caution-text-strong: #f8ecd4;
+	--caution-text-soft: #cbb68c;
+	--caution-text-faint: #b3a077;
+
+	--shadow-ink: 0, 0, 0;
+
+	--code-surface: #0d1016;
+	--code-scroll-track: #20242c;
+	--code-scroll-thumb: #5c6678;
+	--code-scroll-thumb-hover: #8b93a3;
+
+	/* 数据块在浅色下是浅底，深色下必须一起翻过来，否则工具详情整块刺眼。 */
+	--data-surface: #1a1e25;
+	--data-ink: #d7dce5;
+	--data-inline-surface: #23272f;
+	--data-inline-ink: #c9d1dc;
+
+	/* 深色下卡片靠比面板略亮一档来「浮起」，与浅色靠略暗一档的方向相反。 */
+	--card-surface: #1c2027;
+	--card-line: #262b34;
+	--card-line-hover: #333944;
+	--card-nested-surface: #22262e;
+	--card-nested-line: #2d323c;
+	--spinner-track: #333944;
+	--quote-line: #343b47;
+	--fill-strong: #e9ebf0;
+	--fill-strong-ink: #16191f;
+	--shimmer-dim: #5f6a7d;
+	--shimmer-bright: #b9c4d6;
+	--overlay: rgba(0, 0, 0, 0.55);
+	--overlay-strong: rgba(0, 0, 0, 0.68);
+	--overlay-heavy: rgba(0, 0, 0, 0.82);
+	--overlay-shadow: rgba(0, 0, 0, 0.5);
+
+	--term-bg: #101318;
+	--term-fg: #dfe3ea;
+	--term-cursor: #dfe3ea;
+	--term-selection: #2c4a7c;
+	--term-black: #2b313b;
+	--term-red: #f2777a;
+	--term-green: #5cc98a;
+	--term-yellow: #d9b25f;
+	--term-blue: #7aa2f7;
+	--term-magenta: #c792ea;
+	--term-cyan: #56c8c8;
+	--term-white: #c9d1dc;
+	--term-bright-black: #6a7181;
+	--term-bright-red: #ff9a9d;
+	--term-bright-green: #86e3ab;
+	--term-bright-yellow: #f0cd85;
+	--term-bright-blue: #a3c0ff;
+	--term-bright-magenta: #e0b3ff;
+	--term-bright-cyan: #86e0e0;
+	--term-bright-white: #f2f5fa;
+}
+
+/*
+ * ═══ 2 · 语义层 ═══
+ *
+ * 用途命名，组件只应引用这一层（及别名层）。带 var(--user-x, …) 的是用户可覆盖项：
+ * useAppearance 把 --user-* 写到 <html> 的 inline style，没设置就是未定义、回落到
+ * 主题默认值 —— 所以换主题时用户的自定义颜色/字体依然生效。
+ *
+ * 规则：有主题相关默认值的（颜色、字体栈）走 --user-* 空槽；无主题相关默认值的
+ * （--ui-font-scale / --code-font-scale 这类纯数字）由 JS 直接写同名 inline 覆盖。
+ *
+ * 本块声明的 token 名与基元层不重名，故与 html[data-theme] 的特异度差无关；
+ * 自定义属性在使用点惰性求值，写在深色块之后不影响解析。
+ */
+:root {
+	/* ── 表面与文本 ── */
+	--bg: var(--surface-base);
+	--bg-canvas: var(--surface-canvas);
+	--panel: var(--surface-base);
+	--panel-soft: var(--surface-soft);
+	--panel-muted: var(--surface-muted);
+	--panel-elevated: var(--surface-base);
+	--panel-hover: var(--surface-hover);
+	--text: var(--user-text, var(--ink-1));
+	--text-strong: var(--ink-1);
+	--text-soft: var(--ink-2);
+	--muted: var(--ink-3);
+	--muted-soft: var(--ink-4);
+	--faint: var(--ink-5);
+
+	/* ── 描边 ── */
+	--border: var(--line-solid);
+	--border-strong: var(--line-solid-strong);
+	--card-border: var(--line-card);
+
+	/* ── 强调与状态 ── */
+	--accent: var(--user-accent, var(--accent-base));
+	--accent-2: var(--accent-base-strong);
+	--accent-ink-on: var(--accent-ink);
+	--accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
+	--accent-line: color-mix(in srgb, var(--accent) 30%, transparent);
+	--success: var(--ok-base);
+	--danger: var(--err-base);
+	--warning: var(--warn-base);
+
+	/* ── 阴影与滚动条 ── */
+	--shadow: 0 12px 30px rgba(var(--shadow-ink), 0.08);
+	--card-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.05), 0 10px 26px rgba(var(--shadow-ink), 0.06);
+	--scroll-track: transparent;
+	--scroll-thumb: color-mix(in srgb, var(--ink-1) 16%, transparent);
+	--scroll-thumb-hover: color-mix(in srgb, var(--ink-1) 26%, transparent);
+
+	/* ── 字体 ── */
+	--font-ui: var(--user-font-ui, var(--font-ui-default));
+	--font-display: var(--user-font-display, var(--font-display-default));
+	--font-code: var(--user-font-code, var(--font-code-default));
+	/* 历史别名：--font-mono 与 --font-code 同源，保留是因为已有 ~10 处引用。 */
+	--font-mono: var(--font-code);
+
+	/* ── 代码块（Markdown 围栏代码 + hljs） ── */
+	--code-bg: var(--user-code-surface, var(--code-surface));
+	--code-fg: var(--user-code-ink, var(--code-ink));
+	--code-fs: calc(var(--code-fs-base) * var(--code-font-scale));
+
+	/* ── 窗口外壳 ── */
+	--resize-edge: 6px;
+}
+
+/*
+ * ═══ 3 · 别名层 ═══
+ *
+ * --sc-* / --sb-* 是设置页与左侧栏的历史 token（用量最大：--sc-acid 92 处、
+ * --sc-faint 73 处）。这里把它们改成指向语义层，既有调用点无需改动即跟随主题。
+ *
+ * 两块必须定义在本文件而不是各自的组件里：settings-console.css 经 @import 进入
+ * 各设置组件的 scoped 块后，选择器会带上 [data-v-x] 属性，特异度高于全局 .sc-root，
+ * 会把这里的定义压掉。原定义已从那两个文件删除。
+ */
+.sc-root {
+	--sc-bg: var(--bg-canvas);
+	--sc-panel: var(--panel);
+	--sc-raise: var(--panel-muted);
+	--sc-hover: var(--panel-hover);
+	--sc-line: var(--line-1);
+	--sc-line-2: var(--line-2);
+	--sc-text: var(--text);
+	--sc-soft: var(--text-soft);
+	--sc-mute: var(--muted);
+	--sc-faint: var(--faint);
+	--sc-acid: var(--accent);
+	--sc-acid-ink: var(--accent-ink-on);
+	--sc-acid-soft: var(--accent-soft);
+	--sc-ok: var(--success);
+	--sc-ok-soft: color-mix(in srgb, var(--success) 10%, transparent);
+	--sc-err: var(--danger);
+	--sc-err-soft: color-mix(in srgb, var(--danger) 8%, transparent);
+	--sc-mono: var(--font-code);
+	--sc-sans: var(--font-ui);
+	--sc-display: var(--font-display);
+	--sc-ease-out: var(--ease-out);
+	--sc-ease-spring: var(--ease-spring);
+}
+
+.sidebar {
+	--sb-bg: var(--surface-sidebar);
+	--sb-line: var(--line-1);
+	--sb-line-2: var(--line-2);
+	--sb-text: var(--text);
+	--sb-soft: var(--text-soft);
+	--sb-mute: var(--muted);
+	--sb-faint: var(--faint);
+	--sb-hover: var(--panel-hover);
+	--sb-raise: var(--panel-muted);
+	--sb-accent: var(--accent);
+	--sb-accent-soft: var(--accent-soft);
+	--sb-mono: var(--font-code);
+	--sb-ease-out: var(--ease-out);
+	--sb-ease-spring: var(--ease-spring);
+}

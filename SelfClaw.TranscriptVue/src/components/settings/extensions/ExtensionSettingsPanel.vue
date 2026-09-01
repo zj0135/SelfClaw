@@ -170,7 +170,7 @@ async function confirmPermissions() {
 	gap: 7px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 	font-weight: 650;
 }
 
@@ -183,7 +183,7 @@ async function confirmPermissions() {
 
 .page-head h1 {
 	margin: 5px 0 3px;
-	font-size: 25px;
+	font-size: var(--fs-25);
 	font-weight: 650;
 	letter-spacing: 0;
 }
@@ -191,13 +191,13 @@ async function confirmPermissions() {
 .page-head p {
 	margin: 0;
 	color: var(--sc-mute);
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 
 .page-head code {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 }
 
 .extensions-page> :deep(.tabs) {
@@ -210,11 +210,11 @@ async function confirmPermissions() {
 	gap: 8px;
 	margin: 10px 28px 0;
 	padding: 9px 11px;
-	border: 1px solid rgba(220, 69, 69, .2);
+	border: 1px solid color-mix(in srgb, var(--danger) 20%, transparent);
 	border-radius: 5px;
 	background: var(--sc-err-soft);
 	color: var(--sc-err);
-	font-size: 11px;
+	font-size: var(--fs-11);
 }
 
 .workspace {
@@ -222,7 +222,7 @@ async function confirmPermissions() {
 	grid-template-columns: minmax(0, 1fr);
 	min-height: 0;
 	flex: 1;
-	background: linear-gradient(to bottom, rgba(245, 246, 248, .9), rgba(245, 246, 248, 0) 44px), var(--sc-panel);
+	background: linear-gradient(to bottom, color-mix(in srgb, var(--sc-bg) 90%, transparent), transparent 44px), var(--sc-panel);
 }
 
 .workspace.inspecting {

@@ -120,7 +120,7 @@ const formatNames = {
 	display: grid;
 	place-items: center;
 	padding: 24px;
-	background: rgba(23, 26, 31, 0.28);
+	background: var(--overlay);
 	backdrop-filter: blur(4px);
 	animation: sc-fade 160ms ease-out;
 	font-family: var(--sc-sans);
@@ -134,7 +134,7 @@ const formatNames = {
 	border: 1px solid var(--sc-line-2);
 	border-radius: 16px;
 	background: var(--sc-panel);
-	box-shadow: 0 32px 90px rgba(23, 26, 31, 0.2);
+	box-shadow: 0 32px 90px rgba(var(--shadow-ink), 0.2);
 	color: var(--sc-text);
 	animation: sc-pop 240ms var(--sc-ease-out);
 }
@@ -151,7 +151,7 @@ header {
 	margin-bottom: 6px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9.5px;
+	font-size: var(--fs-95);
 	font-weight: 600;
 	letter-spacing: 0.24em;
 }
@@ -159,7 +159,7 @@ header {
 h3 {
 	margin: 0;
 	font-family: var(--sc-display);
-	font-size: 19px;
+	font-size: var(--fs-19);
 	font-weight: 640;
 	line-height: 1.3;
 }
@@ -167,7 +167,7 @@ h3 {
 p {
 	margin: 5px 0 0;
 	color: var(--sc-mute);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	line-height: 1.5;
 }
 
@@ -208,7 +208,7 @@ p {
 .form-dialog label>span {
 	color: var(--sc-soft);
 	font-family: var(--sc-mono);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 	font-weight: 600;
 	letter-spacing: 0.16em;
 	text-transform: uppercase;
@@ -225,7 +225,7 @@ p {
 	background: var(--sc-panel);
 	color: var(--sc-text);
 	font: inherit;
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 	transition: border-color 0.16s, box-shadow 0.16s;
 }
 
@@ -251,12 +251,12 @@ p {
 
 .hint {
 	color: var(--sc-mute);
-	font-size: 11.5px;
+	font-size: var(--fs-115);
 }
 
 .mono {
 	font-family: var(--sc-mono) !important;
-	font-size: 12.5px !important;
+	font-size: var(--fs-125) !important;
 	letter-spacing: 0.02em;
 }
 
@@ -272,7 +272,7 @@ footer button {
 	padding: 0 18px;
 	border-radius: 9px;
 	font: inherit;
-	font-size: 13px;
+	font-size: var(--fs-13);
 	font-weight: 600;
 	cursor: pointer;
 	transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s, transform 0.12s;
@@ -297,7 +297,7 @@ footer button {
 
 .primary:hover:not(:disabled) {
 	transform: translateY(-1px);
-	box-shadow: 0 8px 22px rgba(59, 91, 253, 0.2);
+	box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .primary:disabled {

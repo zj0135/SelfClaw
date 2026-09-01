@@ -131,19 +131,19 @@ onBeforeUnmount(() => {
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
-	color: #6b7280;
+	color: var(--muted);
 	cursor: pointer;
 	transition: background 0.15s, color 0.15s;
 }
 
 .icon-btn:hover {
-	background: #f3f4f6;
-	color: #171a1f;
+	background: var(--panel-muted);
+	color: var(--text);
 }
 
 .icon-btn[aria-expanded='true'] {
-	background: #f3f4f6;
-	color: #171a1f;
+	background: var(--panel-muted);
+	color: var(--text);
 }
 
 /* ===== 下拉菜单 ===== */
@@ -152,10 +152,10 @@ onBeforeUnmount(() => {
 	left: 0;
 	width: 248px;
 	padding: 4px;
-	border: 1px solid #e2e5eb;
+	border: 1px solid var(--border);
 	border-radius: 10px;
-	background: #ffffff;
-	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.05), 0 12px 32px rgba(23, 26, 31, 0.12);
+	background: var(--panel);
+	box-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.05), 0 12px 32px rgba(var(--shadow-ink), 0.12);
 	z-index: 40;
 }
 
@@ -212,18 +212,18 @@ onBeforeUnmount(() => {
 	border: 0;
 	border-radius: 6px;
 	background: transparent;
-	color: #171a1f;
+	color: var(--text);
 	text-align: left;
 	cursor: pointer;
 	transition: background 0.15s;
 }
 
 .perm-opt:hover {
-	background: #f5f6f8;
+	background: var(--bg-canvas);
 }
 
 .perm-opt[aria-selected='true'] {
-	background: var(--accent-soft, rgba(59, 91, 253, 0.08));
+	background: var(--accent-soft, color-mix(in srgb, var(--accent) 8%, transparent));
 }
 
 .perm-opt-icon {
@@ -241,13 +241,13 @@ onBeforeUnmount(() => {
 }
 
 .perm-opt-icon--require-approval {
-	background: rgba(200, 122, 20, 0.14);
-	color: #b26a09;
+	background: var(--caution-icon-bg);
+	color: var(--caution-fill);
 }
 
 .perm-opt-icon--full-access {
-	background: rgba(34, 139, 87, 0.14);
-	color: #1f7a4d;
+	background: color-mix(in srgb, var(--success) 14%, transparent);
+	color: var(--success);
 }
 
 .perm-opt-copy {
@@ -260,13 +260,13 @@ onBeforeUnmount(() => {
 .perm-opt-copy strong {
 	font: inherit;
 	font-weight: 600;
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 }
 
 .perm-opt-copy small {
 	overflow: hidden;
-	color: #8a929e;
-	font-size: 10.5px;
+	color: var(--muted-soft);
+	font-size: var(--fs-105);
 	font-weight: 500;
 	line-height: 1.35;
 	text-overflow: ellipsis;
@@ -276,7 +276,7 @@ onBeforeUnmount(() => {
 .perm-opt-check {
 	width: 14px;
 	height: 14px;
-	color: var(--accent, #3b5bfd);
+	color: var(--accent);
 	flex: none;
 	display: none;
 }

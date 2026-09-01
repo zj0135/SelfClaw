@@ -59,18 +59,18 @@ const icon = computed(() => iconMap[props.tab.panel.icon] || Puzzle);
 	flex: 0 1 auto;
 	padding-right: 3px;
 	border-radius: 999px;
-	color: #6b7280;
+	color: var(--muted);
 	transition: background 0.14s, color 0.14s;
 }
 
 .tab:hover {
-	background: #f1f3f6;
-	color: #171a1f;
+	background: var(--panel-muted);
+	color: var(--text);
 }
 
 .tab.active {
-	background: #eef0f4;
-	color: #171a1f;
+	background: var(--panel-hover);
+	color: var(--text);
 }
 
 .tab-main {
@@ -84,7 +84,7 @@ const icon = computed(() => iconMap[props.tab.panel.icon] || Puzzle);
 	border: 0;
 	background: transparent;
 	color: inherit;
-	font-size: 12px;
+	font-size: var(--fs-12);
 	font-weight: 560;
 }
 
@@ -92,11 +92,11 @@ const icon = computed(() => iconMap[props.tab.panel.icon] || Puzzle);
 	display: inline-grid;
 	flex: none;
 	place-items: center;
-	color: #8a929e;
+	color: var(--muted-soft);
 }
 
 .tab.active .tab-icon {
-	color: var(--accent, #3b5bfd);
+	color: var(--accent);
 }
 
 .tab-title {
@@ -115,7 +115,7 @@ const icon = computed(() => iconMap[props.tab.panel.icon] || Puzzle);
 	border: 0;
 	border-radius: 5px;
 	background: transparent;
-	color: #9aa1ad;
+	color: var(--faint);
 	opacity: 0;
 	transition: background 0.12s, color 0.12s, opacity 0.12s;
 }
@@ -126,7 +126,7 @@ const icon = computed(() => iconMap[props.tab.panel.icon] || Puzzle);
 }
 
 .tab-close:hover {
-	background: #e5e7eb;
-	color: #171a1f;
+	background: var(--border);
+	color: var(--text);
 }
 </style>

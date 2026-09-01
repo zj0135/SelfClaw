@@ -32,8 +32,8 @@ defineEmits(['activate', 'close', 'hide']);
 	height: 38px;
 	flex: none;
 	padding: 0 6px;
-	border-bottom: 1px solid var(--border, #e5e7eb);
-	background: #fafbfd;
+	border-bottom: 1px solid var(--border);
+	background: var(--surface-sidebar);
 }
 
 .tab-strip {
@@ -63,21 +63,21 @@ defineEmits(['activate', 'close', 'hide']);
 	   box-sizing 让 22px 连边框一起算，否则实际盒子是 24px。 */
 	padding: 0;
 	box-sizing: border-box;
-	border: 1px solid var(--border-strong, #d8dde5);
+	border: 1px solid var(--border-strong);
 	border-radius: 6px;
-	background: #ffffff;
-	color: #6b7280;
-	box-shadow: 0 1px 2px rgba(23, 26, 31, 0.05);
+	background: var(--panel);
+	color: var(--muted);
+	box-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.05);
 	transition: background 0.14s, border-color 0.14s, color 0.14s;
 }
 
 .tab-hide:hover {
-	border-color: var(--accent, #3b5bfd);
-	background: #eef0f4;
-	color: var(--accent, #3b5bfd);
+	border-color: var(--accent);
+	background: var(--panel-hover);
+	color: var(--accent);
 }
 
 .tab-hide:active {
-	background: #e3e6ec;
+	background: var(--card-border);
 }
 </style>

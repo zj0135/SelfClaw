@@ -481,7 +481,7 @@ onUnmounted(() => {
 	height: 100%;
 	display: grid;
 	grid-template-rows: minmax(0, 1fr) auto 0;
-	background: #ffffff;
+	background: var(--panel);
 	transition: grid-template-rows 850ms cubic-bezier(0.18, 0.86, 0.24, 1);
 }
 
@@ -526,16 +526,16 @@ onUnmounted(() => {
 
 .empty-kicker {
 	margin-bottom: 14px;
-	color: #9aa1ad;
-	font-family: var(--font-mono, 'Cascadia Code', ui-monospace, monospace);
-	font-size: 10px;
+	color: var(--faint);
+	font-family: var(--font-mono);
+	font-size: var(--fs-10);
 	font-weight: 600;
 	letter-spacing: 0.28em;
 }
 
 .empty-composer-copy h1 {
 	margin: 0;
-	color: #171a1f;
+	color: var(--text);
 	font-family: var(--font-display);
 	font-size: clamp(32px, 4vw, 42px);
 	font-weight: 700;
@@ -545,8 +545,8 @@ onUnmounted(() => {
 
 .empty-composer-copy p {
 	margin: 12px 0 0;
-	color: #9aa2ad;
-	font-size: 14px;
+	color: var(--faint);
+	font-size: var(--fs-14);
 	line-height: 1.6;
 }
 

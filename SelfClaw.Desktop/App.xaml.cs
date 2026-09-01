@@ -12,6 +12,7 @@ using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.Extensions.Abstractions;
@@ -126,6 +127,8 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<PluginPanelBridge>();
             builder.Services.AddSingleton<ProgrammingAssistantSettingsService>();
             builder.Services.AddSingleton<ProgrammingAssistantSettingsBridge>();
+            builder.Services.AddSingleton<AppearanceSettingsService>();
+            builder.Services.AddSingleton<AppearanceSettingsBridge>();
             builder.Services.AddSingleton<AiProviderSettingsBridge>();
             builder.Services.AddSingleton<ExtensionSettingsBridge>();
             builder.Services.AddSingleton<AgentSettingsBridge>();
@@ -166,6 +169,7 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<AgentSettingsBridge>(),
                 services.GetRequiredService<IExtensionStateChangeNotifier>(),
                 services.GetRequiredService<ProgrammingAssistantSettingsBridge>(),
+                services.GetRequiredService<AppearanceSettingsBridge>(),
                 services.GetRequiredService<PetSettingsBridge>(),
                 services.GetRequiredService<WorkspaceSelectionBridge>(),
                 services.GetRequiredService<TerminalHostController>(),
@@ -186,6 +190,7 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<WebViewMessageRouter>(),
                 services.GetRequiredService<TerminalHostController>(),
                 services.GetRequiredService<PluginPanelHostController>(),
+                services.GetRequiredService<AppearanceSettingsService>(),
                 services.GetRequiredService<StoragePaths>()));
             _host = builder.Build();
 
@@ -197,6 +202,9 @@ public partial class App : System.Windows.Application
             await _host.Services.GetRequiredService<IExtensionCatalogReconciler>().ReconcileAsync();
             await _host.Services.GetRequiredService<UserSkillDiscoveryService>().DiscoverAndRegisterAsync();
             await _host.Services.GetRequiredService<ProgrammingAssistantSettingsService>().GetOrInitializeAsync();
+            // 必须在窗口显示之前：MainWindow.OnSourceInitialized 要同步读缓存来定标题栏明暗，
+            // 晚一步深色用户就会看到标题栏先白一下。
+            await _host.Services.GetRequiredService<AppearanceSettingsService>().GetAsync();
             var mainWindow = _host.Services.GetRequiredService<MainWindow>();
             RegisterToastNotifications();
             await _host.StartAsync();

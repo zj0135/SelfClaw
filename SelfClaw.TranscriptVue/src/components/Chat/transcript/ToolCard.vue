@@ -64,8 +64,8 @@ const sourceText = computed(() => {
 }
 
 .tool-source {
-	color: var(--text-muted);
-	font-size: 10px;
+	color: var(--muted);
+	font-size: var(--fs-10);
 	font-weight: 500;
 	letter-spacing: 0;
 }

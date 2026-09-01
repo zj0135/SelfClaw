@@ -168,7 +168,7 @@ function submit(testAfterSave = false) {
 	display: grid;
 	place-items: center;
 	padding: 22px;
-	background: rgba(18, 22, 30, .38);
+	background: var(--overlay);
 	backdrop-filter: blur(6px);
 }
 
@@ -181,7 +181,7 @@ function submit(testAfterSave = false) {
 	border: 1px solid var(--sc-line-2);
 	border-radius: 8px;
 	background: var(--sc-bg);
-	box-shadow: 0 24px 70px rgba(18, 22, 30, .24);
+	box-shadow: 0 24px 70px var(--overlay-shadow);
 	animation: sc-pop 180ms var(--sc-ease-out) both;
 }
 
@@ -207,12 +207,12 @@ footer {
 header span {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 }
 
 h2 {
 	margin: 3px 0 0;
-	font-size: 18px;
+	font-size: var(--fs-18);
 	letter-spacing: 0;
 }
 
@@ -231,7 +231,7 @@ h2 {
 .field>span,
 .field-head>span {
 	color: var(--sc-mute);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 650;
 }
 
@@ -248,7 +248,7 @@ h2 {
 	background: var(--sc-panel);
 	color: var(--sc-text);
 	font: inherit;
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 
 .field input:focus,
@@ -260,7 +260,7 @@ h2 {
 
 small {
 	color: var(--sc-err);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 }
 
 .segments {
@@ -279,7 +279,7 @@ small {
 	border-radius: 4px;
 	background: transparent;
 	color: var(--sc-mute);
-	font-size: 11px;
+	font-size: var(--fs-11);
 }
 
 .segments button.active {
@@ -328,7 +328,7 @@ small {
 	height: 35px;
 	gap: 7px;
 	color: var(--sc-soft);
-	font-size: 11.5px;
+	font-size: var(--fs-115);
 }
 
 .check input {
@@ -340,11 +340,11 @@ small {
 	align-items: center;
 	gap: 8px;
 	padding: 9px 10px;
-	border: 1px solid rgba(183, 121, 31, .24);
+	border: 1px solid var(--caution-line);
 	border-radius: 5px;
-	background: rgba(183, 121, 31, .08);
-	color: #966315;
-	font-size: 11px;
+	background: var(--caution-tint);
+	color: var(--caution-fill);
+	font-size: var(--fs-11);
 }
 
 footer button {

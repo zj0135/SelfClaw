@@ -72,19 +72,19 @@ function setWorkspaceMode(mode) {
 	height: 36px;
 	margin-top: -1px;
 	padding: 0 12px;
-	border: 1px solid rgba(19, 27, 45, 0.1);
-	border-top-color: rgba(19, 27, 45, 0.14);
+	border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+	border-top-color: var(--line-2);
 	border-radius: 0 0 16px 16px;
-	background: #fff;
-	box-shadow: 0 8px 24px rgba(23, 26, 31, 0.04);
+	background: var(--panel);
+	box-shadow: 0 8px 24px rgba(var(--shadow-ink), 0.04);
 	clip-path: inset(-420px -48px -48px -48px);
 	transition: border-color 0.18s, box-shadow 0.18s;
 }
 
 :global(.composer-shell:focus-within + .composer-statusbar) {
-	border-color: rgba(59, 91, 253, 0.45);
-	border-top-color: rgba(19, 27, 45, 0.14);
-	box-shadow: 0 12px 32px rgba(23, 26, 31, 0.07), 0 0 0 3px rgba(59, 91, 253, 0.1);
+	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+	border-top-color: var(--line-2);
+	box-shadow: 0 12px 32px rgba(var(--shadow-ink), 0.07), 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .workspace-mode {
@@ -92,9 +92,9 @@ function setWorkspaceMode(mode) {
 	grid-template-columns: 1fr 1fr;
 	height: 26px;
 	padding: 2px;
-	border: 1px solid #e3e6eb;
+	border: 1px solid var(--border);
 	border-radius: 7px;
-	background: #f5f6f8;
+	background: var(--bg-canvas);
 }
 
 .mode-option {
@@ -107,15 +107,15 @@ function setWorkspaceMode(mode) {
 	border: 0;
 	border-radius: 5px;
 	background: transparent;
-	color: #7a8390;
+	color: var(--muted);
 	font: 500 11.5px/1 var(--font-ui);
 	cursor: pointer;
 }
 
 .mode-option.active {
-	background: #fff;
-	color: #262b33;
-	box-shadow: 0 1px 3px rgba(23, 26, 31, 0.1);
+	background: var(--panel);
+	color: var(--text-strong);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.1);
 }
 
 .mode-option:disabled {
@@ -126,8 +126,8 @@ function setWorkspaceMode(mode) {
 	display: inline-flex;
 	align-items: center;
 	gap: 5px;
-	color: #7f8792;
-	font-size: 12px;
+	color: var(--muted);
+	font-size: var(--fs-12);
 }
 
 .dirty-warning {
@@ -136,8 +136,8 @@ function setWorkspaceMode(mode) {
 	bottom: -25px;
 	z-index: 4;
 	margin: 0;
-	color: #a15f08;
-	font-size: 11.5px;
+	color: var(--caution-fill);
+	font-size: var(--fs-115);
 	line-height: 20px;
 }
 

@@ -80,7 +80,7 @@ defineEmits(['select', 'toggle']);
 strong {
 	overflow: hidden;
 	color: var(--sc-text);
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -88,14 +88,14 @@ strong {
 code {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 }
 
 p {
 	margin: 6px 0 8px;
 	overflow: hidden;
 	color: var(--sc-mute);
-	font-size: 12px;
+	font-size: var(--fs-12);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -105,7 +105,7 @@ p {
 	align-items: center;
 	gap: 14px;
 	color: var(--sc-faint);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 }
 
 .switch {
@@ -135,7 +135,7 @@ p {
 	height: 14px;
 	border-radius: 50%;
 	background: var(--sc-panel);
-	box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+	box-shadow: 0 1px 3px var(--overlay-shadow);
 	content: '';
 	transition: transform 140ms;
 }

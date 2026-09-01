@@ -264,21 +264,21 @@ defineExpose({
 	display: grid;
 	grid-template-rows: 1fr auto;
 	padding: 22px 18px 12px;
-	border: 1px solid rgba(19, 27, 45, 0.1);
+	border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
 	border-radius: 16px 16px 0 0;
-	background: #ffffff;
+	background: var(--panel);
 	box-shadow:
-		0 1px 2px rgba(23, 26, 31, 0.05),
-		0 8px 24px rgba(23, 26, 31, 0.04);
+		0 1px 2px rgba(var(--shadow-ink), 0.05),
+		0 8px 24px rgba(var(--shadow-ink), 0.04);
 	transition: border-color 0.18s, box-shadow 0.18s;
 }
 
 .composer-shell:focus-within {
-	border-color: rgba(59, 91, 253, 0.45);
+	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 	box-shadow:
-		0 1px 2px rgba(23, 26, 31, 0.05),
-		0 12px 32px rgba(23, 26, 31, 0.07),
-		0 0 0 3px rgba(59, 91, 253, 0.1);
+		0 1px 2px rgba(var(--shadow-ink), 0.05),
+		0 12px 32px rgba(var(--shadow-ink), 0.07),
+		0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 :global(.empty-workspace) .composer-shell {
@@ -292,15 +292,15 @@ defineExpose({
 	width: 36px;
 	height: 3.5px;
 	border-radius: 99px;
-	background: #dde1e7;
+	background: var(--border-strong);
 	transform: translateX(-50%);
 }
 
 .composer-error {
 	align-self: end;
 	margin: 2px 2px 7px;
-	color: #b04438;
-	font-size: 11.5px;
+	color: var(--err-text);
+	font-size: var(--fs-115);
 	line-height: 1.35;
 }
 
@@ -311,9 +311,9 @@ defineExpose({
 	gap: 10px;
 	margin-bottom: 10px;
 	padding: 9px 10px 9px 12px;
-	border: 1px solid rgba(200, 122, 20, 0.32);
+	border: 1px solid var(--caution-line);
 	border-radius: 11px;
-	background: rgba(251, 191, 84, 0.12);
+	background: var(--caution-tint);
 }
 
 .tool-approval-icon {
@@ -323,8 +323,8 @@ defineExpose({
 	height: 26px;
 	flex: none;
 	border-radius: 8px;
-	color: #b26a09;
-	background: rgba(240, 165, 60, 0.2);
+	color: var(--caution-fill);
+	background: var(--caution-icon-bg);
 }
 
 .tool-approval-copy {
@@ -338,8 +338,8 @@ defineExpose({
 .tool-approval-title {
 	max-width: 100%;
 	overflow: hidden;
-	color: #4a3410;
-	font-size: 12.5px;
+	color: var(--caution-text);
+	font-size: var(--fs-125);
 	line-height: 1.4;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -347,23 +347,23 @@ defineExpose({
 
 .tool-approval-title strong {
 	font-weight: 650;
-	color: #33240a;
+	color: var(--caution-text-strong);
 }
 
 .tool-approval-detail {
 	max-width: 100%;
 	overflow: hidden;
-	color: #8a7343;
-	font-family: var(--font-mono, ui-monospace, monospace);
-	font-size: 11px;
+	color: var(--caution-text-soft);
+	font-family: var(--font-mono);
+	font-size: var(--fs-11);
 	line-height: 1.35;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
 .tool-approval-source {
-	color: #6f5b2e;
-	font-size: 10px;
+	color: var(--caution-text-faint);
+	font-size: var(--fs-10);
 	font-weight: 600;
 }
 
@@ -382,30 +382,30 @@ defineExpose({
 	padding: 0 12px;
 	border: 1px solid transparent;
 	border-radius: 8px;
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 600;
 	line-height: 1;
 	transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .tool-approval-btn.reject {
-	border-color: #d9dde4;
-	background: #ffffff;
-	color: #5f6a78;
+	border-color: var(--border-strong);
+	background: var(--panel);
+	color: var(--muted);
 }
 
 .tool-approval-btn.reject:hover {
-	border-color: #c7ccd5;
-	color: #3d4654;
+	border-color: var(--border-strong);
+	color: var(--text-soft);
 }
 
 .tool-approval-btn.approve {
-	background: #b26a09;
-	color: #ffffff;
+	background: var(--caution-fill);
+	color: var(--caution-fill-ink);
 }
 
 .tool-approval-btn.approve:hover {
-	background: #9a5a06;
+	background: var(--caution-fill-hover);
 }
 
 .approval-bar-enter-active,
@@ -427,12 +427,12 @@ defineExpose({
 	border: 0;
 	outline: none;
 	background: transparent;
-	color: #20242a;
+	color: var(--text-strong);
 	font: 14px/1.65 var(--font-ui);
 }
 
 .composer-input::placeholder {
-	color: #8f9aab;
+	color: var(--muted-soft);
 }
 
 .composer-input:disabled {
@@ -466,7 +466,7 @@ defineExpose({
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
-	color: #6b7280;
+	color: var(--muted);
 	cursor: pointer;
 	transition:
 		background 0.15s,
@@ -474,8 +474,8 @@ defineExpose({
 }
 
 .icon-btn:hover {
-	background: #f3f4f6;
-	color: #171a1f;
+	background: var(--panel-muted);
+	color: var(--text);
 }
 
 .send-btn {
@@ -486,10 +486,10 @@ defineExpose({
 	height: 36px;
 	border: 0;
 	border-radius: 50%;
-	background: var(--accent, #3b5bfd);
-	color: #ffffff;
+	background: var(--accent);
+	color: var(--accent-ink);
 	cursor: pointer;
-	box-shadow: 0 4px 14px rgba(59, 91, 253, 0.3);
+	box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
 	transition:
 		background 0.16s,
 		box-shadow 0.16s,
@@ -498,8 +498,8 @@ defineExpose({
 }
 
 .send-btn:hover {
-	background: var(--accent-2, #2f49d1);
-	box-shadow: 0 8px 20px rgba(59, 91, 253, 0.36);
+	background: var(--accent-2);
+	box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 36%, transparent);
 	transform: translateY(-1px);
 }
 
@@ -508,7 +508,7 @@ defineExpose({
 }
 
 .send-btn:disabled {
-	background: #c3c9d4;
+	background: var(--border-strong);
 	box-shadow: none;
 	opacity: 0.55;
 	cursor: default;
@@ -516,7 +516,7 @@ defineExpose({
 }
 
 .send-btn.stop {
-	background: #171a1f;
+	background: var(--text);
 	box-shadow: none;
 }
 

@@ -64,7 +64,7 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 	margin-bottom: 5px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9.5px;
+	font-size: var(--fs-95);
 	font-weight: 500;
 	letter-spacing: 0.24em;
 }
@@ -72,14 +72,14 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 .card-head h3 {
 	margin: 0;
 	font-family: var(--sc-display);
-	font-size: 17px;
+	font-size: var(--fs-17);
 	font-weight: 630;
 }
 
 .card-count {
 	margin-top: 3px;
 	color: var(--sc-mute);
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 
 .rows {
@@ -107,7 +107,7 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 }
 
 .cap-row:hover:not(:disabled) {
-	background: rgba(19, 27, 45, 0.025);
+	background: color-mix(in srgb, var(--text) 2.5%, transparent);
 }
 
 .cap-row:disabled {
@@ -144,14 +144,14 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 	display: flex;
 	align-items: center;
 	gap: 9px;
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 	font-weight: 600;
 }
 
 .cap-kicker {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9.5px;
+	font-size: var(--fs-95);
 	font-weight: 500;
 	letter-spacing: 0.2em;
 }
@@ -159,7 +159,7 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 .cap-hint {
 	overflow: hidden;
 	color: var(--sc-mute);
-	font-size: 12px;
+	font-size: var(--fs-12);
 	line-height: 1.5;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -173,7 +173,7 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 	background: var(--sc-acid-soft);
 	color: var(--sc-acid);
 	font-family: var(--sc-mono);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 600;
 	letter-spacing: 0.04em;
 	transition: transform 0.14s var(--sc-ease-spring), box-shadow 0.15s;
@@ -181,7 +181,7 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 
 .cap-row:hover:not(:disabled) .count-pill {
 	transform: translateY(-1px);
-	box-shadow: 0 6px 16px rgba(59, 91, 253, 0.16);
+	box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .count-pill.off {

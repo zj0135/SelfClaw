@@ -167,7 +167,7 @@ function selectItem(id) {
 	margin-bottom: 14px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 	font-weight: 600;
 	letter-spacing: 0.22em;
 }
@@ -175,7 +175,7 @@ function selectItem(id) {
 .sb-head h1 {
 	margin: 0;
 	font-family: var(--sc-display);
-	font-size: 34px;
+	font-size: var(--fs-34);
 	font-weight: 650;
 	letter-spacing: 0.02em;
 	line-height: 1.1;
@@ -184,7 +184,7 @@ function selectItem(id) {
 .sb-head p {
 	margin: 8px 0 0;
 	color: var(--sc-mute);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	line-height: 1.5;
 }
 
@@ -218,7 +218,7 @@ function selectItem(id) {
 	justify-content: space-between;
 	padding: 6px 10px 8px;
 	color: var(--sc-mute);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 600;
 	letter-spacing: 0.06em;
 	user-select: none;
@@ -227,7 +227,7 @@ function selectItem(id) {
 .sb-label-en {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 	font-weight: 500;
 	letter-spacing: 0.18em;
 }
@@ -244,7 +244,7 @@ function selectItem(id) {
 	background: transparent;
 	color: var(--sc-mute);
 	font-family: inherit;
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 	font-weight: 500;
 	text-align: left;
 	line-height: 1.2;
@@ -265,7 +265,7 @@ function selectItem(id) {
 .ni-index {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 	font-weight: 500;
 	letter-spacing: 0.08em;
 	transition: color 0.16s;
@@ -313,7 +313,7 @@ function selectItem(id) {
 	transform: translateY(-50%);
 	border-radius: 2px;
 	background: var(--sc-acid);
-	box-shadow: 0 0 12px rgba(59, 91, 253, 0.45);
+	box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
 	content: '';
 }
 
@@ -349,14 +349,14 @@ function selectItem(id) {
 	height: 6px;
 	border-radius: 50%;
 	background: var(--sc-acid);
-	box-shadow: 0 0 10px rgba(59, 91, 253, 0.5);
+	box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 50%, transparent);
 	animation: sc-blink 2.4s ease-in-out infinite;
 }
 
 .sb-foot-text {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 	font-weight: 500;
 	letter-spacing: 0.22em;
 }

@@ -105,13 +105,13 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
-	color: #6b7280;
+	color: var(--muted);
 }
 
 .trigger:hover,
 .trigger[aria-expanded='true'] {
-	background: #f3f4f6;
-	color: #171a1f;
+	background: var(--panel-muted);
+	color: var(--text);
 }
 
 .popover {
@@ -122,10 +122,10 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	width: min(310px, calc(100vw - 32px));
 	max-height: 320px;
 	overflow: hidden;
-	border: 1px solid #e1e4ea;
+	border: 1px solid var(--border);
 	border-radius: 7px;
-	background: #fff;
-	box-shadow: 0 16px 42px rgba(23, 26, 31, .16);
+	background: var(--panel);
+	box-shadow: 0 16px 42px rgba(var(--shadow-ink), .16);
 }
 
 header {
@@ -135,7 +135,7 @@ header {
 	gap: 12px;
 	min-height: 48px;
 	padding: 9px 12px;
-	border-bottom: 1px solid #eceef2;
+	border-bottom: 1px solid var(--border);
 }
 
 header div {
@@ -151,14 +151,14 @@ header span {
 }
 
 header strong {
-	color: #252930;
-	font-size: 12px;
+	color: var(--text-strong);
+	font-size: var(--fs-12);
 }
 
 header span {
 	margin-top: 2px;
-	color: #8a94a3;
-	font-size: 10px;
+	color: var(--muted-soft);
+	font-size: var(--fs-10);
 }
 
 .skill-list {
@@ -180,29 +180,29 @@ header span {
 }
 
 .skill-list button:hover {
-	background: #f5f6f8;
+	background: var(--bg-canvas);
 }
 
 .skill-list span {
 	overflow: hidden;
-	color: #262a31;
-	font-size: 12px;
+	color: var(--text-strong);
+	font-size: var(--fs-12);
 	font-weight: 600;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
 .skill-list code {
-	color: #7c8797;
-	font-family: var(--font-mono, ui-monospace, monospace);
-	font-size: 9px;
+	color: var(--muted);
+	font-family: var(--font-mono);
+	font-size: var(--fs-9);
 }
 
 .skill-list small {
 	grid-column: 1 / -1;
 	overflow: hidden;
-	color: #7d8795;
-	font-size: 10px;
+	color: var(--muted);
+	font-size: var(--fs-10);
 	line-height: 1.4;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -211,13 +211,13 @@ header span {
 .message {
 	margin: 0;
 	padding: 20px 12px;
-	color: #8490a0;
-	font-size: 11px;
+	color: var(--muted-soft);
+	font-size: var(--fs-11);
 	text-align: center;
 }
 
 .message.error {
-	color: #b44747;
+	color: var(--err-text);
 }
 
 .spin {

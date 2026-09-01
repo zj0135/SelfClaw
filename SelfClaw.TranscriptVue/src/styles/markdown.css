@@ -30,11 +30,11 @@
 .markdown-content blockquote {
 	margin: 0.7rem 0;
 	padding: 0.15rem 0.9rem;
-	border-left: 3px solid var(--accent, #7c83fd);
+	border-left: 3px solid var(--accent);
 	opacity: 0.86;
 }
 .markdown-content a {
-	color: var(--accent, #6872e8);
+	color: var(--accent);
 	text-decoration: underline;
 	text-underline-offset: 2px;
 }
@@ -70,10 +70,11 @@
 	overflow-y: hidden;
 	padding: 0.8rem 0.9rem;
 	border-radius: 9px;
-	background: #171a22;
-	color: #e7eaf3;
+	background: var(--code-bg);
+	color: var(--code-fg);
+	/* 默认代码底色在两个主题下都是深色，这里固定 dark 以让原生滚动条画对。 */
 	color-scheme: dark;
-	scrollbar-color: #69758d #2a303c;
+	scrollbar-color: var(--code-scroll-thumb) var(--code-scroll-track);
 	scrollbar-width: thin;
 }
 .markdown-content pre::-webkit-scrollbar {
@@ -82,61 +83,59 @@
 }
 .markdown-content pre::-webkit-scrollbar-track {
 	border-radius: 999px;
-	background: #2a303c;
+	background: var(--code-scroll-track);
 }
 .markdown-content pre::-webkit-scrollbar-thumb {
-	border: 2px solid #2a303c;
+	border: 2px solid var(--code-scroll-track);
 	border-radius: 999px;
-	background: #69758d;
+	background: var(--code-scroll-thumb);
 }
 .markdown-content pre::-webkit-scrollbar-thumb:hover {
-	background: #9aa7bd;
+	background: var(--code-scroll-thumb-hover);
 }
+/*
+ * font 简写拆开：字族与字号要分别由 --font-code 与 --code-fs 控制，简写里塞
+ * var() 会让两者绑死在一起。--code-fs 是绝对值（12.5px × code-font-scale），
+ * 与原来的 0.9em 在 13.5px 正文下几乎等值，但从此只跟代码字号档位走。
+ */
 .markdown-content pre code {
 	display: block;
 	width: max-content;
 	min-width: 100%;
 	white-space: pre;
-	font:
-		0.9em/1.55 ui-monospace,
-		SFMono-Regular,
-		Menlo,
-		Consolas,
-		monospace;
+	font-family: var(--font-code);
+	font-size: var(--code-fs);
+	line-height: 1.55;
 }
 .markdown-content code:not(pre code) {
 	padding: 0.12em 0.35em;
 	border-radius: 4px;
 	background: color-mix(in srgb, currentColor 10%, transparent);
-	font:
-		0.9em ui-monospace,
-		SFMono-Regular,
-		Menlo,
-		Consolas,
-		monospace;
+	font-family: var(--font-code);
+	font-size: var(--code-fs);
 }
 .markdown-content .hljs-comment,
 .markdown-content .hljs-quote {
-	color: #8b93a7;
+	color: var(--syntax-comment);
 }
 .markdown-content .hljs-keyword,
 .markdown-content .hljs-selector-tag,
 .markdown-content .hljs-literal,
 .markdown-content .hljs-title {
-	color: #c792ea;
+	color: var(--syntax-keyword);
 }
 .markdown-content .hljs-string,
 .markdown-content .hljs-attr {
-	color: #addb67;
+	color: var(--syntax-string);
 }
 .markdown-content .hljs-number,
 .markdown-content .hljs-built_in,
 .markdown-content .hljs-variable {
-	color: #f78c6c;
+	color: var(--syntax-number);
 }
 .markdown-content .hljs-type,
 .markdown-content .hljs-class .hljs-title {
-	color: #82aaff;
+	color: var(--syntax-type);
 }
 .message-skill-chip {
 	display: inline-flex;
@@ -144,15 +143,15 @@
 	gap: 0.25rem;
 	padding: 0.08rem 0.42rem;
 	border-radius: 999px;
-	background: color-mix(in srgb, var(--accent, #6872e8) 14%, transparent);
-	color: var(--accent, #6872e8);
+	background: color-mix(in srgb, var(--accent) 14%, transparent);
+	color: var(--accent);
 	font-size: 0.88em;
 }
 .message-error {
 	margin: 0.65rem 0 0;
-	color: #b42318;
+	color: var(--err-text);
 	white-space: pre-wrap;
 }
 .message-cancelled {
-	color: #8a6d1d;
+	color: var(--warning);
 }

@@ -12,6 +12,7 @@ using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.AiProviders;
+using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Desktop.Services.Pet;
@@ -294,6 +295,7 @@ public sealed class WebViewMessageRouterTests
                     ExtensionStateChangeNotifier),
                 ExtensionStateChangeNotifier,
                 new ProgrammingAssistantSettingsBridge(programmingSettings),
+                new AppearanceSettingsBridge(new AppearanceSettingsService(settingsStore)),
                 new PetSettingsBridge(petHost),
                 new WorkspaceSelectionBridge(viewModel, Unused<IWorkspaceFolderPicker>()),
                 _terminalHostController,

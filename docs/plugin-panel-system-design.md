@@ -205,9 +205,9 @@ SDK（`Assets/plugin-sdk.js`）在 `window.parent === window` 时直接返回，
 
 ```js
 window.selfclaw = {
-  panelKey, permissions, ready(),
+  panelKey, permissions, appearance, ready(),
   getContext(),                  // host.context.read
-  on('context-changed'|'transcript'|'handshake', fn),
+  on('context-changed'|'transcript'|'handshake'|'appearance-changed', fn),
   insertPrompt(text),            // host.composer.write，外壳本地处理，不往返宿主
   workspace: { list, glob, read, search },  // host.workspace.read
 }
@@ -220,7 +220,32 @@ window.selfclaw = {
 `PluginPanelBridge` 的权限**从宿主状态解析**（`PluginPanelHostController.GetPermissions(panelKey)`），
 不读 payload 里的 `permissions` 字段，也因此只有已打开的面板才能调用。
 
-v1 不发 `theme-changed`：应用目前只有浅色主题，没有可广播的切换事件。
+### 4.05 外观：送事实，不送样式
+
+面板是跨源 iframe，外壳的 CSS 变量继承不进去。外壳因此**只报告外观事实**，由面板自己决定怎么画：
+
+```js
+selfclaw.appearance
+// { theme: 'light' | 'dark',        ← 已解析，'system' 不会出现在这里
+//   mode: 'light' | 'dark' | 'system',
+//   uiFontFamily, uiFontScale, codeFontFamily, codeFontScale }
+
+selfclaw.on('appearance-changed', (a) => paint(a.theme));
+```
+
+同一份负载出现在两处：`handshake`（面板一打开就有值，不必等第一次变化）和随后的
+`appearance-changed`。`selfclaw.appearance` 在处理器运行**之前**就已更新，所以处理器里读它是当前值。
+
+不下发解析后的实色。把外壳的 token 表变成插件 API，往后每增删一个颜色都是破坏性变更，而面板的视觉需求
+本来就未必和外壳一致 —— 给 `theme` 让它自己选调色板，边界更稳。同理不下发 `textColor` 之类的用户覆盖色：
+那是外壳自己的排版偏好，不是面板该继承的东西。
+
+**不设权限门。** 外观是「你被嵌在什么样的外壳里」这个事实，与会话内容无关；任何面板都该能画得和外壳一致，
+为此声明权限没有意义。`broadcast()` 的 `permission` 参数留空即可。
+
+`mode` 一并送出，是为了让面板能区分「用户明确选了浅色」与「跟随系统恰好是浅色」—— 有些面板要据此决定
+自己是否也跟随系统。`theme` 始终是解析后的值：`system` 只有前端能解（`matchMedia`），让面板再解一次
+就会出现第二套解析逻辑。
 
 ### 4.1 上下文只有一个生产者
 

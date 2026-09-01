@@ -104,14 +104,14 @@ h2 {
 	margin: 7px 0 2px;
 	overflow-wrap: anywhere;
 	color: var(--sc-text);
-	font-size: 18px;
+	font-size: var(--fs-18);
 	letter-spacing: 0;
 }
 
 code {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 }
 
 .icon {
@@ -126,7 +126,7 @@ code {
 .description {
 	margin: 18px 0;
 	color: var(--sc-mute);
-	font-size: 12px;
+	font-size: var(--fs-12);
 	line-height: 1.65;
 }
 
@@ -142,7 +142,7 @@ dd {
 	margin: 0;
 	padding: 9px 0;
 	border-bottom: 1px solid var(--sc-line);
-	font-size: 11px;
+	font-size: var(--fs-11);
 }
 
 dt {
@@ -177,7 +177,7 @@ dd.error {
 	flex: none;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 }
 
 footer {

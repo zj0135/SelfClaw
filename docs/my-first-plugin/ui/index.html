@@ -6,14 +6,33 @@
 	<title>我的第一个插件</title>
 	<style>
 		/* 面板是独立源的 iframe，拿不到宿主的设计系统，样式必须自带。
-		   应用当前只有浅色主题，所以这里不做深色适配。 */
-		:root {
+		   外壳只报告 selfclaw.appearance.theme，调色板由面板自己给：下面两组变量就是
+		   本面板的答案，脚本把 theme 写到 <html data-theme> 上来切换。 */
+		:root,
+		html[data-theme='light'] {
+			color-scheme: light;
 			--ink: #171a1f;
 			--muted: #6b7280;
 			--line: #e5e7eb;
+			--surface: #ffffff;
+			--chip: #eef1f6;
 			--accent: #3b5bfd;
 			--ok: #0f9d63;
 			--warn: #c2740a;
+			--danger: #dc4545;
+		}
+
+		html[data-theme='dark'] {
+			color-scheme: dark;
+			--ink: #e8eaf0;
+			--muted: #8b93a3;
+			--line: #2b303a;
+			--surface: #171a20;
+			--chip: #232833;
+			--accent: #6b83ff;
+			--ok: #35c48b;
+			--warn: #e0a03c;
+			--danger: #f07171;
 		}
 
 		* {
@@ -24,8 +43,12 @@
 			margin: 0;
 			padding: 14px;
 			color: var(--ink);
-			font: 13px/1.6 'Segoe UI', system-ui, sans-serif;
-			background: #fff;
+			/* 字体与字号跟随宿主，取不到就回落到面板自己的默认值。
+			   font: 简写会覆盖 font-family，所以这里必须拆开写。 */
+			font-family: var(--host-font-ui, 'Segoe UI'), system-ui, sans-serif;
+			font-size: calc(13px * var(--host-ui-scale, 1));
+			line-height: 1.6;
+			background: var(--surface);
 		}
 
 		header {
@@ -80,11 +103,14 @@
 		}
 
 		dd.empty {
-			color: #9ca3af;
+			color: var(--muted);
+			opacity: 0.75;
 		}
 
 		code {
-			font: 11.5px/1.5 'Cascadia Code', ui-monospace, monospace;
+			font-family: var(--host-font-code, 'Cascadia Code'), ui-monospace, monospace;
+			font-size: calc(11.5px * var(--host-code-scale, 1));
+			line-height: 1.5;
 		}
 
 		.pill {
@@ -93,17 +119,18 @@
 			border-radius: 999px;
 			font-size: 11px;
 			font-weight: 600;
-			background: #eef1f6;
+			background: var(--chip);
 			color: var(--muted);
 		}
 
+		/* 底色由前景色兑出来，两套主题各自成立，不必再写第二份色值。 */
 		.pill.on {
-			background: #fdf3e3;
+			background: color-mix(in srgb, var(--warn) 16%, var(--surface));
 			color: var(--warn);
 		}
 
 		.pill.off {
-			background: #e9f7f1;
+			background: color-mix(in srgb, var(--ok) 16%, var(--surface));
 			color: var(--ok);
 		}
 
@@ -141,7 +168,7 @@
 		}
 
 		.error {
-			color: #dc4545;
+			color: var(--danger);
 			font-size: 11.5px;
 		}
 	</style>
@@ -167,6 +194,14 @@
 			<dd class="empty">读取中…</dd>
 		</dl>
 		<p class="error" id="context-error" hidden></p>
+	</section>
+
+	<section>
+		<h2>外观</h2>
+		<dl id="appearance">
+			<dt>状态</dt>
+			<dd class="empty">读取中…</dd>
+		</dl>
 	</section>
 
 	<section>
@@ -221,6 +256,8 @@
 		renderIdentity();
 		selfclaw.on('handshake', () => {
 			renderIdentity();
+			// 外观事实随 handshake 一起送达，此时才第一次可读。
+			applyAppearance(selfclaw.appearance || {});
 			log('handshake', '权限已确认');
 		});
 
@@ -266,6 +303,41 @@
 		selfclaw.on('context-changed', (context) => {
 			renderContext(context);
 			log('context-changed', '上下文已更新');
+		});
+
+		// ---- 外观：宿主只报事实，配色由面板自己决定 -------------------------------
+		// theme 已经是解析后的结果，只会是 'light' 或 'dark'：「跟随系统」由外壳解析掉了,
+		// 面板不需要自己监听 prefers-color-scheme。把它写到 <html data-theme> 上，
+		// 顶部那两组 CSS 变量就切过去了——宿主不传颜色，这套调色板是本面板的。
+		// 字体与字号是可选的呼应：跟随宿主能让面板不出戏，不跟随也不算错。
+		function applyAppearance(appearance) {
+			const theme = appearance.theme === 'dark' ? 'dark' : 'light';
+			document.documentElement.dataset.theme = theme;
+
+			const style = document.documentElement.style;
+			style.setProperty('--host-font-ui', appearance.uiFontFamily || '');
+			style.setProperty('--host-font-code', appearance.codeFontFamily || '');
+			style.setProperty('--host-ui-scale', String(appearance.uiFontScale ?? 1));
+			style.setProperty('--host-code-scale', String(appearance.codeFontScale ?? 1));
+
+			$('appearance').innerHTML = [
+				`<dt>主题</dt><dd><span class="pill ${theme === 'dark' ? 'on' : 'off'}">${theme}</span></dd>`,
+				`<dt>模式</dt><dd><code>${appearance.mode || '(未知)'}</code></dd>`,
+				`<dt>界面字体</dt><dd><code>${appearance.uiFontFamily || '(默认)'}</code></dd>`,
+				`<dt>界面字号系数</dt><dd><code>${appearance.uiFontScale ?? 1}</code></dd>`,
+				`<dt>代码字体</dt><dd><code>${appearance.codeFontFamily || '(默认)'}</code></dd>`,
+				`<dt>代码字号系数</dt><dd><code>${appearance.codeFontScale ?? 1}</code></dd>`,
+			].join('');
+		}
+
+		// 与 handshake 同理：外观事实随 handshake 一起到，可能早于本脚本，先读一次再订阅。
+		if (selfclaw.appearance) {
+			applyAppearance(selfclaw.appearance);
+		}
+
+		selfclaw.on('appearance-changed', (appearance) => {
+			applyAppearance(appearance);
+			log('appearance-changed', appearance.theme);
 		});
 
 		// ---- transcript：需要 host.transcript.read ------------------------------

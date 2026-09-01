@@ -461,22 +461,9 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* --sb-* token 定义已移入 styles/tokens.css 的别名层：scoped 选择器会带上
+   [data-v-x]，特异度高于全局 .sidebar，留在这里会把主题值压掉。 */
 .sidebar {
-	--sb-bg: #fafbfd;
-	--sb-line: rgba(19, 27, 45, 0.08);
-	--sb-line-2: rgba(19, 27, 45, 0.14);
-	--sb-text: #171a1f;
-	--sb-soft: #454c59;
-	--sb-mute: #6b7280;
-	--sb-faint: #9aa1ad;
-	--sb-hover: #eef0f4;
-	--sb-raise: #f1f3f6;
-	--sb-accent: #3b5bfd;
-	--sb-accent-soft: rgba(59, 91, 253, 0.08);
-	--sb-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
-	--sb-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-	--sb-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-
 	height: 100%;
 	display: flex;
 	flex-direction: column;
@@ -522,11 +509,11 @@ onUnmounted(() => {
 	height: 34px;
 	border: 1px solid var(--sb-line);
 	border-radius: 9px;
-	background: #fff;
+	background: var(--panel);
 	color: var(--sb-text);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 620;
-	box-shadow: 0 1px 3px rgba(23, 26, 31, 0.04);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.04);
 	transition:
 		border-color 0.14s,
 		box-shadow 0.16s,
@@ -535,7 +522,7 @@ onUnmounted(() => {
 
 .head-new:hover {
 	border-color: var(--sb-line-2);
-	box-shadow: 0 4px 12px rgba(23, 26, 31, 0.07);
+	box-shadow: 0 4px 12px rgba(var(--shadow-ink), 0.07);
 	transform: translateY(-1px);
 }
 
@@ -624,7 +611,7 @@ onUnmounted(() => {
 	place-items: center;
 	border: 1px solid var(--sb-line);
 	border-radius: 10px;
-	background: #fff;
+	background: var(--panel);
 	color: var(--sb-soft);
 	transition:
 		background 0.15s,
@@ -688,10 +675,10 @@ onUnmounted(() => {
 	transform: translateY(-50%);
 	border: 1px solid var(--sb-line-2);
 	border-radius: 7px;
-	background: #fff;
-	box-shadow: 0 8px 24px rgba(23, 26, 31, 0.12);
+	background: var(--panel);
+	box-shadow: 0 8px 24px rgba(var(--shadow-ink), 0.12);
 	color: var(--sb-text);
-	font-size: 11.5px;
+	font-size: var(--fs-115);
 	font-weight: 550;
 	white-space: nowrap;
 	pointer-events: none;
@@ -700,7 +687,7 @@ onUnmounted(() => {
 .rail-tip .k {
 	color: var(--sb-faint);
 	font-family: var(--sb-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 }
 
 .rail-tip-enter-active,
@@ -739,7 +726,7 @@ onUnmounted(() => {
 	border-radius: 8px;
 	background: transparent;
 	color: var(--sb-mute);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 540;
 	text-align: left;
 	transition:
@@ -773,7 +760,7 @@ onUnmounted(() => {
 .kbd {
 	color: var(--sb-faint);
 	font-family: var(--sb-mono);
-	font-size: 9.5px;
+	font-size: var(--fs-95);
 	letter-spacing: 0.04em;
 }
 
@@ -839,7 +826,7 @@ onUnmounted(() => {
 	flex: 1;
 	min-width: 0;
 	overflow: hidden;
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 650;
 	letter-spacing: 0.05em;
 	text-align: left;
@@ -850,7 +837,7 @@ onUnmounted(() => {
 .group-count {
 	color: var(--sb-faint);
 	font-family: var(--sb-mono);
-	font-size: 9.5px;
+	font-size: var(--fs-95);
 	font-weight: 500;
 	letter-spacing: 0.08em;
 }
@@ -903,7 +890,7 @@ onUnmounted(() => {
 	border-radius: 8px;
 	background: transparent;
 	color: var(--sb-soft);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 560;
 	text-align: left;
 	transition:
@@ -971,7 +958,7 @@ onUnmounted(() => {
 	border-radius: 8px;
 	background: transparent;
 	color: var(--sb-mute);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 500;
 	text-align: left;
 	transition:
@@ -999,9 +986,9 @@ onUnmounted(() => {
 
 .node.active {
 	border-color: var(--sb-line);
-	background: #fff;
+	background: var(--panel);
 	color: var(--sb-text);
-	box-shadow: 0 1px 4px rgba(23, 26, 31, 0.05);
+	box-shadow: 0 1px 4px rgba(var(--shadow-ink), 0.05);
 }
 
 .node.active::before {
@@ -1013,13 +1000,13 @@ onUnmounted(() => {
 	transform: translateY(-50%);
 	border-radius: 2px;
 	background: var(--sb-accent);
-	box-shadow: 0 0 8px rgba(59, 91, 253, 0.45);
+	box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent);
 	content: '';
 }
 
 .node.active .dot {
 	background: var(--sb-accent);
-	box-shadow: 0 0 6px rgba(59, 91, 253, 0.5);
+	box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .ntext {
@@ -1034,14 +1021,14 @@ onUnmounted(() => {
 	flex: none;
 	color: var(--sb-faint);
 	font-family: var(--sb-mono);
-	font-size: 9.5px;
+	font-size: var(--fs-95);
 	letter-spacing: 0.02em;
 }
 
 .empty-group {
 	padding: 8px 8px 4px;
 	color: var(--sb-faint);
-	font-size: 11.5px;
+	font-size: var(--fs-115);
 }
 
 /* ---- 下：设置 ---- */
@@ -1062,7 +1049,7 @@ onUnmounted(() => {
 	border-radius: 9px;
 	background: transparent;
 	color: var(--sb-mute);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 560;
 	transition:
 		background 0.14s,
@@ -1077,9 +1064,9 @@ onUnmounted(() => {
 
 .settings-btn.active {
 	border-color: var(--sb-line);
-	background: #fff;
+	background: var(--panel);
 	color: var(--sb-accent);
-	box-shadow: 0 1px 4px rgba(23, 26, 31, 0.05);
+	box-shadow: 0 1px 4px rgba(var(--shadow-ink), 0.05);
 }
 
 .settings-btn .ico {
@@ -1112,10 +1099,10 @@ onUnmounted(() => {
 	padding: 5px;
 	border: 1px solid var(--sb-line-2);
 	border-radius: 11px;
-	background: #fff;
+	background: var(--panel);
 	box-shadow:
-		0 2px 6px rgba(23, 26, 31, 0.06),
-		0 18px 44px rgba(23, 26, 31, 0.14);
+		0 2px 6px rgba(var(--shadow-ink), 0.06),
+		0 18px 44px rgba(var(--shadow-ink), 0.14);
 	animation: menu-pop 0.18s var(--sb-ease-out);
 }
 
@@ -1142,7 +1129,7 @@ onUnmounted(() => {
 	border-radius: 7px;
 	background: transparent;
 	color: var(--sb-soft);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 530;
 	text-align: left;
 	transition:
@@ -1156,12 +1143,12 @@ onUnmounted(() => {
 }
 
 .context-menu-item.danger {
-	color: #d04545;
+	color: var(--danger);
 }
 
 .context-menu-item.danger:hover {
-	background: rgba(220, 69, 69, 0.08);
-	color: #c23333;
+	background: color-mix(in srgb, var(--danger) 8%, transparent);
+	color: var(--err-text);
 }
 
 .context-menu-icon {

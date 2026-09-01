@@ -187,18 +187,18 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	border: 0;
 	border-radius: 6px;
 	background: transparent;
-	color: #5f6876;
+	color: var(--muted);
 	font: 500 12px/1 var(--font-ui);
 	cursor: pointer;
 }
 
 .git-trigger:hover,
 .git-trigger.active {
-	background: rgba(19, 27, 45, 0.06);
+	background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .git-trigger.conflict {
-	color: #b04438;
+	color: var(--err-text);
 }
 
 .git-trigger span {
@@ -211,7 +211,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	background: #c47a18;
+	background: var(--caution);
 }
 
 .git-menu {
@@ -220,10 +220,10 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	bottom: 36px;
 	z-index: 92;
 	width: min(392px, calc(100vw - 42px));
-	border: 1px solid #dfe3ea;
+	border: 1px solid var(--border-strong);
 	border-radius: 9px;
-	background: #fff;
-	box-shadow: 0 18px 50px rgba(23, 26, 31, 0.14), 0 3px 10px rgba(23, 26, 31, 0.05);
+	background: var(--panel);
+	box-shadow: 0 18px 50px rgba(var(--shadow-ink), 0.14), 0 3px 10px rgba(var(--shadow-ink), 0.05);
 	overflow: hidden;
 }
 
@@ -243,14 +243,14 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 }
 
 .git-head strong {
-	color: #242930;
-	font-size: 12.5px;
+	color: var(--text-strong);
+	font-size: var(--fs-125);
 }
 
 .git-head span,
 .merge-footer span {
-	color: #8b939f;
-	font-size: 11px;
+	color: var(--muted-soft);
+	font-size: var(--fs-11);
 }
 
 .icon-action,
@@ -263,15 +263,15 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	border: 0;
 	border-radius: 6px;
 	background: transparent;
-	color: #77808d;
+	color: var(--muted);
 	cursor: pointer;
 }
 
 .icon-action:hover,
 .branch-create button:hover,
 .branch-delete:hover {
-	background: #f0f2f5;
-	color: #292e36;
+	background: var(--panel-muted);
+	color: var(--text-strong);
 }
 
 .conflict-banner {
@@ -280,11 +280,11 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	gap: 7px;
 	margin: 0 10px 8px;
 	padding: 8px 9px;
-	border: 1px solid #efd1cc;
+	border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
 	border-radius: 7px;
-	background: #fff5f3;
-	color: #a23f34;
-	font-size: 11.5px;
+	background: color-mix(in srgb, var(--danger) 5%, transparent);
+	color: var(--err-text);
+	font-size: var(--fs-115);
 }
 
 .conflict-banner span {
@@ -298,18 +298,18 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	gap: 5px;
 	height: 28px;
 	padding: 0 9px;
-	border: 1px solid #d9dde4;
+	border: 1px solid var(--border-strong);
 	border-radius: 6px;
-	background: #fff;
-	color: #343a44;
+	background: var(--panel);
+	color: var(--text-soft);
 	font: 550 11.5px/1 var(--font-ui);
 	cursor: pointer;
 }
 
 .git-error {
 	margin: 0 12px 8px;
-	color: #b04438;
-	font-size: 11.5px;
+	color: var(--err-text);
+	font-size: var(--fs-115);
 }
 
 .git-tabs {
@@ -317,7 +317,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	gap: 15px;
 	height: 34px;
 	padding: 0 12px;
-	border-bottom: 1px solid #e9ecf0;
+	border-bottom: 1px solid var(--border);
 }
 
 .git-tabs button {
@@ -327,13 +327,13 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	gap: 5px;
 	border: 0;
 	background: transparent;
-	color: #858d98;
+	color: var(--muted-soft);
 	font: 550 11.5px/1 var(--font-ui);
 	cursor: pointer;
 }
 
 .git-tabs button.active {
-	color: #242930;
+	color: var(--text-strong);
 }
 
 .git-tabs button.active::after {
@@ -342,7 +342,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	bottom: -1px;
 	left: 0;
 	height: 2px;
-	background: #303741;
+	background: var(--fill-strong);
 	content: '';
 }
 
@@ -353,12 +353,12 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 .branch-create {
 	display: flex;
 	height: 32px;
-	border: 1px solid #e1e5ea;
+	border: 1px solid var(--border);
 	border-radius: 7px;
 }
 
 .branch-create:focus-within {
-	border-color: rgba(59, 91, 253, 0.45);
+	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .branch-create input {
@@ -368,7 +368,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	border: 0;
 	outline: 0;
 	background: transparent;
-	color: #292e36;
+	color: var(--text-strong);
 	font: 12px/1 var(--font-ui);
 }
 
@@ -386,7 +386,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 }
 
 .branch-row:hover {
-	background: #f4f5f7;
+	background: var(--panel-muted);
 }
 
 .branch-select {
@@ -399,7 +399,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	padding: 0 7px;
 	border: 0;
 	background: transparent;
-	color: #3d444e;
+	color: var(--text-soft);
 	font: 500 12px/1 var(--font-ui);
 	text-align: left;
 	cursor: pointer;
@@ -441,7 +441,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 }
 
 .worktree-row:hover {
-	background: #f4f5f7;
+	background: var(--panel-muted);
 }
 
 .worktree-row>div {
@@ -451,38 +451,38 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 }
 
 .worktree-row strong {
-	color: #343a44;
-	font-size: 12px;
+	color: var(--text-soft);
+	font-size: var(--fs-12);
 }
 
 .worktree-row span {
 	overflow: hidden;
-	color: #9098a3;
-	font-size: 10.5px;
+	color: var(--muted-soft);
+	font-size: var(--fs-105);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
 .worktree-row i {
-	color: #68717e;
-	font-size: 10.5px;
+	color: var(--muted);
+	font-size: var(--fs-105);
 	font-style: normal;
 }
 
 .empty-state {
 	margin: 12px 7px;
-	color: #929aa6;
-	font-size: 12px;
+	color: var(--faint);
+	font-size: var(--fs-12);
 }
 
 .merge-footer {
-	border-top: 1px solid #e9ecf0;
+	border-top: 1px solid var(--border);
 }
 
 .merge-footer button {
-	border-color: #303741;
-	background: #303741;
-	color: #fff;
+	border-color: var(--fill-strong);
+	background: var(--fill-strong);
+	color: var(--fill-strong-ink);
 }
 
 .merge-footer button:disabled,

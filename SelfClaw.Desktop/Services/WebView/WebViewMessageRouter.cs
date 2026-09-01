@@ -3,6 +3,7 @@ using System.Windows.Threading;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.AiProviders;
+using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.Pet;
@@ -23,6 +24,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly AgentSettingsBridge _agentSettingsBridge;
     private readonly IExtensionStateChangeNotifier _extensionStateChangeNotifier;
     private readonly ProgrammingAssistantSettingsBridge _programmingAssistantSettingsBridge;
+    private readonly AppearanceSettingsBridge _appearanceSettingsBridge;
     private readonly PetSettingsBridge _petSettingsBridge;
     private readonly WorkspaceSelectionBridge _workspaceSelectionBridge;
     private readonly GitWorkspaceBridge? _gitWorkspaceBridge;
@@ -41,6 +43,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         AgentSettingsBridge agentSettingsBridge,
         IExtensionStateChangeNotifier extensionStateChangeNotifier,
         ProgrammingAssistantSettingsBridge programmingAssistantSettingsBridge,
+        AppearanceSettingsBridge appearanceSettingsBridge,
         PetSettingsBridge petSettingsBridge,
         WorkspaceSelectionBridge workspaceSelectionBridge,
         TerminalHostController terminalHostController,
@@ -57,6 +60,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _agentSettingsBridge = agentSettingsBridge;
         _extensionStateChangeNotifier = extensionStateChangeNotifier;
         _programmingAssistantSettingsBridge = programmingAssistantSettingsBridge;
+        _appearanceSettingsBridge = appearanceSettingsBridge;
         _petSettingsBridge = petSettingsBridge;
         _workspaceSelectionBridge = workspaceSelectionBridge;
         _gitWorkspaceBridge = gitWorkspaceBridge;
@@ -184,6 +188,20 @@ internal sealed class WebViewMessageRouter : IDisposable
         {
             _hostChannel.PostResponse(response);
             return null;
+        }
+
+        // 外观是唯一一个既要回包、又要顺手改原生窗口的设置项，所以它的返回是个二元组：
+        // 回包照旧走 hostChannel，明暗结论转成命令交给 MainWindow。
+        var appearance = await _appearanceSettingsBridge.TryHandleAsync(
+            type,
+            payload,
+            cancellationToken);
+        if (appearance is not null)
+        {
+            _hostChannel.PostResponse(appearance.Value.Response);
+            return appearance.Value.IsDark is { } isDark
+                ? new WebViewHostCommand(WebViewHostCommandKind.ApplyCaptionTheme, isDark ? "dark" : "light")
+                : null;
         }
 
         response = await _petSettingsBridge.TryHandleAsync(

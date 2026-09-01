@@ -126,7 +126,7 @@ async function onToggleSubagentBinding(kind, id, enabled) {
 	overflow: hidden;
 	color: var(--sc-text);
 	font-family: var(--sc-sans);
-	font-size: 14px;
+	font-size: var(--fs-14);
 	line-height: 1.5;
 }
 
@@ -150,7 +150,7 @@ async function onToggleSubagentBinding(kind, id, enabled) {
 	border-bottom: 1px solid color-mix(in srgb, var(--sc-err) 25%, transparent);
 	background: var(--sc-err-soft);
 	color: var(--sc-err);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 }
 
 .detail-empty {
@@ -158,7 +158,7 @@ async function onToggleSubagentBinding(kind, id, enabled) {
 	place-items: center;
 	height: 100%;
 	color: var(--sc-mute);
-	font-size: 13px;
+	font-size: var(--fs-13);
 }
 
 @media (max-width: 980px) {

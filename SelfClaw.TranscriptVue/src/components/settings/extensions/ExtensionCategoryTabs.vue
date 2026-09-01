@@ -44,7 +44,7 @@ button {
 	border: 0;
 	background: transparent;
 	color: var(--sc-mute);
-	font-size: 13px;
+	font-size: var(--fs-13);
 }
 
 button::after {
@@ -74,6 +74,6 @@ small {
 	margin-left: auto;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 }
 </style>

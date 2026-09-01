@@ -30,7 +30,7 @@ const label = computed(() => labels[props.status] || props.status);
 	gap: 6px;
 	min-height: 22px;
 	color: var(--sc-mute);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 650;
 	white-space: nowrap;
 }
@@ -52,7 +52,7 @@ const label = computed(() => labels[props.status] || props.status);
 
 .status.needs-config,
 .status.needs-permission {
-	color: #b7791f;
+	color: var(--caution);
 }
 
 .status.broken {

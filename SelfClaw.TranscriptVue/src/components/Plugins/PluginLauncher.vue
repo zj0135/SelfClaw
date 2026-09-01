@@ -49,7 +49,7 @@ defineEmits(['close', 'select', 'manage']);
 	align-items: center;
 	justify-content: center;
 	padding: 24px;
-	background: rgba(23, 26, 31, 0.28);
+	background: var(--overlay);
 	backdrop-filter: blur(3px);
 }
 
@@ -59,10 +59,10 @@ defineEmits(['close', 'select', 'manage']);
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
-	border: 1px solid var(--border-strong, #d8dde5);
+	border: 1px solid var(--border-strong);
 	border-radius: 14px;
-	background: #ffffff;
-	box-shadow: 0 24px 70px rgba(23, 26, 31, 0.22);
+	background: var(--panel);
+	box-shadow: 0 24px 70px rgba(var(--shadow-ink), 0.22);
 	animation: launcher-pop 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -79,9 +79,9 @@ header {
 	gap: 8px;
 	flex: none;
 	padding: 14px 16px 12px;
-	border-bottom: 1px solid var(--border, #e5e7eb);
-	color: #6b7280;
-	font-size: 11px;
+	border-bottom: 1px solid var(--border);
+	color: var(--muted);
+	font-size: var(--fs-11);
 	font-weight: 650;
 	letter-spacing: 0.04em;
 }
@@ -104,14 +104,14 @@ header {
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
-	color: #171a1f;
-	font-size: 13px;
+	color: var(--text);
+	font-size: var(--fs-13);
 	text-align: left;
 	transition: background 0.12s;
 }
 
 .panel-list button:hover {
-	background: #f1f3f6;
+	background: var(--panel-muted);
 }
 
 .panel-title {
@@ -124,29 +124,29 @@ header {
 
 .panel-list code {
 	flex: none;
-	color: #9aa1ad;
+	color: var(--faint);
 	font-family: var(--font-mono);
-	font-size: 10px;
+	font-size: var(--fs-10);
 }
 
 .panel-state {
 	flex: none;
-	color: var(--accent, #3b5bfd);
-	font-size: 10px;
+	color: var(--accent);
+	font-size: var(--fs-10);
 }
 
 .empty {
 	margin: 0;
 	padding: 26px 16px;
-	color: #9aa1ad;
-	font-size: 12px;
+	color: var(--faint);
+	font-size: var(--fs-12);
 	text-align: center;
 }
 
 footer {
 	flex: none;
 	padding: 8px;
-	border-top: 1px solid var(--border, #e5e7eb);
+	border-top: 1px solid var(--border);
 }
 
 footer button {
@@ -159,14 +159,14 @@ footer button {
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
-	color: #6b7280;
-	font-size: 12px;
+	color: var(--muted);
+	font-size: var(--fs-12);
 	font-weight: 560;
 	transition: background 0.12s, color 0.12s;
 }
 
 footer button:hover {
-	background: #f1f3f6;
-	color: #171a1f;
+	background: var(--panel-muted);
+	color: var(--text);
 }
 </style>

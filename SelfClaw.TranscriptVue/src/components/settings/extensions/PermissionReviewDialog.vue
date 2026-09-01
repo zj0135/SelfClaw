@@ -59,7 +59,7 @@ defineEmits(['close', 'confirm']);
 	display: grid;
 	place-items: center;
 	padding: 20px;
-	background: rgba(3, 5, 8, .76);
+	background: var(--overlay-heavy);
 	animation: sc-fade 140ms ease-out both;
 }
 
@@ -68,7 +68,7 @@ defineEmits(['close', 'confirm']);
 	border: 1px solid var(--sc-line-2);
 	border-radius: 7px;
 	background: var(--sc-panel);
-	box-shadow: 0 24px 70px rgba(0, 0, 0, .42);
+	box-shadow: 0 24px 70px var(--overlay-shadow);
 	color: var(--sc-text);
 }
 
@@ -78,7 +78,7 @@ header {
 	align-items: center;
 	gap: 10px;
 	padding: 18px 20px;
-	border-bottom: 1px solid var(--sc-line-1);
+	border-bottom: 1px solid var(--sc-line);
 }
 
 .mark {
@@ -87,20 +87,20 @@ header {
 	height: 30px;
 	place-items: center;
 	border-radius: 50%;
-	background: rgba(183, 121, 31, .14);
-	color: #d29a48;
+	background: var(--caution-icon-bg);
+	color: var(--caution-icon);
 }
 
 header span {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 }
 
 h2 {
 	margin: 3px 0 0;
 	overflow-wrap: anywhere;
-	font-size: 15px;
+	font-size: var(--fs-15);
 	font-weight: 650;
 	letter-spacing: 0;
 }
@@ -113,7 +113,7 @@ button {
 	gap: 7px;
 	border: 1px solid var(--sc-line-2);
 	border-radius: 5px;
-	background: var(--sc-panel-2);
+	background: var(--sc-raise);
 	color: var(--sc-soft);
 }
 
@@ -136,20 +136,20 @@ button:disabled {
 	gap: 8px;
 	margin: 16px 20px 0;
 	padding: 10px 11px;
-	border-left: 2px solid #b7791f;
-	background: rgba(183, 121, 31, .08);
+	border-left: 2px solid var(--caution);
+	background: var(--caution-tint);
 	color: var(--sc-mute);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	line-height: 1.55;
 }
 
 .notice svg {
-	color: #d29a48;
+	color: var(--caution-icon);
 }
 
 .permissions {
 	margin: 14px 20px 18px;
-	border-top: 1px solid var(--sc-line-1);
+	border-top: 1px solid var(--sc-line);
 }
 
 .permission {
@@ -158,7 +158,7 @@ button:disabled {
 	align-items: center;
 	min-height: 40px;
 	gap: 8px;
-	border-bottom: 1px solid var(--sc-line-1);
+	border-bottom: 1px solid var(--sc-line);
 	color: var(--sc-soft);
 }
 
@@ -169,21 +169,21 @@ button:disabled {
 .permission code {
 	overflow-wrap: anywhere;
 	font-family: var(--sc-mono);
-	font-size: 11px;
+	font-size: var(--fs-11);
 }
 
 .permission span {
 	padding: 2px 5px;
-	border: 1px solid rgba(183, 121, 31, .35);
+	border: 1px solid var(--caution-line);
 	border-radius: 4px;
-	color: #d29a48;
-	font-size: 9px;
+	color: var(--caution-icon);
+	font-size: var(--fs-9);
 }
 
 .permissions p {
 	margin: 14px 0;
 	color: var(--sc-faint);
-	font-size: 11px;
+	font-size: var(--fs-11);
 }
 
 footer {
@@ -191,7 +191,7 @@ footer {
 	justify-content: flex-end;
 	gap: 8px;
 	padding: 14px 20px;
-	border-top: 1px solid var(--sc-line-1);
+	border-top: 1px solid var(--sc-line);
 }
 
 footer button {

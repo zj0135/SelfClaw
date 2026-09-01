@@ -16,6 +16,9 @@
 	var sequence = 0;
 	var permissions = [];
 	var panelKey = new URLSearchParams(window.location.search).get('__selfclaw_panel') || '';
+	// The shell reports what the surrounding chrome looks like; it does not push its own colors in.
+	// A panel reads this to pick its own palette, and re-reads it on every 'appearance-changed'.
+	var appearance = { theme: 'light', mode: 'system', uiFontFamily: '', uiFontScale: 1, codeFontFamily: '', codeFontScale: 1 };
 
 	function send(message) {
 		window.parent.postMessage(Object.assign({ __selfclaw: 1 }, message), SHELL_ORIGIN);
@@ -66,6 +69,14 @@
 			if (message.type === 'handshake') {
 				permissions = message.payload && message.payload.permissions ? message.payload.permissions : [];
 				panelKey = (message.payload && message.payload.panelKey) || panelKey;
+				if (message.payload && message.payload.appearance) {
+					appearance = message.payload.appearance;
+				}
+			}
+
+			// Cached before the handlers run, so selfclaw.appearance is already current inside them.
+			if (message.type === 'appearance-changed' && message.payload) {
+				appearance = message.payload;
 			}
 
 			emit(message.type, message.payload);
@@ -97,6 +108,9 @@
 		},
 		get permissions() {
 			return permissions.slice();
+		},
+		get appearance() {
+			return Object.assign({}, appearance);
 		},
 		ready: function () {
 			send({ kind: 'ready' });

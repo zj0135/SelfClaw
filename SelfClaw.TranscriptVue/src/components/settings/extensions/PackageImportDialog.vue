@@ -63,7 +63,7 @@ defineEmits(['close']);
 	display: grid;
 	place-items: center;
 	padding: 20px;
-	background: rgba(3, 5, 8, .72);
+	background: var(--overlay-heavy);
 }
 
 .dialog {
@@ -71,7 +71,7 @@ defineEmits(['close']);
 	border: 1px solid var(--sc-line-2);
 	border-radius: 7px;
 	background: var(--sc-panel);
-	box-shadow: 0 24px 70px rgba(0, 0, 0, .42);
+	box-shadow: 0 24px 70px var(--overlay-shadow);
 	color: var(--sc-text);
 }
 
@@ -81,7 +81,7 @@ header {
 	align-items: center;
 	gap: 10px;
 	padding: 18px 20px;
-	border-bottom: 1px solid var(--sc-line-1);
+	border-bottom: 1px solid var(--sc-line);
 }
 
 .success {
@@ -90,20 +90,20 @@ header {
 	height: 30px;
 	place-items: center;
 	border-radius: 50%;
-	background: rgba(77, 190, 128, .12);
+	background: color-mix(in srgb, var(--success) 12%, transparent);
 	color: var(--sc-ok);
 }
 
 header span {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 }
 
 h2 {
 	margin: 3px 0 0;
 	overflow-wrap: anywhere;
-	font-size: 15px;
+	font-size: var(--fs-15);
 	font-weight: 650;
 	letter-spacing: 0;
 }
@@ -115,7 +115,7 @@ button {
 	height: 34px;
 	border: 1px solid var(--sc-line-2);
 	border-radius: 5px;
-	background: var(--sc-panel-2);
+	background: var(--sc-raise);
 	color: var(--sc-soft);
 }
 
@@ -129,7 +129,7 @@ button {
 	display: grid;
 	grid-template-columns: minmax(0, 1.4fr) .7fr .55fr;
 	padding: 16px 20px;
-	border-bottom: 1px solid var(--sc-line-1);
+	border-bottom: 1px solid var(--sc-line);
 }
 
 .manifest div {
@@ -139,14 +139,14 @@ button {
 
 .manifest div+div {
 	padding-left: 12px;
-	border-left: 1px solid var(--sc-line-1);
+	border-left: 1px solid var(--sc-line);
 }
 
 .manifest span {
 	display: block;
 	margin-bottom: 5px;
 	color: var(--sc-faint);
-	font-size: 9px;
+	font-size: var(--fs-9);
 }
 
 .manifest code,
@@ -155,7 +155,7 @@ button {
 	overflow: hidden;
 	color: var(--sc-text);
 	font-family: var(--sc-mono);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 550;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -164,7 +164,7 @@ button {
 .description {
 	margin: 16px 20px 0;
 	color: var(--sc-mute);
-	font-size: 12px;
+	font-size: var(--fs-12);
 	line-height: 1.6;
 }
 
@@ -179,16 +179,16 @@ button {
 .permissions span {
 	margin-right: 3px;
 	color: var(--sc-faint);
-	font-size: 9px;
+	font-size: var(--fs-9);
 }
 
 .permissions code {
 	padding: 3px 6px;
-	border: 1px solid rgba(183, 121, 31, .3);
+	border: 1px solid var(--caution-line);
 	border-radius: 4px;
-	color: #d29a48;
+	color: var(--caution-icon);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 }
 
 .triggers {
@@ -204,7 +204,7 @@ button {
 	border-radius: 4px;
 	color: var(--sc-soft);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 }
 
 .hash-row {
@@ -214,7 +214,7 @@ button {
 	gap: 7px;
 	margin: 16px 20px;
 	padding: 9px 10px;
-	background: var(--sc-stage);
+	background: var(--sc-bg);
 	color: var(--sc-faint);
 }
 
@@ -222,7 +222,7 @@ button {
 	overflow-wrap: anywhere;
 	color: var(--sc-mute);
 	font-family: var(--sc-mono);
-	font-size: 9px;
+	font-size: var(--fs-9);
 	line-height: 1.5;
 }
 
@@ -232,7 +232,7 @@ footer {
 	justify-content: space-between;
 	gap: 16px;
 	padding: 14px 20px;
-	border-top: 1px solid var(--sc-line-1);
+	border-top: 1px solid var(--sc-line);
 }
 
 footer div {
@@ -240,7 +240,7 @@ footer div {
 	align-items: center;
 	gap: 7px;
 	color: var(--sc-faint);
-	font-size: 10px;
+	font-size: var(--fs-10);
 }
 
 .primary {

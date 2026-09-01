@@ -63,7 +63,7 @@ function send(action) {
 	align-items: center;
 	gap: 8px;
 	height: 34px;
-	color: #171a1f;
+	color: var(--text);
 	user-select: none;
 }
 
@@ -77,7 +77,7 @@ function send(action) {
 
 .window-tool-group {
 	padding-right: 4px;
-	border-right: 1px solid rgba(19, 27, 45, 0.12);
+	border-right: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
 }
 
 .chrome-button {
@@ -93,37 +93,39 @@ function send(action) {
 }
 
 .chrome-button:hover {
-	background: #eef0f4;
+	background: var(--panel-hover);
 }
 
 .chrome-button:active {
-	background: #e3e6ec;
+	background: var(--card-border);
 }
 
 .tool-button {
 	width: 34px;
-	color: #454c59;
+	color: var(--text-soft);
 }
 
 .tool-button:hover {
-	color: var(--accent, #3b5bfd);
+	color: var(--accent);
 }
 
 /* 右栏开着的时候按钮自己就是状态指示，不用等 hover。 */
 .tool-button.on {
-	background: rgba(59, 91, 253, 0.1);
-	color: var(--accent, #3b5bfd);
+	background: color-mix(in srgb, var(--accent) 10%, transparent);
+	color: var(--accent);
 }
 
 .tool-button.on:hover {
-	background: rgba(59, 91, 253, 0.16);
+	background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .caption-button {
 	width: 44px;
-	color: #171a1f;
+	color: var(--text);
 }
 
+/* 关闭键的红是 Windows 的窗口按钮约定色，两个主题下都一样，不进 token。
+   白色描线同理：底色恒为这个红，跟着主题翻成深色反而看不清。 */
 .close-button:hover {
 	background: #e81123;
 	color: #ffffff;

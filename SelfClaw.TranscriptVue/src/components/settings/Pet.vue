@@ -147,7 +147,7 @@ onMounted(() => {
 }
 
 .pet-view .sc-page-body {
-  font-size: 13px;
+  font-size: var(--fs-13);
   line-height: 1.5;
 }
 
@@ -173,7 +173,7 @@ onMounted(() => {
   border-radius: 9px;
   background: var(--sc-panel);
   color: var(--sc-text);
-  font-size: 13px;
+  font-size: var(--fs-13);
   font-weight: 600;
   line-height: 1.2;
   transition:
@@ -231,9 +231,9 @@ onMounted(() => {
   border: 1px solid var(--sc-line);
   border-radius: 15px;
   background: var(--sc-panel);
-  box-shadow: 0 1px 3px rgba(23, 26, 31, 0.05);
+  box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.05);
   text-align: left;
-  font-size: 12px;
+  font-size: var(--fs-12);
   transition:
     border-color 0.18s,
     background 0.18s,
@@ -245,7 +245,7 @@ onMounted(() => {
   border-color: var(--sc-line-2);
   background: var(--sc-panel);
   transform: translateY(-3px);
-  box-shadow: 0 18px 44px rgba(23, 26, 31, 0.1);
+  box-shadow: 0 18px 44px rgba(var(--shadow-ink), 0.1);
 }
 
 .pet-card:disabled {
@@ -269,7 +269,7 @@ onMounted(() => {
 .pet-card[data-selected="true"] {
   border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
   background:
-    radial-gradient(220px 130px at 15% 0%, rgba(59, 91, 253, 0.06), transparent 70%),
+    radial-gradient(220px 130px at 15% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 70%),
     var(--sc-panel);
 }
 
@@ -281,7 +281,7 @@ onMounted(() => {
   height: 7px;
   border-radius: 50%;
   background: var(--sc-acid);
-  box-shadow: 0 0 10px rgba(59, 91, 253, 0.5);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 50%, transparent);
   content: '';
   animation: sc-blink 2.4s ease-in-out infinite;
 }
@@ -297,7 +297,7 @@ onMounted(() => {
   border: 1px solid var(--sc-line);
   border-radius: 12px;
   background:
-    radial-gradient(60px 40px at 50% 78%, rgba(59, 91, 253, 0.08), transparent 70%),
+    radial-gradient(60px 40px at 50% 78%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%),
     var(--sc-bg);
   color: var(--sc-mute);
 }
@@ -307,7 +307,7 @@ onMounted(() => {
   height: 100%;
   background-repeat: no-repeat;
   image-rendering: auto;
-  filter: drop-shadow(0 6px 14px rgba(23, 26, 31, 0.18));
+  filter: drop-shadow(0 6px 14px rgba(var(--shadow-ink), 0.18));
   transition: transform 0.25s var(--sc-ease-spring);
 }
 
@@ -318,7 +318,7 @@ onMounted(() => {
 .pet-initials {
   color: var(--sc-mute);
   font-family: var(--sc-mono);
-  font-size: 13px;
+  font-size: var(--fs-13);
   font-weight: 700;
 }
 
@@ -342,7 +342,7 @@ onMounted(() => {
   min-width: 0;
   overflow: hidden;
   color: var(--sc-text);
-  font-size: 14px;
+  font-size: var(--fs-14);
   font-weight: 620;
   line-height: 1.35;
   text-overflow: ellipsis;
@@ -359,7 +359,7 @@ onMounted(() => {
   border-radius: 999px;
   background: var(--sc-acid-soft);
   color: var(--sc-acid);
-  font-size: 10.5px;
+  font-size: var(--fs-105);
   font-weight: 640;
   line-height: 1.55;
 }
@@ -368,7 +368,7 @@ onMounted(() => {
   display: -webkit-box;
   overflow: hidden;
   color: var(--sc-mute);
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1.5;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -380,7 +380,7 @@ onMounted(() => {
   gap: 8px;
   color: var(--sc-faint);
   font-family: var(--sc-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.03em;
   line-height: 1.4;
 }

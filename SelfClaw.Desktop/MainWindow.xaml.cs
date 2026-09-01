@@ -10,6 +10,7 @@ using Microsoft.Web.WebView2.Core;
 using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.WebView;
@@ -48,6 +49,7 @@ public partial class MainWindow : Window
     private readonly WebViewMessageRouter _webViewMessageRouter;
     private readonly TerminalHostController _terminalHostController;
     private readonly PluginPanelHostController _pluginPanelHostController;
+    private readonly AppearanceSettingsService _appearanceSettingsService;
     private bool _isSystemSettingsOpen;
     private Guid? _currentApprovalId;
 
@@ -61,11 +63,13 @@ public partial class MainWindow : Window
         WebViewMessageRouter webViewMessageRouter,
         TerminalHostController terminalHostController,
         PluginPanelHostController pluginPanelHostController,
+        AppearanceSettingsService appearanceSettingsService,
         StoragePaths storagePaths)
     {
         InitializeComponent();
         ApplyAdaptiveStartupSize();
         _viewModel = viewModel;
+        _appearanceSettingsService = appearanceSettingsService;
         _storagePaths = storagePaths;
         _petActivityPresenter = petActivityPresenter;
         _agentActivityCoordinator = agentActivityCoordinator;
@@ -144,7 +148,9 @@ public partial class MainWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         WindowBackdropHelper.TryApplySystemBackdrop(this);
-        WindowBackdropHelper.TryApplyCaptionTheme(this, false);
+        // 缓存值来自上一次运行时前端推送的解析结果。WebView 还没加载，这是此刻能拿到的
+        // 最好答案；前端起来后会经 ApplyCaptionTheme 命令校正。
+        WindowBackdropHelper.TryApplyCaptionTheme(this, _appearanceSettingsService.CachedIsDark);
 
         if (PresentationSource.FromVisual(this) is HwndSource source)
         {
@@ -415,6 +421,11 @@ public partial class MainWindow : Window
                 break;
             case WebViewHostCommandKind.SettingsClosed:
                 OnSettingsClosedFromWebView();
+                break;
+            case WebViewHostCommandKind.ApplyCaptionTheme:
+                WindowBackdropHelper.TryApplyCaptionTheme(
+                    this,
+                    string.Equals(command.Value, "dark", StringComparison.OrdinalIgnoreCase));
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), command.Kind, "Unsupported WebView host command.");

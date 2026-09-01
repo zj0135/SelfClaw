@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useAppearance } from '../../composables/useAppearance.js';
 
 const props = defineProps({
 	isOpen: {
@@ -21,11 +22,55 @@ const props = defineProps({
 
 const emit = defineEmits(['ready', 'input', 'resize', 'close', 'restart', 'focus-change']);
 
+const { revision } = useAppearance();
+
 const terminalHostRef = ref(null);
 let terminal = null;
 let fitAddon = null;
 let resizeObserver = null;
 let readySent = false;
+
+// xterm 自己解析颜色并画到 canvas，读不到 var()。所以这里把 --term-* 读成真实
+// 色串再交给它；主题一变就得整份重读，没有办法只让 CSS 生效。
+function readTerminalTheme() {
+	const styles = getComputedStyle(document.documentElement);
+	const pick = (name) => styles.getPropertyValue(name).trim();
+
+	return {
+		background: pick('--term-bg'),
+		foreground: pick('--term-fg'),
+		cursor: pick('--term-cursor'),
+		selectionBackground: pick('--term-selection'),
+		black: pick('--term-black'),
+		red: pick('--term-red'),
+		green: pick('--term-green'),
+		yellow: pick('--term-yellow'),
+		blue: pick('--term-blue'),
+		magenta: pick('--term-magenta'),
+		cyan: pick('--term-cyan'),
+		white: pick('--term-white'),
+		brightBlack: pick('--term-bright-black'),
+		brightRed: pick('--term-bright-red'),
+		brightGreen: pick('--term-bright-green'),
+		brightYellow: pick('--term-bright-yellow'),
+		brightBlue: pick('--term-bright-blue'),
+		brightMagenta: pick('--term-bright-magenta'),
+		brightCyan: pick('--term-bright-cyan'),
+		brightWhite: pick('--term-bright-white'),
+	};
+}
+
+// 终端是等宽内容，跟代码块用同一组字体设置，而不是界面字体。
+function readTerminalFont() {
+	const styles = getComputedStyle(document.documentElement);
+	const family = styles.getPropertyValue('--font-code').trim();
+	const size = Number.parseFloat(styles.getPropertyValue('--code-fs'));
+
+	return {
+		fontFamily: family || '"Cascadia Mono", "Cascadia Code", Consolas, monospace',
+		fontSize: Number.isFinite(size) && size >= 6 ? size : 12,
+	};
+}
 
 function fitAndNotify() {
 	if (!terminal || !fitAddon || !terminalHostRef.value || !props.isOpen) {
@@ -93,37 +138,17 @@ function sendReady() {
 }
 
 onMounted(() => {
+	const font = readTerminalFont();
 	terminal = new Terminal({
 		cursorBlink: true,
 		cursorStyle: 'bar',
-		fontFamily: '"Cascadia Mono", "Cascadia Code", Consolas, monospace',
-		fontSize: 12,
+		fontFamily: font.fontFamily,
+		fontSize: font.fontSize,
 		lineHeight: 1.2,
 		scrollback: 8000,
 		convertEol: true,
 		allowProposedApi: false,
-		theme: {
-			background: '#ffffff',
-			foreground: '#171a1f',
-			cursor: '#171a1f',
-			selectionBackground: '#dbeafe',
-			black: '#171a1f',
-			red: '#b42318',
-			green: '#1f7a4d',
-			yellow: '#9a6400',
-			blue: '#315fb8',
-			magenta: '#7c3aa8',
-			cyan: '#0f766e',
-			white: '#f7f8fa',
-			brightBlack: '#6b7280',
-			brightRed: '#d92d20',
-			brightGreen: '#2f855a',
-			brightYellow: '#b7791f',
-			brightBlue: '#4f73c8',
-			brightMagenta: '#9333ea',
-			brightCyan: '#0e9488',
-			brightWhite: '#ffffff',
-		},
+		theme: readTerminalTheme(),
 	});
 
 	fitAddon = new FitAddon();
@@ -165,6 +190,20 @@ watch(
 		});
 	}
 );
+
+// 外观一变就整份重读。字号变了必须紧跟一次 fit()：xterm 的行列数是按字符尺寸
+// 算的，不重新测量的话网格与容器就对不上，右侧或底部会空出一条。
+watch(revision, () => {
+	if (!terminal) {
+		return;
+	}
+
+	const font = readTerminalFont();
+	terminal.options.theme = readTerminalTheme();
+	terminal.options.fontFamily = font.fontFamily;
+	terminal.options.fontSize = font.fontSize;
+	nextTick(fitAndNotify);
+});
 
 defineExpose({
 	write,
@@ -226,8 +265,8 @@ defineExpose({
 	grid-template-rows: 30px minmax(0, 1fr);
 	overflow: hidden;
 	position: relative;
-	border-top: 1px solid #d8dde5;
-	background: #ffffff;
+	border-top: 1px solid var(--border-strong);
+	background: var(--panel);
 	opacity: 0;
 	pointer-events: none;
 }
@@ -244,18 +283,18 @@ defineExpose({
 	align-items: center;
 	gap: 9px;
 	padding: 0 8px;
-	border-bottom: 1px solid #e5e7eb;
-	background: #ffffff;
-	color: #171a1f;
-	font-size: 10px;
+	border-bottom: 1px solid var(--border);
+	background: var(--panel);
+	color: var(--text);
+	font-size: var(--fs-10);
 }
 
 .terminal-title {
 	display: inline-flex;
 	align-items: center;
 	gap: 7px;
-	color: #171a1f;
-	font-size: 12px;
+	color: var(--text);
+	font-size: var(--fs-12);
 	font-weight: 650;
 }
 
@@ -264,7 +303,7 @@ defineExpose({
 	height: 15px;
 	display: inline-grid;
 	place-items: center;
-	color: #171a1f;
+	color: var(--text);
 }
 
 .terminal-icon svg {
@@ -280,7 +319,7 @@ defineExpose({
 .terminal-cwd {
 	min-width: 0;
 	overflow: hidden;
-	color: #6b7280;
+	color: var(--muted);
 	font-family: var(--font-code);
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -292,12 +331,12 @@ defineExpose({
 	display: inline-grid;
 	place-items: center;
 	border-radius: 50%;
-	color: #c24150;
+	color: var(--danger);
 	white-space: nowrap;
 }
 
 .terminal-status.running {
-	color: #2f855a;
+	color: var(--success);
 }
 
 .terminal-status svg {
@@ -316,10 +355,10 @@ defineExpose({
 	height: 22px;
 	display: grid;
 	place-items: center;
-	border: 1px solid #d8dde5;
+	border: 1px solid var(--border-strong);
 	border-radius: 50%;
-	background: #ffffff;
-	color: #171a1f;
+	background: var(--panel);
+	color: var(--text);
 	padding: 0;
 }
 
@@ -349,15 +388,15 @@ defineExpose({
 
 .terminal-action:hover,
 .terminal-close:hover {
-	border-color: #c7ced8;
-	background: #f1f3f6;
+	border-color: var(--border-strong);
+	background: var(--panel-muted);
 }
 
 .terminal-host {
 	min-height: 0;
 	padding: 4px 8px 8px;
 	overflow: hidden;
-	background: #ffffff;
+	background: var(--term-bg);
 }
 
 .terminal-host :deep(.xterm) {
@@ -365,7 +404,7 @@ defineExpose({
 }
 
 .terminal-host :deep(.xterm .xterm-viewport) {
-	background-color: #ffffff;
+	background-color: var(--term-bg);
 }
 
 .terminal-host :deep(.xterm .xterm-scrollable-element > .shadow) {
@@ -379,12 +418,12 @@ defineExpose({
 }
 
 .terminal-host :deep(.xterm .xterm-viewport::-webkit-scrollbar-track) {
-	background: rgba(23, 26, 31, 0.04);
+	background: var(--scroll-track);
 }
 
 .terminal-host :deep(.xterm .xterm-viewport::-webkit-scrollbar-thumb) {
-	background: rgba(23, 26, 31, 0.14);
-	border: 2px solid #ffffff;
+	background: var(--scroll-thumb);
+	border: 2px solid var(--term-bg);
 	border-radius: 999px;
 }
 </style>

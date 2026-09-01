@@ -293,13 +293,13 @@ function submit() {
 	border-radius: 99px;
 	background: var(--sc-err-soft);
 	color: var(--sc-err);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 600;
 }
 
 .field-error {
 	margin: 0;
 	color: var(--sc-err);
-	font-size: 11.5px;
+	font-size: var(--fs-115);
 }
 </style>

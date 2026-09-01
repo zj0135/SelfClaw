@@ -14,6 +14,8 @@ const isRescanning = ref(false);
 const scanError = ref('');
 const selectedCliId = ref('');
 
+// iconBackground 刻意不跟主题：这几个品牌 SVG 是近黑或白色描线，浅色底板在两个
+// 主题下都认得出来。换成 var(--panel) 会让深色下的 opencode 图标糊掉。
 const cliRegistry = {
 	claude: {
 		id: 'claude',
@@ -365,7 +367,7 @@ onMounted(() => {
 }
 
 .programming-assistant .sc-page-body {
-	font-size: 15px;
+	font-size: var(--fs-15);
 	line-height: 1.55;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
@@ -377,7 +379,7 @@ onMounted(() => {
 	gap: 8px;
 	margin: 0;
 	color: var(--sc-soft);
-	font-size: 13px;
+	font-size: var(--fs-13);
 	font-weight: 600;
 	letter-spacing: 0.04em;
 	white-space: nowrap;
@@ -386,7 +388,7 @@ onMounted(() => {
 .count {
 	color: var(--sc-acid);
 	font-family: var(--sc-mono);
-	font-size: 12px;
+	font-size: var(--fs-12);
 	font-weight: 500;
 	letter-spacing: 0.08em;
 }
@@ -410,7 +412,7 @@ onMounted(() => {
 	background: var(--sc-panel);
 	color: var(--sc-text);
 	font-family: inherit;
-	font-size: 13px;
+	font-size: var(--fs-13);
 	font-weight: 560;
 	line-height: 1.2;
 	cursor: pointer;
@@ -459,7 +461,7 @@ onMounted(() => {
 .pa-btn--acid:hover {
 	border-color: var(--sc-acid);
 	background: var(--sc-acid);
-	box-shadow: 0 8px 22px rgba(59, 91, 253, 0.18);
+	box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .is-rescanning .scan-icon {
@@ -483,7 +485,7 @@ onMounted(() => {
 	border-radius: 13px;
 	background: var(--sc-raise);
 	color: var(--sc-mute);
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 }
 
 .scan-state--error {
@@ -497,7 +499,7 @@ onMounted(() => {
 	border: 1px solid var(--sc-line);
 	border-radius: 15px;
 	background: var(--sc-panel);
-	box-shadow: 0 1px 3px rgba(23, 26, 31, 0.05);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.05);
 	transition:
 		border-color 0.18s,
 		transform 0.18s var(--sc-ease-out),
@@ -534,7 +536,7 @@ onMounted(() => {
 .cli-card:hover {
 	border-color: var(--sc-line-2);
 	transform: translateY(-2px);
-	box-shadow: 0 16px 40px rgba(23, 26, 31, 0.08);
+	box-shadow: 0 16px 40px rgba(var(--shadow-ink), 0.08);
 }
 
 .cli-card.is-open {
@@ -581,9 +583,9 @@ onMounted(() => {
 }
 
 .cli-initials {
-	color: #6b7280;
+	color: var(--muted);
 	font-family: var(--sc-mono);
-	font-size: 13px;
+	font-size: var(--fs-13);
 	font-weight: 700;
 }
 
@@ -601,7 +603,7 @@ onMounted(() => {
 
 .cli-name {
 	font-family: var(--sc-display);
-	font-size: 17px;
+	font-size: var(--fs-17);
 	font-weight: 630;
 	letter-spacing: 0.01em;
 }
@@ -609,7 +611,7 @@ onMounted(() => {
 .cli-vendor {
 	color: var(--sc-mute);
 	font-family: var(--sc-mono);
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 500;
 	letter-spacing: 0.03em;
 }
@@ -620,13 +622,13 @@ onMounted(() => {
 	flex-wrap: wrap;
 	gap: 10px;
 	margin-top: 6px;
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 
 .label {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: 9.5px;
+	font-size: var(--fs-95);
 	font-weight: 600;
 	letter-spacing: 0.2em;
 }
@@ -635,7 +637,7 @@ onMounted(() => {
 .model-name {
 	color: var(--sc-soft);
 	font-family: var(--sc-mono);
-	font-size: 12px;
+	font-size: var(--fs-12);
 }
 
 .ver {
@@ -643,7 +645,7 @@ onMounted(() => {
 	border: 1px solid var(--sc-line);
 	border-radius: 5px;
 	background: var(--sc-raise);
-	font-size: 10.5px;
+	font-size: var(--fs-105);
 }
 
 .cli-expand {
@@ -683,7 +685,7 @@ onMounted(() => {
 	gap: 5px;
 	padding: 2px 9px;
 	border-radius: 999px;
-	font-size: 11px;
+	font-size: var(--fs-11);
 	font-weight: 600;
 	line-height: 1.7;
 	white-space: nowrap;
@@ -700,7 +702,7 @@ onMounted(() => {
 	background: var(--sc-ok-soft);
 	color: var(--sc-ok);
 	font-family: var(--sc-mono);
-	font-size: 9.5px;
+	font-size: var(--fs-95);
 	font-weight: 600;
 	letter-spacing: 0.1em;
 }
@@ -727,7 +729,7 @@ onMounted(() => {
 	gap: 10px;
 	margin-bottom: 11px;
 	color: var(--sc-soft);
-	font-size: 13px;
+	font-size: var(--fs-13);
 	font-weight: 560;
 }
 
@@ -753,7 +755,7 @@ onMounted(() => {
 
 .select-field__label {
 	color: var(--sc-soft);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 	font-weight: 560;
 	white-space: nowrap;
 }
@@ -773,7 +775,7 @@ onMounted(() => {
 	background: var(--sc-panel);
 	color: var(--sc-text);
 	font-family: inherit;
-	font-size: 13.5px;
+	font-size: var(--fs-135);
 	cursor: pointer;
 	transition:
 		border-color 0.15s,
@@ -807,7 +809,7 @@ onMounted(() => {
 .cli-config__hint {
 	margin: 10px 0 0;
 	color: var(--sc-mute);
-	font-size: 12.5px;
+	font-size: var(--fs-125);
 }
 
 .em {
@@ -825,7 +827,7 @@ onMounted(() => {
 	background: var(--sc-ok-soft);
 	color: var(--sc-ok);
 	font-family: var(--sc-mono);
-	font-size: 12px;
+	font-size: var(--fs-12);
 	letter-spacing: 0.02em;
 }
 

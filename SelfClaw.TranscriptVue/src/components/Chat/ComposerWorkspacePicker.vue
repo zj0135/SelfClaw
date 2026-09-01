@@ -109,14 +109,14 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	border: 0;
 	border-radius: 6px;
 	background: transparent;
-	color: #5f6876;
+	color: var(--muted);
 	font: 500 12px/1.4 var(--font-ui);
 	cursor: pointer;
 }
 
 .workspace-trigger:hover,
 .workspace-trigger.active {
-	background: rgba(19, 27, 45, 0.06);
+	background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .workspace-trigger span {
@@ -141,10 +141,10 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	z-index: 90;
 	width: 288px;
 	padding: 9px;
-	border: 1px solid #dfe3ea;
+	border: 1px solid var(--border-strong);
 	border-radius: 9px;
-	background: #fff;
-	box-shadow: 0 18px 50px rgba(23, 26, 31, 0.14), 0 3px 10px rgba(23, 26, 31, 0.05);
+	background: var(--panel);
+	box-shadow: 0 18px 50px rgba(var(--shadow-ink), 0.14), 0 3px 10px rgba(var(--shadow-ink), 0.05);
 }
 
 .workspace-search {
@@ -153,13 +153,13 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	gap: 7px;
 	height: 34px;
 	padding: 0 9px;
-	border: 1px solid #e3e6ec;
+	border: 1px solid var(--card-border);
 	border-radius: 7px;
-	color: #929aa6;
+	color: var(--faint);
 }
 
 .workspace-search:focus-within {
-	border-color: rgba(59, 91, 253, 0.45);
+	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .workspace-search input {
@@ -168,7 +168,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	border: 0;
 	outline: none;
 	background: transparent;
-	color: #20242a;
+	color: var(--text-strong);
 	font: 12.5px/1 var(--font-ui);
 }
 
@@ -189,7 +189,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	border: 0;
 	border-radius: 6px;
 	background: transparent;
-	color: #394150;
+	color: var(--text-soft);
 	font: 12.5px/1 var(--font-ui);
 	text-align: left;
 	cursor: pointer;
@@ -197,7 +197,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 
 .workspace-row:hover,
 .workspace-row.selected {
-	background: #f3f4f6;
+	background: var(--panel-muted);
 }
 
 .workspace-row span {
@@ -211,28 +211,28 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 
 .workspace-row svg {
 	flex: none;
-	color: #8c95a2;
+	color: var(--muted-soft);
 }
 
 .row-delete {
-	color: #929aa6;
+	color: var(--faint);
 	transition: color 0.15s ease;
 }
 
 .row-delete:hover {
-	color: #dc4545;
+	color: var(--danger);
 }
 
 .browse-row {
 	margin-top: 7px;
-	border-top: 1px solid #eceff3;
+	border-top: 1px solid var(--border);
 	border-radius: 0 0 6px 6px;
 }
 
 .empty-row {
 	margin: 10px 8px;
-	color: #929aa6;
-	font-size: 12px;
+	color: var(--faint);
+	font-size: var(--fs-12);
 }
 
 @media (max-width: 700px) {
