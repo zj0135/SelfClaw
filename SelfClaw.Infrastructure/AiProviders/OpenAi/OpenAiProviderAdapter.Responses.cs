@@ -83,9 +83,15 @@ internal sealed partial class OpenAiProviderAdapter
             raw.StoredOutputEnabled = store;
         }
 
-        if (options.TryReadInt(ResponseMaxOutputTokensKey, out var maxOutputTokens))
+        // The raw value takes precedence over ChatOptions.MaxOutputTokens for this format,
+        // so the catalog fallback has to be applied here rather than on the shared options.
+        if (AiChatOptions.ResolveMaxOutputTokens(
+                request,
+                options.TryReadInt(ResponseMaxOutputTokensKey, out var maxOutputTokens)
+                    ? maxOutputTokens
+                    : null) is { } resolvedMaxOutputTokens)
         {
-            raw.MaxOutputTokenCount = maxOutputTokens;
+            raw.MaxOutputTokenCount = resolvedMaxOutputTokens;
         }
 
         if (options.TryReadString(ResponseTruncationKey, out var truncation))

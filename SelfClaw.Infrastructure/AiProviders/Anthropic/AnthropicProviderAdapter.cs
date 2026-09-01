@@ -21,7 +21,8 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
     private static readonly IReadOnlySet<string> RecognizedModelOptionKeys =
         new HashSet<string>(StringComparer.Ordinal)
         {
-            MaxTokensKey
+            MaxTokensKey,
+            AiChatOptions.MaxOutputTokensKey
         };
 
     private readonly ILogger<AnthropicProviderAdapter> _logger;
@@ -71,9 +72,7 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
             string.Empty,
             string.Empty,
             request.Tools.ToList(),
-            ModelOptionReader.ForProfile(_logger, request.Profile).TryReadInt(MaxTokensKey, out var maxTokens)
-                ? maxTokens
-                : null,
+            ResolveMaxOutputTokens(request),
             chatClient =>
             {
                 capturedClient = chatClient;
@@ -94,14 +93,25 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
         }
 
         var options = AiChatOptions.CreateBase(request);
-        var reader = ModelOptionReader.ForProfile(_logger, request.Profile);
-        if (reader.TryReadInt(MaxTokensKey, out var maxTokens))
-        {
-            options.MaxOutputTokens = maxTokens;
-        }
-
-        reader.LogUnknown(RecognizedModelOptionKeys);
+        options.MaxOutputTokens = ResolveMaxOutputTokens(request);
+        ModelOptionReader.ForProfile(_logger, request.Profile).LogUnknown(RecognizedModelOptionKeys);
         return options;
+    }
+
+    /// <summary>
+    /// Resolves the turn's output ceiling from model options, falling back to the model's
+    /// catalog maximum. Without this the Agent Framework integration sends its own 4096
+    /// default, which truncates ordinary answers.
+    /// </summary>
+    private int? ResolveMaxOutputTokens(AiProviderClientRequest request)
+    {
+        var reader = ModelOptionReader.ForProfile(_logger, request.Profile);
+        int? configured = reader.TryReadInt(MaxTokensKey, out var maxTokens)
+            ? maxTokens
+            : reader.TryReadInt(AiChatOptions.MaxOutputTokensKey, out var aliased)
+                ? aliased
+                : null;
+        return AiChatOptions.ResolveMaxOutputTokens(request, configured);
     }
 
     private static AnthropicClient CreateAnthropicClient(AiProviderClientRequest request)

@@ -70,7 +70,8 @@ internal sealed class OpenAiModelListClient
                 modelId,
                 displayName,
                 contextLength,
-                null,
+                ReadOptionalInt64(item, "max_output_tokens") ??
+                    ReadOptionalInt64(item, "max_completion_tokens"),
                 ReadPricePerMTok(pricing, "prompt"),
                 ReadPricePerMTok(pricing, "completion"),
                 ReadPricePerMTok(pricing, "input_cache_write"),

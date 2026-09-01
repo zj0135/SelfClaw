@@ -13,6 +13,42 @@ namespace SelfClaw.Infrastructure.AiProviders;
 internal static class AiChatOptions
 {
     /// <summary>
+    /// Model option every format understands for capping a turn's output length. Each adapter
+    /// maps it onto <see cref="ChatOptions.MaxOutputTokens"/> so the ceiling is configured the
+    /// same way regardless of provider.
+    /// </summary>
+    public const string MaxOutputTokensKey = "max_output_tokens";
+
+    /// <summary>
+    /// Display metadata written by model-list refresh from the provider's own catalog. It holds
+    /// the model's true output ceiling, which is a far better default than whatever the provider
+    /// SDK falls back to.
+    /// </summary>
+    private const string CatalogMaxOutputTokensKey = "display.maxOutputTokens";
+
+    /// <summary>
+    /// Resolves the output-token ceiling for a turn: an explicitly configured value wins, otherwise
+    /// the model's catalog-reported maximum is used. Leaving this null hands the decision to the
+    /// provider, and some providers default low enough to cut ordinary answers off mid-sentence
+    /// (the Anthropic integration sends 4096), which surfaces as a response that stops for no
+    /// visible reason.
+    /// </summary>
+    public static int? ResolveMaxOutputTokens(AiProviderClientRequest request, int? configured)
+    {
+        if (configured > 0)
+        {
+            return configured;
+        }
+
+        return request.Profile.ModelOptions.TryGetValue(CatalogMaxOutputTokensKey, out var element) &&
+               element.ValueKind == JsonValueKind.Number &&
+               element.TryGetInt32(out var catalogMaximum) &&
+               catalogMaximum > 0
+            ? catalogMaximum
+            : null;
+    }
+
+    /// <summary>
     /// Builds the format-independent <see cref="ChatOptions"/> shared by every adapter: sampling pulled
     /// from the profile, and tool mode/list derived from the request. <paramref name="rawRepresentationFactory"/>
     /// wires a provider-specific raw options object when the adapter needs one.

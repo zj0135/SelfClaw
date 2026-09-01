@@ -60,6 +60,36 @@ public sealed class OpenAiProviderAdapterTests
     }
 
     [Fact]
+    public void CreateChatOptions_maps_max_output_tokens_for_chat_completions()
+    {
+        // Chat Completions has no raw patch for the cap; M.E.AI turns MaxOutputTokens into
+        // max_completion_tokens, so an explicit option has to land on the shared options.
+        var adapter = new OpenAiProviderAdapter();
+        var request = CreateRequest(
+            AiProviderKind.OpenAI,
+            AiProviderApiFormat.OpenAIChatCompletions,
+            modelOptions: ReadJsonObject("{\"max_output_tokens\":9000}"));
+
+        var options = adapter.CreateChatOptions(request);
+
+        options.MaxOutputTokens.Should().Be(9000);
+    }
+
+    [Fact]
+    public void CreateChatOptions_falls_back_to_catalog_max_output_tokens_for_chat_completions()
+    {
+        var adapter = new OpenAiProviderAdapter();
+        var request = CreateRequest(
+            AiProviderKind.OpenAI,
+            AiProviderApiFormat.OpenAIChatCompletions,
+            modelOptions: ReadJsonObject("{\"display.maxOutputTokens\":32000}"));
+
+        var options = adapter.CreateChatOptions(request);
+
+        options.MaxOutputTokens.Should().Be(32000);
+    }
+
+    [Fact]
     public void CreateChatOptions_maps_tool_mode()
     {
         var adapter = new OpenAiProviderAdapter();
@@ -160,6 +190,22 @@ public sealed class OpenAiProviderAdapterTests
         rawJson.GetProperty("max_output_tokens").GetInt32().Should().Be(2048);
         rawJson.GetProperty("truncation").GetString().Should().Be("auto");
         rawJson.GetProperty("parallel_tool_calls").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public void Responses_options_fall_back_to_catalog_max_output_tokens()
+    {
+        // The raw value wins over ChatOptions.MaxOutputTokens for this format, so the
+        // catalog fallback has to be written onto the raw options object.
+        var adapter = new OpenAiProviderAdapter();
+        var request = CreateRequest(
+            AiProviderKind.OpenAI,
+            AiProviderApiFormat.OpenAIResponses,
+            modelOptions: ReadJsonObject("{\"display.maxOutputTokens\":16000}"));
+
+        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request));
+
+        rawJson.GetProperty("max_output_tokens").GetInt32().Should().Be(16000);
     }
 
     [Fact]

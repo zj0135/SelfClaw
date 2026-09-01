@@ -25,7 +25,8 @@ internal sealed partial class OpenAiProviderAdapter
             ChatThinkingTypeKey,
             ChatReasoningEffortKey,
             ChatParallelToolCallsKey,
-            ChatStoreKey
+            ChatStoreKey,
+            AiChatOptions.MaxOutputTokensKey
         };
 
     private IChatClient CreateChatCompletionsClient(AiProviderClientRequest request)
@@ -37,8 +38,20 @@ internal sealed partial class OpenAiProviderAdapter
         return client.AsIChatClient();
     }
 
-    private ChatOptions CreateChatCompletionsOptions(AiProviderClientRequest request) =>
-        AiChatOptions.CreateBase(request, _ => BuildChatCompletionRawOptions(request));
+    private ChatOptions CreateChatCompletionsOptions(AiProviderClientRequest request)
+    {
+        var options = AiChatOptions.CreateBase(request, _ => BuildChatCompletionRawOptions(request));
+
+        // Chat Completions has no raw patch for the output cap here; the M.E.AI layer maps
+        // MaxOutputTokens onto max_completion_tokens for this format, so setting it is what
+        // keeps a small server-side default from truncating the answer.
+        options.MaxOutputTokens = AiChatOptions.ResolveMaxOutputTokens(
+            request,
+            OptionReader(request).TryReadInt(AiChatOptions.MaxOutputTokensKey, out var configured)
+                ? configured
+                : null);
+        return options;
+    }
 
     private OpenAIChatCompletionOptions BuildChatCompletionRawOptions(AiProviderClientRequest request)
     {

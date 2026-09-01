@@ -49,6 +49,32 @@ public sealed class AnthropicProviderAdapterTests
     }
 
     [Fact]
+    public void CreateChatOptions_falls_back_to_catalog_max_output_tokens()
+    {
+        // Without an explicit cap the integration would send its own low default, so the
+        // model's catalog maximum is used instead of leaving the value unset.
+        var adapter = new AnthropicProviderAdapter();
+        var request = CreateRequest(
+            modelOptions: ReadJsonObject("{\"display.maxOutputTokens\":64000}"));
+
+        var options = adapter.CreateChatOptions(request);
+
+        options.MaxOutputTokens.Should().Be(64000);
+    }
+
+    [Fact]
+    public void CreateChatOptions_prefers_explicit_max_tokens_over_catalog_value()
+    {
+        var adapter = new AnthropicProviderAdapter();
+        var request = CreateRequest(
+            modelOptions: ReadJsonObject("{\"max_tokens\":8192,\"display.maxOutputTokens\":64000}"));
+
+        var options = adapter.CreateChatOptions(request);
+
+        options.MaxOutputTokens.Should().Be(8192);
+    }
+
+    [Fact]
     public void CreateChatOptions_uses_none_tool_mode_without_tools()
     {
         var adapter = new AnthropicProviderAdapter();
