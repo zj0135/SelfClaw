@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
@@ -127,6 +127,68 @@ public sealed class DirectAgentChatRuntimeTests
         streamEvents.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Should().Be(
             new RunCompletedEvent(RunCompletionStatus.Failed, "partial", "provider failed"));
         client.IsDisposed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task StreamTurnAsync_reports_truncated_without_continuing_when_cut_off_by_length()
+    {
+        // Hitting the configured output cap is a normal outcome, not a failure: the runtime
+        // stops after one pass and leaves the decision to resume with the user.
+        var client = new MultiScriptChatClient(
+        [
+            [FinishUpdate("m", ChatFinishReason.Length, new TextContent("part 1"))],
+            [FinishUpdate("m", ChatFinishReason.Stop, new TextContent(" and part 2"))]
+        ]);
+        var factory = new FakeChatClientFactory(client);
+        var runtime = CreateRuntime(factory);
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
+
+        // A single provider round-trip: no continuation is spent on the user's behalf.
+        client.Invocations.Should().HaveCount(1);
+        events.OfType<AssistantTextDeltaEvent>().Select(item => item.Delta).Should().Equal("part 1");
+        var completed = events.OfType<RunCompletedEvent>().Should().ContainSingle().Which;
+        completed.Status.Should().Be(RunCompletionStatus.Truncated);
+        // The partial answer survives so it can be resumed later.
+        completed.FinalText.Should().Be("part 1");
+        completed.ErrorMessage.Should().Contain("output-token limit");
+    }
+
+    [Fact]
+    public async Task StreamTurnAsync_reports_failure_when_length_truncation_yields_no_text()
+    {
+        // Nothing was produced before the cap, so there is no partial answer to resume from.
+        var client = new MultiScriptChatClient(
+        [
+            [FinishUpdate("m", ChatFinishReason.Length)]
+        ]);
+        var factory = new FakeChatClientFactory(client);
+        var runtime = CreateRuntime(factory);
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
+
+        client.Invocations.Should().HaveCount(1);
+        var completed = events.OfType<RunCompletedEvent>().Should().ContainSingle().Which;
+        completed.Status.Should().Be(RunCompletionStatus.Failed);
+        completed.ErrorMessage.Should().Contain("without producing any output");
+    }
+
+    [Fact]
+    public async Task StreamTurnAsync_reports_failure_when_tool_call_loop_stops_early()
+    {
+        // A trailing tool_calls finish reason means the tool-invocation loop stopped while the
+        // model still wanted to call tools, so the turn is incomplete rather than successful.
+        var client = new ScriptedChatClient(
+            [FinishUpdate("m", ChatFinishReason.ToolCalls, new TextContent("checking"))]);
+        var factory = new FakeChatClientFactory(client);
+        var runtime = CreateRuntime(factory);
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
+
+        var completed = events.OfType<RunCompletedEvent>().Should().ContainSingle().Which;
+        completed.Status.Should().Be(RunCompletionStatus.Failed);
+        completed.ErrorMessage.Should().NotBeNullOrEmpty();
+        completed.FinalText.Should().Contain("checking");
     }
 
     [Fact]
@@ -269,6 +331,12 @@ public sealed class DirectAgentChatRuntimeTests
     private static ChatResponseUpdate Update(string messageId, params AIContent[] contents)
         => new(ChatRole.Assistant, contents) { MessageId = messageId };
 
+    private static ChatResponseUpdate FinishUpdate(
+        string messageId,
+        ChatFinishReason finishReason,
+        params AIContent[] contents)
+        => new(ChatRole.Assistant, contents) { MessageId = messageId, FinishReason = finishReason };
+
     private static async Task<List<AgentStreamEvent>> CollectAsync(IAsyncEnumerable<AgentStreamEvent> events)
     {
         var result = new List<AgentStreamEvent>();
@@ -377,6 +445,49 @@ public sealed class DirectAgentChatRuntimeTests
             IsDisposed = true;
             _dispose?.Invoke();
         }
+    }
+
+    /// <summary>
+    /// Returns a distinct scripted response per invocation so tests can exercise the
+    /// runtime's auto-continuation loop across multiple provider round-trips. When the
+    /// scripts are exhausted the final script is replayed, which lets a test model an
+    /// endlessly-truncating provider.
+    /// </summary>
+    private sealed class MultiScriptChatClient : IChatClient
+    {
+        private readonly IReadOnlyList<IReadOnlyList<ChatResponseUpdate>> _scripts;
+
+        public MultiScriptChatClient(IReadOnlyList<IReadOnlyList<ChatResponseUpdate>> scripts)
+        {
+            _scripts = scripts;
+        }
+
+        public List<IReadOnlyList<ChatMessage>> Invocations { get; } = [];
+        public bool IsDisposed { get; private set; }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var index = Math.Min(Invocations.Count, _scripts.Count - 1);
+            Invocations.Add(messages.ToList());
+            foreach (var update in _scripts[index])
+            {
+                yield return update;
+            }
+
+            await Task.CompletedTask;
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() => IsDisposed = true;
     }
 
     private sealed class FakeCapabilityResolver : IDirectTurnCapabilityResolver

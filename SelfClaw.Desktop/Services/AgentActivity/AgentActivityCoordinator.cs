@@ -178,9 +178,12 @@ public sealed class AgentActivityCoordinator : IDisposable
                         toolKind: null);
 
             case RunCompletedEvent completed:
+                // A truncated run did not error - it delivered a valid partial answer and
+                // stopped at the configured cap. The message status carries the incomplete
+                // signal; this transient activity outcome only tracks failures.
                 return CompleteTurn(
                     turn,
-                    completed.Status == RunCompletionStatus.Succeeded
+                    completed.Status is RunCompletionStatus.Succeeded or RunCompletionStatus.Truncated
                         ? AgentActivityOutcome.Succeeded
                         : AgentActivityOutcome.Failed,
                     completed.ErrorMessage);

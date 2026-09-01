@@ -272,12 +272,19 @@ internal sealed class ConversationTurnRecorder
             return;
         }
 
-        var kind = completed.Status == RunCompletionStatus.Succeeded
-            ? TurnFinalizationKind.Succeeded
-            : TurnFinalizationKind.Failed;
-        var errorMessage = kind == TurnFinalizationKind.Succeeded
-            ? null
-            : completed.ErrorMessage ?? "The agent run failed.";
+        var kind = completed.Status switch
+        {
+            RunCompletionStatus.Succeeded => TurnFinalizationKind.Succeeded,
+            RunCompletionStatus.Truncated => TurnFinalizationKind.Truncated,
+            _ => TurnFinalizationKind.Failed
+        };
+        var errorMessage = kind switch
+        {
+            TurnFinalizationKind.Succeeded => null,
+            // Not an error: carried through so the UI can explain why the answer stopped.
+            TurnFinalizationKind.Truncated => completed.ErrorMessage,
+            _ => completed.ErrorMessage ?? "The agent run failed."
+        };
 
         await FinalizeTurnAsync(session, turn, existing, kind, completed.FinalText, errorMessage, committer);
     }
@@ -414,6 +421,7 @@ internal sealed class ConversationTurnRecorder
                 TurnFinalizationKind.Succeeded => MessageStatus.Completed,
                 TurnFinalizationKind.Failed => MessageStatus.Failed,
                 TurnFinalizationKind.Cancelled => MessageStatus.Cancelled,
+                TurnFinalizationKind.Truncated => MessageStatus.Truncated,
                 _ => throw new ArgumentOutOfRangeException(nameof(request), request.Kind, "Unsupported turn outcome.")
             },
             InputTokens = request.InputTokens,

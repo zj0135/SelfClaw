@@ -43,11 +43,12 @@ internal sealed class ConversationCompletionNotifier : IConversationCompletionNo
     private static string BuildPreview(IReadOnlyList<MessageRecord> messages)
     {
         var latestMessage = messages
-            .Where(message => message.Status == MessageStatus.Completed && message.Role == MessageRole.Assistant)
+            .Where(message => message.Status is MessageStatus.Completed or MessageStatus.Truncated
+                              && message.Role == MessageRole.Assistant)
             .OrderByDescending(message => message.CreatedAtUtc)
             .FirstOrDefault()
             ?? messages
-                .Where(message => message.Status == MessageStatus.Completed &&
+                .Where(message => message.Status is MessageStatus.Completed or MessageStatus.Truncated &&
                                   message.Role is MessageRole.Assistant or MessageRole.System)
                 .OrderByDescending(message => message.CreatedAtUtc)
                 .FirstOrDefault();

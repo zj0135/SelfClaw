@@ -10,6 +10,65 @@ namespace SelfClaw.Tests.Infrastructure.Extensions;
 public sealed class DirectPromptComposerTests
 {
     [Fact]
+    public void BuildMessages_keeps_a_truncated_answer_and_appends_the_resume_nudge()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var history = new[]
+        {
+            new MessageRecord(
+                Guid.NewGuid(), conversationId, MessageRole.User, "Write a long guide",
+                MessageStatus.Completed, now.AddSeconds(-2), now.AddSeconds(-2)),
+            new MessageRecord(
+                Guid.NewGuid(), conversationId, MessageRole.Assistant, "Part one of the guide",
+                MessageStatus.Truncated, now.AddSeconds(-1), now.AddSeconds(-1))
+        };
+        var composer = new DirectPromptComposer();
+
+        var messages = composer.BuildMessages(
+            history,
+            "Keep working.",
+            [],
+            new Dictionary<Guid, string>(),
+            new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));
+
+        // The partial answer survives so the model can resume from it, unlike a failed turn.
+        messages.Should().HaveCount(4);
+        messages[2].Role.Should().Be(ChatRole.Assistant);
+        messages[2].Text.Should().Be("Part one of the guide");
+        messages[3].Role.Should().Be(ChatRole.User);
+        messages[3].Text.Should().Be(DirectPromptComposer.ContinuationPrompt);
+    }
+
+    [Fact]
+    public void BuildMessages_omits_the_resume_nudge_once_the_user_has_replied()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var history = new[]
+        {
+            new MessageRecord(
+                Guid.NewGuid(), conversationId, MessageRole.Assistant, "Part one of the guide",
+                MessageStatus.Truncated, now.AddSeconds(-2), now.AddSeconds(-2)),
+            new MessageRecord(
+                Guid.NewGuid(), conversationId, MessageRole.User, "Actually, summarize instead",
+                MessageStatus.Completed, now.AddSeconds(-1), now.AddSeconds(-1))
+        };
+        var composer = new DirectPromptComposer();
+
+        var messages = composer.BuildMessages(
+            history,
+            "Keep working.",
+            [],
+            new Dictionary<Guid, string>(),
+            new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));
+
+        // The truncated answer is settled history now; the new instruction is what to follow.
+        messages.Should().HaveCount(3);
+        messages[^1].Text.Should().Be("Actually, summarize instead");
+    }
+
+    [Fact]
     public void BuildMessages_adds_completion_batch_as_transient_untrusted_user_input()
     {
         var now = DateTimeOffset.UtcNow;

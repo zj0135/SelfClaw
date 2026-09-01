@@ -25,6 +25,31 @@ namespace SelfClaw.Infrastructure.Agents.Runtime;
 /// </summary>
 internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 {
+    /// <summary>
+    /// Reported when the model stops at its output-token cap. Hitting the cap is normal
+    /// once the limit is configured, so this is informational rather than an error.
+    /// </summary>
+    private const string TruncatedMessage =
+        "The response reached the configured output-token limit. Continue the message to " +
+        "have the model resume from where it stopped.";
+
+    /// <summary>
+    /// Reported when the function-invoking tool loop stops while the model is still
+    /// requesting tool calls, which means it hit <c>MaximumIterationsPerRequest</c>
+    /// rather than finishing its work.
+    /// </summary>
+    private const string ToolLoopExhaustedMessage =
+        "The response stopped while the model was still calling tools, which means the " +
+        "tool-call loop hit its per-request iteration limit before the task finished.";
+
+    /// <summary>
+    /// Reported when the output-token cap is hit before any text is produced. There is no
+    /// partial answer to resume from, so the limit is likely configured too low to be usable.
+    /// </summary>
+    private const string TruncatedWithoutOutputMessage =
+        "The response reached the configured output-token limit without producing any output. " +
+        "Raise the output-token limit for this model and try again.";
+
     private readonly IAiChatClientFactory _chatClientFactory;
     private readonly IDirectTurnCapabilityResolver _capabilityResolver;
     private readonly DirectPromptComposer _promptComposer;
@@ -125,78 +150,94 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 AgentKind: null));
             writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
 
-            var messages = _promptComposer.BuildMessages(
+            var messages = new List<ChatMessage>(_promptComposer.BuildMessages(
                 request.Messages,
                 request.Agent.Instructions,
                 capabilityLease.SystemInstructions,
                 capabilityLease.MessageAdjustments,
-                request.ExecutionContext);
-            await foreach (var update in providerLease.Client.GetStreamingResponseAsync(
-                               messages,
-                               providerLease.Options,
-                               cancellationToken))
+                request.ExecutionContext));
+
+            // The M.E.AI FunctionInvokingChatClient owns the tool loop but never reports
+            // that the model truncated its answer at the output-token cap
+            // (FinishReason.Length). Left undetected that surfaces as output which "stops
+            // for no reason" while the turn claims success. We detect the length stop and
+            // report it as Truncated so the partial answer is kept and the decision to
+            // continue - which costs another full request - stays with the user.
+            ChatFinishReason? finishReason = null;
             {
-                var blockId = string.IsNullOrWhiteSpace(update.MessageId)
-                    ? "direct-response"
-                    : update.MessageId;
-
-                foreach (var content in update.Contents)
+                await foreach (var update in providerLease.Client.GetStreamingResponseAsync(
+                                   messages,
+                                   providerLease.Options,
+                                   cancellationToken))
                 {
-                    switch (content)
+                    if (update.FinishReason is ChatFinishReason reason)
                     {
-                        case TextContent text when !string.IsNullOrEmpty(text.Text):
-                            finalText.Append(text.Text);
-                            writer.TryWrite(new AssistantTextDeltaEvent(blockId, text.Text));
-                            break;
+                        finishReason = reason;
+                    }
 
-                        case TextReasoningContent reasoning when !string.IsNullOrEmpty(reasoning.Text):
-                            writer.TryWrite(new AssistantThinkingDeltaEvent(blockId, reasoning.Text));
-                            break;
+                    var blockId = string.IsNullOrWhiteSpace(update.MessageId)
+                        ? "direct-response"
+                        : update.MessageId;
 
-                        case FunctionCallContent call when startedCalls.Add(call.CallId):
-                            capabilityLease.ToolDescriptors.TryGetValue(call.Name, out var descriptor);
-                            var toolKind = descriptor?.Kind ?? ToolCallKind.Other;
-                            if (descriptor is not null)
-                            {
-                                startedDescriptors[call.CallId] = descriptor;
-                            }
+                    foreach (var content in update.Contents)
+                    {
+                        switch (content)
+                        {
+                            case TextContent text when !string.IsNullOrEmpty(text.Text):
+                                finalText.Append(text.Text);
+                                writer.TryWrite(new AssistantTextDeltaEvent(blockId, text.Text));
+                                break;
 
-                            writer.TryWrite(new ToolCallStartedEvent(
-                                call.CallId,
-                                call.Name,
-                                JsonSerializer.Serialize(call.Arguments),
-                                toolKind,
-                                descriptor?.SourceKind ?? ToolSourceKind.BuiltIn,
-                                descriptor?.SourceId,
-                                descriptor?.DisplayName));
-                            break;
+                            case TextReasoningContent reasoning when !string.IsNullOrEmpty(reasoning.Text):
+                                writer.TryWrite(new AssistantThinkingDeltaEvent(blockId, reasoning.Text));
+                                break;
 
-                        case FunctionResultContent result:
-                            var (status, summary, detail) =
-                                result.Exception is null &&
-                                startedDescriptors.TryGetValue(result.CallId, out var resultDescriptor) &&
-                                resultDescriptor.SourceKind == ToolSourceKind.Mcp
-                                    ? McpToolAdapter.DescribeResult(result.Result)
-                                    : DescribeToolResult(result);
-                            writer.TryWrite(new ToolCallCompletedEvent(result.CallId, status, summary, detail));
-                            break;
+                            case FunctionCallContent call when startedCalls.Add(call.CallId):
+                                capabilityLease.ToolDescriptors.TryGetValue(call.Name, out var descriptor);
+                                var toolKind = descriptor?.Kind ?? ToolCallKind.Other;
+                                if (descriptor is not null)
+                                {
+                                    startedDescriptors[call.CallId] = descriptor;
+                                }
 
-                        case UsageContent usage:
-                            if (usage.Details.InputTokenCount is long input)
-                            {
-                                hasInputUsage = true;
-                                inputTokens += input;
-                            }
+                                writer.TryWrite(new ToolCallStartedEvent(
+                                    call.CallId,
+                                    call.Name,
+                                    JsonSerializer.Serialize(call.Arguments),
+                                    toolKind,
+                                    descriptor?.SourceKind ?? ToolSourceKind.BuiltIn,
+                                    descriptor?.SourceId,
+                                    descriptor?.DisplayName));
+                                break;
 
-                            if (usage.Details.OutputTokenCount is long output)
-                            {
-                                hasOutputUsage = true;
-                                outputTokens += output;
-                            }
+                            case FunctionResultContent result:
+                                var (status, summary, detail) =
+                                    result.Exception is null &&
+                                    startedDescriptors.TryGetValue(result.CallId, out var resultDescriptor) &&
+                                    resultDescriptor.SourceKind == ToolSourceKind.Mcp
+                                        ? McpToolAdapter.DescribeResult(result.Result)
+                                        : DescribeToolResult(result);
+                                writer.TryWrite(new ToolCallCompletedEvent(result.CallId, status, summary, detail));
+                                break;
 
-                            break;
+                            case UsageContent usage:
+                                if (usage.Details.InputTokenCount is long input)
+                                {
+                                    hasInputUsage = true;
+                                    inputTokens += input;
+                                }
+
+                                if (usage.Details.OutputTokenCount is long output)
+                                {
+                                    hasOutputUsage = true;
+                                    outputTokens += output;
+                                }
+
+                                break;
+                        }
                     }
                 }
+
             }
 
             if (hasInputUsage || hasOutputUsage)
@@ -209,11 +250,52 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                     outputTokens);
             }
 
-            writer.TryWrite(new RunCompletedEvent(
-                RunCompletionStatus.Succeeded,
-                finalText.ToString(),
-                ErrorMessage: null));
-            runCompletedEmitted = true;
+            if (finishReason == ChatFinishReason.Length && finalText.Length > 0)
+            {
+                // Distinct from Failed: the partial answer is valid and is kept in the
+                // prompt history, so the model can resume from it if the user continues.
+                _logger.LogInformation(
+                    "Direct AI agent turn stopped at the output-token cap; reporting it as truncated.");
+                writer.TryWrite(new RunCompletedEvent(
+                    RunCompletionStatus.Truncated,
+                    finalText.ToString(),
+                    TruncatedMessage));
+                runCompletedEmitted = true;
+            }
+            else if (finishReason == ChatFinishReason.Length)
+            {
+                // Capped before emitting anything: there is no partial answer to resume from.
+                _logger.LogWarning(
+                    "Direct AI agent turn hit the output-token cap without producing any text.");
+                writer.TryWrite(new RunCompletedEvent(
+                    RunCompletionStatus.Failed,
+                    ErrorMessage: TruncatedWithoutOutputMessage,
+                    FinalText: null));
+                runCompletedEmitted = true;
+            }
+            else if (finishReason == ChatFinishReason.ToolCalls)
+            {
+                // FunctionInvokingChatClient resolves tool calls internally and only leaves
+                // this finish reason on the final update when it stopped early - it hit
+                // MaximumIterationsPerRequest while the model still wanted to call tools.
+                // Surfacing it keeps the turn from looking like a clean finish.
+                _logger.LogWarning(
+                    "Direct AI agent turn ended while the model was still requesting tool calls; " +
+                    "the tool-call loop hit its iteration limit.");
+                writer.TryWrite(new RunCompletedEvent(
+                    RunCompletionStatus.Failed,
+                    NullIfEmpty(finalText),
+                    ToolLoopExhaustedMessage));
+                runCompletedEmitted = true;
+            }
+            else
+            {
+                writer.TryWrite(new RunCompletedEvent(
+                    RunCompletionStatus.Succeeded,
+                    finalText.ToString(),
+                    ErrorMessage: null));
+                runCompletedEmitted = true;
+            }
         }
         catch (OperationCanceledException exception)
         {

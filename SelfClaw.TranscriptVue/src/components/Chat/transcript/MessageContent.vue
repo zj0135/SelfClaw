@@ -74,7 +74,7 @@ const preparingLabel = computed(() => String(props.activityText || '').trim() ||
 						:is-last="block.isLast" @preview-image="emit('preview-image', $event)" />
 				</template>
 				<p v-if="item.errorMessage" class="message-error"
-					:class="{ 'message-cancelled': item.status === 'cancelled' }">{{
+					:class="{ 'message-cancelled': item.status === 'cancelled' || item.status === 'truncated' }">{{
 						item.errorMessage }}</p>
 			</div>
 		</article>

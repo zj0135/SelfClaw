@@ -299,7 +299,9 @@ public sealed class TranscriptProjection
             message.Role == MessageRole.Assistant && message.Status == MessageStatus.Streaming,
             message.CreatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
             BuildImageAttachments(message),
-            message.Status is MessageStatus.Failed or MessageStatus.Cancelled ? message.ErrorMessage : null);
+            message.Status is MessageStatus.Failed or MessageStatus.Cancelled or MessageStatus.Truncated
+                ? message.ErrorMessage
+                : null);
     }
 
     private TranscriptRenderSegment BuildToolSegmentCached(ToolExecutionRecord toolRun)
