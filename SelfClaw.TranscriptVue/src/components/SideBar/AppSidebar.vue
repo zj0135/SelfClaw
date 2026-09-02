@@ -8,6 +8,7 @@ import {
 	Zap,
 	FolderOpen,
 	Folder,
+	File,
 	Pencil,
 	FolderCog,
 	BookOpen,
@@ -21,7 +22,10 @@ import {
 	PanelLeftClose,
 	PanelLeftOpen,
 	ChevronRight,
+	ChevronLeft,
+	RotateCw,
 } from 'lucide-vue-next';
+import { useWorkspaceTree } from '../../composables/useWorkspaceTree.js';
 
 const props = defineProps({
 	items: {
@@ -72,6 +76,21 @@ function hideRailTip() {
 // 折叠态：图标轨对应的可操作项（去掉会话记录，仅保留功能图标）
 const railItems = computed(() => props.items.filter((i) => i.type === 'action' && i.id !== 'new-chat'));
 
+// 中区有两种形态：会话列表（默认）与某个会话的工作目录树。
+// 解构成顶层绑定，模板里才会自动解包 ref。
+const {
+	root: treeRoot,
+	rows: treeRows,
+	isOpen: treeOpen,
+	rootLoading: treeLoading,
+	rootError: treeError,
+	rootLoaded: treeLoaded,
+	open: openTree,
+	close: closeTree,
+	toggle: toggleTreeNode,
+	reload: reloadTree,
+} = useWorkspaceTree();
+
 const expandedGroups = ref(new Set(['projects', 'conversations']));
 const expandedFolders = ref(new Set());
 const contextMenu = ref({
@@ -90,7 +109,24 @@ const contextMenuItems = computed(() => {
 		return [];
 	}
 
-	return sidebarMenuItems.filter((item) => item.type === 'divider' || item.id !== 'clear-conversations' || contextMenu.value.target.kind === 'folder');
+	const target = contextMenu.value.target;
+	return sidebarMenuItems.filter((item) => {
+		if (item.type === 'divider') {
+			return true;
+		}
+
+		// 清空会话列表只对项目分组有意义。
+		if (item.id === 'clear-conversations') {
+			return target.kind === 'folder';
+		}
+
+		// 没有工作区根的会话（「对话」分组）没有工作目录可看。
+		if (item.id === 'working-directory') {
+			return Boolean(target.node?.workspaceRootId);
+		}
+
+		return true;
+	});
 });
 
 function toggleGroup(groupId) {
@@ -118,6 +154,11 @@ function selectSettings() {
 }
 
 function onAction(actionId) {
+	// 新建对话后会话列表才是该看的东西，否则新会话被目录树挡住、看不见。
+	if (actionId === 'new-chat') {
+		closeTree();
+	}
+
 	emit('action', actionId);
 }
 
@@ -209,9 +250,25 @@ function onContextMenuItem(item) {
 			id: 'clear-conversations',
 			conversationIds: Array.isArray(target.node.children) ? target.node.children.map((child) => child.id).filter(Boolean) : [],
 		});
+	} else if (item.id === 'working-directory') {
+		openWorkingDirectory(target.node);
 	}
 
 	closeContextMenu();
+}
+
+// 会话节点带的是工作区根的名字与路径（不是会话标题）；项目分组节点的 label 可能是
+// Git 仓库名，故同样优先用 workspaceRootName。
+function openWorkingDirectory(node) {
+	if (!node?.workspaceRootId) {
+		return;
+	}
+
+	openTree({
+		workspaceRootId: node.workspaceRootId,
+		name: node.workspaceRootName || node.label || '工作目录',
+		path: node.workspaceRootPath || '',
+	});
 }
 
 function onDocumentClick(event) {
@@ -257,6 +314,36 @@ function getIcon(id) {
 
 function getContextIcon(id) {
 	return contextIconMap[id] || Folder;
+}
+
+// 目录树的悬浮提示：相对路径 + 文件大小，窄栏里名字被截断时仍能看全。
+function describeTreeRow(row) {
+	if (row.isDirectory || row.sizeBytes === null || row.sizeBytes === undefined) {
+		return row.relativePath;
+	}
+
+	return `${row.relativePath} · ${formatBytes(row.sizeBytes)}`;
+}
+
+function formatBytes(value) {
+	const bytes = Number(value);
+	if (!Number.isFinite(bytes) || bytes < 0) {
+		return '';
+	}
+
+	if (bytes < 1024) {
+		return `${bytes} B`;
+	}
+
+	const units = ['KB', 'MB', 'GB', 'TB'];
+	let size = bytes / 1024;
+	let unitIndex = 0;
+	while (size >= 1024 && unitIndex < units.length - 1) {
+		size /= 1024;
+		unitIndex += 1;
+	}
+
+	return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unitIndex]}`;
 }
 
 const sidebarMenuItems = [
@@ -367,68 +454,123 @@ onUnmounted(() => {
 			</div>
 		</div>
 
-		<!-- 中：项目节点 + 对话节点 -->
+		<!-- 中：工作目录树（右键菜单进入）或项目/对话节点 -->
 		<div class="nav-mid">
-			<section v-for="(group, gi) in groupItems" :key="group.id" class="group"
-				:class="{ open: isGroupOpen(group.id) }">
-				<button class="group-head" type="button" @click="toggleGroup(group.id)">
-					<span class="group-chevron" aria-hidden="true">
-						<ChevronRight :size="13" :stroke-width="2" />
+			<template v-if="treeOpen">
+				<div class="dir-head">
+					<button class="dir-back" type="button" title="返回会话列表" aria-label="返回会话列表"
+						@click="closeTree">
+						<ChevronLeft :size="15" :stroke-width="2" />
+					</button>
+					<span class="dir-title" :title="treeRoot?.path || treeRoot?.name">
+						{{ treeRoot?.path || treeRoot?.name }}
 					</span>
-					<span class="group-title">{{ group.label }}</span>
-					<span class="group-count">{{ String(group.children?.length || 0).padStart(2, '0') }}</span>
-					<span class="group-add" role="button" :title="`新建${group.label}`"
-						@click.stop="onGroupAdd(group.id)">
-						<Plus :size="13" :stroke-width="2.2" />
-					</span>
-				</button>
+					<button class="dir-refresh" type="button" title="刷新" aria-label="刷新目录"
+						:disabled="treeLoading" @click="reloadTree">
+						<RotateCw :size="13" :stroke-width="2" :class="{ spinning: treeLoading }" />
+					</button>
+				</div>
 
-				<div class="group-body">
-					<template v-if="group.id === 'projects'">
-						<!-- 项目节点：三级结构 项目→目录→会话 -->
-						<div v-for="folder in group.children" :key="folder.id" class="subfolder"
-							:class="{ open: isFolderOpen(folder.id) || folderHasActiveChild(folder) }">
-							<button class="project-folder" :class="{ 'menu-open': isContextTarget(folder.id) }"
-								type="button" @click="toggleFolder(folder.id)"
-								@contextmenu.prevent.stop="openFolderMenu($event, folder)">
-								<span class="folder-ico" aria-hidden="true">
-									<Folder :size="14" :stroke-width="1.8" />
-								</span>
-								<span class="folder-name">{{ folder.label }}</span>
-								<span class="folder-chevron" aria-hidden="true">
-									<ChevronRight :size="13" :stroke-width="2" />
-								</span>
-							</button>
-							<div class="subfolder-body">
-								<button v-for="(session, si) in folder.children" :key="session.id"
-									class="node kind-chat sc-rise" :style="{ '--i': si }"
-									:class="{ active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
-									type="button" @click="selectNode(session.id)"
-									@contextmenu.prevent.stop="openConversationMenu($event, session)">
-									<span class="dot" aria-hidden="true"></span>
-									<span class="ntext">{{ session.label }}</span>
-									<span v-if="session.time" class="ntime">{{ session.time }}</span>
-								</button>
-							</div>
+				<div v-if="treeError" class="dir-error">{{ treeError }}</div>
+				<div v-else-if="treeLoading && !treeLoaded" class="empty-group">正在读取目录…</div>
+				<div v-else-if="!treeRows.length" class="empty-group">该目录为空</div>
+
+				<div v-else class="dir-tree" role="tree">
+					<template v-for="row in treeRows" :key="row.key">
+						<div v-if="row.kind === 'at-limit'" class="dir-more"
+							:style="{ '--depth': row.depth }">
+							每层最多显示 {{ row.limit }} 项
 						</div>
-						<div v-if="!group.children?.length" class="empty-group">暂无项目会话</div>
-					</template>
-
-					<template v-else>
-						<!-- 普通对话节点：二级结构 -->
-						<button v-for="(child, ci) in group.children" :key="child.id" class="node kind-chat sc-rise"
-							:style="{ '--i': ci }"
-							:class="{ active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
-							type="button" @click="selectNode(child.id)"
-							@contextmenu.prevent.stop="openConversationMenu($event, child)">
-							<span class="dot" aria-hidden="true"></span>
-							<span class="ntext">{{ child.label }}</span>
-							<span v-if="child.time" class="ntime">{{ child.time }}</span>
+						<button v-else-if="row.isDirectory" class="dir-row is-dir" type="button" role="treeitem"
+							:aria-expanded="row.expanded" :style="{ '--depth': row.depth }"
+							:title="describeTreeRow(row)" @click="toggleTreeNode(row.relativePath)">
+							<span class="dir-chevron" :class="{ open: row.expanded }" aria-hidden="true">
+								<RotateCw v-if="row.loading" :size="11" :stroke-width="2" class="spinning" />
+								<ChevronRight v-else :size="12" :stroke-width="2" />
+							</span>
+							<span class="dir-ico" aria-hidden="true">
+								<FolderOpen v-if="row.expanded" :size="13" :stroke-width="1.8" />
+								<Folder v-else :size="13" :stroke-width="1.8" />
+							</span>
+							<span class="dir-name">{{ row.name }}</span>
 						</button>
-						<div v-if="!group.children?.length" class="empty-group">暂无会话记录</div>
+						<div v-else class="dir-row is-file" role="treeitem" :style="{ '--depth': row.depth }"
+							:title="describeTreeRow(row)">
+							<span class="dir-chevron" aria-hidden="true"></span>
+							<span class="dir-ico" aria-hidden="true">
+								<File :size="13" :stroke-width="1.8" />
+							</span>
+							<span class="dir-name">{{ row.name }}</span>
+						</div>
+						<div v-if="row.error" class="dir-error nested" :style="{ '--depth': row.depth + 1 }">
+							{{ row.error }}
+						</div>
 					</template>
 				</div>
-			</section>
+			</template>
+
+			<template v-else>
+				<section v-for="(group, gi) in groupItems" :key="group.id" class="group"
+					:class="{ open: isGroupOpen(group.id) }">
+					<button class="group-head" type="button" @click="toggleGroup(group.id)">
+						<span class="group-chevron" aria-hidden="true">
+							<ChevronRight :size="13" :stroke-width="2" />
+						</span>
+						<span class="group-title">{{ group.label }}</span>
+						<span class="group-count">{{ String(group.children?.length || 0).padStart(2, '0') }}</span>
+						<span class="group-add" role="button" :title="`新建${group.label}`"
+							@click.stop="onGroupAdd(group.id)">
+							<Plus :size="13" :stroke-width="2.2" />
+						</span>
+					</button>
+
+					<div class="group-body">
+						<template v-if="group.id === 'projects'">
+							<!-- 项目节点：三级结构 项目→目录→会话 -->
+							<div v-for="folder in group.children" :key="folder.id" class="subfolder"
+								:class="{ open: isFolderOpen(folder.id) || folderHasActiveChild(folder) }">
+								<button class="project-folder" :class="{ 'menu-open': isContextTarget(folder.id) }"
+									type="button" @click="toggleFolder(folder.id)"
+									@contextmenu.prevent.stop="openFolderMenu($event, folder)">
+									<span class="folder-ico" aria-hidden="true">
+										<Folder :size="14" :stroke-width="1.8" />
+									</span>
+									<span class="folder-name">{{ folder.label }}</span>
+									<span class="folder-chevron" aria-hidden="true">
+										<ChevronRight :size="13" :stroke-width="2" />
+									</span>
+								</button>
+								<div class="subfolder-body">
+									<button v-for="(session, si) in folder.children" :key="session.id"
+										class="node kind-chat sc-rise" :style="{ '--i': si }"
+										:class="{ active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
+										type="button" @click="selectNode(session.id)"
+										@contextmenu.prevent.stop="openConversationMenu($event, session)">
+										<span class="dot" aria-hidden="true"></span>
+										<span class="ntext">{{ session.label }}</span>
+										<span v-if="session.time" class="ntime">{{ session.time }}</span>
+									</button>
+								</div>
+							</div>
+							<div v-if="!group.children?.length" class="empty-group">暂无项目会话</div>
+						</template>
+
+						<template v-else>
+							<!-- 普通对话节点：二级结构 -->
+							<button v-for="(child, ci) in group.children" :key="child.id"
+								class="node kind-chat sc-rise" :style="{ '--i': ci }"
+								:class="{ active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
+								type="button" @click="selectNode(child.id)"
+								@contextmenu.prevent.stop="openConversationMenu($event, child)">
+								<span class="dot" aria-hidden="true"></span>
+								<span class="ntext">{{ child.label }}</span>
+								<span v-if="child.time" class="ntime">{{ child.time }}</span>
+							</button>
+							<div v-if="!group.children?.length" class="empty-group">暂无会话记录</div>
+						</template>
+					</div>
+				</section>
+			</template>
 		</div>
 
 		<!-- 下：系统设置区 -->
@@ -1029,6 +1171,148 @@ onUnmounted(() => {
 	padding: 8px 8px 4px;
 	color: var(--sb-faint);
 	font-size: var(--fs-115);
+}
+
+/* ---- 中区：工作目录树 ---- */
+.dir-head {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin: 6px 0;
+	padding: 0 2px 0 0;
+}
+
+.dir-back,
+.dir-refresh {
+	display: grid;
+	width: 24px;
+	height: 24px;
+	place-items: center;
+	flex: none;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--sb-mute);
+	transition:
+		background 0.14s,
+		color 0.14s;
+}
+
+.dir-back:hover,
+.dir-refresh:hover:not(:disabled) {
+	background: var(--sb-hover);
+	color: var(--sb-text);
+}
+
+.dir-refresh:disabled {
+	color: var(--sb-faint);
+}
+
+.dir-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	color: var(--sb-text);
+	font-size: var(--fs-125);
+	font-weight: 620;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.dir-tree {
+	padding-bottom: 4px;
+}
+
+.dir-row {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	width: 100%;
+	height: 27px;
+	padding: 0 6px 0 calc(4px + var(--depth, 0) * 12px);
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--sb-mute);
+	font-size: var(--fs-12);
+	font-weight: 500;
+	text-align: left;
+}
+
+.dir-row.is-dir {
+	color: var(--sb-soft);
+	transition:
+		background 0.12s,
+		color 0.12s;
+}
+
+.dir-row.is-dir:hover {
+	background: var(--sb-hover);
+	color: var(--sb-text);
+}
+
+.dir-chevron {
+	display: grid;
+	width: 12px;
+	height: 12px;
+	place-items: center;
+	flex: none;
+	color: var(--sb-faint);
+	transition: transform 0.18s var(--sb-ease-out);
+}
+
+.dir-chevron.open {
+	transform: rotate(90deg);
+}
+
+.dir-ico {
+	display: grid;
+	width: 14px;
+	height: 14px;
+	place-items: center;
+	flex: none;
+	color: var(--sb-faint);
+}
+
+.dir-row.is-dir .dir-ico {
+	color: var(--sb-mute);
+}
+
+.dir-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.dir-error {
+	padding: 7px 8px;
+	border-radius: 7px;
+	background: rgba(220, 69, 69, 0.07);
+	color: #c23333;
+	font-size: var(--fs-115);
+	overflow-wrap: anywhere;
+}
+
+.dir-error.nested {
+	margin-left: calc(4px + var(--depth, 0) * 12px);
+}
+
+.dir-more {
+	padding: 4px 6px 6px calc(21px + var(--depth, 0) * 12px);
+	color: var(--sb-faint);
+	font-size: var(--fs-11);
+}
+
+.spinning {
+	animation: dir-spin 0.9s linear infinite;
+}
+
+@keyframes dir-spin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 /* ---- 下：设置 ---- */

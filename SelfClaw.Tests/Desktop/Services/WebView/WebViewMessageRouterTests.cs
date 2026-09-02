@@ -297,7 +297,10 @@ public sealed class WebViewMessageRouterTests
                 new ProgrammingAssistantSettingsBridge(programmingSettings),
                 new AppearanceSettingsBridge(new AppearanceSettingsService(settingsStore)),
                 new PetSettingsBridge(petHost),
-                new WorkspaceSelectionBridge(viewModel, Unused<IWorkspaceFolderPicker>()),
+                new WorkspaceSelectionBridge(
+                    viewModel,
+                    Unused<IWorkspaceFolderPicker>(),
+                    Unused<IWorkspaceToolService>()),
                 _terminalHostController,
                 _pluginPanelHostController,
                 new PluginPanelBridge(

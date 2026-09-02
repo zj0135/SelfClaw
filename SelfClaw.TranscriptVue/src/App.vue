@@ -158,6 +158,9 @@ function toConversationNode(conversation) {
 		type: 'conversation',
 		isManagedWorktree: Boolean(conversation.isManagedWorktree),
 		workspaceRootId: conversation.workspaceRootId || null,
+		// 右键「工作目录」要用工作区根的名字与路径，不是会话标题。
+		workspaceRootName: conversation.workspaceRootName || '',
+		workspaceRootPath: conversation.workspaceRootPath || '',
 	};
 }
 
@@ -174,6 +177,7 @@ function buildProjectGroups(conversations) {
 				id: `workspace-${key}`,
 				label: conversation.gitRepositoryName || conversation.workspaceRootName || conversation.workspaceRootPath || '工作区',
 				workspaceRootId: conversation.workspaceRootId || null,
+				workspaceRootName: conversation.workspaceRootName || '',
 				workspaceRootPath: conversation.workspaceRootPath || '',
 				gitRepositoryId: conversation.gitRepositoryId || null,
 				type: 'folder',

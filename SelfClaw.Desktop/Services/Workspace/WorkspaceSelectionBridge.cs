@@ -10,15 +10,18 @@ internal sealed class WorkspaceSelectionBridge
 {
     private readonly IWorkspaceSelectionController _selectionController;
     private readonly IWorkspaceFolderPicker _folderPicker;
+    private readonly IWorkspaceToolService _workspaceToolService;
     private readonly IGitWorkspaceQuery? _gitWorkspaceQuery;
 
     public WorkspaceSelectionBridge(
         IWorkspaceSelectionController selectionController,
         IWorkspaceFolderPicker folderPicker,
+        IWorkspaceToolService workspaceToolService,
         IGitWorkspaceQuery? gitWorkspaceQuery = null)
     {
         _selectionController = selectionController;
         _folderPicker = folderPicker;
+        _workspaceToolService = workspaceToolService;
         _gitWorkspaceQuery = gitWorkspaceQuery;
     }
 
@@ -28,6 +31,11 @@ internal sealed class WorkspaceSelectionBridge
         nint ownerHandle,
         CancellationToken cancellationToken = default)
     {
+        if (type is WorkspaceTreeMessageType)
+        {
+            return await ListWorkspaceTreeAsync(payload, cancellationToken).ConfigureAwait(false);
+        }
+
         if (type is not ("get-workspace-selection" or "select-workspace-root" or "browse-workspace-folder" or "delete-workspace-root"))
         {
             return null;
@@ -158,6 +166,99 @@ internal sealed class WorkspaceSelectionBridge
             commonFolders = BuildCommonFolders()
         };
     }
+
+    #region Working-directory tree
+
+    private const string WorkspaceTreeMessageType = "workspace-tree/list";
+
+    // Mirrors WorkspaceToolService's own listing cap. It is not observable from the returned list, so a
+    // full page is reported as "at the limit" rather than guessed to be complete.
+    private const int TreeEntryLimit = 250;
+
+    /// <summary>
+    /// Serves the sidebar's working-directory tree, one directory level per request.
+    ///
+    /// The root is addressed by id and looked up in <see cref="IWorkspaceSelectionController.WorkspaceRoots"/>
+    /// rather than taken as a path from the payload, so the reachable set stays closed to roots the user has
+    /// already opened. Enumeration is <see cref="IWorkspaceToolService.ListFilesAsync"/> — the same primitive
+    /// the agent tools and plugin panels read through — which owns the traversal guard, the entry cap and the
+    /// hidden/dot-prefixed/build-directory filtering.
+    ///
+    /// Unlike the selection messages this answers with its own payload instead of the shared state envelope:
+    /// expanding a folder is a per-click operation and <see cref="BuildStateResponseAsync"/> would fork a
+    /// handful of git processes each time.
+    /// </summary>
+    private async Task<object> ListWorkspaceTreeAsync(JsonElement payload, CancellationToken cancellationToken)
+    {
+        var requestId = ReadOptionalString(payload, "requestId");
+        var relativePath = ReadOptionalString(payload, "relativePath");
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var root = ResolveWorkspaceRootById(payload);
+            var entries = await _workspaceToolService
+                .ListFilesAsync(root.RootPath, relativePath, cancellationToken)
+                .ConfigureAwait(false);
+
+            return new
+            {
+                type = WorkspaceTreeMessageType,
+                requestId,
+                ok = true,
+                workspaceRootId = root.Id.ToString("D"),
+                rootName = root.Name,
+                rootPath = root.RootPath,
+                relativePath = relativePath ?? string.Empty,
+                entries = entries.Select(ToTreeEntry).ToArray(),
+                atEntryLimit = entries.Count >= TreeEntryLimit,
+                entryLimit = TreeEntryLimit
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return new
+            {
+                type = WorkspaceTreeMessageType,
+                requestId,
+                ok = false,
+                relativePath = relativePath ?? string.Empty,
+                error = exception.Message
+            };
+        }
+    }
+
+    private WorkspaceRoot ResolveWorkspaceRootById(JsonElement payload)
+    {
+        var workspaceRootId = ReadOptionalString(payload, "workspaceRootId");
+        if (!Guid.TryParse(workspaceRootId, out var parsedId) || parsedId == Guid.Empty)
+        {
+            throw new ArgumentException("workspaceRootId is required.");
+        }
+
+        return _selectionController.WorkspaceRoots.FirstOrDefault(candidate => candidate.Id == parsedId)
+            ?? throw new InvalidOperationException("该工作目录已不在工作区列表中。");
+    }
+
+    // ListFilesAsync returns paths relative to the root; the leaf segment is the display name and the
+    // separator is normalised so the frontend can key rows on it and send it straight back.
+    private static object ToTreeEntry(WorkspaceFileEntry entry)
+    {
+        var relativePath = entry.RelativePath.Replace('\\', '/');
+        var separatorIndex = relativePath.LastIndexOf('/');
+        return new
+        {
+            name = separatorIndex >= 0 ? relativePath[(separatorIndex + 1)..] : relativePath,
+            relativePath,
+            entry.IsDirectory,
+            entry.SizeBytes
+        };
+    }
+
+    #endregion
 
     private string ResolveInitialPickerDirectory()
     {

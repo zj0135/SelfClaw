@@ -1,7 +1,7 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import ComposerPanel from '../components/Chat/ComposerPanel.vue';
-import TerminalPanel from '../components/Chat/TerminalPanel.vue';
+const TerminalPanel = defineAsyncComponent(() => import('../components/Chat/TerminalPanel.vue'));
 import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
 import { isSuperseded, useHostBridge } from '../composables/hostBridge.js';
 import { useTranscriptCollapse } from '../composables/useTranscriptCollapse.js';
