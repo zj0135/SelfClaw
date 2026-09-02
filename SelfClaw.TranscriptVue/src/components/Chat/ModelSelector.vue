@@ -1,9 +1,9 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
 import { ChevronDown, ChevronRight, Check, Bot, Terminal } from 'lucide-vue-next';
-import claudeIcon from '../../../assets/agents-icons/claude.svg';
-import codexIcon from '../../../assets/agents-icons/codex.svg';
-import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
+import claudeIcon from '@lobehub/icons-static-png/light/claude-color.png';
+import codexIcon from '@lobehub/icons-static-png/light/openai.png';
+import opencodeIcon from '@lobehub/icons-static-png/light/opencode.png';
 import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js';
 
 const { request, requestLatest, post } = useHostBridge();
@@ -34,9 +34,9 @@ const isDirect = computed(() => selectedMode.value === 'direct');
 
 const defaultModel = 'Default (CLI config)';
 
-// 已知 CLI 的展示图标：与设置页「编程助手」共用同一组 SVG 资源；未知 id 走 fallback 线条图形。
+// 已知 CLI 的展示图标：与设置页「编程助手」共用同一组 @lobehub/icons-static-png PNG 资源；未知 id 走 fallback 线条图形。
 const agentPresentation = {
-	// 品牌图标的底板刻意不跟主题：opencode.svg 是近黑描线、codex.svg 是白描线叠渐变，
+	// 品牌图标的底板刻意不跟主题：lobehub 的 PNG 图标在浅色底板上更清晰，
 	// 两个主题下都需要浅色底板才认得出来。不要换成 var(--panel)。
 	claude: { iconSrc: claudeIcon, iconBackground: '#ffffff' },
 	codex: { iconSrc: codexIcon, iconBackground: '#ffffff' },

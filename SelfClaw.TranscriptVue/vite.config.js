@@ -18,15 +18,13 @@ export default defineConfig({
 		emptyOutDir: true,
 		rollupOptions: {
 			output: {
-				manualChunks: {
-					// 将 Vue 核心库单独分割
-					'vue-vendor': ['vue'],
-					// 将终端相关库分割
-					'xterm-vendor': ['@xterm/xterm', '@xterm/addon-fit'],
-					// 将 Markdown 相关库分割
-					'markdown-vendor': ['markdown-it', 'highlight.js', 'dompurify'],
-					// 将图标库分割
-					'icons-vendor': ['lucide-vue-next'],
+				manualChunks(id) {
+					if (id.includes('node_modules')) {
+						if (id.includes('vue')) return 'vue-vendor';
+						if (id.includes('@xterm')) return 'xterm-vendor';
+						if (id.includes('markdown-it') || id.includes('highlight.js') || id.includes('dompurify')) return 'markdown-vendor';
+						if (id.includes('lucide-vue-next')) return 'icons-vendor';
+					}
 				},
 			},
 		},

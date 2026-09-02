@@ -1,9 +1,9 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { RefreshCw, ChevronDown, Check, Zap, TriangleAlert } from 'lucide-vue-next';
-import claudeIcon from '../../../assets/agents-icons/claude.svg';
-import codexIcon from '../../../assets/agents-icons/codex.svg';
-import opencodeIcon from '../../../assets/agents-icons/opencode.svg';
+import claudeIcon from '@lobehub/icons-static-png/light/claude-color.png';
+import codexIcon from '@lobehub/icons-static-png/light/openai.png';
+import opencodeIcon from '@lobehub/icons-static-png/light/opencode.png';
 import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js';
 
 const { request, requestLatest } = useHostBridge();
@@ -14,8 +14,8 @@ const isRescanning = ref(false);
 const scanError = ref('');
 const selectedCliId = ref('');
 
-// iconBackground 刻意不跟主题：这几个品牌 SVG 是近黑或白色描线，浅色底板在两个
-// 主题下都认得出来。换成 var(--panel) 会让深色下的 opencode 图标糊掉。
+// iconBackground 刻意不跟主题：lobehub 品牌 PNG 是近黑描线或彩色 logo，浅色底板
+// 在两个主题下都认得出来。换成 var(--panel) 会让深色下的 opencode 图标糊掉。
 const cliRegistry = {
 	claude: {
 		id: 'claude',
