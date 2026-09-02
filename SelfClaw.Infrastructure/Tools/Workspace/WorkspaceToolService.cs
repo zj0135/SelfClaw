@@ -453,7 +453,10 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
                 }
 
                 // Whole-file read (legacy behaviour) with a character-count safety cap.
-                var content = await File.ReadAllTextAsync(fullPath, cancellationToken);
+                // CRLF/CR is normalized to LF so the model sees the same line-ending shape
+                // that ranged reads and edit_file operate on — the file's on-disk convention
+                // is preserved by edit_file on write-back, not by the read path.
+                var content = NormalizeToLf(await File.ReadAllTextAsync(fullPath, cancellationToken));
                 var totalLines = CountLines(content);
                 var truncated = content.Length > MaxReadCharacters;
                 if (truncated)
@@ -709,13 +712,38 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
                 var relative = Path.GetRelativePath(root, fullPath);
                 var original = await File.ReadAllTextAsync(fullPath, cancellationToken);
 
-                // Ordinal counting so the match is exact and encoding-agnostic. A
-                // unique-match contract (unless replaceAll) prevents the model from
-                // silently editing the wrong occurrence.
-                var occurrences = CountOccurrences(original, oldText);
+                // Match against LF-normalized text so CRLF/CR line endings (common on
+                // Windows, especially under git's autocrlf) never break the substring
+                // search. The file's original line-ending convention is restored when the
+                // result is written back, so on-disk line endings are preserved.
+                var lineEnding = DetectLineEnding(original);
+                var normalizedOriginal = NormalizeToLf(original);
+                var normalizedOld = NormalizeToLf(oldText);
+                var normalizedNew = NormalizeToLf(newText);
+
+                // Ordinal counting on the normalized text. A unique-match contract
+                // (unless replaceAll) prevents the model from silently editing the wrong
+                // occurrence.
+                var occurrences = CountOccurrences(normalizedOriginal, normalizedOld);
                 if (occurrences == 0)
                 {
-                    return new WorkspaceFileWriteResult(relative, false, true, original.Length, "The text to replace was not found.");
+                    // Whitespace-insensitive line-block fallback (single, unique block
+                    // only) so tab/space and trailing-whitespace drift don't reject an
+                    // otherwise correct whole-line edit. replaceAll keeps the strict
+                    // exact-match contract and does not fall through here.
+                    if (!replaceAll
+                        && TryReplaceUniqueLineBlock(normalizedOriginal, normalizedOld, normalizedNew) is { } lineUpdated)
+                    {
+                        return await CommitEditAsync(
+                            fullPath, relative, lineUpdated, lineEnding, 1, cancellationToken);
+                    }
+
+                    return new WorkspaceFileWriteResult(
+                        relative,
+                        false,
+                        true,
+                        original.Length,
+                        BuildNotFoundMessage(normalizedOriginal, normalizedOld));
                 }
 
                 if (occurrences > 1 && !replaceAll)
@@ -729,25 +757,11 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
                 }
 
                 var updated = replaceAll
-                    ? original.Replace(oldText, newText, StringComparison.Ordinal)
-                    : ReplaceFirst(original, oldText, newText);
+                    ? normalizedOriginal.Replace(normalizedOld, normalizedNew, StringComparison.Ordinal)
+                    : ReplaceFirst(normalizedOriginal, normalizedOld, normalizedNew);
 
-                if (updated.Length > MaxWriteCharacters)
-                {
-                    throw new InvalidOperationException($"The edited content is too large to write safely. Limit: {MaxWriteCharacters} characters.");
-                }
-
-                await File.WriteAllTextAsync(fullPath, updated, new UTF8Encoding(false), cancellationToken);
-
-                var replacedCount = replaceAll ? occurrences : 1;
-                return new WorkspaceFileWriteResult(
-                    relative,
-                    true,
-                    true,
-                    updated.Length,
-                    replacedCount == 1
-                        ? "Replaced 1 occurrence."
-                        : $"Replaced {replacedCount} occurrences.");
+                return await CommitEditAsync(
+                    fullPath, relative, updated, lineEnding, replaceAll ? occurrences : 1, cancellationToken);
             },
             ("RelativePath", relativePath),
             ("ReplaceAll", replaceAll));
@@ -778,6 +792,290 @@ public sealed class WorkspaceToolService : IWorkspaceToolService
             haystack.AsSpan(0, index),
             replacement,
             haystack.AsSpan(index + needle.Length));
+    }
+
+    /// <summary>
+    /// Writes the LF-normalized edited content back to disk, restoring the file's
+    /// original line-ending convention and enforcing the size cap.
+    /// </summary>
+    private static async Task<WorkspaceFileWriteResult> CommitEditAsync(
+        string fullPath,
+        string relative,
+        string lfContent,
+        string lineEnding,
+        int replacedCount,
+        CancellationToken cancellationToken)
+    {
+        if (lfContent.Length > MaxWriteCharacters)
+        {
+            throw new InvalidOperationException($"The edited content is too large to write safely. Limit: {MaxWriteCharacters} characters.");
+        }
+
+        var finalText = lineEnding == "\r\n"
+            ? lfContent.Replace("\n", "\r\n")
+            : lfContent;
+
+        await File.WriteAllTextAsync(fullPath, finalText, new UTF8Encoding(false), cancellationToken);
+
+        return new WorkspaceFileWriteResult(
+            relative,
+            true,
+            true,
+            finalText.Length,
+            replacedCount == 1
+                ? "Replaced 1 occurrence."
+                : $"Replaced {replacedCount} occurrences.");
+    }
+
+    /// <summary>
+    /// The file's dominant line ending, used to restore the original convention after
+    /// matching against LF-normalized text. CRLF wins when any \r\n is present;
+    /// otherwise LF (lone CR is normalized away during matching and not re-introduced).
+    /// </summary>
+    private static string DetectLineEnding(string text)
+        => text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+
+    /// <summary>
+    /// Collapses CRLF and lone CR to LF so the substring search is line-ending-agnostic.
+    /// Fast path: no CR present returns the original reference unchanged.
+    /// </summary>
+    private static string NormalizeToLf(string text)
+    {
+        if (text.Length == 0 || !text.Contains('\r'))
+        {
+            return text;
+        }
+
+        return text.Replace("\r\n", "\n").Replace('\r', '\n');
+    }
+
+    /// <summary>
+    /// Whitespace-insensitive line-block fallback. Splits both sides on LF, compares
+    /// lines by a signature that trims ends and collapses internal whitespace runs to a
+    /// single space (so tab/space and trailing-whitespace drift align), and replaces
+    /// the unique matching block. Returns null on no match or an ambiguous match.
+    /// </summary>
+    private static string? TryReplaceUniqueLineBlock(string haystack, string needle, string replacement)
+    {
+        var needleLines = SplitLines(needle);
+        if (needleLines.Length == 0)
+        {
+            return null;
+        }
+
+        var needleSignatures = new string[needleLines.Length];
+        for (var i = 0; i < needleLines.Length; i++)
+        {
+            needleSignatures[i] = LineSignature(needleLines[i]);
+        }
+
+        var haystackLines = SplitLines(haystack);
+        if (needleSignatures.Length > haystackLines.Length)
+        {
+            return null;
+        }
+
+        var lineSignatures = new string[haystackLines.Length];
+        var lineStarts = new int[haystackLines.Length];
+        var offset = 0;
+        for (var i = 0; i < haystackLines.Length; i++)
+        {
+            lineSignatures[i] = LineSignature(haystackLines[i]);
+            lineStarts[i] = offset;
+            offset += haystackLines[i].Length + 1; // content + the trailing '\n'
+        }
+
+        var matchStart = -1;
+        for (var start = 0; start + needleSignatures.Length <= haystackLines.Length; start++)
+        {
+            var ok = true;
+            for (var k = 0; k < needleSignatures.Length; k++)
+            {
+                if (!string.Equals(lineSignatures[start + k], needleSignatures[k], StringComparison.Ordinal))
+                {
+                    ok = false;
+                    break;
+                }
+            }
+
+            if (!ok)
+            {
+                continue;
+            }
+
+            // Ambiguous — refuse rather than risk editing the wrong location.
+            if (matchStart >= 0)
+            {
+                return null;
+            }
+
+            matchStart = start;
+        }
+
+        if (matchStart < 0)
+        {
+            return null;
+        }
+
+        var lastLineIndex = matchStart + needleSignatures.Length - 1;
+        var beforeOffset = lineStarts[matchStart];
+        var hasFollowing = lastLineIndex < haystackLines.Length - 1;
+        var afterOffset = hasFollowing
+            ? lineStarts[lastLineIndex + 1]
+            : haystack.Length;
+        var eofHadNewline = !hasFollowing
+            && haystack.Length > 0
+            && haystack[^1] == '\n';
+
+        // Splice the replacement in place of the matched block. When the block had a
+        // trailing newline (following content, or EOF that originally ended with one)
+        // and the replacement does not, add it back so line structure is preserved.
+        var finalReplacement = replacement;
+        if (finalReplacement.Length > 0
+            && !finalReplacement.EndsWith('\n')
+            && (hasFollowing || eofHadNewline))
+        {
+            finalReplacement += "\n";
+        }
+
+        return string.Concat(
+            haystack.AsSpan(0, beforeOffset),
+            finalReplacement,
+            haystack.AsSpan(afterOffset));
+    }
+
+    /// <summary>Splits text on LF without emitting a trailing empty line for a final newline.</summary>
+    private static string[] SplitLines(string text)
+    {
+        if (text.Length == 0)
+        {
+            return [];
+        }
+
+        var lines = new List<string>();
+        var start = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '\n')
+            {
+                lines.Add(text.Substring(start, i - start));
+                start = i + 1;
+            }
+        }
+
+        if (start < text.Length)
+        {
+            lines.Add(text.Substring(start, text.Length - start));
+        }
+
+        return lines.ToArray();
+    }
+
+    /// <summary>
+    /// A line's whitespace-insensitive signature: leading/trailing whitespace trimmed,
+    /// internal whitespace runs (tabs and spaces) collapsed to a single space.
+    /// </summary>
+    private static string LineSignature(string line)
+    {
+        var start = 0;
+        var end = line.Length;
+        while (start < end && char.IsWhiteSpace(line[start]))
+        {
+            start++;
+        }
+
+        while (end > start && char.IsWhiteSpace(line[end - 1]))
+        {
+            end--;
+        }
+
+        var builder = new StringBuilder(end - start);
+        var inWhitespace = false;
+        for (var i = start; i < end; i++)
+        {
+            var current = line[i];
+            if (char.IsWhiteSpace(current))
+            {
+                if (!inWhitespace)
+                {
+                    builder.Append(' ');
+                    inWhitespace = true;
+                }
+
+                continue;
+            }
+
+            builder.Append(current);
+            inWhitespace = false;
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Builds a guiding failure message: locates the haystack line whose signature shares
+    /// the longest common prefix with the needle's first line, and returns a small window
+    /// around it so the model can re-read and correct oldText.
+    /// </summary>
+    private static string BuildNotFoundMessage(string haystack, string needle)
+    {
+        var needleFirstLine = SplitLines(needle);
+        var needleSignature = needleFirstLine.Length > 0
+            ? LineSignature(needleFirstLine[0])
+            : string.Empty;
+
+        var haystackLines = SplitLines(haystack);
+        var bestLine = -1;
+        var bestScore = 0;
+        for (var i = 0; i < haystackLines.Length; i++)
+        {
+            var signature = LineSignature(haystackLines[i]);
+            if (signature.Length == 0)
+            {
+                continue;
+            }
+
+            var score = LongestCommonPrefix(signature, needleSignature);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestLine = i;
+            }
+        }
+
+        if (bestLine < 0)
+        {
+            return "The text to replace was not found. Re-read the file with read_file and copy the exact snippet (including indentation) into oldText.";
+        }
+
+        var fromLine = Math.Max(0, bestLine - 2);
+        var toLine = Math.Min(haystackLines.Length - 1, bestLine + 2);
+        var builder = new StringBuilder();
+        builder.Append("The text to replace was not found. The closest lines in the file are:");
+        for (var i = fromLine; i <= toLine; i++)
+        {
+            builder.Append('\n');
+            builder.Append(i + 1);
+            builder.Append(": ");
+            builder.Append(haystackLines[i]);
+        }
+
+        builder.Append("\nRe-read the file and ensure oldText matches the exact characters (indentation, punctuation, and surrounding context).");
+        return builder.ToString();
+    }
+
+    private static int LongestCommonPrefix(string a, string b)
+    {
+        var limit = Math.Min(a.Length, b.Length);
+        for (var i = 0; i < limit; i++)
+        {
+            if (a[i] != b[i])
+            {
+                return i;
+            }
+        }
+
+        return limit;
     }
 
     public async Task<ShellCommandResult> RunShellCommandAsync(

@@ -228,6 +228,133 @@ public sealed class WorkspaceToolServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Edit_file_matches_when_file_uses_crlf_and_old_text_uses_lf()
+    {
+        // Windows files under git autocrlf are CRLF; the model emits LF in oldText.
+        File.WriteAllBytes(
+            Path.Combine(_rootPath, "src", "crlf.txt"),
+            System.Text.Encoding.UTF8.GetBytes("alpha\r\n beta\r\n gamma\r\n"));
+
+        var result = await _service.EditFileAsync(
+            _rootPath,
+            "src/crlf.txt",
+            "beta\r\n gamma",
+            "BETA\r\n GAMMA");
+
+        result.Applied.Should().BeTrue();
+        var written = File.ReadAllText(Path.Combine(_rootPath, "src", "crlf.txt"));
+        // On-disk CRLF convention is preserved end-to-end (no bare LF leaked back).
+        written.Should().Be("alpha\r\n BETA\r\n GAMMA\r\n");
+    }
+
+    [Fact]
+    public async Task Edit_file_matches_lf_old_text_against_crlf_file()
+    {
+        // The model emits LF only; the file is CRLF. The match must still succeed
+        // because edit_file normalizes both sides to LF before searching.
+        File.WriteAllBytes(
+            Path.Combine(_rootPath, "src", "crlf2.txt"),
+            System.Text.Encoding.UTF8.GetBytes("line one\r\nline two\r\nline three\r\n"));
+
+        var result = await _service.EditFileAsync(
+            _rootPath,
+            "src/crlf2.txt",
+            "line two\nline three",
+            "TWO\nTHREE");
+
+        result.Applied.Should().BeTrue();
+        var written = File.ReadAllBytes(Path.Combine(_rootPath, "src", "crlf2.txt"));
+        // On-disk CRLF convention is preserved.
+        System.Text.Encoding.UTF8.GetString(written).Should().Be("line one\r\nTWO\r\nTHREE\r\n");
+    }
+
+    [Fact]
+    public async Task Edit_file_fuzzy_matches_internal_whitespace_drift()
+    {
+        // The file has two spaces between `return` and `42`; the model's oldText has
+        // one. The exact substring search fails, so the line-block fallback aligns
+        // the whole line via whitespace-insensitive signatures.
+        File.WriteAllText(
+            Path.Combine(_rootPath, "src", "drift.txt"),
+            "def example():\n    return  42\n");
+
+        var result = await _service.EditFileAsync(
+            _rootPath,
+            "src/drift.txt",
+            "    return 42",
+            "    return 43");
+
+        result.Applied.Should().BeTrue();
+        File.ReadAllText(Path.Combine(_rootPath, "src", "drift.txt"))
+            .Should().Be("def example():\n    return 43\n");
+    }
+
+    [Fact]
+    public async Task Edit_file_fuzzy_matches_tab_vs_space_indent()
+    {
+        File.WriteAllText(
+            Path.Combine(_rootPath, "src", "tabs.txt"),
+            "def example():\n\treturn 42\n");
+
+        var result = await _service.EditFileAsync(
+            _rootPath,
+            "src/tabs.txt",
+            "    return 42",
+            "    return 43");
+
+        result.Applied.Should().BeTrue();
+        File.ReadAllText(Path.Combine(_rootPath, "src", "tabs.txt"))
+            .Should().Be("def example():\n    return 43\n");
+    }
+
+    [Fact]
+    public async Task Edit_file_fuzzy_refuses_ambiguous_line_block()
+    {
+        File.WriteAllText(
+            Path.Combine(_rootPath, "src", "ambig.txt"),
+            "return 1\nreturn 2\n");
+
+        var result = await _service.EditFileAsync(
+            _rootPath,
+            "src/ambig.txt",
+            "return",
+            "yield");
+
+        result.Applied.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Edit_file_not_found_message_reports_closest_lines()
+    {
+        File.WriteAllText(
+            Path.Combine(_rootPath, "src", "diag.txt"),
+            "import os\nfrom pathlib import Path\n\ndef main():\n    pass\n");
+
+        var result = await _service.EditFileAsync(
+            _rootPath,
+            "src/diag.txt",
+            "def example():",
+            "def example(): pass");
+
+        result.Applied.Should().BeFalse();
+        result.Message.Should().Contain("closest lines");
+        result.Message.Should().Contain("def main()");
+    }
+
+    [Fact]
+    public async Task Read_file_normalizes_crlf_to_lf_for_consistent_view()
+    {
+        File.WriteAllBytes(
+            Path.Combine(_rootPath, "src", "crlf-read.txt"),
+            System.Text.Encoding.UTF8.GetBytes("alpha\r\n beta\r\n"));
+
+        var content = await _service.ReadFileAsync(_rootPath, "src/crlf-read.txt");
+
+        content.Content.Should().NotContain("\r");
+        content.Content.Should().Be("alpha\n beta\n");
+    }
+
+    [Fact]
     public async Task Path_traversal_is_rejected()
     {
         var action = () => _service.ReadFileAsync(_rootPath, "..\\outside.txt");
