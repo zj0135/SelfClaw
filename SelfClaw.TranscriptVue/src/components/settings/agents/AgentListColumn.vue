@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Bot, Search, Workflow } from 'lucide-vue-next';
+import { Bot, Search, Workflow, Plus } from 'lucide-vue-next';
 
 const props = defineProps({
 	agents: { type: Array, default: () => [] },
@@ -10,7 +10,7 @@ const props = defineProps({
 	loading: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['update:activeKind', 'select']);
+const emit = defineEmits(['update:activeKind', 'select', 'create']);
 
 const term = ref('');
 
@@ -71,16 +71,27 @@ function itemHealthy(item) {
 				<span>{{ activeKind === 'agent' ? 'AGENT INDEX' : 'SUBAGENT INDEX' }}</span>
 				<span class="list-kicker-count">{{ totalCount }} 项</span>
 			</div>
-			<div class="seg" role="tablist" aria-label="定义类型">
-				<button type="button" role="tab" :aria-selected="activeKind === 'agent'"
-					:class="{ active: activeKind === 'agent' }" @click="emit('update:activeKind', 'agent')">
-					<Bot :size="13" :stroke-width="2.1" aria-hidden="true" />
-					代理
-				</button>
-				<button type="button" role="tab" :aria-selected="activeKind === 'subagent'"
-					:class="{ active: activeKind === 'subagent' }" @click="emit('update:activeKind', 'subagent')">
-					<Workflow :size="13" :stroke-width="2.1" aria-hidden="true" />
-					子代理
+			<div class="seg-wrap">
+				<div class="seg" role="tablist" aria-label="定义类型">
+					<button type="button" role="tab" :aria-selected="activeKind === 'agent'"
+						:class="{ active: activeKind === 'agent' }" @click="emit('update:activeKind', 'agent')">
+						<Bot :size="13" :stroke-width="2.1" aria-hidden="true" />
+						代理
+					</button>
+					<button type="button" role="tab" :aria-selected="activeKind === 'subagent'"
+						:class="{ active: activeKind === 'subagent' }" @click="emit('update:activeKind', 'subagent')">
+						<Workflow :size="13" :stroke-width="2.1" aria-hidden="true" />
+						子代理
+					</button>
+				</div>
+				<button
+					type="button"
+					class="add-btn"
+					:title="`新增${activeKind === 'agent' ? '代理' : '子代理'}`"
+					:aria-label="`新增${activeKind === 'agent' ? '代理' : '子代理'}`"
+					@click="emit('create')"
+				>
+					<Plus :size="15" :stroke-width="2.2" aria-hidden="true" />
 				</button>
 			</div>
 			<div class="search">
@@ -155,11 +166,18 @@ function itemHealthy(item) {
 	letter-spacing: 0.12em;
 }
 
+.seg-wrap {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 10px;
+}
+
 .seg {
 	display: grid;
 	grid-template-columns: 1fr 1fr;
 	gap: 4px;
-	margin-bottom: 10px;
+	flex: 1;
 	padding: 4px;
 	border: 1px solid var(--sc-line);
 	border-radius: 10px;
@@ -194,6 +212,35 @@ function itemHealthy(item) {
 	background: var(--sc-panel);
 	color: var(--sc-acid);
 	box-shadow: 0 2px 8px rgba(var(--shadow-ink), 0.08);
+}
+
+.add-btn {
+	display: grid;
+	width: 38px;
+	height: 38px;
+	flex: 0 0 auto;
+	place-items: center;
+	border: 1px solid var(--sc-line);
+	border-radius: 10px;
+	background: var(--sc-raise);
+	color: var(--sc-soft);
+	cursor: pointer;
+	transition:
+		background 0.16s var(--sc-ease-out),
+		color 0.16s var(--sc-ease-out),
+		border-color 0.16s var(--sc-ease-out),
+		box-shadow 0.16s var(--sc-ease-out);
+}
+
+.add-btn:hover {
+	border-color: color-mix(in srgb, var(--sc-acid) 35%, transparent);
+	background: var(--sc-panel);
+	color: var(--sc-acid);
+	box-shadow: 0 2px 8px rgba(var(--shadow-ink), 0.08);
+}
+
+.add-btn:active {
+	transform: scale(0.96);
 }
 
 .search {

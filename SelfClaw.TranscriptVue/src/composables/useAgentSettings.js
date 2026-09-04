@@ -65,14 +65,38 @@ export function useAgentSettings() {
 
 	function applyAgent(agent, revision) {
 		const index = state.value.agents.findIndex((candidate) => candidate.id === agent.id);
-		if (index >= 0) state.value.agents[index] = agent;
+		if (index >= 0) {
+			state.value.agents[index] = agent;
+		} else {
+			// 新增的代理，添加到列表中
+			state.value.agents.push(agent);
+		}
 		state.value.revision = revision;
 	}
 
 	function applySubagent(subagent, revision) {
 		const index = state.value.subagents.findIndex((candidate) => candidate.id === subagent.id);
-		if (index >= 0) state.value.subagents[index] = subagent;
+		if (index >= 0) {
+			state.value.subagents[index] = subagent;
+		} else {
+			// 新增的子代理，添加到列表中
+			state.value.subagents.push(subagent);
+		}
 		state.value.revision = revision;
+	}
+
+	async function createAgent(form) {
+		const response = await mutate('agent:create', () => request('agents/create-agent', form));
+		if (!response) return false;
+		applyAgent(response.agent, response.revision);
+		return response.agent;
+	}
+
+	async function createSubagent(form) {
+		const response = await mutate('subagent:create', () => request('agents/create-subagent', form));
+		if (!response) return false;
+		applySubagent(response.subagent, response.revision);
+		return response.subagent;
 	}
 
 	async function saveAgent(agentId, form) {
@@ -114,6 +138,15 @@ export function useAgentSettings() {
 		return true;
 	}
 
+	async function deleteAgent(agentId) {
+		const response = await mutate(`agent:delete:${agentId}`, () => request('agents/delete-agent', { id: agentId }));
+		if (!response) return false;
+		// 从列表中移除该代理
+		state.value.agents = state.value.agents.filter((agent) => agent.id !== agentId);
+		state.value.revision = response.revision;
+		return true;
+	}
+
 	// 复用扩展状态 revision：Agent 绑定变更与扩展页共享同一条刷新通道。
 	on('extensions/state-changed', (payload) => {
 		if ((payload.revision || 0) > state.value.revision) load();
@@ -131,7 +164,10 @@ export function useAgentSettings() {
 		isSubagentSaving,
 		isSubagentBindingPending,
 		load,
+		createAgent,
+		createSubagent,
 		saveAgent,
+		deleteAgent,
 		setAgentBinding,
 		setSubagentAllowance,
 		saveSubagent,

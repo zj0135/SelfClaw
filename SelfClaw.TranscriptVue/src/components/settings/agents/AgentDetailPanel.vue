@@ -3,16 +3,15 @@ import { computed, reactive, ref, watch } from 'vue';
 import {
 	AlertTriangle,
 	Bot,
-	Check,
-	ChevronDown,
-	LoaderCircle,
 	Network,
 	Puzzle,
+	Trash2,
 	Wrench,
 	Workflow,
 } from 'lucide-vue-next';
 import CapabilityBindingCard from './CapabilityBindingCard.vue';
 import BindingDialog from './BindingDialog.vue';
+import BasicCapabilityDialog from './BasicCapabilityDialog.vue';
 
 const props = defineProps({
 	agent: { type: Object, required: true },
@@ -26,29 +25,17 @@ const props = defineProps({
 	allowancePending: { type: Function, default: () => false },
 });
 
-const emit = defineEmits(['save', 'toggle-binding', 'toggle-subagent']);
+const emit = defineEmits(['save', 'toggle-binding', 'toggle-subagent', 'delete']);
 
-const form = reactive({ name: '', description: '', mode: 'direct', instructions: '' });
 const openSectionKey = ref('');
+const showBasicDialog = ref(false);
 
 watch(
 	() => props.agent.id,
 	() => {
-		form.name = props.agent.name;
-		form.description = props.agent.description;
-		form.mode = props.agent.mode;
-		form.instructions = props.agent.instructions;
 		openSectionKey.value = '';
 	},
 	{ immediate: true },
-);
-
-const isDirty = computed(
-	() =>
-		form.name !== props.agent.name ||
-		form.description !== props.agent.description ||
-		form.mode !== props.agent.mode ||
-		form.instructions !== props.agent.instructions,
 );
 
 const includes = (list, id) => (list || []).some((candidate) => candidate.toLowerCase() === id.toLowerCase());
@@ -101,6 +88,16 @@ const subagentItems = computed(() =>
 );
 
 const sections = computed(() => [
+	{
+		key: 'basic',
+		kicker: 'BASIC',
+		title: '基本能力',
+		hint: '配置代理的基本信息和系统指令',
+		icon: Bot,
+		items: [],
+		emptyText: '',
+		isBasic: true,
+	},
 	{
 		key: 'plugin',
 		kicker: 'PLUGINS',
@@ -159,14 +156,17 @@ function onDialogToggle(item, enabled) {
 	}
 }
 
-function submit() {
-	if (!isDirty.value || props.saving) return;
-	emit('save', {
-		name: form.name.trim(),
-		description: form.description.trim(),
-		mode: form.mode,
-		instructions: form.instructions,
-	});
+function onSectionOpen(section) {
+	if (section.key === 'basic') {
+		showBasicDialog.value = true;
+	} else {
+		openSectionKey.value = section.key;
+	}
+}
+
+function onBasicSave(form) {
+	emit('save', form);
+	showBasicDialog.value = false;
 }
 </script>
 
@@ -185,6 +185,10 @@ function submit() {
 				</div>
 				<p :title="agent.description || '暂无描述'">{{ agent.description || '暂无描述' }}</p>
 			</div>
+			<button v-if="!agent.isBuiltIn" class="m-icon agent-delete" type="button"
+				title="删除代理" aria-label="删除代理" :disabled="saving" @click="$emit('delete')">
+				<Trash2 :size="16" :stroke-width="1.9" />
+			</button>
 			<span class="mode-badge" :class="agent.mode">{{ agent.mode === 'cli' ? 'CLI' : 'DIRECT' }}</span>
 			<span v-if="agent.isBuiltIn" class="builtin-badge">内置</span>
 		</header>
@@ -198,53 +202,10 @@ function submit() {
 				</div>
 			</div>
 
-			<section class="card sc-rise" style="--i: 2">
-				<div class="card-head">
-					<div>
-						<div class="card-kicker">PROFILE</div>
-						<h3>基本信息</h3>
-					</div>
-					<button class="btn save-btn" type="button" :disabled="!isDirty || saving" @click="submit">
-						<LoaderCircle v-if="saving" :size="14" :stroke-width="2.2" class="spin-ico"
-							aria-hidden="true" />
-						<Check v-else :size="14" :stroke-width="2.4" aria-hidden="true" />
-						{{ saving ? '保存中…' : '保存' }}
-					</button>
-				</div>
+			<CapabilityBindingCard v-if="agent.mode === 'direct'" class="sc-rise" style="--i: 2" :sections="sections"
+				@open="onSectionOpen" />
 
-				<div class="form-grid">
-					<div class="field">
-						<label class="fl" for="agent-name">名称</label>
-						<input id="agent-name" v-model="form.name" class="input" type="text" maxlength="120" />
-					</div>
-					<div class="field">
-						<label class="fl" for="agent-mode">运行模式</label>
-						<div class="select">
-							<select id="agent-mode" v-model="form.mode" aria-label="运行模式">
-								<option value="direct">Direct — 进程内调用 AI 服务商</option>
-								<option value="cli">CLI — 运行本地编程 CLI 子进程</option>
-							</select>
-							<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
-						</div>
-					</div>
-					<div class="field span-2">
-						<label class="fl" for="agent-desc">描述</label>
-						<input id="agent-desc" v-model="form.description" class="input" type="text"
-							placeholder="一句话说明该代理的职责" />
-					</div>
-					<div class="field span-2">
-						<label class="fl" for="agent-instructions">系统指令（Instructions）</label>
-						<textarea id="agent-instructions" v-model="form.instructions" class="input mono instructions"
-							rows="8" placeholder="写入该代理的系统提示，Direct 模式注入系统消息，CLI 模式作为附加系统提示"></textarea>
-					</div>
-				</div>
-				<p v-if="form.mode !== agent.mode" class="field-hint">运行模式修改将在保存后生效。</p>
-			</section>
-
-			<CapabilityBindingCard v-if="agent.mode === 'direct'" class="sc-rise" style="--i: 3" :sections="sections"
-				@open="(section) => (openSectionKey = section.key)" />
-
-			<div v-else class="notice info sc-rise" style="--i: 3">
+			<div v-else class="notice info sc-rise" style="--i: 2">
 				<Bot :size="15" :stroke-width="2" aria-hidden="true" />
 				<div>
 					<strong>CLI 模式</strong>
@@ -257,6 +218,9 @@ function submit() {
 			:title="openSection ? `绑定${openSection.title}` : ''" :hint="openSection?.hint || ''"
 			:items="openSection?.items || []" :empty-text="openSection?.emptyText || ''" :pending="dialogPending"
 			@close="openSectionKey = ''" @toggle="onDialogToggle" />
+
+		<BasicCapabilityDialog :open="showBasicDialog" :agent="agent" :saving="saving"
+			@close="showBasicDialog = false" @save="onBasicSave" />
 	</main>
 </template>
 

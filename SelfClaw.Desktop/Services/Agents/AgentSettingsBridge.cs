@@ -64,11 +64,25 @@ internal sealed class AgentSettingsBridge
                     response = new { type, requestId, state };
                     break;
                 }
+                case "agents/create-agent":
+                {
+                    var agent = CreateAgent(payload);
+                    var revision = NotifyMutation();
+                    response = new { type, requestId, ok = true, revision, agent };
+                    break;
+                }
                 case "agents/save-agent":
                 {
                     var agent = SaveAgent(payload);
                     var revision = NotifyMutation();
                     response = new { type, requestId, ok = true, revision, agent };
+                    break;
+                }
+                case "agents/delete-agent":
+                {
+                    DeleteAgent(payload);
+                    var revision = NotifyMutation();
+                    response = new { type, requestId, ok = true, revision };
                     break;
                 }
                 case "agents/set-binding":
@@ -83,6 +97,13 @@ internal sealed class AgentSettingsBridge
                     var agent = SetSubagentBinding(payload);
                     var revision = NotifyMutation();
                     response = new { type, requestId, ok = true, revision, agent };
+                    break;
+                }
+                case "agents/create-subagent":
+                {
+                    var subagent = CreateSubagent(payload);
+                    var revision = NotifyMutation();
+                    response = new { type, requestId, ok = true, revision, subagent };
                     break;
                 }
                 case "agents/save-subagent":
@@ -129,6 +150,40 @@ internal sealed class AgentSettingsBridge
             extensionState.McpServers);
     }
 
+    private AgentDefinitionView CreateAgent(JsonElement payload)
+    {
+        var id = ReadRequiredString(payload, "id");
+        var name = ReadRequiredString(payload, "name");
+        var description = ReadOptionalString(payload, "description") ?? string.Empty;
+        var mode = ParseMode(ReadOptionalString(payload, "mode") ?? "direct");
+        var instructions = ReadOptionalString(payload, "instructions") ?? string.Empty;
+
+        // 检查 ID 是否已存在
+        if (_agentDefinitionService.LoadAll().Any(a =>
+            string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"Agent with id '{id}' already exists.");
+        }
+
+        var newAgent = new DesktopAgentDefinition(
+            Id: id,
+            Name: name,
+            Description: description,
+            Mode: mode,
+            ToolPolicy: AgentRuntimeDefinition.SystemToolPolicy,
+            PluginIds: Array.Empty<string>(),
+            SkillIds: Array.Empty<string>(),
+            McpServerIds: Array.Empty<string>(),
+            SubagentIds: Array.Empty<string>(),
+            Instructions: instructions,
+            FilePath: string.Empty,
+            IsBuiltIn: false,
+            Warnings: Array.Empty<string>());
+
+        var saved = _agentDefinitionService.Save(newAgent);
+        return CreateAgentView(saved);
+    }
+
     private AgentDefinitionView SaveAgent(JsonElement payload)
     {
         var agent = FindAgent(ReadRequiredString(payload, "id"));
@@ -140,6 +195,20 @@ internal sealed class AgentSettingsBridge
             Instructions = ReadOptionalString(payload, "instructions") ?? string.Empty
         });
         return CreateAgentView(saved);
+    }
+
+    private void DeleteAgent(JsonElement payload)
+    {
+        var agentId = ReadRequiredString(payload, "id");
+        var agent = FindAgent(agentId);
+
+        // 不允许删除内置代理
+        if (agent.IsBuiltIn)
+        {
+            throw new InvalidOperationException($"无法删除内置代理 '{agent.Name}'。");
+        }
+
+        _agentDefinitionService.Delete(agentId);
     }
 
     private async Task<AgentDefinitionView> SetExtensionBindingAsync(
@@ -170,6 +239,38 @@ internal sealed class AgentSettingsBridge
                 ReadRequiredBoolean(payload, "enabled"))
         });
         return CreateAgentView(saved);
+    }
+
+    private SubagentDefinitionView CreateSubagent(JsonElement payload)
+    {
+        var id = ReadRequiredString(payload, "id");
+        var name = ReadRequiredString(payload, "name");
+        var description = ReadRequiredString(payload, "description");
+        var instructions = ReadOptionalString(payload, "instructions") ?? string.Empty;
+
+        // 检查 ID 是否已存在
+        if (_subagentCatalog.Get(id) != null)
+        {
+            throw new InvalidOperationException($"Subagent with id '{id}' already exists.");
+        }
+
+        var newSubagent = new SubagentDefinition(
+            Id: id,
+            Name: name,
+            Description: description,
+            ModelProfileId: null,
+            ToolPolicy: SubagentDefinitionCatalog.DefaultToolPolicy,
+            PluginIds: Array.Empty<string>(),
+            SkillIds: Array.Empty<string>(),
+            McpServerIds: Array.Empty<string>(),
+            MaxRunSeconds: SubagentDefinitionCatalog.DefaultMaxRunSeconds,
+            Instructions: instructions,
+            FilePath: string.Empty,
+            IsValid: true,
+            Diagnostics: Array.Empty<string>());
+
+        var saved = _subagentCatalog.Save(newSubagent);
+        return CreateSubagentView(saved);
     }
 
     private SubagentDefinitionView SaveSubagent(JsonElement payload)

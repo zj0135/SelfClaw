@@ -1,18 +1,15 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import {
 	AlertTriangle,
-	Check,
-	ChevronDown,
-	LoaderCircle,
 	Network,
 	Puzzle,
 	Wrench,
 	Workflow,
 } from 'lucide-vue-next';
-import { useHostBridge } from '../../../composables/hostBridge.js';
 import CapabilityBindingCard from './CapabilityBindingCard.vue';
 import BindingDialog from './BindingDialog.vue';
+import SubagentBasicCapabilityDialog from './SubagentBasicCapabilityDialog.vue';
 
 const props = defineProps({
 	subagent: { type: Object, required: true },
@@ -26,66 +23,15 @@ const props = defineProps({
 
 const emit = defineEmits(['save', 'toggle-binding']);
 
-const { request } = useHostBridge();
-
-const form = reactive({
-	name: '',
-	description: '',
-	modelProfileId: '',
-	toolPolicy: 'read-only',
-	maxRunSeconds: 900,
-	instructions: '',
-});
 const openSectionKey = ref('');
+const showBasicDialog = ref(false);
 
 watch(
 	() => props.subagent.id,
 	() => {
-		form.name = props.subagent.name;
-		form.description = props.subagent.description;
-		form.modelProfileId = props.subagent.modelProfileId || '';
-		form.toolPolicy = props.subagent.toolPolicy;
-		form.maxRunSeconds = props.subagent.maxRunSeconds;
-		form.instructions = props.subagent.instructions;
 		openSectionKey.value = '';
 	},
 	{ immediate: true },
-);
-
-const enabledModels = ref([]);
-
-onMounted(async () => {
-	try {
-		const payload = await request('ai-providers/list-enabled-models');
-		enabledModels.value = payload.models || [];
-	} catch {
-		enabledModels.value = [];
-	}
-});
-
-const isDirty = computed(
-	() =>
-		form.name !== props.subagent.name ||
-		form.description !== props.subagent.description ||
-		form.modelProfileId !== (props.subagent.modelProfileId || '') ||
-		form.toolPolicy !== props.subagent.toolPolicy ||
-		Number(form.maxRunSeconds) !== props.subagent.maxRunSeconds ||
-		form.instructions !== props.subagent.instructions,
-);
-
-const maxRunValid = computed(() => {
-	const value = Number(form.maxRunSeconds);
-	return Number.isInteger(value) && value >= 30 && value <= 3600;
-});
-
-const canSubmit = computed(
-	() =>
-		isDirty.value &&
-		!props.saving &&
-		form.name.trim().length > 0 &&
-		form.description.trim().length > 0 &&
-		form.instructions.trim().length > 0 &&
-		maxRunValid.value,
 );
 
 const includes = (list, id) => (list || []).some((candidate) => candidate.toLowerCase() === id.toLowerCase());
@@ -128,6 +74,15 @@ const mcpItems = computed(() =>
 
 const sections = computed(() => [
 	{
+		key: 'basic',
+		kicker: 'BASIC',
+		title: '基本能力',
+		hint: '配置子代理的基本信息和系统指令',
+		icon: Workflow,
+		items: [],
+		isBasic: true,
+	},
+	{
 		key: 'plugin',
 		kicker: 'PLUGINS',
 		title: '插件',
@@ -168,16 +123,17 @@ function onDialogToggle(item, enabled) {
 	if (openSection.value) emit('toggle-binding', openSection.value.key, item.id, enabled);
 }
 
-function submit() {
-	if (!canSubmit.value) return;
-	emit('save', {
-		name: form.name.trim(),
-		description: form.description.trim(),
-		modelProfileId: form.modelProfileId || null,
-		toolPolicy: form.toolPolicy,
-		maxRunSeconds: Number(form.maxRunSeconds),
-		instructions: form.instructions,
-	});
+function onSectionOpen(section) {
+	if (section.key === 'basic') {
+		showBasicDialog.value = true;
+	} else {
+		openSectionKey.value = section.key;
+	}
+}
+
+function onBasicSave(data) {
+	emit('save', data);
+	showBasicDialog.value = false;
 }
 </script>
 
@@ -209,76 +165,17 @@ function submit() {
 				</div>
 			</div>
 
-			<section class="card sc-rise" style="--i: 2">
-				<div class="card-head">
-					<div>
-						<div class="card-kicker">PROFILE</div>
-						<h3>基本信息</h3>
-					</div>
-					<button class="btn save-btn" type="button" :disabled="!canSubmit" @click="submit">
-						<LoaderCircle v-if="saving" :size="14" :stroke-width="2.2" class="spin-ico"
-							aria-hidden="true" />
-						<Check v-else :size="14" :stroke-width="2.4" aria-hidden="true" />
-						{{ saving ? '保存中…' : '保存' }}
-					</button>
-				</div>
-
-				<div class="form-grid">
-					<div class="field">
-						<label class="fl" for="subagent-name">名称</label>
-						<input id="subagent-name" v-model="form.name" class="input" type="text" maxlength="120" />
-					</div>
-					<div class="field">
-						<label class="fl" for="subagent-model">模型配置</label>
-						<div class="select">
-							<select id="subagent-model" v-model="form.modelProfileId" aria-label="模型配置">
-								<option value="">继承父级 Agent 的模型</option>
-								<option v-for="model in enabledModels" :key="model.modelProfileId"
-									:value="model.modelProfileId">
-									{{ model.name }} · {{ model.providerName }}
-								</option>
-							</select>
-							<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
-						</div>
-					</div>
-					<div class="field span-2">
-						<label class="fl" for="subagent-desc">描述</label>
-						<input id="subagent-desc" v-model="form.description" class="input" type="text"
-							placeholder="一句话说明该子代理的职责" />
-					</div>
-					<div class="field">
-						<label class="fl" for="subagent-tools">工具策略</label>
-						<div class="select">
-							<select id="subagent-tools" v-model="form.toolPolicy" aria-label="工具策略">
-								<option value="none">none — 不注入工作区工具</option>
-								<option value="read-only">read-only — 仅只读工具</option>
-								<option value="system">system — 完整系统工具</option>
-							</select>
-							<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
-						</div>
-					</div>
-					<div class="field">
-						<label class="fl" for="subagent-max-run">最长运行时间（秒）</label>
-						<input id="subagent-max-run" v-model="form.maxRunSeconds" class="input mono" type="number"
-							min="30" max="3600" step="30" />
-						<p v-if="!maxRunValid" class="field-error">取值需在 30 到 3600 秒之间。</p>
-					</div>
-					<div class="field span-2">
-						<label class="fl" for="subagent-instructions">系统指令（Instructions）</label>
-						<textarea id="subagent-instructions" v-model="form.instructions" class="input mono instructions"
-							rows="8" placeholder="写入该子代理执行任务时使用的系统提示"></textarea>
-					</div>
-				</div>
-			</section>
-
-			<CapabilityBindingCard class="sc-rise" style="--i: 3" :sections="sections"
-				@open="(section) => (openSectionKey = section.key)" />
+			<CapabilityBindingCard class="sc-rise" style="--i: 2" :sections="sections"
+				@open="onSectionOpen" />
 		</div>
 
 		<BindingDialog :open="Boolean(openSection)" :kicker="openSection?.kicker || ''"
 			:title="openSection ? `绑定${openSection.title}` : ''" :hint="openSection?.hint || ''"
 			:items="openSection?.items || []" :empty-text="openSection?.emptyText || ''" :pending="dialogPending"
 			@close="openSectionKey = ''" @toggle="onDialogToggle" />
+
+		<SubagentBasicCapabilityDialog :open="showBasicDialog" :subagent="subagent" :saving="saving"
+			@close="showBasicDialog = false" @save="onBasicSave" />
 	</main>
 </template>
 
@@ -295,11 +192,5 @@ function submit() {
 	color: var(--sc-err);
 	font-size: var(--fs-11);
 	font-weight: 600;
-}
-
-.field-error {
-	margin: 0;
-	color: var(--sc-err);
-	font-size: var(--fs-115);
 }
 </style>

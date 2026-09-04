@@ -54,6 +54,27 @@ public sealed class DesktopAgentDefinitionService
         }
     }
 
+    public void Delete(string agentId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
+        var normalizedAgentId = NormalizeAgentId(agentId);
+
+        lock (_syncRoot)
+        {
+            // 不允许删除内置代理
+            if (IsBuiltInAgentId(normalizedAgentId))
+            {
+                throw new InvalidOperationException($"Cannot delete built-in agent '{normalizedAgentId}'.");
+            }
+
+            var filePath = GetAgentFilePath(normalizedAgentId);
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+    }
+
     public DesktopAgentDefinition SetExtensionBinding(
         string agentId,
         ExtensionItemKey key,

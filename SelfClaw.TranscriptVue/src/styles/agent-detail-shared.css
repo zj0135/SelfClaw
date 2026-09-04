@@ -122,6 +122,42 @@
 	font-weight: 600;
 }
 
+/* ── 删除按钮 ─────────────────────────────────────────────── */
+.m-icon {
+	display: grid;
+	width: 30px;
+	height: 30px;
+	place-items: center;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--sc-faint);
+	cursor: pointer;
+	transition: background 0.14s, color 0.14s, transform 0.14s var(--sc-ease-spring);
+}
+
+.m-icon:hover {
+	background: var(--sc-hover);
+	color: var(--sc-soft);
+	transform: translateY(-1px);
+}
+
+.agent-delete {
+	color: color-mix(in srgb, var(--sc-err) 80%, var(--sc-mute));
+}
+
+.agent-delete:hover {
+	background: var(--sc-err-soft);
+	color: var(--sc-err);
+}
+
+.m-icon:disabled {
+	opacity: 0.4;
+	cursor: default;
+	transform: none;
+}
+
+
 .detail-body {
 	position: relative;
 	z-index: 1;
@@ -149,11 +185,6 @@
 
 .detail-body::-webkit-scrollbar-thumb:hover {
 	background: var(--sc-faint);
-}
-
-.detail-body > * {
-	max-width: 880px;
-	width: 100%;
 }
 
 /* ── 表单卡片 ─────────────────────────────────────────────── */

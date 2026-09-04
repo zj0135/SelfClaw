@@ -6,6 +6,7 @@ import { useToast } from '../../../composables/useToast.js';
 import AgentListColumn from './AgentListColumn.vue';
 import AgentDetailPanel from './AgentDetailPanel.vue';
 import SubagentDetailPanel from './SubagentDetailPanel.vue';
+import AgentFormDialog from './AgentFormDialog.vue';
 
 const {
 	state,
@@ -16,7 +17,10 @@ const {
 	isSubagentAllowancePending,
 	isSubagentSaving,
 	isSubagentBindingPending,
+	createAgent,
+	createSubagent,
 	saveAgent,
+	deleteAgent,
 	setAgentBinding,
 	setSubagentAllowance,
 	saveSubagent,
@@ -27,6 +31,9 @@ const { showToast } = useToast();
 const activeKind = ref('agent');
 // 每个页签各自记住选中项，来回切换不丢上下文。
 const selection = reactive({ agent: '', subagent: '' });
+const showFormDialog = ref(false);
+const formDialogMode = ref('create');
+const formDialogSaving = ref(false);
 
 const selectedId = computed(() => selection[activeKind.value]);
 
@@ -63,6 +70,90 @@ function onSelect(id) {
 	selection[activeKind.value] = id;
 }
 
+function onCreateClick() {
+	// 根据当前激活的类型决定创建代理还是子代理
+	if (activeKind.value === 'agent') {
+		formDialogMode.value = 'create-agent';
+	} else {
+		formDialogMode.value = 'create-subagent';
+	}
+	showFormDialog.value = true;
+}
+
+async function onFormSubmit(form) {
+	formDialogSaving.value = true;
+	try {
+		if (formDialogMode.value === 'create-agent') {
+			// 创建代理
+			// 校验 ID
+			const id = form.id.trim();
+			if (!id) {
+				showToast('ID 不能为空');
+				return;
+			}
+			if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+				showToast('ID 只能包含字母、数字、下划线和短横线');
+				return;
+			}
+
+			// 校验名称
+			if (!form.name.trim()) {
+				showToast('名称不能为空');
+				return;
+			}
+
+			const newAgent = await createAgent(form);
+			if (newAgent) {
+				showToast('代理创建成功');
+				showFormDialog.value = false;
+				// 选中新创建的代理
+				selection.agent = newAgent.id;
+			}
+		} else if (formDialogMode.value === 'create-subagent') {
+			// 创建子代理
+			// 校验 ID
+			const id = form.id.trim();
+			if (!id) {
+				showToast('ID 不能为空');
+				return;
+			}
+			if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+				showToast('ID 只能包含字母、数字、下划线和短横线');
+				return;
+			}
+
+			// 校验名称
+			if (!form.name.trim()) {
+				showToast('名称不能为空');
+				return;
+			}
+
+			// 校验描述
+			if (!form.description.trim()) {
+				showToast('描述不能为空');
+				return;
+			}
+
+			const newSubagent = await createSubagent(form);
+			if (newSubagent) {
+				showToast('子代理创建成功');
+				showFormDialog.value = false;
+				// 选中新创建的子代理
+				selection.subagent = newSubagent.id;
+			}
+		} else {
+			// 编辑模式暂未实现，预留
+			showFormDialog.value = false;
+		}
+	} finally {
+		formDialogSaving.value = false;
+	}
+}
+
+function onFormClose() {
+	showFormDialog.value = false;
+}
+
 async function onSaveAgent(form) {
 	if (await saveAgent(selection.agent, form)) showToast('代理设置已保存');
 }
@@ -82,12 +173,26 @@ async function onSaveSubagent(form) {
 async function onToggleSubagentBinding(kind, id, enabled) {
 	await setSubagentBinding(selection.subagent, kind, id, enabled);
 }
+
+async function onDeleteAgent() {
+	if (!activeAgent.value) return;
+
+	const agentId = activeAgent.value.id;
+	if (await deleteAgent(agentId)) {
+		showToast('代理已删除');
+		// 删除后选中第一个代理（如果还有的话）
+		if (state.value.agents.length > 0) {
+			selection.agent = state.value.agents[0].id;
+		}
+	}
+}
+
 </script>
 
 <template>
 	<div class="agent-settings sc-root sc-stage">
 		<AgentListColumn v-model:active-kind="activeKind" :agents="state.agents" :subagents="state.subagents"
-			:selected-id="selectedId" :loading="loading" @select="onSelect" />
+			:selected-id="selectedId" :loading="loading" @select="onSelect" @create="onCreateClick" />
 
 		<div class="detail-wrap">
 			<div v-if="error" class="error-bar">
@@ -99,7 +204,8 @@ async function onToggleSubagentBinding(kind, id, enabled) {
 				:plugins="state.plugins" :skills="state.skills" :mcp-servers="state.mcpServers"
 				:subagents="state.subagents" :saving="isAgentSaving(activeAgent.id)"
 				:binding-pending="agentBindingPending" :allowance-pending="allowancePending" @save="onSaveAgent"
-				@toggle-binding="onToggleAgentBinding" @toggle-subagent="onToggleSubagentAllowance" />
+				@toggle-binding="onToggleAgentBinding" @toggle-subagent="onToggleSubagentAllowance"
+				@delete="onDeleteAgent" />
 			<SubagentDetailPanel v-else-if="activeKind === 'subagent' && activeSubagent" :subagent="activeSubagent"
 				:index="activeIndex" :plugins="state.plugins" :skills="state.skills" :mcp-servers="state.mcpServers"
 				:saving="isSubagentSaving(activeSubagent.id)" :binding-pending="subagentBindingPending"
@@ -108,6 +214,15 @@ async function onToggleSubagentBinding(kind, id, enabled) {
 				{{ loading ? '正在加载定义…' : '从左侧选择一个定义查看配置' }}
 			</div>
 		</div>
+
+		<AgentFormDialog
+			:open="showFormDialog"
+			:mode="formDialogMode"
+			:agent="formDialogMode === 'edit' ? activeAgent : null"
+			:saving="formDialogSaving"
+			@close="onFormClose"
+			@submit="onFormSubmit"
+		/>
 	</div>
 </template>
 
