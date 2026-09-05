@@ -23,6 +23,16 @@ internal static class SqliteTurnFinalizationWriter
             return false;
         }
 
+        if (finalization.AssistantMessage.Segments is not null)
+        {
+            await ReplaceMessageSegmentsAsync(
+                    connection,
+                    transaction,
+                    finalization.AssistantMessage,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         foreach (var toolExecution in finalization.ToolExecutions)
         {
             await UpsertToolExecutionAsync(
@@ -91,8 +101,8 @@ ON CONFLICT(id) DO UPDATE SET
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = @"
-INSERT INTO tool_runs(id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index, result_content, source_kind, source_id, display_name)
-VALUES($id, $conversationId, $toolName, $argumentsJson, $status, $resultSummary, $correlationId, $durationMs, $createdAt, $updatedAt, $agentId, $messageId, $afterSegmentIndex, $resultContent, $sourceKind, $sourceId, $displayName)
+INSERT INTO tool_runs(id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name)
+VALUES($id, $conversationId, $toolName, $argumentsJson, $status, $resultSummary, $correlationId, $durationMs, $createdAt, $updatedAt, $agentId, $messageId, $resultContent, $sourceKind, $sourceId, $displayName)
 ON CONFLICT(id) DO UPDATE SET
     status = excluded.status,
     result_summary = excluded.result_summary,
@@ -100,7 +110,6 @@ ON CONFLICT(id) DO UPDATE SET
     duration_ms = excluded.duration_ms,
     agent_id = COALESCE(excluded.agent_id, tool_runs.agent_id),
     message_id = COALESCE(excluded.message_id, tool_runs.message_id),
-    after_segment_index = COALESCE(excluded.after_segment_index, tool_runs.after_segment_index),
     source_kind = COALESCE(excluded.source_kind, tool_runs.source_kind),
     source_id = COALESCE(excluded.source_id, tool_runs.source_id),
     display_name = COALESCE(excluded.display_name, tool_runs.display_name),
@@ -117,11 +126,42 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$updatedAt", record.UpdatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$agentId", record.AgentId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$messageId", record.MessageId?.ToString("D") ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$afterSegmentIndex", record.AfterSegmentIndex ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$resultContent", record.ResultContent ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$sourceKind", record.SourceKind is null ? DBNull.Value : (int)record.SourceKind.Value);
         command.Parameters.AddWithValue("$sourceId", record.SourceId ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$displayName", record.DisplayName ?? (object)DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task ReplaceMessageSegmentsAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        MessageRecord message,
+        CancellationToken cancellationToken)
+    {
+        await using (var deleteCommand = connection.CreateCommand())
+        {
+            deleteCommand.Transaction = transaction;
+            deleteCommand.CommandText = "DELETE FROM message_segments WHERE message_id = $messageId;";
+            deleteCommand.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
+            await deleteCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var segment in message.Segments!)
+        {
+            await using var insertCommand = connection.CreateCommand();
+            insertCommand.Transaction = transaction;
+            insertCommand.CommandText = @"
+INSERT INTO message_segments(message_id, ordinal, kind, text, tool_run_id)
+VALUES($messageId, $ordinal, $kind, $text, $toolRunId);";
+            insertCommand.Parameters.AddWithValue("$messageId", segment.MessageId.ToString("D"));
+            insertCommand.Parameters.AddWithValue("$ordinal", segment.Ordinal);
+            insertCommand.Parameters.AddWithValue("$kind", (int)segment.Kind);
+            insertCommand.Parameters.AddWithValue("$text", (object?)segment.Text ?? DBNull.Value);
+            insertCommand.Parameters.AddWithValue("$toolRunId", segment.ToolRunId.HasValue
+                ? segment.ToolRunId.Value.ToString("D")
+                : DBNull.Value);
+            await insertCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 }

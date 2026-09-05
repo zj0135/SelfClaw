@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
-using SelfClaw.Infrastructure.Tools.Transcript.Models;
 
 namespace SelfClaw.Desktop.Services.Runtime;
 
@@ -14,7 +13,6 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     private readonly ConcurrentDictionary<Guid, Task<ConversationTranscriptSnapshot>> _transcriptLoads = [];
     private readonly List<MessageRecord> _selectedMessages = [];
     private readonly List<ToolExecutionRecord> _selectedToolRuns = [];
-    private readonly Dictionary<Guid, ToolRunAnchor> _selectedToolRunAnchors = [];
     private readonly SemaphoreSlim _startTurnGate = new(1, 1);
     private Guid? _selectedConversationId;
     private int _selectionVersion;
@@ -33,9 +31,6 @@ internal sealed class ConversationSessionCoordinator : IDisposable
 
     internal IReadOnlyList<ToolExecutionRecord> SelectedToolRuns
         => GetSelectedRuntimeState()?.ToolRuns ?? _selectedToolRuns;
-
-    internal IReadOnlyDictionary<Guid, ToolRunAnchor> SelectedToolRunAnchors
-        => GetSelectedRuntimeState()?.ToolRunAnchors ?? _selectedToolRunAnchors;
 
     internal bool IsSelectedRunning => GetSelectedRuntimeState()?.IsRunning == true;
 
@@ -108,7 +103,6 @@ internal sealed class ConversationSessionCoordinator : IDisposable
                 conversation,
                 snapshot.Messages,
                 snapshot.ToolRuns,
-                snapshot.ToolRunAnchors,
                 isDetached);
             if (!isDetached)
             {
@@ -266,29 +260,18 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     {
         ReplaceList(_selectedMessages, state.Messages);
         ReplaceList(_selectedToolRuns, state.ToolRuns);
-        _selectedToolRunAnchors.Clear();
-        foreach (var item in state.ToolRunAnchors)
-        {
-            _selectedToolRunAnchors[item.Key] = item.Value;
-        }
     }
 
     private void ReplaceSelectedTranscript(ConversationTranscriptSnapshot snapshot)
     {
         ReplaceList(_selectedMessages, snapshot.Messages);
         ReplaceList(_selectedToolRuns, snapshot.ToolRuns);
-        _selectedToolRunAnchors.Clear();
-        foreach (var item in snapshot.ToolRunAnchors)
-        {
-            _selectedToolRunAnchors[item.Key] = item.Value;
-        }
     }
 
     private void ClearSelectedTranscript()
     {
         _selectedMessages.Clear();
         _selectedToolRuns.Clear();
-        _selectedToolRunAnchors.Clear();
     }
 
     private static void ReplaceList<T>(List<T> target, IEnumerable<T> source)
@@ -323,8 +306,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     private static ConversationTranscriptSnapshot CreateSnapshot(ConversationRuntimeState state)
         => new(
             state.Messages.ToArray(),
-            state.ToolRuns.ToArray(),
-            new Dictionary<Guid, ToolRunAnchor>(state.ToolRunAnchors));
+            state.ToolRuns.ToArray());
 
     private static ConversationTranscriptSnapshot CreateSnapshot(
         IEnumerable<MessageRecord> messages,
@@ -332,15 +314,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     {
         var messageSnapshot = messages.ToArray();
         var toolRunSnapshot = toolRuns.ToArray();
-        var anchors = new Dictionary<Guid, ToolRunAnchor>();
-        foreach (var toolRun in toolRunSnapshot)
-        {
-            if (toolRun.MessageId is Guid messageId && toolRun.AfterSegmentIndex is int afterSegmentIndex)
-            {
-                anchors[toolRun.Id] = new ToolRunAnchor(messageId, afterSegmentIndex);
-            }
-        }
 
-        return new ConversationTranscriptSnapshot(messageSnapshot, toolRunSnapshot, anchors);
+        return new ConversationTranscriptSnapshot(messageSnapshot, toolRunSnapshot);
     }
 }

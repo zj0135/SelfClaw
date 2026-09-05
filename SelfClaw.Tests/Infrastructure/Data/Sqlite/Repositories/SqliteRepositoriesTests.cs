@@ -48,7 +48,21 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await conversationRepository.UpsertConversationAsync(conversation);
 
         var userMessage = new MessageRecord(Guid.NewGuid(), conversation.Id, MessageRole.User, "Hello", MessageStatus.Completed, now, now);
-        var assistantMessage = new MessageRecord(Guid.NewGuid(), conversation.Id, MessageRole.Assistant, "Hi there", MessageStatus.Completed, now, now, OutputTokens: 32);
+        var assistantMessageId = Guid.NewGuid();
+        var assistantMessage = new MessageRecord(
+            assistantMessageId,
+            conversation.Id,
+            MessageRole.Assistant,
+            "Hi there",
+            MessageStatus.Completed,
+            now,
+            now,
+            OutputTokens: 32,
+            Segments:
+            [
+                new MessageSegmentRecord(assistantMessageId, 0, MessageSegmentKind.Thinking, "plan", null),
+                new MessageSegmentRecord(assistantMessageId, 1, MessageSegmentKind.Text, "Hi there", null)
+            ]);
         await conversationRepository.UpsertMessageAsync(userMessage);
         await conversationRepository.UpsertMessageAsync(assistantMessage);
 
@@ -64,7 +78,6 @@ public sealed class SqliteRepositoriesTests : IDisposable
             now,
             now,
             assistantMessage.Id,
-            1,
             "using System;",
             ToolSourceKind.Mcp,
             "filesystem",
@@ -78,7 +91,14 @@ public sealed class SqliteRepositoriesTests : IDisposable
 
         loadedConversations.Should().ContainSingle().Which.Should().Be(conversation);
         loadedMessages.Should().HaveCount(2);
-        loadedMessages.Should().Contain(assistantMessage);
+        // record equality compares the Segments arrays by reference, so compare fields explicitly.
+        var loadedAssistant = loadedMessages.Should().Contain(message => message.Id == assistantMessageId)
+            .Which;
+        loadedAssistant.MarkdownContent.Should().Be(assistantMessage.MarkdownContent);
+        loadedAssistant.OutputTokens.Should().Be(assistantMessage.OutputTokens);
+        loadedAssistant.Segments.Should().BeEquivalentTo(assistantMessage.Segments);
+        loadedMessages.Should().Contain(message => message.Id == userMessage.Id)
+            .Which.Segments.Should().BeNull();
         loadedToolRuns.Should().ContainSingle().Which.Should().Be(toolRun);
         loadedRoots.Should().ContainSingle().Which.Should().Be(workspace);
     }
@@ -117,7 +137,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
         var maxSchemaVersion = await versionCommand.ExecuteScalarAsync();
-        maxSchemaVersion.Should().Be(24L);
+        maxSchemaVersion.Should().Be(25L);
     }
 
     [Fact]
@@ -368,7 +388,7 @@ VALUES(
         await verification.OpenAsync();
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(24L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(25L);
     }
 
     [Fact]
@@ -557,7 +577,7 @@ WHERE conversation_id = $conversationId AND agent_kind = 1;";
 
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(24L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(25L);
 
         await using var foreignKeyCheck = verification.CreateCommand();
         foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
@@ -729,7 +749,7 @@ VALUES($messageId, $conversationId, 0, 'Preserved v22 message', 1, $createdAt, $
             .Should().Contain(["kind", "parent_conversation_id"]);
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(24L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(25L);
         await using var foreignKeyCheck = verification.CreateCommand();
         foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
         await using var foreignKeyReader = await foreignKeyCheck.ExecuteReaderAsync();
@@ -737,7 +757,7 @@ VALUES($messageId, $conversationId, 0, 'Preserved v22 message', 1, $createdAt, $
     }
 
     [Fact]
-    public async Task Initialize_adds_tool_anchor_columns_to_legacy_tool_runs_table()
+    public async Task Initialize_adds_content_block_columns_to_legacy_tool_runs_table()
     {
         var storagePaths = new StoragePaths(
             _rootPath,
@@ -781,7 +801,7 @@ CREATE TABLE tool_runs (
         }
 
         columns.Should().Contain("message_id");
-        columns.Should().Contain("after_segment_index");
+        columns.Should().NotContain("after_segment_index");
         columns.Should().Contain("result_content");
     }
 

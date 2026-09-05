@@ -169,7 +169,7 @@ VALUES($toolRunId, $conversationId, 'read_file', '{}', 2, $createdAt, $createdAt
 
         await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
         await verification.OpenAsync();
-        (await ExecuteScalarAsync<long>(verification, "SELECT MAX(version) FROM schema_versions;")).Should().Be(24);
+        (await ExecuteScalarAsync<long>(verification, "SELECT MAX(version) FROM schema_versions;")).Should().Be(25);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM conversations;")).Should().Be(1);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM messages;")).Should().Be(1);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM tool_runs;")).Should().Be(1);

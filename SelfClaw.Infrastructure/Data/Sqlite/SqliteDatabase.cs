@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 24;
+    private const int CurrentSchemaVersion = 25;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -291,7 +291,6 @@ CREATE TABLE IF NOT EXISTS tool_runs (
     updated_at_utc TEXT NOT NULL,
     agent_id TEXT NULL,
     message_id TEXT NULL,
-    after_segment_index INTEGER NULL,
     source_kind INTEGER NULL,
     source_id TEXT NULL,
     display_name TEXT NULL,
@@ -317,13 +316,6 @@ CREATE TABLE IF NOT EXISTS tool_runs (
                 "tool_runs",
                 "message_id",
                 "ALTER TABLE tool_runs ADD COLUMN message_id TEXT NULL;",
-                cancellationToken);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "tool_runs",
-                "after_segment_index",
-                "ALTER TABLE tool_runs ADD COLUMN after_segment_index INTEGER NULL;",
                 cancellationToken);
 
             await EnsureColumnExistsAsync(
@@ -452,6 +444,22 @@ CREATE TABLE IF NOT EXISTS subagent_deliveries (
 );", cancellationToken);
 
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_conversations_updated ON conversations(updated_at_utc DESC);", cancellationToken);
+            // Schema v25: assistant content is structured into message_segments blocks and
+            // tool placement is expressed by ToolCall block ordinals, so after_segment_index
+            // is retired. Legacy assistant rows are not migrated; the user deletes them.
+            await RebuildToolRunsWithoutAfterSegmentIndexAsync(connection, cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS message_segments (
+    message_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    kind INTEGER NOT NULL,
+    text TEXT NULL,
+    tool_run_id TEXT NULL,
+    PRIMARY KEY (message_id, ordinal),
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+);", cancellationToken);
+
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_message_attachments_message ON message_attachments(message_id, created_at_utc);", cancellationToken);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_tool_runs_conversation_created ON tool_runs(conversation_id, created_at_utc);", cancellationToken);
@@ -594,6 +602,87 @@ FROM conversations;", cancellationToken);
         await ExecuteAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken);
     }
 
+
+    /// <summary>Rebuilds tool_runs without the retired after_segment_index column (schema v25).</summary>
+    private static async Task RebuildToolRunsWithoutAfterSegmentIndexAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var hasColumn = false;
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA table_info(tool_runs);";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(reader.GetString(1), "after_segment_index", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasColumn = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasColumn)
+        {
+            return;
+        }
+
+        await ExecuteAsync(connection, "PRAGMA foreign_keys = OFF;", cancellationToken);
+        await ExecuteAsync(connection, "BEGIN IMMEDIATE;", cancellationToken);
+        try
+        {
+            await ExecuteAsync(connection, "DROP TABLE IF EXISTS tool_runs_new;", cancellationToken);
+            await ExecuteAsync(connection, @"
+CREATE TABLE tool_runs_new (
+    id TEXT NOT NULL PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    arguments_json TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    result_summary TEXT NULL,
+    result_content TEXT NULL,
+    correlation_id TEXT NULL,
+    duration_ms REAL NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    agent_id TEXT NULL,
+    message_id TEXT NULL,
+    source_kind INTEGER NULL,
+    source_id TEXT NULL,
+    display_name TEXT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);", cancellationToken);
+            await ExecuteAsync(connection, @"
+INSERT INTO tool_runs_new(
+    id, conversation_id, tool_name, arguments_json, status, result_summary, result_content,
+    correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id,
+    source_kind, source_id, display_name)
+SELECT
+    id, conversation_id, tool_name, arguments_json, status, result_summary, result_content,
+    correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id,
+    source_kind, source_id, display_name
+FROM tool_runs;", cancellationToken);
+            await ExecuteAsync(connection, "DROP TABLE tool_runs;", cancellationToken);
+            await ExecuteAsync(connection, "ALTER TABLE tool_runs_new RENAME TO tool_runs;", cancellationToken);
+            await ExecuteAsync(connection, "COMMIT;", cancellationToken);
+        }
+        catch
+        {
+            try
+            {
+                await ExecuteAsync(connection, "ROLLBACK;", CancellationToken.None);
+            }
+            catch
+            {
+                // Initialization is already failing; surface the original error.
+            }
+
+            throw;
+        }
+
+        await ExecuteAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken);
+    }
 
     private static async Task EnsureColumnExistsAsync(
         SqliteConnection connection,

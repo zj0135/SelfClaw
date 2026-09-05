@@ -3,7 +3,6 @@ using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Infrastructure.Options;
-using SelfClaw.Infrastructure.Tools.Transcript;
 
 namespace SelfClaw.Tests.Desktop.Services.Transcript;
 
@@ -68,16 +67,23 @@ public sealed class TranscriptProjectionTests
     {
         var now = DateTimeOffset.UtcNow;
         var conversationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var toolRunId = Guid.NewGuid();
         var message = new MessageRecord(
-            Guid.NewGuid(),
+            messageId,
             conversationId,
             MessageRole.Assistant,
             "answer",
             MessageStatus.Completed,
             now,
-            now);
+            now,
+            Segments:
+            [
+                new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Text, "answer", null),
+                new MessageSegmentRecord(messageId, 1, MessageSegmentKind.ToolCall, null, toolRunId)
+            ]);
         var toolRun = new ToolExecutionRecord(
-            Guid.NewGuid(),
+            toolRunId,
             conversationId,
             "read_file",
             "{\"relativePath\":\"README.md\"}",
@@ -88,7 +94,6 @@ public sealed class TranscriptProjectionTests
             now,
             now,
             MessageId: message.Id,
-            AfterSegmentIndex: 0,
             ResultContent: "before");
         var projection = CreateProjection();
         var request = CreateRequest(messages: [message], toolRuns: [toolRun]);
@@ -111,16 +116,23 @@ public sealed class TranscriptProjectionTests
     {
         var now = DateTimeOffset.UtcNow;
         var conversationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var toolRunId = Guid.NewGuid();
         var message = new MessageRecord(
-            Guid.NewGuid(),
+            messageId,
             conversationId,
             MessageRole.Assistant,
             "answer",
             MessageStatus.Completed,
             now,
-            now);
+            now,
+            Segments:
+            [
+                new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Text, "answer", null),
+                new MessageSegmentRecord(messageId, 1, MessageSegmentKind.ToolCall, null, toolRunId)
+            ]);
         var toolRun = new ToolExecutionRecord(
-            Guid.NewGuid(),
+            toolRunId,
             conversationId,
             "read_file",
             "{}",
@@ -131,7 +143,6 @@ public sealed class TranscriptProjectionTests
             now,
             now,
             MessageId: message.Id,
-            AfterSegmentIndex: 0,
             ResultContent: new string('x', TranscriptToolResultLimiter.MaximumDisplayedCharacters + 1_000));
 
         var state = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: [toolRun]));
@@ -150,6 +161,7 @@ public sealed class TranscriptProjectionTests
         var workspaceRootId = Guid.NewGuid();
         var userMessageId = Guid.NewGuid();
         var assistantMessageId = Guid.NewGuid();
+        var toolRunId = Guid.NewGuid();
         var attachment = new MessageAttachmentRecord(
             Guid.NewGuid(),
             userMessageId,
@@ -177,10 +189,15 @@ public sealed class TranscriptProjectionTests
                 "answer",
                 MessageStatus.Completed,
                 now.AddSeconds(1),
-                now.AddSeconds(1))
+                now.AddSeconds(1),
+                Segments:
+                [
+                    new MessageSegmentRecord(assistantMessageId, 0, MessageSegmentKind.Text, "answer", null),
+                    new MessageSegmentRecord(assistantMessageId, 1, MessageSegmentKind.ToolCall, null, toolRunId)
+                ])
         };
         var toolRun = new ToolExecutionRecord(
-            Guid.NewGuid(),
+            toolRunId,
             conversationId,
             "read_file",
             "{\"relativePath\":\"README.md\"}",
@@ -190,8 +207,7 @@ public sealed class TranscriptProjectionTests
             12,
             now.AddMilliseconds(500),
             now.AddMilliseconds(600),
-            MessageId: assistantMessageId,
-            AfterSegmentIndex: 0);
+            MessageId: assistantMessageId);
         var conversation = new ConversationRecord(
             conversationId,
             "Projection test",
@@ -280,7 +296,6 @@ public sealed class TranscriptProjectionTests
         => new(
             messages ?? [],
             toolRuns ?? [],
-            new Dictionary<Guid, ToolRunAnchor>(),
             conversations ?? [],
             workspaceRoots ?? [],
             selectedConversationId,

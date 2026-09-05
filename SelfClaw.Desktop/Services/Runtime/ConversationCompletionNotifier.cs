@@ -7,7 +7,6 @@ namespace SelfClaw.Desktop.Services.Runtime;
 
 internal sealed class ConversationCompletionNotifier : IConversationCompletionNotifier
 {
-    private const string ToolAnchorPrefix = "<!--selfclaw:tool:";
     private readonly DesktopNotificationService _notificationService;
 
     public ConversationCompletionNotifier(DesktopNotificationService notificationService)
@@ -89,10 +88,9 @@ internal sealed class ConversationCompletionNotifier : IConversationCompletionNo
             return string.Empty;
         }
 
-        var sanitized = RemoveMetadata(text);
-        var builder = new StringBuilder(sanitized.Length);
+        var builder = new StringBuilder(text.Length);
         var previousWhitespace = false;
-        foreach (var character in sanitized)
+        foreach (var character in text)
         {
             var normalized = character switch
             {
@@ -116,40 +114,5 @@ internal sealed class ConversationCompletionNotifier : IConversationCompletionNo
         }
 
         return builder.ToString().Trim();
-    }
-
-    private static string RemoveMetadata(string text)
-    {
-        var startIndex = text.IndexOf(ToolAnchorPrefix, StringComparison.Ordinal);
-        if (startIndex < 0)
-        {
-            return text;
-        }
-
-        var builder = new StringBuilder(text.Length);
-        var segmentStart = 0;
-        while (startIndex >= 0)
-        {
-            if (startIndex > segmentStart)
-            {
-                builder.Append(text, segmentStart, startIndex - segmentStart);
-            }
-
-            var endIndex = text.IndexOf("-->", startIndex, StringComparison.Ordinal);
-            if (endIndex < 0)
-            {
-                return builder.ToString();
-            }
-
-            segmentStart = endIndex + 3;
-            startIndex = text.IndexOf(ToolAnchorPrefix, segmentStart, StringComparison.Ordinal);
-        }
-
-        if (segmentStart < text.Length)
-        {
-            builder.Append(text, segmentStart, text.Length - segmentStart);
-        }
-
-        return builder.ToString();
     }
 }

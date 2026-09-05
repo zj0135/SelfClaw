@@ -56,7 +56,11 @@ public sealed class ConversationTurnEngineTests
         var finalization = context.FinalizationRepository.Finalizations.Should().ContainSingle().Which;
         var assistant = finalization.AssistantMessage;
         assistant.Status.Should().Be(MessageStatus.Completed);
-        assistant.MarkdownContent.Should().Contain("hello ").And.Contain("world").And.Contain("selfclaw:tool:");
+        assistant.MarkdownContent.Should().Be("hello world");
+        assistant.Segments.Should().SatisfyRespectively(
+            segment => segment.Kind.Should().Be(MessageSegmentKind.Text),
+            segment => segment.Kind.Should().Be(MessageSegmentKind.ToolCall),
+            segment => segment.Kind.Should().Be(MessageSegmentKind.Text));
         assistant.InputTokens.Should().Be(11);
         assistant.OutputTokens.Should().Be(7);
         runtime.Requests.Single().TurnId.Should().Be(assistant.Id);

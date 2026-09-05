@@ -78,7 +78,11 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         terminal.OutputTokens.Should().Be(8);
         var assistant = (await conversations.ListMessagesAsync(task.ChildConversationId))
             .Single(message => message.Role == MessageRole.Assistant);
-        assistant.MarkdownContent.Should().Contain("analysis").And.Contain("final answer");
+        assistant.MarkdownContent.Should().Be("final answer");
+        assistant.Segments.Should().SatisfyRespectively(
+            segment => segment.Kind.Should().Be(MessageSegmentKind.Thinking),
+            segment => segment.Kind.Should().Be(MessageSegmentKind.Text),
+            segment => segment.Kind.Should().Be(MessageSegmentKind.ToolCall));
         (await conversations.ListToolExecutionsAsync(task.ChildConversationId))
             .Should().ContainSingle()
             .Which.Status.Should().Be(ToolExecutionStatus.Completed);

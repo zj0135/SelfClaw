@@ -1,11 +1,9 @@
 using SelfClaw.Core.Models;
-using SelfClaw.Infrastructure.Tools.Transcript;
-using SelfClaw.Infrastructure.Tools.Transcript.Models;
 
 namespace SelfClaw.Desktop.Services.Runtime;
 
 /// <summary>
-/// Per-conversation turn state: the transcript projection (messages, tool runs, inline anchors) plus the
+/// Per-conversation turn state: the transcript projection (messages, tool runs) plus the
 /// run lifecycle (cancellation source, running flag, completion signal). Mutation of the transcript happens
 /// through the methods here so the reduction rules stay one place and are testable without WPF; the owner
 /// subscribes to <see cref="TranscriptChanged"/> to publish snapshots. Reads are surfaced back to the
@@ -15,23 +13,18 @@ internal sealed class ConversationRuntimeState : IDisposable
 {
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly List<MessageRecord> _messages = [];
-    private readonly Dictionary<Guid, (StreamingAssistantMessage Stream, long MaterializedRevision)> _messageStreams = [];
+    private readonly Dictionary<Guid, (StreamingAssistantContent Stream, long MaterializedRevision)> _messageStreams = [];
 
     public ConversationRuntimeState(
         ConversationRecord conversation,
         IEnumerable<MessageRecord> messages,
         IEnumerable<ToolExecutionRecord> toolRuns,
-        IReadOnlyDictionary<Guid, ToolRunAnchor> toolRunAnchors,
         bool isDetached = false)
     {
         Conversation = conversation;
         IsDetached = isDetached;
         _messages.AddRange(messages);
         ToolRuns.AddRange(toolRuns);
-        foreach (var item in toolRunAnchors)
-        {
-            ToolRunAnchors[item.Key] = item.Value;
-        }
     }
 
     public ConversationRecord Conversation { get; set; }
@@ -50,8 +43,6 @@ internal sealed class ConversationRuntimeState : IDisposable
     }
 
     public List<ToolExecutionRecord> ToolRuns { get; } = [];
-
-    public Dictionary<Guid, ToolRunAnchor> ToolRunAnchors { get; } = [];
 
     /// <summary>Latest RunStatusEvent text, shown while the streaming message has no content yet.</summary>
     public string? ActivityText { get; set; }
@@ -137,39 +128,12 @@ internal sealed class ConversationRuntimeState : IDisposable
         return true;
     }
 
-    public void CompleteAssistantStream(Guid messageId)
-    {
-        if (!_messageStreams.TryGetValue(messageId, out var entry))
-        {
-            return;
-        }
-
-        entry.Stream.CompleteThinking(DateTimeOffset.UtcNow);
-        MaterializeMessage(messageId);
-    }
-
     /// <summary>
-    /// Places a tool run inline in its assistant message: reuses a captured anchor when present, otherwise
-    /// appends a tool anchor to the assistant markdown and records the resulting segment index so the tool
-    /// card renders where the model emitted the call.
+    /// Places a tool run inline in its assistant message by appending a ToolCall block to the
+    /// streaming content; the block ordinal is the transcript position of the tool card.
     /// </summary>
-    public ToolExecutionRecord CaptureToolRunAnchor(ToolExecutionRecord toolRun)
+    public ToolExecutionRecord CaptureToolRunPlacement(ToolExecutionRecord toolRun)
     {
-        if (ToolRunAnchors.TryGetValue(toolRun.Id, out var existingAnchor))
-        {
-            return toolRun with
-            {
-                MessageId = existingAnchor.MessageId,
-                AfterSegmentIndex = existingAnchor.AfterSegmentIndex
-            };
-        }
-
-        if (toolRun.MessageId is Guid messageId && toolRun.AfterSegmentIndex is int afterSegmentIndex)
-        {
-            ToolRunAnchors[toolRun.Id] = new ToolRunAnchor(messageId, afterSegmentIndex);
-            return toolRun;
-        }
-
         if (toolRun.MessageId is not Guid anchoredMessageId)
         {
             return toolRun;
@@ -182,44 +146,43 @@ internal sealed class ConversationRuntimeState : IDisposable
         }
 
         var stream = GetOrCreateMessageStream(message);
-        stream.AppendToolAnchor(toolRun.Id, DateTimeOffset.UtcNow);
-        var anchoredMarkdown = stream.Snapshot();
-        var anchoredSegments = message.Role == MessageRole.Assistant
-            ? AssistantMessageSegmenter.Split(anchoredMarkdown).Segments
-            : [];
-        var anchorIndex = anchoredSegments
-            .Select((item, index) => (item, index))
-            .FirstOrDefault(entry =>
-                entry.item.Kind == AssistantMessageSegmentKind.ToolAnchor &&
-                entry.item.ToolExecutionId == toolRun.Id)
-            .index;
-        var anchorAfterSegmentIndex = anchorIndex > 0 ? anchorIndex - 1 : -1;
-        var anchor = new ToolRunAnchor(anchoredMessageId, anchorAfterSegmentIndex);
-
-        var messageIndex = _messages.FindIndex(item => item.Id == anchoredMessageId);
-        _messages[messageIndex] = message with
+        if (stream.BuildSegments().All(segment => segment.ToolRunId != toolRun.Id))
         {
-            MarkdownContent = anchoredMarkdown,
+            stream.AppendToolCall(toolRun.Id, DateTimeOffset.UtcNow);
+        }
+
+        var index = _messages.FindIndex(item => item.Id == anchoredMessageId);
+        _messages[index] = message with
+        {
+            MarkdownContent = stream.BuildMarkdown(),
+            Segments = stream.BuildSegments(),
             UpdatedAtUtc = stream.UpdatedAtUtc
         };
         _messageStreams[anchoredMessageId] = (stream, stream.Revision);
 
-        ToolRunAnchors[toolRun.Id] = anchor;
-        return toolRun with
-        {
-            MessageId = anchor.MessageId,
-            AfterSegmentIndex = anchor.AfterSegmentIndex
-        };
+        return toolRun;
     }
 
-    private StreamingAssistantMessage GetOrCreateMessageStream(MessageRecord message)
+    public void CompleteAssistantStream(Guid messageId)
+    {
+        if (!_messageStreams.TryGetValue(messageId, out var entry))
+        {
+            return;
+        }
+
+        entry.Stream.CompleteThinking(DateTimeOffset.UtcNow);
+        MaterializeMessage(messageId);
+    }
+
+    private StreamingAssistantContent GetOrCreateMessageStream(MessageRecord message)
     {
         if (_messageStreams.TryGetValue(message.Id, out var existing))
         {
             return existing.Stream;
         }
 
-        var stream = new StreamingAssistantMessage(message.MarkdownContent, message.UpdatedAtUtc);
+        var stream = new StreamingAssistantContent();
+        stream.Initialize(message.Id, message.Segments, message.UpdatedAtUtc);
         _messageStreams[message.Id] = (stream, stream.Revision);
         return stream;
     }
@@ -249,7 +212,8 @@ internal sealed class ConversationRuntimeState : IDisposable
 
         _messages[index] = _messages[index] with
         {
-            MarkdownContent = entry.Stream.Snapshot(),
+            MarkdownContent = entry.Stream.BuildMarkdown(),
+            Segments = entry.Stream.BuildSegments(),
             UpdatedAtUtc = entry.Stream.UpdatedAtUtc
         };
         _messageStreams[messageId] = (entry.Stream, entry.Stream.Revision);

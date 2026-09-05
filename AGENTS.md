@@ -161,7 +161,7 @@ Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 - Runtimes: CLI process/session services, `CliAgentChatRuntime`, `DirectAgentChatRuntime`, `DispatchingAgentChatRuntime` (as `IAgentChatRuntime`)
 - Extensions: `ExtensionCatalog`, `ExtensionPackageInstaller`, `ExtensionSettingsService`, `ExtensionStateChangeNotifier`, `DirectTurnCapabilityResolver` plus its `SkillCapabilitySource` / `PluginCapabilitySource` / `McpCapabilitySource`, Skill readers/runtime tools
 - MCP: configuration/transport factories, pooled `McpClientManager`, SDK connection factory, `McpToolAdapter`
-- Tools: `WorkspaceToolService`, `WorkspaceAgentToolset`, `MarkdownHtmlRenderer`
+- Tools: `WorkspaceToolService`, `WorkspaceAgentToolset`
 - Security: `DpapiSecretProtector`
 
 Desktop (`App.xaml.cs`):
@@ -189,7 +189,7 @@ Desktop (`App.xaml.cs`):
 
 ### Database
 
-Schema version: **24** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `git_repositories`, `git_checkouts`, `conversations`, `messages`, `message_attachments`, `tool_runs`, `cli_agent_sessions`, `subagent_tasks`, and `subagent_deliveries`. The v22→v23 migration atomically rebuilds `conversations` when legacy `profile_id`, `kind`, or `parent_conversation_id` columns require it, preserves existing data, and defaults old rows to interactive ownership. Schema v24 adds repository identity and checkout ownership without changing the physical Workspace Root execution contract. Subagent deliveries use snapshot-aware FIFO batching, 45-second leases with 15-second heartbeat, and atomic Delivered/DeadLetter resolution.
+Schema version: **25** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `git_repositories`, `git_checkouts`, `conversations`, `messages`, `message_segments`, `message_attachments`, `tool_runs`, `cli_agent_sessions`, `subagent_tasks`, and `subagent_deliveries`. Schema v25 structures assistant content into `message_segments` blocks (Text/Thinking/ToolCall with ordinal placement) and rebuilds `tool_runs` without the retired `after_segment_index` column; legacy assistant rows are not migrated. The v22→v23 migration atomically rebuilds `conversations` when legacy `profile_id`, `kind`, or `parent_conversation_id` columns require it, preserves existing data, and defaults old rows to interactive ownership. Schema v24 adds repository identity and checkout ownership without changing the physical Workspace Root execution contract. Subagent deliveries use snapshot-aware FIFO batching, 45-second leases with 15-second heartbeat, and atomic Delivered/DeadLetter resolution.
 
 ### Image attachments
 
@@ -197,7 +197,7 @@ Persisted to `{AppData}\attachments\{convId}\{msgId}\`. Max 6 images, 10MB each,
 
 ### Transient state
 
-`TranscriptRenderState` is the DTO published to the Vue frontend. The segmenter (`AssistantMessageSegmenter`) parses `<thinking>` blocks and tool anchors for rendering.
+`TranscriptRenderState` is the DTO published to the Vue frontend. Assistant content is structured as `MessageSegmentRecord` blocks (Text/Thinking/ToolCall); the block order is the transcript order, and tool cards render where their ToolCall block sits. `TerminalBlockAligner` maps terminal FinalText onto the streamed blocks once per turn.
 Continuation turns use detached `ConversationRuntimeState`; their transient completion batch is prompt-only and is never persisted as a parent user message or streamed into the selected transcript before atomic terminal commit.
 
 ### Conversation deletion

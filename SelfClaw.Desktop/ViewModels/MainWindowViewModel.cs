@@ -812,7 +812,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         return new TranscriptProjectionRequest(
             _conversationSessions.SelectedMessages,
             _conversationSessions.SelectedToolRuns,
-            _conversationSessions.SelectedToolRunAnchors,
             GetNavigationConversations().ToArray(),
             _workspaceRoots,
             SelectedConversation?.Id,

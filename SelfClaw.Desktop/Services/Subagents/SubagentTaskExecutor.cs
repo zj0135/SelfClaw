@@ -6,7 +6,6 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Subagents.Models;
-using SelfClaw.Infrastructure.Tools.Transcript.Models;
 
 namespace SelfClaw.Desktop.Services.Subagents;
 
@@ -290,16 +289,9 @@ internal sealed class SubagentTaskExecutor
         var toolExecutions = await _conversationRepository.ListToolExecutionsAsync(
             task.ChildConversationId,
             cancellationToken);
-        var anchors = toolExecutions
-            .Where(tool => tool.MessageId is not null && tool.AfterSegmentIndex is not null)
-            .ToDictionary(
-                tool => tool.Id,
-                tool => new ToolRunAnchor(
-                    tool.MessageId.GetValueOrDefault(),
-                    tool.AfterSegmentIndex.GetValueOrDefault()));
         var providerMessages = messages.Where(message => message.Id != task.ChildTurnId).ToArray();
         return new ChildRuntime(
-            new ConversationRuntimeState(conversation, messages, toolExecutions, anchors),
+            new ConversationRuntimeState(conversation, messages, toolExecutions),
             providerMessages);
     }
 
@@ -321,8 +313,7 @@ internal sealed class SubagentTaskExecutor
             new ConversationRuntimeState(
                 conversation,
                 [],
-                [],
-                new Dictionary<Guid, ToolRunAnchor>()),
+                []),
             []);
     }
 

@@ -28,7 +28,6 @@ using SelfClaw.Infrastructure.Extensions.Plugins;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Git;
 using SelfClaw.Infrastructure.Security;
-using SelfClaw.Infrastructure.Tools.Transcript;
 using SelfClaw.Infrastructure.Tools.Workspace;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;

@@ -3,8 +3,6 @@ using System.Text;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Infrastructure.Options;
-using SelfClaw.Infrastructure.Tools.Transcript;
-using SelfClaw.Infrastructure.Tools.Transcript.Models;
 
 namespace SelfClaw.Desktop.Services.Transcript;
 
@@ -32,17 +30,11 @@ public sealed class TranscriptProjection
         }
 
         _lastFingerprint = fingerprint;
-        var toolRunsByMessageId = TranscriptToolRunPresenter.BuildToolRunsByMessageId(
-            request.Messages,
-            request.ToolRuns,
-            request.ToolRunAnchors);
         PruneMessageCache(request.Messages);
         PruneToolSegmentCache(request.ToolRuns);
         var items = request.Messages
             .OrderBy(message => message.CreatedAtUtc)
-            .Select(message => BuildMessageItemCached(
-                message,
-                toolRunsByMessageId.TryGetValue(message.Id, out var toolRuns) ? toolRuns : []))
+            .Select(message => BuildMessageItemCached(message, request.ToolRuns))
             .ToArray();
 
         return new TranscriptRenderState(
@@ -137,17 +129,6 @@ public sealed class TranscriptProjection
             builder.Append(';');
         }
 
-        builder.Append('|');
-        foreach (var anchor in request.ToolRunAnchors.OrderBy(anchor => anchor.Key))
-        {
-            builder.Append(anchor.Key.ToString("D"))
-                .Append(':')
-                .Append(anchor.Value.MessageId.ToString("D"))
-                .Append(':')
-                .Append(anchor.Value.AfterSegmentIndex)
-                .Append(';');
-        }
-
         return builder.ToString();
     }
 
@@ -181,16 +162,16 @@ public sealed class TranscriptProjection
 
     private TranscriptRenderItem BuildMessageItemCached(
         MessageRecord message,
-        IReadOnlyList<ToolRunPlacement> toolRuns)
+        IReadOnlyList<ToolExecutionRecord> conversationToolRuns)
     {
-        var fingerprint = BuildMessageFingerprint(message, toolRuns);
+        var fingerprint = BuildMessageFingerprint(message, conversationToolRuns);
         if (_messageCache.TryGetValue(message.Id, out var cached) &&
             string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return cached.Item;
         }
 
-        var item = BuildMessageItem(message, toolRuns);
+        var item = BuildMessageItem(message, conversationToolRuns);
         _messageCache[message.Id] = (fingerprint, item);
         return item;
     }
@@ -225,18 +206,35 @@ public sealed class TranscriptProjection
 
     private static string BuildMessageFingerprint(
         MessageRecord message,
-        IReadOnlyList<ToolRunPlacement> toolRuns)
+        IReadOnlyList<ToolExecutionRecord> conversationToolRuns)
     {
         var builder = new StringBuilder();
         AppendMessageFingerprint(builder, message);
-        builder.Append('|');
 
-        foreach (var placement in toolRuns)
+        if (message.Role == MessageRole.Assistant && message.Segments is { Count: > 0 })
         {
-            AppendToolRunFingerprint(builder, placement.Record);
-            builder.Append(':')
-                .Append(placement.AfterSegmentIndex)
-                .Append(';');
+            builder.Append('|').Append(message.Segments.Count).Append('|');
+            foreach (var segment in message.Segments)
+            {
+                builder.Append((int)segment.Kind)
+                    .Append(':')
+                    .Append(segment.ToolRunId?.ToString("D") ?? string.Empty)
+                    .Append(':');
+                AppendTextFingerprint(builder, segment.Text);
+            }
+        }
+
+        var messageToolRuns = conversationToolRuns
+            .Where(toolRun => toolRun.MessageId == message.Id)
+            .ToArray();
+        if (messageToolRuns.Length > 0)
+        {
+            builder.Append('|');
+            foreach (var toolRun in messageToolRuns)
+            {
+                AppendToolRunFingerprint(builder, toolRun);
+                builder.Append(';');
+            }
         }
 
         return builder.ToString();
@@ -244,38 +242,42 @@ public sealed class TranscriptProjection
 
     private TranscriptRenderItem BuildMessageItem(
         MessageRecord message,
-        IReadOnlyList<ToolRunPlacement> toolRuns)
+        IReadOnlyList<ToolExecutionRecord> conversationToolRuns)
     {
         var renderSegments = new List<TranscriptRenderSegment>();
         if (message.Role == MessageRole.Assistant)
         {
-            var segments = AssistantMessageSegmenter.Split(message.MarkdownContent);
-            var toolRunsById = toolRuns.ToDictionary(toolRun => toolRun.Record.Id);
-            var consumedToolRunIds = new HashSet<Guid>();
+            var toolRunsById = conversationToolRuns
+                .Where(toolRun => toolRun.MessageId == message.Id)
+                .ToDictionary(toolRun => toolRun.Id);
 
-            foreach (var segment in segments.Segments)
+            foreach (var segment in message.Segments ?? [])
             {
-                if (segment.Kind == AssistantMessageSegmentKind.ToolAnchor)
+                switch (segment.Kind)
                 {
-                    if (segment.ToolExecutionId is Guid toolExecutionId &&
-                        toolRunsById.TryGetValue(toolExecutionId, out var placement) &&
-                        consumedToolRunIds.Add(toolExecutionId))
-                    {
-                        renderSegments.Add(BuildToolSegmentCached(placement.Record));
-                    }
+                    case MessageSegmentKind.Text when !string.IsNullOrEmpty(segment.Text):
+                        renderSegments.Add(new TranscriptRenderSegment(
+                            "content",
+                            segment.Text!,
+                            false));
+                        break;
+                    case MessageSegmentKind.Thinking when !string.IsNullOrEmpty(segment.Text):
+                        renderSegments.Add(new TranscriptRenderSegment(
+                            "thinking",
+                            segment.Text!,
+                            IsLastSegment(message.Segments, segment.Ordinal)));
+                        break;
+                    case MessageSegmentKind.ToolCall when segment.ToolRunId is Guid toolRunId:
+                        if (toolRunsById.TryGetValue(toolRunId, out var toolRun))
+                        {
+                            renderSegments.Add(BuildToolSegmentCached(toolRun));
+                        }
 
-                    continue;
+                        break;
+                    default:
+                        break;
                 }
-
-                renderSegments.Add(new TranscriptRenderSegment(
-                    segment.Kind == AssistantMessageSegmentKind.Thinking ? "thinking" : "content",
-                    segment.Markdown,
-                    segment.IsPending));
             }
-
-            toolRuns = toolRuns.Count > consumedToolRunIds.Count
-                ? toolRuns.Where(toolRun => !consumedToolRunIds.Contains(toolRun.Record.Id)).ToArray()
-                : [];
         }
         else if (!string.IsNullOrWhiteSpace(message.MarkdownContent))
         {
@@ -283,11 +285,6 @@ public sealed class TranscriptProjection
                 "content",
                 message.MarkdownContent,
                 false));
-        }
-
-        if (message.Role == MessageRole.Assistant && toolRuns.Count > 0)
-        {
-            TranscriptToolRunPresenter.InsertToolSegments(renderSegments, toolRuns, BuildToolSegmentCached);
         }
 
         return new TranscriptRenderItem(
@@ -303,6 +300,9 @@ public sealed class TranscriptProjection
                 ? message.ErrorMessage
                 : null);
     }
+
+    private static bool IsLastSegment(IReadOnlyList<MessageSegmentRecord> segments, int ordinal)
+        => ordinal == segments.Count - 1;
 
     private TranscriptRenderSegment BuildToolSegmentCached(ToolExecutionRecord toolRun)
     {
@@ -417,8 +417,6 @@ public sealed class TranscriptProjection
             .Append(toolRun.DurationMs)
             .Append(':')
             .Append(toolRun.MessageId)
-            .Append(':')
-            .Append(toolRun.AfterSegmentIndex)
             .Append(':')
             .Append(toolRun.SourceKind)
             .Append(':');

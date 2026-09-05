@@ -3,7 +3,6 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Transcript;
-using SelfClaw.Infrastructure.Tools.Transcript;
 
 namespace SelfClaw.Desktop.Services.Runtime;
 
@@ -207,12 +206,11 @@ internal sealed class ConversationTurnRecorder
             CreatedAtUtc: now,
             UpdatedAtUtc: now,
             MessageId: turn.TurnId,
-            AfterSegmentIndex: null,
             SourceKind: toolStarted.SourceKind,
             SourceId: toolStarted.SourceId,
             DisplayName: toolStarted.DisplayName);
 
-        var anchored = session.CaptureToolRunAnchor(record);
+        var anchored = session.CaptureToolRunPlacement(record);
         turn.ToolRunsByCallId[toolStarted.ToolCallId] = anchored;
         session.UpsertToolRun(anchored);
         if (persistProgress)
@@ -247,7 +245,7 @@ internal sealed class ConversationTurnRecorder
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
 
-        var anchored = session.CaptureToolRunAnchor(updated);
+        var anchored = session.CaptureToolRunPlacement(updated);
         turn.ToolRunsByCallId[toolCompleted.ToolCallId] = anchored;
         session.UpsertToolRun(anchored);
         if (persistProgress)
@@ -407,15 +405,17 @@ internal sealed class ConversationTurnRecorder
         RecordedTurnFinalizationRequest request,
         DateTimeOffset now)
     {
-        var finalMarkdown = request.FinalText is null
-            ? request.AssistantMessage.MarkdownContent
-            : AssistantMessageSegmenter.MergeFinalMarkdown(
-                request.FinalText,
-                request.AssistantMessage.MarkdownContent);
+        var segments = TerminalBlockAligner.Align(
+            request.AssistantMessage.Id,
+            request.AssistantMessage.Segments ?? [],
+            request.FinalText);
 
         return request.AssistantMessage with
         {
-            MarkdownContent = finalMarkdown,
+            MarkdownContent = string.Concat(segments
+                .Where(segment => segment.Kind == MessageSegmentKind.Text)
+                .Select(segment => segment.Text ?? string.Empty)),
+            Segments = segments,
             Status = request.Kind switch
             {
                 TurnFinalizationKind.Succeeded => MessageStatus.Completed,

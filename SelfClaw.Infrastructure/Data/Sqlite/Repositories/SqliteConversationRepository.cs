@@ -125,11 +125,23 @@ ORDER BY created_at_utc ASC;";
             connection,
             results.Select(item => item.Id).ToArray(),
             cancellationToken);
+        var segmentsByMessageId = await ReadMessageSegmentsAsync(
+            connection,
+            results.Select(item => item.Id).ToArray(),
+            cancellationToken);
 
         return results
-            .Select(message => attachmentsByMessageId.TryGetValue(message.Id, out var attachments)
-                ? message with { Attachments = attachments }
-                : message)
+            .Select(message => message with
+            {
+                Attachments = attachmentsByMessageId.TryGetValue(message.Id, out var attachments)
+                    ? attachments
+                    : message.Attachments,
+                Segments = message.Role == MessageRole.Assistant
+                    ? segmentsByMessageId.TryGetValue(message.Id, out var segments)
+                        ? segments
+                        : message.Segments
+                    : null
+            })
             .ToArray();
     }
 
@@ -149,7 +161,95 @@ ORDER BY created_at_utc ASC;";
             await ReplaceMessageAttachmentsAsync(connection, message, cancellationToken).ConfigureAwait(false);
         }
 
+        if (message.Segments is not null)
+        {
+            await ReplaceMessageSegmentsAsync(connection, message, cancellationToken).ConfigureAwait(false);
+        }
+
         return message;
+    }
+
+    private static async Task<Dictionary<Guid, IReadOnlyList<MessageSegmentRecord>>> ReadMessageSegmentsAsync(
+        SqliteConnection connection,
+        IReadOnlyList<Guid> messageIds,
+        CancellationToken cancellationToken)
+    {
+        if (messageIds.Count == 0)
+        {
+            return [];
+        }
+
+        var parameterNames = messageIds
+            .Select((_, index) => "$messageId" + index.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $@"
+SELECT message_id, ordinal, kind, text, tool_run_id
+FROM message_segments
+WHERE message_id IN ({string.Join(", ", parameterNames)})
+ORDER BY message_id, ordinal ASC;";
+
+        for (var index = 0; index < messageIds.Count; index++)
+        {
+            command.Parameters.AddWithValue(parameterNames[index], messageIds[index].ToString("D"));
+        }
+
+        var results = new Dictionary<Guid, List<MessageSegmentRecord>>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var segment = new MessageSegmentRecord(
+                Guid.Parse(reader.GetString(0)),
+                reader.GetInt32(1),
+                (MessageSegmentKind)reader.GetInt32(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : Guid.Parse(reader.GetString(4)));
+            if (!results.TryGetValue(segment.MessageId, out var segments))
+            {
+                segments = [];
+                results[segment.MessageId] = segments;
+            }
+
+            segments.Add(segment);
+        }
+
+        return results.ToDictionary(
+            item => item.Key,
+            item => (IReadOnlyList<MessageSegmentRecord>)item.Value.ToArray());
+    }
+
+    private static async Task ReplaceMessageSegmentsAsync(
+        SqliteConnection connection,
+        MessageRecord message,
+        CancellationToken cancellationToken)
+    {
+        await using (var deleteCommand = connection.CreateCommand())
+        {
+            deleteCommand.CommandText = "DELETE FROM message_segments WHERE message_id = $messageId;";
+            deleteCommand.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
+            await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (message.Segments is not { Count: > 0 } segments)
+        {
+            return;
+        }
+
+        foreach (var segment in segments)
+        {
+            await using var insertCommand = connection.CreateCommand();
+            insertCommand.CommandText = @"
+INSERT INTO message_segments(message_id, ordinal, kind, text, tool_run_id)
+VALUES($messageId, $ordinal, $kind, $text, $toolRunId);";
+            insertCommand.Parameters.AddWithValue("$messageId", segment.MessageId.ToString("D"));
+            insertCommand.Parameters.AddWithValue("$ordinal", segment.Ordinal);
+            insertCommand.Parameters.AddWithValue("$kind", (int)segment.Kind);
+            insertCommand.Parameters.AddWithValue("$text", (object?)segment.Text ?? DBNull.Value);
+            insertCommand.Parameters.AddWithValue("$toolRunId", segment.ToolRunId.HasValue
+                ? segment.ToolRunId.Value.ToString("D")
+                : DBNull.Value);
+            await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 
     private static async Task<Dictionary<Guid, IReadOnlyList<MessageAttachmentRecord>>> ReadMessageAttachmentsAsync(
@@ -236,7 +336,7 @@ VALUES($id, $messageId, $kind, $fileName, $mediaType, $storagePath, $byteLength,
         await using var connection = await _database.OpenConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, after_segment_index, result_content, source_kind, source_id, display_name
+SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name
 FROM tool_runs
 WHERE conversation_id = $conversationId
 ORDER BY created_at_utc ASC;";

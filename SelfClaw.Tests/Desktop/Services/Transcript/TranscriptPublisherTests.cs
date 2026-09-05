@@ -5,7 +5,6 @@ using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Infrastructure.Options;
-using SelfClaw.Infrastructure.Tools.Transcript;
 
 namespace SelfClaw.Tests.Desktop.Services.Transcript;
 
@@ -70,7 +69,6 @@ public sealed class TranscriptPublisherTests
         => new(
             [],
             [],
-            new Dictionary<Guid, ToolRunAnchor>(),
             [],
             [],
             null,

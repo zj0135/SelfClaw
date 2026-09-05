@@ -41,7 +41,11 @@ public sealed class ConversationTurnRecorderTests
         var finalization = context.Committer.Finalizations.Should().ContainSingle().Which;
         finalization.AssistantMessage.Id.Should().Be(context.TurnId);
         finalization.AssistantMessage.Status.Should().Be(MessageStatus.Completed);
-        finalization.AssistantMessage.MarkdownContent.Should().Contain("reason").And.Contain("answer");
+        finalization.AssistantMessage.MarkdownContent.Should().Be("answer");
+        finalization.AssistantMessage.Segments.Should().SatisfyRespectively(
+            segment => segment.Kind.Should().Be(MessageSegmentKind.Thinking),
+            segment => segment.Kind.Should().Be(MessageSegmentKind.Text),
+            segment => segment.Kind.Should().Be(MessageSegmentKind.ToolCall));
         finalization.AssistantMessage.InputTokens.Should().Be(11);
         finalization.AssistantMessage.OutputTokens.Should().Be(7);
         finalization.ToolExecutions.Should().ContainSingle();
@@ -62,10 +66,14 @@ public sealed class ConversationTurnRecorderTests
         await context.ApplyAsync(new AssistantThinkingDeltaEvent("thinking", "first "));
         await context.ApplyAsync(new AssistantThinkingDeltaEvent("thinking", "second"));
 
-        var markdown = context.Session.Messages.Single().MarkdownContent;
-        CountOccurrences(markdown, "<!--selfclaw:think:start-->").Should().Be(1);
-        CountOccurrences(markdown, "<!--selfclaw:think:end-->").Should().Be(1);
-        markdown.Should().Contain("first second");
+        var message = context.Session.Messages.Single();
+        message.Segments.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new
+            {
+                Kind = MessageSegmentKind.Thinking,
+                Text = "first second"
+            });
+        message.MarkdownContent.Should().BeEmpty();
     }
 
     [Fact]
@@ -108,7 +116,10 @@ public sealed class ConversationTurnRecorderTests
 
         var finalization = context.Committer.Finalizations.Should().ContainSingle().Which;
         finalization.AssistantMessage.Status.Should().Be(MessageStatus.Cancelled);
-        finalization.AssistantMessage.MarkdownContent.Should().Contain("partial").And.Contain("selfclaw:tool:");
+        finalization.AssistantMessage.MarkdownContent.Should().Be("partial");
+        finalization.AssistantMessage.Segments.Should().SatisfyRespectively(
+            segment => segment.Kind.Should().Be(MessageSegmentKind.Text),
+            segment => segment.Kind.Should().Be(MessageSegmentKind.ToolCall));
         finalization.AssistantMessage.ErrorMessage.Should().Be("Generation stopped.");
         finalization.ToolExecutions.Should().ContainSingle()
             .Which.Status.Should().Be(ToolExecutionStatus.Cancelled);
@@ -184,8 +195,7 @@ public sealed class ConversationTurnRecorderTests
         var session = new ConversationRuntimeState(
             conversation,
             [],
-            [],
-            new Dictionary<Guid, ToolRunAnchor>());
+            []);
         var turnId = Guid.NewGuid();
         var turn = new AgentTurnState(turnId, new AgentRuntimeDefinition(
             "build",
@@ -211,8 +221,6 @@ public sealed class ConversationTurnRecorderTests
             new RecordingCommitter());
     }
 
-    private static int CountOccurrences(string value, string search)
-        => value.Split(search, StringSplitOptions.None).Length - 1;
 
     private sealed record RecorderTestContext(
         Guid TurnId,

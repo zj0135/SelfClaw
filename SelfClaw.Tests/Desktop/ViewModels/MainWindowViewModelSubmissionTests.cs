@@ -14,8 +14,6 @@ using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.Options;
-using SelfClaw.Infrastructure.Tools.Transcript;
-using SelfClaw.Infrastructure.Tools.Transcript.Models;
 
 namespace SelfClaw.Tests.Desktop.ViewModels;
 

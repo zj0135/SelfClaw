@@ -32,7 +32,6 @@ using SelfClaw.Infrastructure.AiProviders.Models.Views;
 using SelfClaw.Infrastructure.Extensions;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
 using SelfClaw.Infrastructure.Options;
-using SelfClaw.Infrastructure.Tools.Transcript;
 
 namespace SelfClaw.Tests.Desktop.Services.WebView;
 
