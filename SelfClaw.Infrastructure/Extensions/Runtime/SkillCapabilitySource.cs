@@ -21,15 +21,18 @@ internal sealed class SkillCapabilitySource
     private readonly SkillPackageReader _packageReader;
     private readonly SkillTokenParser _tokenParser;
     private readonly SkillRuntimeToolset _runtimeToolset;
+    private readonly CapabilityContentCache _contentCache;
 
     public SkillCapabilitySource(
         SkillPackageReader packageReader,
         SkillTokenParser tokenParser,
-        SkillRuntimeToolset runtimeToolset)
+        SkillRuntimeToolset runtimeToolset,
+        CapabilityContentCache contentCache)
     {
         _packageReader = packageReader;
         _tokenParser = tokenParser;
         _runtimeToolset = runtimeToolset;
+        _contentCache = contentCache;
     }
 
     public async Task<SkillCapabilities> ResolveAsync(
@@ -126,8 +129,12 @@ internal sealed class SkillCapabilitySource
         {
             try
             {
-                var metadata = await _packageReader.ReadAsync(
+                var metadata = await _contentCache.GetSkillMetadataAsync(
+                        package,
                         ExtensionInstallation.SkillManifestPath(package),
+                        token => _packageReader.ReadAsync(
+                            ExtensionInstallation.SkillManifestPath(package),
+                            token),
                         cancellationToken)
                     .ConfigureAwait(false);
                 resolvedSkills[package.Id] = new ResolvedSkill(

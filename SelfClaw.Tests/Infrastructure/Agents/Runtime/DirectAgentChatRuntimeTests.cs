@@ -7,6 +7,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
@@ -92,6 +93,73 @@ public sealed class DirectAgentChatRuntimeTests
         factory.LastInputs!.Tools.Select(tool => tool.Name).Should().Equal(
             "list_files", "glob_files", "search_text", "read_file", "write_file", "edit_file", "run_shell_command");
         events.Last().Should().Be(new RunCompletedEvent(RunCompletionStatus.Succeeded, "", null));
+    }
+
+    [Fact]
+    public async Task StreamTurnAsync_replays_prior_tool_calls_as_structured_messages()
+    {
+        var client = new ScriptedChatClient([Update("m", new TextContent("ok"))]);
+        var factory = new FakeChatClientFactory(client);
+        var runtime = CreateRuntime(factory);
+        var conversationId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var assistantId = Guid.NewGuid();
+        var run = new ToolExecutionRecord(
+            Guid.NewGuid(),
+            conversationId,
+            "read_file",
+            "{\"relativePath\":\"README.md\"}",
+            ToolExecutionStatus.Completed,
+            "Read README.md.",
+            "call-1",
+            5,
+            now,
+            now,
+            MessageId: assistantId,
+            ResultContent: "file body");
+        var user = new MessageRecord(
+            Guid.NewGuid(), conversationId, MessageRole.User, "list the files",
+            MessageStatus.Completed, now, now);
+        var assistant = new MessageRecord(
+            assistantId, conversationId, MessageRole.Assistant, "Here you go.",
+            MessageStatus.Completed, now, now,
+            Segments:
+            [
+                new MessageSegmentRecord(assistantId, 0, MessageSegmentKind.Text, "Here you go.", null),
+                new MessageSegmentRecord(assistantId, 1, MessageSegmentKind.ToolCall, null, run.Id)
+            ]);
+        var request = new DirectChatTurnRequest(
+            Guid.NewGuid(),
+            conversationId,
+            null,
+            new AgentRuntimeDefinition(
+                "direct-test", "Direct", "test", AgentExecutionMode.Direct,
+                AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], "Follow project instructions."),
+            [user, assistant],
+            factory.Profile.Id,
+            ToolPermissionMode.FullAccess,
+            ToolApprovalHandler: null,
+            new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null),
+            [run]);
+
+        await CollectAsync(runtime.StreamTurnAsync(request));
+
+        client.LastMessages.Select(message => message.Role).Should().Equal(
+            ChatRole.System,
+            ChatRole.User,
+            ChatRole.Assistant,
+            ChatRole.Tool);
+        var call = client.LastMessages[2].Contents.OfType<FunctionCallContent>().Should().ContainSingle().Which;
+        call.CallId.Should().Be("call-1");
+        call.Name.Should().Be("read_file");
+        Assert.NotNull(call.Arguments);
+        call.Arguments["relativePath"]?.ToString().Should().Be("README.md");
+        client.LastMessages[2].Contents.OfType<TextContent>().Should().ContainSingle()
+            .Which.Text.Should().Be("Here you go.");
+        var functionResult = client.LastMessages[3].Contents.OfType<FunctionResultContent>()
+            .Should().ContainSingle().Which;
+        functionResult.CallId.Should().Be("call-1");
+        functionResult.Result.Should().Be("file body");
     }
 
     [Fact]
@@ -258,6 +326,135 @@ public sealed class DirectAgentChatRuntimeTests
         order.Should().Equal("provider", "capability");
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task StreamTurnAsync_releases_capabilities_when_provider_creation_fails(
+        bool canceled,
+        bool useDefaultModel)
+    {
+        var releases = 0;
+        var capabilityLease = new DirectTurnCapabilityLease([], [],
+            new Dictionary<string, DirectToolDescriptor>(), new Dictionary<Guid, string>(), [],
+            () =>
+            {
+                releases++;
+                return ValueTask.CompletedTask;
+            });
+        Exception failure = canceled
+            ? new OperationCanceledException("provider setup canceled")
+            : new InvalidOperationException("provider setup failed");
+        var factory = new FakeChatClientFactory(new ScriptedChatClient([])) { FactoryException = failure };
+        var runtime = CreateRuntime(factory, new FakeCapabilityResolver(capabilityLease));
+        var request = CreateRequest(useDefaultModel ? null : factory.Profile.Id);
+
+        if (canceled)
+        {
+            var action = () => CollectAsync(runtime.StreamTurnAsync(request));
+            await action.Should().ThrowAsync<OperationCanceledException>();
+        }
+        else
+        {
+            var events = await CollectAsync(runtime.StreamTurnAsync(request));
+            events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.ErrorMessage.Should().Be(failure.Message);
+        }
+
+        releases.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StreamTurnAsync_releases_partial_setup_and_preserves_prompt_failure(bool disposalFails)
+    {
+        var order = new List<string>();
+        var client = new ScriptedChatClient([], dispose: () =>
+        {
+            order.Add("provider");
+            if (disposalFails)
+            {
+                throw new InvalidOperationException("provider dispose failed");
+            }
+        });
+        var capabilityLease = new DirectTurnCapabilityLease([], [],
+            new Dictionary<string, DirectToolDescriptor>(), new Dictionary<Guid, string>(), [],
+            () =>
+            {
+                order.Add("capability");
+                return ValueTask.CompletedTask;
+            });
+        var factory = new FakeChatClientFactory(client);
+        var request = (DirectChatTurnRequest)CreateRequest(factory.Profile.Id);
+        request = request with
+        {
+            ExecutionContext = new DirectTurnExecutionContext(
+                DirectTurnOrigin.Interactive, null, new SubagentCompletionBatch([]))
+        };
+
+        var events = await CollectAsync(CreateRuntime(factory, new FakeCapabilityResolver(capabilityLease))
+            .StreamTurnAsync(request));
+
+        order.Should().Equal("provider", "capability");
+        client.LastMessages.Should().BeEmpty();
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.ErrorMessage
+            .Should().Be("Only a continuation turn can carry a Subagent completion batch.");
+    }
+
+    [Theory]
+    [InlineData("tools")]
+    [InlineData("message")]
+    [InlineData("instructions")]
+    [InlineData("output")]
+    public async Task StreamTurnAsync_rejects_over_budget_input_without_calling_the_provider(string oversizedInput)
+    {
+        var order = new List<string>();
+        var client = new ScriptedChatClient([], dispose: () => order.Add("provider"));
+        var capabilityLease = new DirectTurnCapabilityLease([], [],
+            new Dictionary<string, DirectToolDescriptor>(), new Dictionary<Guid, string>(), [],
+            () =>
+            {
+                order.Add("capability");
+                return ValueTask.CompletedTask;
+            });
+        var factory = new FakeChatClientFactory(client, contextWindowTokens: 400)
+        {
+            Options = new ChatOptions
+            {
+                MaxOutputTokens = oversizedInput == "output" ? 500 : 50,
+                Tools = oversizedInput == "tools"
+                    ? [AIFunctionFactory.CreateDeclaration("lookup", "Lookup a value.",
+                        JsonSerializer.SerializeToElement(new
+                        {
+                            type = "object",
+                            properties = new { query = new { type = "string", description = new string('d', 42000) } }
+                        }))]
+                    : null
+            }
+        };
+        var request = (DirectChatTurnRequest)CreateRequest(factory.Profile.Id);
+        request = oversizedInput switch
+        {
+            "message" => request with
+            {
+                Messages = [request.Messages[1] with { MarkdownContent = new string('m', 24000) }]
+            },
+            "instructions" => request with { Agent = request.Agent with { Instructions = new string('s', 24000) } },
+            _ => request
+        };
+
+        var events = await CollectAsync(CreateRuntime(factory, new FakeCapabilityResolver(capabilityLease))
+            .StreamTurnAsync(request));
+
+        client.StreamingCalls.Should().Be(0);
+        client.LastMessages.Should().BeEmpty();
+        order.Should().Equal("provider", "capability");
+        var completion = events.OfType<RunCompletedEvent>().Should().ContainSingle().Which;
+        completion.Status.Should().Be(RunCompletionStatus.Failed);
+        completion.ErrorMessage.Should().Contain("model context window");
+    }
+
     private static DirectAgentChatRuntime CreateRuntime(
         FakeChatClientFactory factory,
         IDirectTurnCapabilityResolver? capabilityResolver = null)
@@ -278,14 +475,16 @@ public sealed class DirectAgentChatRuntimeTests
             Path.Combine(Path.GetTempPath(), "SelfClawTests"),
             Path.Combine(Path.GetTempPath(), "SelfClawTests", "selfclaw.db"),
             Path.Combine(Path.GetTempPath(), "SelfClawTests", "secrets"));
+        var contentCache = new CapabilityContentCache();
         return new DirectTurnCapabilityResolver(
             new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
             new EmptyExtensionPackageRepository(),
-            new SkillCapabilitySource(skillPackageReader, new SkillTokenParser(), new SkillRuntimeToolset()),
+            new SkillCapabilitySource(skillPackageReader, new SkillTokenParser(), new SkillRuntimeToolset(), contentCache),
             new PluginCapabilitySource(
                 new PluginManifestReader(limits),
                 skillPackageReader,
-                new PluginVersionLeaseManager()),
+                new PluginVersionLeaseManager(),
+                contentCache),
             new McpCapabilitySource(
                 new EmptyMcpServerRepository(),
                 new McpConfigurationResolver(new UnusedSecretProtector(), storagePaths),
@@ -352,17 +551,23 @@ public sealed class DirectAgentChatRuntimeTests
     {
         private readonly IChatClient _client;
 
-        public FakeChatClientFactory(IChatClient client)
+        public FakeChatClientFactory(IChatClient client, int? contextWindowTokens = null)
         {
             _client = client;
             var now = DateTimeOffset.UtcNow;
             Profile = new AiModelProfile(
                 Guid.NewGuid(), Guid.NewGuid(), "Test", AiProviderApiFormat.OpenAIChatCompletions,
                 "test-model", new AiSamplingOptions(false, 0, false, 0),
-                new Dictionary<string, JsonElement>(), now, now);
+                contextWindowTokens is int tokens
+                    ? new Dictionary<string, JsonElement>
+                    {
+                        [AiChatOptions.ContextWindowTokensKey] = JsonSerializer.SerializeToElement(tokens)
+                    }
+                    : new Dictionary<string, JsonElement>(), now, now);
         }
 
         public AiModelProfile Profile { get; }
+        public ChatOptions Options { get; init; } = new();
         public Exception? FactoryException { get; init; }
         public AiChatRuntimeInputs? LastInputs { get; private set; }
         public List<string> ScopeCalls { get; } = [];
@@ -391,7 +596,7 @@ public sealed class DirectAgentChatRuntimeTests
 
         private Task<AiChatClientLease> CreateLease()
             => FactoryException is null
-                ? Task.FromResult(new AiChatClientLease(_client, new ChatOptions(), Profile))
+                ? Task.FromResult(new AiChatClientLease(_client, Options, Profile))
                 : Task.FromException<AiChatClientLease>(FactoryException);
     }
 
@@ -413,6 +618,7 @@ public sealed class DirectAgentChatRuntimeTests
 
         public List<ChatMessage> LastMessages { get; } = [];
         public bool IsDisposed { get; private set; }
+        public int StreamingCalls { get; private set; }
 
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
@@ -425,6 +631,7 @@ public sealed class DirectAgentChatRuntimeTests
             ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            StreamingCalls++;
             LastMessages.AddRange(messages);
             foreach (var update in _updates)
             {
@@ -548,6 +755,16 @@ public sealed class DirectAgentChatRuntimeTests
             McpServerConfigRecord server,
             CancellationToken cancellationToken = default)
             => Task.FromResult(server);
+
+        public Task<bool> UpdateMcpServerHealthAsync(
+            string serverId,
+            long expectedConfigRevision,
+            McpServerHealthStatus status,
+            string? error,
+            IReadOnlyList<string> discoveredTools,
+            DateTimeOffset checkedAtUtc,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
 
         public Task SetMcpServerEnabledAsync(
             string id,

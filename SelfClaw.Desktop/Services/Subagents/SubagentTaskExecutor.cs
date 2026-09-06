@@ -93,7 +93,7 @@ internal sealed class SubagentTaskExecutor
             runtime = await LoadRuntimeAsync(task, execution.Token);
             turn = CreateTurnState(task, runtime.State);
             _turnRecorder.BeginTurn(runtime.State, turn);
-            var request = await CreateRequestAsync(task, runtime.Messages, execution.Token);
+            var request = await CreateRequestAsync(task, runtime.Messages, runtime.State.ToolRuns.ToArray(), execution.Token);
             await foreach (var streamEvent in _chatRuntime.StreamTurnAsync(request, execution.Token))
             {
                 await _turnRecorder.ApplyEventAsync(
@@ -222,6 +222,7 @@ internal sealed class SubagentTaskExecutor
     private async Task<DirectChatTurnRequest> CreateRequestAsync(
         SubagentTaskRecord task,
         IReadOnlyList<MessageRecord> messages,
+        IReadOnlyList<ToolExecutionRecord> toolExecutions,
         CancellationToken cancellationToken)
     {
         var definition = _snapshotSerializer.DeserializeDefinition(task.DefinitionSnapshotJson);
@@ -272,7 +273,8 @@ internal sealed class SubagentTaskExecutor
             new DirectTurnExecutionContext(
                 DirectTurnOrigin.Subagent,
                 parent.CapabilityCeiling,
-                CompletionBatch: null));
+                CompletionBatch: null),
+            toolExecutions);
     }
 
     private async Task<ChildRuntime> LoadRuntimeAsync(

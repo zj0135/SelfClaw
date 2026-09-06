@@ -93,10 +93,14 @@ internal sealed class ConversationRuntimeState : IDisposable
         }
     }
 
-    /// <summary>Appends a streamed delta onto an existing message. Returns whether anything changed.</summary>
+    /// <summary>
+    /// Appends a streamed delta onto an existing message. Returns whether anything changed.
+    /// Only truly empty deltas are dropped: newlines and indentation are valid model output
+    /// and must stay visible while streaming.
+    /// </summary>
     public bool ApplyAssistantDelta(Guid messageId, string deltaMarkdown)
     {
-        if (string.IsNullOrWhiteSpace(deltaMarkdown))
+        if (string.IsNullOrEmpty(deltaMarkdown))
         {
             return false;
         }

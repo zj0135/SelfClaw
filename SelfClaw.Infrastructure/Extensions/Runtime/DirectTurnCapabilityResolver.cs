@@ -59,21 +59,23 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var pluginLeases = new List<PluginVersionLease>();
+        var leases = new DirectTurnLeaseScope();
         try
         {
-            return await ResolveCoreAsync(request, pluginLeases, cancellationToken).ConfigureAwait(false);
+            // On success the returned capability lease owns the scope; on failure this catch is the
+            // single place every lease taken during resolution is released - MCP and Plugin alike.
+            return await ResolveCoreAsync(request, leases, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
-            await DisposePluginLeasesAsync(pluginLeases).ConfigureAwait(false);
+            await leases.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
 
     private async Task<DirectTurnCapabilityLease> ResolveCoreAsync(
         DirectChatTurnRequest request,
-        ICollection<PluginVersionLease> pluginLeases,
+        DirectTurnLeaseScope leases,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -94,8 +96,8 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
                 effectiveRequest.Agent,
                 packages,
                 effectiveSkills,
+                leases,
                 diagnostics,
-                pluginLeases,
                 cancellationToken)
             .ConfigureAwait(false);
         var skills = await _skillSource.ResolveAsync(
@@ -119,6 +121,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
                 effectiveRequest,
                 tools,
                 descriptors,
+                leases,
                 diagnostics,
                 plugins.PluginRoots,
                 cancellationToken)
@@ -143,7 +146,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         }
 
         // The policy only earns its tokens once something extension-provided is actually in play.
-        if (systemInstructions.Count > 0 || mcpCapabilities.Leases.Count > 0)
+        if (systemInstructions.Count > 0 || mcpCapabilities.Capabilities.Count > 0)
         {
             systemInstructions.Insert(0, CapabilitySections.Policy);
         }
@@ -154,7 +157,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             descriptors,
             skills.MessageAdjustments,
             diagnostics.Messages,
-            () => DisposeCapabilityLeasesAsync(mcpCapabilities.Leases, pluginLeases));
+            leases.DisposeAsync);
     }
 
     private (List<AITool> Tools, Dictionary<string, DirectToolDescriptor> Descriptors) CreateWorkspaceCapabilities(
@@ -499,26 +502,4 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             AgentRuntimeDefinition.SystemToolPolicy => 2,
             _ => int.MaxValue
         };
-
-    private static async ValueTask DisposePluginLeasesAsync(IEnumerable<PluginVersionLease> leases)
-    {
-        foreach (var lease in leases.Reverse())
-        {
-            await lease.DisposeAsync().ConfigureAwait(false);
-        }
-    }
-
-    private static async ValueTask DisposeCapabilityLeasesAsync(
-        IReadOnlyList<McpClientLease> mcpLeases,
-        IEnumerable<PluginVersionLease> pluginLeases)
-    {
-        try
-        {
-            await McpCapabilitySource.DisposeLeasesAsync(mcpLeases).ConfigureAwait(false);
-        }
-        finally
-        {
-            await DisposePluginLeasesAsync(pluginLeases).ConfigureAwait(false);
-        }
-    }
 }

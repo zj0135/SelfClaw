@@ -119,6 +119,64 @@ public sealed class SqliteExtensionRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task Mcp_health_update_writes_only_health_fields_and_ignores_a_stale_revision()
+    {
+        var repository = CreateRepository();
+        var now = DateTimeOffset.UtcNow;
+        var initial = await repository.UpsertMcpServerAsync(new McpServerConfigRecord(
+            "local-tools",
+            "Local tools",
+            McpTransportKind.Stdio,
+            "{\"command\":\"node\",\"arguments\":[\"server.js\"]}",
+            new Dictionary<string, string>(),
+            null,
+            true,
+            1,
+            [],
+            McpServerHealthStatus.Unknown,
+            null,
+            null,
+            now,
+            now));
+
+        var recorded = await repository.UpdateMcpServerHealthAsync(
+            initial.Id,
+            initial.ConfigRevision,
+            McpServerHealthStatus.Ready,
+            null,
+            ["read_project"],
+            now.AddMinutes(1));
+
+        var observed = await repository.GetMcpServerAsync(initial.Id);
+        recorded.Should().BeTrue();
+        observed!.LastStatus.Should().Be(McpServerHealthStatus.Ready);
+        observed.DiscoveredTools.Should().Equal("read_project");
+        observed.LastCheckedAtUtc.Should().Be(now.AddMinutes(1));
+        observed.SettingsJson.Should().Be(initial.SettingsJson);
+        observed.ConfigRevision.Should().Be(initial.ConfigRevision);
+
+        var reconfigured = await repository.UpsertMcpServerAsync(observed with
+        {
+            SettingsJson = "{\"command\":\"node\",\"arguments\":[\"server-v2.js\"]}"
+        });
+        reconfigured.ConfigRevision.Should().Be(initial.ConfigRevision + 1);
+
+        var stale = await repository.UpdateMcpServerHealthAsync(
+            initial.Id,
+            initial.ConfigRevision,
+            McpServerHealthStatus.Degraded,
+            "stale observation",
+            [],
+            now.AddMinutes(2));
+
+        var untouched = await repository.GetMcpServerAsync(initial.Id);
+        stale.Should().BeFalse();
+        untouched!.LastStatus.Should().Be(McpServerHealthStatus.Ready);
+        untouched.LastError.Should().BeNull();
+        untouched.SettingsJson.Should().Be(reconfigured.SettingsJson);
+    }
+
+    [Fact]
     public async Task Initialize_migrates_v21_data_and_adds_extension_schema_without_losing_rows()
     {
         var storagePaths = CreateStoragePaths();

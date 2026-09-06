@@ -263,6 +263,89 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         manager.ReleasedLeaseCount.Should().Be(1);
     }
 
+    [Fact]
+    public async Task ResolveAsync_connects_independent_mcp_servers_with_bounded_parallelism()
+    {
+        var serverIds = Enumerable.Range(1, 6).Select(index => $"server{index}").ToArray();
+        var servers = new McpRepository(serverIds.Select(CreateMcpRecord).ToArray());
+        var manager = new ConcurrencyTrackingMcpClientManager();
+        var resolver = CreateResolver(new PackageRepository([]), CreateMcpSource(servers, manager));
+        var request = CreateRequest([], "plain prompt", mcpServerIds: serverIds);
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        manager.PeakConcurrency.Should().Be(McpCapabilitySource.MaximumConcurrentServers);
+        lease.Diagnostics.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_a_late_resolution_failure_releases_every_acquired_mcp_lease()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var brokenPluginRoot = Path.Combine(_rootPath, "plugins", "broken", "versions", "v1");
+        Directory.CreateDirectory(brokenPluginRoot);
+        await File.WriteAllTextAsync(Path.Combine(brokenPluginRoot, "plugin.json"), "{ not json");
+        var brokenPlugin = new ExtensionPackageRecord(
+            ExtensionKind.Plugin, "broken", "Broken", "1.0.0", "",
+            brokenPluginRoot,
+            "sha256:broken", "{ not json", null, true, "[]", now, now, now);
+        var servers = new McpRepository([CreateMcpRecord("one"), CreateMcpRecord("two")]);
+        var manager = new RecordingMcpClientManager(string.Empty);
+        var resolver = CreateResolver(new PackageRepository([brokenPlugin]), CreateMcpSource(servers, manager));
+        var baseRequest = CreateRequest([], "subagent task", mcpServerIds: ["one", "two"]);
+        var request = baseRequest with
+        {
+            Agent = baseRequest.Agent with { PluginIds = ["broken"] },
+            ExecutionContext = new DirectTurnExecutionContext(
+                DirectTurnOrigin.Subagent,
+                new DirectCapabilityCeiling(
+                    AgentRuntimeDefinition.SystemToolPolicy,
+                    [new DirectExtensionCapability("broken", "1.0.0", "sha256:broken")],
+                    [],
+                    [new DirectMcpCapability("one", 1), new DirectMcpCapability("two", 1)],
+                    []),
+                null)
+        };
+
+        var action = () => resolver.ResolveAsync(request);
+
+        // The MCP servers connect first; only the post-resolution required-capability check fails.
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*Required Plugin 'broken' could not be loaded*");
+        manager.ReleasedLeaseCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_mcp_health_notifications_keep_cached_skill_content()
+    {
+        var package = await CreatePackageAsync("cached-skill", true);
+        using var cache = new CapabilityContentCache();
+        var manifestPath = ExtensionInstallation.SkillManifestPath(package);
+        var reads = 0;
+        async Task<SelfClaw.Infrastructure.Extensions.Skills.Models.SkillPackageMetadata> ReadAsync(CancellationToken token)
+        {
+            reads++;
+            return await new SkillPackageReader(CreateLimits()).ReadAsync(manifestPath, token);
+        }
+
+        var metadata = await cache.GetSkillMetadataAsync(package, manifestPath, ReadAsync, CancellationToken.None);
+        var notifier = new ExtensionStateChangeNotifier();
+        var servers = new McpRepository([CreateMcpRecord("healthy")]);
+        var resolver = CreateResolver(new PackageRepository([package]),
+            CreateMcpSource(servers, new RecordingMcpClientManager(string.Empty), notifier), contentCache: cache);
+        var request = CreateRequest([package.Id], "[/cached-skill]", mcpServerIds: ["healthy"]);
+
+        await using var first = await resolver.ResolveAsync(request);
+        await using var second = await resolver.ResolveAsync(request);
+        var afterHealth = await cache.GetSkillMetadataAsync(package, manifestPath, ReadAsync, CancellationToken.None);
+
+        notifier.CurrentRevision.Should().Be(2);
+        first.Diagnostics.Should().NotContain(item => item.Contains("skipped"));
+        second.Diagnostics.Should().NotContain(item => item.Contains("skipped"));
+        afterHealth.Should().BeSameAs(metadata);
+        reads.Should().Be(1);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_rootPath))
@@ -285,20 +368,24 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         IExtensionPackageRepository repository,
         McpCapabilitySource mcpSource,
         PluginManifestReader? pluginManifestReader = null,
-        PluginVersionLeaseManager? pluginVersionLeaseManager = null)
+        PluginVersionLeaseManager? pluginVersionLeaseManager = null,
+        CapabilityContentCache? contentCache = null)
     {
         var limits = CreateLimits();
+        contentCache ??= new CapabilityContentCache();
         return new DirectTurnCapabilityResolver(
             new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
             repository,
             new SkillCapabilitySource(
                 new SkillPackageReader(limits),
                 new SkillTokenParser(),
-                new SkillRuntimeToolset()),
+                new SkillRuntimeToolset(),
+                contentCache),
             new PluginCapabilitySource(
                 pluginManifestReader ?? new PluginManifestReader(limits),
                 new SkillPackageReader(limits),
-                pluginVersionLeaseManager ?? new PluginVersionLeaseManager()),
+                pluginVersionLeaseManager ?? new PluginVersionLeaseManager(),
+                contentCache),
             mcpSource,
             new SelfClaw.Infrastructure.Agents.Subagents.Runtime.SubagentCapabilitySource(null));
     }
@@ -515,6 +602,32 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             return Task.FromResult(server);
         }
 
+        public Task<bool> UpdateMcpServerHealthAsync(
+            string serverId,
+            long expectedConfigRevision,
+            McpServerHealthStatus status,
+            string? error,
+            IReadOnlyList<string> discoveredTools,
+            DateTimeOffset checkedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Records.TryGetValue(serverId, out var existing) ||
+                existing.ConfigRevision != expectedConfigRevision)
+            {
+                return Task.FromResult(false);
+            }
+
+            Records[serverId] = existing with
+            {
+                DiscoveredTools = discoveredTools,
+                LastStatus = status,
+                LastError = error,
+                LastCheckedAtUtc = checkedAtUtc,
+                UpdatedAtUtc = checkedAtUtc
+            };
+            return Task.FromResult(true);
+        }
+
         public Task SetMcpServerEnabledAsync(
             string id,
             bool enabled,
@@ -550,6 +663,41 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
                     ReleasedLeaseCount++;
                     return ValueTask.CompletedTask;
                 }));
+
+        public Task<McpHealthResult> TestAsync(
+            ResolvedMcpServerConfiguration configuration,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task DrainAsync(string serverId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
+    private sealed class ConcurrencyTrackingMcpClientManager : IMcpClientManager
+    {
+        private readonly object _sync = new();
+        private int _inFlight;
+        private int _peak;
+
+        public int PeakConcurrency { get { lock (_sync) return _peak; } }
+
+        public async Task<McpClientLease> AcquireAsync(
+            ResolvedMcpServerConfiguration configuration,
+            CancellationToken cancellationToken = default)
+        {
+            var current = Interlocked.Increment(ref _inFlight);
+            lock (_sync)
+            {
+                if (current > _peak)
+                {
+                    _peak = current;
+                }
+            }
+
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            Interlocked.Decrement(ref _inFlight);
+            return new McpClientLease([], () => ValueTask.CompletedTask);
+        }
 
         public Task<McpHealthResult> TestAsync(
             ResolvedMcpServerConfiguration configuration,

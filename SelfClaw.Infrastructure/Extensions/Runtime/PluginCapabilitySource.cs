@@ -19,23 +19,26 @@ internal sealed class PluginCapabilitySource
     private readonly PluginManifestReader _manifestReader;
     private readonly SkillPackageReader _skillPackageReader;
     private readonly IPluginVersionLeaseManager _versionLeaseManager;
+    private readonly CapabilityContentCache _contentCache;
 
     public PluginCapabilitySource(
         PluginManifestReader manifestReader,
         SkillPackageReader skillPackageReader,
-        IPluginVersionLeaseManager versionLeaseManager)
+        IPluginVersionLeaseManager versionLeaseManager,
+        CapabilityContentCache contentCache)
     {
         _manifestReader = manifestReader;
         _skillPackageReader = skillPackageReader;
         _versionLeaseManager = versionLeaseManager;
+        _contentCache = contentCache;
     }
 
     public async Task<PluginCapabilities> ResolveAsync(
         AgentRuntimeDefinition agent,
         IReadOnlyList<ExtensionPackageRecord> packages,
         IReadOnlyDictionary<string, ExtensionPackageRecord> effectiveStandaloneSkills,
+        DirectTurnLeaseScope leases,
         TurnDiagnostics diagnostics,
-        ICollection<PluginVersionLease> pluginLeases,
         CancellationToken cancellationToken)
     {
         if (agent.PluginIds.Count == 0)
@@ -60,8 +63,11 @@ internal sealed class PluginCapabilitySource
                     throw new InvalidDataException("installation directory is missing");
                 }
 
-                var manifest = await _manifestReader.ReadAsync(
-                        ExtensionInstallation.PluginManifestPath(plugin),
+                var manifest = await _contentCache.GetManifestAsync(
+                        plugin,
+                        token => _manifestReader.ReadAsync(
+                            ExtensionInstallation.PluginManifestPath(plugin),
+                            token),
                         cancellationToken)
                     .ConfigureAwait(false);
                 if (!string.Equals(manifest.Id, plugin.Id, StringComparison.Ordinal))
@@ -84,8 +90,12 @@ internal sealed class PluginCapabilitySource
                 string? instructionSection = null;
                 if (manifest.Contributions.DirectInstructions is not null)
                 {
-                    var content = await File.ReadAllTextAsync(
-                            Path.Combine(plugin.InstallPath, manifest.Contributions.DirectInstructions),
+                    var content = await _contentCache.GetInstructionBodyAsync(
+                            plugin,
+                            manifest.Contributions.DirectInstructions,
+                            token => File.ReadAllTextAsync(
+                                Path.Combine(plugin.InstallPath, manifest.Contributions.DirectInstructions),
+                                token),
                             cancellationToken)
                         .ConfigureAwait(false);
                     instructionSection = CapabilitySections.Plugin(plugin.Id, content);
@@ -120,8 +130,12 @@ internal sealed class PluginCapabilitySource
                     skills.Add(contributedSkill.Id, contributedSkill);
                 }
 
-                pluginLeases.Add(versionLease);
-                versionLease = null;
+                // The scope owns the lease once the plugin contributed; until then the local finally
+                // releases it when this plugin fails and degrades out of the turn.
+                if (leases.Add(versionLease))
+                {
+                    versionLease = null;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -152,8 +166,12 @@ internal sealed class PluginCapabilitySource
         foreach (var contribution in manifest.Contributions.Skills.OrderBy(skill => skill.Id, StringComparer.Ordinal))
         {
             var root = Path.Combine(plugin.InstallPath, contribution.Path);
-            var metadata = await _skillPackageReader.ReadAsync(
-                    Path.Combine(root, ExtensionInstallation.SkillManifestName),
+            var metadata = await _contentCache.GetSkillMetadataAsync(
+                    plugin,
+                    ExtensionInstallation.SkillManifestName + "/" + contribution.Id,
+                    token => _skillPackageReader.ReadAsync(
+                        Path.Combine(root, ExtensionInstallation.SkillManifestName),
+                        token),
                     cancellationToken)
                 .ConfigureAwait(false);
             skills.Add(new ResolvedSkill(

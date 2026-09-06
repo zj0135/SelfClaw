@@ -11,6 +11,7 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
     internal const int DefaultTimeoutSeconds = 100;
 
     private readonly ConcurrentDictionary<ClientCacheKey, Lazy<HttpClient>> _clients = new();
+    private readonly ConcurrentDictionary<string, Lazy<HttpMessageHandler>> _sharedHandlers = new();
     private readonly Func<HttpMessageHandler> _primaryHandlerFactory;
     private bool _disposed;
 
@@ -33,7 +34,25 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
     public TimeSpan GetNonStreamingTimeout(AiProviderConnection connection)
         => ReadConfiguration(connection).Timeout;
 
+    /// <summary>
+    /// Returns the shared streaming handler for a connection: every caller gets the same handler and
+    /// therefore the same connection pool. A caller that builds its own <see cref="HttpClient"/> on top
+    /// must construct it with <c>disposeHandler: false</c> — this provider owns the handler's lifetime.
+    /// </summary>
+    internal HttpMessageHandler GetSharedStreamingHandler(AiProviderConnection connection)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var configuration = ReadConfiguration(connection);
+        return _sharedHandlers.GetOrAdd(
+            configuration.Fingerprint,
+            _ => new Lazy<HttpMessageHandler>(
+                () => CreateHandler(configuration),
+                LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+    }
+
     internal int CachedClientCount => _clients.Count;
+
+    internal int CachedSharedHandlerCount => _sharedHandlers.Count;
 
     private HttpClient GetClient(AiProviderConnection connection, bool streaming)
     {
@@ -49,6 +68,13 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
     }
 
     private HttpClient CreateClient(Uri endpoint, ClientConfiguration configuration, bool streaming)
+        => new(CreateHandler(configuration), disposeHandler: true)
+        {
+            BaseAddress = endpoint,
+            Timeout = streaming ? Timeout.InfiniteTimeSpan : configuration.Timeout
+        };
+
+    private HttpMessageHandler CreateHandler(ClientConfiguration configuration)
     {
         HttpMessageHandler handler = _primaryHandlerFactory();
         if (configuration.ExtraHeaders.Count > 0)
@@ -56,11 +82,7 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
             handler = new ExtraHeadersHandler(configuration.ExtraHeaders) { InnerHandler = handler };
         }
 
-        return new HttpClient(handler, disposeHandler: true)
-        {
-            BaseAddress = endpoint,
-            Timeout = streaming ? Timeout.InfiniteTimeSpan : configuration.Timeout
-        };
+        return handler;
     }
 
     private static ClientConfiguration ReadConfiguration(AiProviderConnection connection)
@@ -162,6 +184,15 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
         }
 
         _clients.Clear();
+        foreach (var handler in _sharedHandlers.Values)
+        {
+            if (handler.IsValueCreated)
+            {
+                handler.Value.Dispose();
+            }
+        }
+
+        _sharedHandlers.Clear();
     }
 
     private sealed record ClientConfiguration(

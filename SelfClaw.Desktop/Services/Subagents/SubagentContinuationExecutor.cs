@@ -233,7 +233,8 @@ internal sealed class SubagentContinuationExecutor
             new DirectTurnExecutionContext(
                 DirectTurnOrigin.Continuation,
                 parent.CapabilityCeiling,
-                batch));
+                batch),
+            runtimeState.ToolRuns.ToArray());
     }
 
     private async Task RenewLeaseAsync(

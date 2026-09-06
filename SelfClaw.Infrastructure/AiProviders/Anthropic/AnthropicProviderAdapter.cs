@@ -1,8 +1,10 @@
 using Anthropic;
+using Anthropic.Core;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.AiProviders.Anthropic;
@@ -29,18 +31,21 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IServiceProvider? _serviceProvider;
     private readonly AnthropicModelListClient _modelListClient;
+    private readonly AiProviderHttpClientProvider _httpClientProvider;
 
     public AnthropicProviderAdapter(
         ILogger<AnthropicProviderAdapter>? logger = null,
         ILoggerFactory? loggerFactory = null,
         IServiceProvider? serviceProvider = null,
-        AnthropicModelListClient? modelListClient = null)
+        AnthropicModelListClient? modelListClient = null,
+        AiProviderHttpClientProvider? httpClientProvider = null)
     {
         _logger = logger ?? NullLogger<AnthropicProviderAdapter>.Instance;
         _loggerFactory = loggerFactory;
         _serviceProvider = serviceProvider;
+        _httpClientProvider = httpClientProvider ?? new AiProviderHttpClientProvider();
         _modelListClient = modelListClient
-            ?? new AnthropicModelListClient(new Http.AiProviderHttpClientProvider());
+            ?? new AnthropicModelListClient(_httpClientProvider);
     }
 
     public AiProviderKind ProviderKind => AiProviderKind.Anthropic;
@@ -114,15 +119,25 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
         return AiChatOptions.ResolveMaxOutputTokens(request, configured);
     }
 
-    private static AnthropicClient CreateAnthropicClient(AiProviderClientRequest request)
+    /// <summary>
+    /// Builds the per-turn Anthropic client on top of the shared pooled handler. The SDK's
+    /// <c>AnthropicClient.Dispose</c> disposes whatever HttpClient it was handed, so the client gets a
+    /// short-lived wrapper over the shared handler (<c>disposeHandler: false</c>): disposing a turn's
+    /// client never tears down the pooled connections the next turn reuses.
+    /// </summary>
+    internal AnthropicClient CreateAnthropicClient(AiProviderClientRequest request)
     {
-        var client = new AnthropicClient
+        var options = default(ClientOptions);
+        options.ApiKey = ResolveApiKey(request);
+        options.BaseUrl = request.Connection.Endpoint.AbsoluteUri;
+        options.HttpClient = new HttpClient(
+            _httpClientProvider.GetSharedStreamingHandler(request.Connection),
+            disposeHandler: false)
         {
-            ApiKey = ResolveApiKey(request),
-            BaseUrl = request.Connection.Endpoint.AbsoluteUri
+            Timeout = Timeout.InfiniteTimeSpan
         };
 
-        return client;
+        return new AnthropicClient(options);
     }
 
     private static string ResolveApiKey(AiProviderClientRequest request)

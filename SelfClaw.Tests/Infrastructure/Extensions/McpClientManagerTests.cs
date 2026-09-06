@@ -76,6 +76,22 @@ public sealed class McpClientManagerTests
     }
 
     [Fact]
+    public async Task AcquireAsync_WorkspaceChange_DoesNotDrainAnotherWorkspaceEntry()
+    {
+        var factory = new FakeConnectionFactory();
+        await using var manager = new McpClientManager(factory, TimeSpan.FromMinutes(1));
+        var firstWorkspace = await manager.AcquireAsync(CreateConfiguration(workspacePath: "C:\\first"));
+        await firstWorkspace.DisposeAsync();
+
+        await using var secondWorkspace = await manager.AcquireAsync(CreateConfiguration(workspacePath: "C:\\second"));
+        var backToFirst = await manager.AcquireAsync(CreateConfiguration(workspacePath: "C:\\first"));
+        await backToFirst.DisposeAsync();
+
+        factory.ConnectCount.Should().Be(2);
+        factory.Connections[0].DisposeCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task ReleaseAsync_AfterIdleTimeout_DisposesConnection()
     {
         var factory = new FakeConnectionFactory();

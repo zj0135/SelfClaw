@@ -20,11 +20,35 @@ internal static class AiChatOptions
     public const string MaxOutputTokensKey = "max_output_tokens";
 
     /// <summary>
+    /// Model option declaring the model's context window. It drives the Direct prompt history budget:
+    /// history is trimmed to leave room for the system prompt and the output reserve. When it is
+    /// unset, the full history is sent.
+    /// </summary>
+    public const string ContextWindowTokensKey = "context_window_tokens";
+
+    /// <summary>
     /// Display metadata written by model-list refresh from the provider's own catalog. It holds
     /// the model's true output ceiling, which is a far better default than whatever the provider
     /// SDK falls back to.
     /// </summary>
     private const string CatalogMaxOutputTokensKey = "display.maxOutputTokens";
+
+    /// <summary>
+    /// Reads the profile's declared context window; null when unset. A mistyped value is treated as
+    /// unset here because this reader runs before logging is bound to the turn's adapter.
+    /// </summary>
+    public static int? ResolveContextWindowTokens(AiModelProfile profile)
+    {
+        if (profile.ModelOptions.TryGetValue(ContextWindowTokensKey, out var element) &&
+            element.ValueKind == JsonValueKind.Number &&
+            element.TryGetInt32(out var tokens) &&
+            tokens > 0)
+        {
+            return tokens;
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Resolves the output-token ceiling for a turn: an explicitly configured value wins, otherwise

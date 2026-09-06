@@ -128,7 +128,6 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
         var autoScroll = _pendingAutoScroll;
         _streamingPublishPending = false;
         _pendingAutoScroll = false;
-        _lastStreamingPublishAtUtc = DateTimeOffset.UtcNow;
         Publish(CreateRequest(autoScroll));
     }
 
@@ -151,5 +150,9 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
         {
             _hostChannel.PublishTranscript(state);
         }
+
+        // Every publish - coalesced or immediate - starts the next coalescing window, so an
+        // immediate first-delta publish cannot cascade into a burst of immediate publishes.
+        _lastStreamingPublishAtUtc = DateTimeOffset.UtcNow;
     }
 }

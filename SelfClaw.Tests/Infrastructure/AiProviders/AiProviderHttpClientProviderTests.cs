@@ -102,6 +102,44 @@ public sealed class AiProviderHttpClientProviderTests
             .Be(TimeSpan.FromSeconds(AiProviderHttpClientProvider.DefaultTimeoutSeconds));
     }
 
+    [Fact]
+    public async Task Shared_streaming_handler_is_reused_and_survives_a_turn_client_disposal()
+    {
+        using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
+        var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{}");
+
+        var handler = provider.GetSharedStreamingHandler(connection);
+
+        provider.GetSharedStreamingHandler(CreateConnection(
+            new Uri("https://api.example.test/v1/"),
+            "{\"extra_headers\":{\"X-Title\":\"SelfClaw\"}}")).Should().NotBeSameAs(handler);
+        provider.GetSharedStreamingHandler(connection).Should().BeSameAs(handler);
+        provider.CachedSharedHandlerCount.Should().Be(2);
+
+        var turnClient = new HttpClient(handler, disposeHandler: false)
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+        turnClient.Dispose();
+        using var followUpClient = new HttpClient(handler);
+        using var response = await followUpClient.SendAsync(
+            new HttpRequestMessage(HttpMethod.Get, "https://api.example.test/v1/models"));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public void Provider_disposal_disposes_the_shared_handlers()
+    {
+        var handlerFactory = new TrackingHandlerFactory();
+        var provider = new AiProviderHttpClientProvider(handlerFactory.Create);
+
+        var handler = (TrackingHandler)provider.GetSharedStreamingHandler(
+            CreateConnection(new Uri("https://api.example.test/v1/"), "{}"));
+
+        provider.Dispose();
+        handler.DisposeCount.Should().Be(1);
+    }
+
     [Theory]
     [InlineData("{\"timeout_seconds\":0}", "*timeout_seconds*")]
     [InlineData("{\"timeout_seconds\":3601}", "*timeout_seconds*")]
@@ -172,6 +210,27 @@ public sealed class AiProviderHttpClientProviderTests
             {
                 Content = new StringContent("{}")
             });
+        }
+    }
+
+    private sealed class TrackingHandlerFactory
+    {
+        public TrackingHandler Create() => new();
+    }
+
+    private sealed class TrackingHandler : HttpMessageHandler
+    {
+        public int DisposeCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") });
+
+        protected override void Dispose(bool disposing)
+        {
+            DisposeCount++;
+            base.Dispose(disposing);
         }
     }
 

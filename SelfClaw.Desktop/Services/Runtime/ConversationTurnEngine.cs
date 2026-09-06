@@ -397,6 +397,7 @@ internal sealed class ConversationTurnEngine : IDisposable
             modelProfileId,
             request.ToolPermissionMode,
             _toolApprovalHandler,
-            new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));
+            new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null),
+            admission.RuntimeState.ToolRuns.ToArray());
     }
 }

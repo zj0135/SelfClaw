@@ -45,12 +45,13 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
         {
             ThrowIfDisposed();
             var key = CreatePoolKey(configuration);
-            entriesToDispose = MarkOlderEntriesDraining(configuration.Id, key);
+            entriesToDispose = MarkOlderEntriesDraining(configuration.Id, configuration.ConfigRevision);
             if (!_entries.TryGetValue(key, out entry!))
             {
                 entry = new PoolEntry(
                     key,
                     configuration.Id,
+                    configuration.ConfigRevision,
                     ConnectAsync(configuration),
                     DisposeIdleEntryAsync);
                 _entries.Add(key, entry);
@@ -177,12 +178,17 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
         }
     }
 
-    private List<PoolEntry> MarkOlderEntriesDraining(string serverId, string currentKey)
+    /// <summary>
+    /// Marks entries of superseded configurations as draining. Only a configuration revision change
+    /// invalidates a connection: the workspace path is part of the pool key but a different workspace's
+    /// entry is still valid, so switching workspaces keeps its idle connections until idle expiry.
+    /// </summary>
+    private List<PoolEntry> MarkOlderEntriesDraining(string serverId, long currentRevision)
     {
         var entriesToDispose = new List<PoolEntry>();
         foreach (var entry in _entries.Values.Where(entry =>
                      string.Equals(entry.ServerId, serverId, StringComparison.Ordinal) &&
-                     !string.Equals(entry.Key, currentKey, StringComparison.Ordinal)))
+                     entry.ConfigRevision != currentRevision))
         {
             entry.MarkDraining();
             if (entry.ReferenceCount == 0)
@@ -327,17 +333,20 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
         public PoolEntry(
             string key,
             string serverId,
+            long configRevision,
             Task<IMcpClientConnection> connectionTask,
             Func<PoolEntry, Task> idleCallback)
         {
             Key = key;
             ServerId = serverId;
+            ConfigRevision = configRevision;
             ConnectionTask = connectionTask;
             _idleCallback = idleCallback;
         }
 
         public string Key { get; }
         public string ServerId { get; }
+        public long ConfigRevision { get; }
         public Task<IMcpClientConnection> ConnectionTask { get; }
         public int ReferenceCount { get; private set; }
         public bool IsDraining { get; private set; }

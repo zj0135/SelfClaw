@@ -112,6 +112,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<McpClientManager>());
         services.AddSingleton<IExtensionSettingsService, ExtensionSettingsService>();
         services.AddSingleton<DirectPromptComposer>();
+        services.AddSingleton<CapabilityContentCache>();
         services.AddSingleton<SkillCapabilitySource>();
         services.AddSingleton<PluginCapabilitySource>();
         services.AddSingleton<McpCapabilitySource>();
@@ -138,7 +139,8 @@ public static class ServiceCollectionExtensions
                 serviceProvider.GetService<ILogger<AnthropicProviderAdapter>>(),
                 serviceProvider.GetService<ILoggerFactory>(),
                 serviceProvider,
-                serviceProvider.GetRequiredService<AnthropicModelListClient>()));
+                serviceProvider.GetRequiredService<AnthropicModelListClient>(),
+                serviceProvider.GetRequiredService<AiProviderHttpClientProvider>()));
         services.AddSingleton<IAiProviderAdapter, OllamaProviderAdapter>();
         services.AddSingleton<IAiProviderRegistry, AiProviderRegistry>();
         services.AddSingleton<IAiProviderSettingsService, AiProviderSettingsService>();

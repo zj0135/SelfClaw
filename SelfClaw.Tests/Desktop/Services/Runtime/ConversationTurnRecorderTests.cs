@@ -77,6 +77,36 @@ public sealed class ConversationTurnRecorderTests
     }
 
     [Fact]
+    public async Task ApplyEventAsync_keeps_whitespace_only_text_deltas_and_ignores_empty_ones()
+    {
+        var context = CreateContext();
+
+        context.Recorder.BeginTurn(context.Session, context.Turn);
+        await context.ApplyAsync(new AssistantTextDeltaEvent("text", "line one"));
+        await context.ApplyAsync(new AssistantTextDeltaEvent("text", "\n  "));
+        await context.ApplyAsync(new AssistantTextDeltaEvent("text", string.Empty));
+        await context.ApplyAsync(new AssistantTextDeltaEvent("text", "line two"));
+
+        context.Session.Messages.Single().MarkdownContent.Should().Be("line one\n  line two");
+    }
+
+    [Fact]
+    public async Task ApplyEventAsync_publishes_the_first_visible_delta_immediately_and_coalesces_the_rest()
+    {
+        var context = CreateContext();
+        var immediates = new List<bool>();
+        context.Session.TranscriptChanged += immediates.Add;
+
+        context.Recorder.BeginTurn(context.Session, context.Turn);
+        await context.ApplyAsync(new RunStatusEvent(AgentRunStatus.Requesting));
+        await context.ApplyAsync(new AssistantTextDeltaEvent("text", "hello"));
+        await context.ApplyAsync(new AssistantTextDeltaEvent("text", " world"));
+        await context.ApplyAsync(new AssistantThinkingDeltaEvent("thinking", "hmm"));
+
+        immediates.Should().Equal(false, false, true, false, false);
+    }
+
+    [Fact]
     public async Task ApplyEventAsync_limits_tool_result_content_before_persistence()
     {
         var context = CreateContext();

@@ -1,8 +1,10 @@
+using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Anthropic;
+using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Tests.Infrastructure.AiProviders;
@@ -112,6 +114,34 @@ public sealed class AnthropicProviderAdapterTests
             .WithMessage("*api_key*");
     }
 
+    [Fact]
+    public async Task CreateAnthropicClient_wraps_the_shared_pooled_handler_per_turn()
+    {
+        using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
+        var adapter = new AnthropicProviderAdapter(httpClientProvider: provider);
+        var request = CreateRequest();
+
+        var first = adapter.CreateAnthropicClient(request);
+        var second = adapter.CreateAnthropicClient(request);
+        try
+        {
+            first.HttpClient.Should().NotBeSameAs(second.HttpClient);
+            first.HttpClient.Timeout.Should().Be(Timeout.InfiniteTimeSpan);
+            provider.CachedSharedHandlerCount.Should().Be(1);
+        }
+        finally
+        {
+            first.Dispose();
+            second.Dispose();
+        }
+
+        // Disposing the SDK client disposes only the per-turn wrapper; the pooled handler stays usable.
+        using var followUpClient = new HttpClient(provider.GetSharedStreamingHandler(request.Connection));
+        using var response = await followUpClient.SendAsync(
+            new HttpRequestMessage(HttpMethod.Get, "https://api.anthropic.com/v1/models"));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
     private static AiProviderClientRequest CreateRequest(
         AiProviderApiFormat apiFormat = AiProviderApiFormat.AnthropicMessages,
         IReadOnlyDictionary<string, string>? secrets = null,
@@ -167,4 +197,15 @@ public sealed class AnthropicProviderAdapterTests
 
     private static IReadOnlyDictionary<string, JsonElement> ReadJsonObject(string json)
         => JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json) ?? [];
+
+    private sealed class RecordingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}")
+            });
+    }
 }

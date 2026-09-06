@@ -225,6 +225,35 @@ ON CONFLICT(id) DO UPDATE SET
         return stored;
     }
 
+    public async Task<bool> UpdateMcpServerHealthAsync(
+        string serverId,
+        long expectedConfigRevision,
+        McpServerHealthStatus status,
+        string? error,
+        IReadOnlyList<string> discoveredTools,
+        DateTimeOffset checkedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+UPDATE mcp_server_configs SET
+    discovered_tools_json = $discoveredToolsJson,
+    last_status = $lastStatus,
+    last_error = $lastError,
+    last_checked_at_utc = $lastCheckedAt,
+    updated_at_utc = $updatedAt
+WHERE id = $id AND config_revision = $revision;";
+        command.Parameters.AddWithValue("$discoveredToolsJson", JsonSerializer.Serialize(discoveredTools));
+        command.Parameters.AddWithValue("$lastStatus", (int)status);
+        command.Parameters.AddWithValue("$lastError", error ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$lastCheckedAt", checkedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$updatedAt", checkedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$id", serverId);
+        command.Parameters.AddWithValue("$revision", expectedConfigRevision);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
+    }
+
     public async Task SetMcpServerEnabledAsync(
         string id,
         bool enabled,

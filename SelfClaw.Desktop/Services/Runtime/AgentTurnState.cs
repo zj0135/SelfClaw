@@ -34,6 +34,12 @@ internal sealed class AgentTurnState
 
     public bool MessageCreated { get; set; }
 
+    /// <summary>
+    /// Whether any text or thinking content has streamed for this turn. The first visible delta
+    /// publishes immediately so the user sees output without waiting out the coalescing interval.
+    /// </summary>
+    public bool HasVisibleDelta { get; set; }
+
     public bool Completed { get; set; }
 
     public RecordedTurnFinalizationRequest? PendingFinalization { get; set; }

@@ -10,11 +10,14 @@ namespace SelfClaw.Infrastructure.Extensions.Runtime;
 
 /// <summary>
 /// Connects the Agent's bound MCP servers for one turn and adds their tools to the turn's tool set.
-/// A single server that cannot be configured or connected degrades this turn; the returned leases keep
-/// the connections alive until the capability lease is disposed.
+/// A single server that cannot be configured or connected degrades this turn; every lease the source
+/// acquires is handed to the turn's <see cref="DirectTurnLeaseScope"/>, which owns its lifetime.
 /// </summary>
 internal sealed class McpCapabilitySource
 {
+    /// <summary>Independent servers connect concurrently, bounded so a turn cannot stampede processes.</summary>
+    internal const int MaximumConcurrentServers = 4;
+
     private readonly IMcpServerRepository _serverRepository;
     private readonly McpConfigurationResolver _configurationResolver;
     private readonly IMcpClientManager _clientManager;
@@ -39,13 +42,14 @@ internal sealed class McpCapabilitySource
         DirectChatTurnRequest request,
         ICollection<AITool> tools,
         IDictionary<string, DirectToolDescriptor> descriptors,
+        DirectTurnLeaseScope leases,
         TurnDiagnostics diagnostics,
         IReadOnlyDictionary<string, string> effectivePluginRoots,
         CancellationToken cancellationToken)
     {
         if (request.Agent.McpServerIds.Count == 0 && effectivePluginRoots.Count == 0)
         {
-            return new McpCapabilities([], []);
+            return new McpCapabilities([]);
         }
 
         var servers = await _serverRepository.ListMcpServersAsync(cancellationToken).ConfigureAwait(false);
@@ -57,34 +61,26 @@ internal sealed class McpCapabilitySource
                              IsAllowedByCapturedCeiling(request, server, diagnostics))
             .OrderBy(server => server.Id, StringComparer.Ordinal)
             .ToArray();
-        var leases = new List<McpClientLease>();
-        var capabilities = new List<DirectMcpCapability>();
-        try
-        {
-            foreach (var server in effectiveServers)
-            {
-                var lease = await AddServerToolsAsync(
-                        server,
-                        request,
-                        tools,
-                        descriptors,
-                        diagnostics,
-                        effectivePluginRoots,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                if (lease is not null)
-                {
-                    leases.Add(lease);
-                    capabilities.Add(new DirectMcpCapability(server.Id, server.ConfigRevision));
-                }
-            }
 
-            return new McpCapabilities(leases, capabilities);
-        }
-        catch
+        var resolutions = await ResolveServersAsync(
+                effectiveServers,
+                request,
+                effectivePluginRoots,
+                leases,
+                cancellationToken)
+            .ConfigureAwait(false);
+        MergeResolutions(resolutions, tools, descriptors, diagnostics, _stateChangeNotifier);
+        return new McpCapabilities(resolutions
+            .Where(resolution => resolution.Lease is not null)
+            .Select(resolution => new DirectMcpCapability(resolution.Server.Id, resolution.Server.ConfigRevision))
+            .ToArray());
+    }
+
+    public static async ValueTask DisposeLeasesAsync(IReadOnlyList<McpClientLease> leases)
+    {
+        for (var index = leases.Count - 1; index >= 0; index--)
         {
-            await DisposeLeasesAsync(leases).ConfigureAwait(false);
-            throw;
+            await leases[index].DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -114,27 +110,100 @@ internal sealed class McpCapabilitySource
         return false;
     }
 
-    public static async ValueTask DisposeLeasesAsync(IReadOnlyList<McpClientLease> leases)
+    /// <summary>
+    /// Resolves, connects to, and discovers the tools of the independent servers concurrently within a
+    /// bounded degree of parallelism. Each slot reports into its own buffer so the merge stays
+    /// deterministic; a lease is owned by the lease scope from the moment it exists, so cancellation
+    /// or failure disposes every completed connection exactly once.
+    /// </summary>
+    private async Task<McpServerResolution[]> ResolveServersAsync(
+        IReadOnlyList<McpServerConfigRecord> servers,
+        DirectChatTurnRequest request,
+        IReadOnlyDictionary<string, string> effectivePluginRoots,
+        DirectTurnLeaseScope leases,
+        CancellationToken cancellationToken)
     {
-        for (var index = leases.Count - 1; index >= 0; index--)
+        var resolutions = new McpServerResolution[servers.Count];
+        await Parallel.ForEachAsync(
+                servers.Select((server, index) => (server, index)),
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = MaximumConcurrentServers,
+                    CancellationToken = cancellationToken
+                },
+                async (item, token) =>
+                {
+                    resolutions[item.index] = await ResolveServerAsync(
+                            item.server,
+                            request,
+                            effectivePluginRoots,
+                            leases,
+                            token)
+                        .ConfigureAwait(false);
+                })
+            .ConfigureAwait(false);
+        return resolutions;
+    }
+
+    /// <summary>
+    /// Applies the buffered per-server results in server order. State change notifications also fire
+    /// here - serially, so subscribers observe the same event order they got before the connects ran
+    /// concurrently.
+    /// </summary>
+    private static void MergeResolutions(
+        McpServerResolution[] resolutions,
+        ICollection<AITool> tools,
+        IDictionary<string, DirectToolDescriptor> descriptors,
+        TurnDiagnostics diagnostics,
+        IExtensionStateChangeNotifier stateChangeNotifier)
+    {
+        foreach (var resolution in resolutions)
         {
-            await leases[index].DisposeAsync().ConfigureAwait(false);
+            foreach (var message in resolution.Messages)
+            {
+                diagnostics.Info(message);
+            }
+
+            foreach (var degradation in resolution.Degradations)
+            {
+                diagnostics.Degrade(degradation);
+            }
+
+            foreach (var tool in resolution.Tools)
+            {
+                tools.Add(tool);
+            }
+
+            foreach (var descriptor in resolution.Descriptors)
+            {
+                if (!descriptors.TryAdd(descriptor.ProviderName, descriptor))
+                {
+                    throw new InvalidDataException(
+                        $"MCP tool name collision for '{descriptor.ProviderName}'.");
+                }
+            }
+
+            if (resolution.HealthRecorded)
+            {
+                stateChangeNotifier.Advance();
+            }
         }
     }
 
     /// <summary>
-    /// Returns the acquired lease, or <c>null</c> when this server degraded out of the turn. The lease is
-    /// added to the caller's list before any tool is registered so a name collision still releases it.
+    /// Returns one server's resolution - with a lease when the server connected, or without one when it
+    /// degraded out of the turn. An exception after the lease was acquired propagates with the lease
+    /// owned by the lease scope.
     /// </summary>
-    private async Task<McpClientLease?> AddServerToolsAsync(
+    private async Task<McpServerResolution> ResolveServerAsync(
         McpServerConfigRecord server,
         DirectChatTurnRequest request,
-        ICollection<AITool> tools,
-        IDictionary<string, DirectToolDescriptor> descriptors,
-        TurnDiagnostics diagnostics,
         IReadOnlyDictionary<string, string> effectivePluginRoots,
+        DirectTurnLeaseScope leases,
         CancellationToken cancellationToken)
     {
+        var messages = new List<string>();
+        var degradations = new List<string>();
         var configuration = await _configurationResolver.ResolveAsync(
                 server,
                 request.WorkspaceRoot?.RootPath,
@@ -145,16 +214,16 @@ internal sealed class McpCapabilitySource
             .ConfigureAwait(false);
         if (!configuration.IsAvailable)
         {
-            diagnostics.Degrade($"MCP server '{server.Id}' was skipped: {configuration.UnavailableReason}");
-            await TryRecordHealthAsync(
+            degradations.Add($"MCP server '{server.Id}' was skipped: {configuration.UnavailableReason}");
+            var configHealthRecorded = await TryRecordHealthAsync(
                     server,
                     McpServerHealthStatus.NeedsConfiguration,
                     configuration.UnavailableReason,
                     [],
-                    diagnostics,
+                    messages,
                     cancellationToken)
                 .ConfigureAwait(false);
-            return null;
+            return new McpServerResolution(server, null, messages, degradations, healthRecorded: configHealthRecorded);
         }
 
         McpClientLease lease;
@@ -171,76 +240,81 @@ internal sealed class McpCapabilitySource
             // The connection failure text can carry endpoint and credential detail, so only a fixed
             // message reaches the model and the settings page.
             const string failure = "Connection or tool discovery failed.";
-            diagnostics.Degrade($"MCP server '{server.Id}' was skipped: {failure}");
-            await TryRecordHealthAsync(
+            degradations.Add($"MCP server '{server.Id}' was skipped: {failure}");
+            var failureHealthRecorded = await TryRecordHealthAsync(
                     server,
                     McpServerHealthStatus.Degraded,
                     failure,
                     [],
-                    diagnostics,
+                    messages,
                     cancellationToken)
                 .ConfigureAwait(false);
-            return null;
+            return new McpServerResolution(server, null, messages, degradations, healthRecorded: failureHealthRecorded);
         }
 
-        try
-        {
-            await TryRecordHealthAsync(
-                    server,
-                    McpServerHealthStatus.Ready,
-                    null,
-                    lease.Tools.Select(tool => tool.Name).ToArray(),
-                    diagnostics,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            foreach (var mcpTool in lease.Tools)
-            {
-                var (Tool, Descriptor) = _toolAdapter.Create(
-                    mcpTool,
-                    configuration,
-                    request.ConversationId,
-                    request.ToolPermissionMode,
-                    request.ToolApprovalHandler);
-                if (!descriptors.TryAdd(Descriptor.ProviderName, Descriptor))
-                {
-                    throw new InvalidDataException(
-                        $"MCP tool name collision for '{Descriptor.ProviderName}'.");
-                }
-
-                tools.Add(Tool);
-            }
-
-            return lease;
-        }
-        catch
+        // The scope owns the lease from here on: a later failure propagates and the scope's dispose
+        // releases this connection together with the rest of the turn's leases.
+        if (!leases.Add(lease))
         {
             await lease.DisposeAsync().ConfigureAwait(false);
-            throw;
+            throw new OperationCanceledException("Capability resolution was already torn down.");
         }
+
+        var healthRecorded = await TryRecordHealthAsync(
+                server,
+                McpServerHealthStatus.Ready,
+                null,
+                lease.Tools.Select(tool => tool.Name).ToArray(),
+                messages,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var tools = new List<AITool>();
+        var toolDescriptors = new List<DirectToolDescriptor>();
+        foreach (var mcpTool in lease.Tools)
+        {
+            var (Tool, Descriptor) = _toolAdapter.Create(
+                mcpTool,
+                configuration,
+                request.ConversationId,
+                request.ToolPermissionMode,
+                request.ToolApprovalHandler);
+            tools.Add(Tool);
+            toolDescriptors.Add(Descriptor);
+        }
+
+        return new McpServerResolution(
+            server,
+            lease,
+            messages,
+            degradations,
+            healthRecorded: healthRecorded,
+            tools,
+            toolDescriptors);
     }
 
-    private async Task TryRecordHealthAsync(
+    private async Task<bool> TryRecordHealthAsync(
         McpServerConfigRecord server,
         McpServerHealthStatus status,
         string? error,
         IReadOnlyList<string> tools,
-        TurnDiagnostics diagnostics,
+        ICollection<string> messages,
         CancellationToken cancellationToken)
     {
         try
         {
-            _ = await _serverRepository.UpsertMcpServerAsync(
-                    server with
-                    {
-                        DiscoveredTools = tools,
-                        LastStatus = status,
-                        LastError = error,
-                        LastCheckedAtUtc = DateTimeOffset.UtcNow,
-                        UpdatedAtUtc = DateTimeOffset.UtcNow
-                    },
+            // The observation is conditioned on the configuration revision it was taken against: a
+            // concurrent enable/disable or settings change makes it stale, and a stale observation
+            // must never overwrite that change. The caller notifies subscribers only for recorded
+            // observations, so the event order stays deterministic.
+            return await _serverRepository.UpdateMcpServerHealthAsync(
+                    server.Id,
+                    server.ConfigRevision,
+                    status,
+                    error,
+                    tools,
+                    DateTimeOffset.UtcNow,
                     cancellationToken)
                 .ConfigureAwait(false);
-            _stateChangeNotifier.Advance();
         }
         catch (OperationCanceledException)
         {
@@ -250,7 +324,27 @@ internal sealed class McpCapabilitySource
         {
             // Health is an observation about the turn, not part of it: failing to persist it must not
             // take down a server that actually connected.
-            diagnostics.Info($"MCP server '{server.Id}' health could not be persisted.");
+            messages.Add($"MCP server '{server.Id}' health could not be persisted.");
+            return false;
         }
+    }
+
+    /// <summary>One server's buffered result, merged in server order after all servers resolved.</summary>
+    private sealed class McpServerResolution(
+        McpServerConfigRecord server,
+        McpClientLease? lease,
+        List<string> messages,
+        List<string> degradations,
+        bool healthRecorded = false,
+        List<AITool>? tools = null,
+        List<DirectToolDescriptor>? descriptors = null)
+    {
+        public McpServerConfigRecord Server { get; } = server;
+        public McpClientLease? Lease { get; } = lease;
+        public bool HealthRecorded { get; } = healthRecorded;
+        public List<AITool> Tools { get; } = tools ?? [];
+        public List<DirectToolDescriptor> Descriptors { get; } = descriptors ?? [];
+        public List<string> Messages { get; } = messages;
+        public List<string> Degradations { get; } = degradations;
     }
 }

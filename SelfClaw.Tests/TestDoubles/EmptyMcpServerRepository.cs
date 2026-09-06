@@ -21,6 +21,16 @@ internal sealed class EmptyMcpServerRepository : IMcpServerRepository
         CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
 
+    public Task<bool> UpdateMcpServerHealthAsync(
+        string serverId,
+        long expectedConfigRevision,
+        McpServerHealthStatus status,
+        string? error,
+        IReadOnlyList<string> discoveredTools,
+        DateTimeOffset checkedAtUtc,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+
     public Task SetMcpServerEnabledAsync(
         string id,
         bool enabled,

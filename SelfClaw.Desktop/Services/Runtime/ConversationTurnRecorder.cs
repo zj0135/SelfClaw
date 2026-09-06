@@ -89,7 +89,7 @@ internal sealed class ConversationTurnRecorder
                 EnsureAssistantMessage(session, turn);
                 if (session.ApplyAssistantDelta(turn.TurnId, textDelta.Delta))
                 {
-                    session.RaiseTranscriptChanged(false);
+                    session.RaiseTranscriptChanged(immediate: TakeFirstVisibleDelta(turn));
                 }
 
                 break;
@@ -98,7 +98,7 @@ internal sealed class ConversationTurnRecorder
                 EnsureAssistantMessage(session, turn);
                 if (session.ApplyAssistantThinkingDelta(turn.TurnId, thinkingDelta.Delta))
                 {
-                    session.RaiseTranscriptChanged(false);
+                    session.RaiseTranscriptChanged(immediate: TakeFirstVisibleDelta(turn));
                 }
 
                 break;
@@ -159,6 +159,21 @@ internal sealed class ConversationTurnRecorder
         session.CompleteAssistantStream(turn.TurnId);
         var existing = session.Messages.First(item => item.Id == turn.TurnId);
         return FinalizeTurnAsync(session, turn, existing, kind, finalText: null, errorMessage, committer);
+    }
+
+    /// <summary>
+    /// Answers whether this delta is the turn's first visible output; that one publishes immediately
+    /// and every later delta goes back onto the coalescing timer.
+    /// </summary>
+    private static bool TakeFirstVisibleDelta(AgentTurnState turn)
+    {
+        if (turn.HasVisibleDelta)
+        {
+            return false;
+        }
+
+        turn.HasVisibleDelta = true;
+        return true;
     }
 
     private static void EnsureAssistantMessage(ConversationRuntimeState session, AgentTurnState turn)
