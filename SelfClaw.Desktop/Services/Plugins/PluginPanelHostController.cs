@@ -404,11 +404,16 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
     }
 
     // A panel that declares no network permission gets connect-src 'self', which means it cannot reach
-    // anything off the local package. frame-ancestors keeps the panel from being embedded anywhere but
-    // the shell, so its postMessage parent is always the shell.
+    // anything off the local package. Each approved origin is opened for both script-initiated requests
+    // (connect-src, used by fetch/XHR/WebSocket) and direct media loads (img-src, used by <img>): many
+    // media endpoints do not answer CORS preflights, so a blob fetched with credentials would be blocked
+    // while a plain <img> load would succeed. frame-ancestors keeps the panel from being embedded anywhere
+    // but the shell, so its postMessage parent is always the shell.
     private static string BuildContentSecurityPolicy(IReadOnlyList<string> networkOrigins)
     {
-        var connect = networkOrigins.Count == 0
+        // The approved origins are the same for image loads and script requests: reusing one list keeps
+        // "what the manifest approved" == "what the CSP sends through" on every directive that splits.
+        var approved = networkOrigins.Count == 0
             ? "'self'"
             : $"'self' {string.Join(' ', networkOrigins)}";
         return string.Join(
@@ -416,9 +421,9 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
             "default-src 'self';",
             "script-src 'self' 'unsafe-inline';",
             "style-src 'self' 'unsafe-inline';",
-            "img-src 'self' data: blob:;",
+            $"img-src data: blob: {approved};",
             "font-src 'self' data:;",
-            $"connect-src {connect};",
+            $"connect-src {approved};",
             $"frame-ancestors https://{WebViewMessageRouter.ApplicationHostName};",
             "frame-src 'none';",
             "object-src 'none';",

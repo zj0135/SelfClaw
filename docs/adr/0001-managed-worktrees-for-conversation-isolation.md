@@ -1,3 +1,0 @@
-# Use managed worktrees for conversation isolation
-
-SelfClaw represents every execution context as a physical Workspace Root, so parallel Git work is isolated by creating a Managed Worktree per interactive conversation rather than switching branches in a shared directory. Git Repository identity groups those checkouts as one project, while Direct, CLI, MCP, and terminal execution continue to depend only on the selected Workspace Root. A Managed Worktree remains owned by one interactive conversation, its child agents inherit the same checkout, and cleanup is allowed only after its Task Branch is merged into the recorded Base Branch with no uncommitted changes or conflicts.

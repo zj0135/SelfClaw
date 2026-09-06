@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "plugin-dev",
+  "name": "插件开发工具包",
+  "version": "1.0.0",
+  "description": "提供 create-plugin Skill：指导代理按 SelfClaw 插件规范生成、自检并打包新插件。",
+  "publisher": "selfclaw",
+  "permissions": [],
+  "contributes": {
+    "skills": [
+      {
+        "id": "create-plugin",
+        "path": "skills/create-plugin"
+      }
+    ]
+  }
+}
