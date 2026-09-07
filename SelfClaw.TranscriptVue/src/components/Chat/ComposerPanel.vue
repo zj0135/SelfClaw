@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { SlidersHorizontal, ArrowRight, Square, ShieldAlert, Check, X } from 'lucide-vue-next';
 import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
+import AgentSelector from './AgentSelector.vue';
 import PermissionSelector from './PermissionSelector.vue';
 import SkillPicker from './SkillPicker.vue';
 
@@ -216,6 +217,7 @@ defineExpose({
 			<div class="composer-toolbar">
 				<div class="composer-tools-left">
 					<ModelSelector :execution-mode="agentMode" />
+				<AgentSelector :selected-agent-id="selectedAgentId" :selected-agent-name="selectedAgentName" />
 					<SkillPicker v-if="agentMode === 'direct'" :agent-id="selectedAgentId"
 						:agent-name="selectedAgentName" :capability-revision="capabilityRevision"
 						@select="insertSkillToken" />

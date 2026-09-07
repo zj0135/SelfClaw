@@ -196,6 +196,28 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     }
 
     /// <summary>
+    /// Applies the composer's agent pick as the VM's current selection. The conversation record is the
+    /// persistence unit: agent id is bound at conversation creation and is immutable for the
+    /// conversation's lifetime, so this only governs the next new conversation and the conversation list
+    /// filter (which narrows to the selected agent's history). The capability/skill/mcp/prompt for any
+    /// running or selected conversation remain driven by that conversation's own bound agent id.
+    /// </summary>
+    public Task SelectAgentAsync(string? agentId)
+    {
+        var normalizedAgentId = NormalizeAgentId(agentId);
+        var nextAgent = ResolveAgent(normalizedAgentId);
+        if (string.Equals(_selectedAgentId, nextAgent.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.CompletedTask;
+        }
+
+        SelectAgentCore(nextAgent.Id);
+        ApplyConversationFilter(SelectedConversation?.Id);
+        PublishShell(false);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// Applies the composer's tool permission pick ("require-approval" / "full-access") as the mode for
     /// the next admitted turn. The conversation record itself is the persistence unit: the turn engine
     /// writes this mode onto the conversation, and loading a conversation resyncs this field.

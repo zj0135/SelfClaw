@@ -307,6 +307,9 @@ internal sealed class WebViewMessageRouter : IDisposable
             case "select-composer-mode":
                 await _viewModel.SelectComposerModeAsync(ReadOptionalString(payload, "mode"));
                 return null;
+            case "select-agent":
+                await _viewModel.SelectAgentAsync(ReadOptionalString(payload, "agentId"));
+                return null;
             case "select-tool-permission-mode":
                 await _viewModel.SelectToolPermissionModeAsync(ReadOptionalString(payload, "mode"));
                 return null;

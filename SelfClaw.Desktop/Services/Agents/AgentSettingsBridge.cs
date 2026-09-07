@@ -64,6 +64,24 @@ internal sealed class AgentSettingsBridge
                     response = new { type, requestId, state };
                     break;
                 }
+                // 编辑器（Composer）顶栏的代理切换入口：只回传轻量展示字段（id/name/mode/description/isBuiltIn），
+                // 不拉取扩展状态；当前选中态由 transcript 推送的 selectedAgentId 提供，所以这里不带。
+                case "agents/list-composer-agents":
+                {
+                    var agents = _agentDefinitionService.LoadAll()
+                        .Select(item => new
+                        {
+                            id = item.Id,
+                            name = item.Name,
+                            mode = item.Mode == AgentExecutionMode.Cli ? "cli" : "direct",
+                            description = item.Description,
+                            isBuiltIn = item.IsBuiltIn,
+                            warnings = item.Warnings
+                        })
+                        .ToArray();
+                    response = new { type, requestId, agents };
+                    break;
+                }
                 case "agents/create-agent":
                 {
                     var agent = CreateAgent(payload);
