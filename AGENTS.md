@@ -149,7 +149,7 @@ Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandle
 
 - `MainWindow.xaml` — custom chrome, title bar buttons, single WebView2 host
 - `LeftSidebar.xaml` — sidebar with Settings entry
-- Settings view: AI 提供商, 编程助手, 代理助手, 插件, and 宠物 are connected to the desktop host; remaining pages are frontend placeholders/mock
+- Settings view: AI 提供商, 模型管理, 编程助手, 代理助手, 插件, and 宠物 are connected to the desktop host; remaining pages are frontend placeholders/mock
 - The right-hand plugin panel column lives in the Vue app, not in WPF (see 插件面板)
 
 ### DI Registration
@@ -189,7 +189,7 @@ Desktop (`App.xaml.cs`):
 
 ### Database
 
-Schema version: **25** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `git_repositories`, `git_checkouts`, `conversations`, `messages`, `message_segments`, `message_attachments`, `tool_runs`, `cli_agent_sessions`, `subagent_tasks`, and `subagent_deliveries`. Schema v25 structures assistant content into `message_segments` blocks (Text/Thinking/ToolCall with ordinal placement) and rebuilds `tool_runs` without the retired `after_segment_index` column; legacy assistant rows are not migrated. The v22→v23 migration atomically rebuilds `conversations` when legacy `profile_id`, `kind`, or `parent_conversation_id` columns require it, preserves existing data, and defaults old rows to interactive ownership. Schema v24 adds repository identity and checkout ownership without changing the physical Workspace Root execution contract. Subagent deliveries use snapshot-aware FIFO batching, 45-second leases with 15-second heartbeat, and atomic Delivered/DeadLetter resolution.
+Schema version: **26** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_configurations`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `git_repositories`, `git_checkouts`, `conversations`, `messages`, `message_segments`, `message_attachments`, `tool_runs`, `cli_agent_sessions`, `subagent_tasks`, and `subagent_deliveries`. Schema v26 adds shared model configurations keyed by the complete case-sensitive model ID; these survive provider deletion and are read with each profile for Direct turns. Schema v25 structures assistant content into `message_segments` blocks (Text/Thinking/ToolCall with ordinal placement) and rebuilds `tool_runs` without the retired `after_segment_index` column; legacy assistant rows are not migrated. The v22→v23 migration atomically rebuilds `conversations` when legacy `profile_id`, `kind`, or `parent_conversation_id` columns require it, preserves existing data, and defaults old rows to interactive ownership. Schema v24 adds repository identity and checkout ownership without changing the physical Workspace Root execution contract. Subagent deliveries use snapshot-aware FIFO batching, 45-second leases with 15-second heartbeat, and atomic Delivered/DeadLetter resolution.
 
 ### Image attachments
 
@@ -209,7 +209,7 @@ Deleting an interactive parent first marks a deletion tombstone, stops its activ
 - **Feishu channel**: fully implemented but never registered in DI
 - **Plan mode**: removed; `AgentExecutionMode.Direct` and `AgentExecutionMode.Cli` are both active
 - **Channel conversations**: data model retained but VM filters them out
-- **Settings pages**: AI 提供商, 编程助手, 代理助手, 插件, and 宠物 are wired to the host; the remaining settings pages are frontend mock
+- **Settings pages**: AI 提供商, 模型管理, 编程助手, 代理助手, 插件, and 宠物 are wired to the host; the remaining settings pages are frontend mock
 - **Legacy provider profiles**: `ProviderProfile`, `IProfileRepository`, the `profiles` table, and `ChatTurnRequest.Profile/ApiKey` were removed; Direct turns use `ModelProfileId`
 
 ## Code Style & Constraints

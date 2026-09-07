@@ -58,21 +58,30 @@ internal sealed partial class OpenAiProviderAdapter
 #pragma warning disable SCME0001
         var raw = new OpenAIChatCompletionOptions();
         var options = OptionReader(request);
+        var configuredEffort = request.Profile.Configuration?.ReasoningEffort;
 
         // thinking.type is a non-standard parameter that the strict OpenAI
         // endpoint rejects, so only the OpenAI-compatible kind gets an
         // EnableReasoning-derived default. An explicit option always wins, and
         // strict OpenAI emits thinking.type only when it is explicitly configured.
-        if (options.TryReadString(ChatThinkingTypeKey, out var explicitThinking))
+        if (configuredEffort is not null && _providerKind == AiProviderKind.OpenAICompatible)
+        {
+            raw.Patch.Set("$.thinking.type"u8, configuredEffort == "none" ? "disabled" : "enabled");
+        }
+        else if (request.Profile.Configuration is null && options.TryReadString(ChatThinkingTypeKey, out var explicitThinking))
         {
             raw.Patch.Set("$.thinking.type"u8, explicitThinking);
         }
-        else if (_providerKind == AiProviderKind.OpenAICompatible)
+        else if (request.Profile.Configuration is null && _providerKind == AiProviderKind.OpenAICompatible)
         {
             raw.Patch.Set("$.thinking.type"u8, request.EnableReasoning ? "enabled" : "disabled");
         }
 
-        if (options.TryReadString(ChatReasoningEffortKey, out var reasoningEffort))
+        if (configuredEffort is not null)
+        {
+            raw.Patch.Set("$.reasoning_effort"u8, configuredEffort);
+        }
+        else if (request.Profile.Configuration is null && options.TryReadString(ChatReasoningEffortKey, out var reasoningEffort))
         {
             raw.Patch.Set("$.reasoning_effort"u8, reasoningEffort);
         }

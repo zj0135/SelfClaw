@@ -70,7 +70,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SqliteSubagentDeliveryRepository>();
         services.AddSingleton<ISubagentDeliveryStore>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteSubagentDeliveryRepository>());
-        services.AddSingleton<IAiProviderRepository, SqliteAiProviderRepository>();
+        services.AddSingleton<SqliteAiProviderRepository>();
+        services.AddSingleton<IAiProviderRepository>(provider => provider.GetRequiredService<SqliteAiProviderRepository>());
+        services.AddSingleton<IAiModelConfigurationRepository>(provider => provider.GetRequiredService<SqliteAiProviderRepository>());
         services.AddSingleton<SqliteExtensionRepository>();
         services.AddSingleton<IExtensionPackageRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteExtensionRepository>());
@@ -137,8 +139,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAiProviderAdapter>(serviceProvider =>
             new AnthropicProviderAdapter(
                 serviceProvider.GetService<ILogger<AnthropicProviderAdapter>>(),
-                serviceProvider.GetService<ILoggerFactory>(),
-                serviceProvider,
                 serviceProvider.GetRequiredService<AnthropicModelListClient>(),
                 serviceProvider.GetRequiredService<AiProviderHttpClientProvider>()));
         services.AddSingleton<IAiProviderAdapter, OllamaProviderAdapter>();

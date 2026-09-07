@@ -1,9 +1,16 @@
 using SelfClaw.Infrastructure.AiProviders.Models.Views;
+using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
 
 public interface IAiProviderSettingsService
 {
+    Task<IReadOnlyList<AiModelConfiguration>> ListModelConfigurationsAsync(CancellationToken cancellationToken = default);
+
+    Task<AiModelConfiguration> SaveModelConfigurationAsync(AiModelConfiguration configuration, CancellationToken cancellationToken = default);
+
+    Task DeleteModelConfigurationAsync(string model, CancellationToken cancellationToken = default);
+
     Task<AiProviderSettingsState> GetStateAsync(CancellationToken cancellationToken = default);
 
     Task<AiProviderView> SaveProviderAsync(

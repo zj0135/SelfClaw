@@ -1,5 +1,6 @@
 using Anthropic;
 using Anthropic.Core;
+using Anthropic.Models.Messages;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -10,10 +11,7 @@ using SelfClaw.Infrastructure.AiProviders.Models;
 namespace SelfClaw.Infrastructure.AiProviders.Anthropic;
 
 /// <summary>
-/// Anthropic provider adapter backed by the official Microsoft Agent Framework
-/// Anthropic integration. The integration exposes Anthropic as a ChatClientAgent;
-/// its client factory hook is used here to capture the underlying IChatClient so
-/// the rest of SelfClaw can keep using the shared provider abstraction.
+/// Anthropic provider adapter backed by the official SDK's IChatClient integration.
 /// </summary>
 internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
 {
@@ -28,21 +26,15 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
         };
 
     private readonly ILogger<AnthropicProviderAdapter> _logger;
-    private readonly ILoggerFactory? _loggerFactory;
-    private readonly IServiceProvider? _serviceProvider;
     private readonly AnthropicModelListClient _modelListClient;
     private readonly AiProviderHttpClientProvider _httpClientProvider;
 
     public AnthropicProviderAdapter(
         ILogger<AnthropicProviderAdapter>? logger = null,
-        ILoggerFactory? loggerFactory = null,
-        IServiceProvider? serviceProvider = null,
         AnthropicModelListClient? modelListClient = null,
         AiProviderHttpClientProvider? httpClientProvider = null)
     {
         _logger = logger ?? NullLogger<AnthropicProviderAdapter>.Instance;
-        _loggerFactory = loggerFactory;
-        _serviceProvider = serviceProvider;
         _httpClientProvider = httpClientProvider ?? new AiProviderHttpClientProvider();
         _modelListClient = modelListClient
             ?? new AnthropicModelListClient(_httpClientProvider);
@@ -68,26 +60,7 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
             throw UnsupportedFormat(request);
         }
 
-        var client = CreateAnthropicClient(request);
-        IChatClient? capturedClient = null;
-
-        client.AsAIAgent(
-            request.Profile.Model,
-            request.Profile.Name,
-            string.Empty,
-            string.Empty,
-            request.Tools.ToList(),
-            ResolveMaxOutputTokens(request),
-            chatClient =>
-            {
-                capturedClient = chatClient;
-                return chatClient;
-            },
-            _loggerFactory,
-            _serviceProvider);
-
-        return capturedClient ?? throw new InvalidOperationException(
-            $"Anthropic provider '{request.Connection.Name}' did not expose an IChatClient.");
+        return CreateAnthropicClient(request).AsIChatClient(request.Profile.Model, ResolveMaxOutputTokens(request));
     }
 
     public ChatOptions CreateChatOptions(AiProviderClientRequest request)
@@ -97,15 +70,43 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
             throw UnsupportedFormat(request);
         }
 
-        var options = AiChatOptions.CreateBase(request);
+        var options = AiChatOptions.CreateBase(request, _ => CreateReasoningOptions(request));
         options.MaxOutputTokens = ResolveMaxOutputTokens(request);
         ModelOptionReader.ForProfile(_logger, request.Profile).LogUnknown(RecognizedModelOptionKeys);
         return options;
     }
 
+    private MessageCreateParams? CreateReasoningOptions(AiProviderClientRequest request)
+    {
+        if (request.Profile.Configuration?.ReasoningEffort is not string effort)
+        {
+            return null;
+        }
+
+        return new MessageCreateParams
+        {
+            Model = request.Profile.Model,
+            Messages = [],
+            MaxTokens = ResolveMaxOutputTokens(request) ?? 4096,
+            Thinking = effort == "none"
+                ? new ThinkingConfigDisabled()
+                : new ThinkingConfigAdaptive(),
+            OutputConfig = effort == "none" ? null : new OutputConfig
+            {
+                Effort = effort switch
+                {
+                    "minimal" or "low" => Effort.Low,
+                    "medium" => Effort.Medium,
+                    "high" => Effort.High,
+                    _ => Effort.Max
+                }
+            }
+        };
+    }
+
     /// <summary>
     /// Resolves the turn's output ceiling from model options, falling back to the model's
-    /// catalog maximum. Without this the Agent Framework integration sends its own 4096
+    /// catalog maximum. Without this the SDK integration sends its own 4096
     /// default, which truncates ordinary answers.
     /// </summary>
     private int? ResolveMaxOutputTokens(AiProviderClientRequest request)
@@ -127,8 +128,9 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
     /// </summary>
     internal AnthropicClient CreateAnthropicClient(AiProviderClientRequest request)
     {
-        var options = default(ClientOptions);
+        var options = new ClientOptions();
         options.ApiKey = ResolveApiKey(request);
+        options.AuthToken = null;
         options.BaseUrl = request.Connection.Endpoint.AbsoluteUri;
         options.HttpClient = new HttpClient(
             _httpClientProvider.GetSharedStreamingHandler(request.Connection),

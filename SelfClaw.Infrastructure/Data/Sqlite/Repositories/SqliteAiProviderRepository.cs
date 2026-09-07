@@ -5,7 +5,7 @@ using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
-public sealed class SqliteAiProviderRepository : IAiProviderRepository
+public sealed partial class SqliteAiProviderRepository : IAiProviderRepository, IAiModelConfigurationRepository
 {
     private readonly SqliteDatabase _database;
 
@@ -153,7 +153,8 @@ WHERE id = $id;";
         {
             command.CommandText = @"
 SELECT id, provider_connection_id, name, api_format, model, temperature_enabled, temperature, top_p_enabled, top_p,
-       model_options_json, created_at_utc, updated_at_utc, is_enabled
+       model_options_json, created_at_utc, updated_at_utc, is_enabled,
+       (SELECT configuration_json FROM ai_model_configurations WHERE model = ai_model_profiles.model)
 FROM ai_model_profiles
 WHERE provider_connection_id = $providerConnectionId
 ORDER BY updated_at_utc DESC;";
@@ -163,7 +164,8 @@ ORDER BY updated_at_utc DESC;";
         {
             command.CommandText = @"
 SELECT id, provider_connection_id, name, api_format, model, temperature_enabled, temperature, top_p_enabled, top_p,
-       model_options_json, created_at_utc, updated_at_utc, is_enabled
+       model_options_json, created_at_utc, updated_at_utc, is_enabled,
+       (SELECT configuration_json FROM ai_model_configurations WHERE model = ai_model_profiles.model)
 FROM ai_model_profiles
 ORDER BY updated_at_utc DESC;";
         }
@@ -184,7 +186,8 @@ ORDER BY updated_at_utc DESC;";
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 SELECT id, provider_connection_id, name, api_format, model, temperature_enabled, temperature, top_p_enabled, top_p,
-       model_options_json, created_at_utc, updated_at_utc, is_enabled
+       model_options_json, created_at_utc, updated_at_utc, is_enabled,
+       (SELECT configuration_json FROM ai_model_configurations WHERE model = ai_model_profiles.model)
 FROM ai_model_profiles
 WHERE id = $id
 LIMIT 1;";
@@ -283,7 +286,8 @@ WHERE provider_connection_id = $providerConnectionId;";
         command.CommandText = @"
 SELECT model.id, model.provider_connection_id, model.name, model.api_format, model.model,
        model.temperature_enabled, model.temperature, model.top_p_enabled, model.top_p,
-       model.model_options_json, model.created_at_utc, model.updated_at_utc, model.is_enabled
+       model.model_options_json, model.created_at_utc, model.updated_at_utc, model.is_enabled,
+       (SELECT configuration_json FROM ai_model_configurations AS configuration WHERE configuration.model = model.model)
 FROM ai_model_profiles AS model
 INNER JOIN ai_provider_connections AS provider
     ON provider.id = model.provider_connection_id

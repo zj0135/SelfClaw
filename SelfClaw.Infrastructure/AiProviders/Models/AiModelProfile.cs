@@ -22,4 +22,5 @@ public sealed record AiModelProfile(
     IReadOnlyDictionary<string, JsonElement> ModelOptions,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
-    bool IsEnabled = true);
+    bool IsEnabled = true,
+    AiModelConfiguration? Configuration = null);

@@ -16,4 +16,5 @@ public sealed record AiModelView(
     decimal? PriceInPerMTok,
     decimal? PriceOutPerMTok,
     decimal? PriceCacheWritePerMTok,
-    decimal? PriceCacheReadPerMTok);
+    decimal? PriceCacheReadPerMTok,
+    AiModelConfiguration? Configuration = null);

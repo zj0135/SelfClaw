@@ -368,6 +368,7 @@ export function useAiProviderHost(options) {
 	onMounted(loadState);
 
 	return {
+		loadState,
 		apiKeyInput,
 		apiKeyDirty,
 		loadingState,

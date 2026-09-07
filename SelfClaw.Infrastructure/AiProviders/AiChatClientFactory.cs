@@ -35,7 +35,7 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
     {
         ArgumentNullException.ThrowIfNull(inputs);
 
-        var profile = await _repository.GetModelProfileAsync(modelProfileId, cancellationToken)
+        var profile = await _repository.GetModelProfileAsync(modelProfileId, cancellationToken).ConfigureAwait(false)
             ?? throw new KeyNotFoundException($"AI model profile '{modelProfileId}' was not found.");
         if (!profile.IsEnabled)
         {
@@ -44,7 +44,7 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
 
         var connection = await _repository.GetProviderConnectionAsync(
                 profile.ProviderConnectionId,
-                cancellationToken)
+                cancellationToken).ConfigureAwait(false)
             ?? throw new KeyNotFoundException(
                 $"AI provider connection '{profile.ProviderConnectionId}' for model '{profile.Name}' was not found.");
         if (!connection.IsEnabled)
@@ -52,7 +52,7 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
             throw new InvalidOperationException($"AI provider connection '{connection.Name}' is disabled.");
         }
 
-        var secrets = await ResolveSecretsAsync(connection, cancellationToken);
+        var secrets = await ResolveSecretsAsync(connection, cancellationToken).ConfigureAwait(false);
         var adapter = _registry.GetRequiredAdapter(connection.ProviderKind);
         if (!adapter.SupportsApiFormat(profile.ApiFormat))
         {
@@ -65,7 +65,7 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
             connection,
             profile,
             secrets,
-            inputs.EnableReasoning,
+            profile.Configuration?.ReasoningEffort is string effort ? effort != "none" : inputs.EnableReasoning,
             inputs.Tools);
         var options = adapter.CreateChatOptions(request);
         var nativeClient = adapter.CreateChatClient(request);
@@ -95,10 +95,10 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
             throw new ArgumentException("A model selection scope is required.", nameof(scope));
         }
 
-        var selection = await _repository.GetModelProfileSelectionAsync(scope.Trim(), cancellationToken)
+        var selection = await _repository.GetModelProfileSelectionAsync(scope.Trim(), cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException(
                 "No default Direct model is selected. Choose a default model in the AI provider settings.");
-        return await CreateAsync(selection.ModelProfileId, inputs, cancellationToken);
+        return await CreateAsync(selection.ModelProfileId, inputs, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<IReadOnlyDictionary<string, string>> ResolveSecretsAsync(
@@ -122,7 +122,7 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
             throw MissingApiKey(connection);
         }
 
-        var secrets = await AiProviderSecrets.ResolveAsync(_secretProtector, connection, cancellationToken);
+        var secrets = await AiProviderSecrets.ResolveAsync(_secretProtector, connection, cancellationToken).ConfigureAwait(false);
         if (!secrets.ContainsKey(ApiKeySecretName))
         {
             throw MissingApiKey(connection);

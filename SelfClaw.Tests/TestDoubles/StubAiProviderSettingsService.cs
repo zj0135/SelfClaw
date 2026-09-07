@@ -1,10 +1,15 @@
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models.Views;
+using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Tests.TestDoubles;
 
 internal sealed class StubAiProviderSettingsService : IAiProviderSettingsService
 {
+    public Task<IReadOnlyList<AiModelConfiguration>> ListModelConfigurationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<AiModelConfiguration> SaveModelConfigurationAsync(AiModelConfiguration configuration, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task DeleteModelConfigurationAsync(string model, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
     internal StubAiProviderSettingsService(Guid? defaultModelProfileId = null)
     {
         DefaultModelProfileId = defaultModelProfileId ?? Guid.NewGuid();

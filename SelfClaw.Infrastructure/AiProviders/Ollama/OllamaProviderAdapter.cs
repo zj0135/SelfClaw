@@ -1,5 +1,7 @@
 using Microsoft.Extensions.AI;
 using OllamaSharp;
+using OllamaSharp.Models;
+using OllamaSharp.Models.Chat;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
@@ -52,6 +54,22 @@ internal sealed class OllamaProviderAdapter : IAiProviderAdapter
 
         var options = AiChatOptions.CreateBase(request);
         options.ModelId = request.Profile.Model;
+        if (AiChatOptions.ResolveContextWindowTokens(request.Profile) is int contextLength)
+        {
+            options.AddOllamaOption(OllamaOption.NumCtx, contextLength);
+        }
+
+        if (request.Profile.Configuration?.ReasoningEffort is string effort)
+        {
+            options.AddOllamaOption(OllamaOption.Think, effort switch
+            {
+                "none" => new ThinkValue(false),
+                "minimal" or "low" => ThinkValue.Low,
+                "medium" => ThinkValue.Medium,
+                _ => ThinkValue.High
+            });
+        }
+
         return options;
     }
 
@@ -63,7 +81,7 @@ internal sealed class OllamaProviderAdapter : IAiProviderAdapter
         using var client = new OllamaApiClient(
             _httpClientProvider.GetNonStreamingClient(connection),
             defaultModel: string.Empty);
-        var models = await client.ListLocalModelsAsync(cancellationToken);
+        var models = await client.ListLocalModelsAsync(cancellationToken).ConfigureAwait(false);
         return models
             .Where(model => !string.IsNullOrWhiteSpace(model.Name))
             .Select(model => new AiModelDescriptor(model.Name, model.Name, null, null, null, null, null, null))

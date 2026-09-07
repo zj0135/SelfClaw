@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Pet;
@@ -372,6 +373,10 @@ public sealed class WebViewMessageRouterTests
 
     private sealed class RouterAiProviderSettingsService : IAiProviderSettingsService
     {
+        public Task<IReadOnlyList<AiModelConfiguration>> ListModelConfigurationsAsync(CancellationToken cancellationToken = default) => throw Unsupported();
+        public Task<AiModelConfiguration> SaveModelConfigurationAsync(AiModelConfiguration configuration, CancellationToken cancellationToken = default) => throw Unsupported();
+        public Task DeleteModelConfigurationAsync(string model, CancellationToken cancellationToken = default) => throw Unsupported();
+
         public static readonly Guid DefaultModelId = Guid.Parse("33333333-3333-3333-3333-333333333333");
 
         public Task<Guid?> GetDefaultModelAsync(string scope, CancellationToken cancellationToken = default)

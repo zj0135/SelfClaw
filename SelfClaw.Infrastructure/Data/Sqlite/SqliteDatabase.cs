@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 25;
+    private const int CurrentSchemaVersion = 26;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -111,6 +111,12 @@ CREATE TABLE IF NOT EXISTS ai_model_profiles (
     updated_at_utc TEXT NOT NULL,
     FOREIGN KEY(provider_connection_id) REFERENCES ai_provider_connections(id) ON DELETE CASCADE
 );", cancellationToken);
+
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS ai_model_configurations (
+    model TEXT NOT NULL PRIMARY KEY COLLATE BINARY,
+    configuration_json TEXT NOT NULL
+);", cancellationToken).ConfigureAwait(false);
 
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS ai_model_profile_selections (

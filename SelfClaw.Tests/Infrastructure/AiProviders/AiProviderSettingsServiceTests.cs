@@ -541,7 +541,7 @@ public sealed class AiProviderSettingsServiceTests
         InMemoryAiProviderRepository repository,
         FakeSecretProtector protector,
         params IAiProviderAdapter[] adapters)
-        => new(repository, new AiProviderRegistry(adapters), protector);
+        => new(repository, new AiProviderRegistry(adapters), protector, new SelfClaw.Tests.TestDoubles.InMemoryAiModelConfigurationRepository());
 
     private static AiProviderConnection CreateConnection(
         string catalogId,

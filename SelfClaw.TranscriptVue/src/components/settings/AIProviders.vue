@@ -7,12 +7,12 @@ import {
 	ArrowUpRight,
 	Eye,
 	EyeOff,
-	RefreshCw,
 	Check,
 	ChevronDown,
-	SlidersHorizontal,
 } from 'lucide-vue-next';
 import AiProviderDialogs from './AiProviderDialogs.vue';
+import ModelConfigurationDialog from './ModelConfigurationDialog.vue';
+import AiProviderModelList from './AiProviderModelList.vue';
 import { useAiProviderHost } from '../../composables/useAiProviderHost.js';
 import { useToast } from '../../composables/useToast.js';
 
@@ -34,7 +34,6 @@ const providers = reactive([]);
 
 const activeId = ref('');
 const providerSearch = ref('');
-const modelSearch = ref('');
 const apiKeyVisible = ref(false);
 // Set from the active provider's first profile once host state loads.
 const selectedCheckModel = ref('');
@@ -42,10 +41,13 @@ const checking = ref(false);
 const fetchingModels = ref(false);
 const checkStatus = reactive({ visible: false, state: '', text: '' });
 const { showToast } = useToast();
+const configuringModel = ref(null);
+const configurationTab = ref('parameters');
 
 const activeProvider = computed(() => providers.find((provider) => provider.id === activeId.value) || providers[0]);
 
 const {
+	loadState,
 	apiKeyInput,
 	loadingState,
 	mutating,
@@ -94,14 +96,6 @@ const providerGroups = computed(() => {
 	].filter((group) => group.providers.length > 0);
 });
 
-const filteredModels = computed(() => {
-	const provider = activeProvider.value;
-	const term = modelSearch.value.trim().toLowerCase();
-
-	return provider.models.filter((model) =>
-		!term || model.name.toLowerCase().includes(term) || model.id.toLowerCase().includes(term));
-});
-
 // Ghost numeral rendered behind the detail header, e.g. "01".
 const activeIndex = computed(() => {
 	const index = providers.indexOf(activeProvider.value);
@@ -132,9 +126,7 @@ function providerKind(provider) {
 }
 
 function providerLogo(provider) {
-	// Unknown/custom connections fall back to the OpenAI brand logo.
-	const src = providerLogos[providerKind(provider)] || providerLogos.openai;
-	return `<img src="${src}" alt="" class="brand-logo" draggable="false" />`;
+	return providerLogos[providerKind(provider)] || providerLogos.openai;
 }
 
 function resetCheckStatus() {
@@ -142,6 +134,17 @@ function resetCheckStatus() {
 	checkStatus.visible = false;
 	checkStatus.state = '';
 	checkStatus.text = '';
+}
+
+function openConfiguration(model, tab = 'parameters') {
+	configurationTab.value = tab;
+	configuringModel.value = model;
+}
+
+function configurationSaved() {
+	configuringModel.value = null;
+	showToast('模型配置已保存');
+	loadState();
 }
 </script>
 
@@ -178,7 +181,7 @@ function resetCheckStatus() {
 							:class="{ active: provider.id === activeId, on: provider.enabled, disabled: !provider.enabled }"
 							@click="selectProviderFromHost(provider.id)">
 							<span class="p-index">{{ providerIndex(provider) }}</span>
-							<span class="p-logo" aria-hidden="true" v-html="providerLogo(provider)"></span>
+							<span class="p-logo" aria-hidden="true"><img :src="providerLogo(provider)" alt="" class="brand-logo" draggable="false" /></span>
 							<span class="p-meta">
 								<span class="p-name">{{ provider.name }}</span>
 								<span class="p-sub">{{ displayEnabledCount(provider) }}/{{ totalCount(provider) }}
@@ -201,7 +204,7 @@ function resetCheckStatus() {
 				<span class="ghost-num" aria-hidden="true">{{ activeIndex }}</span>
 
 				<header class="detail-head sc-rise" style="--i: 0">
-					<div class="dh-logo" aria-hidden="true" v-html="providerLogo(activeProvider)"></div>
+					<div class="dh-logo" aria-hidden="true"><img :src="providerLogo(activeProvider)" alt="" class="brand-logo" draggable="false" /></div>
 					<div class="dh-meta">
 						<div class="dh-kicker">PROVIDER / {{ activeIndex }}</div>
 						<h2>{{ activeProvider.name }}</h2>
@@ -280,87 +283,12 @@ function resetCheckStatus() {
 						</div>
 					</div>
 
-					<div class="field models-field sc-rise" style="--i: 4">
-						<div class="models">
-							<div class="models-head">
-								<div>
-									<div class="mh-kicker">MODEL REGISTRY</div>
-									<h3>模型列表</h3>
-									<div class="count">共 {{ totalCount(activeProvider) }} 个模型，已启用 {{
-										enabledCount(activeProvider) }}</div>
-								</div>
-								<span class="count-pill">{{ enabledCount(activeProvider) }} / {{
-									totalCount(activeProvider) }}</span>
-							</div>
-							<div class="models-toolbar">
-								<div class="search">
-									<Search :size="14" :stroke-width="2" class="search-ico" aria-hidden="true" />
-									<input v-model="modelSearch" type="text" placeholder="搜索模型..." aria-label="搜索模型" />
-								</div>
-								<button class="btn sm" type="button"
-									:disabled="mutating || !activeProvider.connectionId || !activeProvider.models.length"
-									@click="setAllModelsEnabled(true)">全部启用</button>
-								<button class="btn sm" type="button"
-									:disabled="mutating || !activeProvider.connectionId || !activeProvider.models.length"
-									@click="setAllModelsEnabled(false)">全部禁用</button>
-								<button class="btn sm fetch-models-btn" type="button"
-									:disabled="fetchingModels || !activeProvider.connectionId || !activeProvider.supportsModelListing"
-									@click="fetchModelListFromHost">
-									<RefreshCw :size="13" :stroke-width="2" class="refresh-ico"
-										:class="{ spinning: fetchingModels }" />
-									获取模型列表
-								</button>
-								<button class="icon-btn add-model-btn" type="button" title="添加模型" aria-label="添加模型"
-									:disabled="!activeProvider.connectionId" @click="openModelDialog">
-									<Plus :size="15" :stroke-width="2.2" />
-								</button>
-							</div>
-
-							<div v-if="!activeProvider.models.length" class="model-list">
-								<div class="models-empty">尚未获取模型，点击“获取模型列表”加载</div>
-							</div>
-							<div v-else-if="!filteredModels.length" class="model-empty">没有匹配的模型</div>
-							<div v-else class="model-list">
-								<div v-for="model in filteredModels" :key="model.profileId" class="model">
-									<div class="m-logo" aria-hidden="true" v-html="providerLogo(activeProvider)"></div>
-									<div class="m-main">
-										<div class="m-title">
-											<span class="m-name">{{ model.name }}</span>
-											<span class="m-id">{{ model.id }}</span>
-										</div>
-										<div class="m-tags">
-											<span class="tag">{{ model.ctx }} 上下文</span>
-											<span class="tag">{{ model.out }} 输出</span>
-											<span v-if="model.outp !== '—'" class="price-tag">IN {{ model.inp }} / OUT
-												{{ model.outp }}</span>
-											<span v-if="model.cacheW && model.cacheR" class="price-tag dim">CACHE W{{
-												model.cacheW }} / R{{ model.cacheR }}</span>
-										</div>
-									</div>
-									<div class="m-actions">
-										<button class="m-icon" type="button" title="查看详情" aria-label="查看详情">
-											<Eye :size="15" :stroke-width="1.9" />
-										</button>
-										<button class="m-icon" type="button" title="模型参数" aria-label="模型参数">
-											<SlidersHorizontal :size="15" :stroke-width="1.9" />
-										</button>
-										<button class="m-icon model-delete" type="button" title="删除模型" aria-label="删除模型"
-											:disabled="pendingModelIds.has(model.profileId)"
-											@click="deleteModel(model)">
-											<Trash2 :size="15" :stroke-width="1.9" />
-										</button>
-										<label class="switch" title="启用模型">
-											<input type="checkbox" :checked="model.on"
-												:disabled="pendingModelIds.has(model.profileId)" aria-label="启用模型"
-												@change="setModelEnabled(model, $event.target.checked)" />
-											<span class="track"></span>
-											<span class="knob"></span>
-										</label>
-									</div>
-								</div>
-							</div>
-						</div>
-					</div>
+					<AiProviderModelList class="field models-field sc-rise" style="--i: 4"
+						:provider="activeProvider" :logo="providerLogo(activeProvider)"
+						:busy="mutating" :fetching="fetchingModels" :pending-model-ids="pendingModelIds"
+						@set-all-enabled="setAllModelsEnabled" @fetch-models="fetchModelListFromHost"
+						@add-model="openModelDialog" @configure="openConfiguration"
+						@delete-model="deleteModel" @set-enabled="setModelEnabled" />
 				</div>
 			</template>
 		</main>
@@ -370,6 +298,8 @@ function resetCheckStatus() {
 			:model-draft="modelDraft" :busy="mutating" @close-provider="providerDialogOpen = false"
 			@submit-provider="createCustomProvider" @close-model="modelDialogOpen = false"
 			@submit-model="createModel" />
+		<ModelConfigurationDialog v-if="configuringModel" :model="configuringModel" :initial-tab="configurationTab"
+			@close="configuringModel = null" @saved="configurationSaved" />
 	</div>
 </template>
 
@@ -1019,208 +949,6 @@ function resetCheckStatus() {
 	box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
-/* ── model registry ─────────────────────────────────────────── */
-.models {
-	container-type: inline-size;
-	overflow: hidden;
-	border: 1px solid var(--sc-line);
-	border-radius: 14px;
-	background: var(--sc-panel);
-}
-
-.models-head {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 18px 20px 14px;
-}
-
-.mh-kicker {
-	margin-bottom: 5px;
-	color: var(--sc-faint);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-95);
-	font-weight: 500;
-	letter-spacing: 0.24em;
-}
-
-.models-head h3 {
-	margin: 0;
-	font-family: var(--sc-display);
-	font-size: var(--fs-17);
-	font-weight: 630;
-}
-
-.models-head .count {
-	margin-top: 3px;
-	color: var(--sc-mute);
-	font-size: var(--fs-12);
-}
-
-.count-pill {
-	padding: 5px 12px;
-	border: 1px solid color-mix(in srgb, var(--sc-acid) 35%, transparent);
-	border-radius: 99px;
-	background: var(--sc-acid-soft);
-	color: var(--sc-acid);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-115);
-	font-weight: 600;
-	letter-spacing: 0.04em;
-}
-
-.models-toolbar {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 9px;
-	padding: 0 20px 16px;
-}
-
-.models-toolbar .search {
-	min-width: 176px;
-	flex: 1 1 176px;
-}
-
-.models-toolbar .btn.sm {
-	min-width: 0;
-}
-
-.add-model-btn {
-	width: 36px;
-	height: 36px;
-}
-
-@container (max-width: 620px) {
-	.models-toolbar .search {
-		flex-basis: 100%;
-	}
-
-	.models-toolbar .btn.sm {
-		flex: 1 1 calc(50% - 5px);
-		padding-inline: 10px;
-	}
-
-	.models-toolbar .fetch-models-btn {
-		flex-basis: calc(100% - 45px);
-	}
-
-	.add-model-btn {
-		flex: 0 0 36px;
-	}
-}
-
-.refresh-ico.spinning {
-	animation: sc-spin 0.8s linear infinite;
-}
-
-.model-list {
-	border-top: 1px solid var(--sc-line);
-}
-
-.model {
-	display: flex;
-	align-items: center;
-	gap: 14px;
-	padding: 14px 20px;
-	border-bottom: 1px solid var(--sc-line);
-	background: transparent;
-	transition: background 0.15s;
-}
-
-.model:hover {
-	background: color-mix(in srgb, var(--text) 2.5%, transparent);
-}
-
-.model:last-child {
-	border-bottom: 0;
-}
-
-.m-logo {
-	display: grid;
-	width: 32px;
-	height: 32px;
-	flex: 0 0 auto;
-	place-items: center;
-	border: 1px solid var(--sc-line);
-	border-radius: 8px;
-	background: var(--sc-panel);
-}
-
-.m-logo :deep(.brand-logo) {
-	width: 20px;
-	height: 20px;
-	object-fit: contain;
-}
-
-.m-main {
-	min-width: 0;
-	flex: 1;
-}
-
-.m-title {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 9px;
-}
-
-.m-name {
-	font-size: var(--fs-14);
-	font-weight: 600;
-}
-
-.m-id {
-	padding: 2px 7px;
-	border: 1px solid var(--sc-line);
-	border-radius: 5px;
-	background: var(--sc-raise);
-	color: var(--sc-soft);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-105);
-	letter-spacing: 0.02em;
-}
-
-.m-tags {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 7px;
-	margin-top: 8px;
-}
-
-.tag {
-	color: var(--sc-mute);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-105);
-	letter-spacing: 0.02em;
-}
-
-.price-tag {
-	padding: 3px 8px;
-	border: 1px solid color-mix(in srgb, var(--sc-ok) 30%, transparent);
-	border-radius: 6px;
-	background: var(--sc-ok-soft);
-	color: var(--sc-ok);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-105);
-	font-weight: 560;
-	letter-spacing: 0.02em;
-}
-
-.price-tag.dim {
-	border-color: var(--sc-line);
-	background: var(--sc-raise);
-	color: var(--sc-soft);
-}
-
-.m-actions {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	flex: 0 0 auto;
-}
-
 .m-icon {
 	display: grid;
 	width: 30px;
@@ -1240,13 +968,11 @@ function resetCheckStatus() {
 	transform: translateY(-1px);
 }
 
-.provider-delete,
-.model-delete {
+.provider-delete {
 	color: color-mix(in srgb, var(--sc-err) 80%, var(--sc-mute));
 }
 
-.provider-delete:hover,
-.model-delete:hover {
+.provider-delete:hover {
 	background: var(--sc-err-soft);
 	color: var(--sc-err);
 }
@@ -1323,14 +1049,6 @@ function resetCheckStatus() {
 	transform: translateX(21px);
 }
 
-.models-empty,
-.model-empty {
-	padding: 44px;
-	color: var(--sc-mute);
-	font-size: var(--fs-13);
-	text-align: center;
-}
-
 @media (max-width: 980px) {
 	.ai-providers {
 		grid-template-columns: 260px minmax(0, 1fr);
@@ -1338,10 +1056,6 @@ function resetCheckStatus() {
 
 	.detail-body {
 		padding: 24px 24px 56px;
-	}
-
-	.models-toolbar .search {
-		flex-basis: 100%;
 	}
 
 	.ghost-num {
@@ -1369,15 +1083,9 @@ function resetCheckStatus() {
 		padding: 20px;
 	}
 
-	.check-row,
-	.models-toolbar,
-	.model {
+	.check-row {
 		align-items: stretch;
 		flex-direction: column;
-	}
-
-	.m-actions {
-		justify-content: flex-end;
 	}
 }
 </style>

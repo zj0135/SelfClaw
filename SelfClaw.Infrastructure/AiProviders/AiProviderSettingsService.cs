@@ -23,6 +23,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
     private const string PriceCacheReadKey = "display.priceCacheReadPerMTok";
 
     private readonly IAiProviderRepository _repository;
+    private readonly IAiModelConfigurationRepository _configurations;
     private readonly IAiProviderRegistry _registry;
     private readonly ISecretProtector _secretProtector;
     private readonly AiProviderHttpClientProvider _httpClientProvider;
@@ -31,12 +32,32 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         IAiProviderRepository repository,
         IAiProviderRegistry registry,
         ISecretProtector secretProtector,
+        IAiModelConfigurationRepository configurations,
         AiProviderHttpClientProvider? httpClientProvider = null)
     {
         _repository = repository;
+        _configurations = configurations;
         _registry = registry;
         _secretProtector = secretProtector;
         _httpClientProvider = httpClientProvider ?? new AiProviderHttpClientProvider();
+    }
+
+    public Task<IReadOnlyList<AiModelConfiguration>> ListModelConfigurationsAsync(CancellationToken cancellationToken = default)
+        => _configurations.ListAsync(cancellationToken);
+
+    public async Task<AiModelConfiguration> SaveModelConfigurationAsync(
+        AiModelConfiguration configuration,
+        CancellationToken cancellationToken = default)
+    {
+        var validated = AiModelConfigurationValidator.Validate(configuration);
+        await _configurations.SaveAsync(validated, cancellationToken).ConfigureAwait(false);
+        return validated;
+    }
+
+    public Task DeleteModelConfigurationAsync(string model, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        return _configurations.DeleteAsync(model.Trim(), cancellationToken);
     }
 
     public async Task<AiProviderSettingsState> GetStateAsync(CancellationToken cancellationToken = default)
@@ -352,7 +373,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             now,
             command.Enabled ?? existing?.IsEnabled ?? true);
         await _repository.UpsertModelProfileAsync(profile, cancellationToken);
-        return CreateModelView(profile);
+        return CreateModelView(await GetRequiredModelAsync(profile.Id, cancellationToken).ConfigureAwait(false));
     }
 
     public Task SetModelEnabledAsync(
@@ -406,7 +427,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             .Where(profile => connections.ContainsKey(profile.ProviderConnectionId))
             .Select(profile => new EnabledModelView(
                 profile.Id,
-                profile.Name,
+                profile.Configuration?.Name ?? profile.Name,
                 profile.Model,
                 connections[profile.ProviderConnectionId].Name))
             .ToArray();
@@ -516,18 +537,21 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         => new(
             profile.Id,
             profile.ProviderConnectionId,
-            profile.Name,
+            profile.Configuration?.Name ?? profile.Name,
             profile.Model,
             profile.ApiFormat,
-            profile.Sampling,
+            profile.Configuration?.Sampling ?? profile.Sampling,
             profile.ModelOptions,
             profile.IsEnabled,
-            ReadInt64(profile.ModelOptions, ContextLengthKey),
-            ReadInt64(profile.ModelOptions, MaxOutputTokensKey),
-            ReadDecimal(profile.ModelOptions, PriceInKey),
-            ReadDecimal(profile.ModelOptions, PriceOutKey),
-            ReadDecimal(profile.ModelOptions, PriceCacheWriteKey),
-            ReadDecimal(profile.ModelOptions, PriceCacheReadKey));
+            profile.Configuration?.ContextLength ?? ReadInt64(profile.ModelOptions, AiChatOptions.ContextWindowTokensKey) ?? ReadInt64(profile.ModelOptions, ContextLengthKey),
+            profile.Configuration?.MaxOutputTokens ??
+                (profile.ApiFormat == AiProviderApiFormat.AnthropicMessages ? ReadInt64(profile.ModelOptions, "max_tokens") : null) ??
+                ReadInt64(profile.ModelOptions, AiChatOptions.MaxOutputTokensKey) ?? ReadInt64(profile.ModelOptions, MaxOutputTokensKey),
+            profile.Configuration?.PriceInPerMTok ?? ReadDecimal(profile.ModelOptions, PriceInKey),
+            profile.Configuration?.PriceOutPerMTok ?? ReadDecimal(profile.ModelOptions, PriceOutKey),
+            profile.Configuration?.PriceCacheWritePerMTok ?? ReadDecimal(profile.ModelOptions, PriceCacheWriteKey),
+            profile.Configuration?.PriceCacheReadPerMTok ?? ReadDecimal(profile.ModelOptions, PriceCacheReadKey),
+            profile.Configuration);
 
     private async Task<AiProviderConnection> GetRequiredConnectionAsync(
         Guid connectionId,

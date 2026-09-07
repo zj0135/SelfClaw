@@ -61,7 +61,14 @@ internal sealed partial class OpenAiProviderAdapter
         // Reasoning is explicit-only for Responses; do not inject anything from
         // EnableReasoning so unsupported models are not handed invalid params.
         OpenAIResponseReasoningOptions? reasoning = null;
-        if (options.TryReadString(ResponseReasoningEffortKey, out var effort))
+        if (request.Profile.Configuration?.ReasoningEffort is string configuredEffort)
+        {
+            reasoning = new OpenAIResponseReasoningOptions
+            {
+                ReasoningEffortLevel = new OpenAIResponseReasoningEffortLevel(configuredEffort)
+            };
+        }
+        else if (request.Profile.Configuration is null && options.TryReadString(ResponseReasoningEffortKey, out var effort))
         {
             reasoning ??= new OpenAIResponseReasoningOptions();
             reasoning.ReasoningEffortLevel = new OpenAIResponseReasoningEffortLevel(effort);

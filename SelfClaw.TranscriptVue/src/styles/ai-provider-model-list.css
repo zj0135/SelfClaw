@@ -1,0 +1,260 @@
+@import './settings-console.css';
+.model-registry {
+	container-type: inline-size;
+	min-width: 0;
+	letter-spacing: 0;
+}
+header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 18px;
+}
+h3 {
+	margin: 0;
+	font-size: 16px;
+	font-weight: 600;
+}
+p {
+	margin: 5px 0 0;
+	color: var(--sc-mute);
+	font-size: 12px;
+}
+.count {
+	flex: 0 0 auto;
+	color: var(--sc-acid);
+	font-size: 12px;
+	font-family: var(--sc-mono);
+}
+.toolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	padding-bottom: 18px;
+}
+.search {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	flex: 1 1 180px;
+	height: 36px;
+	padding: 0 10px;
+	border: 1px solid var(--sc-line);
+	border-radius: 6px;
+	color: var(--sc-mute);
+}
+.search input {
+	min-width: 0;
+	width: 100%;
+	border: 0;
+	background: transparent;
+	color: var(--sc-text);
+	font: inherit;
+	font-size: 12px;
+	outline: 0;
+}
+.search:focus-within {
+	outline: 2px solid var(--sc-acid);
+	outline-offset: 2px;
+}
+button {
+	display: inline-flex;
+	justify-content: center;
+	align-items: center;
+	gap: 7px;
+	height: 36px;
+	padding: 0 12px;
+	border: 1px solid var(--sc-line);
+	border-radius: 6px;
+	background: var(--sc-panel);
+	color: var(--sc-text);
+	font: inherit;
+	font-size: 12px;
+	white-space: nowrap;
+	cursor: pointer;
+}
+button:hover {
+	background: var(--sc-hover);
+}
+button:focus-visible {
+	outline: 2px solid var(--sc-acid);
+	outline-offset: 2px;
+}
+button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+.icon {
+	flex: 0 0 32px;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	color: var(--sc-mute);
+}
+.toolbar .icon {
+	width: 36px;
+	height: 36px;
+	flex-basis: 36px;
+}
+.danger:hover {
+	color: var(--sc-err);
+	background: var(--sc-err-soft);
+}
+.model {
+	display: grid;
+	grid-template-columns: 30px minmax(0, 1fr) auto;
+	gap: 14px;
+	align-items: center;
+	padding: 18px 0;
+	border-top: 1px solid var(--sc-line);
+}
+.logo {
+	width: 24px;
+	height: 24px;
+	object-fit: contain;
+}
+.model-main {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.title strong {
+	font-size: 13px;
+	font-weight: 550;
+}
+.title svg {
+	flex: 0 0 14px;
+	color: var(--sc-ok);
+}
+code {
+	display: block;
+	width: fit-content;
+	max-width: 100%;
+	margin-top: 5px;
+	font-family: var(--sc-mono);
+	font-size: 11px;
+	color: var(--sc-mute);
+}
+.metadata {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 12px;
+	margin-top: 8px;
+	font-size: 11px;
+	color: var(--sc-mute);
+}
+.prices,
+.cache {
+	margin-top: 6px;
+	font-family: var(--sc-mono);
+	font-size: 11px;
+	color: var(--sc-ok);
+}
+.cache {
+	color: var(--sc-mute);
+}
+.actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.actions .icon {
+	border-color: transparent;
+}
+.toggle {
+	position: relative;
+	flex: 0 0 42px;
+	width: 42px;
+	height: 24px;
+	margin-left: 4px;
+	cursor: pointer;
+}
+.toggle input {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	opacity: 0;
+	cursor: pointer;
+	z-index: 1;
+}
+.toggle > span {
+	position: absolute;
+	inset: 0;
+	border: 1px solid var(--sc-line-2);
+	border-radius: 20px;
+	background: var(--sc-raise);
+}
+.toggle > span::after {
+	content: '';
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: var(--sc-panel);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+	transition: transform 150ms;
+}
+.toggle input:checked + span {
+	background: var(--sc-acid);
+	border-color: var(--sc-acid);
+}
+.toggle input:checked + span::after {
+	transform: translateX(18px);
+}
+.toggle input:focus-visible + span {
+	outline: 2px solid var(--sc-acid);
+	outline-offset: 3px;
+}
+.toggle input:disabled + span {
+	opacity: 0.4;
+}
+.empty {
+	padding: 40px 16px;
+	border-top: 1px solid var(--sc-line);
+	text-align: center;
+	color: var(--sc-mute);
+	font-size: 13px;
+}
+.spinning {
+	animation: sc-spin 1s linear infinite;
+}
+@container (max-width: 620px) {
+	.search {
+		flex-basis: 100%;
+	}
+	.toolbar button:not(.icon) {
+		flex: 1 1 calc(50% - 4px);
+	}
+	.toolbar .fetch {
+		flex-basis: calc(100% - 44px) !important;
+	}
+}
+@container (max-width: 420px) {
+	.model {
+		grid-template-columns: 30px minmax(0, 1fr);
+		align-items: start;
+	}
+	.actions {
+		grid-column: 2;
+		justify-content: flex-end;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.spinning {
+		animation: none;
+	}
+	.toggle > span::after {
+		transition: none;
+	}
+}

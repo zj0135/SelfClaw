@@ -13,6 +13,9 @@ public sealed class AiProviderSettingsBridgeTests
     public static TheoryData<string, string, string> SupportedMessages => new()
     {
         { "ai-providers/get-state", "{}", "get-state" },
+        { "ai-providers/list-model-configurations", "{}", "list-model-configurations" },
+        { "ai-providers/save-model-configuration", "{\"configuration\":{\"model\":\"model\",\"name\":\"Model\",\"sampling\":{\"temperatureEnabled\":true,\"temperature\":0.3,\"topPEnabled\":false,\"topP\":0.9},\"reasoningEffort\":\"max\",\"priceCacheReadPerMTok\":0}}", "save-model-configuration" },
+        { "ai-providers/delete-model-configuration", "{\"model\":\"model\"}", "delete-model-configuration" },
         { "ai-providers/save-provider", "{\"catalogId\":\"openai\",\"name\":\"OpenAI\",\"endpoint\":\"https://api.openai.com/v1/\",\"apiKey\":\"sk-test\"}", "save-provider" },
         { "ai-providers/set-provider-enabled", ProviderBooleanPayload(), "set-provider-enabled" },
         { "ai-providers/delete-provider", ProviderPayload(), "delete-provider" },
@@ -198,6 +201,20 @@ public sealed class AiProviderSettingsBridgeTests
 
     private sealed class RecordingSettingsService : IAiProviderSettingsService
     {
+        public Task<IReadOnlyList<AiModelConfiguration>> ListModelConfigurationsAsync(CancellationToken cancellationToken = default)
+        {
+            Record("list-model-configurations", cancellationToken);
+            return Task.FromResult<IReadOnlyList<AiModelConfiguration>>([]);
+        }
+
+        public Task<AiModelConfiguration> SaveModelConfigurationAsync(AiModelConfiguration configuration, CancellationToken cancellationToken = default)
+        {
+            Record("save-model-configuration", cancellationToken);
+            return Task.FromResult(configuration);
+        }
+
+        public Task DeleteModelConfigurationAsync(string model, CancellationToken cancellationToken = default) => Complete("delete-model-configuration", cancellationToken);
+
         public static readonly Guid ProviderId = Guid.Parse("11111111-1111-1111-1111-111111111111");
         public static readonly Guid ModelId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         public readonly Guid DefaultModelId = Guid.Parse("33333333-3333-3333-3333-333333333333");

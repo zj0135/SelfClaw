@@ -41,6 +41,24 @@ internal sealed class AiProviderSettingsBridge
             object response;
             switch (type)
             {
+                case "ai-providers/list-model-configurations":
+                {
+                    var configurations = await _settingsService.ListModelConfigurationsAsync(cancellationToken);
+                    response = new { type, requestId, configurations };
+                    break;
+                }
+                case "ai-providers/save-model-configuration":
+                {
+                    var configuration = payload.GetProperty("configuration").Deserialize<AiModelConfiguration>(JsonOptions)
+                        ?? throw new ArgumentException("Model configuration is required.");
+                    var saved = await _settingsService.SaveModelConfigurationAsync(configuration, cancellationToken);
+                    response = new { type, requestId, configuration = saved };
+                    break;
+                }
+                case "ai-providers/delete-model-configuration":
+                    await _settingsService.DeleteModelConfigurationAsync(ReadRequiredString(payload, "model"), cancellationToken);
+                    response = new { type, requestId, ok = true };
+                    break;
                 case "ai-providers/get-state":
                 {
                     var state = await _settingsService.GetStateAsync(cancellationToken);

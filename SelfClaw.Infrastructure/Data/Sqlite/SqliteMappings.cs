@@ -38,7 +38,10 @@ internal static class SqliteMappings
             ReadJsonElementDictionary(reader, 9),
             ReadDateTimeOffset(reader, 10),
             ReadDateTimeOffset(reader, 11),
-            reader.FieldCount <= 12 || reader.IsDBNull(12) || reader.GetInt32(12) != 0);
+            reader.FieldCount <= 12 || reader.IsDBNull(12) || reader.GetInt32(12) != 0,
+            reader.FieldCount <= 13 || reader.IsDBNull(13)
+                ? null
+                : JsonSerializer.Deserialize<AiModelConfiguration>(reader.GetString(13)));
 
     public static AiModelProfileSelection ReadAiModelProfileSelection(SqliteDataReader reader)
         => new(
