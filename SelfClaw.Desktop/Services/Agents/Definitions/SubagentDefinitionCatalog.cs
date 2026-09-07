@@ -68,6 +68,25 @@ internal sealed class SubagentDefinitionCatalog
         }
     }
 
+    internal void Delete(string subagentId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subagentId);
+        var normalizedId = NormalizeDefinitionId(subagentId);
+        if (!IsValidDefinitionId(normalizedId))
+        {
+            throw new ArgumentException("Subagent id is invalid.", nameof(subagentId));
+        }
+
+        lock (_syncRoot)
+        {
+            var filePath = Path.Combine(_subagentsDirectory, $"{normalizedId}.md");
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+    }
+
     internal SubagentDefinition Save(SubagentDefinition definition)
     {
         ArgumentNullException.ThrowIfNull(definition);

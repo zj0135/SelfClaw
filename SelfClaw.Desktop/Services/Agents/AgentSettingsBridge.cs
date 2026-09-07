@@ -131,6 +131,13 @@ internal sealed class AgentSettingsBridge
                     response = new { type, requestId, ok = true, revision, subagent };
                     break;
                 }
+                case "agents/delete-subagent":
+                {
+                    DeleteSubagent(payload);
+                    var revision = NotifyMutation();
+                    response = new { type, requestId, ok = true, revision };
+                    break;
+                }
                 case "agents/set-subagent-extension-binding":
                 {
                     var subagent = await SetSubagentExtensionBindingAsync(payload, cancellationToken);
@@ -306,6 +313,17 @@ internal sealed class AgentSettingsBridge
             Instructions = ReadRequiredString(payload, "instructions")
         });
         return CreateSubagentView(saved);
+    }
+
+    private void DeleteSubagent(JsonElement payload)
+    {
+        var subagentId = ReadRequiredString(payload, "id");
+        if (_subagentCatalog.Get(subagentId) is null)
+        {
+            throw new KeyNotFoundException($"Subagent '{subagentId}' was not found.");
+        }
+
+        _subagentCatalog.Delete(subagentId);
     }
 
     private async Task<SubagentDefinitionView> SetSubagentExtensionBindingAsync(

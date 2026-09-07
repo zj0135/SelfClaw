@@ -4,6 +4,7 @@ import {
 	AlertTriangle,
 	Network,
 	Puzzle,
+	Trash2,
 	Wrench,
 	Workflow,
 } from 'lucide-vue-next';
@@ -21,7 +22,7 @@ const props = defineProps({
 	bindingPending: { type: Function, default: () => false },
 });
 
-const emit = defineEmits(['save', 'toggle-binding']);
+const emit = defineEmits(['save', 'toggle-binding', 'delete']);
 
 const openSectionKey = ref('');
 const showBasicDialog = ref(false);
@@ -152,6 +153,10 @@ function onBasicSave(data) {
 				</div>
 				<p :title="subagent.description || '暂无描述'">{{ subagent.description || '暂无描述' }}</p>
 			</div>
+			<button class="m-icon agent-delete" type="button"
+				title="删除子代理" aria-label="删除子代理" :disabled="saving" @click="$emit('delete')">
+				<Trash2 :size="16" :stroke-width="1.9" />
+			</button>
 			<span class="mode-badge">{{ subagent.toolPolicy }}</span>
 			<span v-if="!subagent.isValid" class="invalid-badge">需修复</span>
 		</header>

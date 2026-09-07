@@ -129,6 +129,15 @@ export function useAgentSettings() {
 		return true;
 	}
 
+	async function deleteSubagent(subagentId) {
+		const response = await mutate(`subagent:delete:${subagentId}`, () => request('agents/delete-subagent', { id: subagentId }));
+		if (!response) return false;
+		// 从列表中移除该子代理
+		state.value.subagents = state.value.subagents.filter((subagent) => subagent.id !== subagentId);
+		state.value.revision = response.revision;
+		return true;
+	}
+
 	async function setSubagentBinding(subagentId, kind, id, enabled) {
 		const response = await mutate(subagentBindingKey(subagentId, kind, id), () =>
 			request('agents/set-subagent-extension-binding', { subagentId, kind, id, enabled })
@@ -171,6 +180,7 @@ export function useAgentSettings() {
 		setAgentBinding,
 		setSubagentAllowance,
 		saveSubagent,
+		deleteSubagent,
 		setSubagentBinding,
 	};
 }

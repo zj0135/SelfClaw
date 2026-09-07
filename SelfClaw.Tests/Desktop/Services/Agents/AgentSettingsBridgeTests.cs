@@ -133,6 +133,36 @@ public sealed class AgentSettingsBridgeTests : IDisposable
         saved.Instructions.Should().Be("Review strictly.");
     }
 
+    [Fact]
+    public async Task DeleteSubagent_removes_definition_file()
+    {
+        var catalog = CreateSubagentCatalog();
+        WriteSubagent(catalog, "reviewer");
+        var bridge = CreateBridge(subagentCatalog: catalog);
+        using var document = JsonDocument.Parse("{\"requestId\":\"del-sub\",\"id\":\"reviewer\"}");
+
+        var response = await bridge.TryHandleAsync("agents/delete-subagent", document.RootElement);
+
+        var json = SerializeResponse(response);
+        json.GetProperty("ok").GetBoolean().Should().BeTrue();
+        json.GetProperty("revision").GetInt64().Should().BeGreaterThan(0);
+        catalog.Get("reviewer").Should().BeNull();
+        File.Exists(Path.Combine(catalog.SubagentsDirectory, "reviewer.md")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteSubagent_returns_error_for_missing_id()
+    {
+        var bridge = CreateBridge();
+        using var document = JsonDocument.Parse("{\"requestId\":\"del-missing\",\"id\":\"ghost\"}");
+
+        var response = await bridge.TryHandleAsync("agents/delete-subagent", document.RootElement);
+
+        var json = SerializeResponse(response);
+        json.GetProperty("requestId").GetString().Should().Be("del-missing");
+        json.GetProperty("error").GetString().Should().Contain("ghost");
+    }
+
     [Theory]
     [InlineData("agents/save-agent", "{\"id\":\"ghost\",\"name\":\"x\",\"mode\":\"direct\"}", "not found")]
     [InlineData("agents/not-supported", "{}", "Unsupported agent message type")]

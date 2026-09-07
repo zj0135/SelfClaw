@@ -24,6 +24,7 @@ const {
 	setAgentBinding,
 	setSubagentAllowance,
 	saveSubagent,
+	deleteSubagent,
 	setSubagentBinding,
 } = useAgentSettings();
 const { showToast } = useToast();
@@ -170,6 +171,19 @@ async function onSaveSubagent(form) {
 	if (await saveSubagent(selection.subagent, form)) showToast('子代理设置已保存');
 }
 
+async function onDeleteSubagent() {
+	if (!activeSubagent.value) return;
+
+	const subagentId = activeSubagent.value.id;
+	if (await deleteSubagent(subagentId)) {
+		showToast('子代理已删除');
+		// 删除后选中第一个子代理（如果还有的话）
+		if (state.value.subagents.length > 0) {
+			selection.subagent = state.value.subagents[0].id;
+		}
+	}
+}
+
 async function onToggleSubagentBinding(kind, id, enabled) {
 	await setSubagentBinding(selection.subagent, kind, id, enabled);
 }
@@ -209,7 +223,7 @@ async function onDeleteAgent() {
 			<SubagentDetailPanel v-else-if="activeKind === 'subagent' && activeSubagent" :subagent="activeSubagent"
 				:index="activeIndex" :plugins="state.plugins" :skills="state.skills" :mcp-servers="state.mcpServers"
 				:saving="isSubagentSaving(activeSubagent.id)" :binding-pending="subagentBindingPending"
-				@save="onSaveSubagent" @toggle-binding="onToggleSubagentBinding" />
+				@save="onSaveSubagent" @toggle-binding="onToggleSubagentBinding" @delete="onDeleteSubagent" />
 			<div v-else class="detail-empty">
 				{{ loading ? '正在加载定义…' : '从左侧选择一个定义查看配置' }}
 			</div>

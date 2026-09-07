@@ -101,7 +101,7 @@ Key runtime files:
 `DesktopAgentDefinitionService` loads and atomically updates `.md` files from `{AppData}\agents\`. Built-in agent id: `build`.
 Agent markdown supports front matter: name, description, mode, tools, plugins, skills, mcpServers, subagents. Direct turns resolve those ids against the enabled extension catalog; CLI turns keep their existing subprocess behavior.
 Subagent definitions live in `{AppData}\subagents\` via `SubagentDefinitionCatalog` (name, description, modelProfileId, tools, plugins, skills, mcpServers, maxRunSeconds); `Save()` writes them atomically with the same strict validation as load.
-The 代理助手 settings page talks to `AgentSettingsBridge` (prefix `agents/`): `get-state`, `save-agent`, `set-binding`, `set-subagent-binding`, `save-subagent`, `set-subagent-extension-binding`. Every mutation raises `AgentsChanged` (router reloads the VM agent cache) and advances the shared extension revision.
+The 代理助手 settings page talks to `AgentSettingsBridge` (prefix `agents/`): `get-state`, `save-agent`, `set-binding`, `set-subagent-binding`, `save-subagent`, `delete-subagent`, `set-subagent-extension-binding`. Every mutation raises `AgentsChanged` (router reloads the VM agent cache) and advances the shared extension revision.
 
 ### 插件面板 (Plugin panels)
 
