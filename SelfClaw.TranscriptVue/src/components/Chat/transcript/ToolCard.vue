@@ -56,6 +56,7 @@ const sourceText = computed(() => {
 </template>
 
 <style scoped>
+@import './tool-blocks.css';
 .tool-details-header {
 	display: flex;
 	align-items: center;

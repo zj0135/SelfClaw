@@ -106,10 +106,19 @@ internal sealed class SubagentContinuationExecutor
             _turnRecorder.BeginTurn(runtimeState, turn);
             await foreach (var streamEvent in _chatRuntime.StreamTurnAsync(request, execution.Token))
             {
+                var recordedEvent = streamEvent is RunCompletedEvent { Status: RunCompletionStatus.Truncated } truncated
+                    ? truncated with
+                    {
+                        Status = RunCompletionStatus.Failed,
+                        ErrorMessage = string.IsNullOrWhiteSpace(truncated.ErrorMessage)
+                            ? "The continuation reached the model output limit. Partial output was preserved when tools ran."
+                            : truncated.ErrorMessage
+                    }
+                    : streamEvent;
                 await _turnRecorder.ApplyDetachedEventAsync(
                     runtimeState,
                     turn,
-                    streamEvent,
+                    recordedEvent,
                     committer,
                     execution.Token);
             }

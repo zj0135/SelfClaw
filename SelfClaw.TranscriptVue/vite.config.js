@@ -5,12 +5,12 @@ import { visualizer } from 'rollup-plugin-visualizer';
 export default defineConfig({
 	plugins: [
 		vue(),
-		visualizer({
+		...(process.env.SELFCLAW_ANALYZE === '1' ? [visualizer({
 			open: true,
 			gzipSize: true,
 			brotliSize: true,
 			filename: 'stats.html',
-		}),
+		})] : []),
 	],
 	base: './',
 	build: {

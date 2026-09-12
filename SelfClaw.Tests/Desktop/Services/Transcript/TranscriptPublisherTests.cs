@@ -5,11 +5,49 @@ using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Infrastructure.Options;
+using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Desktop.Services.Transcript;
 
 public sealed class TranscriptPublisherTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task Dispose_drops_publication_already_queued_from_a_background_thread(bool streaming)
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            var messages = new List<string>();
+            var channel = new WebViewHostChannel();
+            channel.Attach(messages.Add);
+            channel.MarkReady();
+            using var publisher = new TranscriptPublisher(new TranscriptProjection(StoragePaths.CreateDefault()), channel, dispatcher);
+            var captures = 0;
+            publisher.Attach(autoScroll => { captures++; return CreateRequest("current", autoScroll); });
+            var failures = new List<Exception>();
+            DispatcherUnhandledExceptionEventHandler onFailure = (_, args) => { failures.Add(args.Exception); args.Handled = true; };
+            dispatcher.UnhandledException += onFailure;
+            try
+            {
+                // Keep the dispatcher paused until publication is queued, then dispose before it can run.
+                Task.Run(() =>
+                {
+                    if (streaming) publisher.RequestStreamingPublish(false);
+                    else publisher.PublishNow(false);
+                }).GetAwaiter().GetResult();
+                publisher.Dispose();
+                await dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+                failures.Should().BeEmpty();
+                captures.Should().Be(0);
+                messages.Should().BeEmpty();
+            }
+            finally
+            {
+                dispatcher.UnhandledException -= onFailure;
+            }
+        });
+
     [Fact]
     public void PublishNow_flushes_the_latest_pending_streaming_snapshot()
     {

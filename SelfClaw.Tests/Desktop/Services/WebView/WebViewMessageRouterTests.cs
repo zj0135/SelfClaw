@@ -64,6 +64,8 @@ public sealed class WebViewMessageRouterTests
     [InlineData("""{"type":"extensions/delete","kind":"plugin","id":"rival"}""")]
     [InlineData("""{"type":"delete-workspace-root","workspaceRootId":"11111111-1111-1111-1111-111111111111"}""")]
     [InlineData("""{"type":"open-link","href":"https://example.com"}""")]
+    [InlineData("""{"type":"activity-panel/subscribe","subscriptionId":"11111111-1111-4111-8111-111111111111"}""")]
+    [InlineData("""{"type":"activity-panel/cancel-task","subscriptionId":"11111111-1111-4111-8111-111111111111","taskId":"22222222-2222-4222-8222-222222222222"}""")]
     [InlineData("""{"type":"get-programming-assistant-settings","requestId":"request-1"}""")]
     public async Task RouteAsync_drops_messages_that_do_not_come_from_the_application_origin(string messageJson)
     {

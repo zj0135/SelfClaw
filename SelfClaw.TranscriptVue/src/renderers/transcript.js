@@ -176,90 +176,6 @@ export function formatAttachmentSize(byteLength) {
 	return `${Math.max(0, size)} B`;
 }
 
-// ── skill-token 后处理（用户消息正文里的 [/xx] → chip） ────────────
-/* skill tokens are rendered by the shared Markdown renderer. */
-/* legacy HTML post-processing intentionally removed. */
-/*
-
-function renderSkillChip(name) {
-	const safeName = escapeText(name);
-	return `<span class="composer-inline-skill message-skill-chip" role="text"><span class="composer-inline-skill-icon" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M8 1.8 13 4.6v6.8L8 14.2l-5-2.8V4.6L8 1.8Z"></path><path d="M3.2 4.8 8 7.5l4.8-2.7"></path><path d="M8 7.5v6.2"></path></svg></span><span class="composer-inline-skill-name">${safeName}</span></span>`;
-}
-
-function renderSkillTokensInText(text) {
-	let html = '';
-	let lastIndex = 0;
-	let match;
-	skillTokenPattern.lastIndex = 0;
-	while ((match = skillTokenPattern.exec(text || '')) !== null) {
-		html += escapeText(text.slice(lastIndex, match.index));
-		html += renderSkillChip(match[1]);
-		lastIndex = match.index + match[0].length;
-	}
-
-	return html + escapeText(String(text || '').slice(lastIndex));
-}
-
-function shouldSkipSkillTokenRendering(node) {
-	let current = node.parentElement;
-	while (current) {
-		if (skillTokenSkipTags.has(current.tagName)) {
-			return true;
-		}
-
-		current = current.parentElement;
-	}
-
-	return false;
-}
-
-// 用户消息的 HTML 在会话内不变，缓存 token 替换结果避免每次重渲染都做 DOM 解析。
-const skillTokenCache = new Map();
-const skillTokenCacheLimit = 200;
-
-export function renderSkillTokensInLegacy(html) {
-	if (!html || !html.includes('[/') || typeof document === 'undefined') {
-		return html;
-	}
-
-	const cached = skillTokenCache.get(html);
-	if (cached !== undefined) {
-		return cached;
-	}
-
-	const template = document.createElement('template');
-	template.innerHTML = html;
-	const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
-	const textNodes = [];
-	let node = walker.nextNode();
-	while (node) {
-		const text = node.nodeValue || '';
-		if (text.includes('[/') && !shouldSkipSkillTokenRendering(node)) {
-			skillTokenPattern.lastIndex = 0;
-			if (skillTokenPattern.test(text)) {
-				textNodes.push(node);
-			}
-		}
-
-		node = walker.nextNode();
-	}
-
-	for (const textNode of textNodes) {
-		const wrapper = document.createElement('span');
-		wrapper.innerHTML = renderSkillTokensInText(textNode.nodeValue || '');
-		textNode.replaceWith(...wrapper.childNodes);
-	}
-
-	const result = template.innerHTML;
-	if (skillTokenCache.size >= skillTokenCacheLimit) {
-		skillTokenCache.clear();
-	}
-
-	skillTokenCache.set(html, result);
-	return result;
-}
-*/
-
 // ── 编排：raw segments → 有序渲染块 ──────────────────────────────
 // 等价于旧 renderMessageContent 的 for 循环，但产出数据而非 HTML 串：
 // 连续的 tool 段贪心合并成组（≥2 张才成组，否则单卡），thinking 按出现序编号。
@@ -276,8 +192,8 @@ export function buildRenderBlocks(item) {
 		if (segment.kind === 'thinking') {
 			blocks.push({
 				type: 'thinking',
-				key: thinkingBlockId(item.id, thinkingOrdinal),
-				id: thinkingBlockId(item.id, thinkingOrdinal),
+				key: segment.segmentId || thinkingBlockId(item.id, thinkingOrdinal),
+				id: segment.segmentId || thinkingBlockId(item.id, thinkingOrdinal),
 				segment,
 				isLast: index === total - 1,
 			});

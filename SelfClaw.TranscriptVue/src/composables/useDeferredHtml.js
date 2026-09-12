@@ -1,7 +1,7 @@
 import { onUnmounted, ref, watch } from 'vue';
 
 export function useDeferredHtml(source, shouldDefer, delayMs = 160) {
-	const html = ref('');
+	const html = ref(source.value || '');
 	let pendingHtml = '';
 	let timer = null;
 

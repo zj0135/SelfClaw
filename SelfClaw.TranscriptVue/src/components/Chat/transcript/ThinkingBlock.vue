@@ -59,3 +59,107 @@ function onContentClick(event) {
 		</div>
 	</section>
 </template>
+
+<style scoped>
+.thinking-block {
+	margin: 0;
+	overflow: hidden;
+	border: 1px solid var(--card-line);
+	border-radius: 12px;
+	background: var(--card-surface);
+	transition: border-color 0.15s;
+}
+
+.thinking-block:not(.pending):hover {
+	border-color: var(--card-line-hover);
+}
+
+.thinking-block.last {
+	margin-bottom: 6px;
+}
+
+.thinking-summary {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 9px;
+	padding: 9px 12px;
+	border: 0;
+	background: transparent;
+	color: var(--text-soft);
+	text-align: left;
+}
+
+.thinking-summary.passive {
+	cursor: default;
+}
+
+.thinking-spark {
+	display: inline-grid;
+	place-items: center;
+	width: 18px;
+	height: 18px;
+	color: var(--muted);
+	flex: none;
+}
+
+.thinking-spark svg {
+	width: 13px;
+	height: 13px;
+}
+
+.thinking-spark.live {
+	color: var(--accent);
+	animation: spark-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes spark-pulse {
+	50% {
+		transform: scale(0.78);
+		opacity: 0.6;
+	}
+}
+
+.thinking-label {
+	font-size: var(--fs-125);
+	font-weight: 600;
+	color: var(--text-strong);
+	letter-spacing: 0.01em;
+}
+
+.thinking-chevron {
+	margin-left: auto;
+	color: var(--faint);
+	font-size: var(--fs-14);
+	transition: transform 140ms ease;
+}
+
+.thinking-block.open .thinking-chevron {
+	transform: rotate(90deg);
+	color: var(--text);
+}
+
+.thinking-content {
+	display: none;
+	padding: 0 12px 11px;
+}
+
+.thinking-block.open .thinking-content {
+	display: block;
+}
+
+.thinking-markdown {
+	padding: 6px 0 2px 12px;
+	border-left: 2px solid var(--quote-line);
+	color: var(--muted);
+	font-size: var(--fs-12);
+	line-height: 1.7;
+}
+
+.thinking-placeholder {
+	margin: 0;
+	color: var(--muted-soft);
+	font-size: var(--fs-12);
+}
+</style>

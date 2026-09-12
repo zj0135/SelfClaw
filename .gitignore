@@ -68,6 +68,9 @@ migrations/
 
 # Frontend
 SelfClaw.TranscriptVue/node_modules/
+SelfClaw.TranscriptVue/test-results/
+SelfClaw.TranscriptVue/playwright-report/
+SelfClaw.TranscriptVue/stats.html
 SelfClaw.Desktop/Assets/TranscriptVue/
 
 # Mac鐩稿叧鏂囦欢

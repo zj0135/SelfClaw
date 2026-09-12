@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
@@ -8,7 +9,6 @@ using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Subagents;
-using SelfClaw.Desktop.Services.Subagents.Models;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 using SelfClaw.Infrastructure.AiProviders.Models.Views;
@@ -16,6 +16,7 @@ using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Tests.TestDoubles;
+using static SelfClaw.Tests.TestDoubles.SubagentTaskTestData;
 
 namespace SelfClaw.Tests.Desktop.Services.Subagents;
 
@@ -26,8 +27,13 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         "SelfClawTests",
         Guid.NewGuid().ToString("N"));
 
-    [Fact]
-    public async Task ExecuteAsync_sends_only_isolated_child_input_and_records_all_events()
+    [Theory]
+    [InlineData(RunCompletionStatus.Succeeded, SubagentTaskStatus.Succeeded, MessageStatus.Completed)]
+    [InlineData(RunCompletionStatus.Truncated, SubagentTaskStatus.Failed, MessageStatus.Failed)]
+    public async Task ExecuteAsync_sends_only_isolated_child_input_and_records_all_events(
+        RunCompletionStatus completionStatus,
+        SubagentTaskStatus expectedTaskStatus,
+        MessageStatus expectedMessageStatus)
     {
         var storagePaths = new StoragePaths(
             _rootPath,
@@ -48,7 +54,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
             settings,
             new EmptyExtensionPackageRepository(),
             new EmptyMcpServerRepository());
-        var runtime = new RecordingRuntime();
+        var runtime = new RecordingRuntime(completionStatus);
         var executor = new SubagentTaskExecutor(
             conversations,
             tasks,
@@ -71,14 +77,17 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         request.Agent.SubagentIds.Should().BeEmpty();
         request.Messages.Should().ContainSingle()
             .Which.MarkdownContent.Should().Be(task.TaskText);
-        var terminal = await tasks.GetAsync(task.ParentConversationId, task.Id);
-        terminal!.Status.Should().Be(SubagentTaskStatus.Succeeded);
+        var terminal = await tasks.GetAsync(task.ParentConversationId, task.Id)
+            ?? throw new InvalidOperationException("The fixture task is missing.");
+        terminal.Status.Should().Be(expectedTaskStatus);
+        terminal.ErrorCode.Should().Be(completionStatus == RunCompletionStatus.Truncated ? "OutputTruncated" : null);
         terminal.FinalText.Should().Be("final answer");
         terminal.InputTokens.Should().Be(21);
         terminal.OutputTokens.Should().Be(8);
         var assistant = (await conversations.ListMessagesAsync(task.ChildConversationId))
             .Single(message => message.Role == MessageRole.Assistant);
         assistant.MarkdownContent.Should().Be("final answer");
+        assistant.Status.Should().Be(expectedMessageStatus);
         assistant.Segments.Should().SatisfyRespectively(
             segment => segment.Kind.Should().Be(MessageSegmentKind.Thinking),
             segment => segment.Kind.Should().Be(MessageSegmentKind.Text),
@@ -86,8 +95,12 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         (await conversations.ListToolExecutionsAsync(task.ChildConversationId))
             .Should().ContainSingle()
             .Which.Status.Should().Be(ToolExecutionStatus.Completed);
-        (await tasks.GetDeliveryAsync(task.ParentConversationId, task.Id))
-            .Should().NotBeNull();
+        var delivery = await tasks.GetDeliveryAsync(task.ParentConversationId, task.Id)
+            ?? throw new InvalidOperationException("The terminal task has no delivery.");
+        delivery.Status.Should().Be(SubagentDeliveryStatus.Pending);
+        using var envelope = JsonDocument.Parse(delivery.EnvelopeJson);
+        envelope.RootElement.GetProperty("status").GetString().Should().Be(expectedTaskStatus.ToString());
+        envelope.RootElement.GetProperty("taskId").GetGuid().Should().Be(task.Id);
     }
 
     [Fact]
@@ -132,7 +145,8 @@ public sealed class SubagentTaskExecutorTests : IDisposable
             task.Id,
             DateTimeOffset.UtcNow);
         registry.RequestCancellation(task.Id);
-        await execution;
+        var awaitExecution = () => execution;
+        await awaitExecution.Should().ThrowAsync<OperationCanceledException>();
 
         var terminal = await tasks.GetAsync(task.ParentConversationId, task.Id)
             ?? throw new InvalidOperationException("The cancelled fixture task is missing.");
@@ -245,120 +259,6 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         }
     }
 
-    private static async Task<SubagentTaskRecord> CreateRunningTaskAsync(
-        SqliteConversationRepository conversations,
-        SqliteSubagentTaskRepository tasks)
-    {
-        await CreateQueuedTaskAsync(conversations, tasks);
-        return (await tasks.TryClaimNextAsync(DateTimeOffset.UtcNow))
-            ?? throw new InvalidOperationException("The fixture task could not be claimed.");
-    }
-
-    private static async Task<SubagentTaskRecord> CreateQueuedTaskAsync(
-        SqliteConversationRepository conversations,
-        SqliteSubagentTaskRepository tasks)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var parent = new ConversationRecord(
-            Guid.NewGuid(),
-            "Parent",
-            null,
-            ConversationMode.Programming,
-            ToolPermissionMode.RequireApproval,
-            "build",
-            now,
-            now);
-        await conversations.UpsertConversationAsync(parent);
-        var childId = Guid.NewGuid();
-        var childTurnId = Guid.NewGuid();
-        var modelProfileId = Guid.NewGuid();
-        var child = new ConversationRecord(
-            childId,
-            "Subagent: Reviewer",
-            null,
-            ConversationMode.Programming,
-            ToolPermissionMode.RequireApproval,
-            "reviewer",
-            now,
-            now,
-            Kind: ConversationKind.Subagent,
-            ParentConversationId: parent.Id);
-        const string taskText = "Inspect the current implementation.";
-        var message = new MessageRecord(
-            Guid.NewGuid(),
-            childId,
-            MessageRole.User,
-            taskText,
-            MessageStatus.Completed,
-            now,
-            now);
-        var serializer = new SubagentTaskSnapshotSerializer();
-        var definition = new SubagentDefinitionSnapshot(
-            1,
-            "reviewer",
-            "Reviewer",
-            "Reviews code",
-            null,
-            "read-only",
-            [],
-            [],
-            [],
-            900,
-            "Review only the supplied task.");
-        var parentAgent = new AgentRuntimeDefinition(
-            "build",
-            "Build",
-            string.Empty,
-            AgentExecutionMode.Direct,
-            AgentRuntimeDefinition.SystemToolPolicy,
-            [],
-            [],
-            [],
-            ["reviewer"],
-            "Parent instructions");
-        var parentSnapshot = new SubagentParentExecutionSnapshot(
-            1,
-            parentAgent,
-            modelProfileId,
-            null,
-            ToolPermissionMode.RequireApproval,
-            new DirectCapabilityCeiling(
-                AgentRuntimeDefinition.SystemToolPolicy,
-                [],
-                [],
-                [],
-                ["reviewer"]));
-        var task = new SubagentTaskRecord(
-            Guid.NewGuid(),
-            parent.Id,
-            Guid.NewGuid(),
-            childId,
-            childTurnId,
-            "reviewer",
-            "Reviewer",
-            taskText,
-            SubagentTaskStatus.Queued,
-            1,
-            null,
-            serializer.Serialize(definition),
-            serializer.Serialize(parentSnapshot),
-            modelProfileId,
-            900,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            now,
-            null,
-            null,
-            now,
-            now);
-        await tasks.CreateAsync(new SubagentTaskCreation(child, message, task));
-        return task;
-    }
-
     private static async Task<SubagentTaskRecord> WaitForTerminalAsync(
         SqliteSubagentTaskRepository tasks,
         SubagentTaskRecord task)
@@ -381,7 +281,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         }
     }
 
-    private sealed class RecordingRuntime : IAgentChatRuntime
+    private sealed class RecordingRuntime(RunCompletionStatus completionStatus = RunCompletionStatus.Succeeded) : IAgentChatRuntime
     {
         public List<ChatTurnRequest> Requests { get; } = [];
 
@@ -406,7 +306,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
                 "content");
             yield return new UsageReportedEvent(21, 8);
             await Task.Yield();
-            yield return new RunCompletedEvent(RunCompletionStatus.Succeeded, "final answer");
+            yield return new RunCompletedEvent(completionStatus, "final answer");
         }
     }
 

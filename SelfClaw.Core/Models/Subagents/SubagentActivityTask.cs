@@ -1,0 +1,27 @@
+namespace SelfClaw.Core.Models;
+
+public sealed record SubagentActivityTask(
+    Guid TaskId,
+    Guid ParentConversationId,
+    Guid ParentTurnId,
+    Guid ChildConversationId,
+    Guid ChildTurnId,
+    string SubagentId,
+    string SubagentName,
+    string TaskPreview,
+    SubagentTaskStatus Status,
+    int Attempt,
+    Guid? RetryOfTaskId,
+    Guid? ModelProfileId,
+    string? ModelDisplayName,
+    DateTimeOffset? CancelRequestedAtUtc,
+    DateTimeOffset QueuedAtUtc,
+    DateTimeOffset? StartedAtUtc,
+    DateTimeOffset? CompletedAtUtc,
+    int? InputTokens,
+    int? OutputTokens,
+    string? ErrorCode,
+    string? ErrorMessage,
+    SubagentDeliveryStatus? DeliveryStatus,
+    int DeliveryAttemptCount,
+    string? DeliveryError);

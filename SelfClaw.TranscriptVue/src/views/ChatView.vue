@@ -1,6 +1,7 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import ComposerPanel from '../components/Chat/ComposerPanel.vue';
+import ActivityStage from '../components/Activities/ActivityStage.vue';
 const TerminalPanel = defineAsyncComponent(() => import('../components/Chat/TerminalPanel.vue'));
 import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
 import { isSuperseded, useHostBridge } from '../composables/hostBridge.js';
@@ -139,10 +140,6 @@ function replaceState(payload) {
 		stopBusyClock();
 	}
 
-	const wasEmpty = (state.items || []).length === 0 && !state.isBusy;
-	const willBeEmpty = nextItems.length === 0 && !nextBusy;
-	const previousComposerRect = wasEmpty && !willBeEmpty ? composerShellRef.value?.getShellEl()?.getBoundingClientRect() : null;
-
 	state.items = nextItems;
 	state.conversations = Array.isArray(payload.conversations) ? payload.conversations : [];
 	state.selectedConversationId = nextConversationId;
@@ -156,19 +153,6 @@ function replaceState(payload) {
 	state.toolPermissionMode = payload.toolPermissionMode || 'require-approval';
 
 	nextTick(() => {
-		const composerEl = composerShellRef.value?.getShellEl();
-		if (composerEl && previousComposerRect) {
-			const nextComposerRect = composerEl.getBoundingClientRect();
-			const deltaY = previousComposerRect.top - nextComposerRect.top;
-
-			if (Math.abs(deltaY) > 4) {
-				composerEl.animate([{ transform: `translateY(${deltaY}px)` }, { transform: 'translateY(0)' }], {
-					duration: 850,
-					easing: 'cubic-bezier(0.18, 0.86, 0.24, 1)',
-				});
-			}
-		}
-
 		transcriptScroll.settleAfterUpdate(nextAutoScroll, scrollSnapshot);
 	});
 }
@@ -448,6 +432,7 @@ onUnmounted(() => {
 		'empty-workspace': isEmptyConversation,
 		'terminal-open': state.terminal.isOpen,
 	}" @pointerdown="onWorkspacePointerDown" @focusin="onWorkspaceFocusIn">
+		<ActivityStage :parent-conversation-id="state.selectedConversationId" @preview-image="openImagePreview">
 		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :items="state.items" :collapse="collapse"
 			:activity-text="state.activityText" :turn-status="turnStatus"
 			@content-resize="transcriptScroll.onContentResize" @scroll="transcriptScroll.onScroll"
@@ -459,6 +444,7 @@ onUnmounted(() => {
 				<p>随意提问，或使用命令/工具。</p>
 			</div>
 		</section>
+		</ActivityStage>
 		<ComposerPanel ref="composerShellRef" :busy="state.isBusy || state.isSubmitting"
 			:workspace-selection="state.workspace" :git-loading="state.workspace.gitLoading"
 			:git-error="state.workspace.gitError" :submit-error="state.submitError" :agent-mode="state.agentMode"
@@ -475,8 +461,9 @@ onUnmounted(() => {
 	</div>
 </template>
 
-<style>
+<style scoped>
 .workspace {
+	position: relative;
 	width: 100%;
 	height: 100%;
 	display: grid;
@@ -530,17 +517,17 @@ onUnmounted(() => {
 	font-family: var(--font-mono);
 	font-size: var(--fs-10);
 	font-weight: 600;
-	letter-spacing: 0.28em;
+	letter-spacing: 0;
 }
 
 .empty-composer-copy h1 {
 	margin: 0;
 	color: var(--text);
 	font-family: var(--font-display);
-	font-size: clamp(32px, 4vw, 42px);
+	font-size: 42px;
 	font-weight: 700;
 	line-height: 1.1;
-	letter-spacing: -0.02em;
+	letter-spacing: 0;
 }
 
 .empty-composer-copy p {

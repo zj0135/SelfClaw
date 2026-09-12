@@ -1,0 +1,27 @@
+namespace SelfClaw.Desktop.Services.Activities.Models;
+
+internal sealed record ActivityPanelWireTask(
+    Guid TaskId,
+    Guid ParentTurnId,
+    string SubagentId,
+    string SubagentName,
+    string TaskPreview,
+    int Attempt,
+    string Status,
+    string Phase,
+    bool CancelRequested,
+    int PendingApprovalCount,
+    bool CanCancel,
+    DateTimeOffset QueuedAtUtc,
+    DateTimeOffset? StartedAtUtc,
+    DateTimeOffset? CompletedAtUtc,
+    string? ModelDisplayName,
+    int? InputTokens,
+    int? OutputTokens,
+    string? ErrorCode,
+    string? ErrorMessage,
+    string DeliveryStatus,
+    int DeliveryAttemptCount,
+    string? DeliveryError,
+    string? RecordingError,
+    bool MetadataTruncated);

@@ -7,6 +7,7 @@ using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
+using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
 
@@ -28,6 +29,7 @@ internal sealed class ConversationTurnEngine : IDisposable
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettings;
     private readonly IAiProviderSettingsService _aiProviderSettings;
     private readonly IConversationCompletionNotifier _completionNotifier;
+    private readonly SubagentActivityService? _subagentActivity;
     private readonly ILogger<ConversationTurnEngine> _logger;
     private readonly SemaphoreSlim _turnAdmissionGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, byte> _deletingConversations = new();
@@ -45,7 +47,8 @@ internal sealed class ConversationTurnEngine : IDisposable
         ProgrammingAssistantSettingsService programmingAssistantSettings,
         IAiProviderSettingsService aiProviderSettings,
         IConversationCompletionNotifier completionNotifier,
-        ILogger<ConversationTurnEngine> logger)
+        ILogger<ConversationTurnEngine> logger,
+        SubagentActivityService? subagentActivity = null)
     {
         _conversationRepository = conversationRepository;
         _turnFinalizer = turnFinalizer;
@@ -57,6 +60,7 @@ internal sealed class ConversationTurnEngine : IDisposable
         _programmingAssistantSettings = programmingAssistantSettings;
         _aiProviderSettings = aiProviderSettings;
         _completionNotifier = completionNotifier;
+        _subagentActivity = subagentActivity;
         _logger = logger;
     }
 
@@ -153,10 +157,14 @@ internal sealed class ConversationTurnEngine : IDisposable
         }
 
         _deletingConversations[conversationId] = 0;
+        _subagentActivity?.SetScopeClosed(conversationId, true);
     }
 
     internal void EndConversationDeletion(Guid conversationId)
-        => _deletingConversations.TryRemove(conversationId, out _);
+    {
+        _deletingConversations.TryRemove(conversationId, out _);
+        _subagentActivity?.SetScopeClosed(conversationId, false);
+    }
 
     internal async Task ExecuteAsync(AdmittedConversationTurn admission)
     {

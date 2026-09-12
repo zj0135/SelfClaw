@@ -99,8 +99,9 @@ internal sealed class SubagentTaskBackgroundHost : BackgroundService
         {
             await _executor.ExecuteAsync(task, cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
+            throw;
         }
         catch (Exception exception)
         {

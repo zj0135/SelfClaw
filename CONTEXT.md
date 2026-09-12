@@ -27,3 +27,15 @@ _Avoid_: Main branch, parent branch
 **Task Branch**:
 The branch checked out by a Managed Worktree for the work owned by its conversation.
 _Avoid_: Worktree
+
+**Subagent Task**:
+One durable, parent-owned Direct delegation with its own child conversation, isolated input, frozen execution settings, and lifecycle. Repeated invocations or retries are separate tasks, even when they use the same subagent definition.
+_Avoid_: Agent definition, parent conversation message
+
+**Subagent Delivery**:
+The durable handoff of a completed Subagent Task result to its parent agent. Pending or failed delivery is separate from the child's execution status; it does not make a completed task run again.
+_Avoid_: Child execution, transcript block
+
+**Activity Panel**:
+An independent view of the current parent's tasks and their live or persisted content. Its subscriptions, selected detail, reading position, and acknowledgement flow are separate from the main transcript and composer.
+_Avoid_: Child conversation navigation, parent transcript

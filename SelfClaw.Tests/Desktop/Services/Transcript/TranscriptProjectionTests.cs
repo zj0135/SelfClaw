@@ -280,6 +280,62 @@ public sealed class TranscriptProjectionTests
             "IsManagedWorktree");
     }
 
+    [Fact]
+    public void Shared_message_projection_matches_main_blocks_and_preserves_thinking_identity_after_terminal_alignment()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var toolId = Guid.NewGuid();
+        var message = new MessageRecord(messageId, conversationId, MessageRole.Assistant, "answer", MessageStatus.Streaming, now, now,
+            Segments:
+            [
+                new(messageId, 0, MessageSegmentKind.Text, "answer", null),
+                new(messageId, 1, MessageSegmentKind.ToolCall, null, toolId),
+                new(messageId, 2, MessageSegmentKind.Thinking, "analysis", null)
+            ]);
+        var tool = new ToolExecutionRecord(toolId, conversationId, "read_file", "{}", ToolExecutionStatus.Completed,
+            "Read file", "call-1", 50, now, now, MessageId: messageId, ResultContent: "recorded content");
+        var root = Path.Combine(Path.GetTempPath(), "SelfClawProjectionTests");
+        var detailProjector = new TranscriptMessageProjector(new StoragePaths(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets")));
+        var main = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: [tool]))
+            ?? throw new InvalidOperationException("Missing main projection.");
+        var detail = detailProjector.Build(message, [tool]);
+        detail.Should().BeEquivalentTo(main.Items.Single());
+        var thinking = detail.Segments.Single(segment => segment.Kind == "thinking");
+        thinking.SegmentId.Should().Be($"{messageId:D}:thinking:0");
+        thinking.IsPending.Should().BeTrue();
+        var terminal = message with
+        {
+            Status = MessageStatus.Completed,
+            Segments =
+            [
+                new(messageId, 0, MessageSegmentKind.Thinking, "analysis", null),
+                new(messageId, 1, MessageSegmentKind.Text, "final answer", null),
+                new(messageId, 2, MessageSegmentKind.ToolCall, null, toolId)
+            ]
+        };
+        var final = detailProjector.Build(terminal, [tool]);
+        var finalThinking = final.Segments.Single(segment => segment.Kind == "thinking");
+        finalThinking.SegmentId.Should().Be(thinking.SegmentId);
+        finalThinking.IsPending.Should().BeFalse();
+        final.Segments.Single(segment => segment.Kind == "tool").SegmentId.Should().Be(toolId.ToString("D"));
+        final.Segments.Select(segment => segment.SegmentOrdinal).Should().Equal(0, 1, 2);
+    }
+
+    [Fact]
+    public void Build_falls_back_to_legacy_assistant_text_without_inventing_tool_positions()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var message = new MessageRecord(Guid.NewGuid(), Guid.NewGuid(), MessageRole.Assistant,
+            "legacy final text", MessageStatus.Completed, now, now);
+        var tool = new ToolExecutionRecord(Guid.NewGuid(), message.ConversationId, "read_file", "{}", ToolExecutionStatus.Completed,
+            "read", "call-1", 20, now, now, MessageId: message.Id);
+        var state = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: [tool]))
+            ?? throw new InvalidOperationException("Missing main projection.");
+        state.Items.Single().Segments.Should().ContainSingle().Which.Markdown.Should().Be("legacy final text");
+    }
+
     private static TranscriptProjection CreateProjection()
     {
         var root = Path.Combine(Path.GetTempPath(), "SelfClawProjectionTests");

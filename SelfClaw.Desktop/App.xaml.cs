@@ -12,6 +12,7 @@ using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
@@ -80,6 +81,8 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<SubagentTaskPreflight>();
             builder.Services.AddSingleton<SubagentTaskWakeSignal>();
             builder.Services.AddSingleton<SubagentTaskExecutionRegistry>();
+            builder.Services.AddSingleton<SubagentActivityRegistry>();
+            builder.Services.AddSingleton<SubagentActivityService>();
             builder.Services.AddSingleton<SubagentTaskCoordinator>();
             builder.Services.AddSingleton<ISubagentTaskCoordinator>(services =>
                 services.GetRequiredService<SubagentTaskCoordinator>());
@@ -97,6 +100,14 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<ConversationTurnEngine>();
             builder.Services.AddSingleton<TranscriptProjection>();
             builder.Services.AddSingleton<WebViewHostChannel>();
+            builder.Services.AddSingleton<ActivityPanelSnapshotBuilder>();
+            builder.Services.AddSingleton(services => new ActivityPanelPublisher(
+                services.GetRequiredService<SubagentActivityService>(),
+                services.GetRequiredService<ActivityPanelSnapshotBuilder>(),
+                services.GetRequiredService<IActivityPanelScopeSource>(),
+                services.GetRequiredService<WebViewHostChannel>(),
+                Dispatcher,
+                services.GetRequiredService<ILogger<ActivityPanelPublisher>>()));
             builder.Services.AddSingleton(services => new TranscriptPublisher(
                 services.GetRequiredService<TranscriptProjection>(),
                 services.GetRequiredService<WebViewHostChannel>(),
@@ -163,6 +174,12 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<MainWindowViewModel>());
             builder.Services.AddSingleton<WorkspaceSelectionBridge>();
             builder.Services.AddSingleton<GitWorkspaceBridge>();
+            builder.Services.AddSingleton<IActivityPanelScopeSource>(services => services.GetRequiredService<MainWindowViewModel>());
+            builder.Services.AddSingleton(services => new ActivityPanelBridge(
+                services.GetRequiredService<ActivityPanelPublisher>(),
+                services.GetRequiredService<SubagentActivityService>(),
+                services.GetRequiredService<ISubagentTaskCoordinator>(),
+                services.GetRequiredService<WebViewHostChannel>(), Dispatcher));
             builder.Services.AddSingleton(services => new WebViewMessageRouter(
                 services.GetRequiredService<AiProviderSettingsBridge>(),
                 services.GetRequiredService<ExtensionSettingsBridge>(),
@@ -179,7 +196,8 @@ public partial class App : System.Windows.Application
                 services.GetRequiredService<AgentActivityCoordinator>(),
                 services.GetRequiredService<WebViewHostChannel>(),
                 Dispatcher,
-                services.GetRequiredService<GitWorkspaceBridge>()));
+                services.GetRequiredService<GitWorkspaceBridge>(),
+                services.GetRequiredService<ActivityPanelBridge>()));
             builder.Services.AddSingleton(services => new MainWindow(
                 services.GetRequiredService<MainWindowViewModel>(),
                 services.GetRequiredService<DesktopNotificationService>(),

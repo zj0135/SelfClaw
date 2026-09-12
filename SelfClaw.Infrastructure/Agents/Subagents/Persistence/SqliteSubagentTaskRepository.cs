@@ -14,13 +14,16 @@ internal sealed class SqliteSubagentTaskRepository : ISubagentTaskStore, ISubage
     private const int MaxRunningTasksPerParent = 3;
     private readonly SqliteDatabase _database;
     private readonly SubagentCompletionEnvelopeFactory _envelopeFactory;
+    private readonly ISubagentStateChangeNotifier? _changeNotifier;
 
     public SqliteSubagentTaskRepository(
         SqliteDatabase database,
-        SubagentCompletionEnvelopeFactory envelopeFactory)
+        SubagentCompletionEnvelopeFactory envelopeFactory,
+        ISubagentStateChangeNotifier? changeNotifier = null)
     {
         _database = database;
         _envelopeFactory = envelopeFactory;
+        _changeNotifier = changeNotifier;
     }
 
     public Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -32,85 +35,22 @@ internal sealed class SqliteSubagentTaskRepository : ISubagentTaskStore, ISubage
     {
         ArgumentNullException.ThrowIfNull(creation);
         ValidateCreation(creation);
-
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var sqliteTransaction = connection.BeginTransaction(deferred: false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        SubagentTaskRecord created;
         try
         {
-            await EnsureInteractiveParentExistsAsync(
-                connection,
-                sqliteTransaction,
-                creation.Task.ParentConversationId,
-                cancellationToken).ConfigureAwait(false);
-            await EnsureParentTurnCapacityAsync(
-                connection,
-                sqliteTransaction,
-                creation.Task.ParentConversationId,
-                creation.Task.ParentTurnId,
-                cancellationToken).ConfigureAwait(false);
-            await ValidateRetryLineageAsync(
-                connection,
-                sqliteTransaction,
-                creation.Task,
-                cancellationToken).ConfigureAwait(false);
-            await InsertChildConversationAsync(
-                connection,
-                sqliteTransaction,
-                creation.ChildConversation,
-                cancellationToken).ConfigureAwait(false);
-            await InsertTaskMessageAsync(
-                connection,
-                sqliteTransaction,
-                creation.TaskMessage,
-                cancellationToken).ConfigureAwait(false);
-            await InsertTaskAsync(
-                connection,
-                sqliteTransaction,
-                creation.Task,
-                cancellationToken).ConfigureAwait(false);
-            var createdTask = creation.Task;
-            if (creation.InitialCompletion is SubagentTaskCompletion initialCompletion)
-            {
-                ValidateCompletion(initialCompletion, SubagentTaskStatus.Queued);
-                ValidateFinalizationOwnership(creation.Task, initialCompletion.TurnFinalization);
-                if (!await SqliteTurnFinalizationWriter.TryWriteAsync(
-                        connection,
-                        sqliteTransaction,
-                        initialCompletion.TurnFinalization,
-                        cancellationToken)
-                    .ConfigureAwait(false))
-                {
-                    throw new InvalidOperationException("The initial Subagent terminal state could not be recorded.");
-                }
-
-                createdTask = CreateTerminalTask(creation.Task, initialCompletion);
-                if (!await TryUpdateTerminalTaskAsync(
-                        connection,
-                        sqliteTransaction,
-                        createdTask,
-                        SubagentTaskStatus.Queued,
-                        cancellationToken)
-                    .ConfigureAwait(false))
-                {
-                    throw new InvalidOperationException("The initial Subagent terminal state was not accepted.");
-                }
-
-                await InsertDeliveryAsync(
-                        connection,
-                        sqliteTransaction,
-                        _envelopeFactory.Create(createdTask),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            await sqliteTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            return createdTask;
+            created = await CreateTaskWithinTransactionAsync(connection, transaction, creation, cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
         {
-            await sqliteTransaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
+
+        _changeNotifier?.Publish(created.ParentConversationId, created.Id, SubagentStateChangeKind.Task);
+        return created;
     }
 
     public async Task<SubagentTaskRecord?> GetAsync(
@@ -213,6 +153,7 @@ WHERE id = $taskId AND status = $queued;";
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        _changeNotifier?.Publish(task.ParentConversationId, task.Id, SubagentStateChangeKind.Task);
         return task with
         {
             Status = SubagentTaskStatus.Running,
@@ -259,6 +200,7 @@ WHERE id = $taskId AND status = $running;";
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        _changeNotifier?.Publish(task.ParentConversationId, task.Id, SubagentStateChangeKind.Task);
         return task with
         {
             CancelRequestedAtUtc = task.CancelRequestedAtUtc ?? requestedAtUtc,
@@ -317,6 +259,39 @@ WHERE id = $taskId AND status = $running;";
                 cancellationToken)
             .ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        _changeNotifier?.Publish(terminal.ParentConversationId, terminal.Id, SubagentStateChangeKind.Task);
+        return terminal;
+    }
+
+    private async Task<SubagentTaskRecord> CreateTaskWithinTransactionAsync(
+        SqliteConnection connection, SqliteTransaction transaction, SubagentTaskCreation creation, CancellationToken cancellationToken)
+    {
+        var task = creation.Task;
+        await EnsureInteractiveParentExistsAsync(connection, transaction, task.ParentConversationId, cancellationToken).ConfigureAwait(false);
+        await EnsureParentTurnCapacityAsync(connection, transaction, task.ParentConversationId, task.ParentTurnId, cancellationToken).ConfigureAwait(false);
+        await ValidateRetryLineageAsync(connection, transaction, task, cancellationToken).ConfigureAwait(false);
+        await InsertChildConversationAsync(connection, transaction, creation.ChildConversation, cancellationToken).ConfigureAwait(false);
+        await InsertTaskMessageAsync(connection, transaction, creation.TaskMessage, cancellationToken).ConfigureAwait(false);
+        await InsertTaskAsync(connection, transaction, task, cancellationToken).ConfigureAwait(false);
+        if (creation.InitialCompletion is not SubagentTaskCompletion completion)
+        {
+            return task;
+        }
+
+        ValidateCompletion(completion, SubagentTaskStatus.Queued);
+        ValidateFinalizationOwnership(task, completion.TurnFinalization);
+        if (!await SqliteTurnFinalizationWriter.TryWriteAsync(connection, transaction, completion.TurnFinalization, cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException("The initial Subagent terminal state could not be recorded.");
+        }
+
+        var terminal = CreateTerminalTask(task, completion);
+        if (!await TryUpdateTerminalTaskAsync(connection, transaction, terminal, SubagentTaskStatus.Queued, cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException("The initial Subagent terminal state was not accepted.");
+        }
+
+        await InsertDeliveryAsync(connection, transaction, _envelopeFactory.Create(terminal), cancellationToken).ConfigureAwait(false);
         return terminal;
     }
 

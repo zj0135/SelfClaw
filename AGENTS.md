@@ -141,6 +141,17 @@ strictly and widens only that panel's `connect-src`; a Plugin declaring none is 
 definitions live in the existing `extension_packages.manifest_json` and open tabs in
 `desktop-settings.json`, so this added no schema version.
 
+### Subagent activity panel
+
+The Vue `ActivityStage` mounts an independent floating activity panel inside the conversation stage. It displays all durable Direct subagent tasks owned by the selected Interactive parent, including tasks still running after the parent turn ends. Child content never enters the parent transcript items or controls the composer busy state.
+
+- `SubagentExecutionSession` serializes recorder mutations, immutable live snapshots, and disposal. `SubagentActivityRegistry` holds active sessions; `SubagentActivityService` combines them with committed SQLite history and task-level approval state.
+- `ISubagentActivityReader` supplies parent-owned counts, 50-task pages, transactional detail, and version-bound content pages. `ISubagentStateChangeNotifier` invalidates metadata only after task/delivery commits; text updates do not issue per-token SQL queries.
+- `Services/Activities/ActivityPanelBridge.cs` and `ActivityPanelPublisher.cs` handle `activity-panel/*` after the application-origin guard. Subscription, detail selection, revision, ACK, and replay are independent of the main transcript channel. Delivery retains one in-flight and one latest pending snapshot, retries at 2-second intervals at most three times, then waits for recovery.
+- Full snapshots contain at most 50 summaries and one 64-block detail window, with a serialized UTF-8 limit of 256 KiB; explicit content responses are capped at 64 KiB. An invalid historical content version preserves summaries and supplies current `selectedTask` metadata while the UI keeps the frozen reading window.
+- `MessageBlocks.vue` and `TranscriptMessageProjector` share block rendering/projection with the main transcript, using separate collapse state and projection caches. Reading positions are bounded per-parent/per-task preferences; WebView reload restores live data, while a process crash only restores persisted history and marks old Running tasks Interrupted.
+- Verification: `npm test` / `npm run test:e2e` in TranscriptVue. WPF/WebView2 and process-recovery tests require `SELFCLAW_DESKTOP_SMOKE=1`; the synthetic live-provider smoke requires `SELFCLAW_PROVIDER_SMOKE=1` and an enabled reasoning-capable model.
+
 ### Tool approval
 
 Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandler` when the conversation is in `RequireApproval` mode. A visible window shows a WPF Yes/No prompt; a hidden/minimized window sends a Windows toast with Confirm/Cancel actions. Pending approvals default to rejection on timeout, subscriber failure, or window close. CLI mode continues to use the CLI's own permission policy.
@@ -156,7 +167,7 @@ Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandle
 
 Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 - Repositories: `SqliteConversationRepository`, `SqliteAiProviderRepository`, `SqliteExtensionRepository`
-- Subagents: `SqliteSubagentTaskRepository` (`ISubagentTaskStore`/`ISubagentTaskExecutionStore`) and `SqliteSubagentDeliveryRepository` (`ISubagentDeliveryStore`)
+- Subagents: `SqliteSubagentTaskRepository` (`ISubagentTaskStore`/`ISubagentTaskExecutionStore`), `SqliteSubagentDeliveryRepository` (`ISubagentDeliveryStore`), `SqliteSubagentActivityReader` (`ISubagentActivityReader`), and `SubagentStateChangeNotifier` (`ISubagentStateChangeNotifier`)
 - AI providers: catalog/registry, provider adapters, `AiProviderHttpClientProvider`, `AiProviderSettingsService`, `AiChatClientFactory`
 - Runtimes: CLI process/session services, `CliAgentChatRuntime`, `DirectAgentChatRuntime`, `DispatchingAgentChatRuntime` (as `IAgentChatRuntime`)
 - Extensions: `ExtensionCatalog`, `ExtensionPackageInstaller`, `ExtensionSettingsService`, `ExtensionStateChangeNotifier`, `DirectTurnCapabilityResolver` plus its `SkillCapabilitySource` / `PluginCapabilitySource` / `McpCapabilitySource`, Skill readers/runtime tools
@@ -170,6 +181,7 @@ Desktop (`App.xaml.cs`):
   `ConversationTurnEngine`, `ConversationSessionCoordinator`, `TranscriptPublisher`, `WebViewMessageRouter`,
   `PluginPanelHostController` (also `IPluginPanelSessionRegistry`), `PluginPanelContextPublisher`, `PluginPanelBridge`,
   `SubagentTaskCoordinator` (`ISubagentTaskCoordinator` and `ISubagentConversationLifecycle`), `SubagentTaskBackgroundHost`, and `SubagentDeliveryDispatcher` hosted services,
+  `SubagentActivityRegistry`, `SubagentActivityService`, `ActivityPanelSnapshotBuilder`, `ActivityPanelPublisher`, `ActivityPanelBridge`,
   `PetPackageCatalog`, `PetActivityPresenter`, `PetHost`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
 
 **Not registered** (retained/dead): `DesktopChannelManager`, Feishu adapters, old `DesktopSettingsStore`.

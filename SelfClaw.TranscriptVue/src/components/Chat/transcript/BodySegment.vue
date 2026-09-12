@@ -13,7 +13,7 @@ const props = defineProps({
 
 const emit = defineEmits(['preview-image']);
 
-// 正文富文本是后端渲染好的 HTML，只能 v-html 注入；用户消息再叠一层 skill-token → chip 替换。
+// Both transcript surfaces use the same sanitized Markdown pipeline.
 const sourceHtml = computed(() => renderMarkdown(props.segment.markdown, {
 	context: props.item.role === 'user' ? 'user' : 'content',
 }));

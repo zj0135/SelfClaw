@@ -36,6 +36,7 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
     public void Attach(Func<bool, TranscriptProjectionRequest> requestFactory)
     {
         ArgumentNullException.ThrowIfNull(requestFactory);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
         if (_requestFactory is not null)
         {
             throw new InvalidOperationException("A transcript projection source is already attached.");
@@ -46,7 +47,10 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
 
     public void RequestStreamingPublish(bool autoScroll)
     {
-        EnsureAttached();
+        if (Volatile.Read(ref _disposeStarted) != 0 || _dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
 
         if (!_dispatcher.CheckAccess())
         {
@@ -56,6 +60,7 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
             return;
         }
 
+        EnsureAttached();
         _streamingPublishPending = true;
         _pendingAutoScroll |= autoScroll;
 
@@ -79,7 +84,10 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
 
     public void PublishNow(bool autoScroll)
     {
-        EnsureAttached();
+        if (Volatile.Read(ref _disposeStarted) != 0 || _dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
 
         if (!_dispatcher.CheckAccess())
         {
@@ -89,6 +97,7 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
             return;
         }
 
+        EnsureAttached();
         if (_streamingPublishPending)
         {
             _pendingAutoScroll |= autoScroll;
@@ -120,7 +129,7 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
     private void FlushStreamingPublish()
     {
         _streamingTimer.Stop();
-        if (!_streamingPublishPending)
+        if (Volatile.Read(ref _disposeStarted) != 0 || !_streamingPublishPending)
         {
             return;
         }

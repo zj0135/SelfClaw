@@ -14,5 +14,6 @@ internal static class SubagentErrorCodes
     internal const string RuntimeCancelled = "RuntimeCancelled";
     internal const string ProcessInterrupted = "ProcessInterrupted";
     internal const string ProviderFailed = "ProviderFailed";
+    internal const string OutputTruncated = "OutputTruncated";
     internal const string SnapshotInvalid = "SnapshotInvalid";
 }

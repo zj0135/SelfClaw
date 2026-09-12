@@ -16,7 +16,8 @@ using SelfClaw.Desktop.Services.Workspace.Abstractions;
 
 namespace SelfClaw.Desktop.ViewModels;
 
-public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSelectionController, IPluginPanelContextSource
+public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSelectionController, IPluginPanelContextSource,
+    SelfClaw.Desktop.Services.Activities.IActivityPanelScopeSource
 {
     #region 字段与构造函数 —— 依赖注入字段、运行时集合状态、流式发布定时器初始化
 
@@ -846,6 +847,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
             _capabilityRevision,
             ToToolPermissionModeWire(_selectedToolPermissionMode));
     }
+
+    Guid? SelfClaw.Desktop.Services.Activities.IActivityPanelScopeSource.CaptureActivityParent()
+        => SelectedConversation is { Kind: ConversationKind.Interactive } parent ? parent.Id : null;
 
     private IEnumerable<ConversationRecord> GetNavigationConversations()
         => _allConversations.Where(MatchesNavigationConversation);

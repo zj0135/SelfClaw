@@ -62,12 +62,14 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<GitWorkspaceService>());
         services.AddSingleton<IGitMergeManager, GitMergeService>();
         services.AddSingleton<SubagentCompletionEnvelopeFactory>();
+        services.AddSingleton<ISubagentStateChangeNotifier, SubagentStateChangeNotifier>();
         services.AddSingleton<SqliteSubagentTaskRepository>();
         services.AddSingleton<ISubagentTaskStore>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteSubagentTaskRepository>());
         services.AddSingleton<ISubagentTaskExecutionStore>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteSubagentTaskRepository>());
         services.AddSingleton<SqliteSubagentDeliveryRepository>();
+        services.AddSingleton<ISubagentActivityReader, SqliteSubagentActivityReader>();
         services.AddSingleton<ISubagentDeliveryStore>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteSubagentDeliveryRepository>());
         services.AddSingleton<SqliteAiProviderRepository>();

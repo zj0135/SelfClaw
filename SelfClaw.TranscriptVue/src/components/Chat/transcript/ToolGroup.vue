@@ -31,3 +31,7 @@ const props = defineProps({
 		</div>
 	</section>
 </template>
+
+<style scoped>
+@import './tool-blocks.css';
+</style>

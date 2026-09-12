@@ -1,10 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { buildRenderBlocks, formatAttachmentSize } from '../../../renderers/transcript.js';
-import BodySegment from './BodySegment.vue';
-import ThinkingBlock from './ThinkingBlock.vue';
-import ToolCard from './ToolCard.vue';
-import ToolGroup from './ToolGroup.vue';
+import MessageBlocks from './MessageBlocks.vue';
 
 const props = defineProps({
 	item: { type: Object, required: true },
@@ -61,18 +58,7 @@ const preparingLabel = computed(() => String(props.activityText || '').trim() ||
 					</figure>
 				</div>
 
-				<template v-for="block in blocks" :key="block.key">
-					<ThinkingBlock v-if="block.type === 'thinking'" :item="item" :segment="block.segment"
-						:is-last="block.isLast" :open="collapse.isThinkingOpen(block.id)"
-						@toggle="collapse.toggleThinking(block.id)" @preview-image="emit('preview-image', $event)" />
-					<ToolGroup v-else-if="block.type === 'tool-group'" :item="item" :block="block"
-						:collapse="collapse" />
-					<ToolCard v-else-if="block.type === 'tool'" :id="block.id" :segment="block.segment"
-						:summary-label="block.summaryLabel" :open="collapse.isToolOpen(block.id)"
-						@toggle="collapse.toggleTool(block.id)" />
-					<BodySegment v-else :item="item" :segment="block.segment" :is-first="block.isFirst"
-						:is-last="block.isLast" @preview-image="emit('preview-image', $event)" />
-				</template>
+				<MessageBlocks :item="item" :collapse="collapse" @preview-image="emit('preview-image', $event)" />
 				<p v-if="item.errorMessage" class="message-error"
 					:class="{ 'message-cancelled': item.status === 'cancelled' || item.status === 'truncated' }">{{
 						item.errorMessage }}</p>

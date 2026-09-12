@@ -24,7 +24,9 @@ public sealed class WebViewHostChannel
     {
         ArgumentNullException.ThrowIfNull(postJson);
         _postJson = postJson;
+        _isReady = false;
         ResetTranscriptDelivery();
+        ReadyChanged?.Invoke(false);
     }
 
     public void Detach()
@@ -32,11 +34,13 @@ public sealed class WebViewHostChannel
         _postJson = null;
         _isReady = false;
         ResetTranscriptDelivery();
+        ReadyChanged?.Invoke(false);
     }
 
     public void MarkReady()
     {
         _isReady = true;
+        ReadyChanged?.Invoke(true);
         if (_latestTranscript is not null && _inFlightTranscriptRevision is null)
         {
             SendTranscript(_latestTranscript);
@@ -47,7 +51,16 @@ public sealed class WebViewHostChannel
     {
         _isReady = false;
         ResetTranscriptDelivery();
+        ReadyChanged?.Invoke(false);
     }
+
+    /// <summary>Raised when the WebView can accept pushes, or when navigation invalidates them.</summary>
+    public event Action<bool>? ReadyChanged;
+
+    internal bool IsReady => _isReady && _postJson is not null;
+
+    internal static byte[] SerializeToUtf8Bytes(object payload)
+        => JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
 
     /// <summary>
     /// Raised whenever new shell state arrives, delivered or not. It is the one funnel every conversation,

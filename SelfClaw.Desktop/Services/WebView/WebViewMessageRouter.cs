@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Windows.Threading;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Extensions;
@@ -34,6 +35,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly MainWindowViewModel _viewModel;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly WebViewHostChannel _hostChannel;
+    private readonly ActivityPanelBridge? _activityPanelBridge;
     private readonly Dispatcher _dispatcher;
     private int _disposeStarted;
 
@@ -53,7 +55,8 @@ internal sealed class WebViewMessageRouter : IDisposable
         AgentActivityCoordinator agentActivityCoordinator,
         WebViewHostChannel hostChannel,
         Dispatcher dispatcher,
-        GitWorkspaceBridge? gitWorkspaceBridge = null)
+        GitWorkspaceBridge? gitWorkspaceBridge = null,
+        ActivityPanelBridge? activityPanelBridge = null)
     {
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
         _extensionSettingsBridge = extensionSettingsBridge;
@@ -70,6 +73,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _viewModel = viewModel;
         _agentActivityCoordinator = agentActivityCoordinator;
         _hostChannel = hostChannel;
+        _activityPanelBridge = activityPanelBridge;
         _dispatcher = dispatcher;
 
         _aiProviderSettingsBridge.ModelSelectionChanged += OnModelSelectionChanged;
@@ -136,6 +140,12 @@ internal sealed class WebViewMessageRouter : IDisposable
         if (string.Equals(type, "transcript-rendered", StringComparison.Ordinal))
         {
             AcknowledgeTranscript(payload);
+            return null;
+        }
+
+        if (type.StartsWith("activity-panel/", StringComparison.Ordinal) && _activityPanelBridge is not null)
+        {
+            await _activityPanelBridge.HandleAsync(type, payload, cancellationToken);
             return null;
         }
 

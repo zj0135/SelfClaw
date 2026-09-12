@@ -25,15 +25,18 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
 
     private readonly SqliteDatabase _database;
     private readonly ILogger<SqliteSubagentDeliveryRepository> _logger;
+    private readonly ISubagentStateChangeNotifier? _changeNotifier;
 
     public SqliteSubagentDeliveryRepository(
         SqliteDatabase database,
-        ILogger<SqliteSubagentDeliveryRepository> logger)
+        ILogger<SqliteSubagentDeliveryRepository> logger,
+        ISubagentStateChangeNotifier? changeNotifier = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(logger);
         _database = database;
         _logger = logger;
+        _changeNotifier = changeNotifier;
     }
 
     internal SqliteSubagentDeliveryRepository(SqliteDatabase database)
@@ -133,6 +136,7 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        _changeNotifier?.Publish(mailbox.ParentConversationId, null, SubagentStateChangeKind.Delivery);
         SubagentDeliveryMetrics.RecordLease(selected.Count);
         _logger.LogInformation(
             "Subagent delivery lease acquired. ParentConversationId={ParentConversationId} ParentTurnId={ParentTurnId} ContinuationTurnId={ContinuationTurnId} DeliveryCount={DeliveryCount} LeasedUntilUtc={LeasedUntilUtc}",
@@ -222,6 +226,7 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        _changeNotifier?.Publish(lease.ParentConversationId, null, SubagentStateChangeKind.Delivery);
         _logger.LogDebug(
             "Subagent delivery lease renewed. ParentConversationId={ParentConversationId} ContinuationTurnId={ContinuationTurnId} LeasedUntilUtc={LeasedUntilUtc}",
             lease.ParentConversationId,
@@ -286,6 +291,7 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        _changeNotifier?.Publish(lease.ParentConversationId, null, SubagentStateChangeKind.Delivery);
         SubagentDeliveryMetrics.RecordResolution(delivered.Count, pending.Count, deadLettered.Count);
         _logger.LogInformation(
             "Subagent delivery resolved. ParentConversationId={ParentConversationId} ContinuationTurnId={ContinuationTurnId} Resolution={Resolution} DeliveredCount={DeliveredCount} RetriedCount={RetriedCount} DeadLetteredCount={DeadLetteredCount}",
@@ -353,6 +359,11 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var parentId in expired.Select(delivery => delivery.ParentConversationId).Distinct())
+        {
+            _changeNotifier?.Publish(parentId, null, SubagentStateChangeKind.Delivery);
+        }
+
         SubagentDeliveryMetrics.RecordRecovery(expired.Count);
         if (expired.Count > 0)
         {

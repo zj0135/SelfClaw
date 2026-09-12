@@ -1,12 +1,14 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Desktop.Services.Tools.Models;
 
 namespace SelfClaw.Desktop.Services;
 
 public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
 {
     private static readonly TimeSpan DefaultApprovalTimeout = TimeSpan.FromMinutes(5);
-    private readonly ConcurrentDictionary<Guid, PendingApproval> _pendingApprovals = new();
+    private readonly ConcurrentDictionary<Guid, PendingToolApproval> _pendingApprovals = new();
     private readonly TimeSpan _approvalTimeout;
 
     public DesktopToolApprovalHandler()
@@ -34,10 +36,14 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
     /// </summary>
     public event Action<Guid>? ApprovalCompleted;
 
+    internal IReadOnlyList<ToolApprovalRequest> GetPendingRequests()
+        => _pendingApprovals.Values.Select(pending => pending.Request).ToImmutableArray();
+
     public Task<bool> RequestApprovalAsync(
         ToolApprovalRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
         var completionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -60,7 +66,7 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
 
         timeoutRegistration = timeoutSource.Token.Register(() => Expire(request.ToolExecutionId));
 
-        var pendingApproval = new PendingApproval(
+        var pendingApproval = new PendingToolApproval(
             request,
             completionSource,
             registration,
@@ -153,7 +159,7 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
         }
     }
 
-    private static async Task<bool> AwaitApprovalAsync(PendingApproval pendingApproval)
+    private static async Task<bool> AwaitApprovalAsync(PendingToolApproval pendingApproval)
     {
         try
         {
@@ -165,17 +171,11 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
         }
     }
 
-    private static void DisposeRegistrations(PendingApproval pending)
+    private static void DisposeRegistrations(PendingToolApproval pending)
     {
         pending.CancellationRegistration.Dispose();
         pending.TimeoutRegistration.Dispose();
         pending.TimeoutSource.Dispose();
     }
 
-    private sealed record PendingApproval(
-        ToolApprovalRequest Request,
-        TaskCompletionSource<bool> CompletionSource,
-        CancellationTokenRegistration CancellationRegistration,
-        CancellationTokenSource TimeoutSource,
-        CancellationTokenRegistration TimeoutRegistration);
 }

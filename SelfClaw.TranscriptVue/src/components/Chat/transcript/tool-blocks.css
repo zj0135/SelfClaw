@@ -1,0 +1,159 @@
+.tool-block,
+.tool-group-block {
+	overflow: hidden;
+	border: 1px solid var(--card-line);
+	border-radius: 12px;
+	background: var(--card-surface);
+	box-shadow: none;
+	transition: border-color 0.15s;
+}
+
+.tool-block:hover,
+.tool-group-block:hover {
+	border-color: var(--card-line-hover);
+}
+
+/* 组内嵌套的工具卡片：比外层卡片再浮起一档 */
+.tool-block.nested {
+	border: 1px solid var(--card-nested-line);
+	border-radius: 9px;
+	background: var(--card-nested-surface);
+}
+
+.tool-summary,
+.tool-group-summary {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 9px 12px;
+	border: 0;
+	background: transparent;
+	color: var(--text-soft);
+	text-align: left;
+}
+
+.tool-summary.nested {
+	padding: 7px 10px;
+}
+
+.tool-summary-main,
+.tool-group-summary-main {
+	min-width: 0;
+	flex: 1 1 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 9px;
+}
+
+.inline-tool-label,
+.tool-group-label {
+	min-width: 0;
+	flex: 0 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--text-strong);
+	font-size: var(--fs-125);
+	font-weight: 600;
+	line-height: 1.4;
+	white-space: nowrap;
+}
+
+.tool-summary-detail {
+	min-width: 0;
+	flex: 0 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--muted-soft);
+	font-size: var(--fs-12);
+	line-height: 1.4;
+}
+
+.tool-summary-side,
+.tool-group-summary-side {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	flex: 0 0 auto;
+	color: var(--faint);
+}
+
+.tool-summary-duration {
+	font-size: var(--fs-11);
+	color: inherit;
+}
+
+.tool-summary-chevron,
+.tool-group-chevron {
+	color: inherit;
+	font-size: var(--fs-14);
+	transition: transform 140ms ease;
+}
+
+.tool-block.open .tool-summary-chevron,
+.tool-group-block.open .tool-group-chevron {
+	transform: rotate(90deg);
+}
+
+.tool-group-details {
+	display: none;
+	margin: 0;
+	padding: 2px 10px 10px;
+}
+
+.tool-group-block.open .tool-group-details {
+	display: grid;
+	gap: 6px;
+}
+
+.tool-details {
+	display: none;
+	padding: 2px 12px 12px;
+}
+
+.tool-block.open .tool-details {
+	display: block;
+}
+
+.tool-details-header {
+	padding: 0 0 6px;
+	color: var(--muted-soft);
+	font-family: var(--font-mono);
+	font-size: var(--fs-10);
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+}
+
+.tool-details-body {
+	border: 1px solid var(--card-nested-line);
+	border-radius: 8px;
+	background: var(--card-nested-surface);
+}
+
+.tool-block.nested .tool-details-body {
+	border-color: var(--card-line);
+	background: var(--panel-soft);
+}
+
+.tool-details-pre {
+	max-height: 280px;
+	margin: 0;
+	padding: 12px 13px;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+	font-size: var(--fs-115);
+	line-height: 1.6;
+}
+
+.tool-details-footer {
+	padding-top: 6px;
+	justify-content: flex-start;
+}
+
+.tool-details-status {
+	font-size: var(--fs-11);
+}
