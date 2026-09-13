@@ -21,7 +21,7 @@ public sealed class SubagentActivityServiceTests
         var execution = context.CreateExecutor(task, runtime).ExecuteAsync(task, CancellationToken.None);
         await runtime.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var initial = await DetailAsync(context, task);
-        initial.Detail.Message.Should().NotBeNull();
+        initial.Content.Message.Should().NotBeNull();
         initial.ContentOrigin.Should().Be("live");
         await context.Service.ListAsync(new SubagentActivityQuery(task.ParentConversationId));
         var listReads = context.Reader.ListReads;
@@ -31,12 +31,12 @@ public sealed class SubagentActivityServiceTests
         await runtime.EmitAsync(new AssistantTextDeltaEvent("text", "answer"));
         await runtime.EmitAsync(new ToolCallStartedEvent("call-1", "read_file", "{}", ToolCallKind.Read, ToolSourceKind.BuiltIn));
         var beforeTerminal = await DetailAsync(context, task);
-        var beforeMessage = beforeTerminal.Detail.Message ?? throw new InvalidOperationException("Live content is missing.");
+        var beforeMessage = beforeTerminal.Content.Message ?? throw new InvalidOperationException("Live content is missing.");
         beforeMessage.Segments?.Select(segment => segment.Kind).Should().Equal(
             MessageSegmentKind.Thinking, MessageSegmentKind.Text, MessageSegmentKind.ToolCall);
         beforeMessage.Segments?.First().Text.Should().Be("analysis \n ");
         beforeMessage.MarkdownContent.Should().Be("answer");
-        beforeTerminal.Detail.ToolRuns.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Running);
+        beforeTerminal.Content.ToolRuns.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Running);
         beforeTerminal.Activity.Phase.Should().Be("tool");
         beforeTerminal.Activity.Task.ModelDisplayName.Should().Be("actual model");
         (await context.Conversations.ListMessagesAsync(task.ChildConversationId)).Should().NotContain(message => message.Role == MessageRole.Assistant);
@@ -54,18 +54,18 @@ public sealed class SubagentActivityServiceTests
         var live = await DetailAsync(context, task);
         live.Activity.Task.InputTokens.Should().Be(21);
         live.Activity.Task.OutputTokens.Should().Be(8);
-        beforeTerminal.Detail.Message?.MarkdownContent.Should().Be("answer");
+        beforeTerminal.Content.Message?.MarkdownContent.Should().Be("answer");
         await runtime.EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "answer!!!!!!!!!!"));
         await execution;
         var terminal = await DetailAsync(context, task);
         terminal.ContentOrigin.Should().Be("persisted");
-        terminal.Detail.Task.Status.Should().Be(SubagentTaskStatus.Succeeded);
-        terminal.Detail.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.Pending);
-        terminal.Detail.Message?.MarkdownContent.Should().Be(live.Detail.Message?.MarkdownContent);
-        terminal.Detail.ToolRuns.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Completed);
+        terminal.Activity.Task.Status.Should().Be(SubagentTaskStatus.Succeeded);
+        terminal.Activity.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.Pending);
+        terminal.Content.Message?.MarkdownContent.Should().Be(live.Content.Message?.MarkdownContent);
+        terminal.Content.ToolRuns.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Completed);
         context.Registry.GetActivity(task.Id).Should().BeNull();
         var staleContent = () => context.Service.ReadContentAsync(new SubagentContentQuery(task.ParentConversationId, task.Id,
-            live.Detail.ContentVersion, "segment/0"));
+            live.Content.ContentVersion, "segment/0"));
         await staleContent.Should().ThrowAsync<SubagentActivityReadException>().WithMessage("content-changed");
     }
 
@@ -89,7 +89,7 @@ public sealed class SubagentActivityServiceTests
         {
             await changes.Reader.ReadAsync(deadline.Token);
             var snapshot = await DetailAsync(context, task);
-            if (snapshot.Detail.Message?.Segments?.Any(segment => segment.Text == "first last") == true)
+            if (snapshot.Content.Message?.Segments?.Any(segment => segment.Text == "first last") == true)
             {
                 break;
             }
@@ -97,7 +97,7 @@ public sealed class SubagentActivityServiceTests
         execution.IsCompleted.Should().BeFalse();
         await runtime.EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
         await execution;
-        (await DetailAsync(context, task)).Detail.Task.Status.Should().Be(SubagentTaskStatus.Succeeded);
+        (await DetailAsync(context, task)).Activity.Task.Status.Should().Be(SubagentTaskStatus.Succeeded);
     }
 
     [Fact]
@@ -114,12 +114,12 @@ public sealed class SubagentActivityServiceTests
         await Task.WhenAll(runtimes.Select((runtime, index) => runtime.EmitAsync(new AssistantTextDeltaEvent("text", $"child {index}"))));
         await Task.WhenAll(runtimes.Select(runtime => runtime.EmitAsync(new ToolCallStartedEvent("same-call", "read_file", "{}", ToolCallKind.Read, ToolSourceKind.BuiltIn))));
         var snapshots = await Task.WhenAll(tasks.Select(task => DetailAsync(context, task)));
-        snapshots.Select(snapshot => snapshot.Detail.ToolRuns.Single().Id).Should().OnlyHaveUniqueItems();
-        snapshots.Select(snapshot => snapshot.Detail.Message?.MarkdownContent).Should().Equal("child 0", "child 1", "child 2");
-        (await context.Service.ListAsync(new SubagentActivityQuery(parent.Id))).Page.Counts.Running.Should().Be(3);
+        snapshots.Select(snapshot => snapshot.Content.ToolRuns.Single().Id).Should().OnlyHaveUniqueItems();
+        snapshots.Select(snapshot => snapshot.Content.Message?.MarkdownContent).Should().Equal("child 0", "child 1", "child 2");
+        (await context.Service.ListAsync(new SubagentActivityQuery(parent.Id))).Counts.Running.Should().Be(3);
         await Task.WhenAll(runtimes.Select((runtime, index) => runtime.EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, $"child {index}"))));
         await Task.WhenAll(executions);
-        (await context.Service.ListAsync(new SubagentActivityQuery(parent.Id))).Page.Counts.Succeeded.Should().Be(3);
+        (await context.Service.ListAsync(new SubagentActivityQuery(parent.Id))).Counts.Succeeded.Should().Be(3);
     }
 
     [Fact]
@@ -145,9 +145,9 @@ public sealed class SubagentActivityServiceTests
         release.SetResult();
         var snapshot = await read;
         snapshot.ContentOrigin.Should().Be("persisted");
-        snapshot.Detail.Task.Status.Should().Be(SubagentTaskStatus.Succeeded);
-        snapshot.Detail.Message?.MarkdownContent.Should().Be("committed");
-        (await DetailAsync(context, task)).Detail.Task.Status.Should().Be(SubagentTaskStatus.Succeeded);
+        snapshot.Activity.Task.Status.Should().Be(SubagentTaskStatus.Succeeded);
+        snapshot.Content.Message?.MarkdownContent.Should().Be("committed");
+        (await DetailAsync(context, task)).Activity.Task.Status.Should().Be(SubagentTaskStatus.Succeeded);
     }
 
     [Theory]
@@ -166,7 +166,7 @@ public sealed class SubagentActivityServiceTests
             ?? throw new InvalidOperationException("Missing waiting task.");
         waiting.Activity.Phase.Should().Be("waiting-approval");
         waiting.Activity.PendingApprovalCount.Should().Be(1);
-        waiting.Detail.ToolRuns.Should().BeEmpty();
+        waiting.Content.ToolRuns.Should().BeEmpty();
         if (!expire)
         {
             context.Approvals.TryResolve(request.ToolExecutionId, approved: true).Should().BeTrue();
@@ -196,7 +196,7 @@ public sealed class SubagentActivityServiceTests
         execution.IsCompleted.Should().BeFalse();
         await runtime.EmitAsync(new AssistantTextDeltaEvent("text", "continued"));
         context.Service.SetScopeClosed(task.ParentConversationId, false);
-        (await DetailAsync(context, task)).Detail.Message?.MarkdownContent.Should().Be("continued");
+        (await DetailAsync(context, task)).Content.Message?.MarkdownContent.Should().Be("continued");
         context.Reader.DetailReads.Should().BeGreaterThan(before);
         await runtime.EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "continued"));
         await execution;
@@ -216,10 +216,10 @@ public sealed class SubagentActivityServiceTests
         var awaitExecution = () => execution;
         await awaitExecution.Should().ThrowAsync<IOException>();
         var snapshot = await DetailAsync(context, task);
-        snapshot.Detail.Task.Status.Should().Be(SubagentTaskStatus.Running);
+        snapshot.Activity.Task.Status.Should().Be(SubagentTaskStatus.Running);
         snapshot.Activity.Phase.Should().Be("recording-error");
         snapshot.Activity.RecordingError.Should().Contain("Terminal write unavailable");
-        snapshot.Detail.Message.Should().BeNull();
+        snapshot.Content.Message.Should().BeNull();
         context.Registry.GetActivity(task.Id).Should().BeNull();
     }
 

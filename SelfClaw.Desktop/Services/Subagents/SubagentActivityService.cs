@@ -4,7 +4,6 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Subagents.Models;
-using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 
 namespace SelfClaw.Desktop.Services.Subagents;
 
@@ -22,7 +21,6 @@ internal sealed class SubagentActivityService : IDisposable
     private long _cacheRevision = -1;
     private long _cacheScopeRevision = -1;
     private long _scopeRevision;
-    private long _observationRevision;
     private bool _disposed;
 
     public SubagentActivityService(ISubagentActivityReader reader, SubagentActivityRegistry registry,
@@ -79,7 +77,7 @@ internal sealed class SubagentActivityService : IDisposable
 
                 EnsureOpen(query.ParentConversationId);
                 var activities = page.Tasks.Select(task => CreateActivity(task, _registry.GetActivity(task.TaskId))).ToArray();
-                return new SubagentActivityPageSnapshot(page, activities, ++_observationRevision);
+                return new SubagentActivityPageSnapshot(page.Counts, page.ListVersion, activities, page.NextCursor);
             }
         }
         finally
@@ -108,7 +106,7 @@ internal sealed class SubagentActivityService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(query);
         var snapshot = await GetDetailAsync(query.ParentConversationId, query.TaskId, cancellationToken: cancellationToken).ConfigureAwait(false);
-        return snapshot is null ? null : SubagentActivityContent.Read(snapshot.Detail, query);
+        return snapshot is null ? null : SubagentActivityContent.Read(snapshot.Activity.Task, snapshot.Content, query);
     }
 
     internal void SetScopeClosed(Guid parentConversationId, bool closed)
@@ -194,18 +192,18 @@ internal sealed class SubagentActivityService : IDisposable
         if (!IsActive(detail.Task))
         {
             _registry.ClearRecordingFailure(detail.Task.TaskId);
-            return new SubagentActivitySnapshot(detail, CreateActivity(detail.Task, null), "persisted", ++_observationRevision);
+            return new SubagentActivitySnapshot(CreateActivity(detail.Task, null), detail.Content, "persisted");
         }
 
         var activity = CreateActivity(detail.Task, live?.Activity);
         if (live is null)
         {
-            return new SubagentActivitySnapshot(detail, activity, "persisted", ++_observationRevision);
+            return new SubagentActivitySnapshot(activity, detail.Content, "persisted");
         }
 
         var message = live.Message is null ? null : live.Message with { Status = MessageStatus.Streaming, ErrorMessage = null };
-        var liveDetail = SubagentActivityContent.CreateDetail(activity.Task, detail.TaskText, message, live.ToolRuns);
-        return new SubagentActivitySnapshot(liveDetail, activity, "live", ++_observationRevision);
+        var content = SubagentActivityContent.Create(activity.Task.Status, detail.Content.TaskText, message, live.ToolRuns);
+        return new SubagentActivitySnapshot(activity, content, "live");
     }
 
     private SubagentTaskActivity CreateActivity(SubagentActivityTask task, SubagentExecutionActivity? live)

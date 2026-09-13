@@ -4,13 +4,13 @@ import SubagentTaskRow from './SubagentTaskRow.vue';
 import SubagentTaskDetail from './SubagentTaskDetail.vue';
 import { useActivityClock } from '../../composables/useActivityClock.js';
 import { activityErrorLabel } from '../../renderers/activityLabels.js';
-defineProps({ section: { type: Object, required: true }, activity: { type: Object, required: true }, collapse: { type: Object, required: true }, scrollPositions: { type: Map, required: true } });
-const emit = defineEmits(['select', 'preview-image']);
+defineProps({ section: { type: Object, required: true }, activity: { type: Object, required: true }, detail: { type: Object, required: true }, collapse: { type: Object, required: true } });
+const emit = defineEmits(['preview-image']);
 const now = useActivityClock();
 </script>
 
 <template>
-	<div class="subagent-section" :class="{ 'with-detail': activity.selectedTaskId.value }">
+	<div class="subagent-section" :class="{ 'with-detail': detail.selectedTaskId.value }">
 		<div class="task-list" :aria-busy="activity.pageLoading.value">
 			<div class="task-counts">
 				<span>{{ section.counts.total }} 个任务</span>
@@ -19,8 +19,8 @@ const now = useActivityClock();
 			</div>
 			<div class="task-rows">
 				<SubagentTaskRow v-for="task in section.tasks" :key="task.taskId" :task="task"
-					:selected="activity.selectedTaskId.value === task.taskId" :cancelling="activity.cancelling.value.has(task.taskId)"
-					:now="now" @select="emit('select', $event)" @cancel="activity.cancelTask" />
+					:selected="detail.selectedTaskId.value === task.taskId" :cancelling="activity.cancelling.value.has(task.taskId)"
+					:now="now" @select="detail.selectTask" @cancel="activity.cancelTask" />
 			</div>
 			<footer v-if="activity.pageIndex.value || section.nextCursor">
 				<button type="button" title="上一页" aria-label="上一页任务" :disabled="!activity.pageIndex.value || activity.pageLoading.value" @click="activity.changePage(-1)"><ChevronLeft :size="14" /></button>
@@ -29,10 +29,7 @@ const now = useActivityClock();
 			</footer>
 			<p v-if="activity.commandError.value" role="alert">{{ activityErrorLabel(activity.commandError.value) }}</p>
 		</div>
-		<SubagentTaskDetail v-if="activity.selectedTaskId.value" :detail="activity.detail.value" :loading="activity.detailLoading.value"
-			:invalidated="activity.detailInvalidated.value" :error="section.detailError" :collapse="collapse" :scroll-positions="scrollPositions"
-			:read-content="activity.readContent" @close="emit('select', null)" @latest="activity.selectTask(activity.selectedTaskId.value)"
-			@window="(offset, version) => activity.selectTask(activity.selectedTaskId.value, offset, version)" @preview-image="emit('preview-image', $event)" />
+		<SubagentTaskDetail v-if="detail.selectedTaskId.value" :detail="detail" :collapse="collapse" @preview-image="emit('preview-image', $event)" />
 	</div>
 </template>
 

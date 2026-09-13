@@ -1,3 +1,4 @@
+using SelfClaw.Core.Models;
 using FluentAssertions;
 using SelfClaw.Infrastructure.AiProviders.Catalog;
 using SelfClaw.Infrastructure.AiProviders.Models;

@@ -105,6 +105,60 @@ it('switches an independent todo section without replacing subagent preferences'
 	expect(wrapper.find('.badge').text()).toBe('3');
 });
 
+it('restores a long historical window after task switching, collapse, and remount', async () => {
+	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
+	const props = { parentConversationId: window.activityFixture.parent };
+	window.activityFixture.longContent();
+	wrapper = mount(Stage, { props });
+	await flushPromises();
+	await wrapper.find('.task-select').trigger('click');
+	await flushPromises();
+	expect(wrapper.findAll('.body-segment')[0].text()).toContain('History block 86');
+	await wrapper.find('.window-link').trigger('click');
+	await flushPromises();
+	expect(wrapper.findAll('.body-segment')[0].text()).toContain('History block 22');
+	await wrapper.findAll('.task-select')[1].trigger('click');
+	await flushPromises();
+	await wrapper.find('.task-select').trigger('click');
+	await flushPromises();
+	expect(wrapper.findAll('.body-segment')[0].text()).toContain('History block 22');
+	await wrapper.find('.activity-toggle').trigger('click');
+	await flushPromises();
+	window.activityFixture.appendBlock('Output while hidden');
+	await wrapper.find('.activity-toggle').trigger('click');
+	await flushPromises();
+	expect(wrapper.findAll('.body-segment')[0].text()).toContain('History block 22');
+	expect(wrapper.find('.new-content').exists()).toBe(true);
+	wrapper.unmount();
+	wrapper = mount(Stage, { props });
+	await flushPromises();
+	expect(wrapper.findAll('.body-segment')[0].text()).toContain('History block 22');
+	const request = window.activityFixture.requests.filter((item) => item.type === 'activity-panel/select-detail').at(-1);
+	expect(request).toMatchObject({ blockOffset: 22, contentVersion: '2' });
+});
+
+it('returns from an invalidated historical window to the tail and follows subsequent output', async () => {
+	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
+	window.activityFixture.longContent();
+	wrapper = mount(Stage, { props: { parentConversationId: window.activityFixture.parent } });
+	await flushPromises();
+	await wrapper.find('.task-select').trigger('click');
+	await flushPromises();
+	await wrapper.find('.window-link').trigger('click');
+	await flushPromises();
+	window.activityFixture.appendBlock('New tail after history');
+	await flushPromises();
+	expect(wrapper.findAll('.body-segment')[0].text()).toContain('History block 22');
+	await wrapper.find('.new-content').trigger('click');
+	await flushPromises();
+	expect(wrapper.findAll('.body-segment').at(-1).text()).toContain('New tail after history');
+	expect(wrapper.find('.new-content').exists()).toBe(false);
+	window.activityFixture.appendBlock('Continues following');
+	await flushPromises();
+	expect(wrapper.findAll('.body-segment').at(-1).text()).toContain('Continues following');
+	expect(wrapper.find('.new-content').exists()).toBe(false);
+});
+
 it('accepts push before initial response and ignores an older failed detail request', async () => {
 	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
 	window.activityFixture.holdResponses(true);

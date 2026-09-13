@@ -16,7 +16,7 @@ public sealed class WorkspaceSelectionBridgeTests
         var bridge = new WorkspaceSelectionBridge(
             controller,
             new FakeWorkspaceFolderPicker(null),
-            new WorkspaceToolService());
+            new WorkspaceToolService(new(), new(), new()));
         using var request = JsonDocument.Parse("""
             {
               "type": "select-workspace-root",
@@ -42,7 +42,7 @@ public sealed class WorkspaceSelectionBridgeTests
     {
         var controller = new FakeWorkspaceSelectionController();
         var picker = new FakeWorkspaceFolderPicker("E:\\work");
-        var bridge = new WorkspaceSelectionBridge(controller, picker, new WorkspaceToolService());
+        var bridge = new WorkspaceSelectionBridge(controller, picker, new WorkspaceToolService(new(), new(), new()));
         using var request = JsonDocument.Parse("""
             { "type": "browse-workspace-folder", "requestId": "browse-1" }
             """);
@@ -131,7 +131,7 @@ public sealed class WorkspaceSelectionBridgeTests
             _bridge = new WorkspaceSelectionBridge(
                 new SingleRootController(_root),
                 new FakeWorkspaceFolderPicker(null),
-                new WorkspaceToolService());
+                new WorkspaceToolService(new(), new(), new()));
         }
 
         public void Dispose()

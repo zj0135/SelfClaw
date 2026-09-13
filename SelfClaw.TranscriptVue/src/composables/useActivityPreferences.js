@@ -9,7 +9,7 @@ export function useActivityPreferences(parentId) {
 			if (preferences.size >= 32) preferences.delete(preferences.keys().next().value);
 			preferences.set(key, {
 				view: reactive({ open: true, section: 'subagents', taskId: null }),
-				collapse: useTranscriptCollapse(), scrollPositions: new Map(),
+				collapse: useTranscriptCollapse(), readings: new Map(),
 			});
 		}
 		return preferences.get(key);

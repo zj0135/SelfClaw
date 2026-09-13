@@ -1,4 +1,4 @@
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, readonly, ref, watch } from 'vue';
 import { useHostBridge } from './hostBridge.js';
 import { createEmptyActivityState, getSubagentSection, reduceActivityState } from '../renderers/activityPanelState.js';
 
@@ -78,6 +78,20 @@ export function useActivityPanel(parentId) {
 		}
 	}
 
+	function selectDetail(taskId, blockOffset = null, contentVersion = null) {
+		selection.value = crypto.randomUUID();
+		return requestState('select-detail', { taskId, detailSelectionId: selection.value, blockOffset, contentVersion });
+	}
+
+	function readContent(query) {
+		return bridge.request('activity-panel/read-content', { ...query,
+			subscriptionId: subscription.value, detailSelectionId: selection.value });
+	}
+
+	function cancelTask(taskId) {
+		return bridge.request('activity-panel/cancel-task', { subscriptionId: subscription.value, taskId });
+	}
+
 	function onVisible() { if (document.visibilityState === 'visible') refresh(); }
 	bridge.on('activity-panel/state', apply);
 	watch(parentId, subscribe, { immediate: true, flush: 'sync' });
@@ -89,5 +103,6 @@ export function useActivityPanel(parentId) {
 		if (subscription.value) bridge.post({ type: 'activity-panel/unsubscribe', subscriptionId: subscription.value });
 		subscription.value = null;
 	});
-	return { state, section, selection, subscription, loading, error, requestState, refresh, bridge };
+	return { state: readonly(state), section, selection: readonly(selection), subscription: readonly(subscription),
+		loading: readonly(loading), error: readonly(error), selectDetail, readContent, cancelTask, refresh };
 }

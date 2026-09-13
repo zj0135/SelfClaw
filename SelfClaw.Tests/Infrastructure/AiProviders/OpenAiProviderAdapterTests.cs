@@ -1,3 +1,4 @@
+using SelfClaw.Core.Models;
 using System.ClientModel.Primitives;
 using System.Text.Json;
 using FluentAssertions;

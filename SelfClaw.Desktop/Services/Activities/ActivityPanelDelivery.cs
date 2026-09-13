@@ -16,6 +16,7 @@ internal sealed class ActivityPanelDelivery : IDisposable
     private ITimer? _timer;
     private int _retries;
     private bool _stalled;
+    private bool _disposed;
 
     internal ActivityPanelDelivery(WebViewHostChannel channel, Dispatcher dispatcher, TimeProvider time, ILogger logger)
     {
@@ -27,7 +28,8 @@ internal sealed class ActivityPanelDelivery : IDisposable
 
     internal void Offer(ActivityPanelWireState state)
     {
-        _dispatcher.VerifyAccess();
+        VerifyAvailable();
+        ArgumentNullException.ThrowIfNull(state);
         if (_inFlight is not null)
         {
             if (_pending is null || state.Revision > _pending.Revision) _pending = state with { RequestId = null };
@@ -43,7 +45,7 @@ internal sealed class ActivityPanelDelivery : IDisposable
 
     internal bool Acknowledge(Guid subscriptionId, long revision)
     {
-        _dispatcher.VerifyAccess();
+        VerifyAvailable();
         if (_inFlight?.SubscriptionId != subscriptionId || _inFlight.Revision != revision) return false;
         _timer?.Dispose();
         _timer = null;
@@ -55,24 +57,45 @@ internal sealed class ActivityPanelDelivery : IDisposable
 
     internal void Resume()
     {
-        _dispatcher.VerifyAccess();
+        VerifyAvailable();
         if (!_stalled) return;
-        _timer?.Dispose();
-        _timer = null;
-        _inFlight = null;
-        _pending = null;
-        _stalled = false;
+        ResetState();
     }
 
-    internal void Ready() => FlushPending();
+    internal void Ready()
+    {
+        VerifyAvailable();
+        FlushPending();
+    }
+
+    internal void Reset()
+    {
+        VerifyAvailable();
+        ResetState();
+    }
 
     public void Dispose()
+    {
+        _dispatcher.VerifyAccess();
+        if (_disposed) return;
+        _disposed = true;
+        ResetState();
+    }
+
+    private void ResetState()
     {
         _timer?.Dispose();
         _timer = null;
         _inFlight = null;
         _pending = null;
         _stalled = false;
+        _retries = 0;
+    }
+
+    private void VerifyAvailable()
+    {
+        _dispatcher.VerifyAccess();
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
     private void FlushPending()
@@ -127,7 +150,7 @@ internal sealed class ActivityPanelDelivery : IDisposable
 
     private void Retry(ActivityPanelWireState state)
     {
-        if (!ReferenceEquals(_inFlight, state)) return;
+        if (_disposed || !ReferenceEquals(_inFlight, state)) return;
         if (_retries >= 3)
         {
             _stalled = true;

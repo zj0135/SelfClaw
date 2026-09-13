@@ -1,3 +1,4 @@
+using SelfClaw.Core.Runtime;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -30,7 +31,7 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly ExtensionCatalog _catalog;
+    private readonly IPluginPanelCatalog _catalog;
     private readonly IExtensionPackageRepository _packageRepository;
     private readonly IPluginVersionLeaseManager _versionLeaseManager;
     private readonly DesktopSettingsJsonStore _settingsStore;
@@ -40,7 +41,7 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
     private CoreWebView2? _webView;
 
     public PluginPanelHostController(
-        ExtensionCatalog catalog,
+        IPluginPanelCatalog catalog,
         IExtensionPackageRepository packageRepository,
         IPluginVersionLeaseManager versionLeaseManager,
         DesktopSettingsJsonStore settingsStore,
@@ -189,9 +190,7 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
             // The WebView is already torn down; the lease still has to be released.
         }
 
-        // PluginVersionLease releases synchronously and hands back an already-completed ValueTask, so
-        // there is nothing to await here.
-        _ = open.Lease.DisposeAsync();
+        open.Lease.Dispose();
     }
 
     private async Task<object> OpenAsync(
@@ -252,7 +251,7 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
         }
         catch
         {
-            _ = lease.DisposeAsync();
+            lease.Dispose();
             throw;
         }
     }
@@ -468,14 +467,14 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
         string pluginId,
         string hostName,
         string rootPath,
-        PluginVersionLease lease,
+        IDisposable lease,
         string contentSecurityPolicy,
         IReadOnlyList<string> permissions)
     {
         public string PluginId { get; } = pluginId;
         public string HostName { get; } = hostName;
         public string RootPath { get; } = rootPath;
-        public PluginVersionLease Lease { get; } = lease;
+        public IDisposable Lease { get; } = lease;
         public string ContentSecurityPolicy { get; } = contentSecurityPolicy;
         public IReadOnlyList<string> Permissions { get; } = permissions;
         public HashSet<string> PanelKeys { get; } = new(StringComparer.OrdinalIgnoreCase);

@@ -8,5 +8,4 @@ public interface ISubagentActivityReader
 
     Task<SubagentActivityDetail?> GetDetailAsync(Guid parentConversationId, Guid taskId, CancellationToken cancellationToken = default);
 
-    Task<SubagentContentPage?> ReadContentAsync(SubagentContentQuery query, CancellationToken cancellationToken = default);
 }

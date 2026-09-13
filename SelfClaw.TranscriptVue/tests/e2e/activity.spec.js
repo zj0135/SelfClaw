@@ -50,6 +50,43 @@ test('detail scroll and resizing do not move a parent reader or hide its final l
 	expect(bounds.lastLine).toBeLessThanOrEqual(bounds.panelTop);
 });
 
+test('a historical block window and its reading position survive switching and remount', async ({ page }) => {
+	await page.evaluate(() => window.activityFixture.longContent());
+	await page.locator('.task-select').first().click();
+	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 86');
+	await page.getByRole('button', { name: '更早内容', exact: true }).click();
+	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
+	await page.locator('.detail-scroll').evaluate((element) => { element.scrollTop = 180; element.dispatchEvent(new Event('scroll')); });
+	await page.locator('.task-select').nth(1).click();
+	await page.locator('.task-select').first().click();
+	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
+	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop))).toBe(180);
+	await page.locator('.activity-toggle').click();
+	await page.evaluate(() => window.activityFixture.appendBlock('Output while hidden'));
+	await page.locator('.activity-toggle').click();
+	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
+	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop))).toBe(180);
+	await page.getByRole('button', { name: '系统设置', exact: true }).click();
+	await page.locator('.kind-chat').filter({ hasText: 'Activity verification' }).click();
+	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
+	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop))).toBe(180);
+});
+
+test('returning from invalidated history resumes the live tail and continues scrolling', async ({ page }) => {
+	await page.evaluate(() => window.activityFixture.longContent());
+	await page.locator('.task-select').first().click();
+	await page.getByRole('button', { name: '更早内容', exact: true }).click();
+	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
+	await page.evaluate(() => window.activityFixture.appendBlock('New tail after history'));
+	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
+	await page.locator('.new-content').click();
+	await expect(page.locator('.task-detail .body-segment').last()).toContainText('New tail after history');
+	await page.evaluate(() => window.activityFixture.appendBlock('Continues following'));
+	await expect(page.locator('.task-detail .body-segment').last()).toContainText('Continues following');
+	await expect(page.locator('.new-content')).toHaveCount(0);
+	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(2);
+});
+
 test('task reading positions survive switching, collapse, and settings navigation', async ({ page }) => {
 	await page.locator('.task-select').first().click();
 	await page.evaluate(() => window.activityFixture.text('\n\n' + 'First child history.\n\n'.repeat(80)));

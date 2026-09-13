@@ -1,3 +1,4 @@
+using SelfClaw.Core.Models;
 using Anthropic;
 using Anthropic.Core;
 using Anthropic.Models.Messages;

@@ -67,7 +67,7 @@ Background SubagentDeliveryDispatcher (when durable child results are pending)
   → atomic parent terminal + Delivered, bounded retry or DeadLetter notification
 ```
 
-Direct mode uses the enabled model selected in the composer, or the `desktop.default` model profile when no explicit id is carried by `ChatTurnRequest.ModelProfileId`. Provider credentials are decrypted only inside Infrastructure. CLI mode uses the local CLI selection persisted by `ProgrammingAssistantSettingsService`; the CLI continues to own its local authentication and model configuration. No detected CLI selection fails a CLI turn with guidance.
+Direct mode uses the enabled model selected in the composer, or the `desktop-default` model selection when no explicit id is carried by `ChatTurnRequest.ModelProfileId`. Provider credentials are decrypted only inside Infrastructure. CLI mode uses the local CLI selection persisted by `ProgrammingAssistantSettingsService`; the CLI continues to own its local authentication and model configuration. No detected CLI selection fails a CLI turn with guidance.
 
 Key runtime files:
 - `Agents/Runtime/DispatchingAgentChatRuntime.cs` — dispatches Direct and CLI modes
@@ -75,6 +75,8 @@ Key runtime files:
 - `Agents/Runtime/WorkspaceAgentToolset.cs` — workspace tools and approval wrapping for Direct turns
 - `AiProviders/AiChatClientFactory.cs` — model/connection validation, credential resolution, adapter construction
 - `AiProviders/AiProviderSettingsService.cs` — provider/model CRUD, discovery, enablement and default selection
+- `SelfClaw.Core/Interfaces/AiProviders/IAiModelCatalog.cs` — the runtime's model-read contract (enabled models and scoped defaults); the same `AiProviderSettingsService` singleton implements it and the separate settings-management contract. Shared settings DTOs and model enums live in `SelfClaw.Core/Models/AiProviders/`.
+- `Tools/Workspace/WorkspaceToolService.cs` — the tool entry point and operation logging; delegates file operations, search and Shell execution to `WorkspaceFileService`, `WorkspaceSearchService` and `WorkspaceShellRunner`. `WorkspaceFileAccess` owns path/file validation; `WorkspaceTextEditor` owns text matching and replacement.
 - `CliAgentChatRuntime.cs` — one turn: session plan → args → spawn → parse → events
 - `Definitions/` — `ClaudeAgentDefinition`, `CodexAgentDefinition`, `OpenCodeAgentDefinition`, `CliAgentRegistry`
 - `Parsers/` — `ClaudeStreamJsonParser` (stream-json), `JsonEventStreamParser` (Codex/OpenCode)
@@ -146,6 +148,8 @@ definitions live in the existing `extension_packages.manifest_json` and open tab
 The Vue `ActivityStage` mounts an independent floating activity panel inside the conversation stage. It displays all durable Direct subagent tasks owned by the selected Interactive parent, including tasks still running after the parent turn ends. Child content never enters the parent transcript items or controls the composer busy state.
 
 - `SubagentExecutionSession` serializes recorder mutations, immutable live snapshots, and disposal. `SubagentActivityRegistry` holds active sessions; `SubagentActivityService` combines them with committed SQLite history and task-level approval state.
+- Activity pages contain one merged task collection; details contain one current task and one `SubagentContentSnapshot`. `SubagentActivityContent` and `SubagentActivityReadException` live in `Core.Runtime`; version-bound content reads enter through `SubagentActivityService`, while `ISubagentActivityReader` only lists persisted tasks and reads persisted details.
+- Vue `useActivityDetail` owns selection, content windows/versions, and following/restoration. `useActivityPanel` owns transport correlation and subscription; `useActivityDetailScroll` measures and applies DOM positions. Frozen windows and their anchors are retained in bounded per-parent reading preferences; body blocks use stable segment ids across paging.
 - `ISubagentActivityReader` supplies parent-owned counts, 50-task pages, transactional detail, and version-bound content pages. `ISubagentStateChangeNotifier` invalidates metadata only after task/delivery commits; text updates do not issue per-token SQL queries.
 - `Services/Activities/ActivityPanelBridge.cs` and `ActivityPanelPublisher.cs` handle `activity-panel/*` after the application-origin guard. Subscription, detail selection, revision, ACK, and replay are independent of the main transcript channel. Delivery retains one in-flight and one latest pending snapshot, retries at 2-second intervals at most three times, then waits for recovery.
 - Full snapshots contain at most 50 summaries and one 64-block detail window, with a serialized UTF-8 limit of 256 KiB; explicit content responses are capped at 64 KiB. An invalid historical content version preserves summaries and supplies current `selectedTask` metadata while the UI keeps the frozen reading window.
@@ -173,7 +177,12 @@ Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 - Extensions: `ExtensionCatalog`, `ExtensionPackageInstaller`, `ExtensionSettingsService`, `ExtensionStateChangeNotifier`, `DirectTurnCapabilityResolver` plus its `SkillCapabilitySource` / `PluginCapabilitySource` / `McpCapabilitySource`, Skill readers/runtime tools
 - MCP: configuration/transport factories, pooled `McpClientManager`, SDK connection factory, `McpToolAdapter`
 - Tools: `WorkspaceToolService`, `WorkspaceAgentToolset`
+- Workspace implementations: `WorkspaceFileService`, `WorkspaceSearchService`, `WorkspaceShellRunner`; the existing `IWorkspaceToolService` contract remains the caller boundary.
 - Security: `DpapiSecretProtector`
+
+`InitializeSelfClawInfrastructureAsync()` initializes repositories, reconciles extension packages and discovers user skills before Desktop startup. Plugin panels query `IPluginPanelCatalog` and acquire synchronous `IDisposable` version leases through Core's `IPluginVersionLeaseManager`. Infrastructure grants internal access only to tests, not to Desktop.
+
+Vue `ChatView` owns layout and event wiring. `useChatTranscript`, `useWorkspaceSelection`, `useChatComposer`, `useChatApprovals`, `useChatTerminal` and `useChatTurnStatus` own their respective state and host interactions. Workspace/Git responses are bound to the current selection generation.
 
 Desktop (`App.xaml.cs`):
 - `DesktopAgentDefinitionService`, `SubagentDefinitionCatalog`, `ExtensionSettingsBridge`, `AgentSettingsBridge`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,

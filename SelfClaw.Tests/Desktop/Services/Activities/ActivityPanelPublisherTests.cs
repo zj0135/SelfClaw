@@ -26,8 +26,9 @@ public sealed class ActivityPanelPublisherTests
         panel.AcknowledgeLatest();
         await panel.Publisher.SelectDetailAsync(subscription, Guid.NewGuid(), task.Id, null, null, "detail", CancellationToken.None);
         panel.AcknowledgeLatest();
+        await panel.Publisher.GetStateAsync(subscription, null, "intermediate", CancellationToken.None);
         await runtime.EmitAsync(new AssistantThinkingDeltaEvent("thinking", "visible before terminal"));
-        await UntilAsync(() => panel.LatestState.ToString().Contains("visible before terminal", StringComparison.Ordinal));
+        await UntilAsync(panel, () => panel.LatestState.ToString().Contains("visible before terminal", StringComparison.Ordinal));
         panel.LatestState.GetProperty("sections")[0].GetProperty("detail").GetProperty("contentOrigin").GetString().Should().Be("live");
         execution.IsCompleted.Should().BeFalse();
         panel.Channel.PublishTranscript(new TranscriptRenderState([], false, [], task.ParentConversationId.ToString("D"), false));
@@ -38,7 +39,7 @@ public sealed class ActivityPanelPublisherTests
         await runtime.EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
         await execution;
         panel.AcknowledgeLatest();
-        await UntilAsync(() => panel.LatestState.ToString().Contains("persisted", StringComparison.Ordinal));
+        await UntilAsync(panel, () => panel.LatestState.ToString().Contains("persisted", StringComparison.Ordinal));
         panel.LatestState.GetProperty("sections")[0].GetProperty("detail").GetProperty("task").GetProperty("status").GetString().Should().Be("succeeded");
     });
 
@@ -110,9 +111,14 @@ public sealed class ActivityPanelPublisherTests
         panel.Publisher.Acknowledge(subscription, firstRevision).Should().BeFalse();
     });
 
-    private static async Task UntilAsync(Func<bool> predicate)
+    private static async Task UntilAsync(ActivityPanelTestContext panel, Func<bool> predicate)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        while (!predicate()) await Task.Delay(10, timeout.Token);
+        while (!predicate())
+        {
+            // Like the WebView reader, acknowledge intermediate states so the pending snapshot can advance.
+            panel.AcknowledgeLatest();
+            await Task.Delay(10, timeout.Token);
+        }
     }
 }

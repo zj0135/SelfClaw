@@ -110,6 +110,7 @@ internal sealed class ActivityPanelPublisher : IDisposable
         if (_disposed) return;
         _disposed = true;
         Reset();
+        _delivery.Dispose();
         _activity.Changed -= OnActivityChanged;
         _source.PropertyChanged -= OnSourceChanged;
         _channel.ReadyChanged -= OnReadyChanged;
@@ -141,7 +142,7 @@ internal sealed class ActivityPanelPublisher : IDisposable
             if (_activity.IsScopeClosed(parent))
             {
                 _query = _query with { Generation = ++_generation };
-                _delivery.Dispose();
+                _delivery.Reset();
                 Publish(new ActivityPanelWireState(_query.SubscriptionId, parent, 0, [], StateError: "activity-scope-closed"));
                 return;
             }
@@ -211,7 +212,7 @@ internal sealed class ActivityPanelPublisher : IDisposable
         _generation++;
         _query = null;
         _dirty = false;
-        _delivery.Dispose();
+        _delivery.Reset();
     }
 
     private void Observe(Task operation)

@@ -77,12 +77,12 @@ public sealed class ActivityPanelLifecycleTests
         clock.TriggerTimeout();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => execution);
         var detail = await activity.Service.GetDetailAsync(task.ParentConversationId, task.Id) ?? throw new InvalidOperationException();
-        detail.Detail.Task.Status.Should().Be(SubagentTaskStatus.Failed);
-        detail.Detail.Task.ErrorCode.Should().Be(SubagentErrorCodes.TimedOut);
-        detail.Detail.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.Pending);
-        detail.Detail.Message?.MarkdownContent.Should().Be("partial result");
-        detail.Detail.Message?.Segments.Should().NotContain(segment => segment.Kind == MessageSegmentKind.Thinking);
-        detail.Detail.ToolRuns.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Failed);
+        detail.Activity.Task.Status.Should().Be(SubagentTaskStatus.Failed);
+        detail.Activity.Task.ErrorCode.Should().Be(SubagentErrorCodes.TimedOut);
+        detail.Activity.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.Pending);
+        detail.Content.Message?.MarkdownContent.Should().Be("partial result");
+        detail.Content.Message?.Segments.Should().NotContain(segment => segment.Kind == MessageSegmentKind.Thinking);
+        detail.Content.ToolRuns.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Failed);
         detail.Activity.Task.InputTokens.Should().BeNull();
         detail.Activity.Task.OutputTokens.Should().BeNull();
         activity.Registry.GetActivity(task.Id).Should().BeNull();

@@ -1,3 +1,4 @@
+using SelfClaw.Core.Models;
 using System.Text.Json;
 using SelfClaw.Infrastructure.AiProviders.Models;
 

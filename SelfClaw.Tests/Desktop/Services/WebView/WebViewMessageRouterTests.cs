@@ -29,7 +29,6 @@ using SelfClaw.Desktop.Services.Workspace;
 using SelfClaw.Desktop.Services.Workspace.Abstractions;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
-using SelfClaw.Infrastructure.AiProviders.Models.Views;
 using SelfClaw.Infrastructure.Extensions;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
 using SelfClaw.Infrastructure.Options;
@@ -245,7 +244,7 @@ public sealed class WebViewMessageRouterTests
                 _activityCoordinator,
                 approvalHandler,
                 programmingSettings,
-                new SelfClaw.Tests.TestDoubles.StubAiProviderSettingsService(),
+                new SelfClaw.Tests.TestDoubles.StubAiModelCatalog(),
                 new NoOpCompletionNotifier(),
                 NullLogger<ConversationTurnEngine>.Instance);
 
@@ -262,7 +261,8 @@ public sealed class WebViewMessageRouterTests
                 NullLogger<MainWindowViewModel>.Instance);
             viewModel.InitializeAsync().GetAwaiter().GetResult();
 
-            var aiProviderBridge = new AiProviderSettingsBridge(new RouterAiProviderSettingsService());
+            var providerSettings = new RouterAiProviderSettingsService();
+            var aiProviderBridge = new AiProviderSettingsBridge(providerSettings, providerSettings);
             ExtensionStateChangeNotifier = new RecordingExtensionStateChangeNotifier();
             var extensionBridge = new ExtensionSettingsBridge(
                 Unused<IExtensionSettingsService>(),
@@ -373,7 +373,7 @@ public sealed class WebViewMessageRouterTests
         }
     }
 
-    private sealed class RouterAiProviderSettingsService : IAiProviderSettingsService
+    private sealed class RouterAiProviderSettingsService : IAiProviderSettingsService, IAiModelCatalog
     {
         public Task<IReadOnlyList<AiModelConfiguration>> ListModelConfigurationsAsync(CancellationToken cancellationToken = default) => throw Unsupported();
         public Task<AiModelConfiguration> SaveModelConfigurationAsync(AiModelConfiguration configuration, CancellationToken cancellationToken = default) => throw Unsupported();

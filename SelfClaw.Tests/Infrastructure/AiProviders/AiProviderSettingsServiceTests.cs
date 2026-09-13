@@ -1,3 +1,4 @@
+using SelfClaw.Core.Runtime;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
@@ -6,7 +7,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
-using SelfClaw.Infrastructure.AiProviders.Models.Views;
+using SelfClaw.Core.Models;
 
 namespace SelfClaw.Tests.Infrastructure.AiProviders;
 
@@ -230,6 +231,10 @@ public sealed class AiProviderSettingsServiceTests
         failure.Ok.Should().BeFalse();
         failure.ErrorMessage.Should().Be("provider unavailable");
         failure.LatencyMs.Should().BeGreaterThanOrEqualTo(0);
+
+        client.ResponseException = new OperationCanceledException("provider cancelled");
+        var cancelled = () => service.CheckConnectivityAsync(connection.Id, profile.Id);
+        await cancelled.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]

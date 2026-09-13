@@ -6,7 +6,6 @@ using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Desktop.Services.Subagents.Models;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
-using SelfClaw.Infrastructure.AiProviders.Models.Views;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
@@ -58,7 +57,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
     internal SubagentTaskExecutor CreateExecutor(SubagentTaskRecord task, ControlledSubagentRuntime runtime, TimeProvider? timeProvider = null)
     {
         var modelId = task.ResolvedModelProfileId ?? throw new InvalidOperationException("Missing model.");
-        var settings = new StubAiProviderSettingsService(modelId)
+        var settings = new StubAiModelCatalog(modelId)
         {
             EnabledModels = [new EnabledModelView(modelId, "Test", "test", "Fixture")]
         };
@@ -79,7 +78,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
 
     internal SubagentTaskCoordinator CreateCoordinator()
         => new(Tasks, new SubagentDefinitionCatalog(StoragePaths.CreateDefault()), new SubagentTaskSnapshotSerializer(),
-            new SubagentTaskPreflight(new StubAiProviderSettingsService(Guid.NewGuid()), new EmptyExtensionPackageRepository(), new EmptyMcpServerRepository()),
+            new SubagentTaskPreflight(new StubAiModelCatalog(Guid.NewGuid()), new EmptyExtensionPackageRepository(), new EmptyMcpServerRepository()),
             new SubagentTaskWakeSignal(), Executions);
 
     public void Dispose()

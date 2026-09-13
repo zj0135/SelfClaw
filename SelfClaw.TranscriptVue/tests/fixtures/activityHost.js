@@ -9,7 +9,9 @@ export function installActivityHost() {
 	let selection = null;
 	let selectedTask = null;
 	let revision = 0;
-	let contentRevision = 1;
+	const contentRevisions = ids.map(() => 1);
+	let selectedOffset = null;
+	let selectedVersion = null;
 	let pageOffset = 0;
 	let paused = false;
 	let holdResponses = false;
@@ -36,15 +38,19 @@ export function installActivityHost() {
 	}
 	function snapshot(requestId) {
 		const selectedIndex = ids.indexOf(selectedTask);
-		const detail = selectedIndex < 0 ? null : {
+		const version = String(contentRevisions[selectedIndex]);
+		const changed = selectedIndex >= 0 && selectedVersion != null && selectedVersion !== version;
+		const total = segments[selectedIndex]?.length ?? 0;
+		const offset = selectedOffset ?? Math.max(0, total - 64);
+		const detail = selectedIndex < 0 || changed ? null : {
 			taskId: selectedTask, task: tasks[selectedIndex], taskText: tasks[selectedIndex].taskPreview,
-			contentVersion: String(contentRevision), contentOrigin: tasks[selectedIndex].status === 'running' ? 'live' : 'persisted', historyCompleteness: 'complete',
-			blockOffset: 0, totalBlocks: segments[selectedIndex].length, earlierOffset: null, laterOffset: null,
-			message: { id: selectedTask, kind: 'message', role: 'assistant', status: 'streaming', isThinking: true, segments: segments[selectedIndex] },
+			contentVersion: version, contentOrigin: tasks[selectedIndex].status === 'running' ? 'live' : 'persisted', historyCompleteness: 'complete',
+			blockOffset: offset, totalBlocks: total, earlierOffset: offset > 0 ? Math.max(0, offset - 64) : null, laterOffset: offset + 64 < total ? offset + 64 : null,
+			message: { id: selectedTask, kind: 'message', role: 'assistant', status: 'streaming', isThinking: true, segments: segments[selectedIndex].slice(offset, offset + 64) },
 			unplacedTools: [], content: [{ contentId: `tool/${selectedTask}/arguments`, segmentId: selectedTask, field: 'arguments', totalCharacters: 2, previewCharacters: 0, isTruncated: true }],
 		};
 		return { type: 'activity-panel/state', requestId, schemaVersion: 1, subscriptionId: subscription, parentConversationId: scope, revision: ++revision,
-			sections: [{ id: 'subagents', kind: 'subagents', title: '子代理', counts: { total: tasks.length, running: tasks.filter((item) => item.status === 'running').length, queued: 0, succeeded: tasks.filter((item) => item.status === 'succeeded').length, failed: 0, cancelled: tasks.filter((item) => item.status === 'cancelled').length, interrupted: 0 }, listVersion: 'fixture-list', cursor: pageOffset ? `page/${pageOffset}` : null, nextCursor: pageOffset + 50 < tasks.length ? `page/${pageOffset + 50}` : null, tasks: tasks.slice(pageOffset, pageOffset + 50), detailSelectionId: selection, detail }] };
+			sections: [{ id: 'subagents', kind: 'subagents', title: '子代理', counts: { total: tasks.length, running: tasks.filter((item) => item.status === 'running').length, queued: 0, succeeded: tasks.filter((item) => item.status === 'succeeded').length, failed: 0, cancelled: tasks.filter((item) => item.status === 'cancelled').length, interrupted: 0 }, listVersion: 'fixture-list', cursor: pageOffset ? `page/${pageOffset}` : null, nextCursor: pageOffset + 50 < tasks.length ? `page/${pageOffset + 50}` : null, tasks: tasks.slice(pageOffset, pageOffset + 50), detailSelectionId: selection, selectedTask: tasks[selectedIndex] ?? null, detailError: changed ? 'content-changed' : null, detail }] };
 	}
 	function push() { if (subscription && !paused) send(snapshot()); }
 	window.chrome = { ...(window.chrome || {}), webview: {
@@ -53,12 +59,12 @@ export function installActivityHost() {
 			requests.push(request);
 			queueMicrotask(() => {
 				const { type, requestId } = request;
-				if (type === 'activity-panel/subscribe') { subscription = request.subscriptionId; scope = request.parentConversationId; selection = null; selectedTask = null; pageOffset = 0; send(snapshot(requestId)); }
-				else if (type === 'activity-panel/select-detail') { selectedTask = request.taskId; selection = request.detailSelectionId; send(snapshot(requestId)); }
+				if (type === 'activity-panel/subscribe') { subscription = request.subscriptionId; scope = request.parentConversationId; selection = null; selectedTask = null; selectedOffset = null; selectedVersion = null; pageOffset = 0; send(snapshot(requestId)); }
+				else if (type === 'activity-panel/select-detail') { selectedTask = request.taskId; selection = request.detailSelectionId; selectedOffset = request.blockOffset ?? null; selectedVersion = request.contentVersion ?? null; send(snapshot(requestId)); }
 				else if (type === 'activity-panel/get-state') { pageOffset = request.cursor ? Number(request.cursor.split('/')[1]) : 0; send(snapshot(requestId)); }
 				else if (type === 'activity-panel/unsubscribe') { if (request.subscriptionId === subscription) subscription = null; }
 				else if (type === 'activity-panel/cancel-task') { const target = tasks.find((item) => item.taskId === request.taskId); target.status = 'cancelled'; target.phase = 'cancelled'; target.canCancel = false; send({ type, requestId, accepted: true }); push(); }
-				else if (type === 'activity-panel/read-content') send({ type: 'activity-panel/content', requestId, subscriptionId: subscription, detailSelectionId: selection, taskId: selectedTask, contentVersion: String(contentRevision), contentId: request.contentId, text: '{}', offset: 0, totalCharacters: 2 });
+				else if (type === 'activity-panel/read-content') send({ type: 'activity-panel/content', requestId, subscriptionId: subscription, detailSelectionId: selection, taskId: selectedTask, contentVersion: String(contentRevisions[ids.indexOf(selectedTask)]), contentId: request.contentId, text: '{}', offset: 0, totalCharacters: 2 });
 				else if (type === 'plugin-host/get-panels' && localStorage.getItem('activity:plugin') === '1') send({ type, requestId, panels: [plugin], tabs: [plugin.key] });
 				else if (type === 'plugin-host/open') send({ type, requestId, panel: plugin, url: `${plugin.origin}/index.html` });
 				else if (requestId) send({ type, requestId, sections: [], models: [], agents: [], tabs: [], panels: [], roots: [], commonFolders: [], current: null });
@@ -70,7 +76,7 @@ export function installActivityHost() {
 		setTaskCount(count) {
 			while (tasks.length < count) {
 				const id = `ffffffff-ffff-4fff-8fff-${String(tasks.length + 1).padStart(12, '0')}`;
-				tasks.push(task(id, tasks.length)); ids.push(id); segments.push(taskSegments(id));
+				tasks.push(task(id, tasks.length)); ids.push(id); segments.push(taskSegments(id)); contentRevisions.push(1);
 			}
 			push();
 		},
@@ -78,8 +84,17 @@ export function installActivityHost() {
 		holdResponses(value) { holdResponses = value; },
 		release(index = 0, error = null) { const payload = deferred.splice(index, 1)[0]; deliver(error ? { type: 'activity-panel/error', requestId: payload.requestId, error } : payload); },
 		pause(value) { paused = value; },
-		text(value, index = 0) { segments[index][1].markdown += value; contentRevision++; push(); },
-		finish(index = 0) { tasks[index].status = 'succeeded'; tasks[index].phase = 'succeeded'; tasks[index].canCancel = false; tasks[index].deliveryStatus = 'pending'; tasks[index].completedAtUtc = new Date().toISOString(); segments[index][2].status = 'completed'; segments[index][2].isPending = false; segments[index][2].detailText = 'Recorded tool result'; contentRevision++; push(); },
+		text(value, index = 0) { segments[index][1].markdown += value; contentRevisions[index]++; push(); },
+		longContent(count = 150, index = 0) {
+			segments[index] = Array.from({ length: count }, (_, ordinal) => ({ kind: 'content', markdown: `History block ${ordinal}`, segmentId: `${ids[index]}:text:${ordinal}`, segmentOrdinal: ordinal, isPending: false }));
+			contentRevisions[index]++; push();
+		},
+		appendBlock(text, index = 0) {
+			const ordinal = segments[index].length;
+			segments[index].push({ kind: 'content', markdown: text, segmentId: `${ids[index]}:text:${ordinal}`, segmentOrdinal: ordinal, isPending: false });
+			contentRevisions[index]++; push();
+		},
+		finish(index = 0) { tasks[index].status = 'succeeded'; tasks[index].phase = 'succeeded'; tasks[index].canCancel = false; tasks[index].deliveryStatus = 'pending'; tasks[index].completedAtUtc = new Date().toISOString(); segments[index][2].status = 'completed'; segments[index][2].isPending = false; segments[index][2].detailText = 'Recorded tool result'; contentRevisions[index]++; push(); },
 		transcript(parentId = parent) { send({ type: 'replaceState', revision: 1, selectedConversationId: parentId, isBusy: false, agentMode: 'direct', selectedAgentId: 'build', selectedAgentName: 'Build', conversations: [{ id: parentId, title: 'Activity verification' }], items: [{ id: 'parent-message', kind: 'message', role: 'assistant', status: 'completed', timestamp: '12:00', isThinking: false, segments: [{ kind: 'content', markdown: 'Parent answer remains independent.\n\n' + 'Transcript line.\n\n'.repeat(25) }] }] }); },
 	};
 }

@@ -243,7 +243,7 @@ export function buildRenderBlocks(item) {
 
 		blocks.push({
 			type: 'body',
-			key: `${item.id}:body:${index}`,
+			key: segment.segmentId || `${item.id}:body:${index}`,
 			segment,
 			isFirst,
 			isLast: index === total - 1,

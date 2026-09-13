@@ -1,3 +1,4 @@
+using SelfClaw.Core.Models;
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;

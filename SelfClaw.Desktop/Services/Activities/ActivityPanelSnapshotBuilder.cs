@@ -4,7 +4,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Activities.Models;
 using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Desktop.Services.Subagents.Models;
-using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop.Services.Activities;

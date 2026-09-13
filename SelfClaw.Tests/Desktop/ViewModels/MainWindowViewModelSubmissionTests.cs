@@ -60,7 +60,7 @@ public sealed class MainWindowViewModelSubmissionTests
                 activityCoordinator,
                 toolApprovalHandler,
                 new ProgrammingAssistantSettingsService(settingsStore),
-                new SelfClaw.Tests.TestDoubles.StubAiProviderSettingsService(),
+                new SelfClaw.Tests.TestDoubles.StubAiModelCatalog(),
                 new ConversationCompletionNotifier(notificationService),
                 NullLogger<ConversationTurnEngine>.Instance);
             var vm = new MainWindowViewModel(

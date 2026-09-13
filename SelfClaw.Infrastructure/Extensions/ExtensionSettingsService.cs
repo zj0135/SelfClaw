@@ -1,3 +1,4 @@
+using SelfClaw.Core.Runtime;
 using System.Net;
 using System.Text.Json;
 using SelfClaw.Core.Interfaces;
@@ -179,7 +180,7 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
                 // Open panels hold a version lease, so they have to be closed before the drain rather
                 // than after it — otherwise the drain waits on a lease only the UI can release.
                 await ClosePluginPanelsAsync(key.Id, cancellationToken).ConfigureAwait(false);
-                await using var versionDrain = _pluginVersionLeaseManager is null
+                using var versionDrain = _pluginVersionLeaseManager is null
                     ? null
                     : await _pluginVersionLeaseManager.AcquireDrainsAsync(versionPaths, cancellationToken)
                         .ConfigureAwait(false);

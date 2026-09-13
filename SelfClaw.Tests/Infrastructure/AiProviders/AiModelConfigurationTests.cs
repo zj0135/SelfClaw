@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Models;
-using SelfClaw.Infrastructure.AiProviders.Models.Views;
+using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.OpenAi;
 using SelfClaw.Infrastructure.Data.Sqlite;

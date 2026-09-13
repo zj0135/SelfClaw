@@ -55,7 +55,7 @@ public sealed class SubagentContinuationExecutorTests : IDisposable
             conversations, new DesktopTurnFinalizer(conversations, NullLogger<DesktopTurnFinalizer>.Instance),
             recorder, runtime, sessions, activity, approvalHandler,
             new ProgrammingAssistantSettingsService(new DesktopSettingsJsonStore(paths)),
-            new StubAiProviderSettingsService(), new NullCompletionNotifier(), NullLogger<ConversationTurnEngine>.Instance);
+            new StubAiModelCatalog(), new NullCompletionNotifier(), NullLogger<ConversationTurnEngine>.Instance);
         var executor = new SubagentContinuationExecutor(deliveries, runtime, recorder, approvalHandler,
             new SubagentTaskSnapshotSerializer(), new SubagentCompletionBatchSerializer(), engine, notifications,
             NullLogger<SubagentContinuationExecutor>.Instance);

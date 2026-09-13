@@ -1,8 +1,10 @@
+using SelfClaw.Core.Runtime;
+using SelfClaw.Core.Interfaces;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
-using SelfClaw.Infrastructure.AiProviders.Models.Views;
+using SelfClaw.Core.Models;
 
 namespace SelfClaw.Desktop.Services.AiProviders;
 
@@ -17,10 +19,12 @@ internal sealed class AiProviderSettingsBridge
     };
 
     private readonly IAiProviderSettingsService _settingsService;
+    private readonly IAiModelCatalog _models;
 
-    public AiProviderSettingsBridge(IAiProviderSettingsService settingsService)
+    public AiProviderSettingsBridge(IAiProviderSettingsService settingsService, IAiModelCatalog models)
     {
         _settingsService = settingsService;
+        _models = models;
     }
 
     public event Action<Guid?>? ModelSelectionChanged;
@@ -156,8 +160,8 @@ internal sealed class AiProviderSettingsBridge
                 }
                 case "ai-providers/list-enabled-models":
                 {
-                    var models = await _settingsService.ListEnabledModelsAsync(cancellationToken);
-                    var defaultModelProfileId = await _settingsService.GetDefaultModelAsync(
+                    var models = await _models.ListEnabledModelsAsync(cancellationToken);
+                    var defaultModelProfileId = await _models.GetDefaultModelAsync(
                         AiModelSelectionScopes.DesktopDefault,
                         cancellationToken);
                     ModelSelectionChanged?.Invoke(defaultModelProfileId);

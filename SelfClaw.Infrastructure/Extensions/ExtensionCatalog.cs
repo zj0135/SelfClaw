@@ -1,3 +1,4 @@
+using SelfClaw.Core.Runtime;
 using System.Text.Json;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
@@ -8,7 +9,7 @@ using SelfClaw.Infrastructure.Extensions.Plugins.Models;
 
 namespace SelfClaw.Infrastructure.Extensions;
 
-internal sealed class ExtensionCatalog : IExtensionCatalogReconciler
+internal sealed class ExtensionCatalog : IPluginPanelCatalog
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

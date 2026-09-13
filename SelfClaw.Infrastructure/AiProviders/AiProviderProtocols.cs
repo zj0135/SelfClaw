@@ -1,5 +1,5 @@
 using SelfClaw.Infrastructure.AiProviders.Models;
-using SelfClaw.Infrastructure.AiProviders.Models.Views;
+using SelfClaw.Core.Models;
 
 namespace SelfClaw.Infrastructure.AiProviders;
 

@@ -6,7 +6,6 @@ using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
-using SelfClaw.Infrastructure.AiProviders.Models.Views;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
@@ -146,7 +145,7 @@ public sealed class SubagentTaskCoordinatorTests : IDisposable
         }
 
         var modelProfileId = Guid.NewGuid();
-        var settings = new StubAiProviderSettingsService(modelProfileId)
+        var settings = new StubAiModelCatalog(modelProfileId)
         {
             EnabledModels = [new EnabledModelView(modelProfileId, "Test", "test", "Fixture")]
         };

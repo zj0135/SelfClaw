@@ -1,4 +1,4 @@
-using SelfClaw.Infrastructure.Extensions.Abstractions;
+using SelfClaw.Core.Interfaces;
 
 namespace SelfClaw.Infrastructure.Extensions;
 
@@ -7,7 +7,7 @@ internal sealed class PluginVersionLeaseManager : IPluginVersionLeaseManager
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.OrdinalIgnoreCase);
 
-    public PluginVersionLease Acquire(string installPath)
+    public IDisposable Acquire(string installPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(installPath);
         var path = Path.GetFullPath(installPath);
@@ -33,10 +33,10 @@ internal sealed class PluginVersionLeaseManager : IPluginVersionLeaseManager
     public async Task DrainAsync(string installPath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(installPath);
-        await using var drain = await AcquireDrainsAsync([installPath], cancellationToken).ConfigureAwait(false);
+        using var drain = await AcquireDrainsAsync([installPath], cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<PluginVersionDrainLease> AcquireDrainsAsync(
+    public async Task<IDisposable> AcquireDrainsAsync(
         IReadOnlyList<string> installPaths,
         CancellationToken cancellationToken = default)
     {
@@ -81,7 +81,7 @@ internal sealed class PluginVersionLeaseManager : IPluginVersionLeaseManager
             throw;
         }
 
-        return new PluginVersionDrainLease(() => ReleaseDrains(entries));
+        return new PluginVersionLease(() => ReleaseDrains(entries));
     }
 
     private void Release(string path)

@@ -1,3 +1,4 @@
+using SelfClaw.Core.Models;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,13 +13,13 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
     private const string ApiKeySecretName = AiProviderSecrets.ApiKeySecretName;
 
     private readonly IAiProviderRepository _repository;
-    private readonly IAiProviderRegistry _registry;
+    private readonly AiProviderRegistry _registry;
     private readonly ISecretProtector _secretProtector;
     private readonly ILoggerFactory _safeLoggerFactory;
 
     public AiChatClientFactory(
         IAiProviderRepository repository,
-        IAiProviderRegistry registry,
+        AiProviderRegistry registry,
         ISecretProtector secretProtector,
         ILoggerFactory? loggerFactory = null)
     {

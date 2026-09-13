@@ -10,7 +10,7 @@ namespace SelfClaw.Infrastructure.Extensions.Runtime;
 /// </summary>
 internal sealed class DirectTurnLeaseScope
 {
-    private readonly List<PluginVersionLease> _pluginLeases = [];
+    private readonly List<IDisposable> _pluginLeases = [];
     private readonly List<McpClientLease> _mcpLeases = [];
     private readonly object _sync = new();
     private int _disposed;
@@ -19,7 +19,7 @@ internal sealed class DirectTurnLeaseScope
     /// Hands a lease to the scope. Returns <c>false</c> when the scope is already disposed (resolution
     /// failed concurrently), telling the caller to dispose the lease itself.
     /// </summary>
-    public bool Add(PluginVersionLease lease)
+    public bool Add(IDisposable lease)
     {
         ArgumentNullException.ThrowIfNull(lease);
         lock (_sync)
@@ -57,7 +57,7 @@ internal sealed class DirectTurnLeaseScope
         }
 
         List<McpClientLease> mcpLeases;
-        List<PluginVersionLease> pluginLeases;
+        List<IDisposable> pluginLeases;
         lock (_sync)
         {
             mcpLeases = [.. _mcpLeases];
@@ -72,7 +72,7 @@ internal sealed class DirectTurnLeaseScope
         {
             foreach (var lease in pluginLeases.AsEnumerable().Reverse())
             {
-                await lease.DisposeAsync().ConfigureAwait(false);
+                lease.Dispose();
             }
         }
     }

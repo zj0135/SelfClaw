@@ -5,34 +5,35 @@ import MessageBlocks from '../Chat/transcript/MessageBlocks.vue';
 import ActivityContentReader from './ActivityContentReader.vue';
 import { useActivityDetailScroll } from '../../composables/useActivityDetailScroll.js';
 import { activityStatusLabel, deliveryStatusLabel, activityErrorLabel } from '../../renderers/activityLabels.js';
-const props = defineProps({ detail: Object, loading: Boolean, invalidated: Boolean, error: String, collapse: { type: Object, required: true }, scrollPositions: { type: Map, required: true }, readContent: { type: Function, required: true } });
-const emit = defineEmits(['close', 'window', 'latest', 'preview-image']);
+const props = defineProps({ detail: { type: Object, required: true }, collapse: { type: Object, required: true } });
+const emit = defineEmits(['preview-image']);
 const scroll = ref(null);
-const { displayed, hasNewContent, onScroll, resume } = useActivityDetailScroll(computed(() => props.detail), scroll, computed(() => props.invalidated), props.scrollPositions);
+const { onScroll } = useActivityDetailScroll(props.detail, scroll);
+const displayed = props.detail.displayed;
 const unplacedMessage = computed(() => ({ id: `${displayed.value?.taskId}:unplaced`, role: 'assistant', status: 'completed', segments: displayed.value?.unplacedTools || [] }));
 </script>
 
 <template>
 	<aside class="task-detail" aria-label="任务详情">
-		<header><strong>{{ detail?.task.subagentName || '任务详情' }}</strong><button type="button" aria-label="关闭任务详情" title="关闭任务详情" @click="emit('close')"><X :size="14" /></button></header>
+		<header><strong>{{ displayed?.task.subagentName || '任务详情' }}</strong><button type="button" aria-label="关闭任务详情" title="关闭任务详情" @click="detail.closeDetail"><X :size="14" /></button></header>
 		<div ref="scroll" class="detail-scroll" @scroll="onScroll">
 			<div class="detail-content">
-			<p v-if="loading" class="detail-state" role="status">读取详情...</p><p v-else-if="error && !invalidated" class="detail-error" role="alert">{{ activityErrorLabel(error) }}</p>
-			<template v-else-if="displayed">
-				<div class="detail-meta"><span>{{ activityStatusLabel(detail?.task.phase) }}</span><span v-if="detail?.task.modelDisplayName">{{ detail.task.modelDisplayName }}</span><span v-if="detail?.task.inputTokens != null">输入 {{ detail.task.inputTokens }}</span><span v-if="detail?.task.outputTokens != null">输出 {{ detail.task.outputTokens }}</span><span v-if="detail?.task.deliveryStatus !== 'none'">{{ deliveryStatusLabel(detail?.task.deliveryStatus) }}</span></div>
+			<p v-if="detail.loading.value" class="detail-state" role="status">读取详情...</p><p v-if="detail.error.value" class="detail-error" role="alert">{{ activityErrorLabel(detail.error.value) }}</p>
+			<template v-if="displayed">
+				<div class="detail-meta"><span>{{ activityStatusLabel(displayed.task.phase) }}</span><span v-if="displayed.task.modelDisplayName">{{ displayed.task.modelDisplayName }}</span><span v-if="displayed.task.inputTokens != null">输入 {{ displayed.task.inputTokens }}</span><span v-if="displayed.task.outputTokens != null">输出 {{ displayed.task.outputTokens }}</span><span v-if="displayed.task.deliveryStatus !== 'none'">{{ deliveryStatusLabel(displayed.task.deliveryStatus) }}</span></div>
 				<p v-if="displayed.historyCompleteness === 'partial'" class="history-warning">历史记录不完整</p>
-				<p v-if="detail?.task.errorMessage || detail?.task.recordingError" class="detail-error">{{ detail.task.errorMessage || detail.task.recordingError }}</p>
-				<p v-if="detail?.task.deliveryError" class="detail-error">{{ detail.task.deliveryError }}</p>
+				<p v-if="displayed.task.errorMessage || displayed.task.recordingError" class="detail-error">{{ displayed.task.errorMessage || displayed.task.recordingError }}</p>
+				<p v-if="displayed.task.deliveryError" class="detail-error">{{ displayed.task.deliveryError }}</p>
 				<p class="task-text">{{ displayed.taskText }}</p>
-				<button v-if="displayed.earlierOffset != null" class="window-link" type="button" @click="emit('window', displayed.earlierOffset, displayed.contentVersion)"><ArrowUp :size="12" />更早内容</button>
+				<button v-if="displayed.earlierOffset != null" class="window-link" type="button" :disabled="detail.loading.value" @click="detail.readEarlier"><ArrowUp :size="12" />更早内容</button>
 				<MessageBlocks v-if="displayed.message" :item="displayed.message" :collapse="collapse" compact @preview-image="emit('preview-image', $event)" />
 				<template v-if="displayed.unplacedTools.length"><h4>已记录工具</h4><MessageBlocks :item="unplacedMessage" :collapse="collapse" compact /></template>
-				<button v-if="displayed.laterOffset != null" class="window-link" type="button" @click="emit('window', displayed.laterOffset, displayed.contentVersion)"><ArrowDown :size="12" />后续内容</button>
-				<ActivityContentReader :detail="displayed" :read-content="readContent" />
+				<button v-if="displayed.laterOffset != null" class="window-link" type="button" :disabled="detail.loading.value" @click="detail.readLater"><ArrowDown :size="12" />后续内容</button>
+				<ActivityContentReader :detail="displayed" :read-content="detail.readContent" />
 			</template>
 			</div>
 		</div>
-		<button v-if="hasNewContent" class="new-content" type="button" @click="invalidated ? emit('latest') : resume()"><ArrowDown :size="13" />有新内容</button>
+		<button v-if="detail.hasNewContent.value" class="new-content" type="button" :disabled="detail.loading.value" @click="detail.resumeLatest"><ArrowDown :size="13" />有新内容</button>
 	</aside>
 </template>
 

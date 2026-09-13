@@ -3,7 +3,7 @@ using SelfClaw.Desktop.Services.Activities.Models;
 using SelfClaw.Desktop.Services.Subagents.Models;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.WebView;
-using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop.Services.Activities;
@@ -26,8 +26,8 @@ internal sealed class ActivityPanelProjection
             try { detail = BuildDetail(snapshot, query); }
             catch (SubagentActivityReadException exception) { detailError = exception.Message; }
         }
-        var section = new ActivityPanelWireSection(page.Page.Counts, page.Page.ListVersion,
-            listReset ? null : query.Cursor, page.Page.NextCursor, listReset,
+        var section = new ActivityPanelWireSection(page.Counts, page.ListVersion,
+            listReset ? null : query.Cursor, page.NextCursor, listReset,
             page.Activities.Select(ToTask).ToArray(), query.DetailSelectionId, detail,
             detailError, SelectedTask: detail is null && snapshot is not null ? ToTask(snapshot.Activity) : null);
         var state = new ActivityPanelWireState(query.SubscriptionId, query.ParentConversationId, 0, [section]);
@@ -49,7 +49,7 @@ internal sealed class ActivityPanelProjection
 
     private ActivityPanelWireDetail BuildDetail(SubagentActivitySnapshot snapshot, ActivityPanelQuery query)
     {
-        var detail = snapshot.Detail;
+        var detail = snapshot.Content;
         if (query.ContentVersion is string expected && expected != detail.ContentVersion)
         {
             throw new SubagentActivityReadException("content-changed");
@@ -77,7 +77,7 @@ internal sealed class ActivityPanelProjection
         }
 
         var placedCount = Math.Clamp(placed.Count - offset, 0, window.Length);
-        return new ActivityPanelWireDetail(detail.Task.TaskId, ToTask(snapshot.Activity), detail.TaskText,
+        return new ActivityPanelWireDetail(snapshot.Activity.Task.TaskId, ToTask(snapshot.Activity), detail.TaskText,
             detail.ContentVersion, snapshot.ContentOrigin, detail.HistoryCompleteness.ToString().ToLowerInvariant(),
             offset, total, offset > 0 ? Math.Max(0, offset - MaximumBlocks) : null,
             offset + window.Length < total ? offset + window.Length : null,
@@ -85,7 +85,7 @@ internal sealed class ActivityPanelProjection
             window.Skip(placedCount).ToArray(), content);
     }
 
-    private static void AddReferences(List<ActivityContentReference> content, SubagentActivityDetail detail,
+    private static void AddReferences(List<ActivityContentReference> content, SubagentContentSnapshot detail,
         TranscriptRenderSegment segment)
     {
         if (segment.Kind != "tool")

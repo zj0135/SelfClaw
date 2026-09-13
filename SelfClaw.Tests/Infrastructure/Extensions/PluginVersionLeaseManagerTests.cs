@@ -18,9 +18,9 @@ public sealed class PluginVersionLeaseManagerTests
         var acquire = () => manager.Acquire(path);
         acquire.Should().Throw<InvalidOperationException>();
 
-        await lease.DisposeAsync();
+        lease.Dispose();
         await drainTask;
-        await manager.Acquire(path).DisposeAsync();
+        manager.Acquire(path).Dispose();
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public sealed class PluginVersionLeaseManagerTests
     {
         var manager = new PluginVersionLeaseManager();
         var path = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
-        await using var lease = manager.Acquire(path);
+        using var lease = manager.Acquire(path);
         using var cancellation = new CancellationTokenSource();
 
         var drainTask = manager.DrainAsync(path, cancellation.Token);
@@ -36,7 +36,7 @@ public sealed class PluginVersionLeaseManagerTests
 
         var waitForDrain = async () => await drainTask;
         await waitForDrain.Should().ThrowAsync<OperationCanceledException>();
-        await manager.Acquire(path).DisposeAsync();
+        manager.Acquire(path).Dispose();
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class PluginVersionLeaseManagerTests
         var acquire = () => manager.Acquire(path);
         acquire.Should().Throw<InvalidOperationException>();
 
-        await lease.DisposeAsync();
+        lease.Dispose();
         await activeDrain;
     }
 
@@ -67,15 +67,15 @@ public sealed class PluginVersionLeaseManagerTests
         var firstPath = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         var secondPath = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
 
-        await using var drain = await manager.AcquireDrainsAsync([firstPath, secondPath]);
+        using var drain = await manager.AcquireDrainsAsync([firstPath, secondPath]);
 
         var acquireFirst = () => manager.Acquire(firstPath);
         var acquireSecond = () => manager.Acquire(secondPath);
         acquireFirst.Should().Throw<InvalidOperationException>();
         acquireSecond.Should().Throw<InvalidOperationException>();
 
-        await drain.DisposeAsync();
-        await manager.Acquire(firstPath).DisposeAsync();
-        await manager.Acquire(secondPath).DisposeAsync();
+        drain.Dispose();
+        manager.Acquire(firstPath).Dispose();
+        manager.Acquire(secondPath).Dispose();
     }
 }

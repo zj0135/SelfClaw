@@ -8,7 +8,6 @@ using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
 using SelfClaw.Desktop.Services.Subagents;
-using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Desktop.Services.Runtime;
@@ -27,7 +26,7 @@ internal sealed class ConversationTurnEngine : IDisposable
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettings;
-    private readonly IAiProviderSettingsService _aiProviderSettings;
+    private readonly IAiModelCatalog _models;
     private readonly IConversationCompletionNotifier _completionNotifier;
     private readonly SubagentActivityService? _subagentActivity;
     private readonly ILogger<ConversationTurnEngine> _logger;
@@ -45,7 +44,7 @@ internal sealed class ConversationTurnEngine : IDisposable
         AgentActivityCoordinator agentActivityCoordinator,
         DesktopToolApprovalHandler toolApprovalHandler,
         ProgrammingAssistantSettingsService programmingAssistantSettings,
-        IAiProviderSettingsService aiProviderSettings,
+        IAiModelCatalog models,
         IConversationCompletionNotifier completionNotifier,
         ILogger<ConversationTurnEngine> logger,
         SubagentActivityService? subagentActivity = null)
@@ -58,7 +57,7 @@ internal sealed class ConversationTurnEngine : IDisposable
         _agentActivityCoordinator = agentActivityCoordinator;
         _toolApprovalHandler = toolApprovalHandler;
         _programmingAssistantSettings = programmingAssistantSettings;
-        _aiProviderSettings = aiProviderSettings;
+        _models = models;
         _completionNotifier = completionNotifier;
         _subagentActivity = subagentActivity;
         _logger = logger;
@@ -391,7 +390,7 @@ internal sealed class ConversationTurnEngine : IDisposable
         }
 
         var modelProfileId = request.ModelProfileId
-            ?? await _aiProviderSettings.GetDefaultModelAsync(
+            ?? await _models.GetDefaultModelAsync(
                 AiModelSelectionScopes.DesktopDefault,
                 cancellationToken)
             ?? throw new InvalidOperationException(

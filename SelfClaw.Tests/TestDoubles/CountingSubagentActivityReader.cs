@@ -29,6 +29,4 @@ internal sealed class CountingSubagentActivityReader(ISubagentActivityReader inn
         return result;
     }
 
-    public Task<SubagentContentPage?> ReadContentAsync(SubagentContentQuery query, CancellationToken cancellationToken = default)
-        => inner.ReadContentAsync(query, cancellationToken);
 }

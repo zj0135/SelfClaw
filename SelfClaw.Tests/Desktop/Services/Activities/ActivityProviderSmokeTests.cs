@@ -81,7 +81,7 @@ public sealed class ActivityProviderSmokeTests(ITestOutputHelper output)
         output.WriteLine("SelectedProfile={0}; Parent={1}; Task={2}; ReasoningEvents={3}; TextEvents={4}; LiveThinkingVisible={5}; DurationMs={6}",
             profile.Id, task.ParentConversationId, task.Id, reasoningEvents, textEvents, visibleBeforeTerminal, timer.ElapsedMilliseconds);
         var detail = await activity.Service.GetDetailAsync(task.ParentConversationId, task.Id);
-        detail?.Detail.Task.Status.Should().Be(SubagentTaskStatus.Succeeded, "{0}: {1}", detail?.Detail.Task.ErrorCode, detail?.Detail.Task.ErrorMessage);
+        detail?.Activity.Task.Status.Should().Be(SubagentTaskStatus.Succeeded, "{0}: {1}", detail?.Activity.Task.ErrorCode, detail?.Activity.Task.ErrorMessage);
         reasoningEvents.Should().BeGreaterThan(0, "this smoke requires a provider that actually emits reasoning");
         visibleBeforeTerminal.Should().BeTrue();
     }, 150);

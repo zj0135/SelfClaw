@@ -40,8 +40,8 @@ public sealed class SubagentStateChangeNotificationTests
         await WaitForCountAsync(notifications, 5);
         notifications.Should().HaveCount(5).And.OnlyContain(change => change.Kind == SubagentStateChangeKind.Task);
         var list = await context.Service.ListAsync(new SubagentActivityQuery(queued.ParentConversationId));
-        list.Page.Counts.Cancelled.Should().Be(1);
-        list.Page.Counts.Failed.Should().Be(1);
+        list.Counts.Cancelled.Should().Be(1);
+        list.Counts.Failed.Should().Be(1);
         (await context.Tasks.GetDeliveryAsync(queued.ParentConversationId, creation.Task.Id)).Should().NotBeNull();
     }
 
@@ -69,7 +69,7 @@ public sealed class SubagentStateChangeNotificationTests
             await deliveries.TryResolveAsync(lease,
                 new SubagentDeliveryResolution(SubagentDeliveryResolutionKind.Succeeded, new TurnFinalization(message, []), null, now));
             context.Changes.PersistenceRevision.Should().Be(5);
-            (await context.Service.GetDetailAsync(task.ParentConversationId, task.Id))?.Detail.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.Delivered);
+            (await context.Service.GetDetailAsync(task.ParentConversationId, task.Id))?.Activity.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.Delivered);
         }
         else
         {
@@ -82,7 +82,7 @@ public sealed class SubagentStateChangeNotificationTests
             await deliveries.TryResolveAsync(lease,
                 new SubagentDeliveryResolution(SubagentDeliveryResolutionKind.DeadLetter, null, "Cannot continue.", ready));
             context.Changes.PersistenceRevision.Should().Be(7);
-            (await context.Service.GetDetailAsync(task.ParentConversationId, task.Id))?.Detail.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.DeadLetter);
+            (await context.Service.GetDetailAsync(task.ParentConversationId, task.Id))?.Activity.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.DeadLetter);
         }
 
         var revision = context.Changes.PersistenceRevision;

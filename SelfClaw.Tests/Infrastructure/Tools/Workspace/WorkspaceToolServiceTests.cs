@@ -7,7 +7,7 @@ namespace SelfClaw.Tests.Infrastructure.Tools.Workspace;
 public sealed class WorkspaceToolServiceTests : IDisposable
 {
     private readonly string _rootPath;
-    private readonly WorkspaceToolService _service = new();
+    private readonly WorkspaceToolService _service = new(new(), new(), new());
 
     public WorkspaceToolServiceTests()
     {
@@ -145,6 +145,27 @@ public sealed class WorkspaceToolServiceTests : IDisposable
         result.Executed.Should().BeTrue();
         result.ExitCode.Should().Be(0);
         result.StandardOutput.Should().Contain("hello from powershell");
+    }
+
+    [Fact]
+    public async Task Invalid_search_regex_reports_the_ripgrep_error()
+    {
+        var search = () => _service.SearchTextAsync(_rootPath, "[", new WorkspaceSearchOptions { IsRegex = true });
+
+        await search.Should().ThrowAsync<InvalidOperationException>().WithMessage("*regex parse error*");
+    }
+
+    [Fact]
+    public async Task Shell_timeout_is_distinct_from_caller_cancellation()
+    {
+        var timeout = () => _service.RunShellCommandAsync(_rootPath, "Start-Sleep -Seconds 10", 1)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        await timeout.Should().ThrowAsync<TimeoutException>().WithMessage("*timed out after 1 seconds*");
+
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        var cancelled = () => _service.RunShellCommandAsync(_rootPath, "Start-Sleep -Seconds 10", 30, cancellation.Token)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        await cancelled.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]

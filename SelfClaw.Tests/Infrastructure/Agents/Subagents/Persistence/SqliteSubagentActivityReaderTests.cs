@@ -1,4 +1,4 @@
-using System.Text;
+using SelfClaw.Core.Runtime;
 using System.Text.Json;
 using FluentAssertions;
 using SelfClaw.Core.Models;
@@ -114,58 +114,19 @@ public sealed class SqliteSubagentActivityReaderTests : IDisposable
         var tool = CreateTool(task, "recorded result");
         await _conversations.UpsertToolExecutionAsync(tool);
         var live = await DetailAsync(task);
-        live.Message.Should().BeNull();
-        live.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Unknown);
-        live.UnplacedToolRuns.Should().ContainSingle();
+        live.Content.Message.Should().BeNull();
+        live.Content.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Unknown);
+        live.Content.UnplacedToolRuns.Should().ContainSingle();
         await CompleteAsync(task, interrupted ? SubagentTaskStatus.Interrupted : SubagentTaskStatus.Succeeded,
             "legacy final text", includeSegments: false, tool);
         var detail = await DetailAsync(task);
-        detail.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Partial);
-        detail.Message.Should().NotBeNull();
-        detail.Message?.MarkdownContent.Should().Be("legacy final text");
-        detail.Message?.Segments.Should().BeEmpty();
-        detail.UnplacedToolRuns.Should().ContainSingle().Which.Id.Should().Be(tool.Id);
-        detail.TaskText.Should().Be(task.TaskText);
+        detail.Content.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Partial);
+        detail.Content.Message.Should().NotBeNull();
+        detail.Content.Message?.MarkdownContent.Should().Be("legacy final text");
+        detail.Content.Message?.Segments.Should().BeEmpty();
+        detail.Content.UnplacedToolRuns.Should().ContainSingle().Which.Id.Should().Be(tool.Id);
+        detail.Content.TaskText.Should().Be(task.TaskText);
         detail.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.Pending);
-    }
-
-    [Fact]
-    public async Task ReadContentAsync_pages_escaped_unicode_and_tools_without_splitting_surrogates_or_crossing_versions()
-    {
-        var task = await CreateRunningAsync();
-        var text = new string('x', 8191) + "\U0001F600\u4e2d\u6587" + new string('\u0001', 25000);
-        var tool = CreateTool(task, new string('t', 60000));
-        await CompleteAsync(task, SubagentTaskStatus.Failed, text, tool: tool);
-        var detail = await DetailAsync(task);
-        detail.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Complete);
-        detail.UnplacedToolRuns.Should().BeEmpty();
-        detail.Message?.Segments?.Select(segment => segment.Kind).Should().Equal(
-            MessageSegmentKind.Thinking, MessageSegmentKind.Text, MessageSegmentKind.ToolCall);
-        var content = new StringBuilder();
-        var query = new SubagentContentQuery(task.ParentConversationId, task.Id, detail.ContentVersion, "segment/1");
-        int? offset = 0;
-        while (offset is int next)
-        {
-            var page = await _reader.ReadContentAsync(query with { Offset = next })
-                ?? throw new InvalidOperationException("Missing content page.");
-            JsonSerializer.SerializeToUtf8Bytes(page).Length.Should().BeLessThanOrEqualTo(64 * 1024);
-            new UTF8Encoding(false, true).GetBytes(page.Text).Should().NotBeEmpty();
-            content.Append(page.Text);
-            offset = page.NextOffset;
-        }
-
-        content.ToString().Should().Be(text);
-        (await _reader.ReadContentAsync(query with { ParentConversationId = Guid.NewGuid() })).Should().BeNull();
-        var split = () => _reader.ReadContentAsync(query with { Offset = 8192 });
-        await split.Should().ThrowAsync<SubagentActivityReadException>().WithMessage("invalid-content-range");
-        var invalidTool = () => _reader.ReadContentAsync(query with { ContentId = $"tool/{Guid.NewGuid():D}/result" });
-        await invalidTool.Should().ThrowAsync<SubagentActivityReadException>().WithMessage("content-not-found");
-        var toolPage = await _reader.ReadContentAsync(query with { ContentId = $"tool/{tool.Id:D}/result", Offset = 50000 });
-        toolPage?.Text.Should().HaveLength(8192);
-        toolPage?.TotalCharacters.Should().Be(60000);
-        await _conversations.UpsertToolExecutionAsync(tool with { ResultContent = "changed" });
-        var stale = () => _reader.ReadContentAsync(query);
-        await stale.Should().ThrowAsync<SubagentActivityReadException>().WithMessage("content-changed");
     }
 
     [Fact]
@@ -200,14 +161,14 @@ public sealed class SqliteSubagentActivityReaderTests : IDisposable
             if (detail.Task.Status == SubagentTaskStatus.Succeeded)
             {
                 detail.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.Pending);
-                var message = detail.Message ?? throw new InvalidOperationException("A terminal task must have its committed assistant.");
+                var message = detail.Content.Message ?? throw new InvalidOperationException("A terminal task must have its committed assistant.");
                 message.Status.Should().Be(MessageStatus.Completed);
                 message.Segments.Should().HaveCount(3);
-                detail.ToolRuns.Should().ContainSingle();
+                detail.Content.ToolRuns.Should().ContainSingle();
             }
             else
             {
-                detail.Message.Should().BeNull();
+                detail.Content.Message.Should().BeNull();
                 detail.Task.DeliveryStatus.Should().BeNull();
             }
         }

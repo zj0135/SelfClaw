@@ -1,3 +1,4 @@
+using SelfClaw.Infrastructure.AiProviders;
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Extensions.Runtime;

@@ -1,3 +1,4 @@
+using SelfClaw.Core.Runtime;
 using System.IO.Compression;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
@@ -301,11 +302,11 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         context.PanelSessions.ClosedPluginIds.Should().Equal("git-inspector");
 
         // A held lease would block DeleteAsync forever if panels were not evicted first.
-        await using var lease = context.PluginVersionLeaseManager.Acquire(pluginPath);
+        using var lease = context.PluginVersionLeaseManager.Acquire(pluginPath);
         var release = Task.Run(async () =>
         {
             await Task.Delay(50);
-            await lease.DisposeAsync();
+            lease.Dispose();
         });
         await context.Service.DeleteAsync(key);
         await release;
@@ -488,7 +489,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
 
         deleteTask.IsCompleted.Should().BeFalse();
         Directory.Exists(pluginPath).Should().BeTrue();
-        await lease.DisposeAsync();
+        lease.Dispose();
         await deleteTask;
         Directory.Exists(Path.Combine(_rootPath, "plugins", "office")).Should().BeFalse();
         (await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "office")).Should().BeNull();
@@ -518,7 +519,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
 
         deleteTask.IsCompleted.Should().BeFalse();
         Directory.Exists(oldPath).Should().BeTrue();
-        await oldVersionLease.DisposeAsync();
+        oldVersionLease.Dispose();
         await deleteTask;
         Directory.Exists(pluginRoot).Should().BeFalse();
     }

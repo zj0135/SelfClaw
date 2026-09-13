@@ -79,8 +79,8 @@ public sealed class SubagentExecutionSessionTests
         await context.CreateExecutor(task, runtime).RecoverInterruptedAsync(task, CancellationToken.None);
         var after = await context.Service.GetDetailAsync(task.ParentConversationId, task.Id)
             ?? throw new InvalidOperationException("Missing recovered task.");
-        after.Detail.Task.Status.Should().Be(SubagentTaskStatus.Interrupted);
-        after.Detail.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Partial);
+        after.Activity.Task.Status.Should().Be(SubagentTaskStatus.Interrupted);
+        after.Content.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Partial);
         after.ContentOrigin.Should().Be("persisted");
         runtime.Started.Task.IsCompleted.Should().BeFalse();
     }

@@ -1,10 +1,11 @@
+using SelfClaw.Core.Interfaces;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
-using SelfClaw.Infrastructure.AiProviders.Models.Views;
+using SelfClaw.Core.Models;
 
 namespace SelfClaw.Tests.Desktop.Services.AiProviders;
 
@@ -37,7 +38,7 @@ public sealed class AiProviderSettingsBridgeTests
         string expectedCall)
     {
         var service = new RecordingSettingsService();
-        var bridge = new AiProviderSettingsBridge(service);
+        var bridge = new AiProviderSettingsBridge(service, service);
         using var document = JsonDocument.Parse(AddRequestId(payloadJson, "request-42"));
 
         var response = await bridge.TryHandleAsync(type, document.RootElement);
@@ -54,7 +55,7 @@ public sealed class AiProviderSettingsBridgeTests
     public async Task TryHandleAsync_ignores_non_provider_messages()
     {
         var service = new RecordingSettingsService();
-        var bridge = new AiProviderSettingsBridge(service);
+        var bridge = new AiProviderSettingsBridge(service, service);
         using var document = JsonDocument.Parse("{}");
 
         (await bridge.TryHandleAsync("send-prompt", document.RootElement)).Should().BeNull();
@@ -67,7 +68,8 @@ public sealed class AiProviderSettingsBridgeTests
     [InlineData("ai-providers/set-provider-enabled", "{}", "GUID property 'id' is required")]
     public async Task TryHandleAsync_returns_correlated_errors(string type, string payloadJson, string errorFragment)
     {
-        var bridge = new AiProviderSettingsBridge(new RecordingSettingsService());
+        var service = new RecordingSettingsService();
+        var bridge = new AiProviderSettingsBridge(service, service);
         using var document = JsonDocument.Parse(AddRequestId(payloadJson, "bad-request"));
 
         var response = await bridge.TryHandleAsync(type, document.RootElement);
@@ -82,7 +84,7 @@ public sealed class AiProviderSettingsBridgeTests
     public async Task List_and_desktop_default_changes_publish_the_authoritative_model_selection()
     {
         var service = new RecordingSettingsService();
-        var bridge = new AiProviderSettingsBridge(service);
+        var bridge = new AiProviderSettingsBridge(service, service);
         var selections = new List<Guid?>();
         bridge.ModelSelectionChanged += selections.Add;
 
@@ -108,7 +110,7 @@ public sealed class AiProviderSettingsBridgeTests
     public async Task Save_provider_parses_the_custom_protocol_kind_and_default_format()
     {
         var service = new RecordingSettingsService();
-        var bridge = new AiProviderSettingsBridge(service);
+        var bridge = new AiProviderSettingsBridge(service, service);
         const string payload =
             "{\"catalogId\":\"custom\",\"name\":\"My Gateway\",\"base\":\"https://api.example.com/v1/\"," +
             "\"apiKey\":null,\"providerKind\":3,\"apiFormat\":2}";
@@ -130,7 +132,7 @@ public sealed class AiProviderSettingsBridgeTests
     public async Task Save_provider_leaves_the_protocol_unset_when_the_payload_omits_it()
     {
         var service = new RecordingSettingsService();
-        var bridge = new AiProviderSettingsBridge(service);
+        var bridge = new AiProviderSettingsBridge(service, service);
         const string payload =
             "{\"catalogId\":\"openai\",\"name\":\"OpenAI\",\"base\":\"https://api.openai.com/v1/\",\"apiKey\":\"sk-x\"}";
         using var document = JsonDocument.Parse(AddRequestId(payload, "req"));
@@ -146,7 +148,7 @@ public sealed class AiProviderSettingsBridgeTests
     public async Task TryHandleAsync_propagates_caller_cancellation()
     {
         var service = new RecordingSettingsService { ObserveCancellation = true };
-        var bridge = new AiProviderSettingsBridge(service);
+        var bridge = new AiProviderSettingsBridge(service, service);
         using var cancellationSource = new CancellationTokenSource();
         cancellationSource.Cancel();
         using var document = JsonDocument.Parse("{}");
@@ -199,7 +201,7 @@ public sealed class AiProviderSettingsBridgeTests
     private static string UpsertModelPayload()
         => $"{{\"providerConnectionId\":\"{RecordingSettingsService.ProviderId:D}\",\"name\":\"GPT\",\"apiFormat\":\"OpenAIResponses\",\"model\":\"gpt-test\"}}";
 
-    private sealed class RecordingSettingsService : IAiProviderSettingsService
+    private sealed class RecordingSettingsService : IAiProviderSettingsService, IAiModelCatalog
     {
         public Task<IReadOnlyList<AiModelConfiguration>> ListModelConfigurationsAsync(CancellationToken cancellationToken = default)
         {

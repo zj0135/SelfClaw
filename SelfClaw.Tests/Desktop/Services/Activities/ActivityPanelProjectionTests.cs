@@ -1,3 +1,4 @@
+using SelfClaw.Core.Runtime;
 using System.Text.Json;
 using FluentAssertions;
 using SelfClaw.Core.Models;
@@ -26,8 +27,8 @@ public sealed class ActivityPanelProjectionTests
             MessageStatus.Streaming, task.QueuedAtUtc, task.QueuedAtUtc,
             Segments: Enumerable.Range(0, 80).Select(index => new MessageSegmentRecord(messageId, index,
                 index % 2 == 0 ? MessageSegmentKind.Thinking : MessageSegmentKind.Text, large, null)).ToArray());
-        var detail = SubagentActivityContent.CreateDetail(metadata.Task, large, message, []);
-        var snapshot = new SubagentActivitySnapshot(detail, metadata, "live", 1);
+        var detail = SubagentActivityContent.Create(metadata.Task.Status, large, message, []);
+        var snapshot = new SubagentActivitySnapshot(metadata, detail, "live");
         var manyTasks = Enumerable.Range(0, 50).Select(_ => metadata with
         {
             Task = metadata.Task with { TaskId = Guid.NewGuid(), TaskPreview = large, ErrorMessage = large, DeliveryError = large }
@@ -47,7 +48,7 @@ public sealed class ActivityPanelProjectionTests
         {
             segment.Markdown.Should().NotEndWith("\ud83d");
             var reference = window.Content.Single(item => item.SegmentId == segment.SegmentId);
-            var remaining = SubagentActivityContent.Read(detail, new SubagentContentQuery(task.ParentConversationId,
+            var remaining = SubagentActivityContent.Read(metadata.Task, detail, new SubagentContentQuery(task.ParentConversationId,
                 task.Id, detail.ContentVersion, reference.ContentId, reference.PreviewCharacters));
             (segment.Markdown + remaining.Text).Should().Be(large[..(segment.Markdown.Length + remaining.Text.Length)]);
         }
@@ -56,7 +57,7 @@ public sealed class ActivityPanelProjectionTests
         var completed = snapshot with { Activity = metadata with { Task = metadata.Task with { Status = SubagentTaskStatus.Succeeded } } };
         var invalidated = projection.Build(query with { BlockOffset = 0, ContentVersion = "stale" }, page, completed, false);
         invalidated.Sections[0].Tasks.Should().HaveCount(50);
-        invalidated.Sections[0].Counts.Should().Be(page.Page.Counts);
+        invalidated.Sections[0].Counts.Should().Be(page.Counts);
         invalidated.Sections[0].Detail.Should().BeNull();
         invalidated.Sections[0].DetailError.Should().Be("content-changed");
         invalidated.Sections[0].SelectedTask?.TaskId.Should().Be(task.Id);
@@ -78,10 +79,10 @@ public sealed class ActivityPanelProjectionTests
             MessageStatus.Completed, task.QueuedAtUtc, task.QueuedAtUtc);
         var tool = new ToolExecutionRecord(Guid.NewGuid(), task.ChildConversationId, "read_file", "{}",
             ToolExecutionStatus.Completed, "recorded", null, 3, task.QueuedAtUtc, task.QueuedAtUtc, MessageId: message.Id);
-        var detail = SubagentActivityContent.CreateDetail(metadata.Task with { Status = SubagentTaskStatus.Interrupted }, "task", message, [tool]);
+        var detail = SubagentActivityContent.Create(SubagentTaskStatus.Interrupted, "task", message, [tool]);
         var projection = new ActivityPanelProjection(StoragePaths.CreateDefault());
         var result = projection.Build(new ActivityPanelQuery(Guid.NewGuid(), task.ParentConversationId, 1), page,
-            new SubagentActivitySnapshot(detail, metadata, "persisted", 1), false).Sections[0].Detail;
+            new SubagentActivitySnapshot(metadata, detail, "persisted"), false).Sections[0].Detail;
         result?.HistoryCompleteness.Should().Be("partial");
         result?.Message?.Segments.Should().ContainSingle().Which.Markdown.Should().Be("legacy");
         result?.UnplacedTools.Should().ContainSingle().Which.SegmentId.Should().Be(tool.Id.ToString("D"));

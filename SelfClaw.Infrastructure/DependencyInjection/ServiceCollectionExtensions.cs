@@ -1,3 +1,4 @@
+using SelfClaw.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
@@ -100,7 +101,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<ExtensionStateChangeNotifier>());
         services.AddSingleton<ExtensionPackageInstaller>();
         services.AddSingleton<ExtensionCatalog>();
-        services.AddSingleton<IExtensionCatalogReconciler>(serviceProvider =>
+        services.AddSingleton<IPluginPanelCatalog>(serviceProvider =>
             serviceProvider.GetRequiredService<ExtensionCatalog>());
         services.AddSingleton<UserSkillDiscoveryService>(serviceProvider =>
             new UserSkillDiscoveryService(
@@ -144,10 +145,15 @@ public static class ServiceCollectionExtensions
                 serviceProvider.GetRequiredService<AnthropicModelListClient>(),
                 serviceProvider.GetRequiredService<AiProviderHttpClientProvider>()));
         services.AddSingleton<IAiProviderAdapter, OllamaProviderAdapter>();
-        services.AddSingleton<IAiProviderRegistry, AiProviderRegistry>();
-        services.AddSingleton<IAiProviderSettingsService, AiProviderSettingsService>();
+        services.AddSingleton<AiProviderRegistry>();
+        services.AddSingleton<AiProviderSettingsService>();
+        services.AddSingleton<IAiProviderSettingsService>(provider => provider.GetRequiredService<AiProviderSettingsService>());
+        services.AddSingleton<IAiModelCatalog>(provider => provider.GetRequiredService<AiProviderSettingsService>());
         services.AddSingleton<IAiChatClientFactory, AiChatClientFactory>();
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
+        services.AddSingleton<WorkspaceFileService>();
+        services.AddSingleton<WorkspaceSearchService>();
+        services.AddSingleton<WorkspaceShellRunner>();
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
         services.AddSingleton<WorkspaceAgentToolset>();
         services.AddSingleton<CliCommandResolver>();
@@ -168,5 +174,16 @@ public static class ServiceCollectionExtensions
                 serviceProvider.GetServices<IAgentRuntimeAdapter>(),
                 serviceProvider.GetService<ILogger<DispatchingAgentChatRuntime>>()));
         return services;
+    }
+
+    public static async Task InitializeSelfClawInfrastructureAsync(
+        this IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        await services.GetRequiredService<IConversationRepository>().InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await services.GetRequiredService<IAiProviderRepository>().InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await services.GetRequiredService<IExtensionPackageRepository>().InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await services.GetRequiredService<ExtensionCatalog>().ReconcileAsync(cancellationToken).ConfigureAwait(false);
+        await services.GetRequiredService<UserSkillDiscoveryService>().DiscoverAndRegisterAsync(cancellationToken).ConfigureAwait(false);
     }
 }

@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence.Models;
-using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
 
 namespace SelfClaw.Infrastructure.Agents.Subagents.Persistence;
@@ -60,14 +60,7 @@ internal sealed class SqliteSubagentActivityReader : ISubagentActivityReader
             connection, transaction, task, cancellationToken).ConfigureAwait(false);
         var tools = await SqliteSubagentActivityQueries.ReadToolsAsync(
             connection, transaction, task, cancellationToken).ConfigureAwait(false);
-        return SubagentActivityContent.CreateDetail(task, taskText, message, tools);
-    }
-
-    public async Task<SubagentContentPage?> ReadContentAsync(SubagentContentQuery query, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(query);
-        var detail = await GetDetailAsync(query.ParentConversationId, query.TaskId, cancellationToken).ConfigureAwait(false);
-        return detail is null ? null : SubagentActivityContent.Read(detail, query);
+        return new SubagentActivityDetail(task, SubagentActivityContent.Create(task.Status, taskText, message, tools));
     }
 
     private static async Task<(SubagentActivityCounts Counts, string Version)> ReadIndexAsync(

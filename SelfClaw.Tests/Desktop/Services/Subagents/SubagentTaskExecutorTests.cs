@@ -11,7 +11,6 @@ using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
-using SelfClaw.Infrastructure.AiProviders.Models.Views;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
@@ -46,7 +45,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         var task = await CreateRunningTaskAsync(conversations, tasks);
         var modelProfileId = task.ResolvedModelProfileId
             ?? throw new InvalidOperationException("The fixture task has no model profile.");
-        var settings = new StubAiProviderSettingsService(modelProfileId)
+        var settings = new StubAiModelCatalog(modelProfileId)
         {
             EnabledModels = [new EnabledModelView(modelProfileId, "Test", "test", "Fixture")]
         };
@@ -129,7 +128,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
             new DesktopToolApprovalHandler(),
             new SubagentTaskSnapshotSerializer(),
             new SubagentTaskPreflight(
-                new StubAiProviderSettingsService(modelProfileId)
+                new StubAiModelCatalog(modelProfileId)
                 {
                     EnabledModels = [new EnabledModelView(modelProfileId, "Test", "test", "Fixture")]
                 },
@@ -178,7 +177,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
             new DesktopToolApprovalHandler(),
             new SubagentTaskSnapshotSerializer(),
             new SubagentTaskPreflight(
-                new StubAiProviderSettingsService(),
+                new StubAiModelCatalog(),
                 new EmptyExtensionPackageRepository(),
                 new EmptyMcpServerRepository()),
             new SubagentTaskExecutionRegistry(),
@@ -220,7 +219,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
             new DesktopToolApprovalHandler(),
             new SubagentTaskSnapshotSerializer(),
             new SubagentTaskPreflight(
-                new StubAiProviderSettingsService(modelProfileId)
+                new StubAiModelCatalog(modelProfileId)
                 {
                     EnabledModels = [new EnabledModelView(modelProfileId, "Test", "test", "Fixture")]
                 },

@@ -6,7 +6,7 @@ import { useActivityPanel } from '../../composables/useActivityPanel.js';
 import { useSubagentActivity } from '../../composables/useSubagentActivity.js';
 import { useActivityPreferences } from '../../composables/useActivityPreferences.js';
 import { useActivityPanelSize } from '../../composables/useActivityPanelSize.js';
-import { useActivityTaskSelection } from '../../composables/useActivityTaskSelection.js';
+import { useActivityDetail } from '../../composables/useActivityDetail.js';
 const props = defineProps({ parentConversationId: { type: String, default: null } });
 const emit = defineEmits(['preview-image']);
 const parent = computed(() => props.parentConversationId);
@@ -16,7 +16,7 @@ const preferences = useActivityPreferences(parent);
 const dock = ref(null);
 const stage = ref(null);
 const { height: dockHeight, constrained } = useActivityPanelSize(dock, stage);
-const { select } = useActivityTaskSelection(panel, activity, preferences, constrained);
+const detail = useActivityDetail(panel, preferences, computed(() => preferences.value.view.open && !constrained.value));
 const sections = computed(() => panel.state.value.sections.filter((section) => section.kind === 'subagents'));
 const visible = computed(() => panel.section.value?.counts.total > 0 || panel.error.value);
 </script>
@@ -26,7 +26,7 @@ const visible = computed(() => panel.section.value?.counts.total > 0 || panel.er
 		<slot />
 		<div ref="dock" class="activity-dock" :class="{ visible }">
 			<ActivityFloatingPanel v-if="visible" :sections="sections" :preferences="preferences.view" :force-collapsed="constrained" :loading="panel.loading.value" :error="panel.error.value" @refresh="panel.refresh()">
-				<template #default="{ section }"><SubagentActivitySection v-if="section.kind === 'subagents'" :key="`${parent}:${section.id}`" :section="section" :activity="activity" :collapse="preferences.collapse" :scroll-positions="preferences.scrollPositions" @select="select" @preview-image="emit('preview-image', $event)" /></template>
+				<template #default="{ section }"><SubagentActivitySection v-if="section.kind === 'subagents'" :key="`${parent}:${section.id}`" :section="section" :activity="activity" :detail="detail" :collapse="preferences.collapse" @preview-image="emit('preview-image', $event)" /></template>
 			</ActivityFloatingPanel>
 		</div>
 	</div>

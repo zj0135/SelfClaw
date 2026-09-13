@@ -1,3 +1,4 @@
+using SelfClaw.Core.Runtime;
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
@@ -6,11 +7,11 @@ using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Catalog;
 using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
-using SelfClaw.Infrastructure.AiProviders.Models.Views;
+using SelfClaw.Core.Models;
 
 namespace SelfClaw.Infrastructure.AiProviders;
 
-internal sealed class AiProviderSettingsService : IAiProviderSettingsService
+internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IAiModelCatalog
 {
     internal const string ApiKeySecretName = AiProviderSecrets.ApiKeySecretName;
 
@@ -24,13 +25,13 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
 
     private readonly IAiProviderRepository _repository;
     private readonly IAiModelConfigurationRepository _configurations;
-    private readonly IAiProviderRegistry _registry;
+    private readonly AiProviderRegistry _registry;
     private readonly ISecretProtector _secretProtector;
     private readonly AiProviderHttpClientProvider _httpClientProvider;
 
     public AiProviderSettingsService(
         IAiProviderRepository repository,
-        IAiProviderRegistry registry,
+        AiProviderRegistry registry,
         ISecretProtector secretProtector,
         IAiModelConfigurationRepository configurations,
         AiProviderHttpClientProvider? httpClientProvider = null)
@@ -62,8 +63,8 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
 
     public async Task<AiProviderSettingsState> GetStateAsync(CancellationToken cancellationToken = default)
     {
-        var connections = await _repository.ListAllProviderConnectionsAsync(cancellationToken);
-        var profiles = await _repository.ListModelProfilesAsync(cancellationToken: cancellationToken);
+        var connections = await _repository.ListAllProviderConnectionsAsync(cancellationToken).ConfigureAwait(false);
+        var profiles = await _repository.ListModelProfilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         var profilesByConnection = profiles
             .GroupBy(profile => profile.ProviderConnectionId)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<AiModelProfile>)group.ToArray());
@@ -94,7 +95,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
                     connection,
                     catalogEntry,
                     connectionProfiles ?? [],
-                    cancellationToken));
+                    cancellationToken).ConfigureAwait(false));
             }
         }
 
@@ -105,12 +106,12 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
                 connection,
                 AiProviderCatalog.GetRequired(connection.CatalogId),
                 connectionProfiles ?? [],
-                cancellationToken));
+                cancellationToken).ConfigureAwait(false));
         }
 
         var defaultSelection = await _repository.GetModelProfileSelectionAsync(
             AiModelSelectionScopes.DesktopDefault,
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         return new AiProviderSettingsState(
             views,
             defaultSelection?.ModelProfileId,
@@ -121,6 +122,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         SaveProviderCommand command,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(command);
         ArgumentException.ThrowIfNullOrWhiteSpace(command.Name);
         if (!command.Endpoint.IsAbsoluteUri)
         {
@@ -131,7 +133,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         AiProviderConnection? existing = null;
         if (command.Id.HasValue)
         {
-            existing = await _repository.GetProviderConnectionAsync(command.Id.Value, cancellationToken)
+            existing = await _repository.GetProviderConnectionAsync(command.Id.Value, cancellationToken).ConfigureAwait(false)
                 ?? throw new KeyNotFoundException($"AI provider connection '{command.Id.Value}' was not found.");
         }
 
@@ -151,7 +153,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         {
             if (!string.IsNullOrWhiteSpace(existingApiKeyRef))
             {
-                await _secretProtector.DeleteSecretAsync(existingApiKeyRef, cancellationToken);
+                await _secretProtector.DeleteSecretAsync(existingApiKeyRef, cancellationToken).ConfigureAwait(false);
             }
 
             credentialRefs.Remove(ApiKeySecretName);
@@ -162,7 +164,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             {
                 if (!string.IsNullOrWhiteSpace(existingApiKeyRef))
                 {
-                    await _secretProtector.DeleteSecretAsync(existingApiKeyRef, cancellationToken);
+                    await _secretProtector.DeleteSecretAsync(existingApiKeyRef, cancellationToken).ConfigureAwait(false);
                 }
 
                 credentialRefs.Remove(ApiKeySecretName);
@@ -172,7 +174,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
                 credentialRefs[ApiKeySecretName] = await _secretProtector.StoreSecretAsync(
                     command.ApiKey,
                     existingApiKeyRef,
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -196,10 +198,10 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             existing?.CreatedAtUtc ?? now,
             now,
             existing?.IsEnabled ?? command.Enabled ?? true);
-        await _repository.UpsertProviderConnectionAsync(connection, cancellationToken);
+        await _repository.UpsertProviderConnectionAsync(connection, cancellationToken).ConfigureAwait(false);
 
-        var profiles = await _repository.ListModelProfilesAsync(connection.Id, cancellationToken);
-        return await CreateProviderViewAsync(connection, effectiveCatalog, profiles, cancellationToken);
+        var profiles = await _repository.ListModelProfilesAsync(connection.Id, cancellationToken).ConfigureAwait(false);
+        return await CreateProviderViewAsync(connection, effectiveCatalog, profiles, cancellationToken).ConfigureAwait(false);
     }
 
     public Task SetProviderEnabledAsync(
@@ -210,20 +212,20 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
 
     public async Task DeleteProviderAsync(Guid connectionId, CancellationToken cancellationToken = default)
     {
-        var connection = await GetRequiredConnectionAsync(connectionId, cancellationToken);
+        var connection = await GetRequiredConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false);
         foreach (var secretRef in connection.CredentialRefs.Values.Distinct(StringComparer.Ordinal))
         {
-            await _secretProtector.DeleteSecretAsync(secretRef, cancellationToken);
+            await _secretProtector.DeleteSecretAsync(secretRef, cancellationToken).ConfigureAwait(false);
         }
 
-        await _repository.DeleteProviderConnectionAsync(connectionId, cancellationToken);
+        await _repository.DeleteProviderConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<AiModelView>> FetchAndMergeRemoteModelsAsync(
         Guid connectionId,
         CancellationToken cancellationToken = default)
     {
-        var connection = await GetRequiredConnectionAsync(connectionId, cancellationToken);
+        var connection = await GetRequiredConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false);
         var catalogEntry = AiProviderCatalog.GetRequired(connection.CatalogId);
         var adapter = _registry.GetRequiredAdapter(connection.ProviderKind);
         if (!catalogEntry.SupportsModelListing || !adapter.SupportsModelListing)
@@ -232,10 +234,10 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
                 $"AI provider connection '{connection.Name}' does not support remote model listing.");
         }
 
-        var secrets = await ResolveSecretsAsync(connection, cancellationToken);
-        var remoteModels = await adapter.ListModelsAsync(connection, secrets, cancellationToken);
+        var secrets = await ResolveSecretsAsync(connection, cancellationToken).ConfigureAwait(false);
+        var remoteModels = await adapter.ListModelsAsync(connection, secrets, cancellationToken).ConfigureAwait(false);
         var defaultApiFormat = ResolveDefaultApiFormat(connection, catalogEntry, adapter);
-        var existingModels = await _repository.ListModelProfilesAsync(connectionId, cancellationToken);
+        var existingModels = await _repository.ListModelProfilesAsync(connectionId, cancellationToken).ConfigureAwait(false);
         var modelsById = existingModels
             .GroupBy(profile => profile.Model, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
@@ -262,7 +264,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
                     now,
                     now,
                     IsEnabled: false);
-                await _repository.UpsertModelProfileAsync(profile, cancellationToken);
+                await _repository.UpsertModelProfileAsync(profile, cancellationToken).ConfigureAwait(false);
                 modelsById.Add(profile.Model, profile);
                 continue;
             }
@@ -271,12 +273,12 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             if (changed)
             {
                 var updated = existing with { ModelOptions = mergedOptions, UpdatedAtUtc = now };
-                await _repository.UpsertModelProfileAsync(updated, cancellationToken);
+                await _repository.UpsertModelProfileAsync(updated, cancellationToken).ConfigureAwait(false);
                 modelsById[updated.Model] = updated;
             }
         }
 
-        var mergedModels = await _repository.ListModelProfilesAsync(connectionId, cancellationToken);
+        var mergedModels = await _repository.ListModelProfilesAsync(connectionId, cancellationToken).ConfigureAwait(false);
         return mergedModels.Select(CreateModelView).ToArray();
     }
 
@@ -288,41 +290,18 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var connection = await GetRequiredConnectionAsync(connectionId, cancellationToken);
-            var profile = await GetRequiredModelAsync(modelProfileId, cancellationToken);
-            if (profile.ProviderConnectionId != connectionId)
-            {
-                throw new InvalidOperationException(
-                    $"AI model profile '{modelProfileId}' does not belong to provider connection '{connectionId}'.");
-            }
-
-            var adapter = _registry.GetRequiredAdapter(connection.ProviderKind);
-            if (!adapter.SupportsApiFormat(profile.ApiFormat))
-            {
-                throw new NotSupportedException(
-                    $"Provider '{connection.Name}' does not support API format '{profile.ApiFormat}'.");
-            }
-
-            var secrets = await ResolveSecretsAsync(connection, cancellationToken);
-            var request = new AiProviderClientRequest(connection, profile, secrets, false, []);
-            using var client = adapter.CreateChatClient(request);
-            var options = adapter.CreateChatOptions(request);
-            options.MaxOutputTokens = 1;
-            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutSource.CancelAfter(_httpClientProvider.GetNonStreamingTimeout(connection));
-            await client.GetResponseAsync(
-                [new ChatMessage(ChatRole.User, "ping")],
-                options,
-                timeoutSource.Token);
+            var connection = await GetRequiredConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false);
+            var profile = await GetRequiredModelAsync(modelProfileId, cancellationToken).ConfigureAwait(false);
+            await SendConnectivityProbeAsync(connection, profile, cancellationToken).ConfigureAwait(false);
 
             stopwatch.Stop();
             return new ConnectivityCheckResult(true, stopwatch.ElapsedMilliseconds, null);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             throw;
         }
-        catch (OperationCanceledException)
+        catch (TimeoutException)
         {
             stopwatch.Stop();
             return new ConnectivityCheckResult(false, stopwatch.ElapsedMilliseconds, "Connectivity check timed out.");
@@ -338,9 +317,10 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         UpsertModelCommand command,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(command);
         ArgumentException.ThrowIfNullOrWhiteSpace(command.Name);
         ArgumentException.ThrowIfNullOrWhiteSpace(command.Model);
-        var connection = await GetRequiredConnectionAsync(command.ProviderConnectionId, cancellationToken);
+        var connection = await GetRequiredConnectionAsync(command.ProviderConnectionId, cancellationToken).ConfigureAwait(false);
         var adapter = _registry.GetRequiredAdapter(connection.ProviderKind);
         if (!adapter.SupportsApiFormat(command.ApiFormat))
         {
@@ -351,7 +331,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         AiModelProfile? existing = null;
         if (command.Id.HasValue)
         {
-            existing = await GetRequiredModelAsync(command.Id.Value, cancellationToken);
+            existing = await GetRequiredModelAsync(command.Id.Value, cancellationToken).ConfigureAwait(false);
             if (existing.ProviderConnectionId != command.ProviderConnectionId)
             {
                 throw new InvalidOperationException(
@@ -372,7 +352,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             existing?.CreatedAtUtc ?? now,
             now,
             command.Enabled ?? existing?.IsEnabled ?? true);
-        await _repository.UpsertModelProfileAsync(profile, cancellationToken);
+        await _repository.UpsertModelProfileAsync(profile, cancellationToken).ConfigureAwait(false);
         return CreateModelView(await GetRequiredModelAsync(profile.Id, cancellationToken).ConfigureAwait(false));
     }
 
@@ -397,7 +377,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
-        var enabledModels = await _repository.ListEnabledModelProfilesAsync(cancellationToken);
+        var enabledModels = await _repository.ListEnabledModelProfilesAsync(cancellationToken).ConfigureAwait(false);
         if (enabledModels.All(profile => profile.Id != modelProfileId))
         {
             throw new InvalidOperationException(
@@ -406,21 +386,21 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
 
         await _repository.SetModelProfileSelectionAsync(
             new AiModelProfileSelection(scope.Trim(), modelProfileId, DateTimeOffset.UtcNow),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<Guid?> GetDefaultModelAsync(string scope, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
-        var selection = await _repository.GetModelProfileSelectionAsync(scope.Trim(), cancellationToken);
+        var selection = await _repository.GetModelProfileSelectionAsync(scope.Trim(), cancellationToken).ConfigureAwait(false);
         return selection?.ModelProfileId;
     }
 
     public async Task<IReadOnlyList<EnabledModelView>> ListEnabledModelsAsync(
         CancellationToken cancellationToken = default)
     {
-        var profiles = await _repository.ListEnabledModelProfilesAsync(cancellationToken);
-        var connections = (await _repository.ListAllProviderConnectionsAsync(cancellationToken))
+        var profiles = await _repository.ListEnabledModelProfilesAsync(cancellationToken).ConfigureAwait(false);
+        var connections = (await _repository.ListAllProviderConnectionsAsync(cancellationToken).ConfigureAwait(false))
             .ToDictionary(connection => connection.Id);
 
         return profiles
@@ -433,6 +413,43 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
             .ToArray();
     }
 
+    private async Task SendConnectivityProbeAsync(
+        AiProviderConnection connection, AiModelProfile profile, CancellationToken cancellationToken)
+    {
+        if (profile.ProviderConnectionId != connection.Id)
+        {
+            throw new InvalidOperationException(
+                $"AI model profile '{profile.Id}' does not belong to provider connection '{connection.Id}'.");
+        }
+
+        var adapter = _registry.GetRequiredAdapter(connection.ProviderKind);
+        if (!adapter.SupportsApiFormat(profile.ApiFormat))
+        {
+            throw new NotSupportedException(
+                $"Provider '{connection.Name}' does not support API format '{profile.ApiFormat}'.");
+        }
+
+        var secrets = await ResolveSecretsAsync(connection, cancellationToken).ConfigureAwait(false);
+        var request = new AiProviderClientRequest(connection, profile, secrets, false, []);
+        using var client = adapter.CreateChatClient(request);
+        var options = adapter.CreateChatOptions(request);
+        options.MaxOutputTokens = 1;
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        try
+        {
+            await client.GetResponseAsync(
+                    [new ChatMessage(ChatRole.User, "ping")],
+                    options,
+                    timeoutSource.Token)
+                .WaitAsync(_httpClientProvider.GetNonStreamingTimeout(connection), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            await timeoutSource.CancelAsync().ConfigureAwait(false);
+        }
+    }
+
     private async Task<AiProviderView> CreateProviderViewAsync(
         AiProviderConnection connection,
         AiProviderCatalogEntry catalogEntry,
@@ -442,7 +459,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
         string? apiKey = null;
         if (connection.CredentialRefs.TryGetValue(ApiKeySecretName, out var apiKeyRef))
         {
-            apiKey = await _secretProtector.RetrieveSecretAsync(apiKeyRef, cancellationToken);
+            apiKey = await _secretProtector.RetrieveSecretAsync(apiKeyRef, cancellationToken).ConfigureAwait(false);
         }
 
         var adapter = _registry.TryGetAdapter(connection.ProviderKind);
@@ -556,19 +573,19 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService
     private async Task<AiProviderConnection> GetRequiredConnectionAsync(
         Guid connectionId,
         CancellationToken cancellationToken)
-        => await _repository.GetProviderConnectionAsync(connectionId, cancellationToken)
+        => await _repository.GetProviderConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false)
             ?? throw new KeyNotFoundException($"AI provider connection '{connectionId}' was not found.");
 
     private async Task<AiModelProfile> GetRequiredModelAsync(
         Guid modelProfileId,
         CancellationToken cancellationToken)
-        => await _repository.GetModelProfileAsync(modelProfileId, cancellationToken)
+        => await _repository.GetModelProfileAsync(modelProfileId, cancellationToken).ConfigureAwait(false)
             ?? throw new KeyNotFoundException($"AI model profile '{modelProfileId}' was not found.");
 
     private async Task<IReadOnlyDictionary<string, string>> ResolveSecretsAsync(
         AiProviderConnection connection,
         CancellationToken cancellationToken)
-        => await AiProviderSecrets.ResolveAsync(_secretProtector, connection, cancellationToken);
+        => await AiProviderSecrets.ResolveAsync(_secretProtector, connection, cancellationToken).ConfigureAwait(false);
 
     private static IReadOnlyDictionary<string, JsonElement> MergeDisplayMetadata(
         IReadOnlyDictionary<string, JsonElement> existingOptions,

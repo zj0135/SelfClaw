@@ -80,14 +80,16 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         var subagentTaskExecutionStore = provider.GetRequiredService<ISubagentTaskExecutionStore>();
         var runtime = provider.GetRequiredService<IAgentChatRuntime>();
         var adapters = provider.GetServices<IAiProviderAdapter>().ToArray();
-        var registry = provider.GetRequiredService<IAiProviderRegistry>();
+        var registry = provider.GetRequiredService<AiProviderRegistry>();
         var settingsService = provider.GetRequiredService<IAiProviderSettingsService>();
+        var modelCatalog = provider.GetRequiredService<IAiModelCatalog>();
         var chatClientFactory = provider.GetRequiredService<IAiChatClientFactory>();
 
         repository.Should().BeOfType<SqliteAiProviderRepository>();
         packageRepository.Should().BeOfType<SqliteExtensionRepository>();
         mcpServerRepository.Should().BeSameAs(packageRepository);
         extensionSettingsService.Should().NotBeNull();
+        modelCatalog.Should().BeSameAs(settingsService);
         subagentTaskRepository.Should().BeOfType<SqliteSubagentTaskRepository>();
         subagentTaskExecutionStore.Should().BeSameAs(subagentTaskRepository);
         runtime.Should().BeOfType<DispatchingAgentChatRuntime>();

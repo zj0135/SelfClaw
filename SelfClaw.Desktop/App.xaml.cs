@@ -122,7 +122,7 @@ public partial class App : System.Windows.Application
                 Dispatcher));
             builder.Services.AddSingleton<IWorkspaceFolderPicker, WpfWorkspaceFolderPicker>();
             builder.Services.AddSingleton(services => new PluginPanelHostController(
-                services.GetRequiredService<ExtensionCatalog>(),
+                services.GetRequiredService<IPluginPanelCatalog>(),
                 services.GetRequiredService<IExtensionPackageRepository>(),
                 services.GetRequiredService<IPluginVersionLeaseManager>(),
                 services.GetRequiredService<DesktopSettingsJsonStore>(),
@@ -214,11 +214,7 @@ public partial class App : System.Windows.Application
 
             Log.Information("SelfClaw starting. LogsDirectory={LogsDirectory}", _storagePaths.LogsDirectory);
 
-            await _host.Services.GetRequiredService<IConversationRepository>().InitializeAsync();
-            await _host.Services.GetRequiredService<IAiProviderRepository>().InitializeAsync();
-            await _host.Services.GetRequiredService<IExtensionPackageRepository>().InitializeAsync();
-            await _host.Services.GetRequiredService<IExtensionCatalogReconciler>().ReconcileAsync();
-            await _host.Services.GetRequiredService<UserSkillDiscoveryService>().DiscoverAndRegisterAsync();
+            await _host.Services.InitializeSelfClawInfrastructureAsync();
             await _host.Services.GetRequiredService<ProgrammingAssistantSettingsService>().GetOrInitializeAsync();
             // 必须在窗口显示之前：MainWindow.OnSourceInitialized 要同步读缓存来定标题栏明暗，
             // 晚一步深色用户就会看到标题栏先白一下。

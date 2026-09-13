@@ -86,8 +86,8 @@ public sealed class ActivityPanelPerformanceTests(ITestOutputHelper output)
         do
         {
             var page = await activity.Service.ListAsync(new SubagentActivityQuery(tasks[0].ParentConversationId, Cursor: cursor));
-            foreach (var task in page.Page.Tasks) seen.Add(task.TaskId).Should().BeTrue();
-            cursor = page.Page.NextCursor;
+            foreach (var taskActivity in page.Activities) seen.Add(taskActivity.Task.TaskId).Should().BeTrue();
+            cursor = page.NextCursor;
         } while (cursor is not null);
         seen.Should().HaveCount(1003);
     }

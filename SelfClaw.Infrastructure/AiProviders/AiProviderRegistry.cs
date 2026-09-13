@@ -1,20 +1,21 @@
+using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.AiProviders;
 
 /// <summary>
-/// Default <see cref="IAiProviderRegistry"/>. Collects every registered
-/// <see cref="IAiProviderAdapter"/> and indexes them by <see cref="AiProviderKind"/>.
+/// Indexes registered <see cref="IAiProviderAdapter"/> instances by <see cref="AiProviderKind"/>.
 /// Registering two adapters for the same kind fails fast at construction so the
 /// problem surfaces at application startup rather than at request time.
 /// </summary>
-internal sealed class AiProviderRegistry : IAiProviderRegistry
+internal sealed class AiProviderRegistry
 {
     private readonly IReadOnlyDictionary<AiProviderKind, IAiProviderAdapter> _adaptersByKind;
 
     public AiProviderRegistry(IEnumerable<IAiProviderAdapter> adapters)
     {
+        ArgumentNullException.ThrowIfNull(adapters);
         var map = new Dictionary<AiProviderKind, IAiProviderAdapter>();
 
         foreach (var adapter in adapters)

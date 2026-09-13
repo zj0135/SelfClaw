@@ -1,3 +1,5 @@
+using SelfClaw.Core.Runtime;
+using SelfClaw.Core.Models;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
@@ -12,6 +14,17 @@ namespace SelfClaw.Tests.Infrastructure.AiProviders;
 
 public sealed class AiChatClientFactoryTests
 {
+    [Fact]
+    public void Lease_releases_its_client_once_even_when_disposed_concurrently()
+    {
+        var nativeClient = new FakeChatClient();
+        var lease = new AiChatClientLease(nativeClient, new ChatOptions(), CreateData().Profile);
+
+        Parallel.For(0, 8, _ => lease.Dispose());
+
+        nativeClient.DisposeCount.Should().Be(1);
+    }
+
     [Fact]
     public async Task CreateAsync_resolves_request_builds_pipeline_and_disposes_native_client()
     {
@@ -269,7 +282,10 @@ public sealed class AiChatClientFactoryTests
 
     private sealed class FakeChatClient : IChatClient
     {
-        public bool IsDisposed { get; private set; }
+        private int _disposeCount;
+
+        public int DisposeCount => Volatile.Read(ref _disposeCount);
+        public bool IsDisposed => DisposeCount > 0;
 
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
@@ -288,6 +304,6 @@ public sealed class AiChatClientFactoryTests
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
-        public void Dispose() => IsDisposed = true;
+        public void Dispose() => Interlocked.Increment(ref _disposeCount);
     }
 }

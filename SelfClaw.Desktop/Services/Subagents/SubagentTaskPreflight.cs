@@ -3,22 +3,21 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Subagents.Models;
-using SelfClaw.Infrastructure.AiProviders.Abstractions;
 
 namespace SelfClaw.Desktop.Services.Subagents;
 
 internal sealed class SubagentTaskPreflight
 {
-    private readonly IAiProviderSettingsService _providerSettings;
+    private readonly IAiModelCatalog _models;
     private readonly IExtensionPackageRepository _packageRepository;
     private readonly IMcpServerRepository _mcpServerRepository;
 
     public SubagentTaskPreflight(
-        IAiProviderSettingsService providerSettings,
+        IAiModelCatalog models,
         IExtensionPackageRepository packageRepository,
         IMcpServerRepository mcpServerRepository)
     {
-        _providerSettings = providerSettings;
+        _models = models;
         _packageRepository = packageRepository;
         _mcpServerRepository = mcpServerRepository;
     }
@@ -41,7 +40,7 @@ internal sealed class SubagentTaskPreflight
                 "The captured workspace is no longer available.");
         }
 
-        var enabledModels = await _providerSettings.ListEnabledModelsAsync(cancellationToken);
+        var enabledModels = await _models.ListEnabledModelsAsync(cancellationToken);
         if (!enabledModels.Any(model => model.ModelProfileId == resolvedModelProfileId))
         {
             return new SubagentPreflightFailure(

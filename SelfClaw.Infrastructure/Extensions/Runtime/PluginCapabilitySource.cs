@@ -1,3 +1,4 @@
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
@@ -55,7 +56,7 @@ internal sealed class PluginCapabilitySource
                                        agent.PluginIds.Contains(package.Id, StringComparer.OrdinalIgnoreCase))
                      .OrderBy(package => package.Id, StringComparer.Ordinal))
         {
-            PluginVersionLease? versionLease = null;
+            IDisposable? versionLease = null;
             try
             {
                 if (!Directory.Exists(plugin.InstallPath))
@@ -149,7 +150,7 @@ internal sealed class PluginCapabilitySource
             {
                 if (versionLease is not null)
                 {
-                    await versionLease.DisposeAsync().ConfigureAwait(false);
+                    versionLease.Dispose();
                 }
             }
         }

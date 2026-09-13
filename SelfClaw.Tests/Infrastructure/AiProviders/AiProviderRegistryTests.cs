@@ -1,3 +1,4 @@
+using SelfClaw.Core.Models;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.AiProviders;
