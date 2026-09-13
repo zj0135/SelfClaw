@@ -17,7 +17,7 @@ internal sealed class SubagentTaskExecutor
     private readonly ConversationTurnRecorder _turnRecorder;
     private readonly DesktopToolApprovalHandler _approvalHandler;
     private readonly SubagentTaskSnapshotSerializer _snapshotSerializer;
-    private readonly SubagentTaskPreflight _preflight;
+    private readonly ISubagentTaskPreflight _preflight;
     private readonly SubagentTaskExecutionRegistry _executionRegistry;
     private readonly SubagentActivityRegistry _activityRegistry;
     private readonly TimeProvider _timeProvider;
@@ -30,7 +30,7 @@ internal sealed class SubagentTaskExecutor
         ConversationTurnRecorder turnRecorder,
         DesktopToolApprovalHandler approvalHandler,
         SubagentTaskSnapshotSerializer snapshotSerializer,
-        SubagentTaskPreflight preflight,
+        ISubagentTaskPreflight preflight,
         SubagentTaskExecutionRegistry executionRegistry,
         ILogger<SubagentTaskExecutor> logger,
         SubagentActivityRegistry? activityRegistry = null)
@@ -56,7 +56,7 @@ internal sealed class SubagentTaskExecutor
         ConversationTurnRecorder turnRecorder,
         DesktopToolApprovalHandler approvalHandler,
         SubagentTaskSnapshotSerializer snapshotSerializer,
-        SubagentTaskPreflight preflight,
+        ISubagentTaskPreflight preflight,
         SubagentTaskExecutionRegistry executionRegistry,
         TimeProvider timeProvider,
         ILogger<SubagentTaskExecutor> logger,

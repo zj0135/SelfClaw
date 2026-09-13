@@ -34,7 +34,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         SubagentTaskStatus expectedTaskStatus,
         MessageStatus expectedMessageStatus)
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -105,7 +105,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
     [Fact]
     public async Task ExecuteAsync_classifies_a_running_parent_cancellation()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "cancellation.db"),
             Path.Combine(_rootPath, "cancellation-secrets"));
@@ -157,7 +157,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
     [Fact]
     public async Task RecoverInterruptedAsync_terminalizes_a_previous_running_task_without_replaying_runtime()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "recovery.db"),
             Path.Combine(_rootPath, "recovery-secrets"));
@@ -195,7 +195,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
     [Fact]
     public async Task BackgroundHost_recovers_running_without_replay_and_executes_queued_tasks()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "host-recovery.db"),
             Path.Combine(_rootPath, "host-recovery-secrets"));

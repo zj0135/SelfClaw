@@ -170,7 +170,7 @@ public sealed class UserSkillDiscoveryServiceTests : IDisposable
     private async Task<TestContext> CreateContextAsync()
     {
         Directory.CreateDirectory(_rootPath);
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

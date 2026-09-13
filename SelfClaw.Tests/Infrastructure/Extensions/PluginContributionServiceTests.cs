@@ -357,7 +357,7 @@ public sealed class PluginContributionServiceTests : IDisposable
 
     private TestContext CreateContext()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

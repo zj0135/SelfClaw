@@ -1,3 +1,8 @@
+using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
+using SelfClaw.Infrastructure.Agents.Direct.Context;
+using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
+using SelfClaw.Infrastructure.Agents.Direct.Tools;
+using SelfClaw.Infrastructure.Agents.Direct;
 using SelfClaw.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -23,7 +28,6 @@ using SelfClaw.Infrastructure.Extensions.Discovery;
 using SelfClaw.Infrastructure.Extensions.Models;
 using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
-using SelfClaw.Infrastructure.Extensions.Runtime;
 using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Plugins;
 using SelfClaw.Infrastructure.Options;
@@ -43,7 +47,7 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         StoragePaths? storagePaths = null)
     {
-        storagePaths ??= StoragePaths.CreateDefault();
+        storagePaths ??= StoragePathDefaults.CreateDefault();
 
         services.AddSingleton(storagePaths);
         services.AddSingleton<SqliteDatabase>();
@@ -52,9 +56,10 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
         services.AddSingleton<ITurnFinalizationRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
-        services.AddSingleton<SqliteGitWorkspaceRepository>();
+        services.AddSingleton<SqliteWorkspaceRepository>();
+        services.AddSingleton<IWorkspaceRootRepository>(serviceProvider => serviceProvider.GetRequiredService<SqliteWorkspaceRepository>());
         services.AddSingleton<IGitWorkspaceStore>(serviceProvider =>
-            serviceProvider.GetRequiredService<SqliteGitWorkspaceRepository>());
+            serviceProvider.GetRequiredService<SqliteWorkspaceRepository>());
         services.AddSingleton<GitCommandRunner>();
         services.AddSingleton<GitWorkspaceService>();
         services.AddSingleton<IGitWorkspaceQuery>(serviceProvider =>
@@ -63,6 +68,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<GitWorkspaceService>());
         services.AddSingleton<IGitMergeManager, GitMergeService>();
         services.AddSingleton<SubagentCompletionEnvelopeFactory>();
+        services.AddSingleton<ISubagentTaskPreflight, SubagentTaskPreflight>();
         services.AddSingleton<ISubagentStateChangeNotifier, SubagentStateChangeNotifier>();
         services.AddSingleton<SqliteSubagentTaskRepository>();
         services.AddSingleton<ISubagentTaskStore>(serviceProvider =>

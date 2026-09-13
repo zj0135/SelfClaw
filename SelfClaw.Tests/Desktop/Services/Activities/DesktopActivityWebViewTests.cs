@@ -35,7 +35,7 @@ public sealed class DesktopActivityWebViewTests(ITestOutputHelper output)
             var channel = new WebViewHostChannel();
             var source = new ActivityPanelTestScope(parent.Id);
             using var publisher = new ActivityPanelPublisher(activity.Service,
-                new ActivityPanelSnapshotBuilder(activity.Service, StoragePaths.CreateDefault()), source, channel,
+                new ActivityPanelSnapshotBuilder(activity.Service, StoragePathDefaults.CreateDefault()), source, channel,
                 Dispatcher.CurrentDispatcher, NullLogger<ActivityPanelPublisher>.Instance);
             var bridge = new ActivityPanelBridge(publisher, activity.Service, activity.CreateCoordinator(), channel, Dispatcher.CurrentDispatcher);
             using var webView = new WebView2();

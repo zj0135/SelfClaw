@@ -12,18 +12,18 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
     private const string FieldSeparator = "\x1f";
     private readonly GitCommandRunner _runner;
     private readonly IGitWorkspaceStore _store;
-    private readonly IConversationRepository _conversationRepository;
+    private readonly IWorkspaceRootRepository _workspaceRootRepository;
     private readonly StoragePaths _storagePaths;
 
     public GitWorkspaceService(
         GitCommandRunner runner,
         IGitWorkspaceStore store,
-        IConversationRepository conversationRepository,
+        IWorkspaceRootRepository workspaceRootRepository,
         StoragePaths storagePaths)
     {
         _runner = runner;
         _store = store;
-        _conversationRepository = conversationRepository;
+        _workspaceRootRepository = workspaceRootRepository;
         _storagePaths = storagePaths;
     }
 
@@ -165,7 +165,7 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
         var existing = await _store.GetConversationCheckoutAsync(conversationId, cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
-            var existingRoot = (await _conversationRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
+            var existingRoot = (await _workspaceRootRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
                 .FirstOrDefault(item => item.Id == existing.WorkspaceRootId);
             if (existingRoot is not null)
             {
@@ -230,7 +230,7 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
             now);
         try
         {
-            await _conversationRepository.UpsertWorkspaceRootAsync(workspaceRoot, cancellationToken).ConfigureAwait(false);
+            await _workspaceRootRepository.UpsertWorkspaceRootAsync(workspaceRoot, cancellationToken).ConfigureAwait(false);
             await _store.SaveAsync(repository, checkout, cancellationToken).ConfigureAwait(false);
         }
         catch
@@ -354,14 +354,14 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
         GitCheckoutRecord checkout,
         CancellationToken cancellationToken)
         => checkout.SourceWorkspaceRootId is Guid sourceId
-            ? (await _conversationRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
+            ? (await _workspaceRootRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
                 .FirstOrDefault(item => item.Id == sourceId)
                 ?? throw new InvalidOperationException("The base workspace for this worktree no longer exists.")
             : throw new InvalidOperationException("The managed worktree has no base workspace.");
 
     private async Task<bool> ReadSourceMergeConflictAsync(Guid sourceWorkspaceRootId, CancellationToken cancellationToken)
     {
-        var source = (await _conversationRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
+        var source = (await _workspaceRootRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
             .FirstOrDefault(item => item.Id == sourceWorkspaceRootId);
         return source is not null && await HasMergeConflictsAsync(source.RootPath, cancellationToken).ConfigureAwait(false);
     }
@@ -550,7 +550,7 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
         }
 
         var managedCheckouts = new Dictionary<string, GitCheckoutRecord>(StringComparer.OrdinalIgnoreCase);
-        foreach (var root in await _conversationRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
+        foreach (var root in await _workspaceRootRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
         {
             var checkout = await _store.GetCheckoutAsync(root.Id, cancellationToken).ConfigureAwait(false);
             if (checkout is not null)

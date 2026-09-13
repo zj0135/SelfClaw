@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using System.Text;
 using System.IO;
 using SelfClaw.Core.Interfaces;
@@ -15,7 +16,7 @@ internal sealed class SubagentTaskCoordinator : ISubagentTaskCoordinator, ISubag
     private readonly ISubagentTaskStore _taskStore;
     private readonly SubagentDefinitionCatalog _definitionCatalog;
     private readonly SubagentTaskSnapshotSerializer _snapshotSerializer;
-    private readonly SubagentTaskPreflight _preflight;
+    private readonly ISubagentTaskPreflight _preflight;
     private readonly SubagentTaskWakeSignal _wakeSignal;
     private readonly SubagentTaskExecutionRegistry _executionRegistry;
     private readonly TimeProvider _timeProvider;
@@ -24,7 +25,7 @@ internal sealed class SubagentTaskCoordinator : ISubagentTaskCoordinator, ISubag
         ISubagentTaskStore taskStore,
         SubagentDefinitionCatalog definitionCatalog,
         SubagentTaskSnapshotSerializer snapshotSerializer,
-        SubagentTaskPreflight preflight,
+        ISubagentTaskPreflight preflight,
         SubagentTaskWakeSignal wakeSignal,
         SubagentTaskExecutionRegistry executionRegistry)
         : this(
@@ -42,7 +43,7 @@ internal sealed class SubagentTaskCoordinator : ISubagentTaskCoordinator, ISubag
         ISubagentTaskStore taskStore,
         SubagentDefinitionCatalog definitionCatalog,
         SubagentTaskSnapshotSerializer snapshotSerializer,
-        SubagentTaskPreflight preflight,
+        ISubagentTaskPreflight preflight,
         SubagentTaskWakeSignal wakeSignal,
         SubagentTaskExecutionRegistry executionRegistry,
         TimeProvider timeProvider)

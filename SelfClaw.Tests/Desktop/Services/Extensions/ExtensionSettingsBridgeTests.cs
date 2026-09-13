@@ -210,7 +210,7 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
         => new(CreateStoragePaths());
 
     private StoragePaths CreateStoragePaths()
-        => new(
+        => StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

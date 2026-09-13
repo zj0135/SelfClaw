@@ -12,7 +12,7 @@ public sealed class ProgrammingAssistantSettingsBridgeTests
     public async Task TryHandleAsync_returns_correlated_settings_response()
     {
         var root = Path.Combine(Path.GetTempPath(), "SelfClawBridgeTests", Guid.NewGuid().ToString("N"));
-        var paths = new StoragePaths(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets"));
+        var paths = StoragePathDefaults.Create(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets"));
         var bridge = new ProgrammingAssistantSettingsBridge(
             new ProgrammingAssistantSettingsService(new DesktopSettingsJsonStore(paths)));
         using var request = JsonDocument.Parse("""
@@ -34,7 +34,7 @@ public sealed class ProgrammingAssistantSettingsBridgeTests
     public async Task TryHandleAsync_ignores_unrelated_messages()
     {
         var root = Path.Combine(Path.GetTempPath(), "SelfClawBridgeTests");
-        var paths = new StoragePaths(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets"));
+        var paths = StoragePathDefaults.Create(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets"));
         var bridge = new ProgrammingAssistantSettingsBridge(
             new ProgrammingAssistantSettingsService(new DesktopSettingsJsonStore(paths)));
         using var request = JsonDocument.Parse("{}");

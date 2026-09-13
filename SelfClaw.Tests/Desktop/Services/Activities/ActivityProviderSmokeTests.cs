@@ -1,3 +1,4 @@
+using SelfClaw.Infrastructure.Agents.Direct;
 using System.Diagnostics;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
@@ -19,10 +20,10 @@ public sealed class ActivityProviderSmokeTests(ITestOutputHelper output)
     [ProviderSmokeFact]
     public Task Configured_provider_reasoning_reaches_the_live_activity_channel() => WpfDispatcherTest.RunAsync(async () =>
     {
-        var source = StoragePaths.CreateDefault();
+        var source = StoragePathDefaults.CreateDefault();
         var root = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var paths = new StoragePaths(root, Path.Combine(root, "provider.db"), source.SecretsDirectory);
+        var paths = StoragePathDefaults.Create(root, Path.Combine(root, "provider.db"), source.SecretsDirectory);
         using (var original = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = source.DatabasePath, Mode = SqliteOpenMode.ReadOnly }.ToString()))
         using (var copy = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = paths.DatabasePath }.ToString()))
         {

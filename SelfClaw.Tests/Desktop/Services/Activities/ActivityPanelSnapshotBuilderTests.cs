@@ -13,7 +13,7 @@ public sealed class ActivityPanelSnapshotBuilderTests
     {
         using var activity = new SubagentActivityTestContext();
         var task = await activity.CreateTaskAsync(claim: false);
-        var builder = new ActivityPanelSnapshotBuilder(activity.Service, StoragePaths.CreateDefault());
+        var builder = new ActivityPanelSnapshotBuilder(activity.Service, StoragePathDefaults.CreateDefault());
         var query = new ActivityPanelQuery(Guid.NewGuid(), task.ParentConversationId, 1, TaskId: task.Id);
         activity.Reader.AfterDetailReadAsync = () => throw new InvalidOperationException("temporary-read-failure");
         var failed = await builder.BuildAsync(query, CancellationToken.None);

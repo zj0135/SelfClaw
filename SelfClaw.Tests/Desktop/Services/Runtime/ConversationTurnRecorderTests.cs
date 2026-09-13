@@ -334,18 +334,7 @@ public sealed class ConversationTurnRecorderTests
             return Task.FromResult(record);
         }
 
-        public Task<IReadOnlyList<WorkspaceRoot>> ListWorkspaceRootsAsync(
-            CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<WorkspaceRoot>>([]);
 
-        public Task<WorkspaceRoot> UpsertWorkspaceRootAsync(
-            WorkspaceRoot workspaceRoot,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(workspaceRoot);
 
-        public Task DeleteWorkspaceRootAsync(
-            Guid workspaceRootId,
-            CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
     }
 }

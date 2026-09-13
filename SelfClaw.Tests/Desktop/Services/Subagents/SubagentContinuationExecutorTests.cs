@@ -30,7 +30,7 @@ public sealed class SubagentContinuationExecutorTests : IDisposable
     [InlineData(true)]
     public async Task ExecuteAsync_truncation_retries_without_tools_and_dead_letters_with_tools(bool hasTool)
     {
-        var paths = new StoragePaths(_rootPath, Path.Combine(_rootPath, "continuation.db"), Path.Combine(_rootPath, "secrets"));
+        var paths = StoragePathDefaults.Create(_rootPath, Path.Combine(_rootPath, "continuation.db"), Path.Combine(_rootPath, "secrets"));
         var database = new SqliteDatabase(paths);
         var conversations = new SqliteConversationRepository(database);
         var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
@@ -55,7 +55,7 @@ public sealed class SubagentContinuationExecutorTests : IDisposable
             conversations, new DesktopTurnFinalizer(conversations, NullLogger<DesktopTurnFinalizer>.Instance),
             recorder, runtime, sessions, activity, approvalHandler,
             new ProgrammingAssistantSettingsService(new DesktopSettingsJsonStore(paths)),
-            new StubAiModelCatalog(), new NullCompletionNotifier(), NullLogger<ConversationTurnEngine>.Instance);
+            new NullCompletionNotifier(), NullLogger<ConversationTurnEngine>.Instance);
         var executor = new SubagentContinuationExecutor(deliveries, runtime, recorder, approvalHandler,
             new SubagentTaskSnapshotSerializer(), new SubagentCompletionBatchSerializer(), engine, notifications,
             NullLogger<SubagentContinuationExecutor>.Instance);
@@ -125,6 +125,9 @@ public sealed class SubagentContinuationExecutorTests : IDisposable
             yield return new AssistantTextDeltaEvent("text", "partial answer");
             if (hasTool)
             {
+                var direct = (DirectChatTurnRequest)request;
+                var checkpoint = direct.ToolExecutionCheckpoint ?? throw new InvalidOperationException("Missing checkpoint.");
+                await checkpoint.BeforeExecutionAsync(cancellationToken);
                 ToolCalls++;
                 yield return new ToolCallStartedEvent("call-1", "write_file", "{}", ToolCallKind.Edit, ToolSourceKind.BuiltIn);
                 yield return new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "written", "done");

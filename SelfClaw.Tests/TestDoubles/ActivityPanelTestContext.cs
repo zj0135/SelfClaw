@@ -21,7 +21,7 @@ internal sealed class ActivityPanelTestContext : IDisposable
         });
         Channel.MarkReady();
         Publisher = new ActivityPanelPublisher(activity.Service,
-            new ActivityPanelSnapshotBuilder(activity.Service, StoragePaths.CreateDefault()),
+            new ActivityPanelSnapshotBuilder(activity.Service, StoragePathDefaults.CreateDefault()),
             Source, Channel, Dispatcher.CurrentDispatcher, NullLogger<ActivityPanelPublisher>.Instance);
     }
 

@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -212,7 +213,7 @@ public sealed class WebViewMessageRouterTests
         public RouterTestContext()
         {
             _storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
-            var storagePaths = new StoragePaths(
+            var storagePaths = StoragePathDefaults.Create(
                 _storageRoot,
                 Path.Combine(_storageRoot, "selfclaw.db"),
                 Path.Combine(_storageRoot, "secrets"));
@@ -244,12 +245,13 @@ public sealed class WebViewMessageRouterTests
                 _activityCoordinator,
                 approvalHandler,
                 programmingSettings,
-                new SelfClaw.Tests.TestDoubles.StubAiModelCatalog(),
+
                 new NoOpCompletionNotifier(),
                 NullLogger<ConversationTurnEngine>.Instance);
 
             var agentDefinitions = new DesktopAgentDefinitionService(storagePaths);
             var viewModel = new MainWindowViewModel(
+                ConversationRepository,
                 ConversationRepository,
                 _turnEngine,
                 _sessions,
@@ -384,6 +386,9 @@ public sealed class WebViewMessageRouterTests
         public Task<Guid?> GetDefaultModelAsync(string scope, CancellationToken cancellationToken = default)
             => Task.FromResult<Guid?>(DefaultModelId);
 
+        public Task<bool> IsModelAvailableAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
+            => Task.FromResult(modelProfileId == DefaultModelId);
+
         public Task<IReadOnlyList<EnabledModelView>> ListEnabledModelsAsync(
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<EnabledModelView>>(
@@ -447,7 +452,7 @@ public sealed class WebViewMessageRouterTests
             => new("This AI provider operation is not used by the router test.");
     }
 
-    private sealed class RecordingConversationRepository : IConversationRepository
+    private sealed class RecordingConversationRepository : IConversationRepository, IWorkspaceRootRepository
     {
         public List<Guid> DeletedWorkspaceRootIds { get; } = [];
 

@@ -22,7 +22,7 @@ public sealed class TranscriptPublisherTests
             var channel = new WebViewHostChannel();
             channel.Attach(messages.Add);
             channel.MarkReady();
-            using var publisher = new TranscriptPublisher(new TranscriptProjection(StoragePaths.CreateDefault()), channel, dispatcher);
+            using var publisher = new TranscriptPublisher(new TranscriptProjection(StoragePathDefaults.CreateDefault()), channel, dispatcher);
             var captures = 0;
             publisher.Attach(autoScroll => { captures++; return CreateRequest("current", autoScroll); });
             var failures = new List<Exception>();
@@ -57,7 +57,7 @@ public sealed class TranscriptPublisherTests
         channel.MarkReady();
         var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         var projection = new TranscriptProjection(
-            new StoragePaths(
+            StoragePathDefaults.Create(
                 storageRoot,
                 Path.Combine(storageRoot, "selfclaw.db"),
                 Path.Combine(storageRoot, "secrets")));
@@ -85,7 +85,7 @@ public sealed class TranscriptPublisherTests
         channel.Attach(hostMessages.Add);
         var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         var projection = new TranscriptProjection(
-            new StoragePaths(
+            StoragePathDefaults.Create(
                 storageRoot,
                 Path.Combine(storageRoot, "selfclaw.db"),
                 Path.Combine(storageRoot, "secrets")));

@@ -36,9 +36,8 @@ public sealed class AiChatClientFactoryTests
         var tool = AIFunctionFactory.Create(() => "ok", "test_tool");
         var factory = CreateFactory(data.Repository, protector, adapter);
 
-        using (var lease = await factory.CreateAsync(
-                   data.Profile.Id,
-                   new AiChatRuntimeInputs(true, [tool])))
+        var preparation = await factory.PrepareAsync(data.Profile.Id);
+        using (var lease = factory.Create(preparation with { EnableReasoning = true }, [tool]))
         {
             lease.Profile.Should().Be(data.Profile);
             lease.Options.Should().BeSameAs(expectedOptions);
@@ -63,7 +62,7 @@ public sealed class AiChatClientFactoryTests
         var adapter = new FakeAdapter(new FakeChatClient(), new ChatOptions());
         var factory = CreateFactory(data.Repository, protector, adapter);
 
-        using var lease = await factory.CreateAsync(data.Profile.Id, new AiChatRuntimeInputs(false, []));
+        using var lease = factory.Create(await factory.PrepareAsync(data.Profile.Id), []);
 
         protector.RetrievedRefs.Should().BeEmpty();
         adapter.LastRequest!.Secrets.Should().BeEmpty();
@@ -76,11 +75,11 @@ public sealed class AiChatClientFactoryTests
         var factory = CreateFactory(data.Repository, new FakeSecretProtector(), new FakeAdapter());
         var missingId = Guid.NewGuid();
 
-        var missing = () => factory.CreateAsync(missingId, new AiChatRuntimeInputs(false, []));
+        var missing = () => factory.PrepareAsync(missingId);
         await missing.Should().ThrowAsync<KeyNotFoundException>().WithMessage($"*{missingId}*not found*");
 
         data.Repository.Models[data.Profile.Id] = data.Profile with { IsEnabled = false };
-        var disabled = () => factory.CreateAsync(data.Profile.Id, new AiChatRuntimeInputs(false, []));
+        var disabled = () => factory.PrepareAsync(data.Profile.Id);
         await disabled.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Test model*disabled*");
     }
 
@@ -91,11 +90,11 @@ public sealed class AiChatClientFactoryTests
         var factory = CreateFactory(data.Repository, new FakeSecretProtector(), new FakeAdapter());
         data.Repository.Connections.Clear();
 
-        var missing = () => factory.CreateAsync(data.Profile.Id, new AiChatRuntimeInputs(false, []));
+        var missing = () => factory.PrepareAsync(data.Profile.Id);
         await missing.Should().ThrowAsync<KeyNotFoundException>().WithMessage("*connection*Test model*not found*");
 
         data.Repository.Connections[data.Connection.Id] = data.Connection with { IsEnabled = false };
-        var disabled = () => factory.CreateAsync(data.Profile.Id, new AiChatRuntimeInputs(false, []));
+        var disabled = () => factory.PrepareAsync(data.Profile.Id);
         await disabled.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Test provider*disabled*");
     }
 
@@ -107,40 +106,32 @@ public sealed class AiChatClientFactoryTests
         var unsupportedAdapter = new FakeAdapter { SupportsFormat = false };
         var missingKeyFactory = CreateFactory(data.Repository, protector, new FakeAdapter());
 
-        var missingKey = () => missingKeyFactory.CreateAsync(
-            data.Profile.Id,
-            new AiChatRuntimeInputs(false, []));
+        var missingKey = () => missingKeyFactory.PrepareAsync(data.Profile.Id);
         await missingKey.Should().ThrowAsync<InvalidOperationException>().WithMessage("*api_key*");
 
         protector.Secrets["secret:openai"] = "sk-test";
         var unsupportedFactory = CreateFactory(data.Repository, protector, unsupportedAdapter);
-        var unsupported = () => unsupportedFactory.CreateAsync(
-            data.Profile.Id,
-            new AiChatRuntimeInputs(false, []));
+        var unsupported = () => unsupportedFactory.PrepareAsync(data.Profile.Id);
         await unsupported.Should().ThrowAsync<NotSupportedException>()
             .WithMessage("*OpenAIChatCompletions*Test model*");
         unsupportedAdapter.CreateClientCalls.Should().Be(0);
     }
 
     [Fact]
-    public async Task CreateForScopeAsync_uses_selection_or_requests_a_direct_default()
+    public async Task PrepareAsync_uses_selection_or_requests_a_direct_default()
     {
         var data = CreateData(authKind: AiProviderAuthKind.None);
         var adapter = new FakeAdapter();
         var factory = CreateFactory(data.Repository, new FakeSecretProtector(), adapter);
 
-        var missing = () => factory.CreateForScopeAsync(
-            AiModelSelectionScopes.DesktopDefault,
-            new AiChatRuntimeInputs(false, []));
+        var missing = () => factory.PrepareAsync(null);
         await missing.Should().ThrowAsync<InvalidOperationException>().WithMessage("*default Direct model*");
 
         data.Repository.Selections[AiModelSelectionScopes.DesktopDefault] = new AiModelProfileSelection(
             AiModelSelectionScopes.DesktopDefault,
             data.Profile.Id,
             DateTimeOffset.UtcNow);
-        using var lease = await factory.CreateForScopeAsync(
-            AiModelSelectionScopes.DesktopDefault,
-            new AiChatRuntimeInputs(false, []));
+        using var lease = factory.Create(await factory.PrepareAsync(null), []);
 
         lease.Profile.Id.Should().Be(data.Profile.Id);
         adapter.CreateClientCalls.Should().Be(1);

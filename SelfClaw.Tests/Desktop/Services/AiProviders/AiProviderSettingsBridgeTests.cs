@@ -281,6 +281,9 @@ public sealed class AiProviderSettingsBridgeTests
         public Task SetDefaultModelAsync(string scope, Guid modelProfileId, CancellationToken cancellationToken = default)
             => Complete("set-default-model", cancellationToken);
 
+        public Task<bool> IsModelAvailableAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
+            => Task.FromResult(modelProfileId == ModelId);
+
         public Task<IReadOnlyList<EnabledModelView>> ListEnabledModelsAsync(CancellationToken cancellationToken = default)
         {
             Record("list-enabled-models", cancellationToken);

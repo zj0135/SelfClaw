@@ -100,9 +100,9 @@ internal sealed class SubagentContinuationExecutor
         var notifyDeadLetter = false;
         try
         {
-            var request = CreateRequest(runtimeState, lease);
-            turn = new AgentTurnState(lease.ContinuationTurnId, request.Agent);
             committer = new SubagentContinuationTurnCommitter(_deliveryStore, lease, _timeProvider);
+            var request = CreateRequest(runtimeState, lease, committer);
+            turn = new AgentTurnState(lease.ContinuationTurnId, request.Agent);
             _turnRecorder.BeginTurn(runtimeState, turn);
             await foreach (var streamEvent in _chatRuntime.StreamTurnAsync(request, execution.Token))
             {
@@ -133,7 +133,7 @@ internal sealed class SubagentContinuationExecutor
                     committer);
             }
 
-            (publishPersistedTurn, notifyDeadLetter) = ReadDisposition(committer, turn);
+            (publishPersistedTurn, notifyDeadLetter) = ReadDisposition(committer);
         }
         catch (OperationCanceledException) when (Volatile.Read(ref leaseLost) != 0)
         {
@@ -141,6 +141,7 @@ internal sealed class SubagentContinuationExecutor
                 "Subagent continuation lease was lost. ParentConversationId={ParentConversationId} ContinuationTurnId={ContinuationTurnId}",
                 lease.ParentConversationId,
                 lease.ContinuationTurnId);
+            throw;
         }
         catch (OperationCanceledException)
         {
@@ -152,8 +153,9 @@ internal sealed class SubagentContinuationExecutor
                     TurnFinalizationKind.Failed,
                     "The application stopped the Subagent continuation.",
                     committer);
-                (publishPersistedTurn, notifyDeadLetter) = ReadDisposition(committer, turn);
+                (publishPersistedTurn, notifyDeadLetter) = ReadDisposition(committer);
             }
+            throw;
         }
         catch (InvalidDataException exception)
         {
@@ -186,7 +188,7 @@ internal sealed class SubagentContinuationExecutor
                     TurnFinalizationKind.Failed,
                     exception.Message,
                     committer);
-                (publishPersistedTurn, notifyDeadLetter) = ReadDisposition(committer, turn);
+                (publishPersistedTurn, notifyDeadLetter) = ReadDisposition(committer);
             }
             else
             {
@@ -202,12 +204,18 @@ internal sealed class SubagentContinuationExecutor
         }
         finally
         {
-            heartbeatCancellation.Cancel();
-            await AwaitHeartbeatAsync(heartbeat);
-            await _turnEngine.CompleteContinuationAsync(
-                runtimeState,
-                publishPersistedTurn,
-                CancellationToken.None);
+            try
+            {
+                heartbeatCancellation.Cancel();
+                await AwaitHeartbeatAsync(heartbeat);
+            }
+            finally
+            {
+                await _turnEngine.CompleteContinuationAsync(
+                    runtimeState,
+                    publishPersistedTurn,
+                    CancellationToken.None);
+            }
         }
 
         if (notifyDeadLetter)
@@ -221,7 +229,8 @@ internal sealed class SubagentContinuationExecutor
 
     private DirectChatTurnRequest CreateRequest(
         ConversationRuntimeState runtimeState,
-        SubagentDeliveryLease lease)
+        SubagentDeliveryLease lease,
+        IToolExecutionCheckpoint checkpoint)
     {
         var parent = _snapshotSerializer.DeserializeParent(lease.ParentExecutionSnapshotJson);
         if (parent.Version != 1 || parent.ModelProfileId == Guid.Empty)
@@ -243,7 +252,8 @@ internal sealed class SubagentContinuationExecutor
                 DirectTurnOrigin.Continuation,
                 parent.CapabilityCeiling,
                 batch),
-            runtimeState.ToolRuns.ToArray());
+            runtimeState.ToolRuns.ToArray(),
+            checkpoint);
     }
 
     private async Task RenewLeaseAsync(
@@ -272,6 +282,11 @@ internal sealed class SubagentContinuationExecutor
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to renew the continuation lease; stopping execution.");
+            leaseLost();
+        }
     }
 
     private static async Task AwaitHeartbeatAsync(Task heartbeat)
@@ -286,12 +301,11 @@ internal sealed class SubagentContinuationExecutor
     }
 
     private static (bool Publish, bool NotifyDeadLetter) ReadDisposition(
-        SubagentContinuationTurnCommitter committer,
-        AgentTurnState turn)
+        SubagentContinuationTurnCommitter committer)
     {
         var deadLetter = committer.Disposition == SubagentContinuationDisposition.DeadLetter;
         var publish = committer.Disposition == SubagentContinuationDisposition.Delivered ||
-                      (deadLetter && turn.ToolRunsByCallId.Count > 0);
+                      (deadLetter && committer.ToolsMayHaveExecuted);
         return (publish, deadLetter);
     }
 }

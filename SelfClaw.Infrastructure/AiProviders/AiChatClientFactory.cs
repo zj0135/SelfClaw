@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
 
@@ -29,14 +30,20 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
         _safeLoggerFactory = new NonSensitiveLoggerFactory(loggerFactory ?? NullLoggerFactory.Instance);
     }
 
-    public async Task<AiChatClientLease> CreateAsync(
-        Guid modelProfileId,
-        AiChatRuntimeInputs inputs,
+    public async Task<AiProviderClientRequest> PrepareAsync(
+        Guid? modelProfileId,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(inputs);
+        if (modelProfileId is null)
+        {
+            var selection = await _repository.GetModelProfileSelectionAsync(
+                AiModelSelectionScopes.DesktopDefault, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(
+                    "No default Direct model is selected. Choose a default model in the AI provider settings.");
+            modelProfileId = selection.ModelProfileId;
+        }
 
-        var profile = await _repository.GetModelProfileAsync(modelProfileId, cancellationToken).ConfigureAwait(false)
+        var profile = await _repository.GetModelProfileAsync(modelProfileId.Value, cancellationToken).ConfigureAwait(false)
             ?? throw new KeyNotFoundException($"AI model profile '{modelProfileId}' was not found.");
         if (!profile.IsEnabled)
         {
@@ -62,12 +69,20 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
                 $"for model profile '{profile.Name}'.");
         }
 
-        var request = new AiProviderClientRequest(
+        return new AiProviderClientRequest(
             connection,
             profile,
             secrets,
-            profile.Configuration?.ReasoningEffort is string effort ? effort != "none" : inputs.EnableReasoning,
-            inputs.Tools);
+            profile.Configuration?.ReasoningEffort is string effort && effort != "none",
+            []);
+    }
+
+    public AiChatClientLease Create(AiProviderClientRequest preparation, IReadOnlyList<AITool> tools)
+    {
+        ArgumentNullException.ThrowIfNull(preparation);
+        ArgumentNullException.ThrowIfNull(tools);
+        var request = preparation with { Tools = tools };
+        var adapter = _registry.GetRequiredAdapter(request.Connection.ProviderKind);
         var options = adapter.CreateChatOptions(request);
         var nativeClient = adapter.CreateChatClient(request);
 
@@ -77,29 +92,13 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
                 .UseFunctionInvocation(_safeLoggerFactory)
                 .UseLogging(_safeLoggerFactory)
                 .Build();
-            return new AiChatClientLease(client, options, profile);
+            return new AiChatClientLease(client, options, request.Profile);
         }
         catch
         {
             nativeClient.Dispose();
             throw;
         }
-    }
-
-    public async Task<AiChatClientLease> CreateForScopeAsync(
-        string scope,
-        AiChatRuntimeInputs inputs,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(scope))
-        {
-            throw new ArgumentException("A model selection scope is required.", nameof(scope));
-        }
-
-        var selection = await _repository.GetModelProfileSelectionAsync(scope.Trim(), cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException(
-                "No default Direct model is selected. Choose a default model in the AI provider settings.");
-        return await CreateAsync(selection.ModelProfileId, inputs, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<IReadOnlyDictionary<string, string>> ResolveSecretsAsync(

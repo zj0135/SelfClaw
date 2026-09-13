@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using FluentAssertions;
 using SelfClaw.Desktop.Services;
 using SelfClaw.Infrastructure.Options;
@@ -228,7 +229,7 @@ public sealed class SubagentDefinitionCatalogTests : IDisposable
             []);
 
     private SubagentDefinitionCatalog CreateCatalog()
-        => new(new StoragePaths(
+        => new(StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets")));

@@ -179,7 +179,7 @@ public sealed class DesktopAgentDefinitionServiceTests : IDisposable
     }
 
     private DesktopAgentDefinitionService CreateService()
-        => new(new StoragePaths(
+        => new(StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets")));

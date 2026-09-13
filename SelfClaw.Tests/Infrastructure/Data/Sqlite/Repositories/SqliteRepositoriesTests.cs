@@ -23,18 +23,19 @@ public sealed class SqliteRepositoriesTests : IDisposable
     [Fact]
     public async Task Repositories_round_trip_conversations_messages_tools_and_workspace_roots()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
         var database = new SqliteDatabase(storagePaths);
         var conversationRepository = new SqliteConversationRepository(database);
+        var workspaceRepository = new SqliteWorkspaceRepository(database);
 
         await conversationRepository.InitializeAsync();
 
         var now = DateTimeOffset.UtcNow;
         var workspace = new WorkspaceRoot(Guid.NewGuid(), "Repo", "E:\\Demo\\SelfClaw", now, now);
-        await conversationRepository.UpsertWorkspaceRootAsync(workspace);
+        await workspaceRepository.UpsertWorkspaceRootAsync(workspace);
 
         var conversation = new ConversationRecord(
             Guid.NewGuid(),
@@ -87,7 +88,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         var loadedConversations = await conversationRepository.ListConversationsAsync();
         var loadedMessages = await conversationRepository.ListMessagesAsync(conversation.Id);
         var loadedToolRuns = await conversationRepository.ListToolExecutionsAsync(conversation.Id);
-        var loadedRoots = await conversationRepository.ListWorkspaceRootsAsync();
+        var loadedRoots = await workspaceRepository.ListWorkspaceRootsAsync();
 
         loadedConversations.Should().ContainSingle().Which.Should().Be(conversation);
         loadedMessages.Should().HaveCount(2);
@@ -106,7 +107,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
     [Fact]
     public async Task Initialize_adds_ai_provider_schema()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -137,13 +138,13 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
         var maxSchemaVersion = await versionCommand.ExecuteScalarAsync();
-        maxSchemaVersion.Should().Be(26L);
+        maxSchemaVersion.Should().Be(27L);
     }
 
     [Fact]
     public async Task AiProviderRepository_round_trips_provider_connections_model_profiles_and_selections()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -218,7 +219,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
     [Fact]
     public async Task AiProviderRepository_delete_provider_connection_cascades_model_profiles()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -268,7 +269,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
     [Fact]
     public async Task AiProviderRepository_model_enablement_requires_enabled_model_and_provider()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -343,7 +344,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
     [Fact]
     public async Task Initialize_adds_catalog_id_to_legacy_ai_provider_connections()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -388,13 +389,13 @@ VALUES(
         await verification.OpenAsync();
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(26L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(27L);
     }
 
     [Fact]
     public async Task Initialize_v21_removes_legacy_profiles_without_losing_conversation_dependencies()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -577,7 +578,7 @@ WHERE conversation_id = $conversationId AND agent_kind = 1;";
 
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(26L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(27L);
 
         await using var foreignKeyCheck = verification.CreateCommand();
         foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
@@ -591,7 +592,7 @@ WHERE conversation_id = $conversationId AND agent_kind = 1;";
         // Simulates a crash during a prior v21 rebuild: conversations still carries profile_id and a
         // stray conversations_new table remains. Initialization must drop the stale table, rebuild
         // cleanly, and keep the conversation row.
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -673,7 +674,7 @@ VALUES($conversationId, 'Recovered chat', $profileId, 0, 0, 'build', $createdAt,
     [Fact]
     public async Task Initialize_v22_adds_conversation_ownership_without_losing_data()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -749,7 +750,7 @@ VALUES($messageId, $conversationId, 0, 'Preserved v22 message', 1, $createdAt, $
             .Should().Contain(["kind", "parent_conversation_id"]);
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(26L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(27L);
         await using var foreignKeyCheck = verification.CreateCommand();
         foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
         await using var foreignKeyReader = await foreignKeyCheck.ExecuteReaderAsync();
@@ -759,7 +760,7 @@ VALUES($messageId, $conversationId, 0, 'Preserved v22 message', 1, $createdAt, $
     [Fact]
     public async Task Initialize_adds_content_block_columns_to_legacy_tool_runs_table()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

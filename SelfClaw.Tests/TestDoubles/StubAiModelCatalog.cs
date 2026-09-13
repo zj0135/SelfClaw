@@ -18,4 +18,7 @@ internal sealed class StubAiModelCatalog : IAiModelCatalog
 
     public Task<IReadOnlyList<EnabledModelView>> ListEnabledModelsAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(EnabledModels);
+
+    public Task<bool> IsModelAvailableAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
+        => Task.FromResult(EnabledModels.Any(model => model.ModelProfileId == modelProfileId));
 }

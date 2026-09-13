@@ -17,4 +17,5 @@ public sealed record SubagentDeliveryRecord(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
     DateTimeOffset? DeliveredAtUtc,
-    DateTimeOffset? DeadLetteredAtUtc);
+    DateTimeOffset? DeadLetteredAtUtc,
+    DateTimeOffset? ToolExecutionStartedAtUtc = null);

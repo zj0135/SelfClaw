@@ -1,3 +1,5 @@
+using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
+using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -42,23 +44,26 @@ public sealed class McpHttpTransportIntegrationTests
         tool.Name.Should().Be("fixture_echo");
         var adapted = new McpToolAdapter().Create(
             tool,
-            configuration,
-            Guid.NewGuid(),
-            ToolPermissionMode.FullAccess,
-            null);
+            configuration);
         adapted.Tool.Name.Should().Be("mcp__http-fixture__fixture_echo");
 
         var result = await adapted.Tool.InvokeAsync(new AIFunctionArguments { ["value"] = "hello" });
         await connection.PingAsync();
 
-        result.Should().BeOfType<TextContent>().Which.Text.Should().Be("echo: hello");
-        McpToolAdapter.DescribeResult(result).Should().Be(
-            (ToolCallStatus.Completed, "echo: hello", "echo: hello"));
+        var successful = result.Should().BeOfType<DirectToolResult>().Which;
+        successful.Status.Should().Be(ToolCallStatus.Completed);
+        successful.Detail.Should().Be("echo: hello");
         fixture.ReturnToolError = true;
         var errorResult = await adapted.Tool.InvokeAsync(new AIFunctionArguments { ["value"] = "blocked" });
-        var errorElement = errorResult.Should().BeOfType<JsonElement>().Subject;
+        var failure = errorResult.Should().BeOfType<DirectToolResult>().Which;
+        var errorElement = failure.Content;
         errorElement.GetProperty("isError").GetBoolean().Should().BeTrue();
-        McpToolAdapter.DescribeResult(errorElement).Status.Should().Be(ToolCallStatus.Failed);
+        failure.Status.Should().Be(ToolCallStatus.Failed);
+        fixture.ReturnToolError = false;
+        var oversized = await adapted.Tool.InvokeAsync(new AIFunctionArguments { ["value"] = new string('"', 70_000) });
+        var bounded = oversized.Should().BeOfType<DirectToolResult>().Which;
+        JsonSerializer.SerializeToUtf8Bytes(bounded).Length.Should().BeLessThanOrEqualTo(McpToolResultFormatter.MaximumModelResultBytes);
+        bounded.Content.GetProperty("truncated").GetBoolean().Should().BeTrue();
         fixture.CalledToolNames.Should().OnlyContain(name => name == "fixture_echo");
         fixture.Methods.Should().ContainInOrder("initialize", "notifications/initialized", "tools/list", "tools/call", "ping");
     }

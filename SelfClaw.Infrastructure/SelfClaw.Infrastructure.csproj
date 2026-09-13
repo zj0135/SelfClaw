@@ -5,7 +5,6 @@
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol.Core" />
-    <PackageReference Include="Microsoft.Agents.AI" />
     <PackageReference Include="Anthropic" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.AI" />

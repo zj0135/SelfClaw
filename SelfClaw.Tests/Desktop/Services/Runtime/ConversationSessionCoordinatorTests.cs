@@ -8,6 +8,73 @@ namespace SelfClaw.Tests.Desktop.Services.Runtime;
 
 public sealed class ConversationSessionCoordinatorTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Failed_or_cancelled_load_is_evicted_so_start_can_retry(bool cancelLoad)
+    {
+        var conversation = CreateConversation(Guid.NewGuid());
+        var repository = new ControlledConversationRepository();
+        using var coordinator = CreateCoordinator(repository);
+        var first = coordinator.StartTurnAsync(conversation);
+        if (cancelLoad) repository.CancelMessages(conversation.Id);
+        else repository.FailMessages(conversation.Id, new IOException("temporary read failure"));
+        repository.CompleteToolRuns(conversation.Id, []);
+        Func<Task> failure = () => first;
+        if (cancelLoad) await failure.Should().ThrowAsync<OperationCanceledException>();
+        else await failure.Should().ThrowAsync<IOException>();
+        repository.ResetMessages(conversation.Id);
+        repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "recovered")]);
+
+        var state = await coordinator.StartTurnAsync(conversation);
+
+        state.Messages.Should().ContainSingle().Which.MarkdownContent.Should().Be("recovered");
+        repository.MessageReads[conversation.Id].Should().Be(2);
+        coordinator.AbandonTurn(state);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_waiter_does_not_cancel_the_shared_load()
+    {
+        var conversation = CreateConversation(Guid.NewGuid());
+        var repository = new ControlledConversationRepository();
+        using var coordinator = CreateCoordinator(repository);
+        using var cancellation = new CancellationTokenSource();
+        var cancelled = coordinator.StartTurnAsync(conversation, cancellation.Token);
+        cancellation.Cancel();
+        await FluentActions.Awaiting(() => cancelled).Should().ThrowAsync<OperationCanceledException>();
+        var retry = coordinator.StartTurnAsync(conversation);
+        repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "shared")]);
+        repository.CompleteToolRuns(conversation.Id, []);
+
+        var state = await retry;
+
+        state.Messages.Should().ContainSingle().Which.MarkdownContent.Should().Be("shared");
+        repository.MessageReads[conversation.Id].Should().Be(1);
+        coordinator.AbandonTurn(state);
+    }
+
+    [Fact]
+    public async Task Only_the_selected_completed_transcript_is_retained()
+    {
+        var repository = new ControlledConversationRepository();
+        using var coordinator = CreateCoordinator(repository);
+        var conversations = Enumerable.Range(0, 40).Select(_ => CreateConversation(Guid.NewGuid())).ToArray();
+        foreach (var conversation in conversations)
+        {
+            repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "history")]);
+            repository.CompleteToolRuns(conversation.Id, []);
+            await coordinator.SelectAsync(conversation.Id);
+        }
+
+        var selected = await coordinator.StartTurnAsync(conversations[^1]);
+        repository.MessageReads[conversations[^1].Id].Should().Be(1);
+        coordinator.AbandonTurn(selected);
+        var old = await coordinator.StartTurnAsync(conversations[0]);
+        repository.MessageReads[conversations[0].Id].Should().Be(2, "completed off-screen loads must not become a permanent content cache");
+        coordinator.AbandonTurn(old);
+    }
+
     [Fact]
     public async Task SelectAsync_clears_the_previous_transcript_while_the_next_conversation_loads()
     {
@@ -228,6 +295,12 @@ public sealed class ConversationSessionCoordinatorTests
         private readonly Dictionary<Guid, TaskCompletionSource<IReadOnlyList<MessageRecord>>> _messages = [];
         private readonly Dictionary<Guid, TaskCompletionSource<IReadOnlyList<ToolExecutionRecord>>> _toolRuns = [];
 
+        public Dictionary<Guid, int> MessageReads { get; } = [];
+
+        public void ResetMessages(Guid conversationId) => _messages.Remove(conversationId);
+
+        public void CancelMessages(Guid conversationId) => GetMessagesSource(conversationId).TrySetCanceled();
+
         public void CompleteMessages(Guid conversationId, IReadOnlyList<MessageRecord> messages)
             => GetMessagesSource(conversationId).TrySetResult(messages);
 
@@ -258,7 +331,10 @@ public sealed class ConversationSessionCoordinatorTests
         public Task<IReadOnlyList<MessageRecord>> ListMessagesAsync(
             Guid conversationId,
             CancellationToken cancellationToken = default)
-            => GetMessagesSource(conversationId).Task.WaitAsync(cancellationToken);
+        {
+            MessageReads[conversationId] = MessageReads.GetValueOrDefault(conversationId) + 1;
+            return GetMessagesSource(conversationId).Task.WaitAsync(cancellationToken);
+        }
 
         public Task<MessageRecord> UpsertMessageAsync(
             MessageRecord message,
@@ -275,16 +351,8 @@ public sealed class ConversationSessionCoordinatorTests
             CancellationToken cancellationToken = default)
             => Task.FromResult(record);
 
-        public Task<IReadOnlyList<WorkspaceRoot>> ListWorkspaceRootsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<WorkspaceRoot>>([]);
 
-        public Task<WorkspaceRoot> UpsertWorkspaceRootAsync(
-            WorkspaceRoot workspaceRoot,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(workspaceRoot);
 
-        public Task DeleteWorkspaceRootAsync(Guid workspaceRootId, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
 
         private TaskCompletionSource<IReadOnlyList<MessageRecord>> GetMessagesSource(Guid conversationId)
         {

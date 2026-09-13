@@ -113,7 +113,7 @@ internal sealed class SqliteSubagentTaskRepository : ISubagentTaskStore, ISubage
         command.CommandText = @"
 SELECT id, task_id, parent_conversation_id, parent_turn_id, status, envelope_json, envelope_bytes,
        lease_token, leased_until_utc, attempt_count, next_attempt_at_utc, continuation_turn_id,
-       last_error, created_at_utc, updated_at_utc, delivered_at_utc, dead_lettered_at_utc
+       last_error, created_at_utc, updated_at_utc, delivered_at_utc, dead_lettered_at_utc, tool_execution_started_at_utc
 FROM subagent_deliveries
 WHERE parent_conversation_id = $parentConversationId AND task_id = $taskId
 LIMIT 1;";
@@ -772,7 +772,8 @@ FROM subagent_tasks";
             ReadDateTimeOffset(reader, 13),
             ReadDateTimeOffset(reader, 14),
             ReadNullableDateTimeOffset(reader, 15),
-            ReadNullableDateTimeOffset(reader, 16));
+            ReadNullableDateTimeOffset(reader, 16),
+            ReadNullableDateTimeOffset(reader, 17));
 
     private static Guid ReadGuid(SqliteDataReader reader, int ordinal)
         => Guid.Parse(reader.GetString(ordinal));

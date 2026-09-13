@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -17,7 +18,7 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
     private const string DeliveryColumns = """
         id, task_id, parent_conversation_id, parent_turn_id, status, envelope_json, envelope_bytes,
         lease_token, leased_until_utc, attempt_count, next_attempt_at_utc, continuation_turn_id,
-        last_error, created_at_utc, updated_at_utc, delivered_at_utc, dead_lettered_at_utc
+        last_error, created_at_utc, updated_at_utc, delivered_at_utc, dead_lettered_at_utc, tool_execution_started_at_utc
         """;
     private static readonly TimeSpan FirstRetryDelay = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan SecondRetryDelay = TimeSpan.FromSeconds(30);
@@ -47,7 +48,8 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
     public async Task<SubagentMailboxKey?> PeekReadyMailboxAsync(
         DateTimeOffset readyAtUtc,
         DateTimeOffset createdBeforeUtc,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyCollection<Guid>? excludedParentConversationIds = null)
     {
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
@@ -60,6 +62,7 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
               AND d.next_attempt_at_utc <= $readyAt
               AND d.created_at_utc <= $createdBefore
               AND d.attempt_count < $maximumAttempts
+              AND d.parent_conversation_id NOT IN (SELECT value FROM json_each($excludedParents))
               AND NOT EXISTS (
                   SELECT 1
                   FROM subagent_deliveries active
@@ -74,6 +77,7 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         command.Parameters.AddWithValue("$readyAt", readyAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$createdBefore", createdBeforeUtc.ToString("O"));
         command.Parameters.AddWithValue("$maximumAttempts", MaximumAttempts);
+        command.Parameters.AddWithValue("$excludedParents", JsonSerializer.Serialize(excludedParentConversationIds ?? []));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -235,6 +239,47 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         return true;
     }
 
+    public async Task<bool> TryMarkToolExecutionStartedAsync(
+        SubagentDeliveryLease lease,
+        DateTimeOffset startedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        if (lease.Deliveries.Count == 0)
+        {
+            throw new ArgumentException("An execution checkpoint requires a non-empty lease.", nameof(lease));
+        }
+
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var current = await ReadLeaseDeliveriesAsync(connection, transaction, lease, cancellationToken).ConfigureAwait(false);
+        if (current.Count != lease.Deliveries.Count || current.Any(delivery => delivery.LeasedUntilUtc <= startedAtUtc))
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE subagent_deliveries
+            SET tool_execution_started_at_utc = COALESCE(tool_execution_started_at_utc, $startedAt)
+            WHERE status = $leased AND lease_token = $leaseToken AND continuation_turn_id = $turnId;
+            """;
+        command.Parameters.AddWithValue("$startedAt", startedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$leased", (int)SubagentDeliveryStatus.Leased);
+        command.Parameters.AddWithValue("$leaseToken", lease.LeaseToken.ToString("D"));
+        command.Parameters.AddWithValue("$turnId", lease.ContinuationTurnId.ToString("D"));
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != lease.Deliveries.Count)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
     public async Task<SubagentDeliveryResolutionResult> TryResolveAsync(
         SubagentDeliveryLease lease,
         SubagentDeliveryResolution resolution,
@@ -318,7 +363,8 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         var deadLetters = new List<SubagentDeliveryRecord>();
         foreach (var delivery in expired)
         {
-            var hasRecordedTools = delivery.ContinuationTurnId is Guid continuationTurnId &&
+            var hasRecordedTools = delivery.ToolExecutionStartedAtUtc is not null ||
+                                   delivery.ContinuationTurnId is Guid continuationTurnId &&
                                    await HasRecordedToolsAsync(
                                        connection,
                                        transaction,
@@ -714,7 +760,8 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         => kind switch
         {
             SubagentDeliveryResolutionKind.Succeeded => SubagentDeliveryStatus.Delivered,
-            SubagentDeliveryResolutionKind.RetryableFailure when delivery.AttemptCount < MaximumAttempts =>
+            SubagentDeliveryResolutionKind.RetryableFailure when delivery.ToolExecutionStartedAtUtc is null &&
+                                                                 delivery.AttemptCount < MaximumAttempts =>
                 SubagentDeliveryStatus.Pending,
             SubagentDeliveryResolutionKind.RetryableFailure => SubagentDeliveryStatus.DeadLetter,
             SubagentDeliveryResolutionKind.UnsafeFailure or SubagentDeliveryResolutionKind.DeadLetter =>
@@ -864,7 +911,8 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
             ReadDateTimeOffset(reader, 13),
             ReadDateTimeOffset(reader, 14),
             ReadNullableDateTimeOffset(reader, 15),
-            ReadNullableDateTimeOffset(reader, 16));
+            ReadNullableDateTimeOffset(reader, 16),
+            ReadNullableDateTimeOffset(reader, 17));
 
     private static Guid ReadGuid(SqliteDataReader reader, int ordinal)
         => Guid.Parse(reader.GetString(ordinal));

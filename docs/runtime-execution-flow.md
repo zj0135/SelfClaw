@@ -1,836 +1,129 @@
-# SelfClaw 整体运行流程与 Direct / CLI 调用链
+# SelfClaw 运行流程与 Direct / CLI 调用链
 
-> 基于 2026-07-25 当前仓库实际代码整理。本文描述运行中的真实调用关系；设计目标与实施历史分别参见 `ai-provider-system-design.md` 和 `ai-provider-implementation-progress.md`。
+更新：2026-09-13。以当前源码为准；逐项证据见 [Direct 架构审查与整改](direct-agent-architecture-review.md)。较早的设计文档保留为设计历史。
 
-## 1. 核心结论
+## 1. 公共回合入口
 
-SelfClaw 的一次编程对话回合只有一个桌面入口和一个统一运行时接口：
+```mermaid
+flowchart TD
+    Vue[Vue composer] --> Router[WebViewMessageRouter]
+    Router --> VM[MainWindowViewModel: 捕获选择与准备 Workspace Root]
+    VM --> Engine[ConversationTurnEngine: 准入与用户消息持久化]
+    Engine --> Dispatch[DispatchingAgentChatRuntime]
+    Dispatch --> Direct[Agents.Direct: DirectAgentChatRuntime]
+    Dispatch --> CLI[CLI subprocess runtime]
+    Direct --> Events[AgentStreamEvent]
+    CLI --> Events
+    Events --> Recorder[ConversationTurnRecorder]
+    Recorder --> Commit[Interactive / Child / Continuation Committer]
+    Recorder --> State[ConversationRuntimeState]
+    State --> Publisher[TranscriptPublisher / ActivityPanelPublisher]
+    Publisher --> Vue
+```
+
+`WebViewMessageRouter` 先校验应用 origin，再把设置请求、窗口命令与会话意图交给各自处理者。`MainWindowViewModel` 拥有用户选择、导航与 Workspace Root 准备；`ConversationTurnEngine` 拥有准入、请求组装、事件归约和交互回合收尾。
+
+Direct 和 CLI 使用不同的请求类型与执行方式，继续共享事件、录制器和 transcript 投影。CLI 保留自己的认证、工具策略、模型配置与会话恢复，不消费 SelfClaw 的 Direct 能力快照。
+
+## 2. Direct 模块与准备顺序
+
+| 位置 | 职责 |
+| --- | --- |
+| `Infrastructure/Agents/Direct/DirectAgentChatRuntime.cs` | 单回合准备、SDK 流消费、事件翻译、usage 与终态纪律 |
+| `Agents/Direct/Capabilities` | 能力规则、来源组装、工具冲突与策略过滤、本回合资源 lease |
+| `Agents/Direct/Context` | system sections、历史回放、completion batch 与 prompt 预算 |
+| `Agents/Direct/Tools` | 工作区 / Skill / MCP 的 SDK 适配、审批与执行 checkpoint、统一结果 |
+| `Infrastructure/Extensions` | 包内容、安装检查、内容缓存、Plugin 版本租约、MCP 配置与连接池 |
+| `Infrastructure/AiProviders` | provider 协议、凭据、HTTP transport、模型准备与 client 创建 |
+| `Infrastructure/Tools/Workspace` | 文件、搜索、Shell I/O 与进程收尾 |
+
+Direct 依赖扩展资源与 provider 服务；Extensions 不引用 Direct 编排、prompt 或工具实现。共享 recorder 留在 Desktop Runtime，继续服务交互 Direct、CLI、child 与 continuation。
+
+一轮 Direct 的顺序是：
+
+1. continuation 请求必须带 `IToolExecutionCheckpoint`。
+2. `AiChatClientFactory.PrepareAsync(ModelProfileId)` 确定具体模型。显式 id 与空 id 的 `desktop-default` 都在这里处理；校验档案、连接、协议并解析凭据，得到 `AiProviderClientRequest`。
+3. 用确定的模型 id 调用 `DirectTurnCapabilityResolver.ResolveAsync()`。子代理工具捕获的父模型始终具体，禁用或无效模型不会先触发 MCP 连接。
+4. `AiChatClientFactory.Create(preparation, tools)` 将工具交给 provider adapter，创建 options 和带 function invocation / logging 的 SDK 管线。
+5. `DirectPromptComposer.BuildMessages()` 构建预算内历史与必需输入。
+6. 消费 SDK 流、产生共享事件；先释放 provider pipeline，再释放 capability lease。
+
+Desktop 不再补齐默认模型。排队 child 与 continuation 使用捕获的具体模型 id；模型禁用使准备失败，不会悄悄切换默认模型。reasoning 来自共享模型配置；没有显式配置时保持 provider 默认行为。
+
+## 3. 能力与工具契约
+
+`DirectCapabilityRules` 是 `none/read-only/system`、版本/hash、安装有效性、Plugin/Skill 关系及 MCP revision 判定的共享实现。`SubagentTaskPreflight` 位于 Infrastructure，通过 Core 的 `ISubagentTaskPreflight` 服务受理和执行前两个检查时点。模型单项可用性调用 `IAiModelCatalog.IsModelAvailableAsync(id)`，不构建 enabled-model UI 列表。
+
+| 入口 | 规则失败后的策略 |
+| --- | --- |
+| Interactive | 使用当前启用且绑定的能力；可选扩展加载失败降级，显式 Skill token 失败仍报错 |
+| Subagent | 必须满足捕获的 ceiling，必需能力缺失或变化时失败 |
+| Continuation | 只在原 ceiling 内收缩，移除禁用、删除或升级的能力，不扩大权限 |
+
+每个来源返回 `DirectToolBinding`，包含 AIFunction、描述符与审批元数据。最终绑定集中检查名称冲突、过滤策略并安装调用边界；SDK 工具列表与描述符索引从同一批绑定派生。新增工具不再维护中央名称表或修改主循环的 DTO 类型分支。
+
+`DirectToolResult` 携带 `Status`、`Summary`、模型 `Content` 与展示 `Detail`；`Detail` 不参与 provider JSON 序列化。工作区、Skill 与子代理函数使用 SDK `MarshalResult`；MCP 在自己的适配层规范化结果。主循环只解释统一契约和 SDK 异常，未知结果不再默认成功。
+
+审批拒绝返回 `Canceled` 和拒绝摘要，recorder 持久化为 `Cancelled`；实际取消异常沿异步调用传播。`ApprovedAIFunction` 负责审批与执行准入，MCP 大小限制不再注入审批包装。
+
+## 4. Continuation 恢复与所有权
+
+`SubagentDeliveryDispatcher` 读取 ready mailbox 时排除运行或删除中的父会话。准入竞争或领取失败后继续尝试其他父会话；每批最多检查 32 个候选，失败父会话的跳过集合保留到扫描结束，避免超过一批的失败项持续挡住后续父会话。SQLite 保留父会话 lease 排他性与 mailbox 批次语义。
+
+- dispatcher 从成功准入开始，用 `try/finally` 覆盖领取到移交。未移交时归还已知租约并释放准入；移交后 executor 负责唯一收尾。
+- executor 拥有取消、heartbeat 与完成准入。heartbeat 失败停止执行；heartbeat 收尾失败也不能跳过准入释放。
+- lease 为 45 秒，heartbeat 为 15 秒；过期恢复在启动时及每 15 秒运行。扫描间隔与 coalescing window 均为 250 ms，最多并发 4 个 continuation。
+- 无工具执行证据的失败遵循最多 3 次、10/30 秒退避；不确定的执行进入 DeadLetter。
+
+Schema v27 增加 `subagent_deliveries.tool_execution_started_at_utc`。调用顺序为：
 
 ```text
-Vue ChatView
-  -> MainWindow.OnTranscriptWebMessageReceived()
-  -> MainWindowViewModel.SubmitPromptAsync()
-  -> MainWindowViewModel.SendAsync()
-  -> IAgentChatRuntime.StreamTurnAsync()
-  -> DispatchingAgentChatRuntime.StreamTurnAsync()
-       -> DirectAgentChatRuntime.StreamTurnAsync()  [Direct]
-       -> CliAgentChatRuntime.StreamTurnAsync()     [CLI]
-  -> ConversationTurnEngine.ApplyEventAsync()
-  -> AgentActivityCoordinator.ApplyEvent()
-  -> ConversationRuntimeState.TranscriptChanged
-  -> TranscriptRenderState
-  -> MainWindow.PostTranscript()
-  -> Vue replaceState
+需要时等待审批
+  -> SubagentContinuationTurnCommitter.BeforeExecutionAsync()
+  -> SQLite 校验当前 lease，持久化整批 checkpoint，等待提交完成
+  -> 再次检查取消
+  -> 实际 AIFunction 调用
 ```
 
-两种模式只在“如何执行 Agent 并产生流事件”这一段不同：
+这个同步边界独立于事件 Channel。`ToolCallStartedEvent` 入队不等于消费者已落库，不能把事件消费当作执行屏障。
 
-- **Direct**：进程内读取模型档案、提供商连接和受保护凭据，构造 Microsoft.Extensions.AI `IChatClient`，直接请求远端或本地模型 API；工作区工具也由 SelfClaw 进程执行。
-- **CLI**：读取本机已选择的 Claude Code / Codex / OpenCode，生成命令行并启动子进程；认证、服务端点、CLI 自身工具和权限策略均由对应 CLI 管理。
-- 两者最终都输出 `IAsyncEnumerable<AgentStreamEvent>`，后续消息更新、工具卡片、用量、终态、SQLite 持久化和 Vue 渲染完全共用。
+detached recorder 不发布父 transcript，也不写中间工具进度；checkpoint 单独保存恢复证据。父终态与 Delivered/DeadLetter 保留原子事务，completion batch 仍是 prompt-only。过期恢复读取 checkpoint；v26 的既有 leased 行缺乏可信证据，升级时保守标为不确定，不自动重放。
 
-## 2. 启动与依赖装配
+checkpoint 表示“工具可能已经开始”，不提供外部文件、Shell 或 MCP 的 exactly-once。中断可能丢失未提交正文，但不会因缺少 `tool_runs` 而自动重复不确定的操作。租约提交成功但调用方未收到返回值时，由过期恢复收敛。
 
-### 2.1 应用启动
+## 5. 状态与成本边界
 
-入口是 `SelfClaw.Desktop/App.xaml.cs` 的 `App.OnStartup()`：
+| 状态或资源 | 所有者与边界 |
+| --- | --- |
+| 当前执行内容与取消 | `ConversationRuntimeState` / `SubagentExecutionSession`，终态后释放 |
+| 会话加载 | coordinator 的进行中加载表只合并未完成 I/O；成功、失败或取消均移除，调用者只取消自己的等待 |
+| 已完成快照 | 只保留当前选中会话；切换后不缓存旧完成会话。运行会话由 runtime state 单独持有 |
+| provider pipeline | `AiChatClientLease` 每回合释放；共享 HttpClient 继续由 provider 管理 |
+| Plugin / MCP lease | `DirectTurnLeaseScope` 统一拥有；来源只释放尚未移交的资源 |
+| 历史构建 | 从最近消息向前按需创建 SDK 单元，达到预算边界停止；调用与结果不可拆分 |
+| Shell 输出 | 两路增量 drain，各保留前 24,000 个 UTF-16 字符；超额继续排空，超时/取消统一收尾 |
+| MCP 模型结果 | 检查完整 `DirectToolResult` 序列化后的 UTF-8 大小，最多 65,536 字节，包含包装、转义及截断提示 |
+| Glob | bundled ripgrep，大小写不敏感，匹配 Workspace Root 相对路径；有界 top-K 保留最近 250 项，时间相同按路径排序 |
 
-1. `StoragePaths.CreateDefault()` 解析应用数据、日志、附件和密钥目录。
-2. `ConfigureLogging()` 创建 Serilog 文件日志。
-3. `Host.CreateApplicationBuilder()` 创建 Generic Host。
-4. `AddSelfClawInfrastructure()` 注册数据库、提供商、工具和两套运行时。
-5. Desktop 层注册 `DesktopAgentDefinitionService`、`ExtensionSettingsBridge`、`ProgrammingAssistantSettingsService`、`AiProviderSettingsBridge`、`DesktopToolApprovalHandler`、`MainWindowViewModel`、`MainWindow` 等单例。
-6. `_host.StartAsync()` 启动容器。
-7. 依次执行：
-   - `IConversationRepository.InitializeAsync()`；
-   - `IAiProviderRepository.InitializeAsync()`；
-   - `IExtensionCatalogReconciler.ReconcileAsync()`，清理扩展 staging 与无引用 Plugin 旧版本；
-   - `ProgrammingAssistantSettingsService.GetOrInitializeAsync()`，首次启动时扫描本机 CLI 并保存结果。
-8. 解析并显示 `MainWindow`。
+Glob 保留忽略 `.gitignore` 的路径枚举语义和隐藏文件可见性，排除隐藏目录及已知构建/依赖目录，不跟随目录链接。`relativePath` 只缩小遍历范围，不改变模式的根。
 
-### 2.2 运行时 DI 关系
+token 预算仍是 UTF-8 大小的启发式估算，不是 provider tokenizer。数据库历史读取、当前会话内容本身及 Skill token 扫描没有变成常量成本。Direct 事件 Channel 仍无界；慢消费者积压与 warm MCP health 写入保留为待测量项。
 
-`SelfClaw.Infrastructure/DependencyInjection/ServiceCollectionExtensions.cs` 的 `AddSelfClawInfrastructure()` 注册：
+## 6. 持久化与配置边界
 
-```text
-IAgentChatRuntime
-  = DispatchingAgentChatRuntime
-      |- CliAgentChatRuntime
-      |   |- CliAgentAdapterRegistry
-      |   |   |- ClaudeCliAgentAdapter
-      |   |   |- CodexCliAgentAdapter
-      |   |   `- OpenCodeCliAgentAdapter
-      |   |- ICliAgentSessionStore
-      |   |- CliCommandResolver
-      |   `- ICliAgentProcessHost
-      `- DirectAgentChatRuntime
-          |- IAiChatClientFactory
-          |   |- IAiProviderRepository
-          |   |- IAiProviderRegistry -> IAiProviderAdapter[]
-          |   `- ISecretProtector
-          |- IDirectTurnCapabilityResolver
-          |   |- ExtensionCatalog / PluginManifestReader / SkillPackageReader
-          |   |- WorkspaceAgentToolset -> IWorkspaceToolService
-          |   `- McpClientManager -> stdio / HTTP MCP transport
-          `- DirectPromptComposer
+`IConversationRepository` 暴露会话、消息和工具记录。Workspace Root CRUD 归入 `IWorkspaceRootRepository`，与 Git checkout/repository 存储共用 `SqliteWorkspaceRepository`；Git 服务不再依赖会话仓库。provider 管理仓库保持 Infrastructure internal，不机械拆分管理接口。
+
+`StoragePaths` 是五个路径值的纯 record。composition root 通过 `StoragePathDefaults` 计算默认值；DTO 不读取环境。审批、执行 checkpoint 和 preflight 契约位于 Core/Interfaces，描述真实项目边界。
+
+## 7. 验证入口
+
+```powershell
+$env:DOTNET_CLI_HOME = 'D:\Repositories\SelfClaw\.dotnet'
+$env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
+$env:DOTNET_NOLOGO = '1'
+dotnet restore SelfClaw.slnx --force-evaluate
+dotnet build SelfClaw.slnx --no-restore -p:BaseOutputPath=bin/direct-refactor-final/
+dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj --no-build --no-restore -p:BaseOutputPath=bin/direct-refactor-final/
 ```
 
-`DispatchingAgentChatRuntime` 是 Desktop 唯一注入的 `IAgentChatRuntime` 实现。Desktop 不直接选择具体运行时。
-
-### 2.3 窗口与前端初始化
-
-`MainWindow.OnLoadedAsync()` 依次执行：
-
-1. `EnsureTranscriptHostAsync()` 初始化 WebView2、注册 `WebMessageReceived`，并加载构建后的 `Assets/TranscriptVue/index.html`。
-2. `MainWindowViewModel.InitializeAsync()`：
-   - 从 `DesktopSettingsJsonStore` 恢复 composer 的 `cli/direct` 覆盖值；
-   - `ReloadAgents()` 从 `{AppData}/agents/*.md` 加载 Agent；
-   - 加载工作区和会话列表；
-   - `PublishShell(false)` 发布首个 transcript 快照。
-
-### 2.4 扩展设置消息族
-
-`ExtensionSettingsBridge` 处理 `extensions/*` WebView2 请求：读取聚合 state、导入 Skill/Plugin、启停与删除、保存/测试 MCP、确认 Plugin 权限、修改 Agent 绑定，以及列出 composer 的有效 Skills。设置 mutation 与 Direct 回合期 MCP health 更新共用单例 `IExtensionStateChangeNotifier`；revision 变化后发布 `extensions/state-changed`，`MainWindowViewModel` 切回 WPF Dispatcher 更新 `capabilityRevision`，打开中的扩展页重新加载，SkillPicker 的缓存随之失效。通知订阅者彼此隔离，UI 订阅异常不会反向中断已完成的 mutation 或 Direct 回合。MCP secret 在 bridge state 中只返回是否已配置，不返回 SecretRef 或明文。
-
-## 3. 模式、模型与 Agent 如何确定
-
-### 3.1 Agent 自带模式
-
-`DesktopAgentDefinitionService` 从 Agent markdown front matter 的 `mode` 读取：
-
-```yaml
-mode: direct
-# 或
-mode: cli
-```
-
-`MainWindowViewModel.ResolveRuntimeAgent()` 把 `DesktopAgentDefinition` 转换为 `AgentRuntimeDefinition`，保留 `agent.Mode`、Instructions、ToolPolicy，以及 `PluginIds` / `SkillIds` / `McpServerIds`。Direct runtime 每回合再把这些绑定与全局启用状态求交；配置和密钥不会进入 Core 请求 DTO。
-
-### 3.2 Composer 模式覆盖优先
-
-前端 `ModelSelector.vue` 发送 `select-composer-mode`，调用链为：
-
-```text
-ModelSelector.vue
-  -> MainWindow.OnTranscriptWebMessageReceived()
-  -> MainWindowViewModel.SelectComposerModeAsync()
-  -> DesktopSettingsJsonStore.WriteNodeAsync("composer", ...)
-```
-
-每次发送时，`SendAsync()` 执行：
-
-```csharp
-runtimeAgent = runtimeAgent with
-{
-    Mode = ResolveComposerExecutionMode(runtimeAgent.Mode)
-};
-```
-
-实际优先级为：
-
-```text
-composer 显式覆盖模式 > Agent markdown 的 mode
-```
-
-所以 Direct Agent 可以临时走 CLI，CLI Agent 也可以临时走 Direct，不需要修改 Agent 文件。
-
-### 3.3 Direct 模型选择
-
-前端读取 Direct 模型：
-
-```text
-ModelSelector.requestDirectModels()
-  -> ai-providers/list-enabled-models
-  -> MainWindow.OnTranscriptWebMessageReceived()
-  -> AiProviderSettingsBridge.TryHandleAsync()
-  -> IAiProviderSettingsService.ListEnabledModelsAsync()
-  -> IAiProviderSettingsService.GetDefaultModelAsync("desktop-default")
-  -> AiProviderSettingsBridge.ModelSelectionChanged
-  -> MainWindow.OnModelSelectionChanged()
-  -> MainWindowViewModel.SelectModelProfile()
-```
-
-用户改选模型时：
-
-```text
-ModelSelector.pickDirectModel()
-  -> ai-providers/set-default-model
-  -> AiProviderSettingsBridge.TryHandleAsync()
-  -> AiProviderSettingsService.SetDefaultModelAsync()
-  -> IAiProviderRepository.SetModelProfileSelectionAsync()
-  -> ModelSelectionChanged(modelProfileId)
-  -> MainWindowViewModel.SelectModelProfile(modelProfileId)
-```
-
-`SendAsync()` 把当前 `_selectedModelProfileId` 放进 `ChatTurnRequest.ModelProfileId`。Direct runtime 优先用该 id；为空时再读取 `desktop-default`。
-
-### 3.4 CLI、模型和推理档位选择
-
-CLI 的检测与选择由 `ProgrammingAssistantSettingsService` 管理：
-
-- 启动时 `GetOrInitializeAsync()` -> `ScanCoreAsync()` -> `ScanDefinitionAsync()` 扫描 PATH 中的 Claude Code、Codex、OpenCode。
-- `SelectCliAsync()` 保存当前 CLI；切换 CLI 时会清空之前的 model/reasoning 选择。
-- `SelectModelAsync()` 与 `SelectReasoningLevelAsync()` 保存 CLI 参数覆盖值。
-- “使用 CLI 默认值”最终归一化为 `null`。
-
-每次发送时，`SendAsync()` 调用 `GetSelectedInvocationAsync()` 得到：
-
-```csharp
-CliInvocationSelection(
-    CliAgentKind Kind,
-    string? Model,
-    string? ReasoningEffort)
-```
-
-并填入 `ChatTurnRequest.CliAgent/CliModel/CliReasoningEffort`。Direct 分支会忽略这三个字段。
-
-## 4. 一次回合的公共入口
-
-### 4.1 Vue 到 Desktop
-
-`SelfClaw.TranscriptVue/src/views/ChatView.vue` 的提交逻辑发送：
-
-```javascript
-post({ type: 'send-prompt', prompt })
-```
-
-WebView2 消息进入 `MainWindow.OnTranscriptWebMessageReceived()`：
-
-```text
-case "send-prompt"
-  -> 读取 prompt
-  -> await _viewModel.SubmitPromptAsync(prompt)
-```
-
-`SubmitPromptAsync()` 记录 composer 文本和待发送图片，然后调用 `SendAsync()`。
-
-### 4.2 `MainWindowViewModel.SendAsync()` 的公共编排
-
-该方法是一次回合真正的 Desktop 编排入口，顺序如下：
-
-1. 固化本轮 prompt、图片、模型、工作区、权限和当前 transcript 快照。
-2. `EnsureConversationAsync()`：复用当前会话，或由 `CreateConversationRecord()` 创建新会话对象。
-3. 防止同一 conversation 同时运行两个回合：`IsConversationRunning()`。
-4. `PersistConversationAsync()` -> `IConversationRepository.UpsertConversationAsync()` 保存工作区、会话模式和工具权限。
-5. `ResolveRuntimeAgent()` 生成运行时 Agent，并用 `ResolveComposerExecutionMode()` 应用模式覆盖。
-6. `StartConversationRuntimeState()` 建立本轮内存状态和 `CancellationTokenSource`。
-7. `PersistPromptImageAttachmentsAsync()` 把附件复制到应用附件目录并生成记录。
-8. 创建 `MessageRole.User` 的 `MessageRecord`，调用 `UpsertMessageAsync()` 落库。
-9. 新会话用 `CreateConversationTitle()` 从首条输入生成标题，再次持久化会话。
-10. 创建 `AgentTurnState`。
-11. `BuildChatTurnRequestAsync()` 按最终模式构造请求；仅 CLI 分支调用 `ProgrammingAssistantSettingsService.GetSelectedInvocationAsync()`。
-12. 调用 `ConversationTurnEngine.BeginAssistantMessage()` 立即放入 Streaming 状态的 assistant 占位消息，再调用 `_agentChatRuntime.StreamTurnAsync()`。
-13. 对每个事件调用 `ConversationTurnEngine.ApplyEventAsync()`。
-14. 流正常结束后调用 `PublishConversationCompletedNotification()`。
-15. `finally` 中执行 `CompleteConversationRuntimeState()` 并释放本轮 CTS。
-
-### 4.3 `ChatTurnRequest` 字段归属
-
-| 字段 | 公共 | Direct 使用 | CLI 使用 |
-|---|---:|---:|---:|
-| `ConversationId` | 是 | 工具审批关联 | CLI session 关联 |
-| `ModelProfileId` |  | 是 | 忽略 |
-| `WorkspaceRoot` | 是 | 决定是否注入工作区工具 | 子进程工作目录 |
-| `Agent` | 是 | Mode、Instructions | Mode、Instructions |
-| `CliAgent` |  | 忽略 | 是 |
-| `CliModel` |  | 忽略 | 可选命令行参数 |
-| `CliReasoningEffort` |  | 忽略 | 可选命令行参数 |
-| `ToolPermissionMode` |  | SelfClaw 工具审批 | 不控制 CLI 自身权限 |
-| `ToolApprovalHandler` |  | 写文件/命令审批 | 忽略 |
-| `Messages` | 是 | 构造完整消息历史 | 只抽取最新 user prompt |
-
-### 4.4 统一分发
-
-`DispatchingAgentChatRuntime.StreamTurnAsync()` 是唯一对 Desktop 暴露的 runtime interface。它先按
-`request.Agent.Mode` 选择内部 adapter：
-
-```text
-AgentExecutionMode.Direct
-  -> DirectAgentChatRuntime.StreamTurnAsync()
-
-AgentExecutionMode.Cli
-  -> CliAgentChatRuntime.StreamTurnAsync()
-```
-
-随后 dispatcher 统一执行终态纪律：成功或失败恰好一个 `RunCompletedEvent`，并且它总是最后一个事件；
-重复终态和终态后的事件会被丢弃，缺失终态或非取消异常会补为失败。首个候选终态出现后结果即锁定，
-dispatcher 在 adapter 结束和释放完成后才输出该终态；若 adapter 不配合，则有界 cleanup 到期后停止等待。
-取消继续抛出 `OperationCanceledException`，不会转换为终态事件。
-
-## 5. Direct 模式完整调用链
-
-### 5.1 总调用链
-
-```text
-DispatchingAgentChatRuntime.StreamTurnAsync()
-  -> DirectAgentChatRuntime.StreamTurnAsync()
-  -> DirectAgentChatRuntime.StreamCoreAsync()
-       -> Channel<AgentStreamEvent>
-       -> DirectAgentChatRuntime.ProduceEventsAsync()
-            |- IDirectTurnCapabilityResolver.ResolveAsync()
-            |    |- workspace tools + unified approval wrapper
-            |    |- acknowledged Plugin instructions / contributed Skills / MCP
-            |    |- standalone Skills + explicit token adjustments
-            |    `- standalone MCP leases + source descriptors
-            |- IAiChatClientFactory.CreateAsync(modelProfileId)
-            |    或 CreateForScopeAsync("desktop-default")
-            |- DirectPromptComposer.BuildMessages()
-            |- IChatClient.GetStreamingResponseAsync()
-            `- 把 ChatResponseUpdate.Contents 转为 AgentStreamEvent
-```
-
-`StreamCoreAsync()` 使用无界 `Channel<AgentStreamEvent>` 隔离 provider 生产侧与 UI 消费侧。枚举器被放弃时，linked CTS 会取消 provider 流，并等待 producer 收尾。
-
-### 5.2 工作区工具创建
-
-capability resolver 先判断 `request.WorkspaceRoot`：
-
-- 无工作区：`tools = Array.Empty<AITool>()`，Direct 模型没有 SelfClaw 工作区工具。
-- 有工作区：调用 `WorkspaceAgentToolset.CreateTools()` 创建 7 个 M.E.AI function tools：
-
-| 工具 | 绑定方法 | 审批 |
-|---|---|---|
-| `list_files` | `BoundWorkspaceTools.ListFilesAsync()` | 不需要 |
-| `glob_files` | `BoundWorkspaceTools.GlobFilesAsync()` | 不需要 |
-| `search_text` | `BoundWorkspaceTools.SearchTextAsync()` | 不需要 |
-| `read_file` | `BoundWorkspaceTools.ReadFileAsync()` | 不需要 |
-| `write_file` | `BoundWorkspaceTools.WriteFileAsync()` | `RequireApproval` 时需要 |
-| `edit_file` | `BoundWorkspaceTools.EditFileAsync()` | `RequireApproval` 时需要 |
-| `run_shell_command` | `BoundWorkspaceTools.RunShellCommandAsync()` | `RequireApproval` 时需要 |
-
-底层全部进入 `WorkspaceToolService`，其中路径操作通过 `NormalizeRoot()` / `ResolvePath()` 限制在 workspace 内。
-
-#### 工具审批链
-
-`write_file`、`edit_file` 和 `run_shell_command` 统一通过 `ApprovedAIFunction`：
-
-```text
-ToolPermissionMode.FullAccess
-  -> 直接允许
-
-ToolPermissionMode.RequireApproval
-  -> DesktopToolApprovalHandler.RequestApprovalAsync()
-  -> ApprovalRequested 事件
-  -> MainWindow.OnToolApprovalRequested()
-       |- 始终发送 Windows toast（窗口隐藏/最小化时的回退）
-       `- 入队 _approvalQueue，队首请求经 PostToolApprovalRequest()
-          以 toolApprovalRequest 消息发到 Vue，在输入框上方渲染确认栏
-  -> 用户在 Vue 确认栏点「允许/拒绝」
-       -> post({ type: "resolve-tool-approval", toolExecutionId, approved })
-       -> MainWindow.OnTranscriptWebMessageReceived()
-       -> DesktopToolApprovalHandler.TryResolve()
-  -> 允许：调用 WorkspaceToolService
-  -> 拒绝/超时：返回 "User denied this tool call."
-```
-
-`DesktopToolApprovalHandler` 额外暴露 `ApprovalCompleted` 事件：无论请求以何种方式离开待决队列（用户确认、toast 确认、取消、超时、`RejectAll()`），都会触发一次。`MainWindow.OnToolApprovalCompleted()` 据此把该 id 移出 `_approvalQueue`；若离开的是当前队首，则清空 `_currentApprovalId` 并 `PromoteNextApprovalIfIdle()` 把下一条推给 Vue（队列空时发送 `toolApprovalClear`）。因此确认栏任何时刻只显示队首一条，多个并行 function call 依次排队。队列与 `_currentApprovalId` 只在 UI 线程访问；WebView 重新导航后 `OnTranscriptNavigationCompleted()` 会重放当前队首，确认栏不会因页面刷新丢失。
-
-审批默认 5 分钟超时；取消、订阅处理异常或窗口关闭均不会无限等待。窗口隐藏时依靠 toast 的 Confirm/Cancel，由 `DesktopNotificationActivationService.HandleActivationAsync()` 调用 `TryResolve()`；`TryResolve()` 幂等，Vue 确认栏与 toast 之间的竞态是安全的。
-
-### 5.3 模型 client 创建
-
-Direct runtime 构造：
-
-```csharp
-var inputs = new AiChatRuntimeInputs(
-    EnableReasoning: false,
-    Tools: tools);
-```
-
-然后：
-
-```text
-有 request.ModelProfileId
-  -> AiChatClientFactory.CreateAsync(modelProfileId, inputs)
-
-无 request.ModelProfileId
-  -> AiChatClientFactory.CreateForScopeAsync("desktop-default", inputs)
-  -> IAiProviderRepository.GetModelProfileSelectionAsync()
-  -> AiChatClientFactory.CreateAsync(selection.ModelProfileId, inputs)
-```
-
-`AiChatClientFactory.CreateAsync()` 的方法级流程：
-
-1. `IAiProviderRepository.GetModelProfileAsync()` 读取 `ai_model_profiles`，检查存在且启用。
-2. `GetProviderConnectionAsync()` 读取 `ai_provider_connections`，检查存在且启用。
-3. `ResolveSecretsAsync()`：
-   - `AuthKind.None` 返回空字典；
-   - `AuthKind.ApiKey` 根据 `CredentialRefs` 调用 `ISecretProtector.RetrieveSecretAsync()`；
-   - 明文密钥只在 Infrastructure 的本轮内存中出现，不进入 `ChatTurnRequest`。
-4. `IAiProviderRegistry.GetRequiredAdapter(connection.ProviderKind)` 选择适配器。
-5. `adapter.SupportsApiFormat(profile.ApiFormat)` 验证协议。
-6. 创建 `AiProviderClientRequest(connection, profile, secrets, EnableReasoning, Tools)`。
-7. `adapter.CreateChatOptions()` 创建协议选项。
-8. `adapter.CreateChatClient()` 创建原生 `IChatClient`。
-9. `new ChatClientBuilder(nativeClient)`：
-   - `.UseFunctionInvocation()` 自动执行模型 function call，并把 function result 继续送回模型；
-   - `.UseLogging()` 添加日志管道；
-   - Trace 被 `NonSensitiveLoggerFactory` 永久屏蔽，避免原始消息和 options 进入日志。
-10. 返回 `AiChatClientLease(Client, Options, Profile)`，本轮结束时由 runtime `Dispose()`。
-
-### 5.4 当前 provider adapter 分流
-
-| ProviderKind | Adapter | 当前实际聊天协议 |
-|---|---|---|
-| `OpenAI` | `OpenAiProviderAdapter` | Chat Completions、Responses |
-| `OpenAICompatible` | `OpenAiProviderAdapter` | Chat Completions、Responses |
-| `DeepSeek` | `OpenAiProviderAdapter` | OpenAI 兼容管道；目录配置使用 Chat Completions |
-| `Anthropic` | `AnthropicProviderAdapter` | Anthropic Messages |
-| `Ollama` | `OllamaProviderAdapter` | Ollama Native、OpenAI Chat Completions |
-| `GoogleGemini` | `GeminiProviderAdapter` | 当前通过 Google 官方 OpenAI 兼容入口走 Chat Completions |
-| `AzureOpenAI` | `AzureOpenAiProviderAdapter` | Azure OpenAI Chat Completions，模型字段作为 deployment 名 |
-
-适配器只负责把统一的连接、档案、密钥、工具和模型参数转换成具体 SDK client/options；Direct runtime 不包含 provider 特例。
-
-### 5.5 消息构造与模型请求
-
-`DirectPromptComposer.BuildMessages()`：
-
-1. 按稳定顺序拼接 Agent instructions、capability policy、Plugin instructions、显式 Skill、Skill compact catalog 和能力降级摘要。
-2. 应用 `MessageAdjustments` 剥离本轮已消费的 Skill token。
-3. 遍历 `request.Messages`：
-   - 跳过 `MessageStatus.Failed`；
-   - 跳过空文本；
-   - User -> `ChatRole.User`；
-   - Assistant -> `ChatRole.Assistant`；
-   - 其他角色跳过。
-3. 把完整可用历史传给：
-
-```csharp
-lease.Client.GetStreamingResponseAsync(
-    messages,
-    lease.Options,
-    cancellationToken)
-```
-
-### 5.6 M.E.AI 内容到统一事件的映射
-
-`ProduceEventsAsync()` 先发：
-
-```text
-RunStartedEvent("direct-<guid>", lease.Profile.Model, AgentKind: null)
-RunStatusEvent(Requesting)
-```
-
-随后逐个处理 `ChatResponseUpdate.Contents`：
-
-| M.E.AI content | 输出事件 |
-|---|---|
-| `TextContent` | `AssistantTextDeltaEvent`，同时累积 `finalText` |
-| `TextReasoningContent` | `AssistantThinkingDeltaEvent` |
-| `FunctionCallContent` | 依据 `DirectToolDescriptor` 去重后输出带来源字段的 `ToolCallStartedEvent` |
-| `FunctionResultContent` | 内建结果或 MCP 专用结果映射 -> `ToolCallCompletedEvent` |
-| `UsageContent` | 累加 input/output tokens，流末输出 `UsageReportedEvent` |
-
-正常结束输出：
-
-```text
-RunCompletedEvent(Succeeded, finalText)
-```
-
-Direct adapter 只负责分类 mode-specific 结果：正常完成时产生成功候选终态，非取消异常产生失败候选终态；
-`OperationCanceledException` 始终继续向上传播。dispatcher 锁定首个候选终态，在 adapter 结束并释放 client lease 后，
-再把该终态作为最后一个事件输出；cleanup 超时只记录诊断，不改写已锁定结果。缺失终态或非取消异常也由 dispatcher
-统一补成失败。
-
-## 6. CLI 模式完整调用链
-
-### 6.1 总调用链
-
-```text
-DispatchingAgentChatRuntime.StreamTurnAsync()
-  -> CliAgentChatRuntime.StreamTurnAsync()
-       |- CliAgentAdapterRegistry.Find()
-       |- ExtractPrompt()
-       |- ICliAgentSessionStore.GetSessionIdAsync()
-       |- ComposeSystemPrompt()
-       |- ICliAgentAdapter.PrepareTurn()
-       |- CliCommandResolver.Resolve()
-       |- ICliAgentProcessHost.Start()
-       |- PreparedCliTurn.StandardInputLines
-       |- ICliAgentProcessSession.WriteStdinLineAsync()
-       |- ICliAgentProcessSession.CompleteStdinAsync()
-       |- ICliAgentProcessSession.ReadOutputLinesAsync()
-       |- CliStreamParser.ParseLine()
-       |- ICliAgentSessionStore.SetSessionIdAsync()
-       `- ICliAgentProcessSession.WaitForExitAsync()
-```
-
-### 6.2 前置校验
-
-`CliAgentChatRuntime.StreamTurnAsync()` 依次检查：
-
-1. `request.CliAgent` 是否存在；没有已选 CLI 时直接返回可读的失败 `RunCompletedEvent`。
-2. `CliAgentAdapterRegistry.Find(agentKind)` 是否能找到 adapter。
-3. `ExtractPrompt(request.Messages)` 是否能找到最新一条 User 消息。
-
-CLI 不重放 SelfClaw 数据库里的完整历史。`ExtractPrompt()` 只发送最新 user 文本，历史上下文由 CLI 的 resume session 维护。
-
-### 6.3 会话恢复
-
-`CliAgentChatRuntime` 先调用：
-
-```text
-ICliAgentSessionStore.GetSessionIdAsync(conversationId, agentKind)
-```
-
-`SqliteCliAgentSessionStore` 使用 `cli_agent_sessions` 表，以 `(conversation_id, agent_kind)` 为联合键。同一个 SelfClaw 会话可分别保存 Claude、Codex、OpenCode session id，互不覆盖。
-
-不同 CLI 的 session 参数规则由各自 adapter 持有：
-
-| CLI | 新会话 | 后续会话 |
-|---|---|---|
-| Claude Code | adapter 生成 GUID，传给 `--session-id` | 传给 `--resume <id>` |
-| Codex | 不传 session 参数，由 CLI 创建 thread id | `exec resume <thread-id>` |
-| OpenCode | 不传 session 参数，由 CLI 创建 session id | `-s <session-id>` |
-
-parser 输出带 session id 的 `RunStartedEvent` 后，runtime 调用：
-
-```text
-ICliAgentSessionStore.SetSessionIdAsync()
-```
-
-只有 CLI 流确认 session id 后才持久化，避免启动失败留下无效 id。
-
-### 6.4 `CliTurnPreparation` 与参数生成
-
-runtime 构造 `CliTurnPreparation`，并交给 `ICliAgentAdapter.PrepareTurn()`：
-
-- `Prompt`：最新一条 user 消息。
-- `StoredSessionId`：来自 `ICliAgentSessionStore`，空值表示新会话。
-- `SystemPrompt`：`ComposeSystemPrompt()` 当前只返回 `AgentRuntimeDefinition.Instructions`。
-- `Model/ReasoningEffort`：来自 `ProgrammingAssistantSettingsService`，空白归一化为 `null`。
-
-adapter 返回 `PreparedCliTurn`，包含 command、参数、stdin 行和对应 parser。各 adapter 实际生成：
-
-#### Claude Code
-
-`ClaudeCliAgentAdapter`：
-
-```text
-claude -p
-  --input-format stream-json
-  --output-format stream-json
-  --verbose
-  --include-partial-messages
-  [--resume <id> | --session-id <new-guid>]
-  [--model <model>]
-  [--effort <level>]
-  [--append-system-prompt <instructions>]
-```
-
-把 prompt 包成一行 Anthropic user message JSONL。
-
-#### Codex
-
-`CodexCliAgentAdapter`：
-
-```text
-codex exec [resume <thread-id>]
-  --json
-  --skip-git-repo-check
-  [--model <model>]
-  [-c model_reasoning_effort="<level>"]
-```
-
-直接返回一行纯文本 prompt。当前 Codex adapter 没有把 Agent Instructions 拼进参数。
-
-#### OpenCode
-
-`OpenCodeCliAgentAdapter`：
-
-```text
-opencode run --format json
-  [-s <session-id>]
-  [--model <provider/model>]
-```
-
-直接返回一行纯文本 prompt。当前 OpenCode 不接收 reasoning 覆盖，也没有把 Agent Instructions 拼进参数。
-
-### 6.5 命令解析与子进程启动
-
-`CliCommandResolver.Resolve()`：
-
-1. 在 PATH/PATHEXT 中解析真实可执行文件。
-2. Windows 下优先可启动扩展，避免误选 npm 同目录的无扩展 POSIX shim。
-3. `.cmd/.bat` 通过 `cmd.exe /d /s /c` 包装并转义参数。
-4. 原生 exe 直接生成 `CommandInvocation.ArgumentList`。
-
-`CliAgentProcessHost.Start()` 创建 `ProcessStartInfo`：
-
-- 指定 WorkingDirectory；
-- 重定向 stdin/stdout/stderr；
-- UTF-8 编码；
-- `UseShellExecute = false`；
-- `CreateNoWindow = true`。
-
-`CliProcessStartInfo` 不注入 AI provider 环境变量。CLI 继续使用自己的登录状态、API Key、base URL 和本地配置。
-
-### 6.6 stdin、stdout 与进程生命周期
-
-启动后 runtime：
-
-1. 遍历 `PreparedCliTurn.StandardInputLines`，调用 `session.WriteStdinLineAsync()`。
-2. `session.CompleteStdinAsync()` 关闭 stdin，以 EOF 表示本轮输入结束。
-3. `session.ReadOutputLinesAsync()` 持续读取 stdout 行。
-4. 每行调用 `parser.ParseLine(line)`，立即输出解析到的 `AgentStreamEvent`。
-5. `session.WaitForExitAsync()` 得到 `CliProcessResult`。
-
-`CliAgentProcessSession` 同时负责：
-
-- 后台泵送 stdout/stderr；
-- stderr 最多保留 64 KiB；
-- stdout/stderr 活动刷新 watchdog；
-- 无活动超时后 `Kill(entireProcessTree: true)`；
-- 外部取消或 Dispose 时终止进程树；
-- 按超时和 exit code 分类成功或失败；外部取消通过 `OperationCanceledException` 传播。
-
-### 6.7 CLI 输出解析
-
-parser 由对应 adapter 创建并放入 `PreparedCliTurn`：
-
-```text
-ClaudeCliAgentAdapter
-  -> ClaudeStreamJsonParser
-
-CodexCliAgentAdapter
-  -> CodexJsonEventStreamParser
-
-OpenCodeCliAgentAdapter
-  -> OpenCodeJsonEventStreamParser
-```
-
-#### `ClaudeStreamJsonParser`
-
-主要映射：
-
-- `system/init` -> `RunStartedEvent(sessionId, model, Claude)`；
-- partial/full assistant text -> `AssistantTextDeltaEvent`；
-- thinking delta -> `AssistantThinkingDeltaEvent`；
-- `tool_use` -> `ToolCallStartedEvent`；
-- user `tool_result` -> `ToolCallCompletedEvent`；
-- `result.usage` -> `UsageReportedEvent`；
-- `result` -> `RunCompletedEvent`。
-
-#### `CodexJsonEventStreamParser`
-
-Codex 主要处理 `thread.* / turn.* / item.*`，映射：
-
-- `RunStartedEvent`；
-- `AssistantTextDeltaEvent` / `AssistantThinkingDeltaEvent`；
-- `ToolCallStartedEvent` / `ToolCallCompletedEvent`；
-- `UsageReportedEvent`。
-
-Codex 的 `error` 事件会额外输出失败的 `RunCompletedEvent`；正常的 `turn.completed` 只报告 usage，最终 `RunCompletedEvent` 由 `CliAgentChatRuntime` 根据进程退出结果补发。
-
-#### `OpenCodeJsonEventStreamParser`
-
-OpenCode 主要处理 `step_start / text / reasoning / tool / step_finish`，映射：
-
-- `RunStartedEvent`；
-- `AssistantTextDeltaEvent` / `AssistantThinkingDeltaEvent`；
-- `ToolCallStartedEvent` / `ToolCallCompletedEvent`；
-- `UsageReportedEvent`。
-
-`step_finish` 只报告 usage，最终 `RunCompletedEvent` 由 `CliAgentChatRuntime` 根据进程退出结果补发。
-
-非法 JSON 行会成为 `RawOutputEvent`；合法但不认识的事件类型被忽略。工具事件在 CLI 模式只是“观察记录”，实际工具由 CLI 子进程自行执行。
-
-### 6.8 CLI 终态
-
-如果 parser 已输出 `RunCompletedEvent`，CLI adapter 不重复输出；dispatcher 还会统一保证终态只出现一次并位于流末尾。
-
-如果进程退出但流里没有终态，`CliAgentChatRuntime` 根据 `CliProcessResult` 补一个：
-
-```text
-RunCompletedEvent(
-  result.Status,
-  FinalText: null,
-  ErrorMessage: writeError ?? BuildExitError(result))
-```
-
-`BuildExitError()` 的优先级是：无活动超时提示 > stderr > exit code > 未知异常。
-
-外部 cancellation 在 CLI 读写/等待链上继续抛出 `OperationCanceledException`，由 Desktop 的 turn finalizer 统一处理。
-
-## 7. 两种模式共用的事件消费、落库与渲染
-
-### 7.1 `ConversationTurnEngine.ApplyEventAsync()`
-
-`MainWindowViewModel.SendAsync()` 对 runtime 的每个事件调用该方法。`ConversationTurnEngine` 是无 WPF 依赖的 transcript reducer；它修改 `ConversationRuntimeState` 并通过 `TranscriptChanged` 通知 ViewModel 发布快照：
-
-| `AgentStreamEvent` | Desktop 处理 |
-|---|---|
-| `RunStartedEvent` | 确保 assistant 占位消息存在 |
-| `AssistantTextDeltaEvent` | `ConversationRuntimeState.ApplyAssistantDelta()` 追加 markdown |
-| `AssistantThinkingDeltaEvent` | `AssistantMessageSegmenter.WrapThinking()` 后追加 |
-| `ToolCallStartedEvent` | `ConversationTurnEngine.StartToolRunAsync()` |
-| `ToolCallCompletedEvent` | `ConversationTurnEngine.CompleteToolRunAsync()` |
-| `UsageReportedEvent` | 更新本轮 input/output token |
-| `RunStatusEvent` | 更新 activity text 并发布 UI |
-| `RunCompletedEvent` | `ConversationTurnEngine.CompleteAssistantTurnAsync()` |
-| `RawOutputEvent` | 当前不进入 transcript |
-| `PermissionRequestedEvent` | 当前不进入 transcript |
-
-### 7.2 Assistant 消息
-
-`BeginAssistantMessage()` 在进入 runtime stream 前创建一次 `MessageStatus.Streaming` 的 assistant 消息，避免 CLI 进程启动期间只有 user 消息。后续 `EnsureAssistantMessage()` 保持幂等；文本 delta 通过 `ConversationRuntimeState.ApplyAssistantDelta()` 追加并节流发布到 UI。
-
-收到终态后，Desktop turn finalizer：
-
-1. 标记本轮完成并移出 `ActiveMessageIds`。
-2. `AssistantMessageSegmenter.MergeFinalMarkdown()` 合并 runtime final text 与已流式内容，避免重复。
-3. 成功 -> `MessageStatus.Completed`；失败 -> `MessageStatus.Failed`；用户取消 -> `MessageStatus.Cancelled`。
-4. 写入 token、duration 和 error message。
-5. 通过聚焦的原子写入一次持久化最终 assistant 消息与本轮未终结工具；重复收尾不会改写首个结果。
-6. `PublishRuntimeStateNow()` 立即发布最终快照。
-
-流式 assistant 文本不会每个 delta 都写 SQLite，只在收尾时写一次。runtime 的失败终态、Desktop 消费事件时的异常和用户取消
-分别进入 turn finalizer 的失败或取消路径，由它原子落库 assistant 最终状态与本轮未终结工具状态。
-
-### 7.3 工具运行记录
-
-`ConversationTurnEngine.StartToolRunAsync()`：
-
-1. 创建 `ToolExecutionStatus.Running` 的 `ToolExecutionRecord`。
-2. `CaptureToolRunAnchor()` 在 assistant markdown 中插入工具锚点。
-3. 以 `ToolCallId` 记录关联。
-4. `UpsertToolExecutionAsync()` 立即落库。
-
-`ConversationTurnEngine.CompleteToolRunAsync()`：
-
-1. 按 `ToolCallId` 找到 started record。
-2. 更新完成/失败/取消状态、摘要、完整结果和 duration。
-3. 再次 `UpsertToolExecutionAsync()`。
-
-这套逻辑不区分 Direct 工具和 CLI 工具。
-
-### 7.4 桌面 Agent 活动投影
-
-`MainWindowViewModel.SendAsync()` 在公共编排层调用 `AgentActivityCoordinator.BeginTurn()`,并在 `ConversationTurnEngine.ApplyEventAsync()` 成功后把同一事件交给 `AgentActivityCoordinator.ApplyEvent()`。用户取消或消费侧失败没有 terminal event,对应 catch 路径调用 `CompleteInterrupted()`。
-
-`AgentActivityCoordinator` 同时监听 `DesktopToolApprovalHandler`,维护 Vue 确认栏与宠物共用的审批 FIFO。`PetActivityPresenter` 把活动快照映射为低频气泡节点和工作动画;Direct 工具审批不依赖 `AgentStreamEvent`。详细映射与优先级见 `docs/pet-system-design.md` §9。
-
-### 7.5 Transcript 发布到 Vue
-
-事件处理最终触发：
-
-```text
-PublishRuntimeState()
-  -> RequestStreamingShellPublish()       // 75ms 节流
-  -> PublishShell()
-       |- BuildShellFingerprint()          // 相同快照去重
-       |- TranscriptToolRunPresenter.BuildToolRunsByMessageId()
-       |- BuildMessageItemCached()
-       `- TranscriptChanged(TranscriptRenderState)
-  -> MainWindow.OnTranscriptChanged()
-  -> MainWindow.PostTranscript()
-  -> CoreWebView2.PostWebMessageAsJson({ type: "replaceState", ... })
-  -> App.vue.handleIncomingMessage()
-  -> ChatView.replaceState()
-```
-
-`TranscriptRenderState` 包含 items、会话列表、选中会话、busy/activity 状态和当前 execution mode。Vue 不感知底层是 Direct 还是 CLI。
-
-## 8. 停止、失败与资源释放
-
-前端发送 `stop-generation` 后：
-
-```text
-MainWindow.OnTranscriptWebMessageReceived()
-  -> MainWindowViewModel.StopSelectedConversation()
-  -> ConversationRuntimeState.CancellationTokenSource.Cancel()
-```
-
-取消 token 贯穿 Desktop -> dispatcher -> Direct provider 或 CLI process session。
-
-- **Direct**：取消继续抛出 `OperationCanceledException`，枚举释放时取消 provider stream 并释放 client lease。
-- **CLI**：取消会中止读写/等待，并由 `CliAgentProcessSession` 杀掉进程树；异常返回 Desktop 的 cancellation catch。
-- **Desktop**：turn finalizer 把 assistant 标记为 `MessageStatus.Cancelled`，保留 partial text、token 与 duration，并把本轮未终结工具标记为 `ToolExecutionStatus.Cancelled` 后原子落库。
-- `SendAsync()` 的 `finally` 总会 `CompleteConversationRuntimeState()`，解除 busy 状态并释放 CTS。
-
-dispatcher 统一保证成功/失败路径恰好产生一个 terminal event；Direct/CLI adapters 只负责把各自 implementation 的结果分类。取消不是 terminal event，而是始终重抛的控制流。
-
-## 9. Direct 与 CLI 的关键差异
-
-| 维度 | Direct | CLI |
-|---|---|---|
-| 执行位置 | SelfClaw 进程内 | 独立子进程 |
-| 认证来源 | SQLite credential ref + DPAPI secret | CLI 本地登录/配置 |
-| 模型来源 | `ai_model_profiles` / `desktop-default` | `ProgrammingAssistantSettingsService` |
-| 请求协议 | M.E.AI + provider adapter | CLI 自己的协议 |
-| 对话历史 | SelfClaw 组装完整有效消息历史 | 只发送最新 user 文本，通过 CLI session resume 保持历史 |
-| Agent Instructions | 作为 system message | Claude 使用 `--append-system-prompt`；Codex/OpenCode 当前未注入 |
-| 工作目录 | 工具绑定 workspace | 子进程 WorkingDirectory |
-| 工具执行 | `WorkspaceToolService` | CLI 自己执行 |
-| 工具审批 | SelfClaw 控制写文件/命令 | CLI 自己的权限策略，SelfClaw 仅观察事件 |
-| 工具事件 | M.E.AI function call/result | stdout parser 解析 |
-| 会话 id | 每轮临时 `direct-<guid>`，不用于恢复 | SQLite 持久化并恢复 |
-| 取消 | 取消 provider stream | 杀掉 CLI 进程树 |
-| 输出 | 统一 `AgentStreamEvent` | 统一 `AgentStreamEvent` |
-
-## 10. 当前实现边界
-
-以下是当前代码的实际行为，排查问题时需要特别注意：
-
-1. **扩展只接入 Direct**：`ResolveRuntimeAgent()` 会传递 Agent markdown 的 Plugin、Skill 与 MCP id；`DirectTurnCapabilityResolver` 每回合将绑定与全局启用状态求交并取得资源 lease。CLI 仍由子进程拥有自己的扩展与权限配置，不消费 SelfClaw 的 Direct 扩展目录。
-2. **图片尚未进入当前 WebView 对话主链**：`SubmitPromptAsync()` 虽支持可选图片，当前 `MainWindow` 处理 `send-prompt` 时只传 prompt。即使其他调用方传入图片，`SendAsync()` 也只会持久化和展示附件；`DirectPromptComposer.BuildMessages()` 只创建文本 `ChatMessage`，CLI 的 `ExtractPrompt()` 也只取文本。
-3. **Direct reasoning 开关固定关闭**：`AiChatRuntimeInputs.EnableReasoning` 当前为 `false`。若 provider 流仍返回 `TextReasoningContent`，runtime 可以显示，但本轮不会主动启用 adapter reasoning options。
-4. **工作区工具依赖 workspace**：未选工作区时不创建内建 workspace `AITool`；不要求 workspace 的 Skill/MCP 能力仍可进入 Direct 回合。
-5. **Agent ToolPolicy 仍是固定基线**：Direct 会消费 Agent 的 Plugin/Skill/MCP 绑定；CLI 只使用 Instructions（且仅 Claude 定义实际注入），不消费这些 Direct 扩展绑定。
-6. **CLI 不使用 Direct provider 配置**：不会读取 `ModelProfileId`、provider connection 或 DPAPI 密钥，也不会注入到子进程环境。
-7. **Direct 每轮读取当前档案**：client lease 不跨回合缓存，因此连接、模型启用状态和密钥变更会在下一轮生效。
-8. **CLI session 按会话和 CLI 隔离**：切换 CLI 不会复用另一个 CLI 的 session；切回原 CLI 时仍可恢复其旧 session。
-9. **`PermissionRequestedEvent` 是预留契约**：当前 CLI 第一版不发该事件，Desktop 的 switch 也不展示它。
-10. **会话 UI 与运行解耦**：`ConversationRuntimeState` 按 conversation id 保存，切换会话不会取消后台回合；只有选中会话才持续同步到当前 transcript 显示。
-
-## 11. 关键方法索引
-
-### 公共入口与渲染
-
-- `App.OnStartup()`：应用、数据库、CLI 设置初始化。
-- `MainWindow.EnsureTranscriptHostAsync()`：WebView2 和 Vue 静态资源初始化。
-- `MainWindow.OnTranscriptWebMessageReceived()`：所有 Vue -> Desktop 消息入口。
-- `MainWindowViewModel.SubmitPromptAsync()`：prompt 入口。
-- `MainWindowViewModel.SendAsync()`：单回合总编排。
-- `ConversationTurnEngine.BeginAssistantMessage()`：创建本轮 streaming assistant 占位消息。
-- `ConversationTurnEngine.ApplyEventAsync()`：统一事件消费、transcript 归约与工具记录落库。
-- `AgentActivityCoordinator.BeginTurn()` / `ApplyEvent()`：投影 Agent 主要节点与审批队列。
-- `PetActivityPresenter`：把 Agent 活动快照映射为宠物气泡和工作动画状态。
-- `MainWindowViewModel.PublishShell()`：构造 `TranscriptRenderState`。
-- `MainWindow.PostTranscript()`：向 Vue 发送 `replaceState`。
-
-### 模式与请求
-
-- `MainWindowViewModel.ResolveRuntimeAgent()`：Desktop Agent -> runtime Agent。
-- `MainWindowViewModel.ResolveComposerExecutionMode()`：应用 composer 模式覆盖。
-- `ProgrammingAssistantSettingsService.GetSelectedInvocationAsync()`：读取 CLI/model/reasoning。
-- `MainWindowViewModel.SelectModelProfile()`：更新 Direct 本轮模型 id。
-- `DispatchingAgentChatRuntime.StreamTurnAsync()`：Direct/CLI 分支点。
-
-### Direct
-
-- `DirectAgentChatRuntime.StreamTurnAsync()` / `StreamCoreAsync()`：Direct 事件枚举入口。
-- `DirectAgentChatRuntime.ProduceEventsAsync()`：client、请求、内容翻译和终态。
-- `DirectPromptComposer.BuildMessages()`：组装 Agent/扩展 system sections + 调整后的历史消息。
-- `AiChatClientFactory.CreateForScopeAsync()`：从 `desktop-default` 找模型。
-- `AiChatClientFactory.CreateAsync()`：验证档案/连接、解密、adapter 和 M.E.AI pipeline。
-- `WorkspaceAgentToolset.CreateTools()`：绑定 7 个工作区函数。
-- `DirectTurnCapabilityResolver.ResolveAsync()`：求解本轮 Plugin/Skill/MCP/工作区能力快照与 lease。
-- `ExtensionSettingsBridge.TryHandleAsync()`：处理 `extensions/*` 设置消息族与 revision 推送。
-- `DesktopToolApprovalHandler.RequestApprovalAsync()`：Direct 写操作审批。
-
-### CLI
-
-- `CliAgentChatRuntime.StreamTurnAsync()`：CLI 单回合总编排。
-- `CliAgentAdapterRegistry.Find()`：按 CLI kind 选择 adapter。
-- `ClaudeCliAgentAdapter`：Claude 命令、JSONL 输入、参数 session 规则和 parser。
-- `CodexCliAgentAdapter`：Codex 命令、文本输入、resume 参数和 parser。
-- `OpenCodeCliAgentAdapter`：OpenCode 命令、文本输入、resume 参数和 parser。
-- `ICliAgentSessionStore`：按 conversation × CLI 保存 session id。
-- `CliCommandResolver.Resolve()`：PATH/PATHEXT 和 Windows batch 包装。
-- `CliAgentProcessHost.Start()`：启动重定向子进程。
-- `CliAgentProcessSession`：stdin/stdout/stderr、watchdog、kill-tree、退出分类。
-- `ClaudeStreamJsonParser.ParseLine()`：Claude 流解析。
-- `CodexJsonEventStreamParser.ParseLine()`：Codex 流解析。
-- `OpenCodeJsonEventStreamParser.ParseLine()`：OpenCode 流解析。
+正式回归覆盖真实 AIFunction 封送、四种 provider 协议序列化、执行前 checkpoint、中断恢复、准入异常、多父调度、缓存重试、预算与 glob 边界。桌面/进程强杀 smoke 需要 `SELFCLAW_DESKTOP_SMOKE=1`；真实 provider smoke 需要 `SELFCLAW_PROVIDER_SMOKE=1`。本次未修改 Vue。

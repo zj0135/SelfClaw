@@ -1,3 +1,5 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
+using SelfClaw.Core.Runtime;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services;
@@ -21,7 +23,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
     {
         _rootPath = rootPath ?? Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         _ownsRoot = rootPath is null;
-        Database = new SqliteDatabase(new StoragePaths(_rootPath, Path.Combine(_rootPath, "activity.db"), Path.Combine(_rootPath, "secrets")));
+        Database = new SqliteDatabase(StoragePathDefaults.Create(_rootPath, Path.Combine(_rootPath, "activity.db"), Path.Combine(_rootPath, "secrets")));
         Changes = new SubagentStateChangeNotifier(NullLogger<SubagentStateChangeNotifier>.Instance);
         Conversations = new SqliteConversationRepository(Database);
         Tasks = new SqliteSubagentTaskRepository(Database, new SubagentCompletionEnvelopeFactory(), Changes);
@@ -77,7 +79,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
     }
 
     internal SubagentTaskCoordinator CreateCoordinator()
-        => new(Tasks, new SubagentDefinitionCatalog(StoragePaths.CreateDefault()), new SubagentTaskSnapshotSerializer(),
+        => new(Tasks, new SubagentDefinitionCatalog(StoragePathDefaults.CreateDefault()), new SubagentTaskSnapshotSerializer(),
             new SubagentTaskPreflight(new StubAiModelCatalog(Guid.NewGuid()), new EmptyExtensionPackageRepository(), new EmptyMcpServerRepository()),
             new SubagentTaskWakeSignal(), Executions);
 

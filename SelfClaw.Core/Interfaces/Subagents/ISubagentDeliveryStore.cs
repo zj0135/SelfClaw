@@ -7,7 +7,8 @@ public interface ISubagentDeliveryStore
     Task<SubagentMailboxKey?> PeekReadyMailboxAsync(
         DateTimeOffset readyAtUtc,
         DateTimeOffset createdBeforeUtc,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IReadOnlyCollection<Guid>? excludedParentConversationIds = null);
 
     Task<SubagentDeliveryLease?> TryLeaseBatchAsync(
         SubagentMailboxKey mailbox,
@@ -22,6 +23,11 @@ public interface ISubagentDeliveryStore
         SubagentDeliveryLease lease,
         DateTimeOffset renewedAtUtc,
         DateTimeOffset leasedUntilUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> TryMarkToolExecutionStartedAsync(
+        SubagentDeliveryLease lease,
+        DateTimeOffset startedAtUtc,
         CancellationToken cancellationToken = default);
 
     Task<SubagentDeliveryResolutionResult> TryResolveAsync(

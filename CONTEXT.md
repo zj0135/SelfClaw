@@ -36,6 +36,10 @@ _Avoid_: Agent definition, parent conversation message
 The durable handoff of a completed Subagent Task result to its parent agent. Pending or failed delivery is separate from the child's execution status; it does not make a completed task run again.
 _Avoid_: Child execution, transcript block
 
+**Continuation Execution Checkpoint**:
+A durable record committed under the current Subagent Delivery lease before a tool may execute. It means execution may have begun and prevents automatic replay after interruption; it is independent of transcript publication and does not promise exactly-once external effects.
+_Avoid_: Tool-start display event, completed tool result
+
 **Activity Panel**:
 An independent view of the current parent's tasks and their live or persisted content. Its subscriptions, selected detail, reading position, and acknowledgement flow are separate from the main transcript and composer.
 _Avoid_: Child conversation navigation, parent transcript

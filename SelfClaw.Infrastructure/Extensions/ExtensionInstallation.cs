@@ -16,7 +16,7 @@ internal static class ExtensionInstallation
     {
         ArgumentNullException.ThrowIfNull(package);
         return Directory.Exists(package.InstallPath) &&
-            (package.Kind != ExtensionKind.Skill || File.Exists(SkillManifestPath(package)));
+            File.Exists(package.Kind == ExtensionKind.Skill ? SkillManifestPath(package) : PluginManifestPath(package));
     }
 
     public static string SkillManifestPath(ExtensionPackageRecord package)

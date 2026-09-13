@@ -332,7 +332,7 @@ public sealed class ExtensionPackageInstallerTests : IDisposable
     private async Task<TestContext> CreateContextAsync(ExtensionPackageLimits? limits = null)
     {
         Directory.CreateDirectory(_rootPath);
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

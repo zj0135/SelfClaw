@@ -27,7 +27,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public async Task Dispatcher_routes_direct_mode_to_the_in_process_runtime()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -63,7 +63,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public async Task AddSelfClawInfrastructure_registers_repository_and_runtime_services()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
@@ -78,6 +78,9 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         var extensionSettingsService = provider.GetRequiredService<IExtensionSettingsService>();
         var subagentTaskRepository = provider.GetRequiredService<ISubagentTaskStore>();
         var subagentTaskExecutionStore = provider.GetRequiredService<ISubagentTaskExecutionStore>();
+        var workspaceRoots = provider.GetRequiredService<IWorkspaceRootRepository>();
+        var gitWorkspaces = provider.GetRequiredService<IGitWorkspaceStore>();
+        var preflight = provider.GetRequiredService<ISubagentTaskPreflight>();
         var runtime = provider.GetRequiredService<IAgentChatRuntime>();
         var adapters = provider.GetServices<IAiProviderAdapter>().ToArray();
         var registry = provider.GetRequiredService<AiProviderRegistry>();
@@ -92,6 +95,9 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         modelCatalog.Should().BeSameAs(settingsService);
         subagentTaskRepository.Should().BeOfType<SqliteSubagentTaskRepository>();
         subagentTaskExecutionStore.Should().BeSameAs(subagentTaskRepository);
+        workspaceRoots.Should().BeOfType<SqliteWorkspaceRepository>();
+        gitWorkspaces.Should().BeSameAs(workspaceRoots);
+        preflight.Should().NotBeNull();
         runtime.Should().BeOfType<DispatchingAgentChatRuntime>();
         adapters.Select(adapter => adapter.ProviderKind).Should().BeEquivalentTo(new[]
         {

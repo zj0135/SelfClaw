@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.IO;
+using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Subagents.Models;
 
 namespace SelfClaw.Desktop.Services.Subagents;

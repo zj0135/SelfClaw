@@ -7,18 +7,18 @@ internal sealed class GitMergeService : IGitMergeManager
 {
     private readonly GitCommandRunner _runner;
     private readonly IGitWorkspaceStore _store;
-    private readonly IConversationRepository _conversationRepository;
+    private readonly IWorkspaceRootRepository _workspaceRootRepository;
     private readonly IGitWorkspaceQuery _workspaceQuery;
 
     public GitMergeService(
         GitCommandRunner runner,
         IGitWorkspaceStore store,
-        IConversationRepository conversationRepository,
+        IWorkspaceRootRepository workspaceRootRepository,
         IGitWorkspaceQuery workspaceQuery)
     {
         _runner = runner;
         _store = store;
-        _conversationRepository = conversationRepository;
+        _workspaceRootRepository = workspaceRootRepository;
         _workspaceQuery = workspaceQuery;
     }
 
@@ -45,7 +45,7 @@ internal sealed class GitMergeService : IGitMergeManager
             return new GitMergeResult(false, false, "Commit or discard worktree changes before merging.", managedState);
         }
 
-        var source = (await _conversationRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
+        var source = (await _workspaceRootRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
             .FirstOrDefault(item => item.Id == sourceId)
             ?? throw new InvalidOperationException("The base workspace for this worktree no longer exists.");
         var sourceState = await _workspaceQuery.GetStateAsync(source, cancellationToken).ConfigureAwait(false);
@@ -83,7 +83,7 @@ internal sealed class GitMergeService : IGitMergeManager
             throw new InvalidOperationException("The selected workspace is not a managed Git worktree.");
         }
 
-        var source = (await _conversationRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
+        var source = (await _workspaceRootRepository.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false))
             .FirstOrDefault(item => item.Id == sourceId)
             ?? throw new InvalidOperationException("The base workspace for this worktree no longer exists.");
         var abort = await _runner.RunAsync(source.RootPath, ["merge", "--abort"], cancellationToken).ConfigureAwait(false);

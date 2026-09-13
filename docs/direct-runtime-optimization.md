@@ -1,5 +1,7 @@
 # Direct Runtime Optimization
 
+> 2026-09-13 实现更新：本文保留原设计/阶段记录。当前目录、默认模型准备、工具契约与 continuation 恢复边界见 [运行流程](runtime-execution-flow.md) 和 [Direct 整改结果](direct-agent-architecture-review.md)。
+
 Scope: Direct execution from `ConversationTurnEngine` through capability resolution,
 provider client construction, streaming, persistence, and transcript publication.
 

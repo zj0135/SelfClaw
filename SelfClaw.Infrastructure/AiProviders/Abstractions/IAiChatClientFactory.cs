@@ -4,13 +4,9 @@ namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
 
 public interface IAiChatClientFactory
 {
-    Task<AiChatClientLease> CreateAsync(
-        Guid modelProfileId,
-        AiChatRuntimeInputs inputs,
+    Task<AiProviderClientRequest> PrepareAsync(
+        Guid? modelProfileId,
         CancellationToken cancellationToken = default);
 
-    Task<AiChatClientLease> CreateForScopeAsync(
-        string scope,
-        AiChatRuntimeInputs inputs,
-        CancellationToken cancellationToken = default);
+    AiChatClientLease Create(AiProviderClientRequest preparation, IReadOnlyList<Microsoft.Extensions.AI.AITool> tools);
 }

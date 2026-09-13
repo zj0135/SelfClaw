@@ -16,7 +16,7 @@ public sealed class DpapiSecretProtectorTests : IDisposable
     [Fact]
     public async Task Stored_secret_can_be_retrieved()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

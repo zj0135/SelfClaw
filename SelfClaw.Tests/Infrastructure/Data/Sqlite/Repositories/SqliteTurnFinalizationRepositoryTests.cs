@@ -19,7 +19,7 @@ public sealed class SqliteTurnFinalizationRepositoryTests : IDisposable
     public async Task TryFinalizeTurnAsync_writes_message_and_tools_atomically_and_only_once(
         bool persistStreamingAssistant)
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

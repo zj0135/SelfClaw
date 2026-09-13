@@ -24,7 +24,7 @@ public sealed class PanelPluginFixtureTests : IDisposable
     [Fact]
     public async Task The_demo_panel_package_installs_and_exposes_its_panel()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

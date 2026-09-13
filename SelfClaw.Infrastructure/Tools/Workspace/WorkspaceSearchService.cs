@@ -42,10 +42,10 @@ internal sealed class WorkspaceSearchService
         // Ripgrep is bundled with the app: multi-threaded, honours .gitignore,
         // and beats a hand-rolled managed scan by 1-2 orders of magnitude.
         return await SearchWithRipgrepAsync(
-            _ripgrepPath.Value, root, searchRoot, query, options, maxResults, cancellationToken).ConfigureAwait(false);
+            root, searchRoot, query, options, maxResults, cancellationToken).ConfigureAwait(false);
     }
 
-    public Task<IReadOnlyList<WorkspaceFileEntry>> GlobFilesAsync(
+    public async Task<IReadOnlyList<WorkspaceFileEntry>> GlobFilesAsync(
         string workspaceRootPath,
         string pattern,
         string? relativePath = null,
@@ -65,42 +65,78 @@ internal sealed class WorkspaceSearchService
             throw new DirectoryNotFoundException($"Directory '{relativePath}' was not found.");
         }
 
-        var globMatcher = BuildGlobMatcher(pattern)
-            ?? throw new ArgumentException("A glob pattern is required.", nameof(pattern));
-
-        // Reuse the searchable-file walk (skips build/dependency/hidden dirs),
-        // match against the workspace-relative forward-slash path, and order
-        // by most-recently-modified so the freshest matches surface first —
-        // the ordering mainstream Glob tools use.
-        var matches = new List<(WorkspaceFileEntry Entry, DateTime Modified)>();
-        foreach (var path in WorkspaceFileAccess.EnumerateSearchableFiles(searchRoot))
+        // Glob lists paths independently of .gitignore, including hidden files, but not hidden
+        // or build/dependency directories. Patterns remain anchored to the workspace root.
+        var arguments = new List<string>
         {
+            "--files", "--hidden", "--no-ignore", "--no-messages",
+            "--iglob", "/" + pattern.Replace('\\', '/').TrimStart('/'),
+            "--iglob", "!**/.*/**"
+        };
+        AddDirectoryExclusions(arguments, "--iglob");
+        arguments.AddRange(["--", searchRoot]);
+        using var process = CreateProcess(root, arguments);
+        if (!process.Start()) throw new InvalidOperationException("Failed to start ripgrep.");
+        using var registration = cancellationToken.Register(() => WorkspaceProcess.TryKill(process));
+        var errors = process.StandardError.ReadToEndAsync(cancellationToken);
+        try
+        {
+            var entries = await ReadGlobMatchesAsync(process, root, cancellationToken)
+                .WaitAsync(TimeSpan.FromSeconds(SearchTimeoutSeconds), cancellationToken).ConfigureAwait(false);
+            var error = await errors.ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
+            if (process.ExitCode > 1) throw new InvalidOperationException($"Workspace glob failed: {error.Trim()}");
+            return entries;
+        }
+        finally
+        {
+            WorkspaceProcess.TryKill(process);
+        }
+    }
 
-            var relativeForward = Path.GetRelativePath(root, path).Replace('\\', '/');
-            if (!globMatcher(relativeForward))
-            {
-                continue;
-            }
-
-            var info = new FileInfo(path);
-            matches.Add((
-                new WorkspaceFileEntry(Path.GetRelativePath(root, path), false, info.Length),
-                info.LastWriteTimeUtc));
+    private static async Task<IReadOnlyList<WorkspaceFileEntry>> ReadGlobMatchesAsync(Process process, string root, CancellationToken cancellationToken)
+    {
+        var comparer = Comparer<(DateTime Modified, string Path)>.Create((left, right) =>
+        {
+            var byTime = left.Modified.CompareTo(right.Modified);
+            return byTime != 0 ? byTime : StringComparer.OrdinalIgnoreCase.Compare(right.Path, left.Path);
+        });
+        var latest = new PriorityQueue<WorkspaceFileEntry, (DateTime Modified, string Path)>(comparer);
+        while (await process.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } path)
+        {
+            var fullPath = WorkspaceFileAccess.ResolvePath(root, path);
+            if (HasHiddenDirectory(root, fullPath)) continue;
+            var info = new FileInfo(fullPath);
+            if (!info.Exists) continue;
+            var relative = Path.GetRelativePath(root, fullPath);
+            var priority = (info.LastWriteTimeUtc, relative);
+            if (latest.Count == MaxListedEntries && latest.TryPeek(out _, out var oldest) && comparer.Compare(priority, oldest) <= 0) continue;
+            latest.Enqueue(new WorkspaceFileEntry(relative, false, info.Length), priority);
+            if (latest.Count > MaxListedEntries) latest.Dequeue();
         }
 
-        var entries = matches
-            .OrderByDescending(match => match.Modified)
-            .ThenBy(match => match.Entry.RelativePath, StringComparer.OrdinalIgnoreCase)
-            .Take(MaxListedEntries)
-            .Select(match => match.Entry)
-            .ToArray();
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        return latest.UnorderedItems.OrderByDescending(item => item.Priority.Modified)
+            .ThenBy(item => item.Element.RelativePath, StringComparer.OrdinalIgnoreCase).Select(item => item.Element).ToArray();
+    }
 
-        return Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>(entries);
+    private static bool HasHiddenDirectory(string root, string path)
+    {
+        for (var directory = Path.GetDirectoryName(path); directory is not null &&
+             !string.Equals(directory, root, StringComparison.OrdinalIgnoreCase); directory = Path.GetDirectoryName(directory))
+        {
+            try
+            {
+                if (File.GetAttributes(directory).HasFlag(FileAttributes.Hidden)) return true;
+            }
+            catch (IOException) { return true; }
+            catch (UnauthorizedAccessException) { return true; }
+        }
+
+        return false;
     }
 
     private async Task<IReadOnlyList<WorkspaceSearchHit>> SearchWithRipgrepAsync(
-        string ripgrepPath,
         string root,
         string searchRoot,
         string query,
@@ -135,35 +171,13 @@ internal sealed class WorkspaceSearchService
 
         // Always exclude the build/dependency directories the managed scan skips, in
         // case they are not covered by a .gitignore.
-        foreach (var skipped in WorkspaceFileAccess.SkippedDirectoryNames)
-        {
-            arguments.Add("--glob");
-            arguments.Add($"!**/{skipped}/**");
-        }
+        AddDirectoryExclusions(arguments, "--glob");
 
         arguments.Add("--");
         arguments.Add(query);
         arguments.Add(searchRoot);
 
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = ripgrepPath,
-                WorkingDirectory = root,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            }
-        };
-
-        foreach (var argument in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(argument);
-        }
+        using var process = CreateProcess(root, arguments);
 
         if (!process.Start())
         {
@@ -269,52 +283,28 @@ internal sealed class WorkspaceSearchService
         return null;
     }
 
-    private static Func<string, bool>? BuildGlobMatcher(string? glob)
+    private Process CreateProcess(string root, IEnumerable<string> arguments)
     {
-        if (string.IsNullOrWhiteSpace(glob))
+        var process = new Process
         {
-            return null;
-        }
-
-        var normalized = glob.Replace('\\', '/');
-        var builder = new StringBuilder("^");
-        for (var index = 0; index < normalized.Length; index++)
-        {
-            var current = normalized[index];
-            switch (current)
+            StartInfo = new ProcessStartInfo
             {
-                case '*':
-                    if (index + 1 < normalized.Length && normalized[index + 1] == '*')
-                    {
-                        builder.Append(".*");
-                        index++;
-                        // Swallow a trailing slash after ** so "src/**/x" matches "src/x".
-                        if (index + 1 < normalized.Length && normalized[index + 1] == '/')
-                        {
-                            index++;
-                        }
-                    }
-                    else
-                    {
-                        builder.Append("[^/]*");
-                    }
-
-                    break;
-                case '?':
-                    builder.Append("[^/]");
-                    break;
-                default:
-                    builder.Append(System.Text.RegularExpressions.Regex.Escape(current.ToString()));
-                    break;
+                FileName = _ripgrepPath.Value, WorkingDirectory = root, UseShellExecute = false,
+                RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
             }
-        }
+        };
+        foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
+        return process;
+    }
 
-        builder.Append('$');
-        var regex = new System.Text.RegularExpressions.Regex(
-            builder.ToString(),
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase
-                | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-        return candidate => regex.IsMatch(candidate);
+    private static void AddDirectoryExclusions(List<string> arguments, string globOption)
+    {
+        foreach (var skipped in WorkspaceFileAccess.SkippedDirectoryNames)
+        {
+            arguments.Add(globOption);
+            arguments.Add($"!**/{skipped}/**");
+        }
     }
 
     private static string ResolveBundledRipgrep()

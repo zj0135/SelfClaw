@@ -54,7 +54,7 @@ public sealed class AiModelConfigurationTests : IDisposable
         view.PriceInPerMTok.Should().Be(0.123456m);
 
         var factory = new AiChatClientFactory(restarted, new AiProviderRegistry([new OpenAiProviderAdapter()]), new TestSecretProtector());
-        using var lease = await factory.CreateAsync(newProfile.Id, new AiChatRuntimeInputs(false, []));
+        using var lease = factory.Create(await factory.PrepareAsync(newProfile.Id), []);
         lease.Options.Temperature.Should().Be(0.2f);
         lease.Options.MaxOutputTokens.Should().Be(16000);
         AiChatOptions.ResolveContextWindowTokens(lease.Profile).Should().Be(128000);
@@ -154,7 +154,7 @@ public sealed class AiModelConfigurationTests : IDisposable
     }
 
     private SqliteAiProviderRepository CreateRepository()
-        => new(new SqliteDatabase(new StoragePaths(_root, Path.Combine(_root, "test.db"), Path.Combine(_root, "secrets"))));
+        => new(new SqliteDatabase(StoragePathDefaults.Create(_root, Path.Combine(_root, "test.db"), Path.Combine(_root, "secrets"))));
 
     private static AiProviderSettingsService CreateService(SqliteAiProviderRepository repository)
         => new(repository, new AiProviderRegistry([new OpenAiProviderAdapter()]), new TestSecretProtector(), repository);

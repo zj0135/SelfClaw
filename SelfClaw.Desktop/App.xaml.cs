@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using System.IO;
 using System.Text;
 using System.Windows;
@@ -52,7 +53,7 @@ public partial class App : System.Windows.Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
-        _storagePaths = StoragePaths.CreateDefault();
+        _storagePaths = StoragePathDefaults.CreateDefault();
         ConfigureLogging(_storagePaths);
         RegisterGlobalExceptionHandlers();
 
@@ -78,7 +79,6 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<ConversationTurnRecorder>();
             builder.Services.AddSingleton<SubagentTaskSnapshotSerializer>();
             builder.Services.AddSingleton<SubagentCompletionBatchSerializer>();
-            builder.Services.AddSingleton<SubagentTaskPreflight>();
             builder.Services.AddSingleton<SubagentTaskWakeSignal>();
             builder.Services.AddSingleton<SubagentTaskExecutionRegistry>();
             builder.Services.AddSingleton<SubagentActivityRegistry>();
@@ -157,6 +157,7 @@ public partial class App : System.Windows.Application
             builder.Services.AddSingleton<SystemTrayService>();
             builder.Services.AddSingleton(services => new MainWindowViewModel(
                 services.GetRequiredService<IConversationRepository>(),
+                services.GetRequiredService<IWorkspaceRootRepository>(),
                 services.GetRequiredService<ConversationTurnEngine>(),
                 services.GetRequiredService<ConversationSessionCoordinator>(),
                 services.GetRequiredService<AgentActivityCoordinator>(),

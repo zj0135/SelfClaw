@@ -300,7 +300,7 @@ public sealed class ConversationTurnEngineTests
                 NullLogger<AgentActivityCoordinator>.Instance);
             _sessions = new ConversationSessionCoordinator(repository, new NoOpTranscriptChangeSink());
             var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
-            var settingsStore = new DesktopSettingsJsonStore(new StoragePaths(
+            var settingsStore = new DesktopSettingsJsonStore(StoragePathDefaults.Create(
                 storageRoot,
                 Path.Combine(storageRoot, "selfclaw.db"),
                 Path.Combine(storageRoot, "secrets")));
@@ -320,7 +320,7 @@ public sealed class ConversationTurnEngineTests
                 _activityCoordinator,
                 approvalHandler,
                 new ProgrammingAssistantSettingsService(settingsStore),
-                new SelfClaw.Tests.TestDoubles.StubAiModelCatalog(),
+
                 Notifier,
                 NullLogger<ConversationTurnEngine>.Instance);
         }
@@ -490,14 +490,8 @@ public sealed class ConversationTurnEngineTests
             return Task.FromResult(record);
         }
 
-        public Task<IReadOnlyList<WorkspaceRoot>> ListWorkspaceRootsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<WorkspaceRoot>>([]);
 
-        public Task<WorkspaceRoot> UpsertWorkspaceRootAsync(WorkspaceRoot workspaceRoot, CancellationToken cancellationToken = default)
-            => Task.FromResult(workspaceRoot);
 
-        public Task DeleteWorkspaceRootAsync(Guid workspaceRootId, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
     }
 
     private sealed class RecordingFinalizationRepository : ITurnFinalizationRepository

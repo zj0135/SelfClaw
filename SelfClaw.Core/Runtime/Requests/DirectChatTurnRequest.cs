@@ -1,3 +1,4 @@
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 
 namespace SelfClaw.Core.Runtime;
@@ -17,7 +18,8 @@ public sealed record DirectChatTurnRequest(
     ToolPermissionMode ToolPermissionMode,
     IToolApprovalHandler? ToolApprovalHandler,
     DirectTurnExecutionContext ExecutionContext,
-    IReadOnlyList<ToolExecutionRecord>? ToolExecutions = null)
+    IReadOnlyList<ToolExecutionRecord>? ToolExecutions = null,
+    IToolExecutionCheckpoint? ToolExecutionCheckpoint = null)
     : ChatTurnRequest(TurnId, ConversationId, WorkspaceRoot, Agent, Messages)
 {
     public override AgentExecutionMode Mode => AgentExecutionMode.Direct;

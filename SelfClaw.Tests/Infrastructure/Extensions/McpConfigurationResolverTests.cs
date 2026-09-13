@@ -122,7 +122,7 @@ public sealed class McpConfigurationResolverTests
     }
 
     private static McpConfigurationResolver CreateResolver(ISecretProtector protector)
-        => new(protector, new StoragePaths(
+        => new(protector, StoragePathDefaults.Create(
             "C:\\SelfClawTest",
             "C:\\SelfClawTest\\selfclaw.db",
             "C:\\SelfClawTest\\secrets"));

@@ -195,13 +195,6 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
         _sharedHandlers.Clear();
     }
 
-    private sealed record ClientConfiguration(
-        TimeSpan Timeout,
-        IReadOnlyDictionary<string, string> ExtraHeaders,
-        string Fingerprint);
-
-    private readonly record struct ClientCacheKey(string Fingerprint, bool Streaming);
-
     private sealed class ExtraHeadersHandler : DelegatingHandler
     {
         private readonly IReadOnlyDictionary<string, string> _headers;

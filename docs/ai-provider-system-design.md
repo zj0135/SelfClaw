@@ -1,5 +1,7 @@
 # 多 AI 提供商后端架构设计（Direct 模式重写基座）
 
+> 2026-09-13 实现更新：本文保留原设计/阶段记录。当前目录、默认模型准备、工具契约与 continuation 恢复边界见 [运行流程](runtime-execution-flow.md) 和 [Direct 整改结果](direct-agent-architecture-review.md)。
+
 > 状态：设计稿 v2（2026-07-14），主体已于 2026-07-15 实施；结果与剩余限制见 §14。
 > 前提：旧 Direct 后端（`ProviderProfile`/`ApiStyle`/`SqliteProfileRepository` 及相关链路）已废弃，不把旧 profile 配置转换为新 provider/model 配置。v21 仅执行必要的 schema 清理迁移，并完整保留 conversation 及其依赖数据。本设计是全新 Direct 模式的地基，同时为设置页 `AIProviders.vue` 提供真实后端。
 >

@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
@@ -210,7 +211,7 @@ public sealed class AgentSettingsBridgeTests : IDisposable
         => new(CreateStoragePaths());
 
     private StoragePaths CreateStoragePaths()
-        => new(
+        => StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

@@ -23,6 +23,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     private static readonly TimeSpan ConversationDeleteStopTimeout = TimeSpan.FromSeconds(8);
     private readonly IConversationRepository _conversationRepository;
+    private readonly IWorkspaceRootRepository _workspaceRootRepository;
     private readonly ConversationTurnEngine _turnEngine;
     private readonly ConversationSessionCoordinator _conversationSessions;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
@@ -54,6 +55,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     internal MainWindowViewModel(
         IConversationRepository conversationRepository,
+        IWorkspaceRootRepository workspaceRootRepository,
         ConversationTurnEngine turnEngine,
         ConversationSessionCoordinator conversationSessions,
         AgentActivityCoordinator agentActivityCoordinator,
@@ -67,6 +69,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         IGitWorkspaceStore? gitWorkspaceStore = null)
     {
         _conversationRepository = conversationRepository;
+        _workspaceRootRepository = workspaceRootRepository;
         _turnEngine = turnEngine;
         _conversationSessions = conversationSessions;
         _agentActivityCoordinator = agentActivityCoordinator;
@@ -366,7 +369,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
             return;
         }
 
-        await _conversationRepository.DeleteWorkspaceRootAsync(workspaceRootId);
+        await _workspaceRootRepository.DeleteWorkspaceRootAsync(workspaceRootId);
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
     }
@@ -435,7 +438,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
                 normalizedPath,
                 now,
                 now);
-            await _conversationRepository.UpsertWorkspaceRootAsync(existing);
+            await _workspaceRootRepository.UpsertWorkspaceRootAsync(existing);
             await ReloadWorkspaceRootsAsync();
             existing = _workspaceRoots.FirstOrDefault(root => WorkspacePathsEqual(root.RootPath, normalizedPath)) ?? existing;
         }
@@ -484,7 +487,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     private async Task ReloadWorkspaceRootsAsync()
     {
         var selectedId = _selectedWorkspaceRoot?.Id;
-        var workspaceRoots = await _conversationRepository.ListWorkspaceRootsAsync();
+        var workspaceRoots = await _workspaceRootRepository.ListWorkspaceRootsAsync();
         if (_gitWorkspaceQuery is not null)
         {
             foreach (var workspaceRoot in workspaceRoots)
@@ -492,7 +495,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
                 await _gitWorkspaceQuery.GetStateAsync(workspaceRoot).ConfigureAwait(false);
             }
 
-            workspaceRoots = await _conversationRepository.ListWorkspaceRootsAsync().ConfigureAwait(false);
+            workspaceRoots = await _workspaceRootRepository.ListWorkspaceRootsAsync().ConfigureAwait(false);
         }
 
         ReplaceList(_workspaceRoots, workspaceRoots);
@@ -689,7 +692,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         try
         {
             await _gitWorkspaceManager.RemoveManagedWorktreeAsync(workspaceRoot).ConfigureAwait(false);
-            await _conversationRepository.DeleteWorkspaceRootAsync(workspaceRoot.Id).ConfigureAwait(false);
+            await _workspaceRootRepository.DeleteWorkspaceRootAsync(workspaceRoot.Id).ConfigureAwait(false);
         }
         catch (Exception cleanupException)
         {
@@ -716,7 +719,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
             if (root is not null && _gitWorkspaceManager is not null)
             {
                 await _gitWorkspaceManager.RemoveManagedWorktreeAsync(root).ConfigureAwait(false);
-                await _conversationRepository.DeleteWorkspaceRootAsync(root.Id).ConfigureAwait(false);
+                await _workspaceRootRepository.DeleteWorkspaceRootAsync(root.Id).ConfigureAwait(false);
             }
 
             return;

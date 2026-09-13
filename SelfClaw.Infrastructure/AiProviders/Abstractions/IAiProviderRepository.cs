@@ -1,7 +1,7 @@
 using SelfClaw.Infrastructure.AiProviders.Models;
 namespace SelfClaw.Infrastructure.AiProviders.Abstractions;
 
-public interface IAiProviderRepository
+internal interface IAiProviderRepository
 {
     Task InitializeAsync(CancellationToken cancellationToken = default);
 

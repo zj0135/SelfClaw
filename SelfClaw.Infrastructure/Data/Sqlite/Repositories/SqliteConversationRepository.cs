@@ -91,16 +91,16 @@ ON CONFLICT(id) DO UPDATE SET
 
     public async Task DeleteConversationAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM conversations WHERE id = $id;";
         command.Parameters.AddWithValue("$id", conversationId.ToString("D"));
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<MessageRecord>> ListMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 SELECT id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc, agent_id, agent_name, agent_role, input_tokens, output_tokens, duration_ms, error_message
@@ -110,8 +110,8 @@ ORDER BY created_at_utc ASC;";
         command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
 
         var results = new List<MessageRecord>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             results.Add(SqliteMappings.ReadMessage(reader));
         }
@@ -124,11 +124,11 @@ ORDER BY created_at_utc ASC;";
         var attachmentsByMessageId = await ReadMessageAttachmentsAsync(
             connection,
             results.Select(item => item.Id).ToArray(),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         var segmentsByMessageId = await ReadMessageSegmentsAsync(
             connection,
             results.Select(item => item.Id).ToArray(),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         return results
             .Select(message => message with
@@ -195,8 +195,8 @@ ORDER BY message_id, ordinal ASC;";
         }
 
         var results = new Dictionary<Guid, List<MessageSegmentRecord>>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             var segment = new MessageSegmentRecord(
                 Guid.Parse(reader.GetString(0)),
@@ -227,7 +227,7 @@ ORDER BY message_id, ordinal ASC;";
         {
             deleteCommand.CommandText = "DELETE FROM message_segments WHERE message_id = $messageId;";
             deleteCommand.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
-            await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+            await deleteCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
         if (message.Segments is not { Count: > 0 } segments)
@@ -248,7 +248,7 @@ VALUES($messageId, $ordinal, $kind, $text, $toolRunId);";
             insertCommand.Parameters.AddWithValue("$toolRunId", segment.ToolRunId.HasValue
                 ? segment.ToolRunId.Value.ToString("D")
                 : DBNull.Value);
-            await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+            await insertCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -278,8 +278,8 @@ ORDER BY created_at_utc ASC;";
         }
 
         var results = new Dictionary<Guid, List<MessageAttachmentRecord>>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             var attachment = SqliteMappings.ReadMessageAttachment(reader);
             if (!results.TryGetValue(attachment.MessageId, out var attachments))
@@ -305,7 +305,7 @@ ORDER BY created_at_utc ASC;";
         {
             deleteCommand.CommandText = "DELETE FROM message_attachments WHERE message_id = $messageId;";
             deleteCommand.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
-            await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+            await deleteCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
         if (message.Attachments is not { Count: > 0 } attachments)
@@ -327,13 +327,13 @@ VALUES($id, $messageId, $kind, $fileName, $mediaType, $storagePath, $byteLength,
             insertCommand.Parameters.AddWithValue("$storagePath", attachment.StoragePath);
             insertCommand.Parameters.AddWithValue("$byteLength", attachment.ByteLength);
             insertCommand.Parameters.AddWithValue("$createdAt", attachment.CreatedAtUtc.ToString("O"));
-            await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+            await insertCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
     public async Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
 SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name
@@ -343,8 +343,8 @@ ORDER BY created_at_utc ASC;";
         command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
 
         var results = new List<ToolExecutionRecord>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             results.Add(SqliteMappings.ReadToolRun(reader));
         }
@@ -387,58 +387,6 @@ ORDER BY created_at_utc ASC;";
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return true;
-    }
-
-    public async Task<IReadOnlyList<WorkspaceRoot>> ListWorkspaceRootsAsync(CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
-SELECT w.id, w.name, w.root_path, w.created_at_utc, w.updated_at_utc,
-       c.repository_id, r.name, c.branch_name, c.is_managed,
-       c.owner_conversation_id, c.base_branch_name
-FROM workspace_roots AS w
-LEFT JOIN git_checkouts AS c ON c.workspace_root_id = w.id
-LEFT JOIN git_repositories AS r ON r.id = c.repository_id
-ORDER BY w.updated_at_utc DESC;";
-
-        var results = new List<WorkspaceRoot>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            results.Add(SqliteMappings.ReadWorkspaceRoot(reader));
-        }
-
-        return results;
-    }
-
-    public async Task<WorkspaceRoot> UpsertWorkspaceRootAsync(WorkspaceRoot workspaceRoot, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
-INSERT INTO workspace_roots(id, name, root_path, created_at_utc, updated_at_utc)
-VALUES($id, $name, $rootPath, $createdAt, $updatedAt)
-ON CONFLICT(id) DO UPDATE SET
-    name = excluded.name,
-    root_path = excluded.root_path,
-    updated_at_utc = excluded.updated_at_utc;";
-        command.Parameters.AddWithValue("$id", workspaceRoot.Id.ToString("D"));
-        command.Parameters.AddWithValue("$name", workspaceRoot.Name);
-        command.Parameters.AddWithValue("$rootPath", workspaceRoot.RootPath);
-        command.Parameters.AddWithValue("$createdAt", workspaceRoot.CreatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$updatedAt", workspaceRoot.UpdatedAtUtc.ToString("O"));
-        await command.ExecuteNonQueryAsync(cancellationToken);
-        return workspaceRoot;
-    }
-
-    public async Task DeleteWorkspaceRootAsync(Guid workspaceRootId, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM workspace_roots WHERE id = $id;";
-        command.Parameters.AddWithValue("$id", workspaceRootId.ToString("D"));
-        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<List<ConversationRecord>> ReadConversationsAsync(

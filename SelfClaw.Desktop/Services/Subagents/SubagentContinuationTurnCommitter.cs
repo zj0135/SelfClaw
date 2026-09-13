@@ -4,7 +4,7 @@ using SelfClaw.Desktop.Services.Runtime;
 
 namespace SelfClaw.Desktop.Services.Subagents;
 
-internal sealed class SubagentContinuationTurnCommitter : IRecordedTurnCommitter
+internal sealed class SubagentContinuationTurnCommitter : IRecordedTurnCommitter, IToolExecutionCheckpoint
 {
     private readonly ISubagentDeliveryStore _deliveryStore;
     private readonly SubagentDeliveryLease _lease;
@@ -21,15 +21,25 @@ internal sealed class SubagentContinuationTurnCommitter : IRecordedTurnCommitter
     }
 
     internal SubagentContinuationDisposition Disposition { get; private set; }
+    internal bool ToolsMayHaveExecuted { get; private set; }
+
+    public async Task BeforeExecutionAsync(CancellationToken cancellationToken)
+    {
+        if (!await _deliveryStore.TryMarkToolExecutionStartedAsync(_lease, _timeProvider.GetUtcNow(), cancellationToken))
+        {
+            throw new InvalidOperationException("The continuation no longer owns its delivery lease; tool execution was blocked.");
+        }
+
+        ToolsMayHaveExecuted = true;
+    }
 
     public async Task<bool> TryCommitAsync(RecordedTurnCommit commit)
     {
         ArgumentNullException.ThrowIfNull(commit);
-        var hasToolCalls = commit.Finalization.ToolExecutions.Count > 0;
         var resolutionKind = commit.Kind switch
         {
             TurnFinalizationKind.Succeeded => SubagentDeliveryResolutionKind.Succeeded,
-            _ when hasToolCalls => SubagentDeliveryResolutionKind.UnsafeFailure,
+            _ when ToolsMayHaveExecuted => SubagentDeliveryResolutionKind.UnsafeFailure,
             _ => SubagentDeliveryResolutionKind.RetryableFailure
         };
         var persistsFinalization = resolutionKind is SubagentDeliveryResolutionKind.Succeeded

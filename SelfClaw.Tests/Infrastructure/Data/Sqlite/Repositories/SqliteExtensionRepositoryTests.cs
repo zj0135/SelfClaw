@@ -227,7 +227,7 @@ VALUES($toolRunId, $conversationId, 'read_file', '{}', 2, $createdAt, $createdAt
 
         await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
         await verification.OpenAsync();
-        (await ExecuteScalarAsync<long>(verification, "SELECT MAX(version) FROM schema_versions;")).Should().Be(26);
+        (await ExecuteScalarAsync<long>(verification, "SELECT MAX(version) FROM schema_versions;")).Should().Be(27);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM conversations;")).Should().Be(1);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM messages;")).Should().Be(1);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM tool_runs;")).Should().Be(1);
@@ -264,7 +264,7 @@ VALUES($toolRunId, $conversationId, 'read_file', '{}', 2, $createdAt, $createdAt
         => new(new SqliteDatabase(CreateStoragePaths()));
 
     private StoragePaths CreateStoragePaths()
-        => new(
+        => StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

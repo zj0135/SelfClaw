@@ -9,9 +9,11 @@ namespace SelfClaw.Desktop.Services.Subagents;
 internal sealed class SubagentDeliveryDispatcher : BackgroundService
 {
     private const int MaximumConcurrentContinuations = 4;
+    private const int MaximumCandidatesPerScan = 32;
     private static readonly TimeSpan ScanInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan CoalescingWindow = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan RecoveryInterval = TimeSpan.FromSeconds(15);
 
     private readonly ISubagentDeliveryStore _deliveryStore;
     private readonly IConversationRepository _conversationRepository;
@@ -21,6 +23,8 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SubagentDeliveryDispatcher> _logger;
     private readonly HashSet<Task> _runningContinuations = [];
+    private readonly HashSet<Guid> _skippedParents = [];
+    private DateTimeOffset _nextRecoveryAtUtc;
 
     public SubagentDeliveryDispatcher(
         ISubagentDeliveryStore deliveryStore,
@@ -62,15 +66,31 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
     {
         try
         {
-            await RecoverExpiredLeasesAsync(stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
                 RemoveCompletedContinuations();
                 var claimed = false;
-                while (_runningContinuations.Count < MaximumConcurrentContinuations &&
-                       await TryStartContinuationAsync(stoppingToken))
+                try
                 {
-                    claimed = true;
+                    var now = _timeProvider.GetUtcNow();
+                    if (now >= _nextRecoveryAtUtc)
+                    {
+                        await RecoverExpiredLeasesAsync(stoppingToken);
+                        _nextRecoveryAtUtc = now + RecoveryInterval;
+                    }
+                    while (_runningContinuations.Count < MaximumConcurrentContinuations &&
+                           await TryStartContinuationAsync(stoppingToken))
+                    {
+                        claimed = true;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogError(exception, "Subagent delivery scan failed; the next scan will retry.");
                 }
 
                 if (!claimed)
@@ -105,58 +125,100 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
         }
     }
 
-    private async Task<bool> TryStartContinuationAsync(CancellationToken cancellationToken)
+    internal async Task<bool> TryStartContinuationAsync(CancellationToken cancellationToken)
     {
-        var now = _timeProvider.GetUtcNow();
-        var mailbox = await _deliveryStore.PeekReadyMailboxAsync(
-            now,
-            now - CoalescingWindow,
-            cancellationToken);
-        if (mailbox is null)
+        var excluded = _turnEngine.GetUnavailableContinuationParents().ToHashSet();
+        excluded.UnionWith(_skippedParents);
+        for (var candidate = 0; candidate < MaximumCandidatesPerScan; candidate++)
         {
-            return false;
+            var now = _timeProvider.GetUtcNow();
+            var mailbox = await _deliveryStore.PeekReadyMailboxAsync(now, now - CoalescingWindow, cancellationToken, excluded);
+            if (mailbox is null)
+            {
+                _skippedParents.Clear();
+                return false;
+            }
+            excluded.Add(mailbox.ParentConversationId);
+            _skippedParents.Add(mailbox.ParentConversationId);
+            try
+            {
+                var parent = await _conversationRepository.GetConversationAsync(mailbox.ParentConversationId, cancellationToken);
+                if (parent is not { Kind: ConversationKind.Interactive }) continue;
+                var runtimeState = await _turnEngine.TryAdmitContinuationAsync(parent, cancellationToken);
+                if (runtimeState is null) continue;
+                if (await StartAdmittedContinuationAsync(parent, runtimeState, mailbox, cancellationToken))
+                {
+                    _skippedParents.Remove(parent.Id);
+                    return true;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "Failed to start a continuation for parent {ParentConversationId}; scanning other parents.",
+                    mailbox.ParentConversationId);
+            }
         }
 
-        var parent = await _conversationRepository.GetConversationAsync(
-            mailbox.ParentConversationId,
-            cancellationToken);
-        if (parent is null || parent.Kind != ConversationKind.Interactive)
-        {
-            return false;
-        }
+        return false;
+    }
 
-        var runtimeState = await _turnEngine.TryAdmitContinuationAsync(parent, cancellationToken);
-        if (runtimeState is null)
+    private async Task<bool> StartAdmittedContinuationAsync(ConversationRecord parent, ConversationRuntimeState runtimeState,
+        SubagentMailboxKey mailbox, CancellationToken cancellationToken)
+    {
+        SubagentDeliveryLease? lease = null;
+        var handedOff = false;
+        try
         {
-            return false;
-        }
+            var now = _timeProvider.GetUtcNow();
+            lease = await _deliveryStore.TryLeaseBatchAsync(
+                mailbox,
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                now,
+                now + LeaseDuration,
+                SubagentCompletionBatchSerializer.MaximumBatchBytes,
+                cancellationToken);
+            if (lease is null)
+            {
+                return false;
+            }
 
-        var lease = await _deliveryStore.TryLeaseBatchAsync(
-            mailbox,
-            Guid.NewGuid(),
-            Guid.NewGuid(),
-            now,
-            now + LeaseDuration,
-            SubagentCompletionBatchSerializer.MaximumBatchBytes,
-            cancellationToken);
-        if (lease is null)
-        {
-            await _turnEngine.CompleteContinuationAsync(
-                runtimeState,
-                publishPersistedTurn: false,
-                CancellationToken.None);
+            cancellationToken.ThrowIfCancellationRequested();
+            _logger.LogInformation(
+                "Subagent continuation leased. ParentConversationId={ParentConversationId} ParentTurnId={ParentTurnId} ContinuationTurnId={ContinuationTurnId} DeliveryCount={DeliveryCount} Attempt={Attempt}",
+                lease.ParentConversationId,
+                lease.ParentTurnId,
+                lease.ContinuationTurnId,
+                lease.Deliveries.Count,
+                lease.Deliveries.Max(delivery => delivery.AttemptCount));
+            _runningContinuations.Add(RunContinuationAsync(parent, runtimeState, lease, cancellationToken));
+            handedOff = true;
             return true;
         }
-
-        _logger.LogInformation(
-            "Subagent continuation leased. ParentConversationId={ParentConversationId} ParentTurnId={ParentTurnId} ContinuationTurnId={ContinuationTurnId} DeliveryCount={DeliveryCount} Attempt={Attempt}",
-            lease.ParentConversationId,
-            lease.ParentTurnId,
-            lease.ContinuationTurnId,
-            lease.Deliveries.Count,
-            lease.Deliveries.Max(delivery => delivery.AttemptCount));
-        _runningContinuations.Add(RunContinuationAsync(parent, runtimeState, lease, cancellationToken));
-        return true;
+        finally
+        {
+            if (!handedOff)
+            {
+                try
+                {
+                    if (lease is not null)
+                    {
+                        await _deliveryStore.TryResolveAsync(lease,
+                            new SubagentDeliveryResolution(SubagentDeliveryResolutionKind.RetryableFailure,
+                                null, "Continuation execution was not started.", _timeProvider.GetUtcNow()),
+                            CancellationToken.None);
+                    }
+                }
+                finally
+                {
+                    await _turnEngine.CompleteContinuationAsync(runtimeState, false, CancellationToken.None);
+                }
+            }
+        }
     }
 
     private async Task RunContinuationAsync(
@@ -169,6 +231,9 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
         {
             await _executor.ExecuteAsync(parent, runtimeState, lease, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
         catch (Exception exception)
         {
             _logger.LogError(
@@ -176,20 +241,6 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
                 "Subagent continuation worker escaped its terminal handling. ParentConversationId={ParentConversationId} ContinuationTurnId={ContinuationTurnId}",
                 lease.ParentConversationId,
                 lease.ContinuationTurnId);
-            try
-            {
-                await _turnEngine.CompleteContinuationAsync(
-                    runtimeState,
-                    publishPersistedTurn: false,
-                    CancellationToken.None);
-            }
-            catch (Exception completionException)
-            {
-                _logger.LogError(
-                    completionException,
-                    "Failed to abandon the escaped Subagent continuation state. ParentConversationId={ParentConversationId}",
-                    lease.ParentConversationId);
-            }
         }
     }
 

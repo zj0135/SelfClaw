@@ -26,7 +26,7 @@ public sealed class MainWindowViewModelSubmissionTests
         var repository = new ControlledConversationRepository(conversation);
         var runtime = new BlockingAgentChatRuntime();
         var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             storageRoot,
             Path.Combine(storageRoot, "selfclaw.db"),
             Path.Combine(storageRoot, "secrets"));
@@ -60,10 +60,11 @@ public sealed class MainWindowViewModelSubmissionTests
                 activityCoordinator,
                 toolApprovalHandler,
                 new ProgrammingAssistantSettingsService(settingsStore),
-                new SelfClaw.Tests.TestDoubles.StubAiModelCatalog(),
+
                 new ConversationCompletionNotifier(notificationService),
                 NullLogger<ConversationTurnEngine>.Instance);
             var vm = new MainWindowViewModel(
+                repository,
                 repository,
                 turnEngine,
                 sessions,
@@ -139,7 +140,7 @@ public sealed class MainWindowViewModelSubmissionTests
         }
     }
 
-    private sealed class ControlledConversationRepository : IConversationRepository
+    private sealed class ControlledConversationRepository : IConversationRepository, IWorkspaceRootRepository
     {
         private readonly ConversationRecord _conversation;
         private readonly TaskCompletionSource<IReadOnlyList<MessageRecord>> _messagesSource =

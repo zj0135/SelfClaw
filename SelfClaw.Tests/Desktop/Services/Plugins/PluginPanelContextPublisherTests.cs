@@ -198,7 +198,7 @@ public sealed class PluginPanelContextPublisherTests : IDisposable
         public static async Task<TestContext> CreateAsync(string rootPath, Dispatcher dispatcher)
         {
             Directory.CreateDirectory(rootPath);
-            var storagePaths = new StoragePaths(
+            var storagePaths = StoragePathDefaults.Create(
                 rootPath,
                 Path.Combine(rootPath, "selfclaw.db"),
                 Path.Combine(rootPath, "secrets"));

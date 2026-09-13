@@ -10,6 +10,7 @@ internal sealed class ControlledSubagentRuntime : IAgentChatRuntime
 {
     private readonly Channel<(AgentStreamEvent Event, TaskCompletionSource Applied)> _events = Channel.CreateUnbounded<(AgentStreamEvent, TaskCompletionSource)>();
     internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal ChatTurnRequest? Request { get; private set; }
 
     internal async Task EmitAsync(AgentStreamEvent streamEvent)
     {
@@ -21,6 +22,7 @@ internal sealed class ControlledSubagentRuntime : IAgentChatRuntime
     public async IAsyncEnumerable<AgentStreamEvent> StreamTurnAsync(ChatTurnRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        Request = request;
         Started.TrySetResult();
         await foreach (var item in _events.Reader.ReadAllAsync(cancellationToken))
         {

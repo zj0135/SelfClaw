@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SelfClaw.Core.Interfaces;

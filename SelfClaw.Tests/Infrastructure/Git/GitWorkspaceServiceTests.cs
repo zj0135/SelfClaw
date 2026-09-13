@@ -17,7 +17,7 @@ public sealed class GitWorkspaceServiceTests
         var testRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         var repositoryPath = Path.Combine(testRoot, "repo");
         Directory.CreateDirectory(repositoryPath);
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             Path.Combine(testRoot, "appdata"),
             Path.Combine(testRoot, "appdata", "selfclaw.db"),
             Path.Combine(testRoot, "appdata", "secrets"));
@@ -37,12 +37,11 @@ public sealed class GitWorkspaceServiceTests
             await conversations.InitializeAsync();
             var now = DateTimeOffset.UtcNow;
             var sourceWorkspace = new WorkspaceRoot(Guid.NewGuid(), "repo", repositoryPath, now, now);
-            await conversations.UpsertWorkspaceRootAsync(sourceWorkspace);
-
-            var store = new SqliteGitWorkspaceRepository(database);
+            var store = new SqliteWorkspaceRepository(database);
+            await store.UpsertWorkspaceRootAsync(sourceWorkspace);
             var runner = new GitCommandRunner();
-            var service = new GitWorkspaceService(runner, store, conversations, storagePaths);
-            var mergeService = new GitMergeService(runner, store, conversations, service);
+            var service = new GitWorkspaceService(runner, store, store, storagePaths);
+            var mergeService = new GitMergeService(runner, store, store, service);
 
             var sourceState = await service.GetStateAsync(sourceWorkspace);
             sourceState.IsRepository.Should().BeTrue();
@@ -85,7 +84,7 @@ public sealed class GitWorkspaceServiceTests
         var testRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         var repositoryPath = Path.Combine(testRoot, "repo");
         Directory.CreateDirectory(repositoryPath);
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             Path.Combine(testRoot, "appdata"),
             Path.Combine(testRoot, "appdata", "selfclaw.db"),
             Path.Combine(testRoot, "appdata", "secrets"));
@@ -104,9 +103,9 @@ public sealed class GitWorkspaceServiceTests
             await conversations.InitializeAsync();
             var now = DateTimeOffset.UtcNow;
             var sourceWorkspace = new WorkspaceRoot(Guid.NewGuid(), "repo", repositoryPath, now, now);
-            await conversations.UpsertWorkspaceRootAsync(sourceWorkspace);
-            var store = new SqliteGitWorkspaceRepository(database);
-            var service = new GitWorkspaceService(new GitCommandRunner(), store, conversations, storagePaths);
+            var store = new SqliteWorkspaceRepository(database);
+            await store.UpsertWorkspaceRootAsync(sourceWorkspace);
+            var service = new GitWorkspaceService(new GitCommandRunner(), store, store, storagePaths);
             await service.GetStateAsync(sourceWorkspace);
 
             var creation = await service.CreateManagedWorktreeAsync(sourceWorkspace, Guid.NewGuid(), "Dirty change");

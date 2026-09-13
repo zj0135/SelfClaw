@@ -10,11 +10,65 @@ using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.AiProviders.Ollama;
 using SelfClaw.Infrastructure.AiProviders.OpenAi;
+using SelfClaw.Infrastructure.Agents.Direct.Tools;
 
 namespace SelfClaw.Tests.Infrastructure.AiProviders;
 
 public sealed class AiModelConfigurationRequestTests
 {
+    [Theory]
+    [InlineData(AiProviderApiFormat.OpenAIChatCompletions)]
+    [InlineData(AiProviderApiFormat.OpenAIResponses)]
+    [InlineData(AiProviderApiFormat.AnthropicMessages)]
+    [InlineData(AiProviderApiFormat.OllamaNative)]
+    public async Task Provider_serialization_preserves_the_bounded_tool_contract_without_display_duplication(AiProviderApiFormat format)
+    {
+        var handler = new RecordingHandler(ResponseFor(format));
+        using var http = new AiProviderHttpClientProvider(() => handler);
+        IAiProviderAdapter adapter = format switch
+        {
+            AiProviderApiFormat.AnthropicMessages => new AnthropicProviderAdapter(httpClientProvider: http),
+            AiProviderApiFormat.OllamaNative => new OllamaProviderAdapter(http),
+            _ => new OpenAiProviderAdapter(httpClientProvider: http)
+        };
+        var request = CreateRequest(adapter.ProviderKind, format, null);
+        var result = McpToolResultFormatter.Format(JsonSerializer.SerializeToElement(new
+        {
+            content = new[] { new { type = "text", text = new string('"', 70_000) } }, isError = true
+        })) with { Detail = "DISPLAY ONLY SENTINEL" };
+        using var client = adapter.CreateChatClient(request);
+        await client.GetResponseAsync(
+        [
+            new ChatMessage(ChatRole.User, "look up"),
+            new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call-1", "lookup", new Dictionary<string, object?>())]),
+            new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-1", result)])
+        ], adapter.CreateChatOptions(request));
+
+        var payload = ReadStrings(handler.Body).Single(text => text.Contains("[SelfClaw truncated"));
+        payload.Should().NotContain("DISPLAY ONLY SENTINEL");
+        Encoding.UTF8.GetByteCount(payload).Should().BeLessThanOrEqualTo(McpToolResultFormatter.MaximumModelResultBytes);
+        using var document = JsonDocument.Parse(payload);
+        document.RootElement.ToString().Should().Contain("Failed");
+    }
+
+    private static IEnumerable<string> ReadStrings(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            yield return element.GetString() ?? string.Empty;
+        }
+        else if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+                foreach (var text in ReadStrings(property.Value)) yield return text;
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+                foreach (var text in ReadStrings(item)) yield return text;
+        }
+    }
+
     [Fact]
     public async Task Anthropic_streaming_preserves_thinking_and_text_with_shared_options()
     {

@@ -297,7 +297,7 @@ public sealed class TranscriptProjectionTests
         var tool = new ToolExecutionRecord(toolId, conversationId, "read_file", "{}", ToolExecutionStatus.Completed,
             "Read file", "call-1", 50, now, now, MessageId: messageId, ResultContent: "recorded content");
         var root = Path.Combine(Path.GetTempPath(), "SelfClawProjectionTests");
-        var detailProjector = new TranscriptMessageProjector(new StoragePaths(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets")));
+        var detailProjector = new TranscriptMessageProjector(StoragePathDefaults.Create(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets")));
         var main = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: [tool]))
             ?? throw new InvalidOperationException("Missing main projection.");
         var detail = detailProjector.Build(message, [tool]);
@@ -340,7 +340,7 @@ public sealed class TranscriptProjectionTests
     {
         var root = Path.Combine(Path.GetTempPath(), "SelfClawProjectionTests");
         return new TranscriptProjection(
-            new StoragePaths(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets")));
+            StoragePathDefaults.Create(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets")));
     }
 
     private static TranscriptProjectionRequest CreateRequest(

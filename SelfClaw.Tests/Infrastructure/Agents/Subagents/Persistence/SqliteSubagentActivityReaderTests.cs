@@ -22,7 +22,7 @@ public sealed class SqliteSubagentActivityReaderTests : IDisposable
 
     public SqliteSubagentActivityReaderTests()
     {
-        _database = new SqliteDatabase(new StoragePaths(_rootPath, Path.Combine(_rootPath, "activity.db"), Path.Combine(_rootPath, "secrets")));
+        _database = new SqliteDatabase(StoragePathDefaults.Create(_rootPath, Path.Combine(_rootPath, "activity.db"), Path.Combine(_rootPath, "secrets")));
         _conversations = new SqliteConversationRepository(_database);
         _tasks = new SqliteSubagentTaskRepository(_database, new SubagentCompletionEnvelopeFactory());
         _reader = new SqliteSubagentActivityReader(_database);

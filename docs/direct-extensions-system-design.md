@@ -1,5 +1,7 @@
 # Direct 模式 Plugins / MCP / Skills 全栈接入设计
 
+> 2026-09-13 实现更新：本文保留原设计/阶段记录。当前目录、默认模型准备、工具契约与 continuation 恢复边界见 [运行流程](runtime-execution-flow.md) 和 [Direct 整改结果](direct-agent-architecture-review.md)。
+
 > 状态：设计稿 v1.1（2026-07-26；v1.1 按当前代码逐链路核对后补充事实修正与缺口：现状行为 §1.2–§1.4、ToolPolicy §5.4、权限确认持久化 §6.2、跨回合与 token 规则 §8.4、stdio 环境事实修正 §9.1、结果映射 §9.5、审批载体 §9.4、投影链 §10.2、桥接推送与超时 §11.2、DI 接线 §15）
 >
 > 基线：以 `docs/runtime-execution-flow.md` 和当前仓库代码为准。本设计只扩展 **Direct** 执行模式；CLI 继续由各 CLI 自身管理插件、MCP、Skill 与权限。

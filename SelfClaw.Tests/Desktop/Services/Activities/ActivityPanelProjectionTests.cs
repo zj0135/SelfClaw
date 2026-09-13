@@ -35,7 +35,7 @@ public sealed class ActivityPanelProjectionTests
         }).ToArray();
         page = page with { Activities = manyTasks };
         var query = new ActivityPanelQuery(Guid.NewGuid(), task.ParentConversationId, 1, DetailSelectionId: Guid.NewGuid(), TaskId: task.Id);
-        var projection = new ActivityPanelProjection(StoragePaths.CreateDefault());
+        var projection = new ActivityPanelProjection(StoragePathDefaults.CreateDefault());
         var state = projection.Build(query, page, snapshot, false) with { RequestId = new string('r', 128), Revision = long.MaxValue };
         var bytes = WebViewHostChannel.SerializeToUtf8Bytes(state);
         bytes.Length.Should().BeLessThanOrEqualTo(256 * 1024);
@@ -80,7 +80,7 @@ public sealed class ActivityPanelProjectionTests
         var tool = new ToolExecutionRecord(Guid.NewGuid(), task.ChildConversationId, "read_file", "{}",
             ToolExecutionStatus.Completed, "recorded", null, 3, task.QueuedAtUtc, task.QueuedAtUtc, MessageId: message.Id);
         var detail = SubagentActivityContent.Create(SubagentTaskStatus.Interrupted, "task", message, [tool]);
-        var projection = new ActivityPanelProjection(StoragePaths.CreateDefault());
+        var projection = new ActivityPanelProjection(StoragePathDefaults.CreateDefault());
         var result = projection.Build(new ActivityPanelQuery(Guid.NewGuid(), task.ParentConversationId, 1), page,
             new SubagentActivitySnapshot(metadata, detail, "persisted"), false).Sections[0].Detail;
         result?.HistoryCompleteness.Should().Be("partial");

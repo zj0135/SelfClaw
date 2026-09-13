@@ -580,7 +580,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
 
     private async Task<TestContext> CreateContextAsync()
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));

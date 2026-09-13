@@ -6,7 +6,7 @@ namespace SelfClaw.Infrastructure.Tools.Workspace;
 
 internal sealed class WorkspaceShellRunner
 {
-    private const int MaxShellOutputCharacters = 24_000;
+    internal const int MaxShellOutputCharacters = 24_000;
     private const int MinShellTimeoutSeconds = 1;
     private const int MaxShellTimeoutSeconds = 600;
 
@@ -33,13 +33,20 @@ internal sealed class WorkspaceShellRunner
             throw new InvalidOperationException("Failed to start the PowerShell process.");
         }
 
-        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
-        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        using var drainCancellation = new CancellationTokenSource();
+        var standardOutputTask = DrainAsync(process.StandardOutput, drainCancellation.Token);
+        var standardErrorTask = DrainAsync(process.StandardError, drainCancellation.Token);
+        var drains = Task.WhenAll(standardOutputTask, standardErrorTask);
 
         using var registration = cancellationToken.Register(() => WorkspaceProcess.TryKill(process));
         try
         {
-            await process.WaitForExitAsync(cancellationToken).WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            await Task.WhenAll(process.WaitForExitAsync(cancellationToken), drains)
+                .WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            var standardOutput = await standardOutputTask.ConfigureAwait(false);
+            var standardError = await standardErrorTask.ConfigureAwait(false);
+            return CreateResult(command, process.ExitCode, standardOutput.Text, standardError.Text,
+                standardOutput.Truncated || standardError.Truncated);
         }
         catch (TimeoutException exception)
         {
@@ -48,11 +55,35 @@ internal sealed class WorkspaceShellRunner
         finally
         {
             WorkspaceProcess.TryKill(process);
+            // These readers use an internal shutdown token; caller cancellation still propagates
+            // from the wait above, while inherited pipes get at most two seconds to close.
+            drainCancellation.CancelAfter(TimeSpan.FromSeconds(2));
+            try
+            {
+                await drains.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (drainCancellation.IsCancellationRequested)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+        }
+    }
+
+    private static async Task<(string Text, bool Truncated)> DrainAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        var output = new StringBuilder(MaxShellOutputCharacters);
+        var buffer = new char[4096];
+        var truncated = false;
+        int read;
+        while ((read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            var retained = Math.Min(read, MaxShellOutputCharacters - output.Length);
+            output.Append(buffer, 0, retained);
+            truncated |= retained < read;
         }
 
-        var standardOutput = await standardOutputTask.ConfigureAwait(false);
-        var standardError = await standardErrorTask.ConfigureAwait(false);
-        return CreateResult(command, process.ExitCode, standardOutput, standardError);
+        if (truncated && output.Length > 0 && char.IsHighSurrogate(output[^1])) output.Length--;
+        return (output.ToString(), truncated);
     }
 
     private static Process CreateProcess(string root, string command)
@@ -82,11 +113,8 @@ internal sealed class WorkspaceShellRunner
         };
     }
 
-    private static ShellCommandResult CreateResult(string command, int exitCode, string standardOutput, string standardError)
+    private static ShellCommandResult CreateResult(string command, int exitCode, string standardOutput, string standardError, bool outputTruncated)
     {
-        var outputTruncated = false;
-        standardOutput = TruncateShellOutput(standardOutput, ref outputTruncated);
-        standardError = TruncateShellOutput(standardError, ref outputTruncated);
         return new ShellCommandResult(
             command,
             true,
@@ -99,14 +127,4 @@ internal sealed class WorkspaceShellRunner
                 : $"PowerShell exited with code {exitCode}.");
     }
 
-    private static string TruncateShellOutput(string value, ref bool truncated)
-    {
-        if (string.IsNullOrEmpty(value) || value.Length <= MaxShellOutputCharacters)
-        {
-            return value;
-        }
-
-        truncated = true;
-        return value[..MaxShellOutputCharacters];
-    }
 }

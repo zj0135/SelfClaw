@@ -413,6 +413,14 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IA
             .ToArray();
     }
 
+    public async Task<bool> IsModelAvailableAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
+    {
+        var profile = await _repository.GetModelProfileAsync(modelProfileId, cancellationToken).ConfigureAwait(false);
+        if (profile is not { IsEnabled: true }) return false;
+        var connection = await _repository.GetProviderConnectionAsync(profile.ProviderConnectionId, cancellationToken).ConfigureAwait(false);
+        return connection is { IsEnabled: true } && _registry.GetRequiredAdapter(connection.ProviderKind).SupportsApiFormat(profile.ApiFormat);
+    }
+
     private async Task SendConnectivityProbeAsync(
         AiProviderConnection connection, AiModelProfile profile, CancellationToken cancellationToken)
     {

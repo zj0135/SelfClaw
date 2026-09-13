@@ -8,11 +8,11 @@ SelfClaw is a Windows desktop AI programming assistant built with WPF and .NET 1
 
 ### Issue tracker
 
-Issues and specs live as markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+Issues and specs live as markdown files under `.scratch/<feature-slug>/`. This directory is ignored by Git; durable implementation and verification notes belong in `docs/`.
 
 ### Domain docs
 
-Single-context domain docs use root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+Domain language lives in root `CONTEXT.md`. Current execution architecture is documented in `docs/runtime-execution-flow.md`; the 2026-09-13 Direct refactor and verification are recorded in `docs/direct-agent-architecture-review.md`.
 
 ## Projects
 
@@ -50,8 +50,9 @@ User input (WebView2)
         → builds the Direct/CLI ChatTurnRequest
         → DispatchingAgentChatRuntime.StreamTurnAsync()
           ├─ Mode=Direct → DirectAgentChatRuntime
-          │   → AiChatClientFactory (selected/default model profile + protected credential)
-          │   → provider IChatClient + WorkspaceAgentToolset + desktop approval
+          │   → AiChatClientFactory.PrepareAsync (validated selected/default model + protected credential)
+          │   → DirectTurnCapabilityResolver (bindings, policy, approval + execution checkpoint)
+          │   → AiChatClientFactory.Create + provider IChatClient
           │   → M.E.AI updates → AgentStreamEvents
           └─ Mode=Cli → CliAgentChatRuntime
               → CliSessionResolver + CliAgentRegistry
@@ -62,7 +63,8 @@ User input (WebView2)
     → TranscriptRenderState → WebViewHostChannel replay → Vue renders
 
 Background SubagentDeliveryDispatcher (when durable child results are pending)
-  → parent-priority admission/lease/coalescing
+  → user-priority admission/lease/coalescing, skipping busy parents
+  → awaited durable execution checkpoint before any continuation tool executes
   → detached Direct continuation with transient completion batch
   → atomic parent terminal + Delivered, bounded retry or DeadLetter notification
 ```
@@ -71,11 +73,15 @@ Direct mode uses the enabled model selected in the composer, or the `desktop-def
 
 Key runtime files:
 - `Agents/Runtime/DispatchingAgentChatRuntime.cs` — dispatches Direct and CLI modes
-- `Agents/Runtime/DirectAgentChatRuntime.cs` — in-process provider turn, event translation, usage and terminal-state discipline
-- `Agents/Runtime/WorkspaceAgentToolset.cs` — workspace tools and approval wrapping for Direct turns
-- `AiProviders/AiChatClientFactory.cs` — model/connection validation, credential resolution, adapter construction
+- `Agents/Direct/DirectAgentChatRuntime.cs` — model preparation, in-process turn, unified tool-result translation, usage and terminal-state discipline
+- `Agents/Direct/Capabilities/DirectTurnCapabilityResolver.cs` — source assembly; one tool-binding list owns conflict checks, policy and descriptor alignment
+- `Agents/Direct/Capabilities/DirectCapabilityRules.cs` — shared ceiling, package and MCP validity rules; Infrastructure `SubagentTaskPreflight` applies them before acceptance and execution
+- `Agents/Direct/Context/DirectPromptComposer.cs` — builds history backwards within budget, keeping tool call/result units intact
+- `Agents/Direct/Tools/WorkspaceAgentToolset.cs` — typed workspace functions and result formatting; `ApprovedAIFunction` owns approval and execution checkpoints
+- `Agents/Direct/Tools/McpToolResultFormatter.cs` — limits the complete serialized model result to 64 KiB UTF-8, independently of display text
+- `AiProviders/AiChatClientFactory.cs` — resolves and validates a concrete model before capability work, then binds tools and constructs the adapter pipeline
 - `AiProviders/AiProviderSettingsService.cs` — provider/model CRUD, discovery, enablement and default selection
-- `SelfClaw.Core/Interfaces/AiProviders/IAiModelCatalog.cs` — the runtime's model-read contract (enabled models and scoped defaults); the same `AiProviderSettingsService` singleton implements it and the separate settings-management contract. Shared settings DTOs and model enums live in `SelfClaw.Core/Models/AiProviders/`.
+- `SelfClaw.Core/Interfaces/AiProviders/IAiModelCatalog.cs` — the runtime's model-read contract (enabled models, scoped defaults, and individual model availability); the same `AiProviderSettingsService` singleton implements it and the separate settings-management contract. Shared settings DTOs and model enums live in `SelfClaw.Core/Models/AiProviders/`.
 - `Tools/Workspace/WorkspaceToolService.cs` — the tool entry point and operation logging; delegates file operations, search and Shell execution to `WorkspaceFileService`, `WorkspaceSearchService` and `WorkspaceShellRunner`. `WorkspaceFileAccess` owns path/file validation; `WorkspaceTextEditor` owns text matching and replacement.
 - `CliAgentChatRuntime.cs` — one turn: session plan → args → spawn → parse → events
 - `Definitions/` — `ClaudeAgentDefinition`, `CodexAgentDefinition`, `OpenCodeAgentDefinition`, `CliAgentRegistry`
@@ -93,7 +99,7 @@ Key runtime files:
 - `MainWindowViewModel.cs` — prompt snapshots, conversation navigation, workspace selection, and transcript request construction
 - `MainWindowViewModel.Agents.cs` — preserves each `DesktopAgentDefinition`'s Direct/CLI mode in `AgentRuntimeDefinition`
 - `ConversationTurnEngine.cs` — turn admission, conversation/message persistence, request construction, runtime dispatch, event reduction, terminal finalization, and completion notification
-- `ConversationSessionCoordinator.cs` — running conversation state, cancellation, selected transcript synchronization, and direct presentation signaling
+- `ConversationSessionCoordinator.cs` — running state, cancellation and selected transcript synchronization; pending loads are evicted on completion/failure, and only the selected completed snapshot is retained
 - `TranscriptPublisher.cs` — dispatcher marshaling, stream coalescing, projection dedupe, invalidation, and WebView replay publication
 - `WebViewMessageRouter.cs` — frontend request routing, bridge responses, shell intents, and host-only commands
 - `ConversationTurnEngine.cs` — shared admission gate, deletion tombstones and detached continuation admission
@@ -170,13 +176,14 @@ Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandle
 ### DI Registration
 
 Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
-- Repositories: `SqliteConversationRepository`, `SqliteAiProviderRepository`, `SqliteExtensionRepository`
+- Repositories: `SqliteConversationRepository`, `SqliteWorkspaceRepository` (`IWorkspaceRootRepository` and `IGitWorkspaceStore`), `SqliteAiProviderRepository`, `SqliteExtensionRepository`
 - Subagents: `SqliteSubagentTaskRepository` (`ISubagentTaskStore`/`ISubagentTaskExecutionStore`), `SqliteSubagentDeliveryRepository` (`ISubagentDeliveryStore`), `SqliteSubagentActivityReader` (`ISubagentActivityReader`), and `SubagentStateChangeNotifier` (`ISubagentStateChangeNotifier`)
 - AI providers: catalog/registry, provider adapters, `AiProviderHttpClientProvider`, `AiProviderSettingsService`, `AiChatClientFactory`
 - Runtimes: CLI process/session services, `CliAgentChatRuntime`, `DirectAgentChatRuntime`, `DispatchingAgentChatRuntime` (as `IAgentChatRuntime`)
 - Extensions: `ExtensionCatalog`, `ExtensionPackageInstaller`, `ExtensionSettingsService`, `ExtensionStateChangeNotifier`, `DirectTurnCapabilityResolver` plus its `SkillCapabilitySource` / `PluginCapabilitySource` / `McpCapabilitySource`, Skill readers/runtime tools
 - MCP: configuration/transport factories, pooled `McpClientManager`, SDK connection factory, `McpToolAdapter`
-- Tools: `WorkspaceToolService`, `WorkspaceAgentToolset`
+- Direct preflight: `SubagentTaskPreflight` (`ISubagentTaskPreflight`); reads individual model availability through `IAiModelCatalog.IsModelAvailableAsync`
+- Tools: `WorkspaceToolService`, `WorkspaceAgentToolset`; all Direct sources return `DirectToolBinding` and `DirectToolResult`
 - Workspace implementations: `WorkspaceFileService`, `WorkspaceSearchService`, `WorkspaceShellRunner`; the existing `IWorkspaceToolService` contract remains the caller boundary.
 - Security: `DpapiSecretProtector`
 
@@ -193,7 +200,7 @@ Desktop (`App.xaml.cs`):
   `SubagentActivityRegistry`, `SubagentActivityService`, `ActivityPanelSnapshotBuilder`, `ActivityPanelPublisher`, `ActivityPanelBridge`,
   `PetPackageCatalog`, `PetActivityPresenter`, `PetHost`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
 
-**Not registered** (retained/dead): `DesktopChannelManager`, Feishu adapters, old `DesktopSettingsStore`.
+`StoragePaths` contains resolved path values only; `StoragePathDefaults` supplies composition-root defaults. `Microsoft.Agents.AI` is no longer referenced; Direct uses Microsoft.Extensions.AI.
 
 ## Key Conventions
 
@@ -203,14 +210,16 @@ Desktop (`App.xaml.cs`):
 - `SelfClaw.Core.Runtime`
 
 ### Common namespaces (Infrastructure)
-- `SelfClaw.Infrastructure.Agents.Runtime.{Orchestration,Execution,Context,Mcp,Tools}`
+- `SelfClaw.Infrastructure.Agents.Direct.{Capabilities,Context,Tools}`
+- `SelfClaw.Infrastructure.Agents.Runtime` — shared Direct/CLI dispatch
+- `SelfClaw.Infrastructure.Agents.Subagents.{Runtime,Persistence}`
 - `SelfClaw.Infrastructure.Data.Sqlite.{Repositories}`
 - `SelfClaw.Infrastructure.Tools.{Transcript,Workspace}`
 - `SelfClaw.Infrastructure.AiProviders.{OpenAi,Anthropic}`
 
 ### Database
 
-Schema version: **26** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_configurations`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `git_repositories`, `git_checkouts`, `conversations`, `messages`, `message_segments`, `message_attachments`, `tool_runs`, `cli_agent_sessions`, `subagent_tasks`, and `subagent_deliveries`. Schema v26 adds shared model configurations keyed by the complete case-sensitive model ID; these survive provider deletion and are read with each profile for Direct turns. Schema v25 structures assistant content into `message_segments` blocks (Text/Thinking/ToolCall with ordinal placement) and rebuilds `tool_runs` without the retired `after_segment_index` column; legacy assistant rows are not migrated. The v22→v23 migration atomically rebuilds `conversations` when legacy `profile_id`, `kind`, or `parent_conversation_id` columns require it, preserves existing data, and defaults old rows to interactive ownership. Schema v24 adds repository identity and checkout ownership without changing the physical Workspace Root execution contract. Subagent deliveries use snapshot-aware FIFO batching, 45-second leases with 15-second heartbeat, and atomic Delivered/DeadLetter resolution.
+Schema version: **27** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_configurations`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `git_repositories`, `git_checkouts`, `conversations`, `messages`, `message_segments`, `message_attachments`, `tool_runs`, `cli_agent_sessions`, `subagent_tasks`, and `subagent_deliveries`. Schema v27 adds `subagent_deliveries.tool_execution_started_at_utc`, committed before continuation tools execute; legacy leased rows are marked uncertain during upgrade. Schema v26 adds shared model configurations keyed by the complete case-sensitive model ID; these survive provider deletion and are read with each profile for Direct turns. Schema v25 structures assistant content into `message_segments` blocks (Text/Thinking/ToolCall with ordinal placement) and rebuilds `tool_runs` without the retired `after_segment_index` column; legacy assistant rows are not migrated. The v22→v23 migration atomically rebuilds `conversations` when legacy `profile_id`, `kind`, or `parent_conversation_id` columns require it, preserves existing data, and defaults old rows to interactive ownership. Schema v24 adds repository identity and checkout ownership without changing the physical Workspace Root execution contract. Subagent deliveries use snapshot-aware FIFO batching, 45-second leases with 15-second heartbeat/recovery scans, and atomic Delivered/DeadLetter resolution. Busy parents are excluded from ready-mailbox scans; dispatcher owns admission until handoff, then executor owns cleanup.
 
 ### Image attachments
 
@@ -225,9 +234,8 @@ Continuation turns use detached `ConversationRuntimeState`; their transient comp
 
 Deleting an interactive parent first marks a deletion tombstone, stops its active turn, cancels and bounded-waits all queued/running child tasks through `ISubagentConversationLifecycle`, and only then applies SQLite cascade. A timeout aborts deletion. Conversation list/navigation also defensively accept only `ConversationKind.Interactive`, so crafted child rows cannot enter the normal Vue workflow.
 
-## Dead / Retained Code (NOT active)
+## Removed and inactive features
 
-- **Feishu channel**: fully implemented but never registered in DI
 - **Plan mode**: removed; `AgentExecutionMode.Direct` and `AgentExecutionMode.Cli` are both active
 - **Channel conversations**: data model retained but VM filters them out
 - **Settings pages**: AI 提供商, 模型管理, 编程助手, 代理助手, 插件, and 宠物 are wired to the host; the remaining settings pages are frontend mock

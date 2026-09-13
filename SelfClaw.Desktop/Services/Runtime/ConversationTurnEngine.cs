@@ -26,7 +26,6 @@ internal sealed class ConversationTurnEngine : IDisposable
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly DesktopToolApprovalHandler _toolApprovalHandler;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettings;
-    private readonly IAiModelCatalog _models;
     private readonly IConversationCompletionNotifier _completionNotifier;
     private readonly SubagentActivityService? _subagentActivity;
     private readonly ILogger<ConversationTurnEngine> _logger;
@@ -44,7 +43,6 @@ internal sealed class ConversationTurnEngine : IDisposable
         AgentActivityCoordinator agentActivityCoordinator,
         DesktopToolApprovalHandler toolApprovalHandler,
         ProgrammingAssistantSettingsService programmingAssistantSettings,
-        IAiModelCatalog models,
         IConversationCompletionNotifier completionNotifier,
         ILogger<ConversationTurnEngine> logger,
         SubagentActivityService? subagentActivity = null)
@@ -57,7 +55,6 @@ internal sealed class ConversationTurnEngine : IDisposable
         _agentActivityCoordinator = agentActivityCoordinator;
         _toolApprovalHandler = toolApprovalHandler;
         _programmingAssistantSettings = programmingAssistantSettings;
-        _models = models;
         _completionNotifier = completionNotifier;
         _subagentActivity = subagentActivity;
         _logger = logger;
@@ -93,6 +90,9 @@ internal sealed class ConversationTurnEngine : IDisposable
             Interlocked.Decrement(ref _pendingInteractiveAdmissions);
         }
     }
+
+    internal IReadOnlyCollection<Guid> GetUnavailableContinuationParents()
+        => _conversationSessions.RunningConversationIds.Concat(_deletingConversations.Keys).Distinct().ToArray();
 
     internal async Task<ConversationRuntimeState?> TryAdmitContinuationAsync(
         ConversationRecord conversation,
@@ -389,19 +389,13 @@ internal sealed class ConversationTurnEngine : IDisposable
                 cliSelection?.ReasoningEffort);
         }
 
-        var modelProfileId = request.ModelProfileId
-            ?? await _models.GetDefaultModelAsync(
-                AiModelSelectionScopes.DesktopDefault,
-                cancellationToken)
-            ?? throw new InvalidOperationException(
-                "No default Direct model is selected. Choose a default model in the AI provider settings.");
         return new DirectChatTurnRequest(
             turnId,
             admission.Conversation.Id,
             request.WorkspaceRoot,
             request.Agent,
             messages,
-            modelProfileId,
+            request.ModelProfileId,
             request.ToolPermissionMode,
             _toolApprovalHandler,
             new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null),

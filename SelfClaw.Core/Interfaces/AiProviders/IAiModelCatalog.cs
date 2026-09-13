@@ -7,4 +7,6 @@ public interface IAiModelCatalog
     Task<Guid?> GetDefaultModelAsync(string scope, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<EnabledModelView>> ListEnabledModelsAsync(CancellationToken cancellationToken = default);
+
+    Task<bool> IsModelAvailableAsync(Guid modelProfileId, CancellationToken cancellationToken = default);
 }

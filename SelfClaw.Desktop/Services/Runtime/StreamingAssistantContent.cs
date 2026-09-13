@@ -67,9 +67,6 @@ internal sealed class StreamingAssistantContent
         }
     }
 
-    public bool HasPendingThinking
-        => _blocks.LastOrDefault() is { Kind: MessageSegmentKind.Thinking };
-
     public IReadOnlyList<MessageSegmentRecord> BuildSegments()
     {
         var messageId = _messageId ?? Guid.Empty;

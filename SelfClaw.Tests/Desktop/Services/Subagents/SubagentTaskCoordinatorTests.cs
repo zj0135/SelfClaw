@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
@@ -117,7 +118,7 @@ public sealed class SubagentTaskCoordinatorTests : IDisposable
 
     private async Task<TestContext> CreateContextAsync(bool createDefinition)
     {
-        var storagePaths = new StoragePaths(
+        var storagePaths = StoragePathDefaults.Create(
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
