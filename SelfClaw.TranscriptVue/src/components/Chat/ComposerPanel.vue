@@ -190,6 +190,7 @@ defineExpose({
 					<ShieldAlert :size="16" :stroke-width="1.9" />
 				</span>
 				<div class="tool-approval-copy">
+					<span v-if="props.pendingApproval.conversationId" class="tool-approval-source">会话：{{ props.pendingApproval.conversationTitle || props.pendingApproval.conversationId.slice(0, 8) }}</span>
 					<span class="tool-approval-title">
 						请求执行 <strong>{{ approvalTitle }}</strong>
 					</span>

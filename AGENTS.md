@@ -12,7 +12,7 @@ Issues and specs live as markdown files under `.scratch/<feature-slug>/`. This d
 
 ### Domain docs
 
-Domain language lives in root `CONTEXT.md`. Current execution architecture is documented in `docs/runtime-execution-flow.md`; the 2026-09-13 Direct refactor and verification are recorded in `docs/direct-agent-architecture-review.md`.
+Domain language lives in root `CONTEXT.md`. Current execution architecture is documented in `docs/runtime-execution-flow.md`; Direct verification is recorded in `docs/direct-agent-architecture-review.md`, and the 2026-09-14 Desktop R01–R15 implementation and limits in `docs/desktop-architecture-review.md`.
 
 ## Projects
 
@@ -44,7 +44,7 @@ User input (WebView2)
     ├─ settings request → feature bridge → correlated WebView response
     ├─ shell command → MainWindow applies window-only behavior
     └─ conversation intent → MainWindowViewModel
-      → SubmitPromptAsync() captures the current UI selection and provisions a managed Git worktree when requested
+      → SubmitPromptAsync() captures UI selection; ConversationWorkspaceService prepares a Managed Worktree when requested
       → ConversationTurnEngine.ExecuteAsync()
         → admits the turn and persists the conversation + user message
         → builds the Direct/CLI ChatTurnRequest
@@ -60,7 +60,7 @@ User input (WebView2)
               → stdout JSONL → ClaudeStreamJsonParser / JsonEventStreamParser → AgentStreamEvents
         → DesktopTurnFinalizer persists the terminal state
   → ConversationSessionCoordinator → ITranscriptChangeSink → TranscriptPublisher
-    → TranscriptRenderState → WebViewHostChannel replay → Vue renders
+    → TranscriptRenderState → TranscriptDelivery (diff / ACK / bounded recovery) → WebViewHostChannel → Vue renders
 
 Background SubagentDeliveryDispatcher (when durable child results are pending)
   → user-priority admission/lease/coalescing, skipping busy parents
@@ -96,20 +96,22 @@ Key runtime files:
 ### Desktop ViewModel
 
 `MainWindowViewModel` owns UI selection, navigation state, and shell projection; deeper workflow modules own execution and publication:
-- `MainWindowViewModel.cs` — prompt snapshots, conversation navigation, workspace selection, and transcript request construction
+- `MainWindowViewModel.cs` — UI-thread prompt snapshots, navigation, selection generations, and transcript requests; feature services own workspace preparation and deletion
 - `MainWindowViewModel.Agents.cs` — preserves each `DesktopAgentDefinition`'s Direct/CLI mode in `AgentRuntimeDefinition`
 - `ConversationTurnEngine.cs` — turn admission, conversation/message persistence, request construction, runtime dispatch, event reduction, terminal finalization, and completion notification
 - `ConversationSessionCoordinator.cs` — running state, cancellation and selected transcript synchronization; pending loads are evicted on completion/failure, and only the selected completed snapshot is retained
 - `TranscriptPublisher.cs` — dispatcher marshaling, stream coalescing, projection dedupe, invalidation, and WebView replay publication
-- `WebViewMessageRouter.cs` — frontend request routing, bridge responses, shell intents, and host-only commands
+- `WebViewMessageRouter.cs` — application-origin checks, explicit feature dispatch, correlated responses, and admission/draining of frontend requests
 - `ConversationTurnEngine.cs` — shared admission gate, deletion tombstones and detached continuation admission
+
+`ConversationRuntimeState` serializes content mutations and supplies immutable snapshots; the coordinator locks selection/snapshot replacement when background continuations complete. `ConversationWorkspaceService` owns root preparation/release and `ConversationDeletionService` owns deletion sequencing. `App` uses explicit shutdown: await initialization, stop admission, cancel/wait for active work, drain UI resources, dispose services, then stop WPF. `OnExit` contains only synchronous fallback. MainWindow and VM share in-flight initialization tasks.
 
 ### Agent definitions
 
 `DesktopAgentDefinitionService` loads and atomically updates `.md` files from `{AppData}\agents\`. Built-in agent id: `build`.
 Agent markdown supports front matter: name, description, mode, tools, plugins, skills, mcpServers, subagents. Direct turns resolve those ids against the enabled extension catalog; CLI turns keep their existing subprocess behavior.
 Subagent definitions live in `{AppData}\subagents\` via `SubagentDefinitionCatalog` (name, description, modelProfileId, tools, plugins, skills, mcpServers, maxRunSeconds); `Save()` writes them atomically with the same strict validation as load.
-The 代理助手 settings page talks to `AgentSettingsBridge` (prefix `agents/`): `get-state`, `save-agent`, `set-binding`, `set-subagent-binding`, `save-subagent`, `delete-subagent`, `set-subagent-extension-binding`. Every mutation raises `AgentsChanged` (router reloads the VM agent cache) and advances the shared extension revision.
+The 代理助手 settings page talks to `AgentSettingsBridge` (prefix `agents/`). `AgentSettingsService` owns CRUD, binding rules, atomic read/modify/write and committed change signals; the VM subscribes directly and preserves its valid selection. A missing conversation-bound definition stays visibly unavailable and rejects execution. Definitions/parsers live in `Services/Agents/Definitions`, edits in `Models`, and UI projections in `Views`.
 
 ### 插件面板 (Plugin panels)
 
@@ -118,8 +120,8 @@ A Plugin package may contribute right-hand UI panels through `contributes.panels
 column, not in WPF.
 
 Each panel is served from its own origin, `https://<plugin-id>.plugin.selfclaw.local`. That is load
-bearing: the distinct origin gives every Plugin its own renderer process, its own storage partition, and
-an `event.origin` the shell treats as unforgeable identity. A Plugin whose id is not a legal DNS label is
+bearing for frame identity and origin-scoped storage such as localStorage/IndexedDB. Renderer process
+allocation is owned by WebView2; security does not rely on a guaranteed process per origin. A Plugin whose id is not a legal DNS label is
 rejected at install time rather than failing when a user first opens the tab.
 
 Three layers, outermost first:
@@ -144,6 +146,8 @@ Host-side pieces:
   Captured by `MainWindowViewModel.CaptureContext()`; deduplicated by record value, except on panel open
 - `Assets/plugin-sdk.js` — injected into every document via `AddScriptToExecuteOnDocumentCreatedAsync`
 
+Plugin opens pass one bounded mutation gate (at most 8 panels); close/navigation/disable invalidates pending opens. `PluginPanelResourceReader` prepares responses off the UI thread, with WebView deferrals, at most four reads and 8 MiB per resource. A read holds its own version lease until bytes are materialized. Frontend transcript broadcasts are coalesced every 500 ms into a recoverable window capped at 256 KiB UTF-8, with `totalItems` and `truncated`; they do not always contain all history. Saved active tabs are restored.
+
 Permissions are a disclosure list, so unknown bare tokens stay legal. `network.fetch:<origin>` is parsed
 strictly and widens only that panel's `connect-src`; a Plugin declaring none is fully offline. Panel
 definitions live in the existing `extension_packages.manifest_json` and open tabs in
@@ -164,12 +168,12 @@ The Vue `ActivityStage` mounts an independent floating activity panel inside the
 
 ### Tool approval
 
-Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandler` when the conversation is in `RequireApproval` mode. A visible window shows a WPF Yes/No prompt; a hidden/minimized window sends a Windows toast with Confirm/Cancel actions. Pending approvals default to rejection on timeout, subscriber failure, or window close. CLI mode continues to use the CLI's own permission policy.
+Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandler` in `RequireApproval` mode. It alone owns pending decisions. `ToolApprovalPresenter` publishes versioned `tool-approval/state` with conversation context for Vue and reload recovery; Pet observes the same activity state. A hidden/minimized window may receive a Windows toast with Confirm/Cancel actions. Pending requests reject on timeout/subscriber failure/shutdown. Toast, Pet and tray navigation use `DesktopConversationActivationService`. CLI mode keeps its own permission policy.
 
 ### WPF shell
 
 - `MainWindow.xaml` — custom chrome, title bar buttons, single WebView2 host
-- `LeftSidebar.xaml` — sidebar with Settings entry
+- Vue `AppSidebar.vue` and `useConversationNavigation` — sidebar/navigation and correlated operation feedback
 - Settings view: AI 提供商, 模型管理, 编程助手, 代理助手, 插件, and 宠物 are connected to the desktop host; remaining pages are frontend placeholders/mock
 - The right-hand plugin panel column lives in the Vue app, not in WPF (see 插件面板)
 
@@ -191,7 +195,7 @@ Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 
 Vue `ChatView` owns layout and event wiring. `useChatTranscript`, `useWorkspaceSelection`, `useChatComposer`, `useChatApprovals`, `useChatTerminal` and `useChatTurnStatus` own their respective state and host interactions. Workspace/Git responses are bound to the current selection generation.
 
-Desktop (`App.xaml.cs`):
+Desktop registration (`Composition/DesktopServiceRegistration.cs`; lifecycle in `App.xaml.cs`):
 - `DesktopAgentDefinitionService`, `SubagentDefinitionCatalog`, `ExtensionSettingsBridge`, `AgentSettingsBridge`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
   `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `AiProviderSettingsBridge`,
   `ConversationTurnEngine`, `ConversationSessionCoordinator`, `TranscriptPublisher`, `WebViewMessageRouter`,
@@ -201,6 +205,10 @@ Desktop (`App.xaml.cs`):
   `PetPackageCatalog`, `PetActivityPresenter`, `PetHost`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
 
 `StoragePaths` contains resolved path values only; `StoragePathDefaults` supplies composition-root defaults. `Microsoft.Agents.AI` is no longer referenced; Direct uses Microsoft.Extensions.AI.
+
+Desktop settings use `Services/Settings/DesktopSettingsJsonStore`: serialize to a same-directory temporary file, flush, atomically replace, then commit feature caches. Corrupt or unreadable files are reported, never treated as empty settings. CLI configuration reads do not scan; `ProgrammingCliDiscoveryHost` performs observable background discovery without holding the settings gate. The settings page/composer share `useProgrammingAssistantSelection` and save confirmed values with correlated requests.
+
+`WebViewHostChannel` and Vue `hostBridge` provide transport only. `TranscriptDelivery` and `transcriptBridge` own transcript patch bases, `transcript-applied`/`transcript-rejected`/`transcript-resync`, and bounded recovery. Activity delivery remains independent. `PetHost` owns configuration plus actual package/visibility/load result; the catalog prepares frozen resources in the background. Terminal decodes a continuous UTF-8 stream and batches a bounded tail; native ConPTY/Toast/WPF shutdown still need the explicit smoke/manual checks listed in the Desktop review.
 
 ## Key Conventions
 
@@ -314,7 +322,7 @@ Deleting an interactive parent first marks a deletion tombstone, stops its activ
 
 - All component-level styles use `<style scoped>`. Global layout/reset/theme variables belong in `App.vue`'s unscoped `<style>` only.
 - Do NOT mix scoped and unscoped `<style>` blocks in the same component file unless the unscoped block is exclusively for dynamic `v-html`-injected content that cannot be targeted by scoped selectors.
-- The settings pages share the light "Console" design system: tokens/keyframes plus the shared page scaffold (`sc-page` / `sc-page-head` / `sc-page-body` — fixed gray header over a white scrolling body) live in `components/settings/settings-console.css` and are pulled into each component via `@import` inside its scoped style block (page root carries `sc-root` / `sc-stage`).
+- The settings pages share the light "Console" design system: tokens/keyframes plus the shared page scaffold (`sc-page` / `sc-page-head` / `sc-page-body` — fixed gray header over a white scrolling body) live in `styles/settings-console.css` and are pulled into each component via `@import` inside its scoped style block (page root carries `sc-root` / `sc-stage`).
 
 ### Icons
 

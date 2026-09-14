@@ -26,8 +26,7 @@ export function isSuperseded(error) {
 	return error instanceof SupersededError || error?.name === 'SupersededError';
 }
 
-function createHostBridge() {
-	const webview = window.chrome?.webview;
+export function createHostBridge(webview = window.chrome?.webview) {
 
 	let sequence = 0;
 	// requestId -> { type, resolve, reject, timer }
@@ -39,9 +38,6 @@ function createHostBridge() {
 	// 标记为 replayLast 的 type -> 最近一次 payload
 	const stickyPayloads = new Map();
 	const stickyTypes = new Set();
-	let transcriptState = null;
-	let transcriptAckFrame = null;
-	let pendingTranscriptRevision = 0;
 
 	function hasHost() {
 		return Boolean(webview);
@@ -82,7 +78,8 @@ function createHostBridge() {
 					: null;
 
 			pendingRequests.set(requestId, { type, resolve, reject, timer });
-			post({ type, requestId, ...payload });
+			try { post({ type, requestId, ...payload }); }
+			catch (error) { settlePending(requestId, (pending) => pending.reject(error)); }
 		});
 		promise.requestId = requestId;
 		return promise;
@@ -125,67 +122,11 @@ function createHostBridge() {
 		}
 
 		for (const handler of [...handlers]) {
-			handler(payload);
+			try {
+				const result = handler(payload);
+				if (result?.catch) result.catch((error) => console.error(`Host subscriber failed: ${type}`, error));
+			} catch (error) { console.error(`Host subscriber failed: ${type}`, error); }
 		}
-	}
-
-	function reduceTranscriptPush(payload) {
-		if (payload.type === 'replaceState') {
-			transcriptState = { ...payload, type: 'replaceState' };
-			return transcriptState;
-		}
-
-		if (payload.type !== 'patchState' || !transcriptState) {
-			return null;
-		}
-
-		const itemsById = new Map((Array.isArray(transcriptState.items) ? transcriptState.items : []).map((item) => [item.id, item]));
-		for (const itemId of payload.removedItemIds || []) {
-			itemsById.delete(itemId);
-		}
-
-		for (const item of payload.upsertItems || []) {
-			itemsById.set(item.id, item);
-		}
-
-		const itemOrder = Array.isArray(payload.itemOrder) ? payload.itemOrder : Array.from(itemsById.keys());
-		const items = itemOrder.map((itemId) => itemsById.get(itemId)).filter(Boolean);
-
-		transcriptState = {
-			...transcriptState,
-			...payload,
-			type: 'replaceState',
-			items,
-			conversations: Array.isArray(payload.conversations) ? payload.conversations : transcriptState.conversations,
-		};
-		// 后端 DefaultIgnoreCondition=WhenWritingNull 会把 null 标量字段整个省略，
-		// 扩展运算符因此不会覆盖旧值。这里显式以 payload 为准重置，保证「取消选中」
-		// 这类 null 广播能真正生效。
-		transcriptState.selectedConversationId = payload.selectedConversationId ?? null;
-		delete transcriptState.upsertItems;
-		delete transcriptState.removedItemIds;
-		delete transcriptState.itemOrder;
-		return transcriptState;
-	}
-
-	function scheduleTranscriptAcknowledgement(revision) {
-		if (!Number.isSafeInteger(revision) || revision <= 0) {
-			return;
-		}
-
-		pendingTranscriptRevision = Math.max(pendingTranscriptRevision, revision);
-		if (transcriptAckFrame !== null) {
-			return;
-		}
-
-		const schedule =
-			typeof window.requestAnimationFrame === 'function' ? window.requestAnimationFrame.bind(window) : (callback) => window.setTimeout(callback, 0);
-		transcriptAckFrame = schedule(() => {
-			transcriptAckFrame = null;
-			const acknowledgedRevision = pendingTranscriptRevision;
-			pendingTranscriptRevision = 0;
-			post({ type: 'transcript-rendered', revision: acknowledgedRevision });
-		});
 	}
 
 	function on(type, handler, { replayLast = false } = {}) {
@@ -201,7 +142,7 @@ function createHostBridge() {
 			stickyTypes.add(type);
 			const last = stickyPayloads.get(type);
 			if (last !== undefined) {
-				handler(last);
+				try { handler(last); } catch (error) { console.error(`Host replay failed: ${type}`, error); }
 			}
 		}
 
@@ -240,21 +181,20 @@ function createHostBridge() {
 			return;
 		}
 
-		if (payload.type === 'replaceState' || payload.type === 'patchState') {
-			const reduced = reduceTranscriptPush(payload);
-			if (reduced) {
-				dispatchPush(reduced);
-				scheduleTranscriptAcknowledgement(payload.revision);
-			}
-			return;
-		}
 
 		dispatchPush(payload);
 	}
 
 	webview?.addEventListener('message', handleIncomingMessage);
 
-	return { hasHost, request, requestLatest, on, post };
+	function dispose() {
+		webview?.removeEventListener?.('message', handleIncomingMessage);
+		for (const id of pendingRequests.keys()) settlePending(id, (pending) => pending.reject(new Error('Host transport disposed.')));
+		subscribers.clear();
+		stickyPayloads.clear();
+	}
+
+	return { hasHost, request, requestLatest, on, post, dispose };
 }
 
 export const hostBridge = createHostBridge();

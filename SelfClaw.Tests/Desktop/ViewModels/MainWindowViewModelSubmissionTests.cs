@@ -1,3 +1,8 @@
+using SelfClaw.Desktop.Services.Agents;
+using SelfClaw.Desktop.Services.Agents.Definitions;
+using SelfClaw.Desktop.Services.Notifications;
+using SelfClaw.Desktop.Services.Settings;
+using SelfClaw.Desktop.Services.Tools;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
 using FluentAssertions;
@@ -6,12 +11,12 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.WebView;
+using SelfClaw.Desktop.Services.Workspace;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.Options;
 
@@ -37,16 +42,17 @@ public sealed class MainWindowViewModelSubmissionTests
             using var activityCoordinator = new AgentActivityCoordinator(
                 toolApprovalHandler,
                 NullLogger<AgentActivityCoordinator>.Instance);
-            using var notificationService = new DesktopNotificationService(
+            var notificationService = new DesktopNotificationService(
                 NullLogger<DesktopNotificationService>.Instance);
             var settingsStore = new DesktopSettingsJsonStore(storagePaths);
             var turnFinalizer = new DesktopTurnFinalizer(
                 new NoOpTurnFinalizationRepository(),
                 NullLogger<DesktopTurnFinalizer>.Instance);
             var projection = new TranscriptProjection(storagePaths);
+            using var delivery = new TranscriptDelivery(new WebViewHostChannel(), Dispatcher.CurrentDispatcher);
             using var transcriptPublisher = new TranscriptPublisher(
                 projection,
-                new WebViewHostChannel(),
+                delivery,
                 Dispatcher.CurrentDispatcher);
             using var sessions = new ConversationSessionCoordinator(repository, transcriptPublisher);
             using var turnEngine = new ConversationTurnEngine(
@@ -59,20 +65,24 @@ public sealed class MainWindowViewModelSubmissionTests
                 sessions,
                 activityCoordinator,
                 toolApprovalHandler,
-                new ProgrammingAssistantSettingsService(settingsStore),
+                SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore),
 
                 new ConversationCompletionNotifier(notificationService),
                 NullLogger<ConversationTurnEngine>.Instance);
+            var workspaces = new ConversationWorkspaceService(repository);
             var vm = new MainWindowViewModel(
-                repository,
                 repository,
                 turnEngine,
                 sessions,
                 activityCoordinator,
                 transcriptPublisher,
-                new DesktopAgentDefinitionService(storagePaths),
+                new AgentSettingsService(new DesktopAgentDefinitionService(storagePaths),
+                    new SelfClaw.Desktop.Services.Agents.Definitions.SubagentDefinitionCatalog(storagePaths),
+                    new SelfClaw.Tests.TestDoubles.EmptyExtensionSettingsService(), new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier()),
+                new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier(),
                 settingsStore,
-                new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(),
+                workspaces,
+                new ConversationDeletionService(turnEngine, sessions, new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(), workspaces, repository),
                 NullLogger<MainWindowViewModel>.Instance);
 
             await vm.InitializeAsync();

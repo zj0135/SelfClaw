@@ -1,8 +1,8 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using System.Text;
 using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Tests.Desktop.Services.Agents;

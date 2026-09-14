@@ -18,13 +18,15 @@ internal sealed class FakePetWindowAdapter : IPetWindowAdapter
 
     public TaskCompletionSource<bool>? ContinueShow { get; set; }
 
-    public Task<bool> GetIsVisibleAsync(CancellationToken cancellationToken = default)
+    public Task FlushPlacementAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<bool> GetIsVisibleAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(IsVisible);
     }
 
-    public async Task ShowAsync(PetSettings settings, CancellationToken cancellationToken = default)
+    public async Task ShowAsync(PetSettings settings, PetLoadedPackage package, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ShowCount++;
@@ -45,7 +47,7 @@ internal sealed class FakePetWindowAdapter : IPetWindowAdapter
         return Task.CompletedTask;
     }
 
-    public Task ReloadAsync(PetSettings settings, CancellationToken cancellationToken = default)
+    public Task ReloadAsync(PetSettings settings, PetLoadedPackage package, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
         cancellationToken.ThrowIfCancellationRequested();

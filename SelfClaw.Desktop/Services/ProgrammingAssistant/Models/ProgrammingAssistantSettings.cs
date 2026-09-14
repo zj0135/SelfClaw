@@ -2,6 +2,7 @@ namespace SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 
 public sealed record ProgrammingAssistantSettings
 {
+    public long Revision { get; init; }
     public bool HasScanned { get; init; }
 
     public DateTimeOffset? ScannedAtUtc { get; init; }

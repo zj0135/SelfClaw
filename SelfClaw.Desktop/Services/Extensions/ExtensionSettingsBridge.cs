@@ -1,14 +1,17 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using SelfClaw.Core.Runtime;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Windows.Threading;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Extensions.Abstractions;
+using SelfClaw.Desktop.Services.WebView;
 
 namespace SelfClaw.Desktop.Services.Extensions;
 
-internal sealed class ExtensionSettingsBridge
+internal sealed class ExtensionSettingsBridge : IDisposable
 {
     private const string MessagePrefix = "extensions/";
 
@@ -23,19 +26,44 @@ internal sealed class ExtensionSettingsBridge
     private readonly DesktopAgentDefinitionService _agentDefinitionService;
     private readonly IExtensionPackagePicker _packagePicker;
     private readonly IExtensionStateChangeNotifier _stateChangeNotifier;
+    private readonly WebViewHostChannel _channel;
+    private readonly Dispatcher _dispatcher;
+    private bool _disposed;
 
     public ExtensionSettingsBridge(
         IExtensionSettingsService settingsService,
         IExtensionPackageRepository packageRepository,
         DesktopAgentDefinitionService agentDefinitionService,
         IExtensionPackagePicker packagePicker,
-        IExtensionStateChangeNotifier stateChangeNotifier)
+        IExtensionStateChangeNotifier stateChangeNotifier,
+        WebViewHostChannel channel,
+        Dispatcher dispatcher)
     {
         _settingsService = settingsService;
         _packageRepository = packageRepository;
         _agentDefinitionService = agentDefinitionService;
         _packagePicker = packagePicker;
         _stateChangeNotifier = stateChangeNotifier;
+        _channel = channel;
+        _dispatcher = dispatcher;
+        _stateChangeNotifier.StateChanged += OnStateChanged;
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _stateChangeNotifier.StateChanged -= OnStateChanged;
+    }
+
+    private void OnStateChanged(long revision)
+    {
+        if (_disposed || _dispatcher.HasShutdownStarted) return;
+        if (!_dispatcher.CheckAccess())
+        {
+            _ = _dispatcher.InvokeAsync(() => OnStateChanged(revision));
+            return;
+        }
+        _channel.PostPush(new { type = "extensions/state-changed", revision });
     }
 
     public async Task<object?> TryHandleAsync(

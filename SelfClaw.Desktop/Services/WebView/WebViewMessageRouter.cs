@@ -1,16 +1,19 @@
+using SelfClaw.Desktop.Pet;
+using SelfClaw.Desktop.Services.Agents;
 using System.Text.Json;
-using System.Windows.Threading;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
-using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Tools;
 using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
-using SelfClaw.Desktop.Services.Pet;
 using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Terminal;
+using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.Workspace;
 using SelfClaw.Desktop.ViewModels;
 
@@ -23,7 +26,6 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly AiProviderSettingsBridge _aiProviderSettingsBridge;
     private readonly ExtensionSettingsBridge _extensionSettingsBridge;
     private readonly AgentSettingsBridge _agentSettingsBridge;
-    private readonly IExtensionStateChangeNotifier _extensionStateChangeNotifier;
     private readonly ProgrammingAssistantSettingsBridge _programmingAssistantSettingsBridge;
     private readonly AppearanceSettingsBridge _appearanceSettingsBridge;
     private readonly PetSettingsBridge _petSettingsBridge;
@@ -33,17 +35,21 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly PluginPanelHostController _pluginPanelHostController;
     private readonly PluginPanelBridge _pluginPanelBridge;
     private readonly MainWindowViewModel _viewModel;
-    private readonly AgentActivityCoordinator _agentActivityCoordinator;
+    private readonly ToolApprovalPresenter _approvals;
     private readonly WebViewHostChannel _hostChannel;
+    private readonly TranscriptDelivery _transcriptDelivery;
     private readonly ActivityPanelBridge? _activityPanelBridge;
-    private readonly Dispatcher _dispatcher;
     private int _disposeStarted;
+    private readonly ILogger<WebViewMessageRouter> _logger;
+    private readonly object _lifecycleGate = new();
+    private int _activeRoutes;
+    private bool _stopping;
+    private TaskCompletionSource? _drained;
 
     public WebViewMessageRouter(
         AiProviderSettingsBridge aiProviderSettingsBridge,
         ExtensionSettingsBridge extensionSettingsBridge,
         AgentSettingsBridge agentSettingsBridge,
-        IExtensionStateChangeNotifier extensionStateChangeNotifier,
         ProgrammingAssistantSettingsBridge programmingAssistantSettingsBridge,
         AppearanceSettingsBridge appearanceSettingsBridge,
         PetSettingsBridge petSettingsBridge,
@@ -52,16 +58,16 @@ internal sealed class WebViewMessageRouter : IDisposable
         PluginPanelHostController pluginPanelHostController,
         PluginPanelBridge pluginPanelBridge,
         MainWindowViewModel viewModel,
-        AgentActivityCoordinator agentActivityCoordinator,
+        ToolApprovalPresenter approvals,
         WebViewHostChannel hostChannel,
-        Dispatcher dispatcher,
+        TranscriptDelivery transcriptDelivery,
         GitWorkspaceBridge? gitWorkspaceBridge = null,
-        ActivityPanelBridge? activityPanelBridge = null)
+        ActivityPanelBridge? activityPanelBridge = null,
+        ILogger<WebViewMessageRouter>? logger = null)
     {
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
         _extensionSettingsBridge = extensionSettingsBridge;
         _agentSettingsBridge = agentSettingsBridge;
-        _extensionStateChangeNotifier = extensionStateChangeNotifier;
         _programmingAssistantSettingsBridge = programmingAssistantSettingsBridge;
         _appearanceSettingsBridge = appearanceSettingsBridge;
         _petSettingsBridge = petSettingsBridge;
@@ -71,14 +77,12 @@ internal sealed class WebViewMessageRouter : IDisposable
         _pluginPanelHostController = pluginPanelHostController;
         _pluginPanelBridge = pluginPanelBridge;
         _viewModel = viewModel;
-        _agentActivityCoordinator = agentActivityCoordinator;
+        _approvals = approvals;
         _hostChannel = hostChannel;
+        _transcriptDelivery = transcriptDelivery;
         _activityPanelBridge = activityPanelBridge;
-        _dispatcher = dispatcher;
+        _logger = logger ?? NullLogger<WebViewMessageRouter>.Instance;
 
-        _aiProviderSettingsBridge.ModelSelectionChanged += OnModelSelectionChanged;
-        _agentSettingsBridge.AgentsChanged += OnAgentsChanged;
-        _extensionStateChangeNotifier.StateChanged += OnExtensionStateChanged;
     }
 
     public async Task<WebViewHostCommand?> RouteAsync(
@@ -104,8 +108,50 @@ internal sealed class WebViewMessageRouter : IDisposable
 
         using (document)
         {
-            return await RouteDocumentAsync(document.RootElement, ownerHandle, cancellationToken);
+            lock (_lifecycleGate)
+            {
+                if (_stopping)
+                {
+                    PostFailure(document.RootElement, "shutting-down", "The application is shutting down.");
+                    return null;
+                }
+                _activeRoutes++;
+            }
+            try
+            {
+                return await RouteDocumentAsync(document.RootElement, ownerHandle, cancellationToken);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception exception)
+            {
+                _logger.LogError(exception, "WebView command {Command} failed. RequestId={RequestId}",
+                    ReadOptionalString(document.RootElement, "type"), ReadOptionalString(document.RootElement, "requestId"));
+                PostFailure(document.RootElement, exception is ArgumentException ? "invalid-request" : "operation-failed", exception.Message);
+                return null;
+            }
+            finally
+            {
+                lock (_lifecycleGate)
+                    if (--_activeRoutes == 0) _drained?.TrySetResult();
+            }
         }
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        lock (_lifecycleGate)
+        {
+            _stopping = true;
+            return _activeRoutes == 0 ? Task.CompletedTask :
+                (_drained ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task.WaitAsync(cancellationToken);
+        }
+    }
+
+    private void PostFailure(JsonElement payload, string errorCode, string error)
+    {
+        if (payload.ValueKind != JsonValueKind.Object) return;
+        _hostChannel.PostResponse(new { type = "operation-result", requestId = ReadOptionalString(payload, "requestId"),
+            command = ReadOptionalString(payload, "type"), ok = false, errorCode, error });
     }
 
     // Every message type below acts on the user's behalf — sending prompts, deleting extensions, closing
@@ -117,6 +163,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         => sourceUri is not null &&
            Uri.TryCreate(sourceUri, UriKind.Absolute, out var uri) &&
            uri.Scheme == Uri.UriSchemeHttps &&
+           uri.IsDefaultPort &&
            string.Equals(uri.Host, ApplicationHostName, StringComparison.OrdinalIgnoreCase);
 
     private async Task<WebViewHostCommand?> RouteDocumentAsync(
@@ -137,9 +184,14 @@ internal sealed class WebViewMessageRouter : IDisposable
             return null;
         }
 
-        if (string.Equals(type, "transcript-rendered", StringComparison.Ordinal))
+        if (type is "transcript-applied" or "transcript-rejected" or "transcript-resync")
         {
-            AcknowledgeTranscript(payload);
+            if (type == "transcript-resync") _transcriptDelivery.Resynchronize();
+            else if (payload.TryGetProperty("revision", out var value) && value.TryGetInt64(out var revision))
+            {
+                if (type == "transcript-applied") _transcriptDelivery.Acknowledge(revision);
+                else _transcriptDelivery.Reject(revision);
+            }
             return null;
         }
 
@@ -149,128 +201,59 @@ internal sealed class WebViewMessageRouter : IDisposable
             return null;
         }
 
-        var response = await _aiProviderSettingsBridge.TryHandleAsync(
-            type,
-            payload,
-            cancellationToken);
-        if (response is not null)
+        if (type.StartsWith("appearance/", StringComparison.Ordinal))
         {
-            _hostChannel.PostResponse(response);
-            return null;
-        }
-
-        if (_gitWorkspaceBridge is not null)
-        {
-            response = await _gitWorkspaceBridge.TryHandleAsync(type, payload, cancellationToken);
-            if (response is not null)
-            {
-                _hostChannel.PostResponse(response);
-                return null;
-            }
-        }
-
-        response = await _extensionSettingsBridge.TryHandleAsync(
-            type,
-            payload,
-            _viewModel.SelectedAgentId,
-            cancellationToken);
-        if (response is not null)
-        {
-            _hostChannel.PostResponse(response);
-            return null;
-        }
-
-        response = await _agentSettingsBridge.TryHandleAsync(
-            type,
-            payload,
-            cancellationToken);
-        if (response is not null)
-        {
-            _hostChannel.PostResponse(response);
-            return null;
-        }
-
-        response = await _programmingAssistantSettingsBridge.TryHandleAsync(
-            type,
-            payload,
-            cancellationToken);
-        if (response is not null)
-        {
-            _hostChannel.PostResponse(response);
-            return null;
-        }
-
-        // 外观是唯一一个既要回包、又要顺手改原生窗口的设置项，所以它的返回是个二元组：
-        // 回包照旧走 hostChannel，明暗结论转成命令交给 MainWindow。
-        var appearance = await _appearanceSettingsBridge.TryHandleAsync(
-            type,
-            payload,
-            cancellationToken);
-        if (appearance is not null)
-        {
+            var appearance = await _appearanceSettingsBridge.TryHandleAsync(type, payload, cancellationToken);
+            if (appearance is null) throw new ArgumentException("Unsupported appearance message.");
             _hostChannel.PostResponse(appearance.Value.Response);
-            return appearance.Value.IsDark is { } isDark
-                ? new WebViewHostCommand(WebViewHostCommandKind.ApplyCaptionTheme, isDark ? "dark" : "light")
-                : null;
+            return appearance.Value.IsDark is { } dark
+                ? new WebViewHostCommand(WebViewHostCommandKind.ApplyCaptionTheme, dark ? "dark" : "light") : null;
         }
-
-        response = await _petSettingsBridge.TryHandleAsync(
-            type,
-            payload,
-            cancellationToken);
-        if (response is not null)
+        if (type.StartsWith("terminal-", StringComparison.Ordinal))
         {
-            _hostChannel.PostResponse(response);
+            if (!await _terminalHostController.TryHandleMessageAsync(type, payload))
+                throw new ArgumentException("Unsupported terminal message.");
             return null;
         }
-
-        response = await _workspaceSelectionBridge.TryHandleAsync(
-            type,
-            payload,
-            ownerHandle,
-            cancellationToken);
-        if (response is not null)
+        object? response;
+        switch (type)
         {
-            _hostChannel.PostResponse(response);
-            return null;
+            case var name when name.StartsWith("ai-providers/", StringComparison.Ordinal):
+                response = await _aiProviderSettingsBridge.TryHandleAsync(type, payload, cancellationToken); break;
+            case var name when name.StartsWith("agents/", StringComparison.Ordinal):
+                response = await _agentSettingsBridge.TryHandleAsync(type, payload, cancellationToken); break;
+            case var name when name.StartsWith("extensions/", StringComparison.Ordinal):
+                response = await _extensionSettingsBridge.TryHandleAsync(type, payload, _viewModel.SelectedAgentId, cancellationToken); break;
+            case "plugin-host/api":
+                response = await _pluginPanelBridge.TryHandleAsync(type, payload, cancellationToken); break;
+            case var name when name.StartsWith("plugin-host/", StringComparison.Ordinal):
+                response = await _pluginPanelHostController.TryHandleAsync(type, payload, cancellationToken); break;
+            case "get-git-state":
+            case var name when name.StartsWith("git-", StringComparison.Ordinal):
+                response = _gitWorkspaceBridge is null ? null : await _gitWorkspaceBridge.TryHandleAsync(type, payload, cancellationToken); break;
+            case "scan-programming-clis" or "get-programming-assistant-settings" or "select-programming-cli" or
+                 "select-programming-model" or "select-programming-reasoning" or "test-programming-cli":
+                response = await _programmingAssistantSettingsBridge.TryHandleAsync(type, payload, cancellationToken); break;
+            case "get-pet-settings" or "set-pet-visible" or "select-builtin-pet":
+                response = await _petSettingsBridge.TryHandleAsync(type, payload, cancellationToken); break;
+            case "get-workspace-selection" or "select-workspace-root" or "browse-workspace-folder" or
+                 "delete-workspace-root" or "workspace-tree/list":
+                response = await _workspaceSelectionBridge.TryHandleAsync(type, payload, ownerHandle, cancellationToken); break;
+            default:
+                var command = await RouteShellIntentAsync(type, payload);
+                if (type is not ("send-prompt" or "tool-approval/get-state") && ReadOptionalString(payload, "requestId") is { } requestId)
+                    _hostChannel.PostResponse(new { type = "operation-result", requestId, ok = true });
+                return command;
         }
-
-        if (_terminalHostController.TryHandleMessage(type, payload))
-        {
-            return null;
-        }
-
-        // The bridge must be offered `plugin-host/*` before the host controller. The controller claims the
-        // whole prefix and answers anything it does not recognise with an "unsupported type" error rather
-        // than null, so placing it first would swallow `plugin-host/api` before the bridge ever sees it.
-        // Any future `plugin-host/*` handler has to be chained above the controller for the same reason.
-        response = await _pluginPanelBridge.TryHandleAsync(type, payload, cancellationToken);
-        if (response is not null)
-        {
-            _hostChannel.PostResponse(response);
-            return null;
-        }
-
-        response = await _pluginPanelHostController.TryHandleAsync(type, payload, cancellationToken);
-        if (response is not null)
-        {
-            _hostChannel.PostResponse(response);
-            return null;
-        }
-
-        return await RouteShellIntentAsync(type, payload);
+        if (response is null) throw new ArgumentException($"Unsupported message '{type}'.");
+        _hostChannel.PostResponse(response);
+        return null;
     }
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
-        {
-            return;
-        }
-
-        _aiProviderSettingsBridge.ModelSelectionChanged -= OnModelSelectionChanged;
-        _agentSettingsBridge.AgentsChanged -= OnAgentsChanged;
-        _extensionStateChangeNotifier.StateChanged -= OnExtensionStateChanged;
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
+        lock (_lifecycleGate) _stopping = true;
     }
 
     private async Task<WebViewHostCommand?> RouteShellIntentAsync(string type, JsonElement payload)
@@ -281,7 +264,8 @@ internal sealed class WebViewMessageRouter : IDisposable
             {
                 var result = await _viewModel.SubmitPromptAsync(
                     ReadOptionalString(payload, "prompt") ?? string.Empty,
-                    ReadOptionalString(payload, "workspaceMode"));
+                    ReadOptionalString(payload, "workspaceMode"),
+                    Guid.TryParse(ReadOptionalString(payload, "modelProfileId"), out var modelProfileId) ? modelProfileId : null);
                 var requestId = ReadOptionalString(payload, "requestId");
                 if (requestId is not null)
                 {
@@ -298,6 +282,9 @@ internal sealed class WebViewMessageRouter : IDisposable
             }
             case "stop-generation":
                 _viewModel.StopSelectedConversation();
+                return null;
+            case "tool-approval/get-state":
+                _hostChannel.PostResponse(_approvals.Capture(ReadOptionalString(payload, "requestId")));
                 return null;
             case "resolve-tool-approval":
                 ResolveToolApproval(payload);
@@ -341,98 +328,40 @@ internal sealed class WebViewMessageRouter : IDisposable
                 return new WebViewHostCommand(WebViewHostCommandKind.CloseWindow);
             case "toggle-terminal":
                 return new WebViewHostCommand(WebViewHostCommandKind.ToggleTerminal);
-            case "settings-closed":
-                return new WebViewHostCommand(WebViewHostCommandKind.SettingsClosed);
             default:
-                return null;
-        }
-    }
-
-    private void AcknowledgeTranscript(JsonElement payload)
-    {
-        if (payload.TryGetProperty("revision", out var revisionElement) &&
-            revisionElement.TryGetInt64(out var revision))
-        {
-            _hostChannel.AcknowledgeTranscript(revision);
+                if (ReadOptionalString(payload, "requestId") is null) return null;
+                throw new ArgumentException($"Unsupported message '{type}'.");
         }
     }
 
     private void ResolveToolApproval(JsonElement payload)
     {
-        var toolExecutionId = ReadOptionalString(payload, "toolExecutionId");
-        var approved = payload.TryGetProperty("approved", out var approvedElement) &&
-                       approvedElement.ValueKind is JsonValueKind.True or JsonValueKind.False &&
-                       approvedElement.GetBoolean();
-        if (Guid.TryParse(toolExecutionId, out var parsedToolExecutionId))
-        {
-            _agentActivityCoordinator.TryResolveApproval(parsedToolExecutionId, approved);
-        }
+        var id = ReadRequiredGuid(payload, "toolExecutionId");
+        if (!payload.TryGetProperty("approved", out var approval) || approval.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            throw new ArgumentException("A boolean approval decision is required.");
+        if (!_approvals.Resolve(id, approval.GetBoolean()))
+            throw new InvalidOperationException("This approval has already completed or expired.");
     }
 
-    private async Task SelectConversationAsync(JsonElement payload)
+    private Task SelectConversationAsync(JsonElement payload)
+        => _viewModel.SelectConversationAsync(ReadRequiredGuid(payload, "conversationId"));
+
+    private Task DeleteConversationAsync(JsonElement payload)
+        => _viewModel.DeleteConversationAsync(ReadRequiredGuid(payload, "conversationId"), ReadBoolean(payload, "removeManagedWorktree"));
+
+    private Task DeleteConversationsAsync(JsonElement payload)
     {
-        if (Guid.TryParse(ReadOptionalString(payload, "conversationId"), out var conversationId))
-        {
-            await _viewModel.SelectConversationAsync(conversationId);
-        }
+        if (!payload.TryGetProperty("conversationIds", out var values) || values.ValueKind != JsonValueKind.Array)
+            throw new ArgumentException("conversationIds must be an array.");
+        var ids = values.EnumerateArray().Select(item => item.ValueKind == JsonValueKind.String &&
+            Guid.TryParse(item.GetString(), out var id) && id != Guid.Empty ? id :
+            throw new ArgumentException("Every conversation id must be a non-empty GUID.")).ToArray();
+        return _viewModel.DeleteConversationsAsync(ids);
     }
 
-    private async Task DeleteConversationAsync(JsonElement payload)
-    {
-        if (Guid.TryParse(ReadOptionalString(payload, "conversationId"), out var conversationId))
-        {
-            await _viewModel.DeleteConversationAsync(
-                conversationId,
-                ReadBoolean(payload, "removeManagedWorktree"));
-        }
-    }
-
-    private async Task DeleteConversationsAsync(JsonElement payload)
-    {
-        if (!payload.TryGetProperty("conversationIds", out var conversationIdsElement) ||
-            conversationIdsElement.ValueKind != JsonValueKind.Array)
-        {
-            return;
-        }
-
-        var conversationIds = conversationIdsElement
-            .EnumerateArray()
-            .Select(item => Guid.TryParse(item.GetString(), out var conversationId) ? conversationId : (Guid?)null)
-            .Where(conversationId => conversationId.HasValue)
-            .Select(conversationId => conversationId.GetValueOrDefault())
-            .ToArray();
-        await _viewModel.DeleteConversationsAsync(conversationIds);
-    }
-
-    private void OnModelSelectionChanged(Guid? modelProfileId)
-        => RunOnDispatcher(() => _viewModel.SelectModelProfile(modelProfileId));
-
-    // Agent 定义文件已落盘：先刷新 VM 的 Agent 缓存，随后的 revision 推进会带着新定义重绘 transcript。
-    private void OnAgentsChanged()
-        => RunOnDispatcher(() => _viewModel.ReloadAgents());
-
-    private void OnExtensionStateChanged(long revision)
-        => RunOnDispatcher(() =>
-        {
-            _viewModel.UpdateCapabilityRevision(revision);
-            _hostChannel.PostPush(new { type = "extensions/state-changed", revision });
-        });
-
-    private void RunOnDispatcher(Action action)
-    {
-        if (_dispatcher.HasShutdownStarted || _dispatcher.HasShutdownFinished)
-        {
-            return;
-        }
-
-        if (_dispatcher.CheckAccess())
-        {
-            action();
-            return;
-        }
-
-        _ = _dispatcher.BeginInvoke(action, DispatcherPriority.Normal);
-    }
+    private static Guid ReadRequiredGuid(JsonElement payload, string property)
+        => Guid.TryParse(ReadOptionalString(payload, property), out var value) && value != Guid.Empty ? value :
+            throw new ArgumentException($"{property} must be a non-empty GUID.");
 
     private static string? ReadOptionalString(JsonElement payload, string propertyName)
     {

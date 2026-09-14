@@ -34,7 +34,7 @@ internal sealed class AppearanceSettingsBridge
                 ? await _settingsService.SaveAsync(ReadSettings(payload), cancellationToken)
                 : await _settingsService.GetAsync(cancellationToken);
 
-            return (BuildResponse(requestId, settings), settings.IsDark);
+            return (BuildResponse(requestId, settings), AppearanceSettingsService.IsDark(settings));
         }
         catch (OperationCanceledException)
         {

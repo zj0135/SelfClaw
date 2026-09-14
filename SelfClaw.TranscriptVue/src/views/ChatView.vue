@@ -21,7 +21,7 @@ const terminalPanelRef = ref(null);
 const composerShellRef = ref(null);
 const collapse = useTranscriptCollapse();
 const transcriptScroll = useTranscriptScroll(() => transcriptPanelRef.value?.getScrollEl?.() ?? null);
-const { state, isEmptyConversation } = useChatTranscript(transcriptScroll, bridge);
+const { state, isEmptyConversation } = useChatTranscript(transcriptScroll);
 const workspace = useWorkspaceSelection(computed(() => state.selectedConversationId), bridge);
 const composer = useChatComposer(state, workspace, transcriptScroll, bridge);
 const approvals = useChatApprovals(bridge);

@@ -1,5 +1,7 @@
 # SelfClaw 桌宠系统设计文档
 
+> 2026-09-14 实现更新：配置与实际包/可见性/加载错误由 `PetHost` 统一协调；Catalog 在后台准备冻结位图，Window adapter 只安装资源，ViewModel 不再读取文件或吞加载失败。设置页消费 Host 变更，退出前 flush 待保存位置；窗口仅由注入路径创建。当前代码、验证及原生实机限制见 [Desktop 架构整改 R03/R05/R12/R15](desktop-architecture-review.md)。下文保留原始设计，涉及初始化和加载的旧调用链以该整改记录为准。
+
 > 状态:浮窗、宠物包选择、交互/工作动画、Agent 节点气泡与 Direct 审批已实现
 > 目标平台:WPF (.NET 10, `net10.0-windows10.0.19041.0`) + 独立桌面浮动窗口
 > 参考来源:`open-design/apps/web/src/components/pet`(React/Web 实现,思路参考,代码不复用)

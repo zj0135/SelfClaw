@@ -1,4 +1,4 @@
-namespace SelfClaw.Desktop.Services;
+namespace SelfClaw.Desktop.Services.Agents.Definitions;
 
 internal sealed class AgentMarkdownDocumentParser
 {

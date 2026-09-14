@@ -1,7 +1,9 @@
+using SelfClaw.Desktop.Services.Transcript.Views;
+using SelfClaw.Desktop.Services.Transcript;
+using System.Windows.Threading;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Windows;
-using System.Windows.Threading;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Web.WebView2.Core;
@@ -9,7 +11,6 @@ using Microsoft.Web.WebView2.Wpf;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Infrastructure.Options;
@@ -33,6 +34,7 @@ public sealed class DesktopActivityWebViewTests(ITestOutputHelper output)
             var executions = tasks.Select((task, index) => activity.CreateExecutor(task, runtimes[index]).ExecuteAsync(task, shutdown.Token)).ToArray();
             await Task.WhenAll(runtimes.Select(runtime => runtime.Started.Task));
             var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
             var source = new ActivityPanelTestScope(parent.Id);
             using var publisher = new ActivityPanelPublisher(activity.Service,
                 new ActivityPanelSnapshotBuilder(activity.Service, StoragePathDefaults.CreateDefault()), source, channel,
@@ -63,13 +65,13 @@ public sealed class DesktopActivityWebViewTests(ITestOutputHelper output)
                         var payload = document.RootElement;
                         var type = payload.GetProperty("type").GetString() ?? string.Empty;
                         if (type.StartsWith("activity-panel/", StringComparison.Ordinal)) await bridge.HandleAsync(type, payload, CancellationToken.None);
-                        else if (type == "transcript-rendered") channel.AcknowledgeTranscript(payload.GetProperty("revision").GetInt64());
+                        else if (type == "transcript-applied") delivery.Acknowledge(payload.GetProperty("revision").GetInt64());
                         else if (payload.TryGetProperty("requestId", out var requestId))
                             channel.PostResponse(new { type, requestId = requestId.GetString(), tabs = Array.Empty<object>(), panels = Array.Empty<object>(), models = Array.Empty<object>(), agents = Array.Empty<object>(), roots = Array.Empty<object>() });
                     }
                     catch (Exception exception) { routeErrors.Add(exception.GetType().Name + ": " + exception.Message); }
                 };
-                channel.PublishTranscript(new TranscriptRenderState([], false, [], parent.Id.ToString("D"), false));
+                delivery.Publish(new TranscriptRenderState([], false, [], parent.Id.ToString("D"), false));
                 webView.Source = new Uri($"https://{WebViewMessageRouter.ApplicationHostName}/index.html");
                 await WaitForScriptAsync(webView, "document.querySelectorAll('.task-row').length === 3");
                 await webView.ExecuteScriptAsync("document.querySelector('.task-select').click()");

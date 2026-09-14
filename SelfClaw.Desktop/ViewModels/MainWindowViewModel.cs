@@ -1,39 +1,41 @@
-using System.IO;
+using SelfClaw.Desktop.Services.Agents;
+using SelfClaw.Desktop.Services.Agents.Definitions;
+using SelfClaw.Desktop.Services.Settings;
+using SelfClaw.Desktop.Services.Transcript.Views;
+using SelfClaw.Desktop.Services.Workspace.Models;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Runtime;
-using SelfClaw.Desktop.Services.Subagents;
+using SelfClaw.Desktop.Services.Workspace;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.Workspace.Abstractions;
 
 namespace SelfClaw.Desktop.ViewModels;
 
-public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSelectionController, IPluginPanelContextSource,
+public sealed partial class MainWindowViewModel : ObservableObject, IDisposable, IWorkspaceSelectionController, IPluginPanelContextSource,
     SelfClaw.Desktop.Services.Activities.IActivityPanelScopeSource
 {
     #region 字段与构造函数 —— 依赖注入字段、运行时集合状态、流式发布定时器初始化
 
-    private static readonly TimeSpan ConversationDeleteStopTimeout = TimeSpan.FromSeconds(8);
     private readonly IConversationRepository _conversationRepository;
-    private readonly IWorkspaceRootRepository _workspaceRootRepository;
     private readonly ConversationTurnEngine _turnEngine;
     private readonly ConversationSessionCoordinator _conversationSessions;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly TranscriptPublisher _transcriptPublisher;
-    private readonly DesktopAgentDefinitionService _desktopAgentDefinitionService;
+    private readonly AgentSettingsService _agentSettings;
+    private readonly IExtensionStateChangeNotifier _extensionChanges;
     private readonly DesktopSettingsJsonStore _settingsStore;
-    private readonly ISubagentConversationLifecycle _subagentConversationLifecycle;
-    private readonly IGitWorkspaceManager? _gitWorkspaceManager;
-    private readonly IGitWorkspaceQuery? _gitWorkspaceQuery;
-    private readonly IGitWorkspaceStore? _gitWorkspaceStore;
+    private readonly ConversationWorkspaceService _workspaces;
+    private readonly ConversationDeletionService _deletion;
+    private readonly Dispatcher? _dispatcher;
     private readonly ILogger<MainWindowViewModel> _logger;
 
     private readonly List<ConversationRecord> _allConversations = [];
@@ -41,13 +43,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     private readonly List<DesktopAgentDefinition> _agents = [];
     private readonly List<WorkspaceRoot> _workspaceRoots = [];
     private Task _selectionLoadTask = Task.CompletedTask;
-    private bool _initialized;
+    private Task? _initializationTask;
+    private int _workspaceLoadVersion;
+    private int _conversationLoadVersion;
     private int _selectionVersion;
     private ConversationRecord? _selectedConversation;
     private WorkspaceRoot? _selectedWorkspaceRoot;
     private string _selectedAgentId = DesktopAgentDefinitionService.BuildAgentId;
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
-    private Guid? _selectedModelProfileId;
+    private bool _disposed;
+    private readonly SemaphoreSlim _composerModeGate = new(1, 1);
     // Composer-level execution mode override ("本地 CLI" / "提供商"). Null defers to the
     // active agent's own mode; a value forces every sent turn onto that runtime branch.
     private AgentExecutionMode? _composerModeOverride;
@@ -55,33 +60,34 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     internal MainWindowViewModel(
         IConversationRepository conversationRepository,
-        IWorkspaceRootRepository workspaceRootRepository,
         ConversationTurnEngine turnEngine,
         ConversationSessionCoordinator conversationSessions,
         AgentActivityCoordinator agentActivityCoordinator,
         TranscriptPublisher transcriptPublisher,
-        DesktopAgentDefinitionService desktopAgentDefinitionService,
+        AgentSettingsService agentSettings,
+        IExtensionStateChangeNotifier extensionChanges,
         DesktopSettingsJsonStore settingsStore,
-        ISubagentConversationLifecycle subagentConversationLifecycle,
+        ConversationWorkspaceService workspaces,
+        ConversationDeletionService deletion,
         ILogger<MainWindowViewModel> logger,
-        IGitWorkspaceManager? gitWorkspaceManager = null,
-        IGitWorkspaceQuery? gitWorkspaceQuery = null,
-        IGitWorkspaceStore? gitWorkspaceStore = null)
+        Dispatcher? dispatcher = null)
     {
         _conversationRepository = conversationRepository;
-        _workspaceRootRepository = workspaceRootRepository;
         _turnEngine = turnEngine;
         _conversationSessions = conversationSessions;
         _agentActivityCoordinator = agentActivityCoordinator;
         _transcriptPublisher = transcriptPublisher;
-        _desktopAgentDefinitionService = desktopAgentDefinitionService;
+        _agentSettings = agentSettings;
+        _extensionChanges = extensionChanges;
         _settingsStore = settingsStore;
-        _subagentConversationLifecycle = subagentConversationLifecycle;
-        _gitWorkspaceManager = gitWorkspaceManager;
-        _gitWorkspaceQuery = gitWorkspaceQuery;
-        _gitWorkspaceStore = gitWorkspaceStore;
+        _workspaces = workspaces;
+        _deletion = deletion;
+        _dispatcher = dispatcher;
         _logger = logger;
         _transcriptPublisher.Attach(BuildTranscriptProjectionRequest);
+        _agentSettings.Changed += OnAgentsChanged;
+        _extensionChanges.StateChanged += OnExtensionStateChanged;
+        _conversationSessions.SelectedStateChanged += OnSelectedRuntimeChanged;
     }
 
     #endregion
@@ -116,16 +122,23 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     /// 启动时一次性加载：代理、工作区、会话列表，并发布初始 transcript。
     /// 由宿主窗口（OnLoaded）与通知激活服务调用，是渲染路径的引导入口。
     /// </summary>
-    public async Task InitializeAsync()
+    public Task InitializeAsync()
     {
-        if (_initialized)
-        {
-            return;
-        }
+        _dispatcher?.VerifyAccess();
+        if (_initializationTask is null || _initializationTask.IsFaulted || _initializationTask.IsCanceled)
+            _initializationTask = InitializeCoreAsync();
+        return _initializationTask;
+    }
 
-        _initialized = true;
-        _composerModeOverride = ParseComposerMode(
-            (await _settingsStore.ReadNodeAsync<ComposerSettings>(ComposerSettingsNode))?.ExecutionMode);
+    private async Task InitializeCoreAsync()
+    {
+        await _composerModeGate.WaitAsync();
+        try
+        {
+            _composerModeOverride = ParseComposerMode(
+                (await _settingsStore.ReadNodeAsync<ComposerSettings>(ComposerSettingsNode))?.ExecutionMode);
+        }
+        finally { _composerModeGate.Release(); }
         ReloadAgents();
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
@@ -137,7 +150,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     /// <summary>
     /// WebView 的 "send-prompt" 消息经宿主路由后落到这里，触发一次发送回合。
     /// </summary>
-    public Task<PromptSubmissionResult> SubmitPromptAsync(string prompt, string? workspaceMode = null)
+    public Task<PromptSubmissionResult> SubmitPromptAsync(string prompt, string? workspaceMode = null, Guid? modelProfileId = null)
     {
         ArgumentNullException.ThrowIfNull(prompt);
 
@@ -152,7 +165,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
             SelectedConversation,
             _selectedWorkspaceRoot,
             _selectedToolPermissionMode,
-            _selectedModelProfileId,
+            modelProfileId,
             _selectedAgentId,
             _composerModeOverride,
             ParseWorkspaceMode(workspaceMode),
@@ -166,11 +179,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     public void StopSelectedConversation()
         => _conversationSessions.StopSelected();
 
-    public void SelectModelProfile(Guid? modelProfileId)
-    {
-        _selectedModelProfileId = modelProfileId;
-    }
-
     /// <summary>
     /// Applies the composer's mode pick ("cli" / "direct") as a persisted override on top of the
     /// active agent's own mode, so provider models can be exercised without a Direct-mode agent.
@@ -178,25 +186,24 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     /// </summary>
     public async Task SelectComposerModeAsync(string? mode)
     {
-        var parsed = ParseComposerMode(mode);
-        if (_composerModeOverride == parsed)
-        {
-            return;
-        }
-
-        _composerModeOverride = parsed;
+        await _composerModeGate.WaitAsync();
         try
         {
+            var parsed = ParseComposerMode(mode);
+            if (_composerModeOverride == parsed)
+            {
+                return;
+            }
+
             await _settingsStore.WriteNodeAsync(
                 ComposerSettingsNode,
                 new ComposerSettings(parsed?.ToString().ToLowerInvariant()));
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "Failed to persist the composer execution mode.");
-        }
+            _composerModeOverride = parsed;
 
-        PublishShell(false);
+            PublishShell(false);
+
+        }
+        finally { _composerModeGate.Release(); }
     }
 
     /// <summary>
@@ -216,6 +223,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         }
 
         SelectAgentCore(nextAgent.Id);
+        _selectionVersion++;
         ApplyConversationFilter(SelectedConversation?.Id);
         PublishShell(false);
         return Task.CompletedTask;
@@ -275,7 +283,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     private const string ComposerSettingsNode = "composer";
 
     public Task StartNewConversationAsync()
-        => SelectConversationCoreAsync(null);
+        => SelectConversationCoreAsync(null, clearWorkspace: true);
 
     public Task SelectConversationAsync(Guid conversationId)
     {
@@ -294,72 +302,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     public async Task DeleteConversationsAsync(IEnumerable<Guid> conversationIds, bool removeManagedWorktree = false)
     {
-        var requestedIds = conversationIds
-            .Where(item => item != Guid.Empty)
-            .Distinct()
-            .ToHashSet();
-        if (requestedIds.Count == 0)
-        {
-            return;
-        }
-
-        var deleteIds = _allConversations
-            .Where(item => requestedIds.Contains(item.Id))
-            .Select(item => item.Id)
-            .ToArray();
-        if (deleteIds.Length == 0)
-        {
-            return;
-        }
-
-        foreach (var conversationId in deleteIds)
-        {
-            _turnEngine.BeginConversationDeletion(conversationId);
-        }
-
+        ArgumentNullException.ThrowIfNull(conversationIds);
+        var requestedIds = conversationIds.Where(id => id != Guid.Empty).ToHashSet();
+        var deleteIds = _allConversations.Where(item => requestedIds.Contains(item.Id)).Select(item => item.Id).ToArray();
+        if (deleteIds.Length == 0) return;
         try
         {
-            foreach (var conversationId in deleteIds)
-            {
-                await StopConversationForDeletionAsync(conversationId);
-                try
-                {
-                    await _subagentConversationLifecycle.CancelAndWaitAsync(
-                        conversationId,
-                        ConversationDeleteStopTimeout);
-                }
-                catch (TimeoutException exception)
-                {
-                    _logger.LogWarning(
-                        exception,
-                        "Conversation deletion stopped because Subagent tasks did not terminate. ConversationId={ConversationId} TimeoutSeconds={TimeoutSeconds}",
-                        conversationId,
-                        ConversationDeleteStopTimeout.TotalSeconds);
-                    throw;
-                }
-            }
-
-            foreach (var conversationId in deleteIds)
-            {
-                await ReleaseConversationWorkspaceAsync(conversationId, removeManagedWorktree);
-                await _conversationRepository.DeleteConversationAsync(conversationId);
-                _allConversations.RemoveAll(item => item.Id == conversationId);
-                _filteredConversations.RemoveAll(item => item.Id == conversationId);
-            }
+            await _deletion.DeleteAsync(deleteIds, removeManagedWorktree);
         }
         finally
         {
-            foreach (var conversationId in deleteIds)
-            {
-                _turnEngine.EndConversationDeletion(conversationId);
-            }
+            await ReloadWorkspaceRootsAsync();
+            await ReloadConversationsAsync();
         }
-
-        var deletedIdSet = deleteIds.ToHashSet();
-        var preferredConversationId = SelectedConversation?.Id is Guid selectedId && !deletedIdSet.Contains(selectedId)
-            ? (Guid?)selectedId
-            : null;
-        ApplyConversationFilter(preferredConversationId);
     }
 
     public async Task DeleteWorkspaceRootAsync(Guid workspaceRootId)
@@ -369,7 +324,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
             return;
         }
 
-        await _workspaceRootRepository.DeleteWorkspaceRootAsync(workspaceRootId);
+        await _workspaces.DeleteRootAsync(workspaceRootId);
         await ReloadWorkspaceRootsAsync();
         await ReloadConversationsAsync();
     }
@@ -380,6 +335,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     private void SelectWorkspaceRoot(WorkspaceRoot? workspaceRoot, bool publishShell)
     {
+        _dispatcher?.VerifyAccess();
         if (_selectedWorkspaceRoot?.Id == workspaceRoot?.Id)
         {
             if (!ReferenceEquals(_selectedWorkspaceRoot, workspaceRoot))
@@ -391,6 +347,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
             return;
         }
 
+        _selectionVersion++;
         _selectedWorkspaceRoot = workspaceRoot;
         OnPropertyChanged(nameof(SelectedWorkspaceRootPath));
         if (publishShell)
@@ -401,8 +358,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     public async Task ReloadWorkspaceSelectionAsync()
     {
+        var version = _selectionVersion;
         await ReloadWorkspaceRootsAsync();
-        ApplyWorkspaceSelectionChanged(SelectedConversation?.Id);
+        if (version == _selectionVersion) ApplyWorkspaceSelectionChanged(SelectedConversation?.Id);
+        else PublishShell(false);
     }
 
     public void SelectWorkspaceRoot(Guid? workspaceRootId)
@@ -422,30 +381,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     public async Task<WorkspaceRoot> SelectOrAddWorkspaceRootAsync(string rootPath)
     {
-        var normalizedPath = NormalizeWorkspaceRootPath(rootPath);
-        if (!Directory.Exists(normalizedPath))
+        var version = _selectionVersion;
+        var root = await _workspaces.AddAsync(rootPath);
+        await ReloadWorkspaceRootsAsync();
+        if (version == _selectionVersion)
         {
-            throw new DirectoryNotFoundException($"The selected workspace directory does not exist: {normalizedPath}");
+            SelectWorkspaceRoot(_workspaceRoots.FirstOrDefault(item => item.Id == root.Id) ?? root, publishShell: false);
+            ApplyWorkspaceSelectionChanged();
         }
-
-        var existing = _workspaceRoots.FirstOrDefault(root => WorkspacePathsEqual(root.RootPath, normalizedPath));
-        if (existing is null)
-        {
-            var now = DateTimeOffset.UtcNow;
-            existing = new WorkspaceRoot(
-                Guid.NewGuid(),
-                ResolveWorkspaceRootName(normalizedPath),
-                normalizedPath,
-                now,
-                now);
-            await _workspaceRootRepository.UpsertWorkspaceRootAsync(existing);
-            await ReloadWorkspaceRootsAsync();
-            existing = _workspaceRoots.FirstOrDefault(root => WorkspacePathsEqual(root.RootPath, normalizedPath)) ?? existing;
-        }
-
-        SelectWorkspaceRoot(existing, publishShell: false);
-        ApplyWorkspaceSelectionChanged();
-        return existing;
+        return root;
     }
 
     private void ApplyWorkspaceSelectionChanged(Guid? preferredConversationId = null)
@@ -458,72 +402,38 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         ApplyConversationFilter(preferredConversationId);
     }
 
-    private static string NormalizeWorkspaceRootPath(string rootPath)
-    {
-        if (string.IsNullOrWhiteSpace(rootPath))
-        {
-            throw new ArgumentException("A workspace directory path is required.", nameof(rootPath));
-        }
-
-        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath.Trim()));
-    }
-
-    private static bool WorkspacePathsEqual(string left, string right)
-        => string.Equals(
-            NormalizeWorkspaceRootPath(left),
-            NormalizeWorkspaceRootPath(right),
-            StringComparison.OrdinalIgnoreCase);
-
-    private static string ResolveWorkspaceRootName(string rootPath)
-    {
-        var name = Path.GetFileName(NormalizeWorkspaceRootPath(rootPath));
-        return string.IsNullOrWhiteSpace(name) ? NormalizeWorkspaceRootPath(rootPath) : name;
-    }
-
     #endregion
 
     #region 数据加载 —— 重载工作区 / 会话列表，并加载选中会话的消息与工具运行
 
     private async Task ReloadWorkspaceRootsAsync()
     {
+        var version = ++_workspaceLoadVersion;
+        var roots = await _workspaces.ListAsync();
+        _dispatcher?.VerifyAccess();
+        if (version != _workspaceLoadVersion) return;
         var selectedId = _selectedWorkspaceRoot?.Id;
-        var workspaceRoots = await _workspaceRootRepository.ListWorkspaceRootsAsync();
-        if (_gitWorkspaceQuery is not null)
-        {
-            foreach (var workspaceRoot in workspaceRoots)
-            {
-                await _gitWorkspaceQuery.GetStateAsync(workspaceRoot).ConfigureAwait(false);
-            }
-
-            workspaceRoots = await _workspaceRootRepository.ListWorkspaceRootsAsync().ConfigureAwait(false);
-        }
-
-        ReplaceList(_workspaceRoots, workspaceRoots);
-        SelectWorkspaceRoot(
-            selectedId is Guid id
-                ? workspaceRoots.FirstOrDefault(root => root.Id == id)
-                : null,
-            publishShell: false);
+        ReplaceList(_workspaceRoots, roots);
+        SelectWorkspaceRoot(selectedId is Guid id ? roots.FirstOrDefault(root => root.Id == id) : null, publishShell: false);
     }
 
     private async Task ReloadConversationsAsync()
     {
-        var selectedId = SelectedConversation?.Id;
+        var version = ++_conversationLoadVersion;
         var conversations = await _conversationRepository.ListConversationsAsync();
+        _dispatcher?.VerifyAccess();
+        if (version != _conversationLoadVersion) return;
+        var selectedId = SelectedConversation?.Id;
         _allConversations.Clear();
         _allConversations.AddRange(conversations.Where(conversation =>
             conversation.Kind == ConversationKind.Interactive));
         ApplyConversationFilter(selectedId);
     }
 
-    private async Task StopConversationForDeletionAsync(Guid conversationId)
-        => await _conversationSessions.StopAndRemoveAsync(
-            conversationId,
-            ConversationDeleteStopTimeout);
-
-    private Task SelectConversationCoreAsync(ConversationRecord? conversation)
+    private Task SelectConversationCoreAsync(ConversationRecord? conversation, bool clearWorkspace = false)
     {
-        if (conversation is null)
+        _dispatcher?.VerifyAccess();
+        if (conversation is null && clearWorkspace)
         {
             SelectWorkspaceRoot(null, publishShell: false);
         }
@@ -555,7 +465,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         catch (Exception exception)
         {
             _logger.LogError(exception, "Failed to load conversation {ConversationId}.", conversation?.Id);
-            return;
+            throw;
         }
 
         if (version != _selectionVersion || _selectedConversation?.Id != conversation?.Id)
@@ -584,78 +494,27 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     private async Task<PromptSubmissionResult> SendAsync(PromptSubmissionSnapshot submission)
     {
-        WorkspaceRoot? provisionedWorkspaceRoot = null;
+        PreparedConversationWorkspace? prepared = null;
+        var admitted = false;
         try
         {
             if (submission.SelectionVersion != _selectionVersion)
-            {
                 return new PromptSubmissionResult(false, "当前选择已改变，请重试。");
-            }
-
-            var conversation = submission.Conversation;
-            var preferConversationSelection = SelectedConversation is null ||
-                                               conversation is not null &&
-                                               _conversationSessions.IsSelected(conversation.Id);
-            var runtimeAgent = ResolveRuntimeAgent(conversation?.AgentId ?? submission.AgentId);
+            var runtimeAgent = ResolveRuntimeAgent(submission.Conversation?.AgentId ?? submission.AgentId);
             runtimeAgent = runtimeAgent with { Mode = submission.ExecutionModeOverride ?? runtimeAgent.Mode };
-            var workspaceRoot = submission.WorkspaceRoot;
-            Guid? conversationId = conversation?.Id;
-            if (conversation is null && workspaceRoot?.IsManagedWorktree == true)
-            {
-                return new PromptSubmissionResult(false, "该工作树已绑定其他会话，请选择基础工作目录后新建会话。");
-            }
-
-            if (submission.WorkspaceMode == GitWorkspaceMode.ManagedWorktree)
-            {
-                if (workspaceRoot is null)
-                {
-                    return new PromptSubmissionResult(false, "请先选择一个 Git 工作目录。");
-                }
-
-                if (conversation is not null)
-                {
-                    if (!workspaceRoot.IsManagedWorktree)
-                    {
-                        return new PromptSubmissionResult(false, "现有本地会话不能切换为工作树，请新建会话。");
-                    }
-                }
-                else
-                {
-                    if (_gitWorkspaceManager is null)
-                    {
-                        return new PromptSubmissionResult(false, "Git 工作树功能当前不可用。");
-                    }
-
-                    conversationId = Guid.NewGuid();
-                    var creation = await _gitWorkspaceManager.CreateManagedWorktreeAsync(
-                        workspaceRoot,
-                        conversationId.Value,
-                        submission.Prompt).ConfigureAwait(false);
-                    workspaceRoot = creation.WorkspaceRoot;
-                    provisionedWorkspaceRoot = workspaceRoot;
-                    await ReloadWorkspaceRootsAsync().ConfigureAwait(false);
-                    SelectWorkspaceRoot(
-                        _workspaceRoots.FirstOrDefault(item => item.Id == workspaceRoot.Id) ?? workspaceRoot,
-                        publishShell: false);
-                }
-            }
-
+            prepared = await _workspaces.PrepareAsync(submission.Conversation, submission.WorkspaceRoot,
+                submission.WorkspaceMode, submission.Prompt);
+            if (submission.SelectionVersion != _selectionVersion)
+                return new PromptSubmissionResult(false, "当前选择已改变，请重试。");
             var admission = await _turnEngine.TryAdmitAsync(new DesktopConversationTurnRequest(
-                conversation,
-                runtimeAgent,
-                submission.Prompt,
-                submission.ModelProfileId,
-                workspaceRoot,
-                submission.ToolPermissionMode,
-                conversationId));
+                submission.Conversation, runtimeAgent, submission.Prompt, submission.ModelProfileId,
+                prepared.WorkspaceRoot, submission.ToolPermissionMode, prepared.ConversationId));
             if (admission is null)
-            {
-                await CleanupProvisionedWorkspaceAsync(provisionedWorkspaceRoot).ConfigureAwait(false);
-                return new PromptSubmissionResult(false, "当前会话正在执行，请稍候。");
-            }
-
-            ApplyAdmittedConversation(admission.Conversation, preferConversationSelection);
+                return new PromptSubmissionResult(false, "当前会话正在执行或应用正在退出，请稍候。");
+            admitted = true;
             _ = ExecuteAcceptedTurnAsync(admission);
+            if (prepared.Provisioned && prepared.WorkspaceRoot is { } root) _workspaceRoots.Add(root);
+            ApplyAdmittedConversation(admission.Conversation, submission.SelectionVersion == _selectionVersion);
             return new PromptSubmissionResult(true);
         }
         catch (OperationCanceledException)
@@ -665,8 +524,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
         catch (Exception exception)
         {
             _logger.LogError(exception, "Failed to prepare the chat turn.");
-            await CleanupProvisionedWorkspaceAsync(provisionedWorkspaceRoot).ConfigureAwait(false);
             return new PromptSubmissionResult(false, exception.Message);
+        }
+        finally
+        {
+            if (!admitted && prepared?.Provisioned == true)
+                await _workspaces.DiscardAsync(prepared);
         }
     }
 
@@ -674,58 +537,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     {
         try
         {
-            await _turnEngine.ExecuteAsync(admission).ConfigureAwait(false);
+            await _turnEngine.ExecuteAsync(admission);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception exception)
         {
             _logger.LogError(exception, "Accepted chat turn failed outside the turn engine.");
         }
-    }
-
-    private async Task CleanupProvisionedWorkspaceAsync(WorkspaceRoot? workspaceRoot)
-    {
-        if (workspaceRoot is null || _gitWorkspaceManager is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _gitWorkspaceManager.RemoveManagedWorktreeAsync(workspaceRoot).ConfigureAwait(false);
-            await _workspaceRootRepository.DeleteWorkspaceRootAsync(workspaceRoot.Id).ConfigureAwait(false);
-        }
-        catch (Exception cleanupException)
-        {
-            _logger.LogWarning(cleanupException, "Failed to clean up a provisioned Git worktree {WorkspaceRootId}.", workspaceRoot.Id);
-        }
-    }
-
-    private async Task ReleaseConversationWorkspaceAsync(Guid conversationId, bool removeManagedWorktree)
-    {
-        if (_gitWorkspaceStore is null)
-        {
-            return;
-        }
-
-        var checkout = await _gitWorkspaceStore.GetConversationCheckoutAsync(conversationId).ConfigureAwait(false);
-        if (checkout is null)
-        {
-            return;
-        }
-
-        if (removeManagedWorktree)
-        {
-            var root = _workspaceRoots.FirstOrDefault(item => item.Id == checkout.WorkspaceRootId);
-            if (root is not null && _gitWorkspaceManager is not null)
-            {
-                await _gitWorkspaceManager.RemoveManagedWorktreeAsync(root).ConfigureAwait(false);
-                await _workspaceRootRepository.DeleteWorkspaceRootAsync(root.Id).ConfigureAwait(false);
-            }
-
-            return;
-        }
-
-        await _gitWorkspaceStore.ReleaseConversationAsync(conversationId).ConfigureAwait(false);
     }
 
     #endregion
@@ -734,29 +555,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
 
     private void ApplyAdmittedConversation(ConversationRecord conversation, bool preferSelection)
     {
-        var shouldPreferSelection = preferSelection &&
-                                    (SelectedConversation is null || SelectedConversation.Id == conversation.Id);
-        UpsertConversation(conversation, shouldPreferSelection);
-        if (shouldPreferSelection || SelectedConversation?.Id == conversation.Id)
-        {
-            _selectedConversation = conversation;
-            _agentActivityCoordinator.SetSelectedConversation(conversation.Id);
-            OnPropertyChanged(nameof(SelectedConversation));
-        }
-
-        PublishShell(false);
-    }
-
-    private void UpsertConversation(ConversationRecord conversation, bool preferSelection = true)
-    {
-        var existing = _allConversations.FirstOrDefault(item => item.Id == conversation.Id);
-        if (existing is not null)
-        {
-            _allConversations.Remove(existing);
-        }
-
+        _dispatcher?.VerifyAccess();
+        _allConversations.RemoveAll(item => item.Id == conversation.Id);
         _allConversations.Insert(0, conversation);
-        ApplyConversationFilter(preferSelection ? conversation.Id : SelectedConversation?.Id);
+        if (preferSelection)
+        {
+            SelectWorkspaceRoot(_workspaceRoots.FirstOrDefault(item => item.Id == conversation.WorkspaceRootId), publishShell: false);
+            SyncSelectedAgentFromConversation(conversation);
+            _ = SelectConversationCoreAsync(conversation);
+        }
+        ReplaceList(_filteredConversations, GetFilteredConversations());
+        PublishShell(false);
     }
 
     private void ApplyConversationFilter(Guid? preferredConversationId = null)
@@ -808,7 +617,30 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     #region Transcript 发布
 
     private void PublishShell(bool autoScroll)
-        => _transcriptPublisher.PublishNow(autoScroll);
+    {
+        OnPropertyChanged(string.Empty);
+        _transcriptPublisher.PublishNow(autoScroll);
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _agentSettings.Changed -= OnAgentsChanged;
+        _extensionChanges.StateChanged -= OnExtensionStateChanged;
+        _conversationSessions.SelectedStateChanged -= OnSelectedRuntimeChanged;
+    }
+
+    private void OnAgentsChanged() => RunOnUi(() => { ReloadAgents(); PublishShell(false); });
+    private void OnExtensionStateChanged(long revision) => RunOnUi(() => UpdateCapabilityRevision(revision));
+    private void OnSelectedRuntimeChanged() => RunOnUi(() => OnPropertyChanged(string.Empty));
+
+    private void RunOnUi(Action action)
+    {
+        if (_disposed || _dispatcher?.HasShutdownStarted == true) return;
+        if (_dispatcher is not null && !_dispatcher.CheckAccess())
+            _ = _dispatcher.InvokeAsync(() => { if (!_disposed) action(); });
+        else action();
+    }
 
     /// <summary>
     /// The context handed to right-hand plugin panels, for both <c>getContext()</c> and the
@@ -833,11 +665,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IWorkspaceSe
     private TranscriptProjectionRequest BuildTranscriptProjectionRequest(bool autoScroll)
     {
         var selectedAgent = ResolveSelectedAgent();
+        var transcript = _conversationSessions.CaptureSelectedTranscript();
         var isBusy = _conversationSessions.IsSelectedRunning;
         var activityText = isBusy ? _conversationSessions.SelectedActivityText : null;
         return new TranscriptProjectionRequest(
-            _conversationSessions.SelectedMessages,
-            _conversationSessions.SelectedToolRuns,
+            transcript.Messages,
+            transcript.ToolRuns,
             GetNavigationConversations().ToArray(),
             _workspaceRoots,
             SelectedConversation?.Id,

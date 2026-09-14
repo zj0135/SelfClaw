@@ -10,14 +10,16 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     private readonly IConversationRepository _conversationRepository;
     private readonly ITranscriptChangeSink _transcriptChangeSink;
     private readonly ConcurrentDictionary<Guid, ConversationRuntimeState> _runtimeStates = [];
-    private readonly Dictionary<Guid, TaskCompletionSource<ConversationTranscriptSnapshot>> _transcriptLoads = [];
+    private readonly Dictionary<Guid, Task<ConversationTranscriptSnapshot>> _transcriptLoads = [];
     private readonly object _transcriptLoadGate = new();
+    private readonly object _selectionGate = new();
     private readonly CancellationTokenSource _loadCancellation = new();
     private ConversationTranscriptSnapshot? _selectedTranscript;
     private readonly SemaphoreSlim _startTurnGate = new(1, 1);
     private Guid? _selectedConversationId;
     private int _selectionVersion;
     private int _disposeStarted;
+    private int _stopping;
 
     public ConversationSessionCoordinator(
         IConversationRepository conversationRepository,
@@ -28,16 +30,26 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     }
 
     internal IReadOnlyList<MessageRecord> SelectedMessages
-        => GetSelectedRuntimeState()?.Messages ?? _selectedTranscript?.Messages ?? [];
+        => CaptureSelectedTranscript().Messages;
 
     internal IReadOnlyList<ToolExecutionRecord> SelectedToolRuns
-        => GetSelectedRuntimeState()?.ToolRuns ?? _selectedTranscript?.ToolRuns ?? [];
+        => CaptureSelectedTranscript().ToolRuns;
+
+    internal ConversationTranscriptSnapshot CaptureSelectedTranscript()
+    {
+        lock (_selectionGate)
+            return GetSelectedRuntimeState()?.CaptureSnapshot() ?? _selectedTranscript ?? new([], []);
+    }
 
     internal bool IsSelectedRunning => GetSelectedRuntimeState()?.IsRunning == true;
+    internal event Action? SelectedStateChanged;
 
     internal string? SelectedActivityText => GetSelectedRuntimeState()?.ActivityText;
 
-    internal bool IsSelected(Guid conversationId) => _selectedConversationId == conversationId;
+    internal bool IsSelected(Guid conversationId)
+    {
+        lock (_selectionGate) return _selectedConversationId == conversationId;
+    }
 
     internal bool IsRunning(Guid conversationId)
         => _runtimeStates.TryGetValue(conversationId, out var state) && state.IsRunning;
@@ -47,9 +59,13 @@ internal sealed class ConversationSessionCoordinator : IDisposable
 
     internal async Task SelectAsync(Guid? conversationId, CancellationToken cancellationToken = default)
     {
-        var version = ++_selectionVersion;
-        _selectedConversationId = conversationId;
-        ClearSelectedTranscript();
+        int version;
+        lock (_selectionGate)
+        {
+            version = ++_selectionVersion;
+            _selectedConversationId = conversationId;
+            ClearSelectedTranscript();
+        }
         _transcriptChangeSink.PublishNow(conversationId is not null);
 
         if (conversationId is not Guid selectedId ||
@@ -60,12 +76,12 @@ internal sealed class ConversationSessionCoordinator : IDisposable
 
         var snapshot = await GetTranscriptSnapshotAsync(selectedId, cancellationToken);
 
-        if (version != _selectionVersion || _selectedConversationId != selectedId)
+        lock (_selectionGate)
         {
-            return;
+            if (version != _selectionVersion || _selectedConversationId != selectedId || Volatile.Read(ref _stopping) != 0)
+                return;
+            ReplaceSelectedTranscript(snapshot);
         }
-
-        ReplaceSelectedTranscript(snapshot);
         _transcriptChangeSink.PublishNow(true);
     }
 
@@ -85,11 +101,13 @@ internal sealed class ConversationSessionCoordinator : IDisposable
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(conversation);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _stopping) != 0, this);
 
         var snapshot = await GetTranscriptSnapshotAsync(conversation.Id, cancellationToken);
         await _startTurnGate.WaitAsync(cancellationToken);
         try
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _stopping) != 0, this);
             if (_runtimeStates.TryGetValue(conversation.Id, out var existing))
             {
                 if (existing.IsRunning)
@@ -118,6 +136,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
             }
 
             _runtimeStates[conversation.Id] = state;
+            if (IsSelected(conversation.Id)) SelectedStateChanged?.Invoke();
             return state;
         }
         finally
@@ -130,21 +149,26 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     {
         ArgumentNullException.ThrowIfNull(state);
 
-        state.IsRunning = false;
-        state.MarkCompleted();
-        ForgetTranscriptLoad(state.ConversationId);
-        if (IsSelected(state.ConversationId))
+        try
         {
-            _selectionVersion++;
-            ReplaceSelectedTranscript(state);
+            state.IsRunning = false;
+            ForgetTranscriptLoad(state.ConversationId);
+            lock (_selectionGate)
+            {
+                if (IsSelected(state.ConversationId))
+                {
+                    _selectionVersion++;
+                    ReplaceSelectedTranscript(state);
+                }
+                _runtimeStates.TryRemove(state.ConversationId, out _);
+            }
+            state.Dispose();
+            if (IsSelected(state.ConversationId)) _transcriptChangeSink.PublishNow(true);
+            if (IsSelected(state.ConversationId)) SelectedStateChanged?.Invoke();
         }
-
-        _runtimeStates.TryRemove(state.ConversationId, out _);
-        state.Dispose();
-
-        if (IsSelected(state.ConversationId))
+        finally
         {
-            _transcriptChangeSink.PublishNow(true);
+            state.MarkCompleted();
         }
     }
 
@@ -152,7 +176,6 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     {
         ArgumentNullException.ThrowIfNull(state);
         state.IsRunning = false;
-        state.MarkCompleted();
         if (_runtimeStates.TryRemove(state.ConversationId, out var registered))
         {
             registered.Dispose();
@@ -161,6 +184,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
         {
             state.Dispose();
         }
+        state.MarkCompleted();
     }
 
     internal void StopSelected()
@@ -203,12 +227,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
                 // The turn completed between lookup and cancellation.
             }
 
-            var delayTask = Task.Delay(timeout, cancellationToken);
-            var completedTask = await Task.WhenAny(state.Completion, delayTask);
-            if (completedTask != state.Completion && state.IsRunning)
-            {
-                throw new TimeoutException("The conversation is still running and cannot be deleted yet.");
-            }
+            await state.Completion.WaitAsync(timeout, cancellationToken);
         }
 
         if (_runtimeStates.TryRemove(conversationId, out var remainingState))
@@ -219,6 +238,21 @@ internal sealed class ConversationSessionCoordinator : IDisposable
         ForgetTranscriptLoad(conversationId);
     }
 
+    internal async Task StopAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Exchange(ref _stopping, 1);
+        await _startTurnGate.WaitAsync(cancellationToken);
+        ConversationRuntimeState[] running;
+        try { running = _runtimeStates.Values.ToArray(); }
+        finally { _startTurnGate.Release(); }
+        foreach (var state in running)
+        {
+            try { state.CancellationTokenSource.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
+        await Task.WhenAll(running.Select(state => state.Completion)).WaitAsync(cancellationToken);
+    }
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
@@ -226,14 +260,22 @@ internal sealed class ConversationSessionCoordinator : IDisposable
             return;
         }
 
+        Interlocked.Exchange(ref _stopping, 1);
+        lock (_selectionGate)
+        {
+            _selectionVersion++;
+            _selectedConversationId = null;
+            _selectedTranscript = null;
+        }
         foreach (var state in _runtimeStates.Values)
         {
             if (state.IsRunning)
             {
-                state.CancellationTokenSource.Cancel();
+                try { state.CancellationTokenSource.Cancel(); }
+                catch (ObjectDisposedException) { }
             }
 
-            state.Dispose();
+            if (state.Completion.IsCompleted) state.Dispose();
         }
 
         _runtimeStates.Clear();
@@ -245,11 +287,11 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     }
 
     private ConversationRuntimeState? GetSelectedRuntimeState()
-        => _selectedConversationId is Guid conversationId &&
-           _runtimeStates.TryGetValue(conversationId, out var state) &&
-           !state.IsDetached
-            ? state
-            : null;
+    {
+        lock (_selectionGate)
+            return _selectedConversationId is Guid id && _runtimeStates.TryGetValue(id, out var state) && !state.IsDetached
+                ? state : null;
+    }
 
     private void PublishSelectedTranscriptChange(bool immediate)
     {
@@ -277,51 +319,40 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeStarted) != 0, this);
-        if (IsSelected(conversationId) && _selectedTranscript is { } selected)
+        lock (_selectionGate)
         {
-            return Task.FromResult(selected);
+            if (IsSelected(conversationId) && _selectedTranscript is { } selected)
+                return Task.FromResult(selected);
         }
-
-        TaskCompletionSource<ConversationTranscriptSnapshot> load;
-        var ownsLoad = false;
+        Task<ConversationTranscriptSnapshot> load;
         lock (_transcriptLoadGate)
         {
             if (!_transcriptLoads.TryGetValue(conversationId, out var pending))
             {
-                pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                pending = LoadTranscriptAsync(conversationId, _loadCancellation.Token);
                 _transcriptLoads.Add(conversationId, pending);
-                ownsLoad = true;
+                _ = pending.ContinueWith(completed =>
+                {
+                    if (completed.IsFaulted) _ = completed.Exception;
+                    ForgetTranscriptLoad(conversationId, completed);
+                },
+                    CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
             }
 
             load = pending;
         }
 
-        if (ownsLoad) _ = CompleteTranscriptLoadAsync(conversationId, load);
-        return load.Task.WaitAsync(cancellationToken);
+        return AwaitTranscriptLoadAsync(conversationId, load, cancellationToken);
     }
 
-    private async Task CompleteTranscriptLoadAsync(Guid conversationId, TaskCompletionSource<ConversationTranscriptSnapshot> completion)
+    private async Task<ConversationTranscriptSnapshot> AwaitTranscriptLoadAsync(Guid id,
+        Task<ConversationTranscriptSnapshot> load, CancellationToken cancellationToken)
     {
-        try
-        {
-            var snapshot = await LoadTranscriptAsync(conversationId, _loadCancellation.Token);
-            ForgetTranscriptLoad(conversationId, completion);
-            completion.TrySetResult(snapshot);
-        }
-        catch (OperationCanceledException exception)
-        {
-            ForgetTranscriptLoad(conversationId, completion);
-            completion.TrySetCanceled(exception.CancellationToken);
-            throw;
-        }
-        catch (Exception exception)
-        {
-            ForgetTranscriptLoad(conversationId, completion);
-            completion.TrySetException(exception);
-        }
+        try { return await load.WaitAsync(cancellationToken); }
+        finally { if (load.IsCompleted) ForgetTranscriptLoad(id, load); }
     }
 
-    private void ForgetTranscriptLoad(Guid conversationId, TaskCompletionSource<ConversationTranscriptSnapshot>? expected = null)
+    private void ForgetTranscriptLoad(Guid conversationId, Task<ConversationTranscriptSnapshot>? expected = null)
     {
         lock (_transcriptLoadGate)
         {
@@ -341,9 +372,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     }
 
     private static ConversationTranscriptSnapshot CreateSnapshot(ConversationRuntimeState state)
-        => new(
-            state.Messages.ToArray(),
-            state.ToolRuns.ToArray());
+        => state.CaptureSnapshot();
 
     private static ConversationTranscriptSnapshot CreateSnapshot(
         IEnumerable<MessageRecord> messages,

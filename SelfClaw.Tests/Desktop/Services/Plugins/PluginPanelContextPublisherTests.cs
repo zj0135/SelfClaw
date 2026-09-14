@@ -1,9 +1,9 @@
+using SelfClaw.Desktop.Services.Settings;
 using System.ComponentModel;
 using System.Text.Json;
 using System.Windows.Threading;
 using FluentAssertions;
 using SelfClaw.Core.Models;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Infrastructure.Data.Sqlite;
@@ -215,7 +215,9 @@ public sealed class PluginPanelContextPublisherTests : IDisposable
                 new PluginVersionLeaseManager(),
                 new DesktopSettingsJsonStore(storagePaths),
                 hostChannel,
-                dispatcher);
+                dispatcher,
+                new PluginPanelResourceReader(Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginPanelResourceReader>.Instance),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginPanelHostController>.Instance);
             var source = new FakeContextSource();
             var publisher = new PluginPanelContextPublisher(
                 source,
@@ -225,13 +227,7 @@ public sealed class PluginPanelContextPublisherTests : IDisposable
             return new TestContext(rootPath, repository, controller, publisher, source, hostChannel, postedJson);
         }
 
-        public void PublishTranscript()
-            => HostChannel.PublishTranscript(new TranscriptRenderState(
-                [],
-                false,
-                [],
-                null,
-                Source.Context.IsBusy));
+        public void PublishTranscript() => Source.Change(Source.Context);
 
         public JsonElement OpenPanel(string panelKey)
         {

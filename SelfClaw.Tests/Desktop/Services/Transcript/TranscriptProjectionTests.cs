@@ -1,6 +1,6 @@
+using SelfClaw.Desktop.Services.Transcript.Views;
 using FluentAssertions;
 using SelfClaw.Core.Models;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Infrastructure.Options;
 

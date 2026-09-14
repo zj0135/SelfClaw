@@ -11,26 +11,22 @@ internal sealed class WpfPetWindowAdapter : IPetWindowAdapter, IDisposable
 
     private readonly ILoggerFactory _loggerFactory;
     private readonly PetActivityPresenter _activityPresenter;
-    private readonly PetPackageCatalog _packageCatalog;
 
     private PetWindow? _window;
-    private bool _windowPetLoaded;
+    private PetLoadedPackage? _installedPackage;
     private DispatcherTimer? _placementTimer;
     private Point _pendingPosition;
     private bool _disposed;
 
     public WpfPetWindowAdapter(
         ILoggerFactory loggerFactory,
-        PetActivityPresenter activityPresenter,
-        PetPackageCatalog packageCatalog)
+        PetActivityPresenter activityPresenter)
     {
         ArgumentNullException.ThrowIfNull(loggerFactory);
         ArgumentNullException.ThrowIfNull(activityPresenter);
-        ArgumentNullException.ThrowIfNull(packageCatalog);
 
         _loggerFactory = loggerFactory;
         _activityPresenter = activityPresenter;
-        _packageCatalog = packageCatalog;
     }
 
     public event EventHandler<PetPlacement>? PlacementCommitted;
@@ -38,7 +34,7 @@ internal sealed class WpfPetWindowAdapter : IPetWindowAdapter, IDisposable
     public Task<bool> GetIsVisibleAsync(CancellationToken cancellationToken = default)
         => InvokeOnUiThreadAsync(() => _window is { IsVisible: true }, cancellationToken);
 
-    public Task ShowAsync(PetSettings settings, CancellationToken cancellationToken = default)
+    public Task ShowAsync(PetSettings settings, PetLoadedPackage package, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -46,10 +42,10 @@ internal sealed class WpfPetWindowAdapter : IPetWindowAdapter, IDisposable
             () =>
             {
                 var window = EnsureWindow();
-                if (!_windowPetLoaded)
+                if (!ReferenceEquals(_installedPackage, package))
                 {
-                    window.LoadPet(settings);
-                    _windowPetLoaded = true;
+                    window.LoadPet(settings, package);
+                    _installedPackage = package;
                 }
 
                 window.Show();
@@ -61,7 +57,7 @@ internal sealed class WpfPetWindowAdapter : IPetWindowAdapter, IDisposable
     public Task HideAsync(CancellationToken cancellationToken = default)
         => InvokeOnUiThreadAsync(() => _window?.Hide(), cancellationToken);
 
-    public Task ReloadAsync(PetSettings settings, CancellationToken cancellationToken = default)
+    public Task ReloadAsync(PetSettings settings, PetLoadedPackage package, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -73,11 +69,14 @@ internal sealed class WpfPetWindowAdapter : IPetWindowAdapter, IDisposable
                     return;
                 }
 
-                _window.LoadPet(settings);
-                _windowPetLoaded = true;
+                _window.LoadPet(settings, package);
+                _installedPackage = package;
             },
             cancellationToken);
     }
+
+    public Task FlushPlacementAsync(CancellationToken cancellationToken = default)
+        => InvokeOnUiThreadAsync(() => { if (_placementTimer?.IsEnabled == true) OnPlacementTimerTick(this, EventArgs.Empty); }, cancellationToken);
 
     public void Dispose()
     {
@@ -125,8 +124,7 @@ internal sealed class WpfPetWindowAdapter : IPetWindowAdapter, IDisposable
 
         _window = new PetWindow(new PetViewModel(
             _loggerFactory.CreateLogger<PetViewModel>(),
-            _activityPresenter,
-            _packageCatalog));
+            _activityPresenter));
         _window.PositionCommitted += OnPositionCommitted;
         _window.Closed += OnWindowClosed;
         return _window;
@@ -141,7 +139,7 @@ internal sealed class WpfPetWindowAdapter : IPetWindowAdapter, IDisposable
         }
 
         _window = null;
-        _windowPetLoaded = false;
+        _installedPackage = null;
     }
 
     private void RestoreWindowPosition(PetSettings settings)
@@ -280,7 +278,7 @@ internal sealed class WpfPetWindowAdapter : IPetWindowAdapter, IDisposable
             _window.Closed -= OnWindowClosed;
             _window.Close();
             _window = null;
-            _windowPetLoaded = false;
+            _installedPackage = null;
         }
     }
 }

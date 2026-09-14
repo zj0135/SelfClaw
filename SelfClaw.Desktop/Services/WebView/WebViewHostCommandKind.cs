@@ -9,7 +9,6 @@ internal enum WebViewHostCommandKind
     ToggleMaximizeWindow,
     CloseWindow,
     ToggleTerminal,
-    SettingsClosed,
 
     /// <summary>
     /// 把原生标题栏切成深色或浅色（Value 为 "dark" / "light"）。「跟随系统」只有前端

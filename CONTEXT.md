@@ -6,6 +6,7 @@ SelfClaw coordinates conversations, agents, and the filesystem context in which 
 
 **Workspace Root**:
 A physical directory used as the working directory for a conversation, its tools, and its terminal.
+Desktop selection is owned by the UI; workspace workflows prepare and release Managed Worktrees. A submitted turn carries its captured Workspace Root independently of later navigation.
 _Avoid_: Project, repository
 
 **Git Repository**:

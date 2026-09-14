@@ -1,8 +1,8 @@
+using SelfClaw.Desktop.Services.Settings;
 using System.Text.Json;
 using System.Windows.Threading;
 using FluentAssertions;
 using SelfClaw.Core.Models;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Infrastructure.Data.Sqlite;
@@ -138,7 +138,7 @@ public sealed class PluginPanelHostControllerTests : IDisposable
         File.WriteAllText(Path.Combine(packageRoot, "plugin.json"), "{}");
         File.WriteAllText(Path.Combine(_rootPath, "secrets.txt"), "top secret");
 
-        var resolved = PluginPanelHostController.TryResolvePackageAsset(packageRoot, requestPath, out var filePath);
+        var resolved = PluginPanelResourceReader.TryResolvePackageAsset(packageRoot, requestPath, out var filePath);
 
         resolved.Should().Be(expected);
         if (expected)
@@ -219,7 +219,9 @@ public sealed class PluginPanelHostControllerTests : IDisposable
                 leaseManager,
                 new DesktopSettingsJsonStore(storagePaths),
                 hostChannel,
-                Dispatcher.CurrentDispatcher);
+                Dispatcher.CurrentDispatcher,
+                new PluginPanelResourceReader(Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginPanelResourceReader>.Instance),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginPanelHostController>.Instance);
             return new TestContext(rootPath, repository, leaseManager, controller, hostChannel, postedJson);
         }
 

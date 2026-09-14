@@ -1,6 +1,5 @@
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using FluentAssertions;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Tests.Desktop.Services.Agents;

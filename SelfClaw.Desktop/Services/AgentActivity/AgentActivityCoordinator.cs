@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Tools;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;

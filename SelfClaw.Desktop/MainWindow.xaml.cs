@@ -8,7 +8,6 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using SelfClaw.Desktop.Pet;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Plugins;
@@ -16,11 +15,12 @@ using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.Options;
-using SelfClaw.Core.Runtime;
+using SelfClaw.Desktop.Services.Windowing;
+using Microsoft.Extensions.Logging;
 
 namespace SelfClaw.Desktop;
 
-public partial class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
     private const string AssetsHostName = "appassets.selfclaw.local";
     private const string AttachmentHostName = "attachments.selfclaw.local";
@@ -42,43 +42,39 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel;
     private readonly StoragePaths _storagePaths;
     private readonly PetActivityPresenter _petActivityPresenter;
-    private readonly AgentActivityCoordinator _agentActivityCoordinator;
-    private readonly DesktopToolApprovalHandler _toolApprovalHandler;
-    private readonly DesktopNotificationService _desktopNotificationService;
     private readonly WebViewHostChannel _webViewHostChannel;
     private readonly WebViewMessageRouter _webViewMessageRouter;
     private readonly TerminalHostController _terminalHostController;
     private readonly PluginPanelHostController _pluginPanelHostController;
     private readonly AppearanceSettingsService _appearanceSettingsService;
-    private bool _isSystemSettingsOpen;
-    private Guid? _currentApprovalId;
+    private readonly DesktopConversationActivationService _activation;
+    private readonly ILogger<MainWindow> _logger;
+    private Task? _initializationTask;
 
     internal MainWindow(
         MainWindowViewModel viewModel,
-        DesktopNotificationService desktopNotificationService,
-        DesktopToolApprovalHandler toolApprovalHandler,
         PetActivityPresenter petActivityPresenter,
-        AgentActivityCoordinator agentActivityCoordinator,
         WebViewHostChannel webViewHostChannel,
         WebViewMessageRouter webViewMessageRouter,
         TerminalHostController terminalHostController,
         PluginPanelHostController pluginPanelHostController,
         AppearanceSettingsService appearanceSettingsService,
-        StoragePaths storagePaths)
+        StoragePaths storagePaths,
+        DesktopConversationActivationService activation,
+        ILogger<MainWindow> logger)
     {
         InitializeComponent();
         ApplyAdaptiveStartupSize();
         _viewModel = viewModel;
         _appearanceSettingsService = appearanceSettingsService;
         _storagePaths = storagePaths;
+        _activation = activation;
+        _logger = logger;
         _petActivityPresenter = petActivityPresenter;
-        _agentActivityCoordinator = agentActivityCoordinator;
         _webViewHostChannel = webViewHostChannel;
         _webViewMessageRouter = webViewMessageRouter;
         _terminalHostController = terminalHostController;
         _pluginPanelHostController = pluginPanelHostController;
-        _toolApprovalHandler = toolApprovalHandler;
-        _desktopNotificationService = desktopNotificationService;
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
         SourceInitialized += OnSourceInitialized;
@@ -88,11 +84,7 @@ public partial class MainWindow : Window
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         TranscriptView.NavigationCompleted += OnTranscriptNavigationCompleted;
         TranscriptView.NavigationStarting += OnTranscriptNavigationStarting;
-        _toolApprovalHandler.ApprovalRequested += OnToolApprovalRequested;
-        _toolApprovalHandler.ApprovalExpired += OnToolApprovalExpired;
-        _agentActivityCoordinator.SnapshotChanged += OnAgentActivitySnapshotChanged;
         _petActivityPresenter.ConversationActivationRequested += OnPetConversationActivationRequested;
-        desktopNotificationService.RegisterMainWindow(this);
     }
 
     private void ApplyAdaptiveStartupSize()
@@ -113,6 +105,11 @@ public partial class MainWindow : Window
     }
 
     private async void OnLoadedAsync(object sender, RoutedEventArgs e)
+        => await InitializeAsync();
+
+    internal Task InitializeAsync() => _initializationTask ??= InitializeCoreAsync();
+
+    private async Task InitializeCoreAsync()
     {
         await EnsureTranscriptHostAsync();
         await _viewModel.InitializeAsync();
@@ -124,13 +121,7 @@ public partial class MainWindow : Window
         StateChanged -= OnWindowStateChanged;
         TranscriptView.NavigationCompleted -= OnTranscriptNavigationCompleted;
         TranscriptView.NavigationStarting -= OnTranscriptNavigationStarting;
-        _toolApprovalHandler.ApprovalRequested -= OnToolApprovalRequested;
-        _toolApprovalHandler.ApprovalExpired -= OnToolApprovalExpired;
-        _agentActivityCoordinator.SnapshotChanged -= OnAgentActivitySnapshotChanged;
         _petActivityPresenter.ConversationActivationRequested -= OnPetConversationActivationRequested;
-        _toolApprovalHandler.RejectAll();
-        _terminalHostController.Dispose();
-        _pluginPanelHostController.Dispose();
 
         if (TranscriptView.CoreWebView2 is not null)
         {
@@ -138,6 +129,7 @@ public partial class MainWindow : Window
         }
 
         _webViewHostChannel.Detach();
+        TranscriptView.Dispose();
 
         if (PresentationSource.FromVisual(this) is HwndSource source)
         {
@@ -201,8 +193,10 @@ public partial class MainWindow : Window
 
             TranscriptView.Source = new Uri($"https://{AssetsHostName}/TranscriptVue/index.html");
         }
-        catch
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception)
         {
+            _logger.LogError(exception, "Failed to initialize the WebView transcript host.");
             TranscriptView.Visibility = Visibility.Collapsed;
             WebViewFallback.Visibility = Visibility.Visible;
         }
@@ -218,29 +212,17 @@ public partial class MainWindow : Window
         _webViewHostChannel.MarkReady();
         _terminalHostController.PublishState();
         PostWindowState();
-        RepostCurrentApproval();
     }
 
     private void OnTranscriptNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
         => _webViewHostChannel.MarkNotReady();
 
-    // A WebView reload drops the inline approval bar; re-send the request that is still pending so the
-    // bar comes back rather than leaving the turn blocked with no visible way to answer.
-    private void RepostCurrentApproval()
-    {
-        var current = _agentActivityCoordinator.CurrentSnapshot.Approval;
-        if (current is not null)
-        {
-            _currentApprovalId = current.ToolExecutionId;
-            PostToolApprovalRequest(current);
-        }
-    }
-
-    private void HandlePreviewKeyDown(object sender, KeyEventArgs e)
+    private async void HandlePreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
         {
-            if (_terminalHostController.TryWriteEscape())
+            e.Handled = true;
+            if (await _terminalHostController.TryWriteEscapeAsync())
             {
                 FocusTranscriptView();
                 e.Handled = true;
@@ -254,32 +236,14 @@ public partial class MainWindow : Window
     private void OnFallbackCloseButtonClick(object sender, RoutedEventArgs e)
         => Close();
 
-    private void ToggleTerminalTool()
+    private async Task ToggleTerminalToolAsync()
     {
-        SetSystemSettingsOpen(false);
-        SetTerminalDrawerOpen(!_terminalHostController.IsOpen);
+        await SetTerminalDrawerOpenAsync(!_terminalHostController.IsOpen);
     }
 
-    private void SetSystemSettingsOpen(bool isOpen)
+    private async Task SetTerminalDrawerOpenAsync(bool isOpen)
     {
-        _isSystemSettingsOpen = isOpen;
-        PostSettingsState();
-    }
-
-    private void PostSettingsState()
-        => _webViewHostChannel.PostPush(new
-        {
-            type = _isSystemSettingsOpen ? "show-settings" : "hide-settings"
-        });
-
-    private void OnSettingsClosedFromWebView()
-    {
-        SetSystemSettingsOpen(false);
-    }
-
-    private void SetTerminalDrawerOpen(bool isOpen)
-    {
-        _terminalHostController.SetOpen(isOpen, _viewModel.SelectedWorkspaceRootPath);
+        await _terminalHostController.SetOpenAsync(isOpen, _viewModel.SelectedWorkspaceRootPath);
         if (isOpen)
         {
             FocusTranscriptView();
@@ -358,11 +322,11 @@ public partial class MainWindow : Window
             isMaximized = WindowState == WindowState.Maximized
         });
 
-    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    private async void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainWindowViewModel.SelectedWorkspaceRootPath) && _terminalHostController.IsOpen)
         {
-            _terminalHostController.UpdateWorkspaceRoot(_viewModel.SelectedWorkspaceRootPath);
+            await _terminalHostController.UpdateWorkspaceRootAsync(_viewModel.SelectedWorkspaceRootPath);
         }
     }
 
@@ -374,7 +338,7 @@ public partial class MainWindow : Window
                 e.WebMessageAsJson,
                 new WindowInteropHelper(this).Handle,
                 e.Source);
-            ApplyWebViewHostCommand(command);
+            await ApplyWebViewHostCommandAsync(command);
         }
         catch (OperationCanceledException)
         {
@@ -382,11 +346,11 @@ public partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            Debug.WriteLine(exception);
+            _logger.LogError(exception, "WebView message handling failed.");
         }
     }
 
-    private void ApplyWebViewHostCommand(WebViewHostCommand? command)
+    private async Task ApplyWebViewHostCommandAsync(WebViewHostCommand? command)
     {
         if (command is null)
         {
@@ -417,10 +381,7 @@ public partial class MainWindow : Window
                 Close();
                 break;
             case WebViewHostCommandKind.ToggleTerminal:
-                ToggleTerminalTool();
-                break;
-            case WebViewHostCommandKind.SettingsClosed:
-                OnSettingsClosedFromWebView();
+                await ToggleTerminalToolAsync();
                 break;
             case WebViewHostCommandKind.ApplyCaptionTheme:
                 WindowBackdropHelper.TryApplyCaptionTheme(
@@ -432,143 +393,8 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnToolApprovalRequested(ToolApprovalRequest request)
-    {
-        var summary = BuildToolApprovalSummary(request);
-        _desktopNotificationService.ShowToolApproval(
-            request.ToolExecutionId,
-            request.ConversationId,
-            request.DisplayName,
-            summary);
-
-        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
-        {
-            _toolApprovalHandler.TryResolve(request.ToolExecutionId, approved: false);
-            return;
-        }
-
-    }
-
-    private void OnAgentActivitySnapshotChanged(object? sender, AgentActivitySnapshot snapshot)
-    {
-        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
-        {
-            return;
-        }
-
-        if (Dispatcher.CheckAccess())
-        {
-            SyncCurrentApproval();
-            return;
-        }
-
-        _ = Dispatcher.BeginInvoke(new Action(SyncCurrentApproval), DispatcherPriority.Normal);
-    }
-
-    private void SyncCurrentApproval()
-    {
-        var current = _agentActivityCoordinator.CurrentSnapshot.Approval;
-        if (_currentApprovalId == current?.ToolExecutionId)
-        {
-            return;
-        }
-
-        _currentApprovalId = current?.ToolExecutionId;
-        if (current is null)
-        {
-            PostToolApprovalClear();
-            return;
-        }
-
-        PostToolApprovalRequest(current);
-    }
-
-    private void PostToolApprovalRequest(ToolApprovalRequest request)
-        => _webViewHostChannel.PostPush(new
-        {
-            type = "toolApprovalRequest",
-            toolExecutionId = request.ToolExecutionId.ToString(),
-            toolName = request.ToolName,
-            displayName = request.DisplayName,
-            description = request.Description,
-            argumentsJson = request.ArgumentsJson,
-            sourceKind = request.SourceKind,
-            sourceId = request.SourceId,
-            transportSummary = request.TransportSummary,
-            annotationsJson = request.AnnotationsJson
-        });
-
-    private void PostToolApprovalClear()
-        => _webViewHostChannel.PostPush(new { type = "toolApprovalClear" });
-
-    private void OnToolApprovalExpired(ToolApprovalRequest request)
-    {
-        // Queue cleanup happens through OnToolApprovalCompleted; only surface the timeout as a toast.
-        _desktopNotificationService.ShowToolApprovalExpired(request.DisplayName);
-    }
-
-    private void OnPetConversationActivationRequested(object? sender, Guid conversationId)
-    {
-        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
-        {
-            return;
-        }
-
-        if (!Dispatcher.CheckAccess())
-        {
-            _ = Dispatcher.BeginInvoke(
-                () => ActivateConversationFromPet(conversationId),
-                DispatcherPriority.Normal);
-            return;
-        }
-
-        ActivateConversationFromPet(conversationId);
-    }
-
-    private void ActivateConversationFromPet(Guid conversationId)
-    {
-        try
-        {
-            _ = _viewModel.SelectConversationAsync(conversationId);
-        }
-        catch (InvalidOperationException)
-        {
-            return;
-        }
-
-        if (!IsVisible)
-        {
-            Show();
-        }
-
-        if (WindowState == WindowState.Minimized)
-        {
-            WindowState = WindowState.Normal;
-        }
-
-        Activate();
-        Focus();
-    }
-
-    private static string BuildToolApprovalSummary(ToolApprovalRequest request)
-    {
-        const int maxArgumentsLength = 2000;
-        var arguments = string.IsNullOrWhiteSpace(request.ArgumentsJson)
-            ? "(no arguments)"
-            : request.ArgumentsJson.Trim();
-        if (arguments.Length > maxArgumentsLength)
-        {
-            arguments = $"{arguments[..maxArgumentsLength]}…";
-        }
-
-        var description = string.IsNullOrWhiteSpace(request.Description)
-            ? request.ToolName
-            : request.Description.Trim();
-        var source = string.IsNullOrWhiteSpace(request.SourceId)
-            ? string.Empty
-            : $"{Environment.NewLine}Source: {request.SourceId}";
-        return $"{description}{source}{Environment.NewLine}{Environment.NewLine}Arguments:{Environment.NewLine}{arguments}";
-    }
+    private async void OnPetConversationActivationRequested(object? sender, Guid conversationId)
+        => await _activation.ActivateAsync(conversationId);
 
     private void FocusTranscriptView()
     {

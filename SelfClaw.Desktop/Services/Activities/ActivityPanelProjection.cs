@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Transcript.Views;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Activities.Models;
 using SelfClaw.Desktop.Services.Subagents.Models;

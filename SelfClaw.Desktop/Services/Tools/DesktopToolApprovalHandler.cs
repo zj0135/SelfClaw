@@ -4,7 +4,7 @@ using System.Collections.Immutable;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Tools.Models;
 
-namespace SelfClaw.Desktop.Services;
+namespace SelfClaw.Desktop.Services.Tools;
 
 public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
 {

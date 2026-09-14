@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 
-namespace SelfClaw.Desktop.Services;
+namespace SelfClaw.Desktop.Services.Windowing;
 
 internal static class WindowBackdropHelper
 {

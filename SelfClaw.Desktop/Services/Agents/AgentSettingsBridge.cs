@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Agents.Models;
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -5,7 +6,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 
-namespace SelfClaw.Desktop.Services;
+namespace SelfClaw.Desktop.Services.Agents;
 
 /// <summary>
 /// 代理助手设置页的 WebView 桥接：暴露 Agent/Subagent 定义查询与基本信息、扩展绑定、
@@ -21,27 +22,9 @@ internal sealed class AgentSettingsBridge
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    private readonly DesktopAgentDefinitionService _agentDefinitionService;
-    private readonly SubagentDefinitionCatalog _subagentCatalog;
-    private readonly IExtensionSettingsService _settingsService;
-    private readonly IExtensionStateChangeNotifier _stateChangeNotifier;
+    private readonly AgentSettingsService _service;
 
-    public AgentSettingsBridge(
-        DesktopAgentDefinitionService agentDefinitionService,
-        SubagentDefinitionCatalog subagentCatalog,
-        IExtensionSettingsService settingsService,
-        IExtensionStateChangeNotifier stateChangeNotifier)
-    {
-        _agentDefinitionService = agentDefinitionService;
-        _subagentCatalog = subagentCatalog;
-        _settingsService = settingsService;
-        _stateChangeNotifier = stateChangeNotifier;
-    }
-
-    /// <summary>
-    /// Agent/Subagent 定义落盘后触发（先于 revision 推进），宿主据此刷新运行时 Agent 缓存。
-    /// </summary>
-    public event Action? AgentsChanged;
+    public AgentSettingsBridge(AgentSettingsService service) => _service = service;
 
     public async Task<object?> TryHandleAsync(
         string type,
@@ -61,7 +44,7 @@ internal sealed class AgentSettingsBridge
             {
                 case "agents/get-state":
                 {
-                    var state = await GetStateAsync(cancellationToken);
+                    var state = await _service.GetStateAsync(cancellationToken);
                     response = new { type, requestId, state };
                     break;
                 }
@@ -69,7 +52,7 @@ internal sealed class AgentSettingsBridge
                 // 不拉取扩展状态；当前选中态由 transcript 推送的 selectedAgentId 提供，所以这里不带。
                 case "agents/list-composer-agents":
                 {
-                    var agents = _agentDefinitionService.LoadAll()
+                    var agents = _service.ListAgents()
                         .Select(item => new
                         {
                             id = item.Id,
@@ -85,64 +68,64 @@ internal sealed class AgentSettingsBridge
                 }
                 case "agents/create-agent":
                 {
-                    var agent = CreateAgent(payload);
-                    var revision = NotifyMutation();
+                    var agent = _service.CreateAgent(ReadAgentEdit(payload));
+                    var revision = _service.Revision;
                     response = new { type, requestId, ok = true, revision, agent };
                     break;
                 }
                 case "agents/save-agent":
                 {
-                    var agent = SaveAgent(payload);
-                    var revision = NotifyMutation();
+                    var agent = _service.SaveAgent(ReadAgentEdit(payload));
+                    var revision = _service.Revision;
                     response = new { type, requestId, ok = true, revision, agent };
                     break;
                 }
                 case "agents/delete-agent":
                 {
-                    DeleteAgent(payload);
-                    var revision = NotifyMutation();
+                    _service.DeleteAgent(ReadRequiredString(payload, "id"));
+                    var revision = _service.Revision;
                     response = new { type, requestId, ok = true, revision };
                     break;
                 }
                 case "agents/set-binding":
                 {
-                    var agent = await SetExtensionBindingAsync(payload, cancellationToken);
-                    var revision = NotifyMutation();
+                    var agent = await _service.SetExtensionBindingAsync(ReadRequiredString(payload, "agentId"), ReadItemKey(payload), ReadRequiredBoolean(payload, "enabled"), cancellationToken);
+                    var revision = _service.Revision;
                     response = new { type, requestId, ok = true, revision, agent };
                     break;
                 }
                 case "agents/set-subagent-binding":
                 {
-                    var agent = SetSubagentBinding(payload);
-                    var revision = NotifyMutation();
+                    var agent = _service.SetSubagentBinding(ReadRequiredString(payload, "agentId"), ReadRequiredString(payload, "subagentId"), ReadRequiredBoolean(payload, "enabled"));
+                    var revision = _service.Revision;
                     response = new { type, requestId, ok = true, revision, agent };
                     break;
                 }
                 case "agents/create-subagent":
                 {
-                    var subagent = CreateSubagent(payload);
-                    var revision = NotifyMutation();
+                    var subagent = _service.CreateSubagent(ReadSubagentEdit(payload, creating: true));
+                    var revision = _service.Revision;
                     response = new { type, requestId, ok = true, revision, subagent };
                     break;
                 }
                 case "agents/save-subagent":
                 {
-                    var subagent = SaveSubagent(payload);
-                    var revision = NotifyMutation();
+                    var subagent = _service.SaveSubagent(ReadSubagentEdit(payload, creating: false));
+                    var revision = _service.Revision;
                     response = new { type, requestId, ok = true, revision, subagent };
                     break;
                 }
                 case "agents/delete-subagent":
                 {
-                    DeleteSubagent(payload);
-                    var revision = NotifyMutation();
+                    _service.DeleteSubagent(ReadRequiredString(payload, "id"));
+                    var revision = _service.Revision;
                     response = new { type, requestId, ok = true, revision };
                     break;
                 }
                 case "agents/set-subagent-extension-binding":
                 {
-                    var subagent = await SetSubagentExtensionBindingAsync(payload, cancellationToken);
-                    var revision = NotifyMutation();
+                    var subagent = await _service.SetSubagentExtensionBindingAsync(ReadRequiredString(payload, "subagentId"), ReadItemKey(payload), ReadRequiredBoolean(payload, "enabled"), cancellationToken);
+                    var revision = _service.Revision;
                     response = new { type, requestId, ok = true, revision, subagent };
                     break;
                 }
@@ -163,277 +146,22 @@ internal sealed class AgentSettingsBridge
         }
     }
 
-    private async Task<AgentSettingsState> GetStateAsync(CancellationToken cancellationToken)
-    {
-        var extensionState = await _settingsService.GetStateAsync(cancellationToken);
-        var revision = _stateChangeNotifier.AdvanceTo(extensionState.Revision);
-        return new AgentSettingsState(
-            revision,
-            _agentDefinitionService.LoadAll().Select(CreateAgentView).ToArray(),
-            _subagentCatalog.LoadAll().Select(CreateSubagentView).ToArray(),
-            extensionState.Plugins,
-            extensionState.Skills,
-            extensionState.McpServers);
-    }
-
-    private AgentDefinitionView CreateAgent(JsonElement payload)
-    {
-        var id = ReadRequiredString(payload, "id");
-        var name = ReadRequiredString(payload, "name");
-        var description = ReadOptionalString(payload, "description") ?? string.Empty;
-        var mode = ParseMode(ReadOptionalString(payload, "mode") ?? "direct");
-        var instructions = ReadOptionalString(payload, "instructions") ?? string.Empty;
-
-        // 检查 ID 是否已存在
-        if (_agentDefinitionService.LoadAll().Any(a =>
-            string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase)))
+    private static AgentEdit ReadAgentEdit(JsonElement payload) => new(
+        ReadRequiredString(payload, "id"), ReadRequiredString(payload, "name"),
+        ReadOptionalString(payload, "description") ?? string.Empty,
+        (ReadOptionalString(payload, "mode") ?? "direct").Trim().ToLowerInvariant() switch
         {
-            throw new InvalidOperationException($"Agent with id '{id}' already exists.");
-        }
-
-        var newAgent = new DesktopAgentDefinition(
-            Id: id,
-            Name: name,
-            Description: description,
-            Mode: mode,
-            ToolPolicy: AgentRuntimeDefinition.SystemToolPolicy,
-            PluginIds: Array.Empty<string>(),
-            SkillIds: Array.Empty<string>(),
-            McpServerIds: Array.Empty<string>(),
-            SubagentIds: Array.Empty<string>(),
-            Instructions: instructions,
-            FilePath: string.Empty,
-            IsBuiltIn: false,
-            Warnings: Array.Empty<string>());
-
-        var saved = _agentDefinitionService.Save(newAgent);
-        return CreateAgentView(saved);
-    }
-
-    private AgentDefinitionView SaveAgent(JsonElement payload)
-    {
-        var agent = FindAgent(ReadRequiredString(payload, "id"));
-        var saved = _agentDefinitionService.Save(agent with
-        {
-            Name = ReadRequiredString(payload, "name"),
-            Description = ReadOptionalString(payload, "description") ?? string.Empty,
-            Mode = ParseMode(ReadRequiredString(payload, "mode")),
-            Instructions = ReadOptionalString(payload, "instructions") ?? string.Empty
-        });
-        return CreateAgentView(saved);
-    }
-
-    private void DeleteAgent(JsonElement payload)
-    {
-        var agentId = ReadRequiredString(payload, "id");
-        var agent = FindAgent(agentId);
-
-        // 不允许删除内置代理
-        if (agent.IsBuiltIn)
-        {
-            throw new InvalidOperationException($"无法删除内置代理 '{agent.Name}'。");
-        }
-
-        _agentDefinitionService.Delete(agentId);
-    }
-
-    private async Task<AgentDefinitionView> SetExtensionBindingAsync(
-        JsonElement payload,
-        CancellationToken cancellationToken)
-    {
-        var key = ReadItemKey(payload);
-        var extensionState = await _settingsService.GetStateAsync(cancellationToken);
-        EnsureItemExists(extensionState, key);
-        var saved = _agentDefinitionService.SetExtensionBinding(
-            ReadRequiredString(payload, "agentId"),
-            key,
-            ReadRequiredBoolean(payload, "enabled"));
-        return CreateAgentView(saved);
-    }
-
-    private AgentDefinitionView SetSubagentBinding(JsonElement payload)
-    {
-        var agent = FindAgent(ReadRequiredString(payload, "agentId"));
-        var subagentId = ReadRequiredString(payload, "subagentId");
-        var subagent = _subagentCatalog.Get(subagentId)
-            ?? throw new KeyNotFoundException($"Subagent '{subagentId}' was not found.");
-        var saved = _agentDefinitionService.Save(agent with
-        {
-            SubagentIds = SetListItem(
-                agent.SubagentIds,
-                subagent.Id,
-                ReadRequiredBoolean(payload, "enabled"))
-        });
-        return CreateAgentView(saved);
-    }
-
-    private SubagentDefinitionView CreateSubagent(JsonElement payload)
-    {
-        var id = ReadRequiredString(payload, "id");
-        var name = ReadRequiredString(payload, "name");
-        var description = ReadRequiredString(payload, "description");
-        var instructions = ReadOptionalString(payload, "instructions") ?? string.Empty;
-
-        // 检查 ID 是否已存在
-        if (_subagentCatalog.Get(id) != null)
-        {
-            throw new InvalidOperationException($"Subagent with id '{id}' already exists.");
-        }
-
-        var newSubagent = new SubagentDefinition(
-            Id: id,
-            Name: name,
-            Description: description,
-            ModelProfileId: null,
-            ToolPolicy: SubagentDefinitionCatalog.DefaultToolPolicy,
-            PluginIds: Array.Empty<string>(),
-            SkillIds: Array.Empty<string>(),
-            McpServerIds: Array.Empty<string>(),
-            MaxRunSeconds: SubagentDefinitionCatalog.DefaultMaxRunSeconds,
-            Instructions: instructions,
-            FilePath: string.Empty,
-            IsValid: true,
-            Diagnostics: Array.Empty<string>());
-
-        var saved = _subagentCatalog.Save(newSubagent);
-        return CreateSubagentView(saved);
-    }
-
-    private SubagentDefinitionView SaveSubagent(JsonElement payload)
-    {
-        var id = ReadRequiredString(payload, "id");
-        var existing = _subagentCatalog.Get(id)
-            ?? throw new KeyNotFoundException($"Subagent '{id}' was not found.");
-        var saved = _subagentCatalog.Save(existing with
-        {
-            Name = ReadRequiredString(payload, "name"),
-            Description = ReadRequiredString(payload, "description"),
-            ModelProfileId = ReadOptionalGuid(payload, "modelProfileId"),
-            ToolPolicy = ReadRequiredString(payload, "toolPolicy"),
-            MaxRunSeconds = ReadRequiredInt32(payload, "maxRunSeconds"),
-            Instructions = ReadRequiredString(payload, "instructions")
-        });
-        return CreateSubagentView(saved);
-    }
-
-    private void DeleteSubagent(JsonElement payload)
-    {
-        var subagentId = ReadRequiredString(payload, "id");
-        if (_subagentCatalog.Get(subagentId) is null)
-        {
-            throw new KeyNotFoundException($"Subagent '{subagentId}' was not found.");
-        }
-
-        _subagentCatalog.Delete(subagentId);
-    }
-
-    private async Task<SubagentDefinitionView> SetSubagentExtensionBindingAsync(
-        JsonElement payload,
-        CancellationToken cancellationToken)
-    {
-        var subagentId = ReadRequiredString(payload, "subagentId");
-        var existing = _subagentCatalog.Get(subagentId)
-            ?? throw new KeyNotFoundException($"Subagent '{subagentId}' was not found.");
-        var key = ReadItemKey(payload);
-        var extensionState = await _settingsService.GetStateAsync(cancellationToken);
-        EnsureItemExists(extensionState, key);
-        var enabled = ReadRequiredBoolean(payload, "enabled");
-        var updated = key.Kind switch
-        {
-            ExtensionKind.Plugin => existing with
-            {
-                PluginIds = SetListItem(existing.PluginIds, key.Id, enabled)
-            },
-            ExtensionKind.Skill => existing with
-            {
-                SkillIds = SetListItem(existing.SkillIds, key.Id, enabled)
-            },
-            ExtensionKind.McpServer => existing with
-            {
-                McpServerIds = SetListItem(existing.McpServerIds, key.Id, enabled)
-            },
-            _ => throw new ArgumentOutOfRangeException(nameof(key), key.Kind, "Unsupported extension kind.")
-        };
-        return CreateSubagentView(_subagentCatalog.Save(updated));
-    }
-
-    private long NotifyMutation()
-    {
-        AgentsChanged?.Invoke();
-        return _stateChangeNotifier.Advance();
-    }
-
-    private DesktopAgentDefinition FindAgent(string agentId)
-        => _agentDefinitionService.LoadAll().FirstOrDefault(item =>
-               string.Equals(item.Id, agentId, StringComparison.OrdinalIgnoreCase))
-           ?? throw new KeyNotFoundException($"Agent '{agentId}' was not found.");
-
-    private static AgentDefinitionView CreateAgentView(DesktopAgentDefinition agent)
-        => new(
-            agent.Id,
-            agent.Name,
-            agent.Description,
-            agent.Mode == AgentExecutionMode.Cli ? "cli" : "direct",
-            agent.PluginIds,
-            agent.SkillIds,
-            agent.McpServerIds,
-            agent.SubagentIds,
-            agent.Instructions,
-            agent.IsBuiltIn,
-            agent.Warnings);
-
-    private static SubagentDefinitionView CreateSubagentView(SubagentDefinition subagent)
-        => new(
-            subagent.Id,
-            subagent.Name,
-            subagent.Description,
-            subagent.ModelProfileId,
-            subagent.ToolPolicy,
-            subagent.PluginIds,
-            subagent.SkillIds,
-            subagent.McpServerIds,
-            subagent.MaxRunSeconds,
-            subagent.Instructions,
-            subagent.IsValid,
-            subagent.Diagnostics);
-
-    private static void EnsureItemExists(ExtensionSettingsState state, ExtensionItemKey key)
-    {
-        var exists = key.Kind switch
-        {
-            ExtensionKind.Plugin => state.Plugins.Any(item => IdEquals(item.Id, key.Id)),
-            ExtensionKind.Skill => state.Skills.Any(item => IdEquals(item.Id, key.Id)),
-            ExtensionKind.McpServer => state.McpServers.Any(item => IdEquals(item.Id, key.Id)),
-            _ => false
-        };
-        if (!exists)
-        {
-            throw new KeyNotFoundException($"{key.Kind} extension '{key.Id}' was not found.");
-        }
-    }
-
-    private static AgentExecutionMode ParseMode(string value)
-        => value.Trim().ToLowerInvariant() switch
-        {
-            "direct" => AgentExecutionMode.Direct,
             "cli" => AgentExecutionMode.Cli,
-            _ => throw new ArgumentException($"Agent mode '{value}' is invalid.")
-        };
+            "direct" => AgentExecutionMode.Direct,
+            _ => throw new ArgumentException("Agent mode is invalid.")
+        }, ReadOptionalString(payload, "instructions") ?? string.Empty);
 
-    private static IReadOnlyList<string> SetListItem(IReadOnlyList<string> values, string id, bool enabled)
-    {
-        var results = values.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (enabled)
-        {
-            results.Add(id.Trim());
-        }
-        else
-        {
-            results.Remove(id.Trim());
-        }
-
-        return results.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray();
-    }
+    private static SubagentEdit ReadSubagentEdit(JsonElement payload, bool creating) => new(
+        ReadRequiredString(payload, "id"), ReadRequiredString(payload, "name"), ReadRequiredString(payload, "description"),
+        ReadOptionalGuid(payload, "modelProfileId"),
+        creating ? SubagentDefinitionCatalog.DefaultToolPolicy : ReadRequiredString(payload, "toolPolicy"),
+        creating ? SubagentDefinitionCatalog.DefaultMaxRunSeconds : ReadRequiredInt32(payload, "maxRunSeconds"),
+        ReadOptionalString(payload, "instructions") ?? string.Empty);
 
     private static ExtensionItemKey ReadItemKey(JsonElement payload)
         => new(
@@ -504,6 +232,4 @@ internal sealed class AgentSettingsBridge
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
-    private static bool IdEquals(string left, string right)
-        => string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
 }

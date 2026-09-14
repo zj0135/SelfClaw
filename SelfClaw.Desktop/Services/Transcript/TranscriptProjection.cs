@@ -1,7 +1,5 @@
-using System.IO;
-using System.Text;
+using SelfClaw.Desktop.Services.Transcript.Views;
 using SelfClaw.Core.Models;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop.Services.Transcript;
@@ -9,8 +7,11 @@ namespace SelfClaw.Desktop.Services.Transcript;
 public sealed class TranscriptProjection
 {
     private readonly TranscriptMessageProjector _messageProjector;
-    private readonly Dictionary<Guid, (string Fingerprint, TranscriptRenderItem Item)> _messageCache = [];
-    private string? _lastFingerprint;
+    private readonly Dictionary<Guid, (MessageRecord Message, IReadOnlyList<ToolExecutionRecord> Tools, TranscriptRenderItem Item)> _messageCache = [];
+    private IReadOnlyList<ConversationRecord> _navigationSource = [];
+    private IReadOnlyList<WorkspaceRoot> _workspaceSource = [];
+    private IReadOnlyList<TranscriptConversationItem> _navigation = [];
+    private TranscriptRenderState? _lastState;
 
     public TranscriptProjection(StoragePaths storagePaths)
     {
@@ -20,292 +21,82 @@ public sealed class TranscriptProjection
     internal TranscriptRenderState? Build(TranscriptProjectionRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-
-        var fingerprint = BuildFingerprint(request);
-        if (string.Equals(_lastFingerprint, fingerprint, StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        _lastFingerprint = fingerprint;
-        PruneMessageCache(request.Messages);
-        _messageProjector.PruneToolSegmentCache(request.ToolRuns);
-        var items = request.Messages
-            .OrderBy(message => message.CreatedAtUtc)
-            .Select(message => BuildMessageItemCached(message, request.ToolRuns))
-            .ToArray();
-
-        return new TranscriptRenderState(
-            items,
-            request.AutoScroll,
-            BuildConversationItems(request),
-            request.SelectedConversationId?.ToString("D"),
-            request.IsBusy,
-            request.ActivityText,
-            request.AgentMode,
-            request.SelectedAgentId,
-            request.SelectedAgentName,
-            request.CapabilityRevision,
-            request.ToolPermissionMode);
-    }
-
-    internal void Invalidate() => _lastFingerprint = null;
-
-    private static string BuildFingerprint(TranscriptProjectionRequest request)
-    {
-        var conversations = request.Conversations
-            .OrderByDescending(conversation => conversation.UpdatedAtUtc)
-            .ThenBy(conversation => conversation.CreatedAtUtc)
-            .ToArray();
-        var builder = new StringBuilder();
-        builder.Append(request.AutoScroll ? '1' : '0')
-            .Append('|')
-            .Append(request.SelectedConversationId?.ToString("D"))
-            .Append('|')
-            .Append(request.IsBusy ? '1' : '0')
-            .Append('|')
-            .Append(request.ActivityText)
-            .Append('|')
-            .Append(request.AgentMode)
-            .Append('|')
-            .Append(request.SelectedAgentId)
-            .Append('|')
-            .Append(request.SelectedAgentName)
-            .Append('|')
-            .Append(request.CapabilityRevision)
-            .Append('|')
-            .Append(request.ToolPermissionMode)
-            .Append('|')
-            .Append(conversations.Length)
-            .Append('|');
-
-        foreach (var conversation in conversations)
-        {
-            builder.Append(conversation.Id.ToString("D"))
-                .Append(':')
-                .Append(conversation.CreatedAtUtc.UtcTicks)
-                .Append(':')
-                .Append(conversation.UpdatedAtUtc.UtcTicks)
-                .Append(':')
-                .Append(conversation.WorkspaceRootId?.ToString("D"))
-                .Append(':');
-            AppendTextFingerprint(builder, conversation.Title);
-            builder.Append(';');
-        }
-
-        builder.Append('|')
-            .Append(request.WorkspaceRoots.Count)
-            .Append('|');
-        foreach (var workspaceRoot in request.WorkspaceRoots.OrderBy(workspaceRoot => workspaceRoot.Id))
-        {
-            builder.Append(workspaceRoot.Id.ToString("D"))
-                .Append(':');
-            AppendTextFingerprint(builder, workspaceRoot.Name);
-            AppendTextFingerprint(builder, workspaceRoot.RootPath);
-            AppendTextFingerprint(builder, workspaceRoot.GitRepositoryId?.ToString("D"));
-            AppendTextFingerprint(builder, workspaceRoot.GitRepositoryName);
-            AppendTextFingerprint(builder, workspaceRoot.GitBranchName);
-            builder.Append(workspaceRoot.IsManagedWorktree ? '1' : '0');
-            builder.Append(';');
-        }
-
-        builder.Append('|')
-            .Append(request.Messages.Count)
-            .Append('|');
+        var toolsByMessage = IndexTools(request.ToolRuns);
+        var liveMessages = new HashSet<Guid>();
+        var items = new TranscriptRenderItem[request.Messages.Count];
+        var index = 0;
         foreach (var message in request.Messages.OrderBy(message => message.CreatedAtUtc))
         {
-            AppendMessageFingerprint(builder, message);
-            builder.Append(';');
+            liveMessages.Add(message.Id);
+            IReadOnlyList<ToolExecutionRecord> tools = toolsByMessage.TryGetValue(message.Id, out var found) ? found : [];
+            items[index++] = BuildMessageItem(message, tools);
         }
-
-        builder.Append('|')
-            .Append(request.ToolRuns.Count)
-            .Append('|');
-        foreach (var toolRun in request.ToolRuns.OrderBy(toolRun => toolRun.CreatedAtUtc))
-        {
-            AppendToolRunFingerprint(builder, toolRun);
-            builder.Append(';');
-        }
-
-        return builder.ToString();
+        foreach (var id in _messageCache.Keys.Where(id => !liveMessages.Contains(id)).ToArray()) _messageCache.Remove(id);
+        _messageProjector.PruneToolSegmentCache(request.ToolRuns);
+        UpdateNavigation(request);
+        var stableItems = _lastState is { } previous && SameReferences(previous.Items, items) ? previous.Items : items;
+        var state = new TranscriptRenderState(stableItems, request.AutoScroll, _navigation,
+            request.SelectedConversationId?.ToString("D"), request.IsBusy, request.ActivityText, request.AgentMode,
+            request.SelectedAgentId, request.SelectedAgentName, request.CapabilityRevision, request.ToolPermissionMode);
+        if (state == _lastState) return null;
+        _lastState = state;
+        return state;
     }
 
-    private static TranscriptConversationItem[] BuildConversationItems(TranscriptProjectionRequest request)
-        => request.Conversations
-            .OrderByDescending(conversation => conversation.UpdatedAtUtc)
-            .ThenBy(conversation => conversation.CreatedAtUtc)
-            .Select(conversation => BuildConversationItem(conversation, request.WorkspaceRoots))
-            .ToArray();
-
-    private static TranscriptConversationItem BuildConversationItem(
-        ConversationRecord conversation,
-        IReadOnlyList<WorkspaceRoot> workspaceRoots)
+    internal void Invalidate()
     {
-        var workspaceRoot = conversation.WorkspaceRootId is Guid workspaceRootId
-            ? workspaceRoots.FirstOrDefault(root => root.Id == workspaceRootId)
-            : null;
-
-        return new TranscriptConversationItem(
-            conversation.Id.ToString("D"),
-            conversation.Title,
-            conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
-            conversation.WorkspaceRootId?.ToString("D"),
-            workspaceRoot?.Name,
-            workspaceRoot?.RootPath,
-            workspaceRoot?.GitRepositoryId?.ToString("D"),
-            workspaceRoot?.GitRepositoryName,
-            workspaceRoot?.GitBranchName,
-            workspaceRoot?.IsManagedWorktree == true);
+        _lastState = null;
+        _messageCache.Clear();
     }
 
-    private TranscriptRenderItem BuildMessageItemCached(
-        MessageRecord message,
-        IReadOnlyList<ToolExecutionRecord> conversationToolRuns)
+    private TranscriptRenderItem BuildMessageItem(MessageRecord message, IReadOnlyList<ToolExecutionRecord> tools)
     {
-        var fingerprint = BuildMessageFingerprint(message, conversationToolRuns);
-        if (_messageCache.TryGetValue(message.Id, out var cached) &&
-            string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
-        {
-            return cached.Item;
-        }
-
-        var item = _messageProjector.Build(message, conversationToolRuns);
-        _messageCache[message.Id] = (fingerprint, item);
+        if (_messageCache.TryGetValue(message.Id, out var cached) && ReferenceEquals(cached.Message, message) &&
+            SameReferences(cached.Tools, tools)) return cached.Item;
+        var item = _messageProjector.Build(message, tools);
+        _messageCache[message.Id] = (message, tools, item);
         return item;
     }
 
-    private void PruneMessageCache(IReadOnlyList<MessageRecord> messages)
+    private void UpdateNavigation(TranscriptProjectionRequest request)
     {
-        if (_messageCache.Count == 0)
-        {
+        if (SameReferences(_navigationSource, request.Conversations) && SameReferences(_workspaceSource, request.WorkspaceRoots))
             return;
-        }
-
-        var liveIds = messages.Select(message => message.Id).ToHashSet();
-        foreach (var staleId in _messageCache.Keys.Where(id => !liveIds.Contains(id)).ToArray())
-        {
-            _messageCache.Remove(staleId);
-        }
+        _navigationSource = request.Conversations.ToArray();
+        _workspaceSource = request.WorkspaceRoots.ToArray();
+        var roots = _workspaceSource.ToDictionary(root => root.Id);
+        _navigation = _navigationSource.OrderByDescending(conversation => conversation.UpdatedAtUtc)
+            .ThenBy(conversation => conversation.CreatedAtUtc)
+            .Select(conversation => BuildConversationItem(conversation, roots)).ToArray();
     }
 
-
-    private static string BuildMessageFingerprint(
-        MessageRecord message,
-        IReadOnlyList<ToolExecutionRecord> conversationToolRuns)
+    private static Dictionary<Guid, List<ToolExecutionRecord>> IndexTools(IReadOnlyList<ToolExecutionRecord> tools)
     {
-        var builder = new StringBuilder();
-        AppendMessageFingerprint(builder, message);
-
-        if (message.Role == MessageRole.Assistant && message.Segments is { Count: > 0 })
+        var result = new Dictionary<Guid, List<ToolExecutionRecord>>();
+        foreach (var tool in tools)
         {
-            builder.Append('|').Append(message.Segments.Count).Append('|');
-            foreach (var segment in message.Segments)
-            {
-                builder.Append((int)segment.Kind)
-                    .Append(':')
-                    .Append(segment.ToolRunId?.ToString("D") ?? string.Empty)
-                    .Append(':');
-                AppendTextFingerprint(builder, segment.Text);
-            }
+            if (tool.MessageId is not Guid messageId) continue;
+            if (!result.TryGetValue(messageId, out var records)) result[messageId] = records = [];
+            records.Add(tool);
         }
-
-        var messageToolRuns = conversationToolRuns
-            .Where(toolRun => toolRun.MessageId == message.Id)
-            .ToArray();
-        if (messageToolRuns.Length > 0)
-        {
-            builder.Append('|');
-            foreach (var toolRun in messageToolRuns)
-            {
-                AppendToolRunFingerprint(builder, toolRun);
-                builder.Append(';');
-            }
-        }
-
-        return builder.ToString();
+        return result;
     }
 
-
-    private static void AppendAttachments(
-        StringBuilder builder,
-        IReadOnlyList<MessageAttachmentRecord>? attachments)
+    private static TranscriptConversationItem BuildConversationItem(ConversationRecord conversation,
+        IReadOnlyDictionary<Guid, WorkspaceRoot> roots)
     {
-        if (attachments is not { Count: > 0 })
-        {
-            return;
-        }
-
-        foreach (var attachment in attachments)
-        {
-            builder.Append(attachment.Id.ToString("D"))
-                .Append(',')
-                .Append((int)attachment.Kind)
-                .Append(',')
-                .Append(attachment.ByteLength)
-                .Append(',');
-            AppendTextFingerprint(builder, attachment.FileName);
-            AppendTextFingerprint(builder, attachment.MediaType);
-            AppendTextFingerprint(builder, attachment.StoragePath);
-            builder.Append(File.Exists(attachment.StoragePath) ? '1' : '0')
-                .Append(';');
-        }
+        var root = conversation.WorkspaceRootId is Guid id ? roots.GetValueOrDefault(id) : null;
+        return new(conversation.Id.ToString("D"), conversation.Title,
+            conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"), conversation.WorkspaceRootId?.ToString("D"),
+            root?.Name, root?.RootPath, root?.GitRepositoryId?.ToString("D"), root?.GitRepositoryName, root?.GitBranchName,
+            root?.IsManagedWorktree == true);
     }
 
-    private static void AppendMessageFingerprint(StringBuilder builder, MessageRecord message)
+    private static bool SameReferences<T>(IReadOnlyList<T> left, IReadOnlyList<T> right) where T : class
     {
-        builder.Append(message.Id.ToString("D"))
-            .Append(':')
-            .Append((int)message.Role)
-            .Append(':')
-            .Append((int)message.Status)
-            .Append(':')
-            .Append(message.CreatedAtUtc.UtcTicks)
-            .Append(':')
-            .Append(message.UpdatedAtUtc.UtcTicks)
-            .Append(':');
-        AppendTextLength(builder, message.MarkdownContent);
-        AppendTextFingerprint(builder, message.ErrorMessage);
-        AppendAttachments(builder, message.Attachments);
+        if (left.Count != right.Count) return false;
+        for (var index = 0; index < left.Count; index++)
+            if (!ReferenceEquals(left[index], right[index])) return false;
+        return true;
     }
-
-    private static void AppendToolRunFingerprint(StringBuilder builder, ToolExecutionRecord toolRun)
-    {
-        builder.Append(toolRun.Id.ToString("D"))
-            .Append(':')
-            .Append((int)toolRun.Status)
-            .Append(':')
-            .Append(toolRun.CreatedAtUtc.UtcTicks)
-            .Append(':')
-            .Append(toolRun.UpdatedAtUtc.UtcTicks)
-            .Append(':')
-            .Append(toolRun.DurationMs)
-            .Append(':')
-            .Append(toolRun.MessageId)
-            .Append(':')
-            .Append(toolRun.SourceKind)
-            .Append(':');
-        AppendTextFingerprint(builder, toolRun.ToolName);
-        AppendTextLength(builder, toolRun.ArgumentsJson);
-        AppendTextFingerprint(builder, toolRun.ResultSummary);
-        AppendTextLength(builder, toolRun.ResultContent);
-        AppendTextFingerprint(builder, toolRun.SourceId);
-        AppendTextFingerprint(builder, toolRun.DisplayName);
-    }
-
-    private static void AppendTextFingerprint(StringBuilder builder, string? value)
-    {
-        if (value is null)
-        {
-            builder.Append("null:");
-            return;
-        }
-
-        builder.Append(value.Length)
-            .Append(':')
-            .Append(StringComparer.Ordinal.GetHashCode(value))
-            .Append(':');
-    }
-
-    private static void AppendTextLength(StringBuilder builder, string? value)
-        => builder.Append(value?.Length ?? -1).Append(':');
 }

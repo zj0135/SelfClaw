@@ -1,6 +1,8 @@
 # 右侧插件面板系统设计（UI Plugin Panels）
 
-> 状态：v1（实现完成）。基线为仓库当前代码。
+> 2026-09-14 实现更新见 [Desktop 架构整改 R10/R11/R14/R15](desktop-architecture-review.md)。打开操作通过有界修改门和失效代次收敛；资源由后台准备，经 WebView deferral 提交，最多四个并发读取、每份 8 MiB，读取期间持有版本 lease。Transcript 每 500 ms 合并为最多 256 KiB UTF-8 的窗口，并携带 `totalItems/truncated`；已保存的活动标签页会恢复。安全依赖 origin/CSP/权限校验，不以 renderer 进程数量为前提。
+
+> 下文为 v1 设计基线；涉及生命周期、资源读取和广播的旧调用链以以上实现更新为准。
 >
 > 本文只覆盖 **UI 面板** 这一类 contribution。Plugins/Skills/MCP 三类 AI 能力的设计见
 > `direct-extensions-system-design.md`，两者共用同一套包格式、安装、权限确认与版本租约。

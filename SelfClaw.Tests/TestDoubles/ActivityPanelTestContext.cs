@@ -9,7 +9,7 @@ namespace SelfClaw.Tests.TestDoubles;
 
 internal sealed class ActivityPanelTestContext : IDisposable
 {
-    internal ActivityPanelTestContext(SubagentActivityTestContext activity, Guid? parent)
+    internal ActivityPanelTestContext(SubagentActivityTestContext activity, Guid? parent, Xunit.Abstractions.ITestOutputHelper? trace = null)
     {
         Source = new ActivityPanelTestScope(parent);
         var dispatcher = Dispatcher.CurrentDispatcher;
@@ -18,6 +18,7 @@ internal sealed class ActivityPanelTestContext : IDisposable
             dispatcher.VerifyAccess();
             using var document = JsonDocument.Parse(json);
             Messages.Add(document.RootElement.Clone());
+            trace?.WriteLine(json);
         });
         Channel.MarkReady();
         Publisher = new ActivityPanelPublisher(activity.Service,

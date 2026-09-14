@@ -1,3 +1,6 @@
+using SelfClaw.Desktop.Services.Notifications;
+using SelfClaw.Desktop.Services.Settings;
+using SelfClaw.Desktop.Services.Tools;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -5,7 +8,6 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
@@ -48,13 +50,13 @@ public sealed class SubagentContinuationExecutorTests : IDisposable
         var approvalHandler = new DesktopToolApprovalHandler();
         using var activity = new AgentActivityCoordinator(approvalHandler, NullLogger<AgentActivityCoordinator>.Instance);
         using var sessions = new ConversationSessionCoordinator(conversations, new NoOpTranscriptChangeSink());
-        using var notifications = new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance);
+        var notifications = new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance);
         var runtime = new TruncatedRuntime(hasTool);
         var recorder = new ConversationTurnRecorder(conversations, NullLogger<ConversationTurnRecorder>.Instance);
         using var engine = new ConversationTurnEngine(
             conversations, new DesktopTurnFinalizer(conversations, NullLogger<DesktopTurnFinalizer>.Instance),
             recorder, runtime, sessions, activity, approvalHandler,
-            new ProgrammingAssistantSettingsService(new DesktopSettingsJsonStore(paths)),
+            SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(new DesktopSettingsJsonStore(paths)),
             new NullCompletionNotifier(), NullLogger<ConversationTurnEngine>.Instance);
         var executor = new SubagentContinuationExecutor(deliveries, runtime, recorder, approvalHandler,
             new SubagentTaskSnapshotSerializer(), new SubagentCompletionBatchSerializer(), engine, notifications,

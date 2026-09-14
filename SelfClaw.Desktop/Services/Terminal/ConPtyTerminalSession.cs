@@ -20,9 +20,9 @@ public sealed class ConPtyTerminalSession : ITerminalSession
     private readonly object _gate = new();
     private readonly StreamWriter _inputWriter;
     private readonly FileStream _outputReader;
-    private readonly SafeFileHandle _pseudoConsoleInputReadSide;
-    private readonly SafeFileHandle _pseudoConsoleOutputWriteSide;
-    private readonly CancellationTokenSource _outputCancellation = new();
+    private readonly SemaphoreSlim _inputGate = new(1, 1);
+    private Task? _outputTask;
+    private Task? _disposeTask;
     private readonly ProcessInformation _processInformation;
     private readonly IntPtr _pseudoConsole;
     private readonly IntPtr _attributeList;
@@ -44,18 +44,16 @@ public sealed class ConPtyTerminalSession : ITerminalSession
         WorkingDirectory = workingDirectory;
 
         CreatePipe(out var inputReadSide, out var inputWriteSide);
-        CreatePipe(out var outputReadSide, out var outputWriteSide);
+        SafeFileHandle? outputReadSide = null;
+        SafeFileHandle? outputWriteSide = null;
 
         try
         {
+            CreatePipe(out outputReadSide, out outputWriteSide);
             _pseudoConsole = CreatePseudoConsole(inputReadSide, outputWriteSide, Columns, Rows);
             _attributeList = InitializePseudoConsoleAttributeList(_pseudoConsole);
             _processInformation = CreateShellProcess(shellPath, workingDirectory, _attributeList);
 
-            _pseudoConsoleInputReadSide = inputReadSide;
-            _pseudoConsoleOutputWriteSide = outputWriteSide;
-            inputReadSide = null!;
-            outputWriteSide = null!;
             _inputWriter = new StreamWriter(new FileStream(inputWriteSide, FileAccess.Write, bufferSize: 4096, isAsync: false), new UTF8Encoding(false))
             {
                 AutoFlush = true
@@ -65,9 +63,10 @@ public sealed class ConPtyTerminalSession : ITerminalSession
         catch
         {
             inputWriteSide.Dispose();
-            outputReadSide.Dispose();
-            inputReadSide?.Dispose();
-            outputWriteSide?.Dispose();
+            outputReadSide?.Dispose();
+            TryTerminateProcess(_processInformation.Process);
+            CloseHandleIfNeeded(_processInformation.Thread);
+            CloseHandleIfNeeded(_processInformation.Process);
             if (_attributeList != IntPtr.Zero)
             {
                 DeleteProcThreadAttributeList(_attributeList);
@@ -110,23 +109,21 @@ public sealed class ConPtyTerminalSession : ITerminalSession
             }
 
             _started = true;
+            _outputTask = Task.Run(ReadOutputLoopAsync);
         }
-
-        _ = Task.Run(ReadOutputLoop);
     }
 
-    public void WriteInput(string input)
+    public async Task WriteInputAsync(string input, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(input))
-        {
-            return;
-        }
-
-        lock (_gate)
+        if (string.IsNullOrEmpty(input)) return;
+        await _inputGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             ThrowIfDisposed();
-            _inputWriter.Write(input);
+            await Task.Run(async () => await _inputWriter.WriteAsync(input.AsMemory(), cancellationToken).ConfigureAwait(false),
+                cancellationToken).ConfigureAwait(false);
         }
+        finally { _inputGate.Release(); }
     }
 
     public void Resize(int columns, int rows)
@@ -148,61 +145,68 @@ public sealed class ConPtyTerminalSession : ITerminalSession
         }
     }
 
-    public void Dispose()
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    public ValueTask DisposeAsync()
     {
-        lock (_gate)
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-        }
-
-        _outputCancellation.Cancel();
-        TryTerminateProcess(_processInformation.Process);
-        _inputWriter.Dispose();
-        _outputReader.Dispose();
-        CloseHandleIfNeeded(_processInformation.Thread);
-        CloseHandleIfNeeded(_processInformation.Process);
-        DeleteProcThreadAttributeList(_attributeList);
-        Marshal.FreeHGlobal(_attributeList);
-        ClosePseudoConsole(_pseudoConsole);
-        _pseudoConsoleOutputWriteSide.Dispose();
-        _pseudoConsoleInputReadSide.Dispose();
-        _outputCancellation.Dispose();
+        lock (_gate) return new ValueTask(_disposeTask ??= DisposeCoreAsync());
     }
 
-    private void ReadOutputLoop()
+    private async Task DisposeCoreAsync()
     {
-        var buffer = new byte[8192];
+        _disposed = true;
+        _outputTask ??= Task.Run(ReadOutputLoopAsync);
         try
         {
-            while (!_outputCancellation.IsCancellationRequested)
+            await Task.Run(() =>
             {
-                var read = _outputReader.Read(buffer, 0, buffer.Length);
-                if (read <= 0)
+                try
                 {
-                    break;
+                    using var process = Process.GetProcessById((int)_processInformation.ProcessId);
+                    if (!process.HasExited) process.Kill(entireProcessTree: true);
                 }
-
-                OutputReceived?.Invoke(this, Encoding.UTF8.GetString(buffer, 0, read));
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        catch (IOException)
-        {
+                catch (ArgumentException) { }
+                catch (InvalidOperationException) { }
+                finally
+                {
+                    TryTerminateProcess(_processInformation.Process);
+                    // The reader stays active until ConPTY has drained and closed its output.
+                    ClosePseudoConsole(_pseudoConsole);
+                }
+            }).ConfigureAwait(false);
+            await _outputTask.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
         }
         finally
         {
-            PublishExited();
+            _outputReader.Dispose();
+            await _inputGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                try { await _inputWriter.DisposeAsync().ConfigureAwait(false); }
+                catch (IOException) { }
+            }
+            finally { _inputGate.Release(); }
+            CloseHandleIfNeeded(_processInformation.Thread);
+            CloseHandleIfNeeded(_processInformation.Process);
+            DeleteProcThreadAttributeList(_attributeList);
+            Marshal.FreeHGlobal(_attributeList);
         }
+    }
+
+    private async Task ReadOutputLoopAsync()
+    {
+        try
+        {
+            await new TerminalOutputReader().ReadAsync(_outputReader,
+                text => OutputReceived?.Invoke(this, text)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (ObjectDisposedException) when (_disposed) { }
+        catch (IOException exception)
+        {
+            if (!_disposed) OutputReceived?.Invoke(this, $"\r\n[Terminal read failed: {exception.Message}]\r\n");
+        }
+        finally { PublishExited(); }
     }
 
     private void PublishExited()

@@ -1,8 +1,8 @@
+using SelfClaw.Desktop.Services.Tools;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
 
 namespace SelfClaw.Tests.Desktop.Services.AgentActivity;

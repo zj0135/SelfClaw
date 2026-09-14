@@ -22,7 +22,7 @@ it('keeps the draft until accepted, prevents duplicate submission, then refreshe
 	const sent = composer.submit(submission);
 	await composer.submit(submission);
 	expect(bridge.request).toHaveBeenCalledExactlyOnceWith('send-prompt',
-		{ prompt: 'review this', workspaceMode: 'worktree' }, { timeout: 120000 });
+		{ modelProfileId: null, prompt: 'review this', workspaceMode: 'worktree' }, { timeout: 120000 });
 	expect(accept).not.toHaveBeenCalled();
 	response.resolve({ accepted: true });
 	await sent;

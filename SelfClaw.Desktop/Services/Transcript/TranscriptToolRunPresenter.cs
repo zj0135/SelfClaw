@@ -1,10 +1,11 @@
+using SelfClaw.Desktop.Services.Transcript.Views;
 using System.Globalization;
 using System.Text.Json;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Transcript;
 
-namespace SelfClaw.Desktop.Services;
+namespace SelfClaw.Desktop.Services.Transcript;
 
 internal static class TranscriptToolRunPresenter
 {

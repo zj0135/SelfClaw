@@ -1,12 +1,14 @@
 using System.IO;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Windows.Threading;
 using SelfClaw.Desktop.Services.Terminal.Abstractions;
 using SelfClaw.Desktop.Services.WebView;
 
 namespace SelfClaw.Desktop.Services.Terminal;
 
-public sealed class TerminalHostController : IDisposable
+public sealed class TerminalHostController : IDisposable, IAsyncDisposable
 {
     private const int DefaultColumns = 120;
     private const int DefaultRows = 24;
@@ -20,20 +22,33 @@ public sealed class TerminalHostController : IDisposable
     private int _rows = DefaultRows;
     private bool _isReady;
     private bool _isFocused;
+    private readonly TerminalOutputBuffer _output = new();
+    private readonly DispatcherTimer _outputTimer;
+    private readonly ILogger<TerminalHostController> _logger;
+    private readonly SemaphoreSlim _transitions = new(1, 1);
+    private int _pendingInputs;
+    private bool _disposed;
+    private Task? _disposeTask;
+
 
     internal TerminalHostController(
         ITerminalSessionFactory sessionFactory,
         WebViewHostChannel webViewHostChannel,
-        Dispatcher dispatcher)
+        Dispatcher dispatcher,
+        ILogger<TerminalHostController>? logger = null)
     {
         _sessionFactory = sessionFactory;
         _webViewHostChannel = webViewHostChannel;
         _dispatcher = dispatcher;
+        _logger = logger ?? NullLogger<TerminalHostController>.Instance;
+        _outputTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = TimeSpan.FromMilliseconds(33) };
+        _outputTimer.Tick += OnOutputTick;
+        _webViewHostChannel.ReadyChanged += OnReadyChanged;
     }
 
     public bool IsOpen { get; private set; }
 
-    public bool TryHandleMessage(string type, JsonElement payload)
+    public async Task<bool> TryHandleMessageAsync(string type, JsonElement payload)
     {
         switch (type)
         {
@@ -43,13 +58,13 @@ public sealed class TerminalHostController : IDisposable
                 PublishState();
                 if (IsOpen)
                 {
-                    EnsureSession();
+                    await EnsureSessionAsync();
                 }
                 return true;
             case "terminal-input":
                 if (_session is not null && payload.TryGetProperty("data", out var dataElement))
                 {
-                    _session.WriteInput(dataElement.GetString() ?? string.Empty);
+                    await WriteInputAsync(dataElement.GetString() ?? string.Empty);
                 }
                 return true;
             case "terminal-resize":
@@ -61,58 +76,68 @@ public sealed class TerminalHostController : IDisposable
                              IsOpen;
                 return true;
             case "terminal-close":
-                SetOpen(false, workspaceRootPath: null);
+                await SetOpenAsync(false, workspaceRootPath: null);
                 return true;
             case "terminal-restart":
-                RestartSession();
+                await RestartSessionAsync();
                 return true;
             default:
                 return false;
         }
     }
 
-    public void SetOpen(bool isOpen, string? workspaceRootPath)
+    public async Task SetOpenAsync(bool isOpen, string? workspaceRootPath)
     {
-        IsOpen = isOpen;
-        if (!isOpen)
+        await _transitions.WaitAsync();
+        try
         {
-            _isFocused = false;
+            IsOpen = isOpen;
+            if (!isOpen)
+            {
+                _isFocused = false;
+                PublishState();
+                return;
+            }
+
+            await UpdateWorkingDirectoryAsync(workspaceRootPath);
+            await EnsureSessionAsync();
             PublishState();
-            return;
         }
-
-        UpdateWorkingDirectory(workspaceRootPath);
-        EnsureSession();
-        PublishState();
+        finally { _transitions.Release(); }
     }
 
-    public void UpdateWorkspaceRoot(string? workspaceRootPath)
+    public async Task UpdateWorkspaceRootAsync(string? workspaceRootPath)
     {
-        if (!IsOpen)
+        await _transitions.WaitAsync();
+        try
         {
-            return;
-        }
+            if (!IsOpen)
+            {
+                return;
+            }
 
-        var nextWorkingDirectory = ResolveWorkingDirectory(workspaceRootPath);
-        if (PathsEqual(_workingDirectory, nextWorkingDirectory))
-        {
-            return;
-        }
+            var nextWorkingDirectory = ResolveWorkingDirectory(workspaceRootPath);
+            if (PathsEqual(_workingDirectory, nextWorkingDirectory))
+            {
+                return;
+            }
 
-        _workingDirectory = nextWorkingDirectory;
-        StopSession();
-        EnsureSession();
-        PublishState();
+            _workingDirectory = nextWorkingDirectory;
+            await StopSessionAsync();
+            await EnsureSessionAsync();
+            PublishState();
+        }
+        finally { _transitions.Release(); }
     }
 
-    public bool TryWriteEscape()
+    public async Task<bool> TryWriteEscapeAsync()
     {
         if (!_isFocused || _session is null)
         {
             return false;
         }
 
-        _session.WriteInput("\x1b");
+        await WriteInputAsync("\x1b");
         return true;
     }
 
@@ -128,9 +153,52 @@ public sealed class TerminalHostController : IDisposable
     public void Focus()
         => _webViewHostChannel.PostPush(new { type = "terminal-focus" });
 
-    public void Dispose() => StopSession();
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
-    private void UpdateWorkingDirectory(string? workspaceRootPath)
+    public ValueTask DisposeAsync() => new(_disposeTask ??= DisposeCoreAsync());
+
+    private async Task DisposeCoreAsync()
+    {
+        _disposed = true;
+        _outputTimer.Stop();
+        _outputTimer.Tick -= OnOutputTick;
+        _webViewHostChannel.ReadyChanged -= OnReadyChanged;
+        await _transitions.WaitAsync();
+        try { await StopSessionAsync(); }
+        finally { _transitions.Release(); }
+    }
+
+    private async Task WriteInputAsync(string input)
+    {
+        if (input.Length > 65536) throw new ArgumentException("Terminal input exceeds 64 KiB of characters.");
+        if (Interlocked.Increment(ref _pendingInputs) > 32)
+        {
+            Interlocked.Decrement(ref _pendingInputs);
+            throw new InvalidOperationException("Terminal input is busy; please retry.");
+        }
+        try
+        {
+            var session = _session;
+            if (session is not null) await session.WriteInputAsync(input);
+        }
+        finally { Interlocked.Decrement(ref _pendingInputs); }
+    }
+
+    private void OnReadyChanged(bool ready)
+    {
+        if (!ready) { _isReady = false; _isFocused = false; }
+    }
+
+    private void OnOutputTick(object? sender, EventArgs e) => FlushOutput();
+
+    internal void FlushOutput()
+    {
+        if (_disposed || !IsOpen || !_isReady || !_webViewHostChannel.IsReady) return;
+        var text = _output.Drain();
+        if (text.Length > 0) PostOutput(text);
+    }
+
+    private async Task UpdateWorkingDirectoryAsync(string? workspaceRootPath)
     {
         var nextWorkingDirectory = ResolveWorkingDirectory(workspaceRootPath);
         if (PathsEqual(_workingDirectory, nextWorkingDirectory))
@@ -139,12 +207,12 @@ public sealed class TerminalHostController : IDisposable
         }
 
         _workingDirectory = nextWorkingDirectory;
-        StopSession();
+        await StopSessionAsync();
     }
 
-    private void EnsureSession()
+    private async Task EnsureSessionAsync()
     {
-        if (!_isReady || _session is not null)
+        if (_disposed || !_isReady || _session is not null)
         {
             return;
         }
@@ -153,6 +221,8 @@ public sealed class TerminalHostController : IDisposable
         {
             var session = _sessionFactory.Create(_workingDirectory, _columns, _rows);
             _session = session;
+            _output.Reset(session);
+            _outputTimer.Start();
             session.OutputReceived += OnOutputReceived;
             session.Exited += OnExited;
             session.Start();
@@ -161,27 +231,32 @@ public sealed class TerminalHostController : IDisposable
         }
         catch (OperationCanceledException)
         {
-            StopSession();
+            await StopSessionAsync();
             throw;
         }
         catch (Exception exception)
         {
-            StopSession();
+            await StopSessionAsync();
             PostOutput($"\r\nFailed to start terminal: {exception.Message}\r\n");
         }
     }
 
-    private void RestartSession()
+    private async Task RestartSessionAsync()
     {
-        StopSession();
-        _webViewHostChannel.PostPush(new { type = "terminal-clear" });
-        if (IsOpen)
+        await _transitions.WaitAsync();
+        try
         {
-            EnsureSession();
+            await StopSessionAsync();
+            _webViewHostChannel.PostPush(new { type = "terminal-clear" });
+            if (IsOpen)
+            {
+                await EnsureSessionAsync();
+            }
         }
+        finally { _transitions.Release(); }
     }
 
-    private void StopSession()
+    private async Task StopSessionAsync()
     {
         var session = _session;
         _session = null;
@@ -192,44 +267,35 @@ public sealed class TerminalHostController : IDisposable
 
         session.OutputReceived -= OnOutputReceived;
         session.Exited -= OnExited;
-        session.Dispose();
+        await session.DisposeAsync();
         _isFocused = false;
         PublishState();
     }
 
-    private void OnOutputReceived(object? sender, string data)
-        => _ = _dispatcher.BeginInvoke(
-            new Action(() =>
-            {
-                if (ReferenceEquals(sender, _session))
-                {
-                    PostOutput(data);
-                }
-            }),
-            DispatcherPriority.Background);
+    private void OnOutputReceived(object? sender, string data) => _output.Append(sender, data);
 
     private void OnExited(object? sender, int? exitCode)
-        => _ = _dispatcher.BeginInvoke(
-            new Action(() => CompleteExitedSession(sender, exitCode)),
-            DispatcherPriority.Background);
-
-    private void CompleteExitedSession(object? sender, int? exitCode)
     {
-        if (sender is not ITerminalSession exitedSession ||
-            !ReferenceEquals(exitedSession, _session))
+        if (_disposed || _dispatcher.HasShutdownStarted) return;
+        _ = _dispatcher.InvokeAsync(async () =>
         {
-            return;
+            try { await CompleteExitedSessionAsync(sender, exitCode); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception exception) { _logger.LogError(exception, "Terminal exit cleanup failed."); }
+        });
+    }
+
+    private async Task CompleteExitedSessionAsync(object? sender, int? exitCode)
+    {
+        await _transitions.WaitAsync();
+        try
+        {
+            if (sender is not ITerminalSession exited || !ReferenceEquals(exited, _session)) return;
+            _output.Append(sender, exitCode is int code ? $"\r\n[terminal exited with code {code}]\r\n" : "\r\n[terminal exited]\r\n");
+            FlushOutput();
+            await StopSessionAsync();
         }
-
-        _session = null;
-        exitedSession.OutputReceived -= OnOutputReceived;
-        exitedSession.Exited -= OnExited;
-        exitedSession.Dispose();
-
-        PostOutput(exitCode is int code
-            ? $"\r\n[terminal exited with code {code}]\r\n"
-            : "\r\n[terminal exited]\r\n");
-        PublishState();
+        finally { _transitions.Release(); }
     }
 
     private void ApplyResize(JsonElement payload)

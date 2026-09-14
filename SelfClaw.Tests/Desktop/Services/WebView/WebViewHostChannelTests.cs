@@ -1,6 +1,8 @@
+using SelfClaw.Desktop.Services.Transcript.Views;
+using SelfClaw.Desktop.Services.Transcript;
+using System.Windows.Threading;
 using System.Text.Json;
 using FluentAssertions;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.WebView;
 
 namespace SelfClaw.Tests.Desktop.Services.WebView;
@@ -8,13 +10,38 @@ namespace SelfClaw.Tests.Desktop.Services.WebView;
 public sealed class WebViewHostChannelTests
 {
     [Fact]
+    public void Missing_ack_has_bounded_full_retries_and_explicit_recovery_uses_the_latest_snapshot()
+    {
+        var messages = new List<string>();
+        var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
+        channel.Attach(messages.Add);
+        channel.MarkReady();
+        delivery.Publish(CreateTranscript("first"));
+        var oldRevision = ReadRevision(messages[0]);
+        delivery.Publish(CreateTranscript("latest"));
+        for (var attempt = 0; attempt < 8; attempt++) delivery.Retry();
+        messages.Should().HaveCount(5, "one original, three complete retries, and one unavailable notification");
+        delivery.Acknowledge(oldRevision).Should().BeFalse();
+        delivery.Resynchronize();
+        using var recovered = JsonDocument.Parse(messages[^1]);
+        recovered.RootElement.GetProperty("type").GetString().Should().Be("replaceState");
+        recovered.RootElement.GetProperty("selectedAgentName").GetString().Should().Be("latest");
+        delivery.Acknowledge(ReadRevision(messages[^1])).Should().BeTrue();
+        delivery.Publish(CreateTranscript("after recovery"));
+        using var patch = JsonDocument.Parse(messages[^1]);
+        patch.RootElement.GetProperty("baseRevision").GetInt64().Should().Be(ReadRevision(messages[^2]));
+    }
+
+    [Fact]
     public void MarkReady_replays_only_the_latest_transcript()
     {
         var messages = new List<string>();
         var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
         channel.Attach(messages.Add);
-        channel.PublishTranscript(CreateTranscript("first"));
-        channel.PublishTranscript(CreateTranscript("second"));
+        delivery.Publish(CreateTranscript("first"));
+        delivery.Publish(CreateTranscript("second"));
 
         channel.MarkReady();
 
@@ -31,22 +58,23 @@ public sealed class WebViewHostChannelTests
     {
         var messages = new List<string>();
         var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
         channel.Attach(messages.Add);
         channel.MarkReady();
-        channel.PublishTranscript(CreateTranscript("first"));
-        channel.PublishTranscript(CreateTranscript("second"));
-        channel.PublishTranscript(CreateTranscript("latest"));
+        delivery.Publish(CreateTranscript("first"));
+        delivery.Publish(CreateTranscript("second"));
+        delivery.Publish(CreateTranscript("latest"));
 
         messages.Should().ContainSingle();
         var firstRevision = ReadRevision(messages[0]);
 
-        channel.AcknowledgeTranscript(firstRevision).Should().BeTrue();
+        delivery.Acknowledge(firstRevision).Should().BeTrue();
 
         messages.Should().HaveCount(2);
         using var patch = JsonDocument.Parse(messages[1]);
         patch.RootElement.GetProperty("type").GetString().Should().Be("patchState");
         patch.RootElement.GetProperty("selectedAgentName").GetString().Should().Be("latest");
-        channel.AcknowledgeTranscript(firstRevision).Should().BeFalse();
+        delivery.Acknowledge(firstRevision).Should().BeFalse();
     }
 
     [Fact]
@@ -54,14 +82,15 @@ public sealed class WebViewHostChannelTests
     {
         var messages = new List<string>();
         var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
         var stableItem = CreateItem("stable", "stable");
         var changingItem = CreateItem("changing", "before");
         channel.Attach(messages.Add);
         channel.MarkReady();
-        channel.PublishTranscript(CreateTranscript("agent", [stableItem, changingItem]));
-        channel.AcknowledgeTranscript(ReadRevision(messages[0])).Should().BeTrue();
+        delivery.Publish(CreateTranscript("agent", [stableItem, changingItem]));
+        delivery.Acknowledge(ReadRevision(messages[0])).Should().BeTrue();
 
-        channel.PublishTranscript(CreateTranscript(
+        delivery.Publish(CreateTranscript(
             "agent",
             [stableItem, CreateItem("changing", "after")]));
 
@@ -78,6 +107,7 @@ public sealed class WebViewHostChannelTests
     {
         var messages = new List<string>();
         var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
         channel.Attach(messages.Add);
 
         channel.PostPush(new { type = "push" }).Should().BeFalse();
@@ -91,6 +121,7 @@ public sealed class WebViewHostChannelTests
     {
         var messages = new List<string>();
         var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
         channel.Attach(messages.Add);
         channel.MarkReady();
         channel.MarkNotReady();

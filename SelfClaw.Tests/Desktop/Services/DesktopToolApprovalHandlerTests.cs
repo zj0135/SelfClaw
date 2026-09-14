@@ -1,6 +1,6 @@
+using SelfClaw.Desktop.Services.Tools;
 using FluentAssertions;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Desktop.Services;
 
 namespace SelfClaw.Tests.Desktop.Services;
 

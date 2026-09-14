@@ -1,3 +1,4 @@
+import { getSelectedModelProfileId } from './useComposerModelSelection.js';
 import { onScopeDispose, readonly, ref } from 'vue';
 
 export function useChatComposer(session, workspace, transcriptScroll, bridge) {
@@ -12,7 +13,7 @@ export function useChatComposer(session, workspace, transcriptScroll, bridge) {
 		error.value = '';
 		try {
 			const response = await bridge.request('send-prompt',
-				{ prompt, workspaceMode: submission.workspaceMode || 'local' }, { timeout: 120000 });
+				{ modelProfileId: getSelectedModelProfileId(), prompt, workspaceMode: submission.workspaceMode || 'local' }, { timeout: 120000 });
 			if (disposed) return;
 			if (!response?.accepted) throw new Error(response?.error || '发送请求未被接受。');
 			transcriptScroll.resumeFollow();

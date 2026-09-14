@@ -1,6 +1,7 @@
 import { computed, nextTick, reactive, readonly } from 'vue';
+import { useTranscriptBridge } from './transcriptBridge.js';
 
-export function useChatTranscript(scroll, bridge) {
+export function useChatTranscript(scroll) {
 	const state = reactive({
 		items: [], selectedConversationId: null, isBusy: false,
 		agentMode: 'cli', selectedAgentId: '', selectedAgentName: '', capabilityRevision: 0,
@@ -24,6 +25,6 @@ export function useChatTranscript(scroll, bridge) {
 		nextTick(() => scroll.settleAfterUpdate(autoScroll, before));
 	}
 
-	bridge.on('replaceState', replaceState, { replayLast: true });
+	useTranscriptBridge().on(replaceState);
 	return { state: readonly(state), isEmptyConversation };
 }

@@ -23,5 +23,4 @@ public sealed record AppearanceSettings(
 {
     public static AppearanceSettings Default { get; } = new();
 
-    public bool IsDark => string.Equals(ResolvedTheme, "dark", StringComparison.OrdinalIgnoreCase);
 }

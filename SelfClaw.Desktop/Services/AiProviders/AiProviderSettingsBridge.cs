@@ -27,8 +27,6 @@ internal sealed class AiProviderSettingsBridge
         _models = models;
     }
 
-    public event Action<Guid?>? ModelSelectionChanged;
-
     public async Task<object?> TryHandleAsync(
         string type,
         JsonElement payload,
@@ -150,11 +148,6 @@ internal sealed class AiProviderSettingsBridge
                         scope,
                         modelProfileId,
                         cancellationToken);
-                    if (string.Equals(scope, AiModelSelectionScopes.DesktopDefault, StringComparison.Ordinal))
-                    {
-                        ModelSelectionChanged?.Invoke(modelProfileId);
-                    }
-
                     response = new { type, requestId, ok = true };
                     break;
                 }
@@ -164,7 +157,6 @@ internal sealed class AiProviderSettingsBridge
                     var defaultModelProfileId = await _models.GetDefaultModelAsync(
                         AiModelSelectionScopes.DesktopDefault,
                         cancellationToken);
-                    ModelSelectionChanged?.Invoke(defaultModelProfileId);
                     response = new { type, requestId, models, defaultModelProfileId };
                     break;
                 }

@@ -1,8 +1,9 @@
+using SelfClaw.Desktop.Services.Notifications;
+using SelfClaw.Desktop.Services.Settings;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
@@ -58,12 +59,12 @@ public sealed class SubagentDeliveryDispatcherTests
             if (outcome == "busy-parent") busy = await sessions.StartTurnAsync(parent);
         }
         using var activity = new AgentActivityCoordinator(context.Approvals, NullLogger<AgentActivityCoordinator>.Instance);
-        using var notifications = new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance);
+        var notifications = new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance);
         var runtime = new ControlledSubagentRuntime();
         using var engine = new ConversationTurnEngine(context.Conversations,
             new DesktopTurnFinalizer(context.Conversations, NullLogger<DesktopTurnFinalizer>.Instance), context.Recorder,
             runtime, sessions, activity, context.Approvals,
-            new ProgrammingAssistantSettingsService(new DesktopSettingsJsonStore(StoragePathDefaults.Create("unused", "unused", "unused"))),
+            SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(new DesktopSettingsJsonStore(StoragePathDefaults.Create("unused", "unused", "unused"))),
             new SilentCompletionNotifier(), NullLogger<ConversationTurnEngine>.Instance);
         var executor = new SubagentContinuationExecutor(store, runtime, context.Recorder, context.Approvals,
             new SubagentTaskSnapshotSerializer(), new SubagentCompletionBatchSerializer(), engine, notifications,

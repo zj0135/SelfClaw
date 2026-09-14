@@ -9,12 +9,15 @@ namespace SelfClaw.Tests.Desktop.Services.Activities;
 
 public sealed class ActivityPanelLifecycleTests
 {
+    private readonly Xunit.Abstractions.ITestOutputHelper _trace;
+    public ActivityPanelLifecycleTests(Xunit.Abstractions.ITestOutputHelper trace) => _trace = trace;
+
     [Fact]
     public Task Queued_and_failed_tasks_update_without_a_provider_event() => WpfDispatcherTest.RunAsync(async () =>
     {
         using var activity = new SubagentActivityTestContext();
         var task = await activity.CreateTaskAsync(claim: false);
-        using var panel = new ActivityPanelTestContext(activity, task.ParentConversationId);
+        using var panel = new ActivityPanelTestContext(activity, task.ParentConversationId, _trace);
         var subscription = Guid.NewGuid();
         await panel.Publisher.SubscribeAsync(subscription, task.ParentConversationId, "initial", CancellationToken.None);
         panel.LatestState.GetProperty("sections")[0].GetProperty("counts").GetProperty("queued").GetInt32().Should().Be(1);
@@ -49,7 +52,7 @@ public sealed class ActivityPanelLifecycleTests
         for (var index = 0; index < 4; index++)
             (await activity.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow)).Should().NotBeNull();
         (await activity.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow)).Should().BeNull();
-        using var panel = new ActivityPanelTestContext(activity, parent.Id);
+        using var panel = new ActivityPanelTestContext(activity, parent.Id, _trace);
         await panel.Publisher.SubscribeAsync(Guid.NewGuid(), parent.Id, "first", CancellationToken.None);
         var counts = panel.LatestState.GetProperty("sections")[0].GetProperty("counts");
         counts.GetProperty("total").GetInt32().Should().Be(4);
@@ -86,7 +89,7 @@ public sealed class ActivityPanelLifecycleTests
         detail.Activity.Task.InputTokens.Should().BeNull();
         detail.Activity.Task.OutputTokens.Should().BeNull();
         activity.Registry.GetActivity(task.Id).Should().BeNull();
-        using var panel = new ActivityPanelTestContext(activity, task.ParentConversationId);
+        using var panel = new ActivityPanelTestContext(activity, task.ParentConversationId, _trace);
         var subscription = Guid.NewGuid();
         await panel.Publisher.SubscribeAsync(subscription, task.ParentConversationId, "initial", CancellationToken.None);
         panel.AcknowledgeLatest();

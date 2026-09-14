@@ -2,7 +2,6 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Desktop.Pet;
-using SelfClaw.Desktop.Services.Pet;
 using SelfClaw.Tests.Desktop.Pet;
 
 namespace SelfClaw.Tests.Desktop.Services.Pet;
@@ -22,7 +21,8 @@ public sealed class PetSettingsBridgeTests
             new FakePetWindowAdapter(),
             catalog,
             NullLogger<PetHost>.Instance);
-        var bridge = new PetSettingsBridge(host);
+        var bridge = new PetSettingsBridge(host, new SelfClaw.Desktop.Services.WebView.WebViewHostChannel(),
+            System.Windows.Threading.Dispatcher.CurrentDispatcher, NullLogger<PetSettingsBridge>.Instance);
         using var request = JsonDocument.Parse("""
             { "type": "get-pet-settings", "requestId": "pet-1" }
             """);

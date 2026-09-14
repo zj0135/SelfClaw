@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Tools;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
@@ -33,6 +34,8 @@ internal sealed class ConversationTurnEngine : IDisposable
     private readonly ConcurrentDictionary<Guid, byte> _deletingConversations = new();
     private int _pendingInteractiveAdmissions;
     private int _disposeStarted;
+    private readonly CancellationTokenSource _shutdownCancellation = new();
+    private int _stopping;
 
     public ConversationTurnEngine(
         IConversationRepository conversationRepository,
@@ -63,21 +66,23 @@ internal sealed class ConversationTurnEngine : IDisposable
     internal async Task<AdmittedConversationTurn?> TryAdmitAsync(DesktopConversationTurnRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (Volatile.Read(ref _stopping) != 0) return null;
         Interlocked.Increment(ref _pendingInteractiveAdmissions);
         try
         {
-            await _turnAdmissionGate.WaitAsync();
+            var cancellationToken = _shutdownCancellation.Token;
+            await _turnAdmissionGate.WaitAsync(cancellationToken);
             try
             {
                 var conversation = CreateConversation(request);
-                if (_deletingConversations.ContainsKey(conversation.Id) ||
+                if (Volatile.Read(ref _stopping) != 0 || _deletingConversations.ContainsKey(conversation.Id) ||
                     _conversationSessions.IsRunning(conversation.Id))
                 {
                     return null;
                 }
 
-                conversation = await _conversationRepository.UpsertConversationAsync(conversation);
-                var runtimeState = await _conversationSessions.StartTurnAsync(conversation);
+                conversation = await _conversationRepository.UpsertConversationAsync(conversation, cancellationToken);
+                var runtimeState = await _conversationSessions.StartTurnAsync(conversation, cancellationToken);
                 return new AdmittedConversationTurn(request, conversation, runtimeState);
             }
             finally
@@ -99,7 +104,7 @@ internal sealed class ConversationTurnEngine : IDisposable
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(conversation);
-        if (conversation.Kind != ConversationKind.Interactive ||
+        if (Volatile.Read(ref _stopping) != 0 || conversation.Kind != ConversationKind.Interactive ||
             Volatile.Read(ref _pendingInteractiveAdmissions) != 0 ||
             _deletingConversations.ContainsKey(conversation.Id))
         {
@@ -109,7 +114,7 @@ internal sealed class ConversationTurnEngine : IDisposable
         await _turnAdmissionGate.WaitAsync(cancellationToken);
         try
         {
-            if (Volatile.Read(ref _pendingInteractiveAdmissions) != 0 ||
+            if (Volatile.Read(ref _stopping) != 0 || Volatile.Read(ref _pendingInteractiveAdmissions) != 0 ||
                 _deletingConversations.ContainsKey(conversation.Id) ||
                 _conversationSessions.IsRunning(conversation.Id))
             {
@@ -216,6 +221,14 @@ internal sealed class ConversationTurnEngine : IDisposable
         }
     }
 
+    internal async Task StopAdmissionsAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Exchange(ref _stopping, 1);
+        await _shutdownCancellation.CancelAsync();
+        await _turnAdmissionGate.WaitAsync(cancellationToken);
+        _turnAdmissionGate.Release();
+    }
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
@@ -224,6 +237,7 @@ internal sealed class ConversationTurnEngine : IDisposable
         }
 
         _turnAdmissionGate.Dispose();
+        _shutdownCancellation.Dispose();
     }
 
     private static ConversationRecord CreateConversation(DesktopConversationTurnRequest request)

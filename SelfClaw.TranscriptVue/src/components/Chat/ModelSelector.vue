@@ -1,19 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
 import { ChevronDown, ChevronRight, Check, Bot, Terminal } from 'lucide-vue-next';
-import claudeIcon from '@lobehub/icons-static-png/light/claude-color.png';
-import codexIcon from '@lobehub/icons-static-png/light/openai.png';
-import opencodeIcon from '@lobehub/icons-static-png/light/opencode.png';
-import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js';
-
-const { request, requestLatest, post } = useHostBridge();
-
-/**
- * 模型选择器（药丸按钮 + 设置弹出面板）
- * 「代理」列表与设置页的「编程助手」共享同一后端状态：
- * 打开时通过 get-programming-assistant-settings 读取扫描结果，
- * 选中代理通过 select-programming-cli 持久化，下一次发送回合即生效。
- */
+import { useComposerModelSelection } from '../../composables/useComposerModelSelection.js';
 
 const props = defineProps({
 	executionMode: {
@@ -24,46 +12,13 @@ const props = defineProps({
 
 const emit = defineEmits(['update:agent', 'update:model', 'update:reasoning']);
 
-// 模式：本地 CLI / 提供商（Direct API）。默认跟随当前 Desktop Agent 的 front matter，
-// 用户在分段控件上的选择会经 select-composer-mode 持久化为覆盖值，宿主回推后二者一致。
-const selectedMode = ref(props.executionMode === 'direct' ? 'direct' : 'cli');
-watch(() => props.executionMode, (mode) => {
-	selectedMode.value = mode === 'direct' ? 'direct' : 'cli';
-});
-const isDirect = computed(() => selectedMode.value === 'direct');
+const { selectedMode, isDirect, loaded, loadError, models, reasoningLevels, hasReasoning, pending,
+    detectedAgents, selectedCliId, selectedAgent, activeModel, activeReasoning, directModels,
+    activeDirectModelProfileId, selectedDirectModel, requestActiveSource, pickMode, pickAgent,
+    pickDirectModel: saveDirectModel, pickModel: saveModel, pickReasoning: saveReasoning } =
+    useComposerModelSelection(() => props.executionMode, emit);
+import { defaultCliModel as defaultModel } from '../../composables/useProgrammingAssistantSelection.js';
 
-const defaultModel = 'Default (CLI config)';
-
-// 已知 CLI 的展示图标：与设置页「编程助手」共用同一组 @lobehub/icons-static-png PNG 资源；未知 id 走 fallback 线条图形。
-const agentPresentation = {
-	// 品牌图标的底板刻意不跟主题：lobehub 的 PNG 图标在浅色底板上更清晰，
-	// 两个主题下都需要浅色底板才认得出来。不要换成 var(--panel)。
-	claude: { iconSrc: claudeIcon, iconBackground: '#ffffff' },
-	codex: { iconSrc: codexIcon, iconBackground: '#ffffff' },
-	opencode: { iconSrc: opencodeIcon, iconBackground: '#ffffff' },
-};
-
-const detectedAgents = ref([]);
-const directModels = ref([]);
-const activeDirectModelProfileId = ref('');
-const selectedCliId = ref('');
-const loaded = ref(false);
-const loadError = ref('');
-
-const selectedAgent = computed(() => detectedAgents.value.find((agent) => agent.id === selectedCliId.value) || null);
-const selectedDirectModel = computed(() =>
-	directModels.value.find((model) => model.modelProfileId === activeDirectModelProfileId.value) || null);
-
-// 模型下拉：来自选中 CLI 的模型列表（当前后端只提供 Default）。
-const models = computed(() => selectedAgent.value?.models?.length ? selectedAgent.value.models : [defaultModel]);
-const activeModel = ref(defaultModel);
-
-// 推理等级：仅部分 CLI（Codex）暴露；首项为 Default 哨兵，长度 > 1 时才展示这一行。
-const reasoningLevels = computed(() => selectedAgent.value?.reasoningLevels?.length ? selectedAgent.value.reasoningLevels : []);
-const activeReasoning = ref(defaultModel);
-const hasReasoning = computed(() => reasoningLevels.value.length > 1);
-
-// 展开状态
 const open = ref(false);
 const menuOpen = ref(false);
 const reasoningMenuOpen = ref(false);
@@ -103,90 +58,6 @@ const modelLabel = computed(() => {
 	return activeModel.value === defaultModel ? selectedAgent.value.name : activeModel.value;
 });
 
-// CLI 与 Direct 两种来源共用 composer-source 这个 key：切换模式会重新拉取，
-// 上一模式尚未返回的请求被 requestLatest 作废，回包不会串到新模式上。
-async function requestSettings() {
-	try {
-		const payload = await requestLatest('composer-source', 'get-programming-assistant-settings');
-		applySettings(payload);
-	} catch (error) {
-		if (isSuperseded(error)) return;
-		loadError.value = `CLI 设置同步失败：${error?.message || error}`;
-		loaded.value = true;
-	}
-}
-
-async function requestDirectModels() {
-	try {
-		const payload = await requestLatest('composer-source', 'ai-providers/list-enabled-models');
-		applyDirectModels(payload);
-	} catch (error) {
-		if (isSuperseded(error)) return;
-		loadError.value = `模型同步失败：${error?.message || error}`;
-		loaded.value = true;
-	}
-}
-
-function requestActiveSource() {
-	loadError.value = '';
-	if (isDirect.value) {
-		requestDirectModels();
-	} else {
-		requestSettings();
-	}
-}
-
-function applySettings(payload) {
-	const rawTools = Array.isArray(payload?.tools) ? payload.tools : [];
-	detectedAgents.value = rawTools
-		.filter((tool) => tool?.id)
-		.map((tool) => ({
-			id: tool.id,
-			name: tool.name || tool.id,
-			models: Array.isArray(tool.models) ? tool.models.filter((m) => typeof m === 'string' && m.trim()) : [],
-			reasoningLevels: Array.isArray(tool.reasoningLevels) ? tool.reasoningLevels.filter((r) => typeof r === 'string' && r.trim()) : [],
-			...(agentPresentation[tool.id] || { glyph: 'open', tint: 'var(--border)', ink: 'var(--text)' }),
-		}));
-
-	const normalized = typeof payload?.selectedCliId === 'string' ? payload.selectedCliId.trim().toLowerCase() : '';
-	selectedCliId.value = detectedAgents.value.some((agent) => agent.id === normalized) ? normalized : '';
-
-	// 恢复上次持久化的模型：命中当前 CLI 的模型列表才采用，否则回落到该 CLI 的第一项（默认）。
-	const persistedModel = typeof payload?.selectedModel === 'string' ? payload.selectedModel : '';
-	if (persistedModel && models.value.includes(persistedModel)) {
-		activeModel.value = persistedModel;
-	} else if (!models.value.includes(activeModel.value)) {
-		activeModel.value = models.value[0] || defaultModel;
-	}
-
-	// 同理恢复推理等级（仅 Codex 有）。
-	const persistedReasoning = typeof payload?.selectedReasoningLevel === 'string' ? payload.selectedReasoningLevel : '';
-	if (persistedReasoning && reasoningLevels.value.includes(persistedReasoning)) {
-		activeReasoning.value = persistedReasoning;
-	} else if (!reasoningLevels.value.includes(activeReasoning.value)) {
-		activeReasoning.value = reasoningLevels.value[0] || defaultModel;
-	}
-	loadError.value = payload?.error ? `CLI 设置同步失败：${payload.error}` : '';
-	loaded.value = true;
-}
-
-function applyDirectModels(payload) {
-	directModels.value = (Array.isArray(payload.models) ? payload.models : [])
-		.filter((model) => model?.modelProfileId)
-		.map((model) => ({
-			modelProfileId: String(model.modelProfileId),
-			name: model.name || model.model || 'Unnamed model',
-			model: model.model || '',
-			providerName: model.providerName || 'Provider',
-		}));
-	const persistedId = payload.defaultModelProfileId ? String(payload.defaultModelProfileId) : '';
-	activeDirectModelProfileId.value = directModels.value.some((model) => model.modelProfileId === persistedId)
-		? persistedId
-		: '';
-	loadError.value = payload.error ? `模型同步失败：${payload.error}` : '';
-	loaded.value = true;
-}
-
 function togglePanel() {
 	open.value = !open.value;
 	if (!open.value) {
@@ -209,49 +80,7 @@ function closePanel() {
 	reasoningMenuOpen.value = false;
 }
 
-function pickMode(mode) {
-	if (selectedMode.value === mode) {
-		return;
-	}
-
-	selectedMode.value = mode;
-	post({ type: 'select-composer-mode', mode });
-}
-
-function pickAgent(agent) {
-	if (agent.id === selectedCliId.value) {
-		return;
-	}
-
-	selectedCliId.value = agent.id;
-	activeModel.value = agent.models?.[0] || defaultModel;
-	activeReasoning.value = agent.reasoningLevels?.[0] || defaultModel;
-	emit('update:agent', agent.id);
-	post({ type: 'select-programming-cli', cliId: agent.id });
-}
-
-async function pickDirectModel(model) {
-	if (!model?.modelProfileId || model.modelProfileId === activeDirectModelProfileId.value) {
-		menuOpen.value = false;
-		return;
-	}
-
-	activeDirectModelProfileId.value = model.modelProfileId;
-	menuOpen.value = false;
-	loadError.value = '';
-	emit('update:model', model.modelProfileId);
-	try {
-		await request('ai-providers/set-default-model', {
-			scope: 'desktop-default',
-			modelProfileId: model.modelProfileId,
-		});
-	} catch (error) {
-		if (isSuperseded(error)) return;
-		// 保存失败：提示并重新拉取，把选中态回滚到宿主的真实值。
-		loadError.value = `默认模型保存失败：${error?.message || error}`;
-		requestDirectModels();
-	}
-}
+async function pickDirectModel(model) { await saveDirectModel(model); menuOpen.value = false; }
 
 function toggleMenu() {
 	menuOpen.value = !menuOpen.value;
@@ -259,13 +88,7 @@ function toggleMenu() {
 		reasoningMenuOpen.value = false;
 	}
 }
-function pickModel(m) {
-	activeModel.value = m;
-	menuOpen.value = false;
-	emit('update:model', m);
-	// 持久化到宿主（desktop-settings.json 的 programming_assistant.selectedModel），下次启动默认选中。
-	post({ type: 'select-programming-model', model: m });
-}
+async function pickModel(model) { await saveModel(model); menuOpen.value = false; }
 
 function toggleReasoningMenu() {
 	reasoningMenuOpen.value = !reasoningMenuOpen.value;
@@ -273,13 +96,7 @@ function toggleReasoningMenu() {
 		menuOpen.value = false;
 	}
 }
-function pickReasoning(level) {
-	activeReasoning.value = level;
-	reasoningMenuOpen.value = false;
-	emit('update:reasoning', level);
-	// 持久化到 programming_assistant.selectedReasoningLevel；Codex 回合会转成 -c model_reasoning_effort。
-	post({ type: 'select-programming-reasoning', reasoningLevel: level });
-}
+async function pickReasoning(level) { await saveReasoning(level); reasoningMenuOpen.value = false; }
 
 function onDocClick(e) {
 	if (rootRef.value && !rootRef.value.contains(e.target)) closePanel();
@@ -298,7 +115,6 @@ onBeforeUnmount(() => {
 });
 
 watch(isDirect, () => {
-	loaded.value = false;
 	menuOpen.value = false;
 	reasoningMenuOpen.value = false;
 	requestActiveSource();
@@ -320,8 +136,9 @@ watch(isDirect, () => {
 		</button>
 
 		<!-- 设置弹出面板：默认贴按钮下方展开；下方空间不足时自动翻转到按钮上方 -->
-		<div v-show="open" ref="popoverRef" class="model-popover" :class="`model-popover--${placement}`" role="dialog"
+		<div v-show="open" ref="popoverRef" :aria-busy="pending" class="model-popover" :class="`model-popover--${placement}`" role="dialog"
 			aria-label="模型与代理设置">
+            <p v-if="loadError" class="agent-hint agent-hint--error" role="alert">{{ loadError }}</p>
 			<!-- 模式 -->
 			<div class="pop-section">
 				<div class="pop-label">模式</div>

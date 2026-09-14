@@ -1,10 +1,10 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using SelfClaw.Core.Runtime;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Infrastructure.Data.Sqlite;
@@ -203,7 +203,8 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
             repository,
             agentDefinitionService ?? CreateAgentService(),
             new CancelledPackagePicker(),
-            stateChangeNotifier ?? new ExtensionStateChangeNotifier());
+            stateChangeNotifier ?? new ExtensionStateChangeNotifier(),
+            new SelfClaw.Desktop.Services.WebView.WebViewHostChannel(), System.Windows.Threading.Dispatcher.CurrentDispatcher);
     }
 
     private DesktopAgentDefinitionService CreateAgentService()

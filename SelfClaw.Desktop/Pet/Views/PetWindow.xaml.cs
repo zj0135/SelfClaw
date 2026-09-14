@@ -32,11 +32,6 @@ public sealed partial class PetWindow : Window
     /// <summary>拖拽结束且位置发生变化时触发,携带当前窗口左上角坐标(屏幕 DIP)。</summary>
     public event EventHandler<Point>? PositionCommitted;
 
-    public PetWindow()
-        : this(new PetViewModel())
-    {
-    }
-
     public PetWindow(PetViewModel viewModel)
     {
         _viewModel = viewModel;
@@ -46,9 +41,9 @@ public sealed partial class PetWindow : Window
         Closed += OnClosed;
     }
 
-    public void LoadPet(PetSettings settings)
+    internal void LoadPet(PetSettings settings, PetLoadedPackage package)
     {
-        _viewModel.Load(settings);
+        _viewModel.Install(settings, package);
         if (IsVisible)
         {
             _viewModel.StartAnimation();

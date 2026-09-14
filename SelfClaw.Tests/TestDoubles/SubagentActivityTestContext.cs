@@ -1,8 +1,8 @@
+using SelfClaw.Desktop.Services.Tools;
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using SelfClaw.Core.Runtime;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Models;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Desktop.Services.Subagents.Models;

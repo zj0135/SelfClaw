@@ -54,33 +54,33 @@ internal sealed class GitWorkspaceBridge
             switch (type)
             {
                 case "get-git-state":
-                    state = await _workspaceQuery.GetStateAsync(workspaceRoot, cancellationToken).ConfigureAwait(false);
+                    state = await _workspaceQuery.GetStateAsync(workspaceRoot, cancellationToken);
                     break;
                 case "git-create-branch":
                     state = await _workspaceManager.CreateBranchAsync(
                         workspaceRoot,
                         ReadRequiredString(payload, "branchName"),
                         ReadOptionalString(payload, "startPoint"),
-                        cancellationToken).ConfigureAwait(false);
-                    await _selectionController.ReloadWorkspaceSelectionAsync().ConfigureAwait(false);
+                        cancellationToken);
+                    await _selectionController.ReloadWorkspaceSelectionAsync();
                     break;
                 case "git-switch-branch":
                     state = await _workspaceManager.SwitchBranchAsync(
                         workspaceRoot,
                         ReadRequiredString(payload, "branchName"),
-                        cancellationToken).ConfigureAwait(false);
-                    await _selectionController.ReloadWorkspaceSelectionAsync().ConfigureAwait(false);
+                        cancellationToken);
+                    await _selectionController.ReloadWorkspaceSelectionAsync();
                     break;
                 case "git-delete-branch":
                     state = await _workspaceManager.DeleteBranchAsync(
                         workspaceRoot,
                         ReadRequiredString(payload, "branchName"),
-                        cancellationToken).ConfigureAwait(false);
-                    await _selectionController.ReloadWorkspaceSelectionAsync().ConfigureAwait(false);
+                        cancellationToken);
+                    await _selectionController.ReloadWorkspaceSelectionAsync();
                     break;
                 case "git-merge":
                 {
-                    var result = await _mergeManager.MergeAsync(workspaceRoot, cancellationToken).ConfigureAwait(false);
+                    var result = await _mergeManager.MergeAsync(workspaceRoot, cancellationToken);
                     return BuildResponse(
                         requestId,
                         result.State,
@@ -90,24 +90,24 @@ internal sealed class GitWorkspaceBridge
                         result.Succeeded && !result.HasConflicts);
                 }
                 case "git-abort-merge":
-                    state = await _mergeManager.AbortAsync(workspaceRoot, cancellationToken).ConfigureAwait(false);
+                    state = await _mergeManager.AbortAsync(workspaceRoot, cancellationToken);
                     break;
                 case "git-remove-worktree":
-                    await _workspaceManager.RemoveManagedWorktreeAsync(workspaceRoot, cancellationToken).ConfigureAwait(false);
-                    await _selectionController.ReloadWorkspaceSelectionAsync().ConfigureAwait(false);
-                    state = await _workspaceQuery.GetStateAsync(workspaceRoot, cancellationToken).ConfigureAwait(false);
+                    await _workspaceManager.RemoveManagedWorktreeAsync(workspaceRoot, cancellationToken);
+                    await _selectionController.ReloadWorkspaceSelectionAsync();
+                    state = await _workspaceQuery.GetStateAsync(workspaceRoot, cancellationToken);
                     break;
                 case "git-release-worktree":
                 {
-                    var checkout = await _workspaceStore.GetCheckoutAsync(workspaceRoot.Id, cancellationToken).ConfigureAwait(false)
+                    var checkout = await _workspaceStore.GetCheckoutAsync(workspaceRoot.Id, cancellationToken)
                         ?? throw new InvalidOperationException("当前工作目录不是 SelfClaw 工作树。");
                     if (checkout.OwnerConversationId is not Guid ownerConversationId)
                     {
                         throw new InvalidOperationException("当前工作树没有绑定会话。");
                     }
 
-                    await _workspaceStore.ReleaseConversationAsync(ownerConversationId, cancellationToken).ConfigureAwait(false);
-                    state = await _workspaceQuery.GetStateAsync(workspaceRoot, cancellationToken).ConfigureAwait(false);
+                    await _workspaceStore.ReleaseConversationAsync(ownerConversationId, cancellationToken);
+                    state = await _workspaceQuery.GetStateAsync(workspaceRoot, cancellationToken);
                     break;
                 }
                 default:

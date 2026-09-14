@@ -1,4 +1,3 @@
-using SelfClaw.Desktop.Services.Agents.Definitions;
 using System.IO;
 using System.Text;
 using System.Windows;
@@ -7,51 +6,44 @@ using CommunityToolkit.WinUI.Notifications;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using SelfClaw.Core.Interfaces;
-using SelfClaw.Core.Runtime;
+using SelfClaw.Desktop.Composition;
 using SelfClaw.Desktop.Pet;
-using SelfClaw.Desktop.Services;
-using SelfClaw.Desktop.Services.AiProviders;
-using SelfClaw.Desktop.Services.AgentActivity;
-using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.Appearance;
-using SelfClaw.Desktop.Services.Extensions;
-using SelfClaw.Desktop.Services.Git;
-using SelfClaw.Desktop.Services.Extensions.Abstractions;
-using SelfClaw.Desktop.Services.ProgrammingAssistant;
-using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
-using SelfClaw.Desktop.Services.Pet;
+using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Plugins;
+using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
-using SelfClaw.Desktop.Services.Runtime.Abstractions;
-using SelfClaw.Desktop.Services.Subagents;
+using SelfClaw.Desktop.Services.SystemTray;
 using SelfClaw.Desktop.Services.Terminal;
-using SelfClaw.Desktop.Services.Terminal.Abstractions;
-using SelfClaw.Desktop.Services.Transcript;
-using SelfClaw.Desktop.Services.Transcript.Abstractions;
+using SelfClaw.Desktop.Services.Tools;
 using SelfClaw.Desktop.Services.WebView;
-using SelfClaw.Desktop.Services.Workspace;
-using SelfClaw.Desktop.Services.Workspace.Abstractions;
-using SelfClaw.Desktop.ViewModels;
+using SelfClaw.Desktop.Services.Windowing;
 using SelfClaw.Infrastructure;
-using SelfClaw.Infrastructure.AiProviders.Abstractions;
-using SelfClaw.Infrastructure.Extensions;
-using SelfClaw.Infrastructure.Extensions.Abstractions;
-using SelfClaw.Infrastructure.Extensions.Discovery;
 using SelfClaw.Infrastructure.Options;
 using Serilog;
 using Serilog.Events;
 
 namespace SelfClaw.Desktop;
 
-public partial class App : System.Windows.Application
+public sealed partial class App : System.Windows.Application
 {
     private IHost? _host;
     private StoragePaths? _storagePaths;
     private int _isShowingUnhandledExceptionDialog;
     private bool _toastActivationRegistered;
+    private Task _startupTask = Task.CompletedTask;
+    private Task? _shutdownTask;
+    private bool _allowClose;
+    private Action? _emergencyCleanup;
 
-    protected override async void OnStartup(StartupEventArgs e)
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        _startupTask = StartAsync();
+    }
+
+    private async Task StartAsync()
     {
         _storagePaths = StoragePathDefaults.CreateDefault();
         ConfigureLogging(_storagePaths);
@@ -59,164 +51,19 @@ public partial class App : System.Windows.Application
 
         try
         {
-            base.OnStartup(e);
-
             ThemeMode = ThemeMode.System;
-            ShutdownMode = ShutdownMode.OnMainWindowClose;
 
             var builder = Host.CreateApplicationBuilder();
             builder.Logging.ClearProviders();
             builder.Services.AddSerilog(Log.Logger, dispose: false);
             builder.Services.AddSelfClawInfrastructure(_storagePaths);
-            builder.Services.AddSingleton<DesktopAgentDefinitionService>();
-            builder.Services.AddSingleton<SubagentDefinitionCatalog>();
-            builder.Services.AddSingleton<DesktopSettingsJsonStore>();
-            builder.Services.AddSingleton<DesktopToolApprovalHandler>();
-            builder.Services.AddSingleton<AgentActivityCoordinator>();
-            builder.Services.AddSingleton<DesktopNotificationService>();
-            builder.Services.AddSingleton<DesktopNotificationActivationService>();
-            builder.Services.AddSingleton<DesktopTurnFinalizer>();
-            builder.Services.AddSingleton<ConversationTurnRecorder>();
-            builder.Services.AddSingleton<SubagentTaskSnapshotSerializer>();
-            builder.Services.AddSingleton<SubagentCompletionBatchSerializer>();
-            builder.Services.AddSingleton<SubagentTaskWakeSignal>();
-            builder.Services.AddSingleton<SubagentTaskExecutionRegistry>();
-            builder.Services.AddSingleton<SubagentActivityRegistry>();
-            builder.Services.AddSingleton<SubagentActivityService>();
-            builder.Services.AddSingleton<SubagentTaskCoordinator>();
-            builder.Services.AddSingleton<ISubagentTaskCoordinator>(services =>
-                services.GetRequiredService<SubagentTaskCoordinator>());
-            builder.Services.AddSingleton<ISubagentConversationLifecycle>(services =>
-                services.GetRequiredService<SubagentTaskCoordinator>());
-            builder.Services.AddSingleton<SubagentTaskExecutor>();
-            builder.Services.AddSingleton<SubagentTaskBackgroundHost>();
-            builder.Services.AddHostedService(services =>
-                services.GetRequiredService<SubagentTaskBackgroundHost>());
-            builder.Services.AddSingleton<SubagentContinuationExecutor>();
-            builder.Services.AddSingleton<SubagentDeliveryDispatcher>();
-            builder.Services.AddHostedService(services =>
-                services.GetRequiredService<SubagentDeliveryDispatcher>());
-            builder.Services.AddSingleton<IConversationCompletionNotifier, ConversationCompletionNotifier>();
-            builder.Services.AddSingleton<ConversationTurnEngine>();
-            builder.Services.AddSingleton<TranscriptProjection>();
-            builder.Services.AddSingleton<WebViewHostChannel>();
-            builder.Services.AddSingleton<ActivityPanelSnapshotBuilder>();
-            builder.Services.AddSingleton(services => new ActivityPanelPublisher(
-                services.GetRequiredService<SubagentActivityService>(),
-                services.GetRequiredService<ActivityPanelSnapshotBuilder>(),
-                services.GetRequiredService<IActivityPanelScopeSource>(),
-                services.GetRequiredService<WebViewHostChannel>(),
-                Dispatcher,
-                services.GetRequiredService<ILogger<ActivityPanelPublisher>>()));
-            builder.Services.AddSingleton(services => new TranscriptPublisher(
-                services.GetRequiredService<TranscriptProjection>(),
-                services.GetRequiredService<WebViewHostChannel>(),
-                Dispatcher));
-            builder.Services.AddSingleton<ITranscriptChangeSink>(services =>
-                services.GetRequiredService<TranscriptPublisher>());
-            builder.Services.AddSingleton<ConversationSessionCoordinator>();
-            builder.Services.AddSingleton<ITerminalSessionFactory, ConPtyTerminalSessionFactory>();
-            builder.Services.AddSingleton(services => new TerminalHostController(
-                services.GetRequiredService<ITerminalSessionFactory>(),
-                services.GetRequiredService<WebViewHostChannel>(),
-                Dispatcher));
-            builder.Services.AddSingleton<IWorkspaceFolderPicker, WpfWorkspaceFolderPicker>();
-            builder.Services.AddSingleton(services => new PluginPanelHostController(
-                services.GetRequiredService<IPluginPanelCatalog>(),
-                services.GetRequiredService<IExtensionPackageRepository>(),
-                services.GetRequiredService<IPluginVersionLeaseManager>(),
-                services.GetRequiredService<DesktopSettingsJsonStore>(),
-                services.GetRequiredService<WebViewHostChannel>(),
-                Dispatcher));
-            builder.Services.AddSingleton<IPluginPanelSessionRegistry>(services =>
-                services.GetRequiredService<PluginPanelHostController>());
-            builder.Services.AddSingleton(services => new PluginPanelContextPublisher(
-                services.GetRequiredService<IPluginPanelContextSource>(),
-                services.GetRequiredService<WebViewHostChannel>(),
-                services.GetRequiredService<PluginPanelHostController>(),
-                Dispatcher));
-            builder.Services.AddSingleton<PluginPanelBridge>();
-            builder.Services.AddSingleton<ProgrammingAssistantSettingsService>();
-            builder.Services.AddSingleton<ProgrammingAssistantSettingsBridge>();
-            builder.Services.AddSingleton<AppearanceSettingsService>();
-            builder.Services.AddSingleton<AppearanceSettingsBridge>();
-            builder.Services.AddSingleton<AiProviderSettingsBridge>();
-            builder.Services.AddSingleton<ExtensionSettingsBridge>();
-            builder.Services.AddSingleton<AgentSettingsBridge>();
-            builder.Services.AddSingleton<IExtensionPackagePicker, ExtensionPackagePicker>();
-            builder.Services.AddSingleton<PetPackageCatalog>();
-            builder.Services.AddSingleton<PetActivityPresenter>();
-            builder.Services.AddSingleton<IPetSettingsRepository, DesktopPetSettingsRepository>();
-            builder.Services.AddSingleton<IPetWindowAdapter, WpfPetWindowAdapter>();
-            builder.Services.AddSingleton<PetHost>(services => new PetHost(
-                services.GetRequiredService<IPetSettingsRepository>(),
-                services.GetRequiredService<IPetWindowAdapter>(),
-                services.GetRequiredService<PetPackageCatalog>(),
-                services.GetRequiredService<ILogger<PetHost>>()));
-            builder.Services.AddSingleton<PetSettingsBridge>();
-            builder.Services.AddSingleton<SystemTrayService>();
-            builder.Services.AddSingleton(services => new MainWindowViewModel(
-                services.GetRequiredService<IConversationRepository>(),
-                services.GetRequiredService<IWorkspaceRootRepository>(),
-                services.GetRequiredService<ConversationTurnEngine>(),
-                services.GetRequiredService<ConversationSessionCoordinator>(),
-                services.GetRequiredService<AgentActivityCoordinator>(),
-                services.GetRequiredService<TranscriptPublisher>(),
-                services.GetRequiredService<DesktopAgentDefinitionService>(),
-                services.GetRequiredService<DesktopSettingsJsonStore>(),
-                services.GetRequiredService<ISubagentConversationLifecycle>(),
-                services.GetRequiredService<ILogger<MainWindowViewModel>>(),
-                services.GetRequiredService<IGitWorkspaceManager>(),
-                services.GetRequiredService<IGitWorkspaceQuery>(),
-                services.GetRequiredService<IGitWorkspaceStore>()));
-            builder.Services.AddSingleton<IWorkspaceSelectionController>(services =>
-                services.GetRequiredService<MainWindowViewModel>());
-            builder.Services.AddSingleton<IPluginPanelContextSource>(services =>
-                services.GetRequiredService<MainWindowViewModel>());
-            builder.Services.AddSingleton<WorkspaceSelectionBridge>();
-            builder.Services.AddSingleton<GitWorkspaceBridge>();
-            builder.Services.AddSingleton<IActivityPanelScopeSource>(services => services.GetRequiredService<MainWindowViewModel>());
-            builder.Services.AddSingleton(services => new ActivityPanelBridge(
-                services.GetRequiredService<ActivityPanelPublisher>(),
-                services.GetRequiredService<SubagentActivityService>(),
-                services.GetRequiredService<ISubagentTaskCoordinator>(),
-                services.GetRequiredService<WebViewHostChannel>(), Dispatcher));
-            builder.Services.AddSingleton(services => new WebViewMessageRouter(
-                services.GetRequiredService<AiProviderSettingsBridge>(),
-                services.GetRequiredService<ExtensionSettingsBridge>(),
-                services.GetRequiredService<AgentSettingsBridge>(),
-                services.GetRequiredService<IExtensionStateChangeNotifier>(),
-                services.GetRequiredService<ProgrammingAssistantSettingsBridge>(),
-                services.GetRequiredService<AppearanceSettingsBridge>(),
-                services.GetRequiredService<PetSettingsBridge>(),
-                services.GetRequiredService<WorkspaceSelectionBridge>(),
-                services.GetRequiredService<TerminalHostController>(),
-                services.GetRequiredService<PluginPanelHostController>(),
-                services.GetRequiredService<PluginPanelBridge>(),
-                services.GetRequiredService<MainWindowViewModel>(),
-                services.GetRequiredService<AgentActivityCoordinator>(),
-                services.GetRequiredService<WebViewHostChannel>(),
-                Dispatcher,
-                services.GetRequiredService<GitWorkspaceBridge>(),
-                services.GetRequiredService<ActivityPanelBridge>()));
-            builder.Services.AddSingleton(services => new MainWindow(
-                services.GetRequiredService<MainWindowViewModel>(),
-                services.GetRequiredService<DesktopNotificationService>(),
-                services.GetRequiredService<DesktopToolApprovalHandler>(),
-                services.GetRequiredService<PetActivityPresenter>(),
-                services.GetRequiredService<AgentActivityCoordinator>(),
-                services.GetRequiredService<WebViewHostChannel>(),
-                services.GetRequiredService<WebViewMessageRouter>(),
-                services.GetRequiredService<TerminalHostController>(),
-                services.GetRequiredService<PluginPanelHostController>(),
-                services.GetRequiredService<AppearanceSettingsService>(),
-                services.GetRequiredService<StoragePaths>()));
+            builder.Services.AddSelfClawDesktop(Dispatcher);
             _host = builder.Build();
 
             Log.Information("SelfClaw starting. LogsDirectory={LogsDirectory}", _storagePaths.LogsDirectory);
 
             await _host.Services.InitializeSelfClawInfrastructureAsync();
-            await _host.Services.GetRequiredService<ProgrammingAssistantSettingsService>().GetOrInitializeAsync();
+            await _host.Services.GetRequiredService<ProgrammingAssistantSettingsService>().GetCurrentAsync();
             // 必须在窗口显示之前：MainWindow.OnSourceInitialized 要同步读缓存来定标题栏明暗，
             // 晚一步深色用户就会看到标题栏先白一下。
             await _host.Services.GetRequiredService<AppearanceSettingsService>().GetAsync();
@@ -225,51 +72,110 @@ public partial class App : System.Windows.Application
             await _host.StartAsync();
             var systemTrayService = _host.Services.GetRequiredService<SystemTrayService>();
             systemTrayService.RegisterMainWindow(mainWindow);
+            var approvals = _host.Services.GetRequiredService<DesktopToolApprovalHandler>();
+            _emergencyCleanup = () => { approvals.RejectAll(); systemTrayService.Dispose(); };
+            _host.Services.GetRequiredService<DesktopConversationActivationService>().RegisterMainWindow(mainWindow);
+            _host.Services.GetRequiredService<DesktopNotificationService>().RegisterMainWindow(mainWindow);
             MainWindow = mainWindow;
+            mainWindow.Closing += OnMainWindowClosing;
             mainWindow.Show();
+            await mainWindow.InitializeAsync();
 
             // 主窗口已被显式设为 Application.MainWindow,此后再显示 PetWindow 不会篡夺 MainWindow(见 §7.2)。
             await _host.Services.GetRequiredService<PetHost>().InitializeAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            _shutdownTask = ShutdownCoreAsync(-1);
+            await _shutdownTask;
+            throw;
         }
         catch (Exception exception)
         {
             Log.Fatal(exception, "Application startup failed.");
             ShowFatalError("SelfClaw failed to start. The error was written to the log file.", exception.Message);
-            Shutdown(-1);
+            _shutdownTask = ShutdownCoreAsync(-1);
+            await _shutdownTask;
         }
     }
 
-    protected override async void OnExit(ExitEventArgs e)
+    internal Task RequestShutdownAsync()
+        => _shutdownTask ??= ShutdownAfterStartupAsync();
+
+    private async Task ShutdownAfterStartupAsync()
     {
+        try { await _startupTask.WaitAsync(TimeSpan.FromSeconds(20)); }
+        catch (TimeoutException exception) { Log.Error(exception, "Initialization did not settle before shutdown."); }
+        await ShutdownCoreAsync(0);
+    }
+
+    private async void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_allowClose) return;
+        e.Cancel = true;
+        await RequestShutdownAsync();
+    }
+
+    private async Task ShutdownCoreAsync(int exitCode)
+    {
+        UnregisterToastNotifications();
+        using var cancellation = new CancellationTokenSource();
         try
         {
-            if (_host is not null)
-            {
-                await _host.StopAsync();
-
-                if (_host is IAsyncDisposable asyncDisposableHost)
-                {
-                    await asyncDisposableHost.DisposeAsync();
-                }
-                else
-                {
-                    _host.Dispose();
-                }
-
-                _host = null;
-            }
+            await StopServicesAsync(cancellation.Token).WaitAsync(TimeSpan.FromSeconds(20));
         }
+        catch (TimeoutException)
+        {
+            await cancellation.CancelAsync();
+            Log.Error("Desktop shutdown exceeded its 20 second budget; unfinished work may require recovery.");
+            exitCode = -1;
+        }
+        catch (OperationCanceledException) { throw; }
         catch (Exception exception)
         {
             Log.Error(exception, "Application shutdown failed.");
+            exitCode = -1;
         }
         finally
         {
-            UnregisterToastNotifications();
-            UnregisterGlobalExceptionHandlers();
-            Log.CloseAndFlush();
-            base.OnExit(e);
+            _allowClose = true;
+            Shutdown(exitCode);
         }
+    }
+
+    private async Task StopServicesAsync(CancellationToken cancellationToken)
+    {
+        if (_host is null) return;
+        if (MainWindow is MainWindow)
+        {
+            var services = _host.Services;
+            var routing = services.GetRequiredService<WebViewMessageRouter>().StopAsync(cancellationToken);
+            await services.GetRequiredService<ConversationTurnEngine>().StopAdmissionsAsync(cancellationToken);
+            services.GetRequiredService<DesktopToolApprovalHandler>().RejectAll();
+            await Task.WhenAll(routing, _host.StopAsync(cancellationToken),
+                services.GetRequiredService<PluginPanelHostController>().StopAsync(cancellationToken),
+                services.GetRequiredService<TerminalHostController>().DisposeAsync().AsTask(),
+                services.GetRequiredService<ConversationSessionCoordinator>().StopAsync(cancellationToken),
+                services.GetRequiredService<PetHost>().StopAsync(cancellationToken));
+        }
+        else await _host.StopAsync(cancellationToken);
+        if (_host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync();
+        else _host.Dispose();
+        _host = null;
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        UnregisterToastNotifications();
+        UnregisterGlobalExceptionHandlers();
+        if (_host is not null)
+        {
+            Log.Error("Desktop exited before asynchronous shutdown completed.");
+            try { _emergencyCleanup?.Invoke(); }
+            catch (Exception exception) { Log.Error(exception, "Synchronous desktop cleanup failed."); }
+        }
+        Log.CloseAndFlush();
+        base.OnExit(e);
     }
 
     private void RegisterGlobalExceptionHandlers()
@@ -290,6 +196,7 @@ public partial class App : System.Windows.Application
     {
         Log.Error(e.Exception, "Unhandled dispatcher exception.");
         e.Handled = true;
+        if (_shutdownTask is not null && e.Exception is OperationCanceledException) return;
         ShowUnhandledExceptionDialog("An unexpected UI error was written to the log file.", e.Exception.Message);
     }
 
@@ -430,7 +337,7 @@ public partial class App : System.Windows.Application
         try
         {
             var activationService = _host.Services.GetRequiredService<DesktopNotificationActivationService>();
-            await activationService.HandleActivationAsync(args.Argument, args.UserInput);
+            await activationService.HandleActivationAsync(args.Argument);
         }
         catch (Exception exception)
         {

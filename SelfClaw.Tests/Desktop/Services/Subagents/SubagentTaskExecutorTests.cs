@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Tools;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
@@ -6,7 +7,6 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;

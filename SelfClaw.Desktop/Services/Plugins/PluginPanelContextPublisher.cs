@@ -33,10 +33,7 @@ internal sealed class PluginPanelContextPublisher : IDisposable
         _hostController = hostController;
         _dispatcher = dispatcher;
 
-        // Three signals, one publish path. Transcript publishes cover the conversation, agent and busy
-        // fields; the view model covers workspace selection, which moves on its own without one. Every
-        // path deduplicates by value, so the overlap between them costs nothing.
-        _hostChannel.TranscriptPublished += OnStateChanged;
+        _hostChannel.ReadyChanged += OnReadyChanged;
         _hostController.PanelOpened += OnPanelOpened;
         _source.PropertyChanged += OnSourcePropertyChanged;
     }
@@ -55,7 +52,7 @@ internal sealed class PluginPanelContextPublisher : IDisposable
         }
 
         _disposed = true;
-        _hostChannel.TranscriptPublished -= OnStateChanged;
+        _hostChannel.ReadyChanged -= OnReadyChanged;
         _hostController.PanelOpened -= OnPanelOpened;
         _source.PropertyChanged -= OnSourcePropertyChanged;
     }
@@ -65,7 +62,7 @@ internal sealed class PluginPanelContextPublisher : IDisposable
     // the new panel needs. So this one ignores it.
     private void OnPanelOpened() => Publish(force: true);
 
-    private void OnStateChanged() => Publish(force: false);
+    private void OnReadyChanged(bool ready) { if (ready && _published is not null) Publish(force: true); }
 
     // Deliberately unfiltered by property name: the deduplication below already makes an irrelevant
     // change free, whereas a name filter would silently stop covering any field added to the context.

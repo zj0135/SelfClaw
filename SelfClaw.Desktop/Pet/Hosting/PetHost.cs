@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 
 namespace SelfClaw.Desktop.Pet;
 
-public sealed class PetHost
+public sealed class PetHost : IAsyncDisposable
 {
     private readonly IPetSettingsRepository _settingsRepository;
     private readonly IPetWindowAdapter _windowAdapter;
@@ -12,6 +12,15 @@ public sealed class PetHost
 
     private PetSettings _settings = new();
     private bool _loaded;
+    private bool _initialized;
+    private (PetSettings Settings, PetLoadedPackage Package)? _prepared;
+    private IReadOnlyList<PetPackageSummary> _builtInPackages = [];
+    private string _loadStatus = "unloaded";
+    private string? _loadError;
+    private long _stateRevision;
+    private readonly object _placementGate = new();
+    private Task _placementSaveTask = Task.CompletedTask;
+    private bool _stopping;
 
     internal PetHost(
         IPetSettingsRepository settingsRepository,
@@ -31,20 +40,27 @@ public sealed class PetHost
         _windowAdapter.PlacementCommitted += OnPlacementCommitted;
     }
 
+    public event Action? Changed;
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (_initialized) return;
             await EnsureLoadedAsync(cancellationToken).ConfigureAwait(false);
             if (_settings.Enabled)
             {
-                await _windowAdapter.ShowAsync(_settings, cancellationToken).ConfigureAwait(false);
+                await ShowAsync(cancellationToken).ConfigureAwait(false);
             }
+            _initialized = true;
         }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) { RecordFailure(exception); throw; }
         finally
         {
             _gate.Release();
+            NotifyChanged();
         }
     }
 
@@ -56,6 +72,8 @@ public sealed class PetHost
             await EnsureLoadedAsync(cancellationToken).ConfigureAwait(false);
             return await CreateStateAsync(cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) { RecordFailure(exception); throw; }
         finally
         {
             _gate.Release();
@@ -93,28 +111,35 @@ public sealed class PetHost
 
             return await CreateStateAsync(cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception) { RecordFailure(exception); throw; }
         finally
         {
             _gate.Release();
+            NotifyChanged();
         }
     }
 
     private async Task ShowAsync(CancellationToken cancellationToken)
     {
-        await _windowAdapter.ShowAsync(_settings, cancellationToken).ConfigureAwait(false);
+        var package = _prepared is { } cached && cached.Settings.SpriteSheetPath == _settings.SpriteSheetPath &&
+            Equals(cached.Settings.Grid, _settings.Grid) ? cached.Package :
+            await _packageCatalog.LoadAsync(_settings, cancellationToken).ConfigureAwait(false);
         if (!_settings.Enabled)
         {
             await PersistAsync(_settings with { Enabled = true }, cancellationToken).ConfigureAwait(false);
         }
+        await _windowAdapter.ShowAsync(_settings, package, cancellationToken).ConfigureAwait(false);
+        AcceptPackage(package);
     }
 
     private async Task HideAsync(CancellationToken cancellationToken)
     {
-        await _windowAdapter.HideAsync(cancellationToken).ConfigureAwait(false);
         if (_settings.Enabled)
         {
             await PersistAsync(_settings with { Enabled = false }, cancellationToken).ConfigureAwait(false);
         }
+        await _windowAdapter.HideAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task ToggleAsync(CancellationToken cancellationToken)
@@ -139,8 +164,10 @@ public sealed class PetHost
             Grid = null,
         };
 
+        var prepared = await _packageCatalog.LoadAsync(next, cancellationToken).ConfigureAwait(false);
         await PersistAsync(next, cancellationToken).ConfigureAwait(false);
-        await _windowAdapter.ReloadAsync(next, cancellationToken).ConfigureAwait(false);
+        await _windowAdapter.ReloadAsync(next, prepared, cancellationToken).ConfigureAwait(false);
+        AcceptPackage(prepared);
     }
 
     private async Task<PetHostState> CreateStateAsync(CancellationToken cancellationToken)
@@ -150,7 +177,11 @@ public sealed class PetHost
             isVisible,
             _settings,
             _packageCatalog.ResolveSelectedBuiltInPetId(_settings.SpriteSheetPath),
-            _packageCatalog.GetBuiltInPackages());
+            _builtInPackages,
+            _prepared?.Package.PackageId,
+            _loadStatus,
+            _loadError,
+            ++_stateRevision);
     }
 
     private async Task EnsureLoadedAsync(CancellationToken cancellationToken)
@@ -161,6 +192,7 @@ public sealed class PetHost
         }
 
         _settings = await _settingsRepository.LoadAsync(cancellationToken).ConfigureAwait(false);
+        _builtInPackages = await _packageCatalog.GetBuiltInPackagesAsync(cancellationToken).ConfigureAwait(false);
         _loaded = true;
     }
 
@@ -173,7 +205,56 @@ public sealed class PetHost
 
     private void OnPlacementCommitted(object? sender, PetPlacement placement)
     {
-        _ = PersistPlacementAsync(placement);
+        lock (_placementGate)
+        {
+            if (_stopping) return;
+            _placementSaveTask = SavePlacementAfterAsync(_placementSaveTask, placement);
+        }
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await _windowAdapter.FlushPlacementAsync(cancellationToken).ConfigureAwait(false);
+        Task pending;
+        lock (_placementGate)
+        {
+            _stopping = true;
+            _windowAdapter.PlacementCommitted -= OnPlacementCommitted;
+            pending = _placementSaveTask;
+        }
+        await pending.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask DisposeAsync() => await StopAsync(CancellationToken.None).ConfigureAwait(false);
+
+    private void AcceptPackage(PetLoadedPackage package)
+    {
+        _prepared = (_settings, package);
+        _loadStatus = package.Warning is null ? "ready" : "fallback";
+        _loadError = package.Warning;
+    }
+
+    private void RecordFailure(Exception exception)
+    {
+        _loadStatus = "failed";
+        _loadError = exception.Message;
+        _logger.LogWarning(exception, "Pet configuration or resource installation failed.");
+    }
+
+    private void NotifyChanged()
+    {
+        foreach (var handler in Changed?.GetInvocationList().Cast<Action>() ?? [])
+        {
+            try { handler(); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception exception) { _logger.LogError(exception, "Failed to publish pet state."); }
+        }
+    }
+
+    private async Task SavePlacementAfterAsync(Task previous, PetPlacement placement)
+    {
+        await previous.ConfigureAwait(false);
+        await PersistPlacementAsync(placement).ConfigureAwait(false);
     }
 
     private async Task PersistPlacementAsync(PetPlacement placement)

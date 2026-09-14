@@ -1,9 +1,9 @@
+using SelfClaw.Desktop.Services.Transcript.Views;
 using System.Text.Json;
 using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Desktop.Services.Activities;
@@ -31,10 +31,11 @@ public sealed class ActivityPanelPublisherTests
         await UntilAsync(panel, () => panel.LatestState.ToString().Contains("visible before terminal", StringComparison.Ordinal));
         panel.LatestState.GetProperty("sections")[0].GetProperty("detail").GetProperty("contentOrigin").GetString().Should().Be("live");
         execution.IsCompleted.Should().BeFalse();
-        panel.Channel.PublishTranscript(new TranscriptRenderState([], false, [], task.ParentConversationId.ToString("D"), false));
+        using var delivery = new SelfClaw.Desktop.Services.Transcript.TranscriptDelivery(panel.Channel, System.Windows.Threading.Dispatcher.CurrentDispatcher);
+        delivery.Publish(new TranscriptRenderState([], false, [], task.ParentConversationId.ToString("D"), false));
         var transcript = panel.Messages.Last(message => message.GetProperty("type").GetString() == "replaceState");
-        panel.Channel.AcknowledgeTranscript(transcript.GetProperty("revision").GetInt64()).Should().BeTrue();
-        panel.Channel.PublishTranscript(new TranscriptRenderState([], false, [], task.ParentConversationId.ToString("D"), false, ActivityText: "changed"));
+        delivery.Acknowledge(transcript.GetProperty("revision").GetInt64()).Should().BeTrue();
+        delivery.Publish(new TranscriptRenderState([], false, [], task.ParentConversationId.ToString("D"), false, ActivityText: "changed"));
         panel.Messages.Last().GetProperty("type").GetString().Should().Be("patchState");
         await runtime.EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
         await execution;

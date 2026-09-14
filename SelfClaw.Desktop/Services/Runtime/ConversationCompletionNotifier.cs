@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Notifications;
 using System.Text;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;

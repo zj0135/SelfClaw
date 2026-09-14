@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Transcript.Views;
 namespace SelfClaw.Desktop.Services.Activities.Models;
 
 internal sealed record ActivityPanelWireDetail(

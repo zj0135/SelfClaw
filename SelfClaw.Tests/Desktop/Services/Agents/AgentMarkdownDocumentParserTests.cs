@@ -1,5 +1,5 @@
+using SelfClaw.Desktop.Services.Agents.Definitions;
 using FluentAssertions;
-using SelfClaw.Desktop.Services;
 
 namespace SelfClaw.Tests.Desktop.Services.Agents;
 

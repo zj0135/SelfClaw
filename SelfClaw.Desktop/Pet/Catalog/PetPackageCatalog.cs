@@ -39,6 +39,7 @@ public sealed class PetPackageCatalog
     private readonly string _builtInPetsRoot;
     private readonly IPetSpriteDecoder _spriteDecoder;
     private readonly ILogger<PetPackageCatalog> _logger;
+    private readonly Lazy<IReadOnlyList<PetPackageSummary>> _builtInPackages;
 
     public PetPackageCatalog(ILogger<PetPackageCatalog> logger)
         : this(
@@ -60,9 +61,24 @@ public sealed class PetPackageCatalog
         _builtInPetsRoot = Path.GetFullPath(builtInPetsRoot);
         _spriteDecoder = spriteDecoder;
         _logger = logger;
+        _builtInPackages = new Lazy<IReadOnlyList<PetPackageSummary>>(ReadBuiltInPackages);
     }
 
     internal IReadOnlyList<PetPackageSummary> GetBuiltInPackages()
+        => _builtInPackages.Value;
+
+    internal Task<IReadOnlyList<PetPackageSummary>> GetBuiltInPackagesAsync(CancellationToken cancellationToken)
+        => Task.Run(GetBuiltInPackages, cancellationToken);
+
+    internal async Task<PetLoadedPackage> LoadAsync(PetSettings settings, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var package = await Task.Run(() => Load(settings), cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return package;
+    }
+
+    private IReadOnlyList<PetPackageSummary> ReadBuiltInPackages()
     {
         if (!Directory.Exists(_builtInPetsRoot))
         {
@@ -91,13 +107,8 @@ public sealed class PetPackageCatalog
     internal PetPackageSummary GetBuiltInPackage(string petId)
     {
         var normalizedId = NormalizeBuiltInId(petId);
-        var packageDirectory = GetBuiltInPackageDirectory(normalizedId);
-        if (!Directory.Exists(packageDirectory))
-        {
-            throw new FileNotFoundException("Built-in pet package was not found.", packageDirectory);
-        }
-
-        return CreateBuiltInSummary(packageDirectory);
+        return GetBuiltInPackages().FirstOrDefault(package => package.Id == normalizedId)
+            ?? throw new FileNotFoundException("Built-in pet package was not found.", normalizedId);
     }
 
     internal string ResolveSelectedBuiltInPetId(string? configuredPath)
@@ -108,7 +119,7 @@ public sealed class PetPackageCatalog
         }
 
         var normalized = NormalizeLegacyId(configuredPath.Trim());
-        if (IsSafeBuiltInPetId(normalized) && Directory.Exists(GetBuiltInPackageDirectory(normalized)))
+        if (IsSafeBuiltInPetId(normalized) && GetBuiltInPackages().Any(package => package.Id == normalized))
         {
             return normalized;
         }
@@ -120,7 +131,7 @@ public sealed class PetPackageCatalog
             if (!relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative))
             {
                 var id = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
-                if (IsSafeBuiltInPetId(id) && Directory.Exists(GetBuiltInPackageDirectory(id)))
+                if (IsSafeBuiltInPetId(id) && GetBuiltInPackages().Any(package => package.Id == id))
                 {
                     return id;
                 }
@@ -141,6 +152,7 @@ public sealed class PetPackageCatalog
         {
             return LoadSelection(ResolveSelection(settings), settings.Grid, warning: null);
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception exception)
         {
             var defaultSelection = ResolveBuiltInSelection(ResolveAvailableDefaultId());
@@ -160,6 +172,7 @@ public sealed class PetPackageCatalog
         string? warning)
     {
         var bitmap = _spriteDecoder.Load(selection.SpriteSheetPath);
+        if (!bitmap.IsFrozen) bitmap.Freeze();
         var grid = selection.Grid ?? settingsGrid ?? PetLayout.CreateDefaultGrid();
         var spriteSheet = SpriteSheet.Create(bitmap, grid);
         return new PetLoadedPackage(selection.PackageId, spriteSheet, warning);
@@ -264,8 +277,7 @@ public sealed class PetPackageCatalog
 
     private string ResolveAvailableDefaultId()
     {
-        var preferred = GetBuiltInPackageDirectory(DefaultBuiltInPetId);
-        if (Directory.Exists(preferred))
+        if (GetBuiltInPackages().Any(package => package.Id == DefaultBuiltInPetId))
         {
             return DefaultBuiltInPetId;
         }

@@ -1,6 +1,6 @@
+using SelfClaw.Desktop.Services.Settings;
 using System.Text.Json;
 using FluentAssertions;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Infrastructure.Options;
 
@@ -14,7 +14,8 @@ public sealed class ProgrammingAssistantSettingsBridgeTests
         var root = Path.Combine(Path.GetTempPath(), "SelfClawBridgeTests", Guid.NewGuid().ToString("N"));
         var paths = StoragePathDefaults.Create(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets"));
         var bridge = new ProgrammingAssistantSettingsBridge(
-            new ProgrammingAssistantSettingsService(new DesktopSettingsJsonStore(paths)));
+            SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(new DesktopSettingsJsonStore(paths)),
+            new SelfClaw.Desktop.Services.WebView.WebViewHostChannel(), System.Windows.Threading.Dispatcher.CurrentDispatcher);
         using var request = JsonDocument.Parse("""
             { "type": "get-programming-assistant-settings", "requestId": "request-1" }
             """);
@@ -36,7 +37,8 @@ public sealed class ProgrammingAssistantSettingsBridgeTests
         var root = Path.Combine(Path.GetTempPath(), "SelfClawBridgeTests");
         var paths = StoragePathDefaults.Create(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets"));
         var bridge = new ProgrammingAssistantSettingsBridge(
-            new ProgrammingAssistantSettingsService(new DesktopSettingsJsonStore(paths)));
+            SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(new DesktopSettingsJsonStore(paths)),
+            new SelfClaw.Desktop.Services.WebView.WebViewHostChannel(), System.Windows.Threading.Dispatcher.CurrentDispatcher);
         using var request = JsonDocument.Parse("{}");
 
         var response = await bridge.TryHandleAsync("new-chat", request.RootElement);

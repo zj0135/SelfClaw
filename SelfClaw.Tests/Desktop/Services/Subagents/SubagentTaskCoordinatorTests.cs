@@ -3,7 +3,6 @@ using FluentAssertions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;

@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Settings;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SelfClaw.Desktop.Services.Appearance.Models;
@@ -62,10 +63,10 @@ public sealed class AppearanceSettingsService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            _cached = normalized;
             await _settingsStore
                 .WriteNodeAsync(SettingsNodeName, normalized, JsonOptions, cancellationToken)
                 .ConfigureAwait(false);
+            _cached = normalized;
             return normalized;
         }
         finally
@@ -80,7 +81,10 @@ public sealed class AppearanceSettingsService
     /// 拖慢启动。App.OnStartup 已在显示窗口前 await 过 <see cref="GetAsync"/>，
     /// 缓存那时就已就绪；真的没有（首次启动无文件）就回落浅色，与 tokens.css 的默认一致。
     /// </summary>
-    public bool CachedIsDark => _cached?.IsDark ?? false;
+    public bool CachedIsDark => _cached is { } settings && IsDark(settings);
+
+    internal static bool IsDark(AppearanceSettings settings)
+        => string.Equals(settings.ResolvedTheme, "dark", StringComparison.OrdinalIgnoreCase);
 
     private static AppearanceSettings Normalize(AppearanceSettings? settings)
     {
@@ -97,7 +101,7 @@ public sealed class AppearanceSettingsService
         var resolved = mode switch
         {
             "light" or "dark" => mode,
-            _ => settings.IsDark ? "dark" : "light"
+            _ => IsDark(settings) ? "dark" : "light"
         };
 
         return settings with

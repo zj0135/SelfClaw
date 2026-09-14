@@ -1,3 +1,5 @@
+using SelfClaw.Desktop.Services.Settings;
+using SelfClaw.Desktop.Services.Tools;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -5,7 +7,6 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
@@ -319,7 +320,7 @@ public sealed class ConversationTurnEngineTests
                 _sessions,
                 _activityCoordinator,
                 approvalHandler,
-                new ProgrammingAssistantSettingsService(settingsStore),
+                SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore),
 
                 Notifier,
                 NullLogger<ConversationTurnEngine>.Instance);

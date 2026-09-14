@@ -1,7 +1,7 @@
+using SelfClaw.Desktop.Services.Transcript.Views;
 using System.Text.Json;
 using System.Windows.Threading;
 using FluentAssertions;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Infrastructure.Options;
@@ -20,9 +20,10 @@ public sealed class TranscriptPublisherTests
             var dispatcher = Dispatcher.CurrentDispatcher;
             var messages = new List<string>();
             var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
             channel.Attach(messages.Add);
             channel.MarkReady();
-            using var publisher = new TranscriptPublisher(new TranscriptProjection(StoragePathDefaults.CreateDefault()), channel, dispatcher);
+            using var publisher = new TranscriptPublisher(new TranscriptProjection(StoragePathDefaults.CreateDefault()), delivery, dispatcher);
             var captures = 0;
             publisher.Attach(autoScroll => { captures++; return CreateRequest("current", autoScroll); });
             var failures = new List<Exception>();
@@ -53,6 +54,7 @@ public sealed class TranscriptPublisherTests
     {
         var hostMessages = new List<string>();
         var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
         channel.Attach(hostMessages.Add);
         channel.MarkReady();
         var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
@@ -61,12 +63,12 @@ public sealed class TranscriptPublisherTests
                 storageRoot,
                 Path.Combine(storageRoot, "selfclaw.db"),
                 Path.Combine(storageRoot, "secrets")));
-        using var publisher = new TranscriptPublisher(projection, channel, Dispatcher.CurrentDispatcher);
+        using var publisher = new TranscriptPublisher(projection, delivery, Dispatcher.CurrentDispatcher);
         var agentName = "first";
         publisher.Attach(autoScroll => CreateRequest(agentName, autoScroll));
 
         publisher.RequestStreamingPublish(false);
-        channel.AcknowledgeTranscript(ReadRevision(hostMessages[^1])).Should().BeTrue();
+        delivery.Acknowledge(ReadRevision(hostMessages[^1])).Should().BeTrue();
         agentName = "latest";
         publisher.RequestStreamingPublish(false);
         publisher.PublishNow(true);
@@ -82,6 +84,7 @@ public sealed class TranscriptPublisherTests
     {
         var hostMessages = new List<string>();
         var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
         channel.Attach(hostMessages.Add);
         var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         var projection = new TranscriptProjection(
@@ -89,7 +92,7 @@ public sealed class TranscriptPublisherTests
                 storageRoot,
                 Path.Combine(storageRoot, "selfclaw.db"),
                 Path.Combine(storageRoot, "secrets")));
-        using var publisher = new TranscriptPublisher(projection, channel, Dispatcher.CurrentDispatcher);
+        using var publisher = new TranscriptPublisher(projection, delivery, Dispatcher.CurrentDispatcher);
         var agentName = "first";
         publisher.Attach(autoScroll => CreateRequest(agentName, autoScroll));
 

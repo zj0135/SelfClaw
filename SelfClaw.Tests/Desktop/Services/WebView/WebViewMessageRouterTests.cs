@@ -1,3 +1,7 @@
+using SelfClaw.Desktop.Services.Agents;
+using SelfClaw.Desktop.Services.Notifications;
+using SelfClaw.Desktop.Services.Settings;
+using SelfClaw.Desktop.Services.Tools;
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -11,13 +15,11 @@ using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Pet;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Extensions.Abstractions;
-using SelfClaw.Desktop.Services.Pet;
 using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
@@ -38,6 +40,21 @@ namespace SelfClaw.Tests.Desktop.Services.WebView;
 
 public sealed class WebViewMessageRouterTests
 {
+    [Theory]
+    [InlineData("delete-conversation", "not-a-guid", "invalid-request")]
+    [InlineData("select-conversation", "not-a-guid", "invalid-request")]
+    [InlineData("select-conversation", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "operation-failed")]
+    public async Task Conversation_command_failures_are_correlated_instead_of_reporting_success(string type, string id, string errorCode)
+    {
+        using var context = new RouterTestContext();
+        await context.RouteAsync($$"""{"type":"{{type}}","requestId":"failed-operation","conversationId":"{{id}}"}""");
+        var response = context.PostedJson.Select(json => JsonDocument.Parse(json).RootElement)
+            .Single(value => value.TryGetProperty("requestId", out var request) && request.GetString() == "failed-operation");
+        response.GetProperty("ok").GetBoolean().Should().BeFalse();
+        response.GetProperty("errorCode").GetString().Should().Be(errorCode);
+        response.GetProperty("error").GetString().Should().NotBeNullOrEmpty();
+    }
+
     private const string ApplicationOrigin = "https://appassets.selfclaw.local/TranscriptVue/index.html";
     private const string PluginOrigin = "https://git-inspector.plugin.selfclaw.local/ui/index.html";
 
@@ -188,12 +205,12 @@ public sealed class WebViewMessageRouterTests
     }
 
     [Fact]
-    public async Task Model_selection_event_changes_the_next_turn_routed_through_the_view_model()
+    public async Task Prompt_carries_its_model_selection_without_a_bridge_owned_vm_cache()
     {
         using var context = new RouterTestContext();
 
         await context.RouteAsync("""{"type":"ai-providers/list-enabled-models","requestId":"models-1"}""");
-        await context.RouteAsync("""{"type":"send-prompt","prompt":"use selected model"}""");
+        await context.RouteAsync("""{"type":"send-prompt","prompt":"use selected model","modelProfileId":"33333333-3333-3333-3333-333333333333"}""");
 
         var request = context.AgentRuntime.Requests.Should().ContainSingle().Which;
         request.Should().BeOfType<DirectChatTurnRequest>()
@@ -204,6 +221,8 @@ public sealed class WebViewMessageRouterTests
     {
         private readonly string _storageRoot;
         private readonly TranscriptPublisher _transcriptPublisher;
+        private readonly TranscriptDelivery _transcriptDelivery;
+        private readonly SelfClaw.Desktop.Services.Tools.ToolApprovalPresenter _approvalPresenter;
         private readonly AgentActivityCoordinator _activityCoordinator;
         private readonly TerminalHostController _terminalHostController;
         private readonly PluginPanelHostController _pluginPanelHostController;
@@ -225,12 +244,13 @@ public sealed class WebViewMessageRouterTests
                 NullLogger<AgentActivityCoordinator>.Instance);
             HostChannel = new WebViewHostChannel();
             HostChannel.Attach(PostedJson.Add);
+            _transcriptDelivery = new TranscriptDelivery(HostChannel, Dispatcher.CurrentDispatcher);
             _transcriptPublisher = new TranscriptPublisher(
                 new TranscriptProjection(storagePaths),
-                HostChannel,
+                _transcriptDelivery,
                 Dispatcher.CurrentDispatcher);
             _sessions = new ConversationSessionCoordinator(ConversationRepository, _transcriptPublisher);
-            var programmingSettings = new ProgrammingAssistantSettingsService(settingsStore);
+            var programmingSettings = SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore);
             AgentRuntime = new RecordingAgentChatRuntime();
             _turnEngine = new ConversationTurnEngine(
                 ConversationRepository,
@@ -250,28 +270,32 @@ public sealed class WebViewMessageRouterTests
                 NullLogger<ConversationTurnEngine>.Instance);
 
             var agentDefinitions = new DesktopAgentDefinitionService(storagePaths);
+            ExtensionStateChangeNotifier = new RecordingExtensionStateChangeNotifier();
+            var agentSettings = new AgentSettingsService(agentDefinitions, new SubagentDefinitionCatalog(storagePaths),
+                Unused<IExtensionSettingsService>(), ExtensionStateChangeNotifier);
+            var workspaces = new ConversationWorkspaceService(ConversationRepository);
             var viewModel = new MainWindowViewModel(
-                ConversationRepository,
                 ConversationRepository,
                 _turnEngine,
                 _sessions,
                 _activityCoordinator,
                 _transcriptPublisher,
-                agentDefinitions,
+                agentSettings,
+                ExtensionStateChangeNotifier,
                 settingsStore,
-                new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(),
+                workspaces,
+                new ConversationDeletionService(_turnEngine, _sessions, new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(), workspaces, ConversationRepository),
                 NullLogger<MainWindowViewModel>.Instance);
             viewModel.InitializeAsync().GetAwaiter().GetResult();
 
             var providerSettings = new RouterAiProviderSettingsService();
             var aiProviderBridge = new AiProviderSettingsBridge(providerSettings, providerSettings);
-            ExtensionStateChangeNotifier = new RecordingExtensionStateChangeNotifier();
             var extensionBridge = new ExtensionSettingsBridge(
                 Unused<IExtensionSettingsService>(),
                 Unused<IExtensionPackageRepository>(),
                 agentDefinitions,
                 Unused<IExtensionPackagePicker>(),
-                ExtensionStateChangeNotifier);
+                ExtensionStateChangeNotifier, HostChannel, Dispatcher.CurrentDispatcher);
             var petHost = new PetHost(
                 new NoOpPetSettingsRepository(),
                 new NoOpPetWindowAdapter(),
@@ -288,19 +312,18 @@ public sealed class WebViewMessageRouterTests
                 Unused<IPluginVersionLeaseManager>(),
                 settingsStore,
                 HostChannel,
-                Dispatcher.CurrentDispatcher);
+                Dispatcher.CurrentDispatcher,
+                new PluginPanelResourceReader(Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginPanelResourceReader>.Instance),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginPanelHostController>.Instance);
+            _approvalPresenter = new SelfClaw.Desktop.Services.Tools.ToolApprovalPresenter(approvalHandler, _activityCoordinator,
+                new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance), HostChannel, Dispatcher.CurrentDispatcher);
             Router = new WebViewMessageRouter(
                 aiProviderBridge,
                 extensionBridge,
-                new AgentSettingsBridge(
-                    agentDefinitions,
-                    new SubagentDefinitionCatalog(storagePaths),
-                    Unused<IExtensionSettingsService>(),
-                    ExtensionStateChangeNotifier),
-                ExtensionStateChangeNotifier,
-                new ProgrammingAssistantSettingsBridge(programmingSettings),
+                new AgentSettingsBridge(agentSettings),
+                new ProgrammingAssistantSettingsBridge(programmingSettings, HostChannel, Dispatcher.CurrentDispatcher),
                 new AppearanceSettingsBridge(new AppearanceSettingsService(settingsStore)),
-                new PetSettingsBridge(petHost),
+                new PetSettingsBridge(petHost, new SelfClaw.Desktop.Services.WebView.WebViewHostChannel(), System.Windows.Threading.Dispatcher.CurrentDispatcher, Microsoft.Extensions.Logging.Abstractions.NullLogger<PetSettingsBridge>.Instance),
                 new WorkspaceSelectionBridge(
                     viewModel,
                     Unused<IWorkspaceFolderPicker>(),
@@ -316,9 +339,9 @@ public sealed class WebViewMessageRouterTests
                         _pluginPanelHostController,
                         Dispatcher.CurrentDispatcher)),
                 viewModel,
-                _activityCoordinator,
+                _approvalPresenter,
                 HostChannel,
-                Dispatcher.CurrentDispatcher);
+                _transcriptDelivery);
         }
 
         /// <summary>
@@ -342,12 +365,14 @@ public sealed class WebViewMessageRouterTests
         public void Dispose()
         {
             Router.Dispose();
+            _approvalPresenter.Dispose();
             _turnEngine.Dispose();
             _sessions.Dispose();
             _terminalHostController.Dispose();
             _pluginPanelHostController.Dispose();
             _activityCoordinator.Dispose();
             _transcriptPublisher.Dispose();
+            _transcriptDelivery.Dispose();
         }
     }
 
@@ -562,16 +587,18 @@ public sealed class WebViewMessageRouterTests
             remove { }
         }
 
+        public Task FlushPlacementAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
         public Task<bool> GetIsVisibleAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(false);
 
-        public Task ShowAsync(PetSettings settings, CancellationToken cancellationToken = default)
+        public Task ShowAsync(PetSettings settings, PetLoadedPackage package, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
         public Task HideAsync(CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
-        public Task ReloadAsync(PetSettings settings, CancellationToken cancellationToken = default)
+        public Task ReloadAsync(PetSettings settings, PetLoadedPackage package, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
 }

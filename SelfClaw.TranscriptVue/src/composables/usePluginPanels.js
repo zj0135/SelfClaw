@@ -1,13 +1,13 @@
 import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue';
-import { hostBridge, useHostBridge } from './hostBridge';
+import { useHostBridge } from './hostBridge.js';
 import { useAppearance } from './useAppearance.js';
+import { createPluginTranscriptProjector } from '../renderers/pluginTranscript.js';
 
 // 面板与宿主之间的中转。插件永远不直接跟宿主说话：它 postMessage 给外壳，外壳凭
 // event.origin + event.source 认出是哪个面板，再用自己的 hostBridge 转发。
 //
 // 身份只来自这两样东西。payload 里出现的任何 pluginId 都不作数——那正是插件唯一能
 // 伪造的部分。
-const SHELL_ORIGIN = 'https://appassets.selfclaw.local';
 const MAX_TABS = 8;
 const SAVE_DEBOUNCE_MS = 400;
 
@@ -38,8 +38,16 @@ export function usePluginPanels() {
 	let saveTimer = null;
 	let latestContext = null;
 	let latestTranscript = null;
+    let latestTranscriptInput = null;
+    let transcriptTimer = null;
+    const projectTranscript = createPluginTranscriptProjector();
+    const opening = new Map();
+    const generations = new Map();
+    const pluginGenerations = new Map();
+    let disposed = false;
+    let restoredActiveKey = '';
 
-	const activeTab = computed(() => tabs.value.find((tab) => tab.key === activeKey.value) || null);
+
 	const isOpen = computed(() => tabs.value.length > 0);
 
 	function registerFrame(key, element) {
@@ -71,9 +79,9 @@ export function usePluginPanels() {
 		return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, toPlain(item)]));
 	}
 
-	function sendToFrame(tab, message) {
+	function sendToFrame(tab, message, prepared = false) {
 		const frame = frames.get(tab.key);
-		frame?.contentWindow?.postMessage(toPlain({ __selfclaw: 1, ...message }), tab.panel.origin);
+		frame?.contentWindow?.postMessage(prepared ? { __selfclaw: 1, ...message } : toPlain({ __selfclaw: 1, ...message }), tab.panel.origin);
 	}
 
 	function grants(tab, permission) {
@@ -137,8 +145,9 @@ export function usePluginPanels() {
 				sendToFrame(tab, { kind: 'event', type: 'context-changed', payload: latestContext });
 			}
 
-			if (latestTranscript && grants(tab, 'host.transcript.read')) {
-				sendToFrame(tab, { kind: 'event', type: 'transcript', payload: latestTranscript });
+			if (latestTranscriptInput && grants(tab, 'host.transcript.read')) {
+                latestTranscript = projectTranscript(latestTranscriptInput);
+				sendToFrame(tab, { kind: 'event', type: 'transcript', payload: latestTranscript }, true);
 			}
 
 			return;
@@ -156,11 +165,10 @@ export function usePluginPanels() {
 		if (saveTimer) window.clearTimeout(saveTimer);
 		saveTimer = window.setTimeout(() => {
 			saveTimer = null;
-			hostBridge.post({
-				type: 'plugin-host/save-tabs',
+			request('plugin-host/save-tabs', {
 				tabs: tabs.value.map((tab) => tab.key),
 				activeKey: activeKey.value || null,
-			});
+			}).catch((cause) => { error.value = cause.message; });
 		}, SAVE_DEBOUNCE_MS);
 	}
 
@@ -169,6 +177,7 @@ export function usePluginPanels() {
 		try {
 			const response = await request('plugin-host/get-panels');
 			available.value = response?.panels || [];
+            restoredActiveKey = response?.activeKey || '';
 			error.value = '';
 			return response?.tabs || [];
 		} catch (cause) {
@@ -179,49 +188,51 @@ export function usePluginPanels() {
 		}
 	}
 
-	async function open(key) {
-		const existing = tabs.value.find((tab) => tab.key === key);
-		if (existing) {
-			activeKey.value = key;
-			scheduleSave();
-			return existing;
-		}
+    function open(key) {
+        const existing = tabs.value.find((tab) => tab.key === key);
+        if (existing) { activeKey.value = key; scheduleSave(); return Promise.resolve(existing); }
+        if (opening.has(key)) return opening.get(key);
+        if (tabs.value.length + opening.size >= MAX_TABS) {
+            error.value = `At most ${MAX_TABS} panels may be open.`;
+            return Promise.resolve(null);
+        }
+        const version = generations.get(key) || 0;
+        const pluginId = key.split('/')[0];
+        const pluginVersion = pluginGenerations.get(pluginId) || 0;
+        const operation = (async () => {
+            try {
+                const response = await request('plugin-host/open', { panelKey: key });
+                if (disposed || version !== (generations.get(key) || 0) || pluginVersion !== (pluginGenerations.get(pluginId) || 0)) {
+                    await request('plugin-host/close', { panelKey: key });
+                    return null;
+                }
+                const tab = { key, panel: response.panel, url: response.url, ready: false };
+                tabs.value = [...tabs.value, tab];
+                activeKey.value = key;
+                error.value = '';
+                scheduleSave();
+                return tab;
+            } catch (cause) { if (!disposed) error.value = cause.message; return null; }
+            finally { opening.delete(key); }
+        })();
+        opening.set(key, operation);
+        return operation;
+    }
 
-		if (tabs.value.length >= MAX_TABS) {
-			error.value = `最多同时打开 ${MAX_TABS} 个面板。`;
-			return null;
-		}
-
-		try {
-			const response = await request('plugin-host/open', { panelKey: key });
-			const tab = { key, panel: response.panel, url: response.url, ready: false };
-			tabs.value = [...tabs.value, tab];
-			activeKey.value = key;
-			error.value = '';
-			scheduleSave();
-			return tab;
-		} catch (cause) {
-			error.value = cause?.message || '无法打开该面板。';
-			return null;
-		}
-	}
-
-	function close(key) {
-		const index = tabs.value.findIndex((tab) => tab.key === key);
-		if (index < 0) return;
-
-		frames.delete(key);
-		tabs.value = tabs.value.filter((tab) => tab.key !== key);
-		if (activeKey.value === key) {
-			activeKey.value = tabs.value[Math.min(index, tabs.value.length - 1)]?.key || '';
-		}
-
-		hostBridge.post({ type: 'plugin-host/close', panelKey: key });
-		scheduleSave();
-	}
+    async function close(key) {
+        generations.set(key, (generations.get(key) || 0) + 1);
+        try { await request('plugin-host/close', { panelKey: key }); }
+        catch (cause) { error.value = cause.message; return; }
+        const index = tabs.value.findIndex((tab) => tab.key === key);
+        frames.delete(key);
+        tabs.value = tabs.value.filter((tab) => tab.key !== key);
+        if (activeKey.value === key) activeKey.value = tabs.value[Math.max(0, Math.min(index, tabs.value.length - 1))]?.key || '';
+        scheduleSave();
+    }
 
 	// 宿主在禁用或删除插件时推送：面板的源已经停止解析，标签留在界面上只会显示一个死框。
 	function evict(pluginId) {
+        pluginGenerations.set(pluginId, (pluginGenerations.get(pluginId) || 0) + 1);
 		for (const tab of tabs.value.filter((candidate) => candidate.panel.pluginId === pluginId)) {
 			frames.delete(tab.key);
 		}
@@ -245,10 +256,18 @@ export function usePluginPanels() {
 		broadcast('context-changed', context, 'host.context.read');
 	}
 
-	function publishTranscript(payload) {
-		latestTranscript = payload;
-		broadcast('transcript', payload, 'host.transcript.read');
-	}
+    function publishTranscript(payload) {
+        latestTranscriptInput = payload;
+        if (transcriptTimer || !tabs.value.some((tab) => grants(tab, 'host.transcript.read'))) return;
+        transcriptTimer = window.setTimeout(() => {
+            transcriptTimer = null;
+            latestTranscript = projectTranscript(latestTranscriptInput);
+            for (const tab of tabs.value) {
+                if (grants(tab, 'host.transcript.read'))
+                    sendToFrame(tab, { kind: 'event', type: 'transcript', payload: latestTranscript }, true);
+            }
+        }, 500);
+    }
 
 	// useHostBridge 的 on() 已在 onUnmounted 自动退订，这里不需要再自己收集 disposer。
 	on('plugin-host/context', (payload) => publishContext(payload.context));
@@ -257,7 +276,7 @@ export function usePluginPanels() {
 		await load();
 		const keys = new Set(available.value.map((panel) => panel.key));
 		for (const tab of tabs.value.filter((candidate) => !keys.has(candidate.key))) {
-			close(tab.key);
+			await close(tab.key);
 		}
 	});
 
@@ -272,13 +291,17 @@ export function usePluginPanels() {
 	onMounted(async () => {
 		window.addEventListener('message', onWindowMessage);
 		const persisted = await load();
+        const active = restoredActiveKey;
 		const keys = new Set(available.value.map((panel) => panel.key));
 		for (const key of persisted.filter((candidate) => keys.has(candidate))) {
 			await open(key);
 		}
+        if (tabs.value.some((tab) => tab.key === active)) activeKey.value = active;
 	});
 
 	onUnmounted(() => {
+        disposed = true;
+        if (transcriptTimer) window.clearTimeout(transcriptTimer);
 		window.removeEventListener('message', onWindowMessage);
 		if (saveTimer) window.clearTimeout(saveTimer);
 	});
@@ -287,7 +310,6 @@ export function usePluginPanels() {
 		available,
 		tabs,
 		activeKey,
-		activeTab,
 		isOpen,
 		error,
 		loading,

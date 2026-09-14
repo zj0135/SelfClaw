@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Agents;
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -5,7 +6,6 @@ using FluentAssertions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Desktop.Services;
 using SelfClaw.Infrastructure.Extensions;
 using SelfClaw.Infrastructure.Options;
 
@@ -13,6 +13,24 @@ namespace SelfClaw.Tests.Desktop.Services.Agents;
 
 public sealed class AgentSettingsBridgeTests : IDisposable
 {
+    [Fact]
+    public async Task Concurrent_bindings_after_delayed_catalog_reads_preserve_both_committed_changes()
+    {
+        var catalog = CreateSubagentCatalog();
+        WriteSubagent(catalog, "reviewer");
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var extensions = new StubExtensionSettingsService { ReadGate = release };
+        var service = new AgentSettingsService(CreateAgentService(), catalog, extensions, new ExtensionStateChangeNotifier());
+        var skill = service.SetSubagentExtensionBindingAsync("reviewer", new(ExtensionKind.Skill, "review"), true, CancellationToken.None);
+        var mcp = service.SetSubagentExtensionBindingAsync("reviewer", new(ExtensionKind.McpServer, "local"), true, CancellationToken.None);
+        extensions.Reads.Should().Be(2);
+        release.TrySetResult();
+        await Task.WhenAll(skill, mcp);
+        var saved = CreateSubagentCatalog().Get("reviewer") ?? throw new InvalidOperationException("Missing saved definition.");
+        saved.SkillIds.Should().Equal("review");
+        saved.McpServerIds.Should().Equal("local");
+    }
+
     private readonly string _rootPath = Path.Combine(
         Path.GetTempPath(),
         "SelfClawTests",
@@ -44,7 +62,8 @@ public sealed class AgentSettingsBridgeTests : IDisposable
         agentService.LoadAll();
         var bridge = CreateBridge(agentService);
         var notifications = 0;
-        bridge.AgentsChanged += () => notifications++;
+        var service = _lastService ?? throw new InvalidOperationException("Missing settings service.");
+        service.Changed += () => notifications++;
         using var document = JsonDocument.Parse(
             """
             {"requestId":"save-request","id":"build","name":"Builder","description":"构建代理","mode":"cli","instructions":"Be careful."}
@@ -195,14 +214,16 @@ public sealed class AgentSettingsBridgeTests : IDisposable
         }
     }
 
+    private AgentSettingsService? _lastService;
+
     private AgentSettingsBridge CreateBridge(
         DesktopAgentDefinitionService? agentService = null,
         SubagentDefinitionCatalog? subagentCatalog = null)
-        => new(
+        => new(_lastService = new AgentSettingsService(
             agentService ?? CreateAgentService(),
             subagentCatalog ?? CreateSubagentCatalog(),
             new StubExtensionSettingsService(),
-            new ExtensionStateChangeNotifier());
+            new ExtensionStateChangeNotifier()));
 
     private DesktopAgentDefinitionService CreateAgentService()
         => new(CreateStoragePaths());
@@ -254,8 +275,13 @@ public sealed class AgentSettingsBridgeTests : IDisposable
 
     private sealed class StubExtensionSettingsService : IExtensionSettingsService
     {
-        public Task<ExtensionSettingsState> GetStateAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(new ExtensionSettingsState(
+        public TaskCompletionSource? ReadGate { get; init; }
+        public int Reads { get; private set; }
+        public async Task<ExtensionSettingsState> GetStateAsync(CancellationToken cancellationToken = default)
+        {
+            Reads++;
+            if (ReadGate is not null) await ReadGate.Task.WaitAsync(cancellationToken);
+            return new ExtensionSettingsState(
                 1,
                 null,
                 [],
@@ -291,7 +317,8 @@ public sealed class AgentSettingsBridgeTests : IDisposable
                     null,
                     null,
                     [])],
-                []));
+                []);
+        }
 
         public Task<ExtensionPackageView> ImportPackageAsync(
             ExtensionKind kind,

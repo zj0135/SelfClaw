@@ -8,6 +8,27 @@ namespace SelfClaw.Tests.Desktop.Services.Runtime;
 
 public sealed class ConversationSessionCoordinatorTests
 {
+    [Fact]
+    public async Task Shutdown_cancels_then_waits_for_terminal_state_and_release()
+    {
+        var conversation = CreateConversation(Guid.NewGuid());
+        var repository = new ControlledConversationRepository();
+        repository.CompleteMessages(conversation.Id, []);
+        repository.CompleteToolRuns(conversation.Id, []);
+        using var coordinator = CreateCoordinator(repository);
+        await coordinator.SelectAsync(conversation.Id);
+        var state = await coordinator.StartTurnAsync(conversation);
+        var shutdown = coordinator.StopAsync(CancellationToken.None);
+        state.CancellationTokenSource.IsCancellationRequested.Should().BeTrue();
+        shutdown.IsCompleted.Should().BeFalse();
+        state.ReplaceMessage(CreateMessage(conversation.Id, "terminal committed"));
+        coordinator.CompleteTurn(state);
+        await shutdown;
+        coordinator.IsRunning(conversation.Id).Should().BeFalse();
+        coordinator.SelectedMessages.Should().ContainSingle().Which.MarkdownContent.Should().Be("terminal committed");
+        await FluentActions.Awaiting(() => coordinator.StartTurnAsync(conversation)).Should().ThrowAsync<ObjectDisposedException>();
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

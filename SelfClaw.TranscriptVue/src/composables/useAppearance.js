@@ -1,5 +1,6 @@
 import { computed, reactive, ref } from 'vue';
 import { hostBridge } from './hostBridge.js';
+import { useToast } from './useToast.js';
 
 // 外观设置的唯一持有者。模块级单例而非 per-component 状态：外壳、设置页、终端、
 // 插件桥都要读同一份，任何一处改动都必须让其余几处立刻看到。
@@ -60,6 +61,10 @@ export const DEFAULTS = {
 };
 
 const state = reactive({ ...DEFAULTS });
+const saveError = ref('');
+let confirmed = { ...DEFAULTS };
+let saveQueue = Promise.resolve();
+let editGeneration = 0;
 
 // 任何一项变化都自增。消费方（终端、插件桥）watch 它即可重读，不必各自
 // 记住「哪几项与我有关」。
@@ -148,27 +153,40 @@ function cacheLocally() {
 // 一个确定的明暗值来设置原生标题栏。让宿主自己再猜一次就会有两套解析逻辑。
 function pushToHost() {
 	if (!hostBridge.hasHost()) {
+		cacheLocally();
 		return;
 	}
-
-	hostBridge.post({
-		type: 'appearance/save',
-		settings: { ...state },
-		resolvedTheme: resolvedTheme.value,
+	const generation = ++editGeneration;
+	const payload = { settings: { ...state }, resolvedTheme: resolvedTheme.value };
+	saveQueue = saveQueue.then(async () => {
+		try {
+			const response = await hostBridge.request('appearance/save', payload);
+			confirmed = sanitize(response.settings);
+			if (generation === editGeneration) {
+				Object.assign(state, confirmed);
+				saveError.value = '';
+				apply();
+				cacheLocally();
+			}
+		} catch (error) {
+			saveError.value = `外观保存失败：${error.message}`;
+			useToast().showToast(saveError.value);
+			if (generation === editGeneration) { Object.assign(state, confirmed); apply(); cacheLocally(); }
+		}
 	});
+	return saveQueue;
 }
 
 function commit({ persist = true } = {}) {
 	apply();
 	if (persist) {
-		cacheLocally();
-		pushToHost();
+		return pushToHost();
 	}
 }
 
 function assign(patch, options) {
 	Object.assign(state, sanitize({ ...state, ...patch }));
-	commit(options);
+	return commit(options);
 }
 
 export function initAppearance() {
@@ -203,9 +221,11 @@ export function initAppearance() {
 	}
 
 	commit({ persist: false });
+	confirmed = { ...state };
 
 	// 宿主是真值。回包与缓存不一致时以宿主为准，并把缓存对齐。
 	if (hostBridge.hasHost()) {
+		const generation = editGeneration;
 		hostBridge
 			.request('appearance/get-state')
 			.then((response) => {
@@ -213,12 +233,15 @@ export function initAppearance() {
 					return;
 				}
 
-				Object.assign(state, sanitize(response.settings));
+				confirmed = sanitize(response.settings);
+				if (generation !== editGeneration) return;
+				Object.assign(state, confirmed);
 				apply();
 				cacheLocally();
 			})
-			.catch(() => {
-				// 宿主不可用：缓存值已经生效，什么都不用做。
+			.catch((error) => {
+				saveError.value = `外观加载失败：${error.message}`;
+				useToast().showToast(saveError.value);
 			});
 	}
 }
@@ -226,6 +249,7 @@ export function initAppearance() {
 export function useAppearance() {
 	return {
 		state,
+		saveError,
 		revision,
 		resolvedTheme,
 		setMode: (mode) => assign({ mode }),

@@ -117,6 +117,7 @@ internal sealed class WorkspaceSelectionBridge
         CancellationToken cancellationToken = default)
     {
         var selected = _selectionController.SelectedWorkspaceRoot;
+        var roots = _selectionController.WorkspaceRoots;
         GitWorkspaceState? gitState = null;
         if (selected is not null && _gitWorkspaceQuery is not null)
         {
@@ -151,7 +152,7 @@ internal sealed class WorkspaceSelectionBridge
                 isDirty = gitState?.IsDirty == true,
                 hasMergeConflicts = gitState?.HasMergeConflicts == true
             },
-            roots = _selectionController.WorkspaceRoots.Select(root => new
+            roots = roots.Select(root => new
             {
                 id = root.Id.ToString("D"),
                 root.Name,

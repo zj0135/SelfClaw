@@ -10,6 +10,9 @@ namespace SelfClaw.Tests.Desktop.Services.Activities;
 
 public sealed class ActivityPanelBridgeTests
 {
+    private readonly Xunit.Abstractions.ITestOutputHelper _trace;
+    public ActivityPanelBridgeTests(Xunit.Abstractions.ITestOutputHelper trace) => _trace = trace;
+
     [Fact]
     public Task Foreign_task_and_invalid_subscription_cannot_cancel_and_accepted_cancel_survives_navigation()
         => WpfDispatcherTest.RunAsync(async () =>
@@ -17,7 +20,7 @@ public sealed class ActivityPanelBridgeTests
             using var activity = new SubagentActivityTestContext();
             var owned = await activity.CreateTaskAsync(claim: false);
             var foreign = await activity.CreateTaskAsync(claim: false);
-            using var panel = new ActivityPanelTestContext(activity, owned.ParentConversationId);
+            using var panel = new ActivityPanelTestContext(activity, owned.ParentConversationId, _trace);
             var coordinator = new ActivityTaskCoordinator();
             var bridge = new ActivityPanelBridge(panel.Publisher, activity.Service, coordinator, panel.Channel, Dispatcher.CurrentDispatcher);
             var subscription = Guid.NewGuid();
@@ -48,7 +51,7 @@ public sealed class ActivityPanelBridgeTests
             await runtime.Started.Task;
             var longText = string.Concat(Enumerable.Repeat("\u4e2d\ud83d\ude42\n", 6000));
             await runtime.EmitAsync(new AssistantTextDeltaEvent("text", longText));
-            using var panel = new ActivityPanelTestContext(activity, task.ParentConversationId);
+            using var panel = new ActivityPanelTestContext(activity, task.ParentConversationId, _trace);
             var bridge = new ActivityPanelBridge(panel.Publisher, activity.Service, new ActivityTaskCoordinator(), panel.Channel, Dispatcher.CurrentDispatcher);
             var subscription = Guid.NewGuid();
             var selection = Guid.NewGuid();

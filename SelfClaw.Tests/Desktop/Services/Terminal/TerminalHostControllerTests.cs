@@ -10,7 +10,7 @@ namespace SelfClaw.Tests.Desktop.Services.Terminal;
 public sealed class TerminalHostControllerTests
 {
     [Fact]
-    public void Ready_open_input_resize_focus_and_dispose_share_one_lifecycle()
+    public async Task Ready_open_input_resize_focus_and_dispose_share_one_lifecycle()
     {
         var messages = new List<string>();
         var channel = new WebViewHostChannel();
@@ -22,8 +22,8 @@ public sealed class TerminalHostControllerTests
             { "cols": 80, "rows": 30 }
             """);
 
-        controller.TryHandleMessage("terminal-ready", ready.RootElement).Should().BeTrue();
-        controller.SetOpen(true, Path.GetTempPath());
+        (await controller.TryHandleMessageAsync("terminal-ready", ready.RootElement)).Should().BeTrue();
+        await controller.SetOpenAsync(true, Path.GetTempPath());
 
         var session = factory.Sessions.Should().ContainSingle().Subject;
         session.Started.Should().BeTrue();
@@ -33,23 +33,23 @@ public sealed class TerminalHostControllerTests
         using var input = JsonDocument.Parse("""
             { "data": "dir\r" }
             """);
-        controller.TryHandleMessage("terminal-input", input.RootElement).Should().BeTrue();
+        (await controller.TryHandleMessageAsync("terminal-input", input.RootElement)).Should().BeTrue();
         session.Inputs.Should().ContainSingle().Which.Should().Be("dir\r");
 
         using var resize = JsonDocument.Parse("""
             { "cols": 100, "rows": 40 }
             """);
-        controller.TryHandleMessage("terminal-resize", resize.RootElement).Should().BeTrue();
+        (await controller.TryHandleMessageAsync("terminal-resize", resize.RootElement)).Should().BeTrue();
         session.LastSize.Should().Be((100, 40));
 
         using var focus = JsonDocument.Parse("""
             { "isFocused": true }
             """);
-        controller.TryHandleMessage("terminal-focus-change", focus.RootElement).Should().BeTrue();
-        controller.TryWriteEscape().Should().BeTrue();
+        (await controller.TryHandleMessageAsync("terminal-focus-change", focus.RootElement)).Should().BeTrue();
+        (await controller.TryWriteEscapeAsync()).Should().BeTrue();
         session.Inputs.Should().EndWith("\x1b");
 
-        controller.SetOpen(false, workspaceRootPath: null);
+        await controller.SetOpenAsync(false, workspaceRootPath: null);
         session.Disposed.Should().BeFalse("closing the drawer keeps the shell session alive");
 
         controller.Dispose();
@@ -58,7 +58,7 @@ public sealed class TerminalHostControllerTests
     }
 
     [Fact]
-    public void Start_failure_disposes_the_failed_session_and_restart_can_create_another()
+    public async Task Start_failure_disposes_the_failed_session_and_restart_can_create_another()
     {
         var messages = new List<string>();
         var channel = new WebViewHostChannel();
@@ -71,14 +71,14 @@ public sealed class TerminalHostControllerTests
         var controller = new TerminalHostController(factory, channel, Dispatcher.CurrentDispatcher);
         using var payload = JsonDocument.Parse("{}");
 
-        controller.TryHandleMessage("terminal-ready", payload.RootElement).Should().BeTrue();
-        controller.SetOpen(true, Path.GetTempPath());
+        (await controller.TryHandleMessageAsync("terminal-ready", payload.RootElement)).Should().BeTrue();
+        await controller.SetOpenAsync(true, Path.GetTempPath());
 
         factory.Sessions.Should().ContainSingle()
             .Which.Disposed.Should().BeTrue();
         messages.Should().Contain(message => message.Contains("Failed to start terminal: start failed", StringComparison.Ordinal));
 
-        controller.TryHandleMessage("terminal-restart", payload.RootElement).Should().BeTrue();
+        (await controller.TryHandleMessageAsync("terminal-restart", payload.RootElement)).Should().BeTrue();
 
         factory.Sessions.Should().HaveCount(2);
         factory.Sessions[1].Started.Should().BeTrue();
@@ -138,7 +138,9 @@ public sealed class TerminalHostControllerTests
             Started = true;
         }
 
-        public void WriteInput(string input) => Inputs.Add(input);
+        public Task WriteInputAsync(string input, CancellationToken cancellationToken = default) { Inputs.Add(input); return Task.CompletedTask; }
+
+        public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
 
         public void Resize(int columns, int rows) => LastSize = (columns, rows);
 

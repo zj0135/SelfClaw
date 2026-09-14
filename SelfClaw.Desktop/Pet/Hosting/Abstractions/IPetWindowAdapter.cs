@@ -6,9 +6,11 @@ internal interface IPetWindowAdapter
 
     Task<bool> GetIsVisibleAsync(CancellationToken cancellationToken = default);
 
-    Task ShowAsync(PetSettings settings, CancellationToken cancellationToken = default);
+    Task ShowAsync(PetSettings settings, PetLoadedPackage package, CancellationToken cancellationToken = default);
 
     Task HideAsync(CancellationToken cancellationToken = default);
 
-    Task ReloadAsync(PetSettings settings, CancellationToken cancellationToken = default);
+    Task ReloadAsync(PetSettings settings, PetLoadedPackage package, CancellationToken cancellationToken = default);
+
+    Task FlushPlacementAsync(CancellationToken cancellationToken = default);
 }

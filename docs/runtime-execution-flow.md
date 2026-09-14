@@ -1,14 +1,15 @@
 # SelfClaw 运行流程与 Direct / CLI 调用链
 
-更新：2026-09-13。以当前源码为准；逐项证据见 [Direct 架构审查与整改](direct-agent-architecture-review.md)。较早的设计文档保留为设计历史。
+更新：2026-09-14。以当前源码为准；逐项证据见 [Direct 架构审查与整改](direct-agent-architecture-review.md) 与 [Desktop 架构整改](desktop-architecture-review.md)。较早的设计文档保留为设计历史。
 
 ## 1. 公共回合入口
 
 ```mermaid
 flowchart TD
     Vue[Vue composer] --> Router[WebViewMessageRouter]
-    Router --> VM[MainWindowViewModel: 捕获选择与准备 Workspace Root]
-    VM --> Engine[ConversationTurnEngine: 准入与用户消息持久化]
+    Router --> VM[MainWindowViewModel: 捕获 UI 选择]
+    VM --> Workspace[ConversationWorkspaceService: 准备 Workspace Root]
+    Workspace --> Engine[ConversationTurnEngine: 准入与用户消息持久化]
     Engine --> Dispatch[DispatchingAgentChatRuntime]
     Dispatch --> Direct[Agents.Direct: DirectAgentChatRuntime]
     Dispatch --> CLI[CLI subprocess runtime]
@@ -18,10 +19,12 @@ flowchart TD
     Recorder --> Commit[Interactive / Child / Continuation Committer]
     Recorder --> State[ConversationRuntimeState]
     State --> Publisher[TranscriptPublisher / ActivityPanelPublisher]
-    Publisher --> Vue
+    Publisher --> Delivery[TranscriptDelivery / ActivityPanelDelivery]
+    Delivery --> Channel[WebViewHostChannel: 原始传输]
+    Channel --> Vue
 ```
 
-`WebViewMessageRouter` 先校验应用 origin，再把设置请求、窗口命令与会话意图交给各自处理者。`MainWindowViewModel` 拥有用户选择、导航与 Workspace Root 准备；`ConversationTurnEngine` 拥有准入、请求组装、事件归约和交互回合收尾。
+`WebViewMessageRouter` 先校验应用 origin，再按明确协议分派，并为业务操作返回关联结果。`MainWindowViewModel` 只在 UI 线程更新选择/导航，工作树准备与释放归 `ConversationWorkspaceService`，删除归 `ConversationDeletionService`；`ConversationTurnEngine` 拥有准入、请求组装、事件归约和交互回合收尾。composer 选择的 Direct 模型 id 随 prompt 捕获，空 id 仍由 Direct factory 解析默认模型，Bridge 不再维护另一份 VM 模型缓存。
 
 Direct 和 CLI 使用不同的请求类型与执行方式，继续共享事件、录制器和 transcript 投影。CLI 保留自己的认证、工具策略、模型配置与会话恢复，不消费 SelfClaw 的 Direct 能力快照。
 
@@ -95,7 +98,7 @@ checkpoint 表示“工具可能已经开始”，不提供外部文件、Shell 
 
 | 状态或资源 | 所有者与边界 |
 | --- | --- |
-| 当前执行内容与取消 | `ConversationRuntimeState` / `SubagentExecutionSession`，终态后释放 |
+| 当前执行内容与取消 | `ConversationRuntimeState` / `SubagentExecutionSession` 串行录制并提供快照，取消后等待终态再释放 |
 | 会话加载 | coordinator 的进行中加载表只合并未完成 I/O；成功、失败或取消均移除，调用者只取消自己的等待 |
 | 已完成快照 | 只保留当前选中会话；切换后不缓存旧完成会话。运行会话由 runtime state 单独持有 |
 | provider pipeline | `AiChatClientLease` 每回合释放；共享 HttpClient 继续由 provider 管理 |
@@ -115,6 +118,12 @@ token 预算仍是 UTF-8 大小的启发式估算，不是 provider tokenizer。
 
 `StoragePaths` 是五个路径值的纯 record。composition root 通过 `StoragePathDefaults` 计算默认值；DTO 不读取环境。审批、执行 checkpoint 和 preflight 契约位于 Core/Interfaces，描述真实项目边界。
 
+Desktop 配置采用同目录临时文件与原子替换；保存成功后功能服务才更新已确认缓存并发布变更。Agent 定义编辑/绑定在 `AgentSettingsService` 内完成原子读改写，VM 直接订阅并保留会话绑定的 Agent。CLI 发现由独立后台服务执行，不阻塞已确认配置读取；Vue 设置页与 composer 共用选择状态。
+
+Desktop 装配位于 `Composition/DesktopServiceRegistration.cs`。`App` 在真正 Shutdown 前等待窗口/VM 初始化、停止请求与回合准入、取消并等待交互和后台工作、flush Pet 位置、排空 Terminal/Plugin 资源，再释放 DI 服务；初始化等待与关闭各有 20 秒预算，超时明确记录。`OnExit` 不承载异步清理。
+
+Transcript 的 diff/ACK/重放归 `TranscriptDelivery` 与 Vue `transcriptBridge`，最多三次完整重试；通用 Channel 不持有 feature 状态。审批展示归 `ToolApprovalPresenter`，决定归 handler；通知/Pet/托盘通过同一会话激活用例导航。Pet 资源在后台准备为冻结位图，Terminal 使用连续解码与有界尾部，Plugin 资源通过 deferral 异步读取并在读取期间另持 version lease。
+
 ## 7. 验证入口
 
 ```powershell
@@ -126,4 +135,4 @@ dotnet build SelfClaw.slnx --no-restore -p:BaseOutputPath=bin/direct-refactor-fi
 dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj --no-build --no-restore -p:BaseOutputPath=bin/direct-refactor-final/
 ```
 
-正式回归覆盖真实 AIFunction 封送、四种 provider 协议序列化、执行前 checkpoint、中断恢复、准入异常、多父调度、缓存重试、预算与 glob 边界。桌面/进程强杀 smoke 需要 `SELFCLAW_DESKTOP_SMOKE=1`；真实 provider smoke 需要 `SELFCLAW_PROVIDER_SMOKE=1`。本次未修改 Vue。
+正式回归覆盖真实 AIFunction 封送、四种 provider 协议序列化、执行前 checkpoint、中断恢复、准入异常、多父调度、缓存重试、预算与 glob 边界。Desktop 整改另覆盖 UI 线程、设置原子性、通知导航、CLI 子进程收尾、跨页面选择、消息恢复和资源 lease。桌面/进程强杀 smoke 需要 `SELFCLAW_DESKTOP_SMOKE=1`；真实 provider smoke 需要 `SELFCLAW_PROVIDER_SMOKE=1`。2026-09-14 最终验证为 .NET 821 通过/4 跳过、Vue 32 通过、Edge e2e 11 通过；环境及原生限制见 Desktop review。

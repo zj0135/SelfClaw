@@ -9,8 +9,11 @@ import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
 import { useHostBridge } from './composables/hostBridge.js';
 import { usePluginPanels } from './composables/usePluginPanels.js';
+import { useTranscriptBridge } from './composables/transcriptBridge.js';
+import { useConversationNavigation } from './composables/useConversationNavigation.js';
 
 const { on, post } = useHostBridge();
+const transcript = useTranscriptBridge();
 
 const viewRegistry = {
 	chat: markRaw(ChatView),
@@ -40,8 +43,6 @@ function toggleSidebarCollapsed() {
 		// 忽略持久化失败
 	}
 }
-const sidebarConversations = ref([]);
-const selectedConversationId = ref(null);
 const windowChrome = reactive({
 	isMaximized: false,
 });
@@ -144,86 +145,17 @@ function openPluginSettings() {
 
 // 面板上下文由宿主推送（plugin-host/context），usePluginPanels 自行订阅。外壳这里只转发
 // transcript：它本来就是外壳收到的负载，没有第二个来源可以跟它对不上。
-on('replaceState', (payload) => {
-	panels.publishTranscript({ items: payload.items || [] });
-});
+transcript.on((payload) => {
+	panels.publishTranscript({ items: payload.items || [], revision: payload.revision });
+}, { critical: false });
 
 panels.onInsertPrompt.value = (text) => chatViewRef.value?.insertPrompt?.(text);
 
-function toConversationNode(conversation) {
-	return {
-		id: conversation.id,
-		label: conversation.title || '未命名对话',
-		time: conversation.timestamp || '',
-		type: 'conversation',
-		isManagedWorktree: Boolean(conversation.isManagedWorktree),
-		workspaceRootId: conversation.workspaceRootId || null,
-		// 右键「工作目录」要用工作区根的名字与路径，不是会话标题。
-		workspaceRootName: conversation.workspaceRootName || '',
-		workspaceRootPath: conversation.workspaceRootPath || '',
-	};
-}
+const { navItems, sidebarActiveId, onSidebarAction, onSidebarSelect } = useConversationNavigation(
+	currentViewId, chatViewRef, () => { launcherOpen.value = true; });
 
-function hasWorkspace(conversation) {
-	return Boolean(conversation?.workspaceRootId || conversation?.workspaceRootPath || conversation?.workspaceRootName);
-}
-
-function buildProjectGroups(conversations) {
-	const groups = new Map();
-	for (const conversation of conversations.filter(hasWorkspace)) {
-		const key = conversation.gitRepositoryId || conversation.workspaceRootId || conversation.workspaceRootPath || conversation.workspaceRootName || 'workspace';
-		if (!groups.has(key)) {
-			groups.set(key, {
-				id: `workspace-${key}`,
-				label: conversation.gitRepositoryName || conversation.workspaceRootName || conversation.workspaceRootPath || '工作区',
-				workspaceRootId: conversation.workspaceRootId || null,
-				workspaceRootName: conversation.workspaceRootName || '',
-				workspaceRootPath: conversation.workspaceRootPath || '',
-				gitRepositoryId: conversation.gitRepositoryId || null,
-				type: 'folder',
-				children: [],
-			});
-		}
-
-		groups.get(key).children.push(toConversationNode(conversation));
-	}
-
-	return Array.from(groups.values());
-}
-
-const navItems = computed(() => [
-	{ id: 'new-chat', label: '新建对话', type: 'action' },
-	{ id: 'search', label: '搜索', type: 'action' },
-	{ id: 'plugins', label: '插件', type: 'action' },
-	{ id: 'extensions', label: '扩展功能', type: 'action' },
-	{ id: 'automation', label: '自动化', type: 'action' },
-	{
-		id: 'projects',
-		label: '项目',
-		type: 'group',
-		children: buildProjectGroups(sidebarConversations.value),
-	},
-	{
-		id: 'conversations',
-		label: '对话',
-		type: 'group',
-		children: sidebarConversations.value.filter((conversation) => !hasWorkspace(conversation)).map(toConversationNode),
-	},
-	{ id: 'settings', label: '设置', type: 'view' },
-]);
-
-const sidebarActiveId = computed(() => (currentViewId.value === 'settings' ? 'settings' : selectedConversationId.value));
-
-// window-state 与 replaceState 都是宿主持续广播的状态型 push；订阅即可，
-// 侧边栏只从 replaceState 里取会话列表。ChatView 单独订阅 replaceState
-// 渲染对话，故这里两处订阅者共存。
 on('window-state', (payload) => {
 	windowChrome.isMaximized = Boolean(payload.isMaximized);
-});
-
-on('replaceState', (payload) => {
-	sidebarConversations.value = Array.isArray(payload.conversations) ? payload.conversations : [];
-	selectedConversationId.value = payload.selectedConversationId || null;
 });
 
 function onWindowDragPointerDown(event) {
@@ -297,64 +229,6 @@ function closeImagePreview() {
 	imagePreview.value = null;
 }
 
-function onSidebarAction(action) {
-	const actionId = typeof action === 'string' ? action : action?.id;
-	switch (actionId) {
-		case 'new-chat':
-		case 'add-conversations':
-			currentViewId.value = 'chat';
-			selectedConversationId.value = null;
-			post({ type: 'new-chat' });
-			break;
-		case 'add-projects':
-			currentViewId.value = 'chat';
-			nextTick(() => chatViewRef.value?.browseWorkspaceFolder());
-			break;
-		case 'plugins':
-			launcherOpen.value = true;
-			break;
-		case 'delete-conversation':
-			if (action?.conversationId) {
-				let removeManagedWorktree = false;
-				if (action.isManagedWorktree) {
-					if (!window.confirm('确认删除该会话？工作树可以继续保留。')) break;
-					removeManagedWorktree = window.confirm('是否同时安全移除工作树？仅已合并且无未提交更改时可移除。');
-				}
-
-				post({
-					type: 'delete-conversation',
-					conversationId: action.conversationId,
-					removeManagedWorktree,
-				});
-			}
-			break;
-		case 'clear-conversations':
-			if (Array.isArray(action?.conversationIds) && action.conversationIds.length > 0) {
-				post({ type: 'clear-conversations', conversationIds: action.conversationIds });
-			}
-			break;
-		case 'delete-workspace-root':
-			if (action?.workspaceRootId) {
-				post({ type: 'delete-workspace-root', workspaceRootId: action.workspaceRootId });
-			}
-			break;
-		default:
-			break;
-	}
-}
-
-function onSidebarSelect(id) {
-	if (id in viewRegistry) {
-		currentViewId.value = id;
-		return;
-	}
-
-	if (sidebarConversations.value.some((conversation) => conversation.id === id)) {
-		currentViewId.value = 'chat';
-		post({ type: 'select-conversation', conversationId: id });
-	}
-}
-
 onMounted(() => {
 	document.addEventListener('click', handleDocumentClick);
 	document.addEventListener('keydown', onDocumentKeydown);
@@ -376,6 +250,9 @@ onUnmounted(() => {
 				<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>
 				<WindowControls :is-maximized="windowChrome.isMaximized" :panel-visible="panelVisible"
 					@action="onWindowControlAction" />
+			</div>
+			<div v-if="transcript.error.value" class="transcript-recovery" role="alert">
+				{{ transcript.error.value }} <button type="button" @click="transcript.resynchronize">Reload</button>
 			</div>
 			<div class="main-body">
 				<div class="main-content">

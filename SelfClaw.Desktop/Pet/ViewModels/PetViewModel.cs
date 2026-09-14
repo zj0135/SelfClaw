@@ -12,14 +12,12 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly ILogger<PetViewModel>? _logger;
     private readonly PetActivityPresenter? _activityPresenter;
-    private readonly PetPackageCatalog _packageCatalog;
     private readonly PetBehavior _behavior = new();
     private readonly DispatcherTimer _waitingTimer;
     private readonly DispatcherTimer _ambientTimer;
     private SpriteAnimator? _animator;
     private ImageSource? _currentFrame;
     private BitmapScalingMode _bitmapScalingMode = BitmapScalingMode.HighQuality;
-    private string? _loadError;
     private string _bubbleText = "Ready.";
     private string _bubbleTitle = "SelfClaw";
     private string? _bubbleDetail;
@@ -29,23 +27,10 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     private bool _canOpenConversation;
     private bool _disposed;
 
-    public PetViewModel()
-        : this(
-            logger: null,
-            activityPresenter: null,
-            new PetPackageCatalog(NullLogger<PetPackageCatalog>.Instance))
+    internal PetViewModel(ILogger<PetViewModel>? logger, PetActivityPresenter? activityPresenter)
     {
-    }
-
-    internal PetViewModel(
-        ILogger<PetViewModel>? logger,
-        PetActivityPresenter? activityPresenter,
-        PetPackageCatalog packageCatalog)
-    {
-        ArgumentNullException.ThrowIfNull(packageCatalog);
         _logger = logger;
         _activityPresenter = activityPresenter;
-        _packageCatalog = packageCatalog;
         _waitingTimer = new DispatcherTimer();
         _waitingTimer.Tick += OnWaitingTimerTick;
         _ambientTimer = new DispatcherTimer();
@@ -69,12 +54,6 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     {
         get => _bitmapScalingMode;
         private set => SetField(ref _bitmapScalingMode, value);
-    }
-
-    public string? LoadError
-    {
-        get => _loadError;
-        private set => SetField(ref _loadError, value);
     }
 
     public string BubbleText
@@ -127,32 +106,24 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _canOpenConversation, value);
     }
 
-    public void Load(PetSettings settings)
+    internal void Install(PetSettings settings, PetLoadedPackage package)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(package);
         ThrowIfDisposed();
+        var sheet = package.SpriteSheet;
+        var firstFrame = sheet.GetFrame(PetLayout.IdleRowId, 0);
+        var animator = new SpriteAnimator(sheet, PetLayout.IdleRowId);
+        if (_animator is not null)
+        {
+            _animator.FrameChanged -= OnFrameChanged;
+            _animator.Dispose();
+        }
+        _animator = animator;
+        _animator.FrameChanged += OnFrameChanged;
+        CurrentFrame = firstFrame;
         BitmapScalingMode = settings.PixelArt ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.HighQuality;
-
-        try
-        {
-            var package = _packageCatalog.Load(settings);
-            var sheet = package.SpriteSheet;
-
-            _animator?.Dispose();
-            _animator = new SpriteAnimator(sheet, PetLayout.IdleRowId);
-            _animator.FrameChanged += OnFrameChanged;
-            CurrentFrame = sheet.GetFrame(PetLayout.IdleRowId, 0);
-            var behaviorResult = _behavior.ConfigureRows(sheet.RowIds);
-            SetAnimationRow(behaviorResult.AnimationRowId);
-            LoadError = package.Warning;
-        }
-        catch (Exception exception)
-        {
-            _logger?.LogWarning(exception, "Failed to load pet spritesheet.");
-            _animator?.Dispose();
-            _animator = null;
-            CurrentFrame = null;
-            LoadError = exception.Message;
-        }
+        SetAnimationRow(_behavior.ConfigureRows(sheet.RowIds).AnimationRowId);
     }
 
     public void StartAnimation()

@@ -1,6 +1,8 @@
+using SelfClaw.Desktop.Services.Settings;
 using SelfClaw.Core.Runtime;
 using System.IO;
-using System.Text;
+using Microsoft.Extensions.Logging;
+using SelfClaw.Desktop.Services.Plugins.Models;
 using System.Text.Json;
 using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
@@ -37,8 +39,19 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
     private readonly DesktopSettingsJsonStore _settingsStore;
     private readonly WebViewHostChannel _hostChannel;
     private readonly Dispatcher _dispatcher;
-    private readonly Dictionary<string, OpenPlugin> _openPlugins = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, OpenPluginPanelSession> _openPlugins = new(StringComparer.OrdinalIgnoreCase);
     private CoreWebView2? _webView;
+    private readonly PluginPanelResourceReader _resources;
+    private readonly ILogger<PluginPanelHostController> _logger;
+    private readonly SemaphoreSlim _openGate = new(1, 1);
+    private readonly object _stateGate = new();
+    private readonly Dictionary<string, long> _pluginGenerations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _panelGenerations = new(StringComparer.OrdinalIgnoreCase);
+    private bool _stopping;
+    private bool _disposed;
+    private int _resourceCount;
+    private TaskCompletionSource? _resourcesDrained;
+
 
     public PluginPanelHostController(
         IPluginPanelCatalog catalog,
@@ -46,7 +59,9 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
         IPluginVersionLeaseManager versionLeaseManager,
         DesktopSettingsJsonStore settingsStore,
         WebViewHostChannel hostChannel,
-        Dispatcher dispatcher)
+        Dispatcher dispatcher,
+        PluginPanelResourceReader resources,
+        ILogger<PluginPanelHostController> logger)
     {
         _catalog = catalog;
         _packageRepository = packageRepository;
@@ -54,6 +69,9 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
         _settingsStore = settingsStore;
         _hostChannel = hostChannel;
         _dispatcher = dispatcher;
+        _resources = resources;
+        _logger = logger;
+        _hostChannel.ReadyChanged += OnHostReadyChanged;
     }
 
     /// <summary>
@@ -85,13 +103,7 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
         {
             return type switch
             {
-                "plugin-host/get-panels" => new
-                {
-                    type,
-                    requestId,
-                    panels = await ListAvailablePanelsAsync(cancellationToken),
-                    tabs = await ReadPersistedTabsAsync(cancellationToken)
-                },
+                "plugin-host/get-panels" => await GetPanelsResponseAsync(type, requestId, cancellationToken),
                 "plugin-host/open" => await OpenAsync(type, requestId, payload, cancellationToken),
                 "plugin-host/close" => CloseTab(type, requestId, payload),
                 "plugin-host/save-tabs" => await SaveTabsAsync(type, requestId, payload, cancellationToken),
@@ -143,128 +155,158 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
             return null;
         }
 
-        return _openPlugins.TryGetValue(panelKey.Split('/')[0], out var open) && open.PanelKeys.Contains(panelKey)
+        lock (_stateGate) return _openPlugins.TryGetValue(panelKey.Split('/')[0], out var open) && open.PanelKeys.Contains(panelKey)
             ? open.Permissions
             : null;
     }
 
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        lock (_stateGate) _stopping = true;
+        await _openGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        _openGate.Release();
+        Task pending;
+        lock (_stateGate)
+            pending = _resourceCount == 0 ? Task.CompletedTask :
+                (_resourcesDrained ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+        await pending.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public void Dispose()
     {
-        if (_webView is not null)
+        if (_webView is not null && !_dispatcher.CheckAccess())
         {
-            _webView.WebResourceRequested -= OnWebResourceRequested;
+            _dispatcher.Invoke(Dispose);
+            return;
         }
-
-        foreach (var pluginId in _openPlugins.Keys.ToArray())
+        lock (_stateGate)
         {
-            ReleasePlugin(pluginId);
+            if (_disposed) return;
+            _disposed = _stopping = true;
+            _hostChannel.ReadyChanged -= OnHostReadyChanged;
+            if (_webView is not null)
+            {
+                _webView.WebResourceRequested -= OnWebResourceRequested;
+                _webView.RemoveWebResourceRequestedFilter(ResourceFilter, CoreWebView2WebResourceContext.All);
+            }
+            foreach (var pluginId in _openPlugins.Keys.ToArray()) ReleasePlugin(pluginId);
+            _webView = null;
         }
-
-        _webView = null;
     }
 
     private void EvictPlugin(string pluginId)
     {
-        if (!_openPlugins.ContainsKey(pluginId))
+        lock (_stateGate)
         {
-            return;
+            _pluginGenerations[pluginId] = _pluginGenerations.GetValueOrDefault(pluginId) + 1;
+            ReleasePlugin(pluginId);
         }
-
-        ReleasePlugin(pluginId);
         _hostChannel.PostPush(new { type = "plugin-host/evict", pluginId });
     }
 
     private void ReleasePlugin(string pluginId)
     {
-        if (!_openPlugins.Remove(pluginId, out var open))
-        {
-            return;
-        }
+        if (!_openPlugins.Remove(pluginId, out var open)) return;
+        try { _webView?.ClearVirtualHostNameToFolderMapping(open.HostName); }
+        catch (InvalidOperationException exception) { _logger.LogDebug(exception, "Plugin WebView mapping already closed."); }
+        finally { open.Dispose(); }
+    }
 
+    private async Task<object> OpenAsync(string type, string? requestId, JsonElement payload, CancellationToken cancellationToken)
+    {
+        var key = ReadString(payload, "panelKey") ?? throw new ArgumentException("panelKey is required.");
+        var pluginId = key.Split('/')[0];
+        long pluginGeneration;
+        long panelGeneration;
+        lock (_stateGate)
+        {
+            _pluginGenerations.TryAdd(pluginId, 0);
+            pluginGeneration = _pluginGenerations.GetValueOrDefault(pluginId);
+            panelGeneration = _panelGenerations.GetValueOrDefault(key);
+        }
+        await _openGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        OpenPluginPanelSession? candidate = null;
+        var transferred = false;
+        var ownsCandidate = false;
         try
         {
-            _webView?.ClearVirtualHostNameToFolderMapping(open.HostName);
-        }
-        catch (InvalidOperationException)
-        {
-            // The WebView is already torn down; the lease still has to be released.
-        }
-
-        open.Lease.Dispose();
-    }
-
-    private async Task<object> OpenAsync(
-        string type,
-        string? requestId,
-        JsonElement payload,
-        CancellationToken cancellationToken)
-    {
-        var key = ReadString(payload, "panelKey")
-            ?? throw new ArgumentException("panelKey is required.");
-        var panel = (await ListAvailablePanelsAsync(cancellationToken))
-            .FirstOrDefault(candidate => string.Equals(candidate.Key, key, StringComparison.OrdinalIgnoreCase))
-            ?? throw new KeyNotFoundException($"Panel '{key}' is not available.");
-        if (!_openPlugins.TryGetValue(panel.PluginId, out var open))
-        {
-            if (_openPlugins.Count >= MaximumOpenPanels)
+            lock (_stateGate) ObjectDisposedException.ThrowIf(_stopping || _disposed, this);
+            var panel = (await ListAvailablePanelsAsync(cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase))
+                ?? throw new KeyNotFoundException($"Panel '{key}' is not available.");
+            lock (_stateGate) _openPlugins.TryGetValue(panel.PluginId, out candidate);
+            var existing = candidate is not null;
+            if (!existing)
             {
-                throw new InvalidOperationException($"At most {MaximumOpenPanels} plugins can be open at once.");
+                candidate = await AcquirePluginAsync(panel, cancellationToken).ConfigureAwait(false);
+                ownsCandidate = true;
             }
-
-            open = await AcquirePluginAsync(panel, cancellationToken);
-            _openPlugins.Add(panel.PluginId, open);
+            var session = candidate ?? throw new InvalidOperationException("The panel has no version session.");
+            void Commit()
+            {
+                lock (_stateGate)
+                {
+                    if (_stopping || _disposed || _pluginGenerations.GetValueOrDefault(pluginId) != pluginGeneration ||
+                        _panelGenerations.GetValueOrDefault(key) != panelGeneration)
+                        throw new InvalidOperationException("The panel was closed while it was opening.");
+                    if (!session.PanelKeys.Contains(panel.Key) && _openPlugins.Values.Sum(item => item.PanelKeys.Count) >= MaximumOpenPanels)
+                        throw new InvalidOperationException($"At most {MaximumOpenPanels} panels can be open at once.");
+                    if (!existing)
+                    {
+                        _webView?.SetVirtualHostNameToFolderMapping(session.HostName, session.RootPath, CoreWebView2HostResourceAccessKind.DenyCors);
+                        _openPlugins.Add(panel.PluginId, session);
+                    }
+                    session.PanelKeys.Add(panel.Key);
+                    transferred = true;
+                }
+                foreach (var handler in PanelOpened?.GetInvocationList().Cast<Action>() ?? [])
+                {
+                    try { handler(); }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception exception) { _logger.LogError(exception, "Plugin panel observer failed after open."); }
+                }
+            }
+            if (_webView is not null && !_dispatcher.CheckAccess()) await _dispatcher.InvokeAsync(Commit, DispatcherPriority.Normal, cancellationToken);
+            else { cancellationToken.ThrowIfCancellationRequested(); Commit(); }
+            return new { type, requestId, ok = true, panel, url = $"{panel.Url}?__selfclaw_panel={Uri.EscapeDataString(panel.Key)}" };
         }
-
-        open.PanelKeys.Add(panel.Key);
-        PanelOpened?.Invoke();
-        return new
+        finally
         {
-            type,
-            requestId,
-            ok = true,
-            panel,
-            url = $"{panel.Url}?__selfclaw_panel={Uri.EscapeDataString(panel.Key)}"
-        };
+            if (!transferred && ownsCandidate) candidate?.Dispose();
+            _openGate.Release();
+        }
     }
 
-    private async Task<OpenPlugin> AcquirePluginAsync(PluginPanelView panel, CancellationToken cancellationToken)
+    private async Task<OpenPluginPanelSession> AcquirePluginAsync(PluginPanelView panel, CancellationToken cancellationToken)
     {
-        var package = await _packageRepository.GetPackageAsync(ExtensionKind.Plugin, panel.PluginId, cancellationToken)
+        var package = await _packageRepository.GetPackageAsync(ExtensionKind.Plugin, panel.PluginId, cancellationToken).ConfigureAwait(false)
             ?? throw new KeyNotFoundException($"Plugin '{panel.PluginId}' is not installed.");
-        // The lease is what keeps this exact version directory on disk while the tab is open, so an
-        // update that lands mid-session cannot swap files out from under a running panel.
+        if (!package.IsEnabled) throw new InvalidOperationException("The plugin was disabled while opening.");
+        var currentPanel = (await ListAvailablePanelsAsync(cancellationToken).ConfigureAwait(false))
+            .FirstOrDefault(item => string.Equals(item.Key, panel.Key, StringComparison.OrdinalIgnoreCase));
+        if (currentPanel is null || currentPanel.Url != panel.Url ||
+            !currentPanel.Permissions.SequenceEqual(panel.Permissions, StringComparer.Ordinal) ||
+            !currentPanel.NetworkOrigins.SequenceEqual(panel.NetworkOrigins, StringComparer.Ordinal))
+            throw new InvalidOperationException("The plugin permissions or panel changed while opening; retry the operation.");
         var lease = _versionLeaseManager.Acquire(package.InstallPath);
         try
         {
-            var hostName = $"{panel.PluginId}{PluginPanelOrigin.HostSuffix}";
-            _webView?.SetVirtualHostNameToFolderMapping(
-                hostName,
-                package.InstallPath,
-                CoreWebView2HostResourceAccessKind.DenyCors);
-            return new OpenPlugin(
-                panel.PluginId,
-                hostName,
-                Path.GetFullPath(package.InstallPath),
-                lease,
-                BuildContentSecurityPolicy(panel.NetworkOrigins),
-                panel.Permissions);
+            return new OpenPluginPanelSession(panel.PluginId, $"{panel.PluginId}{PluginPanelOrigin.HostSuffix}",
+                Path.GetFullPath(package.InstallPath), lease,
+                PluginPanelResourceReader.BuildContentSecurityPolicy(panel.NetworkOrigins), panel.Permissions);
         }
-        catch
-        {
-            lease.Dispose();
-            throw;
-        }
+        catch { lease.Dispose(); throw; }
     }
 
     private object CloseTab(string type, string? requestId, JsonElement payload)
     {
         var key = ReadString(payload, "panelKey") ?? throw new ArgumentException("panelKey is required.");
         var pluginId = key.Split('/')[0];
-        if (_openPlugins.TryGetValue(pluginId, out var open) &&
-            open.PanelKeys.Remove(key) &&
-            open.PanelKeys.Count == 0)
+        lock (_stateGate)
         {
-            ReleasePlugin(pluginId);
+            _panelGenerations[key] = _panelGenerations.GetValueOrDefault(key) + 1;
+            if (_openPlugins.TryGetValue(pluginId, out var open) && open.PanelKeys.Remove(key) && open.PanelKeys.Count == 0)
+                ReleasePlugin(pluginId);
         }
 
         return new { type, requestId, ok = true };
@@ -279,25 +321,31 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
         var tabs = payload.TryGetProperty("tabs", out var tabsElement) && tabsElement.ValueKind == JsonValueKind.Array
             ? tabsElement.EnumerateArray()
                 .Where(item => item.ValueKind == JsonValueKind.String)
-                .Select(item => item.GetString()!)
+                .Select(item => item.GetString() ?? string.Empty)
                 .Take(MaximumOpenPanels)
                 .ToArray()
             : [];
         await _settingsStore.WriteNodeAsync(
             TabsSettingsNode,
-            new PersistedTabs(tabs, ReadString(payload, "activeKey")),
+            new PersistedPluginTabs(tabs, ReadString(payload, "activeKey")),
             JsonOptions,
             cancellationToken);
         return new { type, requestId, ok = true };
     }
 
-    private async Task<IReadOnlyList<string>> ReadPersistedTabsAsync(CancellationToken cancellationToken)
+    private async Task<object> GetPanelsResponseAsync(string type, string? requestId, CancellationToken cancellationToken)
     {
-        var persisted = await _settingsStore.ReadNodeAsync<PersistedTabs>(
-            TabsSettingsNode,
-            JsonOptions,
-            cancellationToken);
-        return persisted?.Tabs ?? [];
+        var panels = await ListAvailablePanelsAsync(cancellationToken).ConfigureAwait(false);
+        var persisted = await _settingsStore.ReadNodeAsync<PersistedPluginTabs>(TabsSettingsNode, JsonOptions, cancellationToken).ConfigureAwait(false);
+        var tabs = persisted?.Tabs ?? [];
+        return new { type, requestId, panels, tabs, activeKey = persisted?.ActiveKey is { } active && tabs.Contains(active) ? active : null };
+    }
+
+    private void OnHostReadyChanged(bool ready)
+    {
+        if (ready) return;
+        lock (_stateGate)
+            foreach (var pluginId in _pluginGenerations.Keys.ToArray()) _pluginGenerations[pluginId]++;
     }
 
     // Only panels whose Plugin is enabled and whose permissions were acknowledged are offered. A panel
@@ -311,144 +359,50 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
     private void OnWebResourceRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
     {
         var environment = _webView?.Environment;
-        if (environment is null)
+        if (environment is null) return;
+        OpenPluginPanelSession? session = null;
+        Uri? uri = null;
+        lock (_stateGate)
         {
+            if (!_stopping && Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out uri) && uri.Scheme == "https" && uri.IsDefaultPort &&
+                uri.Host.EndsWith(PluginPanelOrigin.HostSuffix, StringComparison.OrdinalIgnoreCase))
+                _openPlugins.TryGetValue(uri.Host[..^PluginPanelOrigin.HostSuffix.Length], out session);
+        }
+        if (session is null || uri is null)
+        {
+            e.Response = environment.CreateWebResourceResponse(null, 404, "Not Found", "Content-Type: text/plain");
             return;
         }
-
-        if (!TryResolveAsset(e.Request.Uri, out var filePath, out var open))
-        {
-            e.Response = environment.CreateWebResourceResponse(
-                null,
-                404,
-                "Not Found",
-                "Content-Type: text/plain");
-            return;
-        }
-
-        var bytes = File.ReadAllBytes(filePath);
-        e.Response = environment.CreateWebResourceResponse(
-            new MemoryStream(bytes),
-            200,
-            "OK",
-            string.Join(
-                "\r\n",
-                $"Content-Type: {ResolveContentType(filePath)}",
-                $"Content-Security-Policy: {open.ContentSecurityPolicy}",
-                "X-Content-Type-Options: nosniff",
-                "Cache-Control: no-cache"));
+        var deferral = e.GetDeferral();
+        lock (_stateGate) _resourceCount++;
+        _ = CompleteResourceAsync(environment, e, deferral, session, Uri.UnescapeDataString(uri.AbsolutePath));
     }
 
-    private bool TryResolveAsset(string requestUri, out string filePath, out OpenPlugin open)
+    private async Task CompleteResourceAsync(CoreWebView2Environment environment, CoreWebView2WebResourceRequestedEventArgs request,
+        CoreWebView2Deferral deferral, OpenPluginPanelSession session, string path)
     {
-        filePath = string.Empty;
-        open = null!;
-        if (!Uri.TryCreate(requestUri, UriKind.Absolute, out var uri) ||
-            !uri.Host.EndsWith(PluginPanelOrigin.HostSuffix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var pluginId = uri.Host[..^PluginPanelOrigin.HostSuffix.Length];
-        // A closed panel's origin must stop resolving even if the virtual host mapping outlives it,
-        // otherwise a disabled Plugin could keep serving from a directory that is about to be deleted.
-        if (!_openPlugins.TryGetValue(pluginId, out var candidate))
-        {
-            return false;
-        }
-
-        var relativePath = Uri.UnescapeDataString(uri.AbsolutePath);
-        if (!TryResolvePackageAsset(candidate.RootPath, relativePath, out filePath))
-        {
-            return false;
-        }
-
-        open = candidate;
-        return true;
-    }
-
-    /// <summary>
-    /// Resolves a request path against the version directory a panel is pinned to. Kept separate so the
-    /// containment rule can be tested directly: everything a panel is allowed to read is decided here.
-    /// </summary>
-    internal static bool TryResolvePackageAsset(string rootPath, string requestPath, out string filePath)
-    {
-        filePath = string.Empty;
-        var relativePath = requestPath.TrimStart('/');
-        if (relativePath.Length == 0 ||
-            Path.IsPathRooted(relativePath) ||
-            relativePath.Split('/', '\\').Any(segment => segment is ".." or "."))
-        {
-            return false;
-        }
-
-        var root = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        string resolved;
         try
         {
-            resolved = Path.GetFullPath(Path.Combine(root, relativePath));
+            using var lease = _versionLeaseManager.Acquire(session.RootPath);
+            var resource = await _resources.ReadAsync(session.RootPath, path, session.ContentSecurityPolicy);
+            lock (_stateGate)
+                if (_stopping || !_openPlugins.TryGetValue(session.PluginId, out var current) || !ReferenceEquals(current, session))
+                    resource = PluginPanelResourceReader.Failure(410, "Gone");
+            request.Response = environment.CreateWebResourceResponse(new MemoryStream(resource.Content, writable: false),
+                resource.StatusCode, resource.Reason, resource.Headers);
         }
-        catch (ArgumentException)
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception)
         {
-            return false;
+            _logger.LogWarning(exception, "Plugin resource response failed for {PluginId}.", session.PluginId);
+            request.Response = environment.CreateWebResourceResponse(null, 500, "Resource Error", "Content-Type: text/plain");
         }
-
-        if (!resolved.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(resolved))
+        finally
         {
-            return false;
+            try { deferral.Complete(); }
+            finally { lock (_stateGate) if (--_resourceCount == 0) _resourcesDrained?.TrySetResult(); }
         }
-
-        filePath = resolved;
-        return true;
     }
-
-    // A panel that declares no network permission gets connect-src 'self', which means it cannot reach
-    // anything off the local package. Each approved origin is opened for both script-initiated requests
-    // (connect-src, used by fetch/XHR/WebSocket) and direct media loads (img-src, used by <img>): many
-    // media endpoints do not answer CORS preflights, so a blob fetched with credentials would be blocked
-    // while a plain <img> load would succeed. frame-ancestors keeps the panel from being embedded anywhere
-    // but the shell, so its postMessage parent is always the shell.
-    private static string BuildContentSecurityPolicy(IReadOnlyList<string> networkOrigins)
-    {
-        // The approved origins are the same for image loads and script requests: reusing one list keeps
-        // "what the manifest approved" == "what the CSP sends through" on every directive that splits.
-        var approved = networkOrigins.Count == 0
-            ? "'self'"
-            : $"'self' {string.Join(' ', networkOrigins)}";
-        return string.Join(
-            " ",
-            "default-src 'self';",
-            "script-src 'self' 'unsafe-inline';",
-            "style-src 'self' 'unsafe-inline';",
-            $"img-src data: blob: {approved};",
-            "font-src 'self' data:;",
-            $"connect-src {approved};",
-            $"frame-ancestors https://{WebViewMessageRouter.ApplicationHostName};",
-            "frame-src 'none';",
-            "object-src 'none';",
-            "base-uri 'none';",
-            "form-action 'none'");
-    }
-
-    private static string ResolveContentType(string filePath)
-        => Path.GetExtension(filePath).ToLowerInvariant() switch
-        {
-            ".html" or ".htm" => "text/html; charset=utf-8",
-            ".js" or ".mjs" => "text/javascript; charset=utf-8",
-            ".css" => "text/css; charset=utf-8",
-            ".json" or ".map" => "application/json; charset=utf-8",
-            ".svg" => "image/svg+xml",
-            ".png" => "image/png",
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".gif" => "image/gif",
-            ".webp" => "image/webp",
-            ".ico" => "image/x-icon",
-            ".woff2" => "font/woff2",
-            ".woff" => "font/woff",
-            ".wasm" => "application/wasm",
-            ".txt" or ".md" => "text/plain; charset=utf-8",
-            _ => "application/octet-stream"
-        };
 
     private static string? ReadString(JsonElement payload, string propertyName)
     {
@@ -461,22 +415,4 @@ internal sealed class PluginPanelHostController : IPluginPanelSessionRegistry, I
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
-    private sealed record PersistedTabs(IReadOnlyList<string> Tabs, string? ActiveKey);
-
-    private sealed class OpenPlugin(
-        string pluginId,
-        string hostName,
-        string rootPath,
-        IDisposable lease,
-        string contentSecurityPolicy,
-        IReadOnlyList<string> permissions)
-    {
-        public string PluginId { get; } = pluginId;
-        public string HostName { get; } = hostName;
-        public string RootPath { get; } = rootPath;
-        public IDisposable Lease { get; } = lease;
-        public string ContentSecurityPolicy { get; } = contentSecurityPolicy;
-        public IReadOnlyList<string> Permissions { get; } = permissions;
-        public HashSet<string> PanelKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
-    }
 }

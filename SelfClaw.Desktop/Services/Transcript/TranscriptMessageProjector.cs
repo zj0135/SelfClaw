@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Transcript.Views;
 using System.IO;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Options;

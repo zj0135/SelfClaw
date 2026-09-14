@@ -1,6 +1,6 @@
+using SelfClaw.Desktop.Services.Settings;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using SelfClaw.Desktop.Services;
 
 namespace SelfClaw.Desktop.Pet;
 

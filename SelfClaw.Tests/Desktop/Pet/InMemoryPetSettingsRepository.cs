@@ -12,6 +12,7 @@ internal sealed class InMemoryPetSettingsRepository : IPetSettingsRepository
     public PetSettings Settings { get; private set; }
 
     public int SaveCount { get; private set; }
+    public Exception? SaveError { get; set; }
 
     public Task<PetSettings> LoadAsync(CancellationToken cancellationToken = default)
     {
@@ -22,6 +23,7 @@ internal sealed class InMemoryPetSettingsRepository : IPetSettingsRepository
     public Task SaveAsync(PetSettings settings, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (SaveError is not null) throw SaveError;
         Settings = settings;
         SaveCount++;
         return Task.CompletedTask;

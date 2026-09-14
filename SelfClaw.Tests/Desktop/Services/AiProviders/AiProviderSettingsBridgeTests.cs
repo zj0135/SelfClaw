@@ -81,29 +81,13 @@ public sealed class AiProviderSettingsBridgeTests
     }
 
     [Fact]
-    public async Task List_and_desktop_default_changes_publish_the_authoritative_model_selection()
+    public async Task List_returns_the_authoritative_scoped_default_in_its_response()
     {
         var service = new RecordingSettingsService();
         var bridge = new AiProviderSettingsBridge(service, service);
-        var selections = new List<Guid?>();
-        bridge.ModelSelectionChanged += selections.Add;
-
-        using (var listDocument = JsonDocument.Parse("{}"))
-        {
-            await bridge.TryHandleAsync("ai-providers/list-enabled-models", listDocument.RootElement);
-        }
-
-        using (var defaultDocument = JsonDocument.Parse(DefaultModelPayload("desktop-default")))
-        {
-            await bridge.TryHandleAsync("ai-providers/set-default-model", defaultDocument.RootElement);
-        }
-
-        using (var otherScopeDocument = JsonDocument.Parse(DefaultModelPayload("other-scope")))
-        {
-            await bridge.TryHandleAsync("ai-providers/set-default-model", otherScopeDocument.RootElement);
-        }
-
-        selections.Should().Equal(service.DefaultModelId, RecordingSettingsService.ModelId);
+        using var listDocument = JsonDocument.Parse("{}");
+        var response = await bridge.TryHandleAsync("ai-providers/list-enabled-models", listDocument.RootElement);
+        SerializeResponse(response).GetProperty("defaultModelProfileId").GetGuid().Should().Be(service.DefaultModelId);
     }
 
     [Fact]

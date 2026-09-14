@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Notifications;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;

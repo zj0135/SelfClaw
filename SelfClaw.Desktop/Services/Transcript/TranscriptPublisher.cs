@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Transcript.Views;
 using System.Windows.Threading;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
 using SelfClaw.Desktop.Services.WebView;
@@ -9,7 +10,7 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
     private static readonly TimeSpan StreamingPublishInterval = TimeSpan.FromMilliseconds(120);
 
     private readonly TranscriptProjection _projection;
-    private readonly WebViewHostChannel _hostChannel;
+    private readonly TranscriptDelivery _delivery;
     private readonly Dispatcher _dispatcher;
     private readonly DispatcherTimer _streamingTimer;
     private Func<bool, TranscriptProjectionRequest>? _requestFactory;
@@ -20,11 +21,11 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
 
     public TranscriptPublisher(
         TranscriptProjection projection,
-        WebViewHostChannel hostChannel,
+        TranscriptDelivery delivery,
         Dispatcher dispatcher)
     {
         _projection = projection;
-        _hostChannel = hostChannel;
+        _delivery = delivery;
         _dispatcher = dispatcher;
         _streamingTimer = new DispatcherTimer(DispatcherPriority.Background, dispatcher)
         {
@@ -157,7 +158,7 @@ internal sealed class TranscriptPublisher : ITranscriptChangeSink, IDisposable
         var state = _projection.Build(request);
         if (state is not null)
         {
-            _hostChannel.PublishTranscript(state);
+            _delivery.Publish(state);
         }
 
         // Every publish - coalesced or immediate - starts the next coalescing window, so an

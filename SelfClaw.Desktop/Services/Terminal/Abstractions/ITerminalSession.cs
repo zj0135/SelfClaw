@@ -1,6 +1,6 @@
 namespace SelfClaw.Desktop.Services.Terminal.Abstractions;
 
-public interface ITerminalSession : IDisposable
+public interface ITerminalSession : IDisposable, IAsyncDisposable
 {
     event EventHandler<string>? OutputReceived;
 
@@ -8,7 +8,7 @@ public interface ITerminalSession : IDisposable
 
     void Start();
 
-    void WriteInput(string input);
+    Task WriteInputAsync(string input, CancellationToken cancellationToken = default);
 
     void Resize(int columns, int rows);
 }

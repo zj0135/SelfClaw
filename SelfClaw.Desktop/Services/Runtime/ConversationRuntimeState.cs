@@ -12,7 +12,12 @@ namespace SelfClaw.Desktop.Services.Runtime;
 internal sealed class ConversationRuntimeState : IDisposable
 {
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly object _gate = new();
     private readonly List<MessageRecord> _messages = [];
+    private readonly List<ToolExecutionRecord> _toolRuns = [];
+    private ConversationTranscriptSnapshot? _snapshot;
+    private int _disposed;
+    private int _running = 1;
     private readonly Dictionary<Guid, (StreamingAssistantContent Stream, long MaterializedRevision)> _messageStreams = [];
 
     public ConversationRuntimeState(
@@ -24,7 +29,7 @@ internal sealed class ConversationRuntimeState : IDisposable
         Conversation = conversation;
         IsDetached = isDetached;
         _messages.AddRange(messages);
-        ToolRuns.AddRange(toolRuns);
+        _toolRuns.AddRange(toolRuns);
     }
 
     public ConversationRecord Conversation { get; set; }
@@ -33,23 +38,30 @@ internal sealed class ConversationRuntimeState : IDisposable
 
     public bool IsDetached { get; }
 
-    public IReadOnlyList<MessageRecord> Messages
+    public IReadOnlyList<MessageRecord> Messages => CaptureSnapshot().Messages;
+
+    public IReadOnlyList<ToolExecutionRecord> ToolRuns => CaptureSnapshot().ToolRuns;
+
+    public ConversationTranscriptSnapshot CaptureSnapshot()
     {
-        get
+        lock (_gate)
         {
+            if (_snapshot is not null) return _snapshot;
             MaterializeStreamingMessages();
-            return _messages;
+            return _snapshot = new ConversationTranscriptSnapshot(_messages.ToArray(), _toolRuns.ToArray());
         }
     }
-
-    public List<ToolExecutionRecord> ToolRuns { get; } = [];
 
     /// <summary>Latest RunStatusEvent text, shown while the streaming message has no content yet.</summary>
     public string? ActivityText { get; set; }
 
     public CancellationTokenSource CancellationTokenSource { get; } = new();
 
-    public bool IsRunning { get; set; } = true;
+    public bool IsRunning
+    {
+        get => Volatile.Read(ref _running) != 0;
+        set => Volatile.Write(ref _running, value ? 1 : 0);
+    }
 
     public Task Completion => _completion.Task;
 
@@ -63,33 +75,54 @@ internal sealed class ConversationRuntimeState : IDisposable
 
     public void MarkCompleted() => _completion.TrySetResult();
 
-    public void Dispose() => CancellationTokenSource.Dispose();
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0) CancellationTokenSource.Dispose();
+    }
 
     public void ReplaceMessage(MessageRecord message)
     {
-        var index = _messages.FindIndex(item => item.Id == message.Id);
-        if (index >= 0)
+        lock (_gate)
         {
-            _messages[index] = message;
-        }
-        else
-        {
-            _messages.Add(message);
-        }
+            _snapshot = null;
+            var index = _messages.FindIndex(item => item.Id == message.Id);
+            if (index >= 0)
+            {
+                _messages[index] = message;
+            }
+            else
+            {
+                _messages.Add(message);
+            }
 
-        _messageStreams.Remove(message.Id);
+            _messageStreams.Remove(message.Id);
+        }
     }
 
     public void UpsertToolRun(ToolExecutionRecord record)
     {
-        var index = ToolRuns.FindIndex(item => item.Id == record.Id);
-        if (index >= 0)
+        lock (_gate)
         {
-            ToolRuns[index] = record;
+            _snapshot = null;
+            var index = _toolRuns.FindIndex(item => item.Id == record.Id);
+            if (index >= 0)
+            {
+                _toolRuns[index] = record;
+            }
+            else
+            {
+                _toolRuns.Add(record);
+            }
         }
-        else
+    }
+
+    public void ApplyStreamedToolRun(ToolExecutionRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        lock (_gate)
         {
-            ToolRuns.Add(record);
+            CaptureToolRunPlacement(record);
+            UpsertToolRun(record);
         }
     }
 
@@ -100,43 +133,51 @@ internal sealed class ConversationRuntimeState : IDisposable
     /// </summary>
     public bool ApplyAssistantDelta(Guid messageId, string deltaMarkdown)
     {
-        if (string.IsNullOrEmpty(deltaMarkdown))
+        lock (_gate)
         {
-            return false;
-        }
+            _snapshot = null;
+            if (string.IsNullOrEmpty(deltaMarkdown))
+            {
+                return false;
+            }
 
-        var message = _messages.FirstOrDefault(item => item.Id == messageId);
-        if (message is null)
-        {
-            return false;
-        }
+            var message = _messages.FirstOrDefault(item => item.Id == messageId);
+            if (message is null)
+            {
+                return false;
+            }
 
-        GetOrCreateMessageStream(message).AppendText(deltaMarkdown, DateTimeOffset.UtcNow);
-        return true;
+            GetOrCreateMessageStream(message).AppendText(deltaMarkdown, DateTimeOffset.UtcNow);
+            return true;
+        }
     }
 
     public bool ApplyAssistantThinkingDelta(Guid messageId, string deltaMarkdown)
     {
-        if (string.IsNullOrEmpty(deltaMarkdown))
+        lock (_gate)
         {
-            return false;
-        }
+            _snapshot = null;
+            if (string.IsNullOrEmpty(deltaMarkdown))
+            {
+                return false;
+            }
 
-        var message = _messages.FirstOrDefault(item => item.Id == messageId);
-        if (message is null)
-        {
-            return false;
-        }
+            var message = _messages.FirstOrDefault(item => item.Id == messageId);
+            if (message is null)
+            {
+                return false;
+            }
 
-        GetOrCreateMessageStream(message).AppendThinking(deltaMarkdown, DateTimeOffset.UtcNow);
-        return true;
+            GetOrCreateMessageStream(message).AppendThinking(deltaMarkdown, DateTimeOffset.UtcNow);
+            return true;
+        }
     }
 
     /// <summary>
     /// Places a tool run inline in its assistant message by appending a ToolCall block to the
     /// streaming content; the block ordinal is the transcript position of the tool card.
     /// </summary>
-    public ToolExecutionRecord CaptureToolRunPlacement(ToolExecutionRecord toolRun)
+    private ToolExecutionRecord CaptureToolRunPlacement(ToolExecutionRecord toolRun)
     {
         if (toolRun.MessageId is not Guid anchoredMessageId)
         {
@@ -169,13 +210,17 @@ internal sealed class ConversationRuntimeState : IDisposable
 
     public void CompleteAssistantStream(Guid messageId)
     {
-        if (!_messageStreams.TryGetValue(messageId, out var entry))
+        lock (_gate)
         {
-            return;
-        }
+            _snapshot = null;
+            if (!_messageStreams.TryGetValue(messageId, out var entry))
+            {
+                return;
+            }
 
-        entry.Stream.CompleteThinking(DateTimeOffset.UtcNow);
-        MaterializeMessage(messageId);
+            entry.Stream.CompleteThinking(DateTimeOffset.UtcNow);
+            MaterializeMessage(messageId);
+        }
     }
 
     private StreamingAssistantContent GetOrCreateMessageStream(MessageRecord message)

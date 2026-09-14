@@ -1,34 +1,7 @@
 <script setup>
-import { onMounted, ref } from 'vue'
-import { Eye, EyeOff, Check } from 'lucide-vue-next'
-import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js'
-
-const { requestLatest } = useHostBridge()
-
-const petVisible = ref(false)
-const selectedPet = ref('')
-const pets = ref([])
-const syncPending = ref(false)
-const syncError = ref('')
-
-function normalizePetId(id) {
-  if (pets.value.some((pet) => pet.id === id)) return id
-  return pets.value[0]?.id || ''
-}
-
-function applyPetPackages(value) {
-  if (!Array.isArray(value)) return
-  pets.value = value.map((pet) => ({
-    id: String(pet?.id || ''),
-    name: String(pet?.displayName || pet?.id || ''),
-    desc: String(pet?.description || ''),
-    author: String(pet?.author || ''),
-    tags: Array.isArray(pet?.tags) ? pet.tags.filter(Boolean) : [],
-    previewSrc: String(pet?.previewSrc || ''),
-    cols: Math.max(1, Number(pet?.cols) || 1),
-    rows: Math.max(1, Number(pet?.rows) || 1),
-  })).filter((pet) => pet.id)
-}
+import { Eye, EyeOff, Check } from 'lucide-vue-next';
+import { usePetSettings } from '../../composables/usePetSettings.js';
+const { petVisible, selectedPet, actualPet, pets, syncPending, syncError, toggleVisible, selectPet } = usePetSettings();
 
 function previewStyle(pet) {
   if (!pet.previewSrc) return {}
@@ -48,42 +21,6 @@ function initials(name) {
     .join('') || '?'
 }
 
-function toggleVisible() {
-  syncPetSettings('set-pet-visible', { enabled: !petVisible.value })
-}
-
-function selectPet(id) {
-  const next = normalizePetId(id)
-  if (selectedPet.value === next) return
-
-  syncPetSettings('select-builtin-pet', { petId: next })
-}
-
-// 三种操作（读取 / 显隐 / 选宠）都以 pet-settings 回包收尾，故共用一段请求逻辑。
-// 用 pet 这个固定 key 走 requestLatest：连续操作只认最新一次回包。
-async function syncPetSettings(type, payload = {}) {
-  syncError.value = ''
-  syncPending.value = true
-  try {
-    const result = await requestLatest('pet', type, payload)
-    if (result?.error) {
-      syncError.value = result.error
-    } else {
-      applyPetPackages(result?.pets)
-      petVisible.value = Boolean(result?.enabled)
-      selectedPet.value = normalizePetId(result?.selectedPetId)
-    }
-  } catch (error) {
-    // 被更新的请求取代：让那次请求继续持有 syncPending，这里静默退出。
-    if (isSuperseded(error)) return
-    syncError.value = error?.message || '与桌面应用同步失败'
-  }
-  syncPending.value = false
-}
-
-onMounted(() => {
-  syncPetSettings('get-pet-settings')
-})
 </script>
 
 <template>
@@ -105,6 +42,8 @@ onMounted(() => {
     </header>
 
     <div class="sc-page-body">
+      <p v-if="syncError" class="pet-error" role="alert">{{ syncError }}</p>
+      <p v-if="actualPet && actualPet !== selectedPet">当前加载：{{ actualPet }}</p>
       <div class="pet-grid">
         <button v-for="(pet, pi) in pets" :key="pet.id" type="button" class="pet-card sc-rise"
           :style="{ '--i': pi + 1 }" :disabled="syncPending" :data-selected="selectedPet === pet.id ? 'true' : 'false'"
@@ -135,6 +74,8 @@ onMounted(() => {
 
 <style scoped>
 @import '../../styles/settings-console.css';
+
+.pet-error { color: var(--sc-error, #ad3434); margin: 0 0 18px; }
 
 .pet-view * {
   box-sizing: border-box;

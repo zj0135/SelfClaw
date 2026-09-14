@@ -225,9 +225,9 @@ internal sealed class ConversationTurnRecorder
             SourceId: toolStarted.SourceId,
             DisplayName: toolStarted.DisplayName);
 
-        var anchored = session.CaptureToolRunPlacement(record);
+        var anchored = record;
         turn.ToolRunsByCallId[toolStarted.ToolCallId] = anchored;
-        session.UpsertToolRun(anchored);
+        session.ApplyStreamedToolRun(anchored);
         if (persistProgress)
         {
             await _conversationRepository.UpsertToolExecutionAsync(anchored, cancellationToken);
@@ -260,9 +260,9 @@ internal sealed class ConversationTurnRecorder
             UpdatedAtUtc = DateTimeOffset.UtcNow
         };
 
-        var anchored = session.CaptureToolRunPlacement(updated);
+        var anchored = updated;
         turn.ToolRunsByCallId[toolCompleted.ToolCallId] = anchored;
-        session.UpsertToolRun(anchored);
+        session.ApplyStreamedToolRun(anchored);
         if (persistProgress)
         {
             await _conversationRepository.UpsertToolExecutionAsync(anchored, cancellationToken);
