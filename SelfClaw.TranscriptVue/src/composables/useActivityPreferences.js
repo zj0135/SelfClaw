@@ -8,7 +8,7 @@ export function useActivityPreferences(parentId) {
 		if (!preferences.has(key)) {
 			if (preferences.size >= 32) preferences.delete(preferences.keys().next().value);
 			preferences.set(key, {
-				view: reactive({ open: true, section: 'subagents', taskId: null }),
+				view: reactive({ open: false, section: 'subagents', taskId: null }),
 				collapse: useTranscriptCollapse(), readings: new Map(),
 			});
 		}

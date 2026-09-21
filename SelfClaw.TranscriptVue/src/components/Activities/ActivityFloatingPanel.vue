@@ -18,7 +18,7 @@ watch(() => props.sections, (sections) => {
 		<header>
 			<button class="activity-toggle" type="button" :aria-expanded="expanded" :disabled="forceCollapsed" @click="preferences.open = !preferences.open">
 				<Activity :size="15" /><strong>活动</strong><span v-if="active" class="badge">{{ count(active) }}</span>
-				<small v-if="active?.counts?.running">{{ active.counts.running }} 个运行中</small>
+				<small v-if="expanded && active?.counts?.running">{{ active.counts.running }} 个运行中</small>
 				<ChevronDown v-if="expanded" :size="14" /><ChevronUp v-else :size="14" />
 			</button>
 			<button class="icon-button" type="button" title="刷新活动" aria-label="刷新活动" @click="emit('refresh')"><RefreshCw :size="14" :class="{ spin: loading }" /></button>

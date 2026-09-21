@@ -10,10 +10,36 @@ beforeEach(() => {
 });
 afterEach(() => { wrapper?.unmount(); wrapper = null; });
 
-it('applies and ACKs the correlated first snapshot, streams shared blocks, and cancels an independent child', async () => {
+async function mountStage(props = { parentConversationId: window.activityFixture.parent }) {
 	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
-	wrapper = mount(Stage, { props: { parentConversationId: window.activityFixture.parent } });
+	return mount(Stage, { props });
+}
+
+async function expandActivityPanel() {
+	await wrapper.find('.activity-toggle').trigger('click');
 	await flushPromises();
+}
+
+async function mountExpandedStage(props = { parentConversationId: window.activityFixture.parent }) {
+	wrapper = await mountStage(props);
+	await flushPromises();
+	await expandActivityPanel();
+	return wrapper;
+}
+
+it('starts collapsed as a content-width chip in the stage corner until the user opens it', async () => {
+	wrapper = await mountStage();
+	await flushPromises();
+	expect(wrapper.find('.activity-dock').classes()).toContain('collapsed');
+	expect(wrapper.find('.activity-panel').classes()).toContain('collapsed');
+	expect(wrapper.find('.activity-body').exists()).toBe(false);
+	expect(wrapper.find('.task-row').exists()).toBe(false);
+	await expandActivityPanel();
+	expect(wrapper.findAll('.task-row')).toHaveLength(3);
+});
+
+it('applies and ACKs the correlated first snapshot, streams shared blocks, and cancels an independent child', async () => {
+	wrapper = await mountExpandedStage();
 	expect(wrapper.findAll('.task-row')).toHaveLength(3);
 	expect(window.activityFixture.requests.some((request) => request.type === 'activity-panel/rendered')).toBe(true);
 	await wrapper.find('.task-select').trigger('click');
@@ -41,9 +67,7 @@ it('applies and ACKs the correlated first snapshot, streams shared blocks, and c
 });
 
 it('preserves thinking expansion after switching tasks and does not nest buttons', async () => {
-	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
-	wrapper = mount(Stage, { props: { parentConversationId: window.activityFixture.parent } });
-	await flushPromises();
+	wrapper = await mountExpandedStage();
 	await wrapper.findAll('.task-select')[0].trigger('click');
 	await flushPromises();
 	await wrapper.find('.thinking-summary').trigger('click');
@@ -57,10 +81,8 @@ it('preserves thinking expansion after switching tasks and does not nest buttons
 });
 
 it('retains invalidated historical content, resumes live, and restores selection after collapse and remount', async () => {
-	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
 	const props = { parentConversationId: window.activityFixture.parent };
-	wrapper = mount(Stage, { props });
-	await flushPromises();
+	wrapper = await mountExpandedStage(props);
 	await wrapper.find('.task-select').trigger('click');
 	await flushPromises();
 	const invalidated = window.activityFixture.snapshot();
@@ -86,7 +108,7 @@ it('retains invalidated historical content, resumes live, and restores selection
 	await flushPromises();
 	await vi.waitFor(() => expect(wrapper.find('.body-segment').text()).toContain('while collapsed'));
 	wrapper.unmount();
-	wrapper = mount(Stage, { props });
+	wrapper = await mountStage(props);
 	await flushPromises();
 	await vi.waitFor(() => expect(wrapper.find('.body-segment').text()).toContain('while collapsed'));
 });
@@ -106,11 +128,9 @@ it('switches an independent todo section without replacing subagent preferences'
 });
 
 it('restores a long historical window after task switching, collapse, and remount', async () => {
-	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
 	const props = { parentConversationId: window.activityFixture.parent };
 	window.activityFixture.longContent();
-	wrapper = mount(Stage, { props });
-	await flushPromises();
+	wrapper = await mountExpandedStage(props);
 	await wrapper.find('.task-select').trigger('click');
 	await flushPromises();
 	expect(wrapper.findAll('.body-segment')[0].text()).toContain('History block 86');
@@ -130,7 +150,7 @@ it('restores a long historical window after task switching, collapse, and remoun
 	expect(wrapper.findAll('.body-segment')[0].text()).toContain('History block 22');
 	expect(wrapper.find('.new-content').exists()).toBe(true);
 	wrapper.unmount();
-	wrapper = mount(Stage, { props });
+	wrapper = await mountStage(props);
 	await flushPromises();
 	expect(wrapper.findAll('.body-segment')[0].text()).toContain('History block 22');
 	const request = window.activityFixture.requests.filter((item) => item.type === 'activity-panel/select-detail').at(-1);
@@ -138,10 +158,8 @@ it('restores a long historical window after task switching, collapse, and remoun
 });
 
 it('returns from an invalidated historical window to the tail and follows subsequent output', async () => {
-	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
 	window.activityFixture.longContent();
-	wrapper = mount(Stage, { props: { parentConversationId: window.activityFixture.parent } });
-	await flushPromises();
+	wrapper = await mountExpandedStage();
 	await wrapper.find('.task-select').trigger('click');
 	await flushPromises();
 	await wrapper.find('.window-link').trigger('click');
@@ -160,12 +178,12 @@ it('returns from an invalidated historical window to the tail and follows subseq
 });
 
 it('accepts push before initial response and ignores an older failed detail request', async () => {
-	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
 	window.activityFixture.holdResponses(true);
-	wrapper = mount(Stage, { props: { parentConversationId: window.activityFixture.parent } });
+	wrapper = await mountStage();
 	await flushPromises();
 	window.activityFixture.push();
 	await flushPromises();
+	await expandActivityPanel();
 	expect(wrapper.findAll('.task-row')).toHaveLength(3);
 	window.activityFixture.release();
 	await flushPromises();
@@ -183,10 +201,8 @@ it('accepts push before initial response and ignores an older failed detail requ
 });
 
 it('keeps the confirmed page on failure and resets an invalidated cursor without losing detail selection', async () => {
-	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
 	window.activityFixture.setTaskCount(53);
-	wrapper = mount(Stage, { props: { parentConversationId: window.activityFixture.parent } });
-	await flushPromises();
+	wrapper = await mountExpandedStage();
 	await wrapper.find('.task-select').trigger('click');
 	await flushPromises();
 	window.activityFixture.holdResponses(true);
@@ -213,9 +229,7 @@ it('keeps the confirmed page on failure and resets an invalidated cursor without
 });
 
 it('ignores an unknown section and discards content that arrives after selecting another task', async () => {
-	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
-	wrapper = mount(Stage, { props: { parentConversationId: window.activityFixture.parent } });
-	await flushPromises();
+	wrapper = await mountExpandedStage();
 	const snapshot = window.activityFixture.snapshot();
 	snapshot.sections.unshift({ id: 'future', kind: 'unavailable', title: 'Unknown', badge: 10 });
 	window.activityFixture.send(snapshot);

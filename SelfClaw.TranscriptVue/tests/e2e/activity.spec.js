@@ -5,8 +5,14 @@ test.beforeEach(async ({ page }) => {
 	await page.addInitScript(installActivityHost);
 	await page.goto('/');
 	await page.evaluate(() => window.activityFixture.transcript());
-	await expect(page.locator('.task-row')).toHaveCount(3);
+	await expect(page.locator('.activity-panel')).toHaveClass(/collapsed/);
+	await expandActivityPanel(page);
 });
+
+async function expandActivityPanel(page) {
+	await page.locator('.activity-toggle').click();
+	await expect(page.locator('.task-row')).toHaveCount(3);
+}
 
 test('streaming detail, tool completion, reload, and parent isolation', async ({ page }) => {
 	const errors = [];
@@ -25,11 +31,11 @@ test('streaming detail, tool completion, reload, and parent isolation', async ({
 	expect(await page.evaluate(() => window.injected)).toBeUndefined();
 	await page.reload();
 	await page.evaluate(() => window.activityFixture.transcript());
-	await expect(page.locator('.task-row')).toHaveCount(3);
+	await expandActivityPanel(page);
 	expect(errors).toEqual([]);
 });
 
-test('detail scroll and resizing do not move a parent reader or hide its final line', async ({ page }) => {
+test('detail scroll keeps the parent reader fixed while the floating panel stays out of flow', async ({ page }) => {
 	await page.locator('.task-select').first().click();
 	await page.evaluate(() => window.activityFixture.text('\n\n' + 'Child line.\n\n'.repeat(80)));
 	await expect(page.locator('.task-detail .body-segment')).toContainText('Child line.');
@@ -43,11 +49,24 @@ test('detail scroll and resizing do not move a parent reader or hide its final l
 	await expect(page.locator('.task-detail .body-segment')).toContainText('Frozen latest token');
 	expect(await page.locator('#transcript-scroll').evaluate((element) => element.scrollTop)).toBe(60);
 	await page.locator('#transcript-scroll').evaluate((element) => { element.scrollTop = element.scrollHeight; });
-	const bounds = await page.evaluate(() => ({
-		lastLine: document.querySelector('[data-message-id="parent-message"]').getBoundingClientRect().bottom,
-		panelTop: document.querySelector('.activity-panel').getBoundingClientRect().top,
-	}));
-	expect(bounds.lastLine).toBeLessThanOrEqual(bounds.panelTop);
+	const metrics = () => page.evaluate(() => {
+		const stage = document.querySelector('.activity-stage').getBoundingClientRect();
+		const panel = document.querySelector('.activity-panel').getBoundingClientRect();
+		const scroll = document.querySelector('#transcript-scroll');
+		return { panel: { top: panel.top, right: panel.right, width: panel.width }, stage: { top: stage.top, right: stage.right }, scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight };
+	});
+	const expanded = await metrics();
+	expect(Math.abs(expanded.panel.top - expanded.stage.top - 20)).toBeLessThanOrEqual(1);
+	expect(Math.abs(expanded.panel.right - expanded.stage.right + 20)).toBeLessThanOrEqual(1);
+	expect(expanded.panel.width).toBeGreaterThan(400);
+	await page.locator('.activity-toggle').click();
+	await expect(page.locator('.activity-panel')).toHaveClass(/collapsed/);
+	const collapsed = await metrics();
+	expect(collapsed.panel.width).toBeLessThan(240);
+	expect(collapsed.panel.right).toBeCloseTo(expanded.panel.right, 0);
+	expect(collapsed.scrollTop).toBe(expanded.scrollTop);
+	expect(collapsed.scrollHeight).toBe(expanded.scrollHeight);
+	expect(collapsed.clientHeight).toBe(expanded.clientHeight);
 });
 
 test('a historical block window and its reading position survive switching and remount', async ({ page }) => {
@@ -140,6 +159,7 @@ test('plugin column confines the dock and a short stage collapses without losing
 	await page.reload();
 	await page.evaluate(() => window.activityFixture.transcript());
 	await expect(page.locator('.plugin-panel-host')).toBeVisible();
+	await expandActivityPanel(page);
 	await page.locator('.task-select').first().click();
 	await expect(page.locator('.task-detail .body-segment')).toContainText('Partial answer');
 	const bounds = await page.evaluate(() => ({

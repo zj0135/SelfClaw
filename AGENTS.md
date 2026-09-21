@@ -155,7 +155,7 @@ definitions live in the existing `extension_packages.manifest_json` and open tab
 
 ### Subagent activity panel
 
-The Vue `ActivityStage` mounts an independent floating activity panel inside the conversation stage. It displays all durable Direct subagent tasks owned by the selected Interactive parent, including tasks still running after the parent turn ends. Child content never enters the parent transcript items or controls the composer busy state.
+The Vue `ActivityStage` mounts an independent floating activity panel inside the conversation stage. It displays all durable Direct subagent tasks owned by the selected Interactive parent, including tasks still running after the parent turn ends. The panel is an overlay anchored to the stage's top-right corner and stays out of flow: it collapses to a content-width chip, and expanding or collapsing it never reflows or re-scrolls the transcript. Child content never enters the parent transcript items or controls the composer busy state.
 
 - `SubagentExecutionSession` serializes recorder mutations, immutable live snapshots, and disposal. `SubagentActivityRegistry` holds active sessions; `SubagentActivityService` combines them with committed SQLite history and task-level approval state.
 - Activity pages contain one merged task collection; details contain one current task and one `SubagentContentSnapshot`. `SubagentActivityContent` and `SubagentActivityReadException` live in `Core.Runtime`; version-bound content reads enter through `SubagentActivityService`, while `ISubagentActivityReader` only lists persisted tasks and reads persisted details.
