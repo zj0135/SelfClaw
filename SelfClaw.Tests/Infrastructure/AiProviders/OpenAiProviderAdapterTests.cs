@@ -4,8 +4,9 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
-using SelfClaw.Infrastructure.AiProviders.OpenAi;
+using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
+using SelfClaw.Infrastructure.AiProviders.OpenAi;
 
 namespace SelfClaw.Tests.Infrastructure.AiProviders;
 
@@ -32,6 +33,43 @@ public sealed class OpenAiProviderAdapterTests
         var client = adapter.CreateChatClient(request);
 
         client.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Chat_completions_stream_survives_an_empty_tool_call_type()
+    {
+        // A provider that omits the streamed tool-call "type" used to abort the whole turn
+        // inside the OpenAI SDK's deserializer; the adapter's normalization policy must
+        // let the update through as a normal function call.
+        const string sse =
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"test-model\","
+            + "\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"\","
+            + "\"function\":{\"name\":\"read_file\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n"
+            + "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"test-model\","
+            + "\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,"
+            + "\"function\":{\"arguments\":\"{\\\"relativePath\\\":\\\"a.txt\\\"}\"}}]},\"finish_reason\":null}]}\n\n"
+            + "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"test-model\","
+            + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+            + "data: [DONE]\n\n";
+        using var http = new AiProviderHttpClientProvider(() => new SseHandler(sse));
+        var adapter = new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, httpClientProvider: http);
+        var request = CreateRequest(
+            AiProviderKind.OpenAICompatible,
+            AiProviderApiFormat.OpenAIChatCompletions);
+        var client = adapter.CreateChatClient(request);
+        var options = adapter.CreateChatOptions(request);
+
+        var updates = new List<ChatResponseUpdate>();
+        await foreach (var update in client.GetStreamingResponseAsync(
+                           [new ChatMessage(ChatRole.User, "hi")], options))
+        {
+            updates.Add(update);
+        }
+
+        var toolCall = updates.SelectMany(update => update.Contents).OfType<FunctionCallContent>()
+            .Should().ContainSingle().Which;
+        toolCall.Name.Should().Be("read_file");
+        toolCall.Arguments.Should().ContainKey("relativePath");
     }
 
     [Fact]
@@ -303,4 +341,19 @@ public sealed class OpenAiProviderAdapterTests
 
     private static IReadOnlyDictionary<string, JsonElement> ReadJsonObject(string json)
         => JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json) ?? [];
+
+    private sealed class SseHandler(string sse) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(sse, System.Text.Encoding.UTF8)
+            };
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
+            return Task.FromResult(response);
+        }
+    }
 }

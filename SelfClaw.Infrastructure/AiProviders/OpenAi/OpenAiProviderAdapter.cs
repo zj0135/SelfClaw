@@ -101,12 +101,19 @@ internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
         };
 #pragma warning restore OPENAI001
 
-    private OpenAIClientOptions CreateClientOptions(AiProviderConnection connection) =>
-       new()
-       {
-           Endpoint = connection.Endpoint,
-           Transport = new HttpClientPipelineTransport(_httpClientProvider.GetStreamingClient(connection))
-       };
+    private OpenAIClientOptions CreateClientOptions(AiProviderConnection connection)
+    {
+        var options = new OpenAIClientOptions
+        {
+            Endpoint = connection.Endpoint,
+            Transport = new HttpClientPipelineTransport(_httpClientProvider.GetStreamingClient(connection))
+        };
+        // Chat Completions providers sometimes omit the streamed tool-call "type"; patch it
+        // before the SDK's strict deserializer can reject the whole turn.
+        options.AddPolicy(new OpenAiToolCallTypeNormalizingPolicy(), PipelinePosition.PerCall);
+        return options;
+    }
+
     private static ApiKeyCredential CreateCredential(AiProviderClientRequest request) =>
         new(ResolveApiKey(request));
 

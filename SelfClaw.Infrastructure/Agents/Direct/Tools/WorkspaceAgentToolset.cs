@@ -114,23 +114,23 @@ internal sealed class WorkspaceAgentToolset
         }
 
         public Task<IReadOnlyList<WorkspaceFileEntry>> ListFilesAsync(
-            [Description("Workspace-relative directory path. Use an empty value for the workspace root.")] string? relativePath,
-            CancellationToken cancellationToken)
+            [Description("Workspace-relative directory path. Use an empty value for the workspace root.")] string? relativePath = null,
+            CancellationToken cancellationToken = default)
             => _workspaceTools.ListFilesAsync(_workspaceRootPath, relativePath, cancellationToken);
 
         public Task<IReadOnlyList<WorkspaceFileEntry>> GlobFilesAsync(
             [Description("Glob pattern to match workspace-relative file paths, e.g. \"**/*.cs\" or \"src/**/test_*.ts\". relativePath narrows traversal without changing the pattern root.")] string pattern,
-            [Description("Optional workspace-relative directory to scope the search to. Leave empty to search from the workspace root.")] string? relativePath,
-            CancellationToken cancellationToken)
+            [Description("Optional workspace-relative directory to scope the search to. Leave empty to search from the workspace root.")] string? relativePath = null,
+            CancellationToken cancellationToken = default)
             => _workspaceTools.GlobFilesAsync(_workspaceRootPath, pattern, relativePath, cancellationToken);
 
         public Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(
             [Description("Text to search for across workspace text files. Treated as a literal substring unless isRegex is true.")] string query,
-            [Description("Optional glob limiting which files are searched, e.g. \"src/**/*.cs\" or \"*.md\". Leave empty to search every text file.")] string? glob,
-            [Description("Treat the query as a regular expression instead of a literal substring.")] bool isRegex,
-            [Description("Match case exactly. Defaults to case-insensitive when false.")] bool caseSensitive,
-            [Description("Maximum number of matching lines to return. Leave unset for the default limit.")] int? maxResults,
-            CancellationToken cancellationToken)
+            [Description("Optional glob limiting which files are searched, e.g. \"src/**/*.cs\" or \"*.md\". Leave empty to search every text file.")] string? glob = null,
+            [Description("Treat the query as a regular expression instead of a literal substring.")] bool isRegex = false,
+            [Description("Match case exactly. Defaults to case-insensitive when false.")] bool caseSensitive = false,
+            [Description("Maximum number of matching lines to return. Leave unset for the default limit.")] int? maxResults = null,
+            CancellationToken cancellationToken = default)
             => _workspaceTools.SearchTextAsync(
                 _workspaceRootPath,
                 query,
@@ -145,15 +145,15 @@ internal sealed class WorkspaceAgentToolset
 
         public Task<WorkspaceFileContent> ReadFileAsync(
             [Description("Path to a text file, relative to the workspace root.")] string relativePath,
-            [Description("Optional 1-based line to start reading from. Leave unset to read from the top of the file.")] int? startLine,
-            [Description("Optional number of lines to return from startLine. Leave unset for the default page size.")] int? lineCount,
-            CancellationToken cancellationToken)
+            [Description("Optional 1-based line to start reading from. Leave unset to read from the top of the file.")] int? startLine = null,
+            [Description("Optional number of lines to return from startLine. Leave unset for the default page size.")] int? lineCount = null,
+            CancellationToken cancellationToken = default)
             => _workspaceTools.ReadFileAsync(_workspaceRootPath, relativePath, startLine, lineCount, cancellationToken);
 
         public Task<WorkspaceFileWriteResult> WriteFileAsync(
             [Description("Destination path, relative to the workspace root.")] string relativePath,
             [Description("Complete UTF-8 text content to write to the file.")] string content,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
             => _workspaceTools.WriteFileAsync(
                 _workspaceRootPath,
                 relativePath,
@@ -164,8 +164,8 @@ internal sealed class WorkspaceAgentToolset
             [Description("Path to the text file to edit, relative to the workspace root.")] string relativePath,
             [Description("Exact existing text to find. Include enough surrounding context to match a single location unless replaceAll is set.")] string oldText,
             [Description("Replacement text to substitute for oldText.")] string newText,
-            [Description("Replace every occurrence of oldText. When false, oldText must match exactly one location.")] bool replaceAll,
-            CancellationToken cancellationToken)
+            [Description("Replace every occurrence of oldText. When false, oldText must match exactly one location.")] bool replaceAll = false,
+            CancellationToken cancellationToken = default)
             => _workspaceTools.EditFileAsync(
                 _workspaceRootPath,
                 relativePath,

@@ -36,6 +36,33 @@ public sealed class WorkspaceAgentToolsetTests
     }
 
     [Fact]
+    public async Task Invoke_accepts_omitted_optional_parameters()
+    {
+        // AIFunctionFactory treats a parameter without a default value as required, even when it
+        // is nullable. Every optional tool parameter must therefore declare a default so a model
+        // that leaves the documented "leave unset" parameters out still gets a result.
+        var service = new FakeWorkspaceToolService();
+        var tools = CreateTools(
+            service, CreateWorkspace(), Guid.NewGuid(), ToolPermissionMode.FullAccess, null);
+
+        await FindFunction(tools, "list_files").InvokeAsync(new AIFunctionArguments());
+        await FindFunction(tools, "glob_files").InvokeAsync(
+            new AIFunctionArguments { ["pattern"] = "*.cs" });
+        await FindFunction(tools, "search_text").InvokeAsync(
+            new AIFunctionArguments { ["query"] = "needle" });
+        await FindFunction(tools, "read_file").InvokeAsync(
+            new AIFunctionArguments { ["relativePath"] = "a.txt" });
+        await FindFunction(tools, "edit_file").InvokeAsync(new AIFunctionArguments
+        {
+            ["relativePath"] = "a.txt",
+            ["oldText"] = "a",
+            ["newText"] = "b"
+        });
+
+        service.EditCalls.Should().ContainSingle().Which.ReplaceAll.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Approved_write_executes_and_carries_conversation_and_arguments()
     {
         var service = new FakeWorkspaceToolService();
