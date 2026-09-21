@@ -89,7 +89,9 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
         try
         {
             var client = new ChatClientBuilder(nativeClient)
-                .UseFunctionInvocation(_safeLoggerFactory)
+                .UseFunctionInvocation(_safeLoggerFactory, option => {
+                    option.MaximumIterationsPerRequest = 128;
+                })
                 .UseLogging(_safeLoggerFactory)
                 .Build();
             return new AiChatClientLease(client, options, request.Profile);
