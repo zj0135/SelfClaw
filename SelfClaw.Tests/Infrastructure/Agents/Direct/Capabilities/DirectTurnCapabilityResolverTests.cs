@@ -622,6 +622,11 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             Func<JsonRpcNotification, CancellationToken, ValueTask> handler)
             => throw new NotSupportedException();
 
+        public override ValueTask<IDictionary<string, InputResponse>> ResolveInputRequestsAsync(
+            IDictionary<string, InputRequest> inputRequests,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
         public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 #pragma warning restore MCPEXP002

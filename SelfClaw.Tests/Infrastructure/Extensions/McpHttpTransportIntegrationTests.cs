@@ -146,6 +146,20 @@ public sealed class McpHttpTransportIntegrationTests
                 return;
             }
 
+            if (method == "server/discover")
+            {
+                // The client probes the 2026-07-28 revision first and falls back to the initialize
+                // handshake on method-not-found, so this fixture keeps speaking initialize only.
+                var methodNotFound = JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    jsonrpc = "2.0",
+                    id = id.Clone(),
+                    error = new { code = -32601, message = "Method not found" }
+                });
+                await WriteResponseAsync(stream, 200, methodNotFound, cancellationToken);
+                return;
+            }
+
             object result = method switch
             {
                 "initialize" => new

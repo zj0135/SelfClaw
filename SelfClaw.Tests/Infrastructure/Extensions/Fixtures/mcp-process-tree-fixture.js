@@ -33,6 +33,11 @@ input.on('line', line => {
     return
   }
 
+  if (request.method === 'server/discover') {
+    process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Method not found' } })}\n`)
+    return
+  }
+
   let result = {}
   if (request.method === 'initialize') {
     if (hangInitialize) {
