@@ -28,7 +28,7 @@ it('keeps the draft until accepted, prevents duplicate submission, then refreshe
 	await sent;
 	expect(accept).toHaveBeenCalledOnce();
 	expect(scrolling.resumeFollow).toHaveBeenCalledOnce();
-	expect(workspace.refresh).toHaveBeenCalledWith(true);
+	expect(workspace.refresh).toHaveBeenCalledWith();
 	expect(composer.submitting.value).toBe(false);
 });
 

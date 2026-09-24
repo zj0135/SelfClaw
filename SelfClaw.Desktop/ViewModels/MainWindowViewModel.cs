@@ -140,7 +140,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
         finally { _composerModeGate.Release(); }
         ReloadAgents();
-        await ReloadWorkspaceRootsAsync();
+        // First render must not wait for git probing: the root list comes from the database and the
+        // selected root's git state is fetched on demand by the selection bridge.
+        await ReloadWorkspaceRootListAsync();
         await ReloadConversationsAsync();
         await _selectionLoadTask;
 
@@ -312,7 +314,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
         finally
         {
-            await ReloadWorkspaceRootsAsync();
+            // Deleting a conversation only releases a checkout; re-probing every workspace root
+            // with git is expensive and unnecessary unless a worktree was actually removed.
+            if (removeManagedWorktree) await ReloadWorkspaceRootsAsync();
+            else await ReloadWorkspaceRootListAsync();
             await ReloadConversationsAsync();
         }
     }
@@ -406,10 +411,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     #region 数据加载 —— 重载工作区 / 会话列表，并加载选中会话的消息与工具运行
 
-    private async Task ReloadWorkspaceRootsAsync()
+    private Task ReloadWorkspaceRootsAsync() => ReloadWorkspaceRootsCoreAsync(probeGitState: true);
+
+    private Task ReloadWorkspaceRootListAsync() => ReloadWorkspaceRootsCoreAsync(probeGitState: false);
+
+    private async Task ReloadWorkspaceRootsCoreAsync(bool probeGitState)
     {
         var version = ++_workspaceLoadVersion;
-        var roots = await _workspaces.ListAsync();
+        var roots = probeGitState
+            ? await _workspaces.ListAsync()
+            : await _workspaces.ListRootsAsync();
         _dispatcher?.VerifyAccess();
         if (version != _workspaceLoadVersion) return;
         var selectedId = _selectedWorkspaceRoot?.Id;

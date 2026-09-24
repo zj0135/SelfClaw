@@ -18,7 +18,9 @@ export function useChatComposer(session, workspace, transcriptScroll, bridge) {
 			if (!response?.accepted) throw new Error(response?.error || '发送请求未被接受。');
 			transcriptScroll.resumeFollow();
 			submission.accept?.();
-			await workspace.refresh(true);
+			// The backend already upserts the root list during admission; the default refresh probes
+			// only the selected conversation's root instead of re-scanning every workspace root.
+			await workspace.refresh();
 		} catch (failure) {
 			if (!disposed) error.value = failure?.message || '发送失败，请重试。';
 		} finally {

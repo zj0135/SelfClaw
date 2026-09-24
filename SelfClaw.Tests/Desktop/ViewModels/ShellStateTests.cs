@@ -98,20 +98,25 @@ public sealed class ShellStateTests
         });
 
     [Fact]
-    public Task Initialization_is_shared_and_failure_can_be_retried() => WpfDispatcherTest.RunAsync(async () =>
+    public Task Initialization_is_shared_and_workspace_add_failure_can_be_retried() => WpfDispatcherTest.RunAsync(async () =>
     {
         using var context = new ShellContext();
         await context.AddRootAsync("first");
-        context.Query.PauseNext();
         var first = context.ViewModel.InitializeAsync();
-        await context.Query.Entered.Task;
         var second = context.ViewModel.InitializeAsync();
         second.Should().BeSameAs(first);
-        second.IsCompleted.Should().BeFalse();
-        context.Query.Release.TrySetException(new IOException("delayed read failed"));
-        await FluentActions.Awaiting(() => first).Should().ThrowAsync<IOException>();
-        await context.ViewModel.InitializeAsync();
+        await first;
         context.ViewModel.WorkspaceRoots.Should().ContainSingle();
+
+        var added = Path.Combine(context.RootPath, "added");
+        Directory.CreateDirectory(added);
+        context.Query.PauseNext();
+        var add = context.ViewModel.SelectOrAddWorkspaceRootAsync(added);
+        await context.Query.Entered.Task;
+        context.Query.Release.TrySetException(new IOException("delayed read failed"));
+        await FluentActions.Awaiting(() => add).Should().ThrowAsync<IOException>();
+        await context.ViewModel.SelectOrAddWorkspaceRootAsync(added);
+        context.ViewModel.WorkspaceRoots.Should().HaveCount(2);
     });
 
     [Fact]
@@ -176,6 +181,7 @@ public sealed class ShellStateTests
         }
 
         public DelayedQuery Query { get; } = new();
+        public string RootPath => _root;
         public MainWindowViewModel ViewModel { get; }
         public DesktopSettingsJsonStore Settings { get; }
         public AgentSettingsService Agents { get; }

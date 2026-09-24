@@ -21,6 +21,9 @@ internal sealed class ConversationWorkspaceService
         _store = store;
     }
 
+    public Task<IReadOnlyList<WorkspaceRoot>> ListRootsAsync(CancellationToken cancellationToken = default)
+        => _roots.ListWorkspaceRootsAsync(cancellationToken);
+
     public async Task<IReadOnlyList<WorkspaceRoot>> ListAsync(CancellationToken cancellationToken = default)
     {
         var roots = await _roots.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false);

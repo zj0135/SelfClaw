@@ -84,18 +84,17 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
             return CreateNotRepository(headResult.Message);
         }
 
-        var isDirty = await IsDirtyAsync(workspaceRoot.RootPath, cancellationToken).ConfigureAwait(false);
-        var branches = await ReadBranchesAsync(workspaceRoot.RootPath, branchName, cancellationToken).ConfigureAwait(false);
         var worktrees = await ReadWorktreesAsync(
             workspaceRoot.RootPath,
             workspaceRoot.RootPath,
             cancellationToken).ConfigureAwait(false);
+        var branches = await ReadBranchesAsync(workspaceRoot.RootPath, branchName, worktrees, cancellationToken).ConfigureAwait(false);
+        var (isDirty, hasConflicts) = await ReadStatusAsync(workspaceRoot.RootPath, cancellationToken).ConfigureAwait(false);
         var selectedBranch = branches.FirstOrDefault(item => item.IsCurrent);
         var (ahead, behind) = await ReadAheadBehindAsync(
             workspaceRoot.RootPath,
             checkout?.IsManaged == true ? checkout.BaseBranchName : selectedBranch?.UpstreamName,
             cancellationToken).ConfigureAwait(false);
-        var hasConflicts = await HasMergeConflictsAsync(workspaceRoot.RootPath, cancellationToken).ConfigureAwait(false);
 
         var isManaged = checkout?.IsManaged == true || workspaceRoot.IsManagedWorktree;
         var ownerConversationId = checkout?.OwnerConversationId ?? workspaceRoot.ManagedConversationId;
@@ -444,23 +443,29 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
             : null;
     }
 
-    private async Task<bool> IsDirtyAsync(string workingDirectory, CancellationToken cancellationToken)
+    // One porcelain status read answers both "is dirty" and "are there conflicts"; previously two
+    // separate reads doubled the git process count on every refresh.
+    private async Task<(bool IsDirty, bool HasConflicts)> ReadStatusAsync(
+        string workingDirectory,
+        CancellationToken cancellationToken)
     {
-        var result = await RunGitAsync(workingDirectory, ["status", "--porcelain=v1", "--untracked-files=normal"], cancellationToken).ConfigureAwait(false);
-        return result.Succeeded && !string.IsNullOrWhiteSpace(result.StandardOutput);
+        var result = await RunGitAsync(
+            workingDirectory,
+            ["status", "--porcelain=v1", "--untracked-files=normal"],
+            cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return (false, false);
+        }
+
+        var lines = result.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        return (lines.Length > 0, lines.Any(line => line.Length >= 2 && IsConflictStatus(line.AsSpan(0, 2))));
     }
 
     private async Task<bool> HasMergeConflictsAsync(string workingDirectory, CancellationToken cancellationToken)
     {
-        var result = await RunGitAsync(workingDirectory, ["status", "--porcelain=v1"], cancellationToken).ConfigureAwait(false);
-        if (!result.Succeeded)
-        {
-            return false;
-        }
-
-        return result.StandardOutput
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-            .Any(line => line.Length >= 2 && IsConflictStatus(line.AsSpan(0, 2)));
+        var (_, hasConflicts) = await ReadStatusAsync(workingDirectory, cancellationToken).ConfigureAwait(false);
+        return hasConflicts;
     }
 
     private static bool IsConflictStatus(ReadOnlySpan<char> status)
@@ -495,6 +500,7 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
     private async Task<IReadOnlyList<GitBranchInfo>> ReadBranchesAsync(
         string workingDirectory,
         string? currentBranch,
+        IReadOnlyList<GitWorktreeInfo> worktrees,
         CancellationToken cancellationToken)
     {
         var result = await RunGitAsync(
@@ -529,7 +535,6 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
                 null));
         }
 
-        var worktrees = await ReadWorktreesAsync(workingDirectory, workingDirectory, cancellationToken).ConfigureAwait(false);
         return branches
             .Select(branch => branch with
             {
