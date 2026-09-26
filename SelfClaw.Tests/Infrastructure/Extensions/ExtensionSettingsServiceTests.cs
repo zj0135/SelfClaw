@@ -3,6 +3,8 @@ using System.IO.Compression;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Infrastructure.Agents.Direct.Hooks;
+using SelfClaw.Infrastructure.Agents.Direct.Hooks.Models;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Extensions;
@@ -11,6 +13,7 @@ using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Mcp.Models;
 using SelfClaw.Infrastructure.Extensions.Models;
 using SelfClaw.Infrastructure.Extensions.Plugins;
+using SelfClaw.Infrastructure.Extensions.Plugins.Models;
 using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Options;
 
@@ -314,6 +317,61 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
 
         context.PanelSessions.ClosedPluginIds.Should().Equal("git-inspector", "git-inspector");
         (await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "git-inspector")).Should().BeNull();
+    }
+
+    // The async hook queue holds a version lease per item. If the deletion drained before evicting,
+    // the drain would block on a lease only the executor can release, and this test would time out.
+    [Fact]
+    public async Task Deleting_a_plugin_evicts_queued_async_hooks_before_draining()
+    {
+        var context = CreateContext();
+        var pluginPath = await CreatePanelPluginAsync("git-inspector");
+        var now = DateTimeOffset.UtcNow;
+        await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
+            ExtensionKind.Plugin,
+            "git-inspector",
+            "Git Inspector",
+            "1.0.0",
+            "Inspects git",
+            pluginPath,
+            "sha256:v1",
+            await File.ReadAllTextAsync(Path.Combine(pluginPath, "plugin.json")),
+            null,
+            true,
+            """["network.fetch:https://api.github.com","ui.panel"]""",
+            now,
+            now,
+            now));
+        await context.AsyncHookExecutor.StartAsync(CancellationToken.None);
+        context.AsyncHookExecutor.TryEnqueue(new AsyncHookWork(
+            new ResolvedPluginHook(
+                "git-inspector",
+                "1.0.0",
+                pluginPath,
+                new PluginHookContribution(
+                    "audit",
+                    PluginHookEvent.RunCompleted,
+                    new PluginHookMatcher([], [], [], [], [], []),
+                    "node",
+                    [],
+                    TimeSpan.FromSeconds(30),
+                    PluginHookFailurePolicy.Continue,
+                    RunAsync: false,
+                    IncludeRequestBody: false),
+                DeclarationOrder: 0,
+                Inherited: false),
+            "runCompleted",
+            ReadOnlyMemory<byte>.Empty,
+            Guid.NewGuid(),
+            new HookProcessStart("node", [], pluginPath, new Dictionary<string, string>(StringComparer.Ordinal))))
+            .Should().BeTrue();
+
+        await context.Service.DeleteAsync(new ExtensionItemKey(ExtensionKind.Plugin, "git-inspector"))
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        context.HookLog.GetRecent("git-inspector").Should().Contain(entry => entry.Outcome == "evicted");
+        (await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "git-inspector")).Should().BeNull();
+        await context.AsyncHookExecutor.StopAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -810,6 +868,16 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
             pluginReader);
         var stateChangeNotifier = new ExtensionStateChangeNotifier();
         var panelSessions = new RecordingPanelSessionRegistry();
+        var hookLog = new PluginHookExecutionLog();
+        var asyncHookExecutor = new AsyncHookExecutor(
+            async (_, _, _, cancellationToken) =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return new HookProcessResult(
+                    HookProcessExit.Exited, 0, string.Empty, string.Empty, TimeSpan.Zero, null);
+            },
+            hookLog,
+            pluginVersionLeaseManager);
         return new TestContext(
             new ExtensionSettingsService(
                 repository,
@@ -822,12 +890,15 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
                 pluginContributionService,
                 stateChangeNotifier,
                 pluginVersionLeaseManager,
-                panelSessions),
+                panelSessions,
+                asyncHookExecutor),
             repository,
             protector,
             mcpClientManager,
             pluginVersionLeaseManager,
-            panelSessions);
+            panelSessions,
+            hookLog,
+            asyncHookExecutor);
     }
 
     private static SaveMcpServerCommand CreateStdioCommand(
@@ -853,7 +924,9 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         FakeSecretProtector SecretProtector,
         FakeMcpClientManager McpClientManager,
         PluginVersionLeaseManager PluginVersionLeaseManager,
-        RecordingPanelSessionRegistry PanelSessions);
+        RecordingPanelSessionRegistry PanelSessions,
+        PluginHookExecutionLog HookLog,
+        AsyncHookExecutor AsyncHookExecutor);
 
     private sealed class RecordingPanelSessionRegistry : IPluginPanelSessionRegistry
     {

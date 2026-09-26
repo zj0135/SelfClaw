@@ -108,15 +108,7 @@ internal sealed class SubagentContinuationExecutor
             _turnRecorder.BeginTurn(runtimeState, turn);
             await foreach (var streamEvent in _chatRuntime.StreamTurnAsync(request, execution.Token))
             {
-                var recordedEvent = streamEvent is RunCompletedEvent { Status: RunCompletionStatus.Truncated } truncated
-                    ? truncated with
-                    {
-                        Status = RunCompletionStatus.Failed,
-                        ErrorMessage = string.IsNullOrWhiteSpace(truncated.ErrorMessage)
-                            ? "The continuation reached the model output limit. Partial output was preserved when tools ran."
-                            : truncated.ErrorMessage
-                    }
-                    : streamEvent;
+                var recordedEvent = RewriteTerminalEvent(committer, streamEvent);
                 await _turnRecorder.ApplyDetachedEventAsync(
                     runtimeState,
                     turn,
@@ -225,8 +217,40 @@ internal sealed class SubagentContinuationExecutor
             _notificationService.ShowSubagentContinuationFailed(
                 parentConversation.Id,
                 parentConversation.Title,
+                committer?.BlockedReason ??
                 "Subagent results could not be continued safely. Open the conversation for details.");
         }
+    }
+
+    /// <summary>
+    /// The durable delivery model has no blocked terminal, so both rewrites hand a failed terminal to
+    /// the recorder while the committer decides whether the delivery may be retried.
+    /// </summary>
+    private static AgentStreamEvent RewriteTerminalEvent(
+        SubagentContinuationTurnCommitter committer,
+        AgentStreamEvent streamEvent)
+    {
+        if (streamEvent is RunCompletedEvent { Status: RunCompletionStatus.Truncated } truncated)
+        {
+            return truncated with
+            {
+                Status = RunCompletionStatus.Failed,
+                ErrorMessage = string.IsNullOrWhiteSpace(truncated.ErrorMessage)
+                    ? "The continuation reached the model output limit. Partial output was preserved when tools ran."
+                    : truncated.ErrorMessage
+            };
+        }
+
+        if (streamEvent is RunCompletedEvent { Status: RunCompletionStatus.Blocked } blocked)
+        {
+            var reason = string.IsNullOrWhiteSpace(blocked.ErrorMessage)
+                ? "A Plugin hook blocked the continuation."
+                : blocked.ErrorMessage;
+            committer.MarkBlocked(reason);
+            return blocked with { Status = RunCompletionStatus.Failed, ErrorMessage = reason };
+        }
+
+        return streamEvent;
     }
 
     private DirectChatTurnRequest CreateRequest(

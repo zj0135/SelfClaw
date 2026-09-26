@@ -37,6 +37,7 @@
 
   <ItemGroup>
     <None Update="Infrastructure\AiProviders\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Infrastructure\Agents\Direct\Hooks\Fixtures\*.ps1" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Infrastructure\Extensions\Fixtures\*" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Infrastructure\Extensions\Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

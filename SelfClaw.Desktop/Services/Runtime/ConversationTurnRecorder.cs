@@ -127,6 +127,15 @@ internal sealed class ConversationTurnRecorder
                 turn.OutputTokens = usage.OutputTokens ?? turn.OutputTokens;
                 break;
 
+            case RunNoticeEvent notice:
+                EnsureAssistantMessage(session, turn);
+                if (session.ApplyAssistantNotice(turn.TurnId, notice.Text))
+                {
+                    session.RaiseTranscriptChanged(false);
+                }
+
+                break;
+
             case RunStatusEvent runStatus:
                 EnsureAssistantMessage(session, turn);
                 session.ActivityText = MapRunStatusText(runStatus.Status);
@@ -257,7 +266,8 @@ internal sealed class ConversationTurnRecorder
                 ? startedRecord.ResultContent
                 : TranscriptToolResultLimiter.LimitStored(toolCompleted.ResultContent),
             DurationMs = (DateTimeOffset.UtcNow - startedRecord.CreatedAtUtc).TotalMilliseconds,
-            UpdatedAtUtc = DateTimeOffset.UtcNow
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+            HookOutcome = toolCompleted.HookOutcome ?? startedRecord.HookOutcome
         };
 
         var anchored = updated;
@@ -289,6 +299,7 @@ internal sealed class ConversationTurnRecorder
         {
             RunCompletionStatus.Succeeded => TurnFinalizationKind.Succeeded,
             RunCompletionStatus.Truncated => TurnFinalizationKind.Truncated,
+            RunCompletionStatus.Blocked => TurnFinalizationKind.Blocked,
             _ => TurnFinalizationKind.Failed
         };
         var errorMessage = kind switch
@@ -296,6 +307,7 @@ internal sealed class ConversationTurnRecorder
             TurnFinalizationKind.Succeeded => null,
             // Not an error: carried through so the UI can explain why the answer stopped.
             TurnFinalizationKind.Truncated => completed.ErrorMessage,
+            TurnFinalizationKind.Blocked => completed.ErrorMessage ?? "The agent run was blocked by a plugin hook.",
             _ => completed.ErrorMessage ?? "The agent run failed."
         };
 
@@ -437,6 +449,7 @@ internal sealed class ConversationTurnRecorder
                 TurnFinalizationKind.Failed => MessageStatus.Failed,
                 TurnFinalizationKind.Cancelled => MessageStatus.Cancelled,
                 TurnFinalizationKind.Truncated => MessageStatus.Truncated,
+                TurnFinalizationKind.Blocked => MessageStatus.Blocked,
                 _ => throw new ArgumentOutOfRangeException(nameof(request), request.Kind, "Unsupported turn outcome.")
             },
             InputTokens = request.InputTokens,
@@ -498,7 +511,8 @@ internal sealed class ConversationTurnRecorder
             ToolCallStatus.Completed => ToolExecutionStatus.Completed,
             ToolCallStatus.Failed => ToolExecutionStatus.Failed,
             ToolCallStatus.Canceled => ToolExecutionStatus.Cancelled,
-            _ => ToolExecutionStatus.Completed
+            ToolCallStatus.Blocked => ToolExecutionStatus.Blocked,
+            _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unsupported tool call status.")
         };
 
     private static string MapRunStatusText(AgentRunStatus status)

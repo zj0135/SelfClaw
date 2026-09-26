@@ -13,5 +13,10 @@ public enum RunCompletionStatus
     /// The model stopped because it hit its output-token cap. The partial answer is
     /// valid and kept, and continuing is the user's call rather than the runtime's.
     /// </summary>
-    Truncated = 2
+    Truncated = 2,
+
+    /// <summary>
+    /// A plugin hook blocked the run before any model call.
+    /// </summary>
+    Blocked = 3
 }

@@ -191,6 +191,9 @@ triggers:
 
 拿不到的：写文件、执行进程、发起对话回合、访问其他插件、会话历史数据库。`workspace.*` 的根永远是宿主当前选中的工作区。
 
+`transcript` 条目的 `status` 取值：`streaming` / `completed` / `failed` / `cancelled` / `truncated` / `blocked`（被插件 hook 阻止）。
+`segments[].kind` 取值：`content` / `thinking` / `tool` / `notice`；`notice` 是回合级 hook 通知，纯文本，不走 markdown。
+
 ## 第 5 步：其他贡献（可选）
 
 ### directInstructions

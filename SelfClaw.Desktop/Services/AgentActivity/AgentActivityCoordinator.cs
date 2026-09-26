@@ -166,17 +166,22 @@ public sealed class AgentActivityCoordinator : IDisposable
                     return false;
                 }
 
-                return toolCompleted.Status == ToolCallStatus.Failed
-                    ? turn.SetPhase(
+                if (toolCompleted.Status is ToolCallStatus.Failed or ToolCallStatus.Blocked)
+                {
+                    return turn.SetPhase(
                         AgentActivityPhase.UsingTool,
-                        "工具执行失败，正在继续处理",
+                        toolCompleted.Status == ToolCallStatus.Blocked
+                            ? "工具被 hook 拦截"
+                            : "工具执行失败，正在继续处理",
                         toolCompleted.ResultSummary,
-                        turn.ToolKind)
-                    : turn.ActiveToolCalls.Count == 0 && turn.SetPhase(
-                        AgentActivityPhase.Responding,
-                        "正在继续处理",
-                        null,
-                        toolKind: null);
+                        turn.ToolKind);
+                }
+
+                return turn.ActiveToolCalls.Count == 0 && turn.SetPhase(
+                    AgentActivityPhase.Responding,
+                    "正在继续处理",
+                    null,
+                    toolKind: null);
 
             case RunCompletedEvent completed:
                 // A truncated run did not error - it delivered a valid partial answer and

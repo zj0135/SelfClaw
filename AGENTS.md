@@ -187,6 +187,7 @@ Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 - Extensions: `ExtensionCatalog`, `ExtensionPackageInstaller`, `ExtensionSettingsService`, `ExtensionStateChangeNotifier`, `DirectTurnCapabilityResolver` plus its `SkillCapabilitySource` / `PluginCapabilitySource` / `McpCapabilitySource`, Skill readers/runtime tools
 - MCP: configuration/transport factories, pooled `McpClientManager`, SDK connection factory, `McpToolAdapter`
 - Direct preflight: `SubagentTaskPreflight` (`ISubagentTaskPreflight`); reads individual model availability through `IAiModelCatalog.IsModelAvailableAsync`
+- Hooks: `CommandHookRunner`, `PluginHookExecutionLog` (also `IPluginHookExecutionLog`), `AsyncHookExecutor` (singleton + hosted service), `DirectTurnHooksFactory`
 - Tools: `WorkspaceToolService`, `WorkspaceAgentToolset`; all Direct sources return `DirectToolBinding` and `DirectToolResult`
 - Workspace implementations: `WorkspaceFileService`, `WorkspaceSearchService`, `WorkspaceShellRunner`; the existing `IWorkspaceToolService` contract remains the caller boundary.
 - Security: `DpapiSecretProtector`

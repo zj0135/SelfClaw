@@ -49,6 +49,14 @@ internal static class DirectCapabilityRules
                 return Unavailable($"Skill '{id}' is unavailable or changed after task acceptance.");
         }
 
+        // Hook Plugins inherited from the parent turn are part of the delegated policy: a changed one
+        // must fail the task before acceptance rather than let the child run without its hooks.
+        foreach (var hookPlugin in ceiling.HookPlugins ?? [])
+        {
+            if (!IsPackageCurrent(FindPackage(packages, ExtensionKind.Plugin, hookPlugin.Id), hookPlugin))
+                return Unavailable($"Plugin '{hookPlugin.Id}' is unavailable or changed after task acceptance.");
+        }
+
         return null;
     }
 

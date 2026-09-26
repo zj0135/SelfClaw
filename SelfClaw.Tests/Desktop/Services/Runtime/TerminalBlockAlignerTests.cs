@@ -72,6 +72,26 @@ public sealed class TerminalBlockAlignerTests
     }
 
     [Fact]
+    public void Slow_path_preserves_notices_before_thinking()
+    {
+        var messageId = Guid.NewGuid();
+        var streamed = new[]
+        {
+            new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Notice, "hook notice", null),
+            new MessageSegmentRecord(messageId, 1, MessageSegmentKind.Thinking, "plan", null),
+            new MessageSegmentRecord(messageId, 2, MessageSegmentKind.Text, "draft", null)
+        };
+
+        var result = TerminalBlockAligner.Align(messageId, streamed, "rewritten");
+
+        result.Should().SatisfyRespectively(
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Notice, Text = "hook notice" }),
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Thinking, Text = "plan" }),
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Text, Text = "rewritten" }));
+        result.Select(segment => segment.Ordinal).Should().Equal(0, 1, 2);
+    }
+
+    [Fact]
     public void Null_final_text_keeps_the_streamed_blocks()
     {
         var messageId = Guid.NewGuid();

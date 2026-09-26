@@ -209,6 +209,65 @@ public sealed class ConversationTurnRecorderTests
         context.Turn.Completed.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task ApplyEventAsync_records_a_run_notice_as_a_notice_segment()
+    {
+        var context = CreateContext();
+
+        context.Recorder.BeginTurn(context.Session, context.Turn);
+        await context.ApplyAsync(new RunNoticeEvent("Hook 'alpha/a' failed (timedOut); ignored."));
+        await context.ApplyAsync(new AssistantTextDeltaEvent("text", "answer"));
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "answer"));
+
+        var segments = context.Committer.Finalizations.Should().ContainSingle().Which.AssistantMessage.Segments!;
+        segments.Should().SatisfyRespectively(
+            segment => segment.Kind.Should().Be(MessageSegmentKind.Notice),
+            segment => segment.Kind.Should().Be(MessageSegmentKind.Text));
+        segments[0].Text.Should().Be("Hook 'alpha/a' failed (timedOut); ignored.");
+        context.Committer.Finalizations[0].AssistantMessage.MarkdownContent.Should().Be("answer");
+    }
+
+    [Fact]
+    public async Task ApplyEventAsync_maps_a_blocked_run_to_a_blocked_message_with_its_reason()
+    {
+        var context = CreateContext();
+
+        context.Recorder.BeginTurn(context.Session, context.Turn);
+        await context.ApplyAsync(new RunCompletedEvent(
+            RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: "Blocked by hook 'alpha/a': no."));
+
+        var finalization = context.Committer.Finalizations.Should().ContainSingle().Which;
+        finalization.AssistantMessage.Status.Should().Be(MessageStatus.Blocked);
+        finalization.AssistantMessage.ErrorMessage.Should().Be("Blocked by hook 'alpha/a': no.");
+    }
+
+    [Fact]
+    public async Task ApplyEventAsync_persists_a_tool_hook_outcome_and_maps_a_blocked_tool()
+    {
+        var context = CreateContext();
+        var outcome = new ToolHookOutcome(
+            """{"value":"changed"}""",
+            [new HookSource("alpha", "a")],
+            [new HookSource("alpha", "b")],
+            new HookSource("alpha", "c"),
+            "stop",
+            [new HookFeedback(new HookSource("alpha", "d"), "note")],
+            []);
+
+        context.Recorder.BeginTurn(context.Session, context.Turn);
+        await context.ApplyAsync(new ToolCallStartedEvent(
+            "call-1", "write_file", "{}", ToolCallKind.Edit, ToolSourceKind.BuiltIn));
+        await context.ApplyAsync(new ToolCallCompletedEvent(
+            "call-1", ToolCallStatus.Blocked, "blocked", "blocked", outcome));
+        await context.ApplyAsync(new RunCompletedEvent(
+            RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: "stop"));
+
+        var finalization = context.Committer.Finalizations.Should().ContainSingle().Which;
+        finalization.ToolExecutions.Should().ContainSingle()
+            .Which.Status.Should().Be(ToolExecutionStatus.Blocked);
+        finalization.ToolExecutions[0].HookOutcome.Should().Be(outcome);
+    }
+
     private static RecorderTestContext CreateContext()
     {
         var now = DateTimeOffset.UtcNow;

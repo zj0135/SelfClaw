@@ -10,4 +10,7 @@ public sealed record ToolApprovalRequest(
     Agent.ToolSourceKind? SourceKind = null,
     string? SourceId = null,
     string? TransportSummary = null,
-    string? AnnotationsJson = null);
+    string? AnnotationsJson = null,
+    IReadOnlyList<HookSource>? ApprovalRequiredBy = null,
+    string? ApprovalReason = null,
+    IReadOnlyList<HookSource>? ArgumentsModifiedBy = null);

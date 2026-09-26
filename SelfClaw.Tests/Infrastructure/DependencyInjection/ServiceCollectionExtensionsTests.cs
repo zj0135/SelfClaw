@@ -1,10 +1,12 @@
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Interfaces.Extensions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure;
+using SelfClaw.Infrastructure.Agents.Direct.Hooks;
 using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.AiProviders;
@@ -87,6 +89,11 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         var settingsService = provider.GetRequiredService<IAiProviderSettingsService>();
         var modelCatalog = provider.GetRequiredService<IAiModelCatalog>();
         var chatClientFactory = provider.GetRequiredService<IAiChatClientFactory>();
+        var hookRunner = provider.GetRequiredService<CommandHookRunner>();
+        var hookLog = provider.GetRequiredService<PluginHookExecutionLog>();
+        var hookLogContract = provider.GetRequiredService<IPluginHookExecutionLog>();
+        var asyncHookExecutor = provider.GetRequiredService<AsyncHookExecutor>();
+        var hooksFactory = provider.GetRequiredService<DirectTurnHooksFactory>();
 
         repository.Should().BeOfType<SqliteAiProviderRepository>();
         packageRepository.Should().BeOfType<SqliteExtensionRepository>();
@@ -113,6 +120,10 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         registry.GetRequiredAdapter(AiProviderKind.Ollama).ProviderKind.Should().Be(AiProviderKind.Ollama);
         settingsService.Should().BeOfType<AiProviderSettingsService>();
         chatClientFactory.Should().BeOfType<AiChatClientFactory>();
+        hookRunner.Should().NotBeNull();
+        hookLogContract.Should().BeSameAs(hookLog);
+        asyncHookExecutor.Should().NotBeNull();
+        hooksFactory.Should().NotBeNull();
     }
 
     public void Dispose()

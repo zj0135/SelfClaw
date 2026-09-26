@@ -1,10 +1,18 @@
+using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
+using SelfClaw.Infrastructure.Agents.Direct.Hooks;
+using SelfClaw.Infrastructure.Agents.Direct.Hooks.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
-using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Models;
+using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
+using SelfClaw.Infrastructure.AiProviders;
+using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Http;
+using SelfClaw.Infrastructure.AiProviders.Models;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -15,10 +23,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
-using SelfClaw.Infrastructure.AiProviders;
-using SelfClaw.Infrastructure.AiProviders.Abstractions;
-using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Direct;
 
@@ -56,17 +60,20 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     private readonly IAiChatClientFactory _chatClientFactory;
     private readonly IDirectTurnCapabilityResolver _capabilityResolver;
     private readonly DirectPromptComposer _promptComposer;
+    private readonly DirectTurnHooksFactory _hooksFactory;
     private readonly ILogger<DirectAgentChatRuntime> _logger;
 
     public DirectAgentChatRuntime(
         IAiChatClientFactory chatClientFactory,
         IDirectTurnCapabilityResolver capabilityResolver,
         DirectPromptComposer promptComposer,
+        DirectTurnHooksFactory hooksFactory,
         ILogger<DirectAgentChatRuntime>? logger = null)
     {
         _chatClientFactory = chatClientFactory;
         _capabilityResolver = capabilityResolver;
         _promptComposer = promptComposer;
+        _hooksFactory = hooksFactory;
         _logger = logger ?? NullLogger<DirectAgentChatRuntime>.Instance;
     }
 
@@ -117,17 +124,29 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         ChannelWriter<AgentStreamEvent> writer,
         CancellationToken cancellationToken)
     {
+        var state = new TurnState();
         var output = new TurnOutputStream(writer);
         var cancellationObserved = false;
         var runCompletedEmitted = false;
+        RunCompletedEvent? terminal = null;
         DirectTurnSetup? setup = null;
         try
         {
-            setup = await SetupTurnAsync(request, writer, cancellationToken).ConfigureAwait(false);
-            var finishReason = await StreamResponseAsync(setup, output, cancellationToken).ConfigureAwait(false);
-            output.ReportUsage();
-            WriteTerminalOutcome(writer, finishReason, output);
-            runCompletedEmitted = true;
+            state.Elapsed.Start();
+            setup = await SetupTurnAsync(request, writer, state, cancellationToken).ConfigureAwait(false);
+            if (setup.ProviderLease is null)
+            {
+                // SetupTurnAsync already wrote the Blocked terminal event.
+                terminal = new RunCompletedEvent(RunCompletionStatus.Blocked, FinalText: null, setup.BlockReason);
+                runCompletedEmitted = true;
+            }
+            else
+            {
+                var finishReason = await StreamResponseAsync(setup, output, cancellationToken).ConfigureAwait(false);
+                output.ReportUsage();
+                terminal = WriteTerminalOutcome(writer, finishReason, output);
+                runCompletedEmitted = true;
+            }
         }
         catch (OperationCanceledException exception)
         {
@@ -139,14 +158,17 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         {
             _logger.LogError(exception, "Direct AI agent turn failed.");
             output.ReportUsage();
-            writer.TryWrite(new RunCompletedEvent(
+            terminal = new RunCompletedEvent(
                 RunCompletionStatus.Failed,
                 output.FinalTextOrNull,
-                exception.Message));
+                exception.Message);
+            writer.TryWrite(terminal);
             runCompletedEmitted = true;
         }
         finally
         {
+            state.Elapsed.Stop();
+            DeliverRunCompleted(state, output, terminal, cancellationObserved);
             if (setup is not null)
             {
                 await DisposeResourcesAsync(setup.ProviderLease, setup.CapabilityLease).ConfigureAwait(false);
@@ -161,9 +183,42 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         }
     }
 
+    private void DeliverRunCompleted(
+        TurnState state,
+        TurnOutputStream output,
+        RunCompletedEvent? terminal,
+        bool cancellationObserved)
+    {
+        if (state.Hooks is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var status = cancellationObserved
+                ? "cancelled"
+                : HookNotes.RunStatus(terminal?.Status ?? RunCompletionStatus.Failed);
+            state.Hooks.RunCompleted(new RunCompletedInput(
+                status,
+                terminal?.FinalText,
+                terminal?.ErrorMessage,
+                output.InputTokensOrNull,
+                output.OutputTokensOrNull,
+                state.Invoker?.CallCount ?? 0,
+                state.Elapsed.Elapsed));
+        }
+        catch (Exception exception)
+        {
+            // Delivery must never change the turn's terminal event.
+            _logger.LogWarning(exception, "Failed to deliver the runCompleted hook event.");
+        }
+    }
+
     private async Task<DirectTurnSetup> SetupTurnAsync(
         DirectChatTurnRequest request,
         ChannelWriter<AgentStreamEvent> writer,
+        TurnState state,
         CancellationToken cancellationToken)
     {
         if (request.ExecutionContext.Origin == DirectTurnOrigin.Continuation && request.ToolExecutionCheckpoint is null)
@@ -183,12 +238,68 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 writer.TryWrite(new RunStatusEvent(AgentRunStatus.Initializing, diagnostic));
             }
 
-            var invoker = new DirectToolInvoker(request, capabilityLease.Bindings);
+            foreach (var notice in capabilityLease.HookNotices)
+            {
+                writer.TryWrite(new RunNoticeEvent(notice));
+            }
+
+            // A hook Plugin inherited from the parent turn is missing or changed: the turn is
+            // blocked rather than silently executed without its policy.
+            if (capabilityLease.HookBlockReason is not null)
+            {
+                writer.TryWrite(new RunCompletedEvent(
+                    RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: capabilityLease.HookBlockReason));
+                return new DirectTurnSetup(capabilityLease, null, null, [], capabilityLease.HookBlockReason);
+            }
+
+            var hooks = _hooksFactory.Create(
+                new DirectHookTurnContext(
+                    request.TurnId,
+                    request.ConversationId,
+                    request.ExecutionContext.Origin,
+                    request.Agent.Id,
+                    request.Agent.Name,
+                    request.WorkspaceRoot?.RootPath,
+                    preparation.Connection.Name,
+                    preparation.Connection.ProviderKind,
+                    preparation.Profile.Model),
+                capabilityLease.Hooks);
+            state.Hooks = hooks;
+            if (hooks.HasRunStartingHooks)
+            {
+                writer.TryWrite(new RunStatusEvent(
+                    AgentRunStatus.Initializing, "Running runStarting hooks…"));
+            }
+
+            var start = await hooks
+                .RunStartingAsync(BuildRunStartingInput(request, preparation, capabilityLease), cancellationToken)
+                .ConfigureAwait(false);
+            foreach (var notice in start.Notices)
+            {
+                writer.TryWrite(new RunNoticeEvent(notice));
+            }
+
+            if (start.BlockedBy is not null)
+            {
+                writer.TryWrite(new RunCompletedEvent(
+                    RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: start.BlockReason));
+                return new DirectTurnSetup(capabilityLease, null, null, [], start.BlockReason);
+            }
+
+            var invoker = new DirectToolInvoker(request, capabilityLease.Bindings, hooks);
+            state.Invoker = invoker;
+            var httpHandler = hooks.HasHttpHooks
+                ? new HttpHookHandler(
+                    hooks,
+                    AiProviderHttpClientProvider.ReadExtraHeaderNames(preparation.Connection),
+                    cancellationToken)
+                : null;
             providerLease = _chatClientFactory.Create(
                 preparation,
                 new AiChatClientPipelineOptions(
                     capabilityLease.Tools,
-                    invoker.InvokeAsync));
+                    invoker.InvokeAsync,
+                    httpHandler));
 
             writer.TryWrite(new RunStartedEvent(
                 $"direct-{Guid.NewGuid():N}",
@@ -206,8 +317,9 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 new DirectPromptBudget(
                     AiChatOptions.ResolveContextWindowTokens(providerLease.Profile),
                     providerLease.Options.MaxOutputTokens),
-                providerLease.Options.Tools);
-            return new DirectTurnSetup(capabilityLease, providerLease, messages);
+                providerLease.Options.Tools,
+                start.Context);
+            return new DirectTurnSetup(capabilityLease, providerLease, invoker, messages, null);
         }
         catch
         {
@@ -215,6 +327,28 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             await DisposeResourcesAsync(providerLease, capabilityLease).ConfigureAwait(false);
             throw;
         }
+    }
+
+    private static RunStartingInput BuildRunStartingInput(
+        DirectChatTurnRequest request,
+        AiProviderClientRequest preparation,
+        DirectTurnCapabilityLease capabilityLease)
+    {
+        var latestUser = request.ExecutionContext.Origin == DirectTurnOrigin.Continuation
+            ? null
+            : request.Messages.LastOrDefault(message => message.Role == MessageRole.User);
+        var attachments = latestUser?.Attachments is { Count: > 0 } records
+            ? records.Select(record => new HookAttachmentPayload(
+                record.FileName, record.MediaType, record.ByteLength)).ToArray()
+            : [];
+        return new RunStartingInput(
+            preparation.Connection.Name,
+            preparation.Connection.ProviderKind,
+            preparation.Profile.Model,
+            latestUser?.MarkdownContent,
+            attachments,
+            capabilityLease.Tools.Select(tool => tool.Name).ToArray(),
+            request.ExecutionContext.CompletionBatch?.Deliveries.Select(delivery => delivery.TaskId.ToString("D")).ToArray());
     }
 
     /// <summary>
@@ -233,7 +367,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         // report it as Truncated so the partial answer is kept and the decision to
         // continue - which costs another full request - stays with the user.
         ChatFinishReason? finishReason = null;
-        await foreach (var update in setup.ProviderLease.Client.GetStreamingResponseAsync(
+        await foreach (var update in setup.ProviderLease!.Client.GetStreamingResponseAsync(
                            setup.Messages,
                            setup.ProviderLease.Options,
                            cancellationToken).ConfigureAwait(false))
@@ -243,7 +377,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 finishReason = reason;
             }
 
-            output.TranslateUpdate(update, setup.CapabilityLease.Bindings);
+            output.TranslateUpdate(update, setup.CapabilityLease.Bindings, setup.Invoker);
         }
 
         return finishReason;
@@ -255,7 +389,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     /// history, so the model can resume from it if the user continues); a length stop without text
     /// and an exhausted tool loop are both reported as Failed.
     /// </summary>
-    private void WriteTerminalOutcome(
+    private RunCompletedEvent WriteTerminalOutcome(
         ChannelWriter<AgentStreamEvent> writer,
         ChatFinishReason? finishReason,
         TurnOutputStream output)
@@ -264,22 +398,24 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         {
             _logger.LogInformation(
                 "Direct AI agent turn stopped at the output-token cap; reporting it as truncated.");
-            writer.TryWrite(new RunCompletedEvent(
+            var truncated = new RunCompletedEvent(
                 RunCompletionStatus.Truncated,
                 output.FinalText,
-                TruncatedMessage));
-            return;
+                TruncatedMessage);
+            writer.TryWrite(truncated);
+            return truncated;
         }
 
         if (finishReason == ChatFinishReason.Length)
         {
             _logger.LogWarning(
                 "Direct AI agent turn hit the output-token cap without producing any text.");
-            writer.TryWrite(new RunCompletedEvent(
+            var failed = new RunCompletedEvent(
                 RunCompletionStatus.Failed,
                 ErrorMessage: TruncatedWithoutOutputMessage,
-                FinalText: null));
-            return;
+                FinalText: null);
+            writer.TryWrite(failed);
+            return failed;
         }
 
         if (finishReason == ChatFinishReason.ToolCalls)
@@ -291,17 +427,20 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             _logger.LogWarning(
                 "Direct AI agent turn ended while the model was still requesting tool calls; " +
                 "the tool-call loop hit its iteration limit.");
-            writer.TryWrite(new RunCompletedEvent(
+            var failed = new RunCompletedEvent(
                 RunCompletionStatus.Failed,
                 output.FinalTextOrNull,
-                ToolLoopExhaustedMessage));
-            return;
+                ToolLoopExhaustedMessage);
+            writer.TryWrite(failed);
+            return failed;
         }
 
-        writer.TryWrite(new RunCompletedEvent(
+        var succeeded = new RunCompletedEvent(
             RunCompletionStatus.Succeeded,
             output.FinalText,
-            ErrorMessage: null));
+            ErrorMessage: null);
+        writer.TryWrite(succeeded);
+        return succeeded;
     }
 
     private async Task DisposeResourcesAsync(
@@ -348,6 +487,19 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         => new(RunCompletionStatus.Failed, FinalText: null, ErrorMessage: message);
 
     /// <summary>
+    /// Per-turn mutable state that outlives <c>SetupTurnAsync</c>, so a turn that fails after its
+    /// hooks were created still delivers exactly one <c>runCompleted</c>.
+    /// </summary>
+    private sealed class TurnState
+    {
+        public DirectTurnHooks? Hooks { get; set; }
+
+        public DirectToolInvoker? Invoker { get; set; }
+
+        public Stopwatch Elapsed { get; } = new();
+    }
+
+    /// <summary>
     /// One turn's accumulated stream translation: the final text, usage totals, and the descriptors
     /// of tool calls seen so far, reduced into transcript events on the shared channel.
     /// </summary>
@@ -368,9 +520,14 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
         public bool HasFinalText => _finalText.Length > 0;
 
+        public int? InputTokensOrNull => _hasInputUsage ? ClampTokens(_inputTokens) : null;
+
+        public int? OutputTokensOrNull => _hasOutputUsage ? ClampTokens(_outputTokens) : null;
+
         public void TranslateUpdate(
             ChatResponseUpdate update,
-            IReadOnlyDictionary<string, DirectToolBinding> bindings)
+            IReadOnlyDictionary<string, DirectToolBinding> bindings,
+            DirectToolInvoker? invoker)
         {
             var blockId = string.IsNullOrWhiteSpace(update.MessageId)
                 ? "direct-response"
@@ -405,7 +562,12 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
                     case FunctionResultContent result:
                         var (status, summary, detail) = DescribeToolResult(result);
-                        _writer.TryWrite(new ToolCallCompletedEvent(result.CallId, status, summary, detail));
+                        _writer.TryWrite(new ToolCallCompletedEvent(
+                            result.CallId,
+                            status,
+                            summary,
+                            detail,
+                            invoker?.TryTakeOutcome(result.CallId)));
                         break;
 
                     case UsageContent usage:

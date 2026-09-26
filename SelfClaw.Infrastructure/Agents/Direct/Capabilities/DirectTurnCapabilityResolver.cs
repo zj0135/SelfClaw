@@ -86,6 +86,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
                 effectiveRequest.Agent,
                 packages,
                 effectiveSkills,
+                InheritedHookPlugins(effectiveRequest),
                 leases,
                 diagnostics,
                 cancellationToken)
@@ -135,8 +136,16 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             BindTools(effectiveRequest, bindings),
             skills.MessageAdjustments,
             diagnostics.Messages,
-            leases.DisposeAsync);
+            leases.DisposeAsync,
+            plugins.Hooks,
+            plugins.HookNotices,
+            plugins.HookBlockReason);
     }
+
+    private static IReadOnlyList<DirectExtensionCapability> InheritedHookPlugins(DirectChatTurnRequest request)
+        => request.ExecutionContext.Origin is DirectTurnOrigin.Subagent or DirectTurnOrigin.Continuation
+            ? request.ExecutionContext.CapabilityCeiling?.HookPlugins ?? []
+            : [];
 
     internal static IReadOnlyList<DirectToolBinding> BindTools(
         DirectChatTurnRequest request, IEnumerable<DirectToolBinding> bindings)
@@ -334,12 +343,22 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             : request.Agent.SubagentIds
                 .Where(id => capturedSubagents.Contains(id, StringComparer.OrdinalIgnoreCase))
                 .ToArray();
+        // Only Plugins whose hooks actually resolved survive into the next delegation: they are the
+        // policy an inherited turn must keep enforcing.
+        var hookPlugins = plugins.Hooks
+            .Select(hook => hook.PluginId)
+            .Distinct(StringComparer.Ordinal)
+            .Select(id => CreatePackageCapability(packages, ExtensionKind.Plugin, id))
+            .Where(capability => capability is not null)
+            .Cast<DirectExtensionCapability>()
+            .ToArray();
         return new DirectCapabilityCeiling(
             request.Agent.ToolPolicy,
             pluginCapabilities,
             skillCapabilities,
             mcpCapabilities.Capabilities,
-            subagentIds);
+            subagentIds,
+            hookPlugins);
     }
 
     private static DirectExtensionCapability? CreatePackageCapability(

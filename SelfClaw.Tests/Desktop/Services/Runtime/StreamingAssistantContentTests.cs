@@ -62,6 +62,22 @@ public sealed class StreamingAssistantContentTests
         stream.BuildMarkdown().Should().Be("visible tail");
     }
 
+    [Fact]
+    public void Notice_blocks_stay_separate_and_are_excluded_from_markdown()
+    {
+        var stream = CreateStream();
+
+        stream.AppendNotice("first", DateTimeOffset.UtcNow);
+        stream.AppendNotice("second", DateTimeOffset.UtcNow);
+        stream.AppendText("answer", DateTimeOffset.UtcNow);
+
+        stream.BuildSegments().Should().SatisfyRespectively(
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Notice, Text = "first" }),
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Notice, Text = "second" }),
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Text, Text = "answer" }));
+        stream.BuildMarkdown().Should().Be("answer");
+    }
+
     private static StreamingAssistantContent CreateStream()
     {
         var stream = new StreamingAssistantContent();

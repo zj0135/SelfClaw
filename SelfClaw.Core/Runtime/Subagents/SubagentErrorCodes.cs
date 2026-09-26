@@ -16,4 +16,5 @@ public static class SubagentErrorCodes
     public const string ProviderFailed = "ProviderFailed";
     public const string OutputTruncated = "OutputTruncated";
     public const string SnapshotInvalid = "SnapshotInvalid";
+    public const string BlockedByHook = "BlockedByHook";
 }

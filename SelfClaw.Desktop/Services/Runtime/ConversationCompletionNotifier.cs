@@ -31,14 +31,33 @@ internal sealed class ConversationCompletionNotifier : IConversationCompletionNo
             BuildMessage(messages));
     }
 
-    private static string BuildMessage(IReadOnlyList<MessageRecord> messages)
+    internal static string BuildMessage(IReadOnlyList<MessageRecord> messages)
     {
+        // The terminal assistant message carries the outcome; a blocked or failed turn must not
+        // masquerade as a completed one with a preview of an earlier answer.
+        var terminal = messages.LastOrDefault(message =>
+            message.Role == MessageRole.Assistant &&
+            message.Status is MessageStatus.Blocked or MessageStatus.Failed or MessageStatus.Cancelled
+                or MessageStatus.Truncated or MessageStatus.Completed);
+        if (terminal?.Status == MessageStatus.Blocked)
+        {
+            return WithReason("已被插件 hook 阻止", terminal.ErrorMessage);
+        }
+
+        if (terminal?.Status == MessageStatus.Failed)
+        {
+            return WithReason("会话失败", terminal.ErrorMessage);
+        }
+
         const string modeMessage = "Programming session completed.";
         var preview = BuildPreview(messages);
         return string.IsNullOrWhiteSpace(preview)
             ? modeMessage
             : $"{modeMessage}\n{preview}";
     }
+
+    private static string WithReason(string headline, string? reason)
+        => string.IsNullOrWhiteSpace(reason) ? $"{headline}。" : $"{headline}：{reason}";
 
     private static string BuildPreview(IReadOnlyList<MessageRecord> messages)
     {

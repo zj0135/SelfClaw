@@ -144,6 +144,10 @@ export function resolveToolGroupStatus(segments) {
 		return 'failed';
 	}
 
+	if (segments.some((segment) => segment.status === 'blocked')) {
+		return 'blocked';
+	}
+
 	if (segments.some((segment) => segment.status === 'cancelled')) {
 		return 'cancelled';
 	}
@@ -198,6 +202,17 @@ export function buildRenderBlocks(item) {
 				isLast: index === total - 1,
 			});
 			thinkingOrdinal += 1;
+			continue;
+		}
+
+		if (segment.kind === 'notice') {
+			blocks.push({
+				type: 'notice',
+				key: segment.segmentId || `${item.id}:notice:${index}`,
+				id: segment.segmentId || `${item.id}:notice:${index}`,
+				segment,
+				isLast: index === total - 1,
+			});
 			continue;
 		}
 

@@ -100,6 +100,69 @@ public sealed class SubagentContinuationExecutorTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_blocked_hook_dead_letters_without_retrying(bool hasTool)
+    {
+        var paths = StoragePathDefaults.Create(_rootPath, Path.Combine(_rootPath, "blocked.db"), Path.Combine(_rootPath, "secrets"));
+        var database = new SqliteDatabase(paths);
+        var conversations = new SqliteConversationRepository(database);
+        var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
+        var deliveries = new SqliteSubagentDeliveryRepository(database);
+        await tasks.InitializeAsync();
+        var task = await SubagentTaskTestData.CreateRunningTaskAsync(conversations, tasks);
+        var now = DateTimeOffset.UtcNow;
+        var childMessage = new MessageRecord(task.ChildTurnId, task.ChildConversationId, MessageRole.Assistant,
+            "child result", MessageStatus.Completed, now, now);
+        await tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Running,
+            new SubagentTaskCompletion(SubagentTaskStatus.Succeeded, new TurnFinalization(childMessage, []),
+                "child result", null, null, now));
+        var parent = await conversations.GetConversationAsync(task.ParentConversationId)
+            ?? throw new InvalidOperationException("Missing parent.");
+        var approvalHandler = new DesktopToolApprovalHandler();
+        using var activity = new AgentActivityCoordinator(approvalHandler, NullLogger<AgentActivityCoordinator>.Instance);
+        using var sessions = new ConversationSessionCoordinator(conversations, new NoOpTranscriptChangeSink());
+        var notifications = new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance);
+        var runtime = new BlockedRuntime(hasTool);
+        var recorder = new ConversationTurnRecorder(conversations, NullLogger<ConversationTurnRecorder>.Instance);
+        using var engine = new ConversationTurnEngine(
+            conversations, new DesktopTurnFinalizer(conversations, NullLogger<DesktopTurnFinalizer>.Instance),
+            recorder, runtime, sessions, activity, approvalHandler,
+            SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(new DesktopSettingsJsonStore(paths)),
+            new NullCompletionNotifier(), NullLogger<ConversationTurnEngine>.Instance);
+        var executor = new SubagentContinuationExecutor(deliveries, runtime, recorder, approvalHandler,
+            new SubagentTaskSnapshotSerializer(), new SubagentCompletionBatchSerializer(), engine, notifications,
+            NullLogger<SubagentContinuationExecutor>.Instance);
+
+        var leaseAt = now.AddMinutes(1);
+        var mailbox = await deliveries.PeekReadyMailboxAsync(leaseAt, leaseAt)
+            ?? throw new InvalidOperationException("Missing ready mailbox.");
+        var lease = await deliveries.TryLeaseBatchAsync(mailbox, Guid.NewGuid(), Guid.NewGuid(),
+            leaseAt, leaseAt.AddSeconds(45), 64 * 1024)
+            ?? throw new InvalidOperationException("Missing lease.");
+        var state = await engine.TryAdmitContinuationAsync(parent, CancellationToken.None)
+            ?? throw new InvalidOperationException("Continuation admission failed.");
+        await executor.ExecuteAsync(parent, state, lease, CancellationToken.None);
+
+        var delivery = await tasks.GetDeliveryAsync(parent.Id, task.Id)
+            ?? throw new InvalidOperationException("Missing delivery.");
+        delivery.Status.Should().Be(SubagentDeliveryStatus.DeadLetter);
+        delivery.AttemptCount.Should().Be(1);
+        delivery.LastError.Should().Contain("Blocked by hook 'alpha/a'");
+        runtime.Runs.Should().Be(1);
+        (await deliveries.PeekReadyMailboxAsync(now.AddHours(1), now.AddHours(1))).Should().BeNull();
+        var messages = await conversations.ListMessagesAsync(parent.Id);
+        if (hasTool)
+        {
+            messages.Should().ContainSingle().Which.Status.Should().Be(MessageStatus.Failed);
+        }
+        else
+        {
+            messages.Should().BeEmpty();
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_rootPath))
@@ -137,6 +200,31 @@ public sealed class SubagentContinuationExecutorTests : IDisposable
 
             await Task.Yield();
             yield return new RunCompletedEvent(RunCompletionStatus.Truncated, "partial answer");
+        }
+    }
+
+    private sealed class BlockedRuntime(bool hasTool) : IAgentChatRuntime
+    {
+        internal int Runs { get; private set; }
+
+        public async IAsyncEnumerable<AgentStreamEvent> StreamTurnAsync(
+            ChatTurnRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Runs++;
+            if (hasTool)
+            {
+                var direct = (DirectChatTurnRequest)request;
+                var checkpoint = direct.ToolExecutionCheckpoint ?? throw new InvalidOperationException("Missing checkpoint.");
+                await checkpoint.BeforeExecutionAsync(cancellationToken);
+                yield return new ToolCallStartedEvent("call-1", "write_file", "{}", ToolCallKind.Edit, ToolSourceKind.BuiltIn);
+                yield return new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "written", "done");
+            }
+
+            await Task.Yield();
+            yield return new RunCompletedEvent(
+                RunCompletionStatus.Blocked,
+                FinalText: null,
+                ErrorMessage: "Blocked by hook 'alpha/a': no.");
         }
     }
 

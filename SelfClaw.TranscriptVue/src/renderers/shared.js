@@ -12,11 +12,16 @@ export function toolStatusLabel(status) {
 			return '执行中';
 		case 'awaitingapproval':
 			return '等待确认';
+		case 'completed':
+			return '成功';
 		case 'failed':
 			return '失败';
+		case 'blocked':
+			return '已拦截';
 		case 'cancelled':
 			return '已取消';
 		default:
-			return '成功';
+			// 未知状态原样显示，不再伪装成“成功”。
+			return status ? String(status) : '';
 	}
 }

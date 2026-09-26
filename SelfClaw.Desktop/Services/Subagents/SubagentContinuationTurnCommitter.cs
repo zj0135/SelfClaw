@@ -23,6 +23,18 @@ internal sealed class SubagentContinuationTurnCommitter : IRecordedTurnCommitter
     internal SubagentContinuationDisposition Disposition { get; private set; }
     internal bool ToolsMayHaveExecuted { get; private set; }
 
+    /// <summary>
+    /// Set when the continuation was blocked by a Plugin hook. The same hook would block a retry, so
+    /// the delivery is dead-lettered instead of retried.
+    /// </summary>
+    internal string? BlockedReason { get; private set; }
+
+    internal void MarkBlocked(string reason)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        BlockedReason = reason;
+    }
+
     public async Task BeforeExecutionAsync(CancellationToken cancellationToken)
     {
         if (!await _deliveryStore.TryMarkToolExecutionStartedAsync(_lease, _timeProvider.GetUtcNow(), cancellationToken))
@@ -39,7 +51,10 @@ internal sealed class SubagentContinuationTurnCommitter : IRecordedTurnCommitter
         var resolutionKind = commit.Kind switch
         {
             TurnFinalizationKind.Succeeded => SubagentDeliveryResolutionKind.Succeeded,
+            // UnsafeFailure also resolves to DeadLetter, so a blocked run that already executed tools
+            // can persist its terminal record through the only kind the store accepts one for.
             _ when ToolsMayHaveExecuted => SubagentDeliveryResolutionKind.UnsafeFailure,
+            _ when BlockedReason is not null => SubagentDeliveryResolutionKind.DeadLetter,
             _ => SubagentDeliveryResolutionKind.RetryableFailure
         };
         var persistsFinalization = resolutionKind is SubagentDeliveryResolutionKind.Succeeded

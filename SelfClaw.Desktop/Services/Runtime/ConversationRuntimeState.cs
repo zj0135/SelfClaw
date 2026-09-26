@@ -174,6 +174,31 @@ internal sealed class ConversationRuntimeState : IDisposable
     }
 
     /// <summary>
+    /// Appends a host-generated turn notice as its own block. Notices are never replayed to the model;
+    /// they only exist to explain hook behaviour in the transcript.
+    /// </summary>
+    public bool ApplyAssistantNotice(Guid messageId, string text)
+    {
+        lock (_gate)
+        {
+            _snapshot = null;
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            var message = _messages.FirstOrDefault(item => item.Id == messageId);
+            if (message is null)
+            {
+                return false;
+            }
+
+            GetOrCreateMessageStream(message).AppendNotice(text, DateTimeOffset.UtcNow);
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Places a tool run inline in its assistant message by appending a ToolCall block to the
     /// streaming content; the block ordinal is the transcript position of the tool card.
     /// </summary>

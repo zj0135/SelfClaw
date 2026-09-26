@@ -1,4 +1,5 @@
 using SelfClaw.Tests.Infrastructure.Agents.Direct;
+using SelfClaw.Tests.Infrastructure.Agents.Direct.Hooks.TestDoubles;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
@@ -191,8 +192,10 @@ public sealed class WorkspaceAgentToolsetTests
             .ToArray();
         return new ToolFixture(
             bindings.Select(binding => (AITool)binding.Tool).ToArray(),
-            new DirectToolInvoker(request, bindings.ToDictionary(
-                binding => binding.Tool.Name, StringComparer.Ordinal)));
+            new DirectToolInvoker(
+                request,
+                bindings.ToDictionary(binding => binding.Tool.Name, StringComparer.Ordinal),
+                HookTestFactory.Create([])));
     }
 
     private static WorkspaceRoot CreateWorkspace()

@@ -5,6 +5,7 @@ import ThinkingBlock from './ThinkingBlock.vue';
 import ToolGroup from './ToolGroup.vue';
 import ToolCard from './ToolCard.vue';
 import BodySegment from './BodySegment.vue';
+import NoticeBlock from './NoticeBlock.vue';
 
 const props = defineProps({ item: { type: Object, required: true }, collapse: { type: Object, required: true }, compact: Boolean });
 const emit = defineEmits(['preview-image']);
@@ -20,6 +21,7 @@ const blocks = computed(() => buildRenderBlocks(props.item));
 			<ToolGroup v-else-if="block.type === 'tool-group'" :data-activity-block-id="compact ? block.key : null" :block="block" :collapse="collapse" />
 			<ToolCard v-else-if="block.type === 'tool'" :data-activity-block-id="compact ? block.key : null" :id="block.id" :segment="block.segment" :summary-label="block.summaryLabel"
 				:open="collapse.isToolOpen(block.id)" @toggle="collapse.toggleTool(block.id)" />
+			<NoticeBlock v-else-if="block.type === 'notice'" :data-activity-block-id="compact ? block.key : null" :segment="block.segment" />
 			<BodySegment v-else :data-activity-block-id="compact ? block.key : null" :item="item" :segment="block.segment" :is-first="block.isFirst" :is-last="block.isLast"
 				@preview-image="emit('preview-image', $event)" />
 		</template>

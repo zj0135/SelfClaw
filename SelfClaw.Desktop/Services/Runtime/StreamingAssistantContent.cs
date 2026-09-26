@@ -57,6 +57,21 @@ internal sealed class StreamingAssistantContent
         MarkChanged(updatedAtUtc);
     }
 
+    /// <summary>
+    /// Turn-level notices each stay their own block: two consecutive notices are distinct messages and
+    /// must not merge into one line.
+    /// </summary>
+    public void AppendNotice(string text, DateTimeOffset updatedAtUtc)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        _blocks.Add(new ContentBlock(MessageSegmentKind.Notice, new StringBuilder(text), null));
+        MarkChanged(updatedAtUtc);
+    }
+
     public void CompleteThinking(DateTimeOffset updatedAtUtc)
     {
         // A Thinking block is closed implicitly when a different kind of content follows; this

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Tests.TestDoubles;
 
@@ -7,6 +8,26 @@ namespace SelfClaw.Tests.Desktop.Services.Subagents;
 
 public sealed class SubagentExecutionSessionTests
 {
+    [Fact]
+    public async Task A_blocked_child_turn_is_persisted_as_a_failed_task_with_the_hook_error()
+    {
+        using var context = new SubagentActivityTestContext();
+        var task = await context.CreateTaskAsync();
+        var session = await context.RegisterSessionAsync(task);
+        await session.BeginAsync();
+
+        await session.ApplyEventAsync(
+            new RunCompletedEvent(RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: "blocked by hook 'alpha/a'"),
+            CancellationToken.None);
+
+        var persisted = await context.Tasks.GetAsync(task.ParentConversationId, task.Id)
+            ?? throw new InvalidOperationException("Missing completed task.");
+        persisted.Status.Should().Be(SubagentTaskStatus.Failed);
+        persisted.ErrorCode.Should().Be(SubagentErrorCodes.BlockedByHook);
+        persisted.ErrorMessage.Should().Contain("blocked by hook 'alpha/a'");
+        await session.DisposeAsync();
+    }
+
     [Fact]
     public async Task Unregister_blocks_new_reads_and_waits_for_inflight_snapshot_and_terminal_commit()
     {

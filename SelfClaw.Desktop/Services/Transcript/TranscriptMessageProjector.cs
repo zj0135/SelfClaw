@@ -34,6 +34,7 @@ internal sealed class TranscriptMessageProjector
             message.CreatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
             BuildImageAttachments(message),
             message.Status is MessageStatus.Failed or MessageStatus.Cancelled or MessageStatus.Truncated
+                or MessageStatus.Blocked
                 ? message.ErrorMessage
                 : null);
     }
@@ -84,6 +85,14 @@ internal sealed class TranscriptMessageProjector
                             segment.Text,
                             message.Status == MessageStatus.Streaming && segment.Ordinal == segments[^1].Ordinal,
                             SegmentId: $"{message.Id:D}:thinking:{thinkingIndex}",
+                            SegmentOrdinal: segment.Ordinal));
+                        break;
+                    case MessageSegmentKind.Notice when !string.IsNullOrEmpty(segment.Text):
+                        renderSegments.Add(new TranscriptRenderSegment(
+                            "notice",
+                            segment.Text,
+                            false,
+                            SegmentId: $"{message.Id:D}:notice:{segment.Ordinal}",
                             SegmentOrdinal: segment.Ordinal));
                         break;
                     case MessageSegmentKind.ToolCall when segment.ToolRunId is Guid toolRunId:

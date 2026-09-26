@@ -7,7 +7,7 @@ namespace SelfClaw.Desktop.Services.Runtime;
 /// Aligns the terminal FinalText against the streamed block sequence. Fast path keeps the
 /// streamed blocks when the visible text already matches; slow path maps each ToolCall block's
 /// character offset in the streamed text onto the final text and rebuilds Text/ToolCall blocks.
-/// Thinking blocks are preserved from the stream and prepended.
+/// Notice and Thinking blocks are preserved from the stream and prepended, notices first.
 /// </summary>
 internal static class TerminalBlockAligner
 {
@@ -82,7 +82,7 @@ internal static class TerminalBlockAligner
             chunkStart = index + 1;
         }
 
-        return PrependThinking(streamedSegments, result);
+        return PrependPreservedBlocks(streamedSegments, result);
     }
 
     private static IReadOnlyList<MessageSegmentRecord> RebuildTextOnly(
@@ -96,20 +96,23 @@ internal static class TerminalBlockAligner
             result.Add(new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Text, finalText, null));
         }
 
-        return PrependThinking(streamedSegments, result);
+        return PrependPreservedBlocks(streamedSegments, result);
     }
 
-    private static IReadOnlyList<MessageSegmentRecord> PrependThinking(
+    private static IReadOnlyList<MessageSegmentRecord> PrependPreservedBlocks(
         IReadOnlyList<MessageSegmentRecord> streamedSegments,
         List<MessageSegmentRecord> result)
     {
-        var thinking = streamedSegments.Where(segment => segment.Kind == MessageSegmentKind.Thinking).ToList();
-        if (thinking.Count == 0)
+        // Notices keep their streamed order ahead of thinking; the rebuild only replaces visible content.
+        var prefix = streamedSegments
+            .Where(segment => segment.Kind is MessageSegmentKind.Notice or MessageSegmentKind.Thinking)
+            .ToList();
+        if (prefix.Count == 0)
         {
             return result;
         }
 
-        return thinking.Concat(result)
+        return prefix.Concat(result)
             .Select((segment, index) => segment with { Ordinal = index })
             .ToArray();
     }

@@ -703,6 +703,12 @@ button {
 	font-size: var(--fs-12);
 }
 
+.message-blocked {
+	margin: 8px 0 0;
+	color: var(--accent-2);
+	font-size: var(--fs-12);
+}
+
 h1,
 h2,
 h3 {
@@ -968,6 +974,11 @@ a:hover {
 .tool-status-icon.failed {
 	background: color-mix(in srgb, var(--danger) 10%, transparent);
 	color: var(--danger);
+}
+
+.tool-status-icon.blocked {
+	background: color-mix(in srgb, var(--accent-2) 12%, transparent);
+	color: var(--accent-2);
 }
 
 .tool-status-icon.cancelled {

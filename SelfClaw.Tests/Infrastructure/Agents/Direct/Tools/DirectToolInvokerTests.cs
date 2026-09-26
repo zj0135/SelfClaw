@@ -8,6 +8,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Runtime;
+using SelfClaw.Tests.Infrastructure.Agents.Direct.Hooks.TestDoubles;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Tools;
 
@@ -172,10 +173,13 @@ public sealed class DirectToolInvokerTests
             "stdio: node",
             "{\"readOnlyHint\":true}");
         var request = CreateRequest(permissionMode, approvalHandler, checkpointFactory?.Invoke(order));
-        var invoker = new DirectToolInvoker(request, new Dictionary<string, DirectToolBinding>(StringComparer.Ordinal)
-        {
-            [function.Name] = binding
-        });
+        var invoker = new DirectToolInvoker(
+            request,
+            new Dictionary<string, DirectToolBinding>(StringComparer.Ordinal)
+            {
+                [function.Name] = binding
+            },
+            HookTestFactory.Create([]));
         return new TestPipeline(invoker, function, order);
     }
 

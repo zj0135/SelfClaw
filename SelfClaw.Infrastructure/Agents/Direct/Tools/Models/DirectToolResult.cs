@@ -8,4 +8,9 @@ internal sealed record DirectToolResult(
     [property: JsonConverter(typeof(JsonStringEnumConverter<ToolCallStatus>))] ToolCallStatus Status,
     string Summary,
     JsonElement Content,
-    [property: JsonIgnore] string? Detail);
+    [property: JsonIgnore] string? Detail)
+{
+    [JsonPropertyName("hookFeedback")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<DirectToolHookFeedback>? HookFeedback { get; init; }
+}

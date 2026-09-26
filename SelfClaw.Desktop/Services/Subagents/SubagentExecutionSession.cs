@@ -175,6 +175,15 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
             _committer.OverrideTerminal(SubagentTaskStatus.Failed, SubagentErrorCodes.OutputTruncated, error);
             streamEvent = truncated with { Status = RunCompletionStatus.Failed, ErrorMessage = error };
         }
+        else if (streamEvent is RunCompletedEvent { Status: RunCompletionStatus.Blocked } blocked)
+        {
+            // The durable Subagent task model has no Blocked state; a blocked run is a failed task.
+            var error = string.IsNullOrWhiteSpace(blocked.ErrorMessage)
+                ? "A Plugin hook blocked the Subagent run."
+                : blocked.ErrorMessage;
+            _committer.OverrideTerminal(SubagentTaskStatus.Failed, SubagentErrorCodes.BlockedByHook, error);
+            streamEvent = blocked with { Status = RunCompletionStatus.Failed, ErrorMessage = error };
+        }
 
         await _recorder.ApplyEventAsync(_state, _turn, streamEvent, _committer, cancellationToken).ConfigureAwait(false);
         if (streamEvent is ToolCallCompletedEvent &&

@@ -11,6 +11,37 @@ namespace SelfClaw.Tests.Desktop.Services.Subagents;
 public sealed class SubagentActivityContentTests
 {
     [Fact]
+    public void A_notice_segment_is_readable_as_content()
+    {
+        var messageId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var message = new MessageRecord(
+            messageId,
+            Guid.NewGuid(),
+            MessageRole.Assistant,
+            string.Empty,
+            MessageStatus.Blocked,
+            now,
+            now,
+            Segments:
+            [
+                new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Notice, "hook notice", null),
+                new MessageSegmentRecord(messageId, 1, MessageSegmentKind.Text, "answer", null)
+            ]);
+        var snapshot = SubagentActivityContent.Create(SubagentTaskStatus.Failed, "task", message, []);
+        var task = new SubagentActivityTask(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), messageId,
+            "child", "Child", "task", SubagentTaskStatus.Failed, 1, null, null, null,
+            now, now, now, null, null, null, null, null, null, 0, null);
+        var query = new SubagentContentQuery(
+            task.ParentConversationId, task.TaskId, snapshot.ContentVersion, "segment/0");
+
+        var page = SubagentActivityContent.Read(task, snapshot, query);
+
+        page.Text.Should().Be("hook notice");
+    }
+
+    [Fact]
     public async Task Content_pages_use_the_live_service_and_enforce_unicode_ranges_versions_and_parent_ownership()
     {
         using var context = new SubagentActivityTestContext();
