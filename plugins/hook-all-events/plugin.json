@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "id": "hook-all-events",
+  "name": "Hook All Events Sample",
+  "version": "1.0.0",
+  "description": "Demonstrates all six Direct hook events (run, tool and HTTP) with observable side effects.",
+  "permissions": ["hooks.run", "hooks.tool", "hooks.http", "hooks.http.body"],
+  "contributes": {
+    "hooks": [
+      {
+        "id": "run-starting",
+        "event": "runStarting",
+        "matcher": { "origins": ["interactive", "subagent", "continuation"] },
+        "command": "powershell.exe",
+        "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${pluginRoot}/hooks/run-starting.ps1"],
+        "timeoutSeconds": 10,
+        "onFailure": "continue"
+      },
+      {
+        "id": "run-completed",
+        "event": "runCompleted",
+        "command": "powershell.exe",
+        "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${pluginRoot}/hooks/run-completed.ps1"],
+        "timeoutSeconds": 30
+      },
+      {
+        "id": "tool-executing",
+        "event": "toolExecuting",
+        "matcher": { "tools": ["run_shell_command"], "kinds": ["run"] },
+        "command": "powershell.exe",
+        "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${pluginRoot}/hooks/tool-executing.ps1"],
+        "timeoutSeconds": 10,
+        "onFailure": "block"
+      },
+      {
+        "id": "tool-executed-feedback",
+        "event": "toolExecuted",
+        "matcher": { "tools": ["run_shell_command"] },
+        "command": "powershell.exe",
+        "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${pluginRoot}/hooks/tool-executed-feedback.ps1"],
+        "timeoutSeconds": 10
+      },
+      {
+        "id": "tool-executed-audit",
+        "event": "toolExecuted",
+        "matcher": { "sources": ["builtIn", "mcp", "skill", "plugin"] },
+        "command": "powershell.exe",
+        "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${pluginRoot}/hooks/tool-executed-audit.ps1"],
+        "timeoutSeconds": 30,
+        "async": true
+      },
+      {
+        "id": "read-file-feedback",
+        "event": "toolExecuted",
+        "matcher": { "tools": ["read_file"] },
+        "command": "powershell.exe",
+        "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${pluginRoot}/hooks/read-file-feedback.ps1"],
+        "timeoutSeconds": 10
+      },
+      {
+        "id": "http-request-sending",
+        "event": "httpRequestSending",
+        "command": "powershell.exe",
+        "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${pluginRoot}/hooks/http-request-sending.ps1"],
+        "timeoutSeconds": 5,
+        "includeRequestBody": true
+      },
+      {
+        "id": "http-response-received",
+        "event": "httpResponseReceived",
+        "matcher": { "origins": ["interactive", "subagent", "continuation"] },
+        "command": "powershell.exe",
+        "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${pluginRoot}/hooks/http-response-received.ps1"],
+        "timeoutSeconds": 30
+      }
+    ]
+  }
+}

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Infrastructure.Options;
 
@@ -43,6 +44,64 @@ public sealed class TranscriptMessageProjectorHookTests
 
         item.Status.Should().Be("blocked");
         item.ErrorMessage.Should().Be("Blocked by hook 'alpha/a': no.");
+    }
+
+    [Fact]
+    public void A_tool_hook_outcome_projects_into_the_tool_segment()
+    {
+        var messageId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var toolRunId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var message = new MessageRecord(
+            messageId,
+            conversationId,
+            MessageRole.Assistant,
+            "answer",
+            MessageStatus.Completed,
+            now,
+            now,
+            Segments:
+            [
+                new MessageSegmentRecord(messageId, 0, MessageSegmentKind.ToolCall, null, toolRunId)
+            ]);
+        var modifier = new HookSource("shell-guard", "rewrite");
+        var blockedBy = new HookSource("shell-guard", "deny-dangerous");
+        var toolRun = new ToolExecutionRecord(
+            toolRunId,
+            conversationId,
+            "run_shell_command",
+            "{\"command\":\"rm -rf .\"}",
+            ToolExecutionStatus.Blocked,
+            "Blocked by hook 'shell-guard/deny-dangerous': no.",
+            "call-1",
+            5,
+            now,
+            now,
+            MessageId: messageId,
+            ResultContent: "Blocked by hook 'shell-guard/deny-dangerous': no.",
+            HookOutcome: new ToolHookOutcome(
+                "{\"command\":\"ls\"}",
+                [modifier],
+                [],
+                blockedBy,
+                "no.",
+                [new HookFeedback(modifier, "Rewritten.")],
+                [new HookFailureNotice(modifier, "timedOut", "too slow")]));
+
+        var item = Projector().Build(message, [toolRun]);
+
+        var hook = item.Segments.Single().Hook;
+        hook.Should().NotBeNull();
+        hook!.BlockedBy.Should().Be("shell-guard/deny-dangerous");
+        hook.BlockReason.Should().Be("no.");
+        hook.ArgumentsModifiedBy.Should().Equal("shell-guard/rewrite");
+        hook.EffectiveArgumentsText.Should().Contain("ls");
+        hook.OriginalArgumentsText.Should().Contain("rm -rf .");
+        hook.Feedback.Should().ContainSingle()
+            .Which.Should().Be(new SelfClaw.Desktop.Services.Transcript.Views.TranscriptHookNoteView("shell-guard/rewrite", "Rewritten."));
+        hook.IgnoredFailures.Should().ContainSingle()
+            .Which.Text.Should().Be("timedOut: too slow");
     }
 
     private static TranscriptMessageProjector Projector()

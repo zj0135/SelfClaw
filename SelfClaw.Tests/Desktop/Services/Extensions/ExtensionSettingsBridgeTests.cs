@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Interfaces.Extensions;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Extensions.Abstractions;
@@ -204,6 +205,23 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
         json.GetProperty("package").GetProperty("id").GetString().Should().Be("office");
     }
 
+    [Fact]
+    public async Task GetHookLog_returns_recent_entries_for_the_requested_plugin()
+    {
+        var log = new RecordingHookExecutionLog();
+        log.Append(new PluginHookExecutionEntry(
+            DateTimeOffset.UnixEpoch, "office", "guard", "toolExecuting", null, "blocked", 12, 0, null, null));
+        var bridge = CreateBridge(new RecordingExtensionSettingsService(), hookExecutionLog: log);
+        using var document = JsonDocument.Parse("{\"requestId\":\"log-request\",\"id\":\"office\"}");
+
+        var response = await bridge.TryHandleAsync("extensions/get-hook-log", document.RootElement);
+
+        var json = SerializeResponse(response);
+        json.GetProperty("requestId").GetString().Should().Be("log-request");
+        json.GetProperty("entries")[0].GetProperty("hookId").GetString().Should().Be("guard");
+        log.RequestedPluginId.Should().Be("office");
+    }
+
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))
@@ -223,7 +241,8 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
     private ExtensionSettingsBridge CreateBridge(
         IExtensionSettingsService settingsService,
         DesktopAgentDefinitionService? agentDefinitionService = null,
-        IExtensionStateChangeNotifier? stateChangeNotifier = null)
+        IExtensionStateChangeNotifier? stateChangeNotifier = null,
+        IPluginHookExecutionLog? hookExecutionLog = null)
     {
         var storagePaths = CreateStoragePaths();
         var repository = new SqliteExtensionRepository(new SqliteDatabase(storagePaths));
@@ -232,6 +251,7 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
             repository,
             agentDefinitionService ?? CreateAgentService(),
             new CancelledPackagePicker(),
+            hookExecutionLog ?? new RecordingHookExecutionLog(),
             stateChangeNotifier ?? new ExtensionStateChangeNotifier(),
             new SelfClaw.Desktop.Services.WebView.WebViewHostChannel(), System.Windows.Threading.Dispatcher.CurrentDispatcher);
     }
@@ -429,5 +449,20 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
         public string? PickPackage(ExtensionKind kind) => null;
 
         public string? PickPluginFolder() => null;
+    }
+
+    private sealed class RecordingHookExecutionLog : IPluginHookExecutionLog
+    {
+        private readonly List<PluginHookExecutionEntry> _entries = [];
+
+        public string? RequestedPluginId { get; private set; }
+
+        public void Append(PluginHookExecutionEntry entry) => _entries.Add(entry);
+
+        public IReadOnlyList<PluginHookExecutionEntry> GetRecent(string pluginId)
+        {
+            RequestedPluginId = pluginId;
+            return _entries.Where(entry => entry.PluginId == pluginId).ToArray();
+        }
     }
 }

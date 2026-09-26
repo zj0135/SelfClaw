@@ -1,14 +1,18 @@
 <script setup>
-import { Pencil, Trash2, X } from 'lucide-vue-next';
+import { Pencil, RefreshCw, Trash2, X } from 'lucide-vue-next';
 import ExtensionStatusBadge from './ExtensionStatusBadge.vue';
+import PluginHookList from './PluginHookList.vue';
+import PluginHookLog from './PluginHookLog.vue';
 
 defineProps({
 	item: { type: Object, required: true },
 	kind: { type: String, required: true },
 	panels: { type: Array, default: () => [] },
+	hookLogEntries: { type: Array, default: () => [] },
+	hookLogLoading: { type: Boolean, default: false },
 	pending: { type: Boolean, default: false },
 });
-defineEmits(['close', 'delete', 'edit']);
+defineEmits(['close', 'delete', 'edit', 'reload', 'refresh-hook-log']);
 </script>
 
 <template>
@@ -50,6 +54,15 @@ defineEmits(['close', 'delete', 'edit']);
 				<dt>工具</dt>
 				<dd>{{ item.tools.join(', ') }}</dd>
 			</template>
+			<template v-if="item.sourcePath">
+				<dt>源路径</dt>
+				<dd class="source-path">
+					<code>{{ item.sourcePath }}</code>
+					<button type="button" class="reload" :disabled="pending" @click="$emit('reload')">
+						<RefreshCw :size="12" :class="{ spin: pending }" aria-hidden="true" />重新加载
+					</button>
+				</dd>
+			</template>
 			<template v-if="item.permissions?.length">
 				<dt>权限</dt>
 				<dd>{{ item.permissions.join(', ') }}</dd>
@@ -65,6 +78,10 @@ defineEmits(['close', 'delete', 'edit']);
 				</dd>
 			</template>
 		</dl>
+
+		<PluginHookList v-if="kind === 'plugin' && item.hooks?.length" :hooks="item.hooks" />
+		<PluginHookLog v-if="kind === 'plugin'" :entries="hookLogEntries" :loading="hookLogLoading"
+			@refresh="$emit('refresh-hook-log')" />
 
 		<footer v-if="kind === 'mcpServer' || !item.sourcePluginId">
 			<button v-if="kind === 'mcpServer'" type="button" class="secondary" :disabled="pending"
@@ -88,16 +105,21 @@ defineEmits(['close', 'delete', 'edit']);
 	min-width: 0;
 	height: 100%;
 	padding: 18px;
+	overflow-y: auto;
 	border-left: 1px solid var(--sc-line);
 	background: var(--sc-bg);
 	animation: sc-fade 160ms ease-out both;
 }
 
 header {
+	position: sticky;
+	top: 0;
+	z-index: 2;
 	display: flex;
 	align-items: flex-start;
 	justify-content: space-between;
 	gap: 12px;
+	background: var(--sc-bg);
 }
 
 h2 {
@@ -156,6 +178,38 @@ dd {
 
 dd.error {
 	color: var(--sc-err);
+}
+
+dd.source-path {
+	display: grid;
+	gap: 7px;
+}
+
+dd.source-path code {
+	overflow-wrap: anywhere;
+}
+
+.reload {
+	display: inline-flex;
+	align-items: center;
+	justify-self: start;
+	gap: 5px;
+	height: 26px;
+	padding: 0 9px;
+	border: 1px solid var(--sc-line-2);
+	border-radius: 5px;
+	background: transparent;
+	color: var(--sc-mute);
+	font-size: var(--fs-10);
+}
+
+.reload:disabled {
+	cursor: wait;
+	opacity: 0.55;
+}
+
+.spin {
+	animation: sc-spin 0.8s linear infinite;
 }
 
 .panels {

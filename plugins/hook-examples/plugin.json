@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "hook-examples",
+  "name": "Hook Examples",
+  "version": "1.0.0",
+  "description": "Blocks destructive shell commands and writes a per-run audit log.",
+  "permissions": ["hooks.run", "hooks.tool"],
+  "contributes": {
+    "hooks": [
+      {
+        "id": "guard-shell",
+        "event": "toolExecuting",
+        "matcher": { "tools": ["run_shell_command"] },
+        "command": "powershell.exe",
+        "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${pluginRoot}/hooks/guard-shell.ps1"],
+        "timeoutSeconds": 10,
+        "onFailure": "block"
+      },
+      {
+        "id": "audit-run",
+        "event": "runCompleted",
+        "command": "powershell.exe",
+        "arguments": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "${pluginRoot}/hooks/audit-run.ps1"]
+      }
+    ]
+  }
+}

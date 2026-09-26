@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Threading;
 using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Interfaces.Extensions;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Desktop.Services.WebView;
@@ -25,6 +26,7 @@ internal sealed class ExtensionSettingsBridge : IDisposable
     private readonly IExtensionPackageRepository _packageRepository;
     private readonly DesktopAgentDefinitionService _agentDefinitionService;
     private readonly IExtensionPackagePicker _packagePicker;
+    private readonly IPluginHookExecutionLog _hookExecutionLog;
     private readonly IExtensionStateChangeNotifier _stateChangeNotifier;
     private readonly WebViewHostChannel _channel;
     private readonly Dispatcher _dispatcher;
@@ -35,6 +37,7 @@ internal sealed class ExtensionSettingsBridge : IDisposable
         IExtensionPackageRepository packageRepository,
         DesktopAgentDefinitionService agentDefinitionService,
         IExtensionPackagePicker packagePicker,
+        IPluginHookExecutionLog hookExecutionLog,
         IExtensionStateChangeNotifier stateChangeNotifier,
         WebViewHostChannel channel,
         Dispatcher dispatcher)
@@ -43,6 +46,7 @@ internal sealed class ExtensionSettingsBridge : IDisposable
         _packageRepository = packageRepository;
         _agentDefinitionService = agentDefinitionService;
         _packagePicker = packagePicker;
+        _hookExecutionLog = hookExecutionLog;
         _stateChangeNotifier = stateChangeNotifier;
         _channel = channel;
         _dispatcher = dispatcher;
@@ -138,6 +142,12 @@ internal sealed class ExtensionSettingsBridge : IDisposable
                 {
                     var state = await GetStateAsync(activeAgentId, cancellationToken);
                     response = new { type, requestId, state };
+                    break;
+                }
+                case "extensions/get-hook-log":
+                {
+                    var entries = _hookExecutionLog.GetRecent(ReadRequiredString(payload, "id"));
+                    response = new { type, requestId, entries };
                     break;
                 }
                 case "extensions/list-effective-skills":

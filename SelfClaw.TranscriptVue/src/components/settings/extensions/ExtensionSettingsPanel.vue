@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { AlertCircle } from 'lucide-vue-next';
 import { useExtensionSettings } from '../../../composables/useExtensionSettings';
 import { useToast } from '../../../composables/useToast';
@@ -24,6 +24,9 @@ const {
 	saveMcp,
 	testMcp,
 	importPackage,
+	importPluginFolder,
+	reloadPlugin,
+	getHookLog,
 } = useExtensionSettings();
 
 const { showToast } = useToast();
@@ -35,6 +38,8 @@ const mcpDialogOpen = ref(false);
 const editingMcp = ref(null);
 const importResult = ref(null);
 const permissionPlugin = ref(null);
+const hookLogEntries = ref([]);
+const hookLogLoading = ref(false);
 
 const collectionNames = {
 	plugin: 'plugins',
@@ -88,13 +93,53 @@ async function handleDelete() {
 }
 
 async function handleImport() {
-	const result = await importPackage(activeCategory.value);
+	applyImportResult(await importPackage(activeCategory.value));
+}
+
+async function handleImportFolder() {
+	applyImportResult(await importPluginFolder());
+}
+
+function applyImportResult(result) {
 	if (!result) return;
 	importResult.value = result;
 	selectedId.value = result.package.id;
 	const imported = activeItems.value.find((item) => item.id === result.package.id);
 	if (imported?.status === 'needs-permission') permissionPlugin.value = imported;
 }
+
+async function handleReload() {
+	const item = selectedItem.value;
+	if (!item) return;
+	const response = await reloadPlugin(item.id);
+	if (!response) return;
+	if (!response.changed) {
+		showToast(`${item.name} 内容未变化`);
+		return;
+	}
+
+	showToast(`${item.name} 已重新加载`);
+	const reloaded = activeItems.value.find((candidate) => candidate.id === item.id);
+	// 重新加载后权限可能新增，未确认前该插件会被跳过，继承它的子代理/续跑会被阻止。
+	if (reloaded?.status === 'needs-permission') permissionPlugin.value = reloaded;
+}
+
+async function refreshHookLog() {
+	const item = selectedItem.value;
+	if (!item || activeCategory.value !== 'plugin') return;
+	hookLogLoading.value = true;
+	try {
+		const entries = await getHookLog(item.id);
+		if (entries) hookLogEntries.value = entries;
+	} finally {
+		hookLogLoading.value = false;
+	}
+}
+
+watch([selectedId, activeCategory], ([id, category]) => {
+	hookLogEntries.value = [];
+	if (id && category === 'plugin') refreshHookLog();
+});
 
 function selectItem(item) {
 	selectedId.value = item.id;
@@ -141,14 +186,16 @@ async function confirmPermissions() {
 		<div class="workspace" :class="{ inspecting: selectedItem }">
 			<section class="registry">
 				<ExtensionToolbar v-model="search" :category="activeCategory" :loading="loading" @refresh="load"
-					@add-mcp="openMcp()" @import-package="handleImport" />
+					@add-mcp="openMcp()" @import-package="handleImport" @import-plugin-folder="handleImportFolder" />
 				<ExtensionList :items="filteredItems" :selected-id="selectedId" :kind="activeCategory"
 					:is-pending="isPending" @select="selectItem" @toggle="handleToggle" />
 			</section>
 
 			<ExtensionDetailDrawer v-if="selectedItem" :item="selectedItem" :kind="activeCategory"
-				:panels="selectedPanels" :pending="isPending(activeCategory, selectedItem.id)"
-				@close="selectedId = null" @delete="handleDelete" @edit="openMcp(selectedItem)" />
+				:panels="selectedPanels" :hook-log-entries="hookLogEntries" :hook-log-loading="hookLogLoading"
+				:pending="isPending(activeCategory, selectedItem.id)"
+				@close="selectedId = null" @delete="handleDelete" @edit="openMcp(selectedItem)" @reload="handleReload"
+				@refresh-hook-log="refreshHookLog" />
 		</div>
 
 		<McpServerDialog :open="mcpDialogOpen" :server="editingMcp"
@@ -220,8 +267,11 @@ async function confirmPermissions() {
 .workspace {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
+	/* Constrain the single row so the registry and the drawer scroll instead of growing the page. */
+	grid-template-rows: minmax(0, 1fr);
 	min-height: 0;
 	flex: 1;
+	overflow: hidden;
 	background: linear-gradient(to bottom, color-mix(in srgb, var(--sc-bg) 90%, transparent), transparent 44px), var(--sc-panel);
 }
 

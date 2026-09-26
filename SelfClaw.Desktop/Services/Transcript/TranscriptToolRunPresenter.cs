@@ -2,6 +2,7 @@ using SelfClaw.Desktop.Services.Transcript.Views;
 using System.Globalization;
 using System.Text.Json;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Transcript;
 
@@ -25,7 +26,47 @@ internal static class TranscriptToolRunPresenter
             toolRun.ToolName,
             toolRun.SourceKind?.ToString().ToLowerInvariant(),
             toolRun.SourceId,
-            toolRun.DisplayName);
+            toolRun.DisplayName,
+            Hook: BuildHookView(toolRun));
+
+    private static TranscriptToolHookView? BuildHookView(ToolExecutionRecord toolRun)
+    {
+        if (toolRun.HookOutcome is not { } outcome)
+        {
+            return null;
+        }
+
+        var argumentsModified = outcome.ArgumentsModifiedBy.Count > 0;
+        return new TranscriptToolHookView(
+            FormatArguments(outcome.EffectiveArgumentsJson),
+            outcome.ArgumentsModifiedBy.Select(FormatHookSource).ToArray(),
+            outcome.ApprovalRequiredBy.Select(FormatHookSource).ToArray(),
+            outcome.BlockedBy is null ? null : FormatHookSource(outcome.BlockedBy),
+            LimitOptional(outcome.BlockReason),
+            outcome.Feedback.Select(CreateFeedbackNote).ToArray(),
+            outcome.IgnoredFailures.Select(CreateIgnoredFailureNote).ToArray(),
+            OriginalArgumentsText: argumentsModified ? FormatArguments(toolRun.ArgumentsJson) : null);
+    }
+
+    private static string FormatHookSource(HookSource source)
+        => $"{source.PluginId}/{source.HookId}";
+
+    private static TranscriptHookNoteView CreateFeedbackNote(HookFeedback feedback)
+        => new(FormatHookSource(feedback.Source), LimitOptional(feedback.Text) ?? string.Empty);
+
+    private static TranscriptHookNoteView CreateIgnoredFailureNote(HookFailureNotice failure)
+    {
+        var text = string.IsNullOrWhiteSpace(failure.Message)
+            ? failure.Kind
+            : $"{failure.Kind}: {failure.Message}";
+        return new TranscriptHookNoteView(FormatHookSource(failure.Source), LimitOptional(text) ?? failure.Kind);
+    }
+
+    private static string? FormatArguments(string? argumentsJson)
+        => string.IsNullOrWhiteSpace(argumentsJson) ? null : LimitOptional(PrettyPrintJson(argumentsJson));
+
+    private static string? LimitOptional(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : TranscriptToolResultLimiter.LimitDisplayed(value);
 
     private static string BuildInlineToolSummary(ToolExecutionRecord toolRun)
     {

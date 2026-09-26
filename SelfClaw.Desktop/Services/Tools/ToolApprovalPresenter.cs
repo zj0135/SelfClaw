@@ -1,4 +1,5 @@
 using SelfClaw.Desktop.Services.Notifications;
+using System.Text;
 using System.Windows.Threading;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.AgentActivity;
@@ -55,8 +56,35 @@ internal sealed class ToolApprovalPresenter : IDisposable
         var arguments = request.ArgumentsJson;
         if (arguments.Length > 2000) arguments = arguments[..2000] + "…";
         _notifications.ShowToolApproval(request.ToolExecutionId, request.ConversationId, request.DisplayName,
-            $"{request.Description}{Environment.NewLine}{arguments}");
+            BuildApprovalBody(request, arguments));
     }
+
+    private static string BuildApprovalBody(ToolApprovalRequest request, string arguments)
+    {
+        var body = new StringBuilder(request.Description);
+        if (request.ApprovalRequiredBy is { Count: > 0 } requiredBy)
+        {
+            body.AppendLine();
+            body.Append($"由 {FormatSources(requiredBy)} 要求确认");
+            if (!string.IsNullOrWhiteSpace(request.ApprovalReason))
+            {
+                body.Append($"：{request.ApprovalReason}");
+            }
+        }
+
+        if (request.ArgumentsModifiedBy is { Count: > 0 } modifiedBy)
+        {
+            body.AppendLine();
+            body.Append($"参数已被 {FormatSources(modifiedBy)} 修改");
+        }
+
+        body.AppendLine();
+        body.Append(arguments);
+        return body.ToString();
+    }
+
+    private static string FormatSources(IReadOnlyList<HookSource> sources)
+        => string.Join(", ", sources.Select(source => $"{source.PluginId}/{source.HookId}"));
 
     private void OnExpired(ToolApprovalRequest request) => _notifications.ShowToolApprovalExpired(request.DisplayName);
     private void OnReadyChanged(bool ready) { if (ready) Publish(force: true); }

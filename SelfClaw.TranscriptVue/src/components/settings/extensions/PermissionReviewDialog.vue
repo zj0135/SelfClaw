@@ -1,12 +1,24 @@
 <script setup>
-import { AlertTriangle, Check, ShieldCheck, X } from 'lucide-vue-next';
+import { computed } from 'vue';
+import { AlertTriangle, Check, ShieldCheck, Webhook, X } from 'lucide-vue-next';
+import { describePluginPermission, hasHookPermissions, isSensitivePluginPermission } from '../../../renderers/pluginPermissions.js';
 
-defineProps({
+const props = defineProps({
 	open: { type: Boolean, default: false },
 	plugin: { type: Object, default: null },
 	pending: { type: Boolean, default: false },
 });
 defineEmits(['close', 'confirm']);
+
+const permissions = computed(() =>
+	(props.plugin?.permissions || []).map((token) => ({
+		token,
+		description: describePluginPermission(token),
+		sensitive: isSensitivePluginPermission(token),
+		added: Boolean(props.plugin?.unacknowledgedPermissions?.includes(token)),
+	})),
+);
+const showsHookNotice = computed(() => hasHookPermissions(props.plugin?.permissions));
 </script>
 
 <template>
@@ -31,12 +43,25 @@ defineEmits(['close', 'confirm']);
 			</div>
 
 			<div class="permissions">
-				<div v-for="permission in plugin.permissions" :key="permission" class="permission">
-					<Check :size="14" aria-hidden="true" />
-					<code>{{ permission }}</code>
-					<span v-if="plugin.unacknowledgedPermissions?.includes(permission)">新增</span>
+				<div v-for="permission in permissions" :key="permission.token" class="permission"
+					:class="{ sensitive: permission.sensitive }">
+					<AlertTriangle v-if="permission.sensitive" :size="14" aria-hidden="true" />
+					<Check v-else :size="14" aria-hidden="true" />
+					<div class="permission-body">
+						<code>{{ permission.token }}</code>
+						<span class="permission-description">{{ permission.description }}</span>
+					</div>
+					<span v-if="permission.added">新增</span>
 				</div>
-				<p v-if="!plugin.permissions?.length">此插件未声明额外权限。</p>
+				<p v-if="!permissions.length">此插件未声明额外权限。</p>
+			</div>
+
+			<div v-if="showsHookNotice" class="hook-notice">
+				<Webhook :size="15" aria-hidden="true" />
+				<span>
+					hook 命令以当前用户身份运行并继承环境变量；hooks 对该 agent 发起的子代理与续跑回合同样生效。
+					确认前该插件不在交互回合中生效；继承它的子代理/续跑回合会被阻止。
+				</span>
 			</div>
 
 			<footer>
@@ -166,10 +191,27 @@ button:disabled {
 	color: var(--sc-ok);
 }
 
+.permission.sensitive svg {
+	color: var(--caution-icon);
+}
+
+.permission-body {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+	padding: 7px 0;
+}
+
 .permission code {
 	overflow-wrap: anywhere;
 	font-family: var(--sc-mono);
 	font-size: var(--fs-11);
+}
+
+.permission-description {
+	color: var(--sc-faint);
+	font-size: var(--fs-11);
+	line-height: 1.5;
 }
 
 .permission span {
@@ -178,6 +220,24 @@ button:disabled {
 	border-radius: 4px;
 	color: var(--caution-icon);
 	font-size: var(--fs-9);
+}
+
+.hook-notice {
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr);
+	gap: 8px;
+	margin: 0 20px 18px;
+	padding: 10px 11px;
+	border-left: 2px solid var(--sc-acid);
+	background: var(--sc-raise);
+	color: var(--sc-mute);
+	font-size: var(--fs-11);
+	line-height: 1.55;
+}
+
+.hook-notice svg {
+	margin-top: 2px;
+	color: var(--sc-acid);
 }
 
 .permissions p {

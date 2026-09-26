@@ -25,3 +25,17 @@ export function toolStatusLabel(status) {
 			return status ? String(status) : '';
 	}
 }
+
+// Hook sources reach Vue as HookSource records ({pluginId, hookId}), but the tool
+// transcript pre-formats them as strings; accept either so both call sites share one shape.
+export function formatHookSource(source) {
+	if (!source) {
+		return '';
+	}
+
+	if (typeof source === 'string') {
+		return source;
+	}
+
+	return source.hookId ? `${source.pluginId}/${source.hookId}` : String(source.pluginId || '');
+}

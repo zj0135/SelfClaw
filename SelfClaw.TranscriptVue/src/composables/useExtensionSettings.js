@@ -124,6 +124,28 @@ export function useExtensionSettings() {
 		return response;
 	}
 
+	async function importPluginFolder() {
+		const response = await mutate('plugin', 'import', () =>
+			request('extensions/import-plugin-folder', {}, { timeout: 0 })
+		);
+		if (!response || response.cancelled) return null;
+		await load();
+		return response;
+	}
+
+	async function reloadPlugin(id) {
+		const response = await mutate('plugin', id, () => request('extensions/reload-plugin', { id }, { timeout: 0 }));
+		if (!response) return null;
+		await load();
+		return response;
+	}
+
+	async function getHookLog(id) {
+		// A dedicated pending key: reading the log must not disable the plugin's mutation buttons.
+		const response = await mutate('plugin', `${id}:hook-log`, () => request('extensions/get-hook-log', { id }));
+		return response?.entries || null;
+	}
+
 	// 只有更新的 revision 才值得重拉：mutation 自身已经 load() 过，宿主随后推送的同号
 	// state-changed 若也触发一次，等于每次改动都打两个来回。
 	on('extensions/state-changed', (payload) => {
@@ -145,5 +167,8 @@ export function useExtensionSettings() {
 		saveMcp,
 		testMcp,
 		importPackage,
+		importPluginFolder,
+		reloadPlugin,
+		getHookLog,
 	};
 }

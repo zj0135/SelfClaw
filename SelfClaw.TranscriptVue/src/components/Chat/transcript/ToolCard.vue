@@ -1,7 +1,8 @@
 <script setup>
 import { computed } from 'vue';
-import { ChevronRight } from 'lucide-vue-next';
+import { ChevronRight, Webhook } from 'lucide-vue-next';
 import ToolStatusIcon from './ToolStatusIcon.vue';
+import ToolHookDetails from './ToolHookDetails.vue';
 import { splitSummaryLabel, toolStatusLabel } from '../../../renderers/transcript.js';
 
 const props = defineProps({
@@ -19,6 +20,15 @@ const label = computed(() => splitSummaryLabel(props.summaryLabel || props.segme
 const detailTitle = computed(() => props.segment.detailTitle || 'Tool');
 const detailText = computed(() => props.segment.detailText || '暂无可展示的执行结果。');
 const durationText = computed(() => props.segment.durationText || '');
+const hook = computed(() => props.segment.hook || null);
+const hasHookIntervention = computed(() => Boolean(
+	props.segment.hook?.blockedBy
+	|| props.segment.hook?.blockReason
+	|| props.segment.hook?.argumentsModifiedBy?.length
+	|| props.segment.hook?.approvalRequiredBy?.length
+	|| props.segment.hook?.feedback?.length
+	|| props.segment.hook?.ignoredFailures?.length,
+));
 const sourceText = computed(() => {
 	if (!props.segment.sourceId) return '';
 	const labels = { mcp: 'MCP', skill: 'Skill', plugin: 'Plugin' };
@@ -36,6 +46,8 @@ const sourceText = computed(() => {
 				<span v-if="label.secondary" class="tool-summary-detail">{{ label.secondary }}</span>
 			</span>
 			<span class="tool-summary-side">
+				<Webhook v-if="hasHookIntervention" class="tool-summary-hook" :size="13" :stroke-width="1.9"
+					aria-label="插件 hook 干预" />
 				<span v-if="durationText" class="tool-summary-duration">{{ durationText }}</span>
 				<ChevronRight class="tool-summary-chevron" :size="14" :stroke-width="2" aria-hidden="true" />
 			</span>
@@ -48,6 +60,7 @@ const sourceText = computed(() => {
 			<div class="tool-details-body">
 				<pre class="tool-details-pre"><code>{{ detailText }}</code></pre>
 			</div>
+			<ToolHookDetails v-if="hook" :hook="hook" />
 			<div class="tool-details-footer">
 				<span class="tool-details-status" :class="status">{{ toolStatusLabel(status) }}</span>
 			</div>
@@ -69,5 +82,10 @@ const sourceText = computed(() => {
 	font-size: var(--fs-10);
 	font-weight: 500;
 	letter-spacing: 0;
+}
+
+.tool-summary-hook {
+	flex: none;
+	color: var(--caution-icon);
 }
 </style>
