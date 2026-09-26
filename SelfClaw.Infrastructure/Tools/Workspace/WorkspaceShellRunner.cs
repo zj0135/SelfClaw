@@ -43,6 +43,9 @@ internal sealed class WorkspaceShellRunner
         {
             await Task.WhenAll(process.WaitForExitAsync(cancellationToken), drains)
                 .WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            // The cancellation callback kills the process, which can let the wait above complete
+            // normally before the token is observed; caller cancellation stays authoritative.
+            cancellationToken.ThrowIfCancellationRequested();
             var standardOutput = await standardOutputTask.ConfigureAwait(false);
             var standardError = await standardErrorTask.ConfigureAwait(false);
             return CreateResult(command, process.ExitCode, standardOutput.Text, standardError.Text,
@@ -50,6 +53,7 @@ internal sealed class WorkspaceShellRunner
         }
         catch (TimeoutException exception)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             throw new TimeoutException($"The PowerShell command timed out after {boundedTimeoutSeconds} seconds.", exception);
         }
         finally
