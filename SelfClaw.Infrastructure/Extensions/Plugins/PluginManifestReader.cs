@@ -3,6 +3,7 @@ using System.Text.Json;
 using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Models;
 using SelfClaw.Infrastructure.Extensions.Plugins.Models;
+using SelfClaw.Infrastructure.Extensions.Processes;
 
 namespace SelfClaw.Infrastructure.Extensions.Plugins;
 
@@ -137,7 +138,7 @@ internal sealed class PluginManifestReader
                 throw new InvalidDataException($"Plugin panel '{panel.Id}' must declare an entry.");
             }
 
-            var entryPath = ResolvePackagePath(packageRoot, panel.Entry, "Panel entry");
+            var entryPath = PluginCommandTemplate.ResolvePackagePath(packageRoot, panel.Entry, "Panel entry");
             if (!File.Exists(entryPath))
             {
                 throw new InvalidDataException($"Plugin panel '{panel.Id}' entry file does not exist.");
@@ -180,7 +181,7 @@ internal sealed class PluginManifestReader
                 throw new InvalidDataException($"Duplicate Plugin Skill id '{skill.Id}'.");
             }
 
-            var path = ResolvePackagePath(packageRoot, skill.Path, "Skill path");
+            var path = PluginCommandTemplate.ResolvePackagePath(packageRoot, skill.Path, "Skill path");
             if (!Directory.Exists(path) || !File.Exists(Path.Combine(path, "SKILL.md")))
             {
                 throw new InvalidDataException($"Plugin Skill '{skill.Id}' must contain SKILL.md.");
@@ -220,10 +221,10 @@ internal sealed class PluginManifestReader
             if (transport == "stdio")
             {
                 ArgumentException.ThrowIfNullOrWhiteSpace(server.Command);
-                ValidateTemplateValue(packageRoot, server.Command, "MCP command");
+                PluginCommandTemplate.Validate(packageRoot, server.Command, "MCP command");
                 foreach (var argument in arguments)
                 {
-                    ValidateTemplateValue(packageRoot, argument, "MCP argument");
+                    PluginCommandTemplate.Validate(packageRoot, argument, "MCP argument");
                 }
             }
             else if (transport == "http")
@@ -314,63 +315,13 @@ internal sealed class PluginManifestReader
             return null;
         }
 
-        var path = ResolvePackagePath(packageRoot, relativePath, fieldName);
+        var path = PluginCommandTemplate.ResolvePackagePath(packageRoot, relativePath, fieldName);
         if (!File.Exists(path))
         {
             throw new InvalidDataException($"Plugin {fieldName} file does not exist.");
         }
 
         return NormalizeRelativePath(packageRoot, path);
-    }
-
-    private static void ValidateTemplateValue(string packageRoot, string value, string fieldName)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-        var remainder = value
-            .Replace("${pluginRoot}", string.Empty, StringComparison.Ordinal)
-            .Replace("${workspaceRoot}", string.Empty, StringComparison.Ordinal);
-        if (remainder.Contains("${", StringComparison.Ordinal))
-        {
-            throw new InvalidDataException($"{fieldName} contains an unsupported template variable.");
-        }
-
-        // The DLL ban applies to every value, not just ${pluginRoot}-prefixed ones: a bare relative
-        // "server/entry.dll" is the same declaration with the prefix omitted.
-        if (string.Equals(Path.GetExtension(value.TrimEnd()), ".dll", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidDataException("Plugin DLL entry points are not supported.");
-        }
-
-        // Existence is only checkable for package-relative values; a bare command such as "node" is
-        // resolved from PATH at launch and must stay legal.
-        if (value.Contains("${pluginRoot}", StringComparison.Ordinal))
-        {
-            var relative = value.Replace("${pluginRoot}", string.Empty, StringComparison.Ordinal)
-                .TrimStart('/', '\\');
-            var path = ResolvePackagePath(packageRoot, relative, fieldName);
-            if (!File.Exists(path) && !Directory.Exists(path))
-            {
-                throw new InvalidDataException($"{fieldName} references a missing package entry.");
-            }
-        }
-    }
-
-    private static string ResolvePackagePath(string packageRoot, string relativePath, string fieldName)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
-        if (Path.IsPathRooted(relativePath))
-        {
-            throw new InvalidDataException($"{fieldName} must be package-relative.");
-        }
-
-        var root = Path.GetFullPath(packageRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var candidate = Path.GetFullPath(Path.Combine(root, relativePath));
-        if (!candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidDataException($"{fieldName} escapes the package root.");
-        }
-
-        return candidate;
     }
 
     private static string NormalizeRelativePath(string packageRoot, string path)

@@ -42,11 +42,11 @@ internal sealed partial class OpenAiProviderAdapter
             ResponseParallelToolCallsKey
         };
 
-    private IChatClient CreateResponsesClient(AiProviderClientRequest request)
+    private IChatClient CreateResponsesClient(AiProviderClientRequest request, HttpClient httpClient)
     {
         var client = new OpenAIResponsesClient(
             CreateCredential(request),
-            CreateResponsesClientOptions(request.Connection));
+            CreateResponsesClientOptions(request.Connection, httpClient));
         return client.AsIChatClient(request.Profile.Model);
     }
 

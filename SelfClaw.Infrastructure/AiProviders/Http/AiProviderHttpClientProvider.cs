@@ -10,7 +10,7 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
 {
     internal const int DefaultTimeoutSeconds = 100;
 
-    private readonly ConcurrentDictionary<ClientCacheKey, Lazy<HttpClient>> _clients = new();
+    private readonly ConcurrentDictionary<string, Lazy<HttpClient>> _clients = new();
     private readonly ConcurrentDictionary<string, Lazy<HttpMessageHandler>> _sharedHandlers = new();
     private readonly Func<HttpMessageHandler> _primaryHandlerFactory;
     private bool _disposed;
@@ -25,11 +25,34 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
         _primaryHandlerFactory = primaryHandlerFactory;
     }
 
-    public HttpClient GetStreamingClient(AiProviderConnection connection)
-        => GetClient(connection, streaming: true);
-
     public HttpClient GetNonStreamingClient(AiProviderConnection connection)
-        => GetClient(connection, streaming: false);
+        => GetClient(connection);
+
+    /// <summary>
+    /// Builds the per-turn client over the shared pooled handler. The optional <paramref name="outerHandler"/>
+    /// sits in front of the shared chain so a turn can observe every request the SDK sends.
+    /// </summary>
+    public HttpClient CreateTurnClient(AiProviderConnection connection, DelegatingHandler? outerHandler)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var shared = GetSharedStreamingHandler(connection);
+        HttpMessageHandler handler = shared;
+        if (outerHandler is not null)
+        {
+            outerHandler.InnerHandler = shared;
+            handler = outerHandler;
+        }
+
+        // disposeHandler: false — DelegatingHandler.Dispose would cascade into the shared pooled handler.
+        return new HttpClient(handler, disposeHandler: false)
+        {
+            BaseAddress = connection.Endpoint,
+            Timeout = Timeout.InfiniteTimeSpan
+        };
+    }
+
+    internal static IReadOnlySet<string> ReadExtraHeaderNames(AiProviderConnection connection)
+        => ReadExtraHeaders(connection.ConnectionOptions).Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     public TimeSpan GetNonStreamingTimeout(AiProviderConnection connection)
         => ReadConfiguration(connection).Timeout;
@@ -54,24 +77,23 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
 
     internal int CachedSharedHandlerCount => _sharedHandlers.Count;
 
-    private HttpClient GetClient(AiProviderConnection connection, bool streaming)
+    private HttpClient GetClient(AiProviderConnection connection)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var configuration = ReadConfiguration(connection);
-        var key = new ClientCacheKey(configuration.Fingerprint, streaming);
         var lazy = _clients.GetOrAdd(
-            key,
+            configuration.Fingerprint,
             _ => new Lazy<HttpClient>(
-                () => CreateClient(connection.Endpoint, configuration, streaming),
+                () => CreateClient(connection.Endpoint, configuration),
                 LazyThreadSafetyMode.ExecutionAndPublication));
         return lazy.Value;
     }
 
-    private HttpClient CreateClient(Uri endpoint, ClientConfiguration configuration, bool streaming)
+    private HttpClient CreateClient(Uri endpoint, ClientConfiguration configuration)
         => new(CreateHandler(configuration), disposeHandler: true)
         {
             BaseAddress = endpoint,
-            Timeout = streaming ? Timeout.InfiniteTimeSpan : configuration.Timeout
+            Timeout = configuration.Timeout
         };
 
     private HttpMessageHandler CreateHandler(ClientConfiguration configuration)

@@ -1,6 +1,8 @@
 # Direct 模式 Plugins / MCP / Skills 全栈接入设计
 
 > 2026-09-13 实现更新：本文保留原设计/阶段记录。当前目录、默认模型准备、工具契约与 continuation 恢复边界见 [运行流程](runtime-execution-flow.md) 和 [Direct 整改结果](direct-agent-architecture-review.md)。
+>
+> 2026-09-26 接缝勘误：本文后来描述的以下接缝已由 Direct hooks 阶段一重构（见 [hooks 设计](direct-hooks-system-design.md)）替换，本文中对应示例/调用链已同步为当前实现，其余历史阶段内容仅作设计记录：`DirectTurnCapabilityLease.ToolDescriptors` → `Bindings`（`IReadOnlyDictionary<string, DirectToolBinding>`）；审批与执行检查点包装 `ApprovedAIFunction` → `DirectToolInvoker`（M.E.AI `FunctionInvoker`）；适配器内部取共享 HttpClient → `AiChatClientFactory.Create(preparation, AiChatClientPipelineOptions)` 按回合在共享 pooled handler 上构造 `HttpClient` 并注入适配器。
 
 > 状态：设计稿 v1.1（2026-07-26；v1.1 按当前代码逐链路核对后补充事实修正与缺口：现状行为 §1.2–§1.4、ToolPolicy §5.4、权限确认持久化 §6.2、跨回合与 token 规则 §8.4、stdio 环境事实修正 §9.1、结果映射 §9.5、审批载体 §9.4、投影链 §10.2、桥接推送与超时 §11.2、DI 接线 §15）
 >
@@ -31,7 +33,7 @@ internal interface IDirectTurnCapabilityResolver
 DirectTurnCapabilityLease
   |- SystemInstructions       本轮追加的插件/Skill 指令
   |- Tools                    workspace + Skill loader + MCP AITool
-  |- ToolDescriptors          provider tool name -> 来源/显示名/风险
+  |- Bindings                 provider tool name -> DirectToolBinding（来源/显示名/风险 + 审批元数据）
   |- MessageAdjustments       剥离 skill token 后的消息文本改写（见 §8.4）
   |- Diagnostics              本轮能力降级信息
   `- DisposeAsync()           释放本轮持有的 MCP client lease
@@ -202,7 +204,8 @@ Direct turn
        |- McpClient.ListToolsAsync()
        |- 重命名、包审批、生成来源描述
        `- 返回 DirectTurnCapabilityLease
-  -> IAiChatClientFactory.CreateAsync(..., capabilityLease.Tools)
+  -> AiChatClientFactory.Create(preparation, new AiChatClientPipelineOptions(
+       capabilityLease.Tools, invoker.InvokeAsync))
   -> IChatClient.GetStreamingResponseAsync()
   -> AgentStreamEvent
   -> SQLite tool_runs + Vue transcript
@@ -234,7 +237,7 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
 {
     public string SystemInstructions { get; }
     public IReadOnlyList<AITool> Tools { get; }
-    public IReadOnlyDictionary<string, DirectToolDescriptor> ToolDescriptors { get; }
+    public IReadOnlyDictionary<string, DirectToolBinding> Bindings { get; }
     public IReadOnlyDictionary<Guid, string> MessageAdjustments { get; }
     public IReadOnlyList<CapabilityDiagnostic> Diagnostics { get; }
 
@@ -602,7 +605,7 @@ Http
 
 - stdio 使用 `StdioClientTransport`。
 - HTTP 使用 `HttpClientTransport`，默认 `HttpTransportMode.AutoDetect`。
-- stdio 显式设置 `InheritEnvironmentVariables = false`。注意 SDK 1.4.0 的默认值是 **true**，且设为 false 后子进程环境是**完全空**的（XML 文档原文：empty environment and only the variables explicitly provided）——SDK 没有“安全默认环境集合”。因此 `McpTransportFactory` 必须自己维护 Windows 最小基线集合（`SystemRoot`、`windir`、`ComSpec`、`PATHEXT`、`TEMP`/`TMP`，以及受控的 `PATH`），再叠加用户显式配置；否则 node/python 等常见 server 进程在空环境下无法启动。不能把 SelfClaw 全进程环境原样传给第三方进程。
+- stdio 继承宿主全部环境变量（SDK 默认 `InheritEnvironmentVariables = true`），再叠加用户显式配置；`McpTransportFactory` 不维护额外的最小基线集合。
 - stdio 的 stderr 通过 SDK 的 `StdioClientTransportOptions.StandardErrorLines` 回调接入 §13.3 的限长诊断缓冲；`ShutdownTimeout`（SDK 默认 5 秒）即 §9.2 graceful shutdown 的“短超时”。
 - 有 workspace 时只把所选 workspace 作为工作目录/roots；没有 workspace 而 server 标记 `requiresWorkspace` 时，该 server 本轮不可用。
 - v1 不实现 MCP sampling、elicitation；client capabilities 不注册对应 handler。
@@ -689,7 +692,7 @@ conversation.ToolPermissionMode == RequireApproval
 
 **拒绝语义与 workspace 工具一致**：审批 wrapper 在拒绝时正常返回 `DeniedResult` 字符串（不是抛异常），模型收到否决结果后继续本轮（对应验收 §18.5）；审批期间工具记录保持 `Running`，与当前 workspace 审批行为相同（§1.4）。
 
-审批 wrapper 应是通用 `ApprovedAIFunction`，不要复制 `WorkspaceAgentToolset.BoundWorkspaceTools.IsApprovedAsync()`。workspace write/edit/shell 也可迁移到该 wrapper，统一审批行为。
+审批 wrapper 应是通用的 `DirectToolInvoker`（安装为 M.E.AI `FunctionInvoker` 的唯一工具接缝），不要复制 `WorkspaceAgentToolset.BoundWorkspaceTools.IsApprovedAsync()`。workspace write/edit/shell 也已迁移到该接缝，统一审批行为。
 
 ### 9.5 MCP 工具结果的内容映射
 
@@ -699,7 +702,7 @@ conversation.ToolPermissionMode == RequireApproval
 - **`isError = true`**：映射为 `ToolCallStatus.Failed` 的 `ToolCallCompletedEvent`（工具卡片显示失败），模型照常拿到错误文本继续，本轮不失败——与 §14.2 “MCP tool call 失败”行一致。
 - **摘要（ResultSummary）**：取第一个 text block 的首行（截断），无 text block 时给出内容类型计数（如 `1 image, 2 resources`）。
 - **详情（ResultContent）**：拼接全部 text block；image/audio/blob 以占位符描述（类型 + mimeType + 大小），不把 base64 落库或送进 prompt；`structuredContent` 存在时以 pretty JSON 附加。
-- 摘要/详情映射只服务事件与落库展示，不改写给模型的结果；唯一触碰模型侧的是第一条的上限截断，它在审批 wrapper 内、映射之前统一发生。
+- 摘要/详情映射只服务事件与落库展示，不改写给模型的结果；唯一触碰模型侧的是第一条的上限截断，它由 `McpToolResultFormatter` 在 MCP 适配层统一完成，再把有界的 `DirectToolResult` 返回给 `DirectToolInvoker`。
 
 ---
 
@@ -712,8 +715,9 @@ DirectAgentChatRuntime.ProduceEventsAsync()
   -> capabilityResolver.ResolveAsync(request)
        -> DirectTurnCapabilityLease
   -> emit initializing/degraded status
-  -> AiChatRuntimeInputs(false, capabilityLease.Tools)
-  -> IAiChatClientFactory.CreateAsync()
+  -> new DirectToolInvoker(request, capabilityLease.Bindings)
+  -> AiChatClientFactory.Create(preparation, new AiChatClientPipelineOptions(
+       capabilityLease.Tools, invoker.InvokeAsync, httpHandler))
   -> DirectPromptComposer.BuildMessages(
        request.Messages,
        request.Agent.Instructions,
@@ -721,7 +725,7 @@ DirectAgentChatRuntime.ProduceEventsAsync()
        capabilityLease.MessageAdjustments)
   -> lease.Client.GetStreamingResponseAsync()
   -> FunctionCallContent
-       -> capabilityLease.ToolDescriptors[call.Name]
+       -> capabilityLease.Bindings[call.Name].Descriptor
        -> ToolCallStartedEvent（带来源）
   -> FunctionResultContent
        -> ToolCallCompletedEvent

@@ -3,6 +3,7 @@ using System.Text.Json;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Extensions.Mcp.Models;
+using SelfClaw.Infrastructure.Extensions.Processes;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Infrastructure.Extensions.Mcp;
@@ -98,9 +99,9 @@ internal sealed class McpConfigurationResolver
             return Unavailable(record, UnavailableConfiguration, workspacePath);
         }
 
-        var command = ExpandTemplate(settings.Command, workspacePath, pluginRoot);
+        var command = PluginCommandTemplate.TryExpand(settings.Command, workspacePath, pluginRoot);
         var arguments = settings.Arguments
-            .Select(argument => ExpandTemplate(argument, workspacePath, pluginRoot))
+            .Select(argument => PluginCommandTemplate.TryExpand(argument, workspacePath, pluginRoot))
             .ToArray();
         if (command is null || arguments.Any(argument => argument is null))
         {
@@ -228,32 +229,6 @@ internal sealed class McpConfigurationResolver
         }
 
         return true;
-    }
-
-    private static string? ExpandTemplate(string value, string? workspacePath, string? pluginRoot)
-    {
-        var expanded = value;
-        if (expanded.Contains("${pluginRoot}", StringComparison.Ordinal))
-        {
-            if (pluginRoot is null)
-            {
-                return null;
-            }
-
-            expanded = expanded.Replace("${pluginRoot}", pluginRoot, StringComparison.Ordinal);
-        }
-
-        if (expanded.Contains("${workspaceRoot}", StringComparison.Ordinal))
-        {
-            if (workspacePath is null)
-            {
-                return null;
-            }
-
-            expanded = expanded.Replace("${workspaceRoot}", workspacePath, StringComparison.Ordinal);
-        }
-
-        return expanded.Contains("${", StringComparison.Ordinal) ? null : expanded;
     }
 
     private static string? NormalizeOptionalPath(string? path)

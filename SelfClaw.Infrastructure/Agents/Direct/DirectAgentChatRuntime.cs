@@ -1,4 +1,5 @@
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
+using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
@@ -17,6 +18,7 @@ using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Direct;
 
@@ -181,7 +183,12 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 writer.TryWrite(new RunStatusEvent(AgentRunStatus.Initializing, diagnostic));
             }
 
-            providerLease = _chatClientFactory.Create(preparation, capabilityLease.Tools);
+            var invoker = new DirectToolInvoker(request, capabilityLease.Bindings);
+            providerLease = _chatClientFactory.Create(
+                preparation,
+                new AiChatClientPipelineOptions(
+                    capabilityLease.Tools,
+                    invoker.InvokeAsync));
 
             writer.TryWrite(new RunStartedEvent(
                 $"direct-{Guid.NewGuid():N}",
@@ -236,7 +243,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 finishReason = reason;
             }
 
-            output.TranslateUpdate(update, setup.CapabilityLease.ToolDescriptors);
+            output.TranslateUpdate(update, setup.CapabilityLease.Bindings);
         }
 
         return finishReason;
@@ -363,7 +370,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
         public void TranslateUpdate(
             ChatResponseUpdate update,
-            IReadOnlyDictionary<string, DirectToolDescriptor> toolDescriptors)
+            IReadOnlyDictionary<string, DirectToolBinding> bindings)
         {
             var blockId = string.IsNullOrWhiteSpace(update.MessageId)
                 ? "direct-response"
@@ -383,7 +390,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                         break;
 
                     case FunctionCallContent call when _startedCalls.Add(call.CallId):
-                        toolDescriptors.TryGetValue(call.Name, out var descriptor);
+                        bindings.TryGetValue(call.Name, out var binding);
+                        var descriptor = binding?.Descriptor;
                         var toolKind = descriptor?.Kind ?? ToolCallKind.Other;
                         _writer.TryWrite(new ToolCallStartedEvent(
                             call.CallId,

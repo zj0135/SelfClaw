@@ -815,7 +815,7 @@ public sealed class AiProviderSettingsServiceTests
             return Task.FromResult(RemoteModels);
         }
 
-        public IChatClient CreateChatClient(AiProviderClientRequest request)
+        public IChatClient CreateChatClient(AiProviderClientRequest request, HttpClient httpClient)
         {
             LastSecrets = request.Secrets;
             return ChatClient;

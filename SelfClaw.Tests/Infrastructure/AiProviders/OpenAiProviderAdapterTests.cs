@@ -29,8 +29,9 @@ public sealed class OpenAiProviderAdapterTests
         var request = CreateRequest(
             AiProviderKind.OpenAICompatible,
             AiProviderApiFormat.OpenAIChatCompletions);
+        using var httpClient = new HttpClient();
 
-        var client = adapter.CreateChatClient(request);
+        var client = adapter.CreateChatClient(request, httpClient);
 
         client.Should().NotBeNull();
     }
@@ -56,7 +57,8 @@ public sealed class OpenAiProviderAdapterTests
         var request = CreateRequest(
             AiProviderKind.OpenAICompatible,
             AiProviderApiFormat.OpenAIChatCompletions);
-        var client = adapter.CreateChatClient(request);
+        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        var client = adapter.CreateChatClient(request, httpClient);
         var options = adapter.CreateChatOptions(request);
 
         var updates = new List<ChatResponseUpdate>();
@@ -77,8 +79,9 @@ public sealed class OpenAiProviderAdapterTests
     {
         var adapter = new OpenAiProviderAdapter();
         var request = CreateRequest(AiProviderKind.OpenAI, AiProviderApiFormat.OpenAIResponses);
+        using var httpClient = new HttpClient();
 
-        var client = adapter.CreateChatClient(request);
+        var client = adapter.CreateChatClient(request, httpClient);
 
         client.Should().NotBeNull();
     }

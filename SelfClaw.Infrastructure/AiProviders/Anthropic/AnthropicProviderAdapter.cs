@@ -54,14 +54,15 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
         CancellationToken cancellationToken = default)
         => _modelListClient.ListModelsAsync(connection, secrets, cancellationToken);
 
-    public IChatClient CreateChatClient(AiProviderClientRequest request)
+    public IChatClient CreateChatClient(AiProviderClientRequest request, HttpClient httpClient)
     {
         if (request.Profile.ApiFormat != AiProviderApiFormat.AnthropicMessages)
         {
             throw UnsupportedFormat(request);
         }
 
-        return CreateAnthropicClient(request).AsIChatClient(request.Profile.Model, ResolveMaxOutputTokens(request));
+        return CreateAnthropicClient(request, httpClient)
+            .AsIChatClient(request.Profile.Model, ResolveMaxOutputTokens(request));
     }
 
     public ChatOptions CreateChatOptions(AiProviderClientRequest request)
@@ -122,22 +123,19 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
     }
 
     /// <summary>
-    /// Builds the per-turn Anthropic client on top of the shared pooled handler. The SDK's
-    /// <c>AnthropicClient.Dispose</c> disposes whatever HttpClient it was handed, so the client gets a
-    /// short-lived wrapper over the shared handler (<c>disposeHandler: false</c>): disposing a turn's
-    /// client never tears down the pooled connections the next turn reuses.
+    /// Builds the per-turn Anthropic client on the caller-owned turn client. The SDK's
+    /// <c>AnthropicClient.Dispose</c> disposes whatever HttpClient it was handed, so the caller must keep
+    /// that wrapper alive for the turn's duration; disposing it never tears down the shared pooled handler
+    /// behind it (<c>disposeHandler: false</c>).
     /// </summary>
-    internal AnthropicClient CreateAnthropicClient(AiProviderClientRequest request)
+    internal AnthropicClient CreateAnthropicClient(AiProviderClientRequest request, HttpClient httpClient)
     {
-        var options = new ClientOptions();
-        options.ApiKey = ResolveApiKey(request);
-        options.AuthToken = null;
-        options.BaseUrl = request.Connection.Endpoint.AbsoluteUri;
-        options.HttpClient = new HttpClient(
-            _httpClientProvider.GetSharedStreamingHandler(request.Connection),
-            disposeHandler: false)
+        var options = new ClientOptions
         {
-            Timeout = Timeout.InfiniteTimeSpan
+            ApiKey = ResolveApiKey(request),
+            AuthToken = null,
+            BaseUrl = request.Connection.Endpoint.AbsoluteUri,
+            HttpClient = httpClient
         };
 
         return new AnthropicClient(options);

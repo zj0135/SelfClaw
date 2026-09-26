@@ -8,5 +8,5 @@ public interface IAiChatClientFactory
         Guid? modelProfileId,
         CancellationToken cancellationToken = default);
 
-    AiChatClientLease Create(AiProviderClientRequest preparation, IReadOnlyList<Microsoft.Extensions.AI.AITool> tools);
+    AiChatClientLease Create(AiProviderClientRequest preparation, AiChatClientPipelineOptions pipeline);
 }

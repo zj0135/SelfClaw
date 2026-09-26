@@ -65,7 +65,7 @@ public sealed class AiProviderRegistryTests
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<AiModelDescriptor>>([]);
 
-        public IChatClient CreateChatClient(AiProviderClientRequest request)
+        public IChatClient CreateChatClient(AiProviderClientRequest request, HttpClient httpClient)
             => throw new NotImplementedException();
 
         public ChatOptions CreateChatOptions(AiProviderClientRequest request)

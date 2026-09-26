@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using SelfClaw.Core.Models;
+using SelfClaw.Infrastructure.Processes;
 
 namespace SelfClaw.Infrastructure.Tools.Workspace;
 
@@ -38,7 +39,7 @@ internal sealed class WorkspaceShellRunner
         var standardErrorTask = DrainAsync(process.StandardError, drainCancellation.Token);
         var drains = Task.WhenAll(standardOutputTask, standardErrorTask);
 
-        using var registration = cancellationToken.Register(() => WorkspaceProcess.TryKill(process));
+        using var registration = cancellationToken.Register(() => ProcessTree.TryKill(process));
         try
         {
             await Task.WhenAll(process.WaitForExitAsync(cancellationToken), drains)
@@ -58,7 +59,7 @@ internal sealed class WorkspaceShellRunner
         }
         finally
         {
-            WorkspaceProcess.TryKill(process);
+            ProcessTree.TryKill(process);
             // These readers use an internal shutdown token; caller cancellation still propagates
             // from the wait above, while inherited pipes get at most two seconds to close.
             drainCancellation.CancelAfter(TimeSpan.FromSeconds(2));

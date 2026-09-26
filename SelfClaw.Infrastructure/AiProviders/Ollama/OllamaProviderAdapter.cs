@@ -30,14 +30,14 @@ internal sealed class OllamaProviderAdapter : IAiProviderAdapter
     public bool SupportsApiFormat(AiProviderApiFormat apiFormat)
         => apiFormat is AiProviderApiFormat.OllamaNative or AiProviderApiFormat.OpenAIChatCompletions;
 
-    public IChatClient CreateChatClient(AiProviderClientRequest request)
+    public IChatClient CreateChatClient(AiProviderClientRequest request, HttpClient httpClient)
         => request.Profile.ApiFormat switch
         {
             AiProviderApiFormat.OllamaNative => new OllamaApiClient(
-                _httpClientProvider.GetStreamingClient(request.Connection),
+                httpClient,
                 request.Profile.Model),
             AiProviderApiFormat.OpenAIChatCompletions =>
-                _openAiCompatibilityAdapter.CreateChatClient(CreateOpenAiCompatibilityRequest(request)),
+                _openAiCompatibilityAdapter.CreateChatClient(CreateOpenAiCompatibilityRequest(request), httpClient),
             _ => throw UnsupportedFormat(request)
         };
 

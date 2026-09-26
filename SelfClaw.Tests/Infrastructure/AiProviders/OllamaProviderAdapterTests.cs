@@ -26,11 +26,13 @@ public sealed class OllamaProviderAdapterTests
         adapter.SupportsApiFormat(AiProviderApiFormat.OpenAIChatCompletions).Should().BeTrue();
         adapter.SupportsApiFormat(AiProviderApiFormat.OpenAIResponses).Should().BeFalse();
 
-        using var nativeClient = adapter.CreateChatClient(nativeRequest);
-        using var compatibleClient = adapter.CreateChatClient(compatibleRequest);
+        using var nativeClient = adapter.CreateChatClient(
+            nativeRequest, httpClientProvider.CreateTurnClient(connection, null));
+        using var compatibleClient = adapter.CreateChatClient(
+            compatibleRequest, httpClientProvider.CreateTurnClient(connection, null));
         nativeClient.Should().NotBeNull();
         compatibleClient.Should().NotBeNull();
-        httpClientProvider.CachedClientCount.Should().Be(2);
+        httpClientProvider.CachedSharedHandlerCount.Should().Be(1);
 
         var options = adapter.CreateChatOptions(nativeRequest);
         options.ModelId.Should().Be("llama3.2:latest");
@@ -68,7 +70,7 @@ public sealed class OllamaProviderAdapterTests
         var adapter = new OllamaProviderAdapter(httpClientProvider);
         var request = CreateRequest(CreateConnection(), AiProviderApiFormat.OpenAIResponses);
 
-        var act = () => adapter.CreateChatClient(request);
+        var act = () => adapter.CreateChatClient(request, new HttpClient());
 
         act.Should().Throw<NotSupportedException>().WithMessage("*OpenAIResponses*Test model*");
     }

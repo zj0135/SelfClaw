@@ -21,7 +21,7 @@ public sealed class WorkspaceAgentToolsetTests
             CreateWorkspace(),
             Guid.NewGuid(),
             ToolPermissionMode.RequireApproval,
-            null);
+            null).Tools;
 
         tools.Should().AllBeAssignableTo<AIFunction>();
         tools.Cast<AIFunction>().Select(tool => tool.Name).Should().Equal(
@@ -42,17 +42,14 @@ public sealed class WorkspaceAgentToolsetTests
         // is nullable. Every optional tool parameter must therefore declare a default so a model
         // that leaves the documented "leave unset" parameters out still gets a result.
         var service = new FakeWorkspaceToolService();
-        var tools = CreateTools(
+        var fixture = CreateTools(
             service, CreateWorkspace(), Guid.NewGuid(), ToolPermissionMode.FullAccess, null);
 
-        await FindFunction(tools, "list_files").InvokeAsync(new AIFunctionArguments());
-        await FindFunction(tools, "glob_files").InvokeAsync(
-            new AIFunctionArguments { ["pattern"] = "*.cs" });
-        await FindFunction(tools, "search_text").InvokeAsync(
-            new AIFunctionArguments { ["query"] = "needle" });
-        await FindFunction(tools, "read_file").InvokeAsync(
-            new AIFunctionArguments { ["relativePath"] = "a.txt" });
-        await FindFunction(tools, "edit_file").InvokeAsync(new AIFunctionArguments
+        await fixture.InvokeAsync("list_files", new AIFunctionArguments());
+        await fixture.InvokeAsync("glob_files", new AIFunctionArguments { ["pattern"] = "*.cs" });
+        await fixture.InvokeAsync("search_text", new AIFunctionArguments { ["query"] = "needle" });
+        await fixture.InvokeAsync("read_file", new AIFunctionArguments { ["relativePath"] = "a.txt" });
+        await fixture.InvokeAsync("edit_file", new AIFunctionArguments
         {
             ["relativePath"] = "a.txt",
             ["oldText"] = "a",
@@ -69,15 +66,13 @@ public sealed class WorkspaceAgentToolsetTests
         var approval = new FakeApprovalHandler { Approved = true };
         var workspace = CreateWorkspace();
         var conversationId = Guid.NewGuid();
-        var function = FindFunction(
-            CreateTools(service,
-                workspace,
-                conversationId,
-                ToolPermissionMode.RequireApproval,
-                approval),
-            "write_file");
+        var fixture = CreateTools(service,
+            workspace,
+            conversationId,
+            ToolPermissionMode.RequireApproval,
+            approval);
 
-        var result = await function.InvokeAsync(new AIFunctionArguments
+        var result = await fixture.InvokeAsync("write_file", new AIFunctionArguments
         {
             ["relativePath"] = "src/new.txt",
             ["content"] = "hello"
@@ -100,15 +95,13 @@ public sealed class WorkspaceAgentToolsetTests
     {
         var service = new FakeWorkspaceToolService();
         var approval = useHandler ? new FakeApprovalHandler { Approved = false } : null;
-        var function = FindFunction(
-            CreateTools(service,
-                CreateWorkspace(),
-                Guid.NewGuid(),
-                ToolPermissionMode.RequireApproval,
-                approval),
-            "write_file");
+        var fixture = CreateTools(service,
+            CreateWorkspace(),
+            Guid.NewGuid(),
+            ToolPermissionMode.RequireApproval,
+            approval);
 
-        var result = await function.InvokeAsync(new AIFunctionArguments
+        var result = await fixture.InvokeAsync("write_file", new AIFunctionArguments
         {
             ["relativePath"] = "denied.txt",
             ["content"] = "blocked"
@@ -124,15 +117,13 @@ public sealed class WorkspaceAgentToolsetTests
         var service = new FakeWorkspaceToolService();
         var approval = new FakeApprovalHandler { Approved = false };
         var workspace = CreateWorkspace();
-        var function = FindFunction(
-            CreateTools(service,
-                workspace,
-                Guid.NewGuid(),
-                ToolPermissionMode.FullAccess,
-                approval),
-            "run_shell_command");
+        var fixture = CreateTools(service,
+            workspace,
+            Guid.NewGuid(),
+            ToolPermissionMode.FullAccess,
+            approval);
 
-        await function.InvokeAsync(new AIFunctionArguments
+        await fixture.InvokeAsync("run_shell_command", new AIFunctionArguments
         {
             ["command"] = "dotnet test",
             ["timeoutSeconds"] = 90
@@ -148,15 +139,13 @@ public sealed class WorkspaceAgentToolsetTests
         var service = new FakeWorkspaceToolService();
         var approval = new FakeApprovalHandler { Approved = true };
         var workspace = CreateWorkspace();
-        var function = FindFunction(
-            CreateTools(service,
-                workspace,
-                Guid.NewGuid(),
-                ToolPermissionMode.RequireApproval,
-                approval),
-            "edit_file");
+        var fixture = CreateTools(service,
+            workspace,
+            Guid.NewGuid(),
+            ToolPermissionMode.RequireApproval,
+            approval);
 
-        await function.InvokeAsync(new AIFunctionArguments
+        await fixture.InvokeAsync("edit_file", new AIFunctionArguments
         {
             ["relativePath"] = "src/app.cs",
             ["oldText"] = "var x = 1;",
@@ -174,15 +163,13 @@ public sealed class WorkspaceAgentToolsetTests
     {
         var service = new FakeWorkspaceToolService();
         var approval = new FakeApprovalHandler { Approved = false };
-        var function = FindFunction(
-            CreateTools(service,
-                CreateWorkspace(),
-                Guid.NewGuid(),
-                ToolPermissionMode.RequireApproval,
-                approval),
-            "edit_file");
+        var fixture = CreateTools(service,
+            CreateWorkspace(),
+            Guid.NewGuid(),
+            ToolPermissionMode.RequireApproval,
+            approval);
 
-        var result = await function.InvokeAsync(new AIFunctionArguments
+        var result = await fixture.InvokeAsync("edit_file", new AIFunctionArguments
         {
             ["relativePath"] = "src/app.cs",
             ["oldText"] = "a",
@@ -194,13 +181,18 @@ public sealed class WorkspaceAgentToolsetTests
         result.Should().BeOfType<DirectToolResult>().Which.Status.Should().Be(SelfClaw.Core.Runtime.Agent.ToolCallStatus.Canceled);
     }
 
-    private static IReadOnlyList<AITool> CreateTools(FakeWorkspaceToolService service, WorkspaceRoot workspace,
+    private static ToolFixture CreateTools(FakeWorkspaceToolService service, WorkspaceRoot workspace,
         Guid conversationId, ToolPermissionMode mode, IToolApprovalHandler? approval)
     {
         var request = (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(Guid.NewGuid(), workspace);
         request = request with { ConversationId = conversationId, ToolPermissionMode = mode, ToolApprovalHandler = approval };
-        return DirectTurnCapabilityResolver.BindTools(request, new WorkspaceAgentToolset(service).CreateTools(workspace))
-            .Select(binding => (AITool)binding.Tool).ToArray();
+        var bindings = DirectTurnCapabilityResolver.BindTools(
+                request, new WorkspaceAgentToolset(service).CreateTools(workspace))
+            .ToArray();
+        return new ToolFixture(
+            bindings.Select(binding => (AITool)binding.Tool).ToArray(),
+            new DirectToolInvoker(request, bindings.ToDictionary(
+                binding => binding.Tool.Name, StringComparer.Ordinal)));
     }
 
     private static WorkspaceRoot CreateWorkspace()
@@ -209,8 +201,21 @@ public sealed class WorkspaceAgentToolsetTests
         return new WorkspaceRoot(Guid.NewGuid(), "SelfClaw", "E:\\repo\\SelfClaw", now, now);
     }
 
-    private static AIFunction FindFunction(IReadOnlyList<AITool> tools, string name)
-        => tools.Cast<AIFunction>().Single(tool => tool.Name == name);
+    private sealed record ToolFixture(IReadOnlyList<AITool> Tools, DirectToolInvoker Invoker)
+    {
+        internal ValueTask<object?> InvokeAsync(string name, AIFunctionArguments arguments)
+        {
+            var function = Tools.Cast<AIFunction>().Single(tool => tool.Name == name);
+            return Invoker.InvokeAsync(
+                new FunctionInvocationContext
+                {
+                    Function = function,
+                    Arguments = arguments,
+                    CallContent = new FunctionCallContent("call-1", name, arguments)
+                },
+                CancellationToken.None);
+        }
+    }
 
     private sealed class FakeApprovalHandler : IToolApprovalHandler
     {

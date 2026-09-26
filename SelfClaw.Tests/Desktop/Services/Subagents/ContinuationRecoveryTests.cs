@@ -57,7 +57,10 @@ public sealed class ContinuationRecoveryTests : IDisposable
                 await Task.Delay(Timeout.Infinite, token);
             });
         var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(
-            new ChatClientBuilder(client).UseFunctionInvocation().Build());
+            client,
+            pipelineBuilder: (native, pipeline) => new ChatClientBuilder(native)
+                .UseFunctionInvocation(configure: option => option.FunctionInvoker = pipeline.FunctionInvoker)
+                .Build());
         var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory,
             DirectAgentChatRuntimeTests.CreateCapabilityResolver(new WorkspaceToolService(new(), new(), new())));
         var request = (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(factory.Profile.Id,

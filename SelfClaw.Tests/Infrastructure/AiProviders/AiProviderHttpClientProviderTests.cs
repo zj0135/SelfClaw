@@ -12,7 +12,7 @@ namespace SelfClaw.Tests.Infrastructure.AiProviders;
 public sealed class AiProviderHttpClientProviderTests
 {
     [Fact]
-    public void Clients_are_cached_by_canonical_connection_fingerprint_and_operation_kind()
+    public void Non_streaming_clients_are_cached_by_canonical_connection_fingerprint()
     {
         using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
         var connection = CreateConnection(
@@ -22,17 +22,12 @@ public sealed class AiProviderHttpClientProviderTests
             new Uri("https://api.example.test/v1/"),
             "{\"extra_headers\":{\"HTTP-Referer\":\"https://selfclaw.local\",\"X-Title\":\"SelfClaw\"},\"timeout_seconds\":30}");
 
-        var streaming = provider.GetStreamingClient(connection);
-        var sameStreaming = provider.GetStreamingClient(sameFingerprintDifferentOrder);
         var nonStreaming = provider.GetNonStreamingClient(connection);
         var sameNonStreaming = provider.GetNonStreamingClient(sameFingerprintDifferentOrder);
 
-        streaming.Should().BeSameAs(sameStreaming);
         nonStreaming.Should().BeSameAs(sameNonStreaming);
-        streaming.Should().NotBeSameAs(nonStreaming);
-        streaming.Timeout.Should().Be(Timeout.InfiniteTimeSpan);
         nonStreaming.Timeout.Should().Be(TimeSpan.FromSeconds(30));
-        provider.CachedClientCount.Should().Be(2);
+        provider.CachedClientCount.Should().Be(1);
 
         provider.GetNonStreamingClient(CreateConnection(
             new Uri("https://api.example.test/v1/"),
@@ -46,11 +41,30 @@ public sealed class AiProviderHttpClientProviderTests
             new Uri("https://api.example.test/V1/"),
             "{\"timeout_seconds\":30,\"extra_headers\":{\"X-Title\":\"SelfClaw\",\"HTTP-Referer\":\"https://selfclaw.local\"}}"))
             .Should().NotBeSameAs(nonStreaming);
-        provider.CachedClientCount.Should().Be(5);
+        provider.CachedClientCount.Should().Be(4);
     }
 
     [Fact]
-    public void OpenAi_chat_and_responses_clients_share_the_cached_infinite_timeout_transport()
+    public void CreateTurnClient_returns_distinct_clients_over_one_shared_infinite_timeout_handler()
+    {
+        var handlerFactory = new TrackingHandlerFactory();
+        using var provider = new AiProviderHttpClientProvider(handlerFactory.Create);
+        var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{\"timeout_seconds\":12}");
+
+        using var first = provider.CreateTurnClient(connection, null);
+        using var second = provider.CreateTurnClient(connection, null);
+
+        first.Should().NotBeSameAs(second);
+        first.Timeout.Should().Be(Timeout.InfiniteTimeSpan);
+        second.Timeout.Should().Be(Timeout.InfiniteTimeSpan);
+        first.BaseAddress.Should().Be(connection.Endpoint);
+        handlerFactory.CreatedCount.Should().Be(1);
+        provider.CachedSharedHandlerCount.Should().Be(1);
+        provider.CachedClientCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OpenAi_chat_and_responses_turn_clients_share_the_infinite_timeout_transport()
     {
         using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
         var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{\"timeout_seconds\":12}");
@@ -61,13 +75,16 @@ public sealed class AiProviderHttpClientProviderTests
         var responsesProfile = CreateProfile(connection.Id, AiProviderApiFormat.OpenAIResponses);
         var secrets = new Dictionary<string, string> { [OpenAiProviderAdapter.ApiKeySecretName] = "test-key" };
 
+        using var chatHttpClient = provider.CreateTurnClient(connection, null);
+        using var responsesHttpClient = provider.CreateTurnClient(connection, null);
         using var chatClient = adapter.CreateChatClient(
-            new AiProviderClientRequest(connection, chatProfile, secrets, false, []));
+            new AiProviderClientRequest(connection, chatProfile, secrets, false, []), chatHttpClient);
         using var responsesClient = adapter.CreateChatClient(
-            new AiProviderClientRequest(connection, responsesProfile, secrets, false, []));
+            new AiProviderClientRequest(connection, responsesProfile, secrets, false, []), responsesHttpClient);
 
-        provider.CachedClientCount.Should().Be(1);
-        provider.GetStreamingClient(connection).Timeout.Should().Be(Timeout.InfiniteTimeSpan);
+        chatHttpClient.Timeout.Should().Be(Timeout.InfiniteTimeSpan);
+        responsesHttpClient.Timeout.Should().Be(Timeout.InfiniteTimeSpan);
+        provider.CachedSharedHandlerCount.Should().Be(1);
     }
 
     [Fact]
@@ -117,15 +134,57 @@ public sealed class AiProviderHttpClientProviderTests
         provider.GetSharedStreamingHandler(connection).Should().BeSameAs(handler);
         provider.CachedSharedHandlerCount.Should().Be(2);
 
-        var turnClient = new HttpClient(handler, disposeHandler: false)
-        {
-            Timeout = Timeout.InfiniteTimeSpan
-        };
+        var turnClient = provider.CreateTurnClient(connection, null);
         turnClient.Dispose();
         using var followUpClient = new HttpClient(handler);
         using var response = await followUpClient.SendAsync(
             new HttpRequestMessage(HttpMethod.Get, "https://api.example.test/v1/models"));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Disposing_a_turn_client_does_not_dispose_the_shared_handler_behind_its_outer_handler()
+    {
+        var handlerFactory = new TrackingHandlerFactory();
+        using var provider = new AiProviderHttpClientProvider(handlerFactory.Create);
+        var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{}");
+        var turnClient = provider.CreateTurnClient(connection, new OrderedOuterHandler("outer", new List<string>()));
+
+        turnClient.Dispose();
+
+        handlerFactory.Handlers.Single().DisposeCount.Should().Be(0);
+        using var nextTurnClient = provider.CreateTurnClient(connection, null);
+        using var response = await nextTurnClient.SendAsync(
+            new HttpRequestMessage(HttpMethod.Get, "https://api.example.test/v1/models"));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task The_outer_handler_is_the_outermost_link_in_the_turn_chain()
+    {
+        var order = new List<string>();
+        using var provider = new AiProviderHttpClientProvider(() => new OrderedTerminalHandler("inner", order));
+        var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{}");
+        using var turnClient = provider.CreateTurnClient(connection, new OrderedOuterHandler("outer", order));
+
+        using var response = await turnClient.SendAsync(
+            new HttpRequestMessage(HttpMethod.Get, "https://api.example.test/v1/models"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        order.Should().Equal("outer", "inner");
+    }
+
+    [Fact]
+    public void ReadExtraHeaderNames_is_case_insensitive()
+    {
+        var connection = CreateConnection(
+            new Uri("https://api.example.test/v1/"),
+            "{\"extra_headers\":{\"X-Title\":\"SelfClaw\",\"HTTP-Referer\":\"https://selfclaw.local\"}}");
+
+        var names = AiProviderHttpClientProvider.ReadExtraHeaderNames(connection);
+
+        names.Should().Contain("x-title").And.Contain("http-referer");
+        names.Should().HaveCount(2);
     }
 
     [Fact]
@@ -214,9 +273,58 @@ public sealed class AiProviderHttpClientProviderTests
         }
     }
 
+    private sealed class OrderedOuterHandler : DelegatingHandler
+    {
+        private readonly string _name;
+        private readonly IList<string> _order;
+
+        public OrderedOuterHandler(string name, IList<string> order)
+        {
+            _name = name;
+            _order = order;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            _order.Add(_name);
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
+
+    private sealed class OrderedTerminalHandler : HttpMessageHandler
+    {
+        private readonly string _name;
+        private readonly IList<string> _order;
+
+        public OrderedTerminalHandler(string name, IList<string> order)
+        {
+            _name = name;
+            _order = order;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            _order.Add(_name);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") });
+        }
+    }
+
     private sealed class TrackingHandlerFactory
     {
-        public TrackingHandler Create() => new();
+        public IList<TrackingHandler> Handlers { get; } = [];
+
+        public int CreatedCount => Handlers.Count;
+
+        public TrackingHandler Create()
+        {
+            var handler = new TrackingHandler();
+            Handlers.Add(handler);
+            return handler;
+        }
     }
 
     private sealed class TrackingHandler : HttpMessageHandler

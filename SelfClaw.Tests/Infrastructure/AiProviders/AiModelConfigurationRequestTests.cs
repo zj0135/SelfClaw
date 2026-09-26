@@ -36,7 +36,8 @@ public sealed class AiModelConfigurationRequestTests
         {
             content = new[] { new { type = "text", text = new string('"', 70_000) } }, isError = true
         })) with { Detail = "DISPLAY ONLY SENTINEL" };
-        using var client = adapter.CreateChatClient(request);
+        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var client = adapter.CreateChatClient(request, httpClient);
         await client.GetResponseAsync(
         [
             new ChatMessage(ChatRole.User, "look up"),
@@ -109,7 +110,8 @@ public sealed class AiModelConfigurationRequestTests
         using var http = new AiProviderHttpClientProvider(() => handler);
         var adapter = new AnthropicProviderAdapter(httpClientProvider: http);
         var request = CreateRequest(adapter.ProviderKind, AiProviderApiFormat.AnthropicMessages, "high");
-        using var client = adapter.CreateChatClient(request);
+        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var client = adapter.CreateChatClient(request, httpClient);
         var contents = new List<AIContent>();
         await foreach (var update in client.GetStreamingResponseAsync(
                            [new ChatMessage(ChatRole.User, "Hello")], adapter.CreateChatOptions(request)))
@@ -138,7 +140,8 @@ public sealed class AiModelConfigurationRequestTests
         using var http = new AiProviderHttpClientProvider(() => handler);
         var adapter = new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, httpClientProvider: http);
         var request = CreateRequest(adapter.ProviderKind, AiProviderApiFormat.OpenAIChatCompletions, effort);
-        using var client = adapter.CreateChatClient(request);
+        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var client = adapter.CreateChatClient(request, httpClient);
 
         await client.GetResponseAsync([new ChatMessage(ChatRole.User, "Hello")], adapter.CreateChatOptions(request));
 
@@ -178,7 +181,8 @@ public sealed class AiModelConfigurationRequestTests
             _ => new OpenAiProviderAdapter(httpClientProvider: http)
         };
         var request = CreateRequest(adapter.ProviderKind, format, effort);
-        using var client = adapter.CreateChatClient(request);
+        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var client = adapter.CreateChatClient(request, httpClient);
         var options = adapter.CreateChatOptions(request);
 
         await client.GetResponseAsync([new ChatMessage(ChatRole.User, "Hello")], options);

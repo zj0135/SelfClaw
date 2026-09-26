@@ -77,9 +77,9 @@ Key runtime files:
 - `Agents/Direct/Capabilities/DirectTurnCapabilityResolver.cs` — source assembly; one tool-binding list owns conflict checks, policy and descriptor alignment
 - `Agents/Direct/Capabilities/DirectCapabilityRules.cs` — shared ceiling, package and MCP validity rules; Infrastructure `SubagentTaskPreflight` applies them before acceptance and execution
 - `Agents/Direct/Context/DirectPromptComposer.cs` — builds history backwards within budget, keeping tool call/result units intact
-- `Agents/Direct/Tools/WorkspaceAgentToolset.cs` — typed workspace functions and result formatting; `ApprovedAIFunction` owns approval and execution checkpoints
+- `Agents/Direct/Tools/WorkspaceAgentToolset.cs` — typed workspace functions and result formatting; `DirectToolInvoker` (M.E.AI `FunctionInvoker`) owns approval and execution checkpoints
 - `Agents/Direct/Tools/McpToolResultFormatter.cs` — limits the complete serialized model result to 64 KiB UTF-8, independently of display text
-- `AiProviders/AiChatClientFactory.cs` — resolves and validates a concrete model before capability work, then binds tools and constructs the adapter pipeline
+- `AiProviders/AiChatClientFactory.cs` — resolves and validates a concrete model before capability work, then builds the per-turn `HttpClient` over the shared pooled handler, binds tools and constructs the adapter pipeline
 - `AiProviders/AiProviderSettingsService.cs` — provider/model CRUD, discovery, enablement and default selection
 - `SelfClaw.Core/Interfaces/AiProviders/IAiModelCatalog.cs` — the runtime's model-read contract (enabled models, scoped defaults, and individual model availability); the same `AiProviderSettingsService` singleton implements it and the separate settings-management contract. Shared settings DTOs and model enums live in `SelfClaw.Core/Models/AiProviders/`.
 - `Tools/Workspace/WorkspaceToolService.cs` — the tool entry point and operation logging; delegates file operations, search and Shell execution to `WorkspaceFileService`, `WorkspaceSearchService` and `WorkspaceShellRunner`. `WorkspaceFileAccess` owns path/file validation; `WorkspaceTextEditor` owns text matching and replacement.

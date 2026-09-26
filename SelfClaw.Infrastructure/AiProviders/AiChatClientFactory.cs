@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.AiProviders;
@@ -16,17 +17,20 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
     private readonly IAiProviderRepository _repository;
     private readonly AiProviderRegistry _registry;
     private readonly ISecretProtector _secretProtector;
+    private readonly AiProviderHttpClientProvider _httpClientProvider;
     private readonly ILoggerFactory _safeLoggerFactory;
 
     public AiChatClientFactory(
         IAiProviderRepository repository,
         AiProviderRegistry registry,
         ISecretProtector secretProtector,
+        AiProviderHttpClientProvider httpClientProvider,
         ILoggerFactory? loggerFactory = null)
     {
         _repository = repository;
         _registry = registry;
         _secretProtector = secretProtector;
+        _httpClientProvider = httpClientProvider;
         _safeLoggerFactory = new NonSensitiveLoggerFactory(loggerFactory ?? NullLoggerFactory.Instance);
     }
 
@@ -77,29 +81,58 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
             []);
     }
 
-    public AiChatClientLease Create(AiProviderClientRequest preparation, IReadOnlyList<AITool> tools)
+    public AiChatClientLease Create(AiProviderClientRequest preparation, AiChatClientPipelineOptions pipeline)
     {
         ArgumentNullException.ThrowIfNull(preparation);
-        ArgumentNullException.ThrowIfNull(tools);
-        var request = preparation with { Tools = tools };
+        ArgumentNullException.ThrowIfNull(pipeline);
+        var request = preparation with { Tools = pipeline.Tools };
         var adapter = _registry.GetRequiredAdapter(request.Connection.ProviderKind);
-        var options = adapter.CreateChatOptions(request);
-        var nativeClient = adapter.CreateChatClient(request);
+        var httpClient = _httpClientProvider.CreateTurnClient(request.Connection, pipeline.HttpHandler);
+        IChatClient? nativeClient = null;
 
         try
         {
+            var options = adapter.CreateChatOptions(request);
+            nativeClient = adapter.CreateChatClient(request, httpClient);
             var client = new ChatClientBuilder(nativeClient)
                 .UseFunctionInvocation(_safeLoggerFactory, option => {
                     option.MaximumIterationsPerRequest = 128;
+                    option.FunctionInvoker = pipeline.FunctionInvoker;
                 })
                 .UseLogging(_safeLoggerFactory)
                 .Build();
-            return new AiChatClientLease(client, options, request.Profile);
+            return new AiChatClientLease(client, options, request.Profile, httpClient);
         }
         catch
         {
-            nativeClient.Dispose();
+            // Cleanup must never mask the creation failure, so failures are logged and dropped.
+            DisposeAfterFailedCreation(nativeClient, httpClient);
             throw;
+        }
+    }
+
+    private void DisposeAfterFailedCreation(IChatClient? nativeClient, HttpClient httpClient)
+    {
+        var logger = _safeLoggerFactory.CreateLogger<AiChatClientFactory>();
+        if (nativeClient is not null)
+        {
+            try
+            {
+                nativeClient.Dispose();
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Failed to dispose the Direct chat client after a failed pipeline setup.");
+            }
+        }
+
+        try
+        {
+            httpClient.Dispose();
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Failed to dispose the per-turn HttpClient after a failed pipeline setup.");
         }
     }
 

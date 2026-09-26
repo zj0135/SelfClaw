@@ -53,8 +53,12 @@ public sealed class AiModelConfigurationTests : IDisposable
         view.MaxOutputTokens.Should().Be(16000);
         view.PriceInPerMTok.Should().Be(0.123456m);
 
-        var factory = new AiChatClientFactory(restarted, new AiProviderRegistry([new OpenAiProviderAdapter()]), new TestSecretProtector());
-        using var lease = factory.Create(await factory.PrepareAsync(newProfile.Id), []);
+        var factory = new AiChatClientFactory(
+            restarted,
+            new AiProviderRegistry([new OpenAiProviderAdapter()]),
+            new TestSecretProtector(),
+            new AiProviderHttpClientProvider());
+        using var lease = factory.Create(await factory.PrepareAsync(newProfile.Id), new AiChatClientPipelineOptions([], (_, _) => new ValueTask<object?>((object?)null)));
         lease.Options.Temperature.Should().Be(0.2f);
         lease.Options.MaxOutputTokens.Should().Be(16000);
         AiChatOptions.ResolveContextWindowTokens(lease.Profile).Should().Be(128000);

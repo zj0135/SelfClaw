@@ -597,10 +597,15 @@ public sealed class DirectAgentChatRuntimeTests
     internal sealed class FakeChatClientFactory : IAiChatClientFactory
     {
         private readonly IChatClient _client;
+        private readonly Func<IChatClient, AiChatClientPipelineOptions, IChatClient>? _pipelineBuilder;
 
-        public FakeChatClientFactory(IChatClient client, int? contextWindowTokens = null)
+        public FakeChatClientFactory(
+            IChatClient client,
+            int? contextWindowTokens = null,
+            Func<IChatClient, AiChatClientPipelineOptions, IChatClient>? pipelineBuilder = null)
         {
             _client = client;
+            _pipelineBuilder = pipelineBuilder;
             var now = DateTimeOffset.UtcNow;
             Profile = new AiModelProfile(
                 Guid.NewGuid(), Guid.NewGuid(), "Test", AiProviderApiFormat.OpenAIChatCompletions,
@@ -618,6 +623,7 @@ public sealed class DirectAgentChatRuntimeTests
         public Exception? FactoryException { get; init; }
         public Exception? PreparationException { get; init; }
         public IReadOnlyList<AITool> LastTools { get; private set; } = [];
+        public AiChatClientPipelineOptions? LastPipeline { get; private set; }
         public List<string> ScopeCalls { get; } = [];
         public int CreateCalls { get; private set; }
 
@@ -634,15 +640,16 @@ public sealed class DirectAgentChatRuntimeTests
             return Task.FromResult(new AiProviderClientRequest(connection, Profile, new Dictionary<string, string>(), false, []));
         }
 
-        public AiChatClientLease Create(AiProviderClientRequest preparation, IReadOnlyList<AITool> tools)
+        public AiChatClientLease Create(AiProviderClientRequest preparation, AiChatClientPipelineOptions pipeline)
         {
             CreateCalls++;
-            LastTools = tools;
+            LastTools = pipeline.Tools;
+            LastPipeline = pipeline;
             var options = Options.Clone();
-            options.Tools ??= tools.ToList();
-            return FactoryException is null
-                ? new AiChatClientLease(_client, options, Profile)
-                : throw FactoryException;
+            options.Tools ??= pipeline.Tools.ToList();
+            if (FactoryException is not null) throw FactoryException;
+            var client = _pipelineBuilder is null ? _client : _pipelineBuilder(_client, pipeline);
+            return new AiChatClientLease(client, options, Profile, new HttpClient());
         }
     }
 

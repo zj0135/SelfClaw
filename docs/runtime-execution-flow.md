@@ -47,7 +47,7 @@ Direct 依赖扩展资源与 provider 服务；Extensions 不引用 Direct 编�
 1. continuation 请求必须带 `IToolExecutionCheckpoint`。
 2. `AiChatClientFactory.PrepareAsync(ModelProfileId)` 确定具体模型。显式 id 与空 id 的 `desktop-default` 都在这里处理；校验档案、连接、协议并解析凭据，得到 `AiProviderClientRequest`。
 3. 用确定的模型 id 调用 `DirectTurnCapabilityResolver.ResolveAsync()`。子代理工具捕获的父模型始终具体，禁用或无效模型不会先触发 MCP 连接。
-4. `AiChatClientFactory.Create(preparation, tools)` 将工具交给 provider adapter，创建 options 和带 function invocation / logging 的 SDK 管线。
+4. `AiChatClientFactory.Create(preparation, pipeline)` 按回合在共享 pooled handler 上构造 `HttpClient`，将工具与 `FunctionInvoker` 交给 provider adapter，创建 options 和带 function invocation / logging 的 SDK 管线。
 5. `DirectPromptComposer.BuildMessages()` 构建预算内历史与必需输入。
 6. 消费 SDK 流、产生共享事件；先释放 provider pipeline，再释放 capability lease。
 
@@ -67,7 +67,7 @@ Desktop 不再补齐默认模型。排队 child 与 continuation 使用捕获的
 
 `DirectToolResult` 携带 `Status`、`Summary`、模型 `Content` 与展示 `Detail`；`Detail` 不参与 provider JSON 序列化。工作区、Skill 与子代理函数使用 SDK `MarshalResult`；MCP 在自己的适配层规范化结果。主循环只解释统一契约和 SDK 异常，未知结果不再默认成功。
 
-审批拒绝返回 `Canceled` 和拒绝摘要，recorder 持久化为 `Cancelled`；实际取消异常沿异步调用传播。`ApprovedAIFunction` 负责审批与执行准入，MCP 大小限制不再注入审批包装。
+审批拒绝返回 `Canceled` 和拒绝摘要，recorder 持久化为 `Cancelled`；实际取消异常沿异步调用传播。`DirectToolInvoker`（M.E.AI `FunctionInvoker`）负责审批与执行准入，MCP 大小限制不再注入审批包装。
 
 ## 4. Continuation 恢复与所有权
 
@@ -101,7 +101,7 @@ checkpoint 表示“工具可能已经开始”，不提供外部文件、Shell 
 | 当前执行内容与取消 | `ConversationRuntimeState` / `SubagentExecutionSession` 串行录制并提供快照，取消后等待终态再释放 |
 | 会话加载 | coordinator 的进行中加载表只合并未完成 I/O；成功、失败或取消均移除，调用者只取消自己的等待 |
 | 已完成快照 | 只保留当前选中会话；切换后不缓存旧完成会话。运行会话由 runtime state 单独持有 |
-| provider pipeline | `AiChatClientLease` 每回合释放；共享 HttpClient 继续由 provider 管理 |
+| provider pipeline | `AiChatClientLease` 每回合释放按回合 `HttpClient`；共享 pooled handler 继续由 provider 管理 |
 | Plugin / MCP lease | `DirectTurnLeaseScope` 统一拥有；来源只释放尚未移交的资源 |
 | 历史构建 | 从最近消息向前按需创建 SDK 单元，达到预算边界停止；调用与结果不可拆分 |
 | Shell 输出 | 两路增量 drain，各保留前 24,000 个 UTF-16 字符；超额继续排空，超时/取消统一收尾 |

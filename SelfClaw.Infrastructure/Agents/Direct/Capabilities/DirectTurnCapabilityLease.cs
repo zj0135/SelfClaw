@@ -17,7 +17,7 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
     {
         SystemInstructions = systemInstructions;
         Tools = tools.Select(binding => (AITool)binding.Tool).ToArray();
-        ToolDescriptors = tools.ToDictionary(binding => binding.Tool.Name, binding => binding.Descriptor, StringComparer.Ordinal);
+        Bindings = tools.ToDictionary(binding => binding.Tool.Name, StringComparer.Ordinal);
         MessageAdjustments = messageAdjustments;
         Diagnostics = diagnostics;
         _disposeAsync = disposeAsync;
@@ -25,7 +25,7 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
 
     public IReadOnlyList<string> SystemInstructions { get; }
     public IReadOnlyList<AITool> Tools { get; }
-    public IReadOnlyDictionary<string, DirectToolDescriptor> ToolDescriptors { get; }
+    public IReadOnlyDictionary<string, DirectToolBinding> Bindings { get; }
     public IReadOnlyDictionary<Guid, string> MessageAdjustments { get; }
     public IReadOnlyList<string> Diagnostics { get; }
 

@@ -1,9 +1,9 @@
-using System.Diagnostics;
 using System.ComponentModel;
+using System.Diagnostics;
 
-namespace SelfClaw.Infrastructure.Tools.Workspace;
+namespace SelfClaw.Infrastructure.Processes;
 
-internal static class WorkspaceProcess
+internal static class ProcessTree
 {
     internal static void TryKill(Process process)
     {

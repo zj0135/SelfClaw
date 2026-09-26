@@ -35,7 +35,11 @@ public sealed class DirectToolPipelineTests : IDisposable
             _ => new() { ["relativePath"] = "output.txt", ["content"] = "written" }
         };
         var provider = new SingleToolChatClient(name, arguments);
-        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(new ChatClientBuilder(provider).UseFunctionInvocation().Build());
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(
+            provider,
+            pipelineBuilder: (native, pipeline) => new ChatClientBuilder(native)
+                .UseFunctionInvocation(configure: option => option.FunctionInvoker = pipeline.FunctionInvoker)
+                .Build());
         var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory,
             DirectAgentChatRuntimeTests.CreateCapabilityResolver(new WorkspaceToolService(new(), new(), new())));
         var now = DateTimeOffset.UtcNow;
@@ -77,6 +81,21 @@ public sealed class DirectToolPipelineTests : IDisposable
         Action duplicate = () => DirectTurnCapabilityResolver.BindTools(request, [binding, binding]);
         duplicate.Should().Throw<InvalidDataException>().WithMessage("*collision*");
         DirectTurnCapabilityResolver.BindTools(request, []).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Binding_returns_the_bound_tool_unwrapped()
+    {
+        // Approval and the execution checkpoint belong to the single FunctionInvoker seam, so the
+        // resolver must hand the runtime the same tool instance it was given.
+        var request = (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(Guid.NewGuid());
+        var function = AIFunctionFactory.Create(() => "ok", "same");
+        var binding = new DirectToolBinding(function, new DirectToolDescriptor("same", ToolCallKind.Read));
+
+        var bound = DirectTurnCapabilityResolver.BindTools(request, [binding]).Should().ContainSingle().Subject;
+
+        bound.Should().BeSameAs(binding);
+        bound.Tool.Should().BeSameAs(function);
     }
 
     public void Dispose()

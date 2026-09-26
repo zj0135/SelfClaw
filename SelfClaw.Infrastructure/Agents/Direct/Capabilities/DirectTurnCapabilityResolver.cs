@@ -151,11 +151,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             }
 
             if (!DirectCapabilityRules.Allows(binding.Descriptor.Kind, request.Agent.ToolPolicy)) continue;
-            var descriptor = binding.Descriptor;
-            result.Add(binding with { Tool = new ApprovedAIFunction(binding.Tool, request.ConversationId,
-                request.ToolPermissionMode, request.ToolApprovalHandler, descriptor.DisplayName ?? binding.Tool.Name,
-                descriptor.SourceKind ?? ToolSourceKind.BuiltIn, descriptor.SourceId, binding.TransportSummary,
-                binding.AnnotationsJson, binding.RequiresApproval, request.ToolExecutionCheckpoint) });
+            result.Add(binding);
         }
 
         return result;

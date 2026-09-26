@@ -33,11 +33,13 @@ public interface IAiProviderAdapter
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Creates a Microsoft.Extensions.AI <see cref="IChatClient"/> for the request.
+    /// Creates a Microsoft.Extensions.AI <see cref="IChatClient"/> for the request on top of
+    /// <paramref name="httpClient"/>. The caller owns that client's lifetime; the adapter must not
+    /// dispose the shared handler behind it.
     /// Throws <see cref="NotSupportedException"/> when the profile's API format is
     /// not supported by this adapter.
     /// </summary>
-    IChatClient CreateChatClient(AiProviderClientRequest request);
+    IChatClient CreateChatClient(AiProviderClientRequest request, HttpClient httpClient);
 
     /// <summary>
     /// Builds the <see cref="ChatOptions"/> for the request, mapping shared

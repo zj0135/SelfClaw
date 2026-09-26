@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Tests.Infrastructure.AiProviders;
@@ -18,11 +19,60 @@ public sealed class AiChatClientFactoryTests
     public void Lease_releases_its_client_once_even_when_disposed_concurrently()
     {
         var nativeClient = new FakeChatClient();
-        var lease = new AiChatClientLease(nativeClient, new ChatOptions(), CreateData().Profile);
+        var httpClient = new HttpClient();
+        var lease = new AiChatClientLease(nativeClient, new ChatOptions(), CreateData().Profile, httpClient);
 
         Parallel.For(0, 8, _ => lease.Dispose());
 
         nativeClient.DisposeCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Lease_disposes_its_turn_http_client()
+    {
+        var lease = new AiChatClientLease(
+            new FakeChatClient(), new ChatOptions(), CreateData().Profile, new HttpClient());
+
+        lease.Dispose();
+
+        await FluentActions.Awaiting(() => lease.HttpClient.SendAsync(new HttpRequestMessage(
+                HttpMethod.Get, "https://api.example.test/v1/models")))
+            .Should().ThrowAsync<ObjectDisposedException>();
+    }
+
+    [Fact]
+    public async Task Lease_disposes_its_turn_http_client_even_when_the_client_dispose_throws()
+    {
+        var lease = new AiChatClientLease(
+            new FakeChatClient { DisposeException = new InvalidOperationException("client dispose failed") },
+            new ChatOptions(),
+            CreateData().Profile,
+            new HttpClient());
+
+        var act = () => lease.Dispose();
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("client dispose failed");
+        await FluentActions.Awaiting(() => lease.HttpClient.SendAsync(new HttpRequestMessage(
+                HttpMethod.Get, "https://api.example.test/v1/models")))
+            .Should().ThrowAsync<ObjectDisposedException>();
+    }
+
+    [Fact]
+    public async Task CreateAsync_disposes_the_turn_http_client_when_the_adapter_fails()
+    {
+        var data = CreateData();
+        var protector = new FakeSecretProtector { Secrets = { ["secret:openai"] = "sk-test" } };
+        var adapter = new FakeAdapter { CreateException = new InvalidOperationException("adapter failed") };
+        var factory = CreateFactory(data.Repository, protector, adapter);
+        var preparation = await factory.PrepareAsync(data.Profile.Id);
+
+        var act = () => factory.Create(preparation, CreatePipeline([]));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("adapter failed");
+        adapter.LastHttpClient.Should().NotBeNull();
+        await FluentActions.Awaiting(() => adapter.LastHttpClient!.SendAsync(new HttpRequestMessage(
+                HttpMethod.Get, "https://api.example.test/v1/models")))
+            .Should().ThrowAsync<ObjectDisposedException>();
     }
 
     [Fact]
@@ -37,16 +87,19 @@ public sealed class AiChatClientFactoryTests
         var factory = CreateFactory(data.Repository, protector, adapter);
 
         var preparation = await factory.PrepareAsync(data.Profile.Id);
-        using (var lease = factory.Create(preparation with { EnableReasoning = true }, [tool]))
+        using (var lease = factory.Create(
+            preparation with { EnableReasoning = true },
+            CreatePipeline([tool])))
         {
             lease.Profile.Should().Be(data.Profile);
             lease.Options.Should().BeSameAs(expectedOptions);
             lease.Client.GetService(typeof(LoggingChatClient)).Should().NotBeNull();
-            lease.Client.GetService(typeof(FunctionInvokingChatClient)).Should().NotBeNull();
+            lease.Client.GetService<FunctionInvokingChatClient>()?.FunctionInvoker.Should().NotBeNull();
             adapter.LastRequest.Should().NotBeNull();
             adapter.LastRequest!.Secrets["api_key"].Should().Be("sk-test");
             adapter.LastRequest.EnableReasoning.Should().BeTrue();
             adapter.LastRequest.Tools.Should().ContainSingle().Which.Should().BeSameAs(tool);
+            adapter.LastHttpClient.Should().NotBeNull();
             nativeClient.IsDisposed.Should().BeFalse();
         }
 
@@ -62,7 +115,7 @@ public sealed class AiChatClientFactoryTests
         var adapter = new FakeAdapter(new FakeChatClient(), new ChatOptions());
         var factory = CreateFactory(data.Repository, protector, adapter);
 
-        using var lease = factory.Create(await factory.PrepareAsync(data.Profile.Id), []);
+        using var lease = factory.Create(await factory.PrepareAsync(data.Profile.Id), CreatePipeline([]));
 
         protector.RetrievedRefs.Should().BeEmpty();
         adapter.LastRequest!.Secrets.Should().BeEmpty();
@@ -131,11 +184,14 @@ public sealed class AiChatClientFactoryTests
             AiModelSelectionScopes.DesktopDefault,
             data.Profile.Id,
             DateTimeOffset.UtcNow);
-        using var lease = factory.Create(await factory.PrepareAsync(null), []);
+        using var lease = factory.Create(await factory.PrepareAsync(null), CreatePipeline([]));
 
         lease.Profile.Id.Should().Be(data.Profile.Id);
         adapter.CreateClientCalls.Should().Be(1);
     }
+
+    private static AiChatClientPipelineOptions CreatePipeline(IReadOnlyList<AITool> tools)
+        => new(tools, static (_, _) => new ValueTask<object?>((object?)null));
 
     private static AiChatClientFactory CreateFactory(
         FakeRepository repository,
@@ -145,6 +201,7 @@ public sealed class AiChatClientFactoryTests
             repository,
             new AiProviderRegistry([adapter]),
             protector,
+            new AiProviderHttpClientProvider(() => new StubHandler()),
             NullLoggerFactory.Instance);
 
     private static TestData CreateData(AiProviderAuthKind authKind = AiProviderAuthKind.ApiKey)
@@ -246,16 +303,19 @@ public sealed class AiChatClientFactoryTests
         public AiProviderKind ProviderKind => AiProviderKind.OpenAI;
         public bool SupportsModelListing => false;
         public bool SupportsFormat { get; init; } = true;
+        public Exception? CreateException { get; init; }
         public AiProviderClientRequest? LastRequest { get; private set; }
+        public HttpClient? LastHttpClient { get; private set; }
         public int CreateClientCalls { get; private set; }
 
         public bool SupportsApiFormat(AiProviderApiFormat apiFormat) => SupportsFormat;
 
-        public IChatClient CreateChatClient(AiProviderClientRequest request)
+        public IChatClient CreateChatClient(AiProviderClientRequest request, HttpClient httpClient)
         {
             LastRequest = request;
+            LastHttpClient = httpClient;
             CreateClientCalls++;
-            return _client;
+            return CreateException is null ? _client : throw CreateException;
         }
 
         public ChatOptions CreateChatOptions(AiProviderClientRequest request)
@@ -271,12 +331,21 @@ public sealed class AiChatClientFactoryTests
             => throw new NotSupportedException();
     }
 
+    private sealed class StubHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+    }
+
     private sealed class FakeChatClient : IChatClient
     {
         private int _disposeCount;
 
         public int DisposeCount => Volatile.Read(ref _disposeCount);
         public bool IsDisposed => DisposeCount > 0;
+        public Exception? DisposeException { get; init; }
 
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
@@ -295,6 +364,13 @@ public sealed class AiChatClientFactoryTests
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
-        public void Dispose() => Interlocked.Increment(ref _disposeCount);
+        public void Dispose()
+        {
+            Interlocked.Increment(ref _disposeCount);
+            if (DisposeException is not null)
+            {
+                throw DisposeException;
+            }
+        }
     }
 }

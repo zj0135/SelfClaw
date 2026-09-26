@@ -27,8 +27,9 @@ public sealed class AnthropicProviderAdapterTests
     {
         var adapter = new AnthropicProviderAdapter();
         var request = CreateRequest();
+        using var httpClient = new HttpClient();
 
-        var client = adapter.CreateChatClient(request);
+        var client = adapter.CreateChatClient(request, httpClient);
 
         client.Should().NotBeNull();
     }
@@ -107,8 +108,9 @@ public sealed class AnthropicProviderAdapterTests
     {
         var adapter = new AnthropicProviderAdapter();
         var request = CreateRequest(secrets: new Dictionary<string, string>());
+        using var httpClient = new HttpClient();
 
-        var act = () => adapter.CreateChatClient(request);
+        var act = () => adapter.CreateChatClient(request, httpClient);
 
         act.Should()
             .Throw<InvalidOperationException>()
@@ -116,16 +118,20 @@ public sealed class AnthropicProviderAdapterTests
     }
 
     [Fact]
-    public async Task CreateAnthropicClient_wraps_the_shared_pooled_handler_per_turn()
+    public async Task CreateAnthropicClient_uses_the_caller_owned_turn_client()
     {
         using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
         var adapter = new AnthropicProviderAdapter(httpClientProvider: provider);
         var request = CreateRequest();
 
-        var first = adapter.CreateAnthropicClient(request);
-        var second = adapter.CreateAnthropicClient(request);
+        var firstHttpClient = provider.CreateTurnClient(request.Connection, null);
+        var secondHttpClient = provider.CreateTurnClient(request.Connection, null);
+        var first = adapter.CreateAnthropicClient(request, firstHttpClient);
+        var second = adapter.CreateAnthropicClient(request, secondHttpClient);
         try
         {
+            first.HttpClient.Should().BeSameAs(firstHttpClient);
+            second.HttpClient.Should().BeSameAs(secondHttpClient);
             first.HttpClient.Should().NotBeSameAs(second.HttpClient);
             first.HttpClient.Timeout.Should().Be(Timeout.InfiniteTimeSpan);
             provider.CachedSharedHandlerCount.Should().Be(1);
@@ -136,7 +142,7 @@ public sealed class AnthropicProviderAdapterTests
             second.Dispose();
         }
 
-        // Disposing the SDK client disposes only the per-turn wrapper; the pooled handler stays usable.
+        // Disposing the SDK clientdisposes only the per-turn wrapper; the pooled handler stays usable.
         using var followUpClient = new HttpClient(provider.GetSharedStreamingHandler(request.Connection));
         using var response = await followUpClient.SendAsync(
             new HttpRequestMessage(HttpMethod.Get, "https://api.anthropic.com/v1/models"));

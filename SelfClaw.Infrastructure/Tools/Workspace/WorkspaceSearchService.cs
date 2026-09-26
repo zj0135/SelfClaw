@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using SelfClaw.Core.Models;
+using SelfClaw.Infrastructure.Processes;
 
 namespace SelfClaw.Infrastructure.Tools.Workspace;
 
@@ -77,7 +78,7 @@ internal sealed class WorkspaceSearchService
         arguments.AddRange(["--", searchRoot]);
         using var process = CreateProcess(root, arguments);
         if (!process.Start()) throw new InvalidOperationException("Failed to start ripgrep.");
-        using var registration = cancellationToken.Register(() => WorkspaceProcess.TryKill(process));
+        using var registration = cancellationToken.Register(() => ProcessTree.TryKill(process));
         var errors = process.StandardError.ReadToEndAsync(cancellationToken);
         try
         {
@@ -90,7 +91,7 @@ internal sealed class WorkspaceSearchService
         }
         finally
         {
-            WorkspaceProcess.TryKill(process);
+            ProcessTree.TryKill(process);
         }
     }
 
@@ -184,7 +185,7 @@ internal sealed class WorkspaceSearchService
             throw new InvalidOperationException("Failed to start ripgrep.");
         }
 
-        using var registration = cancellationToken.Register(() => WorkspaceProcess.TryKill(process));
+        using var registration = cancellationToken.Register(() => ProcessTree.TryKill(process));
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         try
         {
@@ -205,7 +206,7 @@ internal sealed class WorkspaceSearchService
         }
         finally
         {
-            WorkspaceProcess.TryKill(process);
+            ProcessTree.TryKill(process);
         }
     }
 
@@ -221,7 +222,7 @@ internal sealed class WorkspaceSearchService
             hits.Add(hit);
             if (hits.Count >= maxResults)
             {
-                WorkspaceProcess.TryKill(process);
+                ProcessTree.TryKill(process);
                 break;
             }
         }

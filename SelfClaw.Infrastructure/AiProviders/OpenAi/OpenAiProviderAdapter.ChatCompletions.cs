@@ -30,12 +30,12 @@ internal sealed partial class OpenAiProviderAdapter
             AiChatOptions.MaxOutputTokensKey
         };
 
-    private IChatClient CreateChatCompletionsClient(AiProviderClientRequest request)
+    private IChatClient CreateChatCompletionsClient(AiProviderClientRequest request, HttpClient httpClient)
     {
         var client = new OpenAIChatClient(
             request.Profile.Model,
             CreateCredential(request),
-            CreateClientOptions(request.Connection));
+            CreateClientOptions(request.Connection, httpClient));
         return client.AsIChatClient();
     }
 

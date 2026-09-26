@@ -76,11 +76,11 @@ internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
         CancellationToken cancellationToken = default)
         => _modelListClient.ListModelsAsync(connection, secrets, cancellationToken);
 
-    public IChatClient CreateChatClient(AiProviderClientRequest request) =>
+    public IChatClient CreateChatClient(AiProviderClientRequest request, HttpClient httpClient) =>
         request.Profile.ApiFormat switch
         {
-            AiProviderApiFormat.OpenAIChatCompletions => CreateChatCompletionsClient(request),
-            AiProviderApiFormat.OpenAIResponses => CreateResponsesClient(request),
+            AiProviderApiFormat.OpenAIChatCompletions => CreateChatCompletionsClient(request, httpClient),
+            AiProviderApiFormat.OpenAIResponses => CreateResponsesClient(request, httpClient),
             _ => throw UnsupportedFormat(request)
         };
 
@@ -93,20 +93,20 @@ internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
         };
 
 #pragma warning disable OPENAI001
-    private ResponsesClientOptions CreateResponsesClientOptions(AiProviderConnection connection) =>
+    private ResponsesClientOptions CreateResponsesClientOptions(AiProviderConnection connection, HttpClient httpClient) =>
         new()
         {
             Endpoint = connection.Endpoint,
-            Transport = new HttpClientPipelineTransport(_httpClientProvider.GetStreamingClient(connection))
+            Transport = new HttpClientPipelineTransport(httpClient)
         };
 #pragma warning restore OPENAI001
 
-    private OpenAIClientOptions CreateClientOptions(AiProviderConnection connection)
+    private OpenAIClientOptions CreateClientOptions(AiProviderConnection connection, HttpClient httpClient)
     {
         var options = new OpenAIClientOptions
         {
             Endpoint = connection.Endpoint,
-            Transport = new HttpClientPipelineTransport(_httpClientProvider.GetStreamingClient(connection))
+            Transport = new HttpClientPipelineTransport(httpClient)
         };
         // Chat Completions providers sometimes omit the streamed tool-call "type"; patch it
         // before the SDK's strict deserializer can reject the whole turn.
