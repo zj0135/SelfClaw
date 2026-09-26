@@ -5,4 +5,6 @@ namespace SelfClaw.Desktop.Services.Extensions.Abstractions;
 public interface IExtensionPackagePicker
 {
     string? PickPackage(ExtensionKind kind);
+
+    string? PickPluginFolder();
 }

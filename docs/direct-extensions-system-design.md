@@ -605,7 +605,7 @@ Http
 
 - stdio 使用 `StdioClientTransport`。
 - HTTP 使用 `HttpClientTransport`，默认 `HttpTransportMode.AutoDetect`。
-- stdio 继承宿主全部环境变量（SDK 默认 `InheritEnvironmentVariables = true`），再叠加用户显式配置；`McpTransportFactory` 不维护额外的最小基线集合。
+- stdio 继承宿主全部环境变量（SDK 默认 `InheritEnvironmentVariables = true`），再叠加用户显式配置；`McpTransportFactory` 不维护额外的最小基线集合。（2026-09-25 决策：hooks 与 MCP 均继承宿主环境。）
 - stdio 的 stderr 通过 SDK 的 `StdioClientTransportOptions.StandardErrorLines` 回调接入 §13.3 的限长诊断缓冲；`ShutdownTimeout`（SDK 默认 5 秒）即 §9.2 graceful shutdown 的“短超时”。
 - 有 workspace 时只把所选 workspace 作为工作目录/roots；没有 workspace 而 server 标记 `requiresWorkspace` 时，该 server 本轮不可用。
 - v1 不实现 MCP sampling、elicitation；client capabilities 不注册对应 handler。

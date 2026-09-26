@@ -175,6 +175,35 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
         json.GetProperty("cancelled").GetBoolean().Should().BeTrue();
     }
 
+    [Fact]
+    public async Task ImportPluginFolder_returns_a_correlated_cancelled_result_when_picker_is_cancelled()
+    {
+        var bridge = CreateBridge(new RecordingExtensionSettingsService());
+        using var document = JsonDocument.Parse("{\"requestId\":\"folder-request\"}");
+
+        var response = await bridge.TryHandleAsync("extensions/import-plugin-folder", document.RootElement);
+
+        var json = SerializeResponse(response);
+        json.GetProperty("requestId").GetString().Should().Be("folder-request");
+        json.GetProperty("ok").GetBoolean().Should().BeFalse();
+        json.GetProperty("cancelled").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ReloadPlugin_returns_the_changed_package()
+    {
+        var bridge = CreateBridge(new RecordingExtensionSettingsService());
+        using var document = JsonDocument.Parse("{\"requestId\":\"reload-request\",\"id\":\"office\"}");
+
+        var response = await bridge.TryHandleAsync("extensions/reload-plugin", document.RootElement);
+
+        var json = SerializeResponse(response);
+        json.GetProperty("requestId").GetString().Should().Be("reload-request");
+        json.GetProperty("ok").GetBoolean().Should().BeTrue();
+        json.GetProperty("changed").GetBoolean().Should().BeTrue();
+        json.GetProperty("package").GetProperty("id").GetString().Should().Be("office");
+    }
+
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))
@@ -274,6 +303,8 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
                     [],
                     ExtensionStatus.Ready,
                     [],
+                    [],
+                    null,
                     [])],
                 [CreateMcpView()],
                 []));
@@ -284,6 +315,34 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
             string selectedPath,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+
+        public Task<ExtensionPackageView> ImportPluginFolderAsync(
+            string folderPath,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<PluginReloadResult> ReloadPluginAsync(
+            string pluginId,
+            CancellationToken cancellationToken = default)
+        {
+            Observe(cancellationToken);
+            return Task.FromResult(new PluginReloadResult(
+                new ExtensionPackageView(
+                    ExtensionKind.Plugin,
+                    pluginId,
+                    "Office",
+                    "1.0.0",
+                    "Office tools",
+                    true,
+                    null,
+                    [],
+                    ExtensionStatus.Ready,
+                    [],
+                    [],
+                    null,
+                    []),
+                Changed: true));
+        }
 
         public Task SetEnabledAsync(
             ExtensionItemKey key,
@@ -368,5 +427,7 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
     private sealed class CancelledPackagePicker : IExtensionPackagePicker
     {
         public string? PickPackage(ExtensionKind kind) => null;
+
+        public string? PickPluginFolder() => null;
     }
 }

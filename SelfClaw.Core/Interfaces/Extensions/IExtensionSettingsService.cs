@@ -11,6 +11,14 @@ public interface IExtensionSettingsService
         string selectedPath,
         CancellationToken cancellationToken = default);
 
+    Task<ExtensionPackageView> ImportPluginFolderAsync(
+        string folderPath,
+        CancellationToken cancellationToken = default);
+
+    Task<PluginReloadResult> ReloadPluginAsync(
+        string pluginId,
+        CancellationToken cancellationToken = default);
+
     Task SetEnabledAsync(
         ExtensionItemKey key,
         bool enabled,

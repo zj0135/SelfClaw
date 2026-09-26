@@ -80,7 +80,61 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         }
 
         _stateChangeNotifier.Advance();
-        return ExtensionCatalog.CreatePackageView(result.Package);
+        return await _catalog.CreatePackageViewAsync(result.Package, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ExtensionPackageView> ImportPluginFolderAsync(
+        string folderPath,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _packageInstaller
+            .InstallPluginFolderAsync(folderPath, expectedPluginId: null, cancellationToken)
+            .ConfigureAwait(false);
+        await _pluginContributionService.SynchronizeMcpServersAsync(result.Package, cancellationToken)
+            .ConfigureAwait(false);
+        _stateChangeNotifier.Advance();
+        return await _catalog.CreatePackageViewAsync(result.Package, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<PluginReloadResult> ReloadPluginAsync(
+        string pluginId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        var record = await _packageRepository.GetPackageAsync(ExtensionKind.Plugin, pluginId, cancellationToken)
+            .ConfigureAwait(false);
+        if (record is null)
+        {
+            throw new InvalidOperationException($"Plugin '{pluginId}' was not found.");
+        }
+
+        if (string.IsNullOrWhiteSpace(record.SourcePath))
+        {
+            throw new InvalidOperationException("Plugin was not installed from a folder.");
+        }
+
+        if (!Directory.Exists(record.SourcePath))
+        {
+            throw new DirectoryNotFoundException(
+                $"Plugin source folder '{record.SourcePath}' was not found.");
+        }
+
+        var result = await _packageInstaller
+            .InstallPluginFolderAsync(record.SourcePath, pluginId, cancellationToken)
+            .ConfigureAwait(false);
+        if (!result.Changed)
+        {
+            return new PluginReloadResult(
+                await _catalog.CreatePackageViewAsync(record, cancellationToken).ConfigureAwait(false),
+                Changed: false);
+        }
+
+        await _pluginContributionService.SynchronizeMcpServersAsync(result.Package, cancellationToken)
+            .ConfigureAwait(false);
+        _stateChangeNotifier.Advance();
+        return new PluginReloadResult(
+            await _catalog.CreatePackageViewAsync(result.Package, cancellationToken).ConfigureAwait(false),
+            Changed: true);
     }
 
     public async Task SetEnabledAsync(

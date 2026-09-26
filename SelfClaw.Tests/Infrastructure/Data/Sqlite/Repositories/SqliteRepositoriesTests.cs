@@ -138,7 +138,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
         var maxSchemaVersion = await versionCommand.ExecuteScalarAsync();
-        maxSchemaVersion.Should().Be(27L);
+        maxSchemaVersion.Should().Be(28L);
     }
 
     [Fact]
@@ -389,7 +389,7 @@ VALUES(
         await verification.OpenAsync();
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(27L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(28L);
     }
 
     [Fact]
@@ -578,7 +578,7 @@ WHERE conversation_id = $conversationId AND agent_kind = 1;";
 
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(27L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(28L);
 
         await using var foreignKeyCheck = verification.CreateCommand();
         foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
@@ -750,7 +750,7 @@ VALUES($messageId, $conversationId, 0, 'Preserved v22 message', 1, $createdAt, $
             .Should().Contain(["kind", "parent_conversation_id"]);
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(27L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(28L);
         await using var foreignKeyCheck = verification.CreateCommand();
         foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
         await using var foreignKeyReader = await foreignKeyCheck.ExecuteReaderAsync();
@@ -820,6 +820,120 @@ CREATE TABLE tool_runs (
         catch (IOException)
         {
         }
+    }
+
+    [Fact]
+    public async Task Initialize_adds_v28_hook_columns_and_extension_source_path()
+    {
+        var storagePaths = StoragePathDefaults.Create(
+            _rootPath,
+            Path.Combine(_rootPath, "selfclaw.db"),
+            Path.Combine(_rootPath, "secrets"));
+        var database = new SqliteDatabase(storagePaths);
+
+        await database.EnsureInitializedAsync();
+
+        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
+        await verification.OpenAsync();
+        var toolRunColumns = await ReadTableColumnNamesAsync(verification, "tool_runs");
+        toolRunColumns.Should().Contain([
+            "effective_arguments_json",
+            "hook_feedback_json",
+            "hook_outcome_json"]);
+        (await ReadTableColumnNamesAsync(verification, "extension_packages")).Should().Contain("source_path");
+    }
+
+    // The v25 rebuild swaps tool_runs for a table without the hook columns, so the v28 columns must be
+    // added after it rather than before.
+    [Fact]
+    public async Task Initialize_adds_v28_hook_columns_to_a_legacy_tool_runs_table()
+    {
+        var storagePaths = StoragePathDefaults.Create(
+            _rootPath,
+            Path.Combine(_rootPath, "selfclaw.db"),
+            Path.Combine(_rootPath, "secrets"));
+        Directory.CreateDirectory(_rootPath);
+
+        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+CREATE TABLE tool_runs (
+    id TEXT NOT NULL PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    arguments_json TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    result_summary TEXT NULL,
+    correlation_id TEXT NULL,
+    duration_ms REAL NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    agent_id TEXT NULL,
+    message_id TEXT NULL,
+    after_segment_index INTEGER NULL
+);";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var repository = new SqliteConversationRepository(new SqliteDatabase(storagePaths));
+        await repository.InitializeAsync();
+
+        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
+        await verification.OpenAsync();
+        var columns = await ReadTableColumnNamesAsync(verification, "tool_runs");
+        columns.Should().Contain([
+            "effective_arguments_json",
+            "hook_feedback_json",
+            "hook_outcome_json"]);
+        columns.Should().NotContain("after_segment_index");
+    }
+
+    [Fact]
+    public async Task Repositories_round_trip_notice_segments()
+    {
+        var storagePaths = StoragePathDefaults.Create(
+            _rootPath,
+            Path.Combine(_rootPath, "selfclaw.db"),
+            Path.Combine(_rootPath, "secrets"));
+        var repository = new SqliteConversationRepository(new SqliteDatabase(storagePaths));
+        await repository.InitializeAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var conversation = new ConversationRecord(
+            Guid.NewGuid(),
+            "Chat",
+            null,
+            ConversationMode.Programming,
+            ToolPermissionMode.RequireApproval,
+            "build",
+            now,
+            now);
+        await repository.UpsertConversationAsync(conversation);
+        var messageId = Guid.NewGuid();
+        var message = new MessageRecord(
+            messageId,
+            conversation.Id,
+            MessageRole.Assistant,
+            "answer",
+            MessageStatus.Completed,
+            now,
+            now,
+            Segments:
+            [
+                new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Thinking, "plan", null),
+                new MessageSegmentRecord(messageId, 1, MessageSegmentKind.Notice, "Hook added context.", null),
+                new MessageSegmentRecord(messageId, 2, MessageSegmentKind.Text, "answer", null)
+            ]);
+        await repository.UpsertMessageAsync(message);
+
+        var loaded = (await repository.ListMessagesAsync(conversation.Id)).Should().ContainSingle().Subject;
+        loaded.Segments.Should().BeEquivalentTo(message.Segments);
+        var notice = loaded.Segments!.Single(segment => segment.Kind == MessageSegmentKind.Notice);
+        notice.Ordinal.Should().Be(1);
+        notice.Text.Should().Be("Hook added context.");
+        notice.ToolRunId.Should().BeNull();
     }
 
     private static async Task<List<string>> ReadSqliteObjectNamesAsync(SqliteConnection connection, string type)

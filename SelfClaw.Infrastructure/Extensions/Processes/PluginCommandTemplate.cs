@@ -60,6 +60,35 @@ internal static class PluginCommandTemplate
         return expanded.Contains("${", StringComparison.Ordinal) ? null : expanded;
     }
 
+    /// <summary>
+    /// A hook command must be resolvable without the host's process directory: a bare PATH name, an
+    /// absolute path, or a package-relative path introduced by <c>${pluginRoot}</c>. A relative path
+    /// with a separator would otherwise be resolved by <c>Process.Start</c> against the host process
+    /// directory rather than the package, launching an unrelated executable.
+    /// </summary>
+    internal static void ValidateCommand(string packageRoot, string value, string fieldName)
+    {
+        Validate(packageRoot, value, fieldName);
+        if (string.IsNullOrWhiteSpace(value) ||
+            value.Contains("${pluginRoot}", StringComparison.Ordinal) ||
+            Path.IsPathFullyQualified(value))
+        {
+            return;
+        }
+
+        // A bare PATH-resolved name carries neither a directory separator nor a drive colon.
+        // Everything else — including "C:guard.exe" (relative to the current directory on drive C:)
+        // and "\tools\guard.exe" (relative to the host's current drive) — is resolved against the
+        // host process, which is exactly what this rule prevents.
+        if (value.IndexOf('/') < 0 && value.IndexOf('\\') < 0 && value.IndexOf(':') < 0)
+        {
+            return;
+        }
+
+        throw new InvalidDataException(
+            $"{fieldName} must be a bare executable name, an absolute path, or a ${{pluginRoot}} path.");
+    }
+
     internal static string ResolvePackagePath(string packageRoot, string relativePath, string fieldName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);

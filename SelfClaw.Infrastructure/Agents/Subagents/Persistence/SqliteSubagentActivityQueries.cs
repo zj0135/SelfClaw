@@ -100,7 +100,8 @@ internal static class SqliteSubagentActivityQueries
         command.Transaction = transaction;
         command.CommandText = """
             SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms,
-                   created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name
+                   created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name,
+                   effective_arguments_json, hook_feedback_json, hook_outcome_json
             FROM tool_runs WHERE conversation_id = $child AND message_id = $turn ORDER BY created_at_utc, id;
             """;
         command.Parameters.AddWithValue("$child", task.ChildConversationId.ToString("D"));

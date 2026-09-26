@@ -22,4 +22,15 @@ internal sealed class ExtensionPackagePicker : IExtensionPackagePicker
 
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
+
+    public string? PickPluginFolder()
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "从文件夹安装插件",
+            Multiselect = false
+        };
+
+        return dialog.ShowDialog() == true ? dialog.FolderName : null;
+    }
 }

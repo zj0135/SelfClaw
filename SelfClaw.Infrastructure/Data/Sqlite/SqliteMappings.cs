@@ -110,7 +110,11 @@ internal static class SqliteMappings
             reader.IsDBNull(12) ? null : reader.GetString(12),
             reader.IsDBNull(13) ? null : (ToolSourceKind)reader.GetInt32(13),
             reader.IsDBNull(14) ? null : reader.GetString(14),
-            reader.IsDBNull(15) ? null : reader.GetString(15));
+            reader.IsDBNull(15) ? null : reader.GetString(15),
+            ToolHookOutcomeColumns.Combine(
+                reader.IsDBNull(16) ? null : reader.GetString(16),
+                reader.IsDBNull(17) ? null : reader.GetString(17),
+                reader.IsDBNull(18) ? null : reader.GetString(18)));
 
     public static WorkspaceRoot ReadWorkspaceRoot(SqliteDataReader reader)
         => new(
@@ -141,7 +145,8 @@ internal static class SqliteMappings
             reader.IsDBNull(10) ? null : reader.GetString(10),
             reader.IsDBNull(11) ? null : ReadDateTimeOffset(reader, 11),
             ReadDateTimeOffset(reader, 12),
-            ReadDateTimeOffset(reader, 13));
+            ReadDateTimeOffset(reader, 13),
+            reader.IsDBNull(14) ? null : reader.GetString(14));
 
     public static McpServerConfigRecord ReadMcpServerConfig(SqliteDataReader reader)
         => new(

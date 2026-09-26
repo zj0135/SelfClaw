@@ -101,8 +101,8 @@ ON CONFLICT(id) DO UPDATE SET
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = @"
-INSERT INTO tool_runs(id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name)
-VALUES($id, $conversationId, $toolName, $argumentsJson, $status, $resultSummary, $correlationId, $durationMs, $createdAt, $updatedAt, $agentId, $messageId, $resultContent, $sourceKind, $sourceId, $displayName)
+INSERT INTO tool_runs(id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name, effective_arguments_json, hook_feedback_json, hook_outcome_json)
+VALUES($id, $conversationId, $toolName, $argumentsJson, $status, $resultSummary, $correlationId, $durationMs, $createdAt, $updatedAt, $agentId, $messageId, $resultContent, $sourceKind, $sourceId, $displayName, $effectiveArgumentsJson, $hookFeedbackJson, $hookOutcomeJson)
 ON CONFLICT(id) DO UPDATE SET
     status = excluded.status,
     result_summary = excluded.result_summary,
@@ -113,6 +113,9 @@ ON CONFLICT(id) DO UPDATE SET
     source_kind = COALESCE(excluded.source_kind, tool_runs.source_kind),
     source_id = COALESCE(excluded.source_id, tool_runs.source_id),
     display_name = COALESCE(excluded.display_name, tool_runs.display_name),
+    effective_arguments_json = COALESCE(excluded.effective_arguments_json, tool_runs.effective_arguments_json),
+    hook_feedback_json = COALESCE(excluded.hook_feedback_json, tool_runs.hook_feedback_json),
+    hook_outcome_json = COALESCE(excluded.hook_outcome_json, tool_runs.hook_outcome_json),
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$id", record.Id.ToString("D"));
         command.Parameters.AddWithValue("$conversationId", record.ConversationId.ToString("D"));
@@ -130,6 +133,10 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$sourceKind", record.SourceKind is null ? DBNull.Value : (int)record.SourceKind.Value);
         command.Parameters.AddWithValue("$sourceId", record.SourceId ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$displayName", record.DisplayName ?? (object)DBNull.Value);
+        var hookColumns = ToolHookOutcomeColumns.Split(record.HookOutcome);
+        command.Parameters.AddWithValue("$effectiveArgumentsJson", hookColumns.EffectiveArgumentsJson ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$hookFeedbackJson", hookColumns.FeedbackJson ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$hookOutcomeJson", hookColumns.OutcomeJson ?? (object)DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 

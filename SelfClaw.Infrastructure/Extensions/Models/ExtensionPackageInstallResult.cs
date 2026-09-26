@@ -4,4 +4,5 @@ namespace SelfClaw.Infrastructure.Extensions.Models;
 
 internal sealed record ExtensionPackageInstallResult(
     ExtensionPackageRecord Package,
-    int FileCount);
+    int FileCount,
+    bool Changed = true);

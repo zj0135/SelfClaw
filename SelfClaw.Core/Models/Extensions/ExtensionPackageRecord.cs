@@ -14,4 +14,5 @@ public sealed record ExtensionPackageRecord(
     string? AcknowledgedPermissionsJson,
     DateTimeOffset? AcknowledgedAtUtc,
     DateTimeOffset InstalledAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    string? SourcePath = null);

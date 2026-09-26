@@ -4,4 +4,5 @@ internal sealed record PluginContributions(
     string? DirectInstructions,
     IReadOnlyList<PluginSkillContribution> Skills,
     IReadOnlyList<PluginMcpServerContribution> McpServers,
-    IReadOnlyList<PluginPanelContribution> Panels);
+    IReadOnlyList<PluginPanelContribution> Panels,
+    IReadOnlyList<PluginHookContribution> Hooks);

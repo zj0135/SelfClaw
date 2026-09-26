@@ -19,6 +19,7 @@ namespace SelfClaw.Tests.Infrastructure.Extensions;
 public sealed class ExtensionSettingsServiceTests : IDisposable
 {
     private readonly string _rootPath;
+    private readonly List<string> _sourceRoots = [];
 
     public ExtensionSettingsServiceTests()
     {
@@ -567,8 +568,133 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         stored.LastCheckedAtUtc.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task ImportPluginFolderAsync_reports_hooks_and_the_source_path()
+    {
+        var context = CreateContext();
+        var sourceRoot = await CreateHookSourceFolderAsync();
+
+        var view = await context.Service.ImportPluginFolderAsync(sourceRoot);
+
+        view.SourcePath.Should().Be(Path.GetFullPath(sourceRoot));
+        view.Hooks.Should().HaveCount(2);
+        var guard = view.Hooks[0];
+        guard.Id.Should().Be("guard");
+        guard.Event.Should().Be("toolExecuting");
+        guard.MatcherSummary.Should().Be("tools=run_shell_command,mcp__github__*; kinds=run");
+        guard.CommandLine.Should().Be("node ${pluginRoot}/guard.js \"--strict flag\"");
+        guard.TimeoutSeconds.Should().Be(15);
+        guard.OnFailure.Should().Be("block");
+        guard.IsAsync.Should().BeFalse();
+        guard.IncludeRequestBody.Should().BeFalse();
+
+        var audit = view.Hooks[1];
+        audit.Event.Should().Be("toolExecuted");
+        audit.MatcherSummary.Should().Be("*");
+        audit.OnFailure.Should().BeNull();
+        audit.IsAsync.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ReloadPluginAsync_preserves_enabled_state_and_acknowledged_permissions()
+    {
+        var context = CreateContext();
+        var sourceRoot = await CreateHookSourceFolderAsync();
+        var imported = await context.Service.ImportPluginFolderAsync(sourceRoot);
+        await context.Service.AcknowledgePluginPermissionsAsync("shell-guard", imported.Permissions);
+        await context.Service.SetEnabledAsync(new ExtensionItemKey(ExtensionKind.Plugin, "shell-guard"), true);
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "guard.js"), "// updated");
+
+        var reload = await context.Service.ReloadPluginAsync("shell-guard");
+
+        reload.Changed.Should().BeTrue();
+        reload.Package.Enabled.Should().BeTrue();
+        reload.Package.UnacknowledgedPermissions.Should().BeEmpty();
+        reload.Package.Status.Should().Be(ExtensionStatus.Ready);
+        var stored = await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "shell-guard");
+        stored!.IsEnabled.Should().BeTrue();
+        stored.SourcePath.Should().Be(Path.GetFullPath(sourceRoot));
+    }
+
+    [Fact]
+    public async Task ReloadPluginAsync_reports_unchanged_content_without_a_new_version()
+    {
+        var context = CreateContext();
+        var sourceRoot = await CreateHookSourceFolderAsync();
+        var imported = await context.Service.ImportPluginFolderAsync(sourceRoot);
+
+        var reload = await context.Service.ReloadPluginAsync("shell-guard");
+
+        reload.Changed.Should().BeFalse();
+        reload.Package.Version.Should().Be(imported.Version);
+    }
+
+    [Fact]
+    public async Task ReloadPluginAsync_surfaces_a_changed_permission_list_as_unacknowledged()
+    {
+        var context = CreateContext();
+        var sourceRoot = await CreateHookSourceFolderAsync();
+        var imported = await context.Service.ImportPluginFolderAsync(sourceRoot);
+        await context.Service.AcknowledgePluginPermissionsAsync("shell-guard", imported.Permissions);
+        await context.Service.SetEnabledAsync(new ExtensionItemKey(ExtensionKind.Plugin, "shell-guard"), true);
+        var manifest = (await File.ReadAllTextAsync(Path.Combine(sourceRoot, "plugin.json")))
+            .Replace("\"hooks.run\"", "\"hooks.run\", \"hooks.http\"", StringComparison.Ordinal);
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "plugin.json"), manifest);
+
+        var reload = await context.Service.ReloadPluginAsync("shell-guard");
+
+        reload.Changed.Should().BeTrue();
+        reload.Package.UnacknowledgedPermissions.Should().Equal("hooks.http");
+        reload.Package.Status.Should().Be(ExtensionStatus.NeedsPermission);
+    }
+
+    [Fact]
+    public async Task ReloadPluginAsync_rejects_a_plugin_without_a_source_path()
+    {
+        var context = CreateContext();
+        var pluginPath = Path.Combine(_rootPath, "plugins", "office", "versions", "v1");
+        Directory.CreateDirectory(pluginPath);
+        var now = DateTimeOffset.UtcNow;
+        await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
+            ExtensionKind.Plugin, "office", "Office", "1.0.0", "", pluginPath,
+            "sha256:v1", "{}", null, false, null, null, now, now));
+
+        var action = () => context.Service.ReloadPluginAsync("office");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*was not installed from a folder*");
+    }
+
+    [Fact]
+    public async Task ReloadPluginAsync_rejects_a_missing_source_folder()
+    {
+        var context = CreateContext();
+        var sourceRoot = await CreateHookSourceFolderAsync();
+        await context.Service.ImportPluginFolderAsync(sourceRoot);
+        Directory.Delete(sourceRoot, true);
+
+        var action = () => context.Service.ReloadPluginAsync("shell-guard");
+
+        await action.Should().ThrowAsync<DirectoryNotFoundException>()
+            .WithMessage($"*{Path.GetFullPath(sourceRoot)}*");
+    }
+
+    [Fact]
+    public async Task ReloadPluginAsync_rejects_an_unknown_plugin()
+    {
+        var context = CreateContext();
+
+        var action = () => context.Service.ReloadPluginAsync("missing");
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*'missing' was not found*");
+    }
+
     public void Dispose()
     {
+        foreach (var sourceRoot in _sourceRoots)
+        {
+            TryDeleteDirectory(sourceRoot);
+        }
         if (!Directory.Exists(_rootPath))
         {
             return;
@@ -577,6 +703,65 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         try
         {
             Directory.Delete(_rootPath, true);
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private async Task<string> CreateHookSourceFolderAsync()
+    {
+        var sourceRoot = Path.Combine(
+            Path.GetTempPath(),
+            "SelfClawPluginSources",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(sourceRoot);
+        _sourceRoots.Add(sourceRoot);
+        var manifest = """
+            {
+              "schemaVersion": 1,
+              "id": "shell-guard",
+              "name": "Shell Guard",
+              "version": "1.0.0",
+              "permissions": ["hooks.tool", "hooks.run"],
+              "contributes": {
+                "hooks": [
+                  {
+                    "id": "guard",
+                    "event": "toolExecuting",
+                    "matcher": { "tools": ["run_shell_command", "mcp__github__*"], "kinds": ["run"] },
+                    "command": "node",
+                    "arguments": ["${pluginRoot}/guard.js", "--strict flag"],
+                    "timeoutSeconds": 15,
+                    "onFailure": "block"
+                  },
+                  {
+                    "id": "audit",
+                    "event": "toolExecuted",
+                    "command": "node",
+                    "arguments": ["${pluginRoot}/audit.js"],
+                    "async": true
+                  }
+                ]
+              }
+            }
+            """;
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "plugin.json"), manifest);
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "guard.js"), "// guard");
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "audit.js"), "// audit");
+        return sourceRoot;
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(path, true);
         }
         catch (IOException)
         {

@@ -13,6 +13,10 @@ public static class PluginPermissions
     public const string TranscriptRead = "host.transcript.read";
     public const string ComposerWrite = "host.composer.write";
     public const string WorkspaceRead = "host.workspace.read";
+    public const string HooksRun = "hooks.run";
+    public const string HooksTool = "hooks.tool";
+    public const string HooksHttp = "hooks.http";
+    public const string HooksHttpBody = "hooks.http.body";
     public const string NetworkFetchPrefix = "network.fetch:";
 
     private const int MaximumLength = 256;

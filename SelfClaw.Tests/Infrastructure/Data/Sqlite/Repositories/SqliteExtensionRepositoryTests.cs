@@ -227,7 +227,7 @@ VALUES($toolRunId, $conversationId, 'read_file', '{}', 2, $createdAt, $createdAt
 
         await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
         await verification.OpenAsync();
-        (await ExecuteScalarAsync<long>(verification, "SELECT MAX(version) FROM schema_versions;")).Should().Be(27);
+        (await ExecuteScalarAsync<long>(verification, "SELECT MAX(version) FROM schema_versions;")).Should().Be(28);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM conversations;")).Should().Be(1);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM messages;")).Should().Be(1);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM tool_runs;")).Should().Be(1);
@@ -242,6 +242,86 @@ VALUES($toolRunId, $conversationId, 'read_file', '{}', 2, $createdAt, $createdAt
         sourceReader.IsDBNull(0).Should().BeTrue();
         sourceReader.IsDBNull(1).Should().BeTrue();
         sourceReader.IsDBNull(2).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Package_round_trips_source_path_and_a_zip_reinstall_clears_it()
+    {
+        var repository = CreateRepository();
+        var now = DateTimeOffset.UtcNow;
+        var sourcePath = Path.Combine(_rootPath, "source", "office");
+        var package = new ExtensionPackageRecord(
+            ExtensionKind.Plugin,
+            "office",
+            "Office",
+            "1.0.0",
+            "Office tools",
+            Path.Combine(_rootPath, "plugins", "office", "versions", "v1"),
+            "sha256:v1",
+            "{}",
+            null,
+            false,
+            null,
+            null,
+            now,
+            now,
+            sourcePath);
+
+        await repository.UpsertPackageAsync(package);
+
+        (await repository.GetPackageAsync(ExtensionKind.Plugin, "office"))!.SourcePath.Should().Be(sourcePath);
+
+        await repository.UpsertPackageAsync(package with { SourcePath = null, UpdatedAtUtc = now.AddMinutes(1) });
+
+        (await repository.GetPackageAsync(ExtensionKind.Plugin, "office"))!.SourcePath.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Initialize_adds_source_path_to_a_legacy_extension_packages_table()
+    {
+        var storagePaths = CreateStoragePaths();
+        Directory.CreateDirectory(_rootPath);
+        var now = "2026-01-01T00:00:00.0000000+00:00";
+
+        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = @"
+CREATE TABLE schema_versions (version INTEGER NOT NULL PRIMARY KEY, applied_at_utc TEXT NOT NULL);
+INSERT INTO schema_versions(version, applied_at_utc) VALUES(27, '2026-01-01T00:00:00.0000000+00:00');
+CREATE TABLE extension_packages (
+    kind INTEGER NOT NULL,
+    id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    description TEXT NOT NULL,
+    install_path TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    source_plugin_id TEXT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 0,
+    acknowledged_permissions_json TEXT NULL,
+    acknowledged_at_utc TEXT NULL,
+    installed_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    PRIMARY KEY(kind, id)
+);
+INSERT INTO extension_packages(
+    kind, id, display_name, version, description, install_path, content_hash, manifest_json,
+    source_plugin_id, is_enabled, acknowledged_permissions_json, acknowledged_at_utc,
+    installed_at_utc, updated_at_utc)
+VALUES(0, 'office', 'Office', '1.0.0', '', 'E:\plugins\office', 'sha256:v1', '{}', NULL, 0, NULL, NULL, $now, $now);";
+            command.Parameters.AddWithValue("$now", now);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var repository = new SqliteExtensionRepository(new SqliteDatabase(storagePaths));
+        await repository.InitializeAsync();
+
+        var stored = await repository.GetPackageAsync(ExtensionKind.Plugin, "office");
+        stored.Should().NotBeNull();
+        stored!.SourcePath.Should().BeNull();
     }
 
     public void Dispose()

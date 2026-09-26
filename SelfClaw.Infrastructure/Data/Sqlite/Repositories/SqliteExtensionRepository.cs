@@ -11,7 +11,7 @@ public sealed class SqliteExtensionRepository : IExtensionPackageRepository, IMc
     private const string PackageSelect = @"
 SELECT kind, id, display_name, version, description, install_path, content_hash, manifest_json,
        source_plugin_id, is_enabled, acknowledged_permissions_json, acknowledged_at_utc,
-       installed_at_utc, updated_at_utc
+       installed_at_utc, updated_at_utc, source_path
 FROM extension_packages";
 
     private const string McpSelect = @"
@@ -74,10 +74,11 @@ FROM mcp_server_configs";
 INSERT INTO extension_packages(
     kind, id, display_name, version, description, install_path, content_hash, manifest_json,
     source_plugin_id, is_enabled, acknowledged_permissions_json, acknowledged_at_utc,
-    installed_at_utc, updated_at_utc)
+    installed_at_utc, updated_at_utc, source_path)
 VALUES(
     $kind, $id, $displayName, $version, $description, $installPath, $contentHash, $manifestJson,
-    $sourcePluginId, $isEnabled, $acknowledgedPermissions, $acknowledgedAt, $installedAt, $updatedAt)
+    $sourcePluginId, $isEnabled, $acknowledgedPermissions, $acknowledgedAt, $installedAt, $updatedAt,
+    $sourcePath)
 ON CONFLICT(kind, id) DO UPDATE SET
     display_name = excluded.display_name,
     version = excluded.version,
@@ -90,7 +91,8 @@ ON CONFLICT(kind, id) DO UPDATE SET
     acknowledged_permissions_json = excluded.acknowledged_permissions_json,
     acknowledged_at_utc = excluded.acknowledged_at_utc,
     installed_at_utc = excluded.installed_at_utc,
-    updated_at_utc = excluded.updated_at_utc;";
+    updated_at_utc = excluded.updated_at_utc,
+    source_path = excluded.source_path;";
         command.Parameters.AddWithValue("$kind", (int)package.Kind);
         command.Parameters.AddWithValue("$id", package.Id);
         command.Parameters.AddWithValue("$displayName", package.DisplayName);
@@ -105,6 +107,7 @@ ON CONFLICT(kind, id) DO UPDATE SET
         command.Parameters.AddWithValue("$acknowledgedAt", package.AcknowledgedAtUtc?.ToString("O") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$installedAt", package.InstalledAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", package.UpdatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$sourcePath", package.SourcePath ?? (object)DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         return package;
     }

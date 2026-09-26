@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
@@ -46,6 +47,7 @@ public sealed class ExtensionPackageInstallerTests : IDisposable
         Path.GetTempPath(),
         "SelfClawTests",
         Guid.NewGuid().ToString("N"));
+    private readonly List<string> _extraPaths = [];
 
     [Fact]
     public async Task InstallAsync_imports_nested_zip_atomically_and_defaults_to_disabled()
@@ -313,18 +315,244 @@ public sealed class ExtensionPackageInstallerTests : IDisposable
         Directory.Exists(second.Package.InstallPath).Should().BeTrue();
     }
 
+    [Fact]
+    public async Task InstallPluginFolderAsync_imports_a_folder_and_records_the_source_path()
+    {
+        var context = await CreateContextAsync();
+        var sourceRoot = CreateSourceFolder();
+        await WritePluginFilesAsync(sourceRoot);
+
+        var result = await context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: null);
+
+        result.Changed.Should().BeTrue();
+        result.Package.SourcePath.Should().Be(Path.GetFullPath(sourceRoot));
+        result.Package.InstallPath.Should().Contain(Path.Combine("plugins", "render-tools", "versions"));
+        File.Exists(Path.Combine(result.Package.InstallPath, "plugin.json")).Should().BeTrue();
+        File.Exists(Path.Combine(result.Package.InstallPath, "server", "index.js")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_matches_the_zip_content_hash_and_a_zip_reinstall_clears_the_source_path()
+    {
+        var context = await CreateContextAsync();
+        var sourceRoot = CreateSourceFolder();
+        await WritePluginFilesAsync(sourceRoot);
+        var folderResult = await context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: null);
+
+        var archivePath = Path.Combine(_rootPath, "render-tools.zip");
+        CreateArchive(archivePath,
+        [
+            ("plugin.json", ValidPluginManifest, 0),
+            ("instructions/direct.md", "Use the renderer.", 0),
+            ("server/index.js", "process.stdin.resume()", 0)
+        ]);
+        var zipResult = await context.Installer.InstallAsync(ExtensionKind.Plugin, archivePath);
+
+        zipResult.Package.ContentHash.Should().Be(folderResult.Package.ContentHash);
+        zipResult.Package.SourcePath.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_with_unchanged_content_is_not_recommitted()
+    {
+        var context = await CreateContextAsync();
+        var sourceRoot = CreateSourceFolder();
+        await WritePluginFilesAsync(sourceRoot);
+        var first = await context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: null);
+
+        var reload = await context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: "render-tools");
+
+        reload.Changed.Should().BeFalse();
+        reload.Package.UpdatedAtUtc.Should().Be(first.Package.UpdatedAtUtc);
+        reload.Package.InstallPath.Should().Be(first.Package.InstallPath);
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_commits_changed_content_as_a_new_version()
+    {
+        var context = await CreateContextAsync();
+        var sourceRoot = CreateSourceFolder();
+        await WritePluginFilesAsync(sourceRoot);
+        var first = await context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: null);
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "instructions", "direct.md"), "Updated v2.");
+
+        var reload = await context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: "render-tools");
+
+        reload.Changed.Should().BeTrue();
+        reload.Package.InstallPath.Should().NotBe(first.Package.InstallPath);
+        reload.Package.SourcePath.Should().Be(Path.GetFullPath(sourceRoot));
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_rejects_a_manifest_id_that_does_not_match_the_expected_plugin()
+    {
+        var context = await CreateContextAsync();
+        var sourceRoot = CreateSourceFolder();
+        await WritePluginFilesAsync(sourceRoot);
+
+        var action = () => context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: "other-plugin");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*does not match the installed Plugin 'other-plugin'*");
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_rejects_a_folder_without_a_root_manifest()
+    {
+        var context = await CreateContextAsync();
+        var sourceRoot = CreateSourceFolder();
+        Directory.CreateDirectory(Path.Combine(sourceRoot, "nested"));
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "nested", "plugin.json"), ValidPluginManifest);
+
+        var action = () => context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: null);
+
+        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*plugin.json at its root*");
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_rejects_a_missing_folder()
+    {
+        var context = await CreateContextAsync();
+
+        var action = () => context.Installer.InstallPluginFolderAsync(
+            Path.Combine(_rootPath, "missing"),
+            expectedPluginId: null);
+
+        await action.Should().ThrowAsync<DirectoryNotFoundException>();
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_rejects_a_folder_inside_appdata()
+    {
+        var context = await CreateContextAsync();
+        var sourceRoot = Path.Combine(_rootPath, "plugins", "render-tools-src");
+        Directory.CreateDirectory(sourceRoot);
+        await WritePluginFilesAsync(sourceRoot);
+
+        var action = () => context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: null);
+
+        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*outside the SelfClaw AppData*");
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_rejects_a_folder_that_contains_appdata()
+    {
+        var wrapperRoot = CreateSourceFolder();
+        var appData = Path.Combine(wrapperRoot, "appdata");
+        Directory.CreateDirectory(appData);
+        var storagePaths = StoragePathDefaults.Create(
+            appData,
+            Path.Combine(appData, "selfclaw.db"),
+            Path.Combine(appData, "secrets"));
+        var context = await CreateContextAsync(storagePaths, limits: null);
+        await WritePluginFilesAsync(wrapperRoot);
+
+        var action = () => context.Installer.InstallPluginFolderAsync(wrapperRoot, expectedPluginId: null);
+
+        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*outside the SelfClaw AppData*");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InstallPluginFolderAsync_rejects_a_folder_containing_git(bool gitAsDirectory)
+    {
+        var context = await CreateContextAsync();
+        var sourceRoot = CreateSourceFolder();
+        await WritePluginFilesAsync(sourceRoot);
+        var gitPath = Path.Combine(sourceRoot, "nested", ".git");
+        Directory.CreateDirectory(Path.GetDirectoryName(gitPath)!);
+        if (gitAsDirectory)
+        {
+            Directory.CreateDirectory(gitPath);
+        }
+        else
+        {
+            await File.WriteAllTextAsync(gitPath, "gitdir: elsewhere");
+        }
+
+        var action = () => context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: null);
+
+        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*contains a .git entry*");
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_enforces_the_file_count_limit()
+    {
+        var limits = new ExtensionPackageLimits(1024 * 1024, 4 * 1024 * 1024, 2, 1024 * 1024, 256 * 1024);
+        var context = await CreateContextAsync(limits);
+        var sourceRoot = CreateSourceFolder();
+        await WritePluginFilesAsync(sourceRoot);
+
+        var action = () => context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: null);
+
+        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*file limit*");
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_honours_caller_cancellation()
+    {
+        var context = await CreateContextAsync();
+        var sourceRoot = CreateSourceFolder();
+        await WritePluginFilesAsync(sourceRoot);
+        using var source = new CancellationTokenSource();
+        source.Cancel();
+
+        var action = () => context.Installer.InstallPluginFolderAsync(
+            sourceRoot,
+            expectedPluginId: null,
+            source.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task InstallPluginFolderAsync_rejects_a_folder_containing_a_junction()
+    {
+        var context = await CreateContextAsync();
+        var sourceRoot = CreateSourceFolder();
+        await WritePluginFilesAsync(sourceRoot);
+        var targetPath = Path.Combine(_rootPath, "junction-target");
+        Directory.CreateDirectory(targetPath);
+        var linkPath = Path.Combine(sourceRoot, "linked");
+        if (!TryCreateJunction(linkPath, targetPath))
+        {
+            // xUnit v2 has no dynamic Skip; the junction could not be created in this environment.
+            return;
+        }
+
+        var action = () => context.Installer.InstallPluginFolderAsync(sourceRoot, expectedPluginId: null);
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*symbolic link or reparse point*");
+        Directory.Delete(linkPath, false);
+    }
+
     public void Dispose()
     {
-        if (!Directory.Exists(_rootPath))
+        foreach (var extraPath in _extraPaths)
+        {
+            TryDeleteDirectory(extraPath);
+        }
+
+        TryDeleteDirectory(_rootPath);
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        if (!Directory.Exists(path))
         {
             return;
         }
 
         try
         {
-            Directory.Delete(_rootPath, true);
+            Directory.Delete(path, true);
         }
         catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
         {
         }
     }
@@ -336,17 +564,70 @@ public sealed class ExtensionPackageInstallerTests : IDisposable
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
+        return await CreateContextAsync(storagePaths, limits);
+    }
+
+    private static async Task<TestContext> CreateContextAsync(
+        StoragePaths storagePaths,
+        ExtensionPackageLimits? limits)
+    {
         var repository = new SqliteExtensionRepository(new SqliteDatabase(storagePaths));
         await repository.InitializeAsync();
-        limits ??= new ExtensionPackageLimits(
-            1024 * 1024,
-            4 * 1024 * 1024,
-            100,
-            1024 * 1024,
-            256 * 1024);
+        limits ??= DefaultLimits();
         var reader = new SkillPackageReader(limits);
         var installer = new ExtensionPackageInstaller(storagePaths, repository, reader, limits);
         return new TestContext(storagePaths, repository, installer);
+    }
+
+    private static ExtensionPackageLimits DefaultLimits()
+        => new(1024 * 1024, 4 * 1024 * 1024, 100, 1024 * 1024, 256 * 1024);
+
+    private string CreateSourceFolder()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            "SelfClawPluginSources",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        _extraPaths.Add(path);
+        return path;
+    }
+
+    private static async Task WritePluginFilesAsync(string sourceRoot)
+    {
+        Directory.CreateDirectory(Path.Combine(sourceRoot, "instructions"));
+        Directory.CreateDirectory(Path.Combine(sourceRoot, "server"));
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "plugin.json"), ValidPluginManifest);
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "instructions", "direct.md"), "Use the renderer.");
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "server", "index.js"), "process.stdin.resume()");
+    }
+
+    private static bool TryCreateJunction(string linkPath, string targetPath)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo("cmd.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            startInfo.ArgumentList.Add("/d");
+            startInfo.ArgumentList.Add("/s");
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add("mklink");
+            startInfo.ArgumentList.Add("/J");
+            startInfo.ArgumentList.Add(linkPath);
+            startInfo.ArgumentList.Add(targetPath);
+            using var process = Process.Start(startInfo);
+            process!.WaitForExit();
+            return process.ExitCode == 0 && Directory.Exists(linkPath);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void CreateArchive(

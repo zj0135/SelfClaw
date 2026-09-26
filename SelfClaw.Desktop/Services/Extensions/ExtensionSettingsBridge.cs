@@ -94,23 +94,43 @@ internal sealed class ExtensionSettingsBridge : IDisposable
                     }
 
                     var package = await _settingsService.ImportPackageAsync(kind, selectedPath, cancellationToken);
-                    var record = await _packageRepository.GetPackageAsync(kind, package.Id, cancellationToken)
-                        ?? throw new InvalidOperationException("Imported package was not persisted.");
-                    using var manifestDocument = JsonDocument.Parse(record.ManifestJson);
-                    var revision = await AdvanceMutationRevisionAsync(cancellationToken);
+                    response = await BuildImportResponseAsync(type, requestId, kind, package, cancellationToken);
+                    break;
+                }
+                case "extensions/import-plugin-folder":
+                {
+                    var folderPath = _packagePicker.PickPluginFolder();
+                    if (folderPath is null)
+                    {
+                        response = new { type, requestId, ok = false, cancelled = true };
+                        break;
+                    }
+
+                    var package = await _settingsService.ImportPluginFolderAsync(folderPath, cancellationToken);
+                    response = await BuildImportResponseAsync(
+                        type,
+                        requestId,
+                        ExtensionKind.Plugin,
+                        package,
+                        cancellationToken);
+                    break;
+                }
+                case "extensions/reload-plugin":
+                {
+                    var result = await _settingsService.ReloadPluginAsync(
+                        ReadRequiredString(payload, "id"),
+                        cancellationToken);
+                    var revision = result.Changed
+                        ? await AdvanceMutationRevisionAsync(cancellationToken)
+                        : _stateChangeNotifier.CurrentRevision;
                     response = new
                     {
                         type,
                         requestId,
                         ok = true,
-                        package,
-                        revision,
-                        summary = new
-                        {
-                            manifest = manifestDocument.RootElement.Clone(),
-                            contentHash = record.ContentHash,
-                            fileCount = CountPackageFiles(record.InstallPath)
-                        }
+                        changed = result.Changed,
+                        package = result.Package,
+                        revision
                     };
                     break;
                 }
@@ -180,6 +200,33 @@ internal sealed class ExtensionSettingsBridge : IDisposable
         {
             return new { type, requestId, error = exception.Message };
         }
+    }
+
+    private async Task<object> BuildImportResponseAsync(
+        string type,
+        string? requestId,
+        ExtensionKind kind,
+        ExtensionPackageView package,
+        CancellationToken cancellationToken)
+    {
+        var record = await _packageRepository.GetPackageAsync(kind, package.Id, cancellationToken)
+            ?? throw new InvalidOperationException("Imported package was not persisted.");
+        using var manifestDocument = JsonDocument.Parse(record.ManifestJson);
+        var revision = await AdvanceMutationRevisionAsync(cancellationToken);
+        return new
+        {
+            type,
+            requestId,
+            ok = true,
+            package,
+            revision,
+            summary = new
+            {
+                manifest = manifestDocument.RootElement.Clone(),
+                contentHash = record.ContentHash,
+                fileCount = CountPackageFiles(record.InstallPath)
+            }
+        };
     }
 
     private async Task<ExtensionSettingsState> GetStateAsync(

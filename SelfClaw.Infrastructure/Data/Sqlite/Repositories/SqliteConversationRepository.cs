@@ -336,7 +336,7 @@ VALUES($id, $messageId, $kind, $fileName, $mediaType, $storagePath, $byteLength,
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = @"
-SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name
+SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name, effective_arguments_json, hook_feedback_json, hook_outcome_json
 FROM tool_runs
 WHERE conversation_id = $conversationId
 ORDER BY created_at_utc ASC;";

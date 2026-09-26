@@ -39,33 +39,12 @@ internal sealed class ExtensionCatalog : IPluginPanelCatalog
         CancellationToken cancellationToken = default)
     {
         var packages = await _packageRepository.ListPackagesAsync(cancellationToken).ConfigureAwait(false);
-        var views = packages
-            .Where(package => package.Kind == kind)
-            .Select(CreatePackageView)
-            .ToList();
-        if (kind == ExtensionKind.Plugin && _pluginManifestReader is not null)
+        var views = new List<ExtensionPackageView>();
+        foreach (var package in packages.Where(package => package.Kind == kind))
         {
-            for (var index = 0; index < views.Count; index++)
-            {
-                var package = packages.First(item =>
-                    item.Kind == ExtensionKind.Plugin &&
-                    string.Equals(item.Id, views[index].Id, StringComparison.OrdinalIgnoreCase));
-                try
-                {
-                    _ = await _pluginManifestReader.ReadAsync(
-                            ExtensionInstallation.PluginManifestPath(package),
-                            cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    views[index] = views[index] with { Status = ExtensionStatus.Broken };
-                }
-            }
+            views.Add(kind == ExtensionKind.Plugin && _pluginManifestReader is not null
+                ? await CreatePluginViewAsync(package, cancellationToken).ConfigureAwait(false)
+                : CreatePackageView(package));
         }
 
         if (kind == ExtensionKind.Skill && _pluginManifestReader is not null)
@@ -76,6 +55,39 @@ internal sealed class ExtensionCatalog : IPluginPanelCatalog
         return views
             .OrderBy(package => package.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    internal async Task<ExtensionPackageView> CreatePackageViewAsync(
+        ExtensionPackageRecord package,
+        CancellationToken cancellationToken = default)
+    {
+        if (package.Kind != ExtensionKind.Plugin || _pluginManifestReader is null)
+        {
+            return CreatePackageView(package);
+        }
+
+        return await CreatePluginViewAsync(package, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ExtensionPackageView> CreatePluginViewAsync(
+        ExtensionPackageRecord package,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var manifest = await _pluginManifestReader!
+                .ReadAsync(ExtensionInstallation.PluginManifestPath(package), cancellationToken)
+                .ConfigureAwait(false);
+            return CreatePackageView(package, manifest);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return CreatePackageView(package) with { Status = ExtensionStatus.Broken };
+        }
     }
 
     private async Task<IReadOnlyList<ExtensionPackageView>> CreatePluginSkillViewsAsync(
@@ -107,6 +119,8 @@ internal sealed class ExtensionCatalog : IPluginPanelCatalog
                         [],
                         pluginView.Status,
                         [],
+                        [],
+                        null,
                         []));
                 }
             }
@@ -293,7 +307,9 @@ internal sealed class ExtensionCatalog : IPluginPanelCatalog
         => JsonSerializer.Deserialize<McpServerSettings>(settingsJson, JsonOptions)
             ?? throw new JsonException("MCP settings are empty.");
 
-    internal static ExtensionPackageView CreatePackageView(ExtensionPackageRecord package)
+    internal static ExtensionPackageView CreatePackageView(
+        ExtensionPackageRecord package,
+        PluginManifest? manifest = null)
     {
         var permissions = package.Kind == ExtensionKind.Plugin
             ? ReadStringArray(package.ManifestJson, "permissions")
@@ -318,8 +334,60 @@ internal sealed class ExtensionCatalog : IPluginPanelCatalog
             [],
             status,
             permissions,
-            unacknowledged);
+            unacknowledged,
+            package.SourcePath,
+            CreateHookViews(manifest));
     }
+
+    private static IReadOnlyList<PluginHookView> CreateHookViews(PluginManifest? manifest)
+        => manifest is null
+            ? []
+            : manifest.Contributions.Hooks.Select(CreateHookView).ToArray();
+
+    private static PluginHookView CreateHookView(PluginHookContribution hook)
+        => new(
+            hook.Id,
+            ToCamelCase(hook.Event.ToString()),
+            FormatMatcherSummary(hook.Matcher),
+            FormatCommandLine(hook),
+            (int)hook.Timeout.TotalSeconds,
+            hook.Event is PluginHookEvent.RunStarting or PluginHookEvent.ToolExecuting
+                ? ToCamelCase(hook.OnFailure.ToString())
+                : null,
+            hook.RunAsync,
+            hook.IncludeRequestBody);
+
+    private static string FormatMatcherSummary(PluginHookMatcher matcher)
+    {
+        var parts = new List<string>();
+        AddMatcherPart(parts, "origins", matcher.Origins.Select(origin => ToCamelCase(origin.ToString())));
+        AddMatcherPart(parts, "tools", matcher.ToolPatterns);
+        AddMatcherPart(parts, "sourceIds", matcher.SourceIdPatterns);
+        AddMatcherPart(parts, "kinds", matcher.Kinds.Select(kind => ToCamelCase(kind.ToString())));
+        AddMatcherPart(parts, "sources", matcher.Sources.Select(source => ToCamelCase(source.ToString())));
+        AddMatcherPart(parts, "hosts", matcher.HostPatterns);
+        return parts.Count == 0 ? "*" : string.Join("; ", parts);
+    }
+
+    private static void AddMatcherPart(List<string> parts, string name, IEnumerable<string> values)
+    {
+        var array = values.ToArray();
+        if (array.Length > 0)
+        {
+            parts.Add($"{name}={string.Join(",", array)}");
+        }
+    }
+
+    private static string FormatCommandLine(PluginHookContribution hook)
+        => string.Join(" ", new[] { hook.Command }.Concat(hook.Arguments).Select(QuoteCommandPart));
+
+    private static string QuoteCommandPart(string value)
+        => value.Contains(' ') ? $"\"{value}\"" : value;
+
+    private static string ToCamelCase(string value)
+        => value.Length == 0 || char.IsLower(value[0])
+            ? value
+            : char.ToLowerInvariant(value[0]) + value[1..];
 
     internal static IReadOnlyList<string> ReadAcknowledgedPermissions(string? json)
     {

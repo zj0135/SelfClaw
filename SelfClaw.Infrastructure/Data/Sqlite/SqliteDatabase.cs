@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 27;
+    private const int CurrentSchemaVersion = 28;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -300,6 +300,9 @@ CREATE TABLE IF NOT EXISTS tool_runs (
     source_kind INTEGER NULL,
     source_id TEXT NULL,
     display_name TEXT NULL,
+    effective_arguments_json TEXT NULL,
+    hook_feedback_json TEXT NULL,
+    hook_outcome_json TEXT NULL,
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken).ConfigureAwait(false);
 
@@ -361,8 +364,16 @@ CREATE TABLE IF NOT EXISTS extension_packages (
     acknowledged_at_utc TEXT NULL,
     installed_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
+    source_path TEXT NULL,
     PRIMARY KEY(kind, id)
 );", cancellationToken).ConfigureAwait(false);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "extension_packages",
+                "source_path",
+                "ALTER TABLE extension_packages ADD COLUMN source_path TEXT NULL;",
+                cancellationToken).ConfigureAwait(false);
 
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS mcp_server_configs (
@@ -462,6 +473,29 @@ CREATE TABLE IF NOT EXISTS subagent_deliveries (
             // tool placement is expressed by ToolCall block ordinals, so after_segment_index
             // is retired. Legacy assistant rows are not migrated; the user deletes them.
             await RebuildToolRunsWithoutAfterSegmentIndexAsync(connection, cancellationToken).ConfigureAwait(false);
+
+            // Schema v28 hook columns go after the v25 rebuild: the rebuilt table has no hook columns,
+            // so adding them first would lose them when the rebuild swaps the table.
+            await EnsureColumnExistsAsync(
+                connection,
+                "tool_runs",
+                "effective_arguments_json",
+                "ALTER TABLE tool_runs ADD COLUMN effective_arguments_json TEXT NULL;",
+                cancellationToken).ConfigureAwait(false);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "tool_runs",
+                "hook_feedback_json",
+                "ALTER TABLE tool_runs ADD COLUMN hook_feedback_json TEXT NULL;",
+                cancellationToken).ConfigureAwait(false);
+
+            await EnsureColumnExistsAsync(
+                connection,
+                "tool_runs",
+                "hook_outcome_json",
+                "ALTER TABLE tool_runs ADD COLUMN hook_outcome_json TEXT NULL;",
+                cancellationToken).ConfigureAwait(false);
 
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS message_segments (
