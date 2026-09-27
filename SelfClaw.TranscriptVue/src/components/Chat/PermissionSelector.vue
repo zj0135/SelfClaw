@@ -7,6 +7,11 @@ const props = defineProps({
 		type: String,
 		default: 'require-approval',
 	},
+	// 菜单水平对齐：放在工具栏右侧时用 end，避免菜单溢出输入框右缘
+	align: {
+		type: String,
+		default: 'start',
+	},
 });
 const emit = defineEmits(['select']);
 
@@ -92,12 +97,12 @@ onBeforeUnmount(() => {
 
 <template>
 	<div ref="rootRef" class="perm-wrap">
-		<button class="icon-btn" type="button" :aria-expanded="open ? 'true' : 'false'" aria-haspopup="menu"
+		<button class="icon-btn" :class="`icon-btn--${current.id}`" type="button" :aria-expanded="open ? 'true' : 'false'" aria-haspopup="menu"
 			:title="`工具权限：${current.label}`" @click.stop="toggle">
 			<component :is="current.icon" :size="16" :stroke-width="1.8" aria-hidden="true" />
 		</button>
 
-		<div v-show="open" ref="menuRef" class="perm-menu" :class="`perm-menu--${placement}`" role="listbox"
+		<div v-show="open" ref="menuRef" class="perm-menu" :class="[`perm-menu--${placement}`, `perm-menu--${align}`]" role="listbox"
 			aria-label="工具权限">
 			<button v-for="mode in MODES" :key="mode.id" type="button" class="perm-opt" role="option"
 				:aria-selected="current.id === mode.id ? 'true' : 'false'" @click="pick(mode.id)">
@@ -146,6 +151,11 @@ onBeforeUnmount(() => {
 	color: var(--text);
 }
 
+/* 需确认时盾牌带琥珀色提示，自动允许回到中性色 */
+.icon-btn--require-approval {
+	color: var(--caution-fill);
+}
+
 /* ===== 下拉菜单 ===== */
 .perm-menu {
 	position: absolute;
@@ -169,6 +179,19 @@ onBeforeUnmount(() => {
 	bottom: calc(100% + 6px);
 	transform-origin: bottom left;
 	animation: menu-in-up 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.perm-menu--end {
+	left: auto;
+	right: 0;
+}
+
+.perm-menu--end.perm-menu--down {
+	transform-origin: top right;
+}
+
+.perm-menu--end.perm-menu--up {
+	transform-origin: bottom right;
 }
 
 @keyframes menu-in-down {

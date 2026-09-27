@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
-import { ChevronDown, Check, Bot } from 'lucide-vue-next';
+import { Check, Bot, Infinity as InfinityIcon } from 'lucide-vue-next';
 import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js';
 
 /**
@@ -133,11 +133,8 @@ watch(() => props.selectedAgentId, () => {
 	<div ref="rootRef" class="agent-wrap">
 		<button class="composer-agent" type="button" :aria-expanded="open ? 'true' : 'false'"
 			aria-haspopup="true" title="代理选择" @click.stop="togglePanel">
-			<span class="agent-badge" aria-hidden="true">
-				<Bot :size="12" :stroke-width="2" />
-			</span>
+			<InfinityIcon class="agent-icon" :size="15" :stroke-width="1.8" aria-hidden="true" />
 			<span class="agent-name">{{ label }}</span>
-			<ChevronDown class="agent-caret" :size="13" :stroke-width="2" aria-hidden="true" />
 		</button>
 
 		<div v-show="open" ref="popoverRef" class="agent-popover" :class="`agent-popover--${placement}`"
@@ -152,7 +149,7 @@ watch(() => props.selectedAgentId, () => {
 				<button v-for="agent in agents" :key="agent.id" type="button" class="agent-item" role="radio"
 					:aria-checked="selectedAgentId === agent.id ? 'true' : 'false'" :title="agent.description || agent.name"
 					@click="pickAgent(agent)">
-					<span class="agent-item-glyph" :class="`agent-item-glyph--${agent.mode}`" aria-hidden="true">
+					<span class="agent-item-glyph" aria-hidden="true">
 						<Bot :size="13" :stroke-width="2" />
 					</span>
 					<span class="agent-item-copy">
@@ -162,7 +159,7 @@ watch(() => props.selectedAgentId, () => {
 							{{ agent.warnings[0] }}
 						</span>
 					</span>
-					<span class="agent-item-mode" :class="`agent-item-mode--${agent.mode}`">
+					<span class="agent-item-mode">
 						{{ agent.mode === 'cli' ? 'CLI' : 'Direct' }}
 					</span>
 					<Check class="agent-item-check" :size="14" :stroke-width="2.4" aria-hidden="true" />
@@ -178,66 +175,49 @@ watch(() => props.selectedAgentId, () => {
 	display: inline-flex;
 }
 
+/* 触发按钮：无边框「图标 + 文字���，仅悬停 / 展开时出现浅底，与工具栏其余图标按钮一致 */
 .composer-agent {
 	display: inline-flex;
 	align-items: center;
-	gap: 7px;
-	height: 32px;
+	gap: 6px;
+	height: 30px;
+	min-width: 0;
 	padding: 0 8px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
-	background: var(--panel);
-	color: var(--text);
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--text-soft);
 	font-size: var(--fs-125);
-	font-weight: 550;
+	font-weight: 500;
 	letter-spacing: 0.01em;
 	white-space: nowrap;
 	cursor: pointer;
-	transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+	transition: background 0.15s, color 0.15s;
 }
 
-.composer-agent:hover {
-	background: var(--panel-soft);
-}
-
+.composer-agent:hover,
 .composer-agent[aria-expanded='true'] {
-	background: var(--panel-soft);
-	border-color: var(--border-strong);
-	box-shadow: 0 0 0 3px rgba(var(--shadow-ink), 0.04);
+	background: var(--panel-muted);
+	color: var(--text);
 }
 
-.agent-badge {
-	display: inline-grid;
-	place-items: center;
-	width: 18px;
-	height: 18px;
-	border-radius: 6px;
-	background: color-mix(in srgb, var(--accent) 14%, transparent);
-	color: var(--accent);
+.agent-icon {
+	width: 15px;
+	height: 15px;
+	color: var(--muted);
 	flex: none;
+	transition: color 0.15s;
 }
 
-.agent-badge svg {
-	width: 12px;
-	height: 12px;
+.composer-agent:hover .agent-icon,
+.composer-agent[aria-expanded='true'] .agent-icon {
+	color: var(--text);
 }
 
 .agent-name {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	max-width: 140px;
-}
-
-.agent-caret {
-	width: 13px;
-	height: 13px;
-	color: var(--muted);
-	flex: none;
-	transition: transform 0.18s ease;
-}
-
-.composer-agent[aria-expanded='true'] .agent-caret {
-	transform: rotate(180deg);
 }
 
 .agent-popover {
@@ -317,7 +297,7 @@ watch(() => props.selectedAgentId, () => {
 
 .agent-list {
 	display: grid;
-	gap: 5px;
+	gap: 2px;
 	max-height: 224px;
 	overflow-y: auto;
 	overscroll-behavior: contain;
@@ -337,28 +317,29 @@ watch(() => props.selectedAgentId, () => {
 	border-radius: 99px;
 }
 
+/* 列表项：去掉逐项边框，与无框触发按钮保持同一语言 */
 .agent-item {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 9px;
 	width: 100%;
-	padding: 6px 8px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
-	background: var(--panel);
+	padding: 7px 8px;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
 	color: var(--text);
 	text-align: left;
 	cursor: pointer;
-	transition: background 0.15s, border-color 0.15s;
+	transition: background 0.12s;
 }
 
 .agent-item:hover {
 	background: var(--panel-soft);
 }
 
+/* 选中项：浅强调底 + 勾，不再用描边区分 */
 .agent-item[aria-checked='true'] {
 	background: var(--accent-soft, color-mix(in srgb, var(--accent) 8%, transparent));
-	border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .agent-item-glyph {
@@ -366,20 +347,10 @@ watch(() => props.selectedAgentId, () => {
 	place-items: center;
 	width: 20px;
 	height: 20px;
-	border-radius: 5px;
+	border-radius: 6px;
 	flex: none;
-	background: var(--panel-soft);
-	color: var(--muted);
-}
-
-.agent-item-glyph--cli {
-	background: color-mix(in srgb, var(--text) 8%, transparent);
+	background: var(--panel-muted);
 	color: var(--text-soft);
-}
-
-.agent-item-glyph--direct {
-	background: color-mix(in srgb, var(--accent) 14%, transparent);
-	color: var(--accent);
 }
 
 .agent-item-glyph svg {
@@ -414,36 +385,28 @@ watch(() => props.selectedAgentId, () => {
 	color: var(--err-text);
 }
 
+/* 模式标签统一中性色，强调色只留给选中态 */
 .agent-item-mode {
 	flex: none;
 	font-size: var(--fs-10);
 	font-weight: 600;
-	letter-spacing: 0.04em;
+	letter-spacing: 0.06em;
 	padding: 2px 6px;
 	border-radius: 5px;
-	background: var(--panel-soft);
+	background: var(--panel-muted);
 	color: var(--muted);
 }
 
-.agent-item-mode--cli {
-	background: color-mix(in srgb, var(--text) 8%, transparent);
-	color: var(--text-soft);
-}
-
-.agent-item-mode--direct {
-	background: color-mix(in srgb, var(--accent) 14%, transparent);
-	color: var(--accent);
-}
-
+/* 勾始终占位，避免选中时模式标签左右跳动 */
 .agent-item-check {
 	width: 14px;
 	height: 14px;
 	color: var(--accent);
-	display: none;
+	visibility: hidden;
 	flex: none;
 }
 
 .agent-item[aria-checked='true'] .agent-item-check {
-	display: block;
+	visibility: visible;
 }
 </style>

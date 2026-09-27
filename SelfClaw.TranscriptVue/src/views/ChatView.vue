@@ -47,17 +47,16 @@ defineExpose({
 		'terminal-open': terminal.state.isOpen,
 	}" @pointerdown="onWorkspaceInteraction" @focusin="onWorkspaceInteraction">
 		<ActivityStage :parent-conversation-id="state.selectedConversationId" @preview-image="openImagePreview">
-		<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :items="state.items" :collapse="collapse"
-			:activity-text="state.activityText" :turn-status="turnStatus"
-			@content-resize="transcriptScroll.onContentResize" @scroll="transcriptScroll.onScroll"
-			@preview-image="openImagePreview" />
-		<section v-else class="empty-composer-stage" aria-label="新对话">
-			<div class="empty-composer-copy">
-				<div class="empty-kicker">SELFCLAW · READY</div>
-				<h1>想聊些什么？</h1>
-				<p>随意提问，或使用命令/工具。</p>
-			</div>
-		</section>
+			<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :items="state.items"
+				:collapse="collapse" :activity-text="state.activityText" :turn-status="turnStatus"
+				@content-resize="transcriptScroll.onContentResize" @scroll="transcriptScroll.onScroll"
+				@preview-image="openImagePreview" />
+			<section v-else class="empty-composer-stage" aria-label="新对话">
+				<div class="empty-composer-copy">
+					<h1>想构建什么？</h1>
+					<p>随意提问，或使用命令/工具。</p>
+				</div>
+			</section>
 		</ActivityStage>
 		<ComposerPanel ref="composerShellRef" :busy="state.isBusy || composer.submitting.value"
 			:workspace-selection="workspace.state" :git-loading="workspace.state.gitLoading"
@@ -68,7 +67,8 @@ defineExpose({
 			@request-workspace="workspace.refresh" @select-workspace-root="workspace.selectRoot"
 			@delete-workspace-root="workspace.deleteRoot" @browse-workspace-folder="workspace.browseFolder"
 			@git-action="workspace.runGitAction" @approve-tool="(id) => approvals.resolve(id, true)"
-			@reject-tool="(id) => approvals.resolve(id, false)" @select-permission-mode="composer.selectPermissionMode" />
+			@reject-tool="(id) => approvals.resolve(id, false)"
+			@select-permission-mode="composer.selectPermissionMode" />
 		<TerminalPanel ref="terminalPanelRef" :is-open="terminal.state.isOpen" :is-running="terminal.state.isRunning"
 			:cwd="terminal.state.cwd" @ready="terminal.ready" @input="terminal.input" @resize="terminal.resize"
 			@close="terminal.close" @restart="terminal.restart" @focus-change="terminal.setFocused" />
@@ -123,15 +123,6 @@ defineExpose({
 		opacity: 1;
 		transform: none;
 	}
-}
-
-.empty-kicker {
-	margin-bottom: 14px;
-	color: var(--faint);
-	font-family: var(--font-mono);
-	font-size: var(--fs-10);
-	font-weight: 600;
-	letter-spacing: 0;
 }
 
 .empty-composer-copy h1 {

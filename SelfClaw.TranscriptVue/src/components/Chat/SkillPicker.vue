@@ -7,6 +7,8 @@ const props = defineProps({
 	agentId: { type: String, default: '' },
 	agentName: { type: String, default: '' },
 	capabilityRevision: { type: Number, default: 0 },
+	// false 时不渲染自身图标按钮，由外部（输入框「+」菜单）通过 openPicker() 打开
+	showTrigger: { type: Boolean, default: true },
 });
 const emit = defineEmits(['select']);
 const { requestLatest } = useHostBridge();
@@ -49,6 +51,12 @@ async function load() {
 	}
 }
 
+async function openPicker() {
+	if (open.value) return;
+	open.value = true;
+	await load();
+}
+
 function selectSkill(skill) {
 	emit('select', skill.id);
 	open.value = false;
@@ -60,11 +68,13 @@ function onDocumentPointerDown(event) {
 
 onMounted(() => document.addEventListener('pointerdown', onDocumentPointerDown));
 onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerDown));
+
+defineExpose({ openPicker });
 </script>
 
 <template>
-	<div ref="rootRef" class="skill-picker">
-		<button class="trigger" type="button" title="插入技能" aria-label="插入技能" :aria-expanded="open" @click="toggle">
+	<div ref="rootRef" class="skill-picker" :class="{ 'skill-picker--headless': !showTrigger }">
+		<button v-if="showTrigger" class="trigger" type="button" title="插入技能" aria-label="插入技能" :aria-expanded="open" @click="toggle">
 			<BookOpenCheck :size="16" :stroke-width="1.8" aria-hidden="true" />
 		</button>
 		<transition name="picker-pop">
@@ -93,6 +103,13 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 <style scoped>
 .skill-picker {
 	position: relative;
+}
+
+/* 无触发按钮时贴在宿主左上角，弹层仍向上展开 */
+.skill-picker--headless {
+	position: absolute;
+	top: 0;
+	left: 0;
 }
 
 .trigger {

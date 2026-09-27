@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
-import { ChevronDown, ChevronRight, Check, Bot, Terminal } from 'lucide-vue-next';
+import { ChevronRight, Check, Bot, Terminal } from 'lucide-vue-next';
 import { useComposerModelSelection } from '../../composables/useComposerModelSelection.js';
 
 const props = defineProps({
@@ -48,14 +48,20 @@ const modelLabel = computed(() => {
 		return '加载中…';
 	}
 	if (isDirect.value) {
-		return selectedDirectModel.value
-			? `${selectedDirectModel.value.providerName} · ${selectedDirectModel.value.name}`
-			: '未选择提供商模型';
+		// 工具栏空间有限，只显示模型名；提供商放进悬停提示和弹出面板
+		return selectedDirectModel.value?.name || '未选择提供商模型';
 	}
 	if (!selectedAgent.value) {
 		return '未选择 CLI';
 	}
 	return activeModel.value === defaultModel ? selectedAgent.value.name : activeModel.value;
+});
+
+const triggerTitle = computed(() => {
+	if (isDirect.value && selectedDirectModel.value) {
+		return `模型选择：${selectedDirectModel.value.providerName} · ${selectedDirectModel.value.name}`;
+	}
+	return `模型选择：${modelLabel.value}`;
 });
 
 function togglePanel() {
@@ -124,15 +130,13 @@ watch(isDirect, () => {
 <template>
 	<div ref="rootRef" class="model-wrap">
 		<button class="composer-model" type="button" :aria-expanded="open ? 'true' : 'false'" aria-haspopup="true"
-			title="模型选择" @click.stop="togglePanel">
-			<span class="model-badge" :class="{ 'model-badge--brand': !isDirect && !!selectedAgent?.iconSrc }"
-				aria-hidden="true">
+			:title="triggerTitle" @click.stop="togglePanel">
+			<span class="model-badge" aria-hidden="true">
 				<img v-if="!isDirect && selectedAgent?.iconSrc" class="model-badge-img" :src="selectedAgent.iconSrc"
 					alt="" />
-				<Bot v-else :size="12" :stroke-width="2" />
+				<Bot v-else :size="15" :stroke-width="1.8" />
 			</span>
 			<span class="model-name">{{ modelLabel }}</span>
-			<ChevronDown class="model-caret" :size="13" :stroke-width="2" aria-hidden="true" />
 		</button>
 
 		<!-- 设置弹出面板：默认贴按钮下方展开；下方空间不足时自动翻转到按钮上方 -->
@@ -237,54 +241,51 @@ watch(isDirect, () => {
 	display: inline-flex;
 }
 
-/* ===== 模型选择触发按钮 ===== */
+/* ===== 模型选择触发按钮：无边框「图标 + 文字」，仅悬停 / 展开时出现浅底 ===== */
 .composer-model {
 	display: inline-flex;
 	align-items: center;
-	gap: 7px;
-	height: 32px;
+	gap: 6px;
+	height: 30px;
+	min-width: 0;
 	padding: 0 8px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
-	background: var(--panel);
-	color: var(--text);
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--text-soft);
 	font-size: var(--fs-125);
-	font-weight: 550;
+	font-weight: 500;
 	letter-spacing: 0.01em;
 	white-space: nowrap;
 	cursor: pointer;
-	transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+	transition: background 0.15s, color 0.15s;
 }
 
-.composer-model:hover {
-	background: var(--panel-soft);
-}
-
+.composer-model:hover,
 .composer-model[aria-expanded='true'] {
-	background: var(--panel-soft);
-	border-color: var(--border-strong);
-	box-shadow: 0 0 0 3px rgba(var(--shadow-ink), 0.04);
+	background: var(--panel-muted);
+	color: var(--text);
 }
 
+/* 徽标不再使用实色底块：Direct 为线性机器人图标，CLI 为品牌图标原色 */
 .model-badge {
 	display: inline-grid;
 	place-items: center;
-	width: 18px;
-	height: 18px;
-	border-radius: 6px;
-	background: var(--accent);
-	color: var(--accent-ink);
+	width: 15px;
+	height: 15px;
+	color: var(--muted);
 	flex: none;
+	transition: color 0.15s;
 }
 
 .model-badge svg {
-	width: 12px;
-	height: 12px;
+	width: 15px;
+	height: 15px;
 }
 
-/* 选中 CLI 后徽标显示品牌图标：去掉深色底，让图标以自身配色呈现 */
-.model-badge--brand {
-	background: transparent;
+.composer-model:hover .model-badge,
+.composer-model[aria-expanded='true'] .model-badge {
+	color: var(--text);
 }
 
 .model-badge-img {
@@ -297,19 +298,7 @@ watch(isDirect, () => {
 .model-name {
 	overflow: hidden;
 	text-overflow: ellipsis;
-	max-width: 180px;
-}
-
-.model-caret {
-	width: 13px;
-	height: 13px;
-	color: var(--muted);
-	flex: none;
-	transition: transform 0.18s ease;
-}
-
-.composer-model[aria-expanded='true'] .model-caret {
-	transform: rotate(180deg);
+	max-width: 168px;
 }
 
 /* ===== 设置弹出面板 ===== */
@@ -423,7 +412,7 @@ watch(isDirect, () => {
 /* 代理列表：固定可视高度（约 4 行），超出滚动 */
 .agent-list {
 	display: grid;
-	gap: 5px;
+	gap: 2px;
 	max-height: 152px;
 	overflow-y: auto;
 	overscroll-behavior: contain;
@@ -443,29 +432,30 @@ watch(isDirect, () => {
 	border-radius: 99px;
 }
 
+/* 列表项：去掉逐项边框，与无框触发按钮保持同一语言 */
 .agent-item {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 9px;
 	width: 100%;
-	padding: 6px 8px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
-	background: var(--panel);
+	padding: 7px 8px;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
 	color: var(--text);
 	font: 550 12.5px/1.2 inherit;
 	text-align: left;
 	cursor: pointer;
-	transition: background 0.15s, border-color 0.15s;
+	transition: background 0.12s;
 }
 
 .agent-item:hover {
 	background: var(--panel-soft);
 }
 
+/* 选中项：浅强调底 + 勾，不再用描边区分 */
 .agent-item[aria-checked='true'] {
 	background: var(--accent-soft, color-mix(in srgb, var(--accent) 8%, transparent));
-	border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .agent-glyph {
@@ -473,7 +463,7 @@ watch(isDirect, () => {
 	place-items: center;
 	width: 20px;
 	height: 20px;
-	border-radius: 5px;
+	border-radius: 6px;
 	flex: none;
 }
 
@@ -498,11 +488,12 @@ watch(isDirect, () => {
 	width: 14px;
 	height: 14px;
 	color: var(--accent);
-	display: none;
+	visibility: hidden;
+	flex: none;
 }
 
 .agent-item[aria-checked='true'] .agent-check {
-	display: block;
+	visibility: visible;
 }
 
 /* 模型下拉 */
@@ -587,9 +578,9 @@ watch(isDirect, () => {
 	justify-content: space-between;
 	gap: 8px;
 	width: 100%;
-	padding: 6px 8px;
+	padding: 7px 8px;
 	border: 0;
-	border-radius: 6px;
+	border-radius: 7px;
 	background: transparent;
 	color: var(--text);
 	font: 500 12.5px/1.2 inherit;
@@ -604,17 +595,19 @@ watch(isDirect, () => {
 .model-opt .tick {
 	width: 14px;
 	height: 14px;
-	color: var(--text);
-	display: none;
+	color: var(--accent);
+	visibility: hidden;
 	flex: none;
 }
 
+/* 选中项与代理列表一致：浅强调底 + 强调色勾 */
 .model-opt[aria-selected='true'] {
+	background: var(--accent-soft, color-mix(in srgb, var(--accent) 8%, transparent));
 	font-weight: 600;
 }
 
 .model-opt[aria-selected='true'] .tick {
-	display: block;
+	visibility: visible;
 }
 
 .model-opt-copy {

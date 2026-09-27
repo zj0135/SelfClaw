@@ -1,11 +1,11 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
-import { SlidersHorizontal, ArrowRight, Square, ShieldAlert, Check, X, Webhook } from 'lucide-vue-next';
+import { ArrowRight, Square, ShieldAlert, Check, X, Webhook } from 'lucide-vue-next';
 import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import PermissionSelector from './PermissionSelector.vue';
-import SkillPicker from './SkillPicker.vue';
+import ComposerAddMenu from './ComposerAddMenu.vue';
 import { formatHookSource } from '../../renderers/shared.js';
 
 const props = defineProps({
@@ -234,18 +234,17 @@ defineExpose({
 				placeholder="让助手帮你处理项目..." @keydown="onKeydown"></textarea>
 			<p v-if="submitError" class="composer-error" role="alert">{{ submitError }}</p>
 			<div class="composer-toolbar">
+				<!-- 左侧只保留「+ / 代理 / 模型」三个无框入口；权限与发送靠右 -->
 				<div class="composer-tools-left">
-					<ModelSelector :execution-mode="agentMode" />
-				<AgentSelector :selected-agent-id="selectedAgentId" :selected-agent-name="selectedAgentName" />
-					<SkillPicker v-if="agentMode === 'direct'" :agent-id="selectedAgentId"
+					<ComposerAddMenu :skills-enabled="agentMode === 'direct'" :agent-id="selectedAgentId"
 						:agent-name="selectedAgentName" :capability-revision="capabilityRevision"
-						@select="insertSkillToken" />
-					<button class="icon-btn" type="button" title="功能" aria-label="功能">
-						<SlidersHorizontal :size="16" :stroke-width="1.8" aria-hidden="true" />
-					</button>
-					<PermissionSelector :mode="toolPermissionMode" @select="emit('select-permission-mode', $event)" />
+						@select-skill="insertSkillToken" />
+					<AgentSelector :selected-agent-id="selectedAgentId" :selected-agent-name="selectedAgentName" />
+					<ModelSelector :execution-mode="agentMode" />
 				</div>
 				<div class="composer-tools-right">
+					<PermissionSelector :mode="toolPermissionMode" align="end"
+						@select="emit('select-permission-mode', $event)" />
 					<button v-if="props.busy" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成"
 						@click="stop">
 						<Square :size="13" fill="currentColor" :stroke-width="0" aria-hidden="true" />
@@ -481,6 +480,8 @@ defineExpose({
 	gap: 12px;
 	min-height: 40px;
 	padding-top: 4px;
+	/* 幽灵按钮自带内边距，向左收回让「+」与输入文字左缘对齐 */
+	margin-left: -6px;
 }
 
 .composer-tools-left,
@@ -491,26 +492,8 @@ defineExpose({
 	min-width: 0;
 }
 
-.icon-btn {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 32px;
-	height: 32px;
-	padding: 0;
-	border: 0;
-	border-radius: 8px;
-	background: transparent;
-	color: var(--muted);
-	cursor: pointer;
-	transition:
-		background 0.15s,
-		color 0.15s;
-}
-
-.icon-btn:hover {
-	background: var(--panel-muted);
-	color: var(--text);
+.composer-tools-left {
+	gap: 2px;
 }
 
 .send-btn {
