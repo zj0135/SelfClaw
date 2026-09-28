@@ -77,8 +77,14 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 
 <template>
 	<div ref="rootRef" class="git-control">
-		<button class="git-trigger" :class="{ active: isOpen, conflict: state?.hasMergeConflicts }" type="button"
-			:title="branchLabel" :aria-expanded="isOpen" @click.stop="toggle">
+		<button
+			class="git-trigger"
+			:class="{ active: isOpen, conflict: state?.hasMergeConflicts }"
+			type="button"
+			:title="branchLabel"
+			:aria-expanded="isOpen"
+			@click.stop="toggle"
+		>
 			<GitBranch :size="13" :stroke-width="1.9" aria-hidden="true" />
 			<span>{{ branchLabel }}</span>
 			<i v-if="state?.isDirty" class="dirty-dot" title="存在未提交更改"></i>
@@ -94,8 +100,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 						领先 {{ state?.aheadCount || 0 }} · 落后 {{ state?.behindCount || 0 }}
 					</span>
 				</div>
-				<button class="icon-action" type="button" title="刷新" :disabled="loading"
-					@click="emit('action', { type: 'refresh' })">
+				<button class="icon-action" type="button" title="刷新" :disabled="loading" @click="emit('action', { type: 'refresh' })">
 					<RefreshCw :class="{ spin: loading }" :size="14" aria-hidden="true" />
 				</button>
 			</header>
@@ -130,16 +135,25 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 				</form>
 				<div class="branch-list">
 					<div v-for="branch in localBranches" :key="branch.fullName" class="branch-row">
-						<button class="branch-select" type="button"
+						<button
+							class="branch-select"
+							type="button"
 							:disabled="branch.isCurrent || Boolean(branch.checkoutPath) || loading"
 							:title="branch.checkoutPath ? `已在 ${branch.checkoutPath} 检出` : branch.name"
-							@click="switchBranch(branch)">
+							@click="switchBranch(branch)"
+						>
 							<Check v-if="branch.isCurrent" :size="14" aria-hidden="true" />
 							<GitBranch v-else :size="14" aria-hidden="true" />
 							<span>{{ branch.name }}</span>
 						</button>
-						<button v-if="!branch.isCurrent" class="branch-delete" type="button" title="安全删除分支"
-							:disabled="Boolean(branch.checkoutPath) || loading" @click="deleteBranch(branch)">
+						<button
+							v-if="!branch.isCurrent"
+							class="branch-delete"
+							type="button"
+							title="安全删除分支"
+							:disabled="Boolean(branch.checkoutPath) || loading"
+							@click="deleteBranch(branch)"
+						>
 							<Trash2 :size="13" aria-hidden="true" />
 						</button>
 					</div>
@@ -160,8 +174,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 
 			<footer v-if="state?.isManagedWorktree" class="merge-footer">
 				<span>{{ state?.baseBranchName }} ← {{ branchLabel }}</span>
-				<button type="button" :disabled="loading || state?.isDirty || state?.hasMergeConflicts"
-					@click="mergeWorktree">
+				<button type="button" :disabled="loading || state?.isDirty || state?.hasMergeConflicts" @click="mergeWorktree">
 					<GitMerge :size="14" aria-hidden="true" />
 					合并
 				</button>
@@ -205,6 +218,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	line-height: 28px;
 }
 
 .dirty-dot {
@@ -223,7 +237,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	border: 1px solid var(--border-strong);
 	border-radius: 9px;
 	background: var(--panel);
-	box-shadow: 0 18px 50px rgba(var(--shadow-ink), 0.14), 0 3px 10px rgba(var(--shadow-ink), 0.05);
+	box-shadow:
+		0 18px 50px rgba(var(--shadow-ink), 0.14),
+		0 3px 10px rgba(var(--shadow-ink), 0.05);
 	overflow: hidden;
 }
 
@@ -236,7 +252,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	padding: 11px 12px;
 }
 
-.git-head>div {
+.git-head > div {
 	display: grid;
 	gap: 3px;
 	min-width: 0;
@@ -413,6 +429,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	line-height: 28px;
 }
 
 .branch-delete {
@@ -444,7 +461,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	background: var(--panel-muted);
 }
 
-.worktree-row>div {
+.worktree-row > div {
 	display: grid;
 	gap: 3px;
 	min-width: 0;
