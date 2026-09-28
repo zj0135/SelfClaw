@@ -31,6 +31,7 @@ public sealed class GitWorkspaceServiceTests
             await RunGitAsync(repositoryPath, "add", "README.md");
             await RunGitAsync(repositoryPath, "commit", "-m", "initial");
             await RunGitAsync(repositoryPath, "branch", "feature/ui");
+            await RunGitAsync(repositoryPath, "update-ref", "refs/remotes/origin/main", "refs/heads/main");
 
             var database = new SelfClaw.Infrastructure.Data.Sqlite.SqliteDatabase(storagePaths);
             var conversations = new SqliteConversationRepository(database);
@@ -51,6 +52,10 @@ public sealed class GitWorkspaceServiceTests
                 item.Name == "main" && !item.IsRemote && item.IsCurrent);
             sourceState.Branches.Should().Contain(item =>
                 item.Name == "feature/ui" && !item.IsRemote);
+            // Remote-tracking refs follow the local ones in the for-each-ref output, so a newline
+            // leaking into the parsed refname used to flag them as local.
+            sourceState.Branches.Should().Contain(item =>
+                item.Name == "origin/main" && item.FullName == "refs/remotes/origin/main" && item.IsRemote);
 
             var conversationId = Guid.NewGuid();
             var creation = await service.CreateManagedWorktreeAsync(sourceWorkspace, conversationId, "Add parser tests");

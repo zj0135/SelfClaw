@@ -577,7 +577,9 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
         var branches = new List<GitBranchInfo>();
         foreach (var record in result.StandardOutput.Split(RecordSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
-            var parts = record.TrimEnd('\r', '\n').Split(FieldSeparator);
+            // Git appends a newline after each ref's format, so every record after the first starts
+            // with one. It has to go before the refname prefix is tested or remote refs read as local.
+            var parts = record.Trim().Split(FieldSeparator);
             if (parts.Length < 5 || string.IsNullOrWhiteSpace(parts[0]))
             {
                 continue;
