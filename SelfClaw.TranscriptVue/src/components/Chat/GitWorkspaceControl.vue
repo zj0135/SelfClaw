@@ -67,6 +67,21 @@ function abortMerge() {
 	emit('action', { type: 'abort-merge' });
 }
 
+// Normal path: refuses when the task branch is unmerged or the worktree is dirty.
+function removeWorktree(worktree) {
+	if (props.loading) return;
+	if (!window.confirm(`确认删除工作树“${worktree.branchName || 'detached HEAD'}”？\n任务分支必须已合并到基础分支。`)) return;
+	emit('action', { type: 'remove-worktree', workspaceRootPath: worktree.path });
+}
+
+// Escape path for worktrees left behind by an earlier defect (e.g. a mojibake task branch name
+// that Git can no longer resolve). Discards local changes.
+function forceRemoveWorktree(worktree) {
+	if (props.loading) return;
+	if (!window.confirm(`强制清理工作树“${worktree.branchName || 'detached HEAD'}”？\n将丢弃该工作树中的未提交更改，仅用于无法正常删除的场景。`)) return;
+	emit('action', { type: 'force-remove-worktree', workspaceRootPath: worktree.path });
+}
+
 function onDocumentPointerDown(event) {
 	if (isOpen.value && !rootRef.value?.contains(event.target)) isOpen.value = false;
 }
@@ -167,7 +182,31 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 						<strong>{{ worktree.branchName || 'detached HEAD' }}</strong>
 						<span :title="worktree.path">{{ worktree.path }}</span>
 					</div>
-					<i v-if="worktree.isCurrent">当前</i>
+								<i v-if="worktree.isCurrent">当前</i>
+								<div v-else class="worktree-actions">
+									<button
+										v-if="worktree.isManaged"
+										class="icon-action"
+										type="button"
+										title="删除工作树（任务分支需已合并）"
+										:disabled="loading"
+										@click="removeWorktree(worktree)"
+									>
+										<Trash2 :size="13" aria-hidden="true" />
+									</button>
+									<!-- Always offered alongside the safe delete: a managed worktree whose
+										recorded task branch no longer resolves (e.g. a mojibake name) fails
+										every guard on the safe path, so the escape hatch must stay reachable. -->
+									<button
+										class="icon-action"
+										type="button"
+										title="强制清理（丢弃未提交更改）"
+										:disabled="loading"
+										@click="forceRemoveWorktree(worktree)"
+									>
+										<AlertTriangle :size="13" aria-hidden="true" />
+									</button>
+								</div>
 				</div>
 				<p v-if="worktrees.length === 0" class="empty-state">没有可用工作树</p>
 			</div>
@@ -465,6 +504,24 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointerD
 	display: grid;
 	gap: 3px;
 	min-width: 0;
+}
+
+.worktree-row .icon-action {
+	width: 24px;
+	height: 24px;
+	opacity: 0;
+}
+
+.worktree-row:hover .icon-action,
+.worktree-row .icon-action:focus-visible {
+	opacity: 1;
+}
+
+/* The trailing grid cell holds the safe delete and the forced cleanup side by side. */
+.worktree-row .worktree-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
 }
 
 .worktree-row strong {

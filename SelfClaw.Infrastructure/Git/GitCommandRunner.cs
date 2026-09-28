@@ -19,9 +19,16 @@ internal sealed class GitCommandRunner
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        // Force UTF-8 I/O and byte-exact argument passing so non-ASCII branch names
+        // (e.g. Chinese prompts) survive the round trip on every code page.
+        startInfo.EnvironmentVariables["LC_ALL"] = "C.UTF-8";
+        startInfo.EnvironmentVariables["LANG"] = "C.UTF-8";
+        startInfo.EnvironmentVariables["GIT_TERMINAL_PROMPT"] = "0";
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);

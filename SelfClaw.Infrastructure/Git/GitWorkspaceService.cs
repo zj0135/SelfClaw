@@ -1,5 +1,5 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
+using System.Text;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Options;
@@ -349,6 +349,68 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
         await _store.DeleteCheckoutAsync(workspaceRoot.Id, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task ForceRemoveManagedWorktreeAsync(
+        WorkspaceRoot workspaceRoot,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(workspaceRoot);
+        var checkout = await _store.GetCheckoutAsync(workspaceRoot.Id, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The selected workspace is not a managed Git worktree.");
+        if (!checkout.IsManaged)
+        {
+            throw new InvalidOperationException("The selected workspace is not a managed Git worktree.");
+        }
+
+        if (!IsPathWithinDirectory(workspaceRoot.RootPath, _storagePaths.WorktreesDirectory))
+        {
+            throw new InvalidOperationException("Managed worktrees can only be removed from SelfClaw's worktree directory.");
+        }
+
+        var source = await ResolveSourceWorkspaceAsync(checkout, cancellationToken).ConfigureAwait(false);
+
+        // `--force` discards local changes, so a stuck checkout can be reclaimed even when the
+        // recorded branch name no longer resolves. The source checkout is only used as the git
+        // process working directory, never mutated.
+        var removeResult = await RunGitAsync(
+            source.RootPath,
+            ["worktree", "remove", "--force", workspaceRoot.RootPath],
+            cancellationToken).ConfigureAwait(false);
+
+        // If Git itself cannot resolve the entry (already unlinked, or the record is stale),
+        // prune the administrative files and delete the directory directly.
+        if (!removeResult.Succeeded)
+        {
+            await RunGitAsync(source.RootPath, ["worktree", "prune"], CancellationToken.None).ConfigureAwait(false);
+            if (Directory.Exists(workspaceRoot.RootPath))
+            {
+                Directory.Delete(workspaceRoot.RootPath, recursive: true);
+            }
+        }
+
+        await _store.DeleteCheckoutAsync(workspaceRoot.Id, cancellationToken).ConfigureAwait(false);
+
+        // Best effort: the branch is only deletable once no worktree holds it, and it may already
+        // be gone if the checkout was created before the branch record was written.
+        await TryDeleteBranchAsync(source.RootPath, checkout.BranchName, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private async Task TryDeleteBranchAsync(string workingDirectory, string? branchName, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+        {
+            return;
+        }
+
+        try
+        {
+            await RunGitAsync(workingDirectory, ["branch", "-D", branchName], cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            // The branch is already merged, already deleted, or still referenced elsewhere.
+        }
+    }
+
     private async Task<WorkspaceRoot> ResolveSourceWorkspaceAsync(
         GitCheckoutRecord checkout,
         CancellationToken cancellationToken)
@@ -621,20 +683,53 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
         return worktrees;
     }
 
+    // Branch names must stay ASCII-safe: they are written by one process and read back
+    // through stdout decoding, so any non-ASCII slug risks a mojibake round trip that later
+    // breaks ancestor checks and worktree cleanup. Readability is carried by the display name.
     private static string CreateTaskBranchName(string prompt, Guid conversationId)
     {
-        var summary = Regex.Replace(prompt.Trim().ToLowerInvariant(), @"[^\p{L}\p{Nd}]+", "-").Trim('-');
-        if (summary.Length > 32)
+        var slug = CreateAsciiSlug(prompt);
+        var suffix = conversationId.ToString("N")[..8];
+        var segments = new List<string>();
+        // A leading digit is legal but reads poorly next to the id suffix, so always carry a
+        // "task" segment when the prompt contributed no usable prefix.
+        if (slug.Length == 0 || char.IsAsciiDigit(slug[0]))
         {
-            summary = summary[..32].Trim('-');
+            segments.Add("task");
         }
 
-        if (summary.Length == 0)
+        if (slug.Length > 0)
         {
-            summary = "task";
+            segments.Add(slug);
         }
 
-        return $"selfclaw/{summary}-{conversationId.ToString("N")[..8]}";
+        segments.Add(suffix);
+        return "selfclaw/" + string.Join('-', segments);
+    }
+
+    private static string CreateAsciiSlug(string prompt)
+    {
+        var normalized = prompt.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormKD);
+        var builder = new StringBuilder();
+        foreach (var character in normalized)
+        {
+            if (character is >= 'a' and <= 'z' or >= '0' and <= '9')
+            {
+                builder.Append(character);
+            }
+            else if (builder.Length > 0 && builder[^1] != '-')
+            {
+                builder.Append('-');
+            }
+        }
+
+        var slug = builder.ToString().Trim('-');
+        if (slug.Length > 32)
+        {
+            slug = slug[..32].Trim('-');
+        }
+
+        return slug;
     }
 
     private static void ValidateBranchName(string branchName)

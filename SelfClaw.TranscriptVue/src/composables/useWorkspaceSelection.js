@@ -4,6 +4,8 @@ import { isSuperseded } from './hostBridge.js';
 const gitRequests = {
 	refresh: 'get-git-state', 'create-branch': 'git-create-branch', 'switch-branch': 'git-switch-branch',
 	'delete-branch': 'git-delete-branch', merge: 'git-merge', 'abort-merge': 'git-abort-merge',
+	'remove-worktree': 'git-remove-worktree', 'force-remove-worktree': 'git-force-remove-worktree',
+	'release-worktree': 'git-release-worktree',
 };
 
 export function useWorkspaceSelection(conversationId, bridge) {
@@ -52,7 +54,11 @@ export function useWorkspaceSelection(conversationId, bridge) {
 		state.gitLoading = true;
 		state.gitError = '';
 		try {
-			const response = await bridge.request(type, { branchName: action.branchName, startPoint: action.startPoint });
+			const response = await bridge.request(type, {
+				branchName: action.branchName,
+				startPoint: action.startPoint,
+				workspaceRootPath: action.workspaceRootPath,
+			});
 			if (!isCurrent()) return;
 			if (response?.state) {
 				state.current = { ...state.current, git: response.state, branchName: response.state.branchName || '',

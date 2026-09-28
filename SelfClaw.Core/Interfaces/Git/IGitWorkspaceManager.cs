@@ -29,4 +29,11 @@ public interface IGitWorkspaceManager
     Task RemoveManagedWorktreeAsync(
         WorkspaceRoot workspaceRoot,
         CancellationToken cancellationToken = default);
+
+    // Escape hatch for worktrees whose recorded branch name no longer matches Git (for example a
+    // mojibake name created before branch names were forced ASCII-safe). It still refuses to touch
+    // anything outside SelfClaw's worktree directory, and it discards local changes.
+    Task ForceRemoveManagedWorktreeAsync(
+        WorkspaceRoot workspaceRoot,
+        CancellationToken cancellationToken = default);
 }
