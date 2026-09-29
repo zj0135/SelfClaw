@@ -35,8 +35,8 @@ Direct 链路的冗余**主要不是行数冗余，而是概念冗余**：同一
 |---|---|---|---|---|
 | S1 | 子代理能力校验三层重复（含 2 次重复 DB 读） | 结构性冗余 | 删 1 层关卡 + 2 次 IO | 中 |
 | S2 | `DirectTurnOrigin` 规则散落 11 处 / 7 文件 | 结构性冗余 | 单一策略入口 | 中 |
-| S3 | 能力 Lease / Scope / Resolver 三型交叉持有 | 所有权冗余 | 一处生命周期 | 中低 |
-| S4 | `PluginCapabilitySource` 主路径与继承路径 80% 复制 | 复制粘贴 | ~90 → ~40 行 | 低 |
+| S3 | 能力 Lease / Scope / Resolver 三型交叉持有 | 所有权冗余 | ✅ 已实施（见 §1） | 完成 |
+| S4 | `PluginCapabilitySource` 主路径与继承路径 80% 复制 | 复制粘贴 | ✅ 已实施（见 §1） | 完成 |
 | D1 | `BindTools` 的 descriptor 对齐校验不可达 | 死校验 | 删 6 行 | 极低 |
 | D2 | 终态纪律双层实现 + 1 处死分支 | 死代码 | 删 flag + 分支 | 低 |
 | D3 | `setup.Invoker` 与 `state.Invoker` 双持有 | 可读性 | 单一真源 | 极低 |
@@ -154,50 +154,41 @@ internal sealed record DirectTurnPolicy(
 
 ---
 
-### S3. 能力 Lease / Scope / Resolver 三型交叉持有
+### S3. 能力 Lease / Scope / Resolver 三型交叉持有（已实施）
 
-**现状证据**
+**状态：2026-09-29 已实施。**
 
-- `DirectTurnCapabilityLease` 构造函数 8 个参数 + 1 个 `Func<ValueTask>`：`systemInstructions`、`tools`、`messageAdjustments`、`diagnostics`、`disposeAsync`、`hooks`、`hookNotices`、`hookBlockReason`。其中 `Tools`（`AITool` 列表）与 `Bindings`（名字→binding 字典）由同一个入参派生。
-- `DirectTurnLeaseScope` 82 行：两个 `List`、两个 `Add` 重载、两段反向释放、一把锁，只为区分 "MCP 先释放、Plugin 后释放"。
-- Resolver（396 行）承担：策略过滤 + 四个来源编排 + 冲突/策略过滤 + ceiling 投影 + 诊断。
+**原问题**
 
-**问题**
+- `DirectTurnCapabilityLease` 构造函数 8 个参数 + 1 个 `Func<ValueTask>`：`systemInstructions`、`tools`、`messageAdjustments`、`diagnostics`、`disposeAsync`、`hooks`、`hookNotices`、`hookBlockReason`；`Tools` 与 `Bindings` 由同一入参派生。
+- `DirectTurnLeaseScope` 82 行：两个 `List`、两个 `Add` 重载、两段反向释放、一把锁，只为区分“MCP 先释放、Plugin 后释放”。
+- lease 同时是“结果 DTO”和“释放句柄”，且自己又实现了一份幂等（`Interlocked.Exchange(...) == 0 && _disposeAsync is not null`）。
 
-一个回合的能力生命周期被三个类型分摊，且 lease 同时是"结果 DTO"和"释放句柄"。`DisposeAsync` 的 `Interlocked.Exchange(...) == 0 && _disposeAsync is not null` 这种写法，读者必须推理三次才能确认恰好释放一次。
+**实施内容**
 
-**建议**
+- `DirectTurnLeaseScope` 改为单一有序 `List<IAsyncDisposable>`：`IDisposable`（Plugin version lease）由一个私有 `SynchronousLease` 适配，两个 `Add` 重载内圈成一个，两段 drain 内圈成一段反向释放。释放顺序由“按获取顺序倒序”定义：Plugin 先于 MCP 加入，因此 MCP 连接先关 —— 与原来的“MCP 列表先排空”完全一致，但规则变得可推导。倒序释放改为“尽力释放全部、重抛首个异常”，修掉原来“一个 MCP 释放抛错会跳过其余 MCP”的缺口。
+- `DirectTurnCapabilityLease` 不再接收 `Func<ValueTask>`，改为持有 `DirectTurnLeaseScope?`；幂等只由 scope 实现，lease 只负责持有。`DisposeAsync` 变成一行 `_scope?.DisposeAsync() ?? ValueTask.CompletedTask`。
+- Resolver 的构造调用从 `leases.DisposeAsync` 改为 `leases`；测试的 4 参构造不变（scope 为可选参数），只有三个依赖“释放顺序”的用例改为向 scope 注入一个记录型 lease。
 
-```csharp
-// 结果与生命周期分离
-internal sealed record CapabilityResolution(
-    IReadOnlyList<string> SystemInstructions,
-    IReadOnlyList<DirectToolBinding> Tools,
-    IReadOnlyDictionary<Guid, string> MessageAdjustments,
-    IReadOnlyList<string> Diagnostics,
-    DirectTurnHooksPlan Hooks);            // HookPlan = hooks + notices + blockReason
+**未做（低价值）**：把 lease 再拆为 `CapabilityResolution` + `CapabilityLease` 两个类型。lease 现在只是一组只读属性加一个转发句柄，再引入一层 record 会增加转换点而无新保障；若后续出现第二种释放策略再拆。
 
-internal sealed class CapabilityLease(CapabilityResolution resolution, DirectTurnLeaseScope scope)
-    : IAsyncDisposable
-{
-    public CapabilityResolution Resolution { get; } = resolution;
-    public ValueTask DisposeAsync() => scope.DisposeAsync();   // 幂等由 scope 保证
-}
-```
-
-`DirectTurnLeaseScope` 改为单一有序 `List<IAsyncDisposable>`（`IDisposable` 用一层 `Func<ValueTask>` 包装），反向释放顺序由加入顺序决定，删除两个 `Add` 重载与两段 drain。
-
-**理由**：`DisposeAsync` 幂等只应有一个实现（scope），lease 只做"持有"；来源侧不再需要 `if (!leases.Add(lease))` 的双路径（当前 Plugin 与 MCP 各写了一遍）。
+**代价**：本轮净增约 25 行（抽出的辅助与文档抵消了删除的重复），收益是“一个生命周期概念”与两处不再重复的职责。
 
 ---
 
-### S4. `PluginCapabilitySource` 双路径复制
+### S4. `PluginCapabilitySource` 双路径复制（已实施）
 
-**现状证据**：`ResolveAsync` 主循环（约 90 行）与 `ResolveInheritedHooksAsync`（约 60 行）都在做：查 package → `IsIntact` → 读 manifest → 校验 manifest.Id → 读取已确认权限 → 取 version lease → 追加 hooks。差别只有失败后果：主路径 `diagnostics.Degrade` 继续，继承路径 `return HookNotes.InheritedHookPluginBlocked(id)`（致命）。
+**状态：2026-09-29 已实施。**
 
-**建议**：抽一个 `TryLoadHookPluginAsync(ExtensionPackageRecord) → HookPluginLoadResult`，返回 `Loaded(manifest, lease, hooks)` 或 `Unavailable(reason)`；调用方决定 degrade 还是 block。`PluginCapabilitySource` 预计 318 → 约 230 行。
+**原问题**：`ResolveAsync` 主循环与 `ResolveInheritedHooksAsync` 都在做：查 package → `IsIntact` → 读 manifest → 校验 manifest.Id → 读取已确认权限 → 取 version lease → 追加 hooks。差别只有失败后果：主路径 `diagnostics.Degrade` 继续，继承路径 `return HookNotes.InheritedHookPluginBlocked(id)`（致命），且两者的退化文案与 hook notice 文案不同（现状说明不是“真正相同”的两段，所以不能简单地合成一句）。
 
-**理由**：权限/lease 是本仓库最容易出并发 bug 的两处（`PluginVersionLeaseManager` 有独立测试），复制两份意味着修一遍要记得另一遍。
+**实施内容**：抽出一个私有 `LoadPluginAsync(plugin, ct)`，返回命名元组 `(Manifest, Lease, SkipReason, UnconfirmedPermissions)`：
+
+- 共享：`IsIntact`、manifest 读取、manifest.Id 比对、已确认权限比对、version lease 获取；“未确认权限”与“损坏”用 `UnconfirmedPermissions` 区分，两个调用方各自保持原有文案（升级消息与 hook notice 都逐字不变）。
+- 各自保留：主路径的 degrade + hook notice + 后续 instructions/skills/roots 展开；继承路径的阻止语义。
+- lease 所有权仍是“调用方拥有”：主路径在展开完成后交给 scope，继承路径立即交给 scope，失败时由 `catch`/`finally` 释放。
+
+**验证**：`PluginHookCapabilityTests`、`DirectTurnCapabilityResolverTests`、`HookAllEventsPluginTests` 覆盖权限未确认 / 损坏 / 变更 / 继承阻断四类场景，均未修改断言；全量 1169 通过 / 4 跳过。
 
 ---
 
@@ -405,7 +396,7 @@ internal abstract record DirectTurnSetup
 |---|---|---|---|
 | PR1 | D1 + D2 + D3 + D4 + D5（死代码与噪音，零行为变化） | 无 | `dotnet test` 全绿；Direct 相关 225 用例不变 |
 | PR2 | C1（策略字面量集中 + 单一未知策略行为） | ✅ 已完成 | 六个 rank 用例 + 未知策略抛错用例 + 全量回归 1169 通过 |
-| PR3 | S4 + S3（`PluginCapabilitySource` 提取、lease/scope 收敛） | 无 | `PluginCapabilitySource`/`PluginVersionLeaseManager`/`AsyncHookExecutor` 既有用例 |
+| PR3 | S4 + S3（`PluginCapabilitySource` 提取、lease/scope 收敛） | ✅ 已完成 | `PluginHookCapabilityTests` / `DirectTurnCapabilityResolverTests` 断言未改；全量 1169 通过 |
 | PR4 | S2（`DirectTurnPolicy`） | 建议在 PR3 后 | 逐来源跑 `DirectTurnCapabilityResolverTests`、`SkillCapabilitySource`/`McpCapabilitySource` 相关用例 |
 | PR5 | S1（子代理校验收敛为一处 + 删 `ValidateCapturedPackageCeiling`） | **依赖 PR4**（需要 `MissingCapabilityIsFatal` 作为唯一判定点） | `SubagentTaskPreflight` / `SubagentTaskCoordinator` / `SubagentTaskExecutor` / `DirectTurnCapabilityResolver` 用例 + 手动验证"受理后删除包"场景 |
 | PR6 | C2（运行时拆分） | 无 | 翻译器新增直测；`DirectAgentChatRuntimeTests` 保持断言不变 |
@@ -415,14 +406,25 @@ internal abstract record DirectTurnSetup
 
 ---
 
-## 6. 量化目标与"不做"清单
+## 6. 进度、量化目标与"不做"清单
 
-**目标**
+**已落地（2026-09-29）**
 
-- 生产代码 6,603 → 约 6,250 行（-5%），其中 `DirectAgentChatRuntime` 608 → 约 350 行。
-- `DirectTurnOrigin` 分支 11 处 → 1 处（策略对象）+ 少量消费点。
-- 子代理任务的重复 package/MCP 读：3 次 → 1 次。
-- 新增能力的触点：从"改 4 个来源 + 2 处校验 + dispatcher 约定"收敛为"改 policy + 对应来源"。
+| 提交 | 内容 | 生产代码变化 | 测试 |
+|---|---|---|---|
+| `a6a421d` | C3 工具故障契约（方案 B） | +1 新类型、invoker 重排 | 1162 通过 |
+| `956f04a` | PR1：D1–D5 死代码与不可达校验 | −12 行（含 1 个删类、1 个删字段） | 1162 通过 |
+| `214ec0d` | PR2：C1 工具策略常量与单一未知值行为 | ±0，3 处字面量收敛 | 1169 通过 |
+| 本轮 | PR3：S4 + S3 复制与生命周期收敛 | 净 +24 行（辅助与文档抵消删除） | 1169 通过 |
+
+实测：Direct 目前 73 文件 / 6,865 行（含未提交的 PR3 与 C3 新增）；`DirectAgentChatRuntime.cs` 608 → 598 行。**行数目标（6,603 → 6,250）已下调预期**：本轮的收益是“同一规则只有一个实现”，不是行数；强行减行会引入新的抽象层。
+
+**剩余目标**
+
+- `DirectTurnOrigin` 分支 11 处 → 1 处（S2/PR4，`DirectTurnPolicy`）。
+- 子代理任务的重复 package/MCP 读：3 次 → 1 次（S1/PR5，依赖 PR4）。
+- 新增能力的触点：从“改 4 个来源 + 2 处校验 + dispatcher 约定”收敛为“改 policy + 对应来源”。
+- `DirectAgentChatRuntime` 拆分（C2/PR6，P2 级）：598 行，拆出事件翻译器与显式联合态。
 
 **不做**
 

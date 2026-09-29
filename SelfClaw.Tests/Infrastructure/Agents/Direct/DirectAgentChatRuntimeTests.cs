@@ -1,4 +1,4 @@
-using SelfClaw.Tests.Infrastructure.Agents.Direct.Capabilities;
+﻿using SelfClaw.Tests.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Tests.Infrastructure.Agents.Direct.Hooks.TestDoubles;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
@@ -363,11 +363,7 @@ public sealed class DirectAgentChatRuntimeTests
             [],
             new Dictionary<Guid, string>(),
             [],
-            () =>
-            {
-                order.Add("capability");
-                return ValueTask.CompletedTask;
-            });
+            RecordingScope(() => order.Add("capability")));
         var factory = new FakeChatClientFactory(client);
 
         await CollectAsync(CreateRuntime(factory, new FakeCapabilityResolver(capabilityLease))
@@ -388,11 +384,7 @@ public sealed class DirectAgentChatRuntimeTests
         var releases = 0;
         var capabilityLease = new DirectTurnCapabilityLease([], [],
             new Dictionary<Guid, string>(), [],
-            () =>
-            {
-                releases++;
-                return ValueTask.CompletedTask;
-            });
+            RecordingScope(() => releases++));
         Exception failure = canceled
             ? new OperationCanceledException("provider setup canceled")
             : new InvalidOperationException("provider setup failed");
@@ -430,11 +422,7 @@ public sealed class DirectAgentChatRuntimeTests
         });
         var capabilityLease = new DirectTurnCapabilityLease([], [],
             new Dictionary<Guid, string>(), [],
-            () =>
-            {
-                order.Add("capability");
-                return ValueTask.CompletedTask;
-            });
+            RecordingScope(() => order.Add("capability")));
         var factory = new FakeChatClientFactory(client);
         var request = (DirectChatTurnRequest)CreateRequest(factory.Profile.Id);
         request = request with
@@ -463,11 +451,7 @@ public sealed class DirectAgentChatRuntimeTests
         var client = new ScriptedChatClient([], dispose: () => order.Add("provider"));
         var capabilityLease = new DirectTurnCapabilityLease([], [],
             new Dictionary<Guid, string>(), [],
-            () =>
-            {
-                order.Add("capability");
-                return ValueTask.CompletedTask;
-            });
+            RecordingScope(() => order.Add("capability")));
         var factory = new FakeChatClientFactory(client, contextWindowTokens: 400)
         {
             Options = new ChatOptions
@@ -514,7 +498,6 @@ public sealed class DirectAgentChatRuntimeTests
             [],
             new Dictionary<Guid, string>(),
             [],
-            disposeAsync: null,
             hooks:
             [
                 HookTestFactory.CreateHook(
@@ -542,7 +525,6 @@ public sealed class DirectAgentChatRuntimeTests
             [],
             new Dictionary<Guid, string>(),
             [],
-            disposeAsync: null,
             hooks:
             [
                 HookTestFactory.CreateHook(
@@ -569,7 +551,6 @@ public sealed class DirectAgentChatRuntimeTests
             [],
             new Dictionary<Guid, string>(),
             [],
-            disposeAsync: null,
             hooks: [],
             hookNotices: ["Plugin 'alpha' declares hooks but was skipped (broken); its hooks are not active in this turn."],
             hookBlockReason: "Inherited hook plugin 'alpha' is unavailable or changed since delegation; the turn was blocked.");
@@ -627,13 +608,29 @@ public sealed class DirectAgentChatRuntimeTests
         payload.GetProperty("toolCallCount").GetInt32().Should().Be(0);
     }
 
+    /// <summary>A capability scope holding one lease that records when it was released.</summary>
+    private static DirectTurnLeaseScope RecordingScope(Action onDispose)
+    {
+        var scope = new DirectTurnLeaseScope();
+        scope.Add(new RecordingLease(onDispose));
+        return scope;
+    }
+
+    private sealed class RecordingLease(Action onDispose) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            onDispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
     private static DirectTurnCapabilityLease LeaseWithRunCompletedHook()
         => new(
             [],
             [],
             new Dictionary<Guid, string>(),
             [],
-            disposeAsync: null,
             hooks:
             [
                 HookTestFactory.CreateHook("alpha", "audit", PluginHookEvent.RunCompleted, runAsync: true)

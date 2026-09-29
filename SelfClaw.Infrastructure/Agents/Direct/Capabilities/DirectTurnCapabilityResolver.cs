@@ -138,7 +138,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             BindTools(effectiveRequest, bindings),
             skills.MessageAdjustments,
             diagnostics.Messages,
-            leases.DisposeAsync,
+            leases,
             plugins.Hooks,
             plugins.HookNotices,
             plugins.HookBlockReason);

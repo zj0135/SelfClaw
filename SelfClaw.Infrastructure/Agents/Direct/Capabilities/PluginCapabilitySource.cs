@@ -61,46 +61,25 @@ internal sealed class PluginCapabilitySource
                                        agent.PluginIds.Contains(package.Id, StringComparer.OrdinalIgnoreCase))
                      .OrderBy(package => package.Id, StringComparer.Ordinal))
         {
-            IDisposable? versionLease = null;
-            PluginManifest? manifest = null;
+            var (manifest, versionLease, skipReason, unconfirmedPermissions) =
+                await LoadPluginAsync(plugin, cancellationToken).ConfigureAwait(false);
+            if (skipReason is not null)
+            {
+                diagnostics.Degrade(unconfirmedPermissions
+                    ? $"Plugin '{plugin.Id}' was skipped because permissions require confirmation: {skipReason}."
+                    : $"Plugin '{plugin.Id}' was skipped because it is broken: {skipReason}");
+                if (manifest is { Contributions.Hooks.Count: > 0 })
+                {
+                    hookNotices.Add(HookNotes.PluginSkipped(
+                        plugin.Id,
+                        unconfirmedPermissions ? $"permissions require confirmation: {skipReason}" : skipReason));
+                }
+
+                continue;
+            }
+
             try
             {
-                if (!ExtensionInstallation.IsIntact(plugin))
-                {
-                    throw new InvalidDataException("installation directory is missing");
-                }
-
-                manifest = await _contentCache.GetManifestAsync(
-                        plugin,
-                        token => _manifestReader.ReadAsync(
-                            ExtensionInstallation.PluginManifestPath(plugin),
-                            token),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                if (!string.Equals(manifest.Id, plugin.Id, StringComparison.Ordinal))
-                {
-                    throw new InvalidDataException("manifest id does not match the installed package");
-                }
-
-                var acknowledged = ExtensionCatalog.ReadAcknowledgedPermissions(plugin.AcknowledgedPermissionsJson);
-                var missingPermissions = manifest.Permissions.Except(acknowledged, StringComparer.Ordinal).ToArray();
-                if (missingPermissions.Length > 0)
-                {
-                    diagnostics.Degrade(
-                        $"Plugin '{plugin.Id}' was skipped because permissions require confirmation: {string.Join(", ", missingPermissions)}.");
-                    if (manifest.Contributions.Hooks.Count > 0)
-                    {
-                        hookNotices.Add(HookNotes.PluginSkipped(
-                            plugin.Id,
-                            $"permissions require confirmation: {string.Join(", ", missingPermissions)}"));
-                    }
-
-                    continue;
-                }
-
-                // The lease is taken before any package file is read so a concurrent delete cannot pull the
-                // version directory out from under this turn.
-                versionLease = _versionLeaseManager.Acquire(plugin.InstallPath);
                 string? instructionSection = null;
                 if (manifest.Contributions.DirectInstructions is not null)
                 {
@@ -231,33 +210,19 @@ internal sealed class PluginCapabilitySource
                 return HookNotes.InheritedHookPluginBlocked(inherited.Id);
             }
 
-            IDisposable? versionLease = null;
+            var (manifest, versionLease, skipReason, _) =
+                await LoadPluginAsync(plugin!, cancellationToken).ConfigureAwait(false);
             try
             {
-                var manifest = await _contentCache.GetManifestAsync(
-                        plugin!,
-                        token => _manifestReader.ReadAsync(
-                            ExtensionInstallation.PluginManifestPath(plugin!),
-                            token),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                if (!string.Equals(manifest.Id, plugin!.Id, StringComparison.Ordinal))
-                {
-                    throw new InvalidDataException("manifest id does not match the installed package");
-                }
-
-                var acknowledged = ExtensionCatalog.ReadAcknowledgedPermissions(plugin.AcknowledgedPermissionsJson);
-                var missingPermissions = manifest.Permissions.Except(acknowledged, StringComparer.Ordinal).ToArray();
-                if (missingPermissions.Length > 0)
+                if (skipReason is not null || manifest is null || versionLease is null)
                 {
                     return HookNotes.InheritedHookPluginBlocked(inherited.Id);
                 }
 
-                versionLease = _versionLeaseManager.Acquire(plugin.InstallPath);
                 for (var index = 0; index < manifest.Contributions.Hooks.Count; index++)
                 {
                     hooks.Add(new ResolvedPluginHook(
-                        plugin.Id,
+                        plugin!.Id,
                         plugin.Version,
                         plugin.InstallPath,
                         manifest.Contributions.Hooks[index],
@@ -285,6 +250,60 @@ internal sealed class PluginCapabilitySource
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Reads one Plugin's manifest and permissions and takes its version lease, so the Agent-bound path and
+    /// the inherited-hook path cannot drift on integrity, identity, permission or lease rules. A skipped
+    /// Plugin reports the detail and whether permissions were the cause; the caller owns the returned lease
+    /// and decides whether a skip degrades or blocks the turn.
+    /// </summary>
+    private async Task<(PluginManifest? Manifest, IDisposable? Lease, string? SkipReason, bool UnconfirmedPermissions)>
+        LoadPluginAsync(ExtensionPackageRecord plugin, CancellationToken cancellationToken)
+    {
+        PluginManifest? manifest = null;
+        IDisposable? versionLease = null;
+        try
+        {
+            if (!ExtensionInstallation.IsIntact(plugin))
+            {
+                return (null, null, "installation directory is missing", false);
+            }
+
+            manifest = await _contentCache.GetManifestAsync(
+                    plugin,
+                    token => _manifestReader.ReadAsync(
+                        ExtensionInstallation.PluginManifestPath(plugin),
+                        token),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!string.Equals(manifest.Id, plugin.Id, StringComparison.Ordinal))
+            {
+                return (manifest, null, "manifest id does not match the installed package", false);
+            }
+
+            var acknowledged = ExtensionCatalog.ReadAcknowledgedPermissions(plugin.AcknowledgedPermissionsJson);
+            var missingPermissions = manifest.Permissions.Except(acknowledged, StringComparer.Ordinal).ToArray();
+            if (missingPermissions.Length > 0)
+            {
+                return (manifest, null, string.Join(", ", missingPermissions), true);
+            }
+
+            // The lease is taken before any package file is read so a concurrent delete cannot pull the
+            // version directory out from under this turn.
+            versionLease = _versionLeaseManager.Acquire(plugin.InstallPath);
+            return (manifest, versionLease, null, false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // A lease taken before the failure must not outlive the skipped Plugin.
+            versionLease?.Dispose();
+            return (manifest, null, exception.Message, false);
+        }
     }
 
     private async Task<IReadOnlyList<ResolvedSkill>> ReadSkillsAsync(

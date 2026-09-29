@@ -4,17 +4,21 @@ using Microsoft.Extensions.AI;
 
 namespace SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 
+/// <summary>
+/// One turn's resolved capabilities, plus the scope that owns every lease taken while resolving them - so
+/// callers read the capabilities and release the leases through the same object. Idempotency belongs to the
+/// scope; this type only holds it.
+/// </summary>
 internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
 {
-    private readonly Func<ValueTask>? _disposeAsync;
-    private int _disposed;
+    private readonly DirectTurnLeaseScope? _scope;
 
     public DirectTurnCapabilityLease(
         IReadOnlyList<string> systemInstructions,
         IReadOnlyList<DirectToolBinding> tools,
         IReadOnlyDictionary<Guid, string> messageAdjustments,
         IReadOnlyList<string> diagnostics,
-        Func<ValueTask>? disposeAsync = null,
+        DirectTurnLeaseScope? scope = null,
         IReadOnlyList<ResolvedPluginHook>? hooks = null,
         IReadOnlyList<string>? hookNotices = null,
         string? hookBlockReason = null)
@@ -27,7 +31,7 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
         Hooks = hooks ?? [];
         HookNotices = hookNotices ?? [];
         HookBlockReason = hookBlockReason;
-        _disposeAsync = disposeAsync;
+        _scope = scope;
     }
 
     public IReadOnlyList<string> SystemInstructions { get; }
@@ -39,8 +43,5 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
     public IReadOnlyList<string> HookNotices { get; }
     public string? HookBlockReason { get; }
 
-    public ValueTask DisposeAsync()
-        => Interlocked.Exchange(ref _disposed, 1) == 0 && _disposeAsync is not null
-            ? _disposeAsync()
-            : ValueTask.CompletedTask;
+    public ValueTask DisposeAsync() => _scope?.DisposeAsync() ?? ValueTask.CompletedTask;
 }
