@@ -13,151 +13,151 @@
         MinHeight="600"
         WindowStartupLocation="CenterScreen"
         Icon="pack://application:,,,/Assets/icon/icon.ico"
-        WindowStyle="None"
+        WindowStyle="SingleBorderWindow"
         ResizeMode="CanResize"
         Background="Transparent"
         ThemeMode="System">
-    <shell:WindowChrome.WindowChrome>
-        <shell:WindowChrome CaptionHeight="0"
-                            CornerRadius="20"
-                            GlassFrameThickness="0"
-                            ResizeBorderThickness="0"
-                            UseAeroCaptionButtons="False"/>
-    </shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome.WindowChrome>
+                <shell:WindowChrome CaptionHeight="0"
+                                    CornerRadius="20"
+                                    GlassFrameThickness="0"
+                                    ResizeBorderThickness="0"
+                                    UseAeroCaptionButtons="False"/>
+        </shell:WindowChrome.WindowChrome>
 
-    <Window.Resources>
-        <SolidColorBrush x:Key="TitleIconBrush"
-                         Color="#FF171A1F"/>
-        <SolidColorBrush x:Key="TitleIconHoverBrush"
-                         Color="#FFF1F3F6"/>
-        <SolidColorBrush x:Key="TitleIconPressedBrush"
-                         Color="#FFE5E7EB"/>
+        <Window.Resources>
+                <SolidColorBrush x:Key="TitleIconBrush"
+                                 Color="#FF171A1F"/>
+                <SolidColorBrush x:Key="TitleIconHoverBrush"
+                                 Color="#FFF1F3F6"/>
+                <SolidColorBrush x:Key="TitleIconPressedBrush"
+                                 Color="#FFE5E7EB"/>
 
-        <Style x:Key="TitleIconPathStyle"
-               TargetType="Path">
-            <Setter Property="Stroke"
-                    Value="{StaticResource TitleIconBrush}"/>
-            <Setter Property="StrokeThickness"
-                    Value="1.35"/>
-            <Setter Property="StrokeStartLineCap"
-                    Value="Round"/>
-            <Setter Property="StrokeEndLineCap"
-                    Value="Round"/>
-            <Setter Property="StrokeLineJoin"
-                    Value="Round"/>
-            <Setter Property="Fill"
-                    Value="Transparent"/>
-            <Setter Property="Stretch"
-                    Value="Uniform"/>
-            <Setter Property="SnapsToDevicePixels"
-                    Value="True"/>
-        </Style>
+                <Style x:Key="TitleIconPathStyle"
+                       TargetType="Path">
+                        <Setter Property="Stroke"
+                                Value="{StaticResource TitleIconBrush}"/>
+                        <Setter Property="StrokeThickness"
+                                Value="1.35"/>
+                        <Setter Property="StrokeStartLineCap"
+                                Value="Round"/>
+                        <Setter Property="StrokeEndLineCap"
+                                Value="Round"/>
+                        <Setter Property="StrokeLineJoin"
+                                Value="Round"/>
+                        <Setter Property="Fill"
+                                Value="Transparent"/>
+                        <Setter Property="Stretch"
+                                Value="Uniform"/>
+                        <Setter Property="SnapsToDevicePixels"
+                                Value="True"/>
+                </Style>
 
-        <Style x:Key="TitleIconButtonStyle"
-               TargetType="Button">
-            <Setter Property="Width"
-                    Value="32"/>
-            <Setter Property="Height"
-                    Value="30"/>
-            <Setter Property="MinHeight"
-                    Value="30"/>
-            <Setter Property="Padding"
-                    Value="0"/>
-            <Setter Property="Margin"
-                    Value="0,0,2,0"/>
-            <Setter Property="Background"
-                    Value="Transparent"/>
-            <Setter Property="BorderBrush"
-                    Value="Transparent"/>
-            <Setter Property="BorderThickness"
-                    Value="0"/>
-            <Setter Property="Cursor"
-                    Value="Hand"/>
-            <Setter Property="Focusable"
-                    Value="False"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Root"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="6">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver"
-                                     Value="True">
-                                <Setter TargetName="Root"
-                                        Property="Background"
-                                        Value="{StaticResource TitleIconHoverBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed"
-                                     Value="True">
-                                <Setter TargetName="Root"
-                                        Property="Background"
-                                        Value="{StaticResource TitleIconPressedBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+                <Style x:Key="TitleIconButtonStyle"
+                       TargetType="Button">
+                        <Setter Property="Width"
+                                Value="32"/>
+                        <Setter Property="Height"
+                                Value="30"/>
+                        <Setter Property="MinHeight"
+                                Value="30"/>
+                        <Setter Property="Padding"
+                                Value="0"/>
+                        <Setter Property="Margin"
+                                Value="0,0,2,0"/>
+                        <Setter Property="Background"
+                                Value="Transparent"/>
+                        <Setter Property="BorderBrush"
+                                Value="Transparent"/>
+                        <Setter Property="BorderThickness"
+                                Value="0"/>
+                        <Setter Property="Cursor"
+                                Value="Hand"/>
+                        <Setter Property="Focusable"
+                                Value="False"/>
+                        <Setter Property="Template">
+                                <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                                <Border x:Name="Root"
+                                                        Background="{TemplateBinding Background}"
+                                                        CornerRadius="6">
+                                                        <ContentPresenter HorizontalAlignment="Center"
+                                                                          VerticalAlignment="Center"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver"
+                                                                 Value="True">
+                                                                <Setter TargetName="Root"
+                                                                        Property="Background"
+                                                                        Value="{StaticResource TitleIconHoverBrush}"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsPressed"
+                                                                 Value="True">
+                                                                <Setter TargetName="Root"
+                                                                        Property="Background"
+                                                                        Value="{StaticResource TitleIconPressedBrush}"/>
+                                                        </Trigger>
+                                                </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                </Setter.Value>
+                        </Setter>
+                </Style>
 
-        <Style x:Key="WindowCaptionButtonStyle"
-               TargetType="Button"
-               BasedOn="{StaticResource TitleIconButtonStyle}">
-            <Setter Property="Width"
-                    Value="44"/>
-            <Setter Property="Height"
-                    Value="34"/>
-            <Setter Property="MinHeight"
-                    Value="34"/>
-            <Setter Property="Margin"
-                    Value="0"/>
-        </Style>
+                <Style x:Key="WindowCaptionButtonStyle"
+                       TargetType="Button"
+                       BasedOn="{StaticResource TitleIconButtonStyle}">
+                        <Setter Property="Width"
+                                Value="44"/>
+                        <Setter Property="Height"
+                                Value="34"/>
+                        <Setter Property="MinHeight"
+                                Value="34"/>
+                        <Setter Property="Margin"
+                                Value="0"/>
+                </Style>
 
-        <Style x:Key="ToolIconButtonStyle"
-               TargetType="Button"
-               BasedOn="{StaticResource TitleIconButtonStyle}">
-            <Setter Property="Width"
-                    Value="34"/>
-            <Setter Property="Margin"
-                    Value="0,0,6,0"/>
-        </Style>
-    </Window.Resources>
+                <Style x:Key="ToolIconButtonStyle"
+                       TargetType="Button"
+                       BasedOn="{StaticResource TitleIconButtonStyle}">
+                        <Setter Property="Width"
+                                Value="34"/>
+                        <Setter Property="Margin"
+                                Value="0,0,6,0"/>
+                </Style>
+        </Window.Resources>
 
-    <Grid Background="Transparent">
-        <!-- 留白为 0：WebView2 铺满整个窗口，没有属于父窗口的边缘。缩放热区因此做在网页里（App.vue 的
+        <Grid Background="Transparent">
+                <!-- 留白为 0：WebView2 铺满整个窗口，没有属于父窗口的边缘。缩放热区因此做在网页里（App.vue 的
              .resize-edge），按下时 post window-resize，宿主再发 WM_NCLBUTTONDOWN + 方位码。 -->
-        <Border x:Name="WindowFrame"
-                BorderThickness="0"
-                BorderBrush="Transparent">
-            <Grid ClipToBounds="True">
-                <Border Background="#FFFFFF"/>
+                <Border x:Name="WindowFrame"
+                        BorderThickness="0"
+                        BorderBrush="Transparent">
+                        <Grid ClipToBounds="True">
+                                <Border Background="#FFFFFF"/>
 
-                <Grid>
-                    <webview2:WebView2 x:Name="TranscriptView"
-                                       Margin="0"/>
+                                <Grid>
+                                        <webview2:WebView2 x:Name="TranscriptView"
+                                                           Margin="0"/>
 
-                    <Border x:Name="WebViewFallback"
-                            Background="#FFFFFF"
-                            Visibility="Collapsed">
-                        <StackPanel HorizontalAlignment="Center"
-                                    VerticalAlignment="Center">
-                            <TextBlock TextAlignment="Center"
-                                       FontSize="18"
-                                       Foreground="#8A929E"
-                                       Text="WebView2 runtime is required to render SelfClaw.&#10;Install Microsoft Edge WebView2 Runtime and restart the app."/>
-                            <Button Width="96"
-                                    Height="34"
-                                    Margin="0,18,0,0"
-                                    HorizontalAlignment="Center"
-                                    Content="Close"
-                                    Click="OnFallbackCloseButtonClick"/>
-                        </StackPanel>
-                    </Border>
-                </Grid>
-            </Grid>
-        </Border>
-    </Grid>
+                                        <Border x:Name="WebViewFallback"
+                                                Background="#FFFFFF"
+                                                Visibility="Collapsed">
+                                                <StackPanel HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock TextAlignment="Center"
+                                                                   FontSize="18"
+                                                                   Foreground="#8A929E"
+                                                                   Text="WebView2 runtime is required to render SelfClaw.&#10;Install Microsoft Edge WebView2 Runtime and restart the app."/>
+                                                        <Button Width="96"
+                                                                Height="34"
+                                                                Margin="0,18,0,0"
+                                                                HorizontalAlignment="Center"
+                                                                Content="Close"
+                                                                Click="OnFallbackCloseButtonClick"/>
+                                                </StackPanel>
+                                        </Border>
+                                </Grid>
+                        </Grid>
+                </Border>
+        </Grid>
 </Window>

@@ -94,6 +94,37 @@ Vue 目录执行 `npm test`、`npm run build`。端到端最终复核时，先�
 4. 内置 Pet 元数据缓存按进程生命周期刷新；Plugin 广播与资源字节预算已经验证，多 iframe 的实际 CPU/渲染成本及 WebView deferral 释放仍需实机测量。
 5. 依赖还原成功，但在线 NuGet 漏洞数据源不可达，出现 NU1900；本次没有宣称在线依赖审计通过。默认 Playwright dev-server 收尾问题保留为测试环境限制，外部服务器方式已完整通过。
 
+## 6. 主窗口最小化/最大化动画（2026-09-29）
+
+**症状**：主窗口最小化时没有 Windows 的过渡动画，窗口直接消失/出现，而同一台机器上其他应用有动画。
+
+**根因是 `WindowStyle="None"`，不是 `WindowChrome`。** WPF 创建窗口时传入的是带标题栏的风格，再在 `Window.CorrectStyleForBorderlessWindowCase()` 里把 `WS_CAPTION` 从 HWND 上摘掉。没有标题栏风格的顶层窗口在 Windows 上不播放最小化/最大化/还原过渡：实测状态切换在 ~30ms 内一次性完成。`WindowChrome`、`CornerRadius` 引起的 `SetWindowRgn` 圆角区域、`Background="Transparent"`、`ThemeMode="System"`、系统背景材质都与此无关（逐个隔离验证过）。
+
+**证据**（隔离 WPF 探针，1920×1080，Windows 10 19045；窗口内容铺满红色，逐帧抓屏统计窗口区域内红色像素占比，同一进程内只改一个变量）：
+
+| 配置 | WS_CAPTION | 最小化后红色占比时间线 | 结论 |
+| --- | --- | --- | --- |
+| `WindowStyle=None` + WindowChrome(CornerRadius=20)（原配置） | 无 | `12ms:100%` → `39ms:0%` | 无动画 |
+| `WindowStyle=None` + 代码补回 `WS_CAPTION` | 有 | `10:86% 32:86% 55:74% 71:40% 111:0` | 有动画 |
+| `WindowStyle=SingleBorderWindow` + 同一个 WindowChrome（现配置） | 有 | `11:100% 32:100% 53:83% 83:34% 108:0` | 有动画 |
+
+后两行同时验证了规则：只补 `WS_CAPTION` 一个风格位，动画就回来了。现配置与原配置的两帧对比里，客户区像素覆盖（163084/163200）和 `GetWindowRgn` 结果（`COMPLEXREGION`，box `(0,0)-(480,340)`）完全一致，说明去掉标题栏的观感和 20px 圆角没有变化；上表最后一行在最大化方向上同样恢复了由小到大的过渡。
+
+**修复**：[MainWindow.xaml](../SelfClaw.Desktop/MainWindow.xaml) 把 `WindowStyle` 从 `None` 改成 `SingleBorderWindow`，`WindowChrome`（`CaptionHeight=0`、`GlassFrameThickness=0`）继续负责让客户区铺满整窗，因此窗口外观不变。窗口的拖拽/缩放热区（Vue 侧 `window-*` 命令 + `WM_NCLBUTTONDOWN`）与 `WM_GETMINMAXINFO` 固定最大化边界都不受影响：`WindowChrome` 的 `WM_NCHITTEST` 处理只依赖 `CaptionHeight`/`ResizeBorderThickness`（均为 0），与 `WindowStyle` 无关。
+
+**限制**：证据来自隔离探针（复刻 MainWindow 的窗口属性，并与运行中的真实窗口 HWND 风格位逐位比对）。真实 WebView2 窗口的动画仍需重启 Desktop 后目视确认。
+
+复查入口（`.scratch` 不被 Git 跟踪，探针只依赖 `net10.0-windows`）：
+
+```powershell
+# 最小化/最大化动画对照（WindowStyle=None vs SingleBorderWindow，同一个 WindowChrome）
+dotnet run --project .scratch/window-minimize-animation/probes/WindowMinimizeProbe.csproj --no-build
+# 转储运行中真实窗口的风格位/圆角区域
+dotnet run --project .scratch/window-minimize-animation/probes/WindowMinimizeProbe.csproj --no-build -- --dump SelfClaw.Desktop
+```
+
+探针会自己创建并最小化临时窗口（会短暂抢焦点），结束后自动关闭，不读写 AppData。
+
 ---
 
 <details>

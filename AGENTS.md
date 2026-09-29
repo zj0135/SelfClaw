@@ -173,7 +173,7 @@ Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandle
 
 ### WPF shell
 
-- `MainWindow.xaml` — custom chrome, title bar buttons, single WebView2 host
+- `MainWindow.xaml` — custom chrome, title bar buttons, single WebView2 host. `WindowStyle` must stay `SingleBorderWindow`: `WindowChrome` (`CaptionHeight=0`, `GlassFrameThickness=0`) already makes the client area cover the whole window, while `WindowStyle=None` strips `WS_CAPTION` and Windows then skips the minimize/maximize/restore animations (see §6 of `docs/desktop-architecture-review.md`)
 - Vue `AppSidebar.vue` and `useConversationNavigation` — sidebar/navigation and correlated operation feedback
 - Settings view: AI 提供商, 模型管理, 编程助手, 代理助手, 插件, and 宠物 are connected to the desktop host; remaining pages are frontend placeholders/mock
 - The right-hand plugin panel column lives in the Vue app, not in WPF (see 插件面板)
