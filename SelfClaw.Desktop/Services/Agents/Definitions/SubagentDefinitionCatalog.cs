@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop.Services.Agents.Definitions;
@@ -10,7 +11,7 @@ namespace SelfClaw.Desktop.Services.Agents.Definitions;
 internal sealed class SubagentDefinitionCatalog : ISubagentDefinitionCatalog
 {
     internal const int DefaultMaxRunSeconds = 900;
-    internal const string DefaultToolPolicy = "read-only";
+    internal const string DefaultToolPolicy = AgentRuntimeDefinition.ReadOnlyToolPolicy;
     internal const int MinimumMaxRunSeconds = 30;
     internal const int MaximumMaxRunSeconds = 3600;
     private const int MaximumNameBytes = 256;
@@ -311,7 +312,7 @@ internal sealed class SubagentDefinitionCatalog : ISubagentDefinitionCatalog
         }
 
         var normalized = value.Trim().ToLowerInvariant();
-        if (normalized is "none" or DefaultToolPolicy or "system")
+        if (IsKnownToolPolicy(normalized))
         {
             return normalized;
         }
@@ -494,10 +495,15 @@ internal sealed class SubagentDefinitionCatalog : ISubagentDefinitionCatalog
     private static string NormalizeToolPolicyForSave(string? toolPolicy)
     {
         var normalized = toolPolicy?.Trim().ToLowerInvariant();
-        return normalized is "none" or DefaultToolPolicy or "system"
+        return normalized is not null && IsKnownToolPolicy(normalized)
             ? normalized
             : throw new ArgumentException($"Subagent tools value '{toolPolicy}' is invalid.", nameof(toolPolicy));
     }
+
+    private static bool IsKnownToolPolicy(string normalized)
+        => normalized is AgentRuntimeDefinition.NoneToolPolicy
+            or AgentRuntimeDefinition.ReadOnlyToolPolicy
+            or AgentRuntimeDefinition.SystemToolPolicy;
 
     private static IReadOnlyList<string> NormalizeIdentifiers(
         IEnumerable<string> values,

@@ -268,7 +268,7 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
     private static AgentTurnState CreateTurn(SubagentTaskRecord task, ConversationRuntimeState state)
     {
         var agent = new AgentRuntimeDefinition(task.SubagentId, task.SubagentName, string.Empty, AgentExecutionMode.Direct,
-            "read-only", [], [], [], [], string.Empty);
+            AgentRuntimeDefinition.ReadOnlyToolPolicy, [], [], [], [], string.Empty);
         var turn = new AgentTurnState(task.ChildTurnId, agent)
         {
             MessageCreated = state.Messages.Any(message => message.Id == task.ChildTurnId)

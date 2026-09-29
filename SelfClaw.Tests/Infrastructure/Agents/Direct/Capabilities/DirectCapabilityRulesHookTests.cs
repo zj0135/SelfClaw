@@ -1,6 +1,7 @@
 using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Capabilities;
@@ -41,6 +42,32 @@ public sealed class DirectCapabilityRulesHookTests : IDisposable
         var ceiling = new DirectCapabilityCeiling("system", [], [], [], []);
 
         DirectCapabilityRules.CheckPackages("system", [], [], ceiling, []).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(AgentRuntimeDefinition.SystemToolPolicy, AgentRuntimeDefinition.SystemToolPolicy, true)]
+    [InlineData(AgentRuntimeDefinition.ReadOnlyToolPolicy, AgentRuntimeDefinition.SystemToolPolicy, true)]
+    [InlineData(AgentRuntimeDefinition.NoneToolPolicy, AgentRuntimeDefinition.SystemToolPolicy, true)]
+    [InlineData(AgentRuntimeDefinition.NoneToolPolicy, AgentRuntimeDefinition.ReadOnlyToolPolicy, true)]
+    [InlineData(AgentRuntimeDefinition.SystemToolPolicy, AgentRuntimeDefinition.ReadOnlyToolPolicy, false)]
+    [InlineData(AgentRuntimeDefinition.ReadOnlyToolPolicy, AgentRuntimeDefinition.NoneToolPolicy, false)]
+    public void IsToolPolicyAuthorized_compares_policy_rank(string requested, string ceiling, bool expected)
+        => DirectCapabilityRules.IsToolPolicyAuthorized(requested, ceiling).Should().Be(expected);
+
+    [Fact]
+    public void An_unknown_tool_policy_is_a_definition_bug_rather_than_a_silent_deny()
+    {
+        // 'readonly' is the plausible typo this guards against: silently treating it as unauthorized
+        // (or as a ceiling) would look like capabilities vanishing instead of a broken definition.
+        const string unknown = "readonly";
+
+        var asRequested = () => DirectCapabilityRules.IsToolPolicyAuthorized(unknown, AgentRuntimeDefinition.SystemToolPolicy);
+        var asCeiling = () => DirectCapabilityRules.IsToolPolicyAuthorized(AgentRuntimeDefinition.SystemToolPolicy, unknown);
+        var asPolicy = () => DirectCapabilityRules.Allows(ToolCallKind.Run, unknown);
+
+        asRequested.Should().Throw<InvalidDataException>().WithMessage("*'readonly'*");
+        asCeiling.Should().Throw<InvalidDataException>().WithMessage("*'readonly'*");
+        asPolicy.Should().Throw<InvalidDataException>().WithMessage("*'readonly'*");
     }
 
     public void Dispose()

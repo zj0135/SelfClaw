@@ -7,11 +7,13 @@ namespace SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 
 internal static class DirectCapabilityRules
 {
+    /// <summary>
+    /// Policies are ranked from most to least restrictive, so authorization is a rank comparison. An
+    /// unparseable value is a definition bug: it throws rather than silently denying (which would look
+    /// like tools disappearing) or granting.
+    /// </summary>
     internal static bool IsToolPolicyAuthorized(string requested, string ceiling)
-    {
-        var rank = ToolPolicyRank(requested);
-        return rank >= 0 && rank <= ToolPolicyRank(ceiling);
-    }
+        => ToolPolicyRank(requested) <= ToolPolicyRank(ceiling);
 
     internal static string RestrictToolPolicy(string requested, string ceiling)
         => IsToolPolicyAuthorized(requested, ceiling) ? requested : ceiling;
@@ -19,10 +21,10 @@ internal static class DirectCapabilityRules
     internal static bool Allows(ToolCallKind kind, string policy)
         => policy switch
         {
-            "none" => false,
-            "read-only" => kind is ToolCallKind.List or ToolCallKind.Search or ToolCallKind.Read,
+            AgentRuntimeDefinition.NoneToolPolicy => false,
+            AgentRuntimeDefinition.ReadOnlyToolPolicy => kind is ToolCallKind.List or ToolCallKind.Search or ToolCallKind.Read,
             AgentRuntimeDefinition.SystemToolPolicy => true,
-            _ => throw new InvalidDataException($"Unknown Direct tool policy '{policy}'.")
+            _ => throw UnknownToolPolicy(policy)
         };
 
     internal static SubagentPreflightFailure? CheckPackages(
@@ -107,7 +109,17 @@ internal static class DirectCapabilityRules
         => capabilities.FirstOrDefault(capability => string.Equals(capability.Id, id, StringComparison.OrdinalIgnoreCase));
 
     private static int ToolPolicyRank(string policy)
-        => policy switch { "none" => 0, "read-only" => 1, AgentRuntimeDefinition.SystemToolPolicy => 2, _ => -1 };
+        => policy switch
+        {
+            AgentRuntimeDefinition.NoneToolPolicy => 0,
+            AgentRuntimeDefinition.ReadOnlyToolPolicy => 1,
+            AgentRuntimeDefinition.SystemToolPolicy => 2,
+            _ => throw UnknownToolPolicy(policy)
+        };
+
+    private static InvalidDataException UnknownToolPolicy(string policy)
+        => new($"Unknown tool policy '{policy}'. Expected '{AgentRuntimeDefinition.NoneToolPolicy}', " +
+               $"'{AgentRuntimeDefinition.ReadOnlyToolPolicy}' or '{AgentRuntimeDefinition.SystemToolPolicy}'.");
 
     private static SubagentPreflightFailure NotAuthorized(string message) => new(SubagentErrorCodes.CapabilityNotAuthorized, message);
     private static SubagentPreflightFailure Unavailable(string message) => new(SubagentErrorCodes.CapabilityUnavailable, message);

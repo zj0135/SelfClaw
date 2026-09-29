@@ -22,7 +22,7 @@ public sealed partial class MainWindowViewModel
         var normalizedAgentId = NormalizeAgentId(agentId);
         return _agents.FirstOrDefault(item => string.Equals(item.Id, normalizedAgentId, StringComparison.OrdinalIgnoreCase))
                ?? new DesktopAgentDefinition(normalizedAgentId, $"{normalizedAgentId} (不可用)", "代理定义已删除或不可用。",
-                   AgentExecutionMode.Direct, "none", [], [], [], [], string.Empty, string.Empty, false, ["代理定义不可用。"]);
+                   AgentExecutionMode.Direct, AgentRuntimeDefinition.NoneToolPolicy, [], [], [], [], string.Empty, string.Empty, false, ["代理定义不可用。"]);
     }
 
     private void SelectAgentCore(string? agentId)

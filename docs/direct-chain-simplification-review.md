@@ -42,7 +42,7 @@ Direct 链路的冗余**主要不是行数冗余，而是概念冗余**：同一
 | D3 | `setup.Invoker` 与 `state.Invoker` 双持有 | 可读性 | 单一真源 | 极低 |
 | D4 | `RunStartedEvent` 的合成 session id 无消费者 | 噪音 | 明确语义 | 极低 |
 | D5 | `AiProviderClientRequest.Tools` 必填但恒为空 | 契约陷阱 | 删字段 | 低 |
-| C1 | 工具策略字面量分散 + 同一非法值两种行为 | 一致性 | 单一判定 | 低 |
+| C1 | 工具策略字面量分散 + 同一非法值两种行为 | 一致性 | ✅ 已实施（见 §3） | 完成 |
 | C2 | `DirectAgentChatRuntime` 608 行承担 7 项职责 | 可读性 | 拆分 3 个文件 | 低 |
 | C3 | `DirectToolInvoker` 工具故障契约（模型可见真实错误 + 自持熔断） | 行为契约 | ✅ 已实施（方案 B，见 §3） | 完成 |
 | C4 | 4 类兜底文案指向同一个"工具结果不合法" | 可读性 | 统一诊断 | 极低 |
@@ -270,9 +270,11 @@ internal sealed class CapabilityLease(CapabilityResolution resolution, DirectTur
 
 ## 3. P2 可读性与一致性
 
-### C1. 工具策略：字面量分散 + 同一非法值两种行为
+### C1. 工具策略：字面量分散 + 同一非法值两种行为（已实施）
 
-**证据**
+**状态：2026-09-29 已实施。**
+
+**原问题**
 
 | 位置 | 内容 |
 |---|---|
@@ -281,10 +283,17 @@ internal sealed class CapabilityLease(CapabilityResolution resolution, DirectTur
 | `DirectCapabilityRules.cs:110` | `ToolPolicyRank` 对未知策略 **返回 -1**，于是 `IsToolPolicyAuthorized` 返回 `false` |
 | `SubagentDefinitionCatalog.cs:13/314/497` | 自定义 `DefaultToolPolicy = "read-only"`，并再写一遍 `"none" or "system"` |
 | `SubagentExecutionSession.cs:271` | 合成 ceiling 里再写一遍 `"read-only"` |
+| `MainWindowViewModel.Agents.cs:25` | 合成不可用定义时再写一遍 `"none"` |
 
-**问题**：同一个非法输入，一条路径抛异常、另一条路径静默判否。调用方无法预知该不该 catch。
+同一个非法输入，一条路径抛异常、另一条路径静默判否；调用方无法预知该不该 catch。
 
-**建议**：在 Core 增加 `ToolPolicies`（`None` / `ReadOnly` / `System`）+ `TryParse(string, out ToolPolicyRank)`；`Allows`、`IsToolPolicyAuthorized`、`RestrictToolPolicy`、两个定义解析器全部改用它。让"未知策略"只有一种行为（建议：抛，因为它是定义文件解析的兜底，静默判否会把配置错误变成"工具忽然消失"）。
+**实施内容**
+
+- Core 的 `AgentRuntimeDefinition` 现在是三个策略名的唯一来源：新增 `NoneToolPolicy` / `ReadOnlyToolPolicy`（与已有 `SystemToolPolicy` 并列，紧贴它所约束的 `ToolPolicy` 属性）。
+- `DirectCapabilityRules` 只剩一个 `ToolPolicyRank`；`IsToolPolicyAuthorized` 改为单次 rank 比较，未知策略与 `Allows` 一样抛 `InvalidDataException`（`UnknownToolPolicy` 统一文案，列出三个合法值）。选择“抛”而非“静默判否”：未知名只能来自定义解析回归，静默判否会把配置错误伪装成“工具忽然消失”，也会让 ceiling 被当成不合法值继续传递。
+- `SubagentDefinitionCatalog` 的 `DefaultToolPolicy` 与两处校验、`SubagentExecutionSession` 的合成 ceiling、`MainWindowViewModel.Agents` 的不可用定义全部改用常量；两个定义解析器的合法集合仍各自保留（交互代理只接受 `system`，子代理接受三种）——这是产品规则而非重复。
+
+**验证**：`DirectCapabilityRulesHookTests` 新增 rank 顺序的 6 个 `[InlineData]` 用例与 1 个“未知策略必须抛且文案含原值”用例；全量 1169 通过 / 4 跳过。
 
 ---
 
@@ -395,7 +404,7 @@ internal abstract record DirectTurnSetup
 | 批次 | 内容 | 前置 | 验证 |
 |---|---|---|---|
 | PR1 | D1 + D2 + D3 + D4 + D5（死代码与噪音，零行为变化） | 无 | `dotnet test` 全绿；Direct 相关 225 用例不变 |
-| PR2 | C1（策略字面量集中 + 单一未知策略行为） | 无 | 新增 `ToolPolicies` 单元测试 + 两个定义解析器测试 |
+| PR2 | C1（策略字面量集中 + 单一未知策略行为） | ✅ 已完成 | 六个 rank 用例 + 未知策略抛错用例 + 全量回归 1169 通过 |
 | PR3 | S4 + S3（`PluginCapabilitySource` 提取、lease/scope 收敛） | 无 | `PluginCapabilitySource`/`PluginVersionLeaseManager`/`AsyncHookExecutor` 既有用例 |
 | PR4 | S2（`DirectTurnPolicy`） | 建议在 PR3 后 | 逐来源跑 `DirectTurnCapabilityResolverTests`、`SkillCapabilitySource`/`McpCapabilitySource` 相关用例 |
 | PR5 | S1（子代理校验收敛为一处 + 删 `ValidateCapturedPackageCeiling`） | **依赖 PR4**（需要 `MissingCapabilityIsFatal` 作为唯一判定点） | `SubagentTaskPreflight` / `SubagentTaskCoordinator` / `SubagentTaskExecutor` / `DirectTurnCapabilityResolver` 用例 + 手动验证"受理后删除包"场景 |
