@@ -2,7 +2,9 @@
 
 > 2026-09-14 实现更新：配置与实际包/可见性/加载错误由 `PetHost` 统一协调；Catalog 在后台准备冻结位图，Window adapter 只安装资源，ViewModel 不再读取文件或吞加载失败。设置页消费 Host 变更，退出前 flush 待保存位置；窗口仅由注入路径创建。当前代码、验证及原生实机限制见 [Desktop 架构整改 R03/R05/R12/R15](desktop-architecture-review.md)。下文保留原始设计，涉及初始化和加载的旧调用链以该整改记录为准。
 
-> 状态:浮窗、宠物包选择、交互/工作动画、Agent 节点气泡与 Direct 审批已实现
+> 2026-09-29 更新：宠物不再参与审批裁决。待审批时 `PetActivityPresenter` 固定显示 `等待「工具名」审批…` 并保持 waiting 动画，点击气泡仅激活对应会话；审批只保留 Vue 审批栏与 Windows toast。`DesktopToolApprovalHandler` 同时移除 5 分钟自动拒绝，未决审批不再超时终止（取消、`RejectAll` 与订阅失败仍安全拒绝）。
+
+> 状态:浮窗、宠物包选择、交互/工作动画、Agent 节点气泡与 Direct 审批等待提示已实现
 > 目标平台:WPF (.NET 10, `net10.0-windows10.0.19041.0`) + 独立桌面浮动窗口
 > 参考来源:`open-design/apps/web/src/components/pet`(React/Web 实现,思路参考,代码不复用)
 
@@ -147,7 +149,7 @@ SelfClaw.Desktop/Pet/
 - **`SpriteSheet` + `SpriteAnimator`**:知道网格布局(列数、行数、每行帧数、fps),按当前行 + 帧号裁出要显示的那一格。
 - **`WebpSpriteLoader`**:`IPetSpriteDecoder` 的生产 adapter,一次性把 `.webp` 解码成 `BitmapSource`(BGRA),后续所有裁切都从内存位图做。
 - **`PetWindow`**:承载视觉 + 转发 `MouseDown/Move/Up/Enter/Leave` 到 ViewModel;负责窗口拖动。
-- **`PetActivityPresenter`**:管理气泡 auto-hide、审批 pin、terminal 动画清理、当前审批动作和会话激活;调度由 `IPetPresentationScheduler` adapter 提供。
+- **`PetActivityPresenter`**:管理气泡 auto-hide、审批固定展示、terminal 动画清理和会话激活;调度由 `IPetPresentationScheduler` adapter 提供。
 - **`PetViewModel`**:只把 `PetBehavior`、`PetActivityPresenter` 与 WPF timer/绑定接起来,不拥有行为或展示生命周期规则。
 
 ### 4.3 接入现有架构的方式
@@ -437,7 +439,7 @@ MainWindowViewModel.SendAsync()
 
 Direct 和 CLI 都已统一为 `AgentStreamEvent`,因此 Agent 的主要运行节点可以在 `SendAsync()` 的公共编排层旁路投影,不需要分别修改 provider adapter 或 CLI parser。
 
-审批是例外。Direct 的 `write_file` / `run_shell_command` 在工具实现内部调用 `DesktopToolApprovalHandler.RequestApprovalAsync()`,通过 `ApprovalRequested` / `ApprovalCompleted` / `ApprovalExpired` 通知 UI。它**不经过** `AgentStreamEvent`;只监听运行事件会漏掉审批。当前 CLI 继续使用 CLI 自身权限策略,`PermissionRequestedEvent` 仍是未使用的预留事件,也没有对应的审批响应通道。
+审批是例外。Direct 的 `write_file` / `run_shell_command` 在工具实现内部调用 `DesktopToolApprovalHandler.RequestApprovalAsync()`,通过 `ApprovalRequested` / `ApprovalCompleted` 通知 UI。它**不经过** `AgentStreamEvent`;只监听运行事件会漏掉审批。当前 CLI 继续使用 CLI 自身权限策略,`PermissionRequestedEvent` 仍是未使用的预留事件,也没有对应的审批响应通道。
 
 ### 9.2 已实现 seam:独立的 Agent 活动投影模块
 
@@ -550,22 +552,21 @@ catch runtime/consumer failure
 | Desktop cancellation catch | `Cancelled` | `任务已停止` | 显示 4-6 秒 |
 | `UsageReportedEvent` / `RawOutputEvent` | 不变 | 不显示 | 忽略 |
 
-工具名称和参数只用于生成短摘要,不能把完整 `ArgumentsJson` 或 assistant 文本塞进气泡。审批场景例外:需要显示操作名称与关键参数预览(文件路径或命令),并提供"查看详情"打开主窗口的完整审批栏。
+工具名称和参数只用于生成短摘要,不能把完整 `ArgumentsJson` 或 assistant 文本塞进气泡。审批态不展示参数,只显示 `等待「工具名」审批…`;点击气泡由主窗口打开该会话的完整审批栏。
 
 ### 9.5 审批必须共用一条队列
 
-当前 `MainWindow` 自己维护 `_approvalQueue` / `_currentApprovalId`;若宠物再维护一份队列,并行 function call 下两个 UI 可能显示不同队首。实现 Agent 联动时应把这段 FIFO 收进 `AgentActivityCoordinator`(或一个被它组合的内部审批队列),让 Vue 确认栏、宠物和 toast 都基于同一个待决集合。
+`AgentActivityCoordinator` 持有全局 FIFO:并行 function call 下 Vue 审批栏与宠物展示同一个队首,不会各显示一份。
 
-推荐审批链:
+当前审批链:
 
 ```text
 DesktopToolApprovalHandler.ApprovalRequested(request)
   -> AgentActivityCoordinator enqueue
   -> 当前活动快照提升为 AwaitingApproval(全局最高优先级)
-  -> PetBubble 固定显示,不启动 4 秒自动隐藏
-  -> [拒绝] / [允许]
-       `- AgentActivityCoordinator.TryResolveApproval(id, approved)
-            `- DesktopToolApprovalHandler.TryResolve(id, approved)
+  -> 宠物气泡固定显示 `等待「工具名」审批…`,不启动 4 秒自动隐藏
+  -> Vue 审批栏 / Windows toast 调用 DesktopToolApprovalHandler.TryResolve(id, approved)
+       `- 后到的一方收到 false,只刷新快照,不重复处理
 
 DesktopToolApprovalHandler.ApprovalCompleted(id)
   -> 从唯一 FIFO 移除
@@ -575,12 +576,12 @@ DesktopToolApprovalHandler.ApprovalCompleted(id)
 
 约束:
 
-- 宠物、Vue、Windows toast 最终都调用同一个 `TryResolve()`,其幂等行为可以安全处理竞态;后到的一方收到 `false` 后只刷新快照。
+- 宠物只展示等待态,不提供任何裁决入口;批准/拒绝只来自 Vue 审批栏与 Windows toast,二者共用 `TryResolve()` 的幂等语义安全处理竞态。
 - `ToolApprovalRequest.ToolExecutionId` 与 `ToolCallStartedEvent.ToolCallId` 不是同一个 id。审批只通过 `ConversationId` 关联 turn,不能尝试按这两个 id join。
-- 多个审批按 `ApprovalRequested` 到达顺序 FIFO 展示,气泡显示 `还有 N 个请求`。
-- 审批气泡不可自动消失;超时仍由现有 5 分钟 handler 控制。
+- 多个审批按 `ApprovalRequested` 到达顺序 FIFO 展示;宠物只显示队首工具名,不显示队列长度。
+- 审批气泡不可自动消失,保持到审批被解决、调用方取消或应用关闭 `RejectAll`。handler 不再自动拒绝超时。
 - 订阅 `ApprovalRequested` 的处理器不得向外抛异常。当前 handler 会把订阅异常视为 UI 失败并安全拒绝,coordinator 内部必须捕获并记录异常。
-- 主窗口隐藏时宠物可直接审批;宠物也隐藏时继续依赖 Windows toast。
+- 主窗口隐藏时通过 Windows toast 审批;宠物隐藏与否不影响裁决路径。
 - 当前可落地的是 **Direct 审批**。CLI 若要由 SelfClaw 审批,还需 CLI adapter/协议提供真正的 permission request + response 通道;仅渲染预留的 `PermissionRequestedEvent` 不能完成审批。
 
 ### 9.6 宠物动画的两条状态轴
@@ -612,9 +613,9 @@ Agent 活跃期间暂停 45 秒 waiting 定时器和 ambient 调度,用户结束
 
 - 为气泡预留固定区域并把宠物锚定在窗口底部,避免气泡高度变化导致桌宠在桌面上跳动。
 - 主标题最多一行,详情最多两行并省略;常态节点 3-4 秒自动隐藏,terminal 节点稍长,审批固定。
-- 审批态显示 `查看详情`、`拒绝`、`允许` 三个可点击控件;按钮区域不参与拖拽手势,点击事件停止向宠物根节点冒泡。
+- 审批态只显示 `等待「工具名」审批…`,无操作按钮;批准/拒绝在 Vue 审批栏或 Windows toast 完成。
 - `PetViewModel.ToggleBubble()` 显示 presenter 保存的最新主要节点;没有活动时才显示 `Ready.`。
-- 点击普通节点或`查看详情`时,由 `MainWindow` 处理 `ConversationActivationRequested(conversationId)`:选择对应会话并激活主窗口。`PetHost` 与 `SystemTrayService` 保持单向依赖,host 不负责激活主窗口。
+- 点击普通节点或审批气泡时,由 `MainWindow` 处理 `ConversationActivationRequested(conversationId)`:选择对应会话并激活主窗口。`PetHost` 与 `SystemTrayService` 保持单向依赖,host 不负责激活主窗口。
 - 位置持久化以宠物 sprite 的锚点为基准,不要因扩大透明窗口而改变用户已保存的视觉位置。
 
 ### 9.8 多会话选择与展示优先级
@@ -640,7 +641,7 @@ Agent 活跃期间暂停 45 秒 waiting 定时器和 ambient 调度,用户结束
 - tool kind 合并、工具失败不误判整轮失败。
 - 用户取消没有 `RunCompletedEvent` 时仍进入 `Cancelled`。
 - 审批优先于运行节点,审批完成后恢复先前阶段。
-- 多审批 FIFO,宠物/Vue/toast 同时 resolve 只有一次成功。
+- 多审批 FIFO,宠物只显示队首等待文案;Vue/toast 同时 resolve 只有一次成功。
 - 多会话时按审批、选中会话、最近活跃的顺序选择。
 - Agent 工作期间 ambient/waiting 不覆盖工作动画,hover/drag 结束后恢复工作动画。
 
@@ -652,10 +653,10 @@ Agent 活跃期间暂停 45 秒 waiting 定时器和 ambient 调度,用户结束
 
 1. **宠物行为**:`PetBehavior` 统一交互、工作状态、waiting、ambient、timer 命令与动画行 fallback。
 2. **宠物包 catalog**:`PetPackageCatalog` 统一 manifest、id、排序、grid、路径安全、解码 fallback 与设置页 catalog。
-3. **展示生命周期**:`PetActivityPresenter` 统一 bubble auto-hide、审批 pin/动作、terminal 清理和会话激活。
+3. **展示生命周期**:`PetActivityPresenter` 统一 bubble auto-hide、审批固定展示、terminal 清理和会话激活。
 4. **桌宠 host**:`PetHost` 以三个入口封装生命周期、选择、命令串行化与持久化;WPF 和 JSON 通过内部 adapter 替换。
 
-验证覆盖行为序列、catalog/fallback/path safety、presenter 生命周期和 host interface。桌面集成还应手工验证宠物切换、托盘显示/隐藏、跨屏拖拽、审批按钮和气泡会话激活。
+验证覆盖行为序列、catalog/fallback/path safety、presenter 生命周期和 host interface。桌面集成还应手工验证宠物切换、托盘显示/隐藏、跨屏拖拽、审批等待文案和气泡会话激活。
 
 ---
 

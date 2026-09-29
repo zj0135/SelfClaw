@@ -13,7 +13,7 @@ public sealed class PetActivityPresenterTests
     [Fact]
     public void Active_bubble_auto_hides_without_stopping_the_work_animation()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var coordinator = CreateCoordinator(handler);
         var scheduler = new ManualPetPresentationScheduler();
         using var presenter = CreatePresenter(coordinator, scheduler);
@@ -34,7 +34,7 @@ public sealed class PetActivityPresenterTests
     [Fact]
     public void Terminal_bubble_auto_hide_clears_terminal_animation_and_toggle_only_restores_content()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var coordinator = CreateCoordinator(handler);
         var scheduler = new ManualPetPresentationScheduler();
         using var presenter = CreatePresenter(coordinator, scheduler);
@@ -62,9 +62,9 @@ public sealed class PetActivityPresenterTests
     }
 
     [Fact]
-    public async Task Approval_state_is_pinned_uses_fifo_detail_and_resolves_the_current_request()
+    public async Task Approval_state_is_pinned_shows_the_tool_headline_and_follows_external_decisions()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var coordinator = CreateCoordinator(handler);
         var scheduler = new ManualPetPresentationScheduler();
         using var presenter = CreatePresenter(coordinator, scheduler);
@@ -78,19 +78,20 @@ public sealed class PetActivityPresenterTests
 
         presenter.Current.Should().Match<PetBubbleViewState>(state =>
             state.IsPinned &&
-            state.ApprovalId == first.ToolExecutionId &&
-            state.Detail != null &&
-            state.Detail.Contains("还有 1 个请求", StringComparison.Ordinal));
+            state.IsVisible &&
+            state.Headline == "等待「Run command」审批…" &&
+            state.Detail == null);
         scheduler.IsScheduled.Should().BeFalse();
 
         presenter.DismissBubble();
         presenter.Current.IsVisible.Should().BeTrue();
 
-        presenter.TryResolveCurrentApproval(approved: true).Should().BeTrue();
+        // Vue and the Windows toast own the decision; the pet only follows the outcome.
+        handler.TryResolve(first.ToolExecutionId, approved: true).Should().BeTrue();
         (await firstDecision).Should().BeTrue();
-        presenter.Current.ApprovalId.Should().Be(second.ToolExecutionId);
+        presenter.Current.Headline.Should().Be("等待「Write file」审批…");
 
-        presenter.TryResolveCurrentApproval(approved: false).Should().BeTrue();
+        handler.TryResolve(second.ToolExecutionId, approved: false).Should().BeTrue();
         (await secondDecision).Should().BeFalse();
         presenter.Current.IsPinned.Should().BeFalse();
     }
@@ -98,7 +99,7 @@ public sealed class PetActivityPresenterTests
     [Fact]
     public void Conversation_activation_uses_the_presented_conversation()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var coordinator = CreateCoordinator(handler);
         using var presenter = CreatePresenter(coordinator, new ManualPetPresentationScheduler());
         var context = CreateContext();
@@ -114,7 +115,7 @@ public sealed class PetActivityPresenterTests
     [Fact]
     public void Throwing_state_subscriber_does_not_break_presentation_lifecycle()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var coordinator = CreateCoordinator(handler);
         var scheduler = new ManualPetPresentationScheduler();
         using var presenter = CreatePresenter(coordinator, scheduler);

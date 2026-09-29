@@ -7,5 +7,4 @@ public sealed record PetBubbleViewState(
     string? Detail,
     bool IsVisible,
     bool IsPinned,
-    Guid? ApprovalId,
     PetWorkState WorkState);

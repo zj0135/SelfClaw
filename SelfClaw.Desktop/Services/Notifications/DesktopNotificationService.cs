@@ -79,18 +79,6 @@ public sealed class DesktopNotificationService
         });
     }
 
-    public void ShowToolApprovalExpired(string title)
-    {
-        ShowCore(builder =>
-        {
-            builder.AddArgument(DesktopNotificationArguments.ActionKey, DesktopNotificationArguments.OpenAppAction);
-            AddNotificationText(
-                builder,
-                string.IsNullOrWhiteSpace(title) ? "Tool approval expired" : title,
-                "The tool call was rejected because approval timed out.");
-        });
-    }
-
     private void ShowCore(Action<ToastContentBuilder> configure)
     {
         if (!ShouldShowNotification())

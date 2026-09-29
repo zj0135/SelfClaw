@@ -11,7 +11,7 @@ public sealed class DesktopToolApprovalHandlerTests
     [InlineData(false)]
     public async Task RequestApprovalAsync_completes_with_the_resolved_decision(bool approved)
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         var request = CreateRequest();
         ToolApprovalRequest? published = null;
         handler.ApprovalRequested += value => published = value;
@@ -27,7 +27,7 @@ public sealed class DesktopToolApprovalHandlerTests
     [Fact]
     public async Task RequestApprovalAsync_cancellation_removes_the_pending_item()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var cancellationSource = new CancellationTokenSource();
         var request = CreateRequest();
         var pending = handler.RequestApprovalAsync(request, cancellationSource.Token);
@@ -40,24 +40,9 @@ public sealed class DesktopToolApprovalHandlerTests
     }
 
     [Fact]
-    public async Task RequestApprovalAsync_timeout_rejects_and_publishes_expiration_once()
-    {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromMilliseconds(25));
-        var request = CreateRequest();
-        var expired = new List<ToolApprovalRequest>();
-        handler.ApprovalExpired += expired.Add;
-
-        var result = await handler.RequestApprovalAsync(request).WaitAsync(TimeSpan.FromSeconds(2));
-
-        result.Should().BeFalse();
-        expired.Should().Equal(request);
-        handler.TryResolve(request.ToolExecutionId, approved: true).Should().BeFalse();
-    }
-
-    [Fact]
     public async Task RequestApprovalAsync_subscriber_failure_safely_rejects()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         var request = CreateRequest();
         handler.ApprovalRequested += _ => throw new InvalidOperationException("UI failed");
 
@@ -68,7 +53,7 @@ public sealed class DesktopToolApprovalHandlerTests
     [Fact]
     public async Task RejectAll_rejects_every_pending_request()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         var first = handler.RequestApprovalAsync(CreateRequest());
         var second = handler.RequestApprovalAsync(CreateRequest());
 
@@ -81,7 +66,7 @@ public sealed class DesktopToolApprovalHandlerTests
     [Fact]
     public async Task RequestApprovalAsync_rejects_duplicate_execution_ids_without_disturbing_the_first_request()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         var request = CreateRequest();
         var first = handler.RequestApprovalAsync(request);
 

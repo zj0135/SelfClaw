@@ -239,12 +239,12 @@ flowchart TB
 ```mermaid
 flowchart LR
     subgraph APPROVAL["工具审批"]
-        A1["DirectToolInvoker 请求审批"] --> A2["DesktopToolApprovalHandler<br/>唯一 pending 决策所有 / 5 分钟超时"]
+        A1["DirectToolInvoker 请求审批"] --> A2["DesktopToolApprovalHandler<br/>唯一 pending 决策所有者"]
         A2 --> A3["ToolApprovalPresenter<br/>tool-approval/state 版本化推送<br/>重载可恢复"]
         A3 --> A4["useChatApprovals"]
         A4 -->|"resolve-tool-approval"| A5["TryResolve(id, approved)"]
         A2 -.->|"窗口隐藏/最小化"| A6["Windows Toast Confirm/Cancel"]
-        A2 -.->|"Pet 观察同一 activity 状态"| A7["PetHost"]
+        A2 -.->|"Pet 只读展示等待态"| A7["PetActivityPresenter"]
     end
     subgraph TERMINAL["终端 (ConPTY)"]
         T1["useChatTerminal"] -->|"terminal-*"| T2["TerminalHostController"]

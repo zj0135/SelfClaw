@@ -7,7 +7,7 @@ namespace SelfClaw.Desktop.Services.AgentActivity;
 
 public sealed class AgentActivityCoordinator : IDisposable
 {
-    private const int ApprovalPreviewLength = 140;
+    private const int DetailPreviewLength = 140;
     private const int MaxRetainedTerminalTurns = 20;
     private readonly object _syncRoot = new();
     private readonly DesktopToolApprovalHandler _approvalHandler;
@@ -121,9 +121,6 @@ public sealed class AgentActivityCoordinator : IDisposable
 
         PublishCurrentSnapshot();
     }
-
-    public bool TryResolveApproval(Guid toolExecutionId, bool approved)
-        => _approvalHandler.TryResolve(toolExecutionId, approved);
 
     private static bool ApplyEvent(TurnActivity turn, AgentStreamEvent streamEvent)
     {
@@ -347,9 +344,9 @@ public sealed class AgentActivityCoordinator : IDisposable
             return CreateSnapshot(
                 turn,
                 AgentActivityPhase.AwaitingApproval,
-                $"需要批准：{approval.DisplayName}",
-                BuildApprovalPreview(approval),
-                ToolKindForApproval(approval.ToolName),
+                $"等待「{approval.DisplayName}」审批…",
+                detail: null,
+                toolKind: null,
                 approval,
                 activeTurnCount);
         }
@@ -418,7 +415,6 @@ public sealed class AgentActivityCoordinator : IDisposable
             detail,
             toolKind,
             approval,
-            _approvals.Count,
             activeTurnCount,
             DateTimeOffset.UtcNow);
 
@@ -435,27 +431,8 @@ public sealed class AgentActivityCoordinator : IDisposable
             Detail: null,
             ToolKind: null,
             Approval: null,
-            PendingApprovalCount: 0,
             ActiveTurnCount: 0,
             DateTimeOffset.UtcNow);
-
-    private static string? BuildApprovalPreview(ToolApprovalRequest request)
-    {
-        var value = string.IsNullOrWhiteSpace(request.ArgumentsJson)
-            ? request.Description
-            : request.ArgumentsJson;
-        var source = string.IsNullOrWhiteSpace(request.SourceId) ? null : $"{request.SourceKind}: {request.SourceId}";
-        return TrimDetail(string.Join(" · ", new[] { source, value?.ReplaceLineEndings(" ") }
-            .Where(item => !string.IsNullOrWhiteSpace(item))));
-    }
-
-    private static ToolCallKind ToolKindForApproval(string toolName)
-        => toolName.Trim().ToLowerInvariant() switch
-        {
-            "write_file" => ToolCallKind.Edit,
-            "run_shell_command" => ToolCallKind.Run,
-            _ => ToolCallKind.Other,
-        };
 
     private static string? TrimDetail(string? detail)
     {
@@ -465,9 +442,9 @@ public sealed class AgentActivityCoordinator : IDisposable
         }
 
         var value = detail.Trim();
-        return value.Length <= ApprovalPreviewLength
+        return value.Length <= DetailPreviewLength
             ? value
-            : $"{value[..ApprovalPreviewLength]}…";
+            : $"{value[..DetailPreviewLength]}…";
     }
 
     private void RaiseSnapshotChanged(AgentActivitySnapshot snapshot)

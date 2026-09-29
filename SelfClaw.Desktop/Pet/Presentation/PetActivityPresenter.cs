@@ -111,19 +111,6 @@ public sealed class PetActivityPresenter : IDisposable
         Publish(next, autoHideAfter: null);
     }
 
-    public bool TryResolveCurrentApproval(bool approved)
-    {
-        Guid? approvalId;
-        lock (_syncRoot)
-        {
-            ThrowIfDisposed();
-            approvalId = _current.ApprovalId;
-        }
-
-        return approvalId is Guid toolExecutionId &&
-               _activityCoordinator.TryResolveApproval(toolExecutionId, approved);
-    }
-
     public bool RequestCurrentConversationActivation()
     {
         Guid? conversationId;
@@ -238,24 +225,10 @@ public sealed class PetActivityPresenter : IDisposable
             snapshot.ConversationId,
             agentLabel,
             snapshot.Headline,
-            BuildDetail(snapshot.Detail, snapshot.PendingApprovalCount),
+            snapshot.Detail,
             IsVisible: !isIdle,
             IsPinned: isApproval,
-            snapshot.Approval?.ToolExecutionId,
             ResolveWorkState(snapshot));
-    }
-
-    private static string? BuildDetail(string? detail, int pendingApprovalCount)
-    {
-        var additionalApprovalCount = Math.Max(0, pendingApprovalCount - 1);
-        if (additionalApprovalCount == 0)
-        {
-            return detail;
-        }
-
-        return string.IsNullOrWhiteSpace(detail)
-            ? $"还有 {additionalApprovalCount} 个请求"
-            : $"{detail} · 还有 {additionalApprovalCount} 个请求";
     }
 
     private static TimeSpan? ResolveAutoHideAfter(AgentActivityPhase phase)

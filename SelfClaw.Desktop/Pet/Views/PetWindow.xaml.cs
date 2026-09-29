@@ -1,7 +1,5 @@
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
 
 namespace SelfClaw.Desktop.Pet;
 
@@ -203,41 +201,8 @@ public sealed partial class PetWindow : Window
 
     private void OnBubbleMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (FindVisualParent<Button>(e.OriginalSource as DependencyObject) is not null)
-        {
-            return;
-        }
-
         e.Handled = true;
         _viewModel.OpenCurrentConversation();
-    }
-
-    private void OnRejectApprovalClick(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        _viewModel.RejectCurrentApproval();
-    }
-
-    private void OnApproveApprovalClick(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        _viewModel.ApproveCurrentApproval();
-    }
-
-    private static T? FindVisualParent<T>(DependencyObject? source)
-        where T : DependencyObject
-    {
-        while (source is not null)
-        {
-            if (source is T match)
-            {
-                return match;
-            }
-
-            source = VisualTreeHelper.GetParent(source);
-        }
-
-        return null;
     }
 
     private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)

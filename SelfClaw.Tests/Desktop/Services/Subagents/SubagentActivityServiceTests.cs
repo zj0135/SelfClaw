@@ -151,11 +151,11 @@ public sealed class SubagentActivityServiceTests
     }
 
     [Theory]
-    [InlineData(false)]
     [InlineData(true)]
-    public async Task Approval_state_is_reconstructable_and_clears_on_resolution_or_timeout(bool expire)
+    [InlineData(false)]
+    public async Task Approval_state_is_reconstructable_and_clears_on_resolution(bool approved)
     {
-        using var context = new SubagentActivityTestContext(expire ? TimeSpan.FromMilliseconds(250) : null);
+        using var context = new SubagentActivityTestContext();
         var task = await context.CreateTaskAsync();
         var runtime = new ControlledSubagentRuntime();
         var execution = context.CreateExecutor(task, runtime).ExecuteAsync(task, CancellationToken.None);
@@ -167,12 +167,10 @@ public sealed class SubagentActivityServiceTests
         waiting.Activity.Phase.Should().Be("waiting-approval");
         waiting.Activity.PendingApprovalCount.Should().Be(1);
         waiting.Content.ToolRuns.Should().BeEmpty();
-        if (!expire)
-        {
-            context.Approvals.TryResolve(request.ToolExecutionId, approved: true).Should().BeTrue();
-        }
 
-        (await approval.WaitAsync(TimeSpan.FromSeconds(3))).Should().Be(!expire);
+        context.Approvals.TryResolve(request.ToolExecutionId, approved).Should().BeTrue();
+
+        (await approval.WaitAsync(TimeSpan.FromSeconds(3))).Should().Be(approved);
         var resumed = await DetailAsync(context, task);
         resumed.Activity.PendingApprovalCount.Should().Be(0);
         resumed.Activity.Phase.Should().NotBe("waiting-approval");

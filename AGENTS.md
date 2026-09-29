@@ -169,7 +169,7 @@ The Vue `ActivityStage` mounts an independent floating activity panel inside the
 
 ### Tool approval
 
-Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandler` in `RequireApproval` mode. It alone owns pending decisions. `ToolApprovalPresenter` publishes versioned `tool-approval/state` with conversation context for Vue and reload recovery; Pet observes the same activity state. A hidden/minimized window may receive a Windows toast with Confirm/Cancel actions. Pending requests reject on timeout/subscriber failure/shutdown. Toast, Pet and tray navigation use `DesktopConversationActivationService`. CLI mode keeps its own permission policy.
+Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandler` in `RequireApproval` mode. It alone owns pending decisions, and only Vue's approval bar or the Windows toast can resolve them. `ToolApprovalPresenter` publishes versioned `tool-approval/state` with conversation context for Vue and reload recovery; Pet observes the same activity state read-only, showing `等待「工具名」审批…` while a request is pending. A hidden/minimized window may receive a Windows toast with Confirm/Cancel actions. Pending requests reject on subscriber failure, caller cancellation or shutdown; there is no timeout auto-reject. Toast, Pet and tray navigation use `DesktopConversationActivationService`. CLI mode keeps its own permission policy.
 
 ### WPF shell
 

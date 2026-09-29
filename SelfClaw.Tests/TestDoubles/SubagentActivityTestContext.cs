@@ -19,7 +19,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
     private readonly string _rootPath;
     private readonly bool _ownsRoot;
 
-    internal SubagentActivityTestContext(TimeSpan? approvalTimeout = null, string? rootPath = null)
+    internal SubagentActivityTestContext(string? rootPath = null)
     {
         _rootPath = rootPath ?? Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         _ownsRoot = rootPath is null;
@@ -30,7 +30,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
         Store = new InterceptingSubagentExecutionStore(Tasks);
         Registry = new SubagentActivityRegistry(Changes);
         Reader = new CountingSubagentActivityReader(new SqliteSubagentActivityReader(Database));
-        Approvals = approvalTimeout is TimeSpan timeout ? new DesktopToolApprovalHandler(timeout) : new DesktopToolApprovalHandler();
+        Approvals = new DesktopToolApprovalHandler();
         Service = new SubagentActivityService(Reader, Registry, Changes, Approvals, NullLogger<SubagentActivityService>.Instance);
         Recorder = new ConversationTurnRecorder(Conversations, NullLogger<ConversationTurnRecorder>.Instance);
     }

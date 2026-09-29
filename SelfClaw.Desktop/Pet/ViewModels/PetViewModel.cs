@@ -23,7 +23,6 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     private string? _bubbleDetail;
     private bool _isBubbleVisible;
     private bool _isBubblePinned;
-    private bool _canApprove;
     private bool _canOpenConversation;
     private bool _disposed;
 
@@ -92,12 +91,6 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
     {
         get => _isBubblePinned;
         private set => SetField(ref _isBubblePinned, value);
-    }
-
-    public bool CanApprove
-    {
-        get => _canApprove;
-        private set => SetField(ref _canApprove, value);
     }
 
     public bool CanOpenConversation
@@ -194,16 +187,6 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
         IsBubbleVisible = !IsBubbleVisible;
     }
 
-    public void ApproveCurrentApproval()
-    {
-        _activityPresenter?.TryResolveCurrentApproval(approved: true);
-    }
-
-    public void RejectCurrentApproval()
-    {
-        _activityPresenter?.TryResolveCurrentApproval(approved: false);
-    }
-
     public void OpenCurrentConversation()
     {
         _activityPresenter?.RequestCurrentConversationActivation();
@@ -282,7 +265,6 @@ public sealed class PetViewModel : INotifyPropertyChanged, IDisposable
         BubbleText = state.Headline;
         BubbleDetail = state.Detail;
         IsBubblePinned = state.IsPinned;
-        CanApprove = state.ApprovalId is not null;
         CanOpenConversation = state.ConversationId is not null;
         SetWorkState(state.WorkState);
         IsBubbleVisible = state.IsVisible;

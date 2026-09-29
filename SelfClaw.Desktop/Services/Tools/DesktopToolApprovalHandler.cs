@@ -8,31 +8,13 @@ namespace SelfClaw.Desktop.Services.Tools;
 
 public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
 {
-    private static readonly TimeSpan DefaultApprovalTimeout = TimeSpan.FromMinutes(5);
     private readonly ConcurrentDictionary<Guid, PendingToolApproval> _pendingApprovals = new();
-    private readonly TimeSpan _approvalTimeout;
-
-    public DesktopToolApprovalHandler()
-        : this(DefaultApprovalTimeout)
-    {
-    }
-
-    internal DesktopToolApprovalHandler(TimeSpan approvalTimeout)
-    {
-        if (approvalTimeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(approvalTimeout));
-        }
-
-        _approvalTimeout = approvalTimeout;
-    }
 
     public event Action<ToolApprovalRequest>? ApprovalRequested;
-    public event Action<ToolApprovalRequest>? ApprovalExpired;
 
     /// <summary>
     /// Raised whenever a pending approval leaves the queue for any reason (resolved, cancelled,
-    /// timed out, or rejected in bulk). Lets the UI advance a single-slot approval indicator without
+    /// or rejected in bulk). Lets the UI advance a single-slot approval indicator without
     /// caring how the request was closed.
     /// </summary>
     public event Action<Guid>? ApprovalCompleted;
@@ -49,8 +31,6 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
 
         var completionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         CancellationTokenRegistration registration = default;
-        var timeoutSource = new CancellationTokenSource(_approvalTimeout);
-        CancellationTokenRegistration timeoutRegistration = default;
 
         if (cancellationToken.CanBeCanceled)
         {
@@ -65,19 +45,10 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
             });
         }
 
-        timeoutRegistration = timeoutSource.Token.Register(() => Expire(request.ToolExecutionId));
-
-        var pendingApproval = new PendingToolApproval(
-            request,
-            completionSource,
-            registration,
-            timeoutSource,
-            timeoutRegistration);
+        var pendingApproval = new PendingToolApproval(request, completionSource, registration);
         if (!_pendingApprovals.TryAdd(request.ToolExecutionId, pendingApproval))
         {
             registration.Dispose();
-            timeoutRegistration.Dispose();
-            timeoutSource.Dispose();
             throw new InvalidOperationException($"Tool approval for '{request.ToolExecutionId}' is already pending.");
         }
 
@@ -87,14 +58,6 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
             DisposeRegistrations(canceledPending);
             canceledPending.CompletionSource.TrySetCanceled(cancellationToken);
             return canceledPending.CompletionSource.Task;
-        }
-
-        // A very short timeout can fire after the callback is registered but before the pending item is
-        // inserted. The callback cannot remove an item that is not visible yet, so close that race here.
-        if (timeoutSource.IsCancellationRequested)
-        {
-            Expire(request.ToolExecutionId);
-            return completionSource.Task;
         }
 
         try
@@ -130,25 +93,6 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
         }
     }
 
-    private void Expire(Guid toolExecutionId)
-    {
-        if (!_pendingApprovals.TryRemove(toolExecutionId, out var pending))
-        {
-            return;
-        }
-
-        pending.CompletionSource.TrySetResult(false);
-        DisposeRegistrations(pending);
-        RaiseApprovalCompleted(toolExecutionId);
-        try
-        {
-            ApprovalExpired?.Invoke(pending.Request);
-        }
-        catch
-        {
-        }
-    }
-
     private void RaiseApprovalCompleted(Guid toolExecutionId)
     {
         try
@@ -173,10 +117,6 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
     }
 
     private static void DisposeRegistrations(PendingToolApproval pending)
-    {
-        pending.CancellationRegistration.Dispose();
-        pending.TimeoutRegistration.Dispose();
-        pending.TimeoutSource.Dispose();
-    }
+        => pending.CancellationRegistration.Dispose();
 
 }

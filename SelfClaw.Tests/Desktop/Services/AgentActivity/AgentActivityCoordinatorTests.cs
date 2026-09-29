@@ -12,7 +12,7 @@ public sealed class AgentActivityCoordinatorTests
     [Fact]
     public void ApplyEvent_projects_major_nodes_and_deduplicates_stream_deltas()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var coordinator = CreateCoordinator(handler);
         var context = CreateContext("build");
         var snapshots = new List<AgentActivitySnapshot>();
@@ -48,7 +48,7 @@ public sealed class AgentActivityCoordinatorTests
     [Fact]
     public async Task Approval_projection_uses_one_fifo_and_restores_the_turn_after_resolution()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var coordinator = CreateCoordinator(handler);
         var context = CreateContext("build");
         coordinator.BeginTurn(context);
@@ -61,14 +61,15 @@ public sealed class AgentActivityCoordinatorTests
 
         coordinator.CurrentSnapshot.Phase.Should().Be(AgentActivityPhase.AwaitingApproval);
         coordinator.CurrentSnapshot.Approval.Should().Be(first);
-        coordinator.CurrentSnapshot.PendingApprovalCount.Should().Be(2);
+        coordinator.CurrentSnapshot.Headline.Should().Be("等待「Run command」审批…");
+        coordinator.CurrentSnapshot.Detail.Should().BeNull();
 
-        coordinator.TryResolveApproval(first.ToolExecutionId, approved: true).Should().BeTrue();
+        handler.TryResolve(first.ToolExecutionId, approved: true).Should().BeTrue();
         (await firstDecision).Should().BeTrue();
         coordinator.CurrentSnapshot.Approval.Should().Be(second);
-        coordinator.CurrentSnapshot.PendingApprovalCount.Should().Be(1);
+        coordinator.CurrentSnapshot.Headline.Should().Be("等待「Write file」审批…");
 
-        coordinator.TryResolveApproval(second.ToolExecutionId, approved: false).Should().BeTrue();
+        handler.TryResolve(second.ToolExecutionId, approved: false).Should().BeTrue();
         (await secondDecision).Should().BeFalse();
         coordinator.CurrentSnapshot.Approval.Should().BeNull();
         coordinator.CurrentSnapshot.Phase.Should().Be(AgentActivityPhase.Thinking);
@@ -77,7 +78,7 @@ public sealed class AgentActivityCoordinatorTests
     [Fact]
     public void Selected_conversation_wins_over_a_more_recent_background_turn()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var coordinator = CreateCoordinator(handler);
         var selected = CreateContext("selected");
         var background = CreateContext("background");
@@ -95,7 +96,7 @@ public sealed class AgentActivityCoordinatorTests
     [Fact]
     public void CompleteInterrupted_projects_cancellation_without_a_terminal_event()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var coordinator = CreateCoordinator(handler);
         var context = CreateContext("build");
         coordinator.BeginTurn(context);
@@ -113,7 +114,7 @@ public sealed class AgentActivityCoordinatorTests
     [Fact]
     public async Task Throwing_snapshot_subscriber_does_not_reject_an_approval()
     {
-        var handler = new DesktopToolApprovalHandler(TimeSpan.FromSeconds(5));
+        var handler = new DesktopToolApprovalHandler();
         using var coordinator = CreateCoordinator(handler);
         coordinator.SnapshotChanged += (_, _) => throw new InvalidOperationException("UI failed");
         var request = CreateApproval(Guid.NewGuid(), "write_file", "Write file");
@@ -121,7 +122,7 @@ public sealed class AgentActivityCoordinatorTests
         var decision = handler.RequestApprovalAsync(request);
 
         decision.IsCompleted.Should().BeFalse();
-        coordinator.TryResolveApproval(request.ToolExecutionId, approved: true).Should().BeTrue();
+        handler.TryResolve(request.ToolExecutionId, approved: true).Should().BeTrue();
         (await decision).Should().BeTrue();
     }
 

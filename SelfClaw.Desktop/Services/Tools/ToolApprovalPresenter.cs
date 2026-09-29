@@ -28,7 +28,6 @@ internal sealed class ToolApprovalPresenter : IDisposable
         _channel = channel;
         _dispatcher = dispatcher;
         _handler.ApprovalRequested += OnRequested;
-        _handler.ApprovalExpired += OnExpired;
         _activity.SnapshotChanged += OnActivityChanged;
         _channel.ReadyChanged += OnReadyChanged;
     }
@@ -46,7 +45,6 @@ internal sealed class ToolApprovalPresenter : IDisposable
     {
         _disposed = true;
         _handler.ApprovalRequested -= OnRequested;
-        _handler.ApprovalExpired -= OnExpired;
         _activity.SnapshotChanged -= OnActivityChanged;
         _channel.ReadyChanged -= OnReadyChanged;
     }
@@ -86,7 +84,6 @@ internal sealed class ToolApprovalPresenter : IDisposable
     private static string FormatSources(IReadOnlyList<HookSource> sources)
         => string.Join(", ", sources.Select(source => $"{source.PluginId}/{source.HookId}"));
 
-    private void OnExpired(ToolApprovalRequest request) => _notifications.ShowToolApprovalExpired(request.DisplayName);
     private void OnReadyChanged(bool ready) { if (ready) Publish(force: true); }
     private void OnActivityChanged(object? sender, AgentActivitySnapshot snapshot)
     {

@@ -258,7 +258,7 @@
 
 **步骤**（§5.2 前置条件；⚠ 当前 `ApprovalRequested` 无订阅者，不做此任务则 RequireApproval 下工具调用永久挂起）
 1. 订阅 `DesktopToolApprovalHandler.ApprovalRequested`：将请求（工具名/描述/参数摘要）经现有通知/桥接通道呈现"允许 / 拒绝"。
-2. 用户选择 → `TryResolve(toolExecutionId, approved)`；超时（如 5 分钟）自动拒绝并提示。
+2. 用户选择 → `TryResolve(toolExecutionId, approved)`。（2026-09-29 更新：原“超时（如 5 分钟）自动拒绝并提示”已移除，未决审批保持挂起。）
 3. 手动验收：Direct 轮内触发 `write_file` → 弹审批 → 允许成功写、拒绝返回 denied 且对话继续。
 
 ### T19 composer 模型选择集成
