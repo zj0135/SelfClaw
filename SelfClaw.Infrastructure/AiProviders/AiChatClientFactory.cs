@@ -97,6 +97,10 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
             var client = new ChatClientBuilder(nativeClient)
                 .UseFunctionInvocation(_safeLoggerFactory, option => {
                     option.MaximumIterationsPerRequest = 128;
+                    // DirectToolInvoker converts tool faults into model-visible failures and rethrows only
+                    // once its own consecutive-fault budget is spent, so the first uncaught tool exception
+                    // must end the turn rather than let the pipeline retry the broken tool.
+                    option.MaximumConsecutiveErrorsPerRequest = 0;
                     option.FunctionInvoker = pipeline.FunctionInvoker;
                 })
                 .UseLogging(_safeLoggerFactory)

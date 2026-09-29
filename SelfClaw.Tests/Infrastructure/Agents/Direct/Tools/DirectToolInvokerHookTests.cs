@@ -109,7 +109,7 @@ public sealed class DirectToolInvokerHookTests
     }
 
     [Fact]
-    public async Task A_throwing_tool_still_runs_toolExecuted_and_records_the_side_band_outcome()
+    public async Task A_faulting_tool_returns_a_failed_result_with_the_real_error_and_hook_feedback()
     {
         var fixture = new Fixture(
             ToolPermissionMode.FullAccess,
@@ -122,13 +122,69 @@ public sealed class DirectToolInvokerHookTests
             ],
             throws: true);
 
-        var action = () => fixture.InvokeAsync().AsTask();
+        var result = await fixture.InvokeAsync();
 
-        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("tool exploded");
+        var failed = result.Should().BeOfType<DirectToolResult>().Subject;
+        failed.Status.Should().Be(ToolCallStatus.Failed);
+        failed.Summary.Should().Be("tool exploded");
+        failed.Detail.Should().Contain("tool exploded");
+        failed.Content.GetProperty("message").GetString().Should().Be("tool exploded");
+        failed.Content.GetProperty("type").GetString().Should().Be("InvalidOperationException");
+        failed.HookFeedback.Should().HaveCount(2);
+        failed.HookFeedback![0].Source.Should().Be("selfclaw");
+        failed.HookFeedback[1].Text.Should().Be("note");
+        fixture.Executions.Should().Be(1);
+
         var outcome = fixture.Invoker.TryTakeOutcome("call-1");
         outcome.Should().NotBeNull();
         outcome!.EffectiveArgumentsJson.Should().Contain("changed");
         outcome.Feedback.Should().ContainSingle().Which.Text.Should().Be("note");
+    }
+
+    [Fact]
+    public async Task Consecutive_faults_are_converted_until_the_budget_is_spent()
+    {
+        var fixture = new Fixture(
+            ToolPermissionMode.FullAccess,
+            approvalHandler: null,
+            checkpoint: null,
+            hooks: [],
+            throws: true);
+
+        for (var attempt = 1; attempt <= DirectToolInvoker.MaximumConsecutiveToolFaults; attempt++)
+        {
+            var converted = await fixture.InvokeAsync($"call-{attempt}");
+
+            converted.Should().BeOfType<DirectToolResult>().Which.Status.Should().Be(ToolCallStatus.Failed);
+        }
+
+        var action = () => fixture
+            .InvokeAsync($"call-{DirectToolInvoker.MaximumConsecutiveToolFaults + 1}")
+            .AsTask();
+
+        await action.Should().ThrowAsync<DirectToolFaultLimitException>();
+        fixture.Executions.Should().Be(DirectToolInvoker.MaximumConsecutiveToolFaults + 1);
+    }
+
+    [Fact]
+    public async Task A_call_without_a_fault_resets_the_consecutive_budget()
+    {
+        var fixture = new Fixture(
+            ToolPermissionMode.FullAccess,
+            approvalHandler: null,
+            checkpoint: null,
+            hooks: [],
+            throws: true);
+
+        await fixture.InvokeAsync("call-1");
+        fixture.Explode = false;
+        await fixture.InvokeAsync("call-2");
+        fixture.Explode = true;
+
+        var result = await fixture.InvokeAsync("call-3");
+
+        result.Should().BeOfType<DirectToolResult>().Which.Status.Should().Be(ToolCallStatus.Failed);
+        fixture.Executions.Should().Be(3);
     }
 
     [Fact]
@@ -166,7 +222,8 @@ public sealed class DirectToolInvokerHookTests
 
     private sealed class Fixture
     {
-        private readonly FunctionInvocationContext _context;
+        private readonly AIFunction _function;
+        private readonly AIFunctionArguments _arguments;
 
         internal Fixture(
             ToolPermissionMode permissionMode,
@@ -176,12 +233,13 @@ public sealed class DirectToolInvokerHookTests
             bool requiresApproval = false,
             bool throws = false)
         {
+            Explode = throws;
             var function = AIFunctionFactory.Create(
                 (string value) =>
                 {
                     LastValue = value;
                     Executions++;
-                    if (throws)
+                    if (Explode)
                     {
                         throw new InvalidOperationException("tool exploded");
                     }
@@ -228,15 +286,13 @@ public sealed class DirectToolInvokerHookTests
                 new Dictionary<string, DirectToolBinding>(StringComparer.Ordinal) { [function.Name] = binding },
                 turnHooks);
             var arguments = new AIFunctionArguments { ["value"] = "original" };
-            _context = new FunctionInvocationContext
-            {
-                Function = function,
-                Arguments = arguments,
-                CallContent = new FunctionCallContent("call-1", function.Name, arguments)
-            };
+            _function = function;
+            _arguments = arguments;
         }
 
         internal DirectToolInvoker Invoker { get; }
+
+        internal bool Explode { get; set; }
 
         internal DirectToolResult? ToolResult { get; private set; }
 
@@ -244,8 +300,15 @@ public sealed class DirectToolInvokerHookTests
 
         internal string? LastValue { get; private set; }
 
-        internal ValueTask<object?> InvokeAsync()
-            => Invoker.InvokeAsync(_context, CancellationToken.None);
+        internal ValueTask<object?> InvokeAsync(string callId = "call-1")
+            => Invoker.InvokeAsync(
+                new FunctionInvocationContext
+                {
+                    Function = _function,
+                    Arguments = _arguments,
+                    CallContent = new FunctionCallContent(callId, _function.Name, _arguments)
+                },
+                CancellationToken.None);
     }
 
     private sealed class CountingCheckpoint : IToolExecutionCheckpoint

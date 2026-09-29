@@ -13,19 +13,28 @@ using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 namespace SelfClaw.Infrastructure.Agents.Direct.Tools;
 
 /// <summary>
-/// The single tool-invocation seam for a Direct turn: it owns the tool hooks, approval and the durable
-/// execution checkpoint, and it is installed as the pipeline's M.E.AI <c>FunctionInvoker</c> so every
-/// tool call passes through exactly once.
+/// The single tool-invocation seam for a Direct turn: it owns the tool hooks, approval, the durable
+/// execution checkpoint and the turn's consecutive-fault budget, and it is installed as the pipeline's
+/// M.E.AI <c>FunctionInvoker</c> so every tool call passes through exactly once.
 /// </summary>
 internal sealed class DirectToolInvoker
 {
     internal const string DeniedResult = "User denied this tool call.";
+
+    /// <summary>
+    /// How many consecutive tool faults are converted into a model-visible failure before the next one
+    /// aborts the turn. The pipeline sets <c>MaximumConsecutiveErrorsPerRequest</c> to 0, so the first
+    /// uncaught fault ends the turn: a permanently broken tool costs at most this many attempts plus one
+    /// instead of the whole tool-call budget.
+    /// </summary>
+    internal const int MaximumConsecutiveToolFaults = 2;
 
     private readonly DirectChatTurnRequest _request;
     private readonly IReadOnlyDictionary<string, DirectToolBinding> _bindings;
     private readonly DirectTurnHooks _hooks;
     private readonly ConcurrentDictionary<string, ToolHookOutcome> _outcomes = new(StringComparer.Ordinal);
     private int _callCount;
+    private int _consecutiveToolFaults;
 
     public DirectToolInvoker(
         DirectChatTurnRequest request,
@@ -63,6 +72,7 @@ internal sealed class DirectToolInvoker
         DirectToolResult? result = null;
         object? raw = null;
         string? deniedBy = null;
+        Exception? fault = null;
         if (pre.BlockedBy is not null)
         {
             deniedBy = "hook";
@@ -74,7 +84,7 @@ internal sealed class DirectToolInvoker
         {
             var arguments = pre.EffectiveArguments ?? context.Arguments;
             var needsApproval =
-                binding.RequiresApproval && _request.ToolPermissionMode != ToolPermissionMode.FullAccess ||
+                (binding.RequiresApproval && _request.ToolPermissionMode != ToolPermissionMode.FullAccess) ||
                 pre.ApprovalRequiredBy.Count > 0;
             if (needsApproval && !await RequestApprovalAsync(context, binding, arguments, pre, cancellationToken)
                     .ConfigureAwait(false))
@@ -100,44 +110,63 @@ internal sealed class DirectToolInvoker
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    // The result object does not exist on this path, so the side-band outcome is the only
-                    // place a rewrite or an ask can still be recorded for the transcript.
-                    var threw = new ToolHookResult(
+                    // A faulting tool is a failure the model must see, not a turn failure: the real error
+                    // reaches it as a result, so the model can correct itself. Fault metadata stays in the
+                    // hook outcome, and the stack trace stays display-only in Detail.
+                    fault = exception;
+                    result = new DirectToolResult(
                         ToolCallStatus.Failed,
-                        DeniedBy: null,
-                        Summary: null,
-                        Content: null,
-                        Error: exception.Message,
-                        EffectiveArgumentsJson: pre.EffectiveArgumentsJson,
-                        Duration: stopwatch.Elapsed);
-                    var postThrew = await _hooks.ToolExecutedAsync(call, threw, cancellationToken).ConfigureAwait(false);
-                    RecordOutcome(callId, pre, postThrew);
-                    throw;
+                        exception.Message,
+                        JsonSerializer.SerializeToElement(new
+                        {
+                            type = exception.GetType().Name,
+                            message = exception.Message
+                        }),
+                        exception.ToString());
                 }
 
-                result = raw as DirectToolResult;
+                result ??= raw as DirectToolResult;
             }
         }
 
-        var hookResult = result is not null
+        // A faulted call keeps reporting Error with no summary or content, so what plugins observe through
+        // toolExecuted is unchanged; only the returned result differs.
+        var hookResult = fault is not null
             ? new ToolHookResult(
-                result.Status,
-                deniedBy,
-                result.Summary,
-                result.Content,
-                Error: null,
-                pre.EffectiveArgumentsJson,
-                stopwatch.Elapsed)
-            : new ToolHookResult(
-                ToolCallStatus.Completed,
+                ToolCallStatus.Failed,
                 deniedBy,
                 Summary: null,
                 Content: null,
+                Error: fault.Message,
+                EffectiveArgumentsJson: pre.EffectiveArgumentsJson,
+                Duration: stopwatch.Elapsed)
+            : new ToolHookResult(
+                result?.Status ?? ToolCallStatus.Completed,
+                deniedBy,
+                Summary: result?.Summary,
+                Content: result?.Content,
                 Error: null,
-                pre.EffectiveArgumentsJson,
-                stopwatch.Elapsed);
+                EffectiveArgumentsJson: pre.EffectiveArgumentsJson,
+                Duration: stopwatch.Elapsed);
         var post = await _hooks.ToolExecutedAsync(call, hookResult, cancellationToken).ConfigureAwait(false);
         RecordOutcome(callId, pre, post);
+
+        if (fault is null)
+        {
+            Interlocked.Exchange(ref _consecutiveToolFaults, 0);
+        }
+        else
+        {
+            var consecutiveFaults = Interlocked.Increment(ref _consecutiveToolFaults);
+            if (consecutiveFaults > MaximumConsecutiveToolFaults)
+            {
+                // The turn's own budget is spent: stop it instead of letting the pipeline retry the broken
+                // tool until the iteration limit. The pipeline's MaximumConsecutiveErrorsPerRequest of 0
+                // makes this rethrow terminal.
+                throw new DirectToolFaultLimitException(binding.Tool.Name, consecutiveFaults, fault);
+            }
+        }
+
         return result is not null ? AttachFeedback(result, pre, post) : raw;
     }
 
