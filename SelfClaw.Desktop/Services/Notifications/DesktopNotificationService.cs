@@ -66,13 +66,13 @@ public sealed class DesktopNotificationService
             AddNotificationText(builder, title, message);
             builder.AddButton(
                 new ToastButton(
-                    "Confirm",
+                    "允许",
                     DesktopNotificationArguments.Build(
                         (DesktopNotificationArguments.ActionKey, DesktopNotificationArguments.ApproveToolAction),
                         (DesktopNotificationArguments.ToolExecutionIdKey, toolExecutionId.ToString()))));
             builder.AddButton(
                 new ToastButton(
-                    "Cancel",
+                    "拒绝",
                     DesktopNotificationArguments.Build(
                         (DesktopNotificationArguments.ActionKey, DesktopNotificationArguments.RejectToolAction),
                         (DesktopNotificationArguments.ToolExecutionIdKey, toolExecutionId.ToString()))));

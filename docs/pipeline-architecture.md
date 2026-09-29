@@ -243,7 +243,7 @@ flowchart LR
         A2 --> A3["ToolApprovalPresenter<br/>tool-approval/state 版本化推送<br/>重载可恢复"]
         A3 --> A4["useChatApprovals"]
         A4 -->|"resolve-tool-approval"| A5["TryResolve(id, approved)"]
-        A2 -.->|"窗口隐藏/最小化"| A6["Windows Toast Confirm/Cancel"]
+        A2 -.->|"窗口隐藏/最小化"| A6["Windows Toast 允许/拒绝"]
         A2 -.->|"Pet 只读展示等待态"| A7["PetActivityPresenter"]
     end
     subgraph TERMINAL["终端 (ConPTY)"]

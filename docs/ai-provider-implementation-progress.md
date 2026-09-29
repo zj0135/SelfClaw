@@ -340,7 +340,7 @@
 
 1. 使用 `mode: direct` Agent、已选择 workspace、`RequireApproval` 权限，请模型调用 `write_file` 写一个可删除的验收标记文件。
 2. 窗口可见时分别执行一次“允许”和“拒绝”：允许时文件写入；拒绝时文件不产生且 transcript 收到 denied 后继续完成回合。
-3. 最小化窗口后分别通过 Windows toast 的 Confirm/Cancel 执行一次，核对结果与前台一致且同一 execution id 不能二次处理。
+3. 最小化窗口后分别通过 Windows toast 的 允许/拒绝 执行一次，核对结果与前台一致且同一 execution id 不能二次处理。
 4. 再触发一项写入但不操作，确认审批持续挂起、不自动拒绝；随后停止回合，确认 pending approval 被取消且回合解除等待。（2026-09-29 更新：原“等待 5 分钟自动拒绝”已移除。）
 5. 有 pending approval 时关闭主窗口，确认应用退出且没有遗留写入或挂起进程。
 
@@ -543,7 +543,7 @@
 ### 新增内容
 
 - `MainWindow` 订阅 `DesktopToolApprovalHandler.ApprovalRequested`；窗口可见时显示默认拒绝的 WPF Yes/No 对话框，展示工具描述与截断后的参数摘要。
-- 窗口隐藏或最小化时复用 Windows toast 的 Confirm/Cancel 按钮；`DesktopNotificationActivationService` 重新解析 approve/reject action 并调用 `TryResolve`。
+- 窗口隐藏或最小化时复用 Windows toast 的 允许/拒绝 按钮；`DesktopNotificationActivationService` 重新解析 approve/reject action 并调用 `TryResolve`。
 - handler 为每项审批增加 5 分钟超时，超时自动返回拒绝并触发前台/系统通知提示。（2026-09-29 更新：已移除；未决审批只由用户决定、调用方取消或关闭时 `RejectAll` 结束。）
 - 补上 timeout callback 先于 pending item 可见时的竞态闭合；即使超短 timeout 落在注册窗口内也会自动拒绝，不会永久等待。
 - 主窗口关闭时取消订阅并 `RejectAll`，避免后台 Direct 回合永久等待；调用方取消仍保持 CancellationToken 语义。
