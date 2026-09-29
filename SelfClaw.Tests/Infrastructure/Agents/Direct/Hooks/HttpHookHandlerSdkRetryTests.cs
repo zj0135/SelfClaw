@@ -55,7 +55,7 @@ public sealed class HttpHookHandlerSdkRetryTests
             AiProviderKind.OpenAICompatible,
             httpClientProvider: provider);
         var client = adapter.CreateChatClient(request, httpClient);
-        var options = adapter.CreateChatOptions(request);
+        var options = adapter.CreateChatOptions(request, []);
 
         var updates = new List<ChatResponseUpdate>();
         await foreach (var update in client.GetStreamingResponseAsync(
@@ -103,8 +103,7 @@ public sealed class HttpHookHandlerSdkRetryTests
             connection,
             profile,
             new Dictionary<string, string> { [OpenAiProviderAdapter.ApiKeySecretName] = "test-api-key" },
-            EnableReasoning: false,
-            []);
+            EnableReasoning: false);
     }
 
     private sealed class RetryOnceHandler(string sse) : HttpMessageHandler

@@ -1,4 +1,4 @@
-using SelfClaw.Core.Models;
+﻿using SelfClaw.Core.Models;
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
@@ -40,10 +40,9 @@ public sealed class AnthropicProviderAdapterTests
         var adapter = new AnthropicProviderAdapter();
         var request = CreateRequest(
             sampling: new AiSamplingOptions(true, 0.3, true, 0.95),
-            modelOptions: ReadJsonObject("{\"max_tokens\":4096}"),
-            tools: [CreateTool()]);
+            modelOptions: ReadJsonObject("{\"max_tokens\":4096}"));
 
-        var options = adapter.CreateChatOptions(request);
+        var options = adapter.CreateChatOptions(request, [CreateTool()]);
 
         options.Temperature.Should().Be(0.3f);
         options.TopP.Should().Be(0.95f);
@@ -61,7 +60,7 @@ public sealed class AnthropicProviderAdapterTests
         var request = CreateRequest(
             modelOptions: ReadJsonObject("{\"display.maxOutputTokens\":64000}"));
 
-        var options = adapter.CreateChatOptions(request);
+        var options = adapter.CreateChatOptions(request, []);
 
         options.MaxOutputTokens.Should().Be(64000);
     }
@@ -73,7 +72,7 @@ public sealed class AnthropicProviderAdapterTests
         var request = CreateRequest(
             modelOptions: ReadJsonObject("{\"max_tokens\":8192,\"display.maxOutputTokens\":64000}"));
 
-        var options = adapter.CreateChatOptions(request);
+        var options = adapter.CreateChatOptions(request, []);
 
         options.MaxOutputTokens.Should().Be(8192);
     }
@@ -84,7 +83,7 @@ public sealed class AnthropicProviderAdapterTests
         var adapter = new AnthropicProviderAdapter();
         var request = CreateRequest();
 
-        var options = adapter.CreateChatOptions(request);
+        var options = adapter.CreateChatOptions(request, []);
 
         options.ToolMode.Should().Be(ChatToolMode.None);
         options.Tools.Should().BeNull();
@@ -96,7 +95,7 @@ public sealed class AnthropicProviderAdapterTests
         var adapter = new AnthropicProviderAdapter();
         var request = CreateRequest(apiFormat: AiProviderApiFormat.OpenAIResponses);
 
-        var act = () => adapter.CreateChatOptions(request);
+        var act = () => adapter.CreateChatOptions(request, []);
 
         act.Should()
             .Throw<NotSupportedException>()
@@ -153,7 +152,6 @@ public sealed class AnthropicProviderAdapterTests
         AiProviderApiFormat apiFormat = AiProviderApiFormat.AnthropicMessages,
         IReadOnlyDictionary<string, string>? secrets = null,
         IReadOnlyDictionary<string, JsonElement>? modelOptions = null,
-        IReadOnlyList<AITool>? tools = null,
         AiSamplingOptions? sampling = null)
     {
         var now = DateTimeOffset.UtcNow;
@@ -189,8 +187,7 @@ public sealed class AnthropicProviderAdapterTests
             {
                 [AnthropicProviderAdapter.ApiKeySecretName] = "test-api-key"
             },
-            EnableReasoning: false,
-            tools ?? []);
+            EnableReasoning: false);
     }
 
     private static AITool CreateTool() =>

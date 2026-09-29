@@ -98,7 +98,7 @@ public sealed class AiChatClientFactoryTests
             adapter.LastRequest.Should().NotBeNull();
             adapter.LastRequest!.Secrets["api_key"].Should().Be("sk-test");
             adapter.LastRequest.EnableReasoning.Should().BeTrue();
-            adapter.LastRequest.Tools.Should().ContainSingle().Which.Should().BeSameAs(tool);
+            adapter.LastTools.Should().ContainSingle().Which.Should().BeSameAs(tool);
             adapter.LastHttpClient.Should().NotBeNull();
             nativeClient.IsDisposed.Should().BeFalse();
         }
@@ -305,6 +305,7 @@ public sealed class AiChatClientFactoryTests
         public bool SupportsFormat { get; init; } = true;
         public Exception? CreateException { get; init; }
         public AiProviderClientRequest? LastRequest { get; private set; }
+        public IReadOnlyList<AITool>? LastTools { get; private set; }
         public HttpClient? LastHttpClient { get; private set; }
         public int CreateClientCalls { get; private set; }
 
@@ -318,9 +319,10 @@ public sealed class AiChatClientFactoryTests
             return CreateException is null ? _client : throw CreateException;
         }
 
-        public ChatOptions CreateChatOptions(AiProviderClientRequest request)
+        public ChatOptions CreateChatOptions(AiProviderClientRequest request, IReadOnlyList<AITool> tools)
         {
             LastRequest = request;
+            LastTools = tools;
             return _options;
         }
 

@@ -1,4 +1,4 @@
-using SelfClaw.Core.Models;
+﻿using SelfClaw.Core.Models;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -34,7 +34,7 @@ public sealed class OllamaProviderAdapterTests
         compatibleClient.Should().NotBeNull();
         httpClientProvider.CachedSharedHandlerCount.Should().Be(1);
 
-        var options = adapter.CreateChatOptions(nativeRequest);
+        var options = adapter.CreateChatOptions(nativeRequest, []);
         options.ModelId.Should().Be("llama3.2:latest");
         options.Temperature.Should().BeApproximately(0.25f, 0.0001f);
         options.TopP.Should().BeNull();
@@ -106,7 +106,7 @@ public sealed class OllamaProviderAdapterTests
             JsonObject("{}"),
             now,
             now);
-        return new AiProviderClientRequest(connection, profile, new Dictionary<string, string>(), false, []);
+        return new AiProviderClientRequest(connection, profile, new Dictionary<string, string>(), false);
     }
 
     private static string ReadFixture(string fixtureName)

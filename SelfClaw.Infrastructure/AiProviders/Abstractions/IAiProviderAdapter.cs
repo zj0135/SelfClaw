@@ -43,7 +43,7 @@ public interface IAiProviderAdapter
 
     /// <summary>
     /// Builds the <see cref="ChatOptions"/> for the request, mapping shared
-    /// sampling/tool settings and injecting provider-specific raw options.
+    /// sampling/tool settings from <paramref name="tools"/> and injecting provider-specific raw options.
     /// </summary>
-    ChatOptions CreateChatOptions(AiProviderClientRequest request);
+    ChatOptions CreateChatOptions(AiProviderClientRequest request, IReadOnlyList<AITool> tools);
 }

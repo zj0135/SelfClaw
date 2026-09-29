@@ -78,9 +78,9 @@ public sealed class AiProviderHttpClientProviderTests
         using var chatHttpClient = provider.CreateTurnClient(connection, null);
         using var responsesHttpClient = provider.CreateTurnClient(connection, null);
         using var chatClient = adapter.CreateChatClient(
-            new AiProviderClientRequest(connection, chatProfile, secrets, false, []), chatHttpClient);
+            new AiProviderClientRequest(connection, chatProfile, secrets, false), chatHttpClient);
         using var responsesClient = adapter.CreateChatClient(
-            new AiProviderClientRequest(connection, responsesProfile, secrets, false, []), responsesHttpClient);
+            new AiProviderClientRequest(connection, responsesProfile, secrets, false), responsesHttpClient);
 
         chatHttpClient.Timeout.Should().Be(Timeout.InfiniteTimeSpan);
         responsesHttpClient.Timeout.Should().Be(Timeout.InfiniteTimeSpan);

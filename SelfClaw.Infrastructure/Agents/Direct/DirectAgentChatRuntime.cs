@@ -127,7 +127,6 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         var state = new TurnState();
         var output = new TurnOutputStream(writer);
         var cancellationObserved = false;
-        var runCompletedEmitted = false;
         RunCompletedEvent? terminal = null;
         DirectTurnSetup? setup = null;
         try
@@ -138,14 +137,12 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             {
                 // SetupTurnAsync already wrote the Blocked terminal event.
                 terminal = new RunCompletedEvent(RunCompletionStatus.Blocked, FinalText: null, setup.BlockReason);
-                runCompletedEmitted = true;
             }
             else
             {
                 var finishReason = await StreamResponseAsync(setup, output, cancellationToken).ConfigureAwait(false);
                 output.ReportUsage();
                 terminal = WriteTerminalOutcome(writer, finishReason, output);
-                runCompletedEmitted = true;
             }
         }
         catch (OperationCanceledException exception)
@@ -163,28 +160,25 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 output.FinalTextOrNull,
                 exception.Message);
             writer.TryWrite(terminal);
-            runCompletedEmitted = true;
         }
         finally
         {
             state.Elapsed.Stop();
-            DeliverRunCompleted(state, output, terminal, cancellationObserved);
+            DeliverRunCompleted(state, setup?.Invoker, output, terminal, cancellationObserved);
             if (setup is not null)
             {
                 await DisposeResourcesAsync(setup.ProviderLease, setup.CapabilityLease).ConfigureAwait(false);
             }
 
-            if (!runCompletedEmitted && !cancellationObserved)
-            {
-                writer.TryWrite(Failed("The Direct AI agent turn ended without a completion status."));
-            }
-
+            // Every path above writes exactly one terminal; the dispatcher synthesizes one if a future
+            // path ever misses, so this producer does not keep a second copy of that guarantee.
             writer.TryComplete();
         }
     }
 
     private void DeliverRunCompleted(
         TurnState state,
+        DirectToolInvoker? invoker,
         TurnOutputStream output,
         RunCompletedEvent? terminal,
         bool cancellationObserved)
@@ -205,7 +199,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 terminal?.ErrorMessage,
                 output.InputTokensOrNull,
                 output.OutputTokensOrNull,
-                state.Invoker?.CallCount ?? 0,
+                invoker?.CallCount ?? 0,
                 state.Elapsed.Elapsed));
         }
         catch (Exception exception)
@@ -287,7 +281,6 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             }
 
             var invoker = new DirectToolInvoker(request, capabilityLease.Bindings, hooks);
-            state.Invoker = invoker;
             var httpHandler = hooks.HasHttpHooks
                 ? new HttpHookHandler(
                     hooks,
@@ -301,8 +294,10 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                     invoker.InvokeAsync,
                     httpHandler));
 
+            // Direct has no resumable session: the whole conversation is replayed into every turn, so only
+            // the CLI parsers ever report a session id.
             writer.TryWrite(new RunStartedEvent(
-                $"direct-{Guid.NewGuid():N}",
+                SessionId: null,
                 providerLease.Profile.Model,
                 AgentKind: null));
             writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
@@ -483,9 +478,6 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
     private static int ClampTokens(long tokens) => (int)Math.Clamp(tokens, 0, int.MaxValue);
 
-    private static RunCompletedEvent Failed(string message)
-        => new(RunCompletionStatus.Failed, FinalText: null, ErrorMessage: message);
-
     /// <summary>
     /// Per-turn mutable state that outlives <c>SetupTurnAsync</c>, so a turn that fails after its
     /// hooks were created still delivers exactly one <c>runCompleted</c>.
@@ -493,8 +485,6 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     private sealed class TurnState
     {
         public DirectTurnHooks? Hooks { get; set; }
-
-        public DirectToolInvoker? Invoker { get; set; }
 
         public Stopwatch Elapsed { get; } = new();
     }

@@ -50,8 +50,8 @@ internal sealed partial class OpenAiProviderAdapter
         return client.AsIChatClient(request.Profile.Model);
     }
 
-    private ChatOptions CreateResponsesOptions(AiProviderClientRequest request) =>
-        AiChatOptions.CreateBase(request, _ => BuildResponseRawOptions(request));
+    private ChatOptions CreateResponsesOptions(AiProviderClientRequest request, IReadOnlyList<AITool> tools) =>
+        AiChatOptions.CreateBase(request, tools, _ => BuildResponseRawOptions(request));
 
     private OpenAICreateResponseOptions BuildResponseRawOptions(AiProviderClientRequest request)
     {

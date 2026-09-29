@@ -39,9 +39,9 @@ internal sealed partial class OpenAiProviderAdapter
         return client.AsIChatClient();
     }
 
-    private ChatOptions CreateChatCompletionsOptions(AiProviderClientRequest request)
+    private ChatOptions CreateChatCompletionsOptions(AiProviderClientRequest request, IReadOnlyList<AITool> tools)
     {
-        var options = AiChatOptions.CreateBase(request, _ => BuildChatCompletionRawOptions(request));
+        var options = AiChatOptions.CreateBase(request, tools, _ => BuildChatCompletionRawOptions(request));
 
         // Chat Completions has no raw patch for the output cap here; the M.E.AI layer maps
         // MaxOutputTokens onto max_completion_tokens for this format, so setting it is what

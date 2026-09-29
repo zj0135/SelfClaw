@@ -84,11 +84,11 @@ internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
             _ => throw UnsupportedFormat(request)
         };
 
-    public ChatOptions CreateChatOptions(AiProviderClientRequest request) =>
+    public ChatOptions CreateChatOptions(AiProviderClientRequest request, IReadOnlyList<AITool> tools) =>
         request.Profile.ApiFormat switch
         {
-            AiProviderApiFormat.OpenAIChatCompletions => CreateChatCompletionsOptions(request),
-            AiProviderApiFormat.OpenAIResponses => CreateResponsesOptions(request),
+            AiProviderApiFormat.OpenAIChatCompletions => CreateChatCompletionsOptions(request, tools),
+            AiProviderApiFormat.OpenAIResponses => CreateResponsesOptions(request, tools),
             _ => throw UnsupportedFormat(request)
         };
 

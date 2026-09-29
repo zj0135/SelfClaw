@@ -106,7 +106,7 @@ public sealed class DirectAgentChatRuntimeTests
         var events = await CollectAsync(runtime.StreamTurnAsync(request));
 
         events[0].Should().BeOfType<RunStartedEvent>().Which.Should().Match<RunStartedEvent>(started =>
-            started.SessionId!.StartsWith("direct-", StringComparison.Ordinal) &&
+            started.SessionId == null &&
             started.Model == "test-model" &&
             started.AgentKind == null);
         events[1].Should().Be(new RunStatusEvent(AgentRunStatus.Requesting));
@@ -829,7 +829,7 @@ public sealed class DirectAgentChatRuntimeTests
             var connection = new AiProviderConnection(Profile.ProviderConnectionId, "test", "Test", AiProviderKind.OpenAI,
                 new Uri("https://example.test"), AiProviderAuthKind.None, new Dictionary<string, string>(),
                 new Dictionary<string, JsonElement>(), now, now);
-            return Task.FromResult(new AiProviderClientRequest(connection, Profile, new Dictionary<string, string>(), false, []));
+            return Task.FromResult(new AiProviderClientRequest(connection, Profile, new Dictionary<string, string>(), false));
         }
 
         public AiChatClientLease Create(AiProviderClientRequest preparation, AiChatClientPipelineOptions pipeline)

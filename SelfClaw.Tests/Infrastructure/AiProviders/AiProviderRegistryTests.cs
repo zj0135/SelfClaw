@@ -68,7 +68,7 @@ public sealed class AiProviderRegistryTests
         public IChatClient CreateChatClient(AiProviderClientRequest request, HttpClient httpClient)
             => throw new NotImplementedException();
 
-        public ChatOptions CreateChatOptions(AiProviderClientRequest request)
+        public ChatOptions CreateChatOptions(AiProviderClientRequest request, IReadOnlyList<AITool> tools)
             => throw new NotImplementedException();
     }
 }

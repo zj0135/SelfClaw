@@ -821,7 +821,7 @@ public sealed class AiProviderSettingsServiceTests
             return ChatClient;
         }
 
-        public ChatOptions CreateChatOptions(AiProviderClientRequest request) => new();
+        public ChatOptions CreateChatOptions(AiProviderClientRequest request, IReadOnlyList<AITool> tools) => new();
     }
 
     private sealed class FakeChatClient : IChatClient

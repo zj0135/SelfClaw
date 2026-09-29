@@ -65,14 +65,14 @@ internal sealed class AnthropicProviderAdapter : IAiProviderAdapter
             .AsIChatClient(request.Profile.Model, ResolveMaxOutputTokens(request));
     }
 
-    public ChatOptions CreateChatOptions(AiProviderClientRequest request)
+    public ChatOptions CreateChatOptions(AiProviderClientRequest request, IReadOnlyList<AITool> tools)
     {
         if (request.Profile.ApiFormat != AiProviderApiFormat.AnthropicMessages)
         {
             throw UnsupportedFormat(request);
         }
 
-        var options = AiChatOptions.CreateBase(request, _ => CreateReasoningOptions(request));
+        var options = AiChatOptions.CreateBase(request, tools, _ => CreateReasoningOptions(request));
         options.MaxOutputTokens = ResolveMaxOutputTokens(request);
         ModelOptionReader.ForProfile(_logger, request.Profile).LogUnknown(RecognizedModelOptionKeys);
         return options;

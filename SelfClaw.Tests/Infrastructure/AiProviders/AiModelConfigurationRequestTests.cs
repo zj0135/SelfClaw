@@ -43,7 +43,7 @@ public sealed class AiModelConfigurationRequestTests
             new ChatMessage(ChatRole.User, "look up"),
             new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call-1", "lookup", new Dictionary<string, object?>())]),
             new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-1", result)])
-        ], adapter.CreateChatOptions(request));
+        ], adapter.CreateChatOptions(request, []));
 
         var payload = ReadStrings(handler.Body).Single(text => text.Contains("[SelfClaw truncated"));
         payload.Should().NotContain("DISPLAY ONLY SENTINEL");
@@ -114,7 +114,7 @@ public sealed class AiModelConfigurationRequestTests
         using var client = adapter.CreateChatClient(request, httpClient);
         var contents = new List<AIContent>();
         await foreach (var update in client.GetStreamingResponseAsync(
-                           [new ChatMessage(ChatRole.User, "Hello")], adapter.CreateChatOptions(request)))
+                           [new ChatMessage(ChatRole.User, "Hello")], adapter.CreateChatOptions(request, [])))
         {
             contents.AddRange(update.Contents);
         }
@@ -143,7 +143,7 @@ public sealed class AiModelConfigurationRequestTests
         using var httpClient = http.CreateTurnClient(request.Connection, null);
         using var client = adapter.CreateChatClient(request, httpClient);
 
-        await client.GetResponseAsync([new ChatMessage(ChatRole.User, "Hello")], adapter.CreateChatOptions(request));
+        await client.GetResponseAsync([new ChatMessage(ChatRole.User, "Hello")], adapter.CreateChatOptions(request, []));
 
         if (effort is null)
         {
@@ -183,7 +183,7 @@ public sealed class AiModelConfigurationRequestTests
         var request = CreateRequest(adapter.ProviderKind, format, effort);
         using var httpClient = http.CreateTurnClient(request.Connection, null);
         using var client = adapter.CreateChatClient(request, httpClient);
-        var options = adapter.CreateChatOptions(request);
+        var options = adapter.CreateChatOptions(request, []);
 
         await client.GetResponseAsync([new ChatMessage(ChatRole.User, "Hello")], options);
 
@@ -243,7 +243,7 @@ public sealed class AiModelConfigurationRequestTests
         var profile = new AiModelProfile(Guid.NewGuid(), connection.Id, "Test", format, configuration.Model,
             new AiSamplingOptions(false, 1, true, 0.5), new Dictionary<string, JsonElement>(), now, now,
             Configuration: configuration);
-        return new AiProviderClientRequest(connection, profile, new Dictionary<string, string> { ["api_key"] = "test-key" }, false, []);
+        return new AiProviderClientRequest(connection, profile, new Dictionary<string, string> { ["api_key"] = "test-key" }, false);
     }
 
     private static string ResponseFor(AiProviderApiFormat format) => format switch

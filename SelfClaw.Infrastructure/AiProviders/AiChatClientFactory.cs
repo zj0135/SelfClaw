@@ -77,23 +77,21 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
             connection,
             profile,
             secrets,
-            profile.Configuration?.ReasoningEffort is string effort && effort != "none",
-            []);
+            profile.Configuration?.ReasoningEffort is string effort && effort != "none");
     }
 
     public AiChatClientLease Create(AiProviderClientRequest preparation, AiChatClientPipelineOptions pipeline)
     {
         ArgumentNullException.ThrowIfNull(preparation);
         ArgumentNullException.ThrowIfNull(pipeline);
-        var request = preparation with { Tools = pipeline.Tools };
-        var adapter = _registry.GetRequiredAdapter(request.Connection.ProviderKind);
-        var httpClient = _httpClientProvider.CreateTurnClient(request.Connection, pipeline.HttpHandler);
+        var adapter = _registry.GetRequiredAdapter(preparation.Connection.ProviderKind);
+        var httpClient = _httpClientProvider.CreateTurnClient(preparation.Connection, pipeline.HttpHandler);
         IChatClient? nativeClient = null;
 
         try
         {
-            var options = adapter.CreateChatOptions(request);
-            nativeClient = adapter.CreateChatClient(request, httpClient);
+            var options = adapter.CreateChatOptions(preparation, pipeline.Tools);
+            nativeClient = adapter.CreateChatClient(preparation, httpClient);
             var client = new ChatClientBuilder(nativeClient)
                 .UseFunctionInvocation(_safeLoggerFactory, option => {
                     option.MaximumIterationsPerRequest = 128;
@@ -105,7 +103,7 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
                 })
                 .UseLogging(_safeLoggerFactory)
                 .Build();
-            return new AiChatClientLease(client, options, request.Profile, httpClient);
+            return new AiChatClientLease(client, options, preparation.Profile, httpClient);
         }
         catch
         {

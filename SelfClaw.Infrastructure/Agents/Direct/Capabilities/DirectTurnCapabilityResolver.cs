@@ -156,9 +156,11 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         var result = new List<DirectToolBinding>();
         foreach (var binding in bindings)
         {
-            if (!names.Add(binding.Tool.Name) || binding.Tool.Name != binding.Descriptor.ProviderName)
+            // Descriptor names are derived from the function itself at every binding site, so the only
+            // possible conflict here is two bindings claiming the same tool name.
+            if (!names.Add(binding.Tool.Name))
             {
-                throw new InvalidDataException($"Direct tool name collision or descriptor mismatch for '{binding.Tool.Name}'.");
+                throw new InvalidDataException($"Direct tool name collision: '{binding.Tool.Name}' is bound more than once.");
             }
 
             if (!DirectCapabilityRules.Allows(binding.Descriptor.Kind, request.Agent.ToolPolicy)) continue;

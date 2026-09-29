@@ -81,11 +81,13 @@ internal static class AiChatOptions
 
     /// <summary>
     /// Builds the format-independent <see cref="ChatOptions"/> shared by every adapter: sampling pulled
-    /// from the profile, and tool mode/list derived from the request. <paramref name="rawRepresentationFactory"/>
-    /// wires a provider-specific raw options object when the adapter needs one.
+    /// from the profile, and tool mode/list derived from the turn's <paramref name="tools"/>.
+    /// <paramref name="rawRepresentationFactory"/> wires a provider-specific raw options object when the
+    /// adapter needs one.
     /// </summary>
     public static ChatOptions CreateBase(
         AiProviderClientRequest request,
+        IReadOnlyList<AITool> tools,
         Func<IChatClient, object?>? rawRepresentationFactory = null)
     {
         var sampling = request.Profile.Configuration?.Sampling ?? request.Profile.Sampling;
@@ -97,8 +99,8 @@ internal static class AiChatOptions
                 request.Profile.ModelOptions.TryGetValue(MaxOutputTokensKey, out var maximum) &&
                 maximum.ValueKind == JsonValueKind.Number &&
                 maximum.TryGetInt32(out var tokens) ? tokens : null),
-            ToolMode = request.Tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
-            Tools = request.Tools.Count > 0 ? request.Tools.ToList() : null,
+            ToolMode = tools.Count > 0 ? ChatToolMode.Auto : ChatToolMode.None,
+            Tools = tools.Count > 0 ? tools.ToList() : null,
             RawRepresentationFactory = rawRepresentationFactory
         };
     }

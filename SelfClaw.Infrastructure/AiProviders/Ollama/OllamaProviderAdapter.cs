@@ -41,11 +41,11 @@ internal sealed class OllamaProviderAdapter : IAiProviderAdapter
             _ => throw UnsupportedFormat(request)
         };
 
-    public ChatOptions CreateChatOptions(AiProviderClientRequest request)
+    public ChatOptions CreateChatOptions(AiProviderClientRequest request, IReadOnlyList<AITool> tools)
     {
         if (request.Profile.ApiFormat == AiProviderApiFormat.OpenAIChatCompletions)
         {
-            return _openAiCompatibilityAdapter.CreateChatOptions(CreateOpenAiCompatibilityRequest(request));
+            return _openAiCompatibilityAdapter.CreateChatOptions(CreateOpenAiCompatibilityRequest(request), tools);
         }
 
         if (request.Profile.ApiFormat != AiProviderApiFormat.OllamaNative)
@@ -53,7 +53,7 @@ internal sealed class OllamaProviderAdapter : IAiProviderAdapter
             throw UnsupportedFormat(request);
         }
 
-        var options = AiChatOptions.CreateBase(request);
+        var options = AiChatOptions.CreateBase(request, tools);
         options.ModelId = request.Profile.Model;
         if (AiChatOptions.ResolveContextWindowTokens(request.Profile) is int contextLength)
         {

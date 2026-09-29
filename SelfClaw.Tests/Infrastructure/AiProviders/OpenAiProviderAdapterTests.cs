@@ -1,4 +1,4 @@
-using SelfClaw.Core.Models;
+﻿using SelfClaw.Core.Models;
 using System.ClientModel.Primitives;
 using System.Text.Json;
 using FluentAssertions;
@@ -59,7 +59,7 @@ public sealed class OpenAiProviderAdapterTests
             AiProviderApiFormat.OpenAIChatCompletions);
         using var httpClient = http.CreateTurnClient(request.Connection, null);
         var client = adapter.CreateChatClient(request, httpClient);
-        var options = adapter.CreateChatOptions(request);
+        var options = adapter.CreateChatOptions(request, []);
 
         var updates = new List<ChatResponseUpdate>();
         await foreach (var update in client.GetStreamingResponseAsync(
@@ -95,7 +95,7 @@ public sealed class OpenAiProviderAdapterTests
             AiProviderApiFormat.OpenAIResponses,
             sampling: new AiSamplingOptions(true, 0.25, true, 0.8));
 
-        var options = adapter.CreateChatOptions(request);
+        var options = adapter.CreateChatOptions(request, []);
 
         options.Temperature.Should().Be(0.25f);
         options.TopP.Should().Be(0.8f);
@@ -112,7 +112,7 @@ public sealed class OpenAiProviderAdapterTests
             AiProviderApiFormat.OpenAIChatCompletions,
             modelOptions: ReadJsonObject("{\"max_output_tokens\":9000}"));
 
-        var options = adapter.CreateChatOptions(request);
+        var options = adapter.CreateChatOptions(request, []);
 
         options.MaxOutputTokens.Should().Be(9000);
     }
@@ -126,7 +126,7 @@ public sealed class OpenAiProviderAdapterTests
             AiProviderApiFormat.OpenAIChatCompletions,
             modelOptions: ReadJsonObject("{\"display.maxOutputTokens\":32000}"));
 
-        var options = adapter.CreateChatOptions(request);
+        var options = adapter.CreateChatOptions(request, []);
 
         options.MaxOutputTokens.Should().Be(32000);
     }
@@ -137,11 +137,10 @@ public sealed class OpenAiProviderAdapterTests
         var adapter = new OpenAiProviderAdapter();
         var withoutTools = adapter.CreateChatOptions(CreateRequest(
             AiProviderKind.OpenAI,
-            AiProviderApiFormat.OpenAIResponses));
+            AiProviderApiFormat.OpenAIResponses), []);
         var withTools = adapter.CreateChatOptions(CreateRequest(
             AiProviderKind.OpenAI,
-            AiProviderApiFormat.OpenAIResponses,
-            tools: [CreateTool()]));
+            AiProviderApiFormat.OpenAIResponses), [CreateTool()]);
 
         withoutTools.ToolMode.Should().Be(ChatToolMode.None);
         withoutTools.Tools.Should().BeNull();
@@ -162,7 +161,7 @@ public sealed class OpenAiProviderAdapterTests
             AiProviderApiFormat.OpenAIChatCompletions,
             enableReasoning: enableReasoning);
 
-        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request));
+        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request, []));
 
         rawJson.GetProperty("thinking").GetProperty("type").GetString().Should().Be(expectedThinkingType);
     }
@@ -176,7 +175,7 @@ public sealed class OpenAiProviderAdapterTests
             AiProviderApiFormat.OpenAIChatCompletions,
             enableReasoning: true);
 
-        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request));
+        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request, []));
 
         rawJson.TryGetProperty("thinking", out _).Should().BeFalse();
     }
@@ -197,7 +196,7 @@ public sealed class OpenAiProviderAdapterTests
             }
             """));
 
-        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request));
+        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request, []));
 
         rawJson.GetProperty("thinking").GetProperty("type").GetString().Should().Be("enabled");
         rawJson.GetProperty("reasoning_effort").GetString().Should().Be("high");
@@ -224,7 +223,7 @@ public sealed class OpenAiProviderAdapterTests
             }
             """));
 
-        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request));
+        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request, []));
 
         rawJson.GetProperty("reasoning").GetProperty("effort").GetString().Should().Be("medium");
         rawJson.GetProperty("reasoning").GetProperty("summary").GetString().Should().Be("auto");
@@ -245,7 +244,7 @@ public sealed class OpenAiProviderAdapterTests
             AiProviderApiFormat.OpenAIResponses,
             modelOptions: ReadJsonObject("{\"display.maxOutputTokens\":16000}"));
 
-        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request));
+        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request, []));
 
         rawJson.GetProperty("max_output_tokens").GetInt32().Should().Be(16000);
     }
@@ -259,7 +258,7 @@ public sealed class OpenAiProviderAdapterTests
             AiProviderApiFormat.OpenAIResponses,
             enableReasoning: true);
 
-        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request));
+        var rawJson = ReadRawOptionsJson(adapter.CreateChatOptions(request, []));
 
         rawJson.TryGetProperty("reasoning", out _).Should().BeFalse();
     }
@@ -272,7 +271,7 @@ public sealed class OpenAiProviderAdapterTests
             AiProviderKind.OpenAI,
             (AiProviderApiFormat)999);
 
-        var act = () => adapter.CreateChatOptions(request);
+        var act = () => adapter.CreateChatOptions(request, []);
 
         act.Should()
             .Throw<NotSupportedException>()
@@ -320,8 +319,7 @@ public sealed class OpenAiProviderAdapterTests
             {
                 [OpenAiProviderAdapter.ApiKeySecretName] = "test-api-key"
             },
-            enableReasoning,
-            tools ?? []);
+            enableReasoning);
     }
 
     private static AITool CreateTool() =>
