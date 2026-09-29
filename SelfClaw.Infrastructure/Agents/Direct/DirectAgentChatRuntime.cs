@@ -1,9 +1,8 @@
-using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
+﻿using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Hooks;
 using SelfClaw.Infrastructure.Agents.Direct.Hooks.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
-using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Models;
@@ -14,8 +13,6 @@ using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using System.Text;
-using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -125,7 +122,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         CancellationToken cancellationToken)
     {
         var state = new TurnState();
-        var output = new TurnOutputStream(writer);
+        var output = new DirectEventTranslator(writer);
         var cancellationObserved = false;
         RunCompletedEvent? terminal = null;
         DirectTurnSetup? setup = null;
@@ -133,14 +130,15 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         {
             state.Elapsed.Start();
             setup = await SetupTurnAsync(request, writer, state, cancellationToken).ConfigureAwait(false);
-            if (setup.ProviderLease is null)
+            if (setup is DirectTurnSetup.Blocked blocked)
             {
                 // SetupTurnAsync already wrote the Blocked terminal event.
-                terminal = new RunCompletedEvent(RunCompletionStatus.Blocked, FinalText: null, setup.BlockReason);
+                terminal = new RunCompletedEvent(RunCompletionStatus.Blocked, FinalText: null, blocked.Reason);
             }
             else
             {
-                var finishReason = await StreamResponseAsync(setup, output, cancellationToken).ConfigureAwait(false);
+                var ready = (DirectTurnSetup.Ready)setup;
+                var finishReason = await StreamResponseAsync(ready, output, cancellationToken).ConfigureAwait(false);
                 output.ReportUsage();
                 terminal = WriteTerminalOutcome(writer, finishReason, output);
             }
@@ -164,10 +162,11 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         finally
         {
             state.Elapsed.Stop();
-            DeliverRunCompleted(state, setup?.Invoker, output, terminal, cancellationObserved);
+            var ready = setup as DirectTurnSetup.Ready;
+            DeliverRunCompleted(state, ready?.Invoker, output, terminal, cancellationObserved);
             if (setup is not null)
             {
-                await DisposeResourcesAsync(setup.ProviderLease, setup.CapabilityLease).ConfigureAwait(false);
+                await DisposeResourcesAsync(ready?.ProviderLease, setup.CapabilityLease).ConfigureAwait(false);
             }
 
             // Every path above writes exactly one terminal; the dispatcher synthesizes one if a future
@@ -179,7 +178,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     private void DeliverRunCompleted(
         TurnState state,
         DirectToolInvoker? invoker,
-        TurnOutputStream output,
+        DirectEventTranslator output,
         RunCompletedEvent? terminal,
         bool cancellationObserved)
     {
@@ -243,7 +242,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             {
                 writer.TryWrite(new RunCompletedEvent(
                     RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: capabilityLease.HookBlockReason));
-                return new DirectTurnSetup(capabilityLease, null, null, [], capabilityLease.HookBlockReason);
+                return new DirectTurnSetup.Blocked(capabilityLease, capabilityLease.HookBlockReason);
             }
 
             var hooks = _hooksFactory.Create(
@@ -277,7 +276,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             {
                 writer.TryWrite(new RunCompletedEvent(
                     RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: start.BlockReason));
-                return new DirectTurnSetup(capabilityLease, null, null, [], start.BlockReason);
+                return new DirectTurnSetup.Blocked(capabilityLease, start.BlockReason);
             }
 
             var invoker = new DirectToolInvoker(request, capabilityLease.Bindings, hooks);
@@ -314,7 +313,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                     providerLease.Options.MaxOutputTokens),
                 providerLease.Options.Tools,
                 start.Context);
-            return new DirectTurnSetup(capabilityLease, providerLease, invoker, messages, null);
+            return new DirectTurnSetup.Ready(capabilityLease, providerLease, invoker, messages);
         }
         catch
         {
@@ -351,8 +350,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     /// finish reason of the final update.
     /// </summary>
     private async Task<ChatFinishReason?> StreamResponseAsync(
-        DirectTurnSetup setup,
-        TurnOutputStream output,
+        DirectTurnSetup.Ready setup,
+        DirectEventTranslator output,
         CancellationToken cancellationToken)
     {
         // The M.E.AI FunctionInvokingChatClient owns the tool loop but never reports
@@ -362,7 +361,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         // report it as Truncated so the partial answer is kept and the decision to
         // continue - which costs another full request - stays with the user.
         ChatFinishReason? finishReason = null;
-        await foreach (var update in setup.ProviderLease!.Client.GetStreamingResponseAsync(
+        await foreach (var update in setup.ProviderLease.Client.GetStreamingResponseAsync(
                            setup.Messages,
                            setup.ProviderLease.Options,
                            cancellationToken).ConfigureAwait(false))
@@ -387,7 +386,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     private RunCompletedEvent WriteTerminalOutcome(
         ChannelWriter<AgentStreamEvent> writer,
         ChatFinishReason? finishReason,
-        TurnOutputStream output)
+        DirectEventTranslator output)
     {
         if (finishReason == ChatFinishReason.Length && output.HasFinalText)
         {
@@ -461,23 +460,6 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         }
     }
 
-    private static (ToolCallStatus Status, string? Summary, string? Detail) DescribeToolResult(
-        FunctionResultContent content)
-    {
-        if (content.Exception is not null)
-        {
-            return (ToolCallStatus.Failed, content.Exception.Message, content.Exception.ToString());
-        }
-
-        return content.Result switch
-        {
-            DirectToolResult result => (result.Status, result.Summary, result.Detail),
-            _ => (ToolCallStatus.Failed, "The tool returned an invalid Direct result.", null)
-        };
-    }
-
-    private static int ClampTokens(long tokens) => (int)Math.Clamp(tokens, 0, int.MaxValue);
-
     /// <summary>
     /// Per-turn mutable state that outlives <c>SetupTurnAsync</c>, so a turn that fails after its
     /// hooks were created still delivers exactly one <c>runCompleted</c>.
@@ -487,112 +469,5 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         public DirectTurnHooks? Hooks { get; set; }
 
         public Stopwatch Elapsed { get; } = new();
-    }
-
-    /// <summary>
-    /// One turn's accumulated stream translation: the final text, usage totals, and the descriptors
-    /// of tool calls seen so far, reduced into transcript events on the shared channel.
-    /// </summary>
-    private sealed class TurnOutputStream(ChannelWriter<AgentStreamEvent> writer)
-    {
-        private readonly ChannelWriter<AgentStreamEvent> _writer = writer;
-        private readonly StringBuilder _finalText = new();
-        private readonly HashSet<string> _startedCalls = new(StringComparer.Ordinal);
-        private long _inputTokens;
-        private long _outputTokens;
-        private bool _hasInputUsage;
-        private bool _hasOutputUsage;
-        private bool _usageWritten;
-
-        public string FinalText => _finalText.ToString();
-
-        public string? FinalTextOrNull => _finalText.Length == 0 ? null : _finalText.ToString();
-
-        public bool HasFinalText => _finalText.Length > 0;
-
-        public int? InputTokensOrNull => _hasInputUsage ? ClampTokens(_inputTokens) : null;
-
-        public int? OutputTokensOrNull => _hasOutputUsage ? ClampTokens(_outputTokens) : null;
-
-        public void TranslateUpdate(
-            ChatResponseUpdate update,
-            IReadOnlyDictionary<string, DirectToolBinding> bindings,
-            DirectToolInvoker? invoker)
-        {
-            var blockId = string.IsNullOrWhiteSpace(update.MessageId)
-                ? "direct-response"
-                : update.MessageId;
-
-            foreach (var content in update.Contents)
-            {
-                switch (content)
-                {
-                    case TextContent text when !string.IsNullOrEmpty(text.Text):
-                        _finalText.Append(text.Text);
-                        _writer.TryWrite(new AssistantTextDeltaEvent(blockId, text.Text));
-                        break;
-
-                    case TextReasoningContent reasoning when !string.IsNullOrEmpty(reasoning.Text):
-                        _writer.TryWrite(new AssistantThinkingDeltaEvent(blockId, reasoning.Text));
-                        break;
-
-                    case FunctionCallContent call when _startedCalls.Add(call.CallId):
-                        bindings.TryGetValue(call.Name, out var binding);
-                        var descriptor = binding?.Descriptor;
-                        var toolKind = descriptor?.Kind ?? ToolCallKind.Other;
-                        _writer.TryWrite(new ToolCallStartedEvent(
-                            call.CallId,
-                            call.Name,
-                            JsonSerializer.Serialize(call.Arguments),
-                            toolKind,
-                            descriptor?.SourceKind ?? ToolSourceKind.BuiltIn,
-                            descriptor?.SourceId,
-                            descriptor?.DisplayName));
-                        break;
-
-                    case FunctionResultContent result:
-                        var (status, summary, detail) = DescribeToolResult(result);
-                        _writer.TryWrite(new ToolCallCompletedEvent(
-                            result.CallId,
-                            status,
-                            summary,
-                            detail,
-                            invoker?.TryTakeOutcome(result.CallId)));
-                        break;
-
-                    case UsageContent usage:
-                        if (usage.Details.InputTokenCount is long input)
-                        {
-                            _hasInputUsage = true;
-                            _inputTokens += input;
-                        }
-
-                        if (usage.Details.OutputTokenCount is long output)
-                        {
-                            _hasOutputUsage = true;
-                            _outputTokens += output;
-                        }
-
-                        break;
-                }
-            }
-        }
-
-        /// <summary>Reports the turn's usage once; later calls are no-ops.</summary>
-        public void ReportUsage()
-        {
-            if (_usageWritten)
-            {
-                return;
-            }
-
-            _usageWritten = true;
-            if (_hasInputUsage || _hasOutputUsage)
-            {
-                _writer.TryWrite(new UsageReportedEvent(
-                    _hasInputUsage ? ClampTokens(_inputTokens) : null,
-                    _hasOutputUsage ? ClampTokens(_outputTokens) : null));
-            }
-        }
     }
 }

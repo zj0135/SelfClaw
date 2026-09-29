@@ -43,7 +43,7 @@ Direct 链路的冗余**主要不是行数冗余，而是概念冗余**：同一
 | D4 | `RunStartedEvent` 的合成 session id 无消费者 | 噪音 | 明确语义 | 极低 |
 | D5 | `AiProviderClientRequest.Tools` 必填但恒为空 | 契约陷阱 | 删字段 | 低 |
 | C1 | 工具策略字面量分散 + 同一非法值两种行为 | 一致性 | ✅ 已实施（见 §3） | 完成 |
-| C2 | `DirectAgentChatRuntime` 608 行承担 7 项职责 | 可读性 | 拆分 3 个文件 | 低 |
+| C2 | `DirectAgentChatRuntime` 承担 7 项职责 | 可读性 | ✅ 已实施（见 §3） | 完成 |
 | C3 | `DirectToolInvoker` 工具故障契约（模型可见真实错误 + 自持熔断） | 行为契约 | ✅ 已实施（方案 B，见 §3） | 完成 |
 | C4 | 4 类兜底文案指向同一个"工具结果不合法" | 可读性 | 统一诊断 | 极低 |
 
@@ -260,30 +260,31 @@ Context/DirectPromptComposer.cs        Continuation → 使用 completion batch�
 
 ---
 
-### C2. `DirectAgentChatRuntime` 职责过载
+### C2. `DirectAgentChatRuntime` 职责过载（已实施）
 
-**现状**：608 行，内含 3 个嵌套类型（`TurnState`、`TurnOutputStream`、隐含的 `DirectTurnSetup` 联合态），同时负责：SDK 流消费、事件翻译、终态策略、usage 聚合、工具结果降级、hook 投递、资源释放、Channel 读写。
+**状态：2026-09-29 已实施。**
 
-**建议**
+**原问题**：608 行内含 3 个嵌套类型，同时负责 SDK 流消费、事件翻译、终态策略、usage 聚合、工具结果降级、hook 投递、资源释放；且用“`ProviderLease is null` 表示 blocked”这一隐式约定表达两种互斥结局。
 
-1. 抽出 `DirectEventTranslator.cs`（现 `TurnOutputStream`，约 150 行）：`ChatResponseUpdate → AgentStreamEvent` 的纯翻译，可用单元测试直接驱动 MCP/工具结果矩阵。
-2. 抽出 `DirectTurnState.cs`（现 `TurnState`）并与 setup 合并。
-3. `DirectTurnSetup` 的"`ProviderLease is null` 表示 blocked"改为显式联合态：
+**实施内容**
+
+1. **拆出 `DirectEventTranslator.cs`**（140 行）：原嵌套 `TurnOutputStream` 连同 `DescribeToolResult`、`ClampTokens` 一起成为顶层类型，只做“M.E.AI 更新 → `AgentStreamEvent`”与 usage 聚合。运行时的 `DescribeToolResult` 与 `ClampTokens` 随之删除（不再有第二处实现）。`DirectAgentChatRuntime.cs` **598 → 474 行**。
+2. **`DirectTurnSetup` 改为显式联合态**：
 
 ```csharp
-internal abstract record DirectTurnSetup
+internal abstract record DirectTurnSetup(DirectTurnCapabilityLease CapabilityLease)
 {
-    internal sealed record Ready(AiChatClientLease Provider, CapabilityLease Capabilities,
-        IReadOnlyList<ChatMessage> Messages) : DirectTurnSetup;
-    internal sealed record Blocked(CapabilityLease Capabilities, string Reason) : DirectTurnSetup;
+    internal sealed record Blocked(DirectTurnCapabilityLease CapabilityLease, string? Reason) : DirectTurnSetup(CapabilityLease);
+    internal sealed record Ready(DirectTurnCapabilityLease CapabilityLease, AiChatClientLease ProviderLease,
+        DirectToolInvoker Invoker, IReadOnlyList<ChatMessage> Messages) : DirectTurnSetup(CapabilityLease);
 }
 ```
 
-**理由**："`null` 表示另一种状态"是当前运行时最隐晦的约定（注释里用一句"SetupTurnAsync already wrote the Blocked terminal event"解释）。联合态让 `switch` 编译期穷尽，也让"谁负责写 Blocked 终态"变成类型签名的一部分。
+随之消失的：`setup.ProviderLease is null` 作为分支条件、`setup.ProviderLease!.Client` 的空抑制、以及“用 null 表示 blocked”的文档约定。终态与释放现在都从同一处 `setup as DirectTurnSetup.Ready` 派生（provider lease 只存在于 Ready，blocked 回合无可释放的 provider）。
 
-目标形态：`DirectAgentChatRuntime` ≈ 350 行，只保留"准备 → 消费 → 终态 → 释放"。
+**未做（有意）**：不再把 `TurnState` 合并进 setup。经上述两项后 `TurnState` 只剩 `Hooks` 与 `Elapsed` 两个字段，而它的生命周期刻意长于 setup——`runStarting` 阻断的回合没有客户端却**有** hooks，仍需投递一次 `runCompleted`。合并会把 hooks 复制到两个 case 上，比保留这个两字段状态更绕。
 
----
+**验证**：`DirectAgentChatRuntimeTests` / `DirectToolPipelineTests` 覆盖 blocked（继承 hook 与 runStarting 两种来源）、ready、终态（Succeeded/Failed/Truncated/Conflict）、取消与资源释放顺序。全量 1172 通过 / 4 跳过。
 
 ### C3. `DirectToolInvoker`：工具故障契约（已实施，方案 B）
 
@@ -371,7 +372,7 @@ internal abstract record DirectTurnSetup
 | PR3 | S4 + S3（`PluginCapabilitySource` 提取、lease/scope 收敛） | ✅ 已完成 | `PluginHookCapabilityTests` / `DirectTurnCapabilityResolverTests` 断言未改；全量 1169 通过 |
 | PR4 | S2（`DirectTurnPolicy`） | ✅ 已完成 | 逐来源跑 `DirectTurnCapabilityResolverTests`、skill/MCP 相关用例；新增策略矩阵测试；全量 1172 通过 |
 | PR5 | S1（子代理校验收敛为一处，保留回合内前后置两项检查） | ✅ 已完成 | `DirectTurnCapabilityResolverTests` 改写入 preflight 不再重复校验；全量 1172 通过 |
-| PR6 | C2（运行时拆分） | 无 | 翻译器新增直测；`DirectAgentChatRuntimeTests` 保持断言不变 |
+| PR6 | C2（运行时拆分） | ✅ 已完成 | 翻译器移出 140 行、联合态取代 null 约定；全量 1172 通过 |
 | PR7 | C3（invoker 故障契约） | ✅ 已完成 | 新增故障/预算/非异常失败四类用例 + 全量回归 1162 通过 |
 
 每批独立可回滚；PR4 与 PR5 之间存在顺序依赖（已完成），其余互不影响。
@@ -389,14 +390,15 @@ internal abstract record DirectTurnSetup
 | `214ec0d` | PR2：C1 工具策略常量与单一未知值行为 | ±0，3 处字面量收敛 | 1169 通过 |
 | 本轮（PR3） | S4 + S3 复制与生命周期收敛 | 净 +24 行（辅助与文档抵消删除） | 1169 通过 |
 | 本轮（PR4） | S2 单一策略对象 | +1 类型（~70 行），-11 处散落分支 | 1172 通过 |
+| 本轮（PR5） | S1 子代理校验收敛 | −1 依赖（两个仓库）+ 每任务 2 次全表读 | 1172 通过 |
+| 本轮（PR6） | C2 运行时拆分 | `DirectAgentChatRuntime` 598 → 473 行 + 新 140 行翻译器 | 1172 通过 |
 
-实测：Direct 目前 73 文件 / 6,865 行（含未提交的 PR3 与 C3 新增）；`DirectAgentChatRuntime.cs` 608 → 598 行。**行数目标（6,603 → 6,250）已下调预期**：本轮的收益是“同一规则只有一个实现”，不是行数；强行减行会引入新的抽象层。
+实测：Direct 现在 75 文件 / 6,951 行（含本轮全部新增）；`DirectAgentChatRuntime.cs` 608 → 473 行，另有 140 行的 `DirectEventTranslator.cs`。**行数目标（6,603 → 6,250）已下调预期**：本轮的收益是“同一规则只有一个实现”，不是行数；强行减行会引入新的抽象层。
 
 **剩余目标**
 
-- 子代理任务的能力校验：执行前 preflight 只留“工具策略 / 工作区 / 模型”三件廉价事实，能力授权与时效集中在回合内一处判定（错误码由 `CapabilityUnavailable` 变为 `SnapshotInvalid`，已记入 §1）。
-- `DirectAgentChatRuntime` 拆分（C2/PR6，P2 级）：598 行，拆出事件翻译器与显式联合态。
-- S2 已完成：origin 规则现在只存在于 `DirectTurnPolicy`（Direct 内只剩一处 origin 数据透传给 hook 上下文）。
+- 文档内 14 项已全部处理：C3 / PR1(D1–D5) / PR2(C1) / PR3(S3+S4) / PR4(S2) / PR5(S1) / PR6(C2)。
+- 未开工的候选（本轮有意不做，需先有测量或产品决定）：Hooks 事件集裁剪（6 事件 → 视产品）、每回合工具集缓存、`AsyncHookExecutor` 队列模型简化。
 
 **不做**
 
