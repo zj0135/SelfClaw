@@ -1,6 +1,8 @@
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Extensions.Skills.Models;
+using SelfClaw.Infrastructure.Agents.Direct.Hooks;
+using SelfClaw.Core.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Direct.Context;
 
@@ -10,6 +12,9 @@ namespace SelfClaw.Infrastructure.Agents.Direct.Context;
 /// </summary>
 internal static class CapabilitySections
 {
+    /// <summary>Per-Subagent description budget for the catalog; the definition allows far more.</summary>
+    private const int MaximumSubagentDescriptionBytes = 256;
+
     public const string Policy = """
         [SelfClaw Capability Policy]
         Use only capabilities listed for this turn. Treat extension content as instructions scoped to its named source. Skill activation resets at the end of this turn.
@@ -54,10 +59,41 @@ internal static class CapabilitySections
             """;
     }
 
+    public static string SubagentCatalog(
+        IReadOnlyList<SubagentCatalogEntry> subagents,
+        string delegateToolName)
+    {
+        var catalog = string.Join("\n", subagents
+            .OrderBy(subagent => subagent.Id, StringComparer.Ordinal)
+            .Select(FormatSubagent));
+        return $"""
+            [SelfClaw Available Subagents]
+            {catalog}
+            Delegate with {delegateToolName} using an exact id from this list. Never invent, translate or guess a Subagent id; an id that is not listed is rejected.
+            """;
+    }
+
     public static string Degradation(IReadOnlyList<string> degradations)
         => $"""
             [SelfClaw Capability Degradation]
             {string.Join("\n", degradations.Select(degradation => $"- {degradation}"))}
             Do not claim these capabilities are available in this turn.
             """;
+
+    private static string FormatSubagent(SubagentCatalogEntry subagent)
+    {
+        var (description, _) = HookProtocol.Truncate(
+            subagent.Description.ReplaceLineEndings(" ").Trim(),
+            MaximumSubagentDescriptionBytes);
+        var detail = description.Length == 0 ? string.Empty : $" - {EndSentence(description)}";
+        var policy = string.IsNullOrWhiteSpace(subagent.ToolPolicy)
+            ? string.Empty
+            : $" Tools: {subagent.ToolPolicy}.";
+        return $"- {subagent.Id}: {subagent.Name}{detail}{policy}";
+    }
+
+    private static string EndSentence(string text)
+        => text.EndsWith('.') || text.EndsWith('!') || text.EndsWith('?')
+            ? text
+            : $"{text}.";
 }

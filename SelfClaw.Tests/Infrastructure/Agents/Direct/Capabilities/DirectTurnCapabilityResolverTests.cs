@@ -141,6 +141,24 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task ResolveAsync_advertises_the_subagent_allowlist_and_the_delegate_tool()
+    {
+        var resolver = CreateResolver(
+            new PackageRepository([]),
+            definitionCatalog: new StubSubagentDefinitionCatalog(new SubagentCatalogEntry(
+                "reviewer", "Reviewer", "Reviews delegated changes.", "read-only")),
+            subagentCoordinator: new SubagentCapabilitySourceTests.NoOpCoordinator());
+        var baseRequest = CreateRequest([], "delegate a review");
+        var request = baseRequest with { Agent = baseRequest.Agent with { SubagentIds = ["reviewer"] } };
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        lease.SystemInstructions.Should().Contain(item => item.Contains("[SelfClaw Available Subagents]", StringComparison.Ordinal));
+        lease.SystemInstructions.Should().Contain(item => item.Contains("Reviews delegated changes.", StringComparison.Ordinal));
+        lease.Tools.Select(tool => tool.Name).Should().Contain(SubagentCapabilitySource.DelegateToolName);
+    }
+
+    [Fact]
     public async Task ResolveAsync_does_not_expand_an_empty_agent_binding()
     {
         var package = await CreatePackageAsync("review", true);
@@ -426,19 +444,25 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
     private DirectTurnCapabilityResolver CreateResolver(
         IExtensionPackageRepository repository,
         PluginManifestReader? pluginManifestReader = null,
-        PluginVersionLeaseManager? pluginVersionLeaseManager = null)
+        PluginVersionLeaseManager? pluginVersionLeaseManager = null,
+        ISubagentDefinitionCatalog? definitionCatalog = null,
+        ISubagentTaskCoordinator? subagentCoordinator = null)
         => CreateResolver(
             repository,
             CreateMcpSource(new McpRepository([]), new RecordingMcpClientManager(string.Empty)),
             pluginManifestReader,
-            pluginVersionLeaseManager);
+            pluginVersionLeaseManager,
+            definitionCatalog: definitionCatalog,
+            subagentCoordinator: subagentCoordinator);
 
     private DirectTurnCapabilityResolver CreateResolver(
         IExtensionPackageRepository repository,
         McpCapabilitySource mcpSource,
         PluginManifestReader? pluginManifestReader = null,
         PluginVersionLeaseManager? pluginVersionLeaseManager = null,
-        CapabilityContentCache? contentCache = null)
+        CapabilityContentCache? contentCache = null,
+        ISubagentDefinitionCatalog? definitionCatalog = null,
+        ISubagentTaskCoordinator? subagentCoordinator = null)
     {
         var limits = CreateLimits();
         contentCache ??= new CapabilityContentCache();
@@ -456,7 +480,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
                 pluginVersionLeaseManager ?? new PluginVersionLeaseManager(),
                 contentCache),
             mcpSource,
-            new SelfClaw.Infrastructure.Agents.Direct.Capabilities.SubagentCapabilitySource(null));
+            new SelfClaw.Infrastructure.Agents.Direct.Capabilities.SubagentCapabilitySource(subagentCoordinator, definitionCatalog));
     }
 
     private McpCapabilitySource CreateMcpSource(

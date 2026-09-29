@@ -1,5 +1,6 @@
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using FluentAssertions;
+using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Tests.Desktop.Services.Agents;
@@ -68,6 +69,42 @@ public sealed class SubagentDefinitionCatalogTests : IDisposable
 
         catalog.Get(" REVIEWER ").Should().NotBeNull();
         catalog.Get("nested/reviewer").Should().BeNull();
+    }
+
+    [Fact]
+    public void GetEntries_supplies_the_advertised_fields_for_usable_definitions_only()
+    {
+        var catalog = CreateCatalog();
+        WriteDefinition(
+            catalog,
+            "search",
+            """
+            ---
+            name: Workspace search
+            description: Finds code in large workspaces.
+            ---
+            Search the workspace.
+            """);
+        WriteDefinition(
+            catalog,
+            "reviewer",
+            """
+            ---
+            name: Reviewer
+            description: Reviews changes.
+            ---
+            Review the task.
+            """);
+        WriteDefinition(catalog, "broken", "---\nname: Broken\nunknown: value\n---\nBody.");
+
+        var entries = catalog.GetEntries(["reviewer", "broken", "search", "absent"]);
+
+        entries.Select(entry => entry.Id).Should().Equal("reviewer", "search");
+        entries[1].Should().BeEquivalentTo(new SubagentCatalogEntry(
+            "search",
+            "Workspace search",
+            "Finds code in large workspaces.",
+            SubagentDefinitionCatalog.DefaultToolPolicy));
     }
 
     [Theory]

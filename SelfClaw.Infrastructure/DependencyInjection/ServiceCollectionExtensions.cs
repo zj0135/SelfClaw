@@ -131,7 +131,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PluginCapabilitySource>();
         services.AddSingleton<McpCapabilitySource>();
         services.AddSingleton(serviceProvider => new SubagentCapabilitySource(
-            serviceProvider.GetService<ISubagentTaskCoordinator>()));
+            serviceProvider.GetService<ISubagentTaskCoordinator>(),
+            serviceProvider.GetService<ISubagentDefinitionCatalog>()));
         services.AddSingleton<IDirectTurnCapabilityResolver, DirectTurnCapabilityResolver>();
         services.AddSingleton<AiProviderHttpClientProvider>();
         services.AddSingleton<OpenAiModelListClient>();

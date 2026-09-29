@@ -55,6 +55,8 @@ internal static class DesktopServiceRegistration
         services.AddSingleton(dispatcher);
         services.AddSingleton<DesktopAgentDefinitionService>();
         services.AddSingleton<SubagentDefinitionCatalog>();
+        services.AddSingleton<ISubagentDefinitionCatalog>(services =>
+            services.GetRequiredService<SubagentDefinitionCatalog>());
         services.AddSingleton<DesktopSettingsJsonStore>();
         services.AddSingleton<DesktopToolApprovalHandler>();
         services.AddSingleton<AgentActivityCoordinator>();

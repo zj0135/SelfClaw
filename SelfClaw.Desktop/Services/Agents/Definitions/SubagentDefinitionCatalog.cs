@@ -1,11 +1,13 @@
 using System.Globalization;
 using System.IO;
 using System.Text;
+using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop.Services.Agents.Definitions;
 
-internal sealed class SubagentDefinitionCatalog
+internal sealed class SubagentDefinitionCatalog : ISubagentDefinitionCatalog
 {
     internal const int DefaultMaxRunSeconds = 900;
     internal const string DefaultToolPolicy = "read-only";
@@ -66,6 +68,31 @@ internal sealed class SubagentDefinitionCatalog
             var filePath = Path.Combine(_subagentsDirectory, $"{normalizedId}.md");
             return File.Exists(filePath) ? LoadFile(filePath) : null;
         }
+    }
+
+    public IReadOnlyList<SubagentCatalogEntry> GetEntries(IReadOnlyList<string> subagentIds)
+    {
+        ArgumentNullException.ThrowIfNull(subagentIds);
+        var entries = new List<SubagentCatalogEntry>(subagentIds.Count);
+        foreach (var subagentId in subagentIds)
+        {
+            if (string.IsNullOrWhiteSpace(subagentId))
+            {
+                continue;
+            }
+
+            var definition = Get(subagentId);
+            if (definition is { IsValid: true })
+            {
+                entries.Add(new SubagentCatalogEntry(
+                    definition.Id,
+                    definition.Name,
+                    definition.Description,
+                    definition.ToolPolicy));
+            }
+        }
+
+        return entries;
     }
 
     internal void Delete(string subagentId)

@@ -119,7 +119,9 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             skills,
             mcpCapabilities);
         bindings.AddRange(mcpCapabilities.Tools);
-        bindings.AddRange(_subagentSource.CreateTools(effectiveRequest, effectiveCeiling));
+        var subagents = _subagentSource.Resolve(effectiveRequest, effectiveCeiling);
+        bindings.AddRange(subagents.Tools);
+        systemInstructions.AddRange(subagents.Instructions);
         if (diagnostics.Degradations.Count > 0)
         {
             systemInstructions.Add(CapabilitySections.Degradation(diagnostics.Degradations));

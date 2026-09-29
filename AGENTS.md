@@ -82,6 +82,7 @@ Key runtime files:
 - `AiProviders/AiChatClientFactory.cs` — resolves and validates a concrete model before capability work, then builds the per-turn `HttpClient` over the shared pooled handler, binds tools and constructs the adapter pipeline
 - `AiProviders/AiProviderSettingsService.cs` — provider/model CRUD, discovery, enablement and default selection
 - `SelfClaw.Core/Interfaces/AiProviders/IAiModelCatalog.cs` — the runtime's model-read contract (enabled models, scoped defaults, and individual model availability); the same `AiProviderSettingsService` singleton implements it and the separate settings-management contract. Shared settings DTOs and model enums live in `SelfClaw.Core/Models/AiProviders/`.
+- `Agents/Direct/Capabilities/SubagentCapabilitySource.cs` — advertises the bound Subagent allowlist (system section plus a `subagentId` schema enum) and exposes the four delegation tools; an id outside the allowlist returns a recoverable `Failed` result, while a bound definition that is missing or invalid still reaches the coordinator for its durable failure envelope
 - `Tools/Workspace/WorkspaceToolService.cs` — the tool entry point and operation logging; delegates file operations, search and Shell execution to `WorkspaceFileService`, `WorkspaceSearchService` and `WorkspaceShellRunner`. `WorkspaceFileAccess` owns path/file validation; `WorkspaceTextEditor` owns text matching and replacement.
 - `CliAgentChatRuntime.cs` — one turn: session plan → args → spawn → parse → events
 - `Definitions/` — `ClaudeAgentDefinition`, `CodexAgentDefinition`, `OpenCodeAgentDefinition`, `CliAgentRegistry`
@@ -110,7 +111,7 @@ Key runtime files:
 
 `DesktopAgentDefinitionService` loads and atomically updates `.md` files from `{AppData}\agents\`. Built-in agent id: `build`.
 Agent markdown supports front matter: name, description, mode, tools, plugins, skills, mcpServers, subagents. Direct turns resolve those ids against the enabled extension catalog; CLI turns keep their existing subprocess behavior.
-Subagent definitions live in `{AppData}\subagents\` via `SubagentDefinitionCatalog` (name, description, modelProfileId, tools, plugins, skills, mcpServers, maxRunSeconds); `Save()` writes them atomically with the same strict validation as load.
+Subagent definitions live in `{AppData}\subagents\` via `SubagentDefinitionCatalog` (name, description, modelProfileId, tools, plugins, skills, mcpServers, maxRunSeconds); `Save()` writes them atomically with the same strict validation as load. It implements `ISubagentDefinitionCatalog`, the Core read contract a Direct turn uses to advertise the allowlisted ids.
 The 代理助手 settings page talks to `AgentSettingsBridge` (prefix `agents/`). `AgentSettingsService` owns CRUD, binding rules, atomic read/modify/write and committed change signals; the VM subscribes directly and preserves its valid selection. A missing conversation-bound definition stays visibly unavailable and rejects execution. Definitions/parsers live in `Services/Agents/Definitions`, edits in `Models`, and UI projections in `Views`.
 
 ### 插件面板 (Plugin panels)

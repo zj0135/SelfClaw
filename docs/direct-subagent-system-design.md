@@ -455,6 +455,14 @@ request.Agent.SubagentIds.Count > 0
 
 工具是否暴露只取决于主 Agent allowlist，不取决于定义文件此刻是否有效。这样 allowlisted 定义被删除或损坏时，调用仍能创建明确的 `DefinitionMissing` / `DefinitionInvalid` failure envelope。即使 child 的定义文件伪造 `subagents` 字段，runtime origin 仍会移除委派工具，禁止嵌套不能被 markdown 绕过。
 
+### 6.1.1 能力目录（allowlist 广播）
+
+模型必须在决定委派之前就知道有哪些 Subagent，因此 allowlist 随每轮一起进入 prompt，而不是靠模型猜名字：
+
+- system prompt 增加 `[SelfClaw Available Subagents]` 段（`CapabilitySections.SubagentCatalog`），每条列出 `id: 名称 - 描述 Tools: <tool policy>`；描述来自 `ISubagentDefinitionCatalog`（Desktop 的 `SubagentDefinitionCatalog` 实现），截断到 256 UTF-8 字节。绑定但定义缺失/无效的 id 仍占位，描述为不可用，保证“可见集合 == 可调用集合”。
+- `delegate_to_subagent` 的 description 重复列出 `Allowed subagentId values: ...`，并把 `subagentId` 的 JSON schema 收紧为 `enum`（M.E.AI 无法从 delegate 参数推导 enum，由 `DelegatingAIFunction` 覆写 `JsonSchema`），使幻觉出的名字在结构上不合法。
+- 目录只提供名称/描述/tool policy；模型选择、绑定和 instructions 仍只存在于任务快照里。
+
 ### 6.2 工具 interface
 
 主 Agent 获得四个 M.E.AI function tools：
@@ -490,10 +498,12 @@ retry_subagent_task(task_id)
 
 以下情况不创建 task：
 
-- Subagent id 不在当前 Agent allowlist；
+- Subagent id 不在当前 Agent allowlist（`delegate_to_subagent` 返回 `Failed` 的 tool result，其中列出可用的 id，让模型当轮自纠；不得抛异常终止整轮）；
 - task 为空或 UTF-8 大小超过 32 KiB；
 - 当前 parent turn 已创建 8 个 task；
 - caller 不是 Direct 主 Agent。
+
+`cancel_subagent_task` / `retry_subagent_task` 指向不存在的 task（`KeyNotFoundException`）同样返回 `Failed` 的 tool result，而不是冒泡成异常。
 
 以下情况创建一个立即 `Failed` 的 task 和 completion envelope，使 parent mailbox 能收到明确结果：
 
