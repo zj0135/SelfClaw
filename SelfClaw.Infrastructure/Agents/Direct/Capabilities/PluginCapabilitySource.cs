@@ -61,18 +61,18 @@ internal sealed class PluginCapabilitySource
                                        agent.PluginIds.Contains(package.Id, StringComparer.OrdinalIgnoreCase))
                      .OrderBy(package => package.Id, StringComparer.Ordinal))
         {
-            var (manifest, versionLease, skipReason, unconfirmedPermissions) =
-                await LoadPluginAsync(plugin, cancellationToken).ConfigureAwait(false);
-            if (skipReason is not null)
+            var load = await LoadPluginAsync(plugin, cancellationToken).ConfigureAwait(false);
+            if (load is not { SkipReason: null, Manifest: { } manifest, Lease: { } versionLease })
             {
-                diagnostics.Degrade(unconfirmedPermissions
-                    ? $"Plugin '{plugin.Id}' was skipped because permissions require confirmation: {skipReason}."
-                    : $"Plugin '{plugin.Id}' was skipped because it is broken: {skipReason}");
-                if (manifest is { Contributions.Hooks.Count: > 0 })
+                var reason = load.SkipReason ?? "its manifest could not be loaded";
+                diagnostics.Degrade(load.UnconfirmedPermissions
+                    ? $"Plugin '{plugin.Id}' was skipped because permissions require confirmation: {reason}."
+                    : $"Plugin '{plugin.Id}' was skipped because it is broken: {reason}");
+                if (load.Manifest is { Contributions.Hooks.Count: > 0 })
                 {
                     hookNotices.Add(HookNotes.PluginSkipped(
                         plugin.Id,
-                        unconfirmedPermissions ? $"permissions require confirmation: {skipReason}" : skipReason));
+                        load.UnconfirmedPermissions ? $"permissions require confirmation: {reason}" : reason));
                 }
 
                 continue;

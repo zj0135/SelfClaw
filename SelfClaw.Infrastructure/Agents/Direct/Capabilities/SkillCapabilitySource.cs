@@ -60,11 +60,10 @@ internal sealed class SkillCapabilitySource
                 diagnostics,
                 cancellationToken)
             .ConfigureAwait(false);
+        var policy = DirectTurnPolicy.For(request);
         foreach (var pluginSkill in pluginSkills)
         {
-            if (request.ExecutionContext.Origin == DirectTurnOrigin.Interactive ||
-                request.ExecutionContext.CapabilityCeiling?.Skills.Any(captured =>
-                    string.Equals(captured.Id, pluginSkill.Key, StringComparison.OrdinalIgnoreCase)) == true)
+            if (policy.AllowsSkill(pluginSkill.Key))
             {
                 resolvedSkills.Add(pluginSkill.Key, pluginSkill.Value);
             }

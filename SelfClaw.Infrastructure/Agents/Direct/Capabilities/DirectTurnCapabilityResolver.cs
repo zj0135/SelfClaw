@@ -68,12 +68,13 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
     {
         cancellationToken.ThrowIfCancellationRequested();
         var diagnostics = new TurnDiagnostics();
+        var policy = DirectTurnPolicy.For(request);
         var packages = await _packageRepository.ListPackagesAsync(cancellationToken).ConfigureAwait(false);
-        var effectiveRequest = CreateEffectiveRequest(request, packages, diagnostics);
+        var effectiveRequest = CreateEffectiveRequest(request, policy, packages, diagnostics);
         var bindings = effectiveRequest.WorkspaceRoot is null
             ? new List<DirectToolBinding>()
             : _workspaceToolset.CreateTools(effectiveRequest.WorkspaceRoot).ToList();
-        ValidateCapturedPackageCeiling(effectiveRequest, packages);
+        ValidateCapturedPackageCeiling(effectiveRequest, policy, packages);
         var installedSkills = packages
             .Where(package => package.Kind == ExtensionKind.Skill)
             .ToDictionary(package => package.Id, StringComparer.OrdinalIgnoreCase);
@@ -86,7 +87,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
                 effectiveRequest.Agent,
                 packages,
                 effectiveSkills,
-                InheritedHookPlugins(effectiveRequest),
+                policy.InheritedHookPlugins,
                 leases,
                 diagnostics,
                 cancellationToken)
@@ -111,9 +112,10 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
                 plugins.PluginRoots,
                 cancellationToken)
             .ConfigureAwait(false);
-        EnsureRequiredCapabilitiesResolved(effectiveRequest, plugins, skills, mcpCapabilities);
+        EnsureRequiredCapabilitiesResolved(effectiveRequest, policy, plugins, skills, mcpCapabilities);
         var effectiveCeiling = CreateEffectiveCeiling(
             effectiveRequest,
+            policy,
             packages,
             plugins,
             skills,
@@ -144,11 +146,6 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             plugins.HookBlockReason);
     }
 
-    private static IReadOnlyList<DirectExtensionCapability> InheritedHookPlugins(DirectChatTurnRequest request)
-        => request.ExecutionContext.Origin is DirectTurnOrigin.Subagent or DirectTurnOrigin.Continuation
-            ? request.ExecutionContext.CapabilityCeiling?.HookPlugins ?? []
-            : [];
-
     internal static IReadOnlyList<DirectToolBinding> BindTools(
         DirectChatTurnRequest request, IEnumerable<DirectToolBinding> bindings)
     {
@@ -172,9 +169,10 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
 
     private static void ValidateCapturedPackageCeiling(
         DirectChatTurnRequest request,
+        DirectTurnPolicy policy,
         IReadOnlyList<ExtensionPackageRecord> packages)
     {
-        if (request.ExecutionContext.Origin != DirectTurnOrigin.Subagent)
+        if (!policy.RequiresCapturedCapabilities)
         {
             return;
         }
@@ -191,10 +189,11 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
 
     private static DirectChatTurnRequest CreateEffectiveRequest(
         DirectChatTurnRequest request,
+        DirectTurnPolicy policy,
         IReadOnlyList<ExtensionPackageRecord> packages,
         TurnDiagnostics diagnostics)
     {
-        if (request.ExecutionContext.Origin != DirectTurnOrigin.Continuation)
+        if (!policy.ShrinksToCapturedCapabilities)
         {
             return request;
         }
@@ -292,11 +291,12 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
 
     private static void EnsureRequiredCapabilitiesResolved(
         DirectChatTurnRequest request,
+        DirectTurnPolicy policy,
         PluginCapabilities plugins,
         SkillCapabilities skills,
         McpCapabilities mcpCapabilities)
     {
-        if (request.ExecutionContext.Origin != DirectTurnOrigin.Subagent)
+        if (!policy.RequiresCapturedCapabilities)
         {
             return;
         }
@@ -326,6 +326,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
 
     private static DirectCapabilityCeiling CreateEffectiveCeiling(
         DirectChatTurnRequest request,
+        DirectTurnPolicy policy,
         IReadOnlyList<ExtensionPackageRecord> packages,
         PluginCapabilities plugins,
         SkillCapabilities skills,
@@ -341,7 +342,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             .Where(capability => capability is not null)
             .Cast<DirectExtensionCapability>()
             .ToArray();
-        var capturedSubagents = request.ExecutionContext.CapabilityCeiling?.SubagentIds;
+        var capturedSubagents = policy.Ceiling?.SubagentIds;
         var subagentIds = capturedSubagents is null
             ? request.Agent.SubagentIds.ToArray()
             : request.Agent.SubagentIds

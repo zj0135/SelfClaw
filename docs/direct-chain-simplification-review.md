@@ -1,4 +1,4 @@
-# Direct 链路精简与可维护性审查
+﻿# Direct 链路精简与可维护性审查
 
 审查基线：`0a23176`（2026-09-28）+ 未提交工作树改动（子代理目录增强，见 §0.3）。
 范围：`SelfClaw.Infrastructure/Agents/Direct/**` 及其直接协作者（`AiProviders`、`Agents/Subagents`、`Core/Runtime/Requests`）。
@@ -34,7 +34,7 @@ Direct 链路的冗余**主要不是行数冗余，而是概念冗余**：同一
 | # | 问题 | 类型 | 净收益 | 风险 |
 |---|---|---|---|---|
 | S1 | 子代理能力校验三层重复（含 2 次重复 DB 读） | 结构性冗余 | 删 1 层关卡 + 2 次 IO | 中 |
-| S2 | `DirectTurnOrigin` 规则散落 11 处 / 7 文件 | 结构性冗余 | 单一策略入口 | 中 |
+| S2 | `DirectTurnOrigin` 规则散落 11 处 / 7 文件 | 结构性冗余 | ✅ 已实施（见 §1） | 完成 |
 | S3 | 能力 Lease / Scope / Resolver 三型交叉持有 | 所有权冗余 | ✅ 已实施（见 §1） | 完成 |
 | S4 | `PluginCapabilitySource` 主路径与继承路径 80% 复制 | 复制粘贴 | ✅ 已实施（见 §1） | 完成 |
 | D1 | `BindTools` 的 descriptor 对齐校验不可达 | 死校验 | 删 6 行 | 极低 |
@@ -88,71 +88,48 @@ Direct 链路的冗余**主要不是行数冗余，而是概念冗余**：同一
 
 ---
 
-### S2. Origin 分支散落：一个策略对象取代 11 处判断
+### S2. Origin 分支散落：一个策略对象取代 11 处判断（已实施）
 
-**现状证据**
+**状态：2026-09-29 已实施。**
 
-`DirectTurnOrigin`（Interactive / Subagent / Continuation）的判断散落在 7 个文件 11 处：
+**原问题**
+
+`DirectTurnOrigin`（Interactive / Subagent / Continuation）的规则判断散落在 7 个文件 11 处：
 
 ```
-DirectAgentChatRuntime.cs         :224  Continuation → 必须有 checkpoint
-DirectAgentChatRuntime.cs         :337  Continuation → 不取 latest user（无附件）
-DirectTurnCapabilityResolver.cs   :148  Subagent|Continuation → 继承 hook plugins
-DirectTurnCapabilityResolver.cs   :175  != Subagent → 跳过 ceiling 校验
-DirectTurnCapabilityResolver.cs   :195  != Continuation → 原样返回请求
-DirectTurnCapabilityResolver.cs   :297  != Subagent → 跳过必需能力校验
-Capabilities/SkillCapabilitySource.cs  :65  Interactive 或 ceiling 含该 skill → 目录可见
-Capabilities/McpCapabilitySource.cs    :83  Interactive → 全部可见
-Capabilities/McpCapabilitySource.cs    :93  Continuation → 记录降级
-Capabilities/SubagentCapabilitySource.cs:55 Subagent → 不提供 delegate 工具
-Context/DirectPromptComposer.cs        :77 Continuation → 使用 completion batch
+DirectAgentChatRuntime.cs         Continuation → 必须有 checkpoint
+DirectAgentChatRuntime.cs         Continuation → 不取 latest user（无附件）
+DirectTurnCapabilityResolver.cs   Subagent|Continuation → 继承 hook plugins
+DirectTurnCapabilityResolver.cs   != Subagent → 跳过 ceiling 校验
+DirectTurnCapabilityResolver.cs   != Continuation → 原样返回请求
+DirectTurnCapabilityResolver.cs   != Subagent → 跳过必需能力校验
+Capabilities/SkillCapabilitySource.cs  Interactive 或 ceiling 含该 skill → 目录可见
+Capabilities/McpCapabilitySource.cs    Interactive → 全部可见 / Continuation → 记录降级
+Capabilities/SubagentCapabilitySource.cs Subagent → 不提供 delegate 工具
+Context/DirectPromptComposer.cs        Continuation → 使用 completion batch（本就是数据驱动，未改）
 ```
 
-**问题**
+**实施内容**
 
-"这个 origin 能做什么"是**一个**三值规则，却由每个来源（Plugin / Skill / MCP / Subagent / 运行时 / Prompt）各自 `if` 出来。新增一种 origin（例如未来的"重试"或"定时任务"）必须改 7 个文件，且没有任何地方能一眼看全规则。
+新增 `Capabilities/DirectTurnPolicy.cs`：`record DirectTurnPolicy(DirectTurnOrigin Origin, DirectCapabilityCeiling? Ceiling)` + `For(request)`，把规则写成有名字的谓词与方法：
 
-**建议**
+| 成员 | 语义 |
+|---|---|
+| `IsDelegated` | 委派回合受捕获 ceiling 约束，交互回合受 Agent 绑定约束 |
+| `InheritsHookPlugins` / `InheritedHookPlugins` | 父回合捕获的 hook Plugin 仍是本回合的策略；缺失或变更即阻断 |
+| `RequiresCapturedCapabilities` | Subagent 子回合必须仍满足 ceiling，故缺失/变更致命 |
+| `ShrinksToCapturedCapabilities` | Continuation 只收缩：变更的能力带诊断降级丢弃 |
+| `RequiresToolExecutionCheckpoint` | 仅 Continuation 必须在任何工具执行前提交 checkpoint |
+| `HasFreshUserMessage` | 仅 Continuation 没有新的用户消息（附件/`runStarting` 输入因此为空） |
+| `CanDelegateToSubagent` | Subagent 子回合不再提供 delegate 工具 |
+| `AllowsSkill(id)` / `AllowsMcpServer(server)` | 能力可见性（含“ceiling 内且未变更”的 MCP 判定） |
+| `DiagnosesRemovedCapabilities` | 仅 Continuation 把被移除的能力记为降级（Subagent 走致命路径） |
 
-在回合开始时构造一个不可变策略对象，把规则集中，来源只消费结论：
+结果：`grep ExecutionContext.Origin` 在 Direct 内只剩一处**数据透传**（把 origin 交给 hook 上下文供插件匹配），不再有任何规则分支。
 
-```csharp
-// Infrastructure/Agents/Direct/Capabilities/DirectTurnPolicy.cs（示意）
-internal sealed record DirectTurnPolicy(
-    DirectTurnOrigin Origin,
-    DirectCapabilityCeiling? Ceiling,
-    string ToolPolicy)
-{
-    internal static DirectTurnPolicy For(DirectChatTurnRequest request) => ...;
+**与原建议的差异（有意为之）**：原建议把 policy 作为参数穿过四个来源的 `ResolveAsync`。实施时改为“每个消费点在需要时 `DirectTurnPolicy.For(request)` 就地构造”——策略是请求的纯函数，穿透参数会改动 4 个来源签名与约 10 个测试调用点，却不带来新的语义保障。规则集中在一个文件的收益已完全得到。
 
-    // 能力可见性
-    internal bool CanUseInteractiveExtensions => Origin == DirectTurnOrigin.Interactive;
-    internal bool InheritsHookPlugins => Origin is Subagent or Continuation;
-    internal bool MustShrinkToCeiling => Origin == DirectTurnOrigin.Continuation;
-    internal bool RequiresCapabilitiesToResolve => Origin == DirectTurnOrigin.Subagent;
-    internal bool CanDelegateToSubagent => Origin != DirectTurnOrigin.Subagent;
-
-    // 运行期与 prompt
-    internal bool RequiresToolExecutionCheckpoint => Origin == DirectTurnOrigin.Continuation;
-    internal bool CarriesCompletionBatch => Origin == DirectTurnOrigin.Continuation;
-
-    // 降级 vs 致命（唯一决策点）
-    internal bool MissingCapabilityIsFatal => Origin == DirectTurnOrigin.Subagent;
-    internal bool ChangedCapabilityIsAllowed => Origin == DirectTurnOrigin.Interactive;
-}
-```
-
-`IDirectTurnCapabilityResolver.ResolveAsync` 开头构造一次，传给四个来源（`ResolveAsync(..., policy, ...)`），运行时的 checkpoint 守卫与 composer 的 completion batch 也读同一对象。
-
-**理由**
-
-- 阅读收益最大：读 `DirectTurnPolicy` 一处即可知道三种回合的全部差异。
-- 与 S1 天然合并：`MissingCapabilityIsFatal` / `ChangedCapabilityIsAllowed` 就是 S1 里"致命还是降级"的判定来源。
-- 与设计文档 §8.3 的"origin 决定策略"表格形成一一对应，后续审计可直接对照。
-
-**风险**：纯重构，无行为变化；但触及 4 个来源的构造函数，必须逐类跑现有 225 个测试。建议单独一个 PR，禁止与行为改动混合。
-
----
+**验证**：新增 `DirectTurnPolicyTests` 用三个事实逐项钉住三种 origin 的规则矩阵（含 MCP revision 变更时 Subagent 拒绝 / Continuation 降级的差异）；全量 1172 通过 / 4 跳过。
 
 ### S3. 能力 Lease / Scope / Resolver 三型交叉持有（已实施）
 
@@ -397,7 +374,7 @@ internal abstract record DirectTurnSetup
 | PR1 | D1 + D2 + D3 + D4 + D5（死代码与噪音，零行为变化） | 无 | `dotnet test` 全绿；Direct 相关 225 用例不变 |
 | PR2 | C1（策略字面量集中 + 单一未知策略行为） | ✅ 已完成 | 六个 rank 用例 + 未知策略抛错用例 + 全量回归 1169 通过 |
 | PR3 | S4 + S3（`PluginCapabilitySource` 提取、lease/scope 收敛） | ✅ 已完成 | `PluginHookCapabilityTests` / `DirectTurnCapabilityResolverTests` 断言未改；全量 1169 通过 |
-| PR4 | S2（`DirectTurnPolicy`） | 建议在 PR3 后 | 逐来源跑 `DirectTurnCapabilityResolverTests`、`SkillCapabilitySource`/`McpCapabilitySource` 相关用例 |
+| PR4 | S2（`DirectTurnPolicy`） | ✅ 已完成 | 逐来源跑 `DirectTurnCapabilityResolverTests`、skill/MCP 相关用例；新增策略矩阵测试；全量 1172 通过 |
 | PR5 | S1（子代理校验收敛为一处 + 删 `ValidateCapturedPackageCeiling`） | **依赖 PR4**（需要 `MissingCapabilityIsFatal` 作为唯一判定点） | `SubagentTaskPreflight` / `SubagentTaskCoordinator` / `SubagentTaskExecutor` / `DirectTurnCapabilityResolver` 用例 + 手动验证"受理后删除包"场景 |
 | PR6 | C2（运行时拆分） | 无 | 翻译器新增直测；`DirectAgentChatRuntimeTests` 保持断言不变 |
 | PR7 | C3（invoker 故障契约） | ✅ 已完成 | 新增故障/预算/非异常失败四类用例 + 全量回归 1162 通过 |
@@ -415,16 +392,16 @@ internal abstract record DirectTurnSetup
 | `a6a421d` | C3 工具故障契约（方案 B） | +1 新类型、invoker 重排 | 1162 通过 |
 | `956f04a` | PR1：D1–D5 死代码与不可达校验 | −12 行（含 1 个删类、1 个删字段） | 1162 通过 |
 | `214ec0d` | PR2：C1 工具策略常量与单一未知值行为 | ±0，3 处字面量收敛 | 1169 通过 |
-| 本轮 | PR3：S4 + S3 复制与生命周期收敛 | 净 +24 行（辅助与文档抵消删除） | 1169 通过 |
+| 本轮（PR3） | S4 + S3 复制与生命周期收敛 | 净 +24 行（辅助与文档抵消删除） | 1169 通过 |
+| 本轮（PR4） | S2 单一策略对象 | +1 类型（~70 行），-11 处散落分支 | 1172 通过 |
 
 实测：Direct 目前 73 文件 / 6,865 行（含未提交的 PR3 与 C3 新增）；`DirectAgentChatRuntime.cs` 608 → 598 行。**行数目标（6,603 → 6,250）已下调预期**：本轮的收益是“同一规则只有一个实现”，不是行数；强行减行会引入新的抽象层。
 
 **剩余目标**
 
-- `DirectTurnOrigin` 分支 11 处 → 1 处（S2/PR4，`DirectTurnPolicy`）。
-- 子代理任务的重复 package/MCP 读：3 次 → 1 次（S1/PR5，依赖 PR4）。
-- 新增能力的触点：从“改 4 个来源 + 2 处校验 + dispatcher 约定”收敛为“改 policy + 对应来源”。
+- 子代理任务的重复 package/MCP 读：3 次 → 1 次（S1/PR5，现在依赖已满足：`DirectTurnPolicy.RequiresCapturedCapabilities` 就是“缺失/变更致命”的唯一判定点）。
 - `DirectAgentChatRuntime` 拆分（C2/PR6，P2 级）：598 行，拆出事件翻译器与显式联合态。
+- S2 已完成：origin 规则现在只存在于 `DirectTurnPolicy`（Direct 内只剩一处 origin 数据透传给 hook 上下文）。
 
 **不做**
 

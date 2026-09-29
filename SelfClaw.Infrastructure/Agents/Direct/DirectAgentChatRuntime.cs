@@ -215,7 +215,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         TurnState state,
         CancellationToken cancellationToken)
     {
-        if (request.ExecutionContext.Origin == DirectTurnOrigin.Continuation && request.ToolExecutionCheckpoint is null)
+        if (DirectTurnPolicy.For(request).RequiresToolExecutionCheckpoint && request.ToolExecutionCheckpoint is null)
         {
             throw new InvalidDataException("A continuation requires a durable tool execution checkpoint.");
         }
@@ -329,9 +329,9 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         AiProviderClientRequest preparation,
         DirectTurnCapabilityLease capabilityLease)
     {
-        var latestUser = request.ExecutionContext.Origin == DirectTurnOrigin.Continuation
-            ? null
-            : request.Messages.LastOrDefault(message => message.Role == MessageRole.User);
+        var latestUser = DirectTurnPolicy.For(request).HasFreshUserMessage
+            ? request.Messages.LastOrDefault(message => message.Role == MessageRole.User)
+            : null;
         var attachments = latestUser?.Attachments is { Count: > 0 } records
             ? records.Select(record => new HookAttachmentPayload(
                 record.FileName, record.MediaType, record.ByteLength)).ToArray()

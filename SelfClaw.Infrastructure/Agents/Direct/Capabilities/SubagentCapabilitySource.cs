@@ -52,7 +52,7 @@ internal sealed class SubagentCapabilitySource
         ArgumentNullException.ThrowIfNull(capabilityCeiling);
         var coordinator = _coordinator;
         if (coordinator is null ||
-            request.ExecutionContext.Origin == DirectTurnOrigin.Subagent ||
+            !DirectTurnPolicy.For(request).CanDelegateToSubagent ||
             request.Agent.SubagentIds.Count == 0)
         {
             return new SubagentCapabilities([], []);

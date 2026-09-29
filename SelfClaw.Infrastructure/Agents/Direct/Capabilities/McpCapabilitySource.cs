@@ -52,12 +52,13 @@ internal sealed class McpCapabilitySource
         }
 
         var servers = await _serverRepository.ListMcpServersAsync(cancellationToken).ConfigureAwait(false);
+        var policy = DirectTurnPolicy.For(request);
         var effectiveServers = servers
             .Where(server => server.IsEnabled &&
                              (string.IsNullOrWhiteSpace(server.SourcePluginId)
                                  ? request.Agent.McpServerIds.Contains(server.Id, StringComparer.OrdinalIgnoreCase)
                                  : effectivePluginRoots.ContainsKey(server.SourcePluginId)) &&
-                             IsAllowedByCapturedCeiling(request, server, diagnostics))
+                             IsAllowedByCapturedCeiling(server, policy, diagnostics))
             .OrderBy(server => server.Id, StringComparer.Ordinal)
             .ToArray();
 
@@ -76,21 +77,16 @@ internal sealed class McpCapabilitySource
     }
 
     private static bool IsAllowedByCapturedCeiling(
-        DirectChatTurnRequest request,
         McpServerConfigRecord server,
+        DirectTurnPolicy policy,
         TurnDiagnostics diagnostics)
     {
-        if (request.ExecutionContext.Origin == DirectTurnOrigin.Interactive)
+        if (policy.AllowsMcpServer(server))
         {
             return true;
         }
 
-        if (request.ExecutionContext.CapabilityCeiling is { } ceiling && DirectCapabilityRules.IsMcpCurrent(server, ceiling))
-        {
-            return true;
-        }
-
-        if (request.ExecutionContext.Origin == DirectTurnOrigin.Continuation)
+        if (policy.DiagnosesRemovedCapabilities)
         {
             diagnostics.Degrade(
                 $"MCP server '{server.Id}' was removed because it changed since delegation.");
