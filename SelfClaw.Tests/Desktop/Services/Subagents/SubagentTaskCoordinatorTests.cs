@@ -1,4 +1,4 @@
-using SelfClaw.Desktop.Services.Agents.Definitions;
+﻿using SelfClaw.Desktop.Services.Agents.Definitions;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
@@ -149,10 +149,7 @@ public sealed class SubagentTaskCoordinatorTests : IDisposable
         {
             EnabledModels = [new EnabledModelView(modelProfileId, "Test", "test", "Fixture")]
         };
-        var preflight = new SubagentTaskPreflight(
-            settings,
-            new EmptyExtensionPackageRepository(),
-            new EmptyMcpServerRepository());
+        var preflight = new SubagentTaskPreflight(settings);
         var coordinator = new SubagentTaskCoordinator(
             tasks,
             catalog,

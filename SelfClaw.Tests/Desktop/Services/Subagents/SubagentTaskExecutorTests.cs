@@ -1,4 +1,4 @@
-using SelfClaw.Desktop.Services.Tools;
+﻿using SelfClaw.Desktop.Services.Tools;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
@@ -49,10 +49,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         {
             EnabledModels = [new EnabledModelView(modelProfileId, "Test", "test", "Fixture")]
         };
-        var preflight = new SubagentTaskPreflight(
-            settings,
-            new EmptyExtensionPackageRepository(),
-            new EmptyMcpServerRepository());
+        var preflight = new SubagentTaskPreflight(settings);
         var runtime = new RecordingRuntime(completionStatus);
         var executor = new SubagentTaskExecutor(
             conversations,
@@ -131,9 +128,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
                 new StubAiModelCatalog(modelProfileId)
                 {
                     EnabledModels = [new EnabledModelView(modelProfileId, "Test", "test", "Fixture")]
-                },
-                new EmptyExtensionPackageRepository(),
-                new EmptyMcpServerRepository()),
+                }),
             registry,
             NullLogger<SubagentTaskExecutor>.Instance);
 
@@ -176,10 +171,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
                 NullLogger<ConversationTurnRecorder>.Instance),
             new DesktopToolApprovalHandler(),
             new SubagentTaskSnapshotSerializer(),
-            new SubagentTaskPreflight(
-                new StubAiModelCatalog(),
-                new EmptyExtensionPackageRepository(),
-                new EmptyMcpServerRepository()),
+            new SubagentTaskPreflight(new StubAiModelCatalog()),
             new SubagentTaskExecutionRegistry(),
             NullLogger<SubagentTaskExecutor>.Instance);
 
@@ -222,9 +214,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
                 new StubAiModelCatalog(modelProfileId)
                 {
                     EnabledModels = [new EnabledModelView(modelProfileId, "Test", "test", "Fixture")]
-                },
-                new EmptyExtensionPackageRepository(),
-                new EmptyMcpServerRepository()),
+                }),
             new SubagentTaskExecutionRegistry(),
             NullLogger<SubagentTaskExecutor>.Instance);
         using var host = new SubagentTaskBackgroundHost(

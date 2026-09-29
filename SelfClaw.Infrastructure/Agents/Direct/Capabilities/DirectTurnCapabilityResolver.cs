@@ -167,6 +167,12 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         return result;
     }
 
+    /// <summary>
+    /// The child turn's single authority on captured capabilities: a delegated turn may only use Plugins,
+    /// Skills and hook Plugins that are still inside its ceiling and unchanged since acceptance. A capability
+    /// that no longer qualifies fails the turn here; a continuation does not reach this method because it
+    /// shrinks instead (see <see cref="DirectTurnPolicy.ShrinksToCapturedCapabilities"/>).
+    /// </summary>
     private static void ValidateCapturedPackageCeiling(
         DirectChatTurnRequest request,
         DirectTurnPolicy policy,

@@ -5,18 +5,27 @@ using SelfClaw.Core.Runtime;
 
 namespace SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 
+/// <summary>
+/// The Subagent acceptance gate, called once when a task is accepted and again before it executes. Both
+/// calls decide the same three facts: whether the definition's tool policy still fits the parent's captured
+/// ceiling, whether the captured workspace still exists, and whether the resolved model is still available.
+/// The first two are pure comparisons, and the third is the one failure that would otherwise only surface
+/// after a provider call.
+/// </summary>
+/// <remarks>
+/// Capability authorization and currency are deliberately not decided here: the child turn's capability
+/// resolution enforces them (it is the only place with the loaded package and MCP state), so a queued task
+/// that outlives a package or server change fails inside the turn as
+/// <c>SubagentErrorCodes.SnapshotInvalid</c> rather than being re-validated from the same repositories a
+/// second time.
+/// </remarks>
 internal sealed class SubagentTaskPreflight : ISubagentTaskPreflight
 {
     private readonly IAiModelCatalog _models;
-    private readonly IExtensionPackageRepository _packageRepository;
-    private readonly IMcpServerRepository _mcpServerRepository;
 
-    public SubagentTaskPreflight(IAiModelCatalog models, IExtensionPackageRepository packageRepository,
-        IMcpServerRepository mcpServerRepository)
+    public SubagentTaskPreflight(IAiModelCatalog models)
     {
         _models = models;
-        _packageRepository = packageRepository;
-        _mcpServerRepository = mcpServerRepository;
     }
 
     public async Task<SubagentPreflightFailure?> CheckAsync(SubagentDefinitionSnapshot definition,
@@ -31,11 +40,6 @@ internal sealed class SubagentTaskPreflight : ISubagentTaskPreflight
         if (!await _models.IsModelAvailableAsync(resolvedModelProfileId, cancellationToken).ConfigureAwait(false))
             return new(SubagentErrorCodes.ModelUnavailable, "The selected Subagent model is unavailable.");
 
-        var packages = await _packageRepository.ListPackagesAsync(cancellationToken).ConfigureAwait(false);
-        var packageFailure = DirectCapabilityRules.CheckPackages(definition.ToolPolicy, definition.PluginIds,
-            definition.SkillIds, request.CapabilityCeiling, packages);
-        if (packageFailure is not null) return packageFailure;
-        var servers = await _mcpServerRepository.ListMcpServersAsync(cancellationToken).ConfigureAwait(false);
-        return DirectCapabilityRules.CheckMcpServers(definition.McpServerIds, request.CapabilityCeiling, servers);
+        return null;
     }
 }

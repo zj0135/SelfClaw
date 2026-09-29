@@ -64,8 +64,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
             EnabledModels = [new EnabledModelView(modelId, "Test", "test", "Fixture")]
         };
         return new SubagentTaskExecutor(Conversations, Store, runtime, Recorder, Approvals,
-            new SubagentTaskSnapshotSerializer(), new SubagentTaskPreflight(settings,
-                new EmptyExtensionPackageRepository(), new EmptyMcpServerRepository()), Executions, timeProvider ?? TimeProvider.System,
+            new SubagentTaskSnapshotSerializer(), new SubagentTaskPreflight(settings), Executions, timeProvider ?? TimeProvider.System,
             NullLogger<SubagentTaskExecutor>.Instance, Registry);
     }
 
@@ -80,7 +79,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
 
     internal SubagentTaskCoordinator CreateCoordinator()
         => new(Tasks, new SubagentDefinitionCatalog(StoragePathDefaults.CreateDefault()), new SubagentTaskSnapshotSerializer(),
-            new SubagentTaskPreflight(new StubAiModelCatalog(Guid.NewGuid()), new EmptyExtensionPackageRepository(), new EmptyMcpServerRepository()),
+            new SubagentTaskPreflight(new StubAiModelCatalog(Guid.NewGuid())),
             new SubagentTaskWakeSignal(), Executions);
 
     public void Dispose()

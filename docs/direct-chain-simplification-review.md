@@ -53,40 +53,35 @@ Direct 链路的冗余**主要不是行数冗余，而是概念冗余**：同一
 
 ## 1. P0 结构性简化
 
-### S1. 子代理能力校验三层重复
+### S1. 子代理能力校验三层重复（已实施）
 
-**现状证据**
+**状态：2026-09-29 已实施。**
 
-同一次子代理任务，包能力被校验三次，其中两次是完整重复：
+**原问题**
+
+同一次子代理任务，包/MCP 能力被校验三次，其中两次是完整重复：
 
 | 关卡 | 位置 | 行为 |
 |---|---|---|
-| 受理前 | `Desktop/Services/Subagents/SubagentTaskCoordinator.cs:72` → `SubagentTaskPreflight.CheckAsync` | `ListPackagesAsync` + `ListMcpServersAsync` + `IsModelAvailableAsync` |
-| 执行前 | `Desktop/Services/Subagents/SubagentTaskExecutor.cs:199` → `SubagentTaskPreflight.CheckAsync` | 同上，完整重复 |
-| 回合内 | `Infrastructure/Agents/Direct/Capabilities/DirectTurnCapabilityResolver.cs:76` → `ValidateCapturedPackageCeiling` → `DirectCapabilityRules.CheckPackages` | 第三次遍历 packages |
+| 受理前 | `SubagentTaskCoordinator.StartAsync` → `SubagentTaskPreflight.CheckAsync` | 3 次 IO：packages + MCP servers + model |
+| 执行前 | `SubagentTaskExecutor.ExecuteAsync` → 同一 `CheckAsync` | 同一套 IO 与校验，完整重复 |
+| 回合内 | `DirectTurnCapabilityResolver.ValidateCapturedPackageCeiling` → `CheckPackages` | 第三次遍历 packages |
+| 回合内（后置） | `EnsureRequiredCapabilitiesResolved` | 第四次同义判断（仅看“是否加载成功”） |
 
-加上 `EnsureRequiredCapabilitiesResolved`（`DirectTurnCapabilityResolver.cs:114/291`，仅 Subagent origin）再检查一次"必需能力是否真的加载成功"，以及 `McpCapabilitySource.IsAllowedByCapturedCeiling`（`McpCapabilitySource.cs:83-99`）对 MCP 的第四次同义判断。
+**实施内容**
 
-**问题**
+- `SubagentTaskPreflight` 收缩为**只判定三件廉价事实**：定义的工具策略是否仍不超出捕获 ceiling（纯比较）、捕获的工作区是否仍存在、解析出的模型是否仍可用。删除对 `IExtensionPackageRepository` / `IMcpServerRepository` 的依赖与两次全表读；受理前与执行前调用同一个实现，语义一致。
+- 能力授权与时效**留在回合内**：`ValidateCapturedPackageCeiling`（子代理回合的唯一授权/时效判定点，已补注释说明）＋ `EnsureRequiredCapabilitiesResolved`（必需能力未加载即失败）＋ `DirectTurnPolicy.AllowsMcpServer`（MCP 越界即排除）。
+- 契约文档（`ISubagentTaskPreflight`）与 `SubagentTaskPreflight` 的 remarks 写明分工。
 
-1. 3 个关卡、2 套错误类型（`SubagentPreflightFailure` vs `InvalidDataException`）、2 套用户可见文案，却只有一个语义："捕获 ceiling 必须被满足"。
-2. 每个子代理任务因此多 2 次 `extension_packages` / `mcp_server_configs` 全表读。
-3. 三处任一改动（例如后续给 package 加 `sourcePath` 校验）都必须同步三处。
+**对原评审的两处修正**
 
-**建议**
+1. “三层校验”实为**一层重复 + 一对前后置检查**。`ValidateCapturedPackageCeiling`（执行前：授权且未变更？）与 `EnsureRequiredCapabilitiesResolved`（执行后：真的加载成功？）性质不同，合并会把“未授权的能力先加载再失败”变成常态，因此**保留两者**，只删除重复的执行前一层。
+2. 成本论据要弱化：每个子代理任务省下的 2 次 SQLite 全表读在绝对量级上很小（表只有几行到几十行）。真正的收益是**一个错误面而不是两个**：不再有“受理时通过、执行前又拒绝”的第二套失败语义。
 
-- **只保留一个权威关卡**：受理时的 preflight 负责"拒绝受理"，用 `SubagentPreflightFailure` 返回给父 Agent（这是唯一能让父代理看到结构化错误码的路径）。
-- 执行前的 `SubagentTaskPreflight.CheckAsync` 收缩为**只检查两个真正会随时间变化、且与本进程无关的事实**：工作区是否还存在、模型是否仍可用（对应 `WorkspaceUnavailable` / `ModelUnavailable`）。包与 MCP 的当前性交由回合内的解析结果承担。
-- **删除 `ValidateCapturedPackageCeiling`**：它检查的三件事已被下游覆盖——强制授权由回合内的 ceiling 过滤/解析承担，必需项缺失由 `EnsureRequiredCapabilitiesResolved` 抛错承担。把它的"必须授权"语义折叠进解析循环（解析时 `captured is null` 即该 origin 的致命错误）。
-- 顺带把 `EnsureRequiredCapabilitiesResolved` 重命名为 `EnsureSubagentCapabilitiesResolved`，并在方法内保留唯一的"致命/降级"决策点。
+**行为差异（唯一一处，需知晓）**：能力在“受理之后、执行之前”被删除/禁用/升级时，此前由执行前 preflight 返回 `CapabilityUnavailable`；现在由回合内抛出 `InvalidDataException`，`SubagentTaskExecutor` 的既有映射把它记为 **`SnapshotInvalid`**（错误文案不变，仍是 `Plugin/Skill 'x' is unavailable or changed after task acceptance.`）。`SnapshotInvalid` 对“捕获快照已不成立”而言语义同样准确。
 
-**理由**
-
-这正是用户感知的"没必要的校验"：同一个不可变输入（`AgentRuntimeDefinition` + `DirectCapabilityCeiling`）在同一秒内被三套代码各判一次。TOCTOU 只需要**一个执行时刻的判定**，受理时刻的判定价值是"尽早拒绝"，不需要与执行时刻的判定等价。
-
-**风险与缓解**：行为差异出现在"受理通过、执行前能力被删除/升级"的场景。缓解：`SubagentTaskPreflightTests` 已有 `CapabilityUnavailable` 用例，改造时把断言从"preflight 返回失败"迁移到"回合内抛 `InvalidDataException` 且任务进入 Failed 且错误码仍为 `CapabilityUnavailable`"。
-
----
+**验证**：`DirectTurnCapabilityResolverTests` 的两个用例从“preflight 与运行时用同一规则”改写为“由子回合执行强制，且网关不再重复校验”（显式断言变更后网关仍返回通过），子回合抛错与 continuation 降级断言保留；`SubagentTaskExecutorTests` / `SubagentTaskCoordinatorTests` / `SubagentActivityTestContext` 的 preflight 构造收敛为单参。全量 1172 通过 / 4 跳过。
 
 ### S2. Origin 分支散落：一个策略对象取代 11 处判断（已实施）
 
@@ -375,11 +370,11 @@ internal abstract record DirectTurnSetup
 | PR2 | C1（策略字面量集中 + 单一未知策略行为） | ✅ 已完成 | 六个 rank 用例 + 未知策略抛错用例 + 全量回归 1169 通过 |
 | PR3 | S4 + S3（`PluginCapabilitySource` 提取、lease/scope 收敛） | ✅ 已完成 | `PluginHookCapabilityTests` / `DirectTurnCapabilityResolverTests` 断言未改；全量 1169 通过 |
 | PR4 | S2（`DirectTurnPolicy`） | ✅ 已完成 | 逐来源跑 `DirectTurnCapabilityResolverTests`、skill/MCP 相关用例；新增策略矩阵测试；全量 1172 通过 |
-| PR5 | S1（子代理校验收敛为一处 + 删 `ValidateCapturedPackageCeiling`） | **依赖 PR4**（需要 `MissingCapabilityIsFatal` 作为唯一判定点） | `SubagentTaskPreflight` / `SubagentTaskCoordinator` / `SubagentTaskExecutor` / `DirectTurnCapabilityResolver` 用例 + 手动验证"受理后删除包"场景 |
+| PR5 | S1（子代理校验收敛为一处，保留回合内前后置两项检查） | ✅ 已完成 | `DirectTurnCapabilityResolverTests` 改写入 preflight 不再重复校验；全量 1172 通过 |
 | PR6 | C2（运行时拆分） | 无 | 翻译器新增直测；`DirectAgentChatRuntimeTests` 保持断言不变 |
 | PR7 | C3（invoker 故障契约） | ✅ 已完成 | 新增故障/预算/非异常失败四类用例 + 全量回归 1162 通过 |
 
-每批独立可回滚；PR4 与 PR5 之间存在顺序依赖，其余互不影响。
+每批独立可回滚；PR4 与 PR5 之间存在顺序依赖（已完成），其余互不影响。
 
 ---
 
@@ -399,7 +394,7 @@ internal abstract record DirectTurnSetup
 
 **剩余目标**
 
-- 子代理任务的重复 package/MCP 读：3 次 → 1 次（S1/PR5，现在依赖已满足：`DirectTurnPolicy.RequiresCapturedCapabilities` 就是“缺失/变更致命”的唯一判定点）。
+- 子代理任务的能力校验：执行前 preflight 只留“工具策略 / 工作区 / 模型”三件廉价事实，能力授权与时效集中在回合内一处判定（错误码由 `CapabilityUnavailable` 变为 `SnapshotInvalid`，已记入 §1）。
 - `DirectAgentChatRuntime` 拆分（C2/PR6，P2 级）：598 行，拆出事件翻译器与显式联合态。
 - S2 已完成：origin 规则现在只存在于 `DirectTurnPolicy`（Direct 内只剩一处 origin 数据透传给 hook 上下文）。
 

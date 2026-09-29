@@ -1,4 +1,4 @@
-using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
+﻿using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using FluentAssertions;
 using ModelContextProtocol;
@@ -33,7 +33,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
     [InlineData("disabled")]
     [InlineData("upgraded")]
     [InlineData("deleted")]
-    public async Task Queued_capability_changes_use_the_same_rule_in_preflight_and_runtime(string change)
+    public async Task Queued_capability_changes_are_enforced_by_the_child_turn(string change)
     {
         var package = await CreatePackageAsync("review", true);
         var request = CreateRequest(["review"], "task");
@@ -43,9 +43,8 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var definition = new SubagentDefinitionSnapshot(1, "child", "Child", "", modelId, "system", [], ["review"], [], 30, "");
         var start = new SubagentTaskStartRequest(request.ConversationId, request.TurnId, "child", "task", request.Agent,
             modelId, null, ToolPermissionMode.FullAccess, ceiling);
-        var servers = new McpRepository([]);
-        (await new SubagentTaskPreflight(models, new PackageRepository([package]), servers)
-            .CheckAsync(definition, start, modelId, CancellationToken.None)).Should().BeNull();
+        (await new SubagentTaskPreflight(models).CheckAsync(definition, start, modelId, CancellationToken.None))
+            .Should().BeNull();
 
         var changed = change switch
         {
@@ -55,13 +54,16 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         };
         if (change == "deleted") File.Delete(Path.Combine(package.InstallPath, "SKILL.md"));
         var packages = new PackageRepository([changed]);
-        var failure = await new SubagentTaskPreflight(models, packages, servers).CheckAsync(definition, start, modelId, CancellationToken.None);
-        failure.Should().NotBeNull();
-        failure!.ErrorCode.Should().Be(SubagentErrorCodes.CapabilityUnavailable);
+
+        // The gate decides only cheap, time-varying facts, so a capability that changed while the task was
+        // queued is enforced when the child turn resolves its capabilities - not rejected twice.
+        (await new SubagentTaskPreflight(models).CheckAsync(definition, start, modelId, CancellationToken.None))
+            .Should().BeNull();
+
         var resolver = CreateResolver(packages);
         var child = request with { ExecutionContext = new(DirectTurnOrigin.Subagent, ceiling, null) };
         Func<Task> resolveChild = async () => { await using var lease = await resolver.ResolveAsync(child); };
-        await resolveChild.Should().ThrowAsync<InvalidDataException>().WithMessage(failure.ErrorMessage);
+        await resolveChild.Should().ThrowAsync<InvalidDataException>().WithMessage("*review*unavailable or changed*");
         await using var continuation = await resolver.ResolveAsync(request with { ExecutionContext = new(DirectTurnOrigin.Continuation, ceiling, null) });
         continuation.Tools.Should().BeEmpty();
         continuation.Diagnostics.Should().Contain(message => message.Contains("removed"));
@@ -70,7 +72,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Changed_mcp_revision_or_enablement_is_rejected_before_child_execution(bool disable)
+    public async Task Changed_mcp_revision_or_enablement_is_enforced_by_the_child_turn(bool disable)
     {
         var server = CreateMcpRecord("fixture");
         var servers = new McpRepository([server]);
@@ -82,11 +84,10 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var start = new SubagentTaskStartRequest(request.ConversationId, request.TurnId, "child", "task", request.Agent,
             modelId, null, ToolPermissionMode.FullAccess, ceiling);
         var packages = new PackageRepository([]);
-        var preflight = new SubagentTaskPreflight(models, packages, servers);
+        var preflight = new SubagentTaskPreflight(models);
         (await preflight.CheckAsync(definition, start, modelId, CancellationToken.None)).Should().BeNull();
         servers.Records[server.Id] = disable ? server with { IsEnabled = false } : server with { ConfigRevision = 2 };
-        (await preflight.CheckAsync(definition, start, modelId, CancellationToken.None))!.ErrorCode
-            .Should().Be(SubagentErrorCodes.CapabilityUnavailable);
+        (await preflight.CheckAsync(definition, start, modelId, CancellationToken.None)).Should().BeNull();
         var resolver = CreateResolver(packages, CreateMcpSource(servers, new RecordingMcpClientManager(string.Empty)));
         Func<Task> child = async () => { await using var lease = await resolver.ResolveAsync(request with
             { ExecutionContext = new(DirectTurnOrigin.Subagent, ceiling, null) }); };
