@@ -62,7 +62,15 @@ const navItems = computed(() => [
 	{ id: 'new-chat', label: '新建对话', type: 'action' },
 	{ id: 'search', label: '搜索', type: 'action' },
 	{ id: 'plugins', label: '插件', type: 'action' },
-	{ id: 'extensions', label: '扩展功能', type: 'action' },
+	{
+		id: 'extensions',
+		label: '扩展功能',
+		type: 'action',
+		children: [
+			{ id: 'image-generation', label: '生图', type: 'view' },
+			{ id: 'translation', label: '翻译', type: 'view' },
+		],
+	},
 	{ id: 'automation', label: '自动化', type: 'action' },
 	{
 		id: 'projects',
@@ -79,7 +87,13 @@ const navItems = computed(() => [
 	{ id: 'settings', label: '设置', type: 'view' },
 ]);
 
-const sidebarActiveId = computed(() => (currentViewId.value === 'settings' ? 'settings' : selectedConversationId.value));
+// 独立视图（设置与扩展功能下的占位页）直接以自身 id 高亮；
+// 其余情况侧栏跟着当前选中的会话走。
+const standaloneViewIds = new Set(['settings', 'image-generation', 'translation', 'automation']);
+const sidebarActiveId = computed(() => {
+	const viewId = currentViewId.value;
+	return standaloneViewIds.has(viewId) ? viewId : selectedConversationId.value;
+});
 
 
 async function onSidebarAction(action) {
@@ -97,6 +111,9 @@ async function onSidebarAction(action) {
 			break;
 		case 'plugins':
 			openPlugins();
+			break;
+		case 'automation':
+			currentViewId.value = 'automation';
 			break;
 		case 'delete-conversation':
 			if (action?.conversationId) {
@@ -130,7 +147,7 @@ async function onSidebarAction(action) {
 
 async function onSidebarSelect(id) {
 	try {
-	if (id === 'chat' || id === 'settings') {
+	if (id === 'chat' || standaloneViewIds.has(id)) {
 		currentViewId.value = id;
 		return;
 	}

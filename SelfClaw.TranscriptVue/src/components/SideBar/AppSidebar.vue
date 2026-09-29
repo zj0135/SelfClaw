@@ -6,6 +6,8 @@ import {
 	Puzzle,
 	Blocks,
 	Zap,
+	ImagePlus,
+	Languages,
 	FolderOpen,
 	Folder,
 	File,
@@ -92,6 +94,7 @@ const {
 } = useWorkspaceTree();
 
 const expandedGroups = ref(new Set(['projects', 'conversations']));
+const expandedActions = ref(new Set());
 const expandedFolders = ref(new Set());
 const contextMenu = ref({
 	open: false,
@@ -143,6 +146,19 @@ function toggleFolder(folderId) {
 	} else {
 		expandedFolders.value.add(folderId);
 	}
+}
+
+// 「扩展功能」这类带子项的动作项：点击自身只负责折叠，不触发跳转。
+function toggleAction(actionId) {
+	if (expandedActions.value.has(actionId)) {
+		expandedActions.value.delete(actionId);
+	} else {
+		expandedActions.value.add(actionId);
+	}
+}
+
+function isActionOpen(actionId) {
+	return expandedActions.value.has(actionId);
 }
 
 function selectNode(nodeId) {
@@ -292,6 +308,8 @@ const iconMap = {
 	plugins: Puzzle,
 	extensions: Blocks,
 	automation: Zap,
+	'image-generation': ImagePlus,
+	translation: Languages,
 };
 
 // 右键菜单图标
@@ -443,14 +461,38 @@ onUnmounted(() => {
 		<!-- 上：功能按钮区 -->
 		<div class="nav-top">
 			<div class="tool-list">
-				<button v-for="item in actionItems.filter((a) => a.id !== 'new-chat')" :key="item.id" class="tool-btn"
-					type="button" @click="onAction(item.id)">
-					<span class="ico" aria-hidden="true">
-						<component :is="getIcon(item.id)" :size="15" :stroke-width="1.8" />
-					</span>
-					<span class="label">{{ item.label }}</span>
-					<span v-if="kbdMap[item.id]" class="kbd">{{ kbdMap[item.id] }}</span>
-				</button>
+				<template v-for="item in actionItems.filter((a) => a.id !== 'new-chat')" :key="item.id">
+					<button v-if="!item.children?.length" class="tool-btn" type="button" @click="onAction(item.id)">
+						<span class="ico" aria-hidden="true">
+							<component :is="getIcon(item.id)" :size="15" :stroke-width="1.8" />
+						</span>
+						<span class="label">{{ item.label }}</span>
+						<span v-if="kbdMap[item.id]" class="kbd">{{ kbdMap[item.id] }}</span>
+					</button>
+
+					<div v-else class="tool-group" :class="{ open: isActionOpen(item.id) }">
+						<button class="tool-btn" type="button" :aria-expanded="isActionOpen(item.id)"
+							@click="toggleAction(item.id)">
+							<span class="ico" aria-hidden="true">
+								<component :is="getIcon(item.id)" :size="15" :stroke-width="1.8" />
+							</span>
+							<span class="label">{{ item.label }}</span>
+							<span class="chev" aria-hidden="true">
+								<ChevronRight :size="13" :stroke-width="2" />
+							</span>
+						</button>
+						<div class="tool-children">
+							<button v-for="child in item.children" :key="child.id" class="tool-child"
+								:class="{ active: activeId === child.id }" type="button"
+								@click="selectNode(child.id)">
+								<span class="child-ico" aria-hidden="true">
+									<component :is="getIcon(child.id)" :size="14" :stroke-width="1.8" />
+								</span>
+								<span class="label">{{ child.label }}</span>
+							</button>
+						</div>
+					</div>
+				</template>
 			</div>
 		</div>
 
@@ -904,6 +946,91 @@ onUnmounted(() => {
 	font-family: var(--sb-mono);
 	font-size: var(--fs-95);
 	letter-spacing: 0.04em;
+}
+
+/* ---- 上：可展开的动作项（扩展功能 → 生图 / 翻译） ---- */
+.tool-group {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.tool-btn .chev {
+	display: grid;
+	width: 13px;
+	height: 13px;
+	place-items: center;
+	flex: none;
+	color: var(--sb-faint);
+	transition: transform 0.2s var(--sb-ease-out);
+}
+
+.tool-group.open .tool-btn .chev {
+	transform: rotate(90deg);
+}
+
+.tool-children {
+	display: none;
+	flex-direction: column;
+	gap: 1px;
+	padding: 1px 0 2px 26px;
+}
+
+.tool-group.open .tool-children {
+	display: flex;
+}
+
+.tool-child {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	width: 100%;
+	height: 30px;
+	padding: 0 9px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--sb-mute);
+	font-size: var(--fs-12);
+	font-weight: 520;
+	text-align: left;
+	transition:
+		background 0.14s,
+		color 0.14s,
+		transform 0.14s var(--sb-ease-out);
+}
+
+.tool-child:hover {
+	background: var(--sb-hover);
+	color: var(--sb-text);
+	transform: translateX(2px);
+}
+
+.tool-child.active {
+	border-color: var(--sb-line);
+	background: var(--panel);
+	color: var(--sb-accent);
+}
+
+.tool-child .child-ico {
+	display: grid;
+	width: 15px;
+	height: 15px;
+	place-items: center;
+	flex: none;
+	color: var(--sb-faint);
+}
+
+.tool-child.active .child-ico {
+	color: var(--sb-accent);
+}
+
+.tool-child .label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* ---- 中：分组与节点 ---- */

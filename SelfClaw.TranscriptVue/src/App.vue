@@ -7,6 +7,9 @@ import PluginPanelHost from './components/Plugins/PluginPanelHost.vue';
 import WindowControls from './components/Chat/WindowControls.vue';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
+import ImageGenerationView from './views/ImageGenerationView.vue';
+import TranslationView from './views/TranslationView.vue';
+import AutomationView from './views/AutomationView.vue';
 import { useHostBridge } from './composables/hostBridge.js';
 import { usePluginPanels } from './composables/usePluginPanels.js';
 import { useTranscriptBridge } from './composables/transcriptBridge.js';
@@ -18,6 +21,9 @@ const transcript = useTranscriptBridge();
 const viewRegistry = {
 	chat: markRaw(ChatView),
 	settings: markRaw(SettingsView),
+	'image-generation': markRaw(ImageGenerationView),
+	translation: markRaw(TranslationView),
+	automation: markRaw(AutomationView),
 };
 
 const currentViewId = ref('chat');
