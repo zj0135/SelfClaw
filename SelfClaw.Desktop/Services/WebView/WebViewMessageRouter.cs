@@ -32,8 +32,8 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly WorkspaceSelectionBridge _workspaceSelectionBridge;
     private readonly GitWorkspaceBridge? _gitWorkspaceBridge;
     private readonly TerminalHostController _terminalHostController;
-    private readonly PluginPanelHostController _pluginPanelHostController;
-    private readonly PluginPanelBridge _pluginPanelBridge;
+    private readonly PluginViewHostController _pluginViewHostController;
+    private readonly PluginViewBridge _pluginViewBridge;
     private readonly MainWindowViewModel _viewModel;
     private readonly ToolApprovalPresenter _approvals;
     private readonly WebViewHostChannel _hostChannel;
@@ -55,8 +55,8 @@ internal sealed class WebViewMessageRouter : IDisposable
         PetSettingsBridge petSettingsBridge,
         WorkspaceSelectionBridge workspaceSelectionBridge,
         TerminalHostController terminalHostController,
-        PluginPanelHostController pluginPanelHostController,
-        PluginPanelBridge pluginPanelBridge,
+        PluginViewHostController pluginViewHostController,
+        PluginViewBridge pluginViewBridge,
         MainWindowViewModel viewModel,
         ToolApprovalPresenter approvals,
         WebViewHostChannel hostChannel,
@@ -74,8 +74,8 @@ internal sealed class WebViewMessageRouter : IDisposable
         _workspaceSelectionBridge = workspaceSelectionBridge;
         _gitWorkspaceBridge = gitWorkspaceBridge;
         _terminalHostController = terminalHostController;
-        _pluginPanelHostController = pluginPanelHostController;
-        _pluginPanelBridge = pluginPanelBridge;
+        _pluginViewHostController = pluginViewHostController;
+        _pluginViewBridge = pluginViewBridge;
         _viewModel = viewModel;
         _approvals = approvals;
         _hostChannel = hostChannel;
@@ -225,9 +225,9 @@ internal sealed class WebViewMessageRouter : IDisposable
             case var name when name.StartsWith("extensions/", StringComparison.Ordinal):
                 response = await _extensionSettingsBridge.TryHandleAsync(type, payload, _viewModel.SelectedAgentId, cancellationToken); break;
             case "plugin-host/api":
-                response = await _pluginPanelBridge.TryHandleAsync(type, payload, cancellationToken); break;
+                response = await _pluginViewBridge.TryHandleAsync(type, payload, cancellationToken); break;
             case var name when name.StartsWith("plugin-host/", StringComparison.Ordinal):
-                response = await _pluginPanelHostController.TryHandleAsync(type, payload, cancellationToken); break;
+                response = await _pluginViewHostController.TryHandleAsync(type, payload, cancellationToken); break;
             case "get-git-state":
             case var name when name.StartsWith("git-", StringComparison.Ordinal):
                 response = _gitWorkspaceBridge is null ? null : await _gitWorkspaceBridge.TryHandleAsync(type, payload, cancellationToken); break;

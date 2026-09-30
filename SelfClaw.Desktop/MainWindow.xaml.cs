@@ -45,7 +45,7 @@ public sealed partial class MainWindow : Window
     private readonly WebViewHostChannel _webViewHostChannel;
     private readonly WebViewMessageRouter _webViewMessageRouter;
     private readonly TerminalHostController _terminalHostController;
-    private readonly PluginPanelHostController _pluginPanelHostController;
+    private readonly PluginViewHostController _pluginViewHostController;
     private readonly AppearanceSettingsService _appearanceSettingsService;
     private readonly DesktopConversationActivationService _activation;
     private readonly ILogger<MainWindow> _logger;
@@ -57,7 +57,7 @@ public sealed partial class MainWindow : Window
         WebViewHostChannel webViewHostChannel,
         WebViewMessageRouter webViewMessageRouter,
         TerminalHostController terminalHostController,
-        PluginPanelHostController pluginPanelHostController,
+        PluginViewHostController pluginViewHostController,
         AppearanceSettingsService appearanceSettingsService,
         StoragePaths storagePaths,
         DesktopConversationActivationService activation,
@@ -74,7 +74,7 @@ public sealed partial class MainWindow : Window
         _webViewHostChannel = webViewHostChannel;
         _webViewMessageRouter = webViewMessageRouter;
         _terminalHostController = terminalHostController;
-        _pluginPanelHostController = pluginPanelHostController;
+        _pluginViewHostController = pluginViewHostController;
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
         SourceInitialized += OnSourceInitialized;
@@ -160,7 +160,7 @@ public sealed partial class MainWindow : Window
             TranscriptView.CoreWebView2.Settings.IsStatusBarEnabled = false;
             TranscriptView.CoreWebView2.WebMessageReceived += OnTranscriptWebMessageReceived;
             _webViewHostChannel.Attach(TranscriptView.CoreWebView2.PostWebMessageAsJson);
-            _pluginPanelHostController.Attach(TranscriptView.CoreWebView2);
+            _pluginViewHostController.Attach(TranscriptView.CoreWebView2);
 
             var assetsRootPath = Path.Combine(AppContext.BaseDirectory, "Assets");
             var vueTranscriptPath = Path.Combine(assetsRootPath, "TranscriptVue", "index.html");

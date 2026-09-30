@@ -1,4 +1,4 @@
-using SelfClaw.Desktop.Services.Agents;
+﻿using SelfClaw.Desktop.Services.Agents;
 using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Settings;
 using SelfClaw.Desktop.Services.Tools;
@@ -212,21 +212,21 @@ public sealed class WebViewMessageRouterTests
     // error instead of null, so it has to be chained below the bridge. Ordered the other way this reached
     // the panel as "Unsupported plugin panel message type 'plugin-host/api'" and every SDK call failed.
     [Fact]
-    public async Task RouteAsync_routes_plugin_host_api_to_the_panel_bridge()
+    public async Task RouteAsync_routes_plugin_host_api_to_the_view_bridge()
     {
         using var context = new RouterTestContext();
 
         var command = await context.RouteAsync(
-            """{"type":"plugin-host/api","requestId":"api-1","panelKey":"git-inspector/changes","op":"context.get"}""");
+            """{"type":"plugin-host/api","requestId":"api-1","viewKey":"git-inspector/changes","op":"context.get"}""");
 
         command.Should().BeNull();
         using var response = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
         response.RootElement.GetProperty("type").GetString().Should().Be("plugin-host/api");
         response.RootElement.GetProperty("requestId").GetString().Should().Be("api-1");
-        // No panel is open in this fixture, so the bridge refuses on identity — the point is that the
+        // No view is open in this fixture, so the bridge refuses on identity — the point is that the
         // refusal comes from the bridge's permission check rather than from an unsupported-type error.
         response.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
-        response.RootElement.GetProperty("error").GetString().Should().Be("The calling panel is not open.");
+        response.RootElement.GetProperty("error").GetString().Should().Be("The calling view is not open.");
     }
 
     [Fact]
@@ -238,7 +238,7 @@ public sealed class WebViewMessageRouterTests
 
         using var response = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
         response.RootElement.GetProperty("error").GetString().Should()
-            .Be("Unsupported plugin panel message type 'plugin-host/nonsense'.");
+            .Be("Unsupported plugin view message type 'plugin-host/nonsense'.");
     }
 
     [Fact]
@@ -276,7 +276,7 @@ public sealed class WebViewMessageRouterTests
         private readonly SelfClaw.Desktop.Services.Tools.ToolApprovalPresenter _approvalPresenter;
         private readonly AgentActivityCoordinator _activityCoordinator;
         private readonly TerminalHostController _terminalHostController;
-        private readonly PluginPanelHostController _pluginPanelHostController;
+        private readonly PluginViewHostController _pluginViewHostController;
         private readonly ConversationSessionCoordinator _sessions;
         private readonly ConversationTurnEngine _turnEngine;
 
@@ -362,15 +362,15 @@ public sealed class WebViewMessageRouterTests
                 HostChannel,
                 Dispatcher.CurrentDispatcher);
             var packageRepository = new SelfClaw.Tests.TestDoubles.EmptyExtensionPackageRepository();
-            _pluginPanelHostController = new PluginPanelHostController(
+            _pluginViewHostController = new PluginViewHostController(
                 new ExtensionCatalog(packageRepository, Unused<IMcpServerRepository>(), storagePaths),
                 packageRepository,
                 Unused<IPluginVersionLeaseManager>(),
                 settingsStore,
                 HostChannel,
                 Dispatcher.CurrentDispatcher,
-                new PluginPanelResourceReader(Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginPanelResourceReader>.Instance),
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginPanelHostController>.Instance);
+                new PluginViewResourceReader(Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginViewResourceReader>.Instance),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginViewHostController>.Instance);
             _approvalPresenter = new SelfClaw.Desktop.Services.Tools.ToolApprovalPresenter(approvalHandler, _activityCoordinator,
                 new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance), HostChannel, Dispatcher.CurrentDispatcher);
             Router = new WebViewMessageRouter(
@@ -385,14 +385,14 @@ public sealed class WebViewMessageRouterTests
                     Unused<IWorkspaceFolderPicker>(),
                     Unused<IWorkspaceToolService>()),
                 _terminalHostController,
-                _pluginPanelHostController,
-                new PluginPanelBridge(
+                _pluginViewHostController,
+                new PluginViewBridge(
                     Unused<IWorkspaceToolService>(),
-                    _pluginPanelHostController,
-                    new PluginPanelContextPublisher(
+                    _pluginViewHostController,
+                    new PluginViewContextPublisher(
                         viewModel,
                         HostChannel,
-                        _pluginPanelHostController,
+                        _pluginViewHostController,
                         Dispatcher.CurrentDispatcher)),
                 viewModel,
                 _approvalPresenter,
@@ -425,7 +425,7 @@ public sealed class WebViewMessageRouterTests
             _turnEngine.Dispose();
             _sessions.Dispose();
             _terminalHostController.Dispose();
-            _pluginPanelHostController.Dispose();
+            _pluginViewHostController.Dispose();
             _activityCoordinator.Dispose();
             _transcriptPublisher.Dispose();
             _transcriptDelivery.Dispose();

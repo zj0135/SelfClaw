@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh" data-theme="light">
+<head>
+	<meta charset="utf-8" />
+	<title>View Demo — 停靠面板</title>
+	<style>
+		:root, html[data-theme='light'] { color-scheme: light; --ink: #171a1f; --muted: #6b7280; --line: #e5e7eb; --surface: #fff; --soft: #f6f7f9; }
+		html[data-theme='dark'] { color-scheme: dark; --ink: #e8eaf0; --muted: #8b93a3; --line: #2b303a; --surface: #171a20; --soft: #1e222a; }
+		body {
+			margin: 0; padding: 14px; background: var(--surface); color: var(--ink);
+			font-family: var(--host-font-ui, 'Segoe UI'), system-ui, sans-serif;
+			font-size: calc(12.5px * var(--host-ui-scale, 1)); line-height: 1.6;
+		}
+		h1 { margin: 0 0 3px; font-size: calc(14px * var(--host-ui-scale, 1)); }
+		p.sub { margin: 0 0 14px; color: var(--muted); font-size: calc(11px * var(--host-ui-scale, 1)); }
+		section { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+		h2 { margin: 0 0 7px; color: var(--muted); font-size: calc(10px * var(--host-ui-scale, 1)); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+		pre { margin: 0; overflow-x: auto; font: calc(11px * var(--host-ui-scale, 1))/1.5 'Cascadia Code', ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; }
+		.row { display: flex; gap: 7px; flex-wrap: wrap; }
+		button { height: 28px; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+		button:hover { border-color: #3b5bfd; color: #3b5bfd; }
+		.hint { margin: 6px 0 0; color: var(--muted); font-size: calc(11px * var(--host-ui-scale, 1)); }
+	</style>
+</head>
+<body>
+	<h1>视图演示</h1>
+	<p class="sub" id="key">…</p>
+
+	<section>
+		<h2>上下文</h2>
+		<pre id="context">读取中…</pre>
+	</section>
+
+	<section>
+		<h2>回合状态</h2>
+		<pre id="turn">等待订阅…</pre>
+	</section>
+
+	<section>
+		<h2>操作</h2>
+		<div class="row">
+			<button id="prompt">插入一句提示词</button>
+			<button id="latest">把最后一条回复写进来</button>
+			<button id="close">关闭自己</button>
+		</div>
+		<p class="hint">
+			悬浮 HUD 不在这里打开：左侧导航的「插件」→ 悬浮视图，或点标题栏的图层按钮。
+		</p>
+	</section>
+
+	<script>
+		const show = (id, value) => { document.getElementById(id).textContent = value; };
+		let lastTurn = null;
+
+		renderKey();
+		selfclaw.on('handshake', renderKey);
+
+		function renderKey() {
+			show('key', `viewKey = ${selfclaw.viewKey}  ·  slot = ${selfclaw.slot}`);
+			applyAppearance(selfclaw.appearance || {});
+		}
+
+		// 宿主只报外观事实（theme 已解析为 light/dark），配色由面板自己给。
+		function applyAppearance(a) {
+			document.documentElement.dataset.theme = a.theme === 'dark' ? 'dark' : 'light';
+			const s = document.documentElement.style;
+			s.setProperty('--host-font-ui', a.uiFontFamily || '');
+			s.setProperty('--host-ui-scale', String(a.uiFontScale ?? 1));
+		}
+		selfclaw.on('appearance-changed', applyAppearance);
+
+		// 先拉一次画第一屏，再订阅变化——拉和推给的是同一个记录。
+		const renderContext = (c) => show('context', JSON.stringify(c, null, 2));
+		selfclaw.getContext().then(renderContext).catch((e) => show('context', '失败：' + e.message));
+		selfclaw.on('context-changed', renderContext);
+
+		selfclaw.on('transcript', (payload) => {
+			const items = payload.items || [];
+			lastTurn = items.at(-1) || null;
+			show('turn', lastTurn
+				? `${lastTurn.role} · ${lastTurn.status} · ${items.length} 条消息（窗口${payload.truncated ? '已截断' : '完整'}）`
+				: '暂无消息');
+		});
+
+		document.getElementById('prompt').addEventListener('click', () => {
+			selfclaw.insertPrompt('来自 view-demo 停靠面板的一句话。').catch((e) => show('turn', '失败：' + e.message));
+		});
+
+		// 转录条目在宿主侧已经是投影后的纯对象，这里只取文本段。
+		document.getElementById('latest').addEventListener('click', () => {
+			const text = (lastTurn?.segments || []).filter((s) => s.kind === 'content').map((s) => s.markdown).join('\n');
+			show('turn', text ? text.slice(0, 600) : '还没有可显示的回复');
+		});
+
+		document.getElementById('close').addEventListener('click', () => selfclaw.close());
+
+		selfclaw.ready();
+	</script>
+</body>
+</html>

@@ -4,5 +4,5 @@ internal sealed record RawPluginContributions(
     string? DirectInstructions = null,
     IReadOnlyList<RawPluginSkillContribution>? Skills = null,
     IReadOnlyList<RawPluginMcpServerContribution>? McpServers = null,
-    IReadOnlyList<RawPluginPanelContribution>? Panels = null,
+    IReadOnlyList<RawPluginViewContribution>? Views = null,
     IReadOnlyList<RawPluginHookContribution>? Hooks = null);

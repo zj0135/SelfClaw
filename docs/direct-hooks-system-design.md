@@ -1318,7 +1318,7 @@ DeclarationOrder: i, Inherited: false)`。插件被降级跳过时，其 hooks �
 - 后续：stdio MCP 的 `command` 是否也采用 `ValidateCommand`（拒绝不带 `${pluginRoot}` 的相对路径）需单独评估兼容性。
 - 审查中发现、与 hooks 无直接关系的既有问题（单独处理，不在本设计范围内）：
   - `ExtensionCatalog.ReconcileAsync` 删除旧版本目录失败会导致应用启动失败；
-  - 禁用插件并不 drain 版本租约，但 `docs/plugin-panel-system-design.md` 与 `IPluginPanelSessionRegistry` 的注释描述为会；
+  - 禁用插件并不 drain 版本租约，但 `docs/plugin-view-system-design.md` 与 `IPluginViewSessionRegistry` 的注释描述为会；
   - `ExtensionCatalog.CreatePackageView` 以 manifest 原始权限字符串比对已规范化的确认列表，非规范写法的
     `network.fetch:` 确认后仍显示 NeedsPermission；
   - 回合失败时完成通知同样显示 “completed”（§15 的通知修正会顺带解决）。

@@ -1,5 +1,6 @@
 <script setup>
-import { PanelRight, SquareTerminal, Minus, Square, Copy, X } from 'lucide-vue-next';
+import { computed } from 'vue';
+import { Layers, PanelRight, SquareTerminal, Minus, Square, Copy, X } from 'lucide-vue-next';
 
 const props = defineProps({
 	isMaximized: {
@@ -11,9 +12,39 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	// 悬浮层是否被用户收起。它与右栏分开：插件盖住整个界面时，这颗按钮是宿主侧最直接的那条退路。
+	floatingVisible: {
+		type: Boolean,
+		default: true,
+	},
+	// 两颗插件按钮各自是否有可显隐的内容。没有已打开的视图时它们是禁用态，而不是退回启动器：
+	// 打开视图只有一个入口（左侧「插件」），标题栏只负责显隐。
+	panelAvailable: {
+		type: Boolean,
+		default: false,
+	},
+	// 悬浮层是否被用户收起。它与右栏分开：插件盖住主对话区时，这颗按钮是宿主侧最直接的那条退路。
+	floatingVisible: {
+		type: Boolean,
+		default: true,
+	},
+	floatingAvailable: {
+		type: Boolean,
+		default: false,
+	},
 });
 
 const emit = defineEmits(['action']);
+
+const panelTitle = computed(() => {
+	if (!props.panelAvailable) return '插件面板：暂无已打开的视图';
+	return props.panelVisible ? '隐藏插件面板' : '显示插件面板';
+});
+
+const floatingTitle = computed(() => {
+	if (!props.floatingAvailable) return '悬浮视图：暂无已打开的视图';
+	return props.floatingVisible ? '隐藏悬浮视图' : '显示悬浮视图';
+});
 
 function send(action) {
 	emit('action', action);
@@ -28,10 +59,15 @@ function send(action) {
 				<SquareTerminal :size="15" :stroke-width="1.7" />
 			</button>
 			<button class="chrome-button tool-button" :class="{ on: props.panelVisible }" type="button"
-				:title="props.panelVisible ? '收起插件面板' : '展开插件面板'"
-				:aria-label="props.panelVisible ? '收起插件面板' : '展开插件面板'" :aria-pressed="props.panelVisible"
-				@click="send('toggle-panel')">
+				:title="panelTitle" :aria-label="panelTitle" :aria-pressed="props.panelAvailable ? props.panelVisible : undefined"
+				:disabled="!props.panelAvailable" @click="send('toggle-panel')">
 				<PanelRight :size="15" :stroke-width="1.7" />
+			</button>
+			<button class="chrome-button tool-button" :class="{ on: props.floatingAvailable && props.floatingVisible }"
+				type="button" :title="floatingTitle" :aria-label="floatingTitle"
+				:aria-pressed="props.floatingAvailable ? props.floatingVisible : undefined"
+				:disabled="!props.floatingAvailable" @click="send('toggle-floating')">
+				<Layers :size="15" :stroke-width="1.7" />
 			</button>
 		</div>
 
@@ -117,6 +153,17 @@ function send(action) {
 
 .tool-button.on:hover {
 	background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* 没有可显隐的内容：按钮仍然占位（用户得知道这颗按钮存在，也知道去左侧「插件」打开），
+   但不吃点击。 */
+.tool-button:disabled {
+	cursor: default;
+	color: color-mix(in srgb, var(--text-soft) 45%, transparent);
+}
+
+.tool-button:disabled:hover {
+	background: transparent;
 }
 
 .caption-button {

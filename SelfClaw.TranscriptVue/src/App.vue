@@ -4,7 +4,8 @@ import AppSidebar from './components/SideBar/AppSidebar.vue';
 import AppToast from './components/common/AppToast.vue';
 import AppConfirmDialog from './components/common/AppConfirmDialog.vue';
 import PluginLauncher from './components/Plugins/PluginLauncher.vue';
-import PluginPanelHost from './components/Plugins/PluginPanelHost.vue';
+import PluginDockHost from './components/Plugins/PluginDockHost.vue';
+import PluginFloatingLayer from './components/Plugins/PluginFloatingLayer.vue';
 import WindowControls from './components/Chat/WindowControls.vue';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
@@ -12,7 +13,7 @@ import ImageGenerationView from './views/ImageGenerationView.vue';
 import TranslationView from './views/TranslationView.vue';
 import AutomationView from './views/AutomationView.vue';
 import { useHostBridge } from './composables/hostBridge.js';
-import { usePluginPanels } from './composables/usePluginPanels.js';
+import { usePluginViews } from './composables/usePluginViews.js';
 import { useTranscriptBridge } from './composables/transcriptBridge.js';
 import { useConversationNavigation } from './composables/useConversationNavigation.js';
 
@@ -54,49 +55,78 @@ const windowChrome = reactive({
 	isMaximized: false,
 });
 
-// ===== 插件面板（右侧栏） =====
-const panels = usePluginPanels();
+// ===== 插件视图（右侧停靠面板 + 窗口悬浮层） =====
 const launcherOpen = ref(false);
-const PANEL_WIDTH_KEY = 'selfclaw:panel-width';
-const PANEL_HIDDEN_KEY = 'selfclaw:panel-hidden';
-const panelWidth = ref(readPanelWidth());
-const panelHidden = ref(readPanelHidden());
+const DOCK_WIDTH_KEY = 'selfclaw:dock-width';
+const DOCK_HIDDEN_KEY = 'selfclaw:dock-hidden';
+const FLOATS_HIDDEN_KEY = 'selfclaw:floats-hidden';
+const dockWidth = ref(readDockWidth());
+const dockHidden = ref(readDockHidden());
+const floatsHidden = ref(readFloatsHidden());
 const resizing = ref(false);
 
-// 隐藏是外壳的视图状态，不是面板的生命周期：标签与租约都留着，只是这一列不占位置。
-// 因此右栏可见 = 有标签 且 没被隐藏。
-const panelVisible = computed(() => panels.isOpen.value && !panelHidden.value);
+// 拖动停靠分隔条或整体收敛悬浮层时一律解除武装：悬浮帧的开关是内联样式，会盖掉
+// `.app.resizing iframe { pointer-events: none }`，所以这里要用 JS 而不是 CSS 来收敛。
+const pluginViews = usePluginViews({ isSuspended: () => resizing.value || floatsHidden.value });
 
-function readPanelWidth() {
-	const stored = Number(localStorage.getItem(PANEL_WIDTH_KEY));
+// 标题栏两颗按钮各自是否有可显隐的内容（有已打开的视图）。没有时它们是禁用态，
+// 不再退回启动器——打开视图只剩左侧「插件」那一个入口。
+const dockAvailable = computed(() => pluginViews.dockedViews.value.length > 0);
+const floatsAvailable = computed(() => pluginViews.floatingViews.value.length > 0);
+
+// 隐藏是外壳的视图状态，不是视图的生命周期：帧与租约都留着，只是这一列不占位置。
+// 因此右栏可见 = 有停靠视图 且 没被隐藏。
+const dockVisible = computed(() => dockAvailable.value && !dockHidden.value);
+const floatsVisible = computed(() => !floatsHidden.value);
+
+function readDockWidth() {
+	const stored = Number(localStorage.getItem(DOCK_WIDTH_KEY));
 	return Number.isFinite(stored) && stored >= 280 ? Math.min(stored, 720) : 380;
 }
 
-function readPanelHidden() {
+function readDockHidden() {
 	try {
-		return localStorage.getItem(PANEL_HIDDEN_KEY) === 'true';
+		return localStorage.getItem(DOCK_HIDDEN_KEY) === 'true';
 	} catch (_) {
 		return false;
 	}
 }
 
-function setPanelHidden(hidden) {
-	panelHidden.value = hidden;
+function readFloatsHidden() {
 	try {
-		localStorage.setItem(PANEL_HIDDEN_KEY, String(hidden));
+		return localStorage.getItem(FLOATS_HIDDEN_KEY) === 'true';
+	} catch (_) {
+		return false;
+	}
+}
+
+function setDockHidden(hidden) {
+	dockHidden.value = hidden;
+	try {
+		localStorage.setItem(DOCK_HIDDEN_KEY, String(hidden));
 	} catch (_) {
 		// 忽略持久化失败
 	}
 }
 
-function startPanelResize(event) {
+// 悬浮层的显隐是用户级的退路：插件盖住整个界面时，标题栏这颗开关永远可点。
+function setFloatsHidden(hidden) {
+	floatsHidden.value = hidden;
+	try {
+		localStorage.setItem(FLOATS_HIDDEN_KEY, String(hidden));
+	} catch (_) {
+		// 忽略持久化失败
+	}
+}
+
+function startDockResize(event) {
 	if (event.button !== 0) return;
 	resizing.value = true;
 	const startX = event.clientX;
-	const startWidth = panelWidth.value;
+	const startWidth = dockWidth.value;
 
 	function onMove(moveEvent) {
-		panelWidth.value = Math.min(720, Math.max(280, startWidth + (startX - moveEvent.clientX)));
+		dockWidth.value = Math.min(720, Math.max(280, startWidth + (startX - moveEvent.clientX)));
 	}
 
 	function onUp() {
@@ -104,7 +134,7 @@ function startPanelResize(event) {
 		window.removeEventListener('pointermove', onMove);
 		window.removeEventListener('pointerup', onUp);
 		try {
-			localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(panelWidth.value)));
+			localStorage.setItem(DOCK_WIDTH_KEY, String(Math.round(dockWidth.value)));
 		} catch (_) {
 			// 忽略持久化失败
 		}
@@ -115,34 +145,33 @@ function startPanelResize(event) {
 	event.preventDefault();
 }
 
-const openPanelKeys = computed(() => panels.tabs.value.map((tab) => tab.key));
+const openViewKeys = computed(() => pluginViews.openViews.value.map((view) => view.key));
 
-// 从左侧导航打开就是要看见它。已经打开过的面板走这条路只是重新激活并取消隐藏，
-// 所以启动器里的条目在隐藏态下必须仍然可点——否则面板全开时右栏就没有出路了。
-async function openPanel(key) {
+// 从左侧导航打开就是要看见它。已经打开过的停靠视图走这条路只是重新激活并取消隐藏，
+// 所以启动器里的条目在隐藏态下必须仍然可点——否则视图全开时右栏就没有出路了。
+// 打开失败（例如宿主的上限）时启动器不关：错误消息就显示在那里，否则悬浮视图失败时用户什么也看不到。
+async function openPluginView(key) {
+	const view = pluginViews.available.value.find((candidate) => candidate.key === key);
+	const opened = await pluginViews.open(key);
+	if (!opened) return;
 	launcherOpen.value = false;
-	setPanelHidden(false);
-	await panels.open(key);
+	// 打开一个视图就是要看见它：停靠视图展开右栏，悬浮视图取消整体隐藏。
+	if (view?.slot === 'right') setDockHidden(false);
+	if (view?.slot === 'floating') setFloatsHidden(false);
 }
 
-function hidePanels() {
-	setPanelHidden(true);
+function hideDock() {
+	setDockHidden(true);
 }
 
-// 标题栏那个按钮是纯粹的显隐开关，但一个标签都没有时「展开」没有东西可展开——
-// 那种情况下退回启动器，让用户先挑一个面板，否则点了会毫无反应。
-function togglePanels() {
-	if (panelVisible.value) {
-		setPanelHidden(true);
-		return;
-	}
+// 标题栏两颗按钮就是纯显隐开关：现在看得见就收起，看不见就展开。没有可显隐的内容时
+// 按钮本来是禁用态，所以这里不必再兜底（打开视图的入口只在左侧「插件」）。
+function toggleFloats() {
+	setFloatsHidden(!floatsHidden.value);
+}
 
-	if (panels.isOpen.value) {
-		setPanelHidden(false);
-		return;
-	}
-
-	launcherOpen.value = true;
+function toggleDock() {
+	setDockHidden(dockVisible.value);
 }
 
 function openPluginSettings() {
@@ -150,13 +179,13 @@ function openPluginSettings() {
 	currentViewId.value = 'settings';
 }
 
-// 面板上下文由宿主推送（plugin-host/context），usePluginPanels 自行订阅。外壳这里只转发
+// 视图上下文由宿主推送（plugin-host/context），usePluginViews 自行订阅。外壳这里只转发
 // transcript：它本来就是外壳收到的负载，没有第二个来源可以跟它对不上。
 transcript.on((payload) => {
-	panels.publishTranscript({ items: payload.items || [], revision: payload.revision });
+	pluginViews.publishTranscript({ items: payload.items || [], revision: payload.revision });
 }, { critical: false });
 
-panels.onInsertPrompt.value = (text) => chatViewRef.value?.insertPrompt?.(text);
+pluginViews.onInsertPrompt.value = (text) => chatViewRef.value?.insertPrompt?.(text);
 
 const { navItems, sidebarActiveId, onSidebarAction, onSidebarSelect } = useConversationNavigation(
 	currentViewId, chatViewRef, () => { launcherOpen.value = true; });
@@ -193,7 +222,10 @@ function onWindowControlAction(action) {
 			break;
 		// 右栏显隐全在前端，不必往宿主跑一趟。
 		case 'toggle-panel':
-			togglePanels();
+			toggleDock();
+			break;
+		case 'toggle-floating':
+			toggleFloats();
 			break;
 		case 'minimize':
 			post({ type: 'window-minimize' });
@@ -249,13 +281,15 @@ onUnmounted(() => {
 
 <template>
 	<div class="app" :class="{ 'sidebar-collapsed': sidebarCollapsed, resizing }"
-		:style="{ '--panel-width': `${panelWidth}px` }">
+		:style="{ '--dock-width': `${dockWidth}px` }">
 		<AppSidebar :items="navItems" :active-id="sidebarActiveId" :collapsed="sidebarCollapsed"
 			@select="onSidebarSelect" @action="onSidebarAction" @toggle-collapse="toggleSidebarCollapsed" />
 		<main class="main">
-			<div class="main-header">
+			<div class="main-header" data-anchor="titlebar">
 				<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>
-				<WindowControls :is-maximized="windowChrome.isMaximized" :panel-visible="panelVisible"
+				<WindowControls :is-maximized="windowChrome.isMaximized" :panel-visible="dockVisible"
+					:panel-available="dockAvailable" :floating-visible="floatsVisible"
+					:floating-available="floatsAvailable"
 					@action="onWindowControlAction" />
 			</div>
 			<div v-if="transcript.error.value" class="transcript-recovery" role="alert">
@@ -264,20 +298,26 @@ onUnmounted(() => {
 			<div class="main-body">
 				<div class="main-content">
 					<component :is="activeViewComponent" ref="chatViewRef" @preview-image="openImagePreview" />
+					<!-- 悬浮层只覆盖主对话区：它不能盖住侧栏与右栏。这不只是视觉要求——实测指针在子 iframe
+						 上时父文档收不到任何 pointermove，悬浮层若与右栏的插件帧重叠，命中测试就永远不会
+						 运行，那一帧也就永远不会被唤醒（点了没反应）。见 docs/plugin-view-system-design.md §2.3。 -->
+					<PluginFloatingLayer :hidden="!floatsVisible" :views="pluginViews.floatingViews.value"
+						:armed-key="pluginViews.armedKey.value" @register="pluginViews.registerFrame" />
 				</div>
-				<div v-if="panelVisible" class="panel-resizer" role="separator" aria-orientation="vertical"
-					aria-label="调整面板宽度" @pointerdown="startPanelResize"></div>
+				<div v-if="dockVisible" class="dock-resizer" role="separator" aria-orientation="vertical"
+					aria-label="调整面板宽度" @pointerdown="startDockResize"></div>
 				<!-- v-show 而非 v-if：隐藏不该卸载 iframe，否则每次收起都要让插件重新加载并重走
-					 握手，收起再展开就不再是一个廉价动作。没有标签时 panelVisible 同样为假，
+					 握手，收起再展开就不再是一个廉价动作。没有停靠视图时 dockVisible 同样为假，
 					 这一列就只是个不占位的空壳。 -->
-				<PluginPanelHost v-show="panelVisible" :tabs="panels.tabs.value"
-					:active-key="panels.activeKey.value" :error="panels.error.value"
-					@activate="(key) => (panels.activeKey.value = key)" @close="panels.close" @hide="hidePanels"
-					@register="panels.registerFrame" />
+				<PluginDockHost v-show="dockVisible" :views="pluginViews.dockedViews.value"
+					:active-key="pluginViews.activeKey.value" :error="pluginViews.error.value"
+					@activate="pluginViews.activate" @close="pluginViews.close" @hide="hideDock"
+					@register="pluginViews.registerFrame" />
 			</div>
 		</main>
-		<PluginLauncher :open="launcherOpen" :panels="panels.available.value" :open-keys="openPanelKeys"
-			@close="launcherOpen = false" @select="openPanel" @manage="openPluginSettings" />
+		<PluginLauncher :open="launcherOpen" :views="pluginViews.available.value" :open-keys="openViewKeys"
+			:error="pluginViews.error.value" @close="launcherOpen = false" @select="openPluginView"
+			@close-view="pluginViews.close" @manage="openPluginSettings" />
 		<div v-if="imagePreview" class="image-preview-backdrop" @click.self="closeImagePreview">
 			<div class="image-preview-dialog">
 				<img :src="imagePreview.src" :alt="imagePreview.alt || 'Preview image'" />
@@ -372,7 +412,7 @@ button {
 }
 
 /* 视觉上就是一条 1px 分割线，与侧栏那条对齐；命中区靠 ::after 向两侧各撑出几像素。 */
-.panel-resizer {
+.dock-resizer {
 	position: relative;
 	width: 1px;
 	flex: none;
@@ -381,7 +421,7 @@ button {
 	transition: background 0.14s;
 }
 
-.panel-resizer::after {
+.dock-resizer::after {
 	position: absolute;
 	top: 0;
 	bottom: 0;
@@ -390,7 +430,7 @@ button {
 	content: '';
 }
 
-.panel-resizer:hover {
+.dock-resizer:hover {
 	background: var(--accent);
 }
 
@@ -417,6 +457,9 @@ button {
 	flex: 0 0 46px;
 	height: 46px;
 	border-bottom: 1px solid var(--border);
+	/* 460 = 悬浮层（450）之上：窗口拖拽区与控制按钮（含「隐藏悬浮视图」）必须永远可点，
+	   这是插件盖住整个界面时的第一道退路。条带本身透明，插件的视觉内容仍然看得见。 */
+	z-index: 460;
 }
 
 /* 标题栏之下才分左右：面板与对话区并排，窗口按钮那一行横贯整个主区。 */
@@ -434,8 +477,8 @@ button {
 	overflow: hidden;
 }
 
-.main-body>.plugin-panel-host {
-	width: var(--panel-width, 380px);
+.main-body>.plugin-dock-host {
+	width: var(--dock-width, 380px);
 	flex: none;
 }
 

@@ -22,7 +22,7 @@ const visible = computed(() => panel.section.value?.counts.total > 0 || panel.er
 </script>
 
 <template>
-	<div ref="stage" class="activity-stage">
+	<div ref="stage" class="activity-stage" data-anchor="stage">
 		<slot />
 		<div v-if="visible" class="activity-dock" :class="{ collapsed: !expanded }">
 			<ActivityFloatingPanel :sections="sections" :preferences="preferences.view" :force-collapsed="constrained" :loading="panel.loading.value" :error="panel.error.value" @refresh="panel.refresh()">

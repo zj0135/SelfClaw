@@ -1,4 +1,5 @@
 using FluentAssertions;
+using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Extensions.Models;
 using SelfClaw.Infrastructure.Extensions.Plugins;
 
@@ -155,43 +156,53 @@ public sealed class PluginManifestReaderTests : IDisposable
     }
 
     [Fact]
-    public async Task ReadAsync_parses_panel_contributions()
+    public async Task ReadAsync_parses_view_contributions_for_both_slots()
     {
-        await CreatePackageAsync(ValidPanelManifest);
+        await CreatePackageAsync(ValidViewManifest);
 
         var manifest = await CreateReader().ReadAsync(Path.Combine(_rootPath, "plugin.json"));
 
-        var panel = manifest.Contributions.Panels.Should().ContainSingle().Subject;
-        panel.Id.Should().Be("changes");
-        panel.Title.Should().Be("变更");
-        panel.Icon.Should().Be("git-branch");
-        panel.Entry.Should().Be("ui/panel/index.html");
-        panel.DefaultWidth.Should().Be(380);
+        manifest.Contributions.Views.Should().HaveCount(2);
+        var docked = manifest.Contributions.Views.Single(view => view.Slot == PluginViewSlot.Right);
+        docked.Id.Should().Be("changes");
+        docked.Title.Should().Be("变更");
+        docked.Icon.Should().Be("git-branch");
+        docked.Entry.Should().Be("ui/panel/index.html");
+        docked.DefaultWidth.Should().Be(380);
+
+        var floating = manifest.Contributions.Views.Single(view => view.Slot == PluginViewSlot.Floating);
+        floating.Id.Should().Be("hud");
+        floating.DefaultWidth.Should().BeNull();
     }
 
     [Fact]
-    public async Task ReadAsync_defaults_the_panel_icon_when_it_is_omitted()
+    public async Task ReadAsync_defaults_the_docked_width_and_icon_when_they_are_omitted()
     {
-        await CreatePackageAsync(CreatePanelManifest(
-            """{"id":"changes","title":"变更","entry":"ui/panel/index.html"}"""));
+        await CreatePackageAsync(CreateViewManifest(
+            """{"id":"changes","slot":"right","title":"变更","entry":"ui/panel/index.html"}"""));
 
         var manifest = await CreateReader().ReadAsync(Path.Combine(_rootPath, "plugin.json"));
 
-        manifest.Contributions.Panels.Should().ContainSingle().Which.Icon.Should().Be("puzzle");
+        var view = manifest.Contributions.Views.Should().ContainSingle().Subject;
+        view.Icon.Should().Be("puzzle");
+        view.DefaultWidth.Should().Be(360);
     }
 
     [Theory]
-    [InlineData("""{"id":"changes","title":"变更","entry":"../outside.html"}""", "*escapes*")]
-    [InlineData("""{"id":"changes","title":"变更","entry":"ui/panel/missing.html"}""", "*entry file does not exist*")]
-    [InlineData("""{"id":"changes","title":"变更","entry":"ui/panel/index.txt"}""", "*must be an .html file*")]
-    [InlineData("""{"id":"changes","title":"变更"}""", "*must declare an entry*")]
-    [InlineData("""{"id":"changes","title":"","entry":"ui/panel/index.html"}""", "*title is invalid*")]
-    [InlineData("""{"id":"Changes","title":"变更","entry":"ui/panel/index.html"}""", "*Plugin panel id*")]
-    [InlineData("""{"id":"changes","title":"变更","entry":"ui/panel/index.html","icon":"skull"}""", "*not a supported icon*")]
-    [InlineData("""{"id":"changes","title":"变更","entry":"ui/panel/index.html","defaultWidth":120}""", "*defaultWidth must be between*")]
-    public async Task ReadAsync_rejects_invalid_panels(string panelJson, string error)
+    [InlineData("""{"id":"changes","slot":"right","title":"变更","entry":"../outside.html"}""", "*escapes*")]
+    [InlineData("""{"id":"changes","slot":"right","title":"变更","entry":"ui/panel/missing.html"}""", "*entry file does not exist*")]
+    [InlineData("""{"id":"changes","slot":"right","title":"变更","entry":"ui/panel/index.txt"}""", "*must be an .html file*")]
+    [InlineData("""{"id":"changes","slot":"right","title":"变更"}""", "*must declare an entry*")]
+    [InlineData("""{"id":"changes","slot":"right","title":"","entry":"ui/panel/index.html"}""", "*title is invalid*")]
+    [InlineData("""{"id":"Changes","slot":"right","title":"变更","entry":"ui/panel/index.html"}""", "*Plugin view id*")]
+    [InlineData("""{"id":"changes","slot":"right","title":"变更","entry":"ui/panel/index.html","icon":"skull"}""", "*not a supported icon*")]
+    [InlineData("""{"id":"changes","slot":"right","title":"变更","entry":"ui/panel/index.html","defaultWidth":120}""", "*defaultWidth must be between*")]
+    [InlineData("""{"id":"changes","title":"变更","entry":"ui/panel/index.html"}""", "*must declare a slot*")]
+    [InlineData("""{"id":"changes","slot":"bottom","title":"变更","entry":"ui/panel/index.html"}""", "*slot 'bottom' is not supported*")]
+    [InlineData("""{"id":"changes","slot":"floating","title":"变更","entry":"ui/panel/index.html","defaultWidth":380}""", "*must not declare defaultWidth*")]
+    public async Task ReadAsync_rejects_invalid_views(string viewJson, string error)
     {
-        await CreatePackageAsync(CreatePanelManifest(panelJson));
+        await CreatePackageAsync(CreateViewManifest(viewJson));
 
         var action = () => CreateReader().ReadAsync(Path.Combine(_rootPath, "plugin.json"));
 
@@ -199,21 +210,21 @@ public sealed class PluginManifestReaderTests : IDisposable
     }
 
     [Fact]
-    public async Task ReadAsync_rejects_duplicate_panel_ids()
+    public async Task ReadAsync_rejects_duplicate_view_ids_across_slots()
     {
-        await CreatePackageAsync(CreatePanelManifest(
-            """{"id":"changes","title":"A","entry":"ui/panel/index.html"},{"id":"changes","title":"B","entry":"ui/panel/index.html"}"""));
+        await CreatePackageAsync(CreateViewManifest(
+            """{"id":"changes","slot":"right","title":"A","entry":"ui/panel/index.html"},{"id":"changes","slot":"floating","title":"B","entry":"ui/panel/index.html"}"""));
 
         var action = () => CreateReader().ReadAsync(Path.Combine(_rootPath, "plugin.json"));
 
-        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*Duplicate Plugin panel id*");
+        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*Duplicate Plugin view id*");
     }
 
     [Fact]
-    public async Task ReadAsync_requires_the_panel_permission_when_panels_are_declared()
+    public async Task ReadAsync_requires_the_docked_permission_when_a_docked_view_is_declared()
     {
-        await CreatePackageAsync(CreatePanelManifest(
-            """{"id":"changes","title":"变更","entry":"ui/panel/index.html"}""",
+        await CreatePackageAsync(CreateViewManifest(
+            """{"id":"changes","slot":"right","title":"变更","entry":"ui/panel/index.html"}""",
             permissions: "\"workspace.read\""));
 
         var action = () => CreateReader().ReadAsync(Path.Combine(_rootPath, "plugin.json"));
@@ -221,26 +232,40 @@ public sealed class PluginManifestReaderTests : IDisposable
         await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*must also declare the 'ui.panel' permission*");
     }
 
-    // These ids are legal package ids but illegal DNS labels, and the panel origin is derived from the
-    // id — so they have to fail at install time rather than when a user first opens the tab.
+    // A floating view can cover the whole window, so it is a separately acknowledged capability: holding
+    // ui.panel must never be enough to place a window-wide overlay.
+    [Fact]
+    public async Task ReadAsync_requires_the_floating_permission_for_the_floating_slot()
+    {
+        await CreatePackageAsync(CreateViewManifest(
+            """{"id":"hud","slot":"floating","title":"HUD","entry":"ui/panel/index.html"}""",
+            permissions: "\"ui.panel\""));
+
+        var action = () => CreateReader().ReadAsync(Path.Combine(_rootPath, "plugin.json"));
+
+        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*must also declare the 'ui.floating' permission*");
+    }
+
+    // These ids are legal package ids but illegal DNS labels, and the view origin is derived from the
+    // id — so they have to fail at install time rather than when a user first opens the view.
     [Theory]
     [InlineData("office-")]
     [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
-    public async Task ReadAsync_rejects_panels_from_a_plugin_id_that_is_not_a_dns_label(string pluginId)
+    public async Task ReadAsync_rejects_views_from_a_plugin_id_that_is_not_a_dns_label(string pluginId)
     {
-        await CreatePackageAsync(CreatePanelManifest(
-                """{"id":"changes","title":"变更","entry":"ui/panel/index.html"}""")
+        await CreatePackageAsync(CreateViewManifest(
+                """{"id":"changes","slot":"right","title":"变更","entry":"ui/panel/index.html"}""")
             .Replace("office-workflows", pluginId, StringComparison.Ordinal));
 
         var action = () => CreateReader().ReadAsync(Path.Combine(_rootPath, "plugin.json"));
 
-        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*cannot host panels*");
+        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*cannot host views*");
     }
 
     [Fact]
     public async Task ReadAsync_normalizes_declared_network_origins()
     {
-        await CreatePackageAsync(ValidPanelManifest.Replace(
+        await CreatePackageAsync(ValidViewManifest.Replace(
             "network.fetch:https://api.example.com",
             "network.fetch:https://API.Example.com:443/",
             StringComparison.Ordinal));
@@ -264,7 +289,7 @@ public sealed class PluginManifestReaderTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(_rootPath, "ui", "panel", "index.txt"), "not a page");
     }
 
-    private static string CreatePanelManifest(string panelJson, string permissions = "\"ui.panel\"")
+    private static string CreateViewManifest(string viewJson, string permissions = "\"ui.panel\",\"ui.floating\"")
         => $$"""
             {
               "schemaVersion": 1,
@@ -272,22 +297,28 @@ public sealed class PluginManifestReaderTests : IDisposable
               "name": "Office Workflows",
               "version": "1.0.0",
               "permissions": [{{permissions}}],
-              "contributes": { "panels": [{{panelJson}}] }
+              "contributes": { "views": [{{viewJson}}] }
             }
             """;
 
-    private const string ValidPanelManifest = """
+    private const string ValidViewManifest = """
         {
           "schemaVersion": 1,
           "id": "office-workflows",
           "name": "Office Workflows",
           "version": "1.0.0",
-          "permissions": ["ui.panel", "host.context.read", "network.fetch:https://api.example.com"],
+          "permissions": ["ui.panel", "ui.floating", "host.context.read", "network.fetch:https://api.example.com"],
           "contributes": {
-            "panels": [{
-              "id": "changes", "title": "变更", "icon": "git-branch",
-              "entry": "ui/panel/index.html", "defaultWidth": 380
-            }]
+            "views": [
+              {
+                "id": "changes", "slot": "right", "title": "变更", "icon": "git-branch",
+                "entry": "ui/panel/index.html", "defaultWidth": 380
+              },
+              {
+                "id": "hud", "slot": "floating", "title": "悬浮 HUD", "icon": "layers",
+                "entry": "ui/panel/index.html"
+              }
+            ]
           }
         }
         """;

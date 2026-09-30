@@ -1,3 +1,4 @@
+using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using System.Net;
@@ -11,10 +12,12 @@ namespace SelfClaw.Infrastructure.Extensions.Plugins;
 
 internal sealed class PluginManifestReader
 {
-    private const int MaximumPanelTitleLength = 40;
-    private const int MinimumPanelWidth = 280;
-    private const int MaximumPanelWidth = 720;
-    private const int FallbackPanelWidth = 360;
+    private const int MaximumViewTitleLength = 40;
+    private const int MinimumDockWidth = 280;
+    private const int MaximumDockWidth = 720;
+    private const int FallbackViewWidth = 360;
+    private const string RightSlot = "right";
+    private const string FloatingSlot = "floating";
     private const int MaximumHooksPerPlugin = 32;
     private const int MaximumHookPatternLength = 128;
 
@@ -81,13 +84,8 @@ internal sealed class PluginManifestReader
             "directInstructions");
         var skills = ValidateSkills(packageRoot, contributions.Skills ?? []);
         var mcpServers = ValidateMcpServers(packageRoot, contributions.McpServers ?? []);
-        var panels = ValidatePanels(raw.Id, packageRoot, contributions.Panels ?? []);
         var permissions = PluginPermissions.Validate(raw.Permissions);
-        if (panels.Count > 0 && !PluginPermissions.Grants(permissions, PluginPermissions.Panel))
-        {
-            throw new InvalidDataException(
-                $"Plugin declares panels, so it must also declare the '{PluginPermissions.Panel}' permission.");
-        }
+        var views = ValidateViews(pluginId: raw.Id, packageRoot, contributions.Views ?? [], permissions);
 
         var hooks = ValidateHooks(packageRoot, contributions.Hooks ?? [], permissions);
 
@@ -99,79 +97,135 @@ internal sealed class PluginManifestReader
             raw.Description?.Trim() ?? string.Empty,
             raw.Publisher?.Trim(),
             permissions,
-            new PluginContributions(directInstructions, skills, mcpServers, panels, hooks));
+            new PluginContributions(directInstructions, skills, mcpServers, views, hooks));
     }
 
-    private static IReadOnlyList<PluginPanelContribution> ValidatePanels(
+    private static IReadOnlyList<PluginViewContribution> ValidateViews(
         string pluginId,
         string packageRoot,
-        IReadOnlyList<RawPluginPanelContribution> panels)
+        IReadOnlyList<RawPluginViewContribution> views,
+        IReadOnlyList<string> permissions)
     {
-        if (panels.Count == 0)
+        if (views.Count == 0)
         {
             return [];
         }
 
-        // Caught here rather than at open time: the panel origin is derived from the Plugin id, so an id
+        // Caught here rather than at open time: the view origin is derived from the Plugin id, so an id
         // that is a legal package id but not a legal DNS label would otherwise install cleanly and then
-        // fail to resolve the first time a user opens the tab.
-        if (!PluginPanelOrigin.IsValidPluginLabel(pluginId))
+        // fail to resolve the first time a user opens the view.
+        if (!PluginViewOrigin.IsValidPluginLabel(pluginId))
         {
             throw new InvalidDataException(
-                $"Plugin id '{pluginId}' cannot host panels: it must be at most 63 characters and must not start or end with '-'.");
+                $"Plugin id '{pluginId}' cannot host views: it must be at most 63 characters and must not start or end with '-'.");
         }
 
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        var results = new List<PluginPanelContribution>();
-        foreach (var panel in panels)
+        var results = new List<PluginViewContribution>();
+        foreach (var view in views)
         {
-            ValidateId(panel.Id, "Plugin panel id");
-            if (!ids.Add(panel.Id!))
+            ValidateId(view.Id, "Plugin view id");
+            if (!ids.Add(view.Id!))
             {
-                throw new InvalidDataException($"Duplicate Plugin panel id '{panel.Id}'.");
+                // The key is <pluginId>/<viewId>, so a duplicate is a duplicate regardless of slot.
+                throw new InvalidDataException($"Duplicate Plugin view id '{view.Id}'.");
             }
 
-            var title = panel.Title?.Trim();
+            var slot = ResolveSlot(view);
+            RequireSlotPermission(view.Id!, slot, permissions);
+
+            var title = view.Title?.Trim();
             if (string.IsNullOrWhiteSpace(title) ||
-                title.Length > MaximumPanelTitleLength ||
+                title.Length > MaximumViewTitleLength ||
                 title.Any(char.IsControl))
             {
-                throw new InvalidDataException($"Plugin panel '{panel.Id}' title is invalid.");
+                throw new InvalidDataException($"Plugin view '{view.Id}' title is invalid.");
             }
 
-            if (string.IsNullOrWhiteSpace(panel.Entry))
+            if (string.IsNullOrWhiteSpace(view.Entry))
             {
-                throw new InvalidDataException($"Plugin panel '{panel.Id}' must declare an entry.");
+                throw new InvalidDataException($"Plugin view '{view.Id}' must declare an entry.");
             }
 
-            var entryPath = PluginCommandTemplate.ResolvePackagePath(packageRoot, panel.Entry, "Panel entry");
+            var entryPath = PluginCommandTemplate.ResolvePackagePath(packageRoot, view.Entry, "View entry");
             if (!File.Exists(entryPath))
             {
-                throw new InvalidDataException($"Plugin panel '{panel.Id}' entry file does not exist.");
+                throw new InvalidDataException($"Plugin view '{view.Id}' entry file does not exist.");
             }
 
             if (!Path.GetExtension(entryPath).Equals(".html", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidDataException($"Plugin panel '{panel.Id}' entry must be an .html file.");
+                throw new InvalidDataException($"Plugin view '{view.Id}' entry must be an .html file.");
             }
 
-            var width = panel.DefaultWidth ?? FallbackPanelWidth;
-            if (width is < MinimumPanelWidth or > MaximumPanelWidth)
-            {
-                throw new InvalidDataException(
-                    $"Plugin panel '{panel.Id}' defaultWidth must be between {MinimumPanelWidth} and {MaximumPanelWidth}.");
-            }
-
-            results.Add(new PluginPanelContribution(
-                panel.Id!,
+            results.Add(new PluginViewContribution(
+                view.Id!,
                 title,
-                PluginPanelIcons.Resolve(panel.Icon),
+                PluginViewIcons.Resolve(view.Icon),
+                slot,
                 NormalizeRelativePath(packageRoot, entryPath),
-                width));
+                ResolveWidth(view, slot)));
         }
 
         return results;
     }
+
+    private static PluginViewSlot ResolveSlot(RawPluginViewContribution view)
+    {
+        var slot = view.Slot?.Trim().ToLowerInvariant();
+        return slot switch
+        {
+            "right" => PluginViewSlot.Right,
+            "floating" => PluginViewSlot.Floating,
+            null or "" => throw new InvalidDataException(
+                $"Plugin view '{view.Id}' must declare a slot of '{RightSlot}' or '{FloatingSlot}'."),
+            _ => throw new InvalidDataException(
+                $"Plugin view '{view.Id}' slot '{view.Slot}' is not supported; use '{RightSlot}' or '{FloatingSlot}'.")
+        };
+    }
+
+    // Each slot is a separately disclosed capability: a floating view can cover the whole window and
+    // intercept clicks over it, so it must never ride on the docked panel's acknowledgement.
+    private static void RequireSlotPermission(
+        string viewId,
+        PluginViewSlot slot,
+        IReadOnlyList<string> permissions)
+    {
+        var permission = slot == PluginViewSlot.Floating ? PluginPermissions.Floating : PluginPermissions.Panel;
+        if (!PluginPermissions.Grants(permissions, permission))
+        {
+            throw new InvalidDataException(
+                $"Plugin view '{viewId}' uses slot '{SlotName(slot)}', so the Plugin must also declare the '{permission}' permission.");
+        }
+    }
+
+    // defaultWidth is a docked-column layout input. Accepting it on another slot would put a setting in
+    // the manifest that nothing ever reads.
+    private static int? ResolveWidth(RawPluginViewContribution view, PluginViewSlot slot)
+    {
+        if (slot != PluginViewSlot.Right)
+        {
+            if (view.DefaultWidth is not null)
+            {
+                throw new InvalidDataException(
+                    $"Plugin view '{view.Id}' is not docked, so it must not declare defaultWidth.");
+            }
+
+            return null;
+        }
+
+        var width = view.DefaultWidth ?? FallbackViewWidth;
+        if (width is < MinimumDockWidth or > MaximumDockWidth)
+        {
+            throw new InvalidDataException(
+                $"Plugin view '{view.Id}' defaultWidth must be between {MinimumDockWidth} and {MaximumDockWidth}.");
+        }
+
+        return width;
+    }
+
+    private static string SlotName(PluginViewSlot slot)
+        => slot == PluginViewSlot.Floating ? FloatingSlot : RightSlot;
 
     private static IReadOnlyList<PluginSkillContribution> ValidateSkills(
         string packageRoot,

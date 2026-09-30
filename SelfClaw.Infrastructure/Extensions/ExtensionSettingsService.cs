@@ -1,4 +1,4 @@
-using SelfClaw.Core.Runtime;
+﻿using SelfClaw.Core.Runtime;
 using System.Net;
 using System.Text.Json;
 using SelfClaw.Core.Interfaces;
@@ -22,7 +22,7 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
     private readonly PluginContributionService _pluginContributionService;
     private readonly IExtensionStateChangeNotifier _stateChangeNotifier;
     private readonly IPluginVersionLeaseManager? _pluginVersionLeaseManager;
-    private readonly IPluginPanelSessionRegistry? _pluginPanelSessionRegistry;
+    private readonly IPluginViewSessionRegistry? _pluginViewSessionRegistry;
     private readonly AsyncHookExecutor? _asyncHookExecutor;
 
     public ExtensionSettingsService(
@@ -36,7 +36,7 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         PluginContributionService pluginContributionService,
         IExtensionStateChangeNotifier stateChangeNotifier,
         IPluginVersionLeaseManager? pluginVersionLeaseManager = null,
-        IPluginPanelSessionRegistry? pluginPanelSessionRegistry = null,
+        IPluginViewSessionRegistry? pluginViewSessionRegistry = null,
         AsyncHookExecutor? asyncHookExecutor = null)
     {
         _packageRepository = packageRepository;
@@ -49,7 +49,7 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         _pluginContributionService = pluginContributionService;
         _stateChangeNotifier = stateChangeNotifier;
         _pluginVersionLeaseManager = pluginVersionLeaseManager;
-        _pluginPanelSessionRegistry = pluginPanelSessionRegistry;
+        _pluginViewSessionRegistry = pluginViewSessionRegistry;
         _asyncHookExecutor = asyncHookExecutor;
     }
 
@@ -58,8 +58,8 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         var pluginsTask = _catalog.ListPackageViewsAsync(ExtensionKind.Plugin, cancellationToken);
         var skillsTask = _catalog.ListPackageViewsAsync(ExtensionKind.Skill, cancellationToken);
         var mcpServersTask = _catalog.ListMcpServerViewsAsync(cancellationToken);
-        var panelsTask = _catalog.ListPluginPanelViewsAsync(cancellationToken);
-        await Task.WhenAll(pluginsTask, skillsTask, mcpServersTask, panelsTask).ConfigureAwait(false);
+        var viewsTask = _catalog.ListPluginViewsAsync(cancellationToken);
+        await Task.WhenAll(pluginsTask, skillsTask, mcpServersTask, viewsTask).ConfigureAwait(false);
         return new ExtensionSettingsState(
             _stateChangeNotifier.CurrentRevision,
             null,
@@ -67,7 +67,7 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
             await pluginsTask.ConfigureAwait(false),
             await skillsTask.ConfigureAwait(false),
             await mcpServersTask.ConfigureAwait(false),
-            await panelsTask.ConfigureAwait(false));
+            await viewsTask.ConfigureAwait(false));
     }
 
     public async Task<ExtensionPackageView> ImportPackageAsync(
@@ -164,7 +164,7 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
                     .ConfigureAwait(false);
                 if (!enabled)
                 {
-                    await ClosePluginPanelsAsync(key.Id, cancellationToken).ConfigureAwait(false);
+                    await ClosePluginViewsAsync(key.Id, cancellationToken).ConfigureAwait(false);
                     await EvictAsyncHookWorkAsync(key.Id, cancellationToken).ConfigureAwait(false);
                 }
 
@@ -236,9 +236,9 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
                 await _packageRepository.SetPackageEnabledAsync(key.Kind, key.Id, false, cancellationToken)
                     .ConfigureAwait(false);
                 await _pluginContributionService.DeleteMcpServersAsync(key.Id, cancellationToken).ConfigureAwait(false);
-                // Open panels hold a version lease, so they have to be closed before the drain rather
+                // Open views hold a version lease, so they have to be closed before the drain rather
                 // than after it — otherwise the drain waits on a lease only the UI can release.
-                await ClosePluginPanelsAsync(key.Id, cancellationToken).ConfigureAwait(false);
+                await ClosePluginViewsAsync(key.Id, cancellationToken).ConfigureAwait(false);
                 // Eviction terminates in-flight hook processes; the drain below then only waits for
                 // the turn's own leases instead of a whole async queue.
                 await EvictAsyncHookWorkAsync(key.Id, cancellationToken).ConfigureAwait(false);
@@ -470,8 +470,8 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         }
     }
 
-    private Task ClosePluginPanelsAsync(string pluginId, CancellationToken cancellationToken)
-        => _pluginPanelSessionRegistry?.CloseAsync(pluginId, cancellationToken) ?? Task.CompletedTask;
+    private Task ClosePluginViewsAsync(string pluginId, CancellationToken cancellationToken)
+        => _pluginViewSessionRegistry?.CloseAsync(pluginId, cancellationToken) ?? Task.CompletedTask;
 
     private Task EvictAsyncHookWorkAsync(string pluginId, CancellationToken cancellationToken)
         => _asyncHookExecutor?.EvictPluginAsync(pluginId, cancellationToken) ?? Task.CompletedTask;

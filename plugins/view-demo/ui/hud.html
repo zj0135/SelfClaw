@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh" data-theme="light">
+<head>
+	<meta charset="utf-8" />
+	<title>View Demo — 悬浮 HUD</title>
+	<style>
+		/* 悬浮视图是一层覆盖主对话列（转录 + 输入区 + 终端）的透明 iframe：它不会盖住侧栏与右栏。
+		   根背景由宿主默认设为透明，未标 data-selfclaw-interactive 的像素对宿主完全透明
+		   （点击、悬停、滚轮都不受影响）。 */
+		:root, html[data-theme='light'] { --ink: #171a1f; --muted: #6b7280; --line: #d8dde5; --card: rgba(255,255,255,.96); --accent: #3b5bfd; }
+		html[data-theme='dark'] { --ink: #e8eaf0; --muted: #8b93a3; --line: #333a48; --card: rgba(23,26,32,.94); --accent: #7f97ff; }
+		html, body { margin: 0; height: 100%; background: transparent; }
+		body {
+			color: var(--ink);
+			font: calc(12px * var(--host-ui-scale, 1))/1.55 var(--host-font-ui, 'Segoe UI'), system-ui, sans-serif;
+			pointer-events: none; /* 视图内部也不要吃掉空白处的指针（宿主那条规则在这里不生效，靠这里兜底） */
+		}
+
+		.hud {
+			position: fixed;
+			right: 16px;
+			bottom: 16px;
+			width: 244px;
+			padding: 11px 12px;
+			border: 1px solid var(--line);
+			border-radius: 12px;
+			background: var(--card);
+			box-shadow: 0 16px 44px rgba(15, 23, 42, .18);
+			backdrop-filter: blur(8px);
+			pointer-events: auto; /* 这一块要接收指针 */
+			transition: border-color .15s, box-shadow .15s, transform .15s;
+		}
+
+		/* 悬停态既走 CSS，也走 JS：JS 那份靠 hit-released 事件复位，指针被宿主收回时不会卡住。 */
+		.hud.hovering { border-color: var(--accent); box-shadow: 0 16px 44px rgba(59, 91, 253, .28); transform: translateY(-1px); }
+
+		h1 { display: flex; align-items: center; gap: 7px; margin: 0 0 8px; font-size: calc(12px * var(--host-ui-scale, 1)); }
+		.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+		dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 0 0 9px; font: calc(10.5px * var(--host-ui-scale, 1))/1.5 'Cascadia Code', ui-monospace, monospace; }
+		dt { color: var(--muted); }
+		dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.row { display: flex; gap: 6px; }
+		button { flex: 1 1 auto; height: 27px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+		button:hover { border-color: var(--accent); color: var(--accent); }
+		.swap { margin-top: 7px; color: var(--muted); font-size: calc(10.5px * var(--host-ui-scale, 1)); }
+	</style>
+</head>
+<body>
+	<div class="hud" id="hud" data-selfclaw-interactive>
+		<h1><span class="dot"></span>悬浮 HUD<span id="hits" style="margin-left:auto;color:var(--muted);font-weight:400"></span></h1>
+		<dl>
+			<dt>view</dt><dd id="key">…</dd>
+			<dt>composer</dt><dd id="composer">—</dd>
+			<dt>dock</dt><dd id="dock">—</dd>
+			<dt>指针</dt><dd id="pointer">在卡片外</dd>
+		</dl>
+		<div class="row">
+			<button id="prompt">插入提示词</button>
+			<button id="close">关闭</button>
+		</div>
+		<p class="swap">点击卡片以外的地方属于宿主 —— 卡片外的像素对应用完全透明。</p>
+	</div>
+
+	<script>
+		const hud = document.getElementById('hud');
+		const show = (id, value) => { document.getElementById(id).textContent = value; };
+		let clicks = 0;
+
+		show('key', selfclaw.viewKey);
+		selfclaw.on('handshake', () => {
+			show('key', `${selfclaw.viewKey} · ${selfclaw.slot}`);
+			applyAppearance(selfclaw.appearance || {});
+			place();
+		});
+
+		function applyAppearance(a) {
+			document.documentElement.dataset.theme = a.theme === 'dark' ? 'dark' : 'light';
+			const s = document.documentElement.style;
+			s.setProperty('--host-font-ui', a.uiFontFamily || '');
+			s.setProperty('--host-ui-scale', String(a.uiFontScale ?? 1));
+		}
+		selfclaw.on('appearance-changed', applyAppearance);
+
+		// 坐标就是本视图的视口（= 主对话列）；anchors 已换算到这个坐标系，用它贴住输入区。
+		// 每个地标都可能为 null（切到设置页时输入区不存在）。
+		function place() {
+			const { composer, dock } = selfclaw.layout.anchors;
+			hud.style.bottom = composer ? `${window.innerHeight - composer.y + 12}px` : '16px';
+			show('composer', composer ? `${composer.x},${composer.y} ${composer.width}×${composer.height}` : 'null');
+			show('dock', dock ? `${dock.width}×${dock.height}` : 'null（面板未打开）');
+		}
+
+		place();
+		selfclaw.on('anchors-changed', place);
+
+		// JS 自己维护的 hover 态：宿主解除武装时会发 hit-released，指针被收回后不会卡在悬停里。
+		hud.addEventListener('pointerenter', () => { hud.classList.add('hovering'); show('pointer', '在卡片上'); });
+		hud.addEventListener('pointerleave', () => { hud.classList.remove('hovering'); show('pointer', '在卡片外'); });
+		selfclaw.on('hit-released', () => { hud.classList.remove('hovering'); show('pointer', '在卡片外（宿主已收回指针）'); });
+
+		document.getElementById('prompt').addEventListener('click', () => {
+			show('hits', `点击 ${++clicks}`);
+			selfclaw.insertPrompt('来自 view-demo 悬浮 HUD 的一句话。').catch((e) => show('pointer', '失败：' + e.message));
+		});
+
+		document.getElementById('close').addEventListener('click', () => selfclaw.close());
+
+		selfclaw.ready();
+	</script>
+</body>
+</html>

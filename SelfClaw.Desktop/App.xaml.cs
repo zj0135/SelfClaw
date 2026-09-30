@@ -153,7 +153,7 @@ public sealed partial class App : System.Windows.Application
             await services.GetRequiredService<ConversationTurnEngine>().StopAdmissionsAsync(cancellationToken);
             services.GetRequiredService<DesktopToolApprovalHandler>().RejectAll();
             await Task.WhenAll(routing, _host.StopAsync(cancellationToken),
-                services.GetRequiredService<PluginPanelHostController>().StopAsync(cancellationToken),
+                services.GetRequiredService<PluginViewHostController>().StopAsync(cancellationToken),
                 services.GetRequiredService<TerminalHostController>().DisposeAsync().AsTask(),
                 services.GetRequiredService<ConversationSessionCoordinator>().StopAsync(cancellationToken),
                 services.GetRequiredService<PetHost>().StopAsync(cancellationToken));

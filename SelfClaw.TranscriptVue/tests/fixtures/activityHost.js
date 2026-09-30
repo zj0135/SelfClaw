@@ -24,7 +24,8 @@ export function installActivityHost() {
 		modelDisplayName: 'Fixture model',
 	});
 	const tasks = ids.map(task);
-	const plugin = { key: 'fixture:panel', pluginId: 'fixture', title: 'Fixture', origin: 'https://fixture.plugin.selfclaw.local', permissions: [] };
+	const plugin = { key: 'fixture/panel', pluginId: 'fixture', viewId: 'panel', title: 'Fixture', icon: 'puzzle', slot: 'right', origin: 'https://fixture.plugin.selfclaw.local', url: 'https://fixture.plugin.selfclaw.local/index.html', defaultWidth: 380, enabled: true, status: 'ready', permissions: [], networkOrigins: [] };
+	const hud = { key: 'fixture/hud', pluginId: 'fixture', viewId: 'hud', title: 'Fixture HUD', icon: 'layers', slot: 'floating', origin: 'https://fixture.plugin.selfclaw.local', url: 'https://fixture.plugin.selfclaw.local/hud.html', defaultWidth: null, enabled: true, status: 'ready', permissions: [], networkOrigins: [] };
 	const taskSegments = (id) => [
 		{ kind: 'thinking', markdown: `Reasoning for ${id}`, segmentId: `${id}:thinking:0`, segmentOrdinal: 0, isPending: false },
 		{ kind: 'content', markdown: 'Partial **answer**', segmentId: `${id}:text:1`, segmentOrdinal: 1, isPending: false },
@@ -65,9 +66,16 @@ export function installActivityHost() {
 				else if (type === 'activity-panel/unsubscribe') { if (request.subscriptionId === subscription) subscription = null; }
 				else if (type === 'activity-panel/cancel-task') { const target = tasks.find((item) => item.taskId === request.taskId); target.status = 'cancelled'; target.phase = 'cancelled'; target.canCancel = false; send({ type, requestId, accepted: true }); push(); }
 				else if (type === 'activity-panel/read-content') send({ type: 'activity-panel/content', requestId, subscriptionId: subscription, detailSelectionId: selection, taskId: selectedTask, contentVersion: String(contentRevisions[ids.indexOf(selectedTask)]), contentId: request.contentId, text: '{}', offset: 0, totalCharacters: 2 });
-				else if (type === 'plugin-host/get-panels' && localStorage.getItem('activity:plugin') === '1') send({ type, requestId, panels: [plugin], tabs: [plugin.key] });
-				else if (type === 'plugin-host/open') send({ type, requestId, panel: plugin, url: `${plugin.origin}/index.html` });
-				else if (requestId) send({ type, requestId, sections: [], models: [], agents: [], tabs: [], panels: [], roots: [], commonFolders: [], current: null });
+				else if (type === 'plugin-host/get-views') {
+					const views = [];
+					const openViews = [];
+					if (localStorage.getItem('activity:plugin') === '1') { views.push(plugin); openViews.push(plugin.key); }
+					if (localStorage.getItem('activity:hud') === '1') { views.push(hud); openViews.push(hud.key); }
+					if (views.length) send({ type, requestId, views, openViews });
+					else if (requestId) send({ type, requestId, views: [], openViews: [] });
+				}
+				else if (type === 'plugin-host/open') { const view = request.viewKey === hud.key ? hud : plugin; send({ type, requestId, view, url: view.url }); }
+				else if (requestId) send({ type, requestId, sections: [], models: [], agents: [], views: [], openViews: [], roots: [], commonFolders: [], current: null });
 			});
 		},
 	} };

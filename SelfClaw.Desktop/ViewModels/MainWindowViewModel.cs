@@ -20,7 +20,7 @@ using SelfClaw.Desktop.Services.Workspace.Abstractions;
 
 namespace SelfClaw.Desktop.ViewModels;
 
-public sealed partial class MainWindowViewModel : ObservableObject, IDisposable, IWorkspaceSelectionController, IPluginPanelContextSource,
+public sealed partial class MainWindowViewModel : ObservableObject, IDisposable, IWorkspaceSelectionController, IPluginViewContextSource,
     SelfClaw.Desktop.Services.Activities.IActivityPanelScopeSource
 {
     #region 字段与构造函数 —— 依赖注入字段、运行时集合状态、流式发布定时器初始化
@@ -660,10 +660,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     /// shell is showing, and the workspace root it reports is the one workspace tool calls resolve
     /// against. Anything added here becomes visible to every panel holding <c>host.context.read</c>.
     /// </summary>
-    PluginPanelContext IPluginPanelContextSource.CaptureContext()
+    PluginViewContext IPluginViewContextSource.CaptureContext()
     {
         var selectedAgent = ResolveSelectedAgent();
-        return new PluginPanelContext(
+        return new PluginViewContext(
             SelectedConversation?.Id.ToString("D"),
             selectedAgent.Id,
             selectedAgent.Name,

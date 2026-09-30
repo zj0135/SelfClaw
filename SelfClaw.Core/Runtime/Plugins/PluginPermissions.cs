@@ -9,6 +9,7 @@ namespace SelfClaw.Core.Runtime;
 public static class PluginPermissions
 {
     public const string Panel = "ui.panel";
+    public const string Floating = "ui.floating";
     public const string ContextRead = "host.context.read";
     public const string TranscriptRead = "host.transcript.read";
     public const string ComposerWrite = "host.composer.write";

@@ -113,24 +113,24 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<WebViewHostChannel>(),
             dispatcher, services.GetRequiredService<ILogger<TerminalHostController>>()));
         services.AddSingleton<IWorkspaceFolderPicker, WpfWorkspaceFolderPicker>();
-        services.AddSingleton<PluginPanelResourceReader>();
-        services.AddSingleton(services => new PluginPanelHostController(
-            services.GetRequiredService<IPluginPanelCatalog>(),
+        services.AddSingleton<PluginViewResourceReader>();
+        services.AddSingleton(services => new PluginViewHostController(
+            services.GetRequiredService<IPluginViewCatalog>(),
             services.GetRequiredService<IExtensionPackageRepository>(),
             services.GetRequiredService<IPluginVersionLeaseManager>(),
             services.GetRequiredService<DesktopSettingsJsonStore>(),
             services.GetRequiredService<WebViewHostChannel>(),
             dispatcher,
-            services.GetRequiredService<PluginPanelResourceReader>(),
-            services.GetRequiredService<ILogger<PluginPanelHostController>>()));
-        services.AddSingleton<IPluginPanelSessionRegistry>(services =>
-            services.GetRequiredService<PluginPanelHostController>());
-        services.AddSingleton(services => new PluginPanelContextPublisher(
-            services.GetRequiredService<IPluginPanelContextSource>(),
+            services.GetRequiredService<PluginViewResourceReader>(),
+            services.GetRequiredService<ILogger<PluginViewHostController>>()));
+        services.AddSingleton<IPluginViewSessionRegistry>(services =>
+            services.GetRequiredService<PluginViewHostController>());
+        services.AddSingleton(services => new PluginViewContextPublisher(
+            services.GetRequiredService<IPluginViewContextSource>(),
             services.GetRequiredService<WebViewHostChannel>(),
-            services.GetRequiredService<PluginPanelHostController>(),
+            services.GetRequiredService<PluginViewHostController>(),
             dispatcher));
-        services.AddSingleton<PluginPanelBridge>();
+        services.AddSingleton<PluginViewBridge>();
         services.AddSingleton<CliProbeProcess>();
         services.AddSingleton<SelfClaw.Desktop.Services.ProgrammingAssistant.Abstractions.IProgrammingCliDiscovery, ProgrammingCliDiscovery>();
         services.AddSingleton<ProgrammingAssistantSettingsService>();
@@ -169,7 +169,7 @@ internal static class DesktopServiceRegistration
             dispatcher));
         services.AddSingleton<IWorkspaceSelectionController>(services =>
             services.GetRequiredService<MainWindowViewModel>());
-        services.AddSingleton<IPluginPanelContextSource>(services =>
+        services.AddSingleton<IPluginViewContextSource>(services =>
             services.GetRequiredService<MainWindowViewModel>());
         services.AddSingleton<WorkspaceSelectionBridge>();
         services.AddSingleton<GitWorkspaceBridge>();
@@ -188,8 +188,8 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<PetSettingsBridge>(),
             services.GetRequiredService<WorkspaceSelectionBridge>(),
             services.GetRequiredService<TerminalHostController>(),
-            services.GetRequiredService<PluginPanelHostController>(),
-            services.GetRequiredService<PluginPanelBridge>(),
+            services.GetRequiredService<PluginViewHostController>(),
+            services.GetRequiredService<PluginViewBridge>(),
             services.GetRequiredService<MainWindowViewModel>(),
             services.GetRequiredService<ToolApprovalPresenter>(),
             services.GetRequiredService<WebViewHostChannel>(),
@@ -203,7 +203,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<WebViewHostChannel>(),
             services.GetRequiredService<WebViewMessageRouter>(),
             services.GetRequiredService<TerminalHostController>(),
-            services.GetRequiredService<PluginPanelHostController>(),
+            services.GetRequiredService<PluginViewHostController>(),
             services.GetRequiredService<AppearanceSettingsService>(),
             services.GetRequiredService<StoragePaths>(),
             services.GetRequiredService<DesktopConversationActivationService>(),

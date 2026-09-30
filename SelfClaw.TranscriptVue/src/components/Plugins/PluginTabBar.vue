@@ -3,18 +3,18 @@ import { Minus } from 'lucide-vue-next';
 import PluginTab from './PluginTab.vue';
 
 defineProps({
-	tabs: { type: Array, required: true },
+	views: { type: Array, required: true },
 	activeKey: { type: String, default: '' },
 });
 
-// 打开面板统一走左侧导航；这里只留隐藏。隐藏不关闭标签，iframe 继续活着。
+// 打开视图统一走左侧导航；这里只留隐藏。隐藏不关闭标签，iframe 继续活着。
 defineEmits(['activate', 'close', 'hide']);
 </script>
 
 <template>
 	<div class="tab-bar" role="tablist" aria-label="插件面板">
 		<div class="tab-strip">
-			<PluginTab v-for="tab in tabs" :key="tab.key" :tab="tab" :active="tab.key === activeKey"
+			<PluginTab v-for="view in views" :key="view.key" :view="view" :active="view.key === activeKey"
 				@activate="$emit('activate', $event)" @close="$emit('close', $event)" />
 		</div>
 		<button class="tab-hide" type="button" aria-label="隐藏面板" title="隐藏面板" @click="$emit('hide')">

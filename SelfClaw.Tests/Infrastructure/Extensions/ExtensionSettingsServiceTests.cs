@@ -1,4 +1,4 @@
-using SelfClaw.Core.Runtime;
+﻿using SelfClaw.Core.Runtime;
 using System.IO.Compression;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
@@ -211,10 +211,10 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetState_projects_plugin_panels_onto_a_per_plugin_origin()
+    public async Task GetState_projects_plugin_views_onto_a_per_plugin_origin()
     {
         var context = CreateContext();
-        var pluginPath = await CreatePanelPluginAsync("git-inspector");
+        var pluginPath = await CreateViewPluginAsync("git-inspector");
         var now = DateTimeOffset.UtcNow;
         await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
             ExtensionKind.Plugin,
@@ -234,23 +234,24 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
 
         var state = await context.Service.GetStateAsync();
 
-        var panel = state.Panels.Should().ContainSingle().Subject;
-        panel.Key.Should().Be("git-inspector/changes");
-        panel.Origin.Should().Be("https://git-inspector.plugin.selfclaw.local");
-        panel.Url.Should().Be("https://git-inspector.plugin.selfclaw.local/ui/index.html");
-        panel.Title.Should().Be("变更");
-        panel.Enabled.Should().BeTrue();
-        panel.Status.Should().Be(ExtensionStatus.Ready);
-        panel.NetworkOrigins.Should().Equal("https://api.github.com");
+        var view = state.Views.Should().ContainSingle().Subject;
+        view.Key.Should().Be("git-inspector/changes");
+        view.Slot.Should().Be(PluginViewSlot.Right);
+        view.Origin.Should().Be("https://git-inspector.plugin.selfclaw.local");
+        view.Url.Should().Be("https://git-inspector.plugin.selfclaw.local/ui/index.html");
+        view.Title.Should().Be("变更");
+        view.Enabled.Should().BeTrue();
+        view.Status.Should().Be(ExtensionStatus.Ready);
+        view.NetworkOrigins.Should().Equal("https://api.github.com");
     }
 
     // A Plugin whose manifest stopped parsing must not take the whole settings state down with it: the
     // user still needs the page to load in order to see it as broken and remove it.
     [Fact]
-    public async Task GetState_drops_panels_from_a_plugin_whose_manifest_no_longer_reads()
+    public async Task GetState_drops_views_from_a_plugin_whose_manifest_no_longer_reads()
     {
         var context = CreateContext();
-        var pluginPath = await CreatePanelPluginAsync("git-inspector");
+        var pluginPath = await CreateViewPluginAsync("git-inspector");
         var manifest = await File.ReadAllTextAsync(Path.Combine(pluginPath, "plugin.json"));
         var now = DateTimeOffset.UtcNow;
         await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
@@ -272,18 +273,18 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
 
         var state = await context.Service.GetStateAsync();
 
-        state.Panels.Should().BeEmpty();
+        state.Views.Should().BeEmpty();
         state.Plugins.Should().ContainSingle().Which.Status.Should().Be(ExtensionStatus.Broken);
     }
 
-    // Deleting a Plugin drains its version directories, and an open panel holds a lease on one. If the
-    // panels were not closed first the drain would wait on a lease only the UI can release, and the
+    // Deleting a Plugin drains its version directories, and an open view holds a lease on one. If the
+    // views were not closed first the drain would wait on a lease only the UI can release, and the
     // settings mutation would never return.
     [Fact]
-    public async Task Disabling_or_deleting_a_plugin_closes_its_open_panels_before_draining()
+    public async Task Disabling_or_deleting_a_plugin_closes_its_open_views_before_draining()
     {
         var context = CreateContext();
-        var pluginPath = await CreatePanelPluginAsync("git-inspector");
+        var pluginPath = await CreateViewPluginAsync("git-inspector");
         var now = DateTimeOffset.UtcNow;
         await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
             ExtensionKind.Plugin,
@@ -305,7 +306,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         await context.Service.SetEnabledAsync(key, false);
         context.PanelSessions.ClosedPluginIds.Should().Equal("git-inspector");
 
-        // A held lease would block DeleteAsync forever if panels were not evicted first.
+        // A held lease would block DeleteAsync forever if views were not evicted first.
         using var lease = context.PluginVersionLeaseManager.Acquire(pluginPath);
         var release = Task.Run(async () =>
         {
@@ -325,7 +326,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
     public async Task Deleting_a_plugin_evicts_queued_async_hooks_before_draining()
     {
         var context = CreateContext();
-        var pluginPath = await CreatePanelPluginAsync("git-inspector");
+        var pluginPath = await CreateViewPluginAsync("git-inspector");
         var now = DateTimeOffset.UtcNow;
         await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
             ExtensionKind.Plugin,
@@ -826,15 +827,15 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         }
     }
 
-    private async Task<string> CreatePanelPluginAsync(string pluginId)
+    private async Task<string> CreateViewPluginAsync(string pluginId)
     {
         var pluginPath = Path.Combine(_rootPath, "plugins", pluginId, "versions", "v1");
         Directory.CreateDirectory(Path.Combine(pluginPath, "ui"));
         var manifest = $$$"""
             {"schemaVersion":1,"id":"{{{pluginId}}}","name":"Git Inspector","version":"1.0.0",
              "permissions":["ui.panel","network.fetch:https://api.github.com"],
-             "contributes":{"panels":[
-               {"id":"changes","title":"变更","icon":"git-branch","entry":"ui/index.html"}]}}
+             "contributes":{"views":[
+               {"id":"changes","slot":"right","title":"变更","icon":"git-branch","entry":"ui/index.html"}]}}
             """;
         await File.WriteAllTextAsync(Path.Combine(pluginPath, "plugin.json"), manifest);
         await File.WriteAllTextAsync(Path.Combine(pluginPath, "ui", "index.html"), "<!doctype html>");
@@ -867,7 +868,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
             mcpClientManager,
             pluginReader);
         var stateChangeNotifier = new ExtensionStateChangeNotifier();
-        var panelSessions = new RecordingPanelSessionRegistry();
+        var panelSessions = new RecordingViewSessionRegistry();
         var hookLog = new PluginHookExecutionLog();
         var asyncHookExecutor = new AsyncHookExecutor(
             async (_, _, _, cancellationToken) =>
@@ -924,11 +925,11 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         FakeSecretProtector SecretProtector,
         FakeMcpClientManager McpClientManager,
         PluginVersionLeaseManager PluginVersionLeaseManager,
-        RecordingPanelSessionRegistry PanelSessions,
+        RecordingViewSessionRegistry PanelSessions,
         PluginHookExecutionLog HookLog,
         AsyncHookExecutor AsyncHookExecutor);
 
-    private sealed class RecordingPanelSessionRegistry : IPluginPanelSessionRegistry
+    private sealed class RecordingViewSessionRegistry : IPluginViewSessionRegistry
     {
         public List<string> ClosedPluginIds { get; } = [];
 

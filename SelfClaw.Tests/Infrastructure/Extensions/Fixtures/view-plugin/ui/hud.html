@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh">
+<head>
+	<meta charset="utf-8" />
+	<title>View Demo — 悬浮层</title>
+	<style>
+		html, body { margin: 0; height: 100%; background: transparent; }
+		body { font: 12px/1.5 'Segoe UI', sans-serif; color: #171a1f; }
+		/* 悬浮视图是一层覆盖整个窗口的透明 iframe：未标 data-selfclaw-interactive 的像素
+		   对宿主完全透明（点击、悬停、滚轮都不受影响）。 */
+		.hud {
+			position: fixed; right: 14px; bottom: 14px; width: 232px;
+			padding: 10px 12px; border: 1px solid #d8dde5; border-radius: 12px;
+			background: rgba(255, 255, 255, .96); box-shadow: 0 14px 40px rgba(15, 23, 42, .18);
+		}
+		h1 { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+		dl { margin: 0 0 8px; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; font: 11px/1.5 'Cascadia Code', monospace; }
+		dt { color: #6b7280; }
+		.row { display: flex; gap: 6px; }
+		button { flex: 1 1 auto; height: 26px; border: 1px solid #d8dde5; border-radius: 7px; background: #fff; font: inherit; cursor: pointer; }
+		button:hover { border-color: #3b5bfd; color: #3b5bfd; }
+	</style>
+</head>
+<body>
+	<div class="hud" data-selfclaw-interactive>
+		<h1>悬浮演示</h1>
+		<dl>
+			<dt>view</dt><dd id="key"></dd>
+			<dt>composer</dt><dd id="anchor">—</dd>
+		</dl>
+		<div class="row">
+			<button id="insert">插入一句</button>
+			<button id="close">关闭</button>
+		</div>
+	</div>
+
+	<script>
+		const show = (id, value) => { document.getElementById(id).textContent = value; };
+		show('key', selfclaw.viewKey || '(未知)');
+
+		// 悬浮视图的坐标就是窗口坐标，anchors 给出宿主地标矩形，据此贴住输入区。
+		const place = () => {
+			const composer = selfclaw.layout.anchors && selfclaw.layout.anchors.composer;
+			const hud = document.querySelector('.hud');
+			hud.style.bottom = composer ? (window.innerHeight - composer.y + 12) + 'px' : '14px';
+			show('anchor', composer ? `y=${composer.y} h=${composer.height}` : '(当前视图无输入区)');
+		};
+
+		place();
+		selfclaw.on('anchors-changed', place);
+		selfclaw.on('handshake', place);
+
+		document.getElementById('insert').addEventListener('click', () => {
+			selfclaw.insertPrompt('来自悬浮视图的一段文字。').catch((error) => console.error(error));
+		});
+		document.getElementById('close').addEventListener('click', () => selfclaw.close());
+
+		selfclaw.ready();
+	</script>
+</body>
+</html>

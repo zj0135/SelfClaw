@@ -192,7 +192,7 @@ defineExpose({
 </script>
 
 <template>
-	<div ref="shellRef" class="composer-stack">
+	<div ref="shellRef" class="composer-stack" data-anchor="composer">
 		<transition name="approval-bar">
 			<div v-if="props.pendingApproval" class="tool-approval-bar" role="alertdialog" aria-label="工具调用确认">
 				<span class="tool-approval-icon" aria-hidden="true">

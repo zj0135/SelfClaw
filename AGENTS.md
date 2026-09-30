@@ -12,7 +12,7 @@ Issues and specs live as markdown files under `.scratch/<feature-slug>/`. This d
 
 ### Domain docs
 
-Domain language lives in root `CONTEXT.md`. Current execution architecture is documented in `docs/runtime-execution-flow.md`; Direct verification is recorded in `docs/direct-agent-architecture-review.md`, and the 2026-09-14 Desktop R01–R15 implementation and limits in `docs/desktop-architecture-review.md`.
+Domain language lives in root `CONTEXT.md`. Current execution architecture is documented in `docs/runtime-execution-flow.md`; Direct verification is recorded in `docs/direct-agent-architecture-review.md`, the 2026-09-14 Desktop R01–R15 implementation and limits in `docs/desktop-architecture-review.md`, and the plugin view system (docked panels + floating layer, trust boundary, geometry and pointer model) in `docs/plugin-view-system-design.md`.
 
 ## Projects
 
@@ -114,44 +114,73 @@ Agent markdown supports front matter: name, description, mode, tools, plugins, s
 Subagent definitions live in `{AppData}\subagents\` via `SubagentDefinitionCatalog` (name, description, modelProfileId, tools, plugins, skills, mcpServers, maxRunSeconds); `Save()` writes them atomically with the same strict validation as load. It implements `ISubagentDefinitionCatalog`, the Core read contract a Direct turn uses to advertise the allowlisted ids.
 The 代理助手 settings page talks to `AgentSettingsBridge` (prefix `agents/`). `AgentSettingsService` owns CRUD, binding rules, atomic read/modify/write and committed change signals; the VM subscribes directly and preserves its valid selection. A missing conversation-bound definition stays visibly unavailable and rejects execution. Definitions/parsers live in `Services/Agents/Definitions`, edits in `Models`, and UI projections in `Views`.
 
-### 插件面板 (Plugin panels)
+### 插件视图 (Plugin views)
 
-A Plugin package may contribute right-hand UI panels through `contributes.panels` in `plugin.json`
-(alongside `directInstructions` / `skills` / `mcpServers`). Panels render as browser-style tabs in a Vue
-column, not in WPF.
+A Plugin package may contribute UI through `contributes.views` in `plugin.json` (alongside
+`directInstructions` / `skills` / `mcpServers`). Each view declares a `slot`: `right` renders as a tab in
+the Vue dock column, `floating` renders in a transparent layer that covers the conversation column. Both
+are cross-origin iframes in one WebView2; the host and the frame transport do not branch on the slot.
+Design and invariants: `docs/plugin-view-system-design.md`.
 
-Each panel is served from its own origin, `https://<plugin-id>.plugin.selfclaw.local`. That is load
+Each view is served from its own origin, `https://<plugin-id>.plugin.selfclaw.local`. That is load
 bearing for frame identity and origin-scoped storage such as localStorage/IndexedDB. Renderer process
 allocation is owned by WebView2; security does not rely on a guaranteed process per origin. A Plugin whose id is not a legal DNS label is
-rejected at install time rather than failing when a user first opens the tab.
+rejected at install time rather than failing when a user first opens the view.
 
 Three layers, outermost first:
 - `WebViewMessageRouter.RouteAsync` drops any message whose `CoreWebView2WebMessageReceivedEventArgs.Source`
   is not the application origin, before `type` is read. This is the load-bearing check, and it holds
   whether or not WebView2 exposes `chrome.webview` inside iframes.
-- `PluginPanelHost.vue` / `usePluginPanels.js` own the iframes and derive panel identity from
-  `event.origin` plus an `event.source === iframe.contentWindow` match. A `pluginId` in a payload is never
-  trusted.
-- The panel runs sandboxed under a host-issued CSP. `allow-same-origin` is required (without it the origin
+- `PluginDockHost.vue` / `PluginFloatingLayer.vue` own the iframes through the shared
+  `usePluginViews.js` facade (`usePluginViewHost` / `usePluginFrames` / `useFloatingPointer` /
+  `useLayoutAnchors`). Frame identity comes from `event.origin` plus an
+  `event.source === iframe.contentWindow` match. A `pluginId` in a payload is never trusted.
+- The view runs sandboxed under a host-issued CSP. `allow-same-origin` is required (without it the origin
   is opaque and both identity and storage are lost); it is safe here only because the plugin host differs
   from the app host.
 
 Host-side pieces:
-- `Services/Plugins/PluginPanelHostController.cs` — virtual host mappings, `WebResourceRequested` serving
-  with CSP/nosniff headers, version leases, `plugin-host/*` messages, tab persistence; implements
-  `IPluginPanelSessionRegistry` so disable/delete evicts panels before draining a version directory
-- `Services/Plugins/PluginPanelBridge.cs` — `plugin-host/api` ops; resolves permissions from host state
+- `Services/Plugins/PluginViewHostController.cs` — virtual host mappings, `WebResourceRequested` serving
+  with CSP/nosniff headers, version leases, `plugin-host/*` messages, view persistence, and the per-slot
+  open caps (8 docked, 4 floating); implements `IPluginViewSessionRegistry` so disable/delete evicts views
+  before draining a version directory
+- `Services/Plugins/PluginViewBridge.cs` — `plugin-host/api` ops; resolves permissions from host state
   (never from the payload) and pins the workspace root to the current selection
-- `Services/Plugins/PluginPanelContextPublisher.cs` — the only producer of `PluginPanelContext`. It both
+- `Services/Plugins/PluginViewContextPublisher.cs` — the only producer of `PluginViewContext`. It both
   answers `getContext()` and pushes `plugin-host/context`, so the pulled and pushed shapes cannot drift.
-  Captured by `MainWindowViewModel.CaptureContext()`; deduplicated by record value, except on panel open
-- `Assets/plugin-sdk.js` — injected into every document via `AddScriptToExecuteOnDocumentCreatedAsync`
+  Captured by `MainWindowViewModel.CaptureContext()`; deduplicated by record value, except on view open
+- `Assets/plugin-sdk.js` — injected into every document via `AddScriptToExecuteOnDocumentCreatedAsync`.
+  Floating views additionally get anchors (`layout.anchors`), an explicit interactive-rect contract
+  (`data-selfclaw-interactive` / `layout.setInteractive`), and `selfclaw.close()`
 
-Plugin opens pass one bounded mutation gate (at most 8 panels); close/navigation/disable invalidates pending opens. `PluginPanelResourceReader` prepares responses off the UI thread, with WebView deferrals, at most four reads and 8 MiB per resource. A read holds its own version lease until bytes are materialized. Frontend transcript broadcasts are coalesced every 500 ms into a recoverable window capped at 256 KiB UTF-8, with `totalItems` and `truncated`; they do not always contain all history. Saved active tabs are restored.
+View opens pass one bounded mutation gate; close/navigation/disable invalidates pending opens.
+`PluginViewResourceReader` prepares responses off the UI thread, with WebView deferrals, at most four reads
+and 8 MiB per resource. A read holds its own version lease until bytes are materialized. Frontend
+transcript broadcasts are coalesced every 500 ms into a recoverable window capped at 256 KiB UTF-8, with
+`totalItems` and `truncated`; they do not always contain all history. Saved open views and the docked
+active view are restored.
+
+The floating layer is `position: absolute; inset: 0` inside `.main-content` (the conversation column:
+transcript + composer + terminal) at `z-index: 450`, and — apart from the one frame whose geometry the
+shell is currently arming — pointer-transparent: a floating view can only intercept input where it
+declares an interactive rect. Confining it to that column is load bearing, not cosmetic: measured on
+Chromium, the parent document receives no `pointermove` at all while the pointer is over a child iframe,
+so a floating view overlapping the dock column could never be armed (clicks would fall through to the
+panel). The sidebar, the 46px titlebar and the dock column are outside `.main-content`, so the window
+controls, the launcher, dialogs and the resize edges can never be covered. Entry points are split by
+responsibility: opening and closing a view happens only in the launcher behind the sidebar's 插件 entry,
+while the two titlebar buttons are pure show/hide switches for the dock column and the floating layer —
+when that slot has no open view they render disabled rather than falling back to the launcher. Concealing
+that layer uses `visibility: hidden`, never `display: none`: a concealed floating frame must keep a valid
+viewport size and origin, otherwise the geometry it measured and the anchors localized for it are both
+garbage and showing the layer again looks like nothing happened. Widgets place themselves with
+the five host landmarks (`titlebar` / `sidebar` / `stage` / `composer` / `dock`), pushed as geometry facts
+localized into each frame's own viewport and possibly `null`.
 
 Permissions are a disclosure list, so unknown bare tokens stay legal. `network.fetch:<origin>` is parsed
-strictly and widens only that panel's `connect-src`; a Plugin declaring none is fully offline. Panel
-definitions live in the existing `extension_packages.manifest_json` and open tabs in
+strictly and widens only that view's `connect-src`; a Plugin declaring none is fully offline. `right`
+requires `ui.panel`, `floating` requires `ui.floating` (an overlay that can intercept clicks inside the conversation column is disclosed separately from
+a docked panel). View definitions live in the existing `extension_packages.manifest_json` and open views in
 `desktop-settings.json`, so this added no schema version.
 
 ### Subagent activity panel
@@ -173,10 +202,10 @@ Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandle
 
 ### WPF shell
 
-- `MainWindow.xaml` — custom chrome, title bar buttons, single WebView2 host. `WindowStyle` must stay `SingleBorderWindow`: `WindowChrome` (`CaptionHeight=0`, `GlassFrameThickness=0`) already makes the client area cover the whole window, while `WindowStyle=None` strips `WS_CAPTION` and Windows then skips the minimize/maximize/restore animations (see §6 of `docs/desktop-architecture-review.md`)
+- `MainWindow.xaml` — custom chrome, title bar buttons, single WebView2 host. `WindowStyle` must stay `SingleBorderWindow`: `WindowChrome` (`CaptionHeight=0`, `GlassFrameThickness=0`) already makes the client area cover the whole window, while `WindowStyle=None` strips `WS_CAPTION` and Windows then skips the minimize/maximize/restore animations (see §7 of `docs/desktop-architecture-review.md`)
 - Vue `AppSidebar.vue` and `useConversationNavigation` — sidebar/navigation and correlated operation feedback
 - Settings view: AI 提供商, 模型管理, 编程助手, 代理助手, 插件, and 宠物 are connected to the desktop host; remaining pages are frontend placeholders/mock
-- The right-hand plugin panel column lives in the Vue app, not in WPF (see 插件面板)
+- Plugin view UI (the docked column and the conversation-column floating layer) lives in the Vue app, not in WPF (see 插件视图)
 
 ### DI Registration
 
@@ -193,7 +222,7 @@ Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
 - Workspace implementations: `WorkspaceFileService`, `WorkspaceSearchService`, `WorkspaceShellRunner`; the existing `IWorkspaceToolService` contract remains the caller boundary.
 - Security: `DpapiSecretProtector`
 
-`InitializeSelfClawInfrastructureAsync()` initializes repositories, reconciles extension packages and discovers user skills before Desktop startup. Plugin panels query `IPluginPanelCatalog` and acquire synchronous `IDisposable` version leases through Core's `IPluginVersionLeaseManager`. Infrastructure grants internal access only to tests, not to Desktop.
+`InitializeSelfClawInfrastructureAsync()` initializes repositories, reconciles extension packages and discovers user skills before Desktop startup. Plugin views query `IPluginViewCatalog` and acquire synchronous `IDisposable` version leases through Core's `IPluginVersionLeaseManager`. Infrastructure grants internal access only to tests, not to Desktop.
 
 Vue `ChatView` owns layout and event wiring. `useChatTranscript`, `useWorkspaceSelection`, `useChatComposer`, `useChatApprovals`, `useChatTerminal` and `useChatTurnStatus` own their respective state and host interactions. Workspace/Git responses are bound to the current selection generation.
 
@@ -201,7 +230,7 @@ Desktop registration (`Composition/DesktopServiceRegistration.cs`; lifecycle in 
 - `DesktopAgentDefinitionService`, `SubagentDefinitionCatalog`, `ExtensionSettingsBridge`, `AgentSettingsBridge`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
   `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `AiProviderSettingsBridge`,
   `ConversationTurnEngine`, `ConversationSessionCoordinator`, `TranscriptPublisher`, `WebViewMessageRouter`,
-  `PluginPanelHostController` (also `IPluginPanelSessionRegistry`), `PluginPanelContextPublisher`, `PluginPanelBridge`,
+  `PluginViewHostController` (also `IPluginViewSessionRegistry`), `PluginViewContextPublisher`, `PluginViewBridge`,
   `SubagentTaskCoordinator` (`ISubagentTaskCoordinator` and `ISubagentConversationLifecycle`), `SubagentTaskBackgroundHost`, and `SubagentDeliveryDispatcher` hosted services,
   `SubagentActivityRegistry`, `SubagentActivityService`, `ActivityPanelSnapshotBuilder`, `ActivityPanelPublisher`, `ActivityPanelBridge`,
   `PetPackageCatalog`, `PetActivityPresenter`, `PetHost`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`

@@ -383,7 +383,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<aside class="sidebar" :class="{ collapsed }" aria-label="主导航">
+	<aside class="sidebar" data-anchor="sidebar" :class="{ collapsed }" aria-label="主导航">
 		<!-- 顶栏：新建对话 + 折叠 -->
 		<div class="head">
 			<button class="head-new" type="button" @click="onAction('new-chat')">

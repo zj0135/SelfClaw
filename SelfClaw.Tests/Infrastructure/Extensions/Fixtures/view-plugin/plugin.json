@@ -1,0 +1,35 @@
+{
+	"schemaVersion": 1,
+	"id": "view-demo",
+	"name": "View Demo",
+	"version": "1.0.0",
+	"description": "Verifies both view slots: context, workspace reads, the CSP boundary, anchors and hit regions.",
+	"publisher": "selfclaw",
+	"permissions": [
+		"ui.panel",
+		"ui.floating",
+		"host.context.read",
+		"host.transcript.read",
+		"host.composer.write",
+		"host.workspace.read"
+	],
+	"contributes": {
+		"views": [
+			{
+				"id": "inspector",
+				"slot": "right",
+				"title": "面板演示",
+				"icon": "layout-grid",
+				"entry": "ui/inspector.html",
+				"defaultWidth": 400
+			},
+			{
+				"id": "hud",
+				"slot": "floating",
+				"title": "悬浮演示",
+				"icon": "layers",
+				"entry": "ui/hud.html"
+			}
+		]
+	}
+}

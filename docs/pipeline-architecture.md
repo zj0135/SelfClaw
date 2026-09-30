@@ -68,7 +68,7 @@ flowchart LR
     D -->|否| DROP["直接丢弃<br/>(iframe / 插件面板消息)"]
     D -->|是| E{"type 前缀分派"}
     E -->|"terminal-*"| T["TerminalHostController"]
-    E -->|"plugin-host/*"| P["PluginPanelBridge"]
+    E -->|"plugin-host/*"| P["PluginViewBridge"]
     E -->|"activity-panel/*"| AC["ActivityPanelBridge"]
     E -->|"send-prompt"| F["MainWindowViewModel.SubmitPromptAsync"]
     F --> G["PromptSubmissionSnapshot<br/>prompt / conversation / workspaceRoot /<br/>toolPermissionMode / modelProfileId / agentId /<br/>composerModeOverride / selectionVersion"]

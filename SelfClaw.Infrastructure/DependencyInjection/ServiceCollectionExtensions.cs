@@ -110,7 +110,7 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<ExtensionStateChangeNotifier>());
         services.AddSingleton<ExtensionPackageInstaller>();
         services.AddSingleton<ExtensionCatalog>();
-        services.AddSingleton<IPluginPanelCatalog>(serviceProvider =>
+        services.AddSingleton<IPluginViewCatalog>(serviceProvider =>
             serviceProvider.GetRequiredService<ExtensionCatalog>());
         services.AddSingleton<UserSkillDiscoveryService>(serviceProvider =>
             new UserSkillDiscoveryService(

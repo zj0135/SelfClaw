@@ -57,9 +57,9 @@ const filteredItems = computed(() => {
 });
 const selectedItem = computed(() => activeItems.value.find((item) => item.id === selectedId.value) || null);
 // 面板不是独立安装项，由所属插件管理，因此只在插件详情里出现，不单开一个分类页。
-const selectedPanels = computed(() =>
+const selectedViews = computed(() =>
 	activeCategory.value === 'plugin' && selectedItem.value
-		? (state.value.panels || []).filter((panel) => panel.pluginId === selectedItem.value.id)
+		? (state.value.views || []).filter((view) => view.pluginId === selectedItem.value.id)
 		: [],
 );
 
@@ -192,7 +192,7 @@ async function confirmPermissions() {
 			</section>
 
 			<ExtensionDetailDrawer v-if="selectedItem" :item="selectedItem" :kind="activeCategory"
-				:panels="selectedPanels" :hook-log-entries="hookLogEntries" :hook-log-loading="hookLogLoading"
+				:views="selectedViews" :hook-log-entries="hookLogEntries" :hook-log-loading="hookLogLoading"
 				:pending="isPending(activeCategory, selectedItem.id)"
 				@close="selectedId = null" @delete="handleDelete" @edit="openMcp(selectedItem)" @reload="handleReload"
 				@refresh-hook-log="refreshHookLog" />

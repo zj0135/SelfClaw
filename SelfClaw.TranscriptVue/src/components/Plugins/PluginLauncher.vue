@@ -1,35 +1,79 @@
 <script setup>
-import { Puzzle, Settings2 } from 'lucide-vue-next';
+import { computed } from 'vue';
+import { AlertCircle, Layers, Settings2, X } from 'lucide-vue-next';
+import { resolvePluginIcon } from '../../renderers/pluginIcons.js';
 
-defineProps({
+// 打开视图只有一个入口：左侧导航的「插件」。列表按 slot 分两段——右侧面板与悬浮视图是两种
+// 摆放方式，用户在打开之前就该知道它会出现在哪里。
+//
+// 已打开的条目照样可点：面板被隐藏时，重新选它就是把右栏叫回来的那条路。若在这里 disabled，
+// 面板全部打开又全部隐藏时右栏就再也回不来了。悬浮视图没有标签栏，所以这里的关闭按钮是宿主侧
+// 保证的关闭入口（插件自己也可以调 selfclaw.close()）。
+const props = defineProps({
 	open: { type: Boolean, default: false },
-	panels: { type: Array, default: () => [] },
+	views: { type: Array, default: () => [] },
 	openKeys: { type: Array, default: () => [] },
+	error: { type: String, default: '' },
 });
 
-defineEmits(['close', 'select', 'manage']);
+defineEmits(['close', 'select', 'close-view', 'manage']);
+
+const dockedViews = computed(() => props.views.filter((view) => view.slot === 'right'));
+const floatingViews = computed(() => props.views.filter((view) => view.slot === 'floating'));
 </script>
 
 <template>
 	<div v-if="open" class="launcher-backdrop" @click.self="$emit('close')">
-		<div class="launcher" role="dialog" aria-label="打开插件面板">
+		<div class="launcher" role="dialog" aria-label="打开插件视图">
 			<header>
-				<Puzzle :size="14" :stroke-width="1.8" />
-				<span>插件面板</span>
+				<Layers :size="14" :stroke-width="1.8" />
+				<span>插件视图</span>
 			</header>
 
-			<!-- 已打开的条目照样可点：面板被隐藏时，重新选它就是把右栏叫回来的那条路。
-				 若在这里 disabled，面板全部打开又全部隐藏时右栏就再也回不来了。 -->
-			<ul v-if="panels.length" class="panel-list">
-				<li v-for="panel in panels" :key="panel.key">
-					<button type="button" @click="$emit('select', panel.key)">
-						<span class="panel-title">{{ panel.title }}</span>
-						<code>{{ panel.pluginId }}</code>
-						<span v-if="openKeys.includes(panel.key)" class="panel-state">已打开</span>
-					</button>
-				</li>
-			</ul>
-			<p v-else class="empty">还没有启用任何提供面板的插件。</p>
+			<p v-if="error" class="launcher-error">
+				<AlertCircle :size="13" />{{ error }}
+			</p>
+
+			<div v-if="views.length" class="view-scroll">
+				<section v-if="dockedViews.length">
+					<h2>右侧面板</h2>
+					<ul class="view-list">
+						<li v-for="view in dockedViews" :key="view.key">
+							<button type="button" class="view-main" @click="$emit('select', view.key)">
+								<component :is="resolvePluginIcon(view.icon)" :size="14" :stroke-width="1.8" />
+								<span class="view-title">{{ view.title }}</span>
+								<code>{{ view.pluginId }}</code>
+								<span v-if="openKeys.includes(view.key)" class="view-state">已打开</span>
+							</button>
+							<button v-if="openKeys.includes(view.key)" type="button" class="view-close"
+								:aria-label="`关闭 ${view.title}`" :title="`关闭 ${view.title}`"
+								@click="$emit('close-view', view.key)">
+								<X :size="13" :stroke-width="2" />
+							</button>
+						</li>
+					</ul>
+				</section>
+
+				<section v-if="floatingViews.length">
+					<h2>悬浮视图</h2>
+					<ul class="view-list">
+						<li v-for="view in floatingViews" :key="view.key">
+							<button type="button" class="view-main" @click="$emit('select', view.key)">
+								<component :is="resolvePluginIcon(view.icon)" :size="14" :stroke-width="1.8" />
+								<span class="view-title">{{ view.title }}</span>
+								<code>{{ view.pluginId }}</code>
+								<span v-if="openKeys.includes(view.key)" class="view-state">已打开</span>
+							</button>
+							<button v-if="openKeys.includes(view.key)" type="button" class="view-close"
+								:aria-label="`关闭 ${view.title}`" :title="`关闭 ${view.title}`"
+								@click="$emit('close-view', view.key)">
+								<X :size="13" :stroke-width="2" />
+							</button>
+						</li>
+					</ul>
+				</section>
+			</div>
+			<p v-else class="empty">还没有启用任何提供视图的插件。</p>
 
 			<footer>
 				<button type="button" @click="$emit('manage')">
@@ -54,8 +98,8 @@ defineEmits(['close', 'select', 'manage']);
 }
 
 .launcher {
-	width: min(420px, 100%);
-	max-height: min(60vh, 520px);
+	width: min(440px, 100%);
+	max-height: min(64vh, 560px);
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
@@ -86,20 +130,52 @@ header {
 	letter-spacing: 0.04em;
 }
 
-.panel-list {
+.launcher-error {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	margin: 0;
+	flex: none;
+	padding: 8px 14px;
+	background: color-mix(in srgb, var(--danger) 8%, transparent);
+	color: var(--danger);
+	font-size: var(--fs-11);
+}
+
+.view-scroll {
 	min-height: 0;
 	flex: 1 1 auto;
-	margin: 0;
-	padding: 6px;
 	overflow-y: auto;
+	padding-bottom: 6px;
+}
+
+.view-scroll h2 {
+	margin: 10px 12px 4px;
+	color: var(--faint);
+	font-size: var(--fs-10);
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.view-list {
+	margin: 0;
+	padding: 0 6px;
 	list-style: none;
 }
 
-.panel-list button {
+.view-list li {
 	display: flex;
-	align-items: baseline;
-	width: 100%;
-	gap: 10px;
+	align-items: center;
+	gap: 2px;
+}
+
+.view-main {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	flex: 1 1 auto;
+	min-width: 0;
 	padding: 9px 10px;
 	border: 0;
 	border-radius: 8px;
@@ -110,11 +186,11 @@ header {
 	transition: background 0.12s;
 }
 
-.panel-list button:hover {
+.view-main:hover {
 	background: var(--panel-muted);
 }
 
-.panel-title {
+.view-title {
 	flex: 1 1 auto;
 	overflow: hidden;
 	font-weight: 560;
@@ -122,17 +198,35 @@ header {
 	white-space: nowrap;
 }
 
-.panel-list code {
+.view-main code {
 	flex: none;
 	color: var(--faint);
 	font-family: var(--font-mono);
 	font-size: var(--fs-10);
 }
 
-.panel-state {
+.view-state {
 	flex: none;
 	color: var(--accent);
 	font-size: var(--fs-10);
+}
+
+.view-close {
+	display: grid;
+	width: 24px;
+	height: 24px;
+	flex: none;
+	place-items: center;
+	padding: 0;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--faint);
+}
+
+.view-close:hover {
+	background: var(--panel-muted);
+	color: var(--text);
 }
 
 .empty {

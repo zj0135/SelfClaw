@@ -1,45 +1,27 @@
 <script setup>
 import { computed } from 'vue';
-import {
-	Activity, BookOpen, Bookmark, Bug, Calendar, Clipboard, Code, Database, Eye, FileCode,
-	FileText, Filter, Folder, FolderOpen, GitBranch, Globe, Image, Info, Key, Layers, LayoutGrid,
-	Lightbulb, Link, List, Map, MessageSquare, Package, Play, Puzzle, Search, Settings, Shield,
-	Sparkles, Star, Table, Tag, Terminal, Timer, Wrench, Zap,
-} from 'lucide-vue-next';
-
-// 图标只认名字，不接受插件包里的 SVG——tab 栏渲染在应用源里，包内容进来就是注入面。
-// 这份映射必须与后端 PluginPanelIcons 的白名单保持一致。
-const iconMap = {
-	activity: Activity, 'book-open': BookOpen, bookmark: Bookmark, bug: Bug, calendar: Calendar,
-	clipboard: Clipboard, code: Code, database: Database, eye: Eye, 'file-code': FileCode,
-	'file-text': FileText, filter: Filter, folder: Folder, 'folder-open': FolderOpen,
-	'git-branch': GitBranch, globe: Globe, image: Image, info: Info, key: Key, layers: Layers,
-	'layout-grid': LayoutGrid, lightbulb: Lightbulb, link: Link, list: List, map: Map,
-	'message-square': MessageSquare, package: Package, play: Play, puzzle: Puzzle, search: Search,
-	settings: Settings, shield: Shield, sparkles: Sparkles, star: Star, table: Table, tag: Tag,
-	terminal: Terminal, timer: Timer, wrench: Wrench, zap: Zap,
-};
+import { resolvePluginIcon } from '../../renderers/pluginIcons.js';
 
 const props = defineProps({
-	tab: { type: Object, required: true },
+	view: { type: Object, required: true },
 	active: { type: Boolean, default: false },
 });
 
 defineEmits(['activate', 'close']);
 
-const icon = computed(() => iconMap[props.tab.panel.icon] || Puzzle);
+const icon = computed(() => resolvePluginIcon(props.view.icon));
 </script>
 
 <template>
 	<div class="tab" :class="{ active }" role="tab" :aria-selected="active">
-		<button class="tab-main" type="button" :title="tab.panel.title" @click="$emit('activate', tab.key)">
+		<button class="tab-main" type="button" :title="view.title" @click="$emit('activate', view.key)">
 			<span class="tab-icon" aria-hidden="true">
 				<component :is="icon" :size="13" :stroke-width="1.8" />
 			</span>
-			<span class="tab-title">{{ tab.panel.title }}</span>
+			<span class="tab-title">{{ view.title }}</span>
 		</button>
-		<button class="tab-close" type="button" :aria-label="`关闭 ${tab.panel.title}`"
-			@click.stop="$emit('close', tab.key)">
+		<button class="tab-close" type="button" :aria-label="`关闭 ${view.title}`"
+			@click.stop="$emit('close', view.key)">
 			<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
 				<path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
 					fill="none" />

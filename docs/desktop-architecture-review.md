@@ -33,7 +33,7 @@ Direct/CLI 共享事件、三种 committer、continuation 执行前 checkpoint�
 | R11 | **已实施。** [TranscriptProjection](../SelfClaw.Desktop/Services/Transcript/TranscriptProjection.cs) 每轮建一次 message-id→tools 索引，按不可变记录引用复用消息投影，导航失效与正文分开，缓存只保留当前输入。附件检查退出缓存命中路径。[Plugin transcript 投影](../SelfClaw.TranscriptVue/src/renderers/pluginTranscript.js) 复用普通对象，每 500 ms 合并一次，完整恢复窗口最多 256 KiB UTF-8，显式携带 `totalItems/truncated`。 | [性能回归](../SelfClaw.Tests/Desktop/Services/Transcript/TranscriptProjectionPerformanceTests.cs) 同时核对未变 item 身份、最新正文和分配增长；数字见第 3 节。Plugin 序列化预算和投影复用有正式测试；多个真实 iframe 的 UI 耗时未测量。 |
 | R12 | **已实施。** [PetHost](../SelfClaw.Desktop/Pet/Hosting/PetHost.cs) 统一配置/实际包/可见性/加载结果；Catalog 后台准备并冻结位图，adapter 只安装资源与操作窗口，VM 不再吞加载异常。内置包元数据按进程生命周期缓存，设置 Bridge 推送 Host 变更。 | [PetHostTests](../SelfClaw.Tests/Desktop/Pet/PetHostTests.cs) 覆盖损坏、回退、重试、隐藏时选择、保存失败和配置一致性；延迟 decoder 时 Dispatcher 仍可执行，真实 PetViewModel 能安装冻结帧。没有打开真实 PetWindow 验证 DPI、拖拽和大型资源的实际帧率。 |
 | R13 | **已实施；ConPTY 实机待验收。** [TerminalOutputReader](../SelfClaw.Desktop/Services/Terminal/TerminalOutputReader.cs) 按连续流解码；[buffer](../SelfClaw.Desktop/Services/Terminal/TerminalOutputBuffer.cs) 保留最多 262,144 字符尾部，33 ms 定时批量发送，每批最多 32,768 字符。隐藏/未就绪保留有界尾部，超量明确提示；输入异步并限制在途数量，释放等待 native reader。 | [TerminalOutputTests](../SelfClaw.Tests/Desktop/Services/Terminal/TerminalOutputTests.cs) 逐字节提供中文/emoji，检查完整文本、超量上限和旧 session 隔离；controller 生命周期回归通过。未运行真实 ConPTY、终端高吞吐或原生退出场景。 |
-| R14 | **已实施；WebView 资源回调实机待验收。** [PluginPanelHostController](../SelfClaw.Desktop/Services/Plugins/PluginPanelHostController.cs) 用单一异步修改门串行打开，最多 8 个面板；关闭/导航/禁用使在途代次失效，未移交 lease 在 finally 释放。资源由 [PluginPanelResourceReader](../SelfClaw.Desktop/Services/Plugins/PluginPanelResourceReader.cs) 准备，经 deferral 回 UI 提交；最多 4 个并发读取、每份 8 MiB，读取另持版本 lease。CSP/origin/权限及工作根约束保留。 | [PluginPanelConcurrencyTests](../SelfClaw.Tests/Desktop/Services/Plugins/PluginPanelConcurrencyTests.cs) 覆盖双打开、关闭/Dispose 期间获取、最后关闭可 drain、锁文件/缺失/超限 HTTP 结果；Vue 测试覆盖在途合并、失效响应、active tab 恢复和来源校验。这里采用有界串行门替代额外的逐 Plugin 任务注册表，以减少状态；同 Plugin 获取次数为一次的测试提供证据。 |
+| R14 | **已实施；WebView 资源回调实机待验收。** [PluginViewHostController](../SelfClaw.Desktop/Services/Plugins/PluginViewHostController.cs) 用单一异步修改门串行打开，最多 8 个停靠视图（悬浮视图另有 4 个独立上限）；关闭/导航/禁用使在途代次失效，未移交 lease 在 finally 释放。资源由 [PluginViewResourceReader](../SelfClaw.Desktop/Services/Plugins/PluginViewResourceReader.cs) 准备，经 deferral 回 UI 提交；最多 4 个并发读取、每份 8 MiB，读取另持版本 lease。CSP/origin/权限及工作根约束保留。 | [PluginViewConcurrencyTests](../SelfClaw.Tests/Desktop/Services/Plugins/PluginViewConcurrencyTests.cs) 覆盖双打开、关闭/Dispose 期间获取、最后关闭可 drain、锁文件/缺失/超限 HTTP 结果；Vue 测试覆盖在途合并、失效响应、active tab 恢复和来源校验。这里采用有界串行门替代额外的逐 Plugin 任务注册表，以减少状态；同 Plugin 获取次数为一次的测试提供证据。 |
 | R15 | **已实施。** Definitions/Models/Views、Notifications、Settings、SystemTray、Transcript.Views、Pet.Settings 目录及命名空间归属一致。删除 `ShellSelectOption`、未用名称解析/HasRow、空通知 IDisposable、旧 settings 协议、CLI 无锁读取面和备用 Pet 构造路径；主题解释归服务，标签 activeKey 真正恢复。同步本文、AGENTS、运行流程及设计文档入口。 | 目录迁移独立回归 **316/0/4**；最终全方案构建及全量测试见第 4 节。仓库源码检索确认旧类型/协议无消费者；参数化 PetWindow XAML 构建通过，但未做设计器预览验收。 |
 
 ## 3. 成本验证
@@ -94,7 +94,29 @@ Vue 目录执行 `npm test`、`npm run build`。端到端最终复核时，先�
 4. 内置 Pet 元数据缓存按进程生命周期刷新；Plugin 广播与资源字节预算已经验证，多 iframe 的实际 CPU/渲染成本及 WebView deferral 释放仍需实机测量。
 5. 依赖还原成功，但在线 NuGet 漏洞数据源不可达，出现 NU1900；本次没有宣称在线依赖审计通过。默认 Playwright dev-server 收尾问题保留为测试环境限制，外部服务器方式已完整通过。
 
-## 6. 主窗口最小化/最大化动画（2026-09-29）
+## 6. 插件悬浮视图（2026-09-30）
+
+右侧面板泛化为「插件视图」：`contributes.panels` → `contributes.views` + `slot`（`right` / `floating`），宿主与帧管道只有一份实现，设计、不变式与不采用方案见 `docs/plugin-view-system-design.md`。此处只记录实施后的状态与**未实机验收的限制**。
+
+| 项 | 状态 | 证据 / 限制 |
+| --- | --- | --- |
+| Manifest 与权限 | `views[].slot` 校验、`defaultWidth` 仅限停靠、`ui.floating` 独立披露 | `PluginManifestReaderTests` 覆盖未知 slot、缺失 slot、悬浮视图带 `defaultWidth`、跨 slot 重名、两种权限缺失；夹具 `Fixtures/view-plugin` 同时贡献两种 slot |
+| 宿主上限与租约 | 停靠 8 / 悬浮 4，全部在宿主执行；关闭/禁用/删除仍先拆状态再推 evict | `PluginViewHostControllerTests` 新增「两槽独立配额」用例；`PluginViewConcurrencyTests` 保留在途合并与 drain 断言 |
+| 帧管道复用 | 身份、握手、context/transcript/appearance/anchors 推送、通知分发都在 `usePluginFrames`；两个容器只是摆放方式 | `pluginViews.test.js` 覆盖伪造来源、握手携带 slot/anchors、anchors 变化推送、evict 关闭帧并解除武装 |
+| 指针模型 | 悬浮层只覆盖主对话列（`.main-content`），默认透明，仅声明的交互矩形在命中时唤醒该帧；标题栏/侧栏/右栏在几何上就碰不到 | `pluginViews.test.js` 覆盖命中唤醒、帧局部坐标下的 anchors 换算、非法矩形丢弃、暂停期不唤醒、指针移到上层元素即解除；`pluginViewComponents.test.js` 断言非武装帧为 `pointer-events: none`；`pluginSdk.test.js` 与 e2e 覆盖插件侧契约（自动发布矩形、离开即 release、`hit-released` 送达） |
+| 悬浮层不得与插件帧重叠 | 实测（Playwright/Chromium 探针）：指针位于子 iframe 上时父文档**零** `pointermove`，因此重叠会让命中测试从不运行（截图里的「HUD 跑到右栏上、点不动」） | e2e 用例 `a floating view stays inside the conversation column and usable while the dock is open`：悬浮层盒刚好等于 `.main-content`（右栏左侧）且仍可唤醒/命中 |
+| 持久化形状 | `pluginViews` 节点 + `selfclaw:dock-*` / `selfclaw:floats-hidden`，不迁移旧键 | `pluginViews.test.js` 断言 `save-views` 负载形状 |
+| 收起中的悬浮层 | 收起用 `visibility: hidden`，不是 `display: none`：帧的视口与原点必须保持有效 | 实测（探针）：`display: none` 下插件视口为 0×0、anchors 退化成窗口坐标、按 anchors 摆好的控件落到视口外；e2e `a floating view keeps valid geometry while the layer is concealed` 钉住（把收起改回 `display: none` 该用例失败） |
+| 图标白名单 | 前后端两份名单由 `pluginViewIcons.test.js` 钉住 | 只验证键集合一致；渲染回退仍是 `puzzle` |
+
+**未实机验收（需 `SELFCLAW_DESKTOP_SMOKE=1` 或人工目视）**：
+
+1. 悬浮层在真实 WebView2 下的透明合成（子文档未声明背景时是否真的透明）；SDK 已注入根透明默认值，但仍需实际看一次。
+2. 指针唤醒/解除的手感：拖动停靠分隔条、打开对话框、切主视图、DPI 缩放与最大化/还原后的地标正确性。
+3. 规范第 13.1 节剩两项未验证行为（子框架合成；翻转 `pointer-events` 是否触发子文档 `pointerout`）——设计不依赖它们。原第 1 条「指针在 iframe 上时父文档是否仍收到 `pointermove`」已在本机 Chromium 实测为**不会**，并已落进几何约束（见上表）。
+4. 最大化窗口下悬浮视图与窗口缩放热区（`z-index: 9999`）的交互（悬浮层现在在 `.main-content` 内，两者已不重叠）。
+
+## 7. 主窗口最小化/最大化动画（2026-09-29）
 
 **症状**：主窗口最小化时没有 Windows 的过渡动画，窗口直接消失/出现，而同一台机器上其他应用有动画。
 
@@ -322,7 +344,7 @@ Router 串行尝试各功能 Bridge，同时订阅模型/Agent/扩展变更、�
 
 ### R10 — 通用通信层与 transcript 互相依赖，ACK 缺少故障恢复
 
-**位置**：[WebViewHostChannel](../SelfClaw.Desktop/Services/WebView/WebViewHostChannel.cs) L14–20、L65–109、L135–214；[hostBridge.js](../SelfClaw.TranscriptVue/src/composables/hostBridge.js) L112–189、L221–252；[PluginPanelContextPublisher](../SelfClaw.Desktop/Services/Plugins/PluginPanelContextPublisher.cs) L36–41。
+**位置**：[WebViewHostChannel](../SelfClaw.Desktop/Services/WebView/WebViewHostChannel.cs) L14–20、L65–109、L135–214；[hostBridge.js](../SelfClaw.TranscriptVue/src/composables/hostBridge.js) L112–189、L221–252；[PluginViewContextPublisher](../SelfClaw.Desktop/Services/Plugins/PluginViewContextPublisher.cs) L36–41。
 
 桌面的通用 Channel 拥有 transcript 的前一版、当前版、patch diff、revision 和 ACK；前端通用 Bridge 又拥有 transcript reducer 和 ACK 调度。Plugin context 的变化信号还借用 `TranscriptPublished`，使一个通用传输类成为界面状态协调中心。
 
@@ -334,7 +356,7 @@ Router 串行尝试各功能 Bridge，同时订阅模型/Agent/扩展变更、�
 
 ### R11 — 投影缓存命中仍重复扫描历史和工具列表
 
-**位置**：[TranscriptProjection](../SelfClaw.Desktop/Services/Transcript/TranscriptProjection.cs) L54–130、L161–225；[TranscriptPublisher](../SelfClaw.Desktop/Services/Transcript/TranscriptPublisher.cs) L129–165；[Vue App](../SelfClaw.TranscriptVue/src/App.vue) L147–149；[usePluginPanels](../SelfClaw.TranscriptVue/src/composables/usePluginPanels.js) L65–87、L248–250。
+**位置**：[TranscriptProjection](../SelfClaw.Desktop/Services/Transcript/TranscriptProjection.cs) L54–130、L161–225；[TranscriptPublisher](../SelfClaw.Desktop/Services/Transcript/TranscriptPublisher.cs) L129–165；[Vue App](../SelfClaw.TranscriptVue/src/App.vue) L147–149；[usePluginViews](../SelfClaw.TranscriptVue/src/composables/usePluginViews.js) L65–87、L248–250。
 
 每次投影先排序/遍历会话、工作目录、消息和工具；再为每条消息生成 fingerprint，并扫描整个 `conversationToolRuns` 取自己的工具。即使只有最后一条消息改变，缓存命中检查仍包含近似 `消息数 × 工具数` 的扫描。该工作在 Dispatcher 内进行。消息段文本 hash、附件存在性检查也进入刷新路径。
 
@@ -381,7 +403,7 @@ Router 串行尝试各功能 Bridge，同时订阅模型/Agent/扩展变更、�
 
 ### R14 — Plugin 宿主的租约移交、文件服务和协议耦合过密
 
-**位置**：[PluginPanelHostController](../SelfClaw.Desktop/Services/Plugins/PluginPanelHostController.cs) L73–109、L196–257、L273–340；[usePluginPanels](../SelfClaw.TranscriptVue/src/composables/usePluginPanels.js) L182–206。
+**位置**：[PluginViewHostController](../SelfClaw.Desktop/Services/Plugins/PluginViewHostController.cs) L73–109、L196–257、L273–340；[usePluginViews](../SelfClaw.TranscriptVue/src/composables/usePluginViews.js) L182–206。
 
 该类型同时维护开放面板、版本租约、origin 映射、CSP、请求解包、标签持久化和文件响应。`OnWebResourceRequested()` 在 WebView 回调中同步 `ReadAllBytes`，再创建 MemoryStream；每个请求把整个文件读入内存，I/O 异常也没有在该入口归一为资源错误响应。大资源读取会占用桌面 UI 回调时间。
 
@@ -476,7 +498,7 @@ flowchart LR
 | Activity 的 Builder / Projection / Delivery | 数据读取、体积控制、ACK/重试各有独立约束；首轮测试失序不能作为删除这些边界的理由 |
 | Pet Behavior / Presenter / Animator / WindowAdapter | 交互状态机、活动含义、帧驱动、窗口副作用分开，现有测试也利用了这些边界 |
 | `IPetSettingsRepository`、文件 picker、Terminal session/factory | 隔离磁盘/平台副作用，使错误与取消可测；一个生产实现并不等于无效抽象 |
-| `IPluginPanelContextSource / IActivityPanelScopeSource` | 让功能只读取所需 Shell 状态；应稳定快照及变更约定，无需改成对整个 VM 的依赖 |
+| `IPluginViewContextSource / IActivityPanelScopeSource` | 让功能只读取所需 Shell 状态；应稳定快照及变更约定，无需改成对整个 VM 的依赖 |
 | Plugin origin、CSP、权限和版本 lease | 是模块隔离与资源有效性的真实约束，职责移动时应完整保留 |
 
 ### 6.3 分批实施

@@ -9,7 +9,7 @@ using SelfClaw.Infrastructure.Extensions.Plugins.Models;
 
 namespace SelfClaw.Infrastructure.Extensions;
 
-internal sealed class ExtensionCatalog : IPluginPanelCatalog
+internal sealed class ExtensionCatalog : IPluginViewCatalog
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -139,9 +139,9 @@ internal sealed class ExtensionCatalog : IPluginPanelCatalog
     /// <summary>
     /// Panels are projected from the Plugin manifest rather than stored separately: the manifest is
     /// already the durable record, and a second copy could disagree with the files a lease is pinned to.
-    /// A Plugin whose manifest no longer reads contributes no panels instead of failing the whole state.
+    /// A Plugin whose manifest no longer reads contributes no views instead of failing the whole state.
     /// </summary>
-    public async Task<IReadOnlyList<PluginPanelView>> ListPluginPanelViewsAsync(
+    public async Task<IReadOnlyList<PluginView>> ListPluginViewsAsync(
         CancellationToken cancellationToken = default)
     {
         if (_pluginManifestReader is null)
@@ -150,7 +150,7 @@ internal sealed class ExtensionCatalog : IPluginPanelCatalog
         }
 
         var packages = await _packageRepository.ListPackagesAsync(cancellationToken).ConfigureAwait(false);
-        var results = new List<PluginPanelView>();
+        var results = new List<PluginView>();
         foreach (var plugin in packages
                      .Where(package => package.Kind == ExtensionKind.Plugin)
                      .OrderBy(package => package.Id, StringComparer.Ordinal))
@@ -171,23 +171,24 @@ internal sealed class ExtensionCatalog : IPluginPanelCatalog
                 continue;
             }
 
-            if (manifest.Contributions.Panels.Count == 0)
+            if (manifest.Contributions.Views.Count == 0)
             {
                 continue;
             }
 
             var status = CreatePackageView(plugin).Status;
-            var origin = PluginPanelOrigin.ForPlugin(plugin.Id);
+            var origin = PluginViewOrigin.ForPlugin(plugin.Id);
             var networkOrigins = PluginPermissions.ReadNetworkOrigins(manifest.Permissions);
-            results.AddRange(manifest.Contributions.Panels.Select(panel => new PluginPanelView(
-                $"{plugin.Id}/{panel.Id}",
+            results.AddRange(manifest.Contributions.Views.Select(view => new PluginView(
+                $"{plugin.Id}/{view.Id}",
                 plugin.Id,
-                panel.Id,
-                panel.Title,
-                panel.Icon,
+                view.Id,
+                view.Title,
+                view.Icon,
+                view.Slot,
                 origin,
-                $"{origin}/{panel.Entry}",
-                panel.DefaultWidth,
+                $"{origin}/{view.Entry}",
+                view.DefaultWidth,
                 plugin.IsEnabled,
                 status,
                 manifest.Permissions,
@@ -195,7 +196,7 @@ internal sealed class ExtensionCatalog : IPluginPanelCatalog
         }
 
         return results
-            .OrderBy(panel => panel.Title, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(view => view.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
 

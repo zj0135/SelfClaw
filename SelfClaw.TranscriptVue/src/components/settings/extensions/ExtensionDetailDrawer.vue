@@ -7,7 +7,7 @@ import PluginHookLog from './PluginHookLog.vue';
 defineProps({
 	item: { type: Object, required: true },
 	kind: { type: String, required: true },
-	panels: { type: Array, default: () => [] },
+	views: { type: Array, default: () => [] },
 	hookLogEntries: { type: Array, default: () => [] },
 	hookLogLoading: { type: Boolean, default: false },
 	pending: { type: Boolean, default: false },
@@ -67,12 +67,13 @@ defineEmits(['close', 'delete', 'edit', 'reload', 'refresh-hook-log']);
 				<dt>权限</dt>
 				<dd>{{ item.permissions.join(', ') }}</dd>
 			</template>
-			<template v-if="panels.length">
-				<dt>面板</dt>
+			<template v-if="views.length">
+				<dt>视图</dt>
 				<dd>
-					<ul class="panels">
-						<li v-for="panel in panels" :key="panel.key">
-							<span>{{ panel.title }}</span><code>{{ panel.panelId }}</code>
+					<ul class="views">
+						<li v-for="view in views" :key="view.key">
+							<span>{{ view.title }}</span><code>{{ view.viewId }}</code>
+							<em>{{ view.slot === 'floating' ? '悬浮' : '面板' }}</em>
 						</li>
 					</ul>
 				</dd>
@@ -212,7 +213,7 @@ dd.source-path code {
 	animation: sc-spin 0.8s linear infinite;
 }
 
-.panels {
+.views {
 	display: grid;
 	gap: 5px;
 	margin: 0;
@@ -220,14 +221,21 @@ dd.source-path code {
 	list-style: none;
 }
 
-.panels li {
+.views li {
 	display: flex;
 	align-items: baseline;
 	justify-content: space-between;
 	gap: 10px;
 }
 
-.panels code {
+.views li em {
+	flex: none;
+	color: var(--sc-accent, var(--accent));
+	font-size: var(--fs-10);
+	font-style: normal;
+}
+
+.views code {
 	flex: none;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
