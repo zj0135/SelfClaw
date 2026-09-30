@@ -420,11 +420,21 @@ CREATE TABLE IF NOT EXISTS cli_agent_sessions (
     conversation_id TEXT NOT NULL,
     agent_kind INTEGER NOT NULL,
     session_id TEXT NOT NULL,
+    cost_baseline_usd_micros INTEGER NOT NULL DEFAULT 0,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
     PRIMARY KEY(conversation_id, agent_kind),
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );", cancellationToken).ConfigureAwait(false);
+
+            // CLIs whose cost is a running session total (Claude Code's total_cost_usd) store the
+            // high-water mark here so a resumed session only records the delta each turn.
+            await EnsureColumnExistsAsync(
+                connection,
+                "cli_agent_sessions",
+                "cost_baseline_usd_micros",
+                "ALTER TABLE cli_agent_sessions ADD COLUMN cost_baseline_usd_micros INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken).ConfigureAwait(false);
 
             await ExecuteAsync(connection, @"
 CREATE TABLE IF NOT EXISTS subagent_tasks (

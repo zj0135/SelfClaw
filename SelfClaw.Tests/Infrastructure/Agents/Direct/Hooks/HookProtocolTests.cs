@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Hooks;
 using SelfClaw.Infrastructure.Agents.Direct.Hooks.Models;
 
@@ -96,8 +97,13 @@ public sealed class HookProtocolTests
     {
         var bytes = HookProtocol.Serialize(new HookUsagePayload(1, 2));
 
-        Encoding.UTF8.GetString(bytes).Should().Be("""{"inputTokens":1,"outputTokens":2}""");
+        // Unknown usage fields stay present as null, matching the documented hook payload contract.
+        Encoding.UTF8.GetString(bytes).Should().Be(
+            """{"inputTokens":1,"outputTokens":2,"cachedInputTokens":null,"cacheWriteInputTokens":null,"reasoningTokens":null,"contextTokens":null,"contextWindowTokens":null,"costUsd":null,"costSource":null}""");
         bytes[0].Should().NotBe(0xEF);
+        Encoding.UTF8.GetString(HookProtocol.Serialize(new HookUsagePayload(
+                1, 2, CostSource: TurnUsageCostSource.ProviderReported)))
+            .Should().Contain("\"costSource\":\"providerReported\"");
     }
 
     [Fact]

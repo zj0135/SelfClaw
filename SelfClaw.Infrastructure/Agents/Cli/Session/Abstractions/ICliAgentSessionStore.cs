@@ -14,4 +14,15 @@ internal interface ICliAgentSessionStore
         CliAgentKind agentKind,
         string sessionId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records the CLI's cumulative session cost and returns the part attributable to the current turn.
+    /// Used by CLIs that report a running session total rather than a per-turn cost.
+    /// </summary>
+    Task<long> TrackCumulativeCostAsync(
+        Guid conversationId,
+        CliAgentKind agentKind,
+        string sessionId,
+        long cumulativeCostUsdMicros,
+        CancellationToken cancellationToken = default);
 }

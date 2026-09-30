@@ -403,7 +403,7 @@ public sealed record ChatTurnRequest(
 | `TextReasoningContent` 增量 | `AssistantThinkingDeltaEvent(blockId, delta)` |
 | `FunctionCallContent` | `ToolCallStartedEvent(callId, name, argsJson, MapToolKind(name))`（参数字典 JSON 序列化；按 callId 去重） |
 | `FunctionResultContent` | `ToolCallCompletedEvent(callId, status, summary, content)`（summary 用 `WorkspaceToolSummaries`） |
-| `UsageContent`（工具环内每次模型往返都可能出现一次） | **累加**，不逐条发；流结束前发一条汇总 `UsageReportedEvent(inputTokens, outputTokens)` |
+| `UsageContent`（工具环内每次模型往返都可能出现一次） | **累加**，不逐条发；流结束前发一条汇总 `UsageReportedEvent(TurnUsage)`（token 求和、最后一次往返的上下文、模型配置补齐的估算成本） |
 | 流正常结束 | `RunCompletedEvent(Succeeded, finalText: 累积文本, null)` |
 | `OperationCanceledException` | `RunCompletedEvent(Cancelled, 累积文本, null)` |
 | 其余异常 | `RunCompletedEvent(Failed, 累积文本或 null, ex.Message)` |

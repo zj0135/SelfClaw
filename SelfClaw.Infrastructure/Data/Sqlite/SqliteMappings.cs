@@ -98,7 +98,8 @@ internal static class SqliteMappings
     /// <summary>Reads the joined turn_usage columns; null when the left join produced no row.</summary>
     public static TurnUsage? ReadTurnUsage(SqliteDataReader reader, int offset)
     {
-        // provider_calls is NOT NULL in turn_usage, so a null there means there is no usage row.
+        // provider_calls is NOT NULL for a real turn_usage row, so a null there means the left join
+        // found no usage (its columns are all NULL).
         if (reader.IsDBNull(offset + 8))
         {
             return null;

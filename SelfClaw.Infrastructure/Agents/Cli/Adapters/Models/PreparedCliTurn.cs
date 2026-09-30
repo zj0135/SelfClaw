@@ -6,4 +6,5 @@ internal sealed record PreparedCliTurn(
     string Command,
     IReadOnlyList<string> Arguments,
     IReadOnlyList<string> StandardInputLines,
-    CliStreamParser Parser);
+    CliStreamParser Parser,
+    bool ReportsCumulativeSessionCost = false);

@@ -191,6 +191,7 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
         }
 
         var runCompletedEmitted = false;
+        string? streamSessionId = null;
 
         if (writeError is null)
         {
@@ -203,6 +204,7 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
                     {
                         if (!string.IsNullOrWhiteSpace(started.SessionId))
                         {
+                            streamSessionId = started.SessionId;
                             await _sessionStore
                                 .SetSessionIdAsync(cliRequest.ConversationId, agentKind, started.SessionId, cancellationToken)
                                 .ConfigureAwait(false);
@@ -212,13 +214,14 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
                     if (streamEvent is RunCompletedEvent)
                         runCompletedEmitted = true;
 
-                    // The parsers only see CLI stdout, so the model selected for this turn is filled in
-                    // here when the CLI itself did not report one.
-                    yield return streamEvent is UsageReportedEvent usageEvent
-                        && string.IsNullOrWhiteSpace(usageEvent.Usage.Model)
-                        && !string.IsNullOrWhiteSpace(cliRequest.CliModel)
-                            ? usageEvent with { Usage = usageEvent.Usage with { Model = cliRequest.CliModel } }
-                            : streamEvent;
+                    yield return await NormalizeUsageAsync(
+                            streamEvent,
+                            cliRequest,
+                            agentKind,
+                            preparedTurn.ReportsCumulativeSessionCost,
+                            streamSessionId ?? storedSessionId,
+                            cancellationToken)
+                        .ConfigureAwait(false);
                 }
             }
         }
@@ -243,6 +246,44 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
                 FinalText: null,
                 ErrorMessage: writeError ?? BuildExitError(result));
         }
+    }
+
+    /// <summary>
+    /// Normalizes a usage report before it reaches the transcript: the model selected for this turn is
+    /// filled in when the CLI did not report one, and a CLI that reports a running session cost is
+    /// converted to the delta this turn spent.
+    /// </summary>
+    private async Task<AgentStreamEvent> NormalizeUsageAsync(
+        AgentStreamEvent streamEvent,
+        CliChatTurnRequest request,
+        CliAgentKind agentKind,
+        bool reportsCumulativeSessionCost,
+        string? sessionId,
+        CancellationToken cancellationToken)
+    {
+        if (streamEvent is not UsageReportedEvent usageEvent)
+        {
+            return streamEvent;
+        }
+
+        var usage = usageEvent.Usage;
+        if (string.IsNullOrWhiteSpace(usage.Model) && !string.IsNullOrWhiteSpace(request.CliModel))
+        {
+            usage = usage with { Model = request.CliModel };
+        }
+
+        if (reportsCumulativeSessionCost
+            && usage is { CostSource: TurnUsageCostSource.ProviderReported, CostUsdMicros: long cumulative }
+            && !string.IsNullOrWhiteSpace(sessionId))
+        {
+            var turnCostUsdMicros = await _sessionStore
+                .TrackCumulativeCostAsync(
+                    request.ConversationId, agentKind, sessionId, cumulative, cancellationToken)
+                .ConfigureAwait(false);
+            usage = usage with { CostUsdMicros = turnCostUsdMicros };
+        }
+
+        return usageEvent with { Usage = usage };
     }
 
     /// <summary>The latest user message is the prompt; the CLI keeps prior turns via session resume.</summary>

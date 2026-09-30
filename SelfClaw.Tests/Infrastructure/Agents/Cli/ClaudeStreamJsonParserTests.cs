@@ -107,10 +107,15 @@ public sealed class ClaudeStreamJsonParserTests
             """
             {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"answer"}}}
             """).ToArray();
+        // The full assistant message repeats the streamed block and carries the API call's own usage.
+        parser.ParseLine(
+            """
+            {"type":"assistant","message":{"id":"m","content":[{"type":"text","text":"answer"}],"usage":{"input_tokens":3,"cache_read_input_tokens":2,"output_tokens":2}}}
+            """).ToArray();
 
         var resultLine =
             """
-            {"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0035,"usage":{"input_tokens":11,"output_tokens":7,"cache_creation_input_tokens":5,"cache_read_input_tokens":20}}
+            {"type":"result","subtype":"success","is_error":false,"num_turns":3,"total_cost_usd":0.0035,"usage":{"input_tokens":11,"output_tokens":7,"cache_creation_input_tokens":5,"cache_read_input_tokens":20}}
             """;
         var events = parser.ParseLine(resultLine).ToArray();
 
@@ -120,12 +125,50 @@ public sealed class ClaudeStreamJsonParserTests
         usage.CachedInputTokens.Should().Be(20);
         usage.CacheWriteInputTokens.Should().Be(5);
         usage.OutputTokens.Should().Be(7);
-        usage.ContextTokens.Should().Be(43);
+        // The result's usage sums the whole main agent loop; the context comes from the last API call.
+        usage.ContextTokens.Should().Be(7);
+        usage.ProviderCalls.Should().Be(3);
         usage.CostUsdMicros.Should().Be(3500);
         usage.CostSource.Should().Be(TurnUsageCostSource.ProviderReported);
         var completed = events.OfType<RunCompletedEvent>().Should().ContainSingle().Subject;
         completed.Status.Should().Be(RunCompletionStatus.Succeeded);
         completed.FinalText.Should().Be("answer");
+    }
+
+    [Fact]
+    public void Result_without_usage_still_reports_the_cost()
+    {
+        var parser = new ClaudeStreamJsonParser();
+
+        var events = parser.ParseLine(
+            """
+            {"type":"result","subtype":"success","is_error":false,"num_turns":1,"total_cost_usd":0.002}
+            """).ToArray();
+
+        var usage = events.OfType<UsageReportedEvent>().Should().ContainSingle().Subject.Usage;
+        usage.CostUsdMicros.Should().Be(2000);
+        usage.CostSource.Should().Be(TurnUsageCostSource.ProviderReported);
+        usage.InputTokens.Should().BeNull();
+        usage.OutputTokens.Should().BeNull();
+        usage.ProviderCalls.Should().Be(1);
+    }
+
+    [Fact]
+    public void Result_sums_cache_buckets_when_input_tokens_is_missing()
+    {
+        var parser = new ClaudeStreamJsonParser();
+
+        var events = parser.ParseLine(
+            """
+            {"type":"result","subtype":"success","is_error":false,"usage":{"cache_read_input_tokens":20,"cache_creation_input_tokens":5,"output_tokens":7}}
+            """).ToArray();
+
+        var usage = events.OfType<UsageReportedEvent>().Should().ContainSingle().Subject.Usage;
+        usage.InputTokens.Should().Be(25);
+        usage.UncachedInputTokens.Should().BeNull();
+        usage.CachedInputTokens.Should().Be(20);
+        usage.CacheWriteInputTokens.Should().Be(5);
+        usage.OutputTokens.Should().Be(7);
     }
 
     [Fact]

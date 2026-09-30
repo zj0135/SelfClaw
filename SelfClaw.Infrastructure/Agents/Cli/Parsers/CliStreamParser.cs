@@ -90,4 +90,19 @@ internal abstract class CliStreamParser
         && value.TryGetDouble(out var usd)
             ? (long)Math.Round(usd * 1_000_000, MidpointRounding.AwayFromZero)
             : null;
+
+    /// <summary>
+    /// Sums the token counts that are present, returning <c>null</c> only when every value is missing.
+    /// A missing bucket must not drop the buckets that were reported.
+    /// </summary>
+    protected static int? SumTokens(params int?[] values)
+    {
+        int? total = null;
+        foreach (var value in values)
+        {
+            total = total is null ? value : value is null ? total : total + value;
+        }
+
+        return total;
+    }
 }

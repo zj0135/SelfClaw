@@ -47,6 +47,10 @@ internal sealed class ClaudeStreamJsonParser : CliStreamParser
     // Captured from system/init; attached to the usage report.
     private string? _model;
 
+    // Usage of the most recent assistant message, which is one API call. The result's usage aggregates
+    // the whole main agent loop, so only this carries the context the next turn starts from.
+    private TurnUsage? _lastCallUsage;
+
     protected override IEnumerable<AgentStreamEvent> HandleObject(JsonElement root)
         => GetString(root, "type") switch
         {
@@ -153,6 +157,7 @@ internal sealed class ClaudeStreamJsonParser : CliStreamParser
             return Array.Empty<AgentStreamEvent>();
 
         var messageId = GetString(message, "id");
+        CaptureCallUsage(message);
         if (!message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
             return Array.Empty<AgentStreamEvent>();
 
@@ -219,6 +224,45 @@ internal sealed class ClaudeStreamJsonParser : CliStreamParser
         return new ToolCallStartedEvent(id, name, argumentsJson, MapToolKind(name));
     }
 
+    /// <summary>
+    /// Every assistant message carries the usage of the single API call that produced it. Keeping the
+    /// latest one separates the turn's context window from the result's main-loop totals.
+    /// </summary>
+    private void CaptureCallUsage(JsonElement message)
+    {
+        if (!message.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        var (input, uncachedInput, cacheRead, cacheWrite, output) = ReadUsage(usage);
+        _lastCallUsage = new TurnUsage(
+            InputTokens: input,
+            UncachedInputTokens: uncachedInput,
+            CachedInputTokens: cacheRead,
+            CacheWriteInputTokens: cacheWrite,
+            OutputTokens: output);
+    }
+
+    /// <summary>
+    /// Claude Code uses the Anthropic split: <c>input_tokens</c> excludes both cache buckets, so the
+    /// normalized total adds them back and the cache buckets stay visible on their own. Each bucket is
+    /// summed independently so a missing one cannot drop the others.
+    /// </summary>
+    private static (int? Input, int? UncachedInput, int? CachedInput, int? CacheWriteInput, int? Output) ReadUsage(
+        JsonElement usage)
+    {
+        var uncachedInput = GetInt(usage, "input_tokens");
+        var cacheRead = GetInt(usage, "cache_read_input_tokens");
+        var cacheWrite = GetInt(usage, "cache_creation_input_tokens");
+        return (
+            SumTokens(uncachedInput, cacheRead, cacheWrite),
+            uncachedInput,
+            cacheRead,
+            cacheWrite,
+            GetInt(usage, "output_tokens"));
+    }
+
     /// <summary>Handles a user message, surfacing any <c>tool_result</c> blocks as completions.</summary>
     private IEnumerable<AgentStreamEvent> HandleUser(JsonElement root)
     {
@@ -255,18 +299,21 @@ internal sealed class ClaudeStreamJsonParser : CliStreamParser
     {
         var events = new List<AgentStreamEvent>();
 
-        if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+        // Claude Code's result usage aggregates every API call of the turn's main agent loop, so it feeds
+        // the token totals. The context window comes from the last assistant message instead, and
+        // num_turns is the number of provider round-trips that produced those totals.
+        var hasUsage = root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object;
+        var cost = GetCostUsdMicros(root, "total_cost_usd");
+        if (hasUsage || cost is not null)
         {
-            // Claude Code uses the Anthropic split: input_tokens excludes both cache buckets, so the
-            // normalized total adds them back and the cache buckets stay visible on their own.
-            var uncachedInput = GetInt(usage, "input_tokens");
-            var cacheRead = GetInt(usage, "cache_read_input_tokens");
-            var cacheWrite = GetInt(usage, "cache_creation_input_tokens");
-            var output = GetInt(usage, "output_tokens");
-            var input = uncachedInput is null
-                ? null
-                : uncachedInput + (cacheRead ?? 0) + (cacheWrite ?? 0);
-            var cost = GetCostUsdMicros(root, "total_cost_usd");
+            var (input, uncachedInput, cacheRead, cacheWrite, output) = hasUsage
+                ? ReadUsage(usage)
+                : (null, null, null, null, null);
+            int? contextTokens = _lastCallUsage switch
+            {
+                { InputTokens: int lastInput } last => lastInput + (last.OutputTokens ?? 0),
+                _ => null
+            };
             events.Add(new UsageReportedEvent(new TurnUsage(
                 Model: _model,
                 InputTokens: input,
@@ -274,8 +321,8 @@ internal sealed class ClaudeStreamJsonParser : CliStreamParser
                 CachedInputTokens: cacheRead,
                 CacheWriteInputTokens: cacheWrite,
                 OutputTokens: output,
-                ProviderCalls: 1,
-                ContextTokens: input is int contextInput ? contextInput + (output ?? 0) : null,
+                ProviderCalls: GetInt(root, "num_turns") ?? 1,
+                ContextTokens: contextTokens,
                 CostUsdMicros: cost,
                 CostSource: cost is null ? TurnUsageCostSource.None : TurnUsageCostSource.ProviderReported)));
         }

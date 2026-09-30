@@ -4,8 +4,8 @@ namespace SelfClaw.Core.Runtime;
 
 /// <summary>
 /// Accumulates the usage observations reported for a single turn. Token counts are summed across
-/// provider calls, context and model come from the latest observation, and provider-reported cost
-/// wins over an estimate.
+/// provider calls; context and model come from the latest observation that carries them; costs are
+/// summed per source, and a provider-reported cost wins over the estimates for the same turn.
 /// </summary>
 public sealed class TurnUsageAccumulator
 {
@@ -19,8 +19,8 @@ public sealed class TurnUsageAccumulator
     private int _providerCalls;
     private int? _contextTokens;
     private int? _contextWindowTokens;
-    private long? _costUsdMicros;
-    private TurnUsageCostSource _costSource;
+    private long? _estimatedCostUsdMicros;
+    private long? _providerReportedCostUsdMicros;
     private string? _additionalCountsJson;
 
     public bool HasObservations { get; private set; }
@@ -30,7 +30,11 @@ public sealed class TurnUsageAccumulator
         ArgumentNullException.ThrowIfNull(usage);
 
         HasObservations = true;
-        _model ??= usage.Model;
+        if (usage.Model is not null)
+        {
+            _model = usage.Model;
+        }
+
         _inputTokens = Add(_inputTokens, usage.InputTokens);
         _cachedInputTokens = Add(_cachedInputTokens, usage.CachedInputTokens);
         _cacheWriteInputTokens = Add(_cacheWriteInputTokens, usage.CacheWriteInputTokens);
@@ -55,18 +59,15 @@ public sealed class TurnUsageAccumulator
         {
             if (usage.CostSource == TurnUsageCostSource.ProviderReported)
             {
-                _costUsdMicros = _costSource == TurnUsageCostSource.ProviderReported
-                    ? (_costUsdMicros ?? 0) + cost
-                    : cost;
-                _costSource = TurnUsageCostSource.ProviderReported;
+                _providerReportedCostUsdMicros = Add(_providerReportedCostUsdMicros, cost);
             }
-            else if (_costSource != TurnUsageCostSource.ProviderReported)
+            else
             {
-                _costUsdMicros = cost;
-                _costSource = TurnUsageCostSource.Estimated;
+                _estimatedCostUsdMicros = Add(_estimatedCostUsdMicros, cost);
             }
         }
 
+        // Provider-specific extra counts come from the latest observation that reported any.
         if (!string.IsNullOrEmpty(usage.AdditionalCountsJson))
         {
             _additionalCountsJson = usage.AdditionalCountsJson;
@@ -86,6 +87,11 @@ public sealed class TurnUsageAccumulator
         int? totalTokens = _totalTokens ?? (_inputTokens is int input && _outputTokens is int output
             ? input + output
             : null);
+        var (costUsdMicros, costSource) = _providerReportedCostUsdMicros is long providerReported
+            ? (providerReported, TurnUsageCostSource.ProviderReported)
+            : _estimatedCostUsdMicros is long estimated
+                ? (estimated, TurnUsageCostSource.Estimated)
+                : ((long?)null, TurnUsageCostSource.None);
 
         return new TurnUsage(
             _model,
@@ -99,11 +105,14 @@ public sealed class TurnUsageAccumulator
             _providerCalls,
             _contextTokens,
             _contextWindowTokens,
-            _costUsdMicros,
-            _costSource,
+            costUsdMicros,
+            costSource,
             _additionalCountsJson);
     }
 
     private static int? Add(int? left, int? right)
+        => left is null ? right : right is null ? left : left + right;
+
+    private static long? Add(long? left, long? right)
         => left is null ? right : right is null ? left : left + right;
 }

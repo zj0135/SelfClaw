@@ -125,9 +125,7 @@ internal sealed class OpenCodeJsonEventStreamParser : CliStreamParser
         var output = GetInt(usage, "output") ?? GetInt(usage, "output_tokens");
         var cacheRead = GetCacheTokens(usage, "read");
         var cacheWrite = GetCacheTokens(usage, "write");
-        var input = uncachedInput is null
-            ? null
-            : uncachedInput + (cacheRead ?? 0) + (cacheWrite ?? 0);
+        var input = SumTokens(uncachedInput, cacheRead, cacheWrite);
         var cost = GetCostUsdMicros(payload, "cost") ?? GetCostUsdMicros(root, "cost");
         if (input is null && output is null && cacheRead is null && cacheWrite is null && cost is null)
             return Array.Empty<AgentStreamEvent>();

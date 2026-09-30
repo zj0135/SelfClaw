@@ -144,8 +144,9 @@ internal sealed class CodexJsonEventStreamParser : CliStreamParser
         if (!root.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
             return Array.Empty<AgentStreamEvent>();
 
-        // Codex follows the OpenAI split: input_tokens already includes the cached subset.
-        var input = GetInt(usage, "input_tokens");
+        // Codex follows the OpenAI split: input_tokens already includes the cached subset, so the
+        // cached count is only a fallback when the inclusive count is missing.
+        var input = GetInt(usage, "input_tokens") ?? GetInt(usage, "cached_input_tokens");
         var output = GetInt(usage, "output_tokens");
         return new AgentStreamEvent[]
         {

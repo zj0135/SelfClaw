@@ -136,6 +136,28 @@ public sealed class CliAgentChatRuntimeTests
             .Which.Status.Should().Be(RunCompletionStatus.Succeeded);
     }
 
+    [Fact]
+    public async Task Claude_turn_converts_the_cumulative_session_cost_to_a_turn_delta()
+    {
+        var conversationId = Guid.NewGuid();
+        var session = new FakeProcessSession(
+            [
+                """{"type":"system","subtype":"init","session_id":"claude-session","model":"claude-sonnet"}""",
+                """{"type":"result","subtype":"success","is_error":false,"num_turns":2,"total_cost_usd":0.0100,"usage":{"input_tokens":1,"output_tokens":1}}""",
+            ]);
+        var (runtime, _, store) = CreateRuntime(session);
+        store.Sessions[(conversationId, CliAgentKind.Claude)] = "claude-session";
+        store.CostBaselines[(conversationId, CliAgentKind.Claude)] = 6_000;
+        var request = CreateRequest(conversationId, CliAgentKind.Claude, model: null, reasoningEffort: null);
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(request));
+
+        var usage = events.OfType<UsageReportedEvent>().Should().ContainSingle().Subject.Usage;
+        usage.CostUsdMicros.Should().Be(4_000);
+        usage.CostSource.Should().Be(TurnUsageCostSource.ProviderReported);
+        store.CostBaselines[(conversationId, CliAgentKind.Claude)].Should().Be(10_000);
+    }
+
     private static (CliAgentChatRuntime Runtime, FakeProcessHost Host, FakeSessionStore Store) CreateRuntime(
         FakeProcessSession session)
     {
@@ -275,6 +297,8 @@ public sealed class CliAgentChatRuntimeTests
     {
         public Dictionary<(Guid ConversationId, CliAgentKind Kind), string> Sessions { get; } = [];
 
+        public Dictionary<(Guid ConversationId, CliAgentKind Kind), long> CostBaselines { get; } = [];
+
         public Task<string?> GetSessionIdAsync(
             Guid conversationId,
             CliAgentKind agentKind,
@@ -292,8 +316,40 @@ public sealed class CliAgentChatRuntimeTests
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Sessions[(conversationId, agentKind)] = sessionId;
+            var key = (conversationId, agentKind);
+            if (Sessions.TryGetValue(key, out var previous) && !string.Equals(previous, sessionId, StringComparison.Ordinal))
+            {
+                CostBaselines.Remove(key);
+            }
+
+            Sessions[key] = sessionId;
             return Task.CompletedTask;
+        }
+
+        public Task<long> TrackCumulativeCostAsync(
+            Guid conversationId,
+            CliAgentKind agentKind,
+            string sessionId,
+            long cumulativeCostUsdMicros,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (cumulativeCostUsdMicros == 0)
+            {
+                return Task.FromResult(0L);
+            }
+
+            var key = (conversationId, agentKind);
+            var baseline = Sessions.TryGetValue(key, out var stored) &&
+                           string.Equals(stored, sessionId, StringComparison.Ordinal)
+                ? CostBaselines.GetValueOrDefault(key)
+                : 0;
+            var delta = cumulativeCostUsdMicros >= baseline
+                ? cumulativeCostUsdMicros - baseline
+                : cumulativeCostUsdMicros;
+            Sessions[key] = sessionId;
+            CostBaselines[key] = cumulativeCostUsdMicros;
+            return Task.FromResult(delta);
         }
     }
 }

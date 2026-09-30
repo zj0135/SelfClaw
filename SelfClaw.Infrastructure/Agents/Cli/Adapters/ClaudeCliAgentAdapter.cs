@@ -19,7 +19,13 @@ internal sealed class ClaudeCliAgentAdapter : ICliAgentAdapter
 
         var arguments = BuildArguments(preparation);
         var input = BuildInput(preparation.Prompt);
-        return new PreparedCliTurn("claude", arguments, input, new ClaudeStreamJsonParser());
+        // Claude Code's total_cost_usd is the running session total, so the runtime records the delta.
+        return new PreparedCliTurn(
+            "claude",
+            arguments,
+            input,
+            new ClaudeStreamJsonParser(),
+            ReportsCumulativeSessionCost: true);
     }
 
     private static IReadOnlyList<string> BuildArguments(CliTurnPreparation preparation)

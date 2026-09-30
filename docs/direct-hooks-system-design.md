@@ -528,7 +528,7 @@ manifest 声明了某事件的 hook 却未声明对应权限 → 非法（与 `u
 | `status` | `succeeded` / `failed` / `truncated` / `blocked` / `cancelled` |
 | `finalText` | ≤ 64 KiB；无则 `null` |
 | `errorMessage` | 无则 `null` |
-| `usage` | `{ inputTokens, outputTokens }`，未知为 `null` |
+| `usage` | `{ inputTokens, outputTokens, cachedInputTokens, cacheWriteInputTokens, reasoningTokens, contextTokens, contextWindowTokens, costUsd, costSource }`，未知字段为 `null`；字段口径见 `docs/usage-tracking-design.md` |
 | `toolCallCount` | 本回合 `DirectToolInvoker` 处理的调用数 |
 | `durationMs` | 从 `SetupTurnAsync` 开始计 |
 

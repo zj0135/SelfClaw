@@ -691,7 +691,18 @@ parent/child 通信只使用 terminal completion envelope，不传输 token delt
   },
   "usage": {
     "inputTokens": 1200,
-    "outputTokens": 340
+    "uncachedInputTokens": 1000,
+    "cachedInputTokens": 200,
+    "cacheWriteInputTokens": null,
+    "outputTokens": 340,
+    "reasoningTokens": 0,
+    "totalTokens": 1540,
+    "providerCalls": 2,
+    "contextTokens": 1300,
+    "contextWindowTokens": 200000,
+    "costUsdMicros": 42000,
+    "costSource": "ProviderReported",
+    "additionalCountsJson": null
   },
   "timing": {
     "queuedAtUtc": "...",

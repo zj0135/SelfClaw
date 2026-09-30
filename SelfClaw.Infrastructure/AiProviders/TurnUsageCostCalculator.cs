@@ -4,8 +4,8 @@ namespace SelfClaw.Infrastructure.AiProviders;
 
 /// <summary>
 /// Estimates a turn's cost from its normalized usage and the model's USD per-million-token prices.
-/// Missing cache prices fall back to the plain input price; without input and output prices no
-/// estimate is possible, so null is returned instead of a misleading zero.
+/// Missing cache prices fall back to the plain input price. A partially priced model returns
+/// <c>null</c> rather than an estimate that silently bills the unpriced side at zero.
 /// </summary>
 internal static class TurnUsageCostCalculator
 {
@@ -15,16 +15,14 @@ internal static class TurnUsageCostCalculator
     internal static long? ComputeCostUsdMicros(TurnUsage usage, AiModelConfiguration? configuration)
     {
         ArgumentNullException.ThrowIfNull(usage);
-        if (configuration is null ||
-            (configuration.PriceInPerMTok is null && configuration.PriceOutPerMTok is null))
+        if (configuration?.PriceInPerMTok is not decimal inputPrice ||
+            configuration.PriceOutPerMTok is not decimal outputPrice)
         {
             return null;
         }
 
-        var inputPrice = configuration.PriceInPerMTok ?? 0m;
-        var outputPrice = configuration.PriceOutPerMTok ?? 0m;
-        var cacheReadPrice = configuration.PriceCacheReadPerMTok ?? configuration.PriceInPerMTok ?? 0m;
-        var cacheWritePrice = configuration.PriceCacheWritePerMTok ?? configuration.PriceInPerMTok ?? 0m;
+        var cacheReadPrice = configuration.PriceCacheReadPerMTok ?? inputPrice;
+        var cacheWritePrice = configuration.PriceCacheWritePerMTok ?? inputPrice;
 
         var usd = ((usage.UncachedInputTokens ?? 0) / TokensPerMillion * inputPrice)
             + ((usage.CachedInputTokens ?? 0) / TokensPerMillion * cacheReadPrice)
