@@ -127,7 +127,7 @@ public sealed class DirectToolInvokerHookTests
         var failed = result.Should().BeOfType<DirectToolResult>().Subject;
         failed.Status.Should().Be(ToolCallStatus.Failed);
         failed.Summary.Should().Be("tool exploded");
-        failed.Detail.Should().Contain("tool exploded");
+        failed.Detail.Should().Be("tool exploded", "a fault's display content must not carry a stack trace into later turns");
         failed.Content.GetProperty("message").GetString().Should().Be("tool exploded");
         failed.Content.GetProperty("type").GetString().Should().Be("InvalidOperationException");
         failed.HookFeedback.Should().HaveCount(2);

@@ -190,7 +190,8 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     {
         if (content.Exception is not null)
         {
-            return (ToolCallStatus.Failed, content.Exception.Message, content.Exception.ToString());
+            // Replayed on later turns, so only the message is kept; the stack trace would be prompt noise.
+            return (ToolCallStatus.Failed, content.Exception.Message, content.Exception.Message);
         }
 
         return content.Result switch

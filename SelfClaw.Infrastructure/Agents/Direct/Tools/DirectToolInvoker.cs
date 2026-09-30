@@ -112,7 +112,9 @@ internal sealed class DirectToolInvoker
                 {
                     // A faulting tool is a failure the model must see, not a turn failure: the real error
                     // reaches it as a result, so the model can correct itself. Fault metadata stays in the
-                    // hook outcome, and the stack trace stays display-only in Detail.
+                    // hook outcome. Detail carries the message rather than the stack trace because it is
+                    // also persisted as the tool result and replayed on later turns, where a stack trace
+                    // is permanent prompt noise that leaks local paths.
                     fault = exception;
                     result = new DirectToolResult(
                         ToolCallStatus.Failed,
@@ -122,7 +124,7 @@ internal sealed class DirectToolInvoker
                             type = exception.GetType().Name,
                             message = exception.Message
                         }),
-                        exception.ToString());
+                        exception.Message);
                 }
 
                 result ??= raw as DirectToolResult;
