@@ -365,6 +365,12 @@ public sealed partial class MainWindow : Window
                     Process.Start(new ProcessStartInfo(command.Value) { UseShellExecute = true });
                 }
                 break;
+            case WebViewHostCommandKind.OpenInExplorer:
+                if (!string.IsNullOrWhiteSpace(command.Value))
+                {
+                    Process.Start(new ProcessStartInfo(command.Value) { UseShellExecute = true });
+                }
+                break;
             case WebViewHostCommandKind.StartWindowDrag:
                 StartWindowDrag();
                 break;

@@ -240,9 +240,32 @@ internal sealed class WorkspaceSelectionBridge
             throw new ArgumentException("workspaceRootId is required.");
         }
 
-        return _selectionController.WorkspaceRoots.FirstOrDefault(candidate => candidate.Id == parsedId)
-            ?? throw new InvalidOperationException("该工作目录已不在工作区列表中。");
+        return FindWorkspaceRoot(parsedId);
     }
+
+    /// <summary>
+    /// 按 id 解析已登记工作区根的绝对路径。和目录树一样，根只在宿主状态里查，
+    /// 不接受前端传路径，可打开的范围因此保持在用户已经用过的根之内。
+    /// </summary>
+    public string ResolveWorkspaceRootPath(Guid workspaceRootId)
+    {
+        if (workspaceRootId == Guid.Empty)
+        {
+            throw new ArgumentException("workspaceRootId is required.");
+        }
+
+        var root = FindWorkspaceRoot(workspaceRootId);
+        if (!Directory.Exists(root.RootPath))
+        {
+            throw new DirectoryNotFoundException($"工作目录已不存在：{root.RootPath}");
+        }
+
+        return root.RootPath;
+    }
+
+    private WorkspaceRoot FindWorkspaceRoot(Guid workspaceRootId)
+        => _selectionController.WorkspaceRoots.FirstOrDefault(candidate => candidate.Id == workspaceRootId)
+            ?? throw new InvalidOperationException("该工作目录已不在工作区列表中。");
 
     // ListFilesAsync returns paths relative to the root; the leaf segment is the display name and the
     // separator is normalised so the frontend can key rows on it and send it straight back.

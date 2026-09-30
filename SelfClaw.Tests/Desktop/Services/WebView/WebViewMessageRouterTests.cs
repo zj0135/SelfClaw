@@ -138,6 +138,56 @@ public sealed class WebViewMessageRouterTests
         context.PostedJson.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task RouteAsync_resolves_open_in_explorer_to_the_registered_workspace_root()
+    {
+        var directory = Directory.CreateTempSubdirectory("selfclaw-open-in-explorer").FullName;
+        var workspaceRoot = new WorkspaceRoot(Guid.NewGuid(), "Repo", directory, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        try
+        {
+            using var context = new RouterTestContext([workspaceRoot]);
+
+            var command = await context.RouteAsync(
+                $$"""{"type":"open-in-explorer","requestId":"open-1","workspaceRootId":"{{workspaceRoot.Id:D}}"}""");
+
+            command.Should().Be(new WebViewHostCommand(WebViewHostCommandKind.OpenInExplorer, directory));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Open_in_explorer_fails_for_a_root_that_is_not_registered()
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.RouteAsync(
+            $$"""{"type":"open-in-explorer","requestId":"open-1","workspaceRootId":"{{Guid.NewGuid():D}}"}""");
+
+        command.Should().BeNull();
+        using var response = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        response.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        response.RootElement.GetProperty("error").GetString().Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task Open_in_explorer_fails_when_the_registered_root_directory_is_gone()
+    {
+        var missingPath = Path.Combine(Path.GetTempPath(), "selfclaw-missing-" + Guid.NewGuid().ToString("N"));
+        var workspaceRoot = new WorkspaceRoot(Guid.NewGuid(), "Repo", missingPath, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        using var context = new RouterTestContext([workspaceRoot]);
+
+        var command = await context.RouteAsync(
+            $$"""{"type":"open-in-explorer","requestId":"open-1","workspaceRootId":"{{workspaceRoot.Id:D}}"}""");
+
+        command.Should().BeNull();
+        using var response = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        response.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        response.RootElement.GetProperty("error").GetString().Should().Contain("工作目录已不存在");
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
@@ -230,7 +280,7 @@ public sealed class WebViewMessageRouterTests
         private readonly ConversationSessionCoordinator _sessions;
         private readonly ConversationTurnEngine _turnEngine;
 
-        public RouterTestContext()
+        public RouterTestContext(IReadOnlyList<WorkspaceRoot>? workspaceRoots = null)
         {
             _storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
             var storagePaths = StoragePathDefaults.Create(
@@ -239,6 +289,10 @@ public sealed class WebViewMessageRouterTests
                 Path.Combine(_storageRoot, "secrets"));
             var settingsStore = new DesktopSettingsJsonStore(storagePaths);
             ConversationRepository = new RecordingConversationRepository();
+            if (workspaceRoots is not null)
+            {
+                ConversationRepository.WorkspaceRoots.AddRange(workspaceRoots);
+            }
             var approvalHandler = new DesktopToolApprovalHandler();
             _activityCoordinator = new AgentActivityCoordinator(
                 approvalHandler,
@@ -483,6 +537,8 @@ public sealed class WebViewMessageRouterTests
     {
         public List<Guid> DeletedWorkspaceRootIds { get; } = [];
 
+        public List<WorkspaceRoot> WorkspaceRoots { get; } = [];
+
         public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task<IReadOnlyList<ConversationRecord>> ListConversationsAsync(CancellationToken cancellationToken = default)
@@ -522,7 +578,7 @@ public sealed class WebViewMessageRouterTests
             => Task.FromResult(record);
 
         public Task<IReadOnlyList<WorkspaceRoot>> ListWorkspaceRootsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<WorkspaceRoot>>([]);
+            => Task.FromResult<IReadOnlyList<WorkspaceRoot>>(WorkspaceRoots.ToArray());
 
         public Task<WorkspaceRoot> UpsertWorkspaceRootAsync(
             WorkspaceRoot workspaceRoot,

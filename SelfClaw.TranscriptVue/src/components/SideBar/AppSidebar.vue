@@ -13,12 +13,7 @@ import {
 	File,
 	Pencil,
 	FolderCog,
-	BookOpen,
-	MessageSquare,
-	GitBranch,
-	Download,
 	Eraser,
-	Pin,
 	Trash2,
 	Settings,
 	PanelLeftClose,
@@ -113,23 +108,13 @@ const contextMenuItems = computed(() => {
 	}
 
 	const target = contextMenu.value.target;
-	return sidebarMenuItems.filter((item) => {
-		if (item.type === 'divider') {
-			return true;
-		}
+	const items = target.kind === 'folder' ? folderMenuItems : conversationMenuItems;
+	// 「工作目录」与「在资源管理器打开」都指向会话的工作区根，没有根就不显示。
+	if (target.node?.workspaceRootId) {
+		return items;
+	}
 
-		// 清空会话列表只对项目分组有意义。
-		if (item.id === 'clear-conversations') {
-			return target.kind === 'folder';
-		}
-
-		// 没有工作区根的会话（「对话」分组）没有工作目录可看。
-		if (item.id === 'working-directory') {
-			return Boolean(target.node?.workspaceRootId);
-		}
-
-		return true;
-	});
+	return items.filter((item) => item.id !== 'working-directory' && item.id !== 'open-in-explorer');
 });
 
 function toggleGroup(groupId) {
@@ -218,7 +203,7 @@ function openFolderMenu(event, folder) {
 
 function openContextMenu(event, target) {
 	const menuWidth = 208;
-	const menuHeight = target.kind === 'folder' ? 376 : 342;
+	const menuHeight = 160;
 	const padding = 8;
 	const viewportWidth = window.innerWidth || document.documentElement.clientWidth || menuWidth;
 	const viewportHeight = window.innerHeight || document.documentElement.clientHeight || menuHeight;
@@ -248,23 +233,21 @@ function onContextMenuItem(item) {
 		return;
 	}
 
-	if (item.id === 'delete') {
-		if (target.kind === 'conversation') {
-			emit('action', {
-				id: 'delete-conversation',
-				conversationId: target.node.id,
-				isManagedWorktree: Boolean(target.node.isManagedWorktree),
-			});
-		} else if (target.node.workspaceRootId) {
-			emit('action', {
-				id: 'delete-workspace-root',
-				workspaceRootId: target.node.workspaceRootId,
-			});
-		}
+	if (item.id === 'delete' && target.kind === 'conversation') {
+		emit('action', {
+			id: 'delete-conversation',
+			conversationId: target.node.id,
+			isManagedWorktree: Boolean(target.node.isManagedWorktree),
+		});
 	} else if (item.id === 'clear-conversations' && target.kind === 'folder') {
 		emit('action', {
 			id: 'clear-conversations',
 			conversationIds: Array.isArray(target.node.children) ? target.node.children.map((child) => child.id).filter(Boolean) : [],
+		});
+	} else if (item.id === 'open-in-explorer' && target.node.workspaceRootId) {
+		emit('action', {
+			id: 'open-in-explorer',
+			workspaceRootId: target.node.workspaceRootId,
 		});
 	} else if (item.id === 'working-directory') {
 		openWorkingDirectory(target.node);
@@ -317,12 +300,7 @@ const contextIconMap = {
 	folder: FolderOpen,
 	rename: Pencil,
 	workingDirectory: FolderCog,
-	book: BookOpen,
-	message: MessageSquare,
-	git: GitBranch,
-	export: Download,
 	clear: Eraser,
-	pin: Pin,
 	trash: Trash2,
 };
 
@@ -364,19 +342,20 @@ function formatBytes(value) {
 	return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unitIndex]}`;
 }
 
-const sidebarMenuItems = [
-	{ id: 'open-project', label: '打开项目', icon: 'folder' },
-	{ id: 'rename', label: '重命名', icon: 'rename' },
+// 右键菜单按节点类型各有一份：文件夹只能清空会话列表，会话只能删除自身。
+const folderMenuItems = [
 	{ id: 'working-directory', label: '工作目录', icon: 'workingDirectory' },
+	{ id: 'rename', label: '重命名', icon: 'rename' },
+	{ id: 'open-in-explorer', label: '在资源管理器打开', icon: 'folder' },
 	{ id: 'divider-a', type: 'divider' },
-	{ id: 'project-docs', label: '项目档案', icon: 'book' },
-	{ id: 'chat-channel', label: '聊天频道', icon: 'message' },
-	{ id: 'git', label: 'Git', icon: 'git' },
-	{ id: 'divider-b', type: 'divider' },
-	{ id: 'export-json', label: '导出项目为 JSON', icon: 'export' },
 	{ id: 'clear-conversations', label: '清空会话列表', icon: 'clear', danger: true },
-	{ id: 'pin', label: '置顶', icon: 'pin' },
-	{ id: 'divider-c', type: 'divider' },
+];
+
+const conversationMenuItems = [
+	{ id: 'working-directory', label: '工作目录', icon: 'workingDirectory' },
+	{ id: 'rename', label: '重命名', icon: 'rename' },
+	{ id: 'open-in-explorer', label: '在资源管理器打开', icon: 'folder' },
+	{ id: 'divider-a', type: 'divider' },
 	{ id: 'delete', label: '删除', icon: 'trash', danger: true },
 ];
 

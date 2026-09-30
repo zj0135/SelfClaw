@@ -312,6 +312,10 @@ internal sealed class WebViewMessageRouter : IDisposable
                 return null;
             case "open-link":
                 return new WebViewHostCommand(WebViewHostCommandKind.OpenLink, ReadOptionalString(payload, "href"));
+            case "open-in-explorer":
+                return new WebViewHostCommand(
+                    WebViewHostCommandKind.OpenInExplorer,
+                    _workspaceSelectionBridge.ResolveWorkspaceRootPath(ReadRequiredGuid(payload, "workspaceRootId")));
             case "window-drag":
                 return new WebViewHostCommand(WebViewHostCommandKind.StartWindowDrag);
             // 缩放热区在网页四周（WebView2 铺满整个窗口，父窗口拿不到边缘的鼠标消息）。

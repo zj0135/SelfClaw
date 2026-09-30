@@ -2,6 +2,7 @@
 import { computed, markRaw, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import AppSidebar from './components/SideBar/AppSidebar.vue';
 import AppToast from './components/common/AppToast.vue';
+import AppConfirmDialog from './components/common/AppConfirmDialog.vue';
 import PluginLauncher from './components/Plugins/PluginLauncher.vue';
 import PluginPanelHost from './components/Plugins/PluginPanelHost.vue';
 import WindowControls from './components/Chat/WindowControls.vue';
@@ -282,6 +283,7 @@ onUnmounted(() => {
 				<img :src="imagePreview.src" :alt="imagePreview.alt || 'Preview image'" />
 			</div>
 		</div>
+		<AppConfirmDialog />
 		<AppToast />
 		<!-- 最大化时窗口贴满工作区，边缘不该再能拖，所以整组热区连同 DOM 一起摘掉。 -->
 		<template v-if="!windowChrome.isMaximized">

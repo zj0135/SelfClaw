@@ -51,4 +51,12 @@ const { toastState } = useToast();
 	transform: translateX(-50%) translateY(0);
 	opacity: 1;
 }
+
+@media (prefers-reduced-motion: reduce) {
+
+	/* settings-console 的降级规则只覆盖 .sc-root 的后代，toast 自身的过渡要单独关掉。 */
+	.app-toast {
+		transition-duration: 0.001ms;
+	}
+}
 </style>

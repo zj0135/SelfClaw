@@ -2,11 +2,13 @@ import { computed, nextTick, ref } from 'vue';
 import { useHostBridge, isSuperseded } from './hostBridge.js';
 import { useTranscriptBridge } from './transcriptBridge.js';
 import { useToast } from './useToast.js';
+import { useConfirm } from './useConfirm.js';
 
 export function useConversationNavigation(currentViewId, chatViewRef, openPlugins) {
 	const { on, request } = useHostBridge();
 	const transcript = useTranscriptBridge();
 	const { showToast } = useToast();
+	const { confirm } = useConfirm();
 	const sidebarConversations = ref([]);
 	const selectedConversationId = ref(null);
 	transcript.on((payload) => {
@@ -119,8 +121,20 @@ async function onSidebarAction(action) {
 			if (action?.conversationId) {
 				let removeManagedWorktree = false;
 				if (action.isManagedWorktree) {
-					if (!window.confirm('确认删除该会话？工作树可以继续保留。')) break;
-					removeManagedWorktree = window.confirm('是否同时安全移除工作树？仅已合并且无未提交更改时可移除。');
+					const confirmed = await confirm({
+						title: '删除会话',
+						message: '确认删除该会话？工作树可以继续保留。',
+						confirmText: '删除',
+						danger: true,
+					});
+					if (!confirmed) break;
+
+					removeManagedWorktree = await confirm({
+						title: '移除工作树',
+						message: '是否同时安全移除工作树？仅已合并且无未提交更改时可移除。',
+						confirmText: '移除',
+						danger: true,
+					});
 				}
 
 				await request('delete-conversation', {
@@ -134,9 +148,9 @@ async function onSidebarAction(action) {
 				await request('clear-conversations', { conversationIds: action.conversationIds });
 			}
 			break;
-		case 'delete-workspace-root':
+		case 'open-in-explorer':
 			if (action?.workspaceRootId) {
-				await request('delete-workspace-root', { workspaceRootId: action.workspaceRootId });
+				await request('open-in-explorer', { workspaceRootId: action.workspaceRootId });
 			}
 			break;
 		default:

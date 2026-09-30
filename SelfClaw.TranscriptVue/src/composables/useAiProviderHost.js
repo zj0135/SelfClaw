@@ -1,5 +1,6 @@
 import { onMounted, reactive, ref } from 'vue';
 import { useHostBridge, isSuperseded } from './hostBridge.js';
+import { useConfirm } from './useConfirm.js';
 
 export function formatTokens(value) {
 	if (typeof value === 'string' && /^(?:\d+(?:\.\d+)?)(?:K|M)$/.test(value)) return value;
@@ -33,6 +34,7 @@ export function useAiProviderHost(options) {
 	} = options;
 
 	const { request, requestLatest, post } = useHostBridge();
+	const { confirm } = useConfirm();
 
 	const apiKeyInput = ref('');
 	const apiKeyDirty = ref(false);
@@ -191,7 +193,13 @@ export function useAiProviderHost(options) {
 
 	async function deleteModel(model) {
 		const provider = activeProvider.value;
-		if (!provider?.connectionId || !model?.profileId || !window.confirm(`删除模型 ${model.name}？`)) return;
+		if (!provider?.connectionId || !model?.profileId) return;
+		if (!(await confirm({
+			title: '删除模型',
+			message: `删除模型 ${model.name}？`,
+			confirmText: '删除',
+			danger: true,
+		}))) return;
 
 		pendingModelIds.add(model.profileId);
 		try {

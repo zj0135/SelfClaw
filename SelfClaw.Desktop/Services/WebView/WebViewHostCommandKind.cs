@@ -3,6 +3,12 @@ namespace SelfClaw.Desktop.Services.WebView;
 internal enum WebViewHostCommandKind
 {
     OpenLink,
+
+    /// <summary>
+    /// 在资源管理器里打开一个工作区根。Value 是宿主按 id 校验过的绝对路径，
+    /// 前端不能直接指定路径。
+    /// </summary>
+    OpenInExplorer,
     StartWindowDrag,
     StartWindowResize,
     MinimizeWindow,

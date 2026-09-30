@@ -1,10 +1,12 @@
 import { computed, onMounted, ref } from 'vue';
 import { useHostBridge, isSuperseded } from './hostBridge.js';
 import { useToast } from './useToast.js';
+import { useConfirm } from './useConfirm.js';
 
 export function useModelManagement() {
 	const { request, requestLatest } = useHostBridge();
 	const { showToast } = useToast();
+	const { confirm } = useConfirm();
 	const models = ref([]);
 	const search = ref('');
 	const loading = ref(false);
@@ -38,7 +40,14 @@ export function useModelManagement() {
 	}
 
 	async function remove(model) {
-		if (deleting.value || !window.confirm(`删除 ${model.model} 的共享配置？关联模型将恢复提供商参数。`)) return;
+		if (deleting.value) return;
+		if (!(await confirm({
+			title: '删除共享配置',
+			message: `删除 ${model.model} 的共享配置？关联模型将恢复提供商参数。`,
+			confirmText: '删除',
+			danger: true,
+		}))) return;
+
 		deleting.value = model.model;
 		try {
 			await request('ai-providers/delete-model-configuration', { model: model.model });

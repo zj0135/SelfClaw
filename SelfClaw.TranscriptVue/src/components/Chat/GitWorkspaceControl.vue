@@ -14,6 +14,7 @@ import {
 	Trash2,
 	Waypoints,
 } from 'lucide-vue-next';
+import { useConfirm } from '../../composables/useConfirm.js';
 
 const props = defineProps({
 	state: { type: Object, default: null },
@@ -22,6 +23,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['action']);
+const { confirm } = useConfirm();
 const isOpen = ref(false);
 const activeTab = ref('branches');
 const branchName = ref('');
@@ -51,14 +53,26 @@ function switchBranch(branch) {
 	emit('action', { type: 'switch-branch', branchName: branch.name });
 }
 
-function deleteBranch(branch) {
+async function deleteBranch(branch) {
 	if (branch.isCurrent || branch.checkoutPath || props.loading) return;
-	if (!window.confirm(`确认安全删除本地分支“${branch.name}”？未合并分支不会被删除。`)) return;
+	if (!(await confirm({
+		title: '删除分支',
+		message: `确认安全删除本地分支“${branch.name}”？未合并分支不会被删除。`,
+		confirmText: '删除',
+		danger: true,
+	}))) return;
+
 	emit('action', { type: 'delete-branch', branchName: branch.name });
 }
 
-function mergeWorktree() {
-	if (props.loading || !window.confirm(`确认将“${branchLabel.value}”合并到“${props.state?.baseBranchName}”？`)) return;
+async function mergeWorktree() {
+	if (props.loading) return;
+	if (!(await confirm({
+		title: '合并分支',
+		message: `确认将“${branchLabel.value}”合并到“${props.state?.baseBranchName}”？`,
+		confirmText: '合并',
+	}))) return;
+
 	emit('action', { type: 'merge' });
 }
 
@@ -68,17 +82,29 @@ function abortMerge() {
 }
 
 // Normal path: refuses when the task branch is unmerged or the worktree is dirty.
-function removeWorktree(worktree) {
+async function removeWorktree(worktree) {
 	if (props.loading) return;
-	if (!window.confirm(`确认删除工作树“${worktree.branchName || 'detached HEAD'}”？\n任务分支必须已合并到基础分支。`)) return;
+	if (!(await confirm({
+		title: '删除工作树',
+		message: `确认删除工作树“${worktree.branchName || 'detached HEAD'}”？\n任务分支必须已合并到基础分支。`,
+		confirmText: '删除',
+		danger: true,
+	}))) return;
+
 	emit('action', { type: 'remove-worktree', workspaceRootPath: worktree.path });
 }
 
 // Escape path for worktrees left behind by an earlier defect (e.g. a mojibake task branch name
 // that Git can no longer resolve). Discards local changes.
-function forceRemoveWorktree(worktree) {
+async function forceRemoveWorktree(worktree) {
 	if (props.loading) return;
-	if (!window.confirm(`强制清理工作树“${worktree.branchName || 'detached HEAD'}”？\n将丢弃该工作树中的未提交更改，仅用于无法正常删除的场景。`)) return;
+	if (!(await confirm({
+		title: '强制清理工作树',
+		message: `强制清理工作树“${worktree.branchName || 'detached HEAD'}”？\n将丢弃该工作树中的未提交更改，仅用于无法正常删除的场景。`,
+		confirmText: '强制清理',
+		danger: true,
+	}))) return;
+
 	emit('action', { type: 'force-remove-worktree', workspaceRootPath: worktree.path });
 }
 
