@@ -3,13 +3,14 @@ using System.ClientModel.Primitives;
 namespace SelfClaw.Infrastructure.AiProviders.OpenAi;
 
 /// <summary>
-/// Some OpenAI-compatible providers stream tool-call deltas with an empty or missing
-/// <c>type</c> field. The OpenAI SDK rejects that while deserializing the SSE frame
-/// (<c>Unknown ChatToolCallKind value</c>), which aborts the whole turn before
-/// Microsoft.Extensions.AI sees the update. This policy rewrites those deltas to
-/// <c>"type":"function"</c> as the response body streams past.
+/// OpenAI-compatible providers stream fields the OpenAI SDK and Microsoft.Extensions.AI either
+/// reject or ignore. An empty or missing <c>tool_calls[].type</c> is rejected while deserializing
+/// the SSE frame (<c>Unknown ChatToolCallKind value</c>), and reasoning text is surfaced as
+/// <c>reasoning</c> / <c>reasoning_text</c> / <c>reasoning_details</c> where M.E.AI only reads
+/// <c>reasoning_content</c>, which silently drops every thinking delta. This policy normalizes the
+/// response body as it streams past. See <see cref="OpenAiStreamNormalizingStream"/>.
 /// </summary>
-internal sealed class OpenAiToolCallTypeNormalizingPolicy : PipelinePolicy
+internal sealed class OpenAiStreamNormalizingPolicy : PipelinePolicy
 {
     public override void Process(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
         => ProcessAsync(message, pipeline, currentIndex).AsTask().GetAwaiter().GetResult();
@@ -33,6 +34,6 @@ internal sealed class OpenAiToolCallTypeNormalizingPolicy : PipelinePolicy
             return;
         }
 
-        response.ContentStream = new OpenAiToolCallTypeNormalizingStream(contentStream);
+        response.ContentStream = new OpenAiStreamNormalizingStream(contentStream);
     }
 }

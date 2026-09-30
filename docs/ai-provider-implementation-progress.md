@@ -709,3 +709,43 @@ T19 的 composer Direct 模型选择依赖"当前 Agent 的 front matter 为 dir
 - 全量测试：180 个通过，0 失败；解决方案构建 0 警告、0 错误。
 - TranscriptVue production build 通过。
 - 待实机核对（并入 T19）：切到"提供商"选模型发送一轮、重启后模式与模型恢复、切回"本地 CLI"后 CLI 回合不受影响。
+
+## OpenAI 兼容流的推理字段归一化（2026-09-30）
+
+状态：已完成（自动化）
+完成日期：2026-09-30
+
+### 背景
+
+OpenAI 兼容网关返回思考内容时使用的字段并不统一。Microsoft.Extensions.AI 的
+`OpenAIChatClient` 只读取 `choices[0].delta.reasoning_content`，因此返回
+`reasoning` / `reasoning_text` / `reasoning_details` 的端点（Cline 网关的
+`cline-pass/deepseek-v4.1-flash` 即为 `reasoning` + `reasoning_details`）整段思考被静默丢弃：
+请求确实开启了推理，模型也确实在流式输出思考，但 Direct 回合收不到任何
+`TextReasoningContent`，转录中的 think 卡片不渲染。
+
+### 新增内容
+
+- `OpenAiToolCallTypeNormalizingPolicy` / `OpenAiToolCallTypeNormalizingStream` 更名为
+  `OpenAiStreamNormalizingPolicy` / `OpenAiStreamNormalizingStream`，成为 OpenAI 兼容流的单点归一化层。
+- 归一化层在流式 `data:` 帧中补写 `reasoning_content`：`reasoning`、`reasoning_text` 优先取首个非空字符串；
+  仅当两者都缺失时，才拼接 `reasoning_details[]` 的 `text` / `summary`（覆盖 OpenRouter 风格端点）。
+- 归一化仅作用于 `delta` / `message` 容器对象；已存在非空 `reasoning_content` 的帧原样透传，避免重复思考块。
+
+### 关键行为
+
+- 请求侧不变：`thinking.type`（OpenAICompatible 默认）与 `reasoning_effort` 的既有映射保持原样；
+  该问题只在响应解析侧。
+- 归一化后由 M.E.AI 继续产出 `TextReasoningContent`，`DirectEventTranslator` 才可能上抛
+  `AssistantThinkingDeltaEvent`。它同时补齐了 T13 关注的 DeepSeek 系推理字段。
+- 与既有 `tool_calls[].type` 补写共用同一条 SSE 重写路径，非 `data:` 行与非事件流响应体不受影响。
+
+### 验证证据
+
+- 新增 4 个流归一化测试（别名补写、`reasoning_details` 拼接、已有 `reasoning_content` 不重复、非思考帧原样透传）。
+- 新增 1 个适配器端到端测试：`reasoning` 帧经适配器后产出唯一的 `TextReasoningContent`。
+- 用真实抓取的 Cline SSE（612 个 `reasoning` 帧）跑通适配器：思考 2091 字符 + 正文 89 字符。
+- 存量数据核对：stepFun `step-5-preview`（同一 OpenAI Chat Completions 路径）的 Direct 回合在
+  `message_segments` 中已有 `kind = 1` 思考段，说明返回 `reasoning_content` 的端点一直正常；本次修复只补齐别名字段。
+- 适配器回归测试改为 theory，同时覆盖 `reasoning_content` 与 `reasoning` + `reasoning_details` 两种字段风格。
+- 全量测试：`Infrastructure.AiProviders` 与 `Infrastructure.Agents.Direct` 451 个通过，0 失败。

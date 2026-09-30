@@ -108,9 +108,9 @@ internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
             Endpoint = connection.Endpoint,
             Transport = new HttpClientPipelineTransport(httpClient)
         };
-        // Chat Completions providers sometimes omit the streamed tool-call "type"; patch it
-        // before the SDK's strict deserializer can reject the whole turn.
-        options.AddPolicy(new OpenAiToolCallTypeNormalizingPolicy(), PipelinePosition.PerCall);
+        // Chat Completions providers raise stream fields the SDK and M.E.AI do not accept or
+        // read as-is; normalize them before either can drop part of the turn.
+        options.AddPolicy(new OpenAiStreamNormalizingPolicy(), PipelinePosition.PerCall);
         return options;
     }
 

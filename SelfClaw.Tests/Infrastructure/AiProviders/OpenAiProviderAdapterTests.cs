@@ -74,6 +74,41 @@ public sealed class OpenAiProviderAdapterTests
         toolCall.Arguments.Should().ContainKey("relativePath");
     }
 
+    [Theory]
+    [InlineData("{\"reasoning_content\":\"we need \"}")]
+    [InlineData("{\"reasoning\":\"we need \",\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"we need \"}]}")]
+    public async Task Chat_completions_stream_surfaces_both_reasoning_field_styles(string delta)
+    {
+        // StepFun and the DeepSeek API stream thinking as "reasoning_content", which M.E.AI reads
+        // directly. Cline's gateway streams it as "reasoning" (+ "reasoning_details"), which M.E.AI
+        // ignores, so without the adapter's stream normalization that whole thinking phase was
+        // dropped and the transcript never rendered a thinking block.
+        var sse =
+            "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"test-model\","
+            + "\"choices\":[{\"index\":0,\"delta\":" + delta + ",\"finish_reason\":null}]}\n\n"
+            + "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"test-model\","
+            + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"two\"},\"finish_reason\":null}]}\n\n"
+            + "data: [DONE]\n\n";
+        using var http = new AiProviderHttpClientProvider(() => new SseHandler(sse));
+        var adapter = new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, httpClientProvider: http);
+        var request = CreateRequest(
+            AiProviderKind.OpenAICompatible,
+            AiProviderApiFormat.OpenAIChatCompletions);
+        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        var client = adapter.CreateChatClient(request, httpClient);
+        var options = adapter.CreateChatOptions(request, []);
+
+        var contents = new List<AIContent>();
+        await foreach (var update in client.GetStreamingResponseAsync(
+                           [new ChatMessage(ChatRole.User, "hi")], options))
+        {
+            contents.AddRange(update.Contents);
+        }
+
+        contents.OfType<TextReasoningContent>().Should().ContainSingle().Which.Text.Should().Be("we need ");
+        contents.OfType<TextContent>().Should().ContainSingle().Which.Text.Should().Be("two");
+    }
+
     [Fact]
     public void CreateChatClient_creates_responses_client()
     {

@@ -4,7 +4,7 @@ using SelfClaw.Infrastructure.AiProviders.OpenAi;
 
 namespace SelfClaw.Tests.Infrastructure.AiProviders;
 
-public sealed class OpenAiToolCallTypeNormalizingStreamTests
+public sealed class OpenAiStreamNormalizingStreamTests
 {
     [Fact]
     public async Task Empty_tool_call_type_is_replaced_with_function()
@@ -72,6 +72,59 @@ public sealed class OpenAiToolCallTypeNormalizingStreamTests
     }
 
     [Fact]
+    public async Task Reasoning_alias_is_mirrored_into_reasoning_content()
+    {
+        // Cline's gateway streams thinking as "reasoning" (+ "reasoning_details") while
+        // Microsoft.Extensions.AI reads only "reasoning_content", which dropped every delta.
+        const string input =
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"we need \","
+            + "\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"we need \"}]},"
+            + "\"finish_reason\":null}]}\n\n";
+
+        var output = await TransformAsync(input);
+
+        output.Should().Contain("\"reasoning_content\":\"we need \"");
+        output.Split("\"reasoning_content\"").Should().HaveCount(2);
+        output.Should().Contain("\"reasoning_details\"");
+    }
+
+    [Fact]
+    public async Task Reasoning_details_alone_are_concatenated_into_reasoning_content()
+    {
+        const string input =
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_details\":["
+            + "{\"type\":\"reasoning.text\",\"text\":\"first \"},"
+            + "{\"type\":\"reasoning.summary\",\"summary\":\"second\"}]}}]}\n\n";
+
+        var output = await TransformAsync(input);
+
+        output.Should().Contain("\"reasoning_content\":\"first second\"");
+    }
+
+    [Fact]
+    public async Task Existing_reasoning_content_is_preserved_without_duplication()
+    {
+        const string input =
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"mirrored\","
+            + "\"reasoning_content\":\"already\"}}]}\n\n";
+
+        var output = await TransformAsync(input);
+
+        output.Should().Be(input);
+    }
+
+    [Fact]
+    public async Task Reasoning_fields_outside_a_delta_are_forwarded_verbatim()
+    {
+        const string input =
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"the reasoning is simple\"}}]}\n\n";
+
+        var output = await TransformAsync(input);
+
+        output.Should().Be(input);
+    }
+
+    [Fact]
     public async Task Multiple_tool_calls_are_all_normalized()
     {
         const string input =
@@ -99,7 +152,7 @@ public sealed class OpenAiToolCallTypeNormalizingStreamTests
     private static async Task<string> TransformAsync(string input, int chunkSize = int.MaxValue)
     {
         await using var source = new ChunkedStream(Encoding.UTF8.GetBytes(input), chunkSize);
-        await using var stream = new OpenAiToolCallTypeNormalizingStream(source);
+        await using var stream = new OpenAiStreamNormalizingStream(source);
         using var reader = new StreamReader(stream, Encoding.UTF8);
         return await reader.ReadToEndAsync();
     }

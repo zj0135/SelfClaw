@@ -4,14 +4,26 @@ using System.Text.Json;
 namespace SelfClaw.Infrastructure.AiProviders.OpenAi;
 
 /// <summary>
-/// Line-buffered SSE transform that guarantees every object inside a streamed
-/// <c>tool_calls</c> array carries <c>"type":"function"</c>. Only <c>data:</c> frames are
+/// Line-buffered SSE transform for the OpenAI-compatible stream quirks the OpenAI SDK and
+/// Microsoft.Extensions.AI reject or ignore. It guarantees every object inside a streamed
+/// <c>tool_calls</c> array carries <c>"type":"function"</c>, and aliases the reasoning field
+/// names M.E.AI does not read onto <c>reasoning_content</c>. Only <c>data:</c> frames are
 /// inspected; every other byte is forwarded unchanged. See
-/// <see cref="OpenAiToolCallTypeNormalizingPolicy"/> for why this is needed.
+/// <see cref="OpenAiStreamNormalizingPolicy"/> for why this is needed.
 /// </summary>
-internal sealed class OpenAiToolCallTypeNormalizingStream : Stream
+internal sealed class OpenAiStreamNormalizingStream : Stream
 {
     private const string DataPrefix = "data:";
+    private const string ToolCallsName = "tool_calls";
+    private const string MessageName = "message";
+    private const string DeltaName = "delta";
+    private const string TypeName = "type";
+    private const string TextName = "text";
+    private const string SummaryName = "summary";
+    private const string ReasoningContentName = "reasoning_content";
+    private const string ReasoningName = "reasoning";
+    private const string ReasoningTextName = "reasoning_text";
+    private const string ReasoningDetailsName = "reasoning_details";
     private readonly Stream _inner;
     private readonly byte[] _readBuffer = new byte[8192];
     private byte[] _pending = new byte[8192];
@@ -19,7 +31,7 @@ internal sealed class OpenAiToolCallTypeNormalizingStream : Stream
     private byte[] _output = [];
     private int _outputOffset;
 
-    public OpenAiToolCallTypeNormalizingStream(Stream inner)
+    public OpenAiStreamNormalizingStream(Stream inner)
     {
         ArgumentNullException.ThrowIfNull(inner);
         _inner = inner;
@@ -141,7 +153,8 @@ internal sealed class OpenAiToolCallTypeNormalizingStream : Stream
     private static string NormalizeLine(string line)
     {
         if (!line.StartsWith(DataPrefix, StringComparison.Ordinal) ||
-            !line.Contains("tool_calls", StringComparison.Ordinal))
+            !(line.Contains(ToolCallsName, StringComparison.Ordinal) ||
+              line.Contains(ReasoningName, StringComparison.Ordinal)))
         {
             return line;
         }
@@ -173,12 +186,12 @@ internal sealed class OpenAiToolCallTypeNormalizingStream : Stream
         }
     }
 
-    private static void WriteElement(JsonElement element, Utf8JsonWriter writer, ref bool changed)
+    private static void WriteElement(JsonElement element, Utf8JsonWriter writer, ref bool changed, bool isMessage = false)
     {
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
-                WriteObject(element, writer, ref changed);
+                WriteObject(element, writer, ref changed, isMessage);
                 break;
             case JsonValueKind.Array:
                 writer.WriteStartArray();
@@ -195,23 +208,96 @@ internal sealed class OpenAiToolCallTypeNormalizingStream : Stream
         }
     }
 
-    private static void WriteObject(JsonElement element, Utf8JsonWriter writer, ref bool changed)
+    private static void WriteObject(JsonElement element, Utf8JsonWriter writer, ref bool changed, bool isMessage)
     {
         writer.WriteStartObject();
+        var hasReasoningContent = false;
         foreach (var property in element.EnumerateObject())
         {
-            if (property.NameEquals("tool_calls") && property.Value.ValueKind == JsonValueKind.Array)
+            if (property.NameEquals(ToolCallsName) && property.Value.ValueKind == JsonValueKind.Array)
             {
                 WriteToolCalls(property, writer, ref changed);
                 continue;
             }
 
+            if (property.NameEquals(ReasoningContentName))
+            {
+                hasReasoningContent = IsNonEmptyString(property.Value);
+            }
+
             writer.WritePropertyName(property.Name);
-            WriteElement(property.Value, writer, ref changed);
+            WriteElement(
+                property.Value,
+                writer,
+                ref changed,
+                property.NameEquals(DeltaName) || property.NameEquals(MessageName));
+        }
+
+        if (isMessage && !hasReasoningContent && TryReadReasoningText(element, out var reasoningText))
+        {
+            writer.WriteString(ReasoningContentName, reasoningText);
+            changed = true;
         }
 
         writer.WriteEndObject();
     }
+
+    /// <summary>
+    /// Reads reasoning text out of the field names OpenAI-compatible providers use instead of
+    /// <c>reasoning_content</c>. The first source that yields text wins, so a provider mirroring the
+    /// same text into several fields is not duplicated into a doubled thinking block.
+    /// </summary>
+    private static bool TryReadReasoningText(JsonElement message, out string reasoningText)
+    {
+        if (TryReadNonEmptyString(message, ReasoningName, out reasoningText) ||
+            TryReadNonEmptyString(message, ReasoningTextName, out reasoningText))
+        {
+            return true;
+        }
+
+        if (message.TryGetProperty(ReasoningDetailsName, out var details) &&
+            details.ValueKind == JsonValueKind.Array)
+        {
+            var builder = new StringBuilder();
+            foreach (var detail in details.EnumerateArray())
+            {
+                if (detail.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                if (TryReadNonEmptyString(detail, TextName, out var text) ||
+                    TryReadNonEmptyString(detail, SummaryName, out text))
+                {
+                    builder.Append(text);
+                }
+            }
+
+            if (builder.Length > 0)
+            {
+                reasoningText = builder.ToString();
+                return true;
+            }
+        }
+
+        reasoningText = string.Empty;
+        return false;
+    }
+
+    private static bool TryReadNonEmptyString(JsonElement element, string name, out string value)
+    {
+        if (element.TryGetProperty(name, out var property) && IsNonEmptyString(property))
+        {
+            value = property.GetString()!;
+            return true;
+        }
+
+        value = string.Empty;
+        return false;
+    }
+
+    private static bool IsNonEmptyString(JsonElement element) =>
+        element.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(element.GetString());
 
     private static void WriteToolCalls(JsonProperty property, Utf8JsonWriter writer, ref bool changed)
     {
@@ -229,7 +315,7 @@ internal sealed class OpenAiToolCallTypeNormalizingStream : Stream
             var hasType = false;
             foreach (var toolCallProperty in toolCall.EnumerateObject())
             {
-                if (toolCallProperty.NameEquals("type"))
+                if (toolCallProperty.NameEquals(TypeName))
                 {
                     hasType = true;
                     WriteToolCallType(toolCallProperty, writer, ref changed);
@@ -242,7 +328,7 @@ internal sealed class OpenAiToolCallTypeNormalizingStream : Stream
 
             if (!hasType)
             {
-                writer.WriteString("type", "function");
+                writer.WriteString(TypeName, "function");
                 changed = true;
             }
 
@@ -254,15 +340,14 @@ internal sealed class OpenAiToolCallTypeNormalizingStream : Stream
 
     private static void WriteToolCallType(JsonProperty property, Utf8JsonWriter writer, ref bool changed)
     {
-        if (property.Value.ValueKind == JsonValueKind.String &&
-            !string.IsNullOrEmpty(property.Value.GetString()))
+        if (IsNonEmptyString(property.Value))
         {
-            writer.WritePropertyName("type");
+            writer.WritePropertyName(TypeName);
             writer.WriteStringValue(property.Value.GetString());
             return;
         }
 
-        writer.WriteString("type", "function");
+        writer.WriteString(TypeName, "function");
         changed = true;
     }
 }
