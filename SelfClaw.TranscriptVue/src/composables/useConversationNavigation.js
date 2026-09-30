@@ -16,7 +16,11 @@ export function useConversationNavigation(currentViewId, chatViewRef, openPlugin
 			sidebarConversations.value = payload.conversations || [];
 		selectedConversationId.value = payload.selectedConversationId || null;
 	});
-	on('operation-result', (payload) => { if (!payload.requestId && payload.error) showToast(payload.error); });
+	on('operation-result', (payload) => {
+		// 「shutting-down」是宿主正在关闭，不是操作失败：窗口已经在消失，再弹一条
+		// 错误只会让用户以为关闭出了故障。
+		if (!payload.requestId && payload.error && payload.errorCode !== 'shutting-down') showToast(payload.error);
+	});
 	on('conversation-activated', () => { currentViewId.value = 'chat'; });
 
 function toConversationNode(conversation) {

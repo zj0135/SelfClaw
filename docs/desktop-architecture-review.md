@@ -147,6 +147,24 @@ dotnet run --project .scratch/window-minimize-animation/probes/WindowMinimizePro
 
 探针会自己创建并最小化临时窗口（会短暂抢焦点），结束后自动关闭，不读写 AppData。
 
+## 8. 关闭延迟：MCP stdio 子进程宽限期（2026-09-30）
+
+**症状**：聊过几轮（即会话内绑定过 MCP server）后点关闭，窗口 4–5 秒才消失；期间再点一次关闭，界面弹出 “The application is shutting down.”。
+
+**根因**：`StdioClientTransportOptions.ShutdownTimeout` 用 SDK 默认 5 秒，而 `App` 的可见关闭路径一直在等它。SDK 的 `StdioClientSessionTransport.CleanupAsync` 先 `WaitForProcessExitAsync()`（上限即该超时），**之后**才 `KillTree`；子进程在等待期间拿不到 stdin EOF（关闭 stdin 发生在 `DisposeProcess` 之后），npx/node 型 server 从不主动退出，因此这 5 秒是固定死等。`McpClientManager.DisposeAsync` 又按 entry 串行 await，N 个 stdio server 就是 N×5 秒（App 总预算 20 秒，够多时直接走超时分支）。同一宽限期也压着 `AcquireAsync` 内联排空旧 revision 的分支，即改一次 MCP 配置会让下一回合启动多等 5 秒。第二次点击的提示来自 `WebViewMessageRouter`：关闭已置 `_stopping` 后，`window-close` 仍被当作失败回包，Vue 的 `operation-result`（无 `requestId`）把它当全局错误弹出。
+
+**证据**：两条真实关机日志里 `message processing canceled` → `shutting down` 的空档为 5.042 s / 5.051 s；隔离复现（ModelContextProtocol.Core 2.2.0 + `npx -y @upstash/context7-mcp`）实测 dispose：默认 5000 ms → **5151 ms**，1000 ms → 1098 ms，500 ms → 596/624 ms，且 500 ms 下进程树仍被终止、无 node 残留。另测：无 MCP 连接时真实 Desktop 从 WM_CLOSE 到进程退出 **180 ms**，说明 WebView2/WPF 收尾不是瓶颈。
+
+**修复**：
+
+1. `McpTransportFactory.CreateStdioOptions` 显式 `ShutdownTimeout = StdioShutdownTimeout`（1 秒，与 `McpStdioProcessTreeSpikeTests` 的既有先例一致）。
+2. `McpClientManager` 新增 `DisposeEntriesAsync`，`AcquireAsync` / `DrainAsync` / `DisposeAsync` 三处排空改为并发，代价从 N×宽限期变 max。
+3. `App.OnMainWindowClosing` 在 `e.Cancel = true` 后立即 `Hide()`，关闭体感与后台收尾解耦；`WebViewMessageRouter` 在 `_stopping` 时把 `window-*` 命令当无操作（不再回 `shutting-down` 失败），Vue 侧再忽略该 errorCode。
+
+**验证**：全量 1191 通过 / 4 跳过；新增 `McpTransportFactoryTests`（超时上限）、`McpClientManagerTests.DisposeAsync_DisposesPooledEntriesConcurrently`（两 entry 必须同时在销毁中；改回串行该用例 5 秒超时失败）、`WebViewMessageRouterTests` 两条（关闭中 `window-close` 静默、其他命令仍回 `shutting-down`）。真实 Desktop 空跑：窗口 23–63 ms 隐藏、进程 194–300 ms 退出。Vue `npm test` 81 通过，`npm run build` 已同步 `Desktop/Assets/TranscriptVue`。
+
+**限制**：MCP 在途场景（绑定 MCP 的 Direct 回合结束后立即关闭）未实机复现，用的是同版本 SDK 隔离复现加真实关机日志的空档比对；关闭预算用尽仍走既有的 -1 退出码分支，不承诺完成未结束工作。`AsyncHookExecutor.StopAsync` 的 5 秒排空保留（窗口已即时隐藏，仅影响进程退出时间，日志可见）。
+
 ---
 
 <details>

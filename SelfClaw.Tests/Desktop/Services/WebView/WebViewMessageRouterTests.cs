@@ -139,6 +139,31 @@ public sealed class WebViewMessageRouterTests
     }
 
     [Fact]
+    public async Task Window_commands_are_silently_ignored_while_shutdown_is_draining()
+    {
+        using var context = new RouterTestContext();
+        await context.Router.StopAsync(CancellationToken.None);
+
+        // The window is hidden the moment the close starts, so a second click on the title bar can
+        // still land here. It is not a failed operation and must not surface as one.
+        var command = await context.RouteAsync("""{"type":"window-close"}""");
+
+        command.Should().BeNull();
+        context.PostedJson.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Non_window_commands_still_report_an_in_progress_shutdown()
+    {
+        using var context = new RouterTestContext();
+        await context.Router.StopAsync(CancellationToken.None);
+
+        await context.RouteAsync("""{"type":"select-conversation","conversationId":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}""");
+
+        context.PostedJson.Should().ContainSingle().Which.Should().Contain("shutting-down");
+    }
+
+    [Fact]
     public async Task RouteAsync_resolves_open_in_explorer_to_the_registered_workspace_root()
     {
         var directory = Directory.CreateTempSubdirectory("selfclaw-open-in-explorer").FullName;

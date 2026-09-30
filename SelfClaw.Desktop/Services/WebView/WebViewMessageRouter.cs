@@ -112,7 +112,14 @@ internal sealed class WebViewMessageRouter : IDisposable
             {
                 if (_stopping)
                 {
-                    PostFailure(document.RootElement, "shutting-down", "The application is shutting down.");
+                    // Shutdown already started. Window commands are no-ops by definition here - the
+                    // window is being hidden and the process is on its way out - so reporting them as
+                    // failures would only surface "The application is shutting down." for a click the
+                    // user made on an already-closing window.
+                    if (ReadOptionalString(document.RootElement, "type") is not { } type || !type.StartsWith("window-", StringComparison.Ordinal))
+                    {
+                        PostFailure(document.RootElement, "shutting-down", "The application is shutting down.");
+                    }
                     return null;
                 }
                 _activeRoutes++;

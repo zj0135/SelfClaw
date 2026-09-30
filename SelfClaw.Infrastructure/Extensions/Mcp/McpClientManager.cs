@@ -60,10 +60,7 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
             entry.Acquire();
         }
 
-        foreach (var staleEntry in entriesToDispose)
-        {
-            await DisposeEntryAsync(staleEntry).ConfigureAwait(false);
-        }
+        await DisposeEntriesAsync(entriesToDispose).ConfigureAwait(false);
 
         try
         {
@@ -158,10 +155,7 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
             drainTasks = entries.Select(entry => entry.Drained).ToArray();
         }
 
-        foreach (var entry in entriesToDispose)
-        {
-            await DisposeEntryAsync(entry).ConfigureAwait(false);
-        }
+        await DisposeEntriesAsync(entriesToDispose).ConfigureAwait(false);
 
         await Task.WhenAll(drainTasks).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -252,6 +246,13 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
         await DisposeEntryAsync(entry).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Disposes independent entries concurrently. Each disposal includes the SDK's bounded wait for a
+    /// stdio server to exit, so a serial teardown would cost one full grace period per pooled server.
+    /// </summary>
+    private Task DisposeEntriesAsync(IEnumerable<PoolEntry> entries)
+        => Task.WhenAll(entries.Select(DisposeEntryAsync));
+
     private async Task DisposeEntryAsync(PoolEntry entry)
     {
         lock (_sync)
@@ -316,10 +317,7 @@ internal sealed class McpClientManager : IMcpClientManager, IAsyncDisposable
             }
         }
 
-        foreach (var entry in entries)
-        {
-            await DisposeEntryAsync(entry).ConfigureAwait(false);
-        }
+        await DisposeEntriesAsync(entries).ConfigureAwait(false);
 
         _shutdown.Dispose();
     }

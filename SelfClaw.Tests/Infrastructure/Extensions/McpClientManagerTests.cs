@@ -153,6 +153,33 @@ public sealed class McpClientManagerTests
         factory.Connections[0].DisposeCount.Should().Be(1);
     }
 
+    [Fact]
+    public async Task DisposeAsync_DisposesPooledEntriesConcurrently()
+    {
+        var factory = new GatedDisposeConnectionFactory();
+        var manager = new McpClientManager(factory, TimeSpan.FromMinutes(1));
+        await using var first = await manager.AcquireAsync(CreateConfiguration(workspacePath: "C:\\first"));
+        await using var second = await manager.AcquireAsync(CreateConfiguration(workspacePath: "C:\\second"));
+
+        var disposal = manager.DisposeAsync().AsTask();
+
+        try
+        {
+            // Both entries have to be inside DisposeAsync at the same time. A serial teardown would still
+            // be waiting for the first connection's gate and would never start the second one.
+            await factory.AllDisposalsStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            disposal.IsCompleted.Should().BeFalse();
+        }
+        finally
+        {
+            factory.ReleaseDisposals();
+        }
+
+        await disposal;
+
+        factory.Connections.Should().OnlyContain(connection => connection.DisposeCount == 1);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         for (var attempt = 0; attempt < 50 && !condition(); attempt++)
@@ -232,6 +259,60 @@ public sealed class McpClientManagerTests
         }
 
         public void Complete() => _connectionSource.TrySetResult(Connection);
+    }
+
+    private sealed class GatedDisposeConnectionFactory : IMcpClientConnectionFactory
+    {
+        private const int ExpectedDisposals = 2;
+        private readonly object _sync = new();
+        private readonly List<GatedDisposeConnection> _connections = [];
+        private readonly TaskCompletionSource _allDisposalsStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseDisposals = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _startedDisposals;
+
+        public IReadOnlyList<GatedDisposeConnection> Connections
+        {
+            get { lock (_sync) return [.. _connections]; }
+        }
+
+        public Task AllDisposalsStarted => _allDisposalsStarted.Task;
+
+        public void ReleaseDisposals() => _releaseDisposals.TrySetResult();
+
+        public Task<IMcpClientConnection> ConnectAsync(
+            ResolvedMcpServerConfiguration configuration,
+            CancellationToken cancellationToken = default)
+        {
+            var connection = new GatedDisposeConnection(OnDisposalStarted, _releaseDisposals.Task);
+            lock (_sync) _connections.Add(connection);
+            return Task.FromResult<IMcpClientConnection>(connection);
+        }
+
+        private void OnDisposalStarted()
+        {
+            if (Interlocked.Increment(ref _startedDisposals) == ExpectedDisposals)
+            {
+                _allDisposalsStarted.TrySetResult();
+            }
+        }
+    }
+
+    private sealed class GatedDisposeConnection(Action onDisposalStarted, Task release) : IMcpClientConnection
+    {
+        private int _disposeCount;
+
+        public IReadOnlyList<McpClientTool> Tools { get; } = [];
+        public int DisposeCount => Volatile.Read(ref _disposeCount);
+
+        public Task PingAsync(CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public async ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref _disposeCount);
+            onDisposalStarted();
+            await release;
+        }
     }
 
     private sealed class FakeConnection : IMcpClientConnection

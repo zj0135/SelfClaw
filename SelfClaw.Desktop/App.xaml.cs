@@ -113,6 +113,15 @@ public sealed partial class App : System.Windows.Application
     {
         if (_allowClose) return;
         e.Cancel = true;
+        // Teardown outlives the window: a stdio MCP server still gets its exit grace period after this
+        // point, and the host keeps stopping services that the window must not observe. Hiding now is
+        // what makes the click feel instant, and it stops a second click from reaching a shell that is
+        // already shutting down.
+        if (sender is Window window)
+        {
+            window.Hide();
+        }
+
         await RequestShutdownAsync();
     }
 
