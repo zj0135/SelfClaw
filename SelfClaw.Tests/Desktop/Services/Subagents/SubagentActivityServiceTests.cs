@@ -1,4 +1,4 @@
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
@@ -41,7 +41,7 @@ public sealed class SubagentActivityServiceTests
         beforeTerminal.Activity.Task.ModelDisplayName.Should().Be("actual model");
         (await context.Conversations.ListMessagesAsync(task.ChildConversationId)).Should().NotContain(message => message.Role == MessageRole.Assistant);
         await runtime.EmitAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "read", "result"));
-        await runtime.EmitAsync(new UsageReportedEvent(21, 8));
+        await runtime.EmitAsync(new UsageReportedEvent(new TurnUsage(InputTokens: 21, OutputTokens: 8)));
         for (var index = 0; index < 10; index++)
         {
             await runtime.EmitAsync(new AssistantTextDeltaEvent("text", "!"));

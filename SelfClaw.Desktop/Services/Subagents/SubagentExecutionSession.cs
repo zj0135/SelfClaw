@@ -95,8 +95,7 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
                 {
                     Segments = message.Segments?.ToImmutableArray(),
                     Attachments = message.Attachments?.ToImmutableArray(),
-                    InputTokens = _turn.InputTokens,
-                    OutputTokens = _turn.OutputTokens
+                    Usage = _turn.Usage.Build() ?? message.Usage
                 };
             }
 
@@ -149,8 +148,9 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
         }
         finally
         {
+            var usage = _turn.Usage.Build();
             Volatile.Write(ref _activity, new SubagentExecutionActivity(_activity.Revision + 1, _phase, _model,
-                _turn.InputTokens, _turn.OutputTokens, _turn.Completed, _recordingError));
+                usage?.InputTokens, usage?.OutputTokens, _turn.Completed, _recordingError));
             var publishImmediately = immediate || _immediate;
             _immediate = false;
             Exit();

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
@@ -143,11 +144,18 @@ internal sealed class CodexJsonEventStreamParser : CliStreamParser
         if (!root.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
             return Array.Empty<AgentStreamEvent>();
 
+        // Codex follows the OpenAI split: input_tokens already includes the cached subset.
+        var input = GetInt(usage, "input_tokens");
+        var output = GetInt(usage, "output_tokens");
         return new AgentStreamEvent[]
         {
-            new UsageReportedEvent(
-                InputTokens: GetInt(usage, "input_tokens"),
-                OutputTokens: GetInt(usage, "output_tokens")),
+            new UsageReportedEvent(new TurnUsage(
+                InputTokens: input,
+                CachedInputTokens: GetInt(usage, "cached_input_tokens"),
+                OutputTokens: output,
+                ReasoningTokens: GetInt(usage, "reasoning_output_tokens"),
+                ProviderCalls: 1,
+                ContextTokens: input is int contextInput ? contextInput + (output ?? 0) : null)),
         };
     }
 

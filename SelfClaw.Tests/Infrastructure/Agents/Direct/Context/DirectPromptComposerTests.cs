@@ -1,4 +1,4 @@
-using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
+﻿using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
@@ -411,7 +411,7 @@ public sealed class DirectPromptComposerTests
         [
             new SubagentCompletionEnvelope(1, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
                 new SubagentIdentity("worker", "Worker"), "Check the workspace.", SubagentTaskStatus.Succeeded, 1,
-                new SubagentCompletionResult(new string('r', 6000), false, null, null), new SubagentUsage(10, 10),
+                new SubagentCompletionResult(new string('r', 6000), false, null, null), new TurnUsage(InputTokens: 10, OutputTokens: 10),
                 new SubagentTiming(now, now, now, 0))
         ]);
         var context = new DirectTurnExecutionContext(DirectTurnOrigin.Continuation, null, batch);

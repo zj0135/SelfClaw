@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
@@ -43,6 +44,9 @@ internal sealed class ClaudeStreamJsonParser : CliStreamParser
     // Accumulated assistant text, used as the final text fallback if `result` carries none.
     private readonly StringBuilder _assistantText = new();
 
+    // Captured from system/init; attached to the usage report.
+    private string? _model;
+
     protected override IEnumerable<AgentStreamEvent> HandleObject(JsonElement root)
         => GetString(root, "type") switch
         {
@@ -61,12 +65,14 @@ internal sealed class ClaudeStreamJsonParser : CliStreamParser
             return Array.Empty<AgentStreamEvent>();
 
         var events = new List<AgentStreamEvent>();
+        var model = GetString(root, "model");
+        _model ??= model;
         if (!_runStarted)
         {
             _runStarted = true;
             events.Add(new RunStartedEvent(
                 SessionId: GetString(root, "session_id"),
-                Model: GetString(root, "model"),
+                Model: model,
                 AgentKind: CliAgentKind.Claude));
             events.Add(new RunStatusEvent(AgentRunStatus.Initializing));
         }
@@ -251,9 +257,27 @@ internal sealed class ClaudeStreamJsonParser : CliStreamParser
 
         if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
         {
-            events.Add(new UsageReportedEvent(
-                InputTokens: GetInt(usage, "input_tokens"),
-                OutputTokens: GetInt(usage, "output_tokens")));
+            // Claude Code uses the Anthropic split: input_tokens excludes both cache buckets, so the
+            // normalized total adds them back and the cache buckets stay visible on their own.
+            var uncachedInput = GetInt(usage, "input_tokens");
+            var cacheRead = GetInt(usage, "cache_read_input_tokens");
+            var cacheWrite = GetInt(usage, "cache_creation_input_tokens");
+            var output = GetInt(usage, "output_tokens");
+            var input = uncachedInput is null
+                ? null
+                : uncachedInput + (cacheRead ?? 0) + (cacheWrite ?? 0);
+            var cost = GetCostUsdMicros(root, "total_cost_usd");
+            events.Add(new UsageReportedEvent(new TurnUsage(
+                Model: _model,
+                InputTokens: input,
+                UncachedInputTokens: uncachedInput,
+                CachedInputTokens: cacheRead,
+                CacheWriteInputTokens: cacheWrite,
+                OutputTokens: output,
+                ProviderCalls: 1,
+                ContextTokens: input is int contextInput ? contextInput + (output ?? 0) : null,
+                CostUsdMicros: cost,
+                CostSource: cost is null ? TurnUsageCostSource.None : TurnUsageCostSource.ProviderReported)));
         }
 
         var subtype = GetString(root, "subtype");

@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 28;
+    private const int CurrentSchemaVersion = 29;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -241,11 +241,33 @@ CREATE TABLE IF NOT EXISTS messages (
     agent_id TEXT NULL,
     agent_name TEXT NULL,
     agent_role TEXT NULL,
-    input_tokens INTEGER NULL,
-    output_tokens INTEGER NULL,
     duration_ms REAL NULL,
     error_message TEXT NULL,
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);", cancellationToken).ConfigureAwait(false);
+
+            // Schema v29: per-turn usage (tokens, cache, context and cost) lives beside the message it
+            // belongs to. messages.input_tokens/output_tokens are retired in favor of this table.
+            await ExecuteAsync(connection, @"
+CREATE TABLE IF NOT EXISTS turn_usage (
+    message_id TEXT NOT NULL PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    model TEXT NULL,
+    input_tokens INTEGER NULL,
+    uncached_input_tokens INTEGER NULL,
+    cached_input_tokens INTEGER NULL,
+    cache_write_input_tokens INTEGER NULL,
+    output_tokens INTEGER NULL,
+    reasoning_tokens INTEGER NULL,
+    total_tokens INTEGER NULL,
+    provider_calls INTEGER NOT NULL DEFAULT 1,
+    context_tokens INTEGER NULL,
+    context_window_tokens INTEGER NULL,
+    cost_usd_micros INTEGER NULL,
+    cost_source INTEGER NOT NULL DEFAULT 0,
+    additional_counts_json TEXT NULL,
+    created_at_utc TEXT NOT NULL,
+    FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
 );", cancellationToken).ConfigureAwait(false);
 
             await EnsureColumnExistsAsync(
@@ -509,6 +531,7 @@ CREATE TABLE IF NOT EXISTS message_segments (
 );", cancellationToken).ConfigureAwait(false);
 
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken).ConfigureAwait(false);
+            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_turn_usage_conversation_created ON turn_usage(conversation_id, created_at_utc);", cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_message_attachments_message ON message_attachments(message_id, created_at_utc);", cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_tool_runs_conversation_created ON tool_runs(conversation_id, created_at_utc);", cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_ai_provider_connections_kind ON ai_provider_connections(provider_kind);", cancellationToken).ConfigureAwait(false);

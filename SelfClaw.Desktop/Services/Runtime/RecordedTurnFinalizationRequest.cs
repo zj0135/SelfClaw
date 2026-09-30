@@ -8,6 +8,5 @@ internal sealed record RecordedTurnFinalizationRequest(
     TurnFinalizationKind Kind,
     string? FinalText,
     string? ErrorMessage,
-    int? InputTokens,
-    int? OutputTokens,
+    TurnUsage? Usage,
     DateTimeOffset StartedAtUtc);

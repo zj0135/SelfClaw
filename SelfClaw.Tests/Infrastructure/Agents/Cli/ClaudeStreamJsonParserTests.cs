@@ -1,4 +1,5 @@
-using FluentAssertions;
+﻿using FluentAssertions;
+using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Cli.Parsers;
 
@@ -109,12 +110,19 @@ public sealed class ClaudeStreamJsonParserTests
 
         var resultLine =
             """
-            {"type":"result","subtype":"success","is_error":false,"usage":{"input_tokens":11,"output_tokens":7}}
+            {"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0035,"usage":{"input_tokens":11,"output_tokens":7,"cache_creation_input_tokens":5,"cache_read_input_tokens":20}}
             """;
         var events = parser.ParseLine(resultLine).ToArray();
 
-        events.OfType<UsageReportedEvent>().Should().ContainSingle()
-            .Which.Should().Be(new UsageReportedEvent(11, 7));
+        var usage = events.OfType<UsageReportedEvent>().Should().ContainSingle().Subject.Usage;
+        usage.InputTokens.Should().Be(36);
+        usage.UncachedInputTokens.Should().Be(11);
+        usage.CachedInputTokens.Should().Be(20);
+        usage.CacheWriteInputTokens.Should().Be(5);
+        usage.OutputTokens.Should().Be(7);
+        usage.ContextTokens.Should().Be(43);
+        usage.CostUsdMicros.Should().Be(3500);
+        usage.CostSource.Should().Be(TurnUsageCostSource.ProviderReported);
         var completed = events.OfType<RunCompletedEvent>().Should().ContainSingle().Subject;
         completed.Status.Should().Be(RunCompletionStatus.Succeeded);
         completed.FinalText.Should().Be("answer");

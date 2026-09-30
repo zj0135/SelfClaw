@@ -11,5 +11,5 @@ public sealed record SubagentCompletionEnvelope(
     SubagentTaskStatus Status,
     int Attempt,
     SubagentCompletionResult Result,
-    SubagentUsage Usage,
+    TurnUsage? Usage,
     SubagentTiming Timing);

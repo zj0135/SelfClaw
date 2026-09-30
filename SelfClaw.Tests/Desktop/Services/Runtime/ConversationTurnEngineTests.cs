@@ -1,4 +1,4 @@
-using SelfClaw.Desktop.Services.Settings;
+﻿using SelfClaw.Desktop.Services.Settings;
 using SelfClaw.Desktop.Services.Tools;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
@@ -38,7 +38,7 @@ public sealed class ConversationTurnEngineTests
                     "status"),
                 new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "read 1 file", "contents"),
                 new AssistantTextDeltaEvent("block", "world"),
-                new UsageReportedEvent(11, 7),
+                new UsageReportedEvent(new TurnUsage(InputTokens: 11, OutputTokens: 7)),
                 new RunCompletedEvent(RunCompletionStatus.Succeeded, "hello world")
             ]
         };
@@ -62,8 +62,8 @@ public sealed class ConversationTurnEngineTests
             segment => segment.Kind.Should().Be(MessageSegmentKind.Text),
             segment => segment.Kind.Should().Be(MessageSegmentKind.ToolCall),
             segment => segment.Kind.Should().Be(MessageSegmentKind.Text));
-        assistant.InputTokens.Should().Be(11);
-        assistant.OutputTokens.Should().Be(7);
+        assistant.Usage!.InputTokens.Should().Be(11);
+        assistant.Usage.OutputTokens.Should().Be(7);
         runtime.Requests.Single().TurnId.Should().Be(assistant.Id);
         finalization.ToolExecutions.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Completed);
         finalization.ToolExecutions[0].SourceKind.Should().Be(ToolSourceKind.Mcp);

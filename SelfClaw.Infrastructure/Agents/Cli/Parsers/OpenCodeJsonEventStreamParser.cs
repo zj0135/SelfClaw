@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Parsers;
@@ -119,12 +120,38 @@ internal sealed class OpenCodeJsonEventStreamParser : CliStreamParser
         if (source is not { } usage)
             return Array.Empty<AgentStreamEvent>();
 
-        var input = GetInt(usage, "input") ?? GetInt(usage, "input_tokens");
+        // OpenCode keeps cache buckets out of `input`, so the normalized total adds them back.
+        var uncachedInput = GetInt(usage, "input") ?? GetInt(usage, "input_tokens");
         var output = GetInt(usage, "output") ?? GetInt(usage, "output_tokens");
-        return input is null && output is null
-            ? Array.Empty<AgentStreamEvent>()
-            : new AgentStreamEvent[] { new UsageReportedEvent(input, output) };
+        var cacheRead = GetCacheTokens(usage, "read");
+        var cacheWrite = GetCacheTokens(usage, "write");
+        var input = uncachedInput is null
+            ? null
+            : uncachedInput + (cacheRead ?? 0) + (cacheWrite ?? 0);
+        var cost = GetCostUsdMicros(payload, "cost") ?? GetCostUsdMicros(root, "cost");
+        if (input is null && output is null && cacheRead is null && cacheWrite is null && cost is null)
+            return Array.Empty<AgentStreamEvent>();
+
+        return new AgentStreamEvent[]
+        {
+            new UsageReportedEvent(new TurnUsage(
+                InputTokens: input,
+                UncachedInputTokens: uncachedInput,
+                CachedInputTokens: cacheRead,
+                CacheWriteInputTokens: cacheWrite,
+                OutputTokens: output,
+                ReasoningTokens: GetInt(usage, "reasoning"),
+                ProviderCalls: 1,
+                ContextTokens: input is int contextInput ? contextInput + (output ?? 0) : null,
+                CostUsdMicros: cost,
+                CostSource: cost is null ? TurnUsageCostSource.None : TurnUsageCostSource.ProviderReported)),
+        };
     }
+
+    private static int? GetCacheTokens(JsonElement usage, string bucket)
+        => usage.TryGetProperty("cache", out var cache) && cache.ValueKind == JsonValueKind.Object
+            ? GetInt(cache, bucket)
+            : null;
 
     private static JsonElement? FindUsageObject(JsonElement element)
     {

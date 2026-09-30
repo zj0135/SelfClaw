@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using SelfClaw.Core.Models;
@@ -58,7 +58,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
             MessageStatus.Completed,
             now,
             now,
-            OutputTokens: 32,
+            Usage: new TurnUsage(OutputTokens: 32),
             Segments:
             [
                 new MessageSegmentRecord(assistantMessageId, 0, MessageSegmentKind.Thinking, "plan", null),
@@ -96,7 +96,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         var loadedAssistant = loadedMessages.Should().Contain(message => message.Id == assistantMessageId)
             .Which;
         loadedAssistant.MarkdownContent.Should().Be(assistantMessage.MarkdownContent);
-        loadedAssistant.OutputTokens.Should().Be(assistantMessage.OutputTokens);
+        loadedAssistant.Usage!.OutputTokens.Should().Be(assistantMessage.Usage!.OutputTokens);
         loadedAssistant.Segments.Should().BeEquivalentTo(assistantMessage.Segments);
         loadedMessages.Should().Contain(message => message.Id == userMessage.Id)
             .Which.Segments.Should().BeNull();
@@ -138,7 +138,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
         var maxSchemaVersion = await versionCommand.ExecuteScalarAsync();
-        maxSchemaVersion.Should().Be(28L);
+        maxSchemaVersion.Should().Be(29L);
     }
 
     [Fact]
@@ -389,7 +389,7 @@ VALUES(
         await verification.OpenAsync();
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(28L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(29L);
     }
 
     [Fact]
@@ -578,7 +578,7 @@ WHERE conversation_id = $conversationId AND agent_kind = 1;";
 
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(28L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(29L);
 
         await using var foreignKeyCheck = verification.CreateCommand();
         foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
@@ -750,7 +750,7 @@ VALUES($messageId, $conversationId, 0, 'Preserved v22 message', 1, $createdAt, $
             .Should().Contain(["kind", "parent_conversation_id"]);
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(28L);
+        (await versionCommand.ExecuteScalarAsync()).Should().Be(29L);
         await using var foreignKeyCheck = verification.CreateCommand();
         foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
         await using var foreignKeyReader = await foreignKeyCheck.ExecuteReaderAsync();

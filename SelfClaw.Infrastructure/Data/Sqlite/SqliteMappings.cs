@@ -9,6 +9,17 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 internal static class SqliteMappings
 {
+    /// <summary>
+    /// Message columns followed by the left-joined <c>turn_usage</c> columns. Every query that maps a
+    /// message selects this fragment from <c>messages m LEFT JOIN turn_usage u ON u.message_id = m.id</c>.
+    /// </summary>
+    internal const string MessageSelectColumns = """
+        m.id, m.conversation_id, m.role, m.markdown_content, m.status, m.created_at_utc, m.updated_at_utc,
+        m.agent_id, m.agent_name, m.agent_role, m.duration_ms, m.error_message,
+        u.model, u.input_tokens, u.uncached_input_tokens, u.cached_input_tokens, u.cache_write_input_tokens,
+        u.output_tokens, u.reasoning_tokens, u.total_tokens, u.provider_calls, u.context_tokens,
+        u.context_window_tokens, u.cost_usd_micros, u.cost_source, u.additional_counts_json
+        """;
     public static AiProviderConnection ReadAiProviderConnection(SqliteDataReader reader)
         => new(
             ReadGuid(reader, 0),
@@ -66,7 +77,8 @@ internal static class SqliteMappings
             reader.IsDBNull(12) ? null : ReadGuid(reader, 12));
 
     public static MessageRecord ReadMessage(SqliteDataReader reader)
-        => new(
+    {
+        var message = new MessageRecord(
             ReadGuid(reader, 0),
             ReadGuid(reader, 1),
             (MessageRole)reader.GetInt32(2),
@@ -77,10 +89,37 @@ internal static class SqliteMappings
             reader.IsDBNull(7) ? null : ReadGuid(reader, 7),
             reader.IsDBNull(8) ? null : reader.GetString(8),
             reader.IsDBNull(9) ? null : reader.GetString(9),
-            reader.IsDBNull(10) ? null : reader.GetInt32(10),
-            reader.IsDBNull(11) ? null : reader.GetInt32(11),
-            reader.IsDBNull(12) ? null : reader.GetDouble(12),
-            reader.IsDBNull(13) ? null : reader.GetString(13));
+            Usage: null,
+            DurationMs: reader.IsDBNull(10) ? null : reader.GetDouble(10),
+            ErrorMessage: reader.IsDBNull(11) ? null : reader.GetString(11));
+        return reader.FieldCount > 12 ? message with { Usage = ReadTurnUsage(reader, 12) } : message;
+    }
+
+    /// <summary>Reads the joined turn_usage columns; null when the left join produced no row.</summary>
+    public static TurnUsage? ReadTurnUsage(SqliteDataReader reader, int offset)
+    {
+        // provider_calls is NOT NULL in turn_usage, so a null there means there is no usage row.
+        if (reader.IsDBNull(offset + 8))
+        {
+            return null;
+        }
+
+        return new TurnUsage(
+            Model: reader.IsDBNull(offset) ? null : reader.GetString(offset),
+            InputTokens: ReadNullableInt(reader, offset + 1),
+            UncachedInputTokens: ReadNullableInt(reader, offset + 2),
+            CachedInputTokens: ReadNullableInt(reader, offset + 3),
+            CacheWriteInputTokens: ReadNullableInt(reader, offset + 4),
+            OutputTokens: ReadNullableInt(reader, offset + 5),
+            ReasoningTokens: ReadNullableInt(reader, offset + 6),
+            TotalTokens: ReadNullableInt(reader, offset + 7),
+            ProviderCalls: reader.GetInt32(offset + 8),
+            ContextTokens: ReadNullableInt(reader, offset + 9),
+            ContextWindowTokens: ReadNullableInt(reader, offset + 10),
+            CostUsdMicros: reader.IsDBNull(offset + 11) ? null : reader.GetInt64(offset + 11),
+            CostSource: (TurnUsageCostSource)reader.GetInt32(offset + 12),
+            AdditionalCountsJson: reader.IsDBNull(offset + 13) ? null : reader.GetString(offset + 13));
+    }
 
     public static MessageAttachmentRecord ReadMessageAttachment(SqliteDataReader reader)
         => new(
@@ -167,6 +206,9 @@ internal static class SqliteMappings
 
     private static Guid ReadGuid(SqliteDataReader reader, int ordinal)
         => Guid.Parse(reader.GetString(ordinal));
+
+    private static int? ReadNullableInt(SqliteDataReader reader, int ordinal)
+        => reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
 
     private static DateTimeOffset ReadDateTimeOffset(SqliteDataReader reader, int ordinal)
         => DateTimeOffset.Parse(reader.GetString(ordinal), System.Globalization.CultureInfo.InvariantCulture);

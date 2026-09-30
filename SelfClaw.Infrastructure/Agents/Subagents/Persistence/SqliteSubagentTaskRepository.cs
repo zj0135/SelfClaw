@@ -255,7 +255,7 @@ WHERE id = $taskId AND status = $running;";
         await InsertDeliveryAsync(
                 connection,
                 transaction,
-                _envelopeFactory.Create(terminal),
+                _envelopeFactory.Create(terminal, completion.TurnFinalization.AssistantMessage.Usage),
                 cancellationToken)
             .ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -291,7 +291,7 @@ WHERE id = $taskId AND status = $running;";
             throw new InvalidOperationException("The initial Subagent terminal state was not accepted.");
         }
 
-        await InsertDeliveryAsync(connection, transaction, _envelopeFactory.Create(terminal), cancellationToken).ConfigureAwait(false);
+        await InsertDeliveryAsync(connection, transaction, _envelopeFactory.Create(terminal, completion.TurnFinalization.AssistantMessage.Usage), cancellationToken).ConfigureAwait(false);
         return terminal;
     }
 
@@ -440,10 +440,10 @@ VALUES(
         command.CommandText = @"
 INSERT INTO messages(
     id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc,
-    agent_id, agent_name, agent_role, input_tokens, output_tokens, duration_ms, error_message)
+    agent_id, agent_name, agent_role, duration_ms, error_message)
 VALUES(
     $id, $conversationId, $role, $markdownContent, $status, $createdAt, $updatedAt,
-    $agentId, $agentName, $agentRole, $inputTokens, $outputTokens, $durationMs, $errorMessage);";
+    $agentId, $agentName, $agentRole, $durationMs, $errorMessage);";
         command.Parameters.AddWithValue("$id", message.Id.ToString("D"));
         command.Parameters.AddWithValue("$conversationId", message.ConversationId.ToString("D"));
         command.Parameters.AddWithValue("$role", (int)message.Role);
@@ -454,8 +454,6 @@ VALUES(
         command.Parameters.AddWithValue("$agentId", message.AgentId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$agentName", message.AgentName ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$agentRole", message.AgentRole ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$inputTokens", message.InputTokens ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$outputTokens", message.OutputTokens ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$durationMs", message.DurationMs ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$errorMessage", message.ErrorMessage ?? (object)DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -617,8 +615,8 @@ VALUES(
         {
             Status = completion.Status,
             FinalText = completion.FinalText,
-            InputTokens = completion.TurnFinalization.AssistantMessage.InputTokens,
-            OutputTokens = completion.TurnFinalization.AssistantMessage.OutputTokens,
+            InputTokens = completion.TurnFinalization.AssistantMessage.Usage?.InputTokens,
+            OutputTokens = completion.TurnFinalization.AssistantMessage.Usage?.OutputTokens,
             ErrorCode = completion.ErrorCode,
             ErrorMessage = completion.ErrorMessage,
             CompletedAtUtc = completion.CompletedAtUtc,

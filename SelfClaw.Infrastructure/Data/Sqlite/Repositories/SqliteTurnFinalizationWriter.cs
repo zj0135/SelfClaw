@@ -56,8 +56,8 @@ internal static class SqliteTurnFinalizationWriter
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = @"
-INSERT INTO messages(id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc, agent_id, agent_name, agent_role, input_tokens, output_tokens, duration_ms, error_message)
-VALUES($id, $conversationId, $role, $markdownContent, $status, $createdAt, $updatedAt, $agentId, $agentName, $agentRole, $inputTokens, $outputTokens, $durationMs, $errorMessage)
+INSERT INTO messages(id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc, agent_id, agent_name, agent_role, duration_ms, error_message)
+VALUES($id, $conversationId, $role, $markdownContent, $status, $createdAt, $updatedAt, $agentId, $agentName, $agentRole, $durationMs, $errorMessage)
 ON CONFLICT(id) DO UPDATE SET
     markdown_content = excluded.markdown_content,
     status = excluded.status,
@@ -65,8 +65,6 @@ ON CONFLICT(id) DO UPDATE SET
     agent_id = excluded.agent_id,
     agent_name = excluded.agent_name,
     agent_role = excluded.agent_role,
-    input_tokens = excluded.input_tokens,
-    output_tokens = excluded.output_tokens,
     duration_ms = excluded.duration_ms,
     error_message = excluded.error_message" +
             (onlyIfStreaming ? " WHERE messages.status = $streamingStatus;" : ";");
@@ -80,8 +78,6 @@ ON CONFLICT(id) DO UPDATE SET
         command.Parameters.AddWithValue("$agentId", message.AgentId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$agentName", message.AgentName ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$agentRole", message.AgentRole ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$inputTokens", message.InputTokens ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$outputTokens", message.OutputTokens ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$durationMs", message.DurationMs ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$errorMessage", message.ErrorMessage ?? (object)DBNull.Value);
         if (onlyIfStreaming)
@@ -89,7 +85,67 @@ ON CONFLICT(id) DO UPDATE SET
             command.Parameters.AddWithValue("$streamingStatus", (int)MessageStatus.Streaming);
         }
 
-        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+        var written = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
+        if (written && message.Usage is not null)
+        {
+            await UpsertTurnUsageAsync(connection, transaction, message, cancellationToken).ConfigureAwait(false);
+        }
+
+        return written;
+    }
+
+    private static async Task UpsertTurnUsageAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        MessageRecord message,
+        CancellationToken cancellationToken)
+    {
+        var usage = message.Usage!;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = @"
+INSERT INTO turn_usage(
+    message_id, conversation_id, model, input_tokens, uncached_input_tokens, cached_input_tokens,
+    cache_write_input_tokens, output_tokens, reasoning_tokens, total_tokens, provider_calls,
+    context_tokens, context_window_tokens, cost_usd_micros, cost_source, additional_counts_json, created_at_utc)
+VALUES(
+    $messageId, $conversationId, $model, $inputTokens, $uncachedInputTokens, $cachedInputTokens,
+    $cacheWriteInputTokens, $outputTokens, $reasoningTokens, $totalTokens, $providerCalls,
+    $contextTokens, $contextWindowTokens, $costUsdMicros, $costSource, $additionalCountsJson, $createdAtUtc)
+ON CONFLICT(message_id) DO UPDATE SET
+    conversation_id = excluded.conversation_id,
+    model = excluded.model,
+    input_tokens = excluded.input_tokens,
+    uncached_input_tokens = excluded.uncached_input_tokens,
+    cached_input_tokens = excluded.cached_input_tokens,
+    cache_write_input_tokens = excluded.cache_write_input_tokens,
+    output_tokens = excluded.output_tokens,
+    reasoning_tokens = excluded.reasoning_tokens,
+    total_tokens = excluded.total_tokens,
+    provider_calls = excluded.provider_calls,
+    context_tokens = excluded.context_tokens,
+    context_window_tokens = excluded.context_window_tokens,
+    cost_usd_micros = excluded.cost_usd_micros,
+    cost_source = excluded.cost_source,
+    additional_counts_json = excluded.additional_counts_json;";
+        command.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
+        command.Parameters.AddWithValue("$conversationId", message.ConversationId.ToString("D"));
+        command.Parameters.AddWithValue("$model", usage.Model ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$inputTokens", usage.InputTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$uncachedInputTokens", usage.UncachedInputTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$cachedInputTokens", usage.CachedInputTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$cacheWriteInputTokens", usage.CacheWriteInputTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$outputTokens", usage.OutputTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$reasoningTokens", usage.ReasoningTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$totalTokens", usage.TotalTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$providerCalls", usage.ProviderCalls);
+        command.Parameters.AddWithValue("$contextTokens", usage.ContextTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$contextWindowTokens", usage.ContextWindowTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$costUsdMicros", usage.CostUsdMicros ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$costSource", (int)usage.CostSource);
+        command.Parameters.AddWithValue("$additionalCountsJson", usage.AdditionalCountsJson ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$createdAtUtc", message.UpdatedAtUtc.ToString("O"));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     internal static async Task UpsertToolExecutionAsync(

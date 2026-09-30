@@ -81,4 +81,13 @@ internal abstract class CliStreamParser
         && value.TryGetInt32(out var number)
             ? number
             : null;
+
+    /// <summary>Reads a USD amount as integer micro-dollars, or <c>null</c> when absent or not a number.</summary>
+    protected static long? GetCostUsdMicros(JsonElement element, string property) =>
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty(property, out var value)
+        && value.ValueKind == JsonValueKind.Number
+        && value.TryGetDouble(out var usd)
+            ? (long)Math.Round(usd * 1_000_000, MidpointRounding.AwayFromZero)
+            : null;
 }

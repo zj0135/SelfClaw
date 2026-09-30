@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
@@ -396,7 +396,7 @@ public sealed class DirectTurnHooksTests
             null);
 
     private static RunCompletedInput CompletedInput(string status)
-        => new(status, "final", null, 1, 2, 3, TimeSpan.FromSeconds(1));
+        => new(status, "final", null, new TurnUsage(InputTokens: 1, OutputTokens: 2), 3, TimeSpan.FromSeconds(1));
 
     private static ToolHookCall Call()
     {

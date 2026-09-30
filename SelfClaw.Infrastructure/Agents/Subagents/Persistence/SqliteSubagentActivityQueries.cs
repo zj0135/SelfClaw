@@ -73,10 +73,11 @@ internal static class SqliteSubagentActivityQueries
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = """
-                SELECT id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc,
-                       agent_id, agent_name, agent_role, input_tokens, output_tokens, duration_ms, error_message
-                FROM messages WHERE id = $turn AND conversation_id = $child AND role = $assistant;
+            command.CommandText = $"""
+                SELECT {SqliteMappings.MessageSelectColumns}
+                FROM messages m
+                LEFT JOIN turn_usage u ON u.message_id = m.id
+                WHERE m.id = $turn AND m.conversation_id = $child AND m.role = $assistant;
                 """;
             command.Parameters.AddWithValue("$turn", task.ChildTurnId.ToString("D"));
             command.Parameters.AddWithValue("$child", task.ChildConversationId.ToString("D"));

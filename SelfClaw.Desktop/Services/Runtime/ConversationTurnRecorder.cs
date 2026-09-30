@@ -123,8 +123,7 @@ internal sealed class ConversationTurnRecorder
                 break;
 
             case UsageReportedEvent usage:
-                turn.InputTokens = usage.InputTokens ?? turn.InputTokens;
-                turn.OutputTokens = usage.OutputTokens ?? turn.OutputTokens;
+                turn.Usage.Observe(usage.Usage);
                 break;
 
             case RunNoticeEvent notice:
@@ -334,8 +333,7 @@ internal sealed class ConversationTurnRecorder
             kind,
             finalText,
             errorMessage,
-            turn.InputTokens,
-            turn.OutputTokens,
+            turn.Usage.Build(),
             turn.StartedAtUtc);
         var finalization = CreateFinalization(turn.PendingFinalization);
         bool written;
@@ -452,8 +450,7 @@ internal sealed class ConversationTurnRecorder
                 TurnFinalizationKind.Blocked => MessageStatus.Blocked,
                 _ => throw new ArgumentOutOfRangeException(nameof(request), request.Kind, "Unsupported turn outcome.")
             },
-            InputTokens = request.InputTokens,
-            OutputTokens = request.OutputTokens,
+            Usage = request.Usage,
             DurationMs = (now - request.StartedAtUtc).TotalMilliseconds,
             ErrorMessage = request.ErrorMessage,
             UpdatedAtUtc = now

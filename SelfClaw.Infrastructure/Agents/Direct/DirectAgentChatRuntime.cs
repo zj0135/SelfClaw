@@ -138,6 +138,10 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             else
             {
                 var ready = (DirectTurnSetup.Ready)setup;
+                output.ConfigureUsage(
+                    ready.ProviderLease.Profile.Configuration,
+                    ready.ProviderLease.Profile.Model,
+                    AiChatOptions.ResolveContextWindowTokens(ready.ProviderLease.Profile));
                 var finishReason = await StreamResponseAsync(ready, output, cancellationToken).ConfigureAwait(false);
                 output.ReportUsage();
                 terminal = WriteTerminalOutcome(writer, finishReason, output);
@@ -196,8 +200,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 status,
                 terminal?.FinalText,
                 terminal?.ErrorMessage,
-                output.InputTokensOrNull,
-                output.OutputTokensOrNull,
+                output.Usage,
                 invoker?.CallCount ?? 0,
                 state.Elapsed.Elapsed));
         }

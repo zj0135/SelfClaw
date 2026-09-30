@@ -293,7 +293,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
                 ToolCallStatus.Completed,
                 "read",
                 "content");
-            yield return new UsageReportedEvent(21, 8);
+            yield return new UsageReportedEvent(new TurnUsage(InputTokens: 21, OutputTokens: 8));
             await Task.Yield();
             yield return new RunCompletedEvent(completionStatus, "final answer");
         }

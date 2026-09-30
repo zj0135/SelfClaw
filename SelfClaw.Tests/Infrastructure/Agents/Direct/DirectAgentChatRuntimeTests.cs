@@ -117,8 +117,13 @@ public sealed class DirectAgentChatRuntimeTests
         events.OfType<ToolCallCompletedEvent>().Should().ContainSingle().Which.Should().Match<ToolCallCompletedEvent>(item =>
             item.ToolCallId == "call-1" && item.Status == ToolCallStatus.Completed &&
             item.ResultSummary == "Read README.md." && item.ResultContent == "1\tbody");
-        events.OfType<UsageReportedEvent>().Should().ContainSingle().Which
-            .Should().Be(new UsageReportedEvent(13, 6));
+        var usage = events.OfType<UsageReportedEvent>().Should().ContainSingle().Subject.Usage;
+        usage.Model.Should().Be("test-model");
+        usage.InputTokens.Should().Be(13);
+        usage.OutputTokens.Should().Be(6);
+        usage.TotalTokens.Should().Be(19);
+        usage.ProviderCalls.Should().Be(2);
+        usage.ContextTokens.Should().Be(7);
         events.Last().Should().Be(new RunCompletedEvent(RunCompletionStatus.Succeeded, "Hello world", null));
         events.OfType<RunCompletedEvent>().Should().ContainSingle();
         client.IsDisposed.Should().BeTrue();

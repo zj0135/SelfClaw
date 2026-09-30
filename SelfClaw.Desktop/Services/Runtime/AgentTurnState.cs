@@ -28,10 +28,7 @@ internal sealed class AgentTurnState
 
     public DateTimeOffset StartedAtUtc { get; } = DateTimeOffset.UtcNow;
 
-    public int? InputTokens { get; set; }
-
-    public int? OutputTokens { get; set; }
-
+    public TurnUsageAccumulator Usage { get; } = new();
     public bool MessageCreated { get; set; }
 
     /// <summary>

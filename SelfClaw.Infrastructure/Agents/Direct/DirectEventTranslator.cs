@@ -2,7 +2,10 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
+using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 
@@ -19,10 +22,16 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     private readonly ChannelWriter<AgentStreamEvent> _writer = writer;
     private readonly StringBuilder _finalText = new();
     private readonly HashSet<string> _startedCalls = new(StringComparer.Ordinal);
-    private long _inputTokens;
-    private long _outputTokens;
-    private bool _hasInputUsage;
-    private bool _hasOutputUsage;
+    private readonly TurnUsageAccumulator _usage = new();
+    private static readonly string[] CacheWriteTokenKeys =
+    [
+        "CacheCreationInputTokens",
+        "cache_creation_input_tokens",
+        "cacheCreationInputTokens"
+    ];
+    private AiModelConfiguration? _usageConfiguration;
+    private string? _usageModel;
+    private int? _contextWindowTokens;
     private bool _usageWritten;
 
     public string FinalText => _finalText.ToString();
@@ -31,9 +40,18 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
 
     public bool HasFinalText => _finalText.Length > 0;
 
-    public int? InputTokensOrNull => _hasInputUsage ? ClampTokens(_inputTokens) : null;
+    public TurnUsage? Usage => BuildUsage();
 
-    public int? OutputTokensOrNull => _hasOutputUsage ? ClampTokens(_outputTokens) : null;
+    /// <summary>
+    /// Supplies the pricing, model id and context window the accumulated usage is reported with.
+    /// The translator has no provider or model knowledge of its own.
+    /// </summary>
+    public void ConfigureUsage(AiModelConfiguration? configuration, string? model, int? contextWindowTokens)
+    {
+        _usageConfiguration = configuration;
+        _usageModel = model;
+        _contextWindowTokens = contextWindowTokens;
+    }
 
     public void TranslateUpdate(
         ChatResponseUpdate update,
@@ -82,18 +100,7 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
                     break;
 
                 case UsageContent usage:
-                    if (usage.Details.InputTokenCount is long input)
-                    {
-                        _hasInputUsage = true;
-                        _inputTokens += input;
-                    }
-
-                    if (usage.Details.OutputTokenCount is long output)
-                    {
-                        _hasOutputUsage = true;
-                        _outputTokens += output;
-                    }
-
+                    ObserveUsage(usage.Details);
                     break;
             }
         }
@@ -108,12 +115,69 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
         }
 
         _usageWritten = true;
-        if (_hasInputUsage || _hasOutputUsage)
+        if (BuildUsage() is { } usage)
         {
-            _writer.TryWrite(new UsageReportedEvent(
-                _hasInputUsage ? ClampTokens(_inputTokens) : null,
-                _hasOutputUsage ? ClampTokens(_outputTokens) : null));
+            _writer.TryWrite(new UsageReportedEvent(usage));
         }
+    }
+
+    /// <summary>Records one provider call; every observation counts as one request.</summary>
+    private void ObserveUsage(UsageDetails details)
+    {
+        var inputTokens = ClampTokensOrNull(details.InputTokenCount);
+        var outputTokens = ClampTokensOrNull(details.OutputTokenCount);
+        _usage.Observe(new TurnUsage(
+            InputTokens: inputTokens,
+            CachedInputTokens: ClampTokensOrNull(details.CachedInputTokenCount),
+            CacheWriteInputTokens: ReadCacheWriteTokens(details),
+            OutputTokens: outputTokens,
+            ReasoningTokens: ClampTokensOrNull(details.ReasoningTokenCount),
+            TotalTokens: ClampTokensOrNull(details.TotalTokenCount),
+            ProviderCalls: 1,
+            ContextTokens: inputTokens is int input ? input + (outputTokens ?? 0) : null,
+            AdditionalCountsJson: details.AdditionalCounts is { Count: > 0 } counts
+                ? JsonSerializer.Serialize(counts)
+                : null));
+    }
+
+    private TurnUsage? BuildUsage()
+    {
+        if (_usage.Build() is not { } usage)
+        {
+            return null;
+        }
+
+        var cost = TurnUsageCostCalculator.ComputeCostUsdMicros(usage, _usageConfiguration);
+        return usage with
+        {
+            Model = _usageModel ?? usage.Model,
+            ContextWindowTokens = _contextWindowTokens ?? usage.ContextWindowTokens,
+            CostUsdMicros = cost,
+            CostSource = cost is null ? TurnUsageCostSource.None : TurnUsageCostSource.Estimated
+        };
+    }
+
+    /// <summary>
+    /// The Anthropic SDK reports cache-write tokens through <see cref="UsageDetails.AdditionalCounts"/>
+    /// instead of a first-class property; accept the snake-case spelling as well so a future SDK
+    /// revision cannot silently drop them.
+    /// </summary>
+    private static int? ReadCacheWriteTokens(UsageDetails details)
+    {
+        if (details.AdditionalCounts is not { Count: > 0 } counts)
+        {
+            return null;
+        }
+
+        foreach (var key in CacheWriteTokenKeys)
+        {
+            if (counts.TryGetValue(key, out var value))
+            {
+                return ClampTokensOrNull(value);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -136,5 +200,6 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
         };
     }
 
-    private static int ClampTokens(long tokens) => (int)Math.Clamp(tokens, 0, int.MaxValue);
+    private static int? ClampTokensOrNull(long? tokens)
+        => tokens is long value ? (int)Math.Clamp(value, 0, int.MaxValue) : null;
 }

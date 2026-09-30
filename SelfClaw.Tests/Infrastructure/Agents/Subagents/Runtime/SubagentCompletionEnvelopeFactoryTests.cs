@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using SelfClaw.Core.Models;
@@ -14,7 +14,7 @@ public sealed class SubagentCompletionEnvelopeFactoryTests
         var factory = new SubagentCompletionEnvelopeFactory();
         var task = CreateTask("review", "done", SubagentTaskStatus.Succeeded);
 
-        var delivery = factory.Create(task);
+        var delivery = factory.Create(task, null);
 
         delivery.Status.Should().Be(SubagentDeliveryStatus.Pending);
         delivery.TaskId.Should().Be(task.Id);
@@ -31,7 +31,7 @@ public sealed class SubagentCompletionEnvelopeFactoryTests
         var factory = new SubagentCompletionEnvelopeFactory();
         var task = CreateTask("review", string.Concat(Enumerable.Repeat("A😀", 20000)), SubagentTaskStatus.Succeeded);
 
-        var delivery = factory.Create(task);
+        var delivery = factory.Create(task, null);
 
         delivery.EnvelopeBytes.Should().BeLessThanOrEqualTo(SubagentCompletionEnvelopeFactory.MaximumEnvelopeBytes);
         using var document = JsonDocument.Parse(delivery.EnvelopeJson);
@@ -55,7 +55,7 @@ public sealed class SubagentCompletionEnvelopeFactoryTests
             ErrorMessage = string.Concat(Enumerable.Repeat("error😀", 10000))
         };
 
-        var delivery = factory.Create(task);
+        var delivery = factory.Create(task, null);
 
         delivery.EnvelopeBytes.Should().BeLessThanOrEqualTo(SubagentCompletionEnvelopeFactory.MaximumEnvelopeBytes);
         using var document = JsonDocument.Parse(delivery.EnvelopeJson);

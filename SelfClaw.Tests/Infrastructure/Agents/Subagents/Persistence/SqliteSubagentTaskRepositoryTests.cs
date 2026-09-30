@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
@@ -684,8 +684,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
             messageStatus,
             now,
             now,
-            InputTokens: 5,
-            OutputTokens: 3,
+            Usage: new TurnUsage(InputTokens: 5, OutputTokens: 3),
             ErrorMessage: errorCode);
         return new SubagentTaskCompletion(
             status,

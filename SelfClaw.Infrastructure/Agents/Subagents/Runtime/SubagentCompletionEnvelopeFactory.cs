@@ -15,7 +15,7 @@ internal sealed class SubagentCompletionEnvelopeFactory
         Converters = { new JsonStringEnumConverter() }
     };
 
-    internal SubagentDeliveryRecord Create(SubagentTaskRecord task)
+    internal SubagentDeliveryRecord Create(SubagentTaskRecord task, TurnUsage? usage)
     {
         ArgumentNullException.ThrowIfNull(task);
         if (!IsTerminal(task.Status) || task.CompletedAtUtc is not DateTimeOffset completedAtUtc)
@@ -42,7 +42,7 @@ internal sealed class SubagentCompletionEnvelopeFactory
                 Truncated: false,
                 task.ErrorCode,
                 task.ErrorMessage),
-            new SubagentUsage(task.InputTokens, task.OutputTokens),
+            usage,
             new SubagentTiming(task.QueuedAtUtc, task.StartedAtUtc, completedAtUtc, duration));
         var envelopeJson = SerializeWithinLimit(envelope);
         var now = completedAtUtc;

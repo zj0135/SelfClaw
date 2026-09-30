@@ -102,11 +102,12 @@ ON CONFLICT(id) DO UPDATE SET
     {
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = @"
-SELECT id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc, agent_id, agent_name, agent_role, input_tokens, output_tokens, duration_ms, error_message
-FROM messages
-WHERE conversation_id = $conversationId
-ORDER BY created_at_utc ASC;";
+        command.CommandText = $@"
+SELECT {SqliteMappings.MessageSelectColumns}
+FROM messages m
+LEFT JOIN turn_usage u ON u.message_id = m.id
+WHERE m.conversation_id = $conversationId
+ORDER BY m.created_at_utc ASC;";
         command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
 
         var results = new List<MessageRecord>();

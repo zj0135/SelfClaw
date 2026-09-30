@@ -656,12 +656,24 @@ internal sealed class DirectTurnHooks
             finalText,
             truncated ? true : null,
             input.ErrorMessage,
-            input.InputTokens is null && input.OutputTokens is null
-                ? null
-                : new HookUsagePayload(input.InputTokens, input.OutputTokens),
+            BuildUsagePayload(input.Usage),
             input.ToolCallCount,
             input.Duration.TotalMilliseconds);
     }
+
+    private static HookUsagePayload? BuildUsagePayload(TurnUsage? usage)
+        => usage is null
+            ? null
+            : new HookUsagePayload(
+                usage.InputTokens,
+                usage.OutputTokens,
+                usage.CachedInputTokens,
+                usage.CacheWriteInputTokens,
+                usage.ReasoningTokens,
+                usage.ContextTokens,
+                usage.ContextWindowTokens,
+                usage.CostUsdMicros is long micros ? micros / 1_000_000m : null,
+                usage.CostSource == TurnUsageCostSource.None ? null : usage.CostSource);
 
     private ToolExecutingPayload BuildToolExecutingPayload(
         ResolvedPluginHook hook,

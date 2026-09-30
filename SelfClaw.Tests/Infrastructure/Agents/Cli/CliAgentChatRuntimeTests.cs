@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
@@ -91,8 +91,9 @@ public sealed class CliAgentChatRuntimeTests
         store.Sessions[(conversationId, CliAgentKind.Codex)].Should().Be("new-thread");
         events.OfType<AssistantTextDeltaEvent>().Should().ContainSingle()
             .Which.Delta.Should().Be("Codex answer");
-        events.OfType<UsageReportedEvent>().Should().ContainSingle()
-            .Which.Should().Be(new UsageReportedEvent(5, 3));
+        var codexUsage = events.OfType<UsageReportedEvent>().Should().ContainSingle().Subject.Usage;
+        codexUsage.InputTokens.Should().Be(5);
+        codexUsage.OutputTokens.Should().Be(3);
         events.OfType<RunCompletedEvent>().Should().ContainSingle()
             .Which.Status.Should().Be(RunCompletionStatus.Succeeded);
     }
@@ -127,8 +128,10 @@ public sealed class CliAgentChatRuntimeTests
         store.Sessions[(conversationId, CliAgentKind.OpenCode)].Should().Be("new-session");
         events.OfType<AssistantTextDeltaEvent>().Should().ContainSingle()
             .Which.Delta.Should().Be("OpenCode answer");
-        events.OfType<UsageReportedEvent>().Should().ContainSingle()
-            .Which.Should().Be(new UsageReportedEvent(7, 4));
+        var openCodeUsage = events.OfType<UsageReportedEvent>().Should().ContainSingle().Subject.Usage;
+        openCodeUsage.InputTokens.Should().Be(7);
+        openCodeUsage.OutputTokens.Should().Be(4);
+        openCodeUsage.Model.Should().Be("opencode/model");
         events.OfType<RunCompletedEvent>().Should().ContainSingle()
             .Which.Status.Should().Be(RunCompletionStatus.Succeeded);
     }

@@ -212,7 +212,13 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
                     if (streamEvent is RunCompletedEvent)
                         runCompletedEmitted = true;
 
-                    yield return streamEvent;
+                    // The parsers only see CLI stdout, so the model selected for this turn is filled in
+                    // here when the CLI itself did not report one.
+                    yield return streamEvent is UsageReportedEvent usageEvent
+                        && string.IsNullOrWhiteSpace(usageEvent.Usage.Model)
+                        && !string.IsNullOrWhiteSpace(cliRequest.CliModel)
+                            ? usageEvent with { Usage = usageEvent.Usage with { Model = cliRequest.CliModel } }
+                            : streamEvent;
                 }
             }
         }

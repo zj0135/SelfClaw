@@ -1,4 +1,5 @@
-using FluentAssertions;
+﻿using FluentAssertions;
+using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Cli.Parsers;
 
@@ -41,8 +42,10 @@ public sealed class CodexJsonEventStreamParserTests
 
         events.OfType<AssistantTextDeltaEvent>().Should().ContainSingle()
             .Which.Delta.Should().Be("answer");
-        events.OfType<UsageReportedEvent>().Should().ContainSingle()
-            .Which.Should().Be(new UsageReportedEvent(12, 8));
+        var usage = events.OfType<UsageReportedEvent>().Should().ContainSingle().Subject.Usage;
+        usage.InputTokens.Should().Be(12);
+        usage.OutputTokens.Should().Be(8);
+        usage.ContextTokens.Should().Be(20);
     }
 
     [Fact]

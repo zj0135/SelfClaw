@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
@@ -33,7 +33,7 @@ public sealed class ConversationTurnRecorderTests
             ToolCallStatus.Completed,
             "read 1 file",
             "contents"));
-        await context.ApplyAsync(new UsageReportedEvent(11, 7));
+        await context.ApplyAsync(new UsageReportedEvent(new TurnUsage(InputTokens: 11, OutputTokens: 7)));
         await context.ApplyAsync(new RunStatusEvent(AgentRunStatus.Thinking));
         await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "answer"));
 
@@ -45,8 +45,8 @@ public sealed class ConversationTurnRecorderTests
             segment => segment.Kind.Should().Be(MessageSegmentKind.Thinking),
             segment => segment.Kind.Should().Be(MessageSegmentKind.Text),
             segment => segment.Kind.Should().Be(MessageSegmentKind.ToolCall));
-        finalization.AssistantMessage.InputTokens.Should().Be(11);
-        finalization.AssistantMessage.OutputTokens.Should().Be(7);
+        finalization.AssistantMessage.Usage!.InputTokens.Should().Be(11);
+        finalization.AssistantMessage.Usage.OutputTokens.Should().Be(7);
         finalization.ToolExecutions.Should().ContainSingle();
         finalization.ToolExecutions[0].Status.Should().Be(ToolExecutionStatus.Completed);
         finalization.ToolExecutions[0].MessageId.Should().Be(context.TurnId);
