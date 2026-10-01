@@ -78,6 +78,36 @@ public sealed class StreamingAssistantContentTests
         stream.BuildMarkdown().Should().Be("answer");
     }
 
+    [Fact]
+    public void Whitespace_only_deltas_do_not_open_a_new_block()
+    {
+        var stream = CreateStream();
+        var toolRunId = Guid.NewGuid();
+
+        stream.AppendText("before", DateTimeOffset.UtcNow);
+        stream.AppendToolCall(toolRunId, DateTimeOffset.UtcNow);
+        stream.AppendText("     ", DateTimeOffset.UtcNow);
+        stream.AppendText("after", DateTimeOffset.UtcNow);
+
+        stream.BuildSegments().Should().SatisfyRespectively(
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Text, Text = "before" }),
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.ToolCall, ToolRunId = toolRunId }),
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Text, Text = "after" }));
+    }
+
+    [Fact]
+    public void Whitespace_inside_an_open_block_is_preserved()
+    {
+        var stream = CreateStream();
+
+        stream.AppendText("line", DateTimeOffset.UtcNow);
+        stream.AppendText("\n\n", DateTimeOffset.UtcNow);
+        stream.AppendText("next", DateTimeOffset.UtcNow);
+
+        stream.BuildSegments().Should().ContainSingle()
+            .Which.Text.Should().Be("line\n\nnext");
+    }
+
     private static StreamingAssistantContent CreateStream()
     {
         var stream = new StreamingAssistantContent();

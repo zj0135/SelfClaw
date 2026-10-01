@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { buildRenderBlocks, formatAttachmentSize } from '../../../renderers/transcript.js';
 import MessageBlocks from './MessageBlocks.vue';
+import ToolStatusIcon from './ToolStatusIcon.vue';
 
 const props = defineProps({
 	item: { type: Object, required: true },
@@ -40,7 +41,7 @@ const preparingLabel = computed(() => String(props.activityText || '').trim() ||
 			<!-- 空态：无可渲染块时，助手思考中显示准备中指示器；否则若有附件只渲染附件。 -->
 			<div v-if="isPreparing" class="message-flow">
 				<div class="preparing-indicator" role="status">
-					<span class="tool-status-icon spinning" aria-hidden="true"></span>
+					<ToolStatusIcon status="running" />
 					<span class="shimmer-text">{{ preparingLabel }}</span>
 				</div>
 			</div>

@@ -78,12 +78,13 @@ const visible = computed(
 </template>
 
 <style scoped>
+/* 展开区内的 hook 干预：发丝线分隔，条目用左沿色条标注语气，不再叠卡片。 */
 .tool-hook {
 	display: grid;
 	gap: 8px;
-	margin-top: 8px;
-	padding-top: 8px;
-	border-top: 1px dashed var(--card-line);
+	margin-top: 9px;
+	padding-top: 9px;
+	border-top: 1px solid var(--line-2);
 }
 
 .hook-note {
@@ -91,11 +92,11 @@ const visible = computed(
 	align-items: flex-start;
 	gap: 7px;
 	padding: 7px 9px;
-	border-left: 2px solid var(--card-line);
-	border-radius: 5px;
-	background: var(--panel-soft);
+	border-left: 2px solid var(--line-2);
+	border-radius: 0 6px 6px 0;
+	background: var(--panel-muted);
 	font-size: var(--fs-115);
-	line-height: 1.5;
+	line-height: 1.55;
 }
 
 .hook-note.blocked {
@@ -169,9 +170,9 @@ code {
 
 .hook-modifiers code {
 	padding: 1px 5px;
-	border: 1px solid var(--card-line);
+	border: 1px solid var(--line-1);
 	border-radius: 4px;
-	background: var(--panel-soft);
+	background: var(--panel-muted);
 }
 
 .hook-arguments-grid {
@@ -183,21 +184,23 @@ code {
 .hook-arguments-column {
 	margin: 0;
 	overflow: hidden;
-	border: 1px solid var(--card-nested-line);
-	border-radius: 7px;
-	background: var(--card-nested-surface);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--data-surface);
 }
 
 .hook-arguments-column.effective {
-	border-color: color-mix(in srgb, var(--caution) 40%, var(--card-nested-line));
+	border-color: color-mix(in srgb, var(--caution) 45%, var(--border));
 }
 
 .hook-arguments-column figcaption {
 	padding: 5px 9px;
-	border-bottom: 1px solid var(--card-nested-line);
+	border-bottom: 1px solid var(--line-1);
 	color: var(--muted-soft);
-	font-size: var(--fs-10);
-	letter-spacing: 0.08em;
+	font-family: var(--font-mono);
+	font-size: var(--fs-95);
+	font-weight: 600;
+	letter-spacing: 0.1em;
 	text-transform: uppercase;
 }
 
@@ -205,6 +208,8 @@ code {
 	max-height: 180px;
 	margin: 0;
 	padding: 9px;
+	border: 0;
+	border-radius: 0;
 	background: transparent;
 	overflow: auto;
 	white-space: pre-wrap;
@@ -213,7 +218,7 @@ code {
 
 .hook-arguments-column code {
 	font-size: var(--fs-105);
-	line-height: 1.55;
+	line-height: 1.6;
 }
 
 .hook-list {
@@ -252,9 +257,9 @@ code {
 .hook-source {
 	flex: none;
 	padding: 1px 5px;
-	border: 1px solid var(--card-line);
+	border: 1px solid var(--line-1);
 	border-radius: 4px;
-	background: var(--panel-soft);
+	background: var(--panel-muted);
 	color: var(--muted);
 }
 

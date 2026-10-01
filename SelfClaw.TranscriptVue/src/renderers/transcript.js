@@ -20,76 +20,22 @@ export const toolGroupId = (messageId, members) => {
 };
 
 // ── 工具类型/摘要的领域逻辑 ───────────────────────────────────────
+// 汇总行（连续多次调用折叠成一行）用中文描述，单个工具行仍用宿主的工具名 + 目标。
 const toolActionDescriptors = {
-	run: { verb: 'ran', singular: 'command', plural: 'commands' },
-	edit: { verb: 'edited', singular: 'file', plural: 'files' },
-	read: { verb: 'read', singular: 'file', plural: 'files' },
-	search: { verb: 'searched', singular: 'query', plural: 'queries' },
-	list: { verb: 'listed', singular: 'directory', plural: 'directories' },
-	export: { verb: 'exported', singular: 'document', plural: 'documents' },
-	tool: { verb: 'used', singular: 'tool', plural: 'tools' },
+	run: { verb: '执行', unit: '条命令' },
+	edit: { verb: '修改', unit: '个文件' },
+	read: { verb: '读取', unit: '个文件' },
+	search: { verb: '搜索', unit: '次' },
+	list: { verb: '列出', unit: '个目录' },
+	export: { verb: '导出', unit: '个文档' },
+	tool: { verb: '调用', unit: '个工具' },
 };
 
-function capitalize(value) {
-	if (!value) {
-		return '';
-	}
-
-	return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
+// 工具身份只认宿主给的 toolName（领域字段），不再从摘要文案反推。
 function resolveToolName(segment) {
-	const explicitToolName = String(segment.toolName || '')
+	return String(segment.toolName || '')
 		.trim()
 		.toLowerCase();
-	if (explicitToolName) {
-		return explicitToolName;
-	}
-
-	const detailTitle = String(segment.detailTitle || '')
-		.trim()
-		.toLowerCase();
-	switch (detailTitle) {
-		case 'shell':
-			return 'run_shell_command';
-		case 'write file':
-			return 'write_file';
-		case 'edit file':
-			return 'edit_file';
-		case 'read file':
-			return 'read_file';
-		case 'search results':
-			return 'search_text';
-		case 'workspace entries':
-			return 'list_files';
-		default:
-			break;
-	}
-
-	const summaryText = String(segment.text || '')
-		.trim()
-		.toLowerCase();
-	if (summaryText.startsWith('run ')) {
-		return 'run_shell_command';
-	}
-
-	if (summaryText.startsWith('write ') || summaryText.startsWith('create ')) {
-		return 'write_file';
-	}
-
-	if (summaryText.startsWith('read ')) {
-		return 'read_file';
-	}
-
-	if (summaryText.startsWith('search ')) {
-		return 'search_text';
-	}
-
-	if (summaryText.startsWith('list ')) {
-		return 'list_files';
-	}
-
-	return '';
 }
 
 function resolveToolAction(segment) {
@@ -121,14 +67,13 @@ export function buildToolActionSummary(segments) {
 		groups.set(action, existing);
 	}
 
-	const fragments = Array.from(groups.values()).map((group, index) => {
-		const descriptor = toolActionDescriptors[group.action] || toolActionDescriptors.tool;
-		const verb = index === 0 ? capitalize(descriptor.verb) : descriptor.verb;
-		const noun = group.count === 1 ? descriptor.singular : descriptor.plural;
-		return `${verb} ${group.count} ${noun}`;
-	});
-
-	return fragments.join(', ');
+	// 「读取3个文件，修改2个文件」：中文量词与动作同源，不再为单复数分支。
+	return Array.from(groups.values())
+		.map((group) => {
+			const descriptor = toolActionDescriptors[group.action] || toolActionDescriptors.tool;
+			return `${descriptor.verb}${group.count}${descriptor.unit}`;
+		})
+		.join('，');
 }
 
 export function resolveToolGroupStatus(segments) {
@@ -245,14 +190,20 @@ export function buildRenderBlocks(item) {
 					key: toolSegmentId(item.id, segment, index),
 					id: toolSegmentId(item.id, segment, index),
 					segment,
-					// 单条工具卡片优先展示具体目标，比聚合计数更有信息量。
-					summaryLabel: segment.text || buildToolActionSummary([segment]),
+					// 单个工具行显示宿主给出的「工具名 + 目标」（如 Read README.md），
+					// 只有成组的连续调用才在折叠行上换成中文汇总量。
+					summaryLabel: segment.text || '',
 					isFirst,
 					isLast,
 				});
 			}
 
 			index = endIndex;
+			continue;
+		}
+
+		// 纯空白内容不占位：不生成空的行内块，否则两个相邻块之间会多出一条空行。
+		if (!String(segment.markdown || '').trim()) {
 			continue;
 		}
 

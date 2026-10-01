@@ -92,6 +92,24 @@ public sealed class TerminalBlockAlignerTests
     }
 
     [Fact]
+    public void Slow_path_drops_whitespace_only_chunks_between_tools()
+    {
+        var messageId = Guid.NewGuid();
+        var toolRunId = Guid.NewGuid();
+        var streamed = new[]
+        {
+            new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Text, "One", null),
+            new MessageSegmentRecord(messageId, 1, MessageSegmentKind.ToolCall, null, toolRunId)
+        };
+
+        var result = TerminalBlockAligner.Align(messageId, streamed, "One      ");
+
+        result.Should().SatisfyRespectively(
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Text, Text = "One" }),
+            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.ToolCall, ToolRunId = toolRunId }));
+    }
+
+    [Fact]
     public void Null_final_text_keeps_the_streamed_blocks()
     {
         var messageId = Guid.NewGuid();

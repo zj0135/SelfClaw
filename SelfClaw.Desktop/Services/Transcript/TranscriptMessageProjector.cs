@@ -71,7 +71,9 @@ internal sealed class TranscriptMessageProjector
                 var thinkingIndex = segment.Kind == MessageSegmentKind.Thinking ? thinkingOrdinal++ : -1;
                 switch (segment.Kind)
                 {
-                    case MessageSegmentKind.Text when !string.IsNullOrEmpty(segment.Text):
+                    // 纯空白段（流式残留的换行/缩进）不是内容：投影时直接丢掉，
+                    // 否则 Vue 会在两个块之间渲染一个空的 .body 占位。
+                    case MessageSegmentKind.Text when !string.IsNullOrWhiteSpace(segment.Text):
                         renderSegments.Add(new TranscriptRenderSegment(
                             "content",
                             segment.Text,
@@ -79,7 +81,7 @@ internal sealed class TranscriptMessageProjector
                             SegmentId: $"{message.Id:D}:text:{segment.Ordinal}",
                             SegmentOrdinal: segment.Ordinal));
                         break;
-                    case MessageSegmentKind.Thinking when !string.IsNullOrEmpty(segment.Text):
+                    case MessageSegmentKind.Thinking when !string.IsNullOrWhiteSpace(segment.Text):
                         renderSegments.Add(new TranscriptRenderSegment(
                             "thinking",
                             segment.Text,
@@ -87,7 +89,7 @@ internal sealed class TranscriptMessageProjector
                             SegmentId: $"{message.Id:D}:thinking:{thinkingIndex}",
                             SegmentOrdinal: segment.Ordinal));
                         break;
-                    case MessageSegmentKind.Notice when !string.IsNullOrEmpty(segment.Text):
+                    case MessageSegmentKind.Notice when !string.IsNullOrWhiteSpace(segment.Text):
                         renderSegments.Add(new TranscriptRenderSegment(
                             "notice",
                             segment.Text,

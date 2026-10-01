@@ -336,6 +336,36 @@ public sealed class TranscriptProjectionTests
         state.Items.Single().Segments.Should().ContainSingle().Which.Markdown.Should().Be("legacy final text");
     }
 
+    [Fact]
+    public void Build_skips_whitespace_only_segments_so_consecutive_tools_stay_adjacent()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var firstToolId = Guid.NewGuid();
+        var secondToolId = Guid.NewGuid();
+        var message = new MessageRecord(messageId, conversationId, MessageRole.Assistant, "answer", MessageStatus.Completed, now, now,
+            Segments:
+            [
+                new(messageId, 0, MessageSegmentKind.ToolCall, null, firstToolId),
+                new(messageId, 1, MessageSegmentKind.Text, "     ", null),
+                new(messageId, 2, MessageSegmentKind.ToolCall, null, secondToolId),
+                new(messageId, 3, MessageSegmentKind.Thinking, "\n", null)
+            ]);
+        var toolRuns = new[]
+        {
+            new ToolExecutionRecord(firstToolId, conversationId, "read_file", "{}", ToolExecutionStatus.Completed,
+                "Read file", null, 20, now, now, MessageId: messageId),
+            new ToolExecutionRecord(secondToolId, conversationId, "list_files", "{}", ToolExecutionStatus.Completed,
+                "List files", null, 20, now, now, MessageId: messageId)
+        };
+
+        var state = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: toolRuns))
+            ?? throw new InvalidOperationException("Missing projection.");
+
+        state.Items.Single().Segments.Select(segment => segment.Kind).Should().Equal("tool", "tool");
+    }
+
     private static TranscriptProjection CreateProjection()
     {
         var root = Path.Combine(Path.GetTempPath(), "SelfClawProjectionTests");

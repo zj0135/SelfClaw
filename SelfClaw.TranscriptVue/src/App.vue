@@ -959,7 +959,7 @@ a:hover {
 	font-size: var(--fs-11);
 }
 
-/* ===== 思考 / 工具调用：浅灰圆角卡片行（状态图标 + 主副标签 + 右侧箭头） ===== */
+/* ===== 思考 / 工具调用：无卡片文本行（状态图标 + 主副标签 + 右侧元信息） ===== */
 
 .preparing-indicator {
 	display: flex;
@@ -990,61 +990,40 @@ a:hover {
 	}
 }
 
-.tool-segment {
-	padding: 0;
-}
-
-.tool-segment+.tool-segment {
-	margin-top: 8px;
-}
-
-.tool-segment.last {
-	padding-bottom: 2px;
-}
-
-/* 状态图标：成功绿勾 / 失败红叉 / 取消灰杠 / 进行中转圈 */
+/* 状态图标：成功绿勾 / 失败红叉 / 已拦截盾牌 / 取消灰杠 / 进行中转圈。
+   一律是无底色的裸字形，配色与旋转由状态类决定，图形由 lucide 组件提供。 */
 .tool-status-icon {
 	display: inline-grid;
 	place-items: center;
 	width: 18px;
 	height: 18px;
-	border-radius: 50%;
 	flex: none;
 }
 
 .tool-status-icon svg {
-	width: 11px;
-	height: 11px;
+	width: 13px;
+	height: 13px;
 }
 
 .tool-status-icon.completed {
-	background: color-mix(in srgb, var(--success) 12%, transparent);
 	color: var(--success);
 }
 
 .tool-status-icon.failed {
-	background: color-mix(in srgb, var(--danger) 10%, transparent);
 	color: var(--danger);
 }
 
 .tool-status-icon.blocked {
-	background: color-mix(in srgb, var(--accent-2) 12%, transparent);
 	color: var(--accent-2);
 }
 
 .tool-status-icon.cancelled {
-	background: var(--panel-muted);
 	color: var(--muted-soft);
 }
 
 .tool-status-icon.spinning {
-	width: 13px;
-	height: 13px;
-	margin: 2.5px;
-	border: 2px solid var(--spinner-track);
-	border-top-color: var(--accent);
-	background: transparent;
-	animation: tool-spin 0.8s linear infinite;
+	color: var(--accent);
+	animation: tool-spin 0.9s linear infinite;
 }
 
 @keyframes tool-spin {

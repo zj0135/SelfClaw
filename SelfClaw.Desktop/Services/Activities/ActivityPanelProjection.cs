@@ -150,8 +150,7 @@ internal sealed class ActivityPanelProjection
         {
             Markdown = Clip(segment.Markdown, maximum), DetailText = ClipNullable(segment.DetailText, maximum),
             Text = ClipNullable(segment.Text, 160), ToolName = ClipNullable(segment.ToolName, 160),
-            SourceId = ClipNullable(segment.SourceId, 160), DisplayName = ClipNullable(segment.DisplayName, 160),
-            DetailTitle = ClipNullable(segment.DetailTitle, 160)
+            SourceId = ClipNullable(segment.SourceId, 160), DisplayName = ClipNullable(segment.DisplayName, 160)
         };
 
     private static ActivityPanelWireTask LimitTask(ActivityPanelWireTask task, int maximum)

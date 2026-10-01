@@ -67,8 +67,9 @@ internal static class TerminalBlockAligner
                 continue;
             }
 
+            // 纯空白块不是内容：落库后会被投影丢掉，但旧行为会在两个工具之间留下空段。
             var text = aligned.Substring(chunkStart, index - chunkStart);
-            if (text.Length > 0)
+            if (!string.IsNullOrWhiteSpace(text))
             {
                 result.Add(new MessageSegmentRecord(messageId, ordinal++, MessageSegmentKind.Text, text, null));
             }
@@ -91,7 +92,7 @@ internal static class TerminalBlockAligner
         string finalText)
     {
         var result = new List<MessageSegmentRecord>();
-        if (finalText.Length > 0)
+        if (!string.IsNullOrWhiteSpace(finalText))
         {
             result.Add(new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Text, finalText, null));
         }

@@ -41,14 +41,18 @@ internal sealed class StreamingAssistantContent
 
     public void AppendText(string delta, DateTimeOffset updatedAtUtc)
     {
-        AppendToTail(MessageSegmentKind.Text, delta);
-        MarkChanged(updatedAtUtc);
+        if (AppendToTail(MessageSegmentKind.Text, delta))
+        {
+            MarkChanged(updatedAtUtc);
+        }
     }
 
     public void AppendThinking(string delta, DateTimeOffset updatedAtUtc)
     {
-        AppendToTail(MessageSegmentKind.Thinking, delta);
-        MarkChanged(updatedAtUtc);
+        if (AppendToTail(MessageSegmentKind.Thinking, delta))
+        {
+            MarkChanged(updatedAtUtc);
+        }
     }
 
     public void AppendToolCall(Guid toolRunId, DateTimeOffset updatedAtUtc)
@@ -101,15 +105,28 @@ internal sealed class StreamingAssistantContent
             .Where(item => item.Kind == MessageSegmentKind.Text)
             .Select(item => item.Text.ToString()));
 
-    private void AppendToTail(MessageSegmentKind kind, string delta)
+    private bool AppendToTail(MessageSegmentKind kind, string delta)
     {
         if (_blocks.LastOrDefault() is { } tail && tail.Kind == kind)
         {
+            if (delta.Length == 0)
+            {
+                return false;
+            }
+
             tail.Text.Append(delta);
-            return;
+            return true;
+        }
+
+        // 纯空白只在延续已有块时有意义。用它开一个新块只会落下一个空段，
+        // 投影时渲染成占位空行，还会把前后两个工具调用切成两组。
+        if (string.IsNullOrWhiteSpace(delta))
+        {
+            return false;
         }
 
         _blocks.Add(new ContentBlock(kind, new StringBuilder(delta), null));
+        return true;
     }
 
     private void MarkChanged(DateTimeOffset updatedAtUtc)

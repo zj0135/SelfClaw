@@ -266,7 +266,7 @@ Persisted to `{AppData}\attachments\{convId}\{msgId}\`. Max 6 images, 10MB each,
 
 ### Transient state
 
-`TranscriptRenderState` is the DTO published to the Vue frontend. Assistant content is structured as `MessageSegmentRecord` blocks (Text/Thinking/ToolCall); the block order is the transcript order, and tool cards render where their ToolCall block sits. `TerminalBlockAligner` maps terminal FinalText onto the streamed blocks once per turn.
+`TranscriptRenderState` is the DTO published to the Vue frontend. Assistant content is structured as `MessageSegmentRecord` blocks (Text/Thinking/ToolCall); the block order is the transcript order, and tool/thinking rows render where their ToolCall block sits. `TerminalBlockAligner` maps terminal FinalText onto the streamed blocks once per turn.
 Continuation turns use detached `ConversationRuntimeState`; their transient completion batch is prompt-only and is never persisted as a parent user message or streamed into the selected transcript before atomic terminal commit.
 
 ### Conversation deletion

@@ -21,7 +21,6 @@ internal static class TranscriptToolRunPresenter
             toolRun.Status.ToString().ToLowerInvariant(),
             toolRun.Id.ToString("D"),
             FormatInlineToolDuration(toolRun),
-            BuildToolDetailTitle(toolRun),
             BuildToolDetailText(toolRun),
             toolRun.ToolName,
             toolRun.SourceKind?.ToString().ToLowerInvariant(),
@@ -165,20 +164,6 @@ internal static class TranscriptToolRunPresenter
             : $"List {relativePath}";
     }
 
-    private static string BuildToolDetailTitle(ToolExecutionRecord toolRun)
-        => toolRun.SourceKind is ToolSourceKind.Mcp or ToolSourceKind.Skill or ToolSourceKind.Plugin
-            ? toolRun.DisplayName ?? HumanizeToolName(toolRun.ToolName)
-            : toolRun.ToolName switch
-            {
-                "run_shell_command" => "Shell",
-                "read_file" => "Read File",
-                "search_text" => "Search Results",
-                "list_files" or "glob_files" => "Workspace Entries",
-                "write_file" => "Write File",
-                "edit_file" => "Edit File",
-                _ => HumanizeToolName(toolRun.ToolName)
-            };
-
     private static string BuildToolDetailText(ToolExecutionRecord toolRun)
     {
         if (!string.IsNullOrWhiteSpace(toolRun.ResultContent))
@@ -191,8 +176,8 @@ internal static class TranscriptToolRunPresenter
         var detail = toolRun.ToolName switch
         {
             "run_shell_command" => BuildShellRequestDetails(arguments),
-            "read_file" => ReadArgument(arguments, "relativePath", "No file path provided."),
-            "search_text" => $"Query: {ReadArgument(arguments, "query", string.Empty)}",
+            "read_file" => ReadArgument(arguments, "relativePath", "未提供文件路径。"),
+            "search_text" => $"查询：{ReadArgument(arguments, "query", string.Empty)}",
             "list_files" or "glob_files" => BuildListRequestDetails(arguments),
             "write_file" or "edit_file" => BuildWriteRequestDetails(arguments),
             _ => toolRun.ResultSummary ?? PrettyPrintJson(toolRun.ArgumentsJson)
@@ -241,7 +226,7 @@ internal static class TranscriptToolRunPresenter
     {
         var command = ReadArgument(arguments, "command", string.Empty);
         return string.IsNullOrWhiteSpace(command)
-            ? "No command payload was recorded."
+            ? "未记录命令内容。"
             : $"$ {command.ReplaceLineEndings(Environment.NewLine)}";
     }
 
@@ -249,17 +234,17 @@ internal static class TranscriptToolRunPresenter
     {
         var relativePath = ReadArgument(arguments, "relativePath", string.Empty);
         return string.IsNullOrWhiteSpace(relativePath)
-            ? "Path: workspace root"
-            : $"Path: {relativePath}";
+            ? "路径：工作区根目录"
+            : $"路径：{relativePath}";
     }
 
     private static string BuildWriteRequestDetails(JsonDocument? arguments)
     {
-        var relativePath = ReadArgument(arguments, "relativePath", "Unknown path");
+        var relativePath = ReadArgument(arguments, "relativePath", "未知路径");
         var characterCount = ReadArgument(arguments, "characterCount", string.Empty);
         return string.IsNullOrWhiteSpace(characterCount)
-            ? $"Path: {relativePath}"
-            : $"Path: {relativePath}{Environment.NewLine}Characters: {characterCount}";
+            ? $"路径：{relativePath}"
+            : $"路径：{relativePath}{Environment.NewLine}字符数：{characterCount}";
     }
 
     private static string TruncateInlineToolText(string value, int? maxLength)

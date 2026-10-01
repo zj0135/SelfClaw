@@ -92,14 +92,7 @@
 	--data-inline-surface: #eef2f7;
 	--data-inline-ink: #263142;
 
-	/* ═══ 1 · 组件面：对话区的思考块 / 工具卡片 / 遮罩 / 微光 ═══ */
-	--card-surface: #f7f8fa;
-	--card-line: #edeff3;
-	--card-line-hover: #e0e4ea;
-	--card-nested-surface: #ffffff;
-	--card-nested-line: #e8ebf0;
-	--spinner-track: #d5dce6;
-	--quote-line: #d9e2ef;
+	/* ═══ 1 · 组件面：中性主按钮 / 遮罩 / 微光 ═══ */
 	/* 中性主按钮（合并、确认这类）。深色下必须反过来变浅，否则深底上的深按钮看不见。 */
 	--fill-strong: #303741;
 	--fill-strong-ink: #ffffff;
@@ -245,14 +238,6 @@ html[data-theme='dark'] {
 	--data-inline-surface: #23272f;
 	--data-inline-ink: #c9d1dc;
 
-	/* 深色下卡片靠比面板略亮一档来「浮起」，与浅色靠略暗一档的方向相反。 */
-	--card-surface: #1c2027;
-	--card-line: #262b34;
-	--card-line-hover: #333944;
-	--card-nested-surface: #22262e;
-	--card-nested-line: #2d323c;
-	--spinner-track: #333944;
-	--quote-line: #343b47;
 	--fill-strong: #e9ebf0;
 	--fill-strong-ink: #16191f;
 	--shimmer-dim: #5f6a7d;

@@ -8,7 +8,6 @@ public sealed record TranscriptRenderSegment(
     string? Status = null,
     string? SegmentId = null,
     string? DurationText = null,
-    string? DetailTitle = null,
     string? DetailText = null,
     string? ToolName = null,
     string? SourceKind = null,

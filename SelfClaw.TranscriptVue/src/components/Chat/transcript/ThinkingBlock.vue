@@ -61,30 +61,19 @@ function onContentClick(event) {
 </template>
 
 <style scoped>
+/* 与工具行同构的纯文本行：图标 + 标签 + 箭头，行底一条 alpha 发丝线，展开内容沿导线缩进。 */
 .thinking-block {
-	margin: 0;
-	overflow: hidden;
-	border: 1px solid var(--card-line);
-	border-radius: 12px;
-	background: var(--card-surface);
-	transition: border-color 0.15s;
-}
-
-.thinking-block:not(.pending):hover {
-	border-color: var(--card-line-hover);
-}
-
-.thinking-block.last {
-	margin-bottom: 6px;
+	min-width: 0;
+	border-bottom: 1px solid var(--line-1);
 }
 
 .thinking-summary {
-	width: 100%;
 	display: flex;
+	width: 100%;
 	align-items: center;
 	justify-content: flex-start;
-	gap: 9px;
-	padding: 9px 12px;
+	gap: 8px;
+	padding: 5px 0;
 	border: 0;
 	background: transparent;
 	color: var(--text-soft);
@@ -95,13 +84,20 @@ function onContentClick(event) {
 	cursor: default;
 }
 
+.thinking-summary:focus-visible {
+	outline: 1px solid var(--accent-line);
+	outline-offset: 2px;
+	border-radius: 3px;
+}
+
 .thinking-spark {
 	display: inline-grid;
 	place-items: center;
 	width: 18px;
 	height: 18px;
-	color: var(--muted);
 	flex: none;
+	color: var(--muted-soft);
+	transition: color 120ms ease;
 }
 
 .thinking-spark svg {
@@ -124,37 +120,41 @@ function onContentClick(event) {
 .thinking-label {
 	font-size: var(--fs-125);
 	font-weight: 600;
-	color: var(--text-strong);
+	color: var(--text-soft);
 	letter-spacing: 0.01em;
+	transition: color 120ms ease;
+}
+
+.thinking-summary:hover .thinking-label,
+.thinking-block.open .thinking-label {
+	color: var(--text-strong);
 }
 
 .thinking-chevron {
 	margin-left: auto;
 	color: var(--faint);
-	font-size: var(--fs-14);
-	transition: transform 140ms ease;
+	transition: transform 140ms ease, color 120ms ease;
+}
+
+.thinking-summary:hover .thinking-chevron {
+	color: var(--muted);
 }
 
 .thinking-block.open .thinking-chevron {
 	transform: rotate(90deg);
-	color: var(--text);
+	color: var(--muted);
 }
 
 .thinking-content {
-	display: none;
-	padding: 0 12px 11px;
-}
-
-.thinking-block.open .thinking-content {
-	display: block;
+	margin: 2px 0 4px 26px;
+	padding: 2px 0 2px 12px;
+	border-left: 1px solid var(--line-2);
 }
 
 .thinking-markdown {
-	padding: 6px 0 2px 12px;
-	border-left: 2px solid var(--quote-line);
 	color: var(--muted);
-	font-size: var(--fs-12);
-	line-height: 1.7;
+	font-size: var(--fs-125);
+	line-height: 1.72;
 }
 
 .thinking-placeholder {

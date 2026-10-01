@@ -1,9 +1,10 @@
 <script setup>
 import { Check, X, Minus, LoaderCircle, ShieldX } from 'lucide-vue-next';
+import { toolStatusLabel } from '../../../renderers/shared.js';
 
 // 状态图标：成功绿勾 / 失败红叉 / 已拦截盾牌 / 取消灰杠 / 进行中转圈。
-// 外层 .tool-status-icon.<status> 保留原有 class，圆底与配色仍由全局 CSS 决定；
-// 这里只把内部 SVG 换成 lucide 组件。
+// 均为无底色的裸字形：外层 .tool-status-icon.<status> 只决定配色与旋转，图形由 lucide 组件提供。
+// 状态文字不再单独占位，改作图标自身的可访问名称。
 defineProps({
 	status: {
 		type: String,
@@ -15,19 +16,19 @@ const isSpinning = (status) => status === 'running' || status === 'awaitingappro
 </script>
 
 <template>
-	<span v-if="isSpinning(status)" class="tool-status-icon spinning" aria-hidden="true">
-		<LoaderCircle :size="11" :stroke-width="2" />
+	<span v-if="isSpinning(status)" class="tool-status-icon spinning" role="img" :aria-label="toolStatusLabel(status)">
+		<LoaderCircle :size="13" :stroke-width="2" />
 	</span>
-	<span v-else-if="status === 'failed'" class="tool-status-icon failed" aria-hidden="true">
-		<X :size="11" :stroke-width="1.9" />
+	<span v-else-if="status === 'failed'" class="tool-status-icon failed" role="img" :aria-label="toolStatusLabel(status)">
+		<X :size="13" :stroke-width="1.9" />
 	</span>
-	<span v-else-if="status === 'blocked'" class="tool-status-icon blocked" aria-hidden="true">
-		<ShieldX :size="11" :stroke-width="1.9" />
+	<span v-else-if="status === 'blocked'" class="tool-status-icon blocked" role="img" :aria-label="toolStatusLabel(status)">
+		<ShieldX :size="13" :stroke-width="1.9" />
 	</span>
-	<span v-else-if="status === 'cancelled'" class="tool-status-icon cancelled" aria-hidden="true">
-		<Minus :size="11" :stroke-width="1.9" />
+	<span v-else-if="status === 'cancelled'" class="tool-status-icon cancelled" role="img" :aria-label="toolStatusLabel(status)">
+		<Minus :size="13" :stroke-width="1.9" />
 	</span>
-	<span v-else class="tool-status-icon completed" aria-hidden="true">
-		<Check :size="11" :stroke-width="1.9" />
+	<span v-else class="tool-status-icon completed" role="img" :aria-label="toolStatusLabel(status)">
+		<Check :size="13" :stroke-width="1.9" />
 	</span>
 </template>
