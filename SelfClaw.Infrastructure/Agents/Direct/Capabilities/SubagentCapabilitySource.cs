@@ -27,6 +27,10 @@ internal sealed class SubagentCapabilitySource
 
     private const string DelegateDisplayName = "Delegate to Subagent";
     private const string GetTaskDisplayName = "Get Subagent task";
+    private const string GetTaskDescription =
+        "Get the current state of a Subagent task created by this conversation. Use this only when a " +
+        "concrete decision depends on the current state, such as before a retry or when the user asks; " +
+        "never poll a running task with it, because completed results are delivered automatically.";
     private const string CancelTaskDisplayName = "Cancel Subagent task";
     private const string RetryTaskDisplayName = "Retry Subagent task";
 
@@ -66,11 +70,10 @@ internal sealed class SubagentCapabilitySource
         var subagentIds = request.Agent.SubagentIds;
         var bound = new BoundTools(coordinator, request, capabilityCeiling, modelProfileId, subagentIds);
         return new SubagentCapabilities(
-            [CapabilitySections.SubagentCatalog(ResolveCatalog(subagentIds), DelegateToolName)],
+            [CapabilitySections.SubagentCatalog(ResolveCatalog(subagentIds), DelegateToolName, GetTaskToolName)],
             [
                 CreateDelegateTool(bound, subagentIds),
-                Create(bound.GetAsync, GetTaskToolName,
-                    "Get the current state of a Subagent task created by this conversation.",
+                Create(bound.GetAsync, GetTaskToolName, GetTaskDescription,
                     ToolCallKind.Read, GetTaskDisplayName),
                 Create(bound.CancelAsync, CancelTaskToolName,
                     "Cancel a queued or running Subagent task created by this conversation.",
@@ -121,7 +124,10 @@ internal sealed class SubagentCapabilitySource
     }
 
     private static string CreateDelegateDescription(IReadOnlyList<string> subagentIds)
-        => "Queue an authorized Subagent task and return immediately with its durable task state. " +
+        => "Queue an authorized Subagent task and return immediately with its durable task state; the task " +
+           "runs in the background. Do not poll for its result: the runtime resumes this conversation with " +
+           "the completed results once they are ready, so end your turn when the delegation is your last " +
+           "pending work. " +
            $"Allowed {ParameterName} values: {string.Join(", ", subagentIds)}. " +
            "Pass one of those exact ids; never invent, translate or guess a Subagent id.";
 

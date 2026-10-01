@@ -64,6 +64,9 @@ public sealed class SubagentCapabilitySourceTests
         section.Should().Contain("- search: Workspace search - Finds code in large workspaces. Tools: read-only.");
         section.Should().Contain("- missing: missing - no usable definition file, so it cannot start");
         section.Should().Contain(SubagentCapabilitySource.DelegateToolName);
+        section.Should().Contain("does not wait for the Subagent to finish");
+        section.Should().Contain($"Do not poll progress with {SubagentCapabilitySource.GetTaskToolName}");
+        section.Should().Contain("the runtime resumes this conversation with the completed results");
     }
 
     [Fact]
@@ -74,10 +77,25 @@ public sealed class SubagentCapabilitySourceTests
 
         var delegateTool = FindTool(capabilities, SubagentCapabilitySource.DelegateToolName);
         delegateTool.Description.Should().Contain("Allowed subagentId values: search, reviewer");
+        delegateTool.Description.Should().Contain("runs in the background");
+        delegateTool.Description.Should().Contain("Do not poll for its result");
+        delegateTool.Description.Should().Contain("the runtime resumes this conversation with the completed results");
 
         using var schema = JsonDocument.Parse(delegateTool.JsonSchema.GetRawText());
         schema.RootElement.GetProperty("properties").GetProperty("subagentId").GetProperty("enum")
             .EnumerateArray().Select(item => item.GetString()).Should().Equal("search", "reviewer");
+    }
+
+    [Fact]
+    public void Get_tool_restricts_itself_to_decision_bearing_reads()
+    {
+        var capabilities = new SubagentCapabilitySource(new NoOpCoordinator())
+            .Resolve(CreateRequest(DirectTurnOrigin.Interactive, ["search"]), CreateCeiling());
+
+        var getTool = FindTool(capabilities, SubagentCapabilitySource.GetTaskToolName);
+
+        getTool.Description.Should().Contain("never poll a running task with it");
+        getTool.Description.Should().Contain("before a retry");
     }
 
     [Fact]

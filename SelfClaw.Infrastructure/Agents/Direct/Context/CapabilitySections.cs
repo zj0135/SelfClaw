@@ -59,9 +59,15 @@ internal static class CapabilitySections
             """;
     }
 
+    /// <summary>
+    /// The allowlist plus the delegation contract. The contract has to live here rather than only on the
+    /// tool descriptions: polling a running Subagent looks like a reasonable move to a model that has not
+    /// been told results arrive on their own, and every poll is persisted and replayed into later turns.
+    /// </summary>
     public static string SubagentCatalog(
         IReadOnlyList<SubagentCatalogEntry> subagents,
-        string delegateToolName)
+        string delegateToolName,
+        string getTaskToolName)
     {
         var catalog = string.Join("\n", subagents
             .OrderBy(subagent => subagent.Id, StringComparer.Ordinal)
@@ -70,6 +76,7 @@ internal static class CapabilitySections
             [SelfClaw Available Subagents]
             {catalog}
             Delegate with {delegateToolName} using an exact id from this list. Never invent, translate or guess a Subagent id; an id that is not listed is rejected.
+            {delegateToolName} returns as soon as the task is durably queued; it does not wait for the Subagent to finish. Do not poll progress with {getTaskToolName}: continue other work or end your turn, and the runtime resumes this conversation with the completed results. Use {getTaskToolName} only when a concrete decision depends on the current state of a task.
             """;
     }
 

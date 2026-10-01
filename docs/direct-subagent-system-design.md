@@ -461,6 +461,7 @@ request.Agent.SubagentIds.Count > 0
 
 - system prompt 增加 `[SelfClaw Available Subagents]` 段（`CapabilitySections.SubagentCatalog`），每条列出 `id: 名称 - 描述 Tools: <tool policy>`；描述来自 `ISubagentDefinitionCatalog`（Desktop 的 `SubagentDefinitionCatalog` 实现），截断到 256 UTF-8 字节。绑定但定义缺失/无效的 id 仍占位，描述为不可用，保证“可见集合 == 可调用集合”。
 - `delegate_to_subagent` 的 description 重复列出 `Allowed subagentId values: ...`，并把 `subagentId` 的 JSON schema 收紧为 `enum`（M.E.AI 无法从 delegate 参数推导 enum，由 `DelegatingAIFunction` 覆写 `JsonSchema`），使幻觉出的名字在结构上不合法。
+- 目录段与两个工具 description 同时声明投递契约：`delegate_to_subagent` 不等待 child，完成结果由 runtime 以 continuation turn 送回，因此不得用 `get_subagent_task` 轮询进度。模型看不到 §9.3 的 transient prompt 与 dispatcher（它们只在投递时存在），若不在这三处说明，轮询就是模型唯一能想到的等待手段，而每次轮询都会落进 `tool_runs` 并被后续每一轮重放。
 - 目录只提供名称/描述/tool policy；模型选择、绑定和 instructions 仍只存在于任务快照里。
 
 ### 6.2 工具 interface
@@ -476,7 +477,8 @@ retry_subagent_task(task_id)
 
 语义：
 
-- `delegate_to_subagent` 只负责 durable acceptance，不等待 child 完成。
+- `delegate_to_subagent` 只负责 durable acceptance，不等待 child 完成；`description` 与目录段都声明这一点，并要求模型在委派是最后一项待办时结束回合，而不是轮询等待。
+- `get_subagent_task` 只用于“具体决策依赖当前状态”的读取（例如 retry 前）；它是诊断/控制入口，不是等待原语。
 - `get/cancel/retry` 必须携带 runtime 注入的 parent conversation scope；模型提供的 task id 不能越权访问其他 conversation 的任务。
 - `cancel` 幂等。terminal task 返回当前状态，不改写终态。
 - `retry` 不复活旧行，而是创建新 task id，设置 `retry_of_task_id` 和递增 `attempt`。
