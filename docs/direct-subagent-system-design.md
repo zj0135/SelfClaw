@@ -747,6 +747,16 @@ child 完整 final text 仍保存在 child assistant message；parent 可通过 
 
 该 transient message 不进入 `messages`，但 continuation 产生的 assistant text、thinking、tool runs、usage 和终态按普通 parent assistant turn 持久化。
 
+continuation 是 **provisional 可见**的：只要该 parent conversation 被选中，detached runtime state 就像普通回合一样把 thinking、正文和工具行流式推给前端（`IsBusy` 为真，`TranscriptRenderState.IsContinuation` 为真，前端据此把状态行写成“正在处理子代理结果”并隐藏停止按钮）。但 provisional 内容从不落库：
+
+- 中间工具进度不写 `tool_runs`，正文只在内存快照里；
+- 成功路径由原子提交把 provisional 回合替换为持久化版本（同一个 message id，前端只更新内容不闪烁）；
+- 放弃路径（可重试失败、用户停用、取消）恢复 `ConversationRuntimeState.InitialSnapshot` 并立即发布，因此重试不会在历史里留下前一次尝试的残渣。
+
+这也是为什么停止按钮在 continuation 期间不可用：取消一次尝试只会被 dispatcher 按退避重试，按钮无法表达“不要这些结果”这个不存在的语义。
+
+provisional 可见性随选中会话生效：父会话未被选中时不产生任何发布，切回时才从内存快照补齐。同一批内容也会进入声明 `host.transcript.read` 的插件视图，因此它们同样会看到 provisional 回合以及放弃时的撤回；这不是新增的披露面（插件本来就能读到用户看到的转录），但作者文档需要说明消息可能回退。
+
 ---
 
 ## 10. parent continuation 与投递幂等

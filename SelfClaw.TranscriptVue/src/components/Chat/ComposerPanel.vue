@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
-import { ArrowRight, Square, ShieldAlert, Check, X, Webhook } from 'lucide-vue-next';
+import { ArrowRight, LoaderCircle, Square, ShieldAlert, Check, X, Webhook } from 'lucide-vue-next';
 import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
 import AgentSelector from './AgentSelector.vue';
@@ -12,6 +12,12 @@ const props = defineProps({
 	busy: {
 		type: Boolean,
 		default: false,
+	},
+	// A background continuation cannot be stopped: cancelling the attempt would only schedule a retry,
+	// so the composer shows progress instead of a stop button.
+	stoppable: {
+		type: Boolean,
+		default: true,
 	},
 	workspaceSelection: {
 		type: Object,
@@ -245,10 +251,13 @@ defineExpose({
 				<div class="composer-tools-right">
 					<PermissionSelector :mode="toolPermissionMode" align="end"
 						@select="emit('select-permission-mode', $event)" />
-					<button v-if="props.busy" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成"
+					<button v-if="props.busy && props.stoppable" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成"
 						@click="stop">
 						<Square :size="13" fill="currentColor" :stroke-width="0" aria-hidden="true" />
 					</button>
+					<span v-else-if="props.busy" class="send-btn background-busy" role="status" title="正在处理子代理结果" aria-label="正在处理子代理结果">
+						<LoaderCircle :size="16" class="spin" aria-hidden="true" />
+					</span>
 					<button v-else class="send-btn" type="button" :disabled="!canSend" title="发送" aria-label="发送"
 						@click="submit">
 						<ArrowRight :size="17" :stroke-width="2.2" aria-hidden="true" />
@@ -536,6 +545,35 @@ defineExpose({
 .send-btn.stop {
 	background: var(--text);
 	box-shadow: none;
+}
+
+.send-btn.background-busy {
+	background: transparent;
+	color: var(--accent);
+	box-shadow: none;
+	cursor: default;
+}
+
+.send-btn.background-busy:hover {
+	background: transparent;
+	box-shadow: none;
+	transform: none;
+}
+
+.spin {
+	animation: composer-spin 1s linear infinite;
+}
+
+@keyframes composer-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.spin {
+		animation: none;
+	}
 }
 
 @media (max-width: 960px) {

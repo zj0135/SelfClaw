@@ -246,7 +246,7 @@ public sealed class ConversationSessionCoordinatorTests
     }
 
     [Fact]
-    public async Task Detached_turn_does_not_publish_or_replace_the_selected_transcript()
+    public async Task Detached_turn_streams_its_provisional_content_into_the_selected_transcript()
     {
         var conversation = CreateConversation(Guid.NewGuid());
         var repository = new ControlledConversationRepository();
@@ -256,17 +256,94 @@ public sealed class ConversationSessionCoordinatorTests
         using var coordinator = new ConversationSessionCoordinator(repository, sink);
 
         await coordinator.SelectAsync(conversation.Id);
-        var selectedBefore = coordinator.SelectedMessages.ToArray();
         sink.ImmediatePublishes.Clear();
+        sink.StreamingPublishes.Clear();
         var detached = await coordinator.StartDetachedTurnAsync(conversation);
-        detached.ReplaceMessage(CreateMessage(conversation.Id, "detached assistant"));
+        detached.ReplaceMessage(CreateMessage(conversation.Id, "provisional"));
+        detached.RaiseTranscriptChanged(immediate: false);
         detached.RaiseTranscriptChanged(immediate: true);
 
-        coordinator.SelectedMessages.Should().Equal(selectedBefore);
+        coordinator.SelectedMessages.Select(message => message.MarkdownContent)
+            .Should().Equal("existing", "provisional");
+        coordinator.IsSelectedContinuation.Should().BeTrue();
+        coordinator.IsSelectedRunning.Should().BeTrue();
+        sink.StreamingPublishes.Should().Equal(true);
+        sink.ImmediatePublishes.Should().Equal(true);
+        coordinator.AbandonTurn(detached);
+    }
+
+    [Fact]
+    public async Task Abandoning_a_detached_turn_restores_the_pre_turn_transcript()
+    {
+        var conversation = CreateConversation(Guid.NewGuid());
+        var repository = new ControlledConversationRepository();
+        repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "existing")]);
+        repository.CompleteToolRuns(conversation.Id, []);
+        var sink = new RecordingTranscriptChangeSink();
+        using var coordinator = new ConversationSessionCoordinator(repository, sink);
+
+        await coordinator.SelectAsync(conversation.Id);
+        var baseline = coordinator.SelectedMessages.ToArray();
+        var detached = await coordinator.StartDetachedTurnAsync(conversation);
+        detached.ReplaceMessage(CreateMessage(conversation.Id, "provisional"));
+        sink.ImmediatePublishes.Clear();
+
+        coordinator.AbandonTurn(detached);
+
+        // The attempt was never persisted, so a retry must not leave its content behind.
+        coordinator.SelectedMessages.Should().Equal(baseline);
+        coordinator.IsSelectedContinuation.Should().BeFalse();
+        coordinator.IsSelectedRunning.Should().BeFalse();
+        coordinator.IsRunning(conversation.Id).Should().BeFalse();
+        sink.ImmediatePublishes.Should().Equal(true);
+    }
+
+    [Fact]
+    public async Task Reselecting_a_conversation_with_a_running_continuation_serves_the_provisional_transcript()
+    {
+        var conversation = CreateConversation(Guid.NewGuid());
+        var repository = new ControlledConversationRepository();
+        repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "existing")]);
+        repository.CompleteToolRuns(conversation.Id, []);
+        using var coordinator = CreateCoordinator(repository);
+
+        await coordinator.SelectAsync(conversation.Id);
+        var reads = repository.MessageReads[conversation.Id];
+        var detached = await coordinator.StartDetachedTurnAsync(conversation);
+        detached.ReplaceMessage(CreateMessage(conversation.Id, "provisional"));
+
+        await coordinator.SelectAsync(conversation.Id);
+
+        coordinator.SelectedMessages.Select(message => message.MarkdownContent)
+            .Should().Equal("existing", "provisional");
+        repository.MessageReads[conversation.Id].Should().Be(reads, "a live continuation is served from memory");
+        coordinator.AbandonTurn(detached);
+    }
+
+    [Fact]
+    public async Task A_detached_turn_for_another_conversation_publishes_nothing()
+    {
+        var selected = CreateConversation(Guid.NewGuid());
+        var other = CreateConversation(Guid.NewGuid());
+        var repository = new ControlledConversationRepository();
+        repository.CompleteMessages(selected.Id, []);
+        repository.CompleteToolRuns(selected.Id, []);
+        repository.CompleteMessages(other.Id, []);
+        repository.CompleteToolRuns(other.Id, []);
+        var sink = new RecordingTranscriptChangeSink();
+        using var coordinator = new ConversationSessionCoordinator(repository, sink);
+
+        await coordinator.SelectAsync(selected.Id);
+        sink.ImmediatePublishes.Clear();
+        sink.StreamingPublishes.Clear();
+        var detached = await coordinator.StartDetachedTurnAsync(other);
+        detached.ReplaceMessage(CreateMessage(other.Id, "provisional"));
+        detached.RaiseTranscriptChanged(immediate: true);
+        coordinator.AbandonTurn(detached);
+
+        coordinator.SelectedMessages.Should().BeEmpty();
         sink.StreamingPublishes.Should().BeEmpty();
         sink.ImmediatePublishes.Should().BeEmpty();
-        coordinator.IsSelected(conversation.Id).Should().BeTrue();
-        coordinator.AbandonTurn(detached);
     }
 
     private static ConversationRecord CreateConversation(Guid id)

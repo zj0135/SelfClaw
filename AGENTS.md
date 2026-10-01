@@ -65,7 +65,7 @@ User input (WebView2)
 Background SubagentDeliveryDispatcher (when durable child results are pending)
   → user-priority admission/lease/coalescing, skipping busy parents
   → awaited durable execution checkpoint before any continuation tool executes
-  → detached Direct continuation with transient completion batch
+  → detached Direct continuation with transient completion batch (provisional, streamed to the selected transcript)
   → atomic parent terminal + Delivered, bounded retry or DeadLetter notification
 ```
 
@@ -267,7 +267,7 @@ Persisted to `{AppData}\attachments\{convId}\{msgId}\`. Max 6 images, 10MB each,
 ### Transient state
 
 `TranscriptRenderState` is the DTO published to the Vue frontend. Assistant content is structured as `MessageSegmentRecord` blocks (Text/Thinking/ToolCall); the block order is the transcript order, and tool/thinking rows render where their ToolCall block sits. `TerminalBlockAligner` maps terminal FinalText onto the streamed blocks once per turn.
-Continuation turns use detached `ConversationRuntimeState`; their transient completion batch is prompt-only and is never persisted as a parent user message or streamed into the selected transcript before atomic terminal commit.
+Continuation turns use detached `ConversationRuntimeState` and stream into the selected transcript while they run: the provisional assistant turn, including thinking text and tool calls, is rendered from memory but never persisted, which is what makes an abandoned attempt republish the pre-turn snapshot and disappear. The transient completion batch stays prompt-only. Only the atomic terminal commit persists the turn and resolves the delivery.
 
 ### Conversation deletion
 

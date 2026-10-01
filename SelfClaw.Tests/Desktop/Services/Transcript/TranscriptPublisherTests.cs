@@ -106,6 +106,32 @@ public sealed class TranscriptPublisherTests
         payload.RootElement.GetProperty("selectedAgentName").GetString().Should().Be("latest");
     }
 
+    [Fact]
+    public void Publish_delivers_the_provisional_continuation_flag_on_both_replace_and_patch()
+    {
+        var hostMessages = new List<string>();
+        var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
+        channel.Attach(hostMessages.Add);
+        channel.MarkReady();
+        var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
+        var projection = new TranscriptProjection(
+            StoragePathDefaults.Create(
+                storageRoot,
+                Path.Combine(storageRoot, "selfclaw.db"),
+                Path.Combine(storageRoot, "secrets")));
+        using var publisher = new TranscriptPublisher(projection, delivery, Dispatcher.CurrentDispatcher);
+        var request = CreateRequest("build", false) with { IsBusy = true, IsContinuation = true };
+        publisher.Attach(_ => request);
+
+        publisher.PublishNow(false);
+
+        using var payload = JsonDocument.Parse(hostMessages.Single());
+        payload.RootElement.GetProperty("type").GetString().Should().Be("replaceState");
+        payload.RootElement.GetProperty("isBusy").GetBoolean().Should().BeTrue();
+        payload.RootElement.GetProperty("isContinuation").GetBoolean().Should().BeTrue();
+    }
+
     private static TranscriptProjectionRequest CreateRequest(string agentName, bool autoScroll)
         => new(
             [],

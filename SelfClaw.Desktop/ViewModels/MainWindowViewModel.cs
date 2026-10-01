@@ -678,6 +678,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         var selectedAgent = ResolveSelectedAgent();
         var transcript = _conversationSessions.CaptureSelectedTranscript();
         var isBusy = _conversationSessions.IsSelectedRunning;
+        var isContinuation = isBusy && _conversationSessions.IsSelectedContinuation;
         var activityText = isBusy ? _conversationSessions.SelectedActivityText : null;
         return new TranscriptProjectionRequest(
             transcript.Messages,
@@ -692,7 +693,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             selectedAgent.Id,
             selectedAgent.Name,
             _capabilityRevision,
-            ToToolPermissionModeWire(_selectedToolPermissionMode));
+            ToToolPermissionModeWire(_selectedToolPermissionMode),
+            isContinuation);
     }
 
     Guid? SelfClaw.Desktop.Services.Activities.IActivityPanelScopeSource.CaptureActivityParent()

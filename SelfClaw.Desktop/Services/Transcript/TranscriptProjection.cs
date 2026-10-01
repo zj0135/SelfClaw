@@ -36,7 +36,7 @@ public sealed class TranscriptProjection
         UpdateNavigation(request);
         var stableItems = _lastState is { } previous && SameReferences(previous.Items, items) ? previous.Items : items;
         var state = new TranscriptRenderState(stableItems, request.AutoScroll, _navigation,
-            request.SelectedConversationId?.ToString("D"), request.IsBusy, request.ActivityText, request.AgentMode,
+            request.SelectedConversationId?.ToString("D"), request.IsBusy, request.IsContinuation, request.ActivityText, request.AgentMode,
             request.SelectedAgentId, request.SelectedAgentName, request.CapabilityRevision, request.ToolPermissionMode);
         if (state == _lastState) return null;
         _lastState = state;

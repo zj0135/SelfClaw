@@ -36,3 +36,16 @@ it('does not duplicate the preparing indicator and hides when the turn completes
 	expect(status.value).toBeNull();
 	expect(vi.getTimerCount()).toBe(0);
 });
+
+it('labels a background continuation so the silent window is not mistaken for an idle conversation', async () => {
+	vi.useFakeTimers();
+	const session = reactive({ isBusy: true, isContinuation: true, selectedConversationId: 'first', items: [] });
+	scope = effectScope();
+	const status = scope.run(() => useChatTurnStatus(session));
+	vi.advanceTimersByTime(3000);
+	expect(status.value.label).toBe('正在处理子代理结果');
+	expect(status.value.elapsedText).toBe('3s');
+	session.isContinuation = false;
+	await nextTick();
+	expect(status.value.label).toBe('执行中');
+});

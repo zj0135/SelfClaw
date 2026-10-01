@@ -90,7 +90,7 @@ Schema v27 增加 `subagent_deliveries.tool_execution_started_at_utc`。调用�
 
 这个同步边界独立于事件 Channel。`ToolCallStartedEvent` 入队不等于消费者已落库，不能把事件消费当作执行屏障。
 
-detached recorder 不发布父 transcript，也不写中间工具进度；checkpoint 单独保存恢复证据。父终态与 Delivered/DeadLetter 保留原子事务，completion batch 仍是 prompt-only。过期恢复读取 checkpoint；v26 的既有 leased 行缺乏可信证据，升级时保守标为不确定，不自动重放。
+detached recorder 流式写入父 transcript，但不写中间工具进度：临时回合对用户可见，但从未持久化，因而失败重试不会在历史中留下残骸。checkpoint 单独保存恢复证据。父终态与 Delivered/DeadLetter 保留原子事务，completion batch 仍是 prompt-only。过期恢复读取 checkpoint；v26 的既有 leased 行缺乏可信证据，升级时保守标为不确定，不自动重放。
 
 checkpoint 表示“工具可能已经开始”，不提供外部文件、Shell 或 MCP 的 exactly-once。中断可能丢失未提交正文，但不会因缺少 `tool_runs` 而自动重复不确定的操作。租约提交成功但调用方未收到返回值时，由过期恢复收敛。
 

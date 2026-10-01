@@ -15,4 +15,5 @@ internal sealed record TranscriptProjectionRequest(
     string SelectedAgentId,
     string SelectedAgentName,
     long CapabilityRevision,
-    string ToolPermissionMode);
+    string ToolPermissionMode,
+    bool IsContinuation = false);

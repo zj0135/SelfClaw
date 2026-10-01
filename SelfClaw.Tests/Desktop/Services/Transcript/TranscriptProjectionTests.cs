@@ -373,6 +373,19 @@ public sealed class TranscriptProjectionTests
             StoragePathDefaults.Create(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets")));
     }
 
+    [Fact]
+    public void Build_marks_a_background_continuation_as_provisional_busy_state()
+    {
+        var projection = CreateProjection();
+        var request = CreateRequest() with { IsBusy = true, IsContinuation = true };
+
+        var state = projection.Build(request);
+
+        state.Should().NotBeNull();
+        state!.IsBusy.Should().BeTrue();
+        state.IsContinuation.Should().BeTrue();
+    }
+
     private static TranscriptProjectionRequest CreateRequest(
         IReadOnlyList<MessageRecord>? messages = null,
         IReadOnlyList<ToolExecutionRecord>? toolRuns = null,

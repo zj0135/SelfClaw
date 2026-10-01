@@ -3,7 +3,7 @@ import { useTranscriptBridge } from './transcriptBridge.js';
 
 export function useChatTranscript(scroll) {
 	const state = reactive({
-		items: [], selectedConversationId: null, isBusy: false,
+		items: [], selectedConversationId: null, isBusy: false, isContinuation: false,
 		agentMode: 'cli', selectedAgentId: '', selectedAgentName: '', capabilityRevision: 0,
 		activityText: '', toolPermissionMode: 'require-approval',
 	});
@@ -16,6 +16,7 @@ export function useChatTranscript(scroll) {
 		state.items = Array.isArray(payload.items) ? payload.items : [];
 		state.selectedConversationId = conversationId;
 		state.isBusy = Boolean(payload.isBusy);
+		state.isContinuation = Boolean(payload.isContinuation);
 		state.activityText = payload.activityText || '';
 		state.agentMode = payload.agentMode || 'cli';
 		state.selectedAgentId = payload.selectedAgentId || '';

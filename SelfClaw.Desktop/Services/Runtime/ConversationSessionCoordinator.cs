@@ -42,6 +42,14 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     }
 
     internal bool IsSelectedRunning => GetSelectedRuntimeState()?.IsRunning == true;
+
+    /// <summary>
+    /// True while the selected conversation is being continued from Subagent results. The turn streams into
+    /// the transcript like any other, but its content is provisional: it is not persisted, and abandoning
+    /// the attempt restores the pre-turn snapshot.
+    /// </summary>
+    internal bool IsSelectedContinuation => GetSelectedRuntimeState()?.IsDetached == true;
+
     internal event Action? SelectedStateChanged;
 
     internal string? SelectedActivityText => GetSelectedRuntimeState()?.ActivityText;
@@ -68,8 +76,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
         }
         _transcriptChangeSink.PublishNow(conversationId is not null);
 
-        if (conversationId is not Guid selectedId ||
-            (_runtimeStates.TryGetValue(selectedId, out var runtimeState) && !runtimeState.IsDetached))
+        if (conversationId is not Guid selectedId || _runtimeStates.ContainsKey(selectedId))
         {
             return;
         }
@@ -124,16 +131,13 @@ internal sealed class ConversationSessionCoordinator : IDisposable
                 snapshot.Messages,
                 snapshot.ToolRuns,
                 isDetached);
-            if (!isDetached)
+            state.TranscriptChanged += immediate =>
             {
-                state.TranscriptChanged += immediate =>
+                if (IsSelected(state.ConversationId))
                 {
-                    if (IsSelected(state.ConversationId))
-                    {
-                        PublishSelectedTranscriptChange(immediate);
-                    }
-                };
-            }
+                    PublishSelectedTranscriptChange(immediate);
+                }
+            };
 
             _runtimeStates[conversation.Id] = state;
             if (IsSelected(conversation.Id)) SelectedStateChanged?.Invoke();
@@ -176,15 +180,33 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     {
         ArgumentNullException.ThrowIfNull(state);
         state.IsRunning = false;
-        if (_runtimeStates.TryRemove(state.ConversationId, out var registered))
+        var publish = false;
+        lock (_selectionGate)
         {
-            registered.Dispose();
+            if (IsSelected(state.ConversationId))
+            {
+                publish = true;
+                _selectionVersion++;
+                // The abandoned turn was provisional: restore what the transcript showed before it started.
+                _selectedTranscript = state.InitialSnapshot;
+            }
+
+            if (_runtimeStates.TryRemove(state.ConversationId, out var registered))
+            {
+                registered.Dispose();
+            }
+            else
+            {
+                state.Dispose();
+            }
         }
-        else
-        {
-            state.Dispose();
-        }
+
         state.MarkCompleted();
+        if (publish)
+        {
+            _transcriptChangeSink.PublishNow(true);
+            SelectedStateChanged?.Invoke();
+        }
     }
 
     internal void StopSelected()
@@ -289,7 +311,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     private ConversationRuntimeState? GetSelectedRuntimeState()
     {
         lock (_selectionGate)
-            return _selectedConversationId is Guid id && _runtimeStates.TryGetValue(id, out var state) && !state.IsDetached
+            return _selectedConversationId is Guid id && _runtimeStates.TryGetValue(id, out var state)
                 ? state : null;
     }
 

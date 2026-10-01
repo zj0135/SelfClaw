@@ -28,8 +28,11 @@ internal sealed class ConversationRuntimeState : IDisposable
     {
         Conversation = conversation;
         IsDetached = isDetached;
-        _messages.AddRange(messages);
-        _toolRuns.AddRange(toolRuns);
+        var initialMessages = messages.ToArray();
+        var initialToolRuns = toolRuns.ToArray();
+        InitialSnapshot = new ConversationTranscriptSnapshot(initialMessages, initialToolRuns);
+        _messages.AddRange(initialMessages);
+        _toolRuns.AddRange(initialToolRuns);
     }
 
     public ConversationRecord Conversation { get; set; }
@@ -37,6 +40,12 @@ internal sealed class ConversationRuntimeState : IDisposable
     public Guid ConversationId => Conversation.Id;
 
     public bool IsDetached { get; }
+
+    /// <summary>
+    /// The persisted transcript this turn started from. A detached turn streams provisionally and is never
+    /// persisted, so abandoning it restores this snapshot and the provisional content disappears.
+    /// </summary>
+    public ConversationTranscriptSnapshot InitialSnapshot { get; }
 
     public IReadOnlyList<MessageRecord> Messages => CaptureSnapshot().Messages;
 

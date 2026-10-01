@@ -25,6 +25,6 @@ export function useChatTurnStatus(session) {
 		const last = session.items.at(-1);
 		const preparing = last?.role === 'assistant' && last.isThinking && !(Array.isArray(last.segments) && last.segments.length);
 		if (!session.isBusy || startedAt.value == null || preparing) return null;
-		return { label: '执行中', elapsedText: formatElapsedTime(now.value - startedAt.value) };
+		return { label: session.isContinuation ? '正在处理子代理结果' : '执行中', elapsedText: formatElapsedTime(now.value - startedAt.value) };
 	});
 }

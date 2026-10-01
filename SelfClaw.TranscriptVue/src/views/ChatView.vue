@@ -59,6 +59,7 @@ defineExpose({
 			</section>
 		</ActivityStage>
 		<ComposerPanel ref="composerShellRef" :busy="state.isBusy || composer.submitting.value"
+			:stoppable="!state.isContinuation"
 			:workspace-selection="workspace.state" :git-loading="workspace.state.gitLoading"
 			:git-error="workspace.state.gitError" :submit-error="composer.error.value" :agent-mode="state.agentMode"
 			:selected-agent-id="state.selectedAgentId" :selected-agent-name="state.selectedAgentName"
