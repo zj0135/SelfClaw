@@ -75,6 +75,11 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
                     _writer.TryWrite(new AssistantThinkingDeltaEvent(blockId, reasoning.Text));
                     break;
 
+                case ErrorContent { ErrorCode: "Refusal" } refusal when !string.IsNullOrEmpty(refusal.Message):
+                    _finalText.Append(refusal.Message);
+                    _writer.TryWrite(new AssistantTextDeltaEvent(blockId, refusal.Message));
+                    break;
+
                 case FunctionCallContent call when _startedCalls.Add(call.CallId):
                     bindings.TryGetValue(call.Name, out var binding);
                     var descriptor = binding?.Descriptor;
@@ -99,9 +104,6 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
                         invoker?.TryTakeOutcome(result.CallId)));
                     break;
 
-                case UsageContent usage:
-                    ObserveUsage(usage.Details);
-                    break;
             }
         }
     }
@@ -122,7 +124,7 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     }
 
     /// <summary>Records one provider call; every observation counts as one request.</summary>
-    private void ObserveUsage(UsageDetails details)
+    public void ObserveUsage(UsageDetails details)
     {
         var inputTokens = ClampTokensOrNull(details.InputTokenCount);
         var outputTokens = ClampTokensOrNull(details.OutputTokenCount);
@@ -134,7 +136,7 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
             ReasoningTokens: ClampTokensOrNull(details.ReasoningTokenCount),
             TotalTokens: ClampTokensOrNull(details.TotalTokenCount),
             ProviderCalls: 1,
-            ContextTokens: inputTokens is int input ? input + (outputTokens ?? 0) : null,
+            ContextTokens: inputTokens is int input && outputTokens is int output ? input + output : null,
             AdditionalCountsJson: details.AdditionalCounts is { Count: > 0 } counts
                 ? JsonSerializer.Serialize(counts)
                 : null));

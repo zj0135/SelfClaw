@@ -10,6 +10,8 @@ namespace SelfClaw.Core.Models;
 /// for display. <see cref="ContextTokens"/> snapshots the last provider call of the turn, which is the
 /// context the next turn starts from. <see cref="AdditionalCountsJson"/> carries the provider-specific
 /// extra counts of the latest observation that reported any.
+/// <see cref="TotalTokens"/> is an already normalized total. Null means unknown, even when both input
+/// and output contain partial observations; consumers must not derive a total from those fields.
 /// </remarks>
 public sealed record TurnUsage(
     string? Model = null,

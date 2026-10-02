@@ -94,6 +94,8 @@ public sealed class ActivityPanelLifecycleTests
         await panel.Publisher.SubscribeAsync(subscription, task.ParentConversationId, "initial", CancellationToken.None);
         panel.AcknowledgeLatest();
         await panel.Publisher.SelectDetailAsync(subscription, Guid.NewGuid(), task.Id, null, null, "detail", CancellationToken.None);
+        // An intervening metadata push can hold the detail snapshot pending until the client ACKs it.
+        panel.AcknowledgeLatest();
         var wire = panel.LatestState.GetProperty("sections")[0].GetProperty("detail");
         wire.GetProperty("contentOrigin").GetString().Should().Be("persisted");
         wire.GetProperty("task").GetProperty("errorCode").GetString().Should().Be(SubagentErrorCodes.TimedOut);

@@ -38,11 +38,7 @@ public sealed class DirectToolPipelineTests : IDisposable
             _ => new() { ["relativePath"] = "output.txt", ["content"] = "written" }
         };
         var provider = new SingleToolChatClient(name, arguments);
-        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(
-            provider,
-            pipelineBuilder: (native, pipeline) => new ChatClientBuilder(native)
-                .UseFunctionInvocation(configure: option => option.FunctionInvoker = pipeline.FunctionInvoker)
-                .Build());
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(provider);
         var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory,
             DirectAgentChatRuntimeTests.CreateCapabilityResolver(new WorkspaceToolService(new(), new(), new())));
         var now = DateTimeOffset.UtcNow;
@@ -89,7 +85,7 @@ public sealed class DirectToolPipelineTests : IDisposable
     [Fact]
     public void Binding_returns_the_bound_tool_unwrapped()
     {
-        // Approval and the execution checkpoint belong to the single FunctionInvoker seam, so the
+        // Approval and the execution checkpoint belong to the single DirectToolInvoker, so the
         // resolver must hand the runtime the same tool instance it was given.
         var request = (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(Guid.NewGuid());
         var function = AIFunctionFactory.Create(() => "ok", "same");
@@ -131,22 +127,14 @@ public sealed class DirectToolPipelineTests : IDisposable
     }
 
     /// <summary>
-    /// Drives one turn through the real M.E.AI function-invoking pipeline over a single synthetic tool, with a
+    /// Drives one turn through the explicit Direct loop over a single synthetic tool, with a
     /// model that keeps requesting that tool until the turn ends.
     /// </summary>
     private static async Task<(RunCompletedEvent Terminal, RepeatingToolChatClient Provider, int Executions)> RunToolLoopAsync(
         Func<int, object?> tool)
     {
         var provider = new RepeatingToolChatClient("probe_tool", new Dictionary<string, object?>());
-        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(
-            provider,
-            pipelineBuilder: (native, pipeline) => new ChatClientBuilder(native)
-                .UseFunctionInvocation(configure: option =>
-                {
-                    option.FunctionInvoker = pipeline.FunctionInvoker;
-                    option.MaximumConsecutiveErrorsPerRequest = 0;
-                })
-                .Build());
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(provider);
 
         var executions = 0;
         Func<object> invoke = () =>
@@ -219,12 +207,6 @@ public sealed class DirectToolPipelineTests : IDisposable
                 yield break;
             }
 
-            FirstToolResult ??= messages.SelectMany(message => message.Contents)
-                .OfType<FunctionResultContent>()
-                .LastOrDefault()?.Result;
-            FirstToolResult ??= messages.SelectMany(message => message.Contents)
-                .OfType<FunctionResultContent>()
-                .LastOrDefault()?.Result;
             yield return new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("done")])
             {
                 MessageId = "answer-message",

@@ -36,7 +36,7 @@ internal sealed partial class OpenAiProviderAdapter
             request.Profile.Model,
             CreateCredential(request),
             CreateClientOptions(request.Connection, httpClient));
-        return client.AsIChatClient();
+        return new OpenAiChatReasoningReplayClient(client.AsIChatClient());
     }
 
     private ChatOptions CreateChatCompletionsOptions(AiProviderClientRequest request, IReadOnlyList<AITool> tools)

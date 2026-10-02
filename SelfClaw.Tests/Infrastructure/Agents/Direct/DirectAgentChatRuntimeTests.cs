@@ -51,7 +51,7 @@ public sealed class DirectAgentChatRuntimeTests
     [Fact]
     public async Task Default_model_is_prepared_before_subagent_tools_capture_the_parent_model()
     {
-        var factory = new FakeChatClientFactory(new ScriptedChatClient([]));
+        var factory = new FakeChatClientFactory(new ScriptedChatClient([FinishUpdate("done", ChatFinishReason.Stop)]));
         var resolver = CreateCapabilityResolver(coordinator:
             new SelfClaw.Tests.Infrastructure.Agents.Direct.Capabilities.SubagentCapabilitySourceTests.NoOpCoordinator());
         var request = (DirectChatTurnRequest)CreateRequest(null);
@@ -80,24 +80,17 @@ public sealed class DirectAgentChatRuntimeTests
     }
 
     [Fact]
-    public async Task StreamTurnAsync_translates_all_content_and_aggregates_usage()
+    public async Task StreamTurnAsync_streams_text_and_reasoning_and_normalizes_cumulative_usage()
     {
         var client = new ScriptedChatClient(
         [
             Update("message-1",
                 new TextReasoningContent("thinking"),
                 new TextContent("Hello "),
-                new FunctionCallContent("call-1", "read_file", new Dictionary<string, object?>
-                {
-                    ["relativePath"] = "README.md"
-                }),
-                new FunctionCallContent("call-1", "read_file", new Dictionary<string, object?>()),
-                new FunctionResultContent("call-1", new DirectToolResult(ToolCallStatus.Completed, "Read README.md.",
-                    JsonSerializer.SerializeToElement(new WorkspaceFileContent("README.md", "body", false)), "1\tbody")),
                 new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 })),
             Update("message-1",
                 new TextContent("world"),
-                new UsageContent(new UsageDetails { InputTokenCount = 3, OutputTokenCount = 4 }))
+                new UsageContent(new UsageDetails { InputTokenCount = 13, OutputTokenCount = 6 }))
         ]);
         var factory = new FakeChatClientFactory(client);
         var runtime = CreateRuntime(factory);
@@ -113,17 +106,15 @@ public sealed class DirectAgentChatRuntimeTests
         events.OfType<AssistantThinkingDeltaEvent>().Should().ContainSingle()
             .Which.Should().Be(new AssistantThinkingDeltaEvent("message-1", "thinking"));
         events.OfType<AssistantTextDeltaEvent>().Select(item => item.Delta).Should().Equal("Hello ", "world");
-        events.OfType<ToolCallStartedEvent>().Should().ContainSingle().Which.Kind.Should().Be(ToolCallKind.Read);
-        events.OfType<ToolCallCompletedEvent>().Should().ContainSingle().Which.Should().Match<ToolCallCompletedEvent>(item =>
-            item.ToolCallId == "call-1" && item.Status == ToolCallStatus.Completed &&
-            item.ResultSummary == "Read README.md." && item.ResultContent == "1\tbody");
+        events.OfType<ToolCallStartedEvent>().Should().BeEmpty();
+        events.OfType<ToolCallCompletedEvent>().Should().BeEmpty();
         var usage = events.OfType<UsageReportedEvent>().Should().ContainSingle().Subject.Usage;
         usage.Model.Should().Be("test-model");
         usage.InputTokens.Should().Be(13);
         usage.OutputTokens.Should().Be(6);
         usage.TotalTokens.Should().Be(19);
-        usage.ProviderCalls.Should().Be(2);
-        usage.ContextTokens.Should().Be(7);
+        usage.ProviderCalls.Should().Be(1);
+        usage.ContextTokens.Should().Be(19);
         events.Last().Should().Be(new RunCompletedEvent(RunCompletionStatus.Succeeded, "Hello world", null));
         events.OfType<RunCompletedEvent>().Should().ContainSingle();
         client.IsDisposed.Should().BeTrue();
@@ -142,7 +133,7 @@ public sealed class DirectAgentChatRuntimeTests
     [Fact]
     public async Task StreamTurnAsync_uses_scope_default_and_binds_workspace_tools()
     {
-        var client = new ScriptedChatClient([]);
+        var client = new ScriptedChatClient([FinishUpdate("done", ChatFinishReason.Stop)]);
         var factory = new FakeChatClientFactory(client);
         var runtime = CreateRuntime(factory);
         var request = CreateRequest(modelProfileId: null, workspace: CreateWorkspace());
@@ -302,10 +293,9 @@ public sealed class DirectAgentChatRuntimeTests
     }
 
     [Fact]
-    public async Task StreamTurnAsync_reports_failure_when_tool_call_loop_stops_early()
+    public async Task StreamTurnAsync_reports_protocol_failure_for_tool_finish_without_calls()
     {
-        // A trailing tool_calls finish reason means the tool-invocation loop stopped while the
-        // model still wanted to call tools, so the turn is incomplete rather than successful.
+        // A tool_calls finish without a complete call is a malformed provider response.
         var client = new ScriptedChatClient(
             [FinishUpdate("m", ChatFinishReason.ToolCalls, new TextContent("checking"))]);
         var factory = new FakeChatClientFactory(client);
@@ -524,7 +514,7 @@ public sealed class DirectAgentChatRuntimeTests
     [Fact]
     public async Task An_ignored_runStarting_failure_emits_a_notice_and_continues()
     {
-        var factory = new FakeChatClientFactory(new ScriptedChatClient([]));
+        var factory = new FakeChatClientFactory(new ScriptedChatClient([FinishUpdate("done", ChatFinishReason.Stop)]));
         var lease = new DirectTurnCapabilityLease(
             [],
             [],
@@ -590,6 +580,28 @@ public sealed class DirectAgentChatRuntimeTests
         var payload = observing.Payloads.Should().ContainSingle().Subject;
         payload.GetProperty("event").GetString().Should().Be("runCompleted");
         payload.GetProperty("status").GetString().Should().Be("cancelled");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Filtered_or_empty_response_delivers_one_non_success_lifecycle(bool filtered)
+    {
+        var client = new ScriptedChatClient(filtered
+            ? [FinishUpdate("m", ChatFinishReason.ContentFilter, new TextContent("filtered"))]
+            : []);
+        var factory = new FakeChatClientFactory(client);
+        await using var observing = new ObservingRunCompletedHooks();
+        await observing.StartAsync();
+        var runtime = CreateRuntime(factory, new FakeCapabilityResolver(LeaseWithRunCompletedHook()), observing.Factory);
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status
+            .Should().Be(filtered ? RunCompletionStatus.Blocked : RunCompletionStatus.Failed);
+        await observing.WaitForDeliveryAsync();
+        var payload = observing.Payloads.Should().ContainSingle().Subject;
+        payload.GetProperty("status").GetString().Should().Be(filtered ? "blocked" : "failed");
+        payload.GetProperty("toolCallCount").GetInt32().Should().Be(0);
+        client.IsDisposed.Should().BeTrue();
     }
 
     [Fact]
@@ -791,15 +803,12 @@ public sealed class DirectAgentChatRuntimeTests
     internal sealed class FakeChatClientFactory : IAiChatClientFactory
     {
         private readonly IChatClient _client;
-        private readonly Func<IChatClient, AiChatClientPipelineOptions, IChatClient>? _pipelineBuilder;
 
         public FakeChatClientFactory(
             IChatClient client,
-            int? contextWindowTokens = null,
-            Func<IChatClient, AiChatClientPipelineOptions, IChatClient>? pipelineBuilder = null)
+            int? contextWindowTokens = null)
         {
             _client = client;
-            _pipelineBuilder = pipelineBuilder;
             var now = DateTimeOffset.UtcNow;
             Profile = new AiModelProfile(
                 Guid.NewGuid(), Guid.NewGuid(), "Test", AiProviderApiFormat.OpenAIChatCompletions,
@@ -812,8 +821,9 @@ public sealed class DirectAgentChatRuntimeTests
                     : new Dictionary<string, JsonElement>(), now, now);
         }
 
-        public AiModelProfile Profile { get; }
+        public AiModelProfile Profile { get; set; }
         public ChatOptions Options { get; init; } = new();
+        public AiUsageUpdateKind UsageUpdateKind { get; init; } = AiUsageUpdateKind.Cumulative;
         public Exception? FactoryException { get; init; }
         public Exception? PreparationException { get; init; }
         public IReadOnlyList<AITool> LastTools { get; private set; } = [];
@@ -842,8 +852,7 @@ public sealed class DirectAgentChatRuntimeTests
             var options = Options.Clone();
             options.Tools ??= pipeline.Tools.ToList();
             if (FactoryException is not null) throw FactoryException;
-            var client = _pipelineBuilder is null ? _client : _pipelineBuilder(_client, pipeline);
-            return new AiChatClientLease(client, options, Profile, new HttpClient());
+            return new AiChatClientLease(_client, options, Profile, new HttpClient(), UsageUpdateKind);
         }
     }
 

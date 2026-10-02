@@ -14,8 +14,7 @@ namespace SelfClaw.Infrastructure.Agents.Direct.Tools;
 
 /// <summary>
 /// The single tool-invocation seam for a Direct turn: it owns the tool hooks, approval, the durable
-/// execution checkpoint and the turn's consecutive-fault budget, and it is installed as the pipeline's
-/// M.E.AI <c>FunctionInvoker</c> so every tool call passes through exactly once.
+/// execution checkpoint and the turn's consecutive-fault budget. The explicit loop calls it once per call.
 /// </summary>
 internal sealed class DirectToolInvoker
 {
@@ -23,8 +22,8 @@ internal sealed class DirectToolInvoker
 
     /// <summary>
     /// How many consecutive tool faults are converted into a model-visible failure before the next one
-    /// aborts the turn. The pipeline sets <c>MaximumConsecutiveErrorsPerRequest</c> to 0, so the first
-    /// uncaught fault ends the turn: a permanently broken tool costs at most this many attempts plus one
+    /// aborts the turn. An uncaught fault ends the explicit loop: a permanently broken tool costs
+    /// at most this many attempts plus one
     /// instead of the whole tool-call budget.
     /// </summary>
     internal const int MaximumConsecutiveToolFaults = 2;
@@ -49,24 +48,27 @@ internal sealed class DirectToolInvoker
     public int CallCount => Volatile.Read(ref _callCount);
 
     public async ValueTask<object?> InvokeAsync(
-        FunctionInvocationContext context,
+        FunctionCallContent callContent,
+        int requestIndex,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        var toolName = context.Function.Name;
+        ArgumentNullException.ThrowIfNull(callContent);
+        cancellationToken.ThrowIfCancellationRequested();
+        var toolName = callContent.Name;
         if (!_bindings.TryGetValue(toolName, out var binding))
         {
             throw new InvalidOperationException($"Direct tool '{toolName}' is not bound to this turn.");
         }
 
         Interlocked.Increment(ref _callCount);
-        var callId = context.CallContent.CallId;
+        var callId = callContent.CallId;
+        var originalArguments = new AIFunctionArguments(callContent.Arguments ?? new Dictionary<string, object?>());
         var stopwatch = Stopwatch.StartNew();
         var call = new ToolHookCall(
             callId,
-            context.Iteration,
+            requestIndex,
             binding,
-            context.Arguments,
+            originalArguments,
             _request.ToolPermissionMode);
         var pre = await _hooks.ToolExecutingAsync(call, cancellationToken).ConfigureAwait(false);
         DirectToolResult? result = null;
@@ -82,11 +84,11 @@ internal sealed class DirectToolInvoker
         }
         else
         {
-            var arguments = pre.EffectiveArguments ?? context.Arguments;
+            var arguments = pre.EffectiveArguments ?? originalArguments;
             var needsApproval =
                 (binding.RequiresApproval && _request.ToolPermissionMode != ToolPermissionMode.FullAccess) ||
                 pre.ApprovalRequiredBy.Count > 0;
-            if (needsApproval && !await RequestApprovalAsync(context, binding, arguments, pre, cancellationToken)
+            if (needsApproval && !await RequestApprovalAsync(binding, arguments, pre, cancellationToken)
                     .ConfigureAwait(false))
             {
                 deniedBy = "user";
@@ -106,7 +108,7 @@ internal sealed class DirectToolInvoker
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    raw = await context.Function.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
+                    raw = await binding.Tool.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
@@ -162,9 +164,7 @@ internal sealed class DirectToolInvoker
             var consecutiveFaults = Interlocked.Increment(ref _consecutiveToolFaults);
             if (consecutiveFaults > MaximumConsecutiveToolFaults)
             {
-                // The turn's own budget is spent: stop it instead of letting the pipeline retry the broken
-                // tool until the iteration limit. The pipeline's MaximumConsecutiveErrorsPerRequest of 0
-                // makes this rethrow terminal.
+                // The explicit loop terminates on this exception; it never retries the broken tool.
                 throw new DirectToolFaultLimitException(binding.Tool.Name, consecutiveFaults, fault);
             }
         }
@@ -180,7 +180,6 @@ internal sealed class DirectToolInvoker
         => _outcomes.TryRemove(callId, out var outcome) ? outcome : null;
 
     private async Task<bool> RequestApprovalAsync(
-        FunctionInvocationContext context,
         DirectToolBinding binding,
         AIFunctionArguments arguments,
         ToolExecutingOutcome pre,
@@ -197,7 +196,7 @@ internal sealed class DirectToolInvoker
                     binding.Tool.Name,
                     binding.Descriptor.DisplayName ?? binding.Tool.Name,
                     binding.Tool.Description,
-                    JsonSerializer.Serialize(arguments, context.Function.JsonSerializerOptions),
+                    JsonSerializer.Serialize(arguments, binding.Tool.JsonSerializerOptions),
                     _request.ConversationId,
                     binding.Descriptor.SourceKind ?? ToolSourceKind.BuiltIn,
                     binding.Descriptor.SourceId,

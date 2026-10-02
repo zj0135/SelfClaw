@@ -6,6 +6,7 @@ namespace SelfClaw.Core.Runtime;
 /// Accumulates the usage observations reported for a single turn. Token counts are summed across
 /// provider calls; context and model come from the latest observation that carries them; costs are
 /// summed per source, and a provider-reported cost wins over the estimates for the same turn.
+/// Totals are already normalized by the producer: an unknown total stays unknown through aggregation.
 /// </summary>
 public sealed class TurnUsageAccumulator
 {
@@ -16,6 +17,7 @@ public sealed class TurnUsageAccumulator
     private int? _outputTokens;
     private int? _reasoningTokens;
     private int? _totalTokens;
+    private bool _hasUnknownTotal;
     private int _providerCalls;
     private int? _contextTokens;
     private int? _contextWindowTokens;
@@ -41,6 +43,7 @@ public sealed class TurnUsageAccumulator
         _outputTokens = Add(_outputTokens, usage.OutputTokens);
         _reasoningTokens = Add(_reasoningTokens, usage.ReasoningTokens);
         _totalTokens = Add(_totalTokens, usage.TotalTokens);
+        _hasUnknownTotal |= usage.TotalTokens is null;
         _providerCalls += usage.ProviderCalls;
 
         // The latest observation is the context the next turn starts from, and the window belongs to
@@ -84,9 +87,6 @@ public sealed class TurnUsageAccumulator
         int? uncachedInputTokens = _inputTokens is int inputTokens
             ? Math.Max(0, inputTokens - (_cachedInputTokens ?? 0) - (_cacheWriteInputTokens ?? 0))
             : null;
-        int? totalTokens = _totalTokens ?? (_inputTokens is int input && _outputTokens is int output
-            ? input + output
-            : null);
         var (costUsdMicros, costSource) = _providerReportedCostUsdMicros is long providerReported
             ? (providerReported, TurnUsageCostSource.ProviderReported)
             : _estimatedCostUsdMicros is long estimated
@@ -101,7 +101,7 @@ public sealed class TurnUsageAccumulator
             _cacheWriteInputTokens,
             _outputTokens,
             _reasoningTokens,
-            totalTokens,
+            _hasUnknownTotal ? null : _totalTokens,
             _providerCalls,
             _contextTokens,
             _contextWindowTokens,

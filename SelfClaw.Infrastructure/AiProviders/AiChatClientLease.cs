@@ -16,7 +16,8 @@ public sealed class AiChatClientLease : IDisposable
         IChatClient client,
         ChatOptions options,
         AiModelProfile profile,
-        HttpClient httpClient)
+        HttpClient httpClient,
+        AiUsageUpdateKind usageUpdateKind = AiUsageUpdateKind.Cumulative)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(options);
@@ -26,12 +27,14 @@ public sealed class AiChatClientLease : IDisposable
         Options = options;
         Profile = profile;
         HttpClient = httpClient;
+        UsageUpdateKind = usageUpdateKind;
     }
 
     public IChatClient Client { get; }
     public ChatOptions Options { get; }
     public AiModelProfile Profile { get; }
     public HttpClient HttpClient { get; }
+    public AiUsageUpdateKind UsageUpdateKind { get; }
 
     public void Dispose()
     {

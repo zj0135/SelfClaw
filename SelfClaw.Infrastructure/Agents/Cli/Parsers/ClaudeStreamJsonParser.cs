@@ -241,7 +241,9 @@ internal sealed class ClaudeStreamJsonParser : CliStreamParser
             UncachedInputTokens: uncachedInput,
             CachedInputTokens: cacheRead,
             CacheWriteInputTokens: cacheWrite,
-            OutputTokens: output);
+            OutputTokens: output,
+            TotalTokens: GetInt(usage, "total_tokens") ??
+                (input is int totalInput && output is int totalOutput ? totalInput + totalOutput : null));
     }
 
     /// <summary>
@@ -321,6 +323,8 @@ internal sealed class ClaudeStreamJsonParser : CliStreamParser
                 CachedInputTokens: cacheRead,
                 CacheWriteInputTokens: cacheWrite,
                 OutputTokens: output,
+                TotalTokens: hasUsage ? GetInt(usage, "total_tokens") ??
+                    (input is int totalInput && output is int totalOutput ? totalInput + totalOutput : null) : null,
                 ProviderCalls: GetInt(root, "num_turns") ?? 1,
                 ContextTokens: contextTokens,
                 CostUsdMicros: cost,

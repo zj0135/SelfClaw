@@ -58,27 +58,32 @@ public sealed class ActivityPanelBridgeTests
             await panel.Publisher.SubscribeAsync(subscription, task.ParentConversationId, "subscribe", CancellationToken.None);
             panel.AcknowledgeLatest();
             await panel.Publisher.SelectDetailAsync(subscription, selection, task.Id, null, null, "detail", CancellationToken.None);
+            panel.AcknowledgeLatest();
             var detail = await activity.Service.GetDetailAsync(task.ParentConversationId, task.Id) ?? throw new InvalidOperationException();
             await HandleAsync(bridge, "read-content", new { subscriptionId = subscription, detailSelectionId = selection, taskId = task.Id,
                 requestId = "content", contentId = "segment/0", contentVersion = detail.Content.ContentVersion, offset = 0 });
-            var response = panel.Messages.Last();
+            var response = Response(panel, "content");
             response.GetProperty("text").GetString().Should().NotEndWith("\ud83d");
             System.Text.Encoding.UTF8.GetByteCount(response.GetRawText()).Should().BeLessThanOrEqualTo(64 * 1024);
             response.GetProperty("isTruncated").GetBoolean().Should().BeTrue();
             await HandleAsync(bridge, "read-content", new { subscriptionId = subscription, detailSelectionId = Guid.NewGuid(), taskId = task.Id,
-                contentId = "segment/0", contentVersion = detail.Content.ContentVersion });
-            panel.Messages.Last().GetProperty("error").GetString().Should().Be("activity-detail-selection-invalid");
+                requestId = "invalid-selection", contentId = "segment/0", contentVersion = detail.Content.ContentVersion });
+            Response(panel, "invalid-selection").GetProperty("error").GetString().Should().Be("activity-detail-selection-invalid");
             await runtime.EmitAsync(new AssistantTextDeltaEvent("text", "updated"));
             await HandleAsync(bridge, "read-content", new { subscriptionId = subscription, detailSelectionId = selection, taskId = task.Id,
-                contentId = "segment/0", contentVersion = detail.Content.ContentVersion });
-            panel.Messages.Last().GetProperty("error").GetString().Should().Be("content-changed");
+                requestId = "changed-content", contentId = "segment/0", contentVersion = detail.Content.ContentVersion });
+            Response(panel, "changed-content").GetProperty("error").GetString().Should().Be("content-changed");
             activity.Service.SetScopeClosed(task.ParentConversationId, true);
-            await HandleAsync(bridge, "read-content", new { subscriptionId = subscription, detailSelectionId = selection, taskId = task.Id });
-            panel.Messages.Last().GetProperty("error").GetString().Should().Be("activity-scope-closed");
+            await HandleAsync(bridge, "read-content", new { subscriptionId = subscription, detailSelectionId = selection,
+                taskId = task.Id, requestId = "closed-scope" });
+            Response(panel, "closed-scope").GetProperty("error").GetString().Should().Be("activity-scope-closed");
             activity.Service.SetScopeClosed(task.ParentConversationId, false);
             await runtime.EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, longText + "updated"));
             await execution;
         });
+
+    private static JsonElement Response(ActivityPanelTestContext panel, string requestId)
+        => panel.Messages.Single(message => message.TryGetProperty("requestId", out var id) && id.GetString() == requestId);
 
     private static async Task HandleAsync(ActivityPanelBridge bridge, string operation, object payload)
     {

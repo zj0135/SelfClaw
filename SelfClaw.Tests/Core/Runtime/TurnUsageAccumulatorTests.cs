@@ -6,6 +6,35 @@ namespace SelfClaw.Tests.Core.Runtime;
 
 public sealed class TurnUsageAccumulatorTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Normalized_unknown_total_survives_accumulation_and_another_consumer(bool reverse)
+    {
+        TurnUsage[] contributions =
+        [
+            new(InputTokens: 10, OutputTokens: 2, TotalTokens: 12),
+            new(InputTokens: 7)
+        ];
+        var accumulator = new TurnUsageAccumulator();
+        foreach (var usage in reverse ? contributions.Reverse() : contributions) accumulator.Observe(usage);
+        var normalized = accumulator.Build()!;
+        normalized.TotalTokens.Should().BeNull("one observed contribution has an explicitly unknown total");
+        normalized.InputTokens.Should().Be(17);
+        normalized.OutputTokens.Should().Be(2);
+        var recorder = new TurnUsageAccumulator();
+        recorder.Observe(normalized);
+        recorder.Build().Should().BeEquivalentTo(normalized);
+    }
+
+    [Fact]
+    public void Complete_components_do_not_authorize_deriving_an_explicitly_unknown_total()
+    {
+        var accumulator = new TurnUsageAccumulator();
+        accumulator.Observe(new TurnUsage(InputTokens: 3, OutputTokens: 4, TotalTokens: null));
+        accumulator.Build()!.TotalTokens.Should().BeNull();
+    }
+
     [Fact]
     public void Build_returns_null_without_observations()
     {

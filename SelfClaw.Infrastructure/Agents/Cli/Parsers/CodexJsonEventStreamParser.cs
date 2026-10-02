@@ -155,6 +155,8 @@ internal sealed class CodexJsonEventStreamParser : CliStreamParser
                 CachedInputTokens: GetInt(usage, "cached_input_tokens"),
                 OutputTokens: output,
                 ReasoningTokens: GetInt(usage, "reasoning_output_tokens"),
+                TotalTokens: GetInt(usage, "total_tokens") ??
+                    (input is int totalInput && output is int totalOutput ? totalInput + totalOutput : null),
                 ProviderCalls: 1,
                 ContextTokens: input is int contextInput ? contextInput + (output ?? 0) : null)),
         };

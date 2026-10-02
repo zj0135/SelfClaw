@@ -210,12 +210,8 @@ public sealed class WorkspaceAgentToolsetTests
         {
             var function = Tools.Cast<AIFunction>().Single(tool => tool.Name == name);
             return Invoker.InvokeAsync(
-                new FunctionInvocationContext
-                {
-                    Function = function,
-                    Arguments = arguments,
-                    CallContent = new FunctionCallContent("call-1", name, arguments)
-                },
+                new FunctionCallContent("call-1", name, arguments),
+                0,
                 CancellationToken.None);
         }
     }

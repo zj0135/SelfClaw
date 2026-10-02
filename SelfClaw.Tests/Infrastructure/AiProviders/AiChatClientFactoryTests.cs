@@ -94,7 +94,7 @@ public sealed class AiChatClientFactoryTests
             lease.Profile.Should().Be(data.Profile);
             lease.Options.Should().BeSameAs(expectedOptions);
             lease.Client.GetService(typeof(LoggingChatClient)).Should().NotBeNull();
-            lease.Client.GetService<FunctionInvokingChatClient>()?.FunctionInvoker.Should().NotBeNull();
+            lease.Client.GetService<FunctionInvokingChatClient>().Should().BeNull();
             adapter.LastRequest.Should().NotBeNull();
             adapter.LastRequest!.Secrets["api_key"].Should().Be("sk-test");
             adapter.LastRequest.EnableReasoning.Should().BeTrue();
@@ -191,7 +191,7 @@ public sealed class AiChatClientFactoryTests
     }
 
     private static AiChatClientPipelineOptions CreatePipeline(IReadOnlyList<AITool> tools)
-        => new(tools, static (_, _) => new ValueTask<object?>((object?)null));
+        => new(tools);
 
     private static AiChatClientFactory CreateFactory(
         FakeRepository repository,

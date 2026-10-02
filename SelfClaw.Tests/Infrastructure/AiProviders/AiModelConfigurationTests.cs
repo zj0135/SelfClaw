@@ -58,7 +58,7 @@ public sealed class AiModelConfigurationTests : IDisposable
             new AiProviderRegistry([new OpenAiProviderAdapter()]),
             new TestSecretProtector(),
             new AiProviderHttpClientProvider());
-        using var lease = factory.Create(await factory.PrepareAsync(newProfile.Id), new AiChatClientPipelineOptions([], (_, _) => new ValueTask<object?>((object?)null)));
+        using var lease = factory.Create(await factory.PrepareAsync(newProfile.Id), new AiChatClientPipelineOptions([]));
         lease.Options.Temperature.Should().Be(0.2f);
         lease.Options.MaxOutputTokens.Should().Be(16000);
         AiChatOptions.ResolveContextWindowTokens(lease.Profile).Should().Be(128000);

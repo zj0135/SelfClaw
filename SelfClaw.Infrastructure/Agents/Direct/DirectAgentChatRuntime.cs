@@ -37,14 +37,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         "The response reached the configured output-token limit. Continue the message to " +
         "have the model resume from where it stopped.";
 
-    /// <summary>
-    /// Reported when the function-invoking tool loop stops while the model is still
-    /// requesting tool calls, which means it hit <c>MaximumIterationsPerRequest</c>
-    /// rather than finishing its work.
-    /// </summary>
     private const string ToolLoopExhaustedMessage =
-        "The response stopped while the model was still calling tools, which means the " +
-        "tool-call loop hit its per-request iteration limit before the task finished.";
+        "BudgetExhausted: the turn reached its 128 provider request limit while still calling tools.";
 
     /// <summary>
     /// Reported when the output-token cap is hit before any text is produced. There is no
@@ -142,14 +136,15 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                     ready.ProviderLease.Profile.Configuration,
                     ready.ProviderLease.Profile.Model,
                     AiChatOptions.ResolveContextWindowTokens(ready.ProviderLease.Profile));
-                var finishReason = await StreamResponseAsync(ready, output, cancellationToken).ConfigureAwait(false);
+                var outcome = await new DirectConversationLoop().RunAsync(ready, output, cancellationToken).ConfigureAwait(false);
                 output.ReportUsage();
-                terminal = WriteTerminalOutcome(writer, finishReason, output);
+                terminal = WriteTerminalOutcome(writer, outcome, output);
             }
         }
         catch (OperationCanceledException exception)
         {
             cancellationObserved = true;
+            output.ReportUsage();
             writer.TryComplete(exception);
             throw;
         }
@@ -293,7 +288,6 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 preparation,
                 new AiChatClientPipelineOptions(
                     capabilityLease.Tools,
-                    invoker.InvokeAsync,
                     httpHandler));
 
             // Direct has no resumable session: the whole conversation is replayed into every turn, so only
@@ -349,38 +343,6 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     }
 
     /// <summary>
-    /// Streams the provider response, translating each update into transcript events, and returns the
-    /// finish reason of the final update.
-    /// </summary>
-    private async Task<ChatFinishReason?> StreamResponseAsync(
-        DirectTurnSetup.Ready setup,
-        DirectEventTranslator output,
-        CancellationToken cancellationToken)
-    {
-        // The M.E.AI FunctionInvokingChatClient owns the tool loop but never reports
-        // that the model truncated its answer at the output-token cap
-        // (FinishReason.Length). Left undetected that surfaces as output which "stops
-        // for no reason" while the turn claims success. We detect the length stop and
-        // report it as Truncated so the partial answer is kept and the decision to
-        // continue - which costs another full request - stays with the user.
-        ChatFinishReason? finishReason = null;
-        await foreach (var update in setup.ProviderLease.Client.GetStreamingResponseAsync(
-                           setup.Messages,
-                           setup.ProviderLease.Options,
-                           cancellationToken).ConfigureAwait(false))
-        {
-            if (update.FinishReason is ChatFinishReason reason)
-            {
-                finishReason = reason;
-            }
-
-            output.TranslateUpdate(update, setup.CapabilityLease.Bindings, setup.Invoker);
-        }
-
-        return finishReason;
-    }
-
-    /// <summary>
     /// Emits the terminal RunCompleted event for the observed finish reason. A length stop with
     /// partial text is reported as Truncated (the partial answer is valid and kept in the prompt
     /// history, so the model can resume from it if the user continues); a length stop without text
@@ -388,10 +350,18 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     /// </summary>
     private RunCompletedEvent WriteTerminalOutcome(
         ChannelWriter<AgentStreamEvent> writer,
-        ChatFinishReason? finishReason,
+        DirectLoopOutcome outcome,
         DirectEventTranslator output)
     {
-        if (finishReason == ChatFinishReason.Length && output.HasFinalText)
+        if (outcome == DirectLoopOutcome.ContentFiltered)
+        {
+            var blocked = new RunCompletedEvent(RunCompletionStatus.Blocked, output.FinalTextOrNull,
+                "The provider filtered or refused the response (ContentFilter).");
+            writer.TryWrite(blocked);
+            return blocked;
+        }
+
+        if (outcome == DirectLoopOutcome.Length && output.HasFinalText)
         {
             _logger.LogInformation(
                 "Direct AI agent turn stopped at the output-token cap; reporting it as truncated.");
@@ -403,7 +373,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             return truncated;
         }
 
-        if (finishReason == ChatFinishReason.Length)
+        if (outcome == DirectLoopOutcome.Length)
         {
             _logger.LogWarning(
                 "Direct AI agent turn hit the output-token cap without producing any text.");
@@ -415,15 +385,9 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             return failed;
         }
 
-        if (finishReason == ChatFinishReason.ToolCalls)
+        if (outcome == DirectLoopOutcome.BudgetExhausted)
         {
-            // FunctionInvokingChatClient resolves tool calls internally and only leaves
-            // this finish reason on the final update when it stopped early - it hit
-            // MaximumIterationsPerRequest while the model still wanted to call tools.
-            // Surfacing it keeps the turn from looking like a clean finish.
-            _logger.LogWarning(
-                "Direct AI agent turn ended while the model was still requesting tool calls; " +
-                "the tool-call loop hit its iteration limit.");
+            _logger.LogWarning("Direct AI agent turn exhausted its 128 provider request budget.");
             var failed = new RunCompletedEvent(
                 RunCompletionStatus.Failed,
                 output.FinalTextOrNull,

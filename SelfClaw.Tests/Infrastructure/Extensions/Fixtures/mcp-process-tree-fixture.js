@@ -18,7 +18,10 @@ const child = spawn(process.execPath, [__filename, '--child'], {
   stdio: 'ignore'
 })
 child.unref()
-fs.writeFileSync(pidFile, JSON.stringify({ parentPid: process.pid, childPid: child.pid }))
+// File existence is the reader's ready signal; publish only after writing and closing it.
+const temporaryPidFile = `${pidFile}.tmp`
+fs.writeFileSync(temporaryPidFile, JSON.stringify({ parentPid: process.pid, childPid: child.pid }))
+fs.renameSync(temporaryPidFile, pidFile)
 
 const input = readline.createInterface({ input: process.stdin })
 input.on('line', line => {

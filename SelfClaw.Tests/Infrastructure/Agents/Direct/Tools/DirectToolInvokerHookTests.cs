@@ -302,12 +302,8 @@ public sealed class DirectToolInvokerHookTests
 
         internal ValueTask<object?> InvokeAsync(string callId = "call-1")
             => Invoker.InvokeAsync(
-                new FunctionInvocationContext
-                {
-                    Function = _function,
-                    Arguments = _arguments,
-                    CallContent = new FunctionCallContent(callId, _function.Name, _arguments)
-                },
+                new FunctionCallContent(callId, _function.Name, _arguments),
+                0,
                 CancellationToken.None);
     }
 

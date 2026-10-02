@@ -139,6 +139,8 @@ internal sealed class OpenCodeJsonEventStreamParser : CliStreamParser
                 CacheWriteInputTokens: cacheWrite,
                 OutputTokens: output,
                 ReasoningTokens: GetInt(usage, "reasoning"),
+                TotalTokens: GetInt(usage, "total") ?? GetInt(usage, "total_tokens") ??
+                    (input is int totalInput && output is int totalOutput ? totalInput + totalOutput : null),
                 ProviderCalls: 1,
                 ContextTokens: input is int contextInput ? contextInput + (output ?? 0) : null,
                 CostUsdMicros: cost,

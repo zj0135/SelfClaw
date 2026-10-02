@@ -138,12 +138,8 @@ public sealed class DirectToolInvokerTests
 
         var action = () => pipeline.Invoker
             .InvokeAsync(
-                new FunctionInvocationContext
-                {
-                    Function = unbound,
-                    Arguments = new AIFunctionArguments { ["value"] = "ok" },
-                    CallContent = new FunctionCallContent("call-1", "other", new AIFunctionArguments())
-                },
+                new FunctionCallContent("call-1", "other", new AIFunctionArguments()),
+                0,
                 CancellationToken.None)
             .AsTask();
 
@@ -213,12 +209,8 @@ public sealed class DirectToolInvokerTests
         {
             var arguments = new AIFunctionArguments { ["value"] = "ok" };
             return Invoker.InvokeAsync(
-                new FunctionInvocationContext
-                {
-                    Function = function,
-                    Arguments = arguments,
-                    CallContent = new FunctionCallContent("call-1", function.Name, arguments)
-                },
+                new FunctionCallContent("call-1", function.Name, arguments),
+                0,
                 cancellationToken);
         }
     }
