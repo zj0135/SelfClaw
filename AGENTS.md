@@ -1,30 +1,10 @@
-# SelfClaw - Project Context
+> 本文件只收录"无法从代码或 `docs/` 推断、且违反会导致错误行为"的规则。架构叙事、文件/类清单、DI 注册、变更日志、阶段性状态一律不写：细节写进 `docs/`，这里只留一行指针。
 
-## Overview
+# SelfClaw — 项目上下文
 
-SelfClaw is a Windows desktop AI programming assistant built with WPF and .NET 10. It supports two active execution modes selected by the current desktop agent: **Direct**, which calls configured AI providers in-process through Microsoft.Extensions.AI, and **CLI**, which runs Claude Code / Codex / OpenCode as a subprocess. Both modes emit the same event stream into a WebView2-hosted Vue transcript.
+Windows 桌面 AI 编程助手：WPF + .NET 10 外壳，WebView2 内托管 Vue 转录。两种执行模式由当前 desktop agent 决定：**Direct**（进程内经 Microsoft.Extensions.AI 调用已配置 provider）与 **CLI**（Claude Code / Codex / OpenCode 子进程）；两者输出同一事件流。
 
-## Agent skills
-
-### Issue tracker
-
-Issues and specs live as markdown files under `.scratch/<feature-slug>/`. This directory is ignored by Git; durable implementation and verification notes belong in `docs/`.
-
-### Domain docs
-
-Domain language lives in root `CONTEXT.md`. Current execution architecture is documented in `docs/runtime-execution-flow.md`; the cross-mode token/context/cost normalization is documented in `docs/usage-tracking-design.md`; Direct verification is recorded in `docs/direct-agent-architecture-review.md`, the 2026-09-14 Desktop R01–R15 implementation and limits in `docs/desktop-architecture-review.md`, and the plugin view system (docked panels + floating layer, trust boundary, geometry and pointer model) in `docs/plugin-view-system-design.md`.
-
-## Projects
-
-| Project | Role |
-|---------|------|
-| `SelfClaw.Core` | Domain models, interfaces, runtime contracts (pure, no external deps) |
-| `SelfClaw.Infrastructure` | Agent runtime, SQLite repos, workspace tools, security, AI provider adapters |
-| `SelfClaw.Desktop` | WPF shell, ViewModels, notifications, tray, WebView2 host |
-| `SelfClaw.Tests` | xUnit tests (mirrors Infrastructure layout) |
-| `SelfClaw.TranscriptVue` | Vue 3 + Vite frontend shell, builds to `Desktop/Assets/TranscriptVue` |
-
-## Build & Run
+## 构建与运行
 
 ```powershell
 dotnet restore SelfClaw.slnx --force-evaluate
@@ -32,346 +12,59 @@ dotnet build SelfClaw.slnx
 dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 ```
 
-TranscriptVue dev: `cd SelfClaw.TranscriptVue && npm install && npm run dev`
-
-## Architecture
-
-### Active workflows
-
-```
-User input (WebView2)
-  → WebViewMessageRouter.RouteAsync()
-    ├─ settings request → feature bridge → correlated WebView response
-    ├─ shell command → MainWindow applies window-only behavior
-    └─ conversation intent → MainWindowViewModel
-      → SubmitPromptAsync() captures UI selection; ConversationWorkspaceService prepares a Managed Worktree when requested
-      → ConversationTurnEngine.ExecuteAsync()
-        → admits the turn and persists the conversation + user message
-        → builds the Direct/CLI ChatTurnRequest
-        → DispatchingAgentChatRuntime.StreamTurnAsync()
-          ├─ Mode=Direct → DirectAgentChatRuntime
-          │   → AiChatClientFactory.PrepareAsync (validated selected/default model + protected credential)
-          │   → DirectTurnCapabilityResolver (bindings, policy, approval + execution checkpoint)
-          │   → AiChatClientFactory.Create + provider IChatClient
-          │   → M.E.AI updates → AgentStreamEvents
-          └─ Mode=Cli → CliAgentChatRuntime
-              → CliSessionResolver + CliAgentRegistry
-              → CliCommandResolver → CliAgentProcessHost (subprocess)
-              → stdout JSONL → ClaudeStreamJsonParser / JsonEventStreamParser → AgentStreamEvents
-        → DesktopTurnFinalizer persists the terminal state
-  → ConversationSessionCoordinator → ITranscriptChangeSink → TranscriptPublisher
-    → TranscriptRenderState → TranscriptDelivery (diff / ACK / bounded recovery) → WebViewHostChannel → Vue renders
-
-Background SubagentDeliveryDispatcher (when durable child results are pending)
-  → user-priority admission/lease/coalescing, skipping busy parents
-  → awaited durable execution checkpoint before any continuation tool executes
-  → detached Direct continuation with transient completion batch (provisional, streamed to the selected transcript)
-  → atomic parent terminal + Delivered, bounded retry or DeadLetter notification
-```
-
-Direct mode uses the enabled model selected in the composer, or the `desktop-default` model selection when no explicit id is carried by `ChatTurnRequest.ModelProfileId`. Provider credentials are decrypted only inside Infrastructure. CLI mode uses the local CLI selection persisted by `ProgrammingAssistantSettingsService`; the CLI continues to own its local authentication and model configuration. No detected CLI selection fails a CLI turn with guidance.
-
-Key runtime files:
-- `Agents/Runtime/DispatchingAgentChatRuntime.cs` — dispatches Direct and CLI modes
-- `Agents/Direct/DirectAgentChatRuntime.cs` — model preparation, in-process turn, unified tool-result translation, usage and terminal-state discipline
-- `Agents/Direct/Capabilities/DirectTurnCapabilityResolver.cs` — source assembly; one tool-binding list owns conflict checks, policy and descriptor alignment
-- `Agents/Direct/Capabilities/DirectCapabilityRules.cs` — shared ceiling, package and MCP validity rules; Infrastructure `SubagentTaskPreflight` applies them before acceptance and execution
-- `Agents/Direct/Context/DirectPromptComposer.cs` — builds history backwards within budget, keeping tool call/result units intact
-- `Agents/Direct/Tools/WorkspaceAgentToolset.cs` — typed workspace functions and result formatting; `DirectToolInvoker` (M.E.AI `FunctionInvoker`) owns approval, execution checkpoints and the turn's consecutive tool-fault budget (faults become model-visible `Failed` results; exceeding the budget ends the turn)
-- `Agents/Direct/Tools/McpToolResultFormatter.cs` — limits the complete serialized model result to 64 KiB UTF-8, independently of display text
-- `AiProviders/AiChatClientFactory.cs` — resolves and validates a concrete model before capability work, then builds the per-turn `HttpClient` over the shared pooled handler, binds tools and constructs the adapter pipeline
-- `AiProviders/AiProviderSettingsService.cs` — provider/model CRUD, discovery, enablement and default selection
-- `SelfClaw.Core/Interfaces/AiProviders/IAiModelCatalog.cs` — the runtime's model-read contract (enabled models, scoped defaults, and individual model availability); the same `AiProviderSettingsService` singleton implements it and the separate settings-management contract. Shared settings DTOs and model enums live in `SelfClaw.Core/Models/AiProviders/`.
-- `Agents/Direct/Capabilities/SubagentCapabilitySource.cs` — advertises the bound Subagent allowlist (system section plus a `subagentId` schema enum) and exposes the four delegation tools; an id outside the allowlist returns a recoverable `Failed` result, while a bound definition that is missing or invalid still reaches the coordinator for its durable failure envelope
-- `Tools/Workspace/WorkspaceToolService.cs` — the tool entry point and operation logging; delegates file operations, search and Shell execution to `WorkspaceFileService`, `WorkspaceSearchService` and `WorkspaceShellRunner`. `WorkspaceFileAccess` owns path/file validation; `WorkspaceTextEditor` owns text matching and replacement.
-- `CliAgentChatRuntime.cs` — one turn: session plan → args → spawn → parse → events
-- `Definitions/` — `ClaudeAgentDefinition`, `CodexAgentDefinition`, `OpenCodeAgentDefinition`, `CliAgentRegistry`
-- `Parsers/` — `ClaudeStreamJsonParser` (stream-json), `JsonEventStreamParser` (Codex/OpenCode)
-- `Process/` — `CliCommandResolver`, `CliAgentProcessHost`, `CliAgentProcessSession` (watchdog, kill-tree)
-- `Session/` — `CliSessionResolver`, `SqliteCliAgentSessionStore` (resume id per conversation × CLI)
-- `Agents/Subagents/Persistence/SqliteSubagentDeliveryRepository.cs` — snapshot-aware mailbox lease, heartbeat, atomic resolution and expired-lease recovery
-- `Services/Subagents/SubagentDeliveryDispatcher.cs` — coalescing, user-priority continuation dispatch and restart recovery
-- `Services/Subagents/SubagentContinuationExecutor.cs` — detached continuation runtime and lease heartbeat
-- `Services/Subagents/SubagentTaskCoordinator.cs` — durable child lifecycle, cancellation and bounded delete wait
-
-### Desktop ViewModel
-
-`MainWindowViewModel` owns UI selection, navigation state, and shell projection; deeper workflow modules own execution and publication:
-- `MainWindowViewModel.cs` — UI-thread prompt snapshots, navigation, selection generations, and transcript requests; feature services own workspace preparation and deletion
-- `MainWindowViewModel.Agents.cs` — preserves each `DesktopAgentDefinition`'s Direct/CLI mode in `AgentRuntimeDefinition`
-- `ConversationTurnEngine.cs` — turn admission, conversation/message persistence, request construction, runtime dispatch, event reduction, terminal finalization, and completion notification
-- `ConversationSessionCoordinator.cs` — running state, cancellation and selected transcript synchronization; pending loads are evicted on completion/failure, and only the selected completed snapshot is retained
-- `TranscriptPublisher.cs` — dispatcher marshaling, stream coalescing, projection dedupe, invalidation, and WebView replay publication
-- `WebViewMessageRouter.cs` — application-origin checks, explicit feature dispatch, correlated responses, and admission/draining of frontend requests
-- `ConversationTurnEngine.cs` — shared admission gate, deletion tombstones and detached continuation admission
-
-`ConversationRuntimeState` serializes content mutations and supplies immutable snapshots; the coordinator locks selection/snapshot replacement when background continuations complete. `ConversationWorkspaceService` owns root preparation/release and `ConversationDeletionService` owns deletion sequencing. `App` uses explicit shutdown: await initialization, stop admission, cancel/wait for active work, drain UI resources, dispose services, then stop WPF. `OnExit` contains only synchronous fallback. MainWindow and VM share in-flight initialization tasks.
-
-### Agent definitions
-
-`DesktopAgentDefinitionService` loads and atomically updates `.md` files from `{AppData}\agents\`. Built-in agent id: `build`.
-Agent markdown supports front matter: name, description, mode, tools, plugins, skills, mcpServers, subagents. Direct turns resolve those ids against the enabled extension catalog; CLI turns keep their existing subprocess behavior.
-Subagent definitions live in `{AppData}\subagents\` via `SubagentDefinitionCatalog` (name, description, modelProfileId, tools, plugins, skills, mcpServers, maxRunSeconds); `Save()` writes them atomically with the same strict validation as load. It implements `ISubagentDefinitionCatalog`, the Core read contract a Direct turn uses to advertise the allowlisted ids.
-The 代理助手 settings page talks to `AgentSettingsBridge` (prefix `agents/`). `AgentSettingsService` owns CRUD, binding rules, atomic read/modify/write and committed change signals; the VM subscribes directly and preserves its valid selection. A missing conversation-bound definition stays visibly unavailable and rejects execution. Definitions/parsers live in `Services/Agents/Definitions`, edits in `Models`, and UI projections in `Views`.
-
-### 插件视图 (Plugin views)
-
-A Plugin package may contribute UI through `contributes.views` in `plugin.json` (alongside
-`directInstructions` / `skills` / `mcpServers`). Each view declares a `slot`: `right` renders as a tab in
-the Vue dock column, `floating` renders in a transparent layer that covers the conversation column. Both
-are cross-origin iframes in one WebView2; the host and the frame transport do not branch on the slot.
-Design and invariants: `docs/plugin-view-system-design.md`.
-
-Each view is served from its own origin, `https://<plugin-id>.plugin.selfclaw.local`. That is load
-bearing for frame identity and origin-scoped storage such as localStorage/IndexedDB. Renderer process
-allocation is owned by WebView2; security does not rely on a guaranteed process per origin. A Plugin whose id is not a legal DNS label is
-rejected at install time rather than failing when a user first opens the view.
-
-Three layers, outermost first:
-- `WebViewMessageRouter.RouteAsync` drops any message whose `CoreWebView2WebMessageReceivedEventArgs.Source`
-  is not the application origin, before `type` is read. This is the load-bearing check, and it holds
-  whether or not WebView2 exposes `chrome.webview` inside iframes.
-- `PluginDockHost.vue` / `PluginFloatingLayer.vue` own the iframes through the shared
-  `usePluginViews.js` facade (`usePluginViewHost` / `usePluginFrames` / `useFloatingPointer` /
-  `useLayoutAnchors`). Frame identity comes from `event.origin` plus an
-  `event.source === iframe.contentWindow` match. A `pluginId` in a payload is never trusted.
-- The view runs sandboxed under a host-issued CSP. `allow-same-origin` is required (without it the origin
-  is opaque and both identity and storage are lost); it is safe here only because the plugin host differs
-  from the app host.
-
-Host-side pieces:
-- `Services/Plugins/PluginViewHostController.cs` — virtual host mappings, `WebResourceRequested` serving
-  with CSP/nosniff headers, version leases, `plugin-host/*` messages, view persistence, and the per-slot
-  open caps (8 docked, 4 floating); implements `IPluginViewSessionRegistry` so disable/delete evicts views
-  before draining a version directory
-- `Services/Plugins/PluginViewBridge.cs` — `plugin-host/api` ops; resolves permissions from host state
-  (never from the payload) and pins the workspace root to the current selection
-- `Services/Plugins/PluginViewContextPublisher.cs` — the only producer of `PluginViewContext`. It both
-  answers `getContext()` and pushes `plugin-host/context`, so the pulled and pushed shapes cannot drift.
-  Captured by `MainWindowViewModel.CaptureContext()`; deduplicated by record value, except on view open
-- `Assets/plugin-sdk.js` — injected into every document via `AddScriptToExecuteOnDocumentCreatedAsync`.
-  Floating views additionally get anchors (`layout.anchors`), an explicit interactive-rect contract
-  (`data-selfclaw-interactive` / `layout.setInteractive`), and `selfclaw.close()`
-
-View opens pass one bounded mutation gate; close/navigation/disable invalidates pending opens.
-`PluginViewResourceReader` prepares responses off the UI thread, with WebView deferrals, at most four reads
-and 8 MiB per resource. A read holds its own version lease until bytes are materialized. Frontend
-transcript broadcasts are coalesced every 500 ms into a recoverable window capped at 256 KiB UTF-8, with
-`totalItems` and `truncated`; they do not always contain all history. Saved open views and the docked
-active view are restored.
-
-The floating layer is `position: absolute; inset: 0` inside `.main-content` (the conversation column:
-transcript + composer + terminal) at `z-index: 450`, and — apart from the one frame whose geometry the
-shell is currently arming — pointer-transparent: a floating view can only intercept input where it
-declares an interactive rect. Confining it to that column is load bearing, not cosmetic: measured on
-Chromium, the parent document receives no `pointermove` at all while the pointer is over a child iframe,
-so a floating view overlapping the dock column could never be armed (clicks would fall through to the
-panel). The sidebar, the 46px titlebar and the dock column are outside `.main-content`, so the window
-controls, the launcher, dialogs and the resize edges can never be covered. Entry points are split by
-responsibility: opening and closing a view happens only in the launcher behind the sidebar's 插件 entry,
-while the two titlebar buttons are pure show/hide switches for the dock column and the floating layer —
-when that slot has no open view they render disabled rather than falling back to the launcher. Concealing
-that layer uses `visibility: hidden`, never `display: none`: a concealed floating frame must keep a valid
-viewport size and origin, otherwise the geometry it measured and the anchors localized for it are both
-garbage and showing the layer again looks like nothing happened. Widgets place themselves with
-the five host landmarks (`titlebar` / `sidebar` / `stage` / `composer` / `dock`), pushed as geometry facts
-localized into each frame's own viewport and possibly `null`.
-
-Permissions are a disclosure list, so unknown bare tokens stay legal. `network.fetch:<origin>` is parsed
-strictly and widens only that view's `connect-src`; a Plugin declaring none is fully offline. `right`
-requires `ui.panel`, `floating` requires `ui.floating` (an overlay that can intercept clicks inside the conversation column is disclosed separately from
-a docked panel). View definitions live in the existing `extension_packages.manifest_json` and open views in
-`desktop-settings.json`, so this added no schema version.
-
-### Subagent activity panel
-
-The Vue `ActivityStage` mounts an independent floating activity panel inside the conversation stage. It displays all durable Direct subagent tasks owned by the selected Interactive parent, including tasks still running after the parent turn ends. The panel is an overlay anchored to the stage's top-right corner and stays out of flow: it collapses to a content-width chip, and expanding or collapsing it never reflows or re-scrolls the transcript. Child content never enters the parent transcript items or controls the composer busy state.
-
-- `SubagentExecutionSession` serializes recorder mutations, immutable live snapshots, and disposal. `SubagentActivityRegistry` holds active sessions; `SubagentActivityService` combines them with committed SQLite history and task-level approval state.
-- Activity pages contain one merged task collection; details contain one current task and one `SubagentContentSnapshot`. `SubagentActivityContent` and `SubagentActivityReadException` live in `Core.Runtime`; version-bound content reads enter through `SubagentActivityService`, while `ISubagentActivityReader` only lists persisted tasks and reads persisted details.
-- Vue `useActivityDetail` owns selection, content windows/versions, and following/restoration. `useActivityPanel` owns transport correlation and subscription; `useActivityDetailScroll` measures and applies DOM positions. Frozen windows and their anchors are retained in bounded per-parent reading preferences; body blocks use stable segment ids across paging.
-- `ISubagentActivityReader` supplies parent-owned counts, 50-task pages, transactional detail, and version-bound content pages. `ISubagentStateChangeNotifier` invalidates metadata only after task/delivery commits; text updates do not issue per-token SQL queries.
-- `Services/Activities/ActivityPanelBridge.cs` and `ActivityPanelPublisher.cs` handle `activity-panel/*` after the application-origin guard. Subscription, detail selection, revision, ACK, and replay are independent of the main transcript channel. Delivery retains one in-flight and one latest pending snapshot, retries at 2-second intervals at most three times, then waits for recovery.
-- Full snapshots contain at most 50 summaries and one 64-block detail window, with a serialized UTF-8 limit of 256 KiB; explicit content responses are capped at 64 KiB. An invalid historical content version preserves summaries and supplies current `selectedTask` metadata while the UI keeps the frozen reading window.
-- `MessageBlocks.vue` and `TranscriptMessageProjector` share block rendering/projection with the main transcript, using separate collapse state and projection caches. Reading positions are bounded per-parent/per-task preferences; WebView reload restores live data, while a process crash only restores persisted history and marks old Running tasks Interrupted.
-- Verification: `npm test` / `npm run test:e2e` in TranscriptVue. WPF/WebView2 and process-recovery tests require `SELFCLAW_DESKTOP_SMOKE=1`; the synthetic live-provider smoke requires `SELFCLAW_PROVIDER_SMOKE=1` and an enabled reasoning-capable model.
-
-### Tool approval
-
-Direct `write_file` and `run_shell_command` calls use `DesktopToolApprovalHandler` in `RequireApproval` mode. It alone owns pending decisions, and only Vue's approval bar or the Windows toast can resolve them. `ToolApprovalPresenter` publishes versioned `tool-approval/state` with conversation context for Vue and reload recovery; Pet observes the same activity state read-only, showing `等待「工具名」审批…` while a request is pending. A hidden/minimized window may receive a Windows toast with 允许/拒绝 actions. Pending requests reject on subscriber failure, caller cancellation or shutdown; there is no timeout auto-reject. Toast, Pet and tray navigation use `DesktopConversationActivationService`. CLI mode keeps its own permission policy.
-
-### WPF shell
-
-- `MainWindow.xaml` — custom chrome, title bar buttons, single WebView2 host. `WindowStyle` must stay `SingleBorderWindow`: `WindowChrome` (`CaptionHeight=0`, `GlassFrameThickness=0`) already makes the client area cover the whole window, while `WindowStyle=None` strips `WS_CAPTION` and Windows then skips the minimize/maximize/restore animations (see §7 of `docs/desktop-architecture-review.md`)
-- Vue `AppSidebar.vue` and `useConversationNavigation` — sidebar/navigation and correlated operation feedback
-- Settings view: AI 提供商, 模型管理, 编程助手, 代理助手, 插件, and 宠物 are connected to the desktop host; remaining pages are frontend placeholders/mock
-- Plugin view UI (the docked column and the conversation-column floating layer) lives in the Vue app, not in WPF (see 插件视图)
-
-### DI Registration
-
-Infrastructure (`ServiceCollectionExtensions.AddSelfClawInfrastructure()`):
-- Repositories: `SqliteConversationRepository`, `SqliteWorkspaceRepository` (`IWorkspaceRootRepository` and `IGitWorkspaceStore`), `SqliteAiProviderRepository`, `SqliteExtensionRepository`
-- Subagents: `SqliteSubagentTaskRepository` (`ISubagentTaskStore`/`ISubagentTaskExecutionStore`), `SqliteSubagentDeliveryRepository` (`ISubagentDeliveryStore`), `SqliteSubagentActivityReader` (`ISubagentActivityReader`), and `SubagentStateChangeNotifier` (`ISubagentStateChangeNotifier`)
-- AI providers: catalog/registry, provider adapters, `AiProviderHttpClientProvider`, `AiProviderSettingsService`, `AiChatClientFactory`
-- Runtimes: CLI process/session services, `CliAgentChatRuntime`, `DirectAgentChatRuntime`, `DispatchingAgentChatRuntime` (as `IAgentChatRuntime`)
-- Extensions: `ExtensionCatalog`, `ExtensionPackageInstaller`, `ExtensionSettingsService`, `ExtensionStateChangeNotifier`, `DirectTurnCapabilityResolver` plus its `SkillCapabilitySource` / `PluginCapabilitySource` / `McpCapabilitySource`, Skill readers/runtime tools
-- MCP: configuration/transport factories, pooled `McpClientManager`, SDK connection factory, `McpToolAdapter`
-- Direct preflight: `SubagentTaskPreflight` (`ISubagentTaskPreflight`); reads individual model availability through `IAiModelCatalog.IsModelAvailableAsync`
-- Hooks: `CommandHookRunner`, `PluginHookExecutionLog` (also `IPluginHookExecutionLog`), `AsyncHookExecutor` (singleton + hosted service), `DirectTurnHooksFactory`
-- Tools: `WorkspaceToolService`, `WorkspaceAgentToolset`; all Direct sources return `DirectToolBinding` and `DirectToolResult`
-- Workspace implementations: `WorkspaceFileService`, `WorkspaceSearchService`, `WorkspaceShellRunner`; the existing `IWorkspaceToolService` contract remains the caller boundary.
-- Security: `DpapiSecretProtector`
-
-`InitializeSelfClawInfrastructureAsync()` initializes repositories, reconciles extension packages and discovers user skills before Desktop startup. Plugin views query `IPluginViewCatalog` and acquire synchronous `IDisposable` version leases through Core's `IPluginVersionLeaseManager`. Infrastructure grants internal access only to tests, not to Desktop.
-
-Vue `ChatView` owns layout and event wiring. `useChatTranscript`, `useWorkspaceSelection`, `useChatComposer`, `useChatApprovals`, `useChatTerminal` and `useChatTurnStatus` own their respective state and host interactions. Workspace/Git responses are bound to the current selection generation.
-
-Desktop registration (`Composition/DesktopServiceRegistration.cs`; lifecycle in `App.xaml.cs`):
-- `DesktopAgentDefinitionService`, `SubagentDefinitionCatalog`, `ExtensionSettingsBridge`, `AgentSettingsBridge`, `DesktopSettingsJsonStore`, `DesktopToolApprovalHandler`, `DesktopNotificationService`,
-  `DesktopNotificationActivationService`, `ProgrammingAssistantSettingsService`, `AiProviderSettingsBridge`,
-  `ConversationTurnEngine`, `ConversationSessionCoordinator`, `TranscriptPublisher`, `WebViewMessageRouter`,
-  `PluginViewHostController` (also `IPluginViewSessionRegistry`), `PluginViewContextPublisher`, `PluginViewBridge`,
-  `SubagentTaskCoordinator` (`ISubagentTaskCoordinator` and `ISubagentConversationLifecycle`), `SubagentTaskBackgroundHost`, and `SubagentDeliveryDispatcher` hosted services,
-  `SubagentActivityRegistry`, `SubagentActivityService`, `ActivityPanelSnapshotBuilder`, `ActivityPanelPublisher`, `ActivityPanelBridge`,
-  `PetPackageCatalog`, `PetActivityPresenter`, `PetHost`, `SystemTrayService`, `MainWindowViewModel`, `MainWindow`
-
-`StoragePaths` contains resolved path values only; `StoragePathDefaults` supplies composition-root defaults. `Microsoft.Agents.AI` is no longer referenced; Direct uses Microsoft.Extensions.AI.
-
-Desktop settings use `Services/Settings/DesktopSettingsJsonStore`: serialize to a same-directory temporary file, flush, atomically replace, then commit feature caches. Corrupt or unreadable files are reported, never treated as empty settings. CLI configuration reads do not scan; `ProgrammingCliDiscoveryHost` performs observable background discovery without holding the settings gate. The settings page/composer share `useProgrammingAssistantSelection` and save confirmed values with correlated requests.
-
-`WebViewHostChannel` and Vue `hostBridge` provide transport only. `TranscriptDelivery` and `transcriptBridge` own transcript patch bases, `transcript-applied`/`transcript-rejected`/`transcript-resync`, and bounded recovery. Activity delivery remains independent. `PetHost` owns configuration plus actual package/visibility/load result; the catalog prepares frozen resources in the background. Terminal decodes a continuous UTF-8 stream and batches a bounded tail; native ConPTY/Toast/WPF shutdown still need the explicit smoke/manual checks listed in the Desktop review.
-
-## Key Conventions
-
-### Stable namespaces (Core)
-- `SelfClaw.Core.Interfaces`
-- `SelfClaw.Core.Models`
-- `SelfClaw.Core.Runtime`
-
-### Common namespaces (Infrastructure)
-- `SelfClaw.Infrastructure.Agents.Direct.{Capabilities,Context,Tools}`
-- `SelfClaw.Infrastructure.Agents.Runtime` — shared Direct/CLI dispatch
-- `SelfClaw.Infrastructure.Agents.Subagents.{Runtime,Persistence}`
-- `SelfClaw.Infrastructure.Data.Sqlite.{Repositories}`
-- `SelfClaw.Infrastructure.Tools.{Transcript,Workspace}`
-- `SelfClaw.Infrastructure.AiProviders.{OpenAi,Anthropic}`
-
-### Database
-
-Schema version: **29** (in `SqliteDatabase.cs`). Tables: `ai_provider_connections`, `ai_model_profiles`, `ai_model_configurations`, `ai_model_profile_selections`, `extension_packages`, `mcp_server_configs`, `workspace_roots`, `git_repositories`, `git_checkouts`, `conversations`, `messages`, `message_segments`, `message_attachments`, `tool_runs`, `turn_usage`, `cli_agent_sessions`, `subagent_tasks`, and `subagent_deliveries`. Schema v29 adds `turn_usage`, the normalized per-turn usage record beside an assistant message (input/uncached/cache/cache-write/output/reasoning/total tokens, provider calls, context, context window, cost and cost source), replacing `messages.input_tokens`/`output_tokens`, which fresh databases no longer create. It also adds `cli_agent_sessions.cost_baseline_usd_micros`, the high-water mark that converts a CLI's cumulative session cost (Claude Code's `total_cost_usd`) into the delta of the current turn. Schema v28 adds three `tool_runs` hook columns (`effective_arguments_json`, `hook_feedback_json`, `hook_outcome_json`, all nullable) and `extension_packages.source_path` for folder installs; turn-level hook notices reuse `message_segments` with `kind = 3`, so they need no schema change. Schema v27 adds `subagent_deliveries.tool_execution_started_at_utc`, committed before continuation tools execute; legacy leased rows are marked uncertain during upgrade. Schema v26 adds shared model configurations keyed by the complete case-sensitive model ID; these survive provider deletion and are read with each profile for Direct turns. Schema v25 structures assistant content into `message_segments` blocks (Text/Thinking/ToolCall with ordinal placement) and rebuilds `tool_runs` without the retired `after_segment_index` column; legacy assistant rows are not migrated. The v22→v23 migration atomically rebuilds `conversations` when legacy `profile_id`, `kind`, or `parent_conversation_id` columns require it, preserves existing data, and defaults old rows to interactive ownership. Schema v24 adds repository identity and checkout ownership without changing the physical Workspace Root execution contract. Subagent deliveries use snapshot-aware FIFO batching, 45-second leases with 15-second heartbeat/recovery scans, and atomic Delivered/DeadLetter resolution. Busy parents are excluded from ready-mailbox scans; dispatcher owns admission until handoff, then executor owns cleanup.
-
-### Image attachments
-
-Persisted to `{AppData}\attachments\{convId}\{msgId}\`. Max 6 images, 10MB each, 30MB total. Served to WebView2 via `https://attachments.selfclaw.local/{path}`.
-
-### Transient state
-
-`TranscriptRenderState` is the DTO published to the Vue frontend. Assistant content is structured as `MessageSegmentRecord` blocks (Text/Thinking/ToolCall); the block order is the transcript order, and tool/thinking rows render where their ToolCall block sits. `TerminalBlockAligner` maps terminal FinalText onto the streamed blocks once per turn.
-Continuation turns use detached `ConversationRuntimeState` and stream into the selected transcript while they run: the provisional assistant turn, including thinking text and tool calls, is rendered from memory but never persisted, which is what makes an abandoned attempt republish the pre-turn snapshot and disappear. The transient completion batch stays prompt-only. Only the atomic terminal commit persists the turn and resolves the delivery.
-
-### Conversation deletion
-
-Deleting an interactive parent first marks a deletion tombstone, stops its active turn, cancels and bounded-waits all queued/running child tasks through `ISubagentConversationLifecycle`, and only then applies SQLite cascade. A timeout aborts deletion. Conversation list/navigation also defensively accept only `ConversationKind.Interactive`, so crafted child rows cannot enter the normal Vue workflow.
-
-## Removed and inactive features
-
-- **Plan mode**: removed; `AgentExecutionMode.Direct` and `AgentExecutionMode.Cli` are both active
-- **Channel conversations**: data model retained but VM filters them out
-- **Settings pages**: AI 提供商, 模型管理, 编程助手, 代理助手, 插件, and 宠物 are wired to the host; the remaining settings pages are frontend mock
-- **Legacy provider profiles**: `ProviderProfile`, `IProfileRepository`, the `profiles` table, and `ChatTurnRequest.Profile/ApiKey` were removed; Direct turns use `ModelProfileId`
-
-## Code Style & Constraints
-
-### DTOs vs. Business Logic
-
-- **DTOs / models** are pure data carriers only — no methods, no business logic, no side effects. Use `record` types with primary constructors in `Core.Models` or `Infrastructure.AiProviders.Models`. Infrastructure-level view DTOs go in `Views/` subdirectories.
-- **Methods / business logic** live exclusively in service classes, not in DTOs. A DTO should never call a service, access a database, or perform validation beyond constructor-level input contracts.
-- Do **NOT** mix DTOs and service methods in the same file. Each file contains either one DTO or one service class — never both.
-
-### Interface & Abstraction Placement
-
-- **Domain contracts**（consumed by Core or by multiple projects） go in `SelfClaw.Core/Interfaces/<Feature>/`.
-- **Infrastructure-internal abstractions**（only consumed within Infrastructure） go in `SelfClaw.Infrastructure/<Feature>/Abstractions/`.
-- Prefer small, focused interfaces（1-5 methods）. Avoid fat interfaces that force consumers to implement unrelated concerns.
-
-### Class Design
-
-- `sealed class` on every class not deliberately designed for inheritance.
-- Dependencies are constructor-injected as private `_camelCase` fields, listed before the constructor.
-- Class layout order: fields → constructor → primary public method(s) → private helper methods.
-- `internal sealed class` for DI-registered infrastructure types that are not `public` API.
-- Extract private helper methods（`private static` where stateless） to keep public methods readable. A public method over 40-50 lines is a signal to decompose.
-
-### Naming
-
-- Async methods: always suffix `Async`.
-- Static factory/exception helpers: `PascalCase` — e.g. `CreateForScopeAsync()`, `MissingApiKey()`, `MaskApiKey()`.
-- `private static`: for stateless helper methods. `const` for compile-time constants.
-- No abbreviations in public names — prefer `Conversation` over `Conv`, `Workspace` over `Ws`.
-
-### Async & Streaming
-
-- All library code（Infrastructure）uses `ConfigureAwait(false)`. Desktop ViewModels omit it.
-- `OperationCanceledException` must always be re-thrown — never caught and converted into a failure result.
-- Streaming uses `IAsyncEnumerable<T>` + `Channel<T>` pattern.
-
-### Nullability & Safety
-
-- Nullable reference types enabled project-wide. Use `string?`, `Guid?` etc. explicitly.
-- Public methods guard with `ArgumentNullException.ThrowIfNull(...)`, not manual null checks.
-- No nullable suppression (`!`) unless immediately after a provable null check the compiler cannot track.
-
-### Code Simplicity
-
-- Favor plain flow control (`if`/`return`/`switch`) over excessive abstraction layers. Do NOT introduce generic wrappers or base classes for a single caller.
-- Use `switch` expressions for dispatch-based branching.
-- Avoid over-encapsulation: a three-line helper that is called exactly once should be inlined unless extracting it significantly improves readability of the caller.
-
-### Comments
-
-- Code should be self-explanatory. Comments are for **why**, not **what**.
-- Do NOT add redundant comments explaining obvious code paths (e.g., `// set the name` above `name = value;`).
-- Do NOT add generated XML doc comments（`/// <summary>` stubs） on private methods or trivial properties. Public API surface may carry concise XML docs where helpful.
-
-### Cleanup Rule
-
-- When adding new code, check whether the adjacent dead/retained code can be removed. If a feature fully replaces another, delete the old one — do not leave it as "retained".
-
-### Proactive Optimization
-
-- When encountering code that violates the above conventions（e.g. DTO mixed with logic, oversized method, missing `ConfigureAwait(false)`, dead code）, **proactively flag it and refactor it** — do not silently work around it.
-
-## TranscriptVue（Vue 3 Frontend） Constraints
-
-### Component Decomposition
-
-- **Single responsibility**: one component per file. Do NOT pile multiple unrelated UI sections into the same `.vue` file. If a component exceeds ~300 lines, consider extracting sub-components into `components/<Feature>/`.
-- Views（`views/`） orchestrate layout and delegate rendering to components（`components/`）. Views should be thin — move domain logic into composables（`composables/`）.
-- Pure rendering logic（HTML string generation, markdown processing） lives in `renderers/`, not inside components.
-
-### Style Isolation
-
-- All component-level styles use `<style scoped>`. Global layout/reset/theme variables belong in `App.vue`'s unscoped `<style>` only.
-- Do NOT mix scoped and unscoped `<style>` blocks in the same component file unless the unscoped block is exclusively for dynamic `v-html`-injected content that cannot be targeted by scoped selectors.
-- The settings pages share the light "Console" design system: tokens/keyframes plus the shared page scaffold (`sc-page` / `sc-page-head` / `sc-page-body` — fixed gray header over a white scrolling body) live in `styles/settings-console.css` and are pulled into each component via `@import` inside its scoped style block (page root carries `sc-root` / `sc-stage`).
-
-### Icons
-
-- Icons come from `lucide-vue-next` components (`<Search :size="14" />`). Do NOT add emoji glyphs or hand-rolled inline SVG icon maps for new settings UI.
-
-### Design Standards
-
-- **图标**：统一使用 Lucide 图标，界面全程禁止使用表情符号。
-- **设计标准**：对标 Awwwards 顶级网站水准，达到 Awwwards、FWA、CSS Design Awards 每日最佳网站同等设计品质。
-- **创意自由度**：将浏览器视作交互式艺术画布，跳出传统布局框架，追求先锋视觉风格、实验性排版、流畅物理动效、极具冲击力的文字版式。
-- **沉浸式体验**：融合代码、高级渲染逻辑，打造统一完整的精品页面，做出突破常规 UI 认知、令人惊艳的数字交互体验。
-
-### Organization
-
-- Vue file script layout: `<script setup>` → `<template>` → `<style scoped>`.
-- Composables: one concern per composable. Composable files live in `composables/`, exported as `use<Feature>()`. Do not embed composable logic directly in component `<script setup>` beyond trivial local state.
-- Async component loading: use `defineAsyncComponent` for route-level splitting（e.g. lazy-loaded settings panels）.
-
-### Proactive Cleanup
-
-- When a component grows too large, **proactively split it into smaller components**. When business logic appears inside a component file, **extract it into a composable**. When duplicate patterns appear across components, **extract into a shared composable or renderer util** — flag and refactor on sight.
+- TranscriptVue：开发 `cd SelfClaw.TranscriptVue && npm install && npm run dev`，测试 `npm test` / `npm run test:e2e`。
+- WPF/WebView2 与进程恢复测试需 `SELFCLAW_DESKTOP_SMOKE=1`；合成 live-provider 冒烟需 `SELFCLAW_PROVIDER_SMOKE=1` 且启用一个具备推理能力的模型。
+
+## 不变量与陷阱
+
+1. **模型与凭据**：Direct 用 composer 选中的 enabled 模型，缺省 `desktop-default`；CLI 自行持有认证与模型配置，无可用 CLI 时回合带指引失败；provider 凭据只在 Infrastructure 内解密。
+2. **子代理投递**：continuation 的任何工具执行前，必须先提交 durable execution checkpoint。
+3. **桌面并发**：run handle 独占回合生命周期；SessionCoordinator 独占选择与快照替换；`ConversationRuntimeState` 只串行化内容变更，不持运行标志。
+4. **关闭顺序**：停受理 → 取消并等待活动 → 释放 UI → dispose 服务 → 停 WPF；`OnExit` 只做同步兜底。
+5. **定义目录**：Agent 定义在 `{AppData}\agents\`，子代理定义在 `{AppData}\subagents\`；会话绑定的定义缺失时保持不可用并拒绝执行。
+6. **插件视图**：一视图一 origin `https://<plugin-id>.plugin.selfclaw.local`，id 非合法 DNS label 在安装期拒绝；`WebViewMessageRouter` 的应用-origin 守卫是唯一信任边界；浮层限定在 `.main-content` 内、除声明的交互矩形外点击穿透、收起必须 `visibility: hidden`（禁用 `display: none`）；权限为 `ui.panel` / `ui.floating` / `network.fetch:<origin>`。
+7. **工具审批**：Direct 工具审批（默认 `RequireApproval`）只有 Vue 审批栏或 Windows toast 能裁决；没有超时自动拒绝；订阅者失败、调用方取消或关闭即拒绝。
+8. **WPF**：`WindowStyle` 必须保持 `SingleBorderWindow`；插件视图 UI 在 Vue，不在 WPF。
+9. **会话删除**：先墓碑 → 停回合 → 取消并限时等待子任务 → 才做 SQLite 级联；超时中止删除；列表与导航只接受 `ConversationKind.Interactive`。
+10. **数据库**：schema 版本 **30**；非 v30 或未版本化数据库只读拒绝，绝不迁移、回填或隐式删除。
+11. **子代理活动面板**：与主转录、输入区互相独立；子内容不得进入父转录项或影响 composer 忙碌态；摘要页 ≤50 条、详情窗口 ≤64 块、序列化 ≤256 KiB；文本更新不得触发 per-token SQL。
+
+## 代码约定
+
+1. DTO 是纯数据载体（`record` + 主构造器），无方法、逻辑或副作用；一个文件只放一个 DTO 或一个服务类，绝不混放。
+2. 领域契约放 `SelfClaw.Core/Interfaces/<Feature>/`；仅 Infrastructure 内部使用的抽象放 `SelfClaw.Infrastructure/<Feature>/Abstractions/`；接口保持 1–5 个方法。
+3. 非为继承设计的类一律 `sealed`；DI 注册的内部类型用 `internal sealed`；依赖以 private `_camelCase` 字段构造注入，字段列在构造函数之前；类内顺序：字段 → 构造 → 主公开方法 → 私有辅助。
+4. 公开方法超 40–50 行即拆分；无状态辅助用 `private static`。
+5. 异步方法一律 `Async` 后缀；公开名不用缩写（`Conversation` 而非 `Conv`）。
+6. Infrastructure 全量 `ConfigureAwait(false)`，Desktop ViewModel 不加；`OperationCanceledException` 必须重抛、绝不转成失败结果；流式用 `IAsyncEnumerable<T>` + `Channel<T>`。
+7. 启用 NRT；公开方法用 `ArgumentNullException.ThrowIfNull`；除编译器不可追踪的可证明空检查外禁用 `!`。
+8. 优先朴素控制流（`if` / `return` / `switch`）；不为单一调用方造泛型包装或基类；只被调用一次的 3 行辅助函数应内联。
+9. 注释只写 why；不加显而易见的注释；私有成员与平凡属性不加 XML 文档注释。
+10. 改动时顺带检查相邻死代码可否删除；新实现完整替代旧实现时删除旧实现，不留 "retained"。
+11. 见到违反以上约定的代码（DTO 混逻辑、超大方法、缺 `ConfigureAwait(false)`、死代码）主动指出并重构。
+
+## 前端约定（SelfClaw.TranscriptVue）
+
+1. 一组件一职责；超过 ~300 行即考虑拆到 `components/<Feature>/`。`views/` 只做编排；领域逻辑进 `composables/`（`use<Feature>()`），`<script setup>` 内除 trivial 本地状态外不写逻辑；纯渲染逻辑进 `renderers/`。
+2. 组件样式一律 `<style scoped>`；全局布局/重置/主题变量只放 `App.vue` 的未作用域 `<style>`；设置页共用 `styles/settings-console.css`（`sc-page` / `sc-page-head` / `sc-page-body`，页面根 `sc-root` / `sc-stage`），在 scoped 块内 `@import` 引入。
+3. 图标统一 `lucide-vue-next`；界面禁止 emoji 和手写内联 SVG 图标表。
+4. 设计标准：对标 Awwwards 每日最佳水准（先锋视觉、实验性排版、流畅物理动效、沉浸式体验）。
+5. SFC 顺序 `<script setup>` → `<template>` → `<style scoped>`；路由级/设置面板用 `defineAsyncComponent` 懒加载。
+6. 组件变大、逻辑混入组件、重复模式出现时，见到就拆或抽（composable / renderer util）。
+
+## 已移除 / 停用（不要复活或顺手启用）
+
+- **Plan mode**：已删除；只有 `AgentExecutionMode.Direct` / `Cli`。
+- **Channel conversations**：数据模型保留；UI 与调度只接受 `ConversationKind.Interactive`。
+- **Legacy provider profiles**（`ProviderProfile`、`IProfileRepository`、`profiles` 表、`ChatTurnRequest.Profile/ApiKey`）：已删除；Direct 只用 `ModelProfileId`。
+- **Direct Queue 默认关闭**（`SELFCLAW_QUEUE_ENABLED`）；**Steer 已停用**（枚举存在，受理/执行不可用）。
+- **附件**：只保留持久化/转录渲染/虚拟主机（`message_attachments`、`https://attachments.selfclaw.local`）；输入入口一律拒绝（`ConversationInputReason.AttachmentsUnsupported`），不要再引用已不存在的 6 张 / 10 MB / 30 MB 限制。
+- **设置页**：AI 提供商 / 模型管理 / 编程助手 / 代理助手 / 插件 / 宠物已接宿主；其余页面（自动化、图像生成、翻译等）是前端 mock。
+
+## 深入阅读
+
+- 端到端主干：`docs/pipeline-architecture.md`（全局图）→ `docs/runtime-execution-flow.md`（当前调用链、回合/准入/消费基线）。
+- Direct 证据链：`docs/direct-agent-architecture-review.md`、`docs/direct-message-input-p{1,2}-implementation-review.md`、`docs/direct-message-input-p3-review-fixes.md`。
+- 桌面/前端：`docs/desktop-architecture-review.md`（§5 剩余验证限制、§7 窗口动画、§8 关闭延迟）、`docs/plugin-view-system-design.md`、`docs/message-segments-system-design.md`。
+- 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/direct-hooks-system-design.md`、`docs/ai-provider-system-design.md`、`docs/pet-system-design.md`、`docs/usage-tracking-design.md`。
+- 规则：spec/issue 写 `.scratch/<feature-slug>/`（git 忽略）；耐久结论写 `docs/`；被取代的设计要么更新要么删除，不留"历史保留"。
