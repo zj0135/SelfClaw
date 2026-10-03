@@ -1,6 +1,7 @@
 <script setup>
-import { computed, defineAsyncComponent, ref } from 'vue';
+import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import ComposerPanel from '../components/Chat/ComposerPanel.vue';
+import ConversationQueue from '../components/Chat/ConversationQueue.vue';
 import ActivityStage from '../components/Activities/ActivityStage.vue';
 import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
 import { useHostBridge } from '../composables/hostBridge.js';
@@ -12,6 +13,7 @@ import { useWorkspaceSelection } from '../composables/useWorkspaceSelection.js';
 import { useChatComposer } from '../composables/useChatComposer.js';
 import { useChatApprovals } from '../composables/useChatApprovals.js';
 import { useChatTerminal } from '../composables/useChatTerminal.js';
+import { useConversationInputs } from '../composables/useConversationInputs.js';
 
 const TerminalPanel = defineAsyncComponent(() => import('../components/Chat/TerminalPanel.vue'));
 const emit = defineEmits(['preview-image']);
@@ -24,6 +26,8 @@ const transcriptScroll = useTranscriptScroll(() => transcriptPanelRef.value?.get
 const { state, isEmptyConversation } = useChatTranscript(transcriptScroll);
 const workspace = useWorkspaceSelection(computed(() => state.selectedConversationId), bridge);
 const composer = useChatComposer(state, workspace, transcriptScroll, bridge);
+const conversationQueue = useConversationInputs(bridge);
+watch(() => state.selectedConversationId, (id) => conversationQueue.subscribe(id), { immediate: true });
 const approvals = useChatApprovals(bridge);
 const terminal = useChatTerminal(terminalPanelRef, bridge);
 const turnStatus = useChatTurnStatus(state);
@@ -59,6 +63,7 @@ defineExpose({
 			</section>
 		</ActivityStage>
 		<ComposerPanel ref="composerShellRef" :busy="state.isBusy || composer.submitting.value"
+			:queueable="state.agentMode === 'direct'"
 			:stoppable="!state.isContinuation"
 			:workspace-selection="workspace.state" :git-loading="workspace.state.gitLoading"
 			:git-error="workspace.state.gitError" :submit-error="composer.error.value" :agent-mode="state.agentMode"
@@ -69,7 +74,16 @@ defineExpose({
 			@delete-workspace-root="workspace.deleteRoot" @browse-workspace-folder="workspace.browseFolder"
 			@git-action="workspace.runGitAction" @approve-tool="(id) => approvals.resolve(id, true)"
 			@reject-tool="(id) => approvals.resolve(id, false)"
-			@select-permission-mode="composer.selectPermissionMode" />
+			@select-permission-mode="composer.selectPermissionMode">
+			<template #queue>
+				<ConversationQueue
+					v-if="state.agentMode === 'direct' && (conversationQueue.state.items.length || conversationQueue.state.paused || conversationQueue.state.error)"
+					:state="conversationQueue.state"
+					@cancel="(item) => conversationQueue.cancel(item.inputId, item.revision)"
+					@retry="(item) => conversationQueue.retry(item.inputId, item.revision)"
+					@pause="conversationQueue.pause()" @resume="conversationQueue.resume()" />
+			</template>
+		</ComposerPanel>
 		<TerminalPanel ref="terminalPanelRef" :is-open="terminal.state.isOpen" :is-running="terminal.state.isRunning"
 			:cwd="terminal.state.cwd" @ready="terminal.ready" @input="terminal.input" @resize="terminal.resize"
 			@close="terminal.close" @restart="terminal.restart" @focus-change="terminal.setFocused" />

@@ -64,6 +64,64 @@ public sealed class ConversationDeletionServiceTests
         context.Repository.Deleted.Should().Equal(id);
     }
 
+    [Fact]
+    public async Task A_failed_delete_releases_the_barrier_but_keeps_the_durable_queue_paused()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var conversation = await fixture.CreateConversationAsync();
+        await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
+            "queued", ConversationInputKind.FollowUp, null, "queued", fixture.Snapshot(), null, true));
+        using var runs = new ConversationRunCoordinator(fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, runs, new Sink());
+        var children = new Children();
+        var service = new ConversationDeletionService(runs, sessions, children,
+            new ConversationWorkspaceService(new EmptyRoots()), fixture.Conversations, null, fixture.Inputs);
+
+        var deletion = service.DeleteAsync([conversation.Id], false);
+        await children.Entered.Task;
+        children.Release.SetException(new TimeoutException("child still running"));
+        await FluentActions.Awaiting(() => deletion).Should().ThrowAsync<TimeoutException>();
+
+        var state = await fixture.Inputs.GetQueueStateAsync(conversation.Id);
+        state.Paused.Should().BeTrue("a failed delete must not silently resume the queue");
+        state.Items.Should().ContainSingle().Which.Preview.Should().Be("queued");
+
+        // The tombstone is released, so a fresh reservation is possible, but nothing is claimed while paused.
+        var handle = runs.TryReserve(conversation.Id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)
+            ?? throw new InvalidOperationException("Deletion barrier leaked.");
+        runs.Complete(handle, false);
+        (await fixture.Inputs.TryClaimNextFollowUpAsync(conversation.Id, Guid.NewGuid(), Guid.NewGuid())).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_successful_delete_removes_the_queue_and_never_reclaims()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var conversation = await fixture.CreateConversationAsync();
+        await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
+            "queued", ConversationInputKind.FollowUp, null, "queued", fixture.Snapshot(), null, true));
+        using var runs = new ConversationRunCoordinator(fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, runs, new Sink());
+        var service = new ConversationDeletionService(runs, sessions, new Children { AutoRelease = true },
+            new ConversationWorkspaceService(new EmptyRoots()), fixture.Conversations, null, fixture.Inputs);
+
+        await service.DeleteAsync([conversation.Id], false);
+
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(0L);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_input_state;")).Should().Be(0L);
+        runs.TryReserve(conversation.Id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive).Should().BeNull();
+    }
+
+    private sealed class EmptyRoots : IWorkspaceRootRepository
+    {
+        public Task<IReadOnlyList<WorkspaceRoot>> ListWorkspaceRootsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<WorkspaceRoot>>([]);
+        public Task<WorkspaceRoot> UpsertWorkspaceRootAsync(WorkspaceRoot workspaceRoot, CancellationToken cancellationToken = default)
+            => Task.FromResult(workspaceRoot);
+        public Task DeleteWorkspaceRootAsync(Guid workspaceRootId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
     private sealed class Context : IDisposable
     {
         private readonly ConversationSessionCoordinator _sessions;
@@ -84,9 +142,11 @@ public sealed class ConversationDeletionServiceTests
     {
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool AutoRelease { get; init; }
         public Task CancelAndWaitAsync(Guid parentConversationId, TimeSpan timeout, CancellationToken cancellationToken = default)
         {
             Entered.TrySetResult();
+            if (AutoRelease) Release.TrySetResult();
             return Release.Task.WaitAsync(cancellationToken);
         }
     }

@@ -13,6 +13,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Transcript;
@@ -26,11 +27,12 @@ namespace SelfClaw.Tests.Desktop.ViewModels;
 public sealed class MainWindowViewModelSubmissionTests
 {
     [Fact]
-    public async Task SubmitPromptAsync_does_not_overwrite_the_first_prompt_when_two_submissions_wait_on_selection()
+    public async Task SubmitPromptAsync_accepts_direct_through_the_input_coordinator_without_executing_a_turn()
     {
         var conversation = CreateConversation(Guid.NewGuid());
         var repository = new ControlledConversationRepository(conversation);
-        var runtime = new BlockingAgentChatRuntime();
+        var runtime = new RecordingAgentChatRuntime();
+        var inputs = new FakeConversationInputCoordinator();
         var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         var storagePaths = StoragePathDefaults.Create(
             storageRoot,
@@ -47,8 +49,8 @@ public sealed class MainWindowViewModelSubmissionTests
                 NullLogger<DesktopNotificationService>.Instance);
             var settingsStore = new DesktopSettingsJsonStore(storagePaths);
             var turns = new RecordingConversationTurnRepository(repository);
-            var inputs = new EmptyConversationInputRepository();
-            using var runs = new ConversationRunCoordinator(inputs, NullLogger<ConversationRunCoordinator>.Instance);
+            var inputStore = new EmptyConversationInputRepository();
+            using var runs = new ConversationRunCoordinator(inputStore, NullLogger<ConversationRunCoordinator>.Instance);
             var turnFinalizer = new DesktopTurnFinalizer(
                 turns,
                 NullLogger<DesktopTurnFinalizer>.Instance);
@@ -63,54 +65,43 @@ public sealed class MainWindowViewModelSubmissionTests
                 turns,
                 turnFinalizer,
                 new ConversationTurnRecorder(
-                    repository, turns, inputs,
+                    repository, turns, inputStore,
                     NullLogger<ConversationTurnRecorder>.Instance),
                 runtime,
                 sessions, runs,
                 activityCoordinator,
                 toolApprovalHandler,
                 SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore),
-
                 new ConversationCompletionNotifier(notificationService),
                 NullLogger<ConversationTurnEngine>.Instance);
             var workspaces = new ConversationWorkspaceService(repository);
             var vm = new MainWindowViewModel(
                 repository,
-                turnEngine, runs,
+                turnEngine, runs, inputs,
                 sessions,
                 activityCoordinator,
                 transcriptPublisher,
                 new AgentSettingsService(new DesktopAgentDefinitionService(storagePaths),
-                    new SelfClaw.Desktop.Services.Agents.Definitions.SubagentDefinitionCatalog(storagePaths),
-                    new SelfClaw.Tests.TestDoubles.EmptyExtensionSettingsService(), new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier()),
+                    new SubagentDefinitionCatalog(storagePaths),
+                    new EmptyExtensionSettingsService(), new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier()),
                 new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier(),
                 settingsStore,
                 workspaces,
-                new ConversationDeletionService(runs, sessions, new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(), workspaces, repository),
+                new ConversationDeletionService(runs, sessions, new NoOpSubagentConversationLifecycle(), workspaces, repository),
                 NullLogger<MainWindowViewModel>.Instance);
 
             await vm.InitializeAsync();
-            var selection = vm.SelectConversationAsync(conversation.Id);
-            await repository.MessagesRequested.Task;
-
-            var firstSubmission = vm.SubmitPromptAsync("first prompt");
-            var secondSubmission = vm.SubmitPromptAsync("second prompt");
-
             repository.CompleteMessages(conversation.Id, []);
             repository.CompleteToolRuns(conversation.Id, []);
-            await runtime.Requested.Task;
-            await secondSubmission;
+            await vm.SelectConversationAsync(conversation.Id);
 
-            runtime.Requests.Should().ContainSingle();
-            runtime.Requests[0].Messages
-                .Should().ContainSingle(message => message.MarkdownContent == "first prompt");
-            turns.Starts.Should().ContainSingle(start => start.Prompt == "first prompt");
+            var result = await vm.SubmitPromptAsync("first prompt");
 
-            var handle = runs.GetActiveRun(conversation.Id) ?? throw new InvalidOperationException();
-            runtime.Release();
-            await handle.Completion;
-            await firstSubmission;
-            await selection;
+            result.Accepted.Should().BeTrue();
+            inputs.Submissions.Should().ContainSingle().Which.Prompt.Should().Be("first prompt");
+            inputs.Submissions[0].ConversationId.Should().Be(conversation.Id);
+            // The view model never starts a turn directly: Direct execution belongs to the dispatcher.
+            runtime.Requests.Should().BeEmpty();
         }
         finally
         {
@@ -134,23 +125,16 @@ public sealed class MainWindowViewModelSubmissionTests
             now);
     }
 
-    private sealed class BlockingAgentChatRuntime : IAgentChatRuntime
+    private sealed class RecordingAgentChatRuntime : IAgentChatRuntime
     {
-        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public TaskCompletionSource Requested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
         public List<ChatTurnRequest> Requests { get; } = [];
-
-        public void Release() => _release.TrySetResult();
 
         public async IAsyncEnumerable<AgentStreamEvent> StreamTurnAsync(
             ChatTurnRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
-            Requested.TrySetResult();
-            await _release.Task.WaitAsync(cancellationToken);
+            await Task.Yield();
             yield break;
         }
     }
@@ -167,9 +151,6 @@ public sealed class MainWindowViewModelSubmissionTests
         {
             _conversation = conversation;
         }
-
-        public TaskCompletionSource MessagesRequested { get; } =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public void CompleteMessages(Guid conversationId, IReadOnlyList<MessageRecord> messages)
             => _messagesSource.TrySetResult(messages);
@@ -192,10 +173,7 @@ public sealed class MainWindowViewModelSubmissionTests
             => Task.CompletedTask;
 
         public Task<IReadOnlyList<MessageRecord>> ListMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
-        {
-            MessagesRequested.TrySetResult();
-            return _messagesSource.Task.WaitAsync(cancellationToken);
-        }
+            => _messagesSource.Task.WaitAsync(cancellationToken);
 
         public Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(Guid conversationId, CancellationToken cancellationToken = default)
             => _toolRunsSource.Task.WaitAsync(cancellationToken);
@@ -209,5 +187,4 @@ public sealed class MainWindowViewModelSubmissionTests
         public Task DeleteWorkspaceRootAsync(Guid workspaceRootId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
-
 }

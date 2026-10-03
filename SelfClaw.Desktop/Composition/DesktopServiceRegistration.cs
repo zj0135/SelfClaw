@@ -1,4 +1,5 @@
 using SelfClaw.Desktop.Services.Agents;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Settings;
 using SelfClaw.Desktop.Services.SystemTray;
@@ -88,6 +89,16 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<IConversationCompletionNotifier, ConversationCompletionNotifier>();
         services.AddSingleton<ConversationRunCoordinator>();
         services.AddSingleton<ConversationTurnEngine>();
+        services.AddSingleton<ConversationInputFeatureSwitch>();
+        services.AddSingleton<ConversationInputChangeNotifier>();
+        services.AddSingleton<ConversationInputDispatcher>();
+        services.AddSingleton<ConversationInputService>();
+        services.AddSingleton<IConversationInputCoordinator>(services =>
+            services.GetRequiredService<ConversationInputService>());
+        services.AddSingleton<ConversationInputPublisher>();
+        services.AddSingleton<ConversationInputBridge>();
+        services.AddHostedService(services =>
+            services.GetRequiredService<ConversationInputDispatcher>());
         services.AddSingleton<ConversationWorkspaceService>();
         services.AddSingleton<ConversationDeletionService>();
         services.AddSingleton<TranscriptProjection>();
@@ -159,6 +170,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<IConversationRepository>(),
             services.GetRequiredService<ConversationTurnEngine>(),
             services.GetRequiredService<ConversationRunCoordinator>(),
+            services.GetRequiredService<IConversationInputCoordinator>(),
             services.GetRequiredService<ConversationSessionCoordinator>(),
             services.GetRequiredService<AgentActivityCoordinator>(),
             services.GetRequiredService<TranscriptPublisher>(),
@@ -197,6 +209,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<WebViewHostChannel>(),
             services.GetRequiredService<TranscriptDelivery>(),
             services.GetRequiredService<GitWorkspaceBridge>(),
+            services.GetRequiredService<ConversationInputBridge>(),
             services.GetRequiredService<ActivityPanelBridge>(),
             services.GetRequiredService<ILogger<WebViewMessageRouter>>()));
         services.AddSingleton(services => new MainWindow(

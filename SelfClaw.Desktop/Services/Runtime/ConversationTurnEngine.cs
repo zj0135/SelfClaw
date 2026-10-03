@@ -59,7 +59,7 @@ internal sealed class ConversationTurnEngine
             state = await _sessions.PrepareRuntimeStateAsync(conversation, false, handle.CancellationToken);
             var started = await _turns.StartTurnAsync(new(conversation,
                 new(handle.TurnId, conversation.Id, handle.Mode, handle.Origin, ConversationTurnStatus.Running, DateTimeOffset.UtcNow),
-                request.Prompt, Guid.NewGuid()), handle.CancellationToken);
+                request.Prompt, request.InputClaim?.MessageId ?? Guid.NewGuid(), InputClaim: request.InputClaim), handle.CancellationToken);
             turn = new AgentTurnState(started.Turn, request.Agent, handle.InputSession);
             state.ReplaceTurn(started.Turn);
             foreach (var message in started.Messages) state.ReplaceMessage(message);
@@ -92,15 +92,17 @@ internal sealed class ConversationTurnEngine
         }
         finally
         {
+            handle.SetExecutionResult(new(state?.Turns.SingleOrDefault(item => item.Id == handle.TurnId), turn?.Completed == true, error));
             try
             {
                 handle.InputSession?.Close();
                 if (activityStarted && turn is not null && !turn.Completed)
                     _activity.CompleteInterrupted(turn.TurnId, AgentActivityOutcome.Failed, "The turn could not be finalized.");
             }
-            finally { _runs.Complete(handle); }
+            // Queued runs retain admission until the dispatcher has durably applied the outcome.
+            finally { if (request.InputClaim is null) _runs.Complete(handle); }
         }
-        return new(state?.Turns.SingleOrDefault(item => item.Id == handle.TurnId), turn?.Completed == true, error);
+        return handle.ExecutionResult ?? throw new InvalidOperationException("The execution result was not recorded.");
     }
 
     private async Task StreamTurnAsync(ConversationRunHandle handle, ConversationRuntimeState state,

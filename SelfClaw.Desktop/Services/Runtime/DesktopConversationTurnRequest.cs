@@ -10,4 +10,5 @@ internal sealed record DesktopConversationTurnRequest(
     Guid? ModelProfileId,
     WorkspaceRoot? WorkspaceRoot,
     ToolPermissionMode ToolPermissionMode,
-    Guid? ConversationId = null);
+    Guid? ConversationId = null,
+    ConversationInputClaim? InputClaim = null);

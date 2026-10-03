@@ -19,6 +19,11 @@ const props = defineProps({
 		type: Boolean,
 		default: true,
 	},
+	// Direct 忙碌时允许加入队列；CLI 忙碌时仍禁止提交。
+	queueable: {
+		type: Boolean,
+		default: false,
+	},
 	workspaceSelection: {
 		type: Object,
 		default: () => ({}),
@@ -119,11 +124,11 @@ const workspaceMode = ref('local');
 const shellRef = ref(null);
 const textareaRef = ref(null);
 
-const canSend = computed(() => composerText.value.trim().length > 0 && !props.busy);
+const canSend = computed(() => composerText.value.trim().length > 0 && (!props.busy || props.queueable));
 
 function submit() {
 	const prompt = composerText.value.trim();
-	if (!prompt || props.busy) {
+	if (!prompt || (props.busy && !props.queueable)) {
 		return;
 	}
 
@@ -234,6 +239,7 @@ defineExpose({
 				</div>
 			</div>
 		</transition>
+		<slot name="queue" />
 		<section class="composer-shell" aria-label="消息输入">
 			<div class="composer-grip" aria-hidden="true"></div>
 			<textarea ref="textareaRef" v-model="composerText" class="composer-input" rows="3"
@@ -251,6 +257,10 @@ defineExpose({
 				<div class="composer-tools-right">
 					<PermissionSelector :mode="toolPermissionMode" align="end"
 						@select="emit('select-permission-mode', $event)" />
+					<button v-if="props.busy && props.queueable" class="send-btn queue" type="button" :disabled="!canSend"
+						title="加入队列" aria-label="加入队列" @click="submit">
+						<ArrowRight :size="17" :stroke-width="2.2" aria-hidden="true" />
+					</button>
 					<button v-if="props.busy && props.stoppable" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成"
 						@click="stop">
 						<Square :size="13" fill="currentColor" :stroke-width="0" aria-hidden="true" />

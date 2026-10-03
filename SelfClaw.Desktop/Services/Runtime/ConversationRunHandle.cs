@@ -11,6 +11,7 @@ internal sealed class ConversationRunHandle
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<ConversationRecord?> _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private ConversationRuntimeState? _runtimeState;
+    private ConversationTurnExecutionResult? _executionResult;
     private int _executionStarted;
     private int _completed;
 
@@ -41,6 +42,13 @@ internal sealed class ConversationRunHandle
     public ConversationRuntimeState? RuntimeState => Volatile.Read(ref _runtimeState);
     public Task Completion => _completion.Task;
     public Task<ConversationRecord?> Started => _started.Task;
+    internal ConversationTurnExecutionResult? ExecutionResult => Volatile.Read(ref _executionResult);
+
+    internal void SetExecutionResult(ConversationTurnExecutionResult result)
+    {
+        if (Interlocked.CompareExchange(ref _executionResult, result, null) is not null)
+            throw new InvalidOperationException("The execution outcome has already been recorded.");
+    }
 
     internal void AttachState(ConversationRuntimeState state)
     {

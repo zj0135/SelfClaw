@@ -68,8 +68,7 @@ public sealed class ShellStateTests
             context.ViewModel.SelectedAgentId.Should().Be("agent-a");
             ((SelfClaw.Desktop.Services.Plugins.IPluginViewContextSource)context.ViewModel).CaptureContext().AgentId.Should().Be("agent-a");
             (await context.ViewModel.SubmitPromptAsync("use A")).Accepted.Should().BeTrue();
-            var request = await context.Runtime.Requested.Task;
-            request.Agent.Id.Should().Be("agent-a");
+            context.Inputs.Submissions.Should().ContainSingle().Which.Agent.Id.Should().Be("agent-a");
             await context.StopTurnsAsync();
             context.Agents.DeleteAgent("agent-a");
             context.ViewModel.SelectedAgentId.Should().Be("agent-a");
@@ -141,6 +140,23 @@ public sealed class ShellStateTests
             notifications.Should().BeGreaterThan(0);
         });
 
+    [Fact]
+    public Task Direct_submission_keeps_its_submit_time_target_after_navigation()
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            using var context = new ShellContext();
+            var first = await context.AddConversationAsync("build");
+            var second = await context.AddConversationAsync("build");
+            await context.ViewModel.InitializeAsync();
+            await context.ViewModel.SelectConversationAsync(first.Id);
+
+            (await context.ViewModel.SubmitPromptAsync("for the first")).Accepted.Should().BeTrue();
+
+            // Navigation after the ACK must not move the already-accepted input to the new selection.
+            await context.ViewModel.SelectConversationAsync(second.Id);
+            context.Inputs.Submissions.Should().ContainSingle().Which.ConversationId.Should().Be(first.Id);
+        });
+
     private sealed class ShellContext : IDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
@@ -178,13 +194,15 @@ public sealed class ShellStateTests
             Agents = new AgentSettingsService(new DesktopAgentDefinitionService(paths),
                     new SelfClaw.Desktop.Services.Agents.Definitions.SubagentDefinitionCatalog(paths),
                     new EmptyExtensionSettingsService(), changes);
-            ViewModel = new MainWindowViewModel(conversations, _engine, _runs, _sessions, _activity, _publisher,
+            Inputs = new SelfClaw.Tests.TestDoubles.FakeConversationInputCoordinator();
+            ViewModel = new MainWindowViewModel(conversations, _engine, _runs, Inputs, _sessions, _activity, _publisher,
                 Agents, changes, settings, workspaces,
                 new ConversationDeletionService(_runs, _sessions, new NoOpSubagentConversationLifecycle(), workspaces, conversations),
                 NullLogger<MainWindowViewModel>.Instance, Dispatcher.CurrentDispatcher);
         }
 
         public DelayedQuery Query { get; } = new();
+        public SelfClaw.Tests.TestDoubles.FakeConversationInputCoordinator Inputs { get; }
         public string RootPath => _root;
         public MainWindowViewModel ViewModel { get; }
         public DesktopSettingsJsonStore Settings { get; }

@@ -5,4 +5,5 @@ public sealed record ConversationTurnStart(
     ConversationTurnRecord Turn,
     string Prompt,
     Guid UserMessageId,
-    IReadOnlyList<MessageAttachmentRecord>? Attachments = null);
+    IReadOnlyList<MessageAttachmentRecord>? Attachments = null,
+    ConversationInputClaim? InputClaim = null);

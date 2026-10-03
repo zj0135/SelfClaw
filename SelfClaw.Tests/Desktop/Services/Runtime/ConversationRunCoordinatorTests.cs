@@ -65,6 +65,28 @@ public sealed class ConversationRunCoordinatorTests
     }
 
     [Fact]
+    public async Task A_user_queue_blocks_only_its_own_continuation_and_not_another_parent()
+    {
+        var blocked = Conversation();
+        var inputs = new EmptyConversationInputRepository { HasUnprocessed = (id, _) => Task.FromResult(id == blocked.Id) };
+        using var runs = Create(inputs);
+
+        (await runs.TryReserveContinuationAsync(blocked)).Should().BeNull();
+        runs.IsRunning(blocked.Id).Should().BeFalse();
+
+        // Another parent's continuation still wins the same admission gate.
+        var other = Conversation();
+        var continuation = await runs.TryReserveContinuationAsync(other);
+        continuation.Should().NotBeNull();
+        continuation!.Origin.Should().Be(DirectTurnOrigin.Continuation);
+        runs.Complete(continuation);
+
+        // Once the queue clears, the interactive path can own the previously blocked conversation.
+        inputs.HasUnprocessed = (_, _) => Task.FromResult(false);
+        runs.Complete(Reserve(runs, blocked.Id));
+    }
+
+    [Fact]
     public async Task Failed_preparation_releases_the_reservation_without_reporting_a_started_turn()
     {
         using var runs = Create(new() { HasUnprocessed = (_, _) => Task.FromException<bool>(new IOException("read failed")) });

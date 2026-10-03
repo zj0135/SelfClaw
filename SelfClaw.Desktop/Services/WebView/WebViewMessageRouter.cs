@@ -8,6 +8,7 @@ using SelfClaw.Desktop.Services.Tools;
 using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Appearance;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.Plugins;
@@ -34,6 +35,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly TerminalHostController _terminalHostController;
     private readonly PluginViewHostController _pluginViewHostController;
     private readonly PluginViewBridge _pluginViewBridge;
+    private readonly ConversationInputBridge? _conversationInputBridge;
     private readonly MainWindowViewModel _viewModel;
     private readonly ToolApprovalPresenter _approvals;
     private readonly WebViewHostChannel _hostChannel;
@@ -62,6 +64,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         WebViewHostChannel hostChannel,
         TranscriptDelivery transcriptDelivery,
         GitWorkspaceBridge? gitWorkspaceBridge = null,
+        ConversationInputBridge? conversationInputBridge = null,
         ActivityPanelBridge? activityPanelBridge = null,
         ILogger<WebViewMessageRouter>? logger = null)
     {
@@ -76,6 +79,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _terminalHostController = terminalHostController;
         _pluginViewHostController = pluginViewHostController;
         _pluginViewBridge = pluginViewBridge;
+        _conversationInputBridge = conversationInputBridge;
         _viewModel = viewModel;
         _approvals = approvals;
         _hostChannel = hostChannel;
@@ -208,6 +212,12 @@ internal sealed class WebViewMessageRouter : IDisposable
             return null;
         }
 
+        if (type.StartsWith("conversation-input/", StringComparison.Ordinal) && _conversationInputBridge is not null)
+        {
+            await _conversationInputBridge.HandleAsync(type, payload, cancellationToken);
+            return null;
+        }
+
         if (type.StartsWith("appearance/", StringComparison.Ordinal))
         {
             var appearance = await _appearanceSettingsBridge.TryHandleAsync(type, payload, cancellationToken);
@@ -272,7 +282,10 @@ internal sealed class WebViewMessageRouter : IDisposable
                 var result = await _viewModel.SubmitPromptAsync(
                     ReadOptionalString(payload, "prompt") ?? string.Empty,
                     ReadOptionalString(payload, "workspaceMode"),
-                    Guid.TryParse(ReadOptionalString(payload, "modelProfileId"), out var modelProfileId) ? modelProfileId : null);
+                    Guid.TryParse(ReadOptionalString(payload, "modelProfileId"), out var modelProfileId) ? modelProfileId : null,
+                    ReadOptionalString(payload, "conversationId") is null ? null : ReadRequiredGuid(payload, "conversationId"),
+                    ReadOptionalString(payload, "clientRequestId") ?? ReadOptionalString(payload, "requestId"),
+                    payload.TryGetProperty("newConversation", out var newConversation) && newConversation.ValueKind == JsonValueKind.True);
                 var requestId = ReadOptionalString(payload, "requestId");
                 if (requestId is not null)
                 {
@@ -281,6 +294,7 @@ internal sealed class WebViewMessageRouter : IDisposable
                         type = "prompt-submission",
                         requestId,
                         result.Accepted,
+                        result.ConversationId,
                         result.Error
                     });
                 }

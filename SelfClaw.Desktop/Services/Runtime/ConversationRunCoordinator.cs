@@ -13,6 +13,7 @@ internal sealed class ConversationRunCoordinator : IDisposable
     private readonly object _gate = new();
     private readonly Dictionary<Guid, ConversationRunHandle> _runs = [];
     private readonly Dictionary<Guid, ConversationDeletionReservation?> _deletions = [];
+    private readonly HashSet<ConversationInputOperation> _inputOperations = [];
     private long _generation;
     private bool _stopping;
 
@@ -25,6 +26,31 @@ internal sealed class ConversationRunCoordinator : IDisposable
     }
 
     internal event Action<ConversationRunChange>? Changed;
+
+    internal ConversationInputOperation? TryBeginInputOperation(Guid conversationId, CancellationToken token = default)
+    {
+        token.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (_stopping || _deletions.ContainsKey(conversationId)) return null;
+            var operation = new ConversationInputOperation(this, conversationId, token);
+            _inputOperations.Add(operation);
+            return operation;
+        }
+    }
+
+    internal void CompleteInputOperation(ConversationInputOperation operation)
+    {
+        lock (_gate) _inputOperations.Remove(operation);
+    }
+
+    internal async Task DrainInputOperationsAsync(Guid conversationId, TimeSpan timeout, CancellationToken token = default)
+    {
+        ConversationInputOperation[] operations;
+        lock (_gate) operations = _inputOperations.Where(item => item.ConversationId == conversationId).ToArray();
+        foreach (var operation in operations) operation.Cancel();
+        await Task.WhenAll(operations.Select(item => item.Completion)).WaitAsync(timeout, token).ConfigureAwait(false);
+    }
 
     internal ConversationRunHandle? TryReserve(Guid conversationId, AgentExecutionMode mode,
         DirectTurnOrigin origin, CancellationToken cancellationToken = default)
@@ -178,23 +204,30 @@ internal sealed class ConversationRunCoordinator : IDisposable
     internal async Task StopAsync(CancellationToken cancellationToken)
     {
         ConversationRunHandle[] handles;
+        ConversationInputOperation[] operations;
         lock (_gate)
         {
             _stopping = true;
             handles = _runs.Values.ToArray();
+            operations = _inputOperations.ToArray();
         }
+        foreach (var operation in operations) operation.Cancel();
         foreach (var handle in handles) handle.Cancel();
-        await Task.WhenAll(handles.Select(handle => handle.Completion)).WaitAsync(cancellationToken).ConfigureAwait(false);
+        await Task.WhenAll(handles.Select(handle => handle.Completion).Concat(operations.Select(item => item.Completion)))
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public void Dispose()
     {
         ConversationRunHandle[] handles;
+        ConversationInputOperation[] operations;
         lock (_gate)
         {
             _stopping = true;
             handles = _runs.Values.ToArray();
+            operations = _inputOperations.ToArray();
         }
+        foreach (var operation in operations) operation.Cancel();
         foreach (var handle in handles) handle.Cancel();
     }
 

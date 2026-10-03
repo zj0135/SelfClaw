@@ -1,4 +1,5 @@
 using System.Text.Json;
+using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
@@ -9,13 +10,16 @@ namespace SelfClaw.Tests.TestDoubles;
 
 internal sealed class ConversationPersistenceFixture : IDisposable
 {
-    public ConversationPersistenceFixture(Func<string, CancellationToken, Task>? boundaryBeforeCommit = null)
+    public ConversationPersistenceFixture(Func<string, CancellationToken, Task>? boundaryBeforeCommit = null,
+        Func<string, CancellationToken, Task>? startBeforeCommit = null)
     {
         RootPath = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         Paths = StoragePathDefaults.Create(RootPath, Path.Combine(RootPath, "p2.db"), Path.Combine(RootPath, "secrets"));
         Database = new SqliteDatabase(Paths);
         Conversations = new SqliteConversationRepository(Database);
-        Turns = new SqliteConversationTurnRepository(Database);
+        Turns = startBeforeCommit is null
+            ? new SqliteConversationTurnRepository(Database)
+            : new SqliteConversationTurnRepository(Database, startBeforeCommit);
         Inputs = boundaryBeforeCommit is null
             ? new SqliteConversationInputRepository(Database)
             : new SqliteConversationInputRepository(Database, boundaryBeforeCommit);
@@ -44,6 +48,45 @@ internal sealed class ConversationPersistenceFixture : IDisposable
         var sequence = await Turns.ReserveMessageSequenceAsync(turn.ConversationId);
         return new MessageRecord(id, turn.ConversationId, turn.Id, sequence, MessageRole.Assistant, text, status,
             turn.StartedAtUtc, turn.StartedAtUtc, Segments: [new MessageSegmentRecord(id, 0, MessageSegmentKind.Text, text, null)]);
+    }
+
+    internal async Task<ConversationRecord> CreateConversationAsync(string title = "Conversation")
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversation = new ConversationRecord(Guid.NewGuid(), title, null, ConversationMode.Programming,
+            ToolPermissionMode.RequireApproval, "build", now, now);
+        return await Conversations.UpsertConversationAsync(conversation);
+    }
+
+    internal ConversationInputExecutionSnapshot Snapshot(string agentId = "build", long revision = 1,
+        Guid? modelProfileId = null, Guid? workspaceRootId = null, string? workspaceRootPath = null)
+        => new(agentId, revision, AgentExecutionMode.Direct, modelProfileId ?? Guid.NewGuid(),
+            workspaceRootId, workspaceRootPath, ToolPermissionMode.RequireApproval);
+
+    internal async Task<ConversationInputRecord> AcceptFollowUpAsync(Guid conversationId, string prompt,
+        string? requestId = null, ConversationInputExecutionSnapshot? snapshot = null, bool queueEnabled = true)
+    {
+        var result = await Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversationId,
+            requestId ?? Guid.NewGuid().ToString("N"), ConversationInputKind.FollowUp, null, prompt,
+            snapshot ?? Snapshot(), null, queueEnabled));
+        result.Status.Should().Be(ConversationInputAcceptStatus.Accepted);
+        return result.Input!;
+    }
+
+    internal async Task<ConversationInputRecord> ClaimNextAsync(Guid conversationId, Guid ownerRunId, Guid claimId)
+        => await Inputs.TryClaimNextFollowUpAsync(conversationId, ownerRunId, claimId)
+           ?? throw new InvalidOperationException("No pending follow-up could be claimed.");
+
+    internal async Task<ConversationTurnCommit> StartClaimedAsync(ConversationRecord conversation,
+        ConversationInputRecord input, Guid claimId, Guid ownerRunId)
+    {
+        var turnId = Guid.NewGuid();
+        var turn = new ConversationTurnRecord(turnId, conversation.Id, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Interactive, ConversationTurnStatus.Running, DateTimeOffset.UtcNow);
+        var claim = new ConversationInputClaim(input.Id, conversation.Id, input.Revision, claimId, ownerRunId,
+            ConversationInputMessageId.Compute(claimId, input.Id));
+        return await Turns.StartTurnAsync(new ConversationTurnStart(conversation, turn, input.Prompt,
+            claim.MessageId, InputClaim: claim));
     }
 
     internal async Task<ConversationInputBatch> SeedClaimAsync(
@@ -87,12 +130,33 @@ internal sealed class ConversationPersistenceFixture : IDisposable
         return await command.ExecuteScalarAsync();
     }
 
+    internal async Task<object?> ScalarAsync(string sql, params (string Name, object Value)[] parameters)
+    {
+        await using var connection = await Database.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        foreach (var parameter in parameters)
+        {
+            command.Parameters.AddWithValue(parameter.Name, parameter.Value);
+        }
+
+        return await command.ExecuteScalarAsync();
+    }
+
     public void Dispose()
     {
         SqliteTestPools.ClearFor(Paths.DatabasePath);
-        if (Directory.Exists(RootPath))
+        for (var attempt = 0; attempt < 10 && Directory.Exists(RootPath); attempt++)
         {
-            Directory.Delete(RootPath, recursive: true);
+            try
+            {
+                Directory.Delete(RootPath, recursive: true);
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(25);
+                SqliteTestPools.ClearFor(Paths.DatabasePath);
+            }
         }
     }
 }

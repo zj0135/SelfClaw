@@ -22,9 +22,57 @@ internal static class SqliteConversationTurnWriter
         await UpsertConversationAsync(connection, transaction, start.Conversation, cancellationToken).ConfigureAwait(false);
         await InsertTurnAsync(connection, transaction, start.Turn, cancellationToken).ConfigureAwait(false);
         await UpsertUsageAsync(connection, transaction, start.Turn, cancellationToken).ConfigureAwait(false);
-        var user = await InsertUserAsync(connection, transaction, start.Turn, start.UserMessageId,
-            start.Prompt, start.Attachments, cancellationToken).ConfigureAwait(false);
+        var user = start.InputClaim is { } claim
+            ? await ConsumeFollowUpAsync(connection, transaction, start, claim, cancellationToken).ConfigureAwait(false)
+            : await InsertUserAsync(connection, transaction, start.Turn, start.UserMessageId,
+                start.Prompt, start.Attachments, cancellationToken).ConfigureAwait(false);
         return new ConversationTurnCommit(start.Turn, [user], []);
+    }
+
+    private static async Task<MessageRecord> ConsumeFollowUpAsync(
+        SqliteConnection connection, SqliteTransaction transaction, ConversationTurnStart start,
+        ConversationInputClaim claim, CancellationToken cancellationToken)
+    {
+        if (claim.InputId == Guid.Empty || claim.ConversationId != start.Turn.ConversationId ||
+            claim.Revision <= 0 || claim.ClaimId == Guid.Empty || claim.OwnerRunId == Guid.Empty ||
+            claim.MessageId != ConversationInputMessageId.Compute(claim.ClaimId, claim.InputId) ||
+            start.UserMessageId != claim.MessageId || start.Turn.ExecutionMode != AgentExecutionMode.Direct ||
+            start.Turn.Origin != DirectTurnOrigin.Interactive)
+        {
+            throw new ArgumentException("A follow-up start requires a matching, stable input claim.", nameof(start));
+        }
+
+        var at = start.Turn.StartedAtUtc;
+        var user = await InsertUserAsync(connection, transaction, start.Turn, claim.MessageId,
+            start.Prompt, start.Attachments, cancellationToken).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE conversation_inputs SET status = 2, consumed_turn_id = $turnId, message_id = $messageId,
+                consumed_at_utc = $at, updated_at_utc = $at, revision = revision + 1
+            WHERE id = $id AND conversation_id = $conversationId AND kind = 0 AND status = 1 AND revision = $revision
+                AND claim_id = $claimId AND claim_owner_run_id = $owner;
+            """;
+        command.Parameters.AddWithValue("$turnId", start.Turn.Id.ToString("D"));
+        command.Parameters.AddWithValue("$messageId", claim.MessageId.ToString("D"));
+        command.Parameters.AddWithValue("$at", at.ToString("O"));
+        command.Parameters.AddWithValue("$id", claim.InputId.ToString("D"));
+        command.Parameters.AddWithValue("$conversationId", start.Turn.ConversationId.ToString("D"));
+        command.Parameters.AddWithValue("$revision", claim.Revision);
+        command.Parameters.AddWithValue("$claimId", claim.ClaimId.ToString("D"));
+        command.Parameters.AddWithValue("$owner", claim.OwnerRunId.ToString("D"));
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new InvalidOperationException("The follow-up claim no longer permits consumption.");
+        }
+
+        await using var revision = connection.CreateCommand();
+        revision.Transaction = transaction;
+        revision.CommandText = "UPDATE conversation_input_state SET queue_revision = queue_revision + 1 WHERE conversation_id = $id;";
+        revision.Parameters.AddWithValue("$id", start.Turn.ConversationId.ToString("D"));
+        await revision.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        return user;
     }
 
     internal static async Task<long> ReserveSequenceAsync(

@@ -58,7 +58,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IConversationRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
         services.AddSingleton<IConversationTurnRepository, SqliteConversationTurnRepository>();
-        services.AddSingleton<IConversationInputRepository, SqliteConversationInputRepository>();
+        services.AddSingleton<SqliteConversationInputRepository>();
+        services.AddSingleton<IConversationInputRepository>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
+        services.AddSingleton<IConversationInputStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
+        services.AddSingleton<IConversationInputSchedulerStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
         services.AddSingleton<IUsageStatisticsReader, SqliteUsageStatisticsReader>();
         services.AddSingleton<SqliteWorkspaceRepository>();
         services.AddSingleton<IWorkspaceRootRepository>(serviceProvider => serviceProvider.GetRequiredService<SqliteWorkspaceRepository>());

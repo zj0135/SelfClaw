@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -9,8 +8,22 @@ using SelfClaw.Infrastructure.Data.Sqlite.Models;
 
 namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
-internal sealed class SqliteConversationInputRepository : IConversationInputRepository
+internal sealed partial class SqliteConversationInputRepository : IConversationInputRepository, IConversationInputStore, IConversationInputSchedulerStore
 {
+    internal const int MaximumInputsPerConversation = 20;
+    internal const int MaximumInputsPerApplication = 500;
+    internal const int MaximumPromptBytes = 64 * 1024;
+    internal const int MaximumPreviewLength = 200;
+
+    private const string RecordSelectColumns = """
+        i.id, i.conversation_id, i.client_request_id, i.sequence, i.kind, i.target_turn_id, i.status, i.revision,
+        i.payload_json, i.execution_snapshot_json, i.claim_id, i.claim_owner_run_id, i.consumed_turn_id, i.message_id,
+        i.created_at_utc, i.updated_at_utc, i.consumed_at_utc, i.reason_code, i.error_message
+        """;
+
+    private static readonly JsonSerializerOptions SnapshotJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions PayloadJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     private readonly SqliteDatabase _database;
     private readonly Func<string, CancellationToken, Task>? _beforeCommit;
 
@@ -25,88 +38,6 @@ internal sealed class SqliteConversationInputRepository : IConversationInputRepo
         _beforeCommit = beforeCommit;
     }
 
-    public async Task<ConversationInputBatch?> ReadClaimedBatchAsync(
-        Guid conversationId, Guid turnId, Guid ownerRunId, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var transaction = connection.BeginTransaction(deferred: true);
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT i.claim_id FROM conversation_inputs i
-            JOIN conversation_turns t ON t.id = i.target_turn_id AND t.conversation_id = i.conversation_id
-            WHERE i.conversation_id = $conversationId AND i.target_turn_id = $turnId
-                AND i.claim_owner_run_id = $owner AND i.status = 1 AND i.kind = 1
-                AND t.status = 0 AND t.execution_mode = 0 AND t.origin = 0
-            ORDER BY i.sequence LIMIT 1;
-            """;
-        command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-        command.Parameters.AddWithValue("$turnId", turnId.ToString("D"));
-        command.Parameters.AddWithValue("$owner", ownerRunId.ToString("D"));
-        if (await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not string claim)
-        {
-            return null;
-        }
-
-        var claimId = Guid.Parse(claim);
-        var rows = await ReadClaimAsync(connection, transaction, claimId, cancellationToken).ConfigureAwait(false);
-        var batch = new ConversationInputBatch(conversationId, turnId, ownerRunId, claimId,
-            rows.Select(row => new ConversationInputItem(row.Id, row.Sequence, row.Revision,
-                CreateMessageId(claimId, row.Id), row.Prompt)).ToArray());
-        ValidateRows(batch, rows);
-        if (rows.Any(row => row.Status != 1))
-        {
-            throw new InvalidOperationException("A claimed input batch must have one consistent durable state.");
-        }
-
-        return batch;
-    }
-
-    public async Task<ConversationInputConsumption?> ReadConsumptionAsync(
-        ConversationInputBatch batch, CancellationToken cancellationToken = default)
-    {
-        ValidateBatch(batch);
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var transaction = connection.BeginTransaction(deferred: true);
-        var rows = await ReadClaimAsync(connection, transaction, batch.ClaimId, cancellationToken).ConfigureAwait(false);
-        ValidateRows(batch, rows);
-        return await ReadConsumptionAsync(connection, transaction, batch, rows, cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task<ConversationInputConsumption> CommitBoundaryAsync(
-        ConversationInputBoundaryCommit commit, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(commit);
-        ValidateBoundary(commit);
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        var rows = await ReadClaimAsync(connection, transaction, commit.Batch.ClaimId, cancellationToken).ConfigureAwait(false);
-        ValidateRows(commit.Batch, rows);
-        var consumed = await ReadConsumptionAsync(connection, transaction, commit.Batch, rows, cancellationToken).ConfigureAwait(false);
-        if (consumed is not null)
-        {
-            return consumed;
-        }
-
-        if (rows.Any(row => row.Status != 1) ||
-            !await SqliteConversationTurnWriter.TryWriteAsync(connection, transaction, commit.Content, cancellationToken).ConfigureAwait(false))
-        {
-            throw new InvalidOperationException("The input claim or its Running turn no longer permits consumption.");
-        }
-
-        var messages = await ConsumeInputsAsync(connection, transaction, commit, cancellationToken).ConfigureAwait(false);
-        await AdvanceQueueRevisionAsync(connection, transaction, commit.Batch.ConversationId, cancellationToken).ConfigureAwait(false);
-        var committedTurn = await SqliteConversationTurnWriter.ReadTurnAsync(connection, transaction, commit.Batch.TurnId, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("The consumed turn disappeared within its transaction.");
-        if (_beforeCommit is not null)
-        {
-            await _beforeCommit("boundary-before-commit", cancellationToken).ConfigureAwait(false);
-        }
-
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        return new ConversationInputConsumption(commit.Batch.ClaimId, committedTurn, messages);
-    }
-
     public async Task<bool> HasUnprocessedInputsAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -116,112 +47,268 @@ internal sealed class SqliteConversationInputRepository : IConversationInputRepo
         return (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0L) != 0;
     }
 
-    private static async Task<IReadOnlyList<MessageRecord>> ConsumeInputsAsync(
-        SqliteConnection connection, SqliteTransaction transaction, ConversationInputBoundaryCommit commit, CancellationToken cancellationToken)
+
+    public async Task<ConversationInputAcceptResult> AcceptAsync(
+        ConversationInputAcceptRequest request, CancellationToken cancellationToken = default)
     {
-        var messages = new List<MessageRecord>();
-        var at = DateTimeOffset.UtcNow;
-        foreach (var input in commit.Batch.Inputs)
+        ArgumentNullException.ThrowIfNull(request);
+        ValidateAccept(request);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+
+        if (await ReadByIdentityAsync(connection, transaction, request.ConversationId, request.ClientRequestId, cancellationToken).ConfigureAwait(false) is { } existing)
         {
-            var message = await SqliteConversationTurnWriter.InsertUserAsync(connection, transaction, commit.Content.Turn,
-                input.MessageId, input.Prompt, null, cancellationToken, at).ConfigureAwait(false);
-            await using var command = connection.CreateCommand();
+            var duplicate = existing.Kind == request.Kind &&
+                (existing.TargetTurnId ?? Guid.Empty) == (request.TargetTurnId ?? Guid.Empty) &&
+                (existing.RequestPrompt ?? existing.Prompt) == request.Prompt &&
+                (request.RequestFingerprint is not null
+                    ? existing.RequestFingerprint == request.RequestFingerprint
+                    : SnapshotEquals(existing.ExecutionSnapshot, request.ExecutionSnapshot));
+            var revision = await ReadQueueRevisionAsync(connection, transaction, request.ConversationId, cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new ConversationInputAcceptResult(
+                duplicate ? ConversationInputAcceptStatus.Duplicate : ConversationInputAcceptStatus.Conflict,
+                duplicate ? existing : null,
+                revision,
+                duplicate ? null : "request-conflict");
+        }
+
+        if (request.Conversation is { } conversation)
+        {
+            await EnsureConversationAsync(connection, transaction, conversation, cancellationToken).ConfigureAwait(false);
+        }
+
+        var state = await ReadStateAsync(connection, transaction, request.ConversationId, cancellationToken).ConfigureAwait(false);
+        if (!request.QueueEnabled && state.UnprocessedCount > 0)
+        {
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new ConversationInputAcceptResult(ConversationInputAcceptStatus.Rejected, null,
+                state.QueueRevision, ConversationInputReason.QueueDisabled);
+        }
+
+        var globalUnprocessed = await CountGlobalUnprocessedAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        if (state.UnprocessedCount >= MaximumInputsPerConversation || globalUnprocessed >= MaximumInputsPerApplication)
+        {
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new ConversationInputAcceptResult(ConversationInputAcceptStatus.Full, null,
+                state.QueueRevision, ConversationInputReason.Capacity);
+        }
+
+        var sequence = await AllocateSequenceAsync(connection, transaction, request.ConversationId, cancellationToken).ConfigureAwait(false);
+        var now = DateTimeOffset.UtcNow;
+        var inputId = Guid.NewGuid();
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO conversation_inputs(id, conversation_id, client_request_id, sequence, kind, target_turn_id,
+                    payload_json, execution_snapshot_json, status, revision, claim_id, claim_owner_run_id,
+                    consumed_turn_id, message_id, created_at_utc, updated_at_utc, consumed_at_utc, reason_code, error_message)
+                VALUES($id, $conversationId, $request, $sequence, $kind, $target, $payload, $snapshot, 0, 1,
+                    NULL, NULL, NULL, NULL, $at, $at, NULL, NULL, NULL);
+                """;
+            insert.Parameters.AddWithValue("$id", inputId.ToString("D"));
+            insert.Parameters.AddWithValue("$conversationId", request.ConversationId.ToString("D"));
+            insert.Parameters.AddWithValue("$request", request.ClientRequestId);
+            insert.Parameters.AddWithValue("$sequence", sequence);
+            insert.Parameters.AddWithValue("$kind", (int)request.Kind);
+            insert.Parameters.AddWithValue("$target", request.TargetTurnId?.ToString("D") ?? (object)DBNull.Value);
+            insert.Parameters.AddWithValue("$payload", SerializePayload(request.Prompt, request.RequestFingerprint));
+            insert.Parameters.AddWithValue("$snapshot", request.ExecutionSnapshot is { } snapshot ? SerializeSnapshot(snapshot) : (object)DBNull.Value);
+            insert.Parameters.AddWithValue("$at", now.ToString("O"));
+            await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var record = await ReadByIdAsync(connection, transaction, inputId, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The accepted input disappeared within its transaction.");
+        var queueRevision = await ReadQueueRevisionAsync(connection, transaction, request.ConversationId, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return new ConversationInputAcceptResult(ConversationInputAcceptStatus.Accepted, record, queueRevision);
+    }
+
+    public async Task<ConversationInputUpdateResult> EditAsync(
+        ConversationInputEditRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Prompt.Length == 0 || Encoding.UTF8.GetByteCount(request.Prompt) > MaximumPromptBytes)
+        {
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Invalid, null, 0);
+        }
+
+        return await ConditionalUpdateAsync(request.InputId, request.ExpectedRevision, """
+            UPDATE conversation_inputs SET payload_json = json_set(payload_json, '$.prompt', $prompt), status = 0, reason_code = NULL, error_message = NULL,
+                revision = revision + 1, updated_at_utc = $at
+            WHERE id = $id AND revision = $revision AND status IN (0, 3);
+            """, ("$prompt", request.Prompt), cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ConversationInputUpdateResult> CancelAsync(
+        ConversationInputCancelRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await ConditionalUpdateAsync(request.InputId, request.ExpectedRevision, """
+            UPDATE conversation_inputs SET status = 4, revision = revision + 1, updated_at_utc = $at
+            WHERE id = $id AND revision = $revision AND status IN (0, 3);
+            """, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ConversationInputUpdateResult> HoldAsync(
+        Guid inputId, int expectedRevision, string reasonCode, string? errorMessage, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
+        return await ConditionalUpdateAsync(inputId, expectedRevision, """
+            UPDATE conversation_inputs SET status = 3, reason_code = $reason, error_message = $error,
+                revision = revision + 1, updated_at_utc = $at
+            WHERE id = $id AND revision = $revision AND status IN (0, 1);
+            """, ("$reason", reasonCode), ("$error", errorMessage ?? (object)DBNull.Value), cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ConversationInputUpdateResult> RetryAsync(
+        Guid inputId, int expectedRevision, CancellationToken cancellationToken = default,
+        ConversationInputExecutionSnapshot? executionSnapshot = null)
+    {
+        return await ConditionalUpdateAsync(inputId, expectedRevision, """
+            UPDATE conversation_inputs SET status = 0, reason_code = NULL, error_message = NULL,
+                execution_snapshot_json = COALESCE($snapshot, execution_snapshot_json),
+                revision = revision + 1, updated_at_utc = $at
+            WHERE id = $id AND revision = $revision AND status = 3;
+            """, ("$snapshot", executionSnapshot is null ? DBNull.Value : SerializeSnapshot(executionSnapshot)), cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ConversationInputRecord?> FindRequestAsync(Guid conversationId, string clientRequestId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: true);
+        return await ReadByIdentityAsync(connection, transaction, conversationId, clientRequestId, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ConversationInputRecord?> GetInputAsync(Guid inputId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: true);
+        return await ReadByIdAsync(connection, transaction, inputId, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ConversationInputQueueState> GetQueueStateAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: true);
+        return await ReadQueueStateAsync(connection, transaction, conversationId, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<ConversationInputQueueState> SetPausedAsync(
+        ConversationInputPauseRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using (var command = connection.CreateCommand())
+        {
             command.Transaction = transaction;
             command.CommandText = """
-                UPDATE conversation_inputs SET status = 2, consumed_turn_id = $turnId, message_id = $messageId,
-                    consumed_at_utc = $at, updated_at_utc = $at
-                WHERE id = $id AND conversation_id = $conversationId AND target_turn_id = $turnId AND kind = 1
-                    AND status = 1 AND revision = $revision AND claim_id = $claimId AND claim_owner_run_id = $owner;
+                UPDATE conversation_input_state SET paused = $paused, pause_reason = $reason,
+                    queue_revision = queue_revision + 1
+                WHERE conversation_id = $id AND queue_revision = $revision;
                 """;
-            command.Parameters.AddWithValue("$turnId", commit.Batch.TurnId.ToString("D"));
-            command.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
-            command.Parameters.AddWithValue("$at", at.ToString("O"));
-            command.Parameters.AddWithValue("$id", input.InputId.ToString("D"));
-            command.Parameters.AddWithValue("$conversationId", commit.Batch.ConversationId.ToString("D"));
-            command.Parameters.AddWithValue("$revision", input.Revision);
-            command.Parameters.AddWithValue("$claimId", commit.Batch.ClaimId.ToString("D"));
-            command.Parameters.AddWithValue("$owner", commit.Batch.OwnerRunId.ToString("D"));
+            command.Parameters.AddWithValue("$paused", request.Paused ? 1 : 0);
+            command.Parameters.AddWithValue("$reason", request.Paused ? (request.Reason ?? ConversationInputReason.QueuePaused) : (object)DBNull.Value);
+            command.Parameters.AddWithValue("$id", request.ConversationId.ToString("D"));
+            command.Parameters.AddWithValue("$revision", request.ExpectedQueueRevision);
             if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
             {
-                throw new InvalidOperationException("The complete input claim must be consumed atomically.");
+                return await ReadQueueStateAsync(connection, transaction, request.ConversationId, cancellationToken).ConfigureAwait(false);
             }
-
-            messages.Add(message);
         }
 
-        return messages;
+        var state = await ReadQueueStateAsync(connection, transaction, request.ConversationId, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return state;
     }
 
-    private static async Task<ConversationInputConsumption?> ReadConsumptionAsync(
-        SqliteConnection connection, SqliteTransaction transaction, ConversationInputBatch batch,
-        IReadOnlyList<SqliteConversationInputRow> rows, CancellationToken cancellationToken)
+
+    private async Task<ConversationInputUpdateResult> ConditionalUpdateAsync(
+        Guid inputId, int expectedRevision, string sql,
+        (string Name, object Value)? extra1 = null, (string Name, object Value)? extra2 = null,
+        CancellationToken cancellationToken = default)
     {
-        if (rows.All(row => row.Status != 2))
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var conversationId = await ReadConversationIdAsync(connection, transaction, inputId, cancellationToken).ConfigureAwait(false);
+        if (conversationId is null)
         {
-            return null;
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Missing, null, 0);
         }
 
-        if (rows.Any(row => row.Status != 2 || row.ConsumedTurnId != batch.TurnId || row.MessageId != CreateMessageId(batch.ClaimId, row.Id)))
+        int changed;
+        await using (var command = connection.CreateCommand())
         {
-            throw new InvalidOperationException("Input consumption contains a partial or inconsistent mapping.");
+            command.Transaction = transaction;
+            command.CommandText = sql;
+            command.Parameters.AddWithValue("$id", inputId.ToString("D"));
+            command.Parameters.AddWithValue("$revision", expectedRevision);
+            command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            if (extra1 is { } first) command.Parameters.AddWithValue(first.Name, first.Value);
+            if (extra2 is { } second) command.Parameters.AddWithValue(second.Name, second.Value);
+            changed = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        var turn = await SqliteConversationTurnWriter.ReadTurnAsync(connection, transaction, batch.TurnId, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("The consumed turn no longer exists.");
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"""
-            SELECT {SqliteMappings.MessageSelectColumns}
-            FROM conversation_inputs i JOIN messages m ON m.id = i.message_id
-            WHERE i.claim_id = $claimId ORDER BY m.sequence;
-            """;
-        command.Parameters.AddWithValue("$claimId", batch.ClaimId.ToString("D"));
-        var messages = new List<MessageRecord>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        if (changed != 1)
         {
-            messages.Add(SqliteMappings.ReadMessage(reader));
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Conflict, null,
+                await ReadQueueRevisionAsync(connection, transaction, conversationId.Value, cancellationToken).ConfigureAwait(false));
         }
 
-        if (messages.Count != batch.Inputs.Count || messages.Where((message, index) =>
-                message.Id != batch.Inputs[index].MessageId || message.TurnId != batch.TurnId ||
-                message.ConversationId != batch.ConversationId || message.Role != MessageRole.User ||
-                message.Status != MessageStatus.Sealed || message.MarkdownContent != batch.Inputs[index].Prompt).Any())
-        {
-            throw new InvalidOperationException("The consumed users do not match the ordered claim.");
-        }
-
-        return new ConversationInputConsumption(batch.ClaimId, turn, messages);
+        await AdvanceQueueRevisionAsync(connection, transaction, conversationId.Value, cancellationToken).ConfigureAwait(false);
+        var record = await ReadByIdAsync(connection, transaction, inputId, cancellationToken).ConfigureAwait(false);
+        var revision = await ReadQueueRevisionAsync(connection, transaction, conversationId.Value, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Applied, record, revision);
     }
 
-    private static async Task<IReadOnlyList<SqliteConversationInputRow>> ReadClaimAsync(
-        SqliteConnection connection, SqliteTransaction transaction, Guid claimId, CancellationToken cancellationToken)
+    private static async Task EnsureConversationAsync(
+        SqliteConnection connection, SqliteTransaction transaction, ConversationRecord conversation, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT id, conversation_id, sequence, revision, target_turn_id, claim_id, claim_owner_run_id,
-                status, payload_json, consumed_turn_id, message_id, kind
-            FROM conversation_inputs WHERE claim_id = $claimId ORDER BY sequence;
+            INSERT INTO conversations(id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
+                channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc, kind, parent_conversation_id)
+            VALUES($id, $title, $workspaceRootId, $mode, $permission, $agentId, $channelKind, $channelId, $channelName,
+                $createdAt, $updatedAt, $kind, $parent)
+            ON CONFLICT(id) DO NOTHING;
             """;
-        command.Parameters.AddWithValue("$claimId", claimId.ToString("D"));
-        var rows = new List<SqliteConversationInputRow>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            if (reader.GetInt32(11) != 1 || reader.IsDBNull(4) || reader.IsDBNull(6))
-            {
-                throw new InvalidOperationException("P2 can only consume an already-claimed Steer batch.");
-            }
+        command.Parameters.AddWithValue("$id", conversation.Id.ToString("D"));
+        command.Parameters.AddWithValue("$title", conversation.Title);
+        command.Parameters.AddWithValue("$workspaceRootId", conversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$mode", (int)conversation.Mode);
+        command.Parameters.AddWithValue("$permission", (int)conversation.ToolPermissionMode);
+        command.Parameters.AddWithValue("$agentId", conversation.AgentId);
+        command.Parameters.AddWithValue("$channelKind", conversation.ChannelKind ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$channelId", conversation.ChannelConversationId ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$channelName", conversation.ChannelDisplayName ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$createdAt", conversation.CreatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$updatedAt", conversation.UpdatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$kind", (int)conversation.Kind);
+        command.Parameters.AddWithValue("$parent", conversation.ParentConversationId?.ToString("D") ?? (object)DBNull.Value);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 
-            rows.Add(new SqliteConversationInputRow(Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)),
-                reader.GetInt64(2), reader.GetInt32(3), Guid.Parse(reader.GetString(4)), Guid.Parse(reader.GetString(5)),
-                Guid.Parse(reader.GetString(6)), reader.GetInt32(7), ReadPrompt(reader.GetString(8)),
-                reader.IsDBNull(9) ? null : Guid.Parse(reader.GetString(9)),
-                reader.IsDBNull(10) ? null : Guid.Parse(reader.GetString(10))));
-        }
-
-        return rows;
+    private static async Task<long> AllocateSequenceAsync(
+        SqliteConnection connection, SqliteTransaction transaction, Guid conversationId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO conversation_input_state(conversation_id, next_input_sequence, queue_revision, paused, pause_reason)
+            VALUES($id, 2, 1, 0, NULL)
+            ON CONFLICT(conversation_id) DO UPDATE SET next_input_sequence = next_input_sequence + 1,
+                queue_revision = queue_revision + 1
+            RETURNING next_input_sequence - 1;
+            """;
+        command.Parameters.AddWithValue("$id", conversationId.ToString("D"));
+        return (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Input sequence allocation returned no value."));
     }
 
     private static async Task AdvanceQueueRevisionAsync(
@@ -238,61 +325,24 @@ internal sealed class SqliteConversationInputRepository : IConversationInputRepo
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static string ReadPrompt(string payload)
+    private static void ValidateAccept(ConversationInputAcceptRequest request)
     {
-        using var document = JsonDocument.Parse(payload);
-        if (!document.RootElement.TryGetProperty("version", out var version) || !version.TryGetInt32(out var value) || value != 1 ||
-            !document.RootElement.TryGetProperty("prompt", out var prompt) || prompt.ValueKind != JsonValueKind.String)
-        {
-            throw new InvalidOperationException("The input payload format is not supported.");
-        }
-
-        return prompt.GetString() ?? throw new InvalidOperationException("An input prompt cannot be null.");
-    }
-
-    private static Guid CreateMessageId(Guid claimId, Guid inputId)
-    {
-        // Stable across repeated claimed reads, without persisting an unconsumed message mapping.
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"SelfClaw.InputMessage.v1/{claimId:D}/{inputId:D}"));
-        return new Guid(hash.AsSpan(0, 16));
-    }
-
-    private static void ValidateBatch(ConversationInputBatch batch)
-    {
-        ArgumentNullException.ThrowIfNull(batch);
-        if (batch.ConversationId == Guid.Empty || batch.TurnId == Guid.Empty || batch.OwnerRunId == Guid.Empty ||
-            batch.ClaimId == Guid.Empty || batch.Inputs.Count == 0 ||
-            batch.Inputs.Select(input => input.InputId).Distinct().Count() != batch.Inputs.Count ||
-            batch.Inputs.Where((input, index) => input.InputId == Guid.Empty || input.Revision <= 0 || input.Sequence <= 0 ||
-                input.MessageId != CreateMessageId(batch.ClaimId, input.InputId) ||
-                (index > 0 && batch.Inputs[index - 1].Sequence >= input.Sequence)).Any())
-        {
-            throw new ArgumentException("An input batch requires a nonempty, ordered, immutable claim.", nameof(batch));
-        }
-    }
-
-    private static void ValidateRows(ConversationInputBatch batch, IReadOnlyList<SqliteConversationInputRow> rows)
-    {
-        ValidateBatch(batch);
-        if (rows.Count != batch.Inputs.Count || rows.Where((row, index) =>
-                row.Id != batch.Inputs[index].InputId || row.Sequence != batch.Inputs[index].Sequence ||
-                row.Revision != batch.Inputs[index].Revision || row.Prompt != batch.Inputs[index].Prompt ||
-                row.ConversationId != batch.ConversationId || row.TargetTurnId != batch.TurnId ||
-                row.ClaimId != batch.ClaimId || row.OwnerRunId != batch.OwnerRunId).Any())
-        {
-            throw new InvalidOperationException("The input batch no longer matches its durable claim and owner.");
-        }
-    }
-
-    private static void ValidateBoundary(ConversationInputBoundaryCommit commit)
-    {
-        ValidateBatch(commit.Batch);
-        var turn = commit.Content.Turn;
-        if (turn.Id != commit.Batch.TurnId || turn.ConversationId != commit.Batch.ConversationId ||
-            turn.Status != ConversationTurnStatus.Running || turn.ExecutionMode != AgentExecutionMode.Direct ||
-            turn.Origin != DirectTurnOrigin.Interactive || commit.Content.Messages.Any(message => message.Status != MessageStatus.Sealed))
-        {
-            throw new ArgumentException("An input boundary seals fragments on its Running Interactive Direct turn.", nameof(commit));
-        }
+        if (request.ConversationId == Guid.Empty)
+            throw new ArgumentException("An input requires a conversation id.", nameof(request));
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientRequestId);
+        if (request.Kind != ConversationInputKind.FollowUp || request.ExecutionSnapshot?.Mode != AgentExecutionMode.Direct)
+            throw new ArgumentException("Only Direct follow-ups can be accepted.", nameof(request));
+        if (request.ClientRequestId.Length > 128)
+            throw new ArgumentException("The client request id is too long.", nameof(request));
+        if (request.Kind == ConversationInputKind.FollowUp && request.TargetTurnId is not null)
+            throw new ArgumentException("A follow-up cannot target a turn.", nameof(request));
+        if (request.Kind == ConversationInputKind.Steer && request.TargetTurnId is null)
+            throw new ArgumentException("A steer requires a target turn.", nameof(request));
+        if (request.Kind == ConversationInputKind.FollowUp && request.ExecutionSnapshot is null)
+            throw new ArgumentException("A follow-up requires an execution snapshot.", nameof(request));
+        if (request.Prompt.Length == 0)
+            throw new ArgumentException("An input prompt cannot be empty.", nameof(request));
+        if (Encoding.UTF8.GetByteCount(request.Prompt) > MaximumPromptBytes)
+            throw new ArgumentException("The input prompt exceeds the maximum size.", nameof(request));
     }
 }

@@ -289,9 +289,19 @@ public sealed class WebViewMessageRouterTests
         await context.RouteAsync("""{"type":"ai-providers/list-enabled-models","requestId":"models-1"}""");
         await context.RouteAsync("""{"type":"send-prompt","prompt":"use selected model","modelProfileId":"33333333-3333-3333-3333-333333333333"}""");
 
-        var request = context.AgentRuntime.Requests.Should().ContainSingle().Which;
-        request.Should().BeOfType<DirectChatTurnRequest>()
-            .Which.ModelProfileId.Should().Be(RouterAiProviderSettingsService.DefaultModelId);
+        context.Inputs.Submissions.Should().ContainSingle().Which.ModelProfileId
+            .Should().Be(Guid.Parse("33333333-3333-3333-3333-333333333333"));
+    }
+
+    [Fact]
+    public async Task Prompt_retries_forward_the_same_client_identity_and_explicit_conversation_target()
+    {
+        using var context = new RouterTestContext();
+        const string id = "77777777-7777-4777-8777-777777777777";
+        await context.RouteAsync($$"""{"type":"send-prompt","requestId":"transport-1","clientRequestId":"durable-1","conversationId":"{{id}}","newConversation":true,"prompt":"hello"}""");
+        await context.RouteAsync($$"""{"type":"send-prompt","requestId":"transport-2","clientRequestId":"durable-1","conversationId":"{{id}}","newConversation":true,"prompt":"hello"}""");
+        context.Inputs.Submissions.Should().HaveCount(2).And.OnlyContain(item =>
+            item.ClientRequestId == "durable-1" && item.ConversationId == Guid.Parse(id));
     }
 
     private sealed class RouterTestContext : IDisposable
@@ -359,9 +369,11 @@ public sealed class WebViewMessageRouterTests
             var agentSettings = new AgentSettingsService(agentDefinitions, new SubagentDefinitionCatalog(storagePaths),
                 Unused<IExtensionSettingsService>(), ExtensionStateChangeNotifier);
             var workspaces = new ConversationWorkspaceService(ConversationRepository);
+            Inputs = new SelfClaw.Tests.TestDoubles.FakeConversationInputCoordinator();
             var viewModel = new MainWindowViewModel(
                 ConversationRepository,
                 _turnEngine, _runs,
+                Inputs,
                 _sessions,
                 _activityCoordinator,
                 _transcriptPublisher,
@@ -445,6 +457,8 @@ public sealed class WebViewMessageRouterTests
         public WebViewHostChannel HostChannel { get; }
 
         public List<string> PostedJson { get; } = [];
+
+        public SelfClaw.Tests.TestDoubles.FakeConversationInputCoordinator Inputs { get; }
 
         public WebViewMessageRouter Router { get; }
 

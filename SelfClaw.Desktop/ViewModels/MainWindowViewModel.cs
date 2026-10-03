@@ -10,6 +10,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
@@ -28,6 +29,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     private readonly IConversationRepository _conversationRepository;
     private readonly ConversationTurnEngine _turnEngine;
     private readonly ConversationRunCoordinator _runs;
+    private readonly IConversationInputCoordinator _conversationInputs;
     private readonly ConversationSessionCoordinator _conversationSessions;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly TranscriptPublisher _transcriptPublisher;
@@ -63,6 +65,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         IConversationRepository conversationRepository,
         ConversationTurnEngine turnEngine,
         ConversationRunCoordinator runs,
+        IConversationInputCoordinator conversationInputs,
         ConversationSessionCoordinator conversationSessions,
         AgentActivityCoordinator agentActivityCoordinator,
         TranscriptPublisher transcriptPublisher,
@@ -77,6 +80,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         _conversationRepository = conversationRepository;
         _turnEngine = turnEngine;
         _runs = runs;
+        _conversationInputs = conversationInputs;
         _conversationSessions = conversationSessions;
         _agentActivityCoordinator = agentActivityCoordinator;
         _transcriptPublisher = transcriptPublisher;
@@ -155,7 +159,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     /// <summary>
     /// WebView 的 "send-prompt" 消息经宿主路由后落到这里，触发一次发送回合。
     /// </summary>
-    public Task<PromptSubmissionResult> SubmitPromptAsync(string prompt, string? workspaceMode = null, Guid? modelProfileId = null)
+    public Task<PromptSubmissionResult> SubmitPromptAsync(string prompt, string? workspaceMode = null, Guid? modelProfileId = null,
+        Guid? conversationId = null, string? clientRequestId = null, bool newConversation = false)
     {
         ArgumentNullException.ThrowIfNull(prompt);
 
@@ -165,6 +170,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             return Task.FromResult(new PromptSubmissionResult(false));
         }
 
+        if (conversationId is { } target && SelectedConversation?.Id != target)
+            return SubmitToTargetAsync(target, clientRequestId, normalizedPrompt, workspaceMode, modelProfileId, newConversation);
         return SendAsync(new PromptSubmissionSnapshot(
             normalizedPrompt,
             SelectedConversation,
@@ -174,7 +181,24 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             _selectedAgentId,
             _composerModeOverride,
             ParseWorkspaceMode(workspaceMode),
-            _selectionVersion));
+            _selectionVersion, conversationId, clientRequestId));
+    }
+
+    private async Task<PromptSubmissionResult> SubmitToTargetAsync(Guid target, string? requestId, string prompt,
+        string? workspaceMode, Guid? modelId, bool isNew)
+    {
+        var selectedRoot = _selectedWorkspaceRoot;
+        var selectedPermission = _selectedToolPermissionMode;
+        var selectedAgent = _selectedAgentId;
+        var selectedMode = _composerModeOverride;
+        var selectionVersion = _selectionVersion;
+        var conversation = await _conversationRepository.GetConversationAsync(target);
+        if (conversation is null && !isNew) return new(false, "该会话已删除或不可用。");
+        var root = conversation is null ? selectedRoot
+            : (await _workspaces.ListRootsAsync()).FirstOrDefault(item => item.Id == conversation.WorkspaceRootId);
+        return await SendAsync(new(prompt, conversation, root, conversation?.ToolPermissionMode ?? selectedPermission,
+            modelId, conversation?.AgentId ?? selectedAgent, selectedMode, ParseWorkspaceMode(workspaceMode),
+            selectionVersion, target, requestId));
     }
 
     /// <summary>
@@ -183,7 +207,25 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     /// </summary>
     public void StopSelectedConversation()
     {
-        if (SelectedConversation is { } conversation) _runs.Stop(conversation.Id);
+        if (SelectedConversation is not { } conversation) return;
+        if (_runs.GetActiveRun(conversation.Id)?.Mode == AgentExecutionMode.Cli) _runs.Stop(conversation.Id);
+        else _ = PauseThenStopAsync(conversation.Id);
+    }
+
+    private async Task PauseThenStopAsync(Guid conversationId)
+    {
+        try
+        {
+            await _conversationInputs.StopAsync(conversationId);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to pause the input queue before stopping {ConversationId}.", conversationId);
+        }
     }
 
     /// <summary>
@@ -510,17 +552,81 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     private async Task<PromptSubmissionResult> SendAsync(PromptSubmissionSnapshot submission)
     {
+        if (submission.ConversationId is null && submission.SelectionVersion != _selectionVersion)
+            return new PromptSubmissionResult(false, "当前选择已改变，请重试。");
+        AgentRuntimeDefinition agent;
+        try
+        {
+            agent = ResolveRuntimeAgent(submission.Conversation?.AgentId ?? submission.AgentId);
+        }
+        catch (Exception exception)
+        {
+            return new PromptSubmissionResult(false, exception.Message);
+        }
+
+        agent = agent with { Mode = submission.ExecutionModeOverride ?? agent.Mode };
+        var conversationId = submission.Conversation?.Id ?? submission.ConversationId ?? Guid.NewGuid();
+        return agent.Mode == AgentExecutionMode.Direct
+            ? await SubmitDirectAsync(submission, agent, conversationId)
+            : await SubmitCliAsync(submission, agent, conversationId);
+    }
+
+    /// <summary>
+    /// Every Direct send is accepted into the durable queue and advanced only by the dispatcher.
+    /// There is no idle bypass: the same accept → dispatcher → single admission path serves a new
+    /// conversation, an idle follow-up and a queued follow-up.
+    /// </summary>
+    private async Task<PromptSubmissionResult> SubmitDirectAsync(PromptSubmissionSnapshot submission,
+        AgentRuntimeDefinition agent, Guid conversationId)
+    {
+        using var operation = _runs.TryBeginInputOperation(conversationId);
+        if (operation is null) return new(false, "当前会话正在删除或应用正在退出。");
+        PreparedConversationWorkspace? prepared = null;
+        var persisted = false;
+        try
+        {
+            prepared = await _workspaces.PrepareAsync(conversationId, submission.Conversation, submission.WorkspaceRoot,
+                submission.WorkspaceMode, submission.Prompt, operation.CancellationToken);
+            var conversation = submission.Conversation ?? CreateConversationRecord(conversationId, submission, agent, prepared.WorkspaceRoot);
+            var result = await _conversationInputs.SubmitAsync(new ConversationInputSubmission(
+                conversationId, submission.ClientRequestId ?? Guid.NewGuid().ToString("N"), submission.Prompt, agent, submission.ModelProfileId,
+                prepared.WorkspaceRoot, submission.ToolPermissionMode, conversation), operation.CancellationToken);
+            if (!result.Accepted)
+                return new PromptSubmissionResult(false, DescribeInputRejection(result));
+            persisted = true;
+            if (prepared.Provisioned && prepared.WorkspaceRoot is { } root && _workspaceRoots.All(item => item.Id != root.Id))
+                _workspaceRoots.Add(root);
+            ApplyAdmittedConversation(conversation, submission.SelectionVersion == _selectionVersion);
+            return new PromptSubmissionResult(true, ConversationId: conversationId);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to accept a Direct input.");
+            return new PromptSubmissionResult(false, exception.Message);
+        }
+        finally
+        {
+            if (!persisted && prepared?.Provisioned == true)
+            {
+                try { await _workspaces.DiscardAsync(prepared); }
+                catch (Exception exception) { _logger.LogError(exception, "Failed to discard a rejected workspace root."); }
+            }
+        }
+    }
+
+    private async Task<PromptSubmissionResult> SubmitCliAsync(PromptSubmissionSnapshot submission,
+        AgentRuntimeDefinition agent, Guid conversationId)
+    {
         PreparedConversationWorkspace? prepared = null;
         ConversationRunHandle? handle = null;
         var handedOff = false;
         var started = false;
         try
         {
-            if (submission.SelectionVersion != _selectionVersion)
-                return new PromptSubmissionResult(false, "当前选择已改变，请重试。");
-            var agent = ResolveRuntimeAgent(submission.Conversation?.AgentId ?? submission.AgentId);
-            agent = agent with { Mode = submission.ExecutionModeOverride ?? agent.Mode };
-            var conversationId = submission.Conversation?.Id ?? Guid.NewGuid();
             handle = _runs.TryReserve(conversationId, agent.Mode, DirectTurnOrigin.Interactive);
             if (handle is null)
                 return new PromptSubmissionResult(false, "当前会话正在执行或应用正在退出，请稍候。");
@@ -562,6 +668,26 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             }
         }
     }
+
+    private static ConversationRecord CreateConversationRecord(Guid conversationId, PromptSubmissionSnapshot submission,
+        AgentRuntimeDefinition agent, WorkspaceRoot? workspaceRoot)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var title = submission.Prompt.ReplaceLineEndings(" ").Trim();
+        return new ConversationRecord(conversationId, title.Length > 48 ? title[..48] + "..." : title,
+            workspaceRoot?.Id, ConversationMode.Programming, submission.ToolPermissionMode, agent.Id, now, now);
+    }
+
+    private static string DescribeInputRejection(ConversationInputSubmitResult result)
+        => result.Reason switch
+        {
+            ConversationInputReason.QueueDisabled => "当前回合执行中，队列功能未启用，请稍后再发送。",
+            ConversationInputReason.Capacity => "队列已满，请先等待或取消部分输入。",
+            "request-conflict" => "该请求与已存在的输入冲突，请重试。",
+            ConversationInputReason.AttachmentsUnsupported => "当前版本不支持在队列中发送附件。",
+            _ => "输入未被接受，请重试。"
+        };
+
 
     private async Task ExecuteAcceptedTurnAsync(ConversationRunHandle handle, DesktopConversationTurnRequest request)
     {

@@ -12,4 +12,6 @@ internal sealed record PromptSubmissionSnapshot(
     string AgentId,
     AgentExecutionMode? ExecutionModeOverride,
     GitWorkspaceMode WorkspaceMode,
-    int SelectionVersion);
+    int SelectionVersion,
+    Guid? ConversationId = null,
+    string? ClientRequestId = null);

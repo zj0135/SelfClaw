@@ -7,10 +7,19 @@ namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 internal sealed class SqliteConversationTurnRepository : IConversationTurnRepository
 {
     private readonly SqliteDatabase _database;
+    private readonly Func<string, CancellationToken, Task>? _beforeStartCommit;
+
+    internal Func<string, CancellationToken, Task>? BeforeFinalizeCommit { get; set; }
 
     public SqliteConversationTurnRepository(SqliteDatabase database)
     {
         _database = database;
+    }
+
+    internal SqliteConversationTurnRepository(SqliteDatabase database, Func<string, CancellationToken, Task> beforeStartCommit)
+        : this(database)
+    {
+        _beforeStartCommit = beforeStartCommit;
     }
 
     public async Task<ConversationTurnCommit> StartTurnAsync(
@@ -20,6 +29,11 @@ internal sealed class SqliteConversationTurnRepository : IConversationTurnReposi
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = connection.BeginTransaction(deferred: false);
         var result = await SqliteConversationTurnWriter.StartAsync(connection, transaction, start, cancellationToken).ConfigureAwait(false);
+        if (_beforeStartCommit is not null)
+        {
+            await _beforeStartCommit("start-before-commit", cancellationToken).ConfigureAwait(false);
+        }
+
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return result;
     }
@@ -85,6 +99,11 @@ internal sealed class SqliteConversationTurnRepository : IConversationTurnReposi
         if (!await SqliteConversationTurnWriter.TryWriteAsync(connection, transaction, commit, cancellationToken).ConfigureAwait(false))
         {
             return false;
+        }
+
+        if (BeforeFinalizeCommit is not null)
+        {
+            await BeforeFinalizeCommit("finalize-before-commit", cancellationToken).ConfigureAwait(false);
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
