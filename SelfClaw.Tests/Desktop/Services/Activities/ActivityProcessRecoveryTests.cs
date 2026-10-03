@@ -30,7 +30,9 @@ public sealed class ActivityProcessRecoveryTests(ITestOutputHelper output)
         section.GetProperty("counts").GetProperty("interrupted").GetInt32().Should().Be(1);
         var detail = section.GetProperty("detail");
         detail.GetProperty("historyCompleteness").GetString().Should().Be("partial");
-        detail.GetProperty("unplacedTools").GetArrayLength().Should().Be(1);
+        detail.GetProperty("unplacedTools").GetArrayLength().Should().Be(0);
+        detail.GetProperty("message").GetProperty("segments")[0].GetProperty("kind").GetString().Should().Be("tool");
+        detail.GetProperty("message").GetProperty("turnOutcome").GetProperty("status").GetString().Should().Be("interrupted");
         detail.ToString().Should().NotContain("uncommitted text").And.NotContain("uncommitted thinking");
         output.WriteLine("Parent={0}; Task={1}; Recovery=Interrupted; History=Partial; Artifacts={2}", task.ParentConversationId, task.Id, root);
     }, 60);
@@ -46,9 +48,9 @@ public sealed class ActivityProcessRecoveryTests(ITestOutputHelper output)
         await runtime.Started.Task;
         var window = new Window { Width = 320, Height = 180, ShowInTaskbar = false, ShowActivated = false, Title = "SelfClaw recovery fixture" };
         window.Show();
+        await runtime.EmitAsync(new ToolCallStartedEvent("call", "read_file", "{}", ToolCallKind.Read, ToolSourceKind.BuiltIn));
         await runtime.EmitAsync(new AssistantThinkingDeltaEvent("thinking", "uncommitted thinking"));
         await runtime.EmitAsync(new AssistantTextDeltaEvent("text", "uncommitted text"));
-        await runtime.EmitAsync(new ToolCallStartedEvent("call", "read_file", "{}", ToolCallKind.Read, ToolSourceKind.BuiltIn));
         await File.WriteAllTextAsync(Path.Combine(root, "ready"), $"{task.ParentConversationId:D}\n{task.Id:D}");
         await execution;
     }, 120);

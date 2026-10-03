@@ -35,8 +35,6 @@ internal static class SubagentTaskTestData
             ToolPermissionMode.RequireApproval, "reviewer", now, now,
             Kind: ConversationKind.Subagent, ParentConversationId: parent.Id);
         const string taskText = "Inspect the current implementation.";
-        var message = new MessageRecord(
-            Guid.NewGuid(), childId, MessageRole.User, taskText, MessageStatus.Completed, now, now);
         var serializer = new SubagentTaskSnapshotSerializer();
         var definition = new SubagentDefinitionSnapshot(
             1, "reviewer", "Reviewer", "Reviews code", null, "read-only", [], [], [], 900,
@@ -52,7 +50,7 @@ internal static class SubagentTaskTestData
             taskText, SubagentTaskStatus.Queued, 1, null,
             serializer.Serialize(definition), serializer.Serialize(parentSnapshot), modelProfileId, 900,
             null, null, null, null, null, null, now, null, null, now, now);
-        await tasks.CreateAsync(new SubagentTaskCreation(child, message, task));
+        await tasks.CreateAsync(new SubagentTaskCreation(child, task));
         return task;
     }
 }

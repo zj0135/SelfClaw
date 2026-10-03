@@ -13,9 +13,10 @@ public abstract record ChatTurnRequest(
     Guid ConversationId,
     WorkspaceRoot? WorkspaceRoot,
     AgentRuntimeDefinition Agent,
-    IReadOnlyList<MessageRecord> Messages)
+    IReadOnlyList<MessageRecord> Messages,
+    IReadOnlyList<ConversationTurnRecord> Turns)
 {
-    /// <summary>The stable identifier for this turn; it is also the assistant message identifier.</summary>
+    /// <summary>The stable identifier for this logical turn, independent of its message fragments.</summary>
     public Guid TurnId { get; } = TurnId != Guid.Empty
         ? TurnId
         : throw new ArgumentException("Turn id cannot be empty.", nameof(TurnId));

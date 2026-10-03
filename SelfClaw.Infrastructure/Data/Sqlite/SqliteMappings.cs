@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
@@ -9,13 +10,13 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 internal static class SqliteMappings
 {
-    /// <summary>
-    /// Message columns followed by the left-joined <c>turn_usage</c> columns. Every query that maps a
-    /// message selects this fragment from <c>messages m LEFT JOIN turn_usage u ON u.message_id = m.id</c>.
-    /// </summary>
     internal const string MessageSelectColumns = """
-        m.id, m.conversation_id, m.role, m.markdown_content, m.status, m.created_at_utc, m.updated_at_utc,
-        m.agent_id, m.agent_name, m.agent_role, m.duration_ms, m.error_message,
+        m.id, m.conversation_id, m.turn_id, m.sequence, m.role, m.markdown_content, m.status,
+        m.created_at_utc, m.updated_at_utc, m.agent_id, m.agent_name, m.agent_role
+        """;
+
+    internal const string TurnSelectColumns = """
+        t.id, t.conversation_id, t.execution_mode, t.origin, t.status, t.started_at_utc, t.completed_at_utc, t.error_message,
         u.model, u.input_tokens, u.uncached_input_tokens, u.cached_input_tokens, u.cache_write_input_tokens,
         u.output_tokens, u.reasoning_tokens, u.total_tokens, u.provider_calls, u.context_tokens,
         u.context_window_tokens, u.cost_usd_micros, u.cost_source, u.additional_counts_json
@@ -77,23 +78,31 @@ internal static class SqliteMappings
             reader.IsDBNull(12) ? null : ReadGuid(reader, 12));
 
     public static MessageRecord ReadMessage(SqliteDataReader reader)
-    {
-        var message = new MessageRecord(
+        => new(
             ReadGuid(reader, 0),
             ReadGuid(reader, 1),
-            (MessageRole)reader.GetInt32(2),
-            reader.GetString(3),
-            (MessageStatus)reader.GetInt32(4),
+            ReadGuid(reader, 2),
+            reader.GetInt64(3),
+            (MessageRole)reader.GetInt32(4),
+            reader.GetString(5),
+            (MessageStatus)reader.GetInt32(6),
+            ReadDateTimeOffset(reader, 7),
+            ReadDateTimeOffset(reader, 8),
+            reader.IsDBNull(9) ? null : ReadGuid(reader, 9),
+            reader.IsDBNull(10) ? null : reader.GetString(10),
+            reader.IsDBNull(11) ? null : reader.GetString(11));
+
+    public static ConversationTurnRecord ReadTurn(SqliteDataReader reader)
+        => new(
+            ReadGuid(reader, 0),
+            ReadGuid(reader, 1),
+            (AgentExecutionMode)reader.GetInt32(2),
+            (DirectTurnOrigin)reader.GetInt32(3),
+            (ConversationTurnStatus)reader.GetInt32(4),
             ReadDateTimeOffset(reader, 5),
-            ReadDateTimeOffset(reader, 6),
-            reader.IsDBNull(7) ? null : ReadGuid(reader, 7),
-            reader.IsDBNull(8) ? null : reader.GetString(8),
-            reader.IsDBNull(9) ? null : reader.GetString(9),
-            Usage: null,
-            DurationMs: reader.IsDBNull(10) ? null : reader.GetDouble(10),
-            ErrorMessage: reader.IsDBNull(11) ? null : reader.GetString(11));
-        return reader.FieldCount > 12 ? message with { Usage = ReadTurnUsage(reader, 12) } : message;
-    }
+            reader.IsDBNull(6) ? null : ReadDateTimeOffset(reader, 6),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            ReadTurnUsage(reader, 8));
 
     /// <summary>Reads the joined turn_usage columns; null when the left join produced no row.</summary>
     public static TurnUsage? ReadTurnUsage(SqliteDataReader reader, int offset)

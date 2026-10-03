@@ -27,6 +27,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     private readonly IConversationRepository _conversationRepository;
     private readonly ConversationTurnEngine _turnEngine;
+    private readonly ConversationRunCoordinator _runs;
     private readonly ConversationSessionCoordinator _conversationSessions;
     private readonly AgentActivityCoordinator _agentActivityCoordinator;
     private readonly TranscriptPublisher _transcriptPublisher;
@@ -61,6 +62,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     internal MainWindowViewModel(
         IConversationRepository conversationRepository,
         ConversationTurnEngine turnEngine,
+        ConversationRunCoordinator runs,
         ConversationSessionCoordinator conversationSessions,
         AgentActivityCoordinator agentActivityCoordinator,
         TranscriptPublisher transcriptPublisher,
@@ -74,6 +76,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     {
         _conversationRepository = conversationRepository;
         _turnEngine = turnEngine;
+        _runs = runs;
         _conversationSessions = conversationSessions;
         _agentActivityCoordinator = agentActivityCoordinator;
         _transcriptPublisher = transcriptPublisher;
@@ -179,7 +182,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     /// The turn engine observes the cancellation and persists the cancelled terminal state.
     /// </summary>
     public void StopSelectedConversation()
-        => _conversationSessions.StopSelected();
+    {
+        if (SelectedConversation is { } conversation) _runs.Stop(conversation.Id);
+    }
 
     /// <summary>
     /// Applies the composer's mode pick ("cli" / "direct") as a persisted override on top of the
@@ -506,26 +511,34 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     private async Task<PromptSubmissionResult> SendAsync(PromptSubmissionSnapshot submission)
     {
         PreparedConversationWorkspace? prepared = null;
-        var admitted = false;
+        ConversationRunHandle? handle = null;
+        var handedOff = false;
+        var started = false;
         try
         {
             if (submission.SelectionVersion != _selectionVersion)
                 return new PromptSubmissionResult(false, "当前选择已改变，请重试。");
-            var runtimeAgent = ResolveRuntimeAgent(submission.Conversation?.AgentId ?? submission.AgentId);
-            runtimeAgent = runtimeAgent with { Mode = submission.ExecutionModeOverride ?? runtimeAgent.Mode };
-            prepared = await _workspaces.PrepareAsync(submission.Conversation, submission.WorkspaceRoot,
-                submission.WorkspaceMode, submission.Prompt);
+            var agent = ResolveRuntimeAgent(submission.Conversation?.AgentId ?? submission.AgentId);
+            agent = agent with { Mode = submission.ExecutionModeOverride ?? agent.Mode };
+            var conversationId = submission.Conversation?.Id ?? Guid.NewGuid();
+            handle = _runs.TryReserve(conversationId, agent.Mode, DirectTurnOrigin.Interactive);
+            if (handle is null)
+                return new PromptSubmissionResult(false, "当前会话正在执行或应用正在退出，请稍候。");
+            prepared = await _workspaces.PrepareAsync(conversationId, submission.Conversation, submission.WorkspaceRoot,
+                submission.WorkspaceMode, submission.Prompt, handle.CancellationToken);
+            handle.CancellationToken.ThrowIfCancellationRequested();
             if (submission.SelectionVersion != _selectionVersion)
                 return new PromptSubmissionResult(false, "当前选择已改变，请重试。");
-            var admission = await _turnEngine.TryAdmitAsync(new DesktopConversationTurnRequest(
-                submission.Conversation, runtimeAgent, submission.Prompt, submission.ModelProfileId,
-                prepared.WorkspaceRoot, submission.ToolPermissionMode, prepared.ConversationId));
-            if (admission is null)
-                return new PromptSubmissionResult(false, "当前会话正在执行或应用正在退出，请稍候。");
-            admitted = true;
-            _ = ExecuteAcceptedTurnAsync(admission);
+            var request = new DesktopConversationTurnRequest(submission.Conversation, agent, submission.Prompt,
+                submission.ModelProfileId, prepared.WorkspaceRoot, submission.ToolPermissionMode, conversationId);
+            handedOff = true;
+            _ = ExecuteAcceptedTurnAsync(handle, request);
+            var conversation = await handle.Started;
+            if (conversation is null)
+                return new PromptSubmissionResult(false, "无法开始回合，请重试。");
+            started = true;
             if (prepared.Provisioned && prepared.WorkspaceRoot is { } root) _workspaceRoots.Add(root);
-            ApplyAdmittedConversation(admission.Conversation, submission.SelectionVersion == _selectionVersion);
+            ApplyAdmittedConversation(conversation, submission.SelectionVersion == _selectionVersion);
             return new PromptSubmissionResult(true);
         }
         catch (OperationCanceledException)
@@ -539,16 +552,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
         finally
         {
-            if (!admitted && prepared?.Provisioned == true)
-                await _workspaces.DiscardAsync(prepared);
+            try
+            {
+                if (!started && prepared?.Provisioned == true) await _workspaces.DiscardAsync(prepared);
+            }
+            finally
+            {
+                if (!handedOff && handle is not null) _runs.Complete(handle, false);
+            }
         }
     }
 
-    private async Task ExecuteAcceptedTurnAsync(AdmittedConversationTurn admission)
+    private async Task ExecuteAcceptedTurnAsync(ConversationRunHandle handle, DesktopConversationTurnRequest request)
     {
         try
         {
-            await _turnEngine.ExecuteAsync(admission);
+            await _turnEngine.ExecuteAsync(handle, request);
         }
         catch (OperationCanceledException)
         {
@@ -682,6 +701,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         var activityText = isBusy ? _conversationSessions.SelectedActivityText : null;
         return new TranscriptProjectionRequest(
             transcript.Messages,
+            transcript.Turns,
             transcript.ToolRuns,
             GetNavigationConversations().ToArray(),
             _workspaceRoots,

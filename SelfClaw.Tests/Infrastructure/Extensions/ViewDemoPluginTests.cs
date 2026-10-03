@@ -1,4 +1,5 @@
 using FluentAssertions;
+using SelfClaw.Tests.TestDoubles;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Extensions.Models;
@@ -15,8 +16,7 @@ public sealed class ViewDemoPluginTests
     [Fact]
     public async Task The_example_view_plugin_passes_manifest_validation()
     {
-        var pluginRoot = Path.GetFullPath(
-            Path.Combine(AppContext.BaseDirectory, "../../../../", "plugins", "view-demo"));
+        var pluginRoot = TestRepositoryRoot.GetPath("plugins", "view-demo");
         Directory.Exists(pluginRoot).Should().BeTrue("the example plugin is checked into the repository");
 
         var reader = new PluginManifestReader(new ExtensionPackageLimits(

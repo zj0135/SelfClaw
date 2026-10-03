@@ -23,10 +23,10 @@ public sealed class ActivityPanelLifecycleTests
         panel.LatestState.GetProperty("sections")[0].GetProperty("counts").GetProperty("queued").GetInt32().Should().Be(1);
         panel.AcknowledgeLatest();
         var now = DateTimeOffset.UtcNow;
-        var message = new MessageRecord(task.ChildTurnId, task.ChildConversationId, MessageRole.Assistant,
-            string.Empty, MessageStatus.Failed, now, now, ErrorMessage: "Model unavailable");
+        var turn = new ConversationTurnRecord(task.ChildTurnId, task.ChildConversationId, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Subagent, ConversationTurnStatus.Failed, now, now, "Model unavailable");
         await activity.Tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Queued,
-            new SubagentTaskCompletion(SubagentTaskStatus.Failed, new TurnFinalization(message, []), null,
+            new SubagentTaskCompletion(SubagentTaskStatus.Failed, new ConversationTurnCommit(turn, [], []), null,
                 SubagentErrorCodes.ModelUnavailable, "Model unavailable", now));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (panel.LatestState.GetProperty("sections")[0].GetProperty("counts").GetProperty("failed").GetInt32() != 1)

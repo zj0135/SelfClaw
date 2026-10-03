@@ -14,13 +14,15 @@ public sealed record DirectChatTurnRequest(
     WorkspaceRoot? WorkspaceRoot,
     AgentRuntimeDefinition Agent,
     IReadOnlyList<MessageRecord> Messages,
+    IReadOnlyList<ConversationTurnRecord> Turns,
     Guid? ModelProfileId,
     ToolPermissionMode ToolPermissionMode,
     IToolApprovalHandler? ToolApprovalHandler,
     DirectTurnExecutionContext ExecutionContext,
     IReadOnlyList<ToolExecutionRecord>? ToolExecutions = null,
-    IToolExecutionCheckpoint? ToolExecutionCheckpoint = null)
-    : ChatTurnRequest(TurnId, ConversationId, WorkspaceRoot, Agent, Messages)
+    IToolExecutionCheckpoint? ToolExecutionCheckpoint = null,
+    IDirectTurnInputSession? InputSession = null)
+    : ChatTurnRequest(TurnId, ConversationId, WorkspaceRoot, Agent, Messages, Turns)
 {
     public override AgentExecutionMode Mode => AgentExecutionMode.Direct;
 }

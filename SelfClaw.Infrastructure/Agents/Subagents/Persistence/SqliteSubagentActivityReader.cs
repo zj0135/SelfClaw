@@ -56,11 +56,13 @@ internal sealed class SqliteSubagentActivityReader : ISubagentActivityReader
 
         var taskText = await SqliteSubagentActivityQueries.ReadTaskTextAsync(
             connection, transaction, taskId, cancellationToken).ConfigureAwait(false);
+        var turn = await SqliteSubagentActivityQueries.ReadTurnAsync(
+            connection, transaction, task, cancellationToken).ConfigureAwait(false);
         var message = await SqliteSubagentActivityQueries.ReadMessageAsync(
             connection, transaction, task, cancellationToken).ConfigureAwait(false);
         var tools = await SqliteSubagentActivityQueries.ReadToolsAsync(
-            connection, transaction, task, cancellationToken).ConfigureAwait(false);
-        return new SubagentActivityDetail(task, SubagentActivityContent.Create(task.Status, taskText, message, tools));
+            connection, transaction, task, message?.Id, cancellationToken).ConfigureAwait(false);
+        return new SubagentActivityDetail(task, SubagentActivityContent.Create(task.Status, taskText, turn, message, tools));
     }
 
     private static async Task<(SubagentActivityCounts Counts, string Version)> ReadIndexAsync(

@@ -9,4 +9,4 @@ public sealed record TranscriptRenderItem(
     bool IsThinking,
     string Timestamp,
     IReadOnlyList<TranscriptImageAttachment>? Attachments = null,
-    string? ErrorMessage = null);
+    TranscriptTurnOutcome? TurnOutcome = null);

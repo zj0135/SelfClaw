@@ -7,10 +7,11 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 29;
+    private const int CurrentSchemaVersion = 30;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
+    private readonly Func<string, CancellationToken, Task>? _beforeCommit;
     private bool _initialized;
 
     public SqliteDatabase(StoragePaths storagePaths, ILogger<SqliteDatabase>? logger = null)
@@ -19,29 +20,24 @@ public sealed class SqliteDatabase
         _logger = logger ?? NullLogger<SqliteDatabase>.Instance;
     }
 
+    internal SqliteDatabase(StoragePaths storagePaths, ILogger<SqliteDatabase>? logger, Func<string, CancellationToken, Task> beforeCommit)
+        : this(storagePaths, logger)
+    {
+        _beforeCommit = beforeCommit;
+    }
+
     public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken = default)
     {
+        await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
+        var connection = CreateConnection(SqliteOpenMode.ReadWrite);
         try
         {
-            await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);
-
-            var connection = new SqliteConnection($"Data Source={_storagePaths.DatabasePath}");
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-            await using var pragma = connection.CreateCommand();
-            pragma.CommandText = "PRAGMA foreign_keys = ON;";
-            await pragma.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-
             return connection;
         }
-        catch (OperationCanceledException)
+        catch
         {
-            _logger.LogDebug("Opening SQLite connection was canceled. DatabasePath={DatabasePath}", _storagePaths.DatabasePath);
-            throw;
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "Failed to open SQLite connection. DatabasePath={DatabasePath}", _storagePaths.DatabasePath);
+            await connection.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
@@ -61,527 +57,16 @@ public sealed class SqliteDatabase
                 return;
             }
 
-            Directory.CreateDirectory(_storagePaths.AppDataDirectory);
-
-            await using var connection = new SqliteConnection($"Data Source={_storagePaths.DatabasePath}");
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS schema_versions (
-    version INTEGER NOT NULL PRIMARY KEY,
-    applied_at_utc TEXT NOT NULL
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS ai_provider_connections (
-    id TEXT NOT NULL PRIMARY KEY,
-    catalog_id TEXT NOT NULL DEFAULT 'custom',
-    name TEXT NOT NULL,
-    provider_kind INTEGER NOT NULL,
-    endpoint TEXT NOT NULL,
-    auth_kind INTEGER NOT NULL,
-    credential_refs_json TEXT NOT NULL DEFAULT '{}',
-    connection_options_json TEXT NOT NULL DEFAULT '{}',
-    is_enabled INTEGER NOT NULL DEFAULT 1,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);", cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "ai_provider_connections",
-                "catalog_id",
-                "ALTER TABLE ai_provider_connections ADD COLUMN catalog_id TEXT NOT NULL DEFAULT 'custom';",
-                cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS ai_model_profiles (
-    id TEXT NOT NULL PRIMARY KEY,
-    provider_connection_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    api_format INTEGER NOT NULL,
-    model TEXT NOT NULL,
-    temperature_enabled INTEGER NOT NULL DEFAULT 0,
-    temperature REAL NOT NULL DEFAULT 0.7,
-    top_p_enabled INTEGER NOT NULL DEFAULT 0,
-    top_p REAL NOT NULL DEFAULT 0.7,
-    model_options_json TEXT NOT NULL DEFAULT '{}',
-    is_enabled INTEGER NOT NULL DEFAULT 1,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(provider_connection_id) REFERENCES ai_provider_connections(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS ai_model_configurations (
-    model TEXT NOT NULL PRIMARY KEY COLLATE BINARY,
-    configuration_json TEXT NOT NULL
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS ai_model_profile_selections (
-    scope TEXT NOT NULL PRIMARY KEY,
-    model_profile_id TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(model_profile_id) REFERENCES ai_model_profiles(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS workspace_roots (
-    id TEXT NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL,
-    root_path TEXT NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS conversations (
-    id TEXT NOT NULL PRIMARY KEY,
-    title TEXT NOT NULL,
-    workspace_root_id TEXT NULL,
-    mode INTEGER NOT NULL DEFAULT 0,
-    tool_permission_mode INTEGER NOT NULL DEFAULT 0,
-    agent_id TEXT NOT NULL DEFAULT 'build',
-    channel_kind TEXT NULL,
-    channel_conversation_id TEXT NULL,
-    channel_display_name TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    kind INTEGER NOT NULL DEFAULT 0,
-    parent_conversation_id TEXT NULL,
-    CHECK((kind = 0 AND parent_conversation_id IS NULL) OR (kind = 1 AND parent_conversation_id IS NOT NULL)),
-    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL,
-    FOREIGN KEY(parent_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS git_repositories (
-    id TEXT NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL,
-    common_directory TEXT NOT NULL UNIQUE,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS git_checkouts (
-    workspace_root_id TEXT NOT NULL PRIMARY KEY,
-    repository_id TEXT NOT NULL,
-    is_managed INTEGER NOT NULL DEFAULT 0,
-    owner_conversation_id TEXT NULL,
-    source_workspace_root_id TEXT NULL,
-    branch_name TEXT NOT NULL,
-    base_branch_name TEXT NULL,
-    base_commit_sha TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE CASCADE,
-    FOREIGN KEY(repository_id) REFERENCES git_repositories(id) ON DELETE CASCADE,
-    FOREIGN KEY(source_workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
-);", cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "mode",
-                "ALTER TABLE conversations ADD COLUMN mode INTEGER NOT NULL DEFAULT 0;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "tool_permission_mode",
-                "ALTER TABLE conversations ADD COLUMN tool_permission_mode INTEGER NOT NULL DEFAULT 0;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "agent_id",
-                "ALTER TABLE conversations ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'build';",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "channel_kind",
-                "ALTER TABLE conversations ADD COLUMN channel_kind TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "channel_conversation_id",
-                "ALTER TABLE conversations ADD COLUMN channel_conversation_id TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "conversations",
-                "channel_display_name",
-                "ALTER TABLE conversations ADD COLUMN channel_display_name TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            // Schema v21: provider/model selection moved to ai_model_profile_selections and the
-            // per-turn request. Rebuild old conversation tables to remove their profiles foreign key
-            // while preserving every conversation row and all dependent message/tool/session rows.
-            await EnsureConversationsWithoutProfileIdAsync(connection, cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "DROP TABLE IF EXISTS profiles;", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS messages (
-    id TEXT NOT NULL PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    role INTEGER NOT NULL,
-    markdown_content TEXT NOT NULL,
-    status INTEGER NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    agent_id TEXT NULL,
-    agent_name TEXT NULL,
-    agent_role TEXT NULL,
-    duration_ms REAL NULL,
-    error_message TEXT NULL,
-    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-
-            // Schema v29: per-turn usage (tokens, cache, context and cost) lives beside the message it
-            // belongs to. messages.input_tokens/output_tokens are retired in favor of this table.
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS turn_usage (
-    message_id TEXT NOT NULL PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    model TEXT NULL,
-    input_tokens INTEGER NULL,
-    uncached_input_tokens INTEGER NULL,
-    cached_input_tokens INTEGER NULL,
-    cache_write_input_tokens INTEGER NULL,
-    output_tokens INTEGER NULL,
-    reasoning_tokens INTEGER NULL,
-    total_tokens INTEGER NULL,
-    provider_calls INTEGER NOT NULL DEFAULT 1,
-    context_tokens INTEGER NULL,
-    context_window_tokens INTEGER NULL,
-    cost_usd_micros INTEGER NULL,
-    cost_source INTEGER NOT NULL DEFAULT 0,
-    additional_counts_json TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "messages",
-                "agent_id",
-                "ALTER TABLE messages ADD COLUMN agent_id TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "messages",
-                "agent_name",
-                "ALTER TABLE messages ADD COLUMN agent_name TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "messages",
-                "agent_role",
-                "ALTER TABLE messages ADD COLUMN agent_role TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS message_attachments (
-    id TEXT NOT NULL PRIMARY KEY,
-    message_id TEXT NOT NULL,
-    kind INTEGER NOT NULL,
-    file_name TEXT NOT NULL,
-    media_type TEXT NOT NULL,
-    storage_path TEXT NOT NULL,
-    byte_length INTEGER NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS tool_runs (
-    id TEXT NOT NULL PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    arguments_json TEXT NOT NULL,
-    status INTEGER NOT NULL,
-    result_summary TEXT NULL,
-    result_content TEXT NULL,
-    correlation_id TEXT NULL,
-    duration_ms REAL NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    agent_id TEXT NULL,
-    message_id TEXT NULL,
-    source_kind INTEGER NULL,
-    source_id TEXT NULL,
-    display_name TEXT NULL,
-    effective_arguments_json TEXT NULL,
-    hook_feedback_json TEXT NULL,
-    hook_outcome_json TEXT NULL,
-    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "tool_runs",
-                "result_content",
-                "ALTER TABLE tool_runs ADD COLUMN result_content TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "tool_runs",
-                "agent_id",
-                "ALTER TABLE tool_runs ADD COLUMN agent_id TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "tool_runs",
-                "message_id",
-                "ALTER TABLE tool_runs ADD COLUMN message_id TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "tool_runs",
-                "source_kind",
-                "ALTER TABLE tool_runs ADD COLUMN source_kind INTEGER NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "tool_runs",
-                "source_id",
-                "ALTER TABLE tool_runs ADD COLUMN source_id TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "tool_runs",
-                "display_name",
-                "ALTER TABLE tool_runs ADD COLUMN display_name TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS extension_packages (
-    kind INTEGER NOT NULL,
-    id TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    version TEXT NOT NULL,
-    description TEXT NOT NULL,
-    install_path TEXT NOT NULL,
-    content_hash TEXT NOT NULL,
-    manifest_json TEXT NOT NULL,
-    source_plugin_id TEXT NULL,
-    is_enabled INTEGER NOT NULL DEFAULT 0,
-    acknowledged_permissions_json TEXT NULL,
-    acknowledged_at_utc TEXT NULL,
-    installed_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    source_path TEXT NULL,
-    PRIMARY KEY(kind, id)
-);", cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "extension_packages",
-                "source_path",
-                "ALTER TABLE extension_packages ADD COLUMN source_path TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS mcp_server_configs (
-    id TEXT NOT NULL PRIMARY KEY,
-    display_name TEXT NOT NULL,
-    transport INTEGER NOT NULL,
-    settings_json TEXT NOT NULL,
-    credential_refs_json TEXT NOT NULL,
-    source_plugin_id TEXT NULL,
-    is_enabled INTEGER NOT NULL DEFAULT 0,
-    config_revision INTEGER NOT NULL DEFAULT 1,
-    discovered_tools_json TEXT NOT NULL DEFAULT '[]',
-    last_status INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT NULL,
-    last_checked_at_utc TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS cli_agent_sessions (
-    conversation_id TEXT NOT NULL,
-    agent_kind INTEGER NOT NULL,
-    session_id TEXT NOT NULL,
-    cost_baseline_usd_micros INTEGER NOT NULL DEFAULT 0,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    PRIMARY KEY(conversation_id, agent_kind),
-    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-
-            // CLIs whose cost is a running session total (Claude Code's total_cost_usd) store the
-            // high-water mark here so a resumed session only records the delta each turn.
-            await EnsureColumnExistsAsync(
-                connection,
-                "cli_agent_sessions",
-                "cost_baseline_usd_micros",
-                "ALTER TABLE cli_agent_sessions ADD COLUMN cost_baseline_usd_micros INTEGER NOT NULL DEFAULT 0;",
-                cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS subagent_tasks (
-    id TEXT NOT NULL PRIMARY KEY,
-    parent_conversation_id TEXT NOT NULL,
-    parent_turn_id TEXT NOT NULL,
-    child_conversation_id TEXT NOT NULL UNIQUE,
-    child_turn_id TEXT NOT NULL UNIQUE,
-    subagent_id TEXT NOT NULL,
-    subagent_name TEXT NOT NULL,
-    task_text TEXT NOT NULL,
-    status INTEGER NOT NULL CHECK(status BETWEEN 0 AND 5),
-    attempt INTEGER NOT NULL DEFAULT 1 CHECK(attempt >= 1),
-    retry_of_task_id TEXT NULL,
-    definition_snapshot_json TEXT NOT NULL,
-    parent_execution_snapshot_json TEXT NOT NULL,
-    resolved_model_profile_id TEXT NULL,
-    max_run_seconds INTEGER NOT NULL CHECK(max_run_seconds BETWEEN 30 AND 3600),
-    final_text TEXT NULL,
-    input_tokens INTEGER NULL,
-    output_tokens INTEGER NULL,
-    error_code TEXT NULL,
-    error_message TEXT NULL,
-    cancel_requested_at_utc TEXT NULL,
-    queued_at_utc TEXT NOT NULL,
-    started_at_utc TEXT NULL,
-    completed_at_utc TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(parent_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
-    FOREIGN KEY(child_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
-    FOREIGN KEY(retry_of_task_id) REFERENCES subagent_tasks(id) ON DELETE SET NULL
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS subagent_deliveries (
-    id TEXT NOT NULL PRIMARY KEY,
-    task_id TEXT NOT NULL UNIQUE,
-    parent_conversation_id TEXT NOT NULL,
-    parent_turn_id TEXT NOT NULL,
-    status INTEGER NOT NULL CHECK(status BETWEEN 0 AND 3),
-    envelope_json TEXT NOT NULL,
-    envelope_bytes INTEGER NOT NULL CHECK(envelope_bytes BETWEEN 0 AND 32768),
-    lease_token TEXT NULL,
-    leased_until_utc TEXT NULL,
-    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count BETWEEN 0 AND 3),
-    next_attempt_at_utc TEXT NOT NULL,
-    continuation_turn_id TEXT NULL,
-    last_error TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    delivered_at_utc TEXT NULL,
-    dead_lettered_at_utc TEXT NULL,
-    FOREIGN KEY(task_id) REFERENCES subagent_tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY(parent_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "subagent_deliveries",
-                "tool_execution_started_at_utc",
-                "ALTER TABLE subagent_deliveries ADD COLUMN tool_execution_started_at_utc TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-            await MarkLegacyContinuationLeasesAsync(connection, cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_conversations_updated ON conversations(updated_at_utc DESC);", cancellationToken).ConfigureAwait(false);
-            // Schema v25: assistant content is structured into message_segments blocks and
-            // tool placement is expressed by ToolCall block ordinals, so after_segment_index
-            // is retired. Legacy assistant rows are not migrated; the user deletes them.
-            await RebuildToolRunsWithoutAfterSegmentIndexAsync(connection, cancellationToken).ConfigureAwait(false);
-
-            // Schema v28 hook columns go after the v25 rebuild: the rebuilt table has no hook columns,
-            // so adding them first would lose them when the rebuild swaps the table.
-            await EnsureColumnExistsAsync(
-                connection,
-                "tool_runs",
-                "effective_arguments_json",
-                "ALTER TABLE tool_runs ADD COLUMN effective_arguments_json TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "tool_runs",
-                "hook_feedback_json",
-                "ALTER TABLE tool_runs ADD COLUMN hook_feedback_json TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await EnsureColumnExistsAsync(
-                connection,
-                "tool_runs",
-                "hook_outcome_json",
-                "ALTER TABLE tool_runs ADD COLUMN hook_outcome_json TEXT NULL;",
-                cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, @"
-CREATE TABLE IF NOT EXISTS message_segments (
-    message_id TEXT NOT NULL,
-    ordinal INTEGER NOT NULL,
-    kind INTEGER NOT NULL,
-    text TEXT NULL,
-    tool_run_id TEXT NULL,
-    PRIMARY KEY (message_id, ordinal),
-    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages(conversation_id, created_at_utc);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_turn_usage_conversation_created ON turn_usage(conversation_id, created_at_utc);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_message_attachments_message ON message_attachments(message_id, created_at_utc);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_tool_runs_conversation_created ON tool_runs(conversation_id, created_at_utc);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_ai_provider_connections_kind ON ai_provider_connections(provider_kind);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_ai_model_profiles_connection ON ai_model_profiles(provider_connection_id);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_ai_model_profiles_updated ON ai_model_profiles(updated_at_utc DESC);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_tasks_queue ON subagent_tasks(status, queued_at_utc, id);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_tasks_parent_status ON subagent_tasks(parent_conversation_id, status);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_tasks_parent_turn ON subagent_tasks(parent_turn_id, created_at_utc);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_deliveries_ready ON subagent_deliveries(status, next_attempt_at_utc, created_at_utc);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_deliveries_parent_turn ON subagent_deliveries(parent_conversation_id, parent_turn_id, status, created_at_utc);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_subagent_deliveries_lease ON subagent_deliveries(status, leased_until_utc);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_git_checkouts_repository ON git_checkouts(repository_id);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "CREATE INDEX IF NOT EXISTS ix_git_checkouts_owner ON git_checkouts(owner_conversation_id);", cancellationToken).ConfigureAwait(false);
-            for (var version = 1; version <= CurrentSchemaVersion; version++)
+            // Inspection is genuinely read-only: rejecting a user's old database must not create
+            // tables, journal files, version markers, or perform a compatibility repair.
+            if (!await IsExistingTargetAsync(cancellationToken).ConfigureAwait(false))
             {
-                await ExecuteAsync(
-                    connection,
-                    $"INSERT OR IGNORE INTO schema_versions(version, applied_at_utc) VALUES({version}, CURRENT_TIMESTAMP);",
-                    cancellationToken).ConfigureAwait(false);
+                await CreateTargetAsync(cancellationToken).ConfigureAwait(false);
             }
 
             _initialized = true;
-            _logger.LogInformation(
-                "SQLite database initialized. DatabasePath={DatabasePath}, SchemaVersion={SchemaVersion}",
-                _storagePaths.DatabasePath,
-                CurrentSchemaVersion);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogDebug("SQLite initialization was canceled. DatabasePath={DatabasePath}", _storagePaths.DatabasePath);
-            throw;
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(
-                exception,
-                "Failed to initialize SQLite database. DatabasePath={DatabasePath}, SchemaVersion={SchemaVersion}",
-                _storagePaths.DatabasePath,
-                CurrentSchemaVersion);
-            throw;
+            _logger.LogInformation("SQLite schema {SchemaVersion} opened. DatabasePath={DatabasePath}",
+                CurrentSchemaVersion, _storagePaths.DatabasePath);
         }
         finally
         {
@@ -589,222 +74,106 @@ CREATE TABLE IF NOT EXISTS message_segments (
         }
     }
 
-    private static async Task ExecuteAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
+    private async Task<bool> IsExistingTargetAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(_storagePaths.DatabasePath) || new FileInfo(_storagePaths.DatabasePath).Length == 0)
+        {
+            return false;
+        }
+
+        await using var connection = CreateConnection(SqliteOpenMode.ReadOnly);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await InspectSchemaAsync(connection, null, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task CreateTargetAsync(CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(_storagePaths.AppDataDirectory);
+        await using var connection = CreateConnection(SqliteOpenMode.ReadWriteCreate);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        // Recheck after acquiring the write lock in case another initializer won the race.
+        if (!await InspectSchemaAsync(connection, transaction, cancellationToken).ConfigureAwait(false))
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = SqliteSchema.CreateSql;
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            command.CommandText = "INSERT INTO schema_versions(version, applied_at_utc) VALUES($version, $at);";
+            command.Parameters.AddWithValue("$version", CurrentSchemaVersion);
+            command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            if (_beforeCommit is not null)
+            {
+                await _beforeCommit("schema-before-commit", cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private SqliteConnection CreateConnection(SqliteOpenMode mode)
+        => new(new SqliteConnectionStringBuilder
+        {
+            DataSource = _storagePaths.DatabasePath,
+            Mode = mode,
+            ForeignKeys = true,
+            Pooling = mode == SqliteOpenMode.ReadWrite
+        }.ToString());
+
+    private static async Task<bool> InspectSchemaAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Rebuilds legacy conversation tables into the v23 ownership shape.</summary>
-    private static async Task EnsureConversationsWithoutProfileIdAsync(
-        SqliteConnection connection,
-        CancellationToken cancellationToken)
-    {
-        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using (var command = connection.CreateCommand())
+        command.Transaction = transaction;
+        command.CommandText = "SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%';";
+        var objects = new HashSet<string>(StringComparer.Ordinal);
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
-            command.CommandText = "PRAGMA table_info(conversations);";
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk.
-                columns.Add(reader.GetString(1));
+                objects.Add(reader.GetString(0));
             }
         }
 
-        var hasProfileId = columns.Contains("profile_id");
-        var hasKind = columns.Contains("kind");
-        var hasParentConversationId = columns.Contains("parent_conversation_id");
-        if (!hasProfileId && hasKind && hasParentConversationId)
+        if (objects.Count == 0)
         {
-            return;
+            return false;
         }
 
-        var kindExpression = hasKind ? "kind" : "0";
-        var parentExpression = hasParentConversationId ? "parent_conversation_id" : "NULL";
-
-        // Foreign keys must be off while the table is swapped, and PRAGMA foreign_keys is a
-        // no-op inside a transaction, so toggle it around the transaction boundaries.
-        await ExecuteAsync(connection, "PRAGMA foreign_keys = OFF;", cancellationToken).ConfigureAwait(false);
-        // Conversations are user data: run the swap as one atomic unit so a crash mid-rebuild
-        // can never leave the database without a populated conversations table.
-        await ExecuteAsync(connection, "BEGIN IMMEDIATE;", cancellationToken).ConfigureAwait(false);
-        try
+        if (!objects.Contains("schema_versions"))
         {
-            await ExecuteAsync(connection, "DROP TABLE IF EXISTS conversations_new;", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, @"
-CREATE TABLE conversations_new (
-    id TEXT NOT NULL PRIMARY KEY,
-    title TEXT NOT NULL,
-    workspace_root_id TEXT NULL,
-    mode INTEGER NOT NULL DEFAULT 0,
-    tool_permission_mode INTEGER NOT NULL DEFAULT 0,
-    agent_id TEXT NOT NULL DEFAULT 'build',
-    channel_kind TEXT NULL,
-    channel_conversation_id TEXT NULL,
-    channel_display_name TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    kind INTEGER NOT NULL DEFAULT 0,
-    parent_conversation_id TEXT NULL,
-    CHECK((kind = 0 AND parent_conversation_id IS NULL) OR (kind = 1 AND parent_conversation_id IS NOT NULL)),
-    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL,
-    FOREIGN KEY(parent_conversation_id) REFERENCES conversations_new(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, $@"
-INSERT INTO conversations_new(
-    id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
-    channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc,
-    kind, parent_conversation_id)
-SELECT
-    id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
-    channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc,
-    {kindExpression}, {parentExpression}
-FROM conversations;", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "DROP TABLE conversations;", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "ALTER TABLE conversations_new RENAME TO conversations;", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "COMMIT;", cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            try
-            {
-                await ExecuteAsync(connection, "ROLLBACK;", CancellationToken.None);
-            }
-            catch
-            {
-                // Initialization is already failing; surface the original error.
-            }
-
-            throw;
+            throw UnsupportedSchema("unversioned");
         }
 
-        await ExecuteAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken).ConfigureAwait(false);
-    }
-
-
-    /// <summary>Rebuilds tool_runs without the retired after_segment_index column (schema v25).</summary>
-    private static async Task RebuildToolRunsWithoutAfterSegmentIndexAsync(
-        SqliteConnection connection,
-        CancellationToken cancellationToken)
-    {
-        var hasColumn = false;
-        await using (var command = connection.CreateCommand())
+        command.CommandText = "SELECT version FROM schema_versions;";
+        var versions = new List<long>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
-            command.CommandText = "PRAGMA table_info(tool_runs);";
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                if (string.Equals(reader.GetString(1), "after_segment_index", StringComparison.OrdinalIgnoreCase))
-                {
-                    hasColumn = true;
-                    break;
-                }
+                versions.Add(reader.GetInt64(0));
             }
         }
 
-        if (!hasColumn)
+        if (versions.Count != 1 || versions[0] != CurrentSchemaVersion)
         {
-            return;
+            throw UnsupportedSchema(string.Join(", ", versions));
         }
 
-        await ExecuteAsync(connection, "PRAGMA foreign_keys = OFF;", cancellationToken).ConfigureAwait(false);
-        await ExecuteAsync(connection, "BEGIN IMMEDIATE;", cancellationToken).ConfigureAwait(false);
-        try
+        foreach (var table in SqliteSchema.RequiredTables)
         {
-            await ExecuteAsync(connection, "DROP TABLE IF EXISTS tool_runs_new;", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, @"
-CREATE TABLE tool_runs_new (
-    id TEXT NOT NULL PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    arguments_json TEXT NOT NULL,
-    status INTEGER NOT NULL,
-    result_summary TEXT NULL,
-    result_content TEXT NULL,
-    correlation_id TEXT NULL,
-    duration_ms REAL NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    agent_id TEXT NULL,
-    message_id TEXT NULL,
-    source_kind INTEGER NULL,
-    source_id TEXT NULL,
-    display_name TEXT NULL,
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, @"
-INSERT INTO tool_runs_new(
-    id, conversation_id, tool_name, arguments_json, status, result_summary, result_content,
-    correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id,
-    source_kind, source_id, display_name)
-SELECT
-    id, conversation_id, tool_name, arguments_json, status, result_summary, result_content,
-    correlation_id, duration_ms, created_at_utc, updated_at_utc, agent_id, message_id,
-    source_kind, source_id, display_name
-FROM tool_runs;", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "DROP TABLE tool_runs;", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "ALTER TABLE tool_runs_new RENAME TO tool_runs;", cancellationToken).ConfigureAwait(false);
-            await ExecuteAsync(connection, "COMMIT;", cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            try
+            if (!objects.Contains(table))
             {
-                await ExecuteAsync(connection, "ROLLBACK;", CancellationToken.None);
+                throw UnsupportedSchema($"incomplete v30 (missing {table})");
             }
-            catch
-            {
-                // Initialization is already failing; surface the original error.
-            }
-
-            throw;
         }
 
-        await ExecuteAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
-    private static async Task MarkLegacyContinuationLeasesAsync(SqliteConnection connection, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        // A v26 lease carries no proof that tools were never executed. Preserve it as uncertain
-        // on upgrade so restart recovery cannot replay external effects from the old runtime.
-        command.CommandText = """
-            UPDATE subagent_deliveries
-            SET tool_execution_started_at_utc = updated_at_utc
-            WHERE status = 1 AND tool_execution_started_at_utc IS NULL
-              AND NOT EXISTS (SELECT 1 FROM schema_versions WHERE version = 27);
-            """;
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async Task EnsureColumnExistsAsync(
-        SqliteConnection connection,
-        string tableName,
-        string columnName,
-        string alterSql,
-        CancellationToken cancellationToken)
-    {
-        var hasColumn = false;
-
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = $"PRAGMA table_info({tableName});";
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
-                {
-                    hasColumn = true;
-                    break;
-                }
-            }
-        }
-
-        if (!hasColumn)
-        {
-            await ExecuteAsync(connection, alterSql, cancellationToken).ConfigureAwait(false);
-        }
-    }
+    private static InvalidOperationException UnsupportedSchema(string version)
+        => new($"SQLite schema '{version}' is not supported. This build requires schema v30; the existing database was not modified. No migration or backfill is performed.");
 }

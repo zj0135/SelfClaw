@@ -23,11 +23,13 @@ public sealed class ActivityPanelProjectionTests
         var metadata = page.Activities.Single();
         var large = string.Concat(Enumerable.Repeat("\u4e2d\ud83d\ude42\"\\\n", 10000));
         var messageId = Guid.NewGuid();
-        var message = new MessageRecord(messageId, task.ChildConversationId, MessageRole.Assistant, large,
+        var turn = new ConversationTurnRecord(task.ChildTurnId, task.ChildConversationId, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Subagent, ConversationTurnStatus.Running, task.QueuedAtUtc);
+        var message = new MessageRecord(messageId, task.ChildConversationId, turn.Id, 1, MessageRole.Assistant, large,
             MessageStatus.Streaming, task.QueuedAtUtc, task.QueuedAtUtc,
             Segments: Enumerable.Range(0, 80).Select(index => new MessageSegmentRecord(messageId, index,
                 index % 2 == 0 ? MessageSegmentKind.Thinking : MessageSegmentKind.Text, large, null)).ToArray());
-        var detail = SubagentActivityContent.Create(metadata.Task.Status, large, message, []);
+        var detail = SubagentActivityContent.Create(metadata.Task.Status, large, turn, message, []);
         var snapshot = new SubagentActivitySnapshot(metadata, detail, "live");
         var manyTasks = Enumerable.Range(0, 50).Select(_ => metadata with
         {
@@ -69,23 +71,57 @@ public sealed class ActivityPanelProjectionTests
     }
 
     [Fact]
-    public async Task Legacy_message_and_unplaced_tools_are_projected_without_invented_positions()
+    public async Task No_output_completion_projects_a_turn_outcome_without_an_assistant_or_incomplete_history()
+    {
+        using var context = new SubagentActivityTestContext();
+        var task = await context.CreateTaskAsync();
+        var session = await context.RegisterSessionAsync(task);
+        await session.BeginAsync();
+        await session.ApplyEventAsync(new SelfClaw.Core.Runtime.Agent.UsageReportedEvent(
+            new TurnUsage(InputTokens: 3, OutputTokens: 4)), CancellationToken.None);
+        await session.ApplyEventAsync(new SelfClaw.Core.Runtime.Agent.RunCompletedEvent(
+            SelfClaw.Core.Runtime.Agent.RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: "blocked before output"), CancellationToken.None);
+        var page = await context.Service.ListAsync(new SubagentActivityQuery(task.ParentConversationId));
+        var detail = await context.Service.GetDetailAsync(task.ParentConversationId, task.Id)
+            ?? throw new InvalidOperationException("Missing no-output completion.");
+        var projection = new ActivityPanelProjection(StoragePathDefaults.CreateDefault());
+        var result = projection.Build(new ActivityPanelQuery(Guid.NewGuid(), task.ParentConversationId, 1),
+            page, detail, false).Sections[0].Detail ?? throw new InvalidOperationException("Missing wire detail.");
+
+        result.Message.Should().BeNull();
+        result.TotalBlocks.Should().Be(0);
+        result.HistoryCompleteness.Should().Be("complete");
+        result.TurnOutcome?.TurnId.Should().Be(task.ChildTurnId.ToString("D"));
+        result.TurnOutcome?.Status.Should().Be("blocked");
+        result.TurnOutcome?.ErrorMessage.Should().Be("blocked before output");
+        result.TurnOutcome?.Usage?.TotalTokens.Should().BeNull();
+        result.Task.Status.Should().Be("failed");
+        await context.Registry.UnregisterAsync(session);
+    }
+
+    [Fact]
+    public async Task Interrupted_message_and_unplaced_tools_are_projected_without_invented_positions()
     {
         using var context = new SubagentActivityTestContext();
         var task = await context.CreateTaskAsync(claim: false);
         var page = await context.Service.ListAsync(new SubagentActivityQuery(task.ParentConversationId));
         var metadata = page.Activities.Single();
-        var message = new MessageRecord(Guid.NewGuid(), task.ChildConversationId, MessageRole.Assistant, "legacy",
-            MessageStatus.Completed, task.QueuedAtUtc, task.QueuedAtUtc);
+        var turn = new ConversationTurnRecord(task.ChildTurnId, task.ChildConversationId, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Subagent, ConversationTurnStatus.Interrupted, task.QueuedAtUtc, task.QueuedAtUtc);
+        var messageId = Guid.NewGuid();
+        var message = new MessageRecord(messageId, task.ChildConversationId, turn.Id, 1, MessageRole.Assistant, "partial",
+            MessageStatus.Interrupted, task.QueuedAtUtc, task.QueuedAtUtc,
+            Segments: [new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Text, "partial", null)]);
         var tool = new ToolExecutionRecord(Guid.NewGuid(), task.ChildConversationId, "read_file", "{}",
             ToolExecutionStatus.Completed, "recorded", null, 3, task.QueuedAtUtc, task.QueuedAtUtc, MessageId: message.Id);
-        var detail = SubagentActivityContent.Create(SubagentTaskStatus.Interrupted, "task", message, [tool]);
+        var detail = SubagentActivityContent.Create(SubagentTaskStatus.Interrupted, "task", turn, message, [tool]);
         var projection = new ActivityPanelProjection(StoragePathDefaults.CreateDefault());
         var result = projection.Build(new ActivityPanelQuery(Guid.NewGuid(), task.ParentConversationId, 1), page,
             new SubagentActivitySnapshot(metadata, detail, "persisted"), false).Sections[0].Detail;
         result?.HistoryCompleteness.Should().Be("partial");
-        result?.Message?.Segments.Should().ContainSingle().Which.Markdown.Should().Be("legacy");
+        result?.Message?.Segments.Should().ContainSingle().Which.Markdown.Should().Be("partial");
+        result?.Message?.TurnOutcome?.Status.Should().Be("interrupted");
         result?.UnplacedTools.Should().ContainSingle().Which.SegmentId.Should().Be(tool.Id.ToString("D"));
-        result?.Content.Should().Contain(reference => reference.ContentId == "final-text");
+        result?.Content.Should().Contain(reference => reference.ContentId == "segment/0");
     }
 }

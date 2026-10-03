@@ -1,11 +1,10 @@
-﻿using FluentAssertions;
-using Microsoft.Extensions.Logging.Abstractions;
-using SelfClaw.Core.Interfaces;
+using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Transcript;
+using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Desktop.Services.Runtime;
 
@@ -14,385 +13,195 @@ public sealed class ConversationTurnRecorderTests
     [Fact]
     public async Task ApplyEventAsync_records_the_shared_event_protocol_and_commits_the_terminal_state()
     {
-        var context = CreateContext();
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
         await context.ApplyAsync(new RunStartedEvent("session", "model", null));
+        context.State.Messages.Should().ContainSingle().Which.Role.Should().Be(MessageRole.User);
         await context.ApplyAsync(new AssistantThinkingDeltaEvent("thinking", "reason"));
         await context.ApplyAsync(new AssistantTextDeltaEvent("text", "answer"));
-        await context.ApplyAsync(new ToolCallStartedEvent(
-            "call-1",
-            "mcp__git__status",
-            "{}",
-            ToolCallKind.Read,
-            ToolSourceKind.Mcp,
-            "git",
-            "status"));
-        await context.ApplyAsync(new ToolCallCompletedEvent(
-            "call-1",
-            ToolCallStatus.Completed,
-            "read 1 file",
-            "contents"));
-        await context.ApplyAsync(new UsageReportedEvent(new TurnUsage(InputTokens: 11, OutputTokens: 7)));
+        await context.ApplyAsync(new ToolCallStartedEvent("call-1", "mcp__git__status", "{}", ToolCallKind.Read,
+            ToolSourceKind.Mcp, "git", "status"));
+        await context.ApplyAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "read 1 file", "contents"));
+        await context.ApplyAsync(new UsageReportedEvent(new TurnUsage(InputTokens: 11, OutputTokens: 7, TotalTokens: 18)));
         await context.ApplyAsync(new RunStatusEvent(AgentRunStatus.Thinking));
         await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "answer"));
 
-        var finalization = context.Committer.Finalizations.Should().ContainSingle().Which;
-        finalization.AssistantMessage.Id.Should().Be(context.TurnId);
-        finalization.AssistantMessage.Status.Should().Be(MessageStatus.Completed);
-        finalization.AssistantMessage.MarkdownContent.Should().Be("answer");
-        finalization.AssistantMessage.Segments.Should().SatisfyRespectively(
-            segment => segment.Kind.Should().Be(MessageSegmentKind.Thinking),
-            segment => segment.Kind.Should().Be(MessageSegmentKind.Text),
-            segment => segment.Kind.Should().Be(MessageSegmentKind.ToolCall));
-        finalization.AssistantMessage.Usage!.InputTokens.Should().Be(11);
-        finalization.AssistantMessage.Usage.OutputTokens.Should().Be(7);
-        finalization.ToolExecutions.Should().ContainSingle();
-        finalization.ToolExecutions[0].Status.Should().Be(ToolExecutionStatus.Completed);
-        finalization.ToolExecutions[0].MessageId.Should().Be(context.TurnId);
-        finalization.ToolExecutions[0].SourceKind.Should().Be(ToolSourceKind.Mcp);
-        finalization.ToolExecutions[0].ResultContent.Should().Be("contents");
-        context.Repository.ToolUpserts.Should().HaveCount(2);
-        context.Session.ActivityText.Should().Be("正在思考...");
+        var turn = (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Should().ContainSingle().Subject;
+        turn.Id.Should().Be(context.Record.Id);
+        turn.Status.Should().Be(ConversationTurnStatus.Succeeded);
+        turn.Usage.Should().BeEquivalentTo(new TurnUsage(InputTokens: 11, OutputTokens: 7, TotalTokens: 18, UncachedInputTokens: 11));
+        var message = (await context.Conversations.ListMessagesAsync(context.Conversation.Id)).Single(item => item.Role == MessageRole.Assistant);
+        message.Id.Should().NotBe(turn.Id);
+        message.TurnId.Should().Be(turn.Id);
+        message.Status.Should().Be(MessageStatus.Sealed);
+        message.MarkdownContent.Should().Be("answer");
+        (message.Segments ?? []).Select(segment => segment.Kind).Should().Equal(MessageSegmentKind.Thinking, MessageSegmentKind.Text, MessageSegmentKind.ToolCall);
+        var tool = (await context.Conversations.ListToolExecutionsAsync(context.Conversation.Id)).Should().ContainSingle().Subject;
+        tool.MessageId.Should().Be(message.Id);
+        tool.Status.Should().Be(ToolExecutionStatus.Completed);
+        tool.SourceKind.Should().Be(ToolSourceKind.Mcp);
+        tool.ResultContent.Should().Be("contents");
+        context.State.ActivityText.Should().Be("正在思考...");
     }
 
     [Fact]
     public async Task ApplyEventAsync_coalesces_consecutive_thinking_deltas_into_one_internal_block()
     {
-        var context = CreateContext();
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
         await context.ApplyAsync(new AssistantThinkingDeltaEvent("thinking", "first "));
         await context.ApplyAsync(new AssistantThinkingDeltaEvent("thinking", "second"));
-
-        var message = context.Session.Messages.Single();
-        message.Segments.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                Kind = MessageSegmentKind.Thinking,
-                Text = "first second"
-            });
+        var message = context.State.Messages.Single(item => item.Role == MessageRole.Assistant);
+        message.Segments.Should().ContainSingle().Which.Text.Should().Be("first second");
         message.MarkdownContent.Should().BeEmpty();
     }
 
     [Fact]
     public async Task ApplyEventAsync_keeps_whitespace_only_text_deltas_and_ignores_empty_ones()
     {
-        var context = CreateContext();
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        await context.ApplyAsync(new AssistantTextDeltaEvent("text", "   "));
+        context.State.Messages.Should().ContainSingle();
         await context.ApplyAsync(new AssistantTextDeltaEvent("text", "line one"));
         await context.ApplyAsync(new AssistantTextDeltaEvent("text", "\n  "));
         await context.ApplyAsync(new AssistantTextDeltaEvent("text", string.Empty));
         await context.ApplyAsync(new AssistantTextDeltaEvent("text", "line two"));
-
-        context.Session.Messages.Single().MarkdownContent.Should().Be("line one\n  line two");
+        context.State.Messages.Last().MarkdownContent.Should().Be("line one\n  line two");
     }
 
     [Fact]
     public async Task ApplyEventAsync_publishes_the_first_visible_delta_immediately_and_coalesces_the_rest()
     {
-        var context = CreateContext();
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
         var immediates = new List<bool>();
-        context.Session.TranscriptChanged += immediates.Add;
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
+        context.State.TranscriptChanged += immediates.Add;
         await context.ApplyAsync(new RunStatusEvent(AgentRunStatus.Requesting));
         await context.ApplyAsync(new AssistantTextDeltaEvent("text", "hello"));
         await context.ApplyAsync(new AssistantTextDeltaEvent("text", " world"));
         await context.ApplyAsync(new AssistantThinkingDeltaEvent("thinking", "hmm"));
-
-        immediates.Should().Equal(false, false, true, false, false);
+        immediates.Should().Equal(false, true, false, false);
     }
 
     [Fact]
     public async Task ApplyEventAsync_limits_tool_result_content_before_persistence()
     {
-        var context = CreateContext();
-        var content = new string('x', TranscriptToolResultLimiter.MaximumStoredCharacters + 1_000);
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
         await context.ApplyAsync(new ToolCallStartedEvent("call-1", "read_file", "{}", ToolCallKind.Read));
-        await context.ApplyAsync(new ToolCallCompletedEvent(
-            "call-1",
-            ToolCallStatus.Completed,
-            "read file",
-            content));
-
-        context.Session.ToolRuns.Should().ContainSingle()
-            .Which.ResultContent.Should().HaveLength(TranscriptToolResultLimiter.MaximumStoredCharacters)
+        await context.ApplyAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "read file",
+            new string('x', TranscriptToolResultLimiter.MaximumStoredCharacters + 1000)));
+        var tool = (await context.Conversations.ListToolExecutionsAsync(context.Conversation.Id)).Single();
+        tool.ResultContent.Should().HaveLength(TranscriptToolResultLimiter.MaximumStoredCharacters)
             .And.EndWith("[SelfClaw truncated the stored tool result at 64 KiB.]");
+        var message = (await context.Conversations.ListMessagesAsync(context.Conversation.Id)).Single(item => item.Id == tool.MessageId);
+        message.Status.Should().Be(MessageStatus.Streaming, "progress persists the real fragment together with its tool");
     }
 
     [Fact]
     public async Task FinalizeInterruptedAsync_preserves_partial_text_and_closes_running_tools()
     {
-        var context = CreateContext();
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
         await context.ApplyAsync(new AssistantTextDeltaEvent("text", "partial"));
-        await context.ApplyAsync(new ToolCallStartedEvent(
-            "call-1",
-            "run_shell_command",
-            "{}",
-            ToolCallKind.Run));
-        await context.Recorder.FinalizeInterruptedAsync(
-            context.Session,
-            context.Turn,
-            TurnFinalizationKind.Cancelled,
-            "Generation stopped.",
-            context.Committer);
-
-        var finalization = context.Committer.Finalizations.Should().ContainSingle().Which;
-        finalization.AssistantMessage.Status.Should().Be(MessageStatus.Cancelled);
-        finalization.AssistantMessage.MarkdownContent.Should().Be("partial");
-        finalization.AssistantMessage.Segments.Should().SatisfyRespectively(
-            segment => segment.Kind.Should().Be(MessageSegmentKind.Text),
-            segment => segment.Kind.Should().Be(MessageSegmentKind.ToolCall));
-        finalization.AssistantMessage.ErrorMessage.Should().Be("Generation stopped.");
-        finalization.ToolExecutions.Should().ContainSingle()
-            .Which.Status.Should().Be(ToolExecutionStatus.Cancelled);
+        await context.ApplyAsync(new ToolCallStartedEvent("call-1", "run_shell_command", "{}", ToolCallKind.Run));
+        await context.Recorder.FinalizeInterruptedAsync(context.State, context.Turn, TurnFinalizationKind.Cancelled,
+            "Generation stopped.", context.Finalizer);
+        var turn = (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Single();
+        turn.Status.Should().Be(ConversationTurnStatus.Cancelled);
+        turn.ErrorMessage.Should().Be("Generation stopped.");
+        var message = context.State.Messages.Last();
+        message.Status.Should().Be(MessageStatus.Interrupted);
+        message.MarkdownContent.Should().Be("partial");
+        context.State.ToolRuns.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Cancelled);
     }
 
     [Fact]
     public async Task ApplyEventAsync_ignores_a_duplicate_terminal_event()
     {
-        var context = CreateContext();
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
         await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
-        await context.ApplyAsync(new RunCompletedEvent(
-            RunCompletionStatus.Failed,
-            null,
-            "late failure"));
-
-        context.Committer.Finalizations.Should().ContainSingle();
-        context.Session.Messages.Single().Status.Should().Be(MessageStatus.Completed);
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Failed, null, "late failure"));
+        context.State.Turns.Single().Status.Should().Be(ConversationTurnStatus.Succeeded);
+        context.State.Messages.Should().HaveCount(2);
+        (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Should().ContainSingle();
     }
 
     [Fact]
     public async Task ApplyEventAsync_reloads_the_persisted_terminal_state_when_the_commit_loses_its_cas()
     {
-        var context = CreateContext();
-        var now = DateTimeOffset.UtcNow;
-        var persistedMessage = new MessageRecord(
-            context.TurnId,
-            context.Session.ConversationId,
-            MessageRole.Assistant,
-            "persisted winner",
-            MessageStatus.Failed,
-            now,
-            now,
-            ErrorMessage: "already finalized");
-        var persistedTool = new ToolExecutionRecord(
-            Guid.NewGuid(),
-            context.Session.ConversationId,
-            "read_file",
-            "{}",
-            ToolExecutionStatus.Failed,
-            "already finalized",
-            "call-1",
-            1,
-            now,
-            now,
-            MessageId: context.TurnId);
-        context.Repository.MessagesToRead = [persistedMessage];
-        context.Repository.ToolExecutionsToRead = [persistedTool];
-        context.Committer.WriteResult = false;
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
         await context.ApplyAsync(new AssistantTextDeltaEvent("text", "losing candidate"));
+        var now = DateTimeOffset.UtcNow;
+        var winnerId = Guid.NewGuid();
+        var winner = new MessageRecord(winnerId, context.Conversation.Id, context.Record.Id,
+            await context.Turns.ReserveMessageSequenceAsync(context.Conversation.Id), MessageRole.Assistant,
+            "persisted winner", MessageStatus.Interrupted, now, now,
+            Segments: [new MessageSegmentRecord(winnerId, 0, MessageSegmentKind.Text, "persisted winner", null)]);
+        var turn = context.Record with { Status = ConversationTurnStatus.Failed, CompletedAtUtc = now, ErrorMessage = "already finalized" };
+        (await context.Turns.TryFinalizeTurnAsync(new ConversationTurnCommit(turn, [winner], []))).Should().BeTrue();
         await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "losing candidate"));
-
-        context.Session.Messages.Should().ContainSingle().Which.Should().Be(persistedMessage);
-        context.Session.ToolRuns.Should().ContainSingle().Which.Should().Be(persistedTool);
+        context.State.Messages.Where(item => item.Role == MessageRole.Assistant).Should().ContainSingle().Which.Id.Should().Be(winnerId);
+        context.State.Turns.Single().ErrorMessage.Should().Be("already finalized");
         context.Turn.Completed.Should().BeTrue();
     }
 
     [Fact]
     public async Task ApplyEventAsync_records_a_run_notice_as_a_notice_segment()
     {
-        var context = CreateContext();
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
         await context.ApplyAsync(new RunNoticeEvent("Hook 'alpha/a' failed (timedOut); ignored."));
         await context.ApplyAsync(new AssistantTextDeltaEvent("text", "answer"));
         await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "answer"));
-
-        var segments = context.Committer.Finalizations.Should().ContainSingle().Which.AssistantMessage.Segments!;
-        segments.Should().SatisfyRespectively(
-            segment => segment.Kind.Should().Be(MessageSegmentKind.Notice),
-            segment => segment.Kind.Should().Be(MessageSegmentKind.Text));
-        segments[0].Text.Should().Be("Hook 'alpha/a' failed (timedOut); ignored.");
-        context.Committer.Finalizations[0].AssistantMessage.MarkdownContent.Should().Be("answer");
+        (context.State.Messages.Last().Segments ?? []).Select(segment => segment.Kind).Should().Equal(MessageSegmentKind.Notice, MessageSegmentKind.Text);
+        context.State.Messages.Last().MarkdownContent.Should().Be("answer");
     }
 
     [Fact]
-    public async Task ApplyEventAsync_maps_a_blocked_run_to_a_blocked_message_with_its_reason()
+    public async Task ApplyEventAsync_records_a_blocked_turn_without_creating_an_assistant()
     {
-        var context = CreateContext();
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
-        await context.ApplyAsync(new RunCompletedEvent(
-            RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: "Blocked by hook 'alpha/a': no."));
-
-        var finalization = context.Committer.Finalizations.Should().ContainSingle().Which;
-        finalization.AssistantMessage.Status.Should().Be(MessageStatus.Blocked);
-        finalization.AssistantMessage.ErrorMessage.Should().Be("Blocked by hook 'alpha/a': no.");
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Blocked, null, "Blocked by hook 'alpha/a': no."));
+        context.State.Messages.Should().ContainSingle().Which.Role.Should().Be(MessageRole.User);
+        var turn = (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Single();
+        turn.Status.Should().Be(ConversationTurnStatus.Blocked);
+        turn.ErrorMessage.Should().Be("Blocked by hook 'alpha/a': no.");
+        turn.CompletedAtUtc.Should().NotBeNull();
     }
 
     [Fact]
     public async Task ApplyEventAsync_persists_a_tool_hook_outcome_and_maps_a_blocked_tool()
     {
-        var context = CreateContext();
-        var outcome = new ToolHookOutcome(
-            """{"value":"changed"}""",
-            [new HookSource("alpha", "a")],
-            [new HookSource("alpha", "b")],
-            new HookSource("alpha", "c"),
-            "stop",
-            [new HookFeedback(new HookSource("alpha", "d"), "note")],
-            []);
-
-        context.Recorder.BeginTurn(context.Session, context.Turn);
-        await context.ApplyAsync(new ToolCallStartedEvent(
-            "call-1", "write_file", "{}", ToolCallKind.Edit, ToolSourceKind.BuiltIn));
-        await context.ApplyAsync(new ToolCallCompletedEvent(
-            "call-1", ToolCallStatus.Blocked, "blocked", "blocked", outcome));
-        await context.ApplyAsync(new RunCompletedEvent(
-            RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: "stop"));
-
-        var finalization = context.Committer.Finalizations.Should().ContainSingle().Which;
-        finalization.ToolExecutions.Should().ContainSingle()
-            .Which.Status.Should().Be(ToolExecutionStatus.Blocked);
-        finalization.ToolExecutions[0].HookOutcome.Should().Be(outcome);
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var outcome = new ToolHookOutcome("""{"value":"changed"}""", [new HookSource("alpha", "a")],
+            [new HookSource("alpha", "b")], new HookSource("alpha", "c"), "stop",
+            [new HookFeedback(new HookSource("alpha", "d"), "note")], []);
+        await context.ApplyAsync(new ToolCallStartedEvent("call-1", "write_file", "{}", ToolCallKind.Edit));
+        await context.ApplyAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Blocked, "blocked", "blocked", outcome));
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Blocked, null, "stop"));
+        var tool = (await context.Conversations.ListToolExecutionsAsync(context.Conversation.Id)).Single();
+        tool.Status.Should().Be(ToolExecutionStatus.Blocked);
+        tool.HookOutcome.Should().BeEquivalentTo(outcome);
     }
 
-    private static RecorderTestContext CreateContext()
+    [Fact]
+    public async Task No_output_failure_persists_usage_on_the_turn_and_keeps_unknown_total()
     {
-        var now = DateTimeOffset.UtcNow;
-        var repository = new RecordingConversationRepository();
-        var conversation = new ConversationRecord(
-            Guid.NewGuid(),
-            "Conversation",
-            null,
-            ToolPermissionMode.RequireApproval,
-            "build",
-            now,
-            now);
-        var session = new ConversationRuntimeState(
-            conversation,
-            [],
-            []);
-        var turnId = Guid.NewGuid();
-        var turn = new AgentTurnState(turnId, new AgentRuntimeDefinition(
-            "build",
-            "Builder",
-            "test",
-            AgentExecutionMode.Direct,
-            AgentRuntimeDefinition.SystemToolPolicy,
-            [],
-            [],
-            [],
-            [],
-            string.Empty));
-        var recorder = new ConversationTurnRecorder(
-            repository,
-            TimeProvider.System,
-            NullLogger<ConversationTurnRecorder>.Instance);
-        return new RecorderTestContext(
-            turnId,
-            repository,
-            session,
-            turn,
-            recorder,
-            new RecordingCommitter());
-    }
-
-
-    private sealed record RecorderTestContext(
-        Guid TurnId,
-        RecordingConversationRepository Repository,
-        ConversationRuntimeState Session,
-        AgentTurnState Turn,
-        ConversationTurnRecorder Recorder,
-        RecordingCommitter Committer)
-    {
-        public Task ApplyAsync(AgentStreamEvent streamEvent)
-            => Recorder.ApplyEventAsync(
-                Session,
-                Turn,
-                streamEvent,
-                Committer,
-                CancellationToken.None);
-    }
-
-    private sealed class RecordingCommitter : IRecordedTurnCommitter
-    {
-        public List<TurnFinalization> Finalizations { get; } = [];
-
-        public bool WriteResult { get; set; } = true;
-
-        public Task<bool> TryCommitAsync(RecordedTurnCommit commit)
-        {
-            Finalizations.Add(commit.Finalization);
-            return Task.FromResult(WriteResult);
-        }
-    }
-
-    private sealed class RecordingConversationRepository : IConversationRepository
-    {
-        public List<ToolExecutionRecord> ToolUpserts { get; } = [];
-
-        public IReadOnlyList<MessageRecord> MessagesToRead { get; set; } = [];
-
-        public IReadOnlyList<ToolExecutionRecord> ToolExecutionsToRead { get; set; } = [];
-
-        public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<ConversationRecord>> ListConversationsAsync(
-            CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<ConversationRecord>>([]);
-
-        public Task<ConversationRecord?> GetConversationAsync(
-            Guid conversationId,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult<ConversationRecord?>(null);
-
-        public Task<ConversationRecord> UpsertConversationAsync(
-            ConversationRecord conversation,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(conversation);
-
-        public Task DeleteConversationAsync(
-            Guid conversationId,
-            CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
-
-        public Task<IReadOnlyList<MessageRecord>> ListMessagesAsync(
-            Guid conversationId,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(MessagesToRead);
-
-        public Task<MessageRecord> UpsertMessageAsync(
-            MessageRecord message,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(message);
-
-        public Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(
-            Guid conversationId,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(ToolExecutionsToRead);
-
-        public Task<ToolExecutionRecord> UpsertToolExecutionAsync(
-            ToolExecutionRecord record,
-            CancellationToken cancellationToken = default)
-        {
-            ToolUpserts.Add(record);
-            return Task.FromResult(record);
-        }
-
-
-
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        await context.ApplyAsync(new UsageReportedEvent(new TurnUsage(InputTokens: 3, OutputTokens: 4, TotalTokens: null)));
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Failed, null, "no response"));
+        context.State.Messages.Should().ContainSingle();
+        var turn = (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Single();
+        turn.Usage?.TotalTokens.Should().BeNull();
+        turn.Usage?.InputTokens.Should().Be(3);
+        turn.Status.Should().Be(ConversationTurnStatus.Failed);
+        (await context.ScalarAsync("SELECT total_tokens FROM turn_usage")).Should().Be(DBNull.Value);
     }
 }

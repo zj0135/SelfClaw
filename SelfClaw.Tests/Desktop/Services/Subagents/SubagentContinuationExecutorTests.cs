@@ -1,6 +1,3 @@
-using SelfClaw.Desktop.Services.Notifications;
-using SelfClaw.Desktop.Services.Settings;
-using SelfClaw.Desktop.Services.Tools;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -8,232 +5,119 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Desktop.Services.AgentActivity;
-using SelfClaw.Desktop.Services.ProgrammingAssistant;
+using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Runtime;
-using SelfClaw.Desktop.Services.Runtime.Abstractions;
 using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
-using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
-using SelfClaw.Infrastructure.Data.Sqlite;
-using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
-using SelfClaw.Infrastructure.Options;
 using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Desktop.Services.Subagents;
 
-public sealed class SubagentContinuationExecutorTests : IDisposable
+public sealed class SubagentContinuationExecutorTests
 {
-    private readonly string _rootPath = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
-
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExecuteAsync_truncation_retries_without_tools_and_dead_letters_with_tools(bool hasTool)
+    [InlineData(RunCompletionStatus.Truncated, false)]
+    [InlineData(RunCompletionStatus.Truncated, true)]
+    [InlineData(RunCompletionStatus.Blocked, false)]
+    [InlineData(RunCompletionStatus.Blocked, true)]
+    public async Task Continuation_preserves_actual_turn_status_and_only_persists_with_atomic_delivery(
+        RunCompletionStatus completion, bool hasTool)
     {
-        var paths = StoragePathDefaults.Create(_rootPath, Path.Combine(_rootPath, "continuation.db"), Path.Combine(_rootPath, "secrets"));
-        var database = new SqliteDatabase(paths);
-        var conversations = new SqliteConversationRepository(database);
-        var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
-        var deliveries = new SqliteSubagentDeliveryRepository(database);
-        await tasks.InitializeAsync();
-        var task = await SubagentTaskTestData.CreateRunningTaskAsync(conversations, tasks);
-        var now = DateTimeOffset.UtcNow;
-        var childMessage = new MessageRecord(task.ChildTurnId, task.ChildConversationId, MessageRole.Assistant,
-            "child result", MessageStatus.Completed, now, now);
-        await tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Running,
-            new SubagentTaskCompletion(SubagentTaskStatus.Succeeded, new TurnFinalization(childMessage, []),
-                "child result", null, null, now));
-        var parent = await conversations.GetConversationAsync(task.ParentConversationId)
+        using var context = new SubagentActivityTestContext();
+        var task = await context.CreateTaskAsync();
+        await CompleteChildAsync(context, task);
+        var parent = await context.Conversations.GetConversationAsync(task.ParentConversationId)
             ?? throw new InvalidOperationException("Missing parent.");
-        var approvalHandler = new DesktopToolApprovalHandler();
-        using var activity = new AgentActivityCoordinator(approvalHandler, NullLogger<AgentActivityCoordinator>.Instance);
-        using var sessions = new ConversationSessionCoordinator(conversations, new NoOpTranscriptChangeSink());
-        var notifications = new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance);
-        var runtime = new TruncatedRuntime(hasTool);
-        var recorder = new ConversationTurnRecorder(conversations, NullLogger<ConversationTurnRecorder>.Instance);
-        using var engine = new ConversationTurnEngine(
-            conversations, new DesktopTurnFinalizer(conversations, NullLogger<DesktopTurnFinalizer>.Instance),
-            recorder, runtime, sessions, activity, approvalHandler,
-            SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(new DesktopSettingsJsonStore(paths)),
-            new NullCompletionNotifier(), NullLogger<ConversationTurnEngine>.Instance);
-        var executor = new SubagentContinuationExecutor(deliveries, runtime, recorder, approvalHandler,
-            new SubagentTaskSnapshotSerializer(), new SubagentCompletionBatchSerializer(), engine, notifications,
-            NullLogger<SubagentContinuationExecutor>.Instance);
-
-        var expectedAttempts = hasTool ? 1 : 3;
-        for (var attempt = 1; attempt <= expectedAttempts; attempt++)
+        var deliveries = new SqliteSubagentDeliveryRepository(context.Database);
+        using var runs = new ConversationRunCoordinator(context.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var sessions = new ConversationSessionCoordinator(context.Conversations, context.Turns, runs, new Sink());
+        var runtime = new TerminalRuntime(completion, hasTool, async request =>
         {
+            (await context.Turns.ListTurnsAsync(parent.Id)).Should().NotContain(turn => turn.Id == request.TurnId);
+            (await context.Conversations.ListMessagesAsync(parent.Id)).Should().NotContain(message => message.TurnId == request.TurnId);
+        });
+        var executor = new SubagentContinuationExecutor(deliveries, runtime, context.Recorder, context.Approvals,
+            new SubagentTaskSnapshotSerializer(), new SubagentCompletionBatchSerializer(), runs, sessions,
+            new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance), NullLogger<SubagentContinuationExecutor>.Instance);
+        var attempts = completion == RunCompletionStatus.Truncated && !hasTool ? 3 : 1;
+        var now = DateTimeOffset.UtcNow;
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            var handle = await runs.TryReserveContinuationAsync(parent) ?? throw new InvalidOperationException("Reservation rejected.");
             var leaseAt = now.AddMinutes(attempt);
-            var mailbox = await deliveries.PeekReadyMailboxAsync(leaseAt, leaseAt)
-                ?? throw new InvalidOperationException("Missing ready mailbox.");
-            var lease = await deliveries.TryLeaseBatchAsync(mailbox, Guid.NewGuid(), Guid.NewGuid(),
-                leaseAt, leaseAt.AddSeconds(45), 64 * 1024)
+            var mailbox = await deliveries.PeekReadyMailboxAsync(leaseAt, leaseAt) ?? throw new InvalidOperationException("Missing mailbox.");
+            var lease = await deliveries.TryLeaseBatchAsync(mailbox, Guid.NewGuid(), handle.TurnId, leaseAt, leaseAt.AddSeconds(45), 64 * 1024)
                 ?? throw new InvalidOperationException("Missing lease.");
-            var state = await engine.TryAdmitContinuationAsync(parent, CancellationToken.None)
-                ?? throw new InvalidOperationException("Continuation admission failed.");
-            await executor.ExecuteAsync(parent, state, lease, CancellationToken.None);
-            var delivery = await tasks.GetDeliveryAsync(parent.Id, task.Id)
-                ?? throw new InvalidOperationException("Missing delivery.");
-            delivery.Status.Should().Be(attempt == expectedAttempts ? SubagentDeliveryStatus.DeadLetter : SubagentDeliveryStatus.Pending);
+            await executor.ExecuteAsync(parent, handle, lease, CancellationToken.None);
+            await handle.Completion;
+            var delivery = await context.Tasks.GetDeliveryAsync(parent.Id, task.Id) ?? throw new InvalidOperationException();
+            delivery.Status.Should().Be(attempt == attempts ? SubagentDeliveryStatus.DeadLetter : SubagentDeliveryStatus.Pending);
             delivery.AttemptCount.Should().Be(attempt);
-            delivery.LastError.Should().Contain("output limit");
+            delivery.LastError.Should().Contain(completion == RunCompletionStatus.Blocked ? "Blocked by hook" : "output limit");
         }
-
-        runtime.Runs.Should().Be(expectedAttempts);
+        runtime.Runs.Should().Be(attempts);
         runtime.ToolCalls.Should().Be(hasTool ? 1 : 0);
-        (await deliveries.PeekReadyMailboxAsync(now.AddHours(1), now.AddHours(1))).Should().BeNull();
-        var messages = await conversations.ListMessagesAsync(parent.Id);
+        runs.IsRunning(parent.Id).Should().BeFalse();
+        var turns = (await context.Turns.ListTurnsAsync(parent.Id)).Where(turn => turn.Origin == DirectTurnOrigin.Continuation).ToArray();
+        var messages = (await context.Conversations.ListMessagesAsync(parent.Id)).Where(message => turns.Any(turn => turn.Id == message.TurnId)).ToArray();
         if (hasTool)
         {
+            var turn = turns.Should().ContainSingle().Which;
+            turn.Status.Should().Be(completion == RunCompletionStatus.Blocked ? ConversationTurnStatus.Blocked : ConversationTurnStatus.Truncated);
             var assistant = messages.Should().ContainSingle().Which;
-            assistant.Status.Should().Be(MessageStatus.Failed);
+            assistant.Id.Should().NotBe(turn.Id);
+            assistant.TurnId.Should().Be(turn.Id);
             assistant.MarkdownContent.Should().Be("partial answer");
-            assistant.Segments.Should().Contain(segment => segment.Kind == MessageSegmentKind.Thinking);
-            (await conversations.ListToolExecutionsAsync(parent.Id)).Should().ContainSingle()
-                .Which.Status.Should().Be(ToolExecutionStatus.Completed);
+            (await context.Conversations.ListToolExecutionsAsync(parent.Id)).Where(tool => tool.MessageId == assistant.Id)
+                .Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Completed);
         }
         else
         {
+            turns.Should().BeEmpty();
             messages.Should().BeEmpty();
         }
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExecuteAsync_blocked_hook_dead_letters_without_retrying(bool hasTool)
+    private static async Task CompleteChildAsync(SubagentActivityTestContext context, SubagentTaskRecord task)
     {
-        var paths = StoragePathDefaults.Create(_rootPath, Path.Combine(_rootPath, "blocked.db"), Path.Combine(_rootPath, "secrets"));
-        var database = new SqliteDatabase(paths);
-        var conversations = new SqliteConversationRepository(database);
-        var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
-        var deliveries = new SqliteSubagentDeliveryRepository(database);
-        await tasks.InitializeAsync();
-        var task = await SubagentTaskTestData.CreateRunningTaskAsync(conversations, tasks);
-        var now = DateTimeOffset.UtcNow;
-        var childMessage = new MessageRecord(task.ChildTurnId, task.ChildConversationId, MessageRole.Assistant,
-            "child result", MessageStatus.Completed, now, now);
-        await tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Running,
-            new SubagentTaskCompletion(SubagentTaskStatus.Succeeded, new TurnFinalization(childMessage, []),
-                "child result", null, null, now));
-        var parent = await conversations.GetConversationAsync(task.ParentConversationId)
-            ?? throw new InvalidOperationException("Missing parent.");
-        var approvalHandler = new DesktopToolApprovalHandler();
-        using var activity = new AgentActivityCoordinator(approvalHandler, NullLogger<AgentActivityCoordinator>.Instance);
-        using var sessions = new ConversationSessionCoordinator(conversations, new NoOpTranscriptChangeSink());
-        var notifications = new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance);
-        var runtime = new BlockedRuntime(hasTool);
-        var recorder = new ConversationTurnRecorder(conversations, NullLogger<ConversationTurnRecorder>.Instance);
-        using var engine = new ConversationTurnEngine(
-            conversations, new DesktopTurnFinalizer(conversations, NullLogger<DesktopTurnFinalizer>.Instance),
-            recorder, runtime, sessions, activity, approvalHandler,
-            SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(new DesktopSettingsJsonStore(paths)),
-            new NullCompletionNotifier(), NullLogger<ConversationTurnEngine>.Instance);
-        var executor = new SubagentContinuationExecutor(deliveries, runtime, recorder, approvalHandler,
-            new SubagentTaskSnapshotSerializer(), new SubagentCompletionBatchSerializer(), engine, notifications,
-            NullLogger<SubagentContinuationExecutor>.Instance);
-
-        var leaseAt = now.AddMinutes(1);
-        var mailbox = await deliveries.PeekReadyMailboxAsync(leaseAt, leaseAt)
-            ?? throw new InvalidOperationException("Missing ready mailbox.");
-        var lease = await deliveries.TryLeaseBatchAsync(mailbox, Guid.NewGuid(), Guid.NewGuid(),
-            leaseAt, leaseAt.AddSeconds(45), 64 * 1024)
-            ?? throw new InvalidOperationException("Missing lease.");
-        var state = await engine.TryAdmitContinuationAsync(parent, CancellationToken.None)
-            ?? throw new InvalidOperationException("Continuation admission failed.");
-        await executor.ExecuteAsync(parent, state, lease, CancellationToken.None);
-
-        var delivery = await tasks.GetDeliveryAsync(parent.Id, task.Id)
-            ?? throw new InvalidOperationException("Missing delivery.");
-        delivery.Status.Should().Be(SubagentDeliveryStatus.DeadLetter);
-        delivery.AttemptCount.Should().Be(1);
-        delivery.LastError.Should().Contain("Blocked by hook 'alpha/a'");
-        runtime.Runs.Should().Be(1);
-        (await deliveries.PeekReadyMailboxAsync(now.AddHours(1), now.AddHours(1))).Should().BeNull();
-        var messages = await conversations.ListMessagesAsync(parent.Id);
-        if (hasTool)
-        {
-            messages.Should().ContainSingle().Which.Status.Should().Be(MessageStatus.Failed);
-        }
-        else
-        {
-            messages.Should().BeEmpty();
-        }
+        var turn = (await context.Turns.ListTurnsAsync(task.ChildConversationId)).Single(turn => turn.Id == task.ChildTurnId);
+        var completedAt = DateTimeOffset.UtcNow;
+        var message = new MessageRecord(Guid.NewGuid(), task.ChildConversationId, turn.Id,
+            await context.Turns.ReserveMessageSequenceAsync(task.ChildConversationId), MessageRole.Assistant,
+            "child result", MessageStatus.Sealed, completedAt, completedAt);
+        await context.Tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Running,
+            new SubagentTaskCompletion(SubagentTaskStatus.Succeeded,
+                new(turn with { Status = ConversationTurnStatus.Succeeded, CompletedAtUtc = completedAt }, [message], []),
+                "child result", null, null, completedAt));
     }
 
-    public void Dispose()
+    private sealed class TerminalRuntime(RunCompletionStatus status, bool hasTool, Func<ChatTurnRequest, Task> verifyDetached) : IAgentChatRuntime
     {
-        if (Directory.Exists(_rootPath))
-        {
-            try
-            {
-                Directory.Delete(_rootPath, recursive: true);
-            }
-            catch (IOException)
-            {
-            }
-        }
-    }
-
-    private sealed class TruncatedRuntime(bool hasTool) : IAgentChatRuntime
-    {
-        internal int Runs { get; private set; }
-        internal int ToolCalls { get; private set; }
-
-        public async IAsyncEnumerable<AgentStreamEvent> StreamTurnAsync(
-            ChatTurnRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        public int Runs { get; private set; }
+        public int ToolCalls { get; private set; }
+        public async IAsyncEnumerable<AgentStreamEvent> StreamTurnAsync(ChatTurnRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             Runs++;
+            var direct = (DirectChatTurnRequest)request;
+            direct.InputSession.Should().BeNull();
+            await verifyDetached(request);
             yield return new AssistantThinkingDeltaEvent("thinking", "analysis");
             yield return new AssistantTextDeltaEvent("text", "partial answer");
             if (hasTool)
             {
-                var direct = (DirectChatTurnRequest)request;
                 var checkpoint = direct.ToolExecutionCheckpoint ?? throw new InvalidOperationException("Missing checkpoint.");
                 await checkpoint.BeforeExecutionAsync(cancellationToken);
                 ToolCalls++;
-                yield return new ToolCallStartedEvent("call-1", "write_file", "{}", ToolCallKind.Edit, ToolSourceKind.BuiltIn);
-                yield return new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "written", "done");
+                yield return new ToolCallStartedEvent("call", "write_file", "{}", ToolCallKind.Edit, ToolSourceKind.BuiltIn);
+                yield return new ToolCallCompletedEvent("call", ToolCallStatus.Completed, "written", "done");
             }
-
-            await Task.Yield();
-            yield return new RunCompletedEvent(RunCompletionStatus.Truncated, "partial answer");
+            await verifyDetached(request);
+            yield return new RunCompletedEvent(status, "partial answer", status == RunCompletionStatus.Blocked ? "Blocked by hook 'alpha/a': no." : null);
         }
     }
 
-    private sealed class BlockedRuntime(bool hasTool) : IAgentChatRuntime
-    {
-        internal int Runs { get; private set; }
-
-        public async IAsyncEnumerable<AgentStreamEvent> StreamTurnAsync(
-            ChatTurnRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            Runs++;
-            if (hasTool)
-            {
-                var direct = (DirectChatTurnRequest)request;
-                var checkpoint = direct.ToolExecutionCheckpoint ?? throw new InvalidOperationException("Missing checkpoint.");
-                await checkpoint.BeforeExecutionAsync(cancellationToken);
-                yield return new ToolCallStartedEvent("call-1", "write_file", "{}", ToolCallKind.Edit, ToolSourceKind.BuiltIn);
-                yield return new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "written", "done");
-            }
-
-            await Task.Yield();
-            yield return new RunCompletedEvent(
-                RunCompletionStatus.Blocked,
-                FinalText: null,
-                ErrorMessage: "Blocked by hook 'alpha/a': no.");
-        }
-    }
-
-    private sealed class NullCompletionNotifier : IConversationCompletionNotifier
-    {
-        public void Notify(ConversationRecord conversation, IReadOnlyList<MessageRecord> messages) { }
-    }
-
-    private sealed class NoOpTranscriptChangeSink : ITranscriptChangeSink
+    private sealed class Sink : ITranscriptChangeSink
     {
         public void RequestStreamingPublish(bool autoScroll) { }
         public void PublishNow(bool autoScroll) { }

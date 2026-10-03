@@ -1,479 +1,229 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
+using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Desktop.Services.Runtime;
 
 public sealed class ConversationSessionCoordinatorTests
 {
-    [Fact]
-    public async Task Shutdown_cancels_then_waits_for_terminal_state_and_release()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Failed_or_cancelled_load_is_evicted_so_preparation_can_retry(bool cancel)
     {
-        var conversation = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository();
-        repository.CompleteMessages(conversation.Id, []);
-        repository.CompleteToolRuns(conversation.Id, []);
-        using var coordinator = CreateCoordinator(repository);
-        await coordinator.SelectAsync(conversation.Id);
-        var state = await coordinator.StartTurnAsync(conversation);
-        var shutdown = coordinator.StopAsync(CancellationToken.None);
-        state.CancellationTokenSource.IsCancellationRequested.Should().BeTrue();
-        shutdown.IsCompleted.Should().BeFalse();
-        state.ReplaceMessage(CreateMessage(conversation.Id, "terminal committed"));
-        coordinator.CompleteTurn(state);
-        await shutdown;
-        coordinator.IsRunning(conversation.Id).Should().BeFalse();
-        coordinator.SelectedMessages.Should().ContainSingle().Which.MarkdownContent.Should().Be("terminal committed");
-        await FluentActions.Awaiting(() => coordinator.StartTurnAsync(conversation)).Should().ThrowAsync<ObjectDisposedException>();
+        using var context = new Context();
+        var conversation = Conversation();
+        var pending = context.Sessions.PrepareRuntimeStateAsync(conversation, false);
+        if (cancel) context.Repository.Source(conversation.Id).SetCanceled();
+        else context.Repository.Source(conversation.Id).SetException(new IOException("temporary"));
+        if (cancel) await FluentActions.Awaiting(() => pending).Should().ThrowAsync<OperationCanceledException>();
+        else await FluentActions.Awaiting(() => pending).Should().ThrowAsync<IOException>();
+        context.Repository.Reset(conversation.Id);
+        context.Repository.Source(conversation.Id).SetResult([Message(conversation.Id, "recovered")]);
+        var state = await context.Sessions.PrepareRuntimeStateAsync(conversation, false);
+        state.Messages.Single().MarkdownContent.Should().Be("recovered");
+        context.Repository.Reads[conversation.Id].Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Cancelling_one_preparation_waiter_does_not_cancel_a_shared_selection_load()
+    {
+        using var context = new Context();
+        var conversation = Conversation();
+        var selection = context.Sessions.SelectAsync(conversation.Id);
+        using var cancellation = new CancellationTokenSource();
+        var preparation = context.Sessions.PrepareRuntimeStateAsync(conversation, false, cancellation.Token);
+        cancellation.Cancel();
+        await FluentActions.Awaiting(() => preparation).Should().ThrowAsync<OperationCanceledException>();
+        context.Repository.Source(conversation.Id).SetResult([Message(conversation.Id, "shared")]);
+        await selection;
+        context.Sessions.SelectedMessages.Single().MarkdownContent.Should().Be("shared");
+        context.Repository.Reads[conversation.Id].Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Selection_clears_old_content_and_never_crosses_a_preparing_runs_identity()
+    {
+        using var context = new Context();
+        var first = Conversation();
+        var second = Conversation();
+        context.Repository.Source(first.Id).SetResult([Message(first.Id, "first")]);
+        await context.Sessions.SelectAsync(first.Id);
+        var preparation = context.Sessions.PrepareRuntimeStateAsync(first, false);
+        var selection = context.Sessions.SelectAsync(second.Id);
+        context.Sessions.SelectedMessages.Should().BeEmpty();
+        context.Repository.Source(second.Id).SetResult([Message(second.Id, "second")]);
+        await selection;
+        (await preparation).Messages.Single().MarkdownContent.Should().Be("first");
+        context.Sessions.SelectedMessages.Single().MarkdownContent.Should().Be("second");
+    }
+
+    [Fact]
+    public async Task Only_the_selected_completed_transcript_is_cached()
+    {
+        using var context = new Context();
+        var conversations = Enumerable.Range(0, 12).Select(_ => Conversation()).ToArray();
+        foreach (var conversation in conversations)
+        {
+            context.Repository.Source(conversation.Id).SetResult([Message(conversation.Id, "history")]);
+            await context.Sessions.SelectAsync(conversation.Id);
+        }
+        await context.Sessions.PrepareRuntimeStateAsync(conversations[^1], false);
+        context.Repository.Reads[conversations[^1].Id].Should().Be(1);
+        await context.Sessions.PrepareRuntimeStateAsync(conversations[0], false);
+        context.Repository.Reads[conversations[0].Id].Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_preparing_reservation_does_not_invalidate_the_pending_selected_history()
+    {
+        using var context = new Context();
+        var conversation = Conversation();
+        var selection = context.Sessions.SelectAsync(conversation.Id);
+        var handle = context.Reserve(conversation);
+        context.Runs.Stop(conversation.Id);
+        context.Runs.Complete(handle, false);
+        context.Repository.Source(conversation.Id).SetResult([Message(conversation.Id, "history")]);
+        await selection;
+        context.Sessions.SelectedMessages.Single().MarkdownContent.Should().Be("history");
+        context.Sessions.IsSelectedRunning.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Preparing_reservation_is_busy_before_transcript_state_exists()
+    {
+        using var context = new Context();
+        var conversation = Conversation();
+        context.Repository.Source(conversation.Id).SetResult([]);
+        await context.Sessions.SelectAsync(conversation.Id);
+        var handle = context.Reserve(conversation);
+        context.Sessions.IsSelectedRunning.Should().BeTrue();
+        handle.RuntimeState.Should().BeNull();
+        context.Runs.Complete(handle, false);
+        context.Sessions.IsSelectedRunning.Should().BeFalse();
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Failed_or_cancelled_load_is_evicted_so_start_can_retry(bool cancelLoad)
+    public async Task Detached_completion_either_keeps_committed_content_or_restores_initial_snapshot(bool committed)
     {
-        var conversation = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository();
-        using var coordinator = CreateCoordinator(repository);
-        var first = coordinator.StartTurnAsync(conversation);
-        if (cancelLoad) repository.CancelMessages(conversation.Id);
-        else repository.FailMessages(conversation.Id, new IOException("temporary read failure"));
-        repository.CompleteToolRuns(conversation.Id, []);
-        Func<Task> failure = () => first;
-        if (cancelLoad) await failure.Should().ThrowAsync<OperationCanceledException>();
-        else await failure.Should().ThrowAsync<IOException>();
-        repository.ResetMessages(conversation.Id);
-        repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "recovered")]);
-
-        var state = await coordinator.StartTurnAsync(conversation);
-
-        state.Messages.Should().ContainSingle().Which.MarkdownContent.Should().Be("recovered");
-        repository.MessageReads[conversation.Id].Should().Be(2);
-        coordinator.AbandonTurn(state);
-    }
-
-    [Fact]
-    public async Task Cancelling_a_waiter_does_not_cancel_the_shared_load()
-    {
-        var conversation = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository();
-        using var coordinator = CreateCoordinator(repository);
-        using var cancellation = new CancellationTokenSource();
-        var cancelled = coordinator.StartTurnAsync(conversation, cancellation.Token);
-        cancellation.Cancel();
-        await FluentActions.Awaiting(() => cancelled).Should().ThrowAsync<OperationCanceledException>();
-        var retry = coordinator.StartTurnAsync(conversation);
-        repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "shared")]);
-        repository.CompleteToolRuns(conversation.Id, []);
-
-        var state = await retry;
-
-        state.Messages.Should().ContainSingle().Which.MarkdownContent.Should().Be("shared");
-        repository.MessageReads[conversation.Id].Should().Be(1);
-        coordinator.AbandonTurn(state);
-    }
-
-    [Fact]
-    public async Task Only_the_selected_completed_transcript_is_retained()
-    {
-        var repository = new ControlledConversationRepository();
-        using var coordinator = CreateCoordinator(repository);
-        var conversations = Enumerable.Range(0, 40).Select(_ => CreateConversation(Guid.NewGuid())).ToArray();
-        foreach (var conversation in conversations)
-        {
-            repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "history")]);
-            repository.CompleteToolRuns(conversation.Id, []);
-            await coordinator.SelectAsync(conversation.Id);
-        }
-
-        var selected = await coordinator.StartTurnAsync(conversations[^1]);
-        repository.MessageReads[conversations[^1].Id].Should().Be(1);
-        coordinator.AbandonTurn(selected);
-        var old = await coordinator.StartTurnAsync(conversations[0]);
-        repository.MessageReads[conversations[0].Id].Should().Be(2, "completed off-screen loads must not become a permanent content cache");
-        coordinator.AbandonTurn(old);
-    }
-
-    [Fact]
-    public async Task SelectAsync_clears_the_previous_transcript_while_the_next_conversation_loads()
-    {
-        var firstConversationId = Guid.NewGuid();
-        var secondConversationId = Guid.NewGuid();
-        var repository = new ControlledConversationRepository();
-        repository.CompleteMessages(firstConversationId, [CreateMessage(firstConversationId, "first")]);
-        repository.CompleteToolRuns(firstConversationId, []);
-        var coordinator = CreateCoordinator(repository);
-
-        await coordinator.SelectAsync(firstConversationId);
-        var secondSelection = coordinator.SelectAsync(secondConversationId);
-
-        coordinator.SelectedMessages.Should().BeEmpty();
-
-        repository.CompleteMessages(secondConversationId, [CreateMessage(secondConversationId, "second")]);
-        repository.CompleteToolRuns(secondConversationId, []);
-        await secondSelection;
-
-        coordinator.SelectedMessages.Should().ContainSingle()
-            .Which.MarkdownContent.Should().Be("second");
-    }
-
-    [Fact]
-    public async Task SelectAsync_requests_bottom_alignment_for_the_selected_conversation()
-    {
-        var conversationId = Guid.NewGuid();
-        var repository = new ControlledConversationRepository();
-        repository.CompleteMessages(conversationId, [CreateMessage(conversationId, "history")]);
-        repository.CompleteToolRuns(conversationId, []);
-        var sink = new RecordingTranscriptChangeSink();
-        using var coordinator = new ConversationSessionCoordinator(repository, sink);
-
-        await coordinator.SelectAsync(conversationId);
-
-        sink.ImmediatePublishes.Should().Equal(true, true);
-    }
-
-    [Fact]
-    public async Task StartTurnAsync_uses_only_the_selected_conversations_loaded_history()
-    {
-        var firstConversationId = Guid.NewGuid();
-        var secondConversationId = Guid.NewGuid();
-        var repository = new ControlledConversationRepository();
-        repository.CompleteMessages(firstConversationId, [CreateMessage(firstConversationId, "first")]);
-        repository.CompleteToolRuns(firstConversationId, []);
-        repository.CompleteMessages(secondConversationId, [CreateMessage(secondConversationId, "second")]);
-        repository.CompleteToolRuns(secondConversationId, []);
-        var coordinator = CreateCoordinator(repository);
-
-        await coordinator.SelectAsync(firstConversationId);
-        await coordinator.SelectAsync(secondConversationId);
-        var state = await coordinator.StartTurnAsync(CreateConversation(secondConversationId));
-
-        state.Messages.Should().ContainSingle()
-            .Which.MarkdownContent.Should().Be("second");
-        state.Messages.Should().OnlyContain(message => message.ConversationId == secondConversationId);
-    }
-
-    [Fact]
-    public async Task StartTurnAsync_rejects_a_second_running_turn_for_the_same_conversation()
-    {
-        var conversation = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository();
-        repository.CompleteMessages(conversation.Id, []);
-        repository.CompleteToolRuns(conversation.Id, []);
-        var coordinator = CreateCoordinator(repository);
-        await coordinator.SelectAsync(conversation.Id);
-        await coordinator.StartTurnAsync(conversation);
-
-        Func<Task> action = () => coordinator.StartTurnAsync(conversation);
-
-        await action.Should().ThrowAsync<InvalidOperationException>();
-    }
-
-    [Fact]
-    public async Task StartTurnAsync_keeps_the_submission_conversation_when_selection_changes_during_load()
-    {
-        var submittedConversationId = Guid.NewGuid();
-        var selectedConversationId = Guid.NewGuid();
-        var repository = new ControlledConversationRepository();
-        var coordinator = CreateCoordinator(repository);
-
-        var submittedSelection = coordinator.SelectAsync(submittedConversationId);
-        var startTurn = coordinator.StartTurnAsync(CreateConversation(submittedConversationId));
-        var nextSelection = coordinator.SelectAsync(selectedConversationId);
-
-        repository.CompleteMessages(
-            submittedConversationId,
-            [CreateMessage(submittedConversationId, "submitted")]);
-        repository.CompleteToolRuns(submittedConversationId, []);
-        repository.CompleteMessages(
-            selectedConversationId,
-            [CreateMessage(selectedConversationId, "selected")]);
-        repository.CompleteToolRuns(selectedConversationId, []);
-
-        await Task.WhenAll(submittedSelection, nextSelection);
-        var state = await startTurn;
-
-        state.ConversationId.Should().Be(submittedConversationId);
-        state.Messages.Should().ContainSingle()
-            .Which.MarkdownContent.Should().Be("submitted");
-        coordinator.IsSelected(selectedConversationId).Should().BeTrue();
-        coordinator.SelectedMessages.Should().ContainSingle()
-            .Which.MarkdownContent.Should().Be("selected");
-    }
-
-    [Fact]
-    public async Task StartTurnAsync_propagates_a_selected_transcript_load_failure()
-    {
-        var conversation = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository();
-        var coordinator = CreateCoordinator(repository);
-        var selection = coordinator.SelectAsync(conversation.Id);
-        var startTurn = coordinator.StartTurnAsync(conversation);
-
-        repository.FailMessages(conversation.Id, new InvalidOperationException("load failed"));
-        repository.CompleteToolRuns(conversation.Id, []);
-
-        await FluentActions.Awaiting(() => selection)
-            .Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("load failed");
-        await FluentActions.Awaiting(() => startTurn)
-            .Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("load failed");
-        coordinator.IsRunning(conversation.Id).Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task Selected_runtime_changes_publish_directly_through_the_transcript_sink()
-    {
-        var conversation = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository();
-        repository.CompleteMessages(conversation.Id, []);
-        repository.CompleteToolRuns(conversation.Id, []);
-        var sink = new RecordingTranscriptChangeSink();
-        var coordinator = new ConversationSessionCoordinator(repository, sink);
-
-        await coordinator.SelectAsync(conversation.Id);
-        var state = await coordinator.StartTurnAsync(conversation);
-        sink.ImmediatePublishes.Clear();
-
+        using var context = new Context();
+        var conversation = Conversation();
+        context.Repository.Source(conversation.Id).SetResult([Message(conversation.Id, "existing")]);
+        await context.Sessions.SelectAsync(conversation.Id);
+        var handle = context.Reserve(conversation, true);
+        var state = await context.Sessions.PrepareRuntimeStateAsync(conversation, true);
+        context.Runs.AttachState(handle, state);
+        state.ReplaceMessage(Message(conversation.Id, "provisional"));
+        context.Sink.Immediate.Clear();
         state.RaiseTranscriptChanged(false);
         state.RaiseTranscriptChanged(true);
-
-        sink.StreamingPublishes.Should().Equal(true);
-        sink.ImmediatePublishes.Should().Equal(true);
+        context.Sessions.SelectedMessages.Select(message => message.MarkdownContent).Should().Equal("existing", "provisional");
+        context.Sessions.IsSelectedContinuation.Should().BeTrue();
+        context.Sink.Streaming.Should().Equal(true);
+        context.Sink.Immediate.Should().Equal(true);
+        await context.Sessions.SelectAsync(conversation.Id);
+        context.Repository.Reads[conversation.Id].Should().Be(1);
+        context.Runs.Complete(handle, committed);
+        context.Sessions.SelectedMessages.Select(message => message.MarkdownContent)
+            .Should().Equal(committed ? ["existing", "provisional"] : ["existing"]);
+        context.Sessions.IsSelectedRunning.Should().BeFalse();
     }
 
     [Fact]
-    public async Task Detached_turn_streams_its_provisional_content_into_the_selected_transcript()
+    public async Task Offscreen_run_does_not_publish_or_replace_the_selected_snapshot()
     {
-        var conversation = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository();
-        repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "existing")]);
-        repository.CompleteToolRuns(conversation.Id, []);
-        var sink = new RecordingTranscriptChangeSink();
-        using var coordinator = new ConversationSessionCoordinator(repository, sink);
-
-        await coordinator.SelectAsync(conversation.Id);
-        sink.ImmediatePublishes.Clear();
-        sink.StreamingPublishes.Clear();
-        var detached = await coordinator.StartDetachedTurnAsync(conversation);
-        detached.ReplaceMessage(CreateMessage(conversation.Id, "provisional"));
-        detached.RaiseTranscriptChanged(immediate: false);
-        detached.RaiseTranscriptChanged(immediate: true);
-
-        coordinator.SelectedMessages.Select(message => message.MarkdownContent)
-            .Should().Equal("existing", "provisional");
-        coordinator.IsSelectedContinuation.Should().BeTrue();
-        coordinator.IsSelectedRunning.Should().BeTrue();
-        sink.StreamingPublishes.Should().Equal(true);
-        sink.ImmediatePublishes.Should().Equal(true);
-        coordinator.AbandonTurn(detached);
+        using var context = new Context();
+        var selected = Conversation();
+        var other = Conversation();
+        context.Repository.Source(selected.Id).SetResult([]);
+        context.Repository.Source(other.Id).SetResult([]);
+        await context.Sessions.SelectAsync(selected.Id);
+        context.Sink.Immediate.Clear();
+        var handle = context.Reserve(other, true);
+        var state = await context.Sessions.PrepareRuntimeStateAsync(other, true);
+        context.Runs.AttachState(handle, state);
+        state.ReplaceMessage(Message(other.Id, "provisional"));
+        state.RaiseTranscriptChanged(true);
+        context.Runs.Complete(handle, false);
+        context.Sessions.SelectedMessages.Should().BeEmpty();
+        context.Sink.Immediate.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task Abandoning_a_detached_turn_restores_the_pre_turn_transcript()
+    public void Turn_only_changes_invalidate_content_snapshots_without_creating_an_assistant()
     {
-        var conversation = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository();
-        repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "existing")]);
-        repository.CompleteToolRuns(conversation.Id, []);
-        var sink = new RecordingTranscriptChangeSink();
-        using var coordinator = new ConversationSessionCoordinator(repository, sink);
-
-        await coordinator.SelectAsync(conversation.Id);
-        var baseline = coordinator.SelectedMessages.ToArray();
-        var detached = await coordinator.StartDetachedTurnAsync(conversation);
-        detached.ReplaceMessage(CreateMessage(conversation.Id, "provisional"));
-        sink.ImmediatePublishes.Clear();
-
-        coordinator.AbandonTurn(detached);
-
-        // The attempt was never persisted, so a retry must not leave its content behind.
-        coordinator.SelectedMessages.Should().Equal(baseline);
-        coordinator.IsSelectedContinuation.Should().BeFalse();
-        coordinator.IsSelectedRunning.Should().BeFalse();
-        coordinator.IsRunning(conversation.Id).Should().BeFalse();
-        sink.ImmediatePublishes.Should().Equal(true);
+        var conversation = Conversation();
+        var turn = new ConversationTurnRecord(Guid.NewGuid(), conversation.Id, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Interactive, ConversationTurnStatus.Running, DateTimeOffset.UtcNow);
+        var state = new ConversationRuntimeState(conversation, [turn], [], []);
+        var before = state.CaptureSnapshot();
+        state.ReplaceTurn(turn with { Status = ConversationTurnStatus.Failed, ErrorMessage = "failed" });
+        var after = state.CaptureSnapshot();
+        after.Should().NotBeSameAs(before);
+        after.Messages.Should().BeEmpty();
+        after.Turns.Single().Status.Should().Be(ConversationTurnStatus.Failed);
     }
 
-    [Fact]
-    public async Task Reselecting_a_conversation_with_a_running_continuation_serves_the_provisional_transcript()
+    private static ConversationRecord Conversation()
+        => new(Guid.NewGuid(), "Conversation", null, ToolPermissionMode.RequireApproval, "build", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+    private static long _sequence;
+    private static MessageRecord Message(Guid conversationId, string text)
+        => new(Guid.NewGuid(), conversationId, Guid.NewGuid(), Interlocked.Increment(ref _sequence), MessageRole.User,
+            text, MessageStatus.Sealed, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+    private sealed class Context : IDisposable
     {
-        var conversation = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository();
-        repository.CompleteMessages(conversation.Id, [CreateMessage(conversation.Id, "existing")]);
-        repository.CompleteToolRuns(conversation.Id, []);
-        using var coordinator = CreateCoordinator(repository);
-
-        await coordinator.SelectAsync(conversation.Id);
-        var reads = repository.MessageReads[conversation.Id];
-        var detached = await coordinator.StartDetachedTurnAsync(conversation);
-        detached.ReplaceMessage(CreateMessage(conversation.Id, "provisional"));
-
-        await coordinator.SelectAsync(conversation.Id);
-
-        coordinator.SelectedMessages.Select(message => message.MarkdownContent)
-            .Should().Equal("existing", "provisional");
-        repository.MessageReads[conversation.Id].Should().Be(reads, "a live continuation is served from memory");
-        coordinator.AbandonTurn(detached);
+        public Context()
+        {
+            Runs = new(new EmptyConversationInputRepository(), NullLogger<ConversationRunCoordinator>.Instance);
+            Sessions = new(Repository, new RecordingConversationTurnRepository(), Runs, Sink);
+        }
+        public ControlledRepository Repository { get; } = new();
+        public Sink Sink { get; } = new();
+        public ConversationRunCoordinator Runs { get; }
+        public ConversationSessionCoordinator Sessions { get; }
+        public ConversationRunHandle Reserve(ConversationRecord conversation, bool detached = false)
+            => Runs.TryReserve(conversation.Id, AgentExecutionMode.Direct, detached ? DirectTurnOrigin.Continuation : DirectTurnOrigin.Interactive)
+                ?? throw new InvalidOperationException();
+        public void Dispose() { Sessions.Dispose(); Runs.Dispose(); }
     }
 
-    [Fact]
-    public async Task A_detached_turn_for_another_conversation_publishes_nothing()
+    private sealed class Sink : ITranscriptChangeSink
     {
-        var selected = CreateConversation(Guid.NewGuid());
-        var other = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository();
-        repository.CompleteMessages(selected.Id, []);
-        repository.CompleteToolRuns(selected.Id, []);
-        repository.CompleteMessages(other.Id, []);
-        repository.CompleteToolRuns(other.Id, []);
-        var sink = new RecordingTranscriptChangeSink();
-        using var coordinator = new ConversationSessionCoordinator(repository, sink);
-
-        await coordinator.SelectAsync(selected.Id);
-        sink.ImmediatePublishes.Clear();
-        sink.StreamingPublishes.Clear();
-        var detached = await coordinator.StartDetachedTurnAsync(other);
-        detached.ReplaceMessage(CreateMessage(other.Id, "provisional"));
-        detached.RaiseTranscriptChanged(immediate: true);
-        coordinator.AbandonTurn(detached);
-
-        coordinator.SelectedMessages.Should().BeEmpty();
-        sink.StreamingPublishes.Should().BeEmpty();
-        sink.ImmediatePublishes.Should().BeEmpty();
+        public List<bool> Immediate { get; } = [];
+        public List<bool> Streaming { get; } = [];
+        public void PublishNow(bool autoScroll) => Immediate.Add(autoScroll);
+        public void RequestStreamingPublish(bool autoScroll) => Streaming.Add(autoScroll);
     }
 
-    private static ConversationRecord CreateConversation(Guid id)
+    private sealed class ControlledRepository : IConversationRepository
     {
-        var now = DateTimeOffset.UtcNow;
-        return new ConversationRecord(
-            id,
-            "Conversation",
-            null,
-            ToolPermissionMode.RequireApproval,
-            "build",
-            now,
-            now);
-    }
-
-    private static ConversationSessionCoordinator CreateCoordinator(IConversationRepository repository)
-        => new(repository, new RecordingTranscriptChangeSink());
-
-    private sealed class RecordingTranscriptChangeSink : ITranscriptChangeSink
-    {
-        public List<bool> StreamingPublishes { get; } = [];
-
-        public List<bool> ImmediatePublishes { get; } = [];
-
-        public void RequestStreamingPublish(bool autoScroll)
-            => StreamingPublishes.Add(autoScroll);
-
-        public void PublishNow(bool autoScroll)
-            => ImmediatePublishes.Add(autoScroll);
-    }
-
-    private static MessageRecord CreateMessage(Guid conversationId, string content)
-    {
-        var now = DateTimeOffset.UtcNow;
-        return new MessageRecord(
-            Guid.NewGuid(),
-            conversationId,
-            MessageRole.User,
-            content,
-            MessageStatus.Completed,
-            now,
-            now);
-    }
-
-    private sealed class ControlledConversationRepository : IConversationRepository
-    {
-        private readonly Dictionary<Guid, TaskCompletionSource<IReadOnlyList<MessageRecord>>> _messages = [];
-        private readonly Dictionary<Guid, TaskCompletionSource<IReadOnlyList<ToolExecutionRecord>>> _toolRuns = [];
-
-        public Dictionary<Guid, int> MessageReads { get; } = [];
-
-        public void ResetMessages(Guid conversationId) => _messages.Remove(conversationId);
-
-        public void CancelMessages(Guid conversationId) => GetMessagesSource(conversationId).TrySetCanceled();
-
-        public void CompleteMessages(Guid conversationId, IReadOnlyList<MessageRecord> messages)
-            => GetMessagesSource(conversationId).TrySetResult(messages);
-
-        public void FailMessages(Guid conversationId, Exception exception)
-            => GetMessagesSource(conversationId).TrySetException(exception);
-
-        public void CompleteToolRuns(Guid conversationId, IReadOnlyList<ToolExecutionRecord> toolRuns)
-            => GetToolRunsSource(conversationId).TrySetResult(toolRuns);
-
+        private readonly Dictionary<Guid, TaskCompletionSource<IReadOnlyList<MessageRecord>>> _sources = [];
+        public Dictionary<Guid, int> Reads { get; } = [];
+        public TaskCompletionSource<IReadOnlyList<MessageRecord>> Source(Guid id)
+        {
+            if (!_sources.TryGetValue(id, out var source)) _sources.Add(id, source = new(TaskCreationOptions.RunContinuationsAsynchronously));
+            return source;
+        }
+        public void Reset(Guid id) => _sources.Remove(id);
         public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task<IReadOnlyList<ConversationRecord>> ListConversationsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<ConversationRecord>>([]);
-
-        public Task<ConversationRecord?> GetConversationAsync(
-            Guid conversationId,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult<ConversationRecord?>(null);
-
-        public Task<ConversationRecord> UpsertConversationAsync(
-            ConversationRecord conversation,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(conversation);
-
-        public Task DeleteConversationAsync(Guid conversationId, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
-
-        public Task<IReadOnlyList<MessageRecord>> ListMessagesAsync(
-            Guid conversationId,
-            CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<ConversationRecord>> ListConversationsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ConversationRecord>>([]);
+        public Task<ConversationRecord?> GetConversationAsync(Guid conversationId, CancellationToken cancellationToken = default) => Task.FromResult<ConversationRecord?>(null);
+        public Task<ConversationRecord> UpsertConversationAsync(ConversationRecord conversation, CancellationToken cancellationToken = default) => Task.FromResult(conversation);
+        public Task DeleteConversationAsync(Guid conversationId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<MessageRecord>> ListMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
         {
-            MessageReads[conversationId] = MessageReads.GetValueOrDefault(conversationId) + 1;
-            return GetMessagesSource(conversationId).Task.WaitAsync(cancellationToken);
+            Reads[conversationId] = Reads.GetValueOrDefault(conversationId) + 1;
+            return Source(conversationId).Task.WaitAsync(cancellationToken);
         }
-
-        public Task<MessageRecord> UpsertMessageAsync(
-            MessageRecord message,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(message);
-
-        public Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(
-            Guid conversationId,
-            CancellationToken cancellationToken = default)
-            => GetToolRunsSource(conversationId).Task.WaitAsync(cancellationToken);
-
-        public Task<ToolExecutionRecord> UpsertToolExecutionAsync(
-            ToolExecutionRecord record,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(record);
-
-
-
-
-        private TaskCompletionSource<IReadOnlyList<MessageRecord>> GetMessagesSource(Guid conversationId)
-        {
-            if (!_messages.TryGetValue(conversationId, out var source))
-            {
-                source = new TaskCompletionSource<IReadOnlyList<MessageRecord>>(
-                    TaskCreationOptions.RunContinuationsAsynchronously);
-                _messages[conversationId] = source;
-            }
-
-            return source;
-        }
-
-        private TaskCompletionSource<IReadOnlyList<ToolExecutionRecord>> GetToolRunsSource(Guid conversationId)
-        {
-            if (!_toolRuns.TryGetValue(conversationId, out var source))
-            {
-                source = new TaskCompletionSource<IReadOnlyList<ToolExecutionRecord>>(
-                    TaskCreationOptions.RunContinuationsAsynchronously);
-                _toolRuns[conversationId] = source;
-            }
-
-            return source;
-        }
+        public Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(Guid conversationId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ToolExecutionRecord>>([]);
     }
 }

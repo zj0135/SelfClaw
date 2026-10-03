@@ -44,6 +44,7 @@ internal sealed class DirectPromptComposer
 
     public IReadOnlyList<ChatMessage> BuildMessages(
         IReadOnlyList<MessageRecord> messages,
+        IReadOnlyList<ConversationTurnRecord> turns,
         IReadOnlyList<ToolExecutionRecord> toolExecutions,
         string agentInstructions,
         IReadOnlyList<string> systemInstructions,
@@ -54,6 +55,9 @@ internal sealed class DirectPromptComposer
         IReadOnlyList<HookContextSection>? hookContext = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(turns);
+        var turnsById = turns.ToDictionary(turn => turn.Id);
+        var orderedMessages = OrderAndValidateMessages(messages, turnsById);
         ArgumentNullException.ThrowIfNull(toolExecutions);
         ArgumentNullException.ThrowIfNull(systemInstructions);
         ArgumentNullException.ThrowIfNull(messageAdjustments);
@@ -77,8 +81,9 @@ internal sealed class DirectPromptComposer
             ? CreateCompletionBatchMessage(completionBatch, executionContext.Origin)
             : null;
         var hookContextMessage = CreateHookContextMessage(hookContext);
-        var latest = messages.LastOrDefault(IsReplayable);
-        var continuationMessage = latest is { Role: MessageRole.Assistant, Status: MessageStatus.Truncated }
+        var latest = orderedMessages.LastOrDefault(message => IsReplayable(message, turnsById[message.TurnId]));
+        var continuationMessage = latest is { Role: MessageRole.Assistant } &&
+                                  turnsById[latest.TurnId].Status == ConversationTurnStatus.Truncated
             ? new ChatMessage(ChatRole.User, ContinuationPrompt)
             : null;
 
@@ -101,7 +106,7 @@ internal sealed class DirectPromptComposer
             mandatory.Add(completionBatchMessage);
         }
 
-        var selectedUnits = BuildHistoryWithinBudget(messages, messageAdjustments, toolExecutions, BudgetFor(mandatory, tools, budget));
+        var selectedUnits = BuildHistoryWithinBudget(orderedMessages, turnsById, messageAdjustments, toolExecutions, BudgetFor(mandatory, tools, budget));
         result.InsertRange(historyStartIndex, selectedUnits.SelectMany(unit => unit.Messages));
         if (hookContextMessage is not null)
         {
@@ -218,8 +223,39 @@ internal sealed class DirectPromptComposer
         return tokens;
     }
 
+    private static IReadOnlyList<MessageRecord> OrderAndValidateMessages(
+        IReadOnlyList<MessageRecord> messages,
+        IReadOnlyDictionary<Guid, ConversationTurnRecord> turns)
+    {
+        var ordered = true;
+        for (var index = 1; index < messages.Count; index++)
+        {
+            if (messages[index - 1].Sequence >= messages[index].Sequence)
+            {
+                ordered = false;
+                break;
+            }
+        }
+
+        var result = ordered ? messages : messages.OrderBy(message => message.Sequence).ToArray();
+        long previousSequence = 0;
+        foreach (var message in result)
+        {
+            if (message.TurnId == Guid.Empty || message.Sequence <= previousSequence ||
+                !turns.TryGetValue(message.TurnId, out var turn) || turn.ConversationId != message.ConversationId)
+            {
+                throw new InvalidDataException("Conversation history requires explicit turn ownership and unique positive message sequences.");
+            }
+
+            previousSequence = message.Sequence;
+        }
+
+        return result;
+    }
+
     private static List<DirectPromptHistoryUnit> BuildHistoryWithinBudget(
         IReadOnlyList<MessageRecord> messages,
+        IReadOnlyDictionary<Guid, ConversationTurnRecord> turns,
         IReadOnlyDictionary<Guid, string> messageAdjustments,
         IReadOnlyList<ToolExecutionRecord> toolExecutions,
         long? budgetTokens)
@@ -228,35 +264,25 @@ internal sealed class DirectPromptComposer
         var recentTools = new Dictionary<Guid, ToolExecutionRecord>();
         var nextToolIndex = toolExecutions.Count - 1;
         var remaining = budgetTokens ?? long.MaxValue;
-        var skipPrecedingUser = false;
         for (var index = messages.Count - 1; index >= 0; index--)
         {
             var message = messages[index];
-            // A blocked turn's prompt must not be replayed: the content that was stopped before
-            // reaching a hook would otherwise be sent to the provider unchecked by the next turn.
-            if (message is { Role: MessageRole.Assistant, Status: MessageStatus.Blocked })
+            if (!IsReplayable(message, turns[message.TurnId]))
             {
-                skipPrecedingUser = true;
-                continue;
-            }
-
-            if (!IsReplayable(message))
-            {
-                continue;
-            }
-
-            if (message.Role == MessageRole.User && skipPrecedingUser)
-            {
-                skipPrecedingUser = false;
                 continue;
             }
 
             var markdown = messageAdjustments.GetValueOrDefault(message.Id) ?? message.MarkdownContent;
             var unit = message.Role == MessageRole.Assistant
-                ? BuildAssistantUnit(message, markdown, toolExecutions, recentTools, ref nextToolIndex)
+                ? BuildAssistantUnit(message, toolExecutions, recentTools, ref nextToolIndex)
                 : new DirectPromptHistoryUnit(
                     string.IsNullOrEmpty(markdown) ? [] : [new ChatMessage(ChatRole.User, markdown)],
                     PerMessageOverheadTokens + EstimateTokens(markdown));
+            if (unit.Messages.Count == 0)
+            {
+                continue;
+            }
+
             if (unit.EstimatedTokens > remaining)
             {
                 if (units.Count == 0)
@@ -278,50 +304,40 @@ internal sealed class DirectPromptComposer
         return units;
     }
 
-    private static bool IsReplayable(MessageRecord message)
-        => message.Status is not (MessageStatus.Failed or MessageStatus.Cancelled or MessageStatus.Blocked) &&
+    private static bool IsReplayable(MessageRecord message, ConversationTurnRecord turn)
+        => turn.Status != ConversationTurnStatus.Blocked && message.Status == MessageStatus.Sealed &&
            message.Role is MessageRole.User or MessageRole.Assistant;
 
-    /// <summary>
-    /// Replays an assistant message from its structured blocks: text stays text and tool calls are
-    /// rebuilt as call/result pairs. Thinking blocks are deliberately not replayed - stored reasoning
-    /// carries no provider signature, so providers like Anthropic reject it; it is transcript-only.
-    /// A message without usable segments falls back to its markdown, matching legacy rows.
-    /// </summary>
+    // Stored reasoning has no provider signature and is transcript-only. Assistant history is
+    // reconstructed exclusively from actual blocks, never from an old unstructured markdown copy.
     private static DirectPromptHistoryUnit BuildAssistantUnit(
         MessageRecord message,
-        string markdown,
         IReadOnlyList<ToolExecutionRecord> toolExecutions,
         Dictionary<Guid, ToolExecutionRecord> recentTools,
         ref int nextToolIndex)
     {
-        var segments = message.Segments;
-        if (segments is not { Count: > 0 })
-        {
-            return new DirectPromptHistoryUnit(
-                string.IsNullOrEmpty(markdown) ? [] : [new ChatMessage(ChatRole.Assistant, markdown)],
-                PerMessageOverheadTokens + EstimateTokens(markdown));
-        }
-
         var contents = new List<AIContent>();
         var replay = new List<ChatMessage>();
-        foreach (var segment in segments.OrderBy(item => item.Ordinal))
+        foreach (var segment in (message.Segments ?? []).OrderBy(item => item.Ordinal))
         {
+            if (segment.MessageId != message.Id)
+            {
+                throw new InvalidDataException("A replayed segment must belong to its message.");
+            }
+
             switch (segment.Kind)
             {
-                case MessageSegmentKind.Text when !string.IsNullOrEmpty(segment.Text):
+                case MessageSegmentKind.Text when !string.IsNullOrWhiteSpace(segment.Text):
                     contents.Add(new TextContent(segment.Text));
                     break;
-
                 case MessageSegmentKind.ToolCall
                     when segment.ToolRunId is Guid toolRunId &&
-                         FindToolRun(toolExecutions, toolRunId, recentTools, ref nextToolIndex) is { } run:
+                         FindToolRun(toolExecutions, toolRunId, recentTools, ref nextToolIndex) is { } run &&
+                         run.MessageId == message.Id && run.ConversationId == message.ConversationId &&
+                         run.Status is ToolExecutionStatus.Completed or ToolExecutionStatus.Failed or
+                             ToolExecutionStatus.Cancelled or ToolExecutionStatus.Blocked:
                     var callId = run.CorrelationId ?? run.Id.ToString("D");
-                    contents.Add(new FunctionCallContent(
-                        callId,
-                        run.ToolName,
-                        ParseArguments(run.ArgumentsJson)));
-                    // Persisted blocks do not retain provider call groups; preserve their causal order.
+                    contents.Add(new FunctionCallContent(callId, run.ToolName, ParseArguments(run.ArgumentsJson)));
                     replay.Add(new ChatMessage(ChatRole.Assistant, contents));
                     replay.Add(CreateToolResultMessage(callId, run));
                     contents = [];
@@ -332,10 +348,6 @@ internal sealed class DirectPromptComposer
         if (contents.Count > 0)
         {
             replay.Add(new ChatMessage(ChatRole.Assistant, contents));
-        }
-        else if (replay.Count == 0 && !string.IsNullOrEmpty(markdown))
-        {
-            replay.Add(new ChatMessage(ChatRole.Assistant, markdown));
         }
 
         return new DirectPromptHistoryUnit(replay, EstimateMessageTokens(replay));

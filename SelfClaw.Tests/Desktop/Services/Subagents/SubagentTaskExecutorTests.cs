@@ -27,12 +27,12 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Theory]
-    [InlineData(RunCompletionStatus.Succeeded, SubagentTaskStatus.Succeeded, MessageStatus.Completed)]
-    [InlineData(RunCompletionStatus.Truncated, SubagentTaskStatus.Failed, MessageStatus.Failed)]
+    [InlineData(RunCompletionStatus.Succeeded, SubagentTaskStatus.Succeeded, ConversationTurnStatus.Succeeded)]
+    [InlineData(RunCompletionStatus.Truncated, SubagentTaskStatus.Failed, ConversationTurnStatus.Truncated)]
     public async Task ExecuteAsync_sends_only_isolated_child_input_and_records_all_events(
         RunCompletionStatus completionStatus,
         SubagentTaskStatus expectedTaskStatus,
-        MessageStatus expectedMessageStatus)
+        ConversationTurnStatus expectedTurnStatus)
     {
         var storagePaths = StoragePathDefaults.Create(
             _rootPath,
@@ -40,6 +40,8 @@ public sealed class SubagentTaskExecutorTests : IDisposable
             Path.Combine(_rootPath, "secrets"));
         var database = new SqliteDatabase(storagePaths);
         var conversations = new SqliteConversationRepository(database);
+        var turns = new SqliteConversationTurnRepository(database);
+        var inputs = new SqliteConversationInputRepository(database);
         var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
         await tasks.InitializeAsync();
         var task = await CreateRunningTaskAsync(conversations, tasks);
@@ -53,10 +55,13 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         var runtime = new RecordingRuntime(completionStatus);
         var executor = new SubagentTaskExecutor(
             conversations,
+            turns,
             tasks,
             runtime,
             new ConversationTurnRecorder(
                 conversations,
+                turns,
+                inputs,
                 NullLogger<ConversationTurnRecorder>.Instance),
             new DesktopToolApprovalHandler(),
             new SubagentTaskSnapshotSerializer(),
@@ -73,6 +78,9 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         request.Agent.SubagentIds.Should().BeEmpty();
         request.Messages.Should().ContainSingle()
             .Which.MarkdownContent.Should().Be(task.TaskText);
+        request.Messages[0].Id.Should().NotBe(task.ChildTurnId);
+        request.Messages[0].TurnId.Should().Be(task.ChildTurnId);
+        request.Turns.Should().ContainSingle().Which.Status.Should().Be(ConversationTurnStatus.Running);
         var terminal = await tasks.GetAsync(task.ParentConversationId, task.Id)
             ?? throw new InvalidOperationException("The fixture task is missing.");
         terminal.Status.Should().Be(expectedTaskStatus);
@@ -83,14 +91,21 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         var assistant = (await conversations.ListMessagesAsync(task.ChildConversationId))
             .Single(message => message.Role == MessageRole.Assistant);
         assistant.MarkdownContent.Should().Be("final answer");
-        assistant.Status.Should().Be(expectedMessageStatus);
+        assistant.Id.Should().NotBe(task.ChildTurnId);
+        assistant.TurnId.Should().Be(task.ChildTurnId);
+        assistant.Status.Should().Be(MessageStatus.Sealed);
+        var turn = (await turns.ListTurnsAsync(task.ChildConversationId)).Should().ContainSingle().Which;
+        turn.Status.Should().Be(expectedTurnStatus);
+        turn.Usage?.InputTokens.Should().Be(21);
+        turn.Usage?.OutputTokens.Should().Be(8);
+        turn.Usage?.TotalTokens.Should().BeNull();
         assistant.Segments.Should().SatisfyRespectively(
             segment => segment.Kind.Should().Be(MessageSegmentKind.Thinking),
             segment => segment.Kind.Should().Be(MessageSegmentKind.Text),
             segment => segment.Kind.Should().Be(MessageSegmentKind.ToolCall));
-        (await conversations.ListToolExecutionsAsync(task.ChildConversationId))
-            .Should().ContainSingle()
-            .Which.Status.Should().Be(ToolExecutionStatus.Completed);
+        var tool = (await conversations.ListToolExecutionsAsync(task.ChildConversationId)).Should().ContainSingle().Which;
+        tool.Status.Should().Be(ToolExecutionStatus.Completed);
+        tool.MessageId.Should().Be(assistant.Id);
         var delivery = await tasks.GetDeliveryAsync(task.ParentConversationId, task.Id)
             ?? throw new InvalidOperationException("The terminal task has no delivery.");
         delivery.Status.Should().Be(SubagentDeliveryStatus.Pending);
@@ -108,6 +123,8 @@ public sealed class SubagentTaskExecutorTests : IDisposable
             Path.Combine(_rootPath, "cancellation-secrets"));
         var database = new SqliteDatabase(storagePaths);
         var conversations = new SqliteConversationRepository(database);
+        var turns = new SqliteConversationTurnRepository(database);
+        var inputs = new SqliteConversationInputRepository(database);
         var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
         await tasks.InitializeAsync();
         var task = await CreateRunningTaskAsync(conversations, tasks);
@@ -117,10 +134,13 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         var registry = new SubagentTaskExecutionRegistry();
         var executor = new SubagentTaskExecutor(
             conversations,
+            turns,
             tasks,
             runtime,
             new ConversationTurnRecorder(
                 conversations,
+                turns,
+                inputs,
                 NullLogger<ConversationTurnRecorder>.Instance),
             new DesktopToolApprovalHandler(),
             new SubagentTaskSnapshotSerializer(),
@@ -158,16 +178,21 @@ public sealed class SubagentTaskExecutorTests : IDisposable
             Path.Combine(_rootPath, "recovery-secrets"));
         var database = new SqliteDatabase(storagePaths);
         var conversations = new SqliteConversationRepository(database);
+        var turns = new SqliteConversationTurnRepository(database);
+        var inputs = new SqliteConversationInputRepository(database);
         var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
         await tasks.InitializeAsync();
         var task = await CreateRunningTaskAsync(conversations, tasks);
         var runtime = new RecordingRuntime();
         var executor = new SubagentTaskExecutor(
             conversations,
+            turns,
             tasks,
             runtime,
             new ConversationTurnRecorder(
                 conversations,
+                turns,
+                inputs,
                 NullLogger<ConversationTurnRecorder>.Instance),
             new DesktopToolApprovalHandler(),
             new SubagentTaskSnapshotSerializer(),
@@ -178,9 +203,12 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         await executor.RecoverInterruptedAsync(task, CancellationToken.None);
 
         runtime.Requests.Should().BeEmpty();
-        var terminal = await tasks.GetAsync(task.ParentConversationId, task.Id);
-        terminal!.Status.Should().Be(SubagentTaskStatus.Interrupted);
+        var terminal = await tasks.GetAsync(task.ParentConversationId, task.Id)
+            ?? throw new InvalidOperationException("The interrupted fixture task is missing.");
+        terminal.Status.Should().Be(SubagentTaskStatus.Interrupted);
         terminal.ErrorCode.Should().Be(SubagentErrorCodes.ProcessInterrupted);
+        (await turns.ListTurnsAsync(task.ChildConversationId)).Should().ContainSingle().Which.Status.Should().Be(ConversationTurnStatus.Interrupted);
+        (await conversations.ListMessagesAsync(task.ChildConversationId)).Should().ContainSingle().Which.Role.Should().Be(MessageRole.User);
         (await tasks.GetDeliveryAsync(task.ParentConversationId, task.Id)).Should().NotBeNull();
     }
 
@@ -193,6 +221,8 @@ public sealed class SubagentTaskExecutorTests : IDisposable
             Path.Combine(_rootPath, "host-recovery-secrets"));
         var database = new SqliteDatabase(storagePaths);
         var conversations = new SqliteConversationRepository(database);
+        var turns = new SqliteConversationTurnRepository(database);
+        var inputs = new SqliteConversationInputRepository(database);
         var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
         await tasks.InitializeAsync();
         var interruptedCandidate = await CreateRunningTaskAsync(conversations, tasks);
@@ -203,10 +233,13 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         var wakeSignal = new SubagentTaskWakeSignal();
         var executor = new SubagentTaskExecutor(
             conversations,
+            turns,
             tasks,
             runtime,
             new ConversationTurnRecorder(
                 conversations,
+                turns,
+                inputs,
                 NullLogger<ConversationTurnRecorder>.Instance),
             new DesktopToolApprovalHandler(),
             new SubagentTaskSnapshotSerializer(),

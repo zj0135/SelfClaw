@@ -19,10 +19,17 @@ internal sealed class TranscriptMessageProjector
 
     internal TranscriptRenderItem Build(
         MessageRecord message,
-        IReadOnlyList<ToolExecutionRecord> conversationToolRuns)
+        ConversationTurnRecord turn,
+        IReadOnlyList<ToolExecutionRecord> conversationToolRuns,
+        bool includeTurnOutcome = true)
     {
         ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(turn);
         ArgumentNullException.ThrowIfNull(conversationToolRuns);
+        if (message.TurnId != turn.Id || message.ConversationId != turn.ConversationId || message.Sequence <= 0)
+        {
+            throw new InvalidDataException("Transcript fragments require explicit turn ownership and a positive sequence.");
+        }
 
         return new TranscriptRenderItem(
             message.Id.ToString("D"),
@@ -33,11 +40,22 @@ internal sealed class TranscriptMessageProjector
             message.Role == MessageRole.Assistant && message.Status == MessageStatus.Streaming,
             message.CreatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
             BuildImageAttachments(message),
-            message.Status is MessageStatus.Failed or MessageStatus.Cancelled or MessageStatus.Truncated
-                or MessageStatus.Blocked
-                ? message.ErrorMessage
-                : null);
+            includeTurnOutcome && message.Role == MessageRole.Assistant ? CreateTurnOutcome(turn) : null);
     }
+
+    internal TranscriptRenderItem BuildTurnOutcome(ConversationTurnRecord turn)
+    {
+        ArgumentNullException.ThrowIfNull(turn);
+        return new TranscriptRenderItem(
+            $"turn-outcome:{turn.Id:D}", "turn-outcome", "system", turn.Status.ToString().ToLowerInvariant(),
+            [], false, (turn.CompletedAtUtc ?? turn.StartedAtUtc).LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
+            TurnOutcome: CreateTurnOutcome(turn));
+    }
+
+    private static TranscriptTurnOutcome CreateTurnOutcome(ConversationTurnRecord turn)
+        => new(turn.Id.ToString("D"), turn.Status.ToString().ToLowerInvariant(), turn.ErrorMessage,
+            turn.CompletedAtUtc is { } completed ? Math.Max(0L, (long)(completed - turn.StartedAtUtc).TotalMilliseconds) : null,
+            turn.Usage);
 
     internal void PruneToolSegmentCache(IReadOnlyList<ToolExecutionRecord> toolRuns)
     {
@@ -59,15 +77,19 @@ internal sealed class TranscriptMessageProjector
     {
         var renderSegments = new List<TranscriptRenderSegment>();
         var segments = message.Segments ?? [];
-        if (message.Role == MessageRole.Assistant && segments.Count > 0)
+        if (message.Role == MessageRole.Assistant)
         {
             var toolRunsById = conversationToolRuns
-                .Where(toolRun => toolRun.MessageId == message.Id)
+                .Where(toolRun => toolRun.MessageId == message.Id && toolRun.ConversationId == message.ConversationId)
                 .ToDictionary(toolRun => toolRun.Id);
 
             var thinkingOrdinal = 0;
-            foreach (var segment in segments)
+            foreach (var segment in segments.OrderBy(segment => segment.Ordinal))
             {
+                if (segment.MessageId != message.Id)
+                {
+                    throw new InvalidDataException("A transcript segment must belong to its message.");
+                }
                 var thinkingIndex = segment.Kind == MessageSegmentKind.Thinking ? thinkingOrdinal++ : -1;
                 switch (segment.Kind)
                 {
@@ -115,7 +137,7 @@ internal sealed class TranscriptMessageProjector
                 "content",
                 message.MarkdownContent,
                 false,
-                SegmentId: $"{message.Id:D}:text:legacy"));
+                SegmentId: $"{message.Id:D}:text:0"));
         }
 
         return renderSegments;

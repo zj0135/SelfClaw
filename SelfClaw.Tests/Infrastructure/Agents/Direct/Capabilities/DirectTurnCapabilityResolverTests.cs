@@ -123,6 +123,32 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task ResolveAsync_does_not_reactivate_a_historical_skill_for_a_no_input_continuation()
+    {
+        var review = await CreatePackageAsync("review", true);
+        var resolver = CreateResolver(new PackageRepository([review]));
+        var request = CreateRequest(["review"], "[/review]");
+        request = new DirectChatTurnRequest(Guid.NewGuid(), request.ConversationId, request.WorkspaceRoot,
+            request.Agent, request.Messages, request.Turns, request.ModelProfileId, request.ToolPermissionMode,
+            request.ToolApprovalHandler, new(DirectTurnOrigin.Continuation,
+                new DirectCapabilityCeiling(AgentRuntimeDefinition.SystemToolPolicy, [], [], [], []), null));
+        await using var lease = await resolver.ResolveAsync(request);
+        lease.Diagnostics.Should().NotContain(item => item.Contains("Explicitly activated", StringComparison.Ordinal));
+        lease.SystemInstructions.Should().NotContain(item => item.Contains("BEGIN SELFCLAW SKILL review", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_activates_only_the_current_turn_highest_sequence_prompt()
+    {
+        var review = await CreatePackageAsync("review", true);
+        var resolver = CreateResolver(new PackageRepository([review]));
+        var request = CreateRequest(["review"], "[/review]", "[/unknown]");
+        request = request with { Messages = request.Messages.Reverse().ToArray() };
+        await using var lease = await resolver.ResolveAsync(request);
+        lease.Diagnostics.Should().ContainSingle(item => item.Contains("activated Skill 'review'", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ResolveAsync_uses_explicit_token_order_and_allows_three_unique_skills()
     {
         var first = await CreatePackageAsync("first", true);
@@ -546,26 +572,28 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         IReadOnlyList<string>? mcpServerIds = null)
     {
         var conversationId = Guid.NewGuid();
+        var turnId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var messages = new List<MessageRecord>();
         if (historicalPrompt is not null)
         {
             messages.Add(new MessageRecord(
-                Guid.NewGuid(), conversationId, MessageRole.User, historicalPrompt,
-                MessageStatus.Completed, now, now));
+                Guid.NewGuid(), conversationId, Guid.NewGuid(), 1, MessageRole.User, historicalPrompt,
+                MessageStatus.Sealed, now, now));
         }
 
         messages.Add(new MessageRecord(
-            Guid.NewGuid(), conversationId, MessageRole.User, latestPrompt,
-            MessageStatus.Completed, now, now));
+            Guid.NewGuid(), conversationId, turnId, messages.Count + 1, MessageRole.User, latestPrompt,
+            MessageStatus.Sealed, now, now));
         return new DirectChatTurnRequest(
-            Guid.NewGuid(),
+            turnId,
             conversationId,
             null,
             new AgentRuntimeDefinition(
                 "build", "Build", "", AgentExecutionMode.Direct,
                 AgentRuntimeDefinition.SystemToolPolicy, pluginIds ?? [], skillIds, mcpServerIds ?? [], [], "Agent instructions"),
             messages,
+            PresentationHistory.Turns(messages),
             Guid.NewGuid(),
             ToolPermissionMode.FullAccess,
             null,

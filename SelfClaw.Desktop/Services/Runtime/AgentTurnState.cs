@@ -1,45 +1,37 @@
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Desktop.Services.ConversationInputs;
 
 namespace SelfClaw.Desktop.Services.Runtime;
 
-/// <summary>Per-turn reduction state shared across the events of a single <c>StreamTurnAsync</c> call.</summary>
 internal sealed class AgentTurnState
 {
-    public AgentTurnState(Guid turnId, AgentRuntimeDefinition agent)
+    public AgentTurnState(
+        ConversationTurnRecord turn,
+        AgentRuntimeDefinition agent,
+        DirectTurnInputSession? inputSession = null)
     {
+        ArgumentNullException.ThrowIfNull(turn);
         ArgumentNullException.ThrowIfNull(agent);
+        if (turn.Id == Guid.Empty || turn.ConversationId == Guid.Empty)
+            throw new ArgumentException("A turn requires independent turn and conversation identities.", nameof(turn));
 
-        if (turnId == Guid.Empty)
-        {
-            throw new ArgumentException("Turn id cannot be empty.", nameof(turnId));
-        }
-
-        TurnId = turnId;
+        Record = turn;
         AgentName = agent.Name;
         AgentRole = "Agent";
+        InputSession = inputSession;
     }
 
-    public Guid TurnId { get; }
-
+    public ConversationTurnRecord Record { get; }
+    public Guid TurnId => Record.Id;
+    public DateTimeOffset StartedAtUtc => Record.StartedAtUtc;
     public string AgentName { get; }
-
     public string AgentRole { get; }
-
-    public DateTimeOffset StartedAtUtc { get; } = DateTimeOffset.UtcNow;
-
+    public DirectTurnInputSession? InputSession { get; }
     public TurnUsageAccumulator Usage { get; } = new();
-    public bool MessageCreated { get; set; }
-
-    /// <summary>
-    /// Whether any text or thinking content has streamed for this turn. The first visible delta
-    /// publishes immediately so the user sees output without waiting out the coalescing interval.
-    /// </summary>
+    public Guid? CurrentAssistantMessageId { get; set; }
     public bool HasVisibleDelta { get; set; }
-
     public bool Completed { get; set; }
-
     public RecordedTurnFinalizationRequest? PendingFinalization { get; set; }
-
     public Dictionary<string, ToolExecutionRecord> ToolRunsByCallId { get; } = new(StringComparer.Ordinal);
 }

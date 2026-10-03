@@ -86,6 +86,7 @@ internal static class DesktopServiceRegistration
         services.AddHostedService(services =>
             services.GetRequiredService<SubagentDeliveryDispatcher>());
         services.AddSingleton<IConversationCompletionNotifier, ConversationCompletionNotifier>();
+        services.AddSingleton<ConversationRunCoordinator>();
         services.AddSingleton<ConversationTurnEngine>();
         services.AddSingleton<ConversationWorkspaceService>();
         services.AddSingleton<ConversationDeletionService>();
@@ -157,6 +158,7 @@ internal static class DesktopServiceRegistration
         services.AddSingleton(services => new MainWindowViewModel(
             services.GetRequiredService<IConversationRepository>(),
             services.GetRequiredService<ConversationTurnEngine>(),
+            services.GetRequiredService<ConversationRunCoordinator>(),
             services.GetRequiredService<ConversationSessionCoordinator>(),
             services.GetRequiredService<AgentActivityCoordinator>(),
             services.GetRequiredService<TranscriptPublisher>(),

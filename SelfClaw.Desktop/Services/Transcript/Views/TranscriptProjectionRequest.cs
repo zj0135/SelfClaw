@@ -4,6 +4,7 @@ namespace SelfClaw.Desktop.Services.Transcript.Views;
 
 internal sealed record TranscriptProjectionRequest(
     IReadOnlyList<MessageRecord> Messages,
+    IReadOnlyList<ConversationTurnRecord> Turns,
     IReadOnlyList<ToolExecutionRecord> ToolRuns,
     IReadOnlyList<ConversationRecord> Conversations,
     IReadOnlyList<WorkspaceRoot> WorkspaceRoots,

@@ -112,11 +112,10 @@ public sealed class SqliteSubagentActivityReaderTests : IDisposable
     {
         var task = await CreateRunningAsync();
         var tool = CreateTool(task, "recorded result");
-        await _conversations.UpsertToolExecutionAsync(tool);
         var live = await DetailAsync(task);
+        live.Content.Turn.Should().NotBeNull();
         live.Content.Message.Should().BeNull();
-        live.Content.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Unknown);
-        live.Content.UnplacedToolRuns.Should().ContainSingle();
+        live.Content.UnplacedToolRuns.Should().BeEmpty();
         await CompleteAsync(task, interrupted ? SubagentTaskStatus.Interrupted : SubagentTaskStatus.Succeeded,
             "legacy final text", includeSegments: false, tool);
         var detail = await DetailAsync(task);
@@ -162,7 +161,10 @@ public sealed class SqliteSubagentActivityReaderTests : IDisposable
             {
                 detail.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.Pending);
                 var message = detail.Content.Message ?? throw new InvalidOperationException("A terminal task must have its committed assistant.");
-                message.Status.Should().Be(MessageStatus.Completed);
+                message.Status.Should().Be(MessageStatus.Sealed);
+                message.Id.Should().NotBe(task.ChildTurnId);
+                message.TurnId.Should().Be(task.ChildTurnId);
+                detail.Content.Turn?.Status.Should().Be(ConversationTurnStatus.Succeeded);
                 message.Segments.Should().HaveCount(3);
                 detail.Content.ToolRuns.Should().ContainSingle();
             }
@@ -172,6 +174,23 @@ public sealed class SqliteSubagentActivityReaderTests : IDisposable
                 detail.Task.DeliveryStatus.Should().BeNull();
             }
         }
+    }
+
+    [Fact]
+    public async Task Queued_then_terminal_without_output_has_explicit_turn_and_complete_history()
+    {
+        var task = await SubagentTaskTestData.CreateQueuedTaskAsync(_conversations, _tasks);
+        var queued = await DetailAsync(task);
+        queued.Content.Turn.Should().BeNull();
+        queued.Content.Message.Should().BeNull();
+        await CompleteAsync(task, SubagentTaskStatus.Cancelled, string.Empty);
+        var terminal = await DetailAsync(task);
+        terminal.Content.Turn.Should().NotBeNull();
+        terminal.Content.Turn?.Status.Should().Be(ConversationTurnStatus.Cancelled);
+        terminal.Content.Message.Should().BeNull();
+        terminal.Content.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Complete);
+        terminal.Content.ToolRuns.Should().BeEmpty();
+        terminal.Content.UnplacedToolRuns.Should().BeEmpty();
     }
 
     public void Dispose()
@@ -199,27 +218,46 @@ public sealed class SqliteSubagentActivityReaderTests : IDisposable
         bool includeSegments = true, ToolExecutionRecord? tool = null)
     {
         var now = DateTimeOffset.UtcNow;
-        var segments = new List<MessageSegmentRecord>
+        var turnStatus = status switch
         {
-            new(task.ChildTurnId, 0, MessageSegmentKind.Thinking, "analysis \n ", null),
-            new(task.ChildTurnId, 1, MessageSegmentKind.Text, text, null)
+            SubagentTaskStatus.Succeeded => ConversationTurnStatus.Succeeded,
+            SubagentTaskStatus.Cancelled => ConversationTurnStatus.Cancelled,
+            SubagentTaskStatus.Interrupted => ConversationTurnStatus.Interrupted,
+            _ => ConversationTurnStatus.Failed
         };
-        if (tool is not null)
+        var turn = new ConversationTurnRecord(task.ChildTurnId, task.ChildConversationId, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Subagent, turnStatus, task.StartedAtUtc ?? task.QueuedAtUtc, now);
+        var messages = new List<MessageRecord>();
+        if (task.Status == SubagentTaskStatus.Running)
         {
-            segments.Add(new MessageSegmentRecord(task.ChildTurnId, 2, MessageSegmentKind.ToolCall, null, tool.Id));
+            var messageId = tool?.MessageId ?? Guid.NewGuid();
+            var segments = new List<MessageSegmentRecord>
+            {
+                new(messageId, 0, MessageSegmentKind.Thinking, "analysis \n ", null),
+                new(messageId, 1, MessageSegmentKind.Text, text, null)
+            };
+            if (tool is not null)
+            {
+                segments.Add(new MessageSegmentRecord(messageId, 2, MessageSegmentKind.ToolCall, null, tool.Id));
+            }
+
+            var sequence = await new SqliteConversationTurnRepository(_database).ReserveMessageSequenceAsync(task.ChildConversationId);
+            messages.Add(new MessageRecord(messageId, task.ChildConversationId, task.ChildTurnId, sequence,
+                MessageRole.Assistant, text, status == SubagentTaskStatus.Succeeded ? MessageStatus.Sealed : MessageStatus.Interrupted,
+                now, now, Segments: segments));
         }
 
-        var messageStatus = status switch
-        {
-            SubagentTaskStatus.Succeeded => MessageStatus.Completed,
-            SubagentTaskStatus.Cancelled => MessageStatus.Cancelled,
-            _ => MessageStatus.Failed
-        };
-        var message = new MessageRecord(task.ChildTurnId, task.ChildConversationId, MessageRole.Assistant, text,
-            messageStatus, now, now, Segments: includeSegments ? segments : null);
         var result = await _tasks.TryCompleteAsync(task.Id, task.Status, new SubagentTaskCompletion(status,
-            new TurnFinalization(message, tool is null ? [] : [tool]), text, null, null, now));
+            new ConversationTurnCommit(turn, messages, tool is null ? [] : [tool]), text, null, null, now));
         result.Should().NotBeNull();
+        if (!includeSegments && messages.Count > 0)
+        {
+            await using var connection = await _database.OpenConnectionAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM message_segments WHERE message_id = $id;";
+            command.Parameters.AddWithValue("$id", messages[0].Id.ToString("D"));
+            await command.ExecuteNonQueryAsync();
+        }
     }
 
     private async Task<SubagentTaskRecord> CreateRetryAsync(SubagentTaskRecord previous, ConversationRecord parent)
@@ -233,13 +271,12 @@ public sealed class SqliteSubagentActivityReaderTests : IDisposable
             Status = SubagentTaskStatus.Queued, Attempt = previous.Attempt + 1, RetryOfTaskId = previous.Id,
             QueuedAtUtc = now, CreatedAtUtc = now, UpdatedAtUtc = now
         };
-        await _tasks.CreateAsync(new SubagentTaskCreation(child,
-            new MessageRecord(Guid.NewGuid(), childId, MessageRole.User, retry.TaskText, MessageStatus.Completed, now, now), retry));
+        await _tasks.CreateAsync(new SubagentTaskCreation(child, retry));
         return retry;
     }
 
     private static ToolExecutionRecord CreateTool(SubagentTaskRecord task, string result)
         => new(Guid.NewGuid(), task.ChildConversationId, "read_file", "{\"path\":\"file.cs\"}", ToolExecutionStatus.Completed,
-            "Read file", "call-1", 20, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, MessageId: task.ChildTurnId,
+            "Read file", "call-1", 20, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, MessageId: Guid.NewGuid(),
             ResultContent: result, SourceKind: ToolSourceKind.BuiltIn);
 }

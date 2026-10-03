@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
@@ -158,6 +158,32 @@ public sealed class CliAgentChatRuntimeTests
         store.CostBaselines[(conversationId, CliAgentKind.Claude)].Should().Be(10_000);
     }
 
+    [Fact]
+    public async Task Cli_prompt_is_the_highest_sequence_user_in_the_current_turn_not_the_last_array_item()
+    {
+        var session = new FakeProcessSession([]);
+        var (runtime, _, _) = CreateRuntime(session);
+        var request = CreateRequest(Guid.NewGuid(), CliAgentKind.Codex, null, null);
+        var initial = request.Messages.Single();
+        var current = initial with { Id = Guid.NewGuid(), Sequence = 2, MarkdownContent = "current prompt" };
+        var unrelated = initial with { Id = Guid.NewGuid(), TurnId = Guid.NewGuid(), Sequence = 3, MarkdownContent = "wrong turn" };
+        request = request with { Messages = [current, initial, unrelated] };
+        await CollectAsync(runtime.StreamTurnAsync(request));
+        session.StandardInputLines.Should().Equal("current prompt");
+    }
+
+    [Fact]
+    public async Task Cli_does_not_launch_when_only_an_older_turn_has_a_prompt()
+    {
+        var session = new FakeProcessSession([]);
+        var (runtime, host, _) = CreateRuntime(session);
+        var request = CreateRequest(Guid.NewGuid(), CliAgentKind.Codex, null, null);
+        request = request with { Messages = [request.Messages.Single() with { TurnId = Guid.NewGuid() }] };
+        var events = await CollectAsync(runtime.StreamTurnAsync(request));
+        host.StartInfo.Should().BeNull();
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Failed);
+    }
+
     private static (CliAgentChatRuntime Runtime, FakeProcessHost Host, FakeSessionStore Store) CreateRuntime(
         FakeProcessSession session)
     {
@@ -178,7 +204,7 @@ public sealed class CliAgentChatRuntimeTests
         return (runtime, host, store);
     }
 
-    private static ChatTurnRequest CreateRequest(
+    private static CliChatTurnRequest CreateRequest(
         Guid conversationId,
         CliAgentKind kind,
         string? model,
@@ -186,12 +212,15 @@ public sealed class CliAgentChatRuntimeTests
         string instructions = "")
     {
         var now = DateTimeOffset.UtcNow;
+        var turnId = Guid.NewGuid();
+        var turn = new ConversationTurnRecord(turnId, conversationId, AgentExecutionMode.Cli, DirectTurnOrigin.Interactive, ConversationTurnStatus.Running, now);
         var message = new MessageRecord(
             Guid.NewGuid(),
             conversationId,
+            turnId, 1,
             MessageRole.User,
             "test prompt",
-            MessageStatus.Completed,
+            MessageStatus.Sealed,
             now,
             now);
         var agent = new AgentRuntimeDefinition(
@@ -207,11 +236,12 @@ public sealed class CliAgentChatRuntimeTests
             instructions);
 
         return new CliChatTurnRequest(
-            Guid.NewGuid(),
+            turnId,
             conversationId,
             WorkspaceRoot: null,
             agent,
             [message],
+            [turn],
             kind,
             model,
             reasoningEffort);

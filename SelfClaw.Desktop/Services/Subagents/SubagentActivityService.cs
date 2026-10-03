@@ -202,8 +202,10 @@ internal sealed class SubagentActivityService : IDisposable
             return new SubagentActivitySnapshot(activity, detail.Content, "persisted");
         }
 
-        var message = live.Message is null ? null : live.Message with { Status = MessageStatus.Streaming, ErrorMessage = null };
-        var content = SubagentActivityContent.Create(activity.Task.Status, detail.Content.TaskText, message, live.ToolRuns);
+        // Until the task transaction commits, a prepared terminal snapshot is provisional.
+        var turn = live.Turn with { Status = ConversationTurnStatus.Running, CompletedAtUtc = null, ErrorMessage = null };
+        var message = live.Message is null ? null : live.Message with { Status = MessageStatus.Streaming };
+        var content = SubagentActivityContent.Create(activity.Task.Status, detail.Content.TaskText, turn, message, live.ToolRuns);
         return new SubagentActivitySnapshot(activity, content, "live");
     }
 

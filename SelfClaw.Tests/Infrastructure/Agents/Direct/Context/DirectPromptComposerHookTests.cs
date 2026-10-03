@@ -15,12 +15,13 @@ public sealed class DirectPromptComposerHookTests
     [Fact]
     public void Hook_context_sits_between_history_and_the_continuation_prompt()
     {
-        var (messages, runs) = History(
-            ("user", MessageRole.User, MessageStatus.Completed, "do it"),
-            ("assistant", MessageRole.Assistant, MessageStatus.Truncated, "partial"));
+        var (messages, turns, runs) = History(
+            ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "do it"),
+            ("assistant", MessageRole.Assistant, ConversationTurnStatus.Truncated, "partial"));
 
         var result = new DirectPromptComposer().BuildMessages(
             messages,
+            turns,
             runs,
             string.Empty,
             [],
@@ -38,12 +39,13 @@ public sealed class DirectPromptComposerHookTests
     [Fact]
     public void Hook_context_never_changes_the_system_prefix()
     {
-        var (messages, runs) = History(("user", MessageRole.User, MessageStatus.Completed, "hi"));
+        var (messages, turns, runs) = History(("user", MessageRole.User, ConversationTurnStatus.Succeeded, "hi"));
         var composer = new DirectPromptComposer();
 
-        var without = composer.BuildMessages(messages, runs, "instructions", ["extra"], NoAdjustments, Interactive());
+        var without = composer.BuildMessages(messages, turns, runs, "instructions", ["extra"], NoAdjustments, Interactive());
         var with = composer.BuildMessages(
             messages,
+            turns,
             runs,
             "instructions",
             ["extra"],
@@ -58,10 +60,11 @@ public sealed class DirectPromptComposerHookTests
     [Fact]
     public void Hook_context_escapes_closing_tags()
     {
-        var (messages, runs) = History(("user", MessageRole.User, MessageStatus.Completed, "hi"));
+        var (messages, turns, runs) = History(("user", MessageRole.User, ConversationTurnStatus.Succeeded, "hi"));
 
         var result = new DirectPromptComposer().BuildMessages(
             messages,
+            turns,
             runs,
             string.Empty,
             [],
@@ -83,10 +86,11 @@ public sealed class DirectPromptComposerHookTests
     [Fact]
     public void Hook_context_counts_against_the_mandatory_budget()
     {
-        var (messages, runs) = History(("user", MessageRole.User, MessageStatus.Completed, "hi"));
+        var (messages, turns, runs) = History(("user", MessageRole.User, ConversationTurnStatus.Succeeded, "hi"));
 
         var action = () => new DirectPromptComposer().BuildMessages(
             messages,
+            turns,
             runs,
             string.Empty,
             [],
@@ -109,9 +113,9 @@ public sealed class DirectPromptComposerHookTests
             null,
             [new HookFeedback(new HookSource("beta", "b"), "remember the lint rule")],
             []);
-        var (messages, runs) = AssistantWithToolCall(MessageStatus.Completed, ToolExecutionStatus.Completed, outcome);
+        var (messages, turns, runs) = AssistantWithToolCall(ConversationTurnStatus.Succeeded, ToolExecutionStatus.Completed, outcome);
 
-        var result = new DirectPromptComposer().BuildMessages(messages, runs, string.Empty, [], NoAdjustments, Interactive());
+        var result = new DirectPromptComposer().BuildMessages(messages, turns, runs, string.Empty, [], NoAdjustments, Interactive());
 
         var toolResult = result.SelectMany(message => message.Contents).OfType<FunctionResultContent>().Should().ContainSingle().Subject;
         var text = toolResult.Result!.ToString()!;
@@ -123,9 +127,9 @@ public sealed class DirectPromptComposerHookTests
     [Fact]
     public void A_blocked_tool_result_replays_with_an_exception()
     {
-        var (messages, runs) = AssistantWithToolCall(MessageStatus.Completed, ToolExecutionStatus.Blocked, outcome: null);
+        var (messages, turns, runs) = AssistantWithToolCall(ConversationTurnStatus.Succeeded, ToolExecutionStatus.Blocked, outcome: null);
 
-        var result = new DirectPromptComposer().BuildMessages(messages, runs, string.Empty, [], NoAdjustments, Interactive());
+        var result = new DirectPromptComposer().BuildMessages(messages, turns, runs, string.Empty, [], NoAdjustments, Interactive());
 
         var toolResult = result.SelectMany(message => message.Contents).OfType<FunctionResultContent>().Should().ContainSingle().Subject;
         toolResult.Exception.Should().NotBeNull();
@@ -134,12 +138,12 @@ public sealed class DirectPromptComposerHookTests
     [Fact]
     public void A_blocked_turn_and_its_user_message_are_not_replayed()
     {
-        var (messages, runs) = History(
-            ("user-1", MessageRole.User, MessageStatus.Completed, "dangerous request"),
-            ("assistant-1", MessageRole.Assistant, MessageStatus.Blocked, string.Empty),
-            ("user-2", MessageRole.User, MessageStatus.Completed, "safe request"));
+        var (messages, turns, runs) = History(
+            ("user-1", MessageRole.User, ConversationTurnStatus.Blocked, "dangerous request"),
+            ("assistant-1", MessageRole.Assistant, ConversationTurnStatus.Blocked, string.Empty),
+            ("user-2", MessageRole.User, ConversationTurnStatus.Succeeded, "safe request"));
 
-        var result = new DirectPromptComposer().BuildMessages(messages, runs, string.Empty, [], NoAdjustments, Interactive());
+        var result = new DirectPromptComposer().BuildMessages(messages, turns, runs, string.Empty, [], NoAdjustments, Interactive());
 
         var text = string.Join("\n", result.Select(message => message.Text));
         text.Should().NotContain("dangerous request");
@@ -154,9 +158,10 @@ public sealed class DirectPromptComposerHookTests
         var message = new MessageRecord(
             messageId,
             Guid.NewGuid(),
+            Guid.NewGuid(), 1,
             MessageRole.Assistant,
             "answer",
-            MessageStatus.Completed,
+            MessageStatus.Sealed,
             now,
             now,
             Segments:
@@ -166,7 +171,7 @@ public sealed class DirectPromptComposerHookTests
             ]);
 
         var result = new DirectPromptComposer().BuildMessages(
-            [message], [], string.Empty, [], NoAdjustments, Interactive());
+            [message], [SelfClaw.Tests.TestDoubles.PresentationHistory.Turn(message)], [], string.Empty, [], NoAdjustments, Interactive());
 
         var text = string.Join("\n", result.Select(item => item.Text));
         text.Should().Contain("answer");
@@ -175,26 +180,29 @@ public sealed class DirectPromptComposerHookTests
 
     private static DirectTurnExecutionContext Interactive() => new(DirectTurnOrigin.Interactive, null, null);
 
-    private static (List<MessageRecord> Messages, List<ToolExecutionRecord> ToolRuns) History(
-        params (string Key, MessageRole Role, MessageStatus Status, string Text)[] entries)
+    private static (List<MessageRecord> Messages, List<ConversationTurnRecord> Turns, List<ToolExecutionRecord> ToolRuns) History(
+        params (string Key, MessageRole Role, ConversationTurnStatus Status, string Text)[] entries)
     {
         var conversationId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var messages = new List<MessageRecord>();
+        var turns = new List<ConversationTurnRecord>();
         foreach (var (_, role, status, text) in entries)
         {
             var messageId = Guid.NewGuid();
+            var turnId = Guid.NewGuid();
+            turns.Add(new(turnId, conversationId, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive, status, now, now));
             var segments = role == MessageRole.Assistant && text.Length > 0
                 ? new List<MessageSegmentRecord> { new(messageId, 0, MessageSegmentKind.Text, text, null) }
                 : null;
-            messages.Add(new MessageRecord(messageId, conversationId, role, text, status, now, now, Segments: segments));
+            messages.Add(new MessageRecord(messageId, conversationId, turnId, messages.Count + 1, role, text, MessageStatus.Sealed, now, now, Segments: segments));
         }
 
-        return (messages, []);
+        return (messages, turns, []);
     }
 
-    private static (List<MessageRecord> Messages, List<ToolExecutionRecord> ToolRuns) AssistantWithToolCall(
-        MessageStatus messageStatus,
+    private static (List<MessageRecord> Messages, List<ConversationTurnRecord> Turns, List<ToolExecutionRecord> ToolRuns) AssistantWithToolCall(
+        ConversationTurnStatus turnStatus,
         ToolExecutionStatus toolStatus,
         ToolHookOutcome? outcome)
     {
@@ -218,12 +226,13 @@ public sealed class DirectPromptComposerHookTests
         var message = new MessageRecord(
             messageId,
             conversationId,
+            Guid.NewGuid(), 1,
             MessageRole.Assistant,
             string.Empty,
-            messageStatus,
+            MessageStatus.Sealed,
             now,
             now,
             Segments: [new MessageSegmentRecord(messageId, 0, MessageSegmentKind.ToolCall, null, run.Id)]);
-        return ([message], [run]);
+        return ([message], [SelfClaw.Tests.TestDoubles.PresentationHistory.Turn(message, turnStatus)], [run]);
     }
 }

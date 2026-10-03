@@ -64,7 +64,7 @@ internal sealed class SqliteUsageStatisticsReader : IUsageStatisticsReader
                 SELECT {AggregateColumns}
                 FROM turn_usage u
                 JOIN subagent_tasks t
-                  ON t.child_turn_id = u.message_id AND t.child_conversation_id = u.conversation_id
+                  ON t.child_turn_id = u.turn_id AND t.child_conversation_id = u.conversation_id
                 WHERE t.parent_conversation_id = $scope
                 GROUP BY COALESCE(u.model, '');
                 """,

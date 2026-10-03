@@ -7,7 +7,8 @@ namespace SelfClaw.Desktop.Services.Transcript;
 public sealed class TranscriptProjection
 {
     private readonly TranscriptMessageProjector _messageProjector;
-    private readonly Dictionary<Guid, (MessageRecord Message, IReadOnlyList<ToolExecutionRecord> Tools, TranscriptRenderItem Item)> _messageCache = [];
+    private readonly Dictionary<Guid, (MessageRecord Message, ConversationTurnRecord Turn, bool IncludeOutcome, IReadOnlyList<ToolExecutionRecord> Tools, TranscriptRenderItem Item)> _messageCache = [];
+    private readonly Dictionary<Guid, (ConversationTurnRecord Turn, TranscriptRenderItem Item)> _outcomeCache = [];
     private IReadOnlyList<ConversationRecord> _navigationSource = [];
     private IReadOnlyList<WorkspaceRoot> _workspaceSource = [];
     private IReadOnlyList<TranscriptConversationItem> _navigation = [];
@@ -21,17 +22,7 @@ public sealed class TranscriptProjection
     internal TranscriptRenderState? Build(TranscriptProjectionRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var toolsByMessage = IndexTools(request.ToolRuns);
-        var liveMessages = new HashSet<Guid>();
-        var items = new TranscriptRenderItem[request.Messages.Count];
-        var index = 0;
-        foreach (var message in request.Messages.OrderBy(message => message.CreatedAtUtc))
-        {
-            liveMessages.Add(message.Id);
-            IReadOnlyList<ToolExecutionRecord> tools = toolsByMessage.TryGetValue(message.Id, out var found) ? found : [];
-            items[index++] = BuildMessageItem(message, tools);
-        }
-        foreach (var id in _messageCache.Keys.Where(id => !liveMessages.Contains(id)).ToArray()) _messageCache.Remove(id);
+        var items = BuildItems(request);
         _messageProjector.PruneToolSegmentCache(request.ToolRuns);
         UpdateNavigation(request);
         var stableItems = _lastState is { } previous && SameReferences(previous.Items, items) ? previous.Items : items;
@@ -47,14 +38,63 @@ public sealed class TranscriptProjection
     {
         _lastState = null;
         _messageCache.Clear();
+        _outcomeCache.Clear();
     }
 
-    private TranscriptRenderItem BuildMessageItem(MessageRecord message, IReadOnlyList<ToolExecutionRecord> tools)
+    private IReadOnlyList<TranscriptRenderItem> BuildItems(TranscriptProjectionRequest request)
+    {
+        var turns = request.Turns.ToDictionary(turn => turn.Id);
+        var messages = request.Messages.OrderBy(message => message.Sequence).ToArray();
+        var lastMessages = messages.GroupBy(message => message.TurnId).ToDictionary(group => group.Key, group => group.Last().Id);
+        var lastAssistants = messages.Where(message => message.Role == MessageRole.Assistant)
+            .GroupBy(message => message.TurnId).ToDictionary(group => group.Key, group => group.Last().Id);
+        var toolsByMessage = IndexTools(request.ToolRuns);
+        var items = new List<TranscriptRenderItem>(messages.Length + turns.Count);
+        long previousSequence = 0;
+        foreach (var message in messages)
+        {
+            if (message.Sequence <= previousSequence || !turns.TryGetValue(message.TurnId, out var turn))
+            {
+                throw new System.IO.InvalidDataException("Transcript requires ordered unique sequences and explicit turns.");
+            }
+
+            previousSequence = message.Sequence;
+            var includeOutcome = lastAssistants.GetValueOrDefault(turn.Id) == message.Id;
+            IReadOnlyList<ToolExecutionRecord> tools = toolsByMessage.TryGetValue(message.Id, out var found) ? found : [];
+            items.Add(BuildMessageItem(message, turn, tools, includeOutcome));
+            if (!lastAssistants.ContainsKey(turn.Id) && lastMessages[turn.Id] == message.Id)
+            {
+                items.Add(BuildOutcomeItem(turn));
+            }
+        }
+
+        foreach (var turn in request.Turns.Where(turn => !lastMessages.ContainsKey(turn.Id)))
+        {
+            items.Add(BuildOutcomeItem(turn));
+        }
+
+        var liveMessages = messages.Select(message => message.Id).ToHashSet();
+        foreach (var id in _messageCache.Keys.Where(id => !liveMessages.Contains(id)).ToArray()) _messageCache.Remove(id);
+        foreach (var id in _outcomeCache.Keys.Where(id => !turns.ContainsKey(id) || lastAssistants.ContainsKey(id)).ToArray()) _outcomeCache.Remove(id);
+        return items;
+    }
+
+    private TranscriptRenderItem BuildMessageItem(MessageRecord message, ConversationTurnRecord turn,
+        IReadOnlyList<ToolExecutionRecord> tools, bool includeOutcome)
     {
         if (_messageCache.TryGetValue(message.Id, out var cached) && ReferenceEquals(cached.Message, message) &&
+            ReferenceEquals(cached.Turn, turn) && cached.IncludeOutcome == includeOutcome &&
             SameReferences(cached.Tools, tools)) return cached.Item;
-        var item = _messageProjector.Build(message, tools);
-        _messageCache[message.Id] = (message, tools, item);
+        var item = _messageProjector.Build(message, turn, tools, includeOutcome);
+        _messageCache[message.Id] = (message, turn, includeOutcome, tools, item);
+        return item;
+    }
+
+    private TranscriptRenderItem BuildOutcomeItem(ConversationTurnRecord turn)
+    {
+        if (_outcomeCache.TryGetValue(turn.Id, out var cached) && ReferenceEquals(cached.Turn, turn)) return cached.Item;
+        var item = _messageProjector.BuildTurnOutcome(turn);
+        _outcomeCache[turn.Id] = (turn, item);
         return item;
     }
 

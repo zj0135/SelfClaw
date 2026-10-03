@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Tests.TestDoubles;
 
@@ -64,10 +65,13 @@ public sealed class SubagentStateChangeNotificationTests
         context.Changes.PersistenceRevision.Should().Be(4);
         if (succeed)
         {
-            var message = new MessageRecord(lease.ContinuationTurnId, task.ParentConversationId, MessageRole.Assistant,
-                "continued", MessageStatus.Completed, now, now);
+            var turn = new ConversationTurnRecord(lease.ContinuationTurnId, task.ParentConversationId,
+                AgentExecutionMode.Direct, DirectTurnOrigin.Continuation, ConversationTurnStatus.Succeeded, now, now);
+            var message = new MessageRecord(Guid.NewGuid(), task.ParentConversationId, turn.Id,
+                await context.Turns.ReserveMessageSequenceAsync(task.ParentConversationId), MessageRole.Assistant,
+                "continued", MessageStatus.Sealed, now, now);
             await deliveries.TryResolveAsync(lease,
-                new SubagentDeliveryResolution(SubagentDeliveryResolutionKind.Succeeded, new TurnFinalization(message, []), null, now));
+                new SubagentDeliveryResolution(SubagentDeliveryResolutionKind.Succeeded, new ConversationTurnCommit(turn, [message], []), null, now));
             context.Changes.PersistenceRevision.Should().Be(5);
             (await context.Service.GetDetailAsync(task.ParentConversationId, task.Id))?.Activity.Task.DeliveryStatus.Should().Be(SubagentDeliveryStatus.Delivered);
         }
@@ -94,9 +98,10 @@ public sealed class SubagentStateChangeNotificationTests
     private static SubagentTaskCompletion Completion(SubagentTaskRecord task, SubagentTaskStatus status)
     {
         var now = DateTimeOffset.UtcNow;
-        var message = new MessageRecord(task.ChildTurnId, task.ChildConversationId, MessageRole.Assistant, string.Empty,
-            status == SubagentTaskStatus.Cancelled ? MessageStatus.Cancelled : MessageStatus.Failed, now, now);
-        return new SubagentTaskCompletion(status, new TurnFinalization(message, []), null, "Fixture", "Fixture failure", now);
+        var turn = new ConversationTurnRecord(task.ChildTurnId, task.ChildConversationId, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Subagent, status == SubagentTaskStatus.Cancelled ? ConversationTurnStatus.Cancelled : ConversationTurnStatus.Failed,
+            task.StartedAtUtc ?? task.QueuedAtUtc, now);
+        return new SubagentTaskCompletion(status, new ConversationTurnCommit(turn, [], []), null, "Fixture", "Fixture failure", now);
     }
 
     private static SubagentTaskCreation CloneCreation(SubagentTaskRecord template)
@@ -109,8 +114,7 @@ public sealed class SubagentStateChangeNotificationTests
         };
         var child = new ConversationRecord(task.ChildConversationId, "Child", null, ConversationMode.Programming,
             ToolPermissionMode.RequireApproval, task.SubagentId, now, now, Kind: ConversationKind.Subagent, ParentConversationId: task.ParentConversationId);
-        return new SubagentTaskCreation(child,
-            new MessageRecord(Guid.NewGuid(), child.Id, MessageRole.User, task.TaskText, MessageStatus.Completed, now, now), task);
+        return new SubagentTaskCreation(child, task);
     }
 
     private static async Task WaitForCountAsync(ConcurrentQueue<SubagentStateChange> changes, int count)

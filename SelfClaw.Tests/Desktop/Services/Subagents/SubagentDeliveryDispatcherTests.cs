@@ -1,17 +1,13 @@
-using SelfClaw.Desktop.Services.Notifications;
-using SelfClaw.Desktop.Services.Settings;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Desktop.Services.AgentActivity;
-using SelfClaw.Desktop.Services.ProgrammingAssistant;
+using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Runtime;
-using SelfClaw.Desktop.Services.Runtime.Abstractions;
 using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
-using SelfClaw.Infrastructure.Options;
 using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Desktop.Services.Subagents;
@@ -31,59 +27,45 @@ public sealed class SubagentDeliveryDispatcherTests
     {
         using var context = new SubagentActivityTestContext();
         var task = await context.CreateTaskAsync();
+        await CompleteChildAsync(context, task);
         var now = DateTimeOffset.UtcNow;
-        await context.Tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Running, new SubagentTaskCompletion(
-            SubagentTaskStatus.Succeeded, new TurnFinalization(new MessageRecord(task.ChildTurnId, task.ChildConversationId,
-                MessageRole.Assistant, "result", MessageStatus.Completed, now, now), []), "result", null, null, now));
-        var parent = await context.Conversations.GetConversationAsync(task.ParentConversationId)
-            ?? throw new InvalidOperationException("Missing parent.");
+        var parent = await context.Conversations.GetConversationAsync(task.ParentConversationId) ?? throw new InvalidOperationException();
         var store = new InterceptingSubagentDeliveryStore(new SqliteSubagentDeliveryRepository(context.Database));
         using var cancellation = new CancellationTokenSource();
         store.LeaseFailure = outcome switch { "io" or "failed-first-parent" => new IOException("lease failed"), "cancel" => new OperationCanceledException(), _ => null };
         store.LeaseFailureParentId = outcome == "failed-first-parent" ? parent.Id : null;
         store.ReturnEmptyLease = outcome == "empty";
         store.AfterLease = outcome == "cancel-after-lease" ? cancellation.Cancel : null;
-        using var sessions = new ConversationSessionCoordinator(context.Conversations, new SilentTranscriptSink());
+        using var runs = new ConversationRunCoordinator(context.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var sessions = new ConversationSessionCoordinator(context.Conversations, context.Turns, runs, new Sink());
         var targetParent = parent;
-        ConversationRuntimeState? busy = null;
+        ConversationRunHandle? busy = null;
         if (outcome is "busy-parent" or "failed-first-parent")
         {
             var second = await context.CreateTaskAsync();
-            var completedAt = now.AddMilliseconds(10);
-            await context.Tasks.TryCompleteAsync(second.Id, SubagentTaskStatus.Running, new SubagentTaskCompletion(
-                SubagentTaskStatus.Succeeded, new TurnFinalization(new MessageRecord(second.ChildTurnId, second.ChildConversationId,
-                    MessageRole.Assistant, "second result", MessageStatus.Completed, completedAt, completedAt), []),
-                "second result", null, null, completedAt));
-            targetParent = await context.Conversations.GetConversationAsync(second.ParentConversationId)
-                ?? throw new InvalidOperationException("Missing second parent.");
-            if (outcome == "busy-parent") busy = await sessions.StartTurnAsync(parent);
+            await CompleteChildAsync(context, second);
+            targetParent = await context.Conversations.GetConversationAsync(second.ParentConversationId) ?? throw new InvalidOperationException();
+            if (outcome == "busy-parent") busy = runs.TryReserve(parent.Id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive);
         }
-        using var activity = new AgentActivityCoordinator(context.Approvals, NullLogger<AgentActivityCoordinator>.Instance);
         var notifications = new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance);
         var runtime = new ControlledSubagentRuntime();
-        using var engine = new ConversationTurnEngine(context.Conversations,
-            new DesktopTurnFinalizer(context.Conversations, NullLogger<DesktopTurnFinalizer>.Instance), context.Recorder,
-            runtime, sessions, activity, context.Approvals,
-            SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(new DesktopSettingsJsonStore(StoragePathDefaults.Create("unused", "unused", "unused"))),
-            new SilentCompletionNotifier(), NullLogger<ConversationTurnEngine>.Instance);
         var executor = new SubagentContinuationExecutor(store, runtime, context.Recorder, context.Approvals,
-            new SubagentTaskSnapshotSerializer(), new SubagentCompletionBatchSerializer(), engine, notifications,
+            new SubagentTaskSnapshotSerializer(), new SubagentCompletionBatchSerializer(), runs, sessions, notifications,
             NullLogger<SubagentContinuationExecutor>.Instance);
-        using var dispatcher = new SubagentDeliveryDispatcher(store, context.Conversations, engine, executor, notifications,
+        using var dispatcher = new SubagentDeliveryDispatcher(store, context.Conversations, runs, executor, notifications,
             new ScanTimeProvider(now.AddSeconds(3)), NullLogger<SubagentDeliveryDispatcher>.Instance);
-
         Func<Task> start = () => dispatcher.TryStartContinuationAsync(cancellation.Token);
         if (outcome is "cancel" or "cancel-after-lease") await start.Should().ThrowAsync<OperationCanceledException>();
         else await start();
-
         if (outcome is "success" or "busy-parent" or "failed-first-parent" or "cancel-during-execution")
         {
             await runtime.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            sessions.IsRunning(targetParent.Id).Should().BeTrue();
-            runtime.Request!.ConversationId.Should().Be(targetParent.Id);
+            var handle = runs.GetActiveRun(targetParent.Id) ?? throw new InvalidOperationException("Missing owner.");
+            runtime.Request?.ConversationId.Should().Be(targetParent.Id);
+            runtime.Request?.TurnId.Should().Be(handle.TurnId);
             if (outcome == "cancel-during-execution") cancellation.Cancel();
             else await runtime.EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "continued"));
-            await WaitForReleaseAsync();
+            await handle.Completion.WaitAsync(TimeSpan.FromSeconds(5));
             store.Resolutions.Should().Be(1);
         }
         else
@@ -91,25 +73,28 @@ public sealed class SubagentDeliveryDispatcherTests
             runtime.Started.Task.IsCompleted.Should().BeFalse();
             store.Resolutions.Should().Be(outcome == "cancel-after-lease" ? 1 : 0);
         }
-
-        sessions.IsRunning(targetParent.Id).Should().BeFalse();
+        runs.IsRunning(targetParent.Id).Should().BeFalse();
         if (busy is not null)
         {
-            sessions.IsRunning(parent.Id).Should().BeTrue("another parent's continuation must not release this interactive turn");
-            sessions.AbandonTurn(busy);
+            runs.GetActiveRun(parent.Id).Should().BeSameAs(busy, "another parent's continuation cannot release this run");
+            runs.Complete(busy, false);
         }
-        var next = await engine.TryAdmitContinuationAsync(targetParent, CancellationToken.None);
-        next.Should().NotBeNull();
-        if (next is not null) await engine.CompleteContinuationAsync(next, false, CancellationToken.None);
-
-        async Task WaitForReleaseAsync()
-        {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            while (sessions.IsRunning(targetParent.Id)) await Task.Delay(10, timeout.Token);
-        }
+        var next = await runs.TryReserveContinuationAsync(targetParent) ?? throw new InvalidOperationException("Reservation leaked.");
+        runs.Complete(next, false);
     }
 
-    private sealed class SilentTranscriptSink : ITranscriptChangeSink
+    private static async Task CompleteChildAsync(SubagentActivityTestContext context, SubagentTaskRecord task)
+    {
+        var turn = (await context.Turns.ListTurnsAsync(task.ChildConversationId)).Single(turn => turn.Id == task.ChildTurnId);
+        var now = DateTimeOffset.UtcNow;
+        var message = new MessageRecord(Guid.NewGuid(), task.ChildConversationId, turn.Id,
+            await context.Turns.ReserveMessageSequenceAsync(task.ChildConversationId), MessageRole.Assistant,
+            "child result", MessageStatus.Sealed, now, now);
+        await context.Tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Running, new SubagentTaskCompletion(SubagentTaskStatus.Succeeded,
+            new(turn with { Status = ConversationTurnStatus.Succeeded, CompletedAtUtc = now }, [message], []), "child result", null, null, now));
+    }
+
+    private sealed class Sink : ITranscriptChangeSink
     {
         public void RequestStreamingPublish(bool autoScroll) { }
         public void PublishNow(bool autoScroll) { }
@@ -118,10 +103,5 @@ public sealed class SubagentDeliveryDispatcherTests
     private sealed class ScanTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
-    }
-
-    private sealed class SilentCompletionNotifier : IConversationCompletionNotifier
-    {
-        public void Notify(ConversationRecord conversation, IReadOnlyList<MessageRecord> messages) { }
     }
 }

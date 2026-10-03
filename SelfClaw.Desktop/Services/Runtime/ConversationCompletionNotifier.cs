@@ -15,91 +15,71 @@ internal sealed class ConversationCompletionNotifier : IConversationCompletionNo
         _notificationService = notificationService;
     }
 
-    public void Notify(ConversationRecord conversation, IReadOnlyList<MessageRecord> messages)
+    public void Notify(ConversationRecord conversation, ConversationTurnRecord turn, IReadOnlyList<MessageRecord> messages)
     {
         ArgumentNullException.ThrowIfNull(conversation);
+        ArgumentNullException.ThrowIfNull(turn);
         ArgumentNullException.ThrowIfNull(messages);
+        if (turn.ConversationId != conversation.Id)
+        {
+            throw new ArgumentException("The completed turn must belong to the conversation.", nameof(turn));
+        }
 
-        if (conversation.Mode != ConversationMode.Programming)
+        if (conversation.Mode != ConversationMode.Programming || turn.Status == ConversationTurnStatus.Running)
         {
             return;
         }
 
         _notificationService.ShowConversationCompleted(
             conversation.Id,
-            ResolveTitle(conversation.Title, messages),
-            BuildMessage(messages));
+            ResolveTitle(conversation.Title, turn, messages),
+            BuildMessage(turn, messages));
     }
 
-    internal static string BuildMessage(IReadOnlyList<MessageRecord> messages)
+    internal static string BuildMessage(ConversationTurnRecord turn, IReadOnlyList<MessageRecord> messages)
     {
-        // The terminal assistant message carries the outcome; a blocked or failed turn must not
-        // masquerade as a completed one with a preview of an earlier answer.
-        var terminal = messages.LastOrDefault(message =>
-            message.Role == MessageRole.Assistant &&
-            message.Status is MessageStatus.Blocked or MessageStatus.Failed or MessageStatus.Cancelled
-                or MessageStatus.Truncated or MessageStatus.Completed);
-        if (terminal?.Status == MessageStatus.Blocked)
+        ArgumentNullException.ThrowIfNull(turn);
+        ArgumentNullException.ThrowIfNull(messages);
+        var headline = turn.Status switch
         {
-            return WithReason("已被插件 hook 阻止", terminal.ErrorMessage);
+            ConversationTurnStatus.Blocked => "回合已被阻止",
+            ConversationTurnStatus.Failed => "会话失败",
+            ConversationTurnStatus.Cancelled => "会话已取消",
+            ConversationTurnStatus.Truncated => "回答已截断",
+            ConversationTurnStatus.Interrupted => "会话已中断",
+            ConversationTurnStatus.Succeeded => "Programming session completed.",
+            _ => throw new ArgumentException("Completion notification requires a terminal turn.", nameof(turn))
+        };
+        if (turn.Status != ConversationTurnStatus.Succeeded)
+        {
+            return WithReason(headline, turn.ErrorMessage);
         }
 
-        if (terminal?.Status == MessageStatus.Failed)
-        {
-            return WithReason("会话失败", terminal.ErrorMessage);
-        }
-
-        const string modeMessage = "Programming session completed.";
-        var preview = BuildPreview(messages);
-        return string.IsNullOrWhiteSpace(preview)
-            ? modeMessage
-            : $"{modeMessage}\n{preview}";
+        var preview = messages
+            .Where(message => message.TurnId == turn.Id && message.ConversationId == turn.ConversationId &&
+                              message.Role == MessageRole.Assistant && message.Status == MessageStatus.Sealed)
+            .OrderByDescending(message => message.Sequence)
+            .Select(message => NormalizeText(message.MarkdownContent))
+            .FirstOrDefault(text => !string.IsNullOrWhiteSpace(text));
+        return string.IsNullOrWhiteSpace(preview) ? headline : $"{headline}\n{Limit(preview, 140)}";
     }
 
     private static string WithReason(string headline, string? reason)
         => string.IsNullOrWhiteSpace(reason) ? $"{headline}。" : $"{headline}：{reason}";
 
-    private static string BuildPreview(IReadOnlyList<MessageRecord> messages)
-    {
-        var latestMessage = messages
-            .Where(message => message.Status is MessageStatus.Completed or MessageStatus.Truncated
-                              && message.Role == MessageRole.Assistant)
-            .OrderByDescending(message => message.CreatedAtUtc)
-            .FirstOrDefault()
-            ?? messages
-                .Where(message => message.Status is MessageStatus.Completed or MessageStatus.Truncated &&
-                                  message.Role is MessageRole.Assistant or MessageRole.System)
-                .OrderByDescending(message => message.CreatedAtUtc)
-                .FirstOrDefault();
-        if (latestMessage is null)
-        {
-            return string.Empty;
-        }
-
-        var preview = NormalizeText(latestMessage.MarkdownContent);
-        if (string.IsNullOrWhiteSpace(preview) && !string.IsNullOrWhiteSpace(latestMessage.ErrorMessage))
-        {
-            preview = NormalizeText(latestMessage.ErrorMessage);
-        }
-
-        return preview.Length > 140 ? preview[..140] + "..." : preview;
-    }
-
-    private static string ResolveTitle(string? fallbackTitle, IReadOnlyList<MessageRecord> messages)
+    private static string ResolveTitle(string? fallbackTitle, ConversationTurnRecord turn, IReadOnlyList<MessageRecord> messages)
     {
         var latestPrompt = messages
-            .Where(message => message.Status == MessageStatus.Completed && message.Role == MessageRole.User)
-            .OrderByDescending(message => message.CreatedAtUtc)
+            .Where(message => message.TurnId == turn.Id && message.ConversationId == turn.ConversationId &&
+                              message.Status == MessageStatus.Sealed && message.Role == MessageRole.User)
+            .OrderByDescending(message => message.Sequence)
             .Select(message => NormalizeText(message.MarkdownContent))
             .FirstOrDefault(prompt => !string.IsNullOrWhiteSpace(prompt));
-        if (!string.IsNullOrWhiteSpace(latestPrompt))
-        {
-            return latestPrompt.Length > 64 ? latestPrompt[..64] + "..." : latestPrompt;
-        }
-
-        var resolved = string.IsNullOrWhiteSpace(fallbackTitle) ? "SelfClaw" : fallbackTitle.Trim();
-        return resolved.Length > 64 ? resolved[..64] + "..." : resolved;
+        var resolved = latestPrompt ?? (string.IsNullOrWhiteSpace(fallbackTitle) ? "SelfClaw" : fallbackTitle.Trim());
+        return Limit(resolved, 64);
     }
+
+    private static string Limit(string text, int length) => text.Length > length ? text[..length] + "..." : text;
 
     private static string NormalizeText(string? text)
     {

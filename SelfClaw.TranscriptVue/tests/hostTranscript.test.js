@@ -16,6 +16,25 @@ function fixture(afterRender = () => Promise.resolve()) {
 }
 const frame = (revision, text = 'current') => ({ type: 'replaceState', revision, items: [{ id: 'message', markdown: text }], conversations: [] });
 
+it('applies an outcome-only patch without changing fragment identity or inventing assistant output', async () => {
+    const panel = fixture();
+    let state;
+    panel.transcript.on((value) => { state = value; });
+    const user = { id: 'u1', kind: 'message', role: 'user', status: 'sealed', segments: [] };
+    const outcome = { id: 'turn-outcome:t1', kind: 'turn-outcome', role: 'system', segments: [], turnOutcome: { turnId: 't1', status: 'running' } };
+    panel.send({ type: 'replaceState', revision: 1, items: [user, outcome], conversations: [] });
+    await flushPromises();
+    panel.send({ type: 'patchState', revision: 2, baseRevision: 1, upsertItems: [{ ...outcome,
+        turnOutcome: { turnId: 't1', status: 'failed', errorMessage: 'no output', usage: { totalTokens: null } } }] });
+    await flushPromises();
+    expect(state.items[0]).toBe(user);
+    expect(state.items).toHaveLength(2);
+    expect(state.items.some((item) => item.role === 'assistant')).toBe(false);
+    expect(state.items[1].turnOutcome.status).toBe('failed');
+    expect(state.items[1].turnOutcome.usage.totalTokens).toBeNull();
+    expect(panel.posted).toContainEqual({ type: 'transcript-applied', revision: 2 });
+});
+
 it('isolates a failing raw subscriber and still delivers and acknowledges a rendered transcript', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const panel = fixture();

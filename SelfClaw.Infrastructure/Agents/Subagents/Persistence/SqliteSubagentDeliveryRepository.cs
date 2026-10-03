@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
@@ -324,12 +325,13 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
             AddResolutionId(target, delivery.Id, delivered, pending, deadLettered);
         }
 
-        if (resolution.TurnFinalization is TurnFinalization finalization &&
-            !await SqliteTurnFinalizationWriter.TryWriteAsync(
+        if (resolution.TurnFinalization is ConversationTurnCommit finalization &&
+            !await SqliteConversationTurnWriter.TryWriteAsync(
                     connection,
                     transaction,
                     finalization,
-                    cancellationToken).ConfigureAwait(false))
+                    cancellationToken,
+                    allowInsert: true).ConfigureAwait(false))
         {
             await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             return LeaseMismatch();
@@ -363,14 +365,7 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         var deadLetters = new List<SubagentDeliveryRecord>();
         foreach (var delivery in expired)
         {
-            var hasRecordedTools = delivery.ToolExecutionStartedAtUtc is not null ||
-                                   delivery.ContinuationTurnId is Guid continuationTurnId &&
-                                   await HasRecordedToolsAsync(
-                                       connection,
-                                       transaction,
-                                       delivery.ParentConversationId,
-                                       continuationTurnId,
-                                       cancellationToken).ConfigureAwait(false);
+            var hasRecordedTools = delivery.ToolExecutionStartedAtUtc is not null;
             var deadLetter = hasRecordedTools || delivery.AttemptCount >= MaximumAttempts;
             await RecoverLeaseAsync(
                 connection,
@@ -388,6 +383,7 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
                         transaction,
                         delivery.ParentConversationId,
                         failedTurnId,
+                        delivery.ToolExecutionStartedAtUtc ?? delivery.UpdatedAtUtc,
                         recoveredAtUtc,
                         cancellationToken).ConfigureAwait(false);
                 }
@@ -569,13 +565,16 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             var delivery = ReadDelivery(reader);
-            if (expectedIds.Contains(delivery.Id))
+            if (!expectedIds.Contains(delivery.Id) || delivery.ParentConversationId != lease.ParentConversationId ||
+                delivery.ParentTurnId != lease.ParentTurnId)
             {
-                deliveries.Add(delivery);
+                return [];
             }
+
+            deliveries.Add(delivery);
         }
 
-        return deliveries.Count == expectedIds.Count ? deliveries : [];
+        return deliveries.Count == expectedIds.Count && expectedIds.Count == lease.Deliveries.Count ? deliveries : [];
     }
 
     private static async Task<bool> TryUpdateResolutionAsync(
@@ -649,21 +648,6 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         return deliveries;
     }
 
-    private static async Task<bool> HasRecordedToolsAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        Guid conversationId,
-        Guid turnId,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT COUNT(*) FROM tool_runs WHERE conversation_id = $conversationId AND message_id = $turnId;";
-        command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-        command.Parameters.AddWithValue("$turnId", turnId.ToString("D"));
-        return (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0L) > 0;
-    }
-
     private static async Task RecoverLeaseAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -706,52 +690,15 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
         SqliteTransaction transaction,
         Guid conversationId,
         Guid turnId,
+        DateTimeOffset startedAtUtc,
         DateTimeOffset recoveredAtUtc,
         CancellationToken cancellationToken)
     {
         const string error = "The application stopped after the continuation began tool execution; replay was suppressed.";
-        await using (var messageCommand = connection.CreateCommand())
-        {
-            messageCommand.Transaction = transaction;
-            messageCommand.CommandText = """
-                INSERT INTO messages(
-                    id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc, error_message)
-                VALUES($id, $conversationId, $role, '', $status, $occurredAt, $occurredAt, $error)
-                ON CONFLICT(id) DO UPDATE SET
-                    status = excluded.status,
-                    updated_at_utc = excluded.updated_at_utc,
-                    error_message = excluded.error_message
-                WHERE messages.status = $streaming;
-                """;
-            messageCommand.Parameters.AddWithValue("$id", turnId.ToString("D"));
-            messageCommand.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-            messageCommand.Parameters.AddWithValue("$role", (int)MessageRole.Assistant);
-            messageCommand.Parameters.AddWithValue("$status", (int)MessageStatus.Failed);
-            messageCommand.Parameters.AddWithValue("$streaming", (int)MessageStatus.Streaming);
-            messageCommand.Parameters.AddWithValue("$occurredAt", recoveredAtUtc.ToString("O"));
-            messageCommand.Parameters.AddWithValue("$error", error);
-            await messageCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        await using var toolCommand = connection.CreateCommand();
-        toolCommand.Transaction = transaction;
-        toolCommand.CommandText = """
-            UPDATE tool_runs
-            SET status = $failed,
-                result_summary = COALESCE(result_summary, $error),
-                updated_at_utc = $occurredAt
-            WHERE conversation_id = $conversationId
-              AND message_id = $turnId
-              AND status IN ($running, $awaitingApproval);
-            """;
-        toolCommand.Parameters.AddWithValue("$failed", (int)ToolExecutionStatus.Failed);
-        toolCommand.Parameters.AddWithValue("$running", (int)ToolExecutionStatus.Running);
-        toolCommand.Parameters.AddWithValue("$awaitingApproval", (int)ToolExecutionStatus.AwaitingApproval);
-        toolCommand.Parameters.AddWithValue("$error", error);
-        toolCommand.Parameters.AddWithValue("$occurredAt", recoveredAtUtc.ToString("O"));
-        toolCommand.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-        toolCommand.Parameters.AddWithValue("$turnId", turnId.ToString("D"));
-        await toolCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        var turn = new ConversationTurnRecord(turnId, conversationId, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Continuation, ConversationTurnStatus.Interrupted, startedAtUtc, recoveredAtUtc, error);
+        await SqliteConversationTurnWriter.TryWriteAsync(connection, transaction,
+            new ConversationTurnCommit(turn, [], []), cancellationToken, allowInsert: true).ConfigureAwait(false);
     }
 
     private static SubagentDeliveryStatus ResolveTarget(
@@ -846,22 +793,20 @@ internal sealed class SqliteSubagentDeliveryRepository : ISubagentDeliveryStore
                 nameof(resolution));
         }
 
-        if (resolution.TurnFinalization is not TurnFinalization finalization)
+        if (resolution.TurnFinalization is not ConversationTurnCommit finalization)
         {
             return;
         }
 
-        var expectedStatus = resolution.Kind == SubagentDeliveryResolutionKind.Succeeded
-            ? MessageStatus.Completed
-            : MessageStatus.Failed;
-        if (finalization.AssistantMessage.Id != lease.ContinuationTurnId ||
-            finalization.AssistantMessage.ConversationId != lease.ParentConversationId ||
-            finalization.AssistantMessage.Status != expectedStatus ||
-            finalization.ToolExecutions.Any(tool =>
-                tool.ConversationId != lease.ParentConversationId ||
-                tool.MessageId != lease.ContinuationTurnId))
+        var validStatus = resolution.Kind == SubagentDeliveryResolutionKind.Succeeded
+            ? finalization.Turn.Status == ConversationTurnStatus.Succeeded
+            : finalization.Turn.Status is not (ConversationTurnStatus.Running or ConversationTurnStatus.Succeeded);
+        if (finalization.Turn.Id != lease.ContinuationTurnId ||
+            finalization.Turn.ConversationId != lease.ParentConversationId ||
+            finalization.Turn.Origin != DirectTurnOrigin.Continuation ||
+            finalization.Turn.ExecutionMode != AgentExecutionMode.Direct || !validStatus)
         {
-            throw new ArgumentException("The continuation finalization does not belong to its delivery lease.", nameof(resolution));
+            throw new ArgumentException("The continuation commit does not belong to its delivery lease.", nameof(resolution));
         }
     }
 

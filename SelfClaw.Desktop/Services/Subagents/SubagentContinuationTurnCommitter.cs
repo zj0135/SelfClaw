@@ -23,17 +23,7 @@ internal sealed class SubagentContinuationTurnCommitter : IRecordedTurnCommitter
     internal SubagentContinuationDisposition Disposition { get; private set; }
     internal bool ToolsMayHaveExecuted { get; private set; }
 
-    /// <summary>
-    /// Set when the continuation was blocked by a Plugin hook. The same hook would block a retry, so
-    /// the delivery is dead-lettered instead of retried.
-    /// </summary>
     internal string? BlockedReason { get; private set; }
-
-    internal void MarkBlocked(string reason)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-        BlockedReason = reason;
-    }
 
     public async Task BeforeExecutionAsync(CancellationToken cancellationToken)
     {
@@ -48,6 +38,8 @@ internal sealed class SubagentContinuationTurnCommitter : IRecordedTurnCommitter
     public async Task<bool> TryCommitAsync(RecordedTurnCommit commit)
     {
         ArgumentNullException.ThrowIfNull(commit);
+        if (commit.Kind == TurnFinalizationKind.Blocked)
+            BlockedReason = commit.ErrorMessage ?? "The continuation was blocked.";
         var resolutionKind = commit.Kind switch
         {
             TurnFinalizationKind.Succeeded => SubagentDeliveryResolutionKind.Succeeded,
@@ -64,7 +56,8 @@ internal sealed class SubagentContinuationTurnCommitter : IRecordedTurnCommitter
             new SubagentDeliveryResolution(
                 resolutionKind,
                 persistsFinalization ? commit.Finalization : null,
-                commit.ErrorMessage,
+                commit.ErrorMessage ?? (commit.Kind == TurnFinalizationKind.Truncated
+                    ? "The continuation reached the model output limit." : null),
                 _timeProvider.GetUtcNow()));
         if (!result.LeaseMatched)
         {

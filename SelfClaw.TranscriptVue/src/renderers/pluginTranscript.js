@@ -12,7 +12,10 @@ export function createPluginTranscriptProjector() {
         if (bytes > maximumPluginTranscriptBytes - 1024) {
             truncated = true;
             json = JSON.stringify({ id: item.id, kind: item.kind, role: item.role, status: item.status,
-                contentTruncated: true, segments: [{ kind: 'content', markdown: '此消息超过插件摘要窗口的大小限制。' }] });
+                turnOutcome: item.turnOutcome ? { ...item.turnOutcome,
+                    errorMessage: typeof item.turnOutcome.errorMessage === 'string' ? item.turnOutcome.errorMessage.slice(0, 2048) : null,
+                    usage: item.turnOutcome.usage ? { totalTokens: item.turnOutcome.usage.totalTokens ?? null } : null } : null,
+                contentTruncated: true, segments: item.kind === 'turn-outcome' ? [] : [{ kind: 'content', markdown: '此消息超过插件摘要窗口的大小限制。' }] });
             bytes = encoder.encode(json).length;
         }
         projected = { item: JSON.parse(json), bytes, truncated };

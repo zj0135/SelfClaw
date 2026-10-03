@@ -21,7 +21,8 @@ public sealed class SubagentActivityServiceTests
         var execution = context.CreateExecutor(task, runtime).ExecuteAsync(task, CancellationToken.None);
         await runtime.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var initial = await DetailAsync(context, task);
-        initial.Content.Message.Should().NotBeNull();
+        initial.Content.Message.Should().BeNull();
+        initial.Content.Turn?.Status.Should().Be(ConversationTurnStatus.Running);
         initial.ContentOrigin.Should().Be("live");
         await context.Service.ListAsync(new SubagentActivityQuery(task.ParentConversationId));
         var listReads = context.Reader.ListReads;
@@ -39,7 +40,12 @@ public sealed class SubagentActivityServiceTests
         beforeTerminal.Content.ToolRuns.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Running);
         beforeTerminal.Activity.Phase.Should().Be("tool");
         beforeTerminal.Activity.Task.ModelDisplayName.Should().Be("actual model");
-        (await context.Conversations.ListMessagesAsync(task.ChildConversationId)).Should().NotContain(message => message.Role == MessageRole.Assistant);
+        var progress = (await context.Conversations.ListMessagesAsync(task.ChildConversationId))
+            .Single(message => message.Role == MessageRole.Assistant);
+        progress.Id.Should().Be(beforeMessage.Id);
+        progress.Id.Should().NotBe(task.ChildTurnId);
+        progress.TurnId.Should().Be(task.ChildTurnId);
+        beforeTerminal.Content.ToolRuns.Single().MessageId.Should().Be(progress.Id);
         await runtime.EmitAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "read", "result"));
         await runtime.EmitAsync(new UsageReportedEvent(new TurnUsage(InputTokens: 21, OutputTokens: 8)));
         for (var index = 0; index < 10; index++)

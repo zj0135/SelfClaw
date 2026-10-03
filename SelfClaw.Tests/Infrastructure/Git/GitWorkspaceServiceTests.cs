@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Git;
 using SelfClaw.Infrastructure.Options;
+using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Infrastructure.Git;
 
@@ -78,7 +78,7 @@ public sealed class GitWorkspaceServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            SqliteTestPools.ClearFor(Path.Combine(testRoot, "appdata", "selfclaw.db"));
             DeleteTestDirectory(testRoot);
         }
     }
@@ -122,7 +122,7 @@ public sealed class GitWorkspaceServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            SqliteTestPools.ClearFor(Path.Combine(testRoot, "appdata", "selfclaw.db"));
             DeleteTestDirectory(testRoot);
         }
     }
@@ -178,7 +178,7 @@ public sealed class GitWorkspaceServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            SqliteTestPools.ClearFor(Path.Combine(testRoot, "appdata", "selfclaw.db"));
             DeleteTestDirectory(testRoot);
         }
     }
@@ -230,7 +230,7 @@ public sealed class GitWorkspaceServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            SqliteTestPools.ClearFor(Path.Combine(testRoot, "appdata", "selfclaw.db"));
             DeleteTestDirectory(testRoot);
         }
     }

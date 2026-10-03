@@ -38,7 +38,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         "have the model resume from where it stopped.";
 
     private const string ToolLoopExhaustedMessage =
-        "BudgetExhausted: the turn reached its 128 provider request limit while still calling tools.";
+        "BudgetExhausted: the turn reached its 128 provider request limit before it could continue.";
 
     /// <summary>
     /// Reported when the output-token cap is hit before any text is produced. There is no
@@ -193,7 +193,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 : HookNotes.RunStatus(terminal?.Status ?? RunCompletionStatus.Failed);
             state.Hooks.RunCompleted(new RunCompletedInput(
                 status,
-                terminal?.FinalText,
+                output.SummaryText,
                 terminal?.ErrorMessage,
                 output.Usage,
                 invoker?.CallCount ?? 0,
@@ -212,6 +212,9 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         TurnState state,
         CancellationToken cancellationToken)
     {
+        if (request.InputSession is not null && request.ExecutionContext.Origin != DirectTurnOrigin.Interactive)
+            throw new InvalidDataException("Only Interactive Direct turns can consume input boundaries.");
+
         if (DirectTurnPolicy.For(request).RequiresToolExecutionCheckpoint && request.ToolExecutionCheckpoint is null)
         {
             throw new InvalidDataException("A continuation requires a durable tool execution checkpoint.");
@@ -300,6 +303,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
             var messages = _promptComposer.BuildMessages(
                 request.Messages,
+                request.Turns,
                 request.ToolExecutions ?? [],
                 request.Agent.Instructions,
                 capabilityLease.SystemInstructions,
@@ -310,7 +314,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                     providerLease.Options.MaxOutputTokens),
                 providerLease.Options.Tools,
                 start.Context);
-            return new DirectTurnSetup.Ready(capabilityLease, providerLease, invoker, messages);
+            return new DirectTurnSetup.Ready(capabilityLease, providerLease, invoker, messages, request.InputSession);
         }
         catch
         {
@@ -326,7 +330,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         DirectTurnCapabilityLease capabilityLease)
     {
         var latestUser = DirectTurnPolicy.For(request).HasFreshUserMessage
-            ? request.Messages.LastOrDefault(message => message.Role == MessageRole.User)
+            ? request.Messages.Where(message => message.TurnId == request.TurnId && message.Role == MessageRole.User)
+                .OrderBy(message => message.Sequence).LastOrDefault()
             : null;
         var attachments = latestUser?.Attachments is { Count: > 0 } records
             ? records.Select(record => new HookAttachmentPayload(

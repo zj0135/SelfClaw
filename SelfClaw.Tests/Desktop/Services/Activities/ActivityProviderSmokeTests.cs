@@ -55,7 +55,8 @@ public sealed class ActivityProviderSmokeTests(ITestOutputHelper output)
         var now = DateTimeOffset.UtcNow;
         var request = new DirectChatTurnRequest(task.ChildTurnId, task.ChildConversationId, null,
             new AgentRuntimeDefinition("verification", "Verification", "", AgentExecutionMode.Direct, "none", [], [], [], [], "Solve the supplied arithmetic problem. Give a concise answer."),
-            [new MessageRecord(Guid.NewGuid(), task.ChildConversationId, MessageRole.User, "What is the remainder when 7^123 is divided by 13? Verify the result.", MessageStatus.Completed, now, now)],
+            [new MessageRecord(Guid.NewGuid(), task.ChildConversationId, task.ChildTurnId, 1, MessageRole.User, "What is the remainder when 7^123 is divided by 13? Verify the result.", MessageStatus.Sealed, now, now)],
+            session.InitialTurns,
             profile.Id, ToolPermissionMode.RequireApproval, null,
             new DirectTurnExecutionContext(DirectTurnOrigin.Subagent, new DirectCapabilityCeiling("none", [], [], [], []), null));
         var runtime = services.GetRequiredService<DirectAgentChatRuntime>();

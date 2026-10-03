@@ -49,13 +49,16 @@ internal sealed class ConversationWorkspaceService
             string.IsNullOrWhiteSpace(name) ? path : name, path, now, now), cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<PreparedConversationWorkspace> PrepareAsync(ConversationRecord? conversation,
+    public async Task<PreparedConversationWorkspace> PrepareAsync(Guid conversationId, ConversationRecord? conversation,
         WorkspaceRoot? root, GitWorkspaceMode mode, string prompt, CancellationToken cancellationToken = default)
     {
+        if (conversationId == Guid.Empty || (conversation is not null && conversation.Id != conversationId))
+            throw new ArgumentException("Workspace preparation requires the reserved conversation id.", nameof(conversationId));
+        cancellationToken.ThrowIfCancellationRequested();
         if (conversation is null && root?.IsManagedWorktree == true)
             throw new InvalidOperationException("该工作树已绑定其他会话，请选择基础工作目录后新建会话。");
         if (mode != GitWorkspaceMode.ManagedWorktree)
-            return new(root, conversation?.Id, false);
+            return new(root, conversationId, false);
         if (root is null) throw new InvalidOperationException("请先选择一个 Git 工作目录。");
         if (conversation is not null)
         {
@@ -64,7 +67,6 @@ internal sealed class ConversationWorkspaceService
             return new(root, conversation.Id, false);
         }
         if (_manager is null) throw new InvalidOperationException("Git 工作树功能当前不可用。");
-        var conversationId = Guid.NewGuid();
         var creation = await _manager.CreateManagedWorktreeAsync(root, conversationId, prompt, cancellationToken).ConfigureAwait(false);
         return new(creation.WorkspaceRoot, conversationId, true);
     }

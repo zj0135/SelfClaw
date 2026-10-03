@@ -1,6 +1,8 @@
+using System.IO;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Transcript;
 
@@ -8,23 +10,36 @@ namespace SelfClaw.Desktop.Services.Runtime;
 
 internal sealed class ConversationTurnRecorder
 {
-    private readonly IConversationRepository _conversationRepository;
+    private readonly IConversationRepository _conversations;
+    private readonly IConversationTurnRepository _turns;
+    private readonly IConversationInputRepository _inputs;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ConversationTurnRecorder> _logger;
 
     public ConversationTurnRecorder(
-        IConversationRepository conversationRepository,
+        IConversationRepository conversations,
+        IConversationTurnRepository turns,
+        IConversationInputRepository inputs,
         ILogger<ConversationTurnRecorder> logger)
-        : this(conversationRepository, TimeProvider.System, logger)
+        : this(conversations, turns, inputs, TimeProvider.System, logger)
     {
     }
 
     internal ConversationTurnRecorder(
-        IConversationRepository conversationRepository,
+        IConversationRepository conversations,
+        IConversationTurnRepository turns,
+        IConversationInputRepository inputs,
         TimeProvider timeProvider,
         ILogger<ConversationTurnRecorder> logger)
     {
-        _conversationRepository = conversationRepository;
+        ArgumentNullException.ThrowIfNull(conversations);
+        ArgumentNullException.ThrowIfNull(turns);
+        ArgumentNullException.ThrowIfNull(inputs);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(logger);
+        _conversations = conversations;
+        _turns = turns;
+        _inputs = inputs;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -33,267 +48,230 @@ internal sealed class ConversationTurnRecorder
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(turn);
-
-        // CLI process startup can delay the first event, so surface the assistant placeholder immediately.
-        EnsureAssistantMessage(session, turn);
+        if (session.ConversationId != turn.Record.ConversationId)
+            throw new InvalidDataException("The turn does not belong to this conversation.");
+        session.ReplaceTurn(turn.Record);
+        session.RaiseTranscriptChanged(false);
     }
 
-    internal async Task ApplyEventAsync(
-        ConversationRuntimeState session,
-        AgentTurnState turn,
-        AgentStreamEvent streamEvent,
-        IRecordedTurnCommitter committer,
-        CancellationToken cancellationToken)
-        => await ApplyEventCoreAsync(
-            session,
-            turn,
-            streamEvent,
-            committer,
-            persistToolProgress: true,
-            cancellationToken);
+    internal Task ApplyEventAsync(ConversationRuntimeState session, AgentTurnState turn,
+        AgentStreamEvent streamEvent, IRecordedTurnCommitter committer, CancellationToken cancellationToken)
+        => ApplyEventCoreAsync(session, turn, streamEvent, committer, persistProgress: true, cancellationToken);
 
-    internal async Task ApplyDetachedEventAsync(
-        ConversationRuntimeState session,
-        AgentTurnState turn,
-        AgentStreamEvent streamEvent,
-        IRecordedTurnCommitter committer,
-        CancellationToken cancellationToken)
-        => await ApplyEventCoreAsync(
-            session,
-            turn,
-            streamEvent,
-            committer,
-            persistToolProgress: false,
-            cancellationToken);
+    internal Task ApplyDetachedEventAsync(ConversationRuntimeState session, AgentTurnState turn,
+        AgentStreamEvent streamEvent, IRecordedTurnCommitter committer, CancellationToken cancellationToken)
+        => ApplyEventCoreAsync(session, turn, streamEvent, committer, persistProgress: false, cancellationToken);
 
-    private async Task ApplyEventCoreAsync(
-        ConversationRuntimeState session,
-        AgentTurnState turn,
-        AgentStreamEvent streamEvent,
-        IRecordedTurnCommitter committer,
-        bool persistToolProgress,
+    internal Task FinalizeInterruptedAsync(ConversationRuntimeState session, AgentTurnState turn,
+        TurnFinalizationKind kind, string errorMessage, IRecordedTurnCommitter committer)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(turn);
+        ArgumentNullException.ThrowIfNull(errorMessage);
+        ArgumentNullException.ThrowIfNull(committer);
+        return FinalizeTurnAsync(session, turn, kind, null, errorMessage, committer);
+    }
+
+    private async Task ApplyEventCoreAsync(ConversationRuntimeState session, AgentTurnState turn,
+        AgentStreamEvent streamEvent, IRecordedTurnCommitter committer, bool persistProgress,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(turn);
         ArgumentNullException.ThrowIfNull(streamEvent);
         ArgumentNullException.ThrowIfNull(committer);
+        if (turn.Completed) return;
 
-        switch (streamEvent)
+        try
         {
-            case RunStartedEvent:
-                EnsureAssistantMessage(session, turn);
-                break;
-
-            case AssistantTextDeltaEvent textDelta:
-                EnsureAssistantMessage(session, turn);
-                if (session.ApplyAssistantDelta(turn.TurnId, textDelta.Delta))
-                {
-                    session.RaiseTranscriptChanged(immediate: TakeFirstVisibleDelta(turn));
-                }
-
-                break;
-
-            case AssistantThinkingDeltaEvent thinkingDelta:
-                EnsureAssistantMessage(session, turn);
-                if (session.ApplyAssistantThinkingDelta(turn.TurnId, thinkingDelta.Delta))
-                {
-                    session.RaiseTranscriptChanged(immediate: TakeFirstVisibleDelta(turn));
-                }
-
-                break;
-
-            case ToolCallStartedEvent toolStarted:
-                EnsureAssistantMessage(session, turn);
-                await StartToolRunAsync(
-                    session,
-                    turn,
-                    toolStarted,
-                    persistToolProgress,
-                    cancellationToken);
-                break;
-
-            case ToolCallCompletedEvent toolCompleted:
-                await CompleteToolRunAsync(
-                    session,
-                    turn,
-                    toolCompleted,
-                    persistToolProgress,
-                    cancellationToken);
-                break;
-
-            case UsageReportedEvent usage:
-                turn.Usage.Observe(usage.Usage);
-                break;
-
-            case RunNoticeEvent notice:
-                EnsureAssistantMessage(session, turn);
-                if (session.ApplyAssistantNotice(turn.TurnId, notice.Text))
-                {
+            switch (streamEvent)
+            {
+                case AssistantTextDeltaEvent text:
+                    await ApplyDeltaAsync(session, turn, text.Delta, thinking: false, cancellationToken);
+                    break;
+                case AssistantThinkingDeltaEvent thinking:
+                    await ApplyDeltaAsync(session, turn, thinking.Delta, thinking: true, cancellationToken);
+                    break;
+                case ToolCallStartedEvent started:
+                    await StartToolAsync(session, turn, started, persistProgress, cancellationToken);
+                    break;
+                case ToolCallCompletedEvent completed:
+                    await CompleteToolAsync(session, turn, completed, persistProgress, cancellationToken);
+                    break;
+                case UsageReportedEvent usage:
+                    turn.Usage.Observe(usage.Usage);
+                    session.ReplaceTurn(GetTurn(session, turn) with { Usage = turn.Usage.Build() });
                     session.RaiseTranscriptChanged(false);
-                }
-
-                break;
-
-            case RunStatusEvent runStatus:
-                EnsureAssistantMessage(session, turn);
-                session.ActivityText = MapRunStatusText(runStatus.Status);
-                session.RaiseTranscriptChanged(false);
-                break;
-
-            case RunCompletedEvent completed:
-                await CompleteAssistantTurnAsync(session, turn, completed, committer);
-                break;
-
-            // RawOutputEvent / PermissionRequestedEvent carry no transcript state in v1.
-            default:
-                break;
+                    break;
+                case TurnInputBoundaryEvent boundary:
+                    await CommitBoundaryAsync(session, turn, boundary, cancellationToken);
+                    break;
+                case RunNoticeEvent notice when !string.IsNullOrWhiteSpace(notice.Text):
+                    var noticeMessage = await EnsureAssistantAsync(session, turn, cancellationToken);
+                    if (session.ApplyAssistantNotice(noticeMessage, notice.Text)) session.RaiseTranscriptChanged(false);
+                    break;
+                case RunStatusEvent status:
+                    session.ActivityText = MapRunStatusText(status.Status);
+                    session.RaiseTranscriptChanged(false);
+                    break;
+                case RunCompletedEvent completed:
+                    await CompleteTurnAsync(session, turn, completed, committer, cancellationToken);
+                    break;
+            }
         }
-    }
-
-    internal Task FinalizeInterruptedAsync(
-        ConversationRuntimeState session,
-        AgentTurnState turn,
-        TurnFinalizationKind kind,
-        string errorMessage,
-        IRecordedTurnCommitter committer)
-    {
-        ArgumentNullException.ThrowIfNull(session);
-        ArgumentNullException.ThrowIfNull(turn);
-        ArgumentNullException.ThrowIfNull(errorMessage);
-        ArgumentNullException.ThrowIfNull(committer);
-
-        EnsureAssistantMessage(session, turn);
-        session.CompleteAssistantStream(turn.TurnId);
-        var existing = session.Messages.First(item => item.Id == turn.TurnId);
-        return FinalizeTurnAsync(session, turn, existing, kind, finalText: null, errorMessage, committer);
-    }
-
-    /// <summary>
-    /// Answers whether this delta is the turn's first visible output; that one publishes immediately
-    /// and every later delta goes back onto the coalescing timer.
-    /// </summary>
-    private static bool TakeFirstVisibleDelta(AgentTurnState turn)
-    {
-        if (turn.HasVisibleDelta)
+        catch (OperationCanceledException exception)
         {
-            return false;
+            turn.InputSession?.Cancel(exception.CancellationToken);
+            throw;
         }
+        catch (Exception exception)
+        {
+            // The producer may be waiting behind this very event. Wake it before iterator disposal.
+            turn.InputSession?.Fail(exception);
+            throw;
+        }
+    }
 
+    private async Task ApplyDeltaAsync(ConversationRuntimeState session, AgentTurnState turn,
+        string delta, bool thinking, CancellationToken cancellationToken)
+    {
+        if (delta.Length == 0 || (turn.CurrentAssistantMessageId is null && string.IsNullOrWhiteSpace(delta))) return;
+        var messageId = await EnsureAssistantAsync(session, turn, cancellationToken);
+        var changed = thinking
+            ? session.ApplyAssistantThinkingDelta(messageId, delta)
+            : session.ApplyAssistantDelta(messageId, delta);
+        if (!changed) return;
+        var first = !turn.HasVisibleDelta;
         turn.HasVisibleDelta = true;
-        return true;
+        session.RaiseTranscriptChanged(first);
     }
 
-    private static void EnsureAssistantMessage(ConversationRuntimeState session, AgentTurnState turn)
+    private async Task<Guid> EnsureAssistantAsync(ConversationRuntimeState session, AgentTurnState turn,
+        CancellationToken cancellationToken)
     {
-        if (turn.MessageCreated)
-        {
-            return;
-        }
+        if (turn.CurrentAssistantMessageId is { } current) return current;
+        var sequence = await _turns.ReserveMessageSequenceAsync(session.ConversationId, cancellationToken);
+        var messageId = Guid.NewGuid();
+        var now = _timeProvider.GetUtcNow();
+        session.ReplaceMessage(new MessageRecord(messageId, session.ConversationId, turn.TurnId, sequence,
+            MessageRole.Assistant, string.Empty, MessageStatus.Streaming, now, now,
+            AgentName: turn.AgentName, AgentRole: turn.AgentRole));
+        turn.CurrentAssistantMessageId = messageId;
+        return messageId;
+    }
 
-        var now = DateTimeOffset.UtcNow;
-        var message = new MessageRecord(
-            turn.TurnId,
-            session.ConversationId,
-            MessageRole.Assistant,
-            string.Empty,
-            MessageStatus.Streaming,
-            now,
-            now,
-            null,
-            turn.AgentName,
-            turn.AgentRole);
-
-        session.ReplaceMessage(message);
-        turn.MessageCreated = true;
+    private async Task StartToolAsync(ConversationRuntimeState session, AgentTurnState turn,
+        ToolCallStartedEvent started, bool persistProgress, CancellationToken cancellationToken)
+    {
+        if (turn.ToolRunsByCallId.ContainsKey(started.ToolCallId)) return;
+        var messageId = await EnsureAssistantAsync(session, turn, cancellationToken);
+        var now = _timeProvider.GetUtcNow();
+        var tool = new ToolExecutionRecord(Guid.NewGuid(), session.ConversationId, started.ToolName,
+            string.IsNullOrWhiteSpace(started.ArgumentsJson) ? "{}" : started.ArgumentsJson,
+            ToolExecutionStatus.Running, null, started.ToolCallId, null, now, now,
+            MessageId: messageId, SourceKind: started.SourceKind, SourceId: started.SourceId,
+            DisplayName: started.DisplayName);
+        turn.ToolRunsByCallId.Add(started.ToolCallId, tool);
+        session.ApplyStreamedToolRun(tool);
+        if (persistProgress) await SaveProgressAsync(session, turn, cancellationToken);
         session.RaiseTranscriptChanged(false);
     }
 
-    private async Task StartToolRunAsync(
-        ConversationRuntimeState session,
-        AgentTurnState turn,
-        ToolCallStartedEvent toolStarted,
-        bool persistProgress,
-        CancellationToken cancellationToken)
+    private async Task CompleteToolAsync(ConversationRuntimeState session, AgentTurnState turn,
+        ToolCallCompletedEvent completed, bool persistProgress, CancellationToken cancellationToken)
     {
-        var now = DateTimeOffset.UtcNow;
-        var record = new ToolExecutionRecord(
-            Id: Guid.NewGuid(),
-            ConversationId: session.ConversationId,
-            ToolName: toolStarted.ToolName,
-            ArgumentsJson: string.IsNullOrWhiteSpace(toolStarted.ArgumentsJson) ? "{}" : toolStarted.ArgumentsJson,
-            Status: ToolExecutionStatus.Running,
-            ResultSummary: null,
-            CorrelationId: toolStarted.ToolCallId,
-            DurationMs: null,
-            CreatedAtUtc: now,
-            UpdatedAtUtc: now,
-            MessageId: turn.TurnId,
-            SourceKind: toolStarted.SourceKind,
-            SourceId: toolStarted.SourceId,
-            DisplayName: toolStarted.DisplayName);
-
-        var anchored = record;
-        turn.ToolRunsByCallId[toolStarted.ToolCallId] = anchored;
-        session.ApplyStreamedToolRun(anchored);
-        if (persistProgress)
+        if (!turn.ToolRunsByCallId.TryGetValue(completed.ToolCallId, out var started)) return;
+        if (started.MessageId != turn.CurrentAssistantMessageId)
+            throw new InvalidDataException("A tool result cannot change a sealed assistant fragment.");
+        var now = _timeProvider.GetUtcNow();
+        var tool = started with
         {
-            await _conversationRepository.UpsertToolExecutionAsync(anchored, cancellationToken);
-        }
-
-        session.RaiseTranscriptChanged(false);
-    }
-
-    private async Task CompleteToolRunAsync(
-        ConversationRuntimeState session,
-        AgentTurnState turn,
-        ToolCallCompletedEvent toolCompleted,
-        bool persistProgress,
-        CancellationToken cancellationToken)
-    {
-        if (!turn.ToolRunsByCallId.TryGetValue(toolCompleted.ToolCallId, out var startedRecord))
-        {
-            // A result for an unseen call has no stable transcript position to anchor to.
-            return;
-        }
-
-        var updated = startedRecord with
-        {
-            Status = MapToolStatus(toolCompleted.Status),
-            ResultSummary = toolCompleted.ResultSummary ?? startedRecord.ResultSummary,
-            ResultContent = toolCompleted.ResultContent is null
-                ? startedRecord.ResultContent
-                : TranscriptToolResultLimiter.LimitStored(toolCompleted.ResultContent),
-            DurationMs = (DateTimeOffset.UtcNow - startedRecord.CreatedAtUtc).TotalMilliseconds,
-            UpdatedAtUtc = DateTimeOffset.UtcNow,
-            HookOutcome = toolCompleted.HookOutcome ?? startedRecord.HookOutcome
+            Status = MapToolStatus(completed.Status),
+            ResultSummary = completed.ResultSummary ?? started.ResultSummary,
+            ResultContent = completed.ResultContent is null ? started.ResultContent : TranscriptToolResultLimiter.LimitStored(completed.ResultContent),
+            DurationMs = (now - started.CreatedAtUtc).TotalMilliseconds,
+            UpdatedAtUtc = now,
+            HookOutcome = completed.HookOutcome ?? started.HookOutcome
         };
-
-        var anchored = updated;
-        turn.ToolRunsByCallId[toolCompleted.ToolCallId] = anchored;
-        session.ApplyStreamedToolRun(anchored);
-        if (persistProgress)
-        {
-            await _conversationRepository.UpsertToolExecutionAsync(anchored, cancellationToken);
-        }
-
+        turn.ToolRunsByCallId[completed.ToolCallId] = tool;
+        session.ApplyStreamedToolRun(tool);
+        if (persistProgress) await SaveProgressAsync(session, turn, cancellationToken);
         session.RaiseTranscriptChanged(false);
     }
 
-    private async Task CompleteAssistantTurnAsync(
-        ConversationRuntimeState session,
-        AgentTurnState turn,
-        RunCompletedEvent completed,
-        IRecordedTurnCommitter committer)
+    private Task SaveProgressAsync(ConversationRuntimeState session, AgentTurnState turn, CancellationToken cancellationToken)
     {
-        EnsureAssistantMessage(session, turn);
-        session.CompleteAssistantStream(turn.TurnId);
-        var existing = session.Messages.FirstOrDefault(item => item.Id == turn.TurnId);
-        if (existing is null)
+        var message = GetCurrentMessage(session, turn)
+            ?? throw new InvalidOperationException("Tool progress requires an actual assistant fragment.");
+        return _turns.CommitProgressAsync(new ConversationTurnCommit(GetTurn(session, turn), [message],
+            GetCurrentTools(turn)), cancellationToken);
+    }
+
+    private async Task CommitBoundaryAsync(ConversationRuntimeState session, AgentTurnState turn,
+        TurnInputBoundaryEvent boundary, CancellationToken cancellationToken)
+    {
+        var inputSession = turn.InputSession;
+        if (inputSession is null || session.IsDetached || turn.Record.Origin != DirectTurnOrigin.Interactive ||
+            turn.Record.ExecutionMode != AgentExecutionMode.Direct || boundary.Batch.TurnId != turn.TurnId ||
+            boundary.Batch.ConversationId != session.ConversationId)
+            throw new InvalidDataException("This run cannot consume an input boundary.");
+
+        var consumed = await _inputs.ReadConsumptionAsync(boundary.Batch, cancellationToken);
+        if (consumed is not null && consumed.Messages.All(user => session.Messages.Any(message => message.Id == user.Id)))
         {
+            inputSession.Confirm(consumed);
             return;
         }
 
+        var content = CaptureBoundary(session, turn, boundary.Usage);
+        consumed ??= await ConsumeBoundaryAsync(new ConversationInputBoundaryCommit(boundary.Batch, content), cancellationToken);
+        foreach (var message in content.Messages) session.ReplaceMessage(message);
+        foreach (var message in consumed.Messages) session.ReplaceMessage(message);
+        session.ReplaceTurn(consumed.Turn);
+        turn.CurrentAssistantMessageId = null;
+        inputSession.Confirm(consumed);
+        try
+        {
+            session.RaiseTranscriptChanged(true);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(exception, "Failed to publish committed input boundary {ClaimId}.", boundary.Batch.ClaimId);
+        }
+    }
+
+    private ConversationTurnCommit CaptureBoundary(ConversationRuntimeState session, AgentTurnState turn, TurnUsage? usage)
+    {
+        var tools = GetCurrentTools(turn);
+        if (tools.Any(tool => tool.Status is ToolExecutionStatus.Running or ToolExecutionStatus.AwaitingApproval))
+            throw new InvalidDataException("An input boundary cannot split an unfinished tool unit.");
+        var message = GetCurrentMessage(session, turn);
+        var messages = message is null ? Array.Empty<MessageRecord>() :
+            [message with { Status = MessageStatus.Sealed, UpdatedAtUtc = _timeProvider.GetUtcNow() }];
+        var currentTurn = GetTurn(session, turn);
+        return new ConversationTurnCommit(currentTurn with { Usage = usage ?? currentTurn.Usage }, messages, tools);
+    }
+
+    private async Task<ConversationInputConsumption> ConsumeBoundaryAsync(
+        ConversationInputBoundaryCommit commit, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _inputs.CommitBoundaryAsync(commit, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A commit response can be lost after SQLite has committed. The claim mappings are the receipt.
+            if (await _inputs.ReadConsumptionAsync(commit.Batch, cancellationToken) is { } committed) return committed;
+            throw;
+        }
+    }
+
+    private async Task CompleteTurnAsync(ConversationRuntimeState session, AgentTurnState turn,
+        RunCompletedEvent completed, IRecordedTurnCommitter committer, CancellationToken cancellationToken)
+    {
+        if (turn.CurrentAssistantMessageId is null && !string.IsNullOrWhiteSpace(completed.FinalText))
+            await EnsureAssistantAsync(session, turn, cancellationToken);
         var kind = completed.Status switch
         {
             RunCompletionStatus.Succeeded => TurnFinalizationKind.Succeeded,
@@ -301,224 +279,127 @@ internal sealed class ConversationTurnRecorder
             RunCompletionStatus.Blocked => TurnFinalizationKind.Blocked,
             _ => TurnFinalizationKind.Failed
         };
-        var errorMessage = kind switch
+        var error = kind switch
         {
             TurnFinalizationKind.Succeeded => null,
-            // Not an error: carried through so the UI can explain why the answer stopped.
             TurnFinalizationKind.Truncated => completed.ErrorMessage,
-            TurnFinalizationKind.Blocked => completed.ErrorMessage ?? "The agent run was blocked by a plugin hook.",
+            TurnFinalizationKind.Blocked => completed.ErrorMessage ?? "The agent run was blocked.",
             _ => completed.ErrorMessage ?? "The agent run failed."
         };
-
-        await FinalizeTurnAsync(session, turn, existing, kind, completed.FinalText, errorMessage, committer);
+        await FinalizeTurnAsync(session, turn, kind, completed.FinalText, error, committer);
     }
 
-    private async Task FinalizeTurnAsync(
-        ConversationRuntimeState session,
-        AgentTurnState turn,
-        MessageRecord existing,
-        TurnFinalizationKind kind,
-        string? finalText,
-        string? errorMessage,
-        IRecordedTurnCommitter committer)
+    private async Task FinalizeTurnAsync(ConversationRuntimeState session, AgentTurnState turn,
+        TurnFinalizationKind kind, string? finalText, string? errorMessage, IRecordedTurnCommitter committer)
     {
-        if (turn.Completed)
-        {
-            return;
-        }
-
-        turn.PendingFinalization ??= new RecordedTurnFinalizationRequest(
-            existing,
-            turn.ToolRunsByCallId.Values.ToArray(),
-            kind,
-            finalText,
-            errorMessage,
-            turn.Usage.Build(),
-            turn.StartedAtUtc);
-        var finalization = CreateFinalization(turn.PendingFinalization);
+        if (turn.Completed) return;
+        if (turn.CurrentAssistantMessageId is { } messageId) session.CompleteAssistantStream(messageId);
+        var currentTurn = GetTurn(session, turn);
+        turn.PendingFinalization ??= new RecordedTurnFinalizationRequest(currentTurn, GetCurrentMessage(session, turn),
+            GetCurrentTools(turn), kind, finalText, errorMessage, turn.Usage.Build() ?? currentTurn.Usage);
+        var finalization = ConversationTurnFinalizationBuilder.Build(turn.PendingFinalization, _timeProvider.GetUtcNow());
         bool written;
         try
         {
-            written = await committer.TryCommitAsync(new RecordedTurnCommit(
-                finalization,
-                turn.PendingFinalization.Kind,
-                turn.PendingFinalization.FinalText,
-                turn.PendingFinalization.ErrorMessage));
+            written = await committer.TryCommitAsync(new RecordedTurnCommit(finalization,
+                turn.PendingFinalization.Kind, turn.PendingFinalization.FinalText, turn.PendingFinalization.ErrorMessage));
         }
         catch (OperationCanceledException exception)
         {
-            ApplyUnpersistedTerminalFailure(session, turn, exception);
+            ApplyUnpersistedFailure(session, turn, exception);
             throw;
         }
         catch (Exception exception)
         {
-            _logger.LogError(
-                exception,
-                "Failed to persist terminal state for turn {TurnId}.",
-                turn.TurnId);
-            ApplyUnpersistedTerminalFailure(session, turn, exception);
+            _logger.LogError(exception, "Failed to persist terminal state for turn {TurnId}.", turn.TurnId);
+            ApplyUnpersistedFailure(session, turn, exception);
             throw;
         }
 
         if (!written)
         {
             await ReloadCommittedTurnAsync(session, turn);
-            turn.Completed = true;
             return;
         }
-
         ApplyFinalization(session, turn, finalization, persisted: true);
     }
 
-    private async Task ReloadCommittedTurnAsync(
-        ConversationRuntimeState session,
-        AgentTurnState turn)
+    private async Task ReloadCommittedTurnAsync(ConversationRuntimeState session, AgentTurnState turn)
     {
-        var messages = await _conversationRepository.ListMessagesAsync(session.ConversationId);
-        var persistedMessage = messages.FirstOrDefault(message => message.Id == turn.TurnId);
-        if (persistedMessage is not null)
-        {
-            session.ReplaceMessage(persistedMessage);
-        }
-
-        var toolExecutions = await _conversationRepository.ListToolExecutionsAsync(session.ConversationId);
-        foreach (var toolExecution in toolExecutions.Where(tool => tool.MessageId == turn.TurnId))
-        {
-            turn.ToolRunsByCallId[toolExecution.CorrelationId ?? toolExecution.Id.ToString("D")] = toolExecution;
-            session.UpsertToolRun(toolExecution);
-        }
-
+        var persistedTurn = (await _turns.ListTurnsAsync(session.ConversationId)).SingleOrDefault(item => item.Id == turn.TurnId);
+        if (persistedTurn is null || persistedTurn.Status == ConversationTurnStatus.Running)
+            throw new InvalidDataException("The finalization did not commit and no terminal turn could be reloaded.");
+        var messages = (await _conversations.ListMessagesAsync(session.ConversationId)).Where(message => message.TurnId == turn.TurnId).ToArray();
+        var messageIds = messages.Select(message => message.Id).ToHashSet();
+        var tools = (await _conversations.ListToolExecutionsAsync(session.ConversationId))
+            .Where(tool => tool.MessageId is { } id && messageIds.Contains(id)).ToArray();
+        session.ReplaceTurnContent(new ConversationTurnCommit(persistedTurn, messages, tools));
+        turn.ToolRunsByCallId.Clear();
+        foreach (var tool in tools) turn.ToolRunsByCallId[tool.CorrelationId ?? tool.Id.ToString("D")] = tool;
+        turn.CurrentAssistantMessageId = null;
+        turn.Completed = true;
         session.RaiseTranscriptChanged(true);
     }
 
-    private TurnFinalization CreateFinalization(RecordedTurnFinalizationRequest request)
+    private void ApplyUnpersistedFailure(ConversationRuntimeState session, AgentTurnState turn, Exception exception)
     {
-        var now = _timeProvider.GetUtcNow();
-        return new TurnFinalization(
-            BuildAssistantMessage(request, now),
-            BuildToolExecutions(request, now));
-    }
-
-    private void ApplyUnpersistedTerminalFailure(
-        ConversationRuntimeState session,
-        AgentTurnState turn,
-        Exception exception)
-    {
-        var pending = turn.PendingFinalization
-            ?? throw new InvalidOperationException("The turn has no pending terminal state.");
-        var fallbackKind = pending.Kind == TurnFinalizationKind.Succeeded
-            ? TurnFinalizationKind.Failed
-            : pending.Kind;
-        var fallbackError = pending.Kind == TurnFinalizationKind.Succeeded
-            ? $"Failed to persist terminal state: {exception.Message}"
-            : pending.ErrorMessage ?? exception.Message;
+        var pending = turn.PendingFinalization ?? throw new InvalidOperationException("The turn has no pending finalization.");
         turn.PendingFinalization = pending with
         {
-            Kind = fallbackKind,
+            Kind = pending.Kind == TurnFinalizationKind.Succeeded ? TurnFinalizationKind.Failed : pending.Kind,
             FinalText = null,
-            ErrorMessage = fallbackError
+            ErrorMessage = pending.Kind == TurnFinalizationKind.Succeeded
+                ? $"Failed to persist terminal state: {exception.Message}"
+                : pending.ErrorMessage ?? exception.Message
         };
-
-        ApplyFinalization(
-            session,
-            turn,
-            CreateFinalization(turn.PendingFinalization),
-            persisted: false);
+        ApplyFinalization(session, turn,
+            ConversationTurnFinalizationBuilder.Build(turn.PendingFinalization, _timeProvider.GetUtcNow()), persisted: false);
     }
 
-    private static MessageRecord BuildAssistantMessage(
-        RecordedTurnFinalizationRequest request,
-        DateTimeOffset now)
+    private static void ApplyFinalization(ConversationRuntimeState session, AgentTurnState turn,
+        ConversationTurnCommit finalization, bool persisted)
     {
-        var segments = TerminalBlockAligner.Align(
-            request.AssistantMessage.Id,
-            request.AssistantMessage.Segments ?? [],
-            request.FinalText);
-
-        return request.AssistantMessage with
+        session.ReplaceTurn(finalization.Turn);
+        foreach (var message in finalization.Messages) session.ReplaceMessage(message);
+        foreach (var tool in finalization.ToolExecutions)
         {
-            MarkdownContent = string.Concat(segments
-                .Where(segment => segment.Kind == MessageSegmentKind.Text)
-                .Select(segment => segment.Text ?? string.Empty)),
-            Segments = segments,
-            Status = request.Kind switch
-            {
-                TurnFinalizationKind.Succeeded => MessageStatus.Completed,
-                TurnFinalizationKind.Failed => MessageStatus.Failed,
-                TurnFinalizationKind.Cancelled => MessageStatus.Cancelled,
-                TurnFinalizationKind.Truncated => MessageStatus.Truncated,
-                TurnFinalizationKind.Blocked => MessageStatus.Blocked,
-                _ => throw new ArgumentOutOfRangeException(nameof(request), request.Kind, "Unsupported turn outcome.")
-            },
-            Usage = request.Usage,
-            DurationMs = (now - request.StartedAtUtc).TotalMilliseconds,
-            ErrorMessage = request.ErrorMessage,
-            UpdatedAtUtc = now
-        };
-    }
-
-    private static IReadOnlyList<ToolExecutionRecord> BuildToolExecutions(
-        RecordedTurnFinalizationRequest request,
-        DateTimeOffset now)
-    {
-        var pendingStatus = request.Kind == TurnFinalizationKind.Cancelled
-            ? ToolExecutionStatus.Cancelled
-            : ToolExecutionStatus.Failed;
-        var pendingSummary = request.Kind == TurnFinalizationKind.Cancelled
-            ? "Generation stopped."
-            : "The agent run ended before this tool call completed.";
-
-        return request.ToolExecutions
-            .Select(toolExecution => toolExecution.Status is ToolExecutionStatus.Running or ToolExecutionStatus.AwaitingApproval
-                ? toolExecution with
-                {
-                    Status = pendingStatus,
-                    ResultSummary = toolExecution.ResultSummary ?? pendingSummary,
-                    DurationMs = (now - toolExecution.CreatedAtUtc).TotalMilliseconds,
-                    UpdatedAtUtc = now
-                }
-                : toolExecution)
-            .ToArray();
-    }
-
-    private static void ApplyFinalization(
-        ConversationRuntimeState session,
-        AgentTurnState turn,
-        TurnFinalization finalization,
-        bool persisted)
-    {
-        session.ReplaceMessage(finalization.AssistantMessage);
-        foreach (var toolExecution in finalization.ToolExecutions)
-        {
-            turn.ToolRunsByCallId[toolExecution.CorrelationId ?? toolExecution.Id.ToString("D")] = toolExecution;
-            session.UpsertToolRun(toolExecution);
+            turn.ToolRunsByCallId[tool.CorrelationId ?? tool.Id.ToString("D")] = tool;
+            session.UpsertToolRun(tool);
         }
-
         if (persisted)
         {
             turn.Completed = true;
+            turn.CurrentAssistantMessageId = null;
         }
-
         session.RaiseTranscriptChanged(true);
     }
 
-    private static ToolExecutionStatus MapToolStatus(ToolCallStatus status)
-        => status switch
-        {
-            ToolCallStatus.Completed => ToolExecutionStatus.Completed,
-            ToolCallStatus.Failed => ToolExecutionStatus.Failed,
-            ToolCallStatus.Canceled => ToolExecutionStatus.Cancelled,
-            ToolCallStatus.Blocked => ToolExecutionStatus.Blocked,
-            _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unsupported tool call status.")
-        };
+    private static ConversationTurnRecord GetTurn(ConversationRuntimeState session, AgentTurnState turn)
+        => session.Turns.Single(item => item.Id == turn.TurnId);
 
-    private static string MapRunStatusText(AgentRunStatus status)
-        => status switch
-        {
-            AgentRunStatus.Initializing => "正在初始化...",
-            AgentRunStatus.Requesting => "正在请求...",
-            AgentRunStatus.Thinking => "正在思考...",
-            AgentRunStatus.Running => "正在执行...",
-            _ => "准备中..."
-        };
+    private static MessageRecord? GetCurrentMessage(ConversationRuntimeState session, AgentTurnState turn)
+        => turn.CurrentAssistantMessageId is { } id ? session.Messages.Single(message => message.Id == id) : null;
+
+    private static IReadOnlyList<ToolExecutionRecord> GetCurrentTools(AgentTurnState turn)
+        => turn.CurrentAssistantMessageId is { } id
+            ? turn.ToolRunsByCallId.Values.Where(tool => tool.MessageId == id).ToArray()
+            : [];
+
+    private static ToolExecutionStatus MapToolStatus(ToolCallStatus status) => status switch
+    {
+        ToolCallStatus.Completed => ToolExecutionStatus.Completed,
+        ToolCallStatus.Failed => ToolExecutionStatus.Failed,
+        ToolCallStatus.Canceled => ToolExecutionStatus.Cancelled,
+        ToolCallStatus.Blocked => ToolExecutionStatus.Blocked,
+        _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unsupported tool call status.")
+    };
+
+    private static string MapRunStatusText(AgentRunStatus status) => status switch
+    {
+        AgentRunStatus.Initializing => "正在初始化...",
+        AgentRunStatus.Requesting => "正在请求...",
+        AgentRunStatus.Thinking => "正在思考...",
+        AgentRunStatus.Running => "正在执行...",
+        _ => "准备中..."
+    };
 }

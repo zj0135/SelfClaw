@@ -18,7 +18,7 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
 
     private readonly ISubagentDeliveryStore _deliveryStore;
     private readonly IConversationRepository _conversationRepository;
-    private readonly ConversationTurnEngine _turnEngine;
+    private readonly ConversationRunCoordinator _runs;
     private readonly SubagentContinuationExecutor _executor;
     private readonly DesktopNotificationService _notificationService;
     private readonly TimeProvider _timeProvider;
@@ -30,14 +30,14 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
     public SubagentDeliveryDispatcher(
         ISubagentDeliveryStore deliveryStore,
         IConversationRepository conversationRepository,
-        ConversationTurnEngine turnEngine,
+        ConversationRunCoordinator runs,
         SubagentContinuationExecutor executor,
         DesktopNotificationService notificationService,
         ILogger<SubagentDeliveryDispatcher> logger)
         : this(
             deliveryStore,
             conversationRepository,
-            turnEngine,
+            runs,
             executor,
             notificationService,
             TimeProvider.System,
@@ -48,7 +48,7 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
     internal SubagentDeliveryDispatcher(
         ISubagentDeliveryStore deliveryStore,
         IConversationRepository conversationRepository,
-        ConversationTurnEngine turnEngine,
+        ConversationRunCoordinator runs,
         SubagentContinuationExecutor executor,
         DesktopNotificationService notificationService,
         TimeProvider timeProvider,
@@ -56,7 +56,7 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
     {
         _deliveryStore = deliveryStore;
         _conversationRepository = conversationRepository;
-        _turnEngine = turnEngine;
+        _runs = runs;
         _executor = executor;
         _notificationService = notificationService;
         _timeProvider = timeProvider;
@@ -128,7 +128,7 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
 
     internal async Task<bool> TryStartContinuationAsync(CancellationToken cancellationToken)
     {
-        var excluded = _turnEngine.GetUnavailableContinuationParents().ToHashSet();
+        var excluded = _runs.GetUnavailableContinuationParents().ToHashSet();
         excluded.UnionWith(_skippedParents);
         for (var candidate = 0; candidate < MaximumCandidatesPerScan; candidate++)
         {
@@ -145,9 +145,9 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
             {
                 var parent = await _conversationRepository.GetConversationAsync(mailbox.ParentConversationId, cancellationToken);
                 if (parent is not { Kind: ConversationKind.Interactive }) continue;
-                var runtimeState = await _turnEngine.TryAdmitContinuationAsync(parent, cancellationToken);
-                if (runtimeState is null) continue;
-                if (await StartAdmittedContinuationAsync(parent, runtimeState, mailbox, cancellationToken))
+                var handle = await _runs.TryReserveContinuationAsync(parent, cancellationToken);
+                if (handle is null) continue;
+                if (await StartAdmittedContinuationAsync(parent, handle, mailbox, cancellationToken))
                 {
                     _skippedParents.Remove(parent.Id);
                     return true;
@@ -167,7 +167,7 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
         return false;
     }
 
-    private async Task<bool> StartAdmittedContinuationAsync(ConversationRecord parent, ConversationRuntimeState runtimeState,
+    private async Task<bool> StartAdmittedContinuationAsync(ConversationRecord parent, ConversationRunHandle handle,
         SubagentMailboxKey mailbox, CancellationToken cancellationToken)
     {
         SubagentDeliveryLease? lease = null;
@@ -178,17 +178,17 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
             lease = await _deliveryStore.TryLeaseBatchAsync(
                 mailbox,
                 Guid.NewGuid(),
-                Guid.NewGuid(),
+                handle.TurnId,
                 now,
                 now + LeaseDuration,
                 SubagentCompletionBatchSerializer.MaximumBatchBytes,
-                cancellationToken);
+                handle.CancellationToken);
             if (lease is null)
             {
                 return false;
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
+            handle.CancellationToken.ThrowIfCancellationRequested();
             _logger.LogInformation(
                 "Subagent continuation leased. ParentConversationId={ParentConversationId} ParentTurnId={ParentTurnId} ContinuationTurnId={ContinuationTurnId} DeliveryCount={DeliveryCount} Attempt={Attempt}",
                 lease.ParentConversationId,
@@ -196,7 +196,7 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
                 lease.ContinuationTurnId,
                 lease.Deliveries.Count,
                 lease.Deliveries.Max(delivery => delivery.AttemptCount));
-            _runningContinuations.Add(RunContinuationAsync(parent, runtimeState, lease, cancellationToken));
+            _runningContinuations.Add(RunContinuationAsync(parent, handle, lease, cancellationToken));
             handedOff = true;
             return true;
         }
@@ -216,7 +216,7 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
                 }
                 finally
                 {
-                    await _turnEngine.CompleteContinuationAsync(runtimeState, false, CancellationToken.None);
+                    _runs.Complete(handle, false);
                 }
             }
         }
@@ -224,13 +224,13 @@ internal sealed class SubagentDeliveryDispatcher : BackgroundService
 
     private async Task RunContinuationAsync(
         ConversationRecord parent,
-        ConversationRuntimeState runtimeState,
+        ConversationRunHandle handle,
         SubagentDeliveryLease lease,
         CancellationToken cancellationToken)
     {
         try
         {
-            await _executor.ExecuteAsync(parent, runtimeState, lease, cancellationToken);
+            await _executor.ExecuteAsync(parent, handle, lease, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

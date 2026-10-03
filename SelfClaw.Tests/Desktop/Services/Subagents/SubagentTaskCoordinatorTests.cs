@@ -29,13 +29,15 @@ public sealed class SubagentTaskCoordinatorTests : IDisposable
 
         view.Status.Should().Be(SubagentTaskStatus.Failed);
         view.ErrorCode.Should().Be(SubagentErrorCodes.DefinitionMissing);
+        (await context.Turns.ListTurnsAsync(view.ChildConversationId)).Should().ContainSingle().Which.Status.Should().Be(ConversationTurnStatus.Failed);
+        (await context.Conversations.ListMessagesAsync(view.ChildConversationId)).Should().ContainSingle().Which.Role.Should().Be(MessageRole.User);
         (await context.Tasks.GetDeliveryAsync(context.Parent.Id, view.TaskId))
             .Should().NotBeNull();
         (await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow)).Should().BeNull();
     }
 
     [Fact]
-    public async Task StartAsync_freezes_definition_and_creates_only_the_exact_child_task_message()
+    public async Task StartAsync_freezes_definition_and_claim_atomically_creates_the_turn_and_exact_user_message()
     {
         var context = await CreateContextAsync(createDefinition: true);
         var request = CreateRequest(context) with { Task = "Review only this explicit task." };
@@ -44,11 +46,20 @@ public sealed class SubagentTaskCoordinatorTests : IDisposable
         File.WriteAllText(context.DefinitionPath, ValidDefinition("Changed instructions."));
 
         view.Status.Should().Be(SubagentTaskStatus.Queued);
-        var stored = await context.Tasks.GetAsync(context.Parent.Id, view.TaskId);
-        stored!.DefinitionSnapshotJson.Should().Contain("Original instructions.").And.NotContain("Changed instructions.");
-        (await context.Conversations.ListMessagesAsync(view.ChildConversationId))
-            .Should().ContainSingle()
-            .Which.MarkdownContent.Should().Be(request.Task);
+        var stored = await context.Tasks.GetAsync(context.Parent.Id, view.TaskId)
+            ?? throw new InvalidOperationException("Missing queued task.");
+        stored.DefinitionSnapshotJson.Should().Contain("Original instructions.").And.NotContain("Changed instructions.");
+        (await context.Conversations.ListMessagesAsync(view.ChildConversationId)).Should().BeEmpty();
+        (await context.Turns.ListTurnsAsync(view.ChildConversationId)).Should().BeEmpty();
+
+        var claimed = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
+        claimed?.Id.Should().Be(view.TaskId);
+        var message = (await context.Conversations.ListMessagesAsync(view.ChildConversationId)).Should().ContainSingle().Which;
+        message.MarkdownContent.Should().Be(request.Task);
+        message.Role.Should().Be(MessageRole.User);
+        message.Id.Should().NotBe(view.ChildTurnId);
+        message.TurnId.Should().Be(view.ChildTurnId);
+        (await context.Turns.ListTurnsAsync(view.ChildConversationId)).Should().ContainSingle().Which.Status.Should().Be(ConversationTurnStatus.Running);
     }
 
     [Fact]
@@ -75,6 +86,8 @@ public sealed class SubagentTaskCoordinatorTests : IDisposable
             new SubagentTaskRetryRequest(context.Parent.Id, Guid.NewGuid(), queued.TaskId));
 
         cancelled.Status.Should().Be(SubagentTaskStatus.Cancelled);
+        (await context.Turns.ListTurnsAsync(queued.ChildConversationId)).Should().ContainSingle().Which.Status.Should().Be(ConversationTurnStatus.Cancelled);
+        (await context.Conversations.ListMessagesAsync(queued.ChildConversationId)).Should().ContainSingle().Which.Role.Should().Be(MessageRole.User);
         retried.Status.Should().Be(SubagentTaskStatus.Queued);
         retried.Attempt.Should().Be(2);
         retried.RetryOfTaskId.Should().Be(queued.TaskId);
@@ -123,6 +136,7 @@ public sealed class SubagentTaskCoordinatorTests : IDisposable
             Path.Combine(_rootPath, "secrets"));
         var database = new SqliteDatabase(storagePaths);
         var conversations = new SqliteConversationRepository(database);
+        var turns = new SqliteConversationTurnRepository(database);
         var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
         await tasks.InitializeAsync();
         var now = DateTimeOffset.UtcNow;
@@ -159,6 +173,7 @@ public sealed class SubagentTaskCoordinatorTests : IDisposable
             new SubagentTaskExecutionRegistry());
         return new TestContext(
             conversations,
+            turns,
             tasks,
             coordinator,
             parent,
@@ -209,6 +224,7 @@ public sealed class SubagentTaskCoordinatorTests : IDisposable
 
     private sealed record TestContext(
         SqliteConversationRepository Conversations,
+        SqliteConversationTurnRepository Turns,
         SqliteSubagentTaskRepository Tasks,
         SubagentTaskCoordinator Coordinator,
         ConversationRecord Parent,

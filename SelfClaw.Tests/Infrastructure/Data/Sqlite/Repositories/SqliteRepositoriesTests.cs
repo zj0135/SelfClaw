@@ -2,6 +2,7 @@
 using Microsoft.Data.Sqlite;
 using System.Text.Json;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.Data.Sqlite;
@@ -48,42 +49,27 @@ public sealed class SqliteRepositoriesTests : IDisposable
             now);
         await conversationRepository.UpsertConversationAsync(conversation);
 
-        var userMessage = new MessageRecord(Guid.NewGuid(), conversation.Id, MessageRole.User, "Hello", MessageStatus.Completed, now, now);
+        var turns = new SqliteConversationTurnRepository(database);
+        var turn = new ConversationTurnRecord(Guid.NewGuid(), conversation.Id, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Interactive, ConversationTurnStatus.Running, now);
+        var started = await turns.StartTurnAsync(new ConversationTurnStart(conversation, turn, "Hello", Guid.NewGuid()));
+        var userMessage = started.Messages.Single();
         var assistantMessageId = Guid.NewGuid();
-        var assistantMessage = new MessageRecord(
-            assistantMessageId,
-            conversation.Id,
-            MessageRole.Assistant,
-            "Hi there",
-            MessageStatus.Completed,
-            now,
-            now,
-            Usage: new TurnUsage(OutputTokens: 32),
-            Segments:
-            [
-                new MessageSegmentRecord(assistantMessageId, 0, MessageSegmentKind.Thinking, "plan", null),
-                new MessageSegmentRecord(assistantMessageId, 1, MessageSegmentKind.Text, "Hi there", null)
-            ]);
-        await conversationRepository.UpsertMessageAsync(userMessage);
-        await conversationRepository.UpsertMessageAsync(assistantMessage);
-
-        var toolRun = new ToolExecutionRecord(
-            Guid.NewGuid(),
-            conversation.Id,
-            "read_workspace_file",
-            "{}",
-            ToolExecutionStatus.Completed,
-            "Read Program.cs",
-            "call-1",
-            4.2d,
-            now,
-            now,
-            assistantMessage.Id,
-            "using System;",
-            ToolSourceKind.Mcp,
-            "filesystem",
-            "read_file");
-        await conversationRepository.UpsertToolExecutionAsync(toolRun);
+        var toolId = Guid.NewGuid();
+        var assistantMessage = new MessageRecord(assistantMessageId, conversation.Id, turn.Id,
+            await turns.ReserveMessageSequenceAsync(conversation.Id), MessageRole.Assistant,
+            "Hi there", MessageStatus.Sealed, now, now, Segments:
+            [new(assistantMessageId, 0, MessageSegmentKind.Thinking, "plan", null),
+             new(assistantMessageId, 1, MessageSegmentKind.Text, "Hi there", null),
+             new(assistantMessageId, 2, MessageSegmentKind.ToolCall, null, toolId)]);
+        var toolRun = new ToolExecutionRecord(toolId, conversation.Id, "read_workspace_file", "{}",
+            ToolExecutionStatus.Completed, "Read Program.cs", "call-1", 4.2d, now, now,
+            MessageId: assistantMessageId, ResultContent: "using System;", SourceKind: ToolSourceKind.Mcp,
+            SourceId: "filesystem", DisplayName: "read_file");
+        await turns.TryFinalizeTurnAsync(new ConversationTurnCommit(turn with
+        {
+            Status = ConversationTurnStatus.Succeeded, CompletedAtUtc = now, Usage = new TurnUsage(OutputTokens: 32)
+        }, [assistantMessage], [toolRun]));
 
         var loadedConversations = await conversationRepository.ListConversationsAsync();
         var loadedMessages = await conversationRepository.ListMessagesAsync(conversation.Id);
@@ -96,7 +82,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         var loadedAssistant = loadedMessages.Should().Contain(message => message.Id == assistantMessageId)
             .Which;
         loadedAssistant.MarkdownContent.Should().Be(assistantMessage.MarkdownContent);
-        loadedAssistant.Usage!.OutputTokens.Should().Be(assistantMessage.Usage!.OutputTokens);
+        (await turns.ListTurnsAsync(conversation.Id)).Single().Usage?.OutputTokens.Should().Be(32);
         loadedAssistant.Segments.Should().BeEquivalentTo(assistantMessage.Segments);
         loadedMessages.Should().Contain(message => message.Id == userMessage.Id)
             .Which.Segments.Should().BeNull();
@@ -138,7 +124,7 @@ public sealed class SqliteRepositoriesTests : IDisposable
         await using var versionCommand = verification.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
         var maxSchemaVersion = await versionCommand.ExecuteScalarAsync();
-        maxSchemaVersion.Should().Be(29L);
+        maxSchemaVersion.Should().Be(30L);
     }
 
     [Fact]
@@ -341,471 +327,6 @@ public sealed class SqliteRepositoriesTests : IDisposable
             .Should().ContainSingle().Which.IsEnabled.Should().BeFalse();
     }
 
-    [Fact]
-    public async Task Initialize_adds_catalog_id_to_legacy_ai_provider_connections()
-    {
-        var storagePaths = StoragePathDefaults.Create(
-            _rootPath,
-            Path.Combine(_rootPath, "selfclaw.db"),
-            Path.Combine(_rootPath, "secrets"));
-        Directory.CreateDirectory(_rootPath);
-
-        var providerId = Guid.NewGuid();
-        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
-        {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = @"
-CREATE TABLE ai_provider_connections (
-    id TEXT NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL,
-    provider_kind INTEGER NOT NULL,
-    endpoint TEXT NOT NULL,
-    auth_kind INTEGER NOT NULL,
-    credential_refs_json TEXT NOT NULL DEFAULT '{}',
-    connection_options_json TEXT NOT NULL DEFAULT '{}',
-    is_enabled INTEGER NOT NULL DEFAULT 1,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);
-INSERT INTO ai_provider_connections(
-    id, name, provider_kind, endpoint, auth_kind, credential_refs_json,
-    connection_options_json, is_enabled, created_at_utc, updated_at_utc)
-VALUES(
-    $id, 'Legacy gateway', 1, 'https://legacy.example/v1/', 0, '{}', '{}', 1,
-    '2026-01-01T00:00:00.0000000+00:00', '2026-01-01T00:00:00.0000000+00:00');";
-            command.Parameters.AddWithValue("$id", providerId.ToString("D"));
-            await command.ExecuteNonQueryAsync();
-        }
-
-        var repository = new SqliteAiProviderRepository(new SqliteDatabase(storagePaths));
-        await repository.InitializeAsync();
-
-        var migrated = await repository.GetProviderConnectionAsync(providerId);
-        migrated.Should().NotBeNull();
-        migrated!.CatalogId.Should().Be("custom");
-
-        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
-        await verification.OpenAsync();
-        await using var versionCommand = verification.CreateCommand();
-        versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(29L);
-    }
-
-    [Fact]
-    public async Task Initialize_v21_removes_legacy_profiles_without_losing_conversation_dependencies()
-    {
-        var storagePaths = StoragePathDefaults.Create(
-            _rootPath,
-            Path.Combine(_rootPath, "selfclaw.db"),
-            Path.Combine(_rootPath, "secrets"));
-        Directory.CreateDirectory(_rootPath);
-
-        var profileId = Guid.NewGuid();
-        var workspaceId = Guid.NewGuid();
-        var conversationId = Guid.NewGuid();
-        var messageId = Guid.NewGuid();
-        var toolRunId = Guid.NewGuid();
-
-        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
-        {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = @"
-CREATE TABLE schema_versions (
-    version INTEGER NOT NULL PRIMARY KEY,
-    applied_at_utc TEXT NOT NULL
-);
-INSERT INTO schema_versions(version, applied_at_utc)
-VALUES(20, '2026-01-01T00:00:00.0000000+00:00');
-
-CREATE TABLE profiles (
-    id TEXT NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL,
-    endpoint TEXT NOT NULL,
-    model TEXT NOT NULL,
-    temperature_enabled INTEGER NOT NULL DEFAULT 0,
-    temperature REAL NOT NULL DEFAULT 0.7,
-    top_p_enabled INTEGER NOT NULL DEFAULT 0,
-    top_p REAL NOT NULL DEFAULT 0.7,
-    api_style INTEGER NOT NULL,
-    secret_ref TEXT NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);
-
-CREATE TABLE workspace_roots (
-    id TEXT NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL,
-    root_path TEXT NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);
-
-CREATE TABLE conversations (
-    id TEXT NOT NULL PRIMARY KEY,
-    title TEXT NOT NULL,
-    profile_id TEXT NOT NULL,
-    workspace_root_id TEXT NULL,
-    mode INTEGER NOT NULL DEFAULT 0,
-    tool_permission_mode INTEGER NOT NULL DEFAULT 0,
-    agent_id TEXT NOT NULL DEFAULT 'build',
-    channel_kind TEXT NULL,
-    channel_conversation_id TEXT NULL,
-    channel_display_name TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE RESTRICT,
-    FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
-);
-
-CREATE TABLE messages (
-    id TEXT NOT NULL PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    role INTEGER NOT NULL,
-    markdown_content TEXT NOT NULL,
-    status INTEGER NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    agent_id TEXT NULL,
-    agent_name TEXT NULL,
-    agent_role TEXT NULL,
-    input_tokens INTEGER NULL,
-    output_tokens INTEGER NULL,
-    duration_ms REAL NULL,
-    error_message TEXT NULL,
-    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);
-
-CREATE TABLE tool_runs (
-    id TEXT NOT NULL PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    arguments_json TEXT NOT NULL,
-    status INTEGER NOT NULL,
-    result_summary TEXT NULL,
-    result_content TEXT NULL,
-    correlation_id TEXT NULL,
-    duration_ms REAL NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    agent_id TEXT NULL,
-    message_id TEXT NULL,
-    after_segment_index INTEGER NULL,
-    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);
-
-CREATE TABLE cli_agent_sessions (
-    conversation_id TEXT NOT NULL,
-    agent_kind INTEGER NOT NULL,
-    session_id TEXT NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    PRIMARY KEY(conversation_id, agent_kind),
-    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);
-
-INSERT INTO profiles(
-    id, name, endpoint, model, temperature_enabled, temperature,
-    top_p_enabled, top_p, api_style, secret_ref, created_at_utc, updated_at_utc)
-VALUES(
-    $profileId, 'Legacy profile', 'https://legacy.example/v1', 'legacy-model', 0, 0.7,
-    0, 0.7, 0, 'secret:legacy', $createdAt, $updatedAt);
-INSERT INTO workspace_roots(id, name, root_path, created_at_utc, updated_at_utc)
-VALUES($workspaceId, 'Legacy repo', 'E:\\Legacy\\Repo', $createdAt, $updatedAt);
-INSERT INTO conversations(
-    id, title, profile_id, workspace_root_id, mode, tool_permission_mode, agent_id,
-    channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc)
-VALUES(
-    $conversationId, 'Legacy chat', $profileId, $workspaceId, 0, $toolPermissionMode, 'legacy-agent',
-    'feishu', 'channel-42', 'Legacy channel', $createdAt, $updatedAt);
-INSERT INTO messages(
-    id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc)
-VALUES($messageId, $conversationId, 1, 'Preserved message', 1, $createdAt, $updatedAt);
-INSERT INTO tool_runs(
-    id, conversation_id, tool_name, arguments_json, status, result_summary, result_content,
-    correlation_id, duration_ms, created_at_utc, updated_at_utc, message_id, after_segment_index)
-VALUES(
-    $toolRunId, $conversationId, 'read_workspace_file', '{}', 2, 'Preserved tool', 'contents',
-    'call-42', 12.5, $createdAt, $updatedAt, $messageId, 3);
-INSERT INTO cli_agent_sessions(
-    conversation_id, agent_kind, session_id, created_at_utc, updated_at_utc)
-VALUES($conversationId, 1, 'session-42', $createdAt, $updatedAt);";
-            command.Parameters.AddWithValue("$profileId", profileId.ToString("D"));
-            command.Parameters.AddWithValue("$workspaceId", workspaceId.ToString("D"));
-            command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-            command.Parameters.AddWithValue("$messageId", messageId.ToString("D"));
-            command.Parameters.AddWithValue("$toolRunId", toolRunId.ToString("D"));
-            command.Parameters.AddWithValue("$toolPermissionMode", (int)ToolPermissionMode.RequireApproval);
-            command.Parameters.AddWithValue("$createdAt", "2026-01-01T00:00:00.0000000+00:00");
-            command.Parameters.AddWithValue("$updatedAt", "2026-01-02T00:00:00.0000000+00:00");
-            await command.ExecuteNonQueryAsync();
-        }
-
-        var database = new SqliteDatabase(storagePaths);
-        var repository = new SqliteConversationRepository(database);
-        await repository.InitializeAsync();
-
-        var migratedConversation = await repository.GetConversationAsync(conversationId);
-        var migratedMessages = await repository.ListMessagesAsync(conversationId);
-        var migratedToolRuns = await repository.ListToolExecutionsAsync(conversationId);
-
-        migratedConversation.Should().NotBeNull();
-        migratedConversation!.Title.Should().Be("Legacy chat");
-        migratedConversation.WorkspaceRootId.Should().Be(workspaceId);
-        migratedConversation.ToolPermissionMode.Should().Be(ToolPermissionMode.RequireApproval);
-        migratedConversation.AgentId.Should().Be("legacy-agent");
-        migratedConversation.ChannelKind.Should().Be("feishu");
-        migratedConversation.ChannelConversationId.Should().Be("channel-42");
-        migratedConversation.ChannelDisplayName.Should().Be("Legacy channel");
-        migratedMessages.Should().ContainSingle().Which.MarkdownContent.Should().Be("Preserved message");
-        migratedToolRuns.Should().ContainSingle().Which.ResultContent.Should().Be("contents");
-
-        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
-        await verification.OpenAsync();
-
-        var tables = await ReadSqliteObjectNamesAsync(verification, "table");
-        tables.Should().NotContain("profiles");
-        (await ReadTableColumnNamesAsync(verification, "conversations")).Should().NotContain("profile_id");
-
-        await using var sessionCommand = verification.CreateCommand();
-        sessionCommand.CommandText = @"
-SELECT session_id
-FROM cli_agent_sessions
-WHERE conversation_id = $conversationId AND agent_kind = 1;";
-        sessionCommand.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-        (await sessionCommand.ExecuteScalarAsync()).Should().Be("session-42");
-
-        await using var versionCommand = verification.CreateCommand();
-        versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(29L);
-
-        await using var foreignKeyCheck = verification.CreateCommand();
-        foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
-        await using var foreignKeyReader = await foreignKeyCheck.ExecuteReaderAsync();
-        (await foreignKeyReader.ReadAsync()).Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task Initialize_v21_recovers_from_a_leftover_conversations_new_table()
-    {
-        // Simulates a crash during a prior v21 rebuild: conversations still carries profile_id and a
-        // stray conversations_new table remains. Initialization must drop the stale table, rebuild
-        // cleanly, and keep the conversation row.
-        var storagePaths = StoragePathDefaults.Create(
-            _rootPath,
-            Path.Combine(_rootPath, "selfclaw.db"),
-            Path.Combine(_rootPath, "secrets"));
-        Directory.CreateDirectory(_rootPath);
-
-        var profileId = Guid.NewGuid();
-        var conversationId = Guid.NewGuid();
-
-        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
-        {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = @"
-CREATE TABLE schema_versions (version INTEGER NOT NULL PRIMARY KEY, applied_at_utc TEXT NOT NULL);
-INSERT INTO schema_versions(version, applied_at_utc) VALUES(20, '2026-01-01T00:00:00.0000000+00:00');
-
-CREATE TABLE profiles (
-    id TEXT NOT NULL PRIMARY KEY,
-    name TEXT NOT NULL,
-    endpoint TEXT NOT NULL,
-    model TEXT NOT NULL,
-    temperature_enabled INTEGER NOT NULL DEFAULT 0,
-    temperature REAL NOT NULL DEFAULT 0.7,
-    top_p_enabled INTEGER NOT NULL DEFAULT 0,
-    top_p REAL NOT NULL DEFAULT 0.7,
-    api_style INTEGER NOT NULL,
-    secret_ref TEXT NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);
-
-CREATE TABLE conversations (
-    id TEXT NOT NULL PRIMARY KEY,
-    title TEXT NOT NULL,
-    profile_id TEXT NOT NULL,
-    workspace_root_id TEXT NULL,
-    mode INTEGER NOT NULL DEFAULT 0,
-    tool_permission_mode INTEGER NOT NULL DEFAULT 0,
-    agent_id TEXT NOT NULL DEFAULT 'build',
-    channel_kind TEXT NULL,
-    channel_conversation_id TEXT NULL,
-    channel_display_name TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);
-
--- Stale artifact from a crashed migration; must not collide with the new rebuild.
-CREATE TABLE conversations_new (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL);
-INSERT INTO conversations_new(id, title) VALUES('stale', 'stale');
-
-INSERT INTO profiles(id, name, endpoint, model, api_style, secret_ref, created_at_utc, updated_at_utc)
-VALUES($profileId, 'Legacy profile', 'https://legacy.example/v1', 'legacy-model', 0, 'secret', $createdAt, $updatedAt);
-INSERT INTO conversations(
-    id, title, profile_id, mode, tool_permission_mode, agent_id, created_at_utc, updated_at_utc)
-VALUES($conversationId, 'Recovered chat', $profileId, 0, 0, 'build', $createdAt, $updatedAt);";
-            command.Parameters.AddWithValue("$profileId", profileId.ToString("D"));
-            command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-            command.Parameters.AddWithValue("$createdAt", "2026-01-01T00:00:00.0000000+00:00");
-            command.Parameters.AddWithValue("$updatedAt", "2026-01-02T00:00:00.0000000+00:00");
-            await command.ExecuteNonQueryAsync();
-        }
-
-        var database = new SqliteDatabase(storagePaths);
-        var repository = new SqliteConversationRepository(database);
-        await repository.InitializeAsync();
-
-        var migratedConversation = await repository.GetConversationAsync(conversationId);
-        migratedConversation.Should().NotBeNull();
-        migratedConversation!.Title.Should().Be("Recovered chat");
-
-        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
-        await verification.OpenAsync();
-        var tables = await ReadSqliteObjectNamesAsync(verification, "table");
-        tables.Should().NotContain("profiles");
-        tables.Should().NotContain("conversations_new");
-        (await ReadTableColumnNamesAsync(verification, "conversations")).Should().NotContain("profile_id");
-    }
-
-    [Fact]
-    public async Task Initialize_v22_adds_conversation_ownership_without_losing_data()
-    {
-        var storagePaths = StoragePathDefaults.Create(
-            _rootPath,
-            Path.Combine(_rootPath, "selfclaw.db"),
-            Path.Combine(_rootPath, "secrets"));
-        Directory.CreateDirectory(_rootPath);
-        var conversationId = Guid.NewGuid();
-        var messageId = Guid.NewGuid();
-
-        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
-        {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = @"
-CREATE TABLE schema_versions (version INTEGER NOT NULL PRIMARY KEY, applied_at_utc TEXT NOT NULL);
-INSERT INTO schema_versions(version, applied_at_utc) VALUES(22, '2026-01-01T00:00:00.0000000+00:00');
-
-CREATE TABLE conversations (
-    id TEXT NOT NULL PRIMARY KEY,
-    title TEXT NOT NULL,
-    workspace_root_id TEXT NULL,
-    mode INTEGER NOT NULL DEFAULT 0,
-    tool_permission_mode INTEGER NOT NULL DEFAULT 0,
-    agent_id TEXT NOT NULL DEFAULT 'build',
-    channel_kind TEXT NULL,
-    channel_conversation_id TEXT NULL,
-    channel_display_name TEXT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);
-
-CREATE TABLE messages (
-    id TEXT NOT NULL PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    role INTEGER NOT NULL,
-    markdown_content TEXT NOT NULL,
-    status INTEGER NOT NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    agent_id TEXT NULL,
-    agent_name TEXT NULL,
-    agent_role TEXT NULL,
-    input_tokens INTEGER NULL,
-    output_tokens INTEGER NULL,
-    duration_ms REAL NULL,
-    error_message TEXT NULL,
-    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-);
-
-INSERT INTO conversations(
-    id, title, mode, tool_permission_mode, agent_id, created_at_utc, updated_at_utc)
-VALUES($conversationId, 'Version 22 chat', 0, 1, 'build', $createdAt, $createdAt);
-INSERT INTO messages(
-    id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc)
-VALUES($messageId, $conversationId, 0, 'Preserved v22 message', 1, $createdAt, $createdAt);";
-            command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-            command.Parameters.AddWithValue("$messageId", messageId.ToString("D"));
-            command.Parameters.AddWithValue("$createdAt", "2026-01-01T00:00:00.0000000+00:00");
-            await command.ExecuteNonQueryAsync();
-        }
-
-        var repository = new SqliteConversationRepository(new SqliteDatabase(storagePaths));
-        await repository.InitializeAsync();
-
-        var conversation = await repository.GetConversationAsync(conversationId);
-        conversation.Should().NotBeNull();
-        conversation!.Kind.Should().Be(ConversationKind.Interactive);
-        conversation.ParentConversationId.Should().BeNull();
-        (await repository.ListMessagesAsync(conversationId)).Should().ContainSingle(message =>
-            message.Id == messageId && message.MarkdownContent == "Preserved v22 message");
-
-        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
-        await verification.OpenAsync();
-        (await ReadTableColumnNamesAsync(verification, "conversations"))
-            .Should().Contain(["kind", "parent_conversation_id"]);
-        await using var versionCommand = verification.CreateCommand();
-        versionCommand.CommandText = "SELECT MAX(version) FROM schema_versions;";
-        (await versionCommand.ExecuteScalarAsync()).Should().Be(29L);
-        await using var foreignKeyCheck = verification.CreateCommand();
-        foreignKeyCheck.CommandText = "PRAGMA foreign_key_check;";
-        await using var foreignKeyReader = await foreignKeyCheck.ExecuteReaderAsync();
-        (await foreignKeyReader.ReadAsync()).Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task Initialize_adds_content_block_columns_to_legacy_tool_runs_table()
-    {
-        var storagePaths = StoragePathDefaults.Create(
-            _rootPath,
-            Path.Combine(_rootPath, "selfclaw.db"),
-            Path.Combine(_rootPath, "secrets"));
-        Directory.CreateDirectory(_rootPath);
-
-        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
-        {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = @"
-CREATE TABLE tool_runs (
-    id TEXT NOT NULL PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    arguments_json TEXT NOT NULL,
-    status INTEGER NOT NULL,
-    result_summary TEXT NULL,
-    correlation_id TEXT NULL,
-    duration_ms REAL NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL
-);";
-            await command.ExecuteNonQueryAsync();
-        }
-
-        var database = new SqliteDatabase(storagePaths);
-        var repository = new SqliteConversationRepository(database);
-        await repository.InitializeAsync();
-
-        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
-        await verification.OpenAsync();
-        await using var pragma = verification.CreateCommand();
-        pragma.CommandText = "PRAGMA table_info(tool_runs);";
-        await using var reader = await pragma.ExecuteReaderAsync();
-        var columns = new List<string>();
-        while (await reader.ReadAsync())
-        {
-            columns.Add(reader.GetString(1));
-        }
-
-        columns.Should().Contain("message_id");
-        columns.Should().NotContain("after_segment_index");
-        columns.Should().Contain("result_content");
-    }
-
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))
@@ -843,53 +364,6 @@ CREATE TABLE tool_runs (
         (await ReadTableColumnNamesAsync(verification, "extension_packages")).Should().Contain("source_path");
     }
 
-    // The v25 rebuild swaps tool_runs for a table without the hook columns, so the v28 columns must be
-    // added after it rather than before.
-    [Fact]
-    public async Task Initialize_adds_v28_hook_columns_to_a_legacy_tool_runs_table()
-    {
-        var storagePaths = StoragePathDefaults.Create(
-            _rootPath,
-            Path.Combine(_rootPath, "selfclaw.db"),
-            Path.Combine(_rootPath, "secrets"));
-        Directory.CreateDirectory(_rootPath);
-
-        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
-        {
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = @"
-CREATE TABLE tool_runs (
-    id TEXT NOT NULL PRIMARY KEY,
-    conversation_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    arguments_json TEXT NOT NULL,
-    status INTEGER NOT NULL,
-    result_summary TEXT NULL,
-    correlation_id TEXT NULL,
-    duration_ms REAL NULL,
-    created_at_utc TEXT NOT NULL,
-    updated_at_utc TEXT NOT NULL,
-    agent_id TEXT NULL,
-    message_id TEXT NULL,
-    after_segment_index INTEGER NULL
-);";
-            await command.ExecuteNonQueryAsync();
-        }
-
-        var repository = new SqliteConversationRepository(new SqliteDatabase(storagePaths));
-        await repository.InitializeAsync();
-
-        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
-        await verification.OpenAsync();
-        var columns = await ReadTableColumnNamesAsync(verification, "tool_runs");
-        columns.Should().Contain([
-            "effective_arguments_json",
-            "hook_feedback_json",
-            "hook_outcome_json"]);
-        columns.Should().NotContain("after_segment_index");
-    }
-
     [Fact]
     public async Task Repositories_round_trip_notice_segments()
     {
@@ -897,7 +371,9 @@ CREATE TABLE tool_runs (
             _rootPath,
             Path.Combine(_rootPath, "selfclaw.db"),
             Path.Combine(_rootPath, "secrets"));
-        var repository = new SqliteConversationRepository(new SqliteDatabase(storagePaths));
+        var database = new SqliteDatabase(storagePaths);
+        var repository = new SqliteConversationRepository(database);
+        var turns = new SqliteConversationTurnRepository(database);
         await repository.InitializeAsync();
 
         var now = DateTimeOffset.UtcNow;
@@ -911,13 +387,18 @@ CREATE TABLE tool_runs (
             now,
             now);
         await repository.UpsertConversationAsync(conversation);
+        var turn = new ConversationTurnRecord(Guid.NewGuid(), conversation.Id, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Interactive, ConversationTurnStatus.Running, now);
+        await turns.StartTurnAsync(new ConversationTurnStart(conversation, turn, "prompt", Guid.NewGuid()));
         var messageId = Guid.NewGuid();
         var message = new MessageRecord(
             messageId,
             conversation.Id,
+            turn.Id,
+            await turns.ReserveMessageSequenceAsync(conversation.Id),
             MessageRole.Assistant,
             "answer",
-            MessageStatus.Completed,
+            MessageStatus.Sealed,
             now,
             now,
             Segments:
@@ -926,9 +407,12 @@ CREATE TABLE tool_runs (
                 new MessageSegmentRecord(messageId, 1, MessageSegmentKind.Notice, "Hook added context.", null),
                 new MessageSegmentRecord(messageId, 2, MessageSegmentKind.Text, "answer", null)
             ]);
-        await repository.UpsertMessageAsync(message);
+        await turns.TryFinalizeTurnAsync(new ConversationTurnCommit(turn with
+        {
+            Status = ConversationTurnStatus.Succeeded, CompletedAtUtc = now
+        }, [message], []));
 
-        var loaded = (await repository.ListMessagesAsync(conversation.Id)).Should().ContainSingle().Subject;
+        var loaded = (await repository.ListMessagesAsync(conversation.Id)).Single(item => item.Role == MessageRole.Assistant);
         loaded.Segments.Should().BeEquivalentTo(message.Segments);
         var notice = loaded.Segments!.Single(segment => segment.Kind == MessageSegmentKind.Notice);
         notice.Ordinal.Should().Be(1);

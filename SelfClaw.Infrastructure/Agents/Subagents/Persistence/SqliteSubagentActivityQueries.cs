@@ -66,6 +66,22 @@ internal static class SqliteSubagentActivityQueries
             ?? throw new InvalidOperationException("The activity task disappeared within its read transaction."));
     }
 
+    internal static async Task<ConversationTurnRecord?> ReadTurnAsync(
+        SqliteConnection connection, SqliteTransaction transaction, SubagentActivityTask task, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"""
+            SELECT {SqliteMappings.TurnSelectColumns}
+            FROM conversation_turns t LEFT JOIN turn_usage u ON u.turn_id = t.id
+            WHERE t.id = $turn AND t.conversation_id = $child;
+            """;
+        command.Parameters.AddWithValue("$turn", task.ChildTurnId.ToString("D"));
+        command.Parameters.AddWithValue("$child", task.ChildConversationId.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? SqliteMappings.ReadTurn(reader) : null;
+    }
+
     internal static async Task<MessageRecord?> ReadMessageAsync(
         SqliteConnection connection, SqliteTransaction transaction, SubagentActivityTask task, CancellationToken cancellationToken)
     {
@@ -76,8 +92,8 @@ internal static class SqliteSubagentActivityQueries
             command.CommandText = $"""
                 SELECT {SqliteMappings.MessageSelectColumns}
                 FROM messages m
-                LEFT JOIN turn_usage u ON u.message_id = m.id
-                WHERE m.id = $turn AND m.conversation_id = $child AND m.role = $assistant;
+                WHERE m.turn_id = $turn AND m.conversation_id = $child AND m.role = $assistant
+                ORDER BY m.sequence DESC LIMIT 1;
                 """;
             command.Parameters.AddWithValue("$turn", task.ChildTurnId.ToString("D"));
             command.Parameters.AddWithValue("$child", task.ChildConversationId.ToString("D"));
@@ -95,18 +111,23 @@ internal static class SqliteSubagentActivityQueries
     }
 
     internal static async Task<IReadOnlyList<ToolExecutionRecord>> ReadToolsAsync(
-        SqliteConnection connection, SqliteTransaction transaction, SubagentActivityTask task, CancellationToken cancellationToken)
+        SqliteConnection connection, SqliteTransaction transaction, SubagentActivityTask task, Guid? messageId, CancellationToken cancellationToken)
     {
+        if (messageId is null)
+        {
+            return [];
+        }
+
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             SELECT id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms,
                    created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name,
                    effective_arguments_json, hook_feedback_json, hook_outcome_json
-            FROM tool_runs WHERE conversation_id = $child AND message_id = $turn ORDER BY created_at_utc, id;
+            FROM tool_runs WHERE conversation_id = $child AND message_id = $message ORDER BY created_at_utc, id;
             """;
         command.Parameters.AddWithValue("$child", task.ChildConversationId.ToString("D"));
-        command.Parameters.AddWithValue("$turn", task.ChildTurnId.ToString("D"));
+        command.Parameters.AddWithValue("$message", messageId.Value.ToString("D"));
         var tools = new List<ToolExecutionRecord>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))

@@ -1,5 +1,6 @@
 using SelfClaw.Desktop.Services.Transcript.Views;
 using FluentAssertions;
+using SelfClaw.Tests.TestDoubles;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Infrastructure.Options;
@@ -72,9 +73,10 @@ public sealed class TranscriptProjectionTests
         var message = new MessageRecord(
             messageId,
             conversationId,
+            Guid.NewGuid(), 1,
             MessageRole.Assistant,
             "answer",
-            MessageStatus.Completed,
+            MessageStatus.Sealed,
             now,
             now,
             Segments:
@@ -121,9 +123,10 @@ public sealed class TranscriptProjectionTests
         var message = new MessageRecord(
             messageId,
             conversationId,
+            Guid.NewGuid(), 1,
             MessageRole.Assistant,
             "answer",
-            MessageStatus.Completed,
+            MessageStatus.Sealed,
             now,
             now,
             Segments:
@@ -159,6 +162,7 @@ public sealed class TranscriptProjectionTests
         var now = DateTimeOffset.UtcNow;
         var conversationId = Guid.NewGuid();
         var workspaceRootId = Guid.NewGuid();
+        var turnId = Guid.NewGuid();
         var userMessageId = Guid.NewGuid();
         var assistantMessageId = Guid.NewGuid();
         var toolRunId = Guid.NewGuid();
@@ -176,18 +180,20 @@ public sealed class TranscriptProjectionTests
             new MessageRecord(
                 userMessageId,
                 conversationId,
+                turnId, 1,
                 MessageRole.User,
                 "**question**",
-                MessageStatus.Completed,
+                MessageStatus.Sealed,
                 now,
                 now,
                 Attachments: [attachment]),
             new MessageRecord(
                 assistantMessageId,
                 conversationId,
+                turnId, 2,
                 MessageRole.Assistant,
                 "answer",
-                MessageStatus.Completed,
+                MessageStatus.Sealed,
                 now.AddSeconds(1),
                 now.AddSeconds(1),
                 Segments:
@@ -265,7 +271,7 @@ public sealed class TranscriptProjectionTests
                 "IsThinking",
                 "Timestamp",
                 "Attachments",
-                "ErrorMessage");
+                "TurnOutcome");
         typeof(TranscriptConversationItem).GetProperties().Select(property => property.Name)
             .Should().BeEquivalentTo(
                 "Id",
@@ -287,7 +293,7 @@ public sealed class TranscriptProjectionTests
         var conversationId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
         var toolId = Guid.NewGuid();
-        var message = new MessageRecord(messageId, conversationId, MessageRole.Assistant, "answer", MessageStatus.Streaming, now, now,
+        var message = new MessageRecord(messageId, conversationId, Guid.NewGuid(), 1, MessageRole.Assistant, "answer", MessageStatus.Streaming, now, now,
             Segments:
             [
                 new(messageId, 0, MessageSegmentKind.Text, "answer", null),
@@ -300,14 +306,14 @@ public sealed class TranscriptProjectionTests
         var detailProjector = new TranscriptMessageProjector(StoragePathDefaults.Create(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets")));
         var main = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: [tool]))
             ?? throw new InvalidOperationException("Missing main projection.");
-        var detail = detailProjector.Build(message, [tool]);
+        var detail = detailProjector.Build(message, PresentationHistory.Turn(message), [tool]);
         detail.Should().BeEquivalentTo(main.Items.Single());
         var thinking = detail.Segments.Single(segment => segment.Kind == "thinking");
         thinking.SegmentId.Should().Be($"{messageId:D}:thinking:0");
         thinking.IsPending.Should().BeTrue();
         var terminal = message with
         {
-            Status = MessageStatus.Completed,
+            Status = MessageStatus.Sealed,
             Segments =
             [
                 new(messageId, 0, MessageSegmentKind.Thinking, "analysis", null),
@@ -315,7 +321,7 @@ public sealed class TranscriptProjectionTests
                 new(messageId, 2, MessageSegmentKind.ToolCall, null, toolId)
             ]
         };
-        var final = detailProjector.Build(terminal, [tool]);
+        var final = detailProjector.Build(terminal, PresentationHistory.Turn(terminal), [tool]);
         var finalThinking = final.Segments.Single(segment => segment.Kind == "thinking");
         finalThinking.SegmentId.Should().Be(thinking.SegmentId);
         finalThinking.IsPending.Should().BeFalse();
@@ -324,16 +330,16 @@ public sealed class TranscriptProjectionTests
     }
 
     [Fact]
-    public void Build_falls_back_to_legacy_assistant_text_without_inventing_tool_positions()
+    public void Build_does_not_fall_back_to_unstructured_assistant_text_or_invent_tool_positions()
     {
         var now = DateTimeOffset.UtcNow;
-        var message = new MessageRecord(Guid.NewGuid(), Guid.NewGuid(), MessageRole.Assistant,
-            "legacy final text", MessageStatus.Completed, now, now);
+        var message = new MessageRecord(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, MessageRole.Assistant,
+            "legacy final text", MessageStatus.Sealed, now, now);
         var tool = new ToolExecutionRecord(Guid.NewGuid(), message.ConversationId, "read_file", "{}", ToolExecutionStatus.Completed,
             "read", "call-1", 20, now, now, MessageId: message.Id);
         var state = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: [tool]))
             ?? throw new InvalidOperationException("Missing main projection.");
-        state.Items.Single().Segments.Should().ContainSingle().Which.Markdown.Should().Be("legacy final text");
+        state.Items.Single().Segments.Should().BeEmpty();
     }
 
     [Fact]
@@ -344,7 +350,7 @@ public sealed class TranscriptProjectionTests
         var messageId = Guid.NewGuid();
         var firstToolId = Guid.NewGuid();
         var secondToolId = Guid.NewGuid();
-        var message = new MessageRecord(messageId, conversationId, MessageRole.Assistant, "answer", MessageStatus.Completed, now, now,
+        var message = new MessageRecord(messageId, conversationId, Guid.NewGuid(), 1, MessageRole.Assistant, "answer", MessageStatus.Sealed, now, now,
             Segments:
             [
                 new(messageId, 0, MessageSegmentKind.ToolCall, null, firstToolId),
@@ -394,6 +400,7 @@ public sealed class TranscriptProjectionTests
         Guid? selectedConversationId = null)
         => new(
             messages ?? [],
+            PresentationHistory.Turns(messages ?? []),
             toolRuns ?? [],
             conversations ?? [],
             workspaceRoots ?? [],

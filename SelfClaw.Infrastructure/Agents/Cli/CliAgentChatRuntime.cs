@@ -83,7 +83,7 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
             yield break;
         }
 
-        var prompt = ExtractPrompt(cliRequest.Messages);
+        var prompt = ExtractPrompt(cliRequest);
         if (string.IsNullOrWhiteSpace(prompt))
         {
             yield return new RunCompletedEvent(
@@ -286,17 +286,12 @@ internal sealed class CliAgentChatRuntime : IAgentRuntimeAdapter
         return usageEvent with { Usage = usage };
     }
 
-    /// <summary>The latest user message is the prompt; the CLI keeps prior turns via session resume.</summary>
-    private static string? ExtractPrompt(IReadOnlyList<MessageRecord> messages)
-    {
-        for (var i = messages.Count - 1; i >= 0; i--)
-        {
-            if (messages[i].Role == MessageRole.User)
-                return messages[i].MarkdownContent;
-        }
-
-        return null;
-    }
+    private static string? ExtractPrompt(CliChatTurnRequest request)
+        => request.Messages
+            .Where(message => message.TurnId == request.TurnId &&
+                              message.ConversationId == request.ConversationId &&
+                              message.Role == MessageRole.User && message.Status == MessageStatus.Sealed)
+            .MaxBy(message => message.Sequence)?.MarkdownContent;
 
     private static string ResolveWorkingDirectory(WorkspaceRoot? workspaceRoot)
     {

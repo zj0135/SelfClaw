@@ -1,6 +1,7 @@
 ﻿using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
@@ -17,7 +18,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public async Task CreateAsync_atomically_persists_child_message_and_queued_task()
+    public async Task CreateAsync_persists_queued_task_without_turn_or_message()
     {
         var context = await CreateContextAsync();
         var parent = CreateParentConversation();
@@ -33,7 +34,8 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         (await context.Conversations.GetConversationAsync(creation.ChildConversation.Id))
             .Should().Be(creation.ChildConversation);
         (await context.Conversations.ListMessagesAsync(creation.ChildConversation.Id))
-            .Should().Equal(creation.TaskMessage);
+            .Should().BeEmpty();
+        (await context.Turns.ListTurnsAsync(creation.ChildConversation.Id)).Should().BeEmpty();
     }
 
     [Fact]
@@ -53,7 +55,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAsync_rolls_back_child_and_message_when_task_insert_fails()
+    public async Task CreateAsync_rolls_back_child_when_task_insert_fails()
     {
         var context = await CreateContextAsync();
         var parent = CreateParentConversation();
@@ -70,7 +72,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAsync_rejects_task_text_that_differs_from_the_child_message()
+    public async Task CreateAsync_rejects_child_conversation_with_wrong_parent()
     {
         var context = await CreateContextAsync();
         var parent = CreateParentConversation();
@@ -78,7 +80,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         var creation = CreateTaskCreation(parent, Guid.NewGuid(), "Original task.");
         creation = creation with
         {
-            TaskMessage = creation.TaskMessage with { MarkdownContent = "Different task." }
+            ChildConversation = creation.ChildConversation with { ParentConversationId = Guid.NewGuid() }
         };
 
         var action = () => context.Tasks.CreateAsync(creation);
@@ -187,7 +189,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         var queued = await context.Tasks.CreateAsync(
             CreateTaskCreation(parent, Guid.NewGuid(), "Review completion."));
         var running = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow);
-        var completion = CreateCompletion(
+        var completion = await CreateCompletionAsync(context,
             running!,
             SubagentTaskStatus.Succeeded,
             "pure provider final",
@@ -223,7 +225,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         var creation = CreateTaskCreation(parent, Guid.NewGuid(), "Missing definition.");
         creation = creation with
         {
-            InitialCompletion = CreateCompletion(
+            InitialCompletion = await CreateCompletionAsync(context,
                 creation.Task,
                 SubagentTaskStatus.Failed,
                 finalText: null,
@@ -254,7 +256,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         _ = await context.Tasks.TryCompleteAsync(
             claimed!.Id,
             SubagentTaskStatus.Running,
-            CreateCompletion(claimed, SubagentTaskStatus.Succeeded, "done", "done"));
+            await CreateCompletionAsync(context, claimed, SubagentTaskStatus.Succeeded, "done", "done"));
         var retry = CreateTaskCreation(parent, Guid.NewGuid(), original.TaskText);
         retry = retry with
         {
@@ -338,19 +340,15 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
             "child result");
         var now = DateTimeOffset.UtcNow.AddSeconds(3);
         var lease = await LeaseNextAsync(context, now);
-        var assistant = new MessageRecord(
-            lease.ContinuationTurnId,
-            parent.Id,
-            MessageRole.Assistant,
-            "parent continuation",
-            MessageStatus.Completed,
-            now,
-            now);
-        var resolution = new SubagentDeliveryResolution(
-            SubagentDeliveryResolutionKind.Succeeded,
-            new TurnFinalization(assistant, []),
-            Error: null,
-            now);
+        var turn = new ConversationTurnRecord(lease.ContinuationTurnId, parent.Id, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Continuation, ConversationTurnStatus.Succeeded, now, now);
+        var assistant = new MessageRecord(Guid.NewGuid(), parent.Id, turn.Id,
+            await context.Turns.ReserveMessageSequenceAsync(parent.Id), MessageRole.Assistant,
+            "parent continuation", MessageStatus.Sealed, now, now);
+        (await context.Turns.ListTurnsAsync(parent.Id)).Should().BeEmpty();
+        (await context.Conversations.ListMessagesAsync(parent.Id)).Should().BeEmpty();
+        var resolution = new SubagentDeliveryResolution(SubagentDeliveryResolutionKind.Succeeded,
+            new ConversationTurnCommit(turn, [assistant], []), null, now);
 
         var committed = await context.Deliveries.TryResolveAsync(lease, resolution);
         var repeated = await context.Deliveries.TryResolveAsync(lease, resolution);
@@ -361,7 +359,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         (await context.Deliveries.GetAsync(parent.Id, task.Id))!.Status
             .Should().Be(SubagentDeliveryStatus.Delivered);
         (await context.Conversations.ListMessagesAsync(parent.Id))
-            .Should().ContainSingle().Which.Should().Be(assistant);
+            .Should().ContainSingle().Which.Should().BeEquivalentTo(assistant);
     }
 
     [Fact]
@@ -415,40 +413,29 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
             "child result");
         var now = DateTimeOffset.UtcNow.AddSeconds(3);
         var lease = await LeaseNextAsync(context, now);
-        var assistant = new MessageRecord(
-            lease.ContinuationTurnId,
-            parent.Id,
-            MessageRole.Assistant,
-            "partial",
-            MessageStatus.Failed,
-            now,
-            now,
-            ErrorMessage: "provider failed after a tool call");
-        var tool = new ToolExecutionRecord(
-            Guid.NewGuid(),
-            parent.Id,
-            "write_file",
-            "{}",
-            ToolExecutionStatus.Failed,
-            "provider failed",
-            "call-1",
-            10,
-            now,
-            now,
-            MessageId: lease.ContinuationTurnId);
+        const string error = "provider failed after a tool call";
+        var turn = new ConversationTurnRecord(lease.ContinuationTurnId, parent.Id, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Continuation, ConversationTurnStatus.Failed, now, now, error);
+        var assistantId = Guid.NewGuid();
+        var tool = new ToolExecutionRecord(Guid.NewGuid(), parent.Id, "write_file", "{}",
+            ToolExecutionStatus.Failed, "provider failed", "call-1", 10, now, now, MessageId: assistantId);
+        var assistant = new MessageRecord(assistantId, parent.Id, turn.Id,
+            await context.Turns.ReserveMessageSequenceAsync(parent.Id), MessageRole.Assistant,
+            "partial", MessageStatus.Interrupted, now, now,
+            Segments: [new MessageSegmentRecord(assistantId, 0, MessageSegmentKind.ToolCall, null, tool.Id)]);
 
         var resolved = await context.Deliveries.TryResolveAsync(
             lease,
             new SubagentDeliveryResolution(
                 SubagentDeliveryResolutionKind.UnsafeFailure,
-                new TurnFinalization(assistant, [tool]),
-                assistant.ErrorMessage,
+                new ConversationTurnCommit(turn, [assistant], [tool]),
+                error,
                 now));
 
         resolved.DeadLetteredDeliveryIds.Should().ContainSingle();
         (await context.Deliveries.GetAsync(parent.Id, task.Id))!.Status
             .Should().Be(SubagentDeliveryStatus.DeadLetter);
-        (await context.Conversations.ListMessagesAsync(parent.Id)).Should().ContainSingle().Which.Should().Be(assistant);
+        (await context.Conversations.ListMessagesAsync(parent.Id)).Should().ContainSingle().Which.Should().BeEquivalentTo(assistant);
         (await context.Conversations.ListToolExecutionsAsync(parent.Id)).Should().ContainSingle().Which.Should().Be(tool);
     }
 
@@ -512,29 +499,19 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
 
         var secondAt = firstAt.AddSeconds(47);
         var secondLease = await LeaseNextAsync(context, secondAt);
-        var tool = new ToolExecutionRecord(
-            Guid.NewGuid(),
-            parent.Id,
-            "write_file",
-            "{}",
-            ToolExecutionStatus.Running,
-            ResultSummary: null,
-            "call-recovery",
-            DurationMs: null,
-            secondAt,
-            secondAt,
-            MessageId: secondLease.ContinuationTurnId);
-        await context.Conversations.UpsertToolExecutionAsync(tool);
+        (await context.Deliveries.TryMarkToolExecutionStartedAsync(secondLease, secondAt)).Should().BeTrue();
+        (await context.Turns.ListTurnsAsync(parent.Id)).Should().BeEmpty();
+        (await context.Conversations.ListMessagesAsync(parent.Id)).Should().BeEmpty();
 
         var deadLetters = await context.Deliveries.RecoverExpiredLeasesAsync(secondAt.AddSeconds(46));
 
         deadLetters.Should().ContainSingle().Which.Id.Should().Be(secondLease.Deliveries[0].Id);
         (await context.Deliveries.GetAsync(parent.Id, task.Id))!.Status
             .Should().Be(SubagentDeliveryStatus.DeadLetter);
-        (await context.Conversations.ListMessagesAsync(parent.Id)).Should().ContainSingle(message =>
-            message.Id == secondLease.ContinuationTurnId && message.Status == MessageStatus.Failed);
-        (await context.Conversations.ListToolExecutionsAsync(parent.Id)).Should().ContainSingle(record =>
-            record.Id == tool.Id && record.Status == ToolExecutionStatus.Failed);
+        (await context.Conversations.ListMessagesAsync(parent.Id)).Should().BeEmpty();
+        (await context.Conversations.ListToolExecutionsAsync(parent.Id)).Should().BeEmpty();
+        (await context.Turns.ListTurnsAsync(parent.Id)).Should().ContainSingle(turn =>
+            turn.Id == secondLease.ContinuationTurnId && turn.Status == ConversationTurnStatus.Interrupted);
     }
 
     [Fact]
@@ -562,6 +539,97 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         leases.Should().ContainSingle(candidate => candidate != null);
     }
 
+    [Fact]
+    public async Task Claim_failure_rolls_back_running_task_turn_user_and_sequence()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var task = await context.Tasks.CreateAsync(CreateTaskCreation(parent, Guid.NewGuid(), "claim"));
+        await ExecuteAsync(context.Database, "CREATE TRIGGER fail_child_user BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT, 'claim fault'); END;");
+        await Assert.ThrowsAsync<SqliteException>(() => context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow));
+        (await context.Tasks.GetAsync(parent.Id, task.Id))?.Status.Should().Be(SubagentTaskStatus.Queued);
+        (await context.Turns.ListTurnsAsync(task.ChildConversationId)).Should().BeEmpty();
+        (await context.Conversations.ListMessagesAsync(task.ChildConversationId)).Should().BeEmpty();
+        await using var connection = await context.Database.OpenConnectionAsync();
+        (await CountAsync(connection, "conversation_message_sequences")).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Queued_cancellation_atomically_persists_terminal_turn_and_user_without_assistant()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var task = await context.Tasks.CreateAsync(CreateTaskCreation(parent, Guid.NewGuid(), "cancel queued"));
+        var completion = await CreateCompletionAsync(context, task, SubagentTaskStatus.Cancelled, null, string.Empty);
+        await ExecuteAsync(context.Database, "CREATE TRIGGER fail_delivery BEFORE INSERT ON subagent_deliveries BEGIN SELECT RAISE(ABORT, 'completion fault'); END;");
+        await Assert.ThrowsAsync<SqliteException>(() => context.Tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Queued, completion));
+        (await context.Turns.ListTurnsAsync(task.ChildConversationId)).Should().BeEmpty();
+        (await context.Conversations.ListMessagesAsync(task.ChildConversationId)).Should().BeEmpty();
+        (await context.Tasks.GetAsync(parent.Id, task.Id))?.Status.Should().Be(SubagentTaskStatus.Queued);
+        await ExecuteAsync(context.Database, "DROP TRIGGER fail_delivery;");
+        await context.Tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Queued, completion);
+        (await context.Turns.ListTurnsAsync(task.ChildConversationId)).Should().ContainSingle().Which.Status.Should().Be(ConversationTurnStatus.Cancelled);
+        var user = (await context.Conversations.ListMessagesAsync(task.ChildConversationId)).Should().ContainSingle().Subject;
+        user.Role.Should().Be(MessageRole.User);
+        user.MarkdownContent.Should().Be(task.TaskText);
+        user.Id.Should().NotBe(task.ChildTurnId);
+        (await context.Tasks.GetDeliveryAsync(parent.Id, task.Id)).Should().NotBeNull();
+    }
+
+    [Theory]
+    [InlineData(ConversationTurnStatus.Blocked)]
+    [InlineData(ConversationTurnStatus.Truncated)]
+    public async Task Child_failed_policy_preserves_actual_turn_outcome(ConversationTurnStatus status)
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var queued = await context.Tasks.CreateAsync(CreateTaskCreation(parent, Guid.NewGuid(), "outcome"));
+        var running = await context.Tasks.TryClaimNextAsync(DateTimeOffset.UtcNow)
+            ?? throw new InvalidOperationException("Missing child.");
+        var turn = (await context.Turns.ListTurnsAsync(queued.ChildConversationId)).Single();
+        await context.Tasks.TryCompleteAsync(running.Id, SubagentTaskStatus.Running, new SubagentTaskCompletion(
+            SubagentTaskStatus.Failed, new ConversationTurnCommit(turn with
+            {
+                Status = status, CompletedAtUtc = DateTimeOffset.UtcNow
+            }, [], []), null, "policy", "stopped", DateTimeOffset.UtcNow));
+        (await context.Turns.ListTurnsAsync(queued.ChildConversationId)).Single().Status.Should().Be(status);
+    }
+
+    [Fact]
+    public async Task Delivery_terminal_fault_rolls_back_delivery_turn_fragment_and_usage()
+    {
+        var context = await CreateContextAsync();
+        var parent = CreateParentConversation();
+        await context.Conversations.UpsertConversationAsync(parent);
+        var task = await CompleteTaskAsync(context, CreateTaskCreation(parent, Guid.NewGuid(), "delivery rollback"), "child");
+        var now = DateTimeOffset.UtcNow.AddSeconds(3);
+        var lease = await LeaseNextAsync(context, now);
+        var turn = new ConversationTurnRecord(lease.ContinuationTurnId, parent.Id, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Continuation, ConversationTurnStatus.Succeeded, now, now, Usage: new TurnUsage(InputTokens: 7, TotalTokens: null));
+        var message = new MessageRecord(Guid.NewGuid(), parent.Id, turn.Id,
+            await context.Turns.ReserveMessageSequenceAsync(parent.Id), MessageRole.Assistant, "answer", MessageStatus.Sealed, now, now);
+        var resolution = new SubagentDeliveryResolution(SubagentDeliveryResolutionKind.Succeeded, new(turn, [message], []), null, now);
+        await ExecuteAsync(context.Database, "CREATE TRIGGER fail_parent_usage BEFORE INSERT ON turn_usage BEGIN SELECT RAISE(ABORT, 'delivery fault'); END;");
+        await Assert.ThrowsAsync<SqliteException>(() => context.Deliveries.TryResolveAsync(lease, resolution));
+        (await context.Turns.ListTurnsAsync(parent.Id)).Should().BeEmpty();
+        (await context.Conversations.ListMessagesAsync(parent.Id)).Should().BeEmpty();
+        (await context.Deliveries.GetAsync(parent.Id, task.Id))?.Status.Should().Be(SubagentDeliveryStatus.Leased);
+        await ExecuteAsync(context.Database, "DROP TRIGGER fail_parent_usage;");
+        (await context.Deliveries.TryResolveAsync(lease, resolution)).LeaseMatched.Should().BeTrue();
+        (await context.Turns.ListTurnsAsync(parent.Id)).Single().Usage?.TotalTokens.Should().BeNull();
+    }
+
+    private static async Task ExecuteAsync(SqliteDatabase database, string sql)
+    {
+        await using var connection = await database.OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
+    }
+
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))
@@ -578,7 +646,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         }
     }
 
-    private async Task<TestContext> CreateContextAsync()
+    private async Task<SubagentPersistenceTestContext> CreateContextAsync()
     {
         var storagePaths = StoragePathDefaults.Create(
             _rootPath,
@@ -589,7 +657,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
         var deliveries = new SqliteSubagentDeliveryRepository(database);
         await tasks.InitializeAsync();
-        return new TestContext(database, conversations, tasks, deliveries);
+        return new SubagentPersistenceTestContext(database, conversations, new SqliteConversationTurnRepository(database), tasks, deliveries);
     }
 
     private static ConversationRecord CreateParentConversation()
@@ -624,14 +692,6 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
             now,
             Kind: ConversationKind.Subagent,
             ParentConversationId: parent.Id);
-        var message = new MessageRecord(
-            Guid.NewGuid(),
-            childId,
-            MessageRole.User,
-            taskText,
-            MessageStatus.Completed,
-            now,
-            now);
         var task = new SubagentTaskRecord(
             Guid.NewGuid(),
             parent.Id,
@@ -659,10 +719,11 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
             CompletedAtUtc: null,
             CreatedAtUtc: now,
             UpdatedAtUtc: now);
-        return new SubagentTaskCreation(child, message, task);
+        return new SubagentTaskCreation(child, task);
     }
 
-    private static SubagentTaskCompletion CreateCompletion(
+    private static async Task<SubagentTaskCompletion> CreateCompletionAsync(
+        SubagentPersistenceTestContext context,
         SubagentTaskRecord task,
         SubagentTaskStatus status,
         string? finalText,
@@ -670,29 +731,28 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         string? errorCode = null)
     {
         var now = DateTimeOffset.UtcNow;
-        var messageStatus = status switch
+        var turnStatus = status switch
         {
-            SubagentTaskStatus.Succeeded => MessageStatus.Completed,
-            SubagentTaskStatus.Cancelled => MessageStatus.Cancelled,
-            _ => MessageStatus.Failed
+            SubagentTaskStatus.Succeeded => ConversationTurnStatus.Succeeded,
+            SubagentTaskStatus.Cancelled => ConversationTurnStatus.Cancelled,
+            SubagentTaskStatus.Interrupted => ConversationTurnStatus.Interrupted,
+            _ => ConversationTurnStatus.Failed
         };
-        var assistant = new MessageRecord(
-            task.ChildTurnId,
-            task.ChildConversationId,
-            MessageRole.Assistant,
-            assistantMarkdown,
-            messageStatus,
-            now,
-            now,
-            Usage: new TurnUsage(InputTokens: 5, OutputTokens: 3),
-            ErrorMessage: errorCode);
-        return new SubagentTaskCompletion(
-            status,
-            new TurnFinalization(assistant, []),
-            finalText,
-            errorCode,
-            errorCode,
-            now);
+        var turn = new ConversationTurnRecord(task.ChildTurnId, task.ChildConversationId, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Subagent, turnStatus, task.StartedAtUtc ?? task.QueuedAtUtc, now, errorCode,
+            new TurnUsage(InputTokens: 5, OutputTokens: 3));
+        var messages = new List<MessageRecord>();
+        if (task.Status == SubagentTaskStatus.Running && !string.IsNullOrEmpty(assistantMarkdown))
+        {
+            var id = Guid.NewGuid();
+            messages.Add(new MessageRecord(id, task.ChildConversationId, task.ChildTurnId,
+                await context.Turns.ReserveMessageSequenceAsync(task.ChildConversationId), MessageRole.Assistant,
+                assistantMarkdown, status == SubagentTaskStatus.Succeeded ? MessageStatus.Sealed : MessageStatus.Interrupted,
+                now, now, Segments: [new MessageSegmentRecord(id, 0, MessageSegmentKind.Text, assistantMarkdown, null)]));
+        }
+
+        return new SubagentTaskCompletion(status, new ConversationTurnCommit(turn, messages, []),
+            finalText, errorCode, errorCode, now);
     }
 
     private static async Task InsertDeliveryAsync(SqliteDatabase database, SubagentTaskRecord task)
@@ -720,7 +780,7 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
     }
 
     private static async Task<SubagentTaskRecord> CompleteTaskAsync(
-        TestContext context,
+        SubagentPersistenceTestContext context,
         SubagentTaskCreation creation,
         string finalText)
     {
@@ -730,11 +790,11 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         return await context.Tasks.TryCompleteAsync(
             running.Id,
             SubagentTaskStatus.Running,
-            CreateCompletion(running, SubagentTaskStatus.Succeeded, finalText, finalText))
+            await CreateCompletionAsync(context, running, SubagentTaskStatus.Succeeded, finalText, finalText))
             ?? throw new InvalidOperationException("The fixture task could not be completed.");
     }
 
-    private static async Task<SubagentDeliveryLease> LeaseNextAsync(TestContext context, DateTimeOffset now)
+    private static async Task<SubagentDeliveryLease> LeaseNextAsync(SubagentPersistenceTestContext context, DateTimeOffset now)
     {
         var mailbox = await context.Deliveries.PeekReadyMailboxAsync(now, now)
             ?? throw new InvalidOperationException("The fixture mailbox is not ready.");
@@ -758,9 +818,4 @@ public sealed class SqliteSubagentTaskRepositoryTests : IDisposable
         return (long)(await command.ExecuteScalarAsync() ?? 0L);
     }
 
-    private sealed record TestContext(
-        SqliteDatabase Database,
-        SqliteConversationRepository Conversations,
-        SqliteSubagentTaskRepository Tasks,
-        SqliteSubagentDeliveryRepository Deliveries);
 }

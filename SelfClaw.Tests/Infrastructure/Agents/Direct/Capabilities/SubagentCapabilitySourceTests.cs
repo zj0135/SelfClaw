@@ -155,8 +155,9 @@ public sealed class SubagentCapabilitySourceTests
     {
         var conversationId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
+        var turnId = Guid.NewGuid();
         return new DirectChatTurnRequest(
-            Guid.NewGuid(),
+            turnId,
             conversationId,
             WorkspaceRoot: null,
             new AgentRuntimeDefinition(
@@ -173,11 +174,14 @@ public sealed class SubagentCapabilitySourceTests
             [new MessageRecord(
                 Guid.NewGuid(),
                 conversationId,
+                turnId,
+                1,
                 MessageRole.User,
                 "work",
-                MessageStatus.Completed,
+                MessageStatus.Sealed,
                 now,
                 now)],
+            [new ConversationTurnRecord(turnId, conversationId, AgentExecutionMode.Direct, origin, ConversationTurnStatus.Running, now)],
             Guid.NewGuid(),
             ToolPermissionMode.FullAccess,
             ToolApprovalHandler: null,

@@ -11,6 +11,7 @@ using SelfClaw.Infrastructure.AiProviders.OpenAi;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
+using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Infrastructure.AiProviders;
 
@@ -97,26 +98,34 @@ public sealed class AiModelConfigurationTests : IDisposable
     }
 
     [Fact]
-    public async Task Upgrading_v25_keeps_existing_profiles_options_and_default_selection()
+    public async Task Opening_v25_is_rejected_without_changing_profiles_or_default_selection()
     {
         var repository = CreateRepository();
         var profile = await CreateProfileAsync(repository, "legacy-model");
         await repository.SetModelProfileSelectionAsync(new AiModelProfileSelection("desktop.default", profile.Id, DateTimeOffset.UtcNow));
-        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(_root, "test.db")}"))
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(_root, "test.db")};Pooling=False"))
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "DROP TABLE ai_model_configurations; DELETE FROM schema_versions WHERE version = 26; INSERT OR IGNORE INTO schema_versions VALUES(25, '2026-01-01');";
+            command.CommandText = "DROP TABLE ai_model_configurations; DELETE FROM schema_versions; INSERT OR IGNORE INTO schema_versions VALUES(25, '2026-01-01');";
             await command.ExecuteNonQueryAsync();
         }
 
-        var upgraded = CreateRepository();
-        var restored = await upgraded.GetModelProfileAsync(profile.Id);
-        restored.Should().BeEquivalentTo(profile, options => options.Excluding(item => item.ModelOptions));
-        restored?.ModelOptions["custom.option"].GetString().Should().Be("preserved");
-        (await upgraded.GetModelProfileSelectionAsync("desktop.default"))?.ModelProfileId.Should().Be(profile.Id);
-        await CreateService(upgraded).SaveModelConfigurationAsync(CreateConfiguration(profile.Model));
-        (await upgraded.ListAsync()).Should().ContainSingle();
+        var incompatible = CreateRepository();
+        await FluentActions.Awaiting(() => incompatible.GetModelProfileAsync(profile.Id))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*not modified*");
+        await using var verify = new SqliteConnection($"Data Source={Path.Combine(_root, "test.db")};Pooling=False");
+        await verify.OpenAsync();
+        await using var query = verify.CreateCommand();
+        query.CommandText = "SELECT version FROM schema_versions";
+        (await query.ExecuteScalarAsync()).Should().Be(25L);
+        query.CommandText = "SELECT COUNT(*) FROM sqlite_schema WHERE name = 'ai_model_configurations'";
+        (await query.ExecuteScalarAsync()).Should().Be(0L);
+        query.CommandText = "SELECT model_profile_id FROM ai_model_profile_selections WHERE scope = 'desktop.default'";
+        (await query.ExecuteScalarAsync()).Should().Be(profile.Id.ToString("D"));
+        query.CommandText = "SELECT model_options_json FROM ai_model_profiles WHERE id = $id";
+        query.Parameters.AddWithValue("$id", profile.Id.ToString("D"));
+        ((string?)await query.ExecuteScalarAsync()).Should().Contain("preserved");
     }
 
     [Theory]
@@ -153,7 +162,7 @@ public sealed class AiModelConfigurationTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        SqliteTestPools.ClearFor(Path.Combine(_root, "test.db"));
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 

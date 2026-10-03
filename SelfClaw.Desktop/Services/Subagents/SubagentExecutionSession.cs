@@ -33,12 +33,13 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
         ISubagentStateChangeNotifier? changes)
     {
         _task = task;
-        _state = new ConversationRuntimeState(input.Conversation, input.Messages, input.ToolRuns);
+        _state = new ConversationRuntimeState(input.Conversation, input.Turns, input.Messages, input.ToolRuns);
         _turn = CreateTurn(task, _state);
         _recorder = recorder;
         _committer = new SubagentChildTurnCommitter(store, task.Id, timeProvider);
         _changes = changes;
-        ProviderMessages = input.Messages.Where(message => message.Id != task.ChildTurnId).ToImmutableArray();
+        InitialMessages = input.Messages.ToImmutableArray();
+        InitialTurns = input.Turns.ToImmutableArray();
         InitialToolRuns = input.ToolRuns.ToImmutableArray();
         _state.TranscriptChanged += OnTranscriptChanged;
     }
@@ -46,7 +47,8 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
     internal Guid TaskId => _task.Id;
     internal Guid ParentConversationId => _task.ParentConversationId;
     internal Guid ChildConversationId => _task.ChildConversationId;
-    internal IReadOnlyList<MessageRecord> ProviderMessages { get; }
+    internal IReadOnlyList<MessageRecord> InitialMessages { get; }
+    internal IReadOnlyList<ConversationTurnRecord> InitialTurns { get; }
     internal IReadOnlyList<ToolExecutionRecord> InitialToolRuns { get; }
     internal SubagentExecutionActivity Activity => Volatile.Read(ref _activity);
 
@@ -74,8 +76,13 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
             }
 
             _committer.OverrideTerminal(status, errorCode, errorMessage);
-            await _recorder.FinalizeInterruptedAsync(_state, _turn,
-                status == SubagentTaskStatus.Cancelled ? TurnFinalizationKind.Cancelled : TurnFinalizationKind.Failed,
+            var kind = status switch
+            {
+                SubagentTaskStatus.Cancelled => TurnFinalizationKind.Cancelled,
+                SubagentTaskStatus.Interrupted => TurnFinalizationKind.Interrupted,
+                _ => TurnFinalizationKind.Failed
+            };
+            await _recorder.FinalizeInterruptedAsync(_state, _turn, kind,
                 errorMessage, _committer).ConfigureAwait(false);
         }, immediate: true, CancellationToken.None);
 
@@ -88,19 +95,20 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
 
         try
         {
-            var message = _state.Messages.FirstOrDefault(item => item.Id == _task.ChildTurnId);
+            var turn = _state.Turns.Single(item => item.Id == _task.ChildTurnId);
+            turn = turn with { Usage = _turn.Usage.Build() ?? turn.Usage };
+            var message = _state.Messages.SingleOrDefault(item => item.TurnId == turn.Id && item.Role == MessageRole.Assistant);
             if (message is not null)
             {
                 message = message with
                 {
                     Segments = message.Segments?.ToImmutableArray(),
-                    Attachments = message.Attachments?.ToImmutableArray(),
-                    Usage = _turn.Usage.Build() ?? message.Usage
+                    Attachments = message.Attachments?.ToImmutableArray()
                 };
             }
 
-            return new SubagentExecutionSnapshot(_task.Id, _task.ParentConversationId, message,
-                _state.ToolRuns.Where(tool => tool.MessageId == _task.ChildTurnId).ToImmutableArray(), Activity);
+            return new SubagentExecutionSnapshot(_task.Id, _task.ParentConversationId, turn, message,
+                _state.ToolRuns.Where(tool => tool.MessageId == message?.Id).ToImmutableArray(), Activity);
         }
         finally
         {
@@ -167,24 +175,6 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
         }
 
         UpdatePhase(streamEvent);
-        if (streamEvent is RunCompletedEvent { Status: RunCompletionStatus.Truncated } truncated)
-        {
-            var error = string.IsNullOrWhiteSpace(truncated.ErrorMessage)
-                ? "The Subagent reached the model output limit. Partial output was preserved."
-                : truncated.ErrorMessage;
-            _committer.OverrideTerminal(SubagentTaskStatus.Failed, SubagentErrorCodes.OutputTruncated, error);
-            streamEvent = truncated with { Status = RunCompletionStatus.Failed, ErrorMessage = error };
-        }
-        else if (streamEvent is RunCompletedEvent { Status: RunCompletionStatus.Blocked } blocked)
-        {
-            // The durable Subagent task model has no Blocked state; a blocked run is a failed task.
-            var error = string.IsNullOrWhiteSpace(blocked.ErrorMessage)
-                ? "A Plugin hook blocked the Subagent run."
-                : blocked.ErrorMessage;
-            _committer.OverrideTerminal(SubagentTaskStatus.Failed, SubagentErrorCodes.BlockedByHook, error);
-            streamEvent = blocked with { Status = RunCompletionStatus.Failed, ErrorMessage = error };
-        }
-
         await _recorder.ApplyEventAsync(_state, _turn, streamEvent, _committer, cancellationToken).ConfigureAwait(false);
         if (streamEvent is ToolCallCompletedEvent &&
             _state.ToolRuns.Any(tool => tool.Status is ToolExecutionStatus.Running or ToolExecutionStatus.AwaitingApproval))
@@ -261,7 +251,6 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
     {
         await _drained.Task.ConfigureAwait(false);
         _state.TranscriptChanged -= OnTranscriptChanged;
-        _state.Dispose();
         _gate.Dispose();
     }
 
@@ -269,11 +258,13 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
     {
         var agent = new AgentRuntimeDefinition(task.SubagentId, task.SubagentName, string.Empty, AgentExecutionMode.Direct,
             AgentRuntimeDefinition.ReadOnlyToolPolicy, [], [], [], [], string.Empty);
-        var turn = new AgentTurnState(task.ChildTurnId, agent)
+        var recordedTurn = state.Turns.Single(turn => turn.Id == task.ChildTurnId);
+        var message = state.Messages.SingleOrDefault(message => message.TurnId == task.ChildTurnId && message.Role == MessageRole.Assistant);
+        var turn = new AgentTurnState(recordedTurn, agent)
         {
-            MessageCreated = state.Messages.Any(message => message.Id == task.ChildTurnId)
+            CurrentAssistantMessageId = message?.Id
         };
-        foreach (var tool in state.ToolRuns.Where(tool => tool.MessageId == task.ChildTurnId))
+        foreach (var tool in state.ToolRuns.Where(tool => tool.MessageId == message?.Id))
         {
             turn.ToolRunsByCallId[tool.CorrelationId ?? tool.Id.ToString("D")] = tool;
         }

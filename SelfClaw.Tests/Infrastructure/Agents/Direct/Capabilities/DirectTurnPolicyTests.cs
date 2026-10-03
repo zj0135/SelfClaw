@@ -88,6 +88,7 @@ public sealed class DirectTurnPolicyTests
                 AgentRuntimeDefinition.SystemToolPolicy,
                 ["alpha"], ["alpha/skill"], ["git"], ["reviewer"], "instructions"),
             [],
+            [],
             null,
             ToolPermissionMode.FullAccess,
             ToolApprovalHandler: null,

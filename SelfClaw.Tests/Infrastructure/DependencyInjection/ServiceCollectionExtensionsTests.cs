@@ -47,6 +47,7 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
                 "direct", "Direct", "test", AgentExecutionMode.Direct,
                 AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], ""),
             Messages: [],
+            Turns: [],
             ModelProfileId: null,
             ToolPermissionMode.RequireApproval,
             ToolApprovalHandler: null,

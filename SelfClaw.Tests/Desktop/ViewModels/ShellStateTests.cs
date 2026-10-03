@@ -150,6 +150,7 @@ public sealed class ShellStateTests
         private readonly TranscriptDelivery _delivery;
         private readonly ConversationSessionCoordinator _sessions;
         private readonly ConversationTurnEngine _engine;
+        private readonly ConversationRunCoordinator _runs;
 
         public ShellContext()
         {
@@ -164,19 +165,22 @@ public sealed class ShellStateTests
             _activity = new AgentActivityCoordinator(approval, NullLogger<AgentActivityCoordinator>.Instance);
             _delivery = new TranscriptDelivery(new WebViewHostChannel(), Dispatcher.CurrentDispatcher);
             _publisher = new TranscriptPublisher(new TranscriptProjection(paths), _delivery, Dispatcher.CurrentDispatcher);
-            _sessions = new ConversationSessionCoordinator(conversations, _publisher);
-            _engine = new ConversationTurnEngine(conversations, new DesktopTurnFinalizer(conversations, NullLogger<DesktopTurnFinalizer>.Instance),
-                new ConversationTurnRecorder(conversations, NullLogger<ConversationTurnRecorder>.Instance), Runtime,
-                _sessions, _activity, approval, SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settings), new SilentCompletion(),
+            var turns = new SqliteConversationTurnRepository(database);
+            var inputs = new SqliteConversationInputRepository(database);
+            _runs = new ConversationRunCoordinator(inputs, NullLogger<ConversationRunCoordinator>.Instance);
+            _sessions = new ConversationSessionCoordinator(conversations, turns, _runs, _publisher);
+            _engine = new ConversationTurnEngine(turns, new DesktopTurnFinalizer(turns, NullLogger<DesktopTurnFinalizer>.Instance),
+                new ConversationTurnRecorder(conversations, turns, inputs, NullLogger<ConversationTurnRecorder>.Instance), Runtime,
+                _sessions, _runs, _activity, approval, SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settings), new SilentCompletion(),
                 NullLogger<ConversationTurnEngine>.Instance);
             var workspaces = new ConversationWorkspaceService(_roots, query: Query);
             var changes = new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier();
             Agents = new AgentSettingsService(new DesktopAgentDefinitionService(paths),
                     new SelfClaw.Desktop.Services.Agents.Definitions.SubagentDefinitionCatalog(paths),
                     new EmptyExtensionSettingsService(), changes);
-            ViewModel = new MainWindowViewModel(conversations, _engine, _sessions, _activity, _publisher,
+            ViewModel = new MainWindowViewModel(conversations, _engine, _runs, _sessions, _activity, _publisher,
                 Agents, changes, settings, workspaces,
-                new ConversationDeletionService(_engine, _sessions, new NoOpSubagentConversationLifecycle(), workspaces, conversations),
+                new ConversationDeletionService(_runs, _sessions, new NoOpSubagentConversationLifecycle(), workspaces, conversations),
                 NullLogger<MainWindowViewModel>.Instance, Dispatcher.CurrentDispatcher);
         }
 
@@ -187,7 +191,7 @@ public sealed class ShellStateTests
         public AgentSettingsService Agents { get; }
         public SqliteConversationRepository Conversations { get; }
         public EmptyRuntime Runtime { get; } = new();
-        public Task StopTurnsAsync() => _sessions.StopAsync(CancellationToken.None);
+        public Task StopTurnsAsync() => _runs.StopAsync(CancellationToken.None);
         public Task<ConversationRecord> AddConversationAsync(string agentId, Guid? workspaceRootId = null)
         {
             var now = DateTimeOffset.UtcNow;
@@ -205,11 +209,12 @@ public sealed class ShellStateTests
         {
             ViewModel.Dispose();
             _sessions.Dispose();
-            _engine.Dispose();
+            _runs.Dispose();
             _publisher.Dispose();
             _delivery.Dispose();
             _activity.Dispose();
-            using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(_root, "test.db")}");
+            using var connection = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+            { DataSource = Path.Combine(_root, "test.db"), Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadWrite, ForeignKeys = true, Pooling = true }.ToString());
             Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
             if (Directory.Exists(_root)) Directory.Delete(_root, true);
         }
@@ -246,6 +251,6 @@ public sealed class ShellStateTests
 
     private sealed class SilentCompletion : IConversationCompletionNotifier
     {
-        public void Notify(ConversationRecord conversation, IReadOnlyList<MessageRecord> messages) { }
+        public void Notify(ConversationRecord conversation, ConversationTurnRecord turn, IReadOnlyList<MessageRecord> messages) { }
     }
 }

@@ -177,7 +177,7 @@ public sealed class SqliteExtensionRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task Initialize_migrates_v21_data_and_adds_extension_schema_without_losing_rows()
+    public async Task Initialize_rejects_v21_without_changing_extension_or_conversation_schema()
     {
         var storagePaths = CreateStoragePaths();
         Directory.CreateDirectory(_rootPath);
@@ -185,7 +185,7 @@ public sealed class SqliteExtensionRepositoryTests : IDisposable
         var messageId = Guid.NewGuid();
         var toolRunId = Guid.NewGuid();
 
-        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
+        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath};Pooling=False"))
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
@@ -222,26 +222,16 @@ VALUES($toolRunId, $conversationId, 'read_file', '{}', 2, $createdAt, $createdAt
             await command.ExecuteNonQueryAsync();
         }
 
+        var before = await File.ReadAllBytesAsync(storagePaths.DatabasePath);
         var repository = new SqliteExtensionRepository(new SqliteDatabase(storagePaths));
-        await repository.InitializeAsync();
-
-        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath}");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.InitializeAsync());
+        (await File.ReadAllBytesAsync(storagePaths.DatabasePath)).Should().Equal(before);
+        await using var verification = new SqliteConnection($"Data Source={storagePaths.DatabasePath};Mode=ReadOnly");
         await verification.OpenAsync();
-        (await ExecuteScalarAsync<long>(verification, "SELECT MAX(version) FROM schema_versions;")).Should().Be(29);
+        (await ExecuteScalarAsync<long>(verification, "SELECT MAX(version) FROM schema_versions;")).Should().Be(21);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM conversations;")).Should().Be(1);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM messages;")).Should().Be(1);
         (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM tool_runs;")).Should().Be(1);
-        (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM extension_packages;")).Should().Be(0);
-        (await ExecuteScalarAsync<long>(verification, "SELECT COUNT(*) FROM mcp_server_configs;")).Should().Be(0);
-
-        await using var sourceCommand = verification.CreateCommand();
-        sourceCommand.CommandText = "SELECT source_kind, source_id, display_name FROM tool_runs WHERE id = $id;";
-        sourceCommand.Parameters.AddWithValue("$id", toolRunId.ToString("D"));
-        await using var sourceReader = await sourceCommand.ExecuteReaderAsync();
-        (await sourceReader.ReadAsync()).Should().BeTrue();
-        sourceReader.IsDBNull(0).Should().BeTrue();
-        sourceReader.IsDBNull(1).Should().BeTrue();
-        sourceReader.IsDBNull(2).Should().BeTrue();
     }
 
     [Fact]
@@ -277,13 +267,13 @@ VALUES($toolRunId, $conversationId, 'read_file', '{}', 2, $createdAt, $createdAt
     }
 
     [Fact]
-    public async Task Initialize_adds_source_path_to_a_legacy_extension_packages_table()
+    public async Task Initialize_rejects_v27_without_adding_extension_source_path()
     {
         var storagePaths = CreateStoragePaths();
         Directory.CreateDirectory(_rootPath);
         var now = "2026-01-01T00:00:00.0000000+00:00";
 
-        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath}"))
+        await using (var connection = new SqliteConnection($"Data Source={storagePaths.DatabasePath};Pooling=False"))
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
@@ -316,12 +306,10 @@ VALUES(0, 'office', 'Office', '1.0.0', '', 'E:\plugins\office', 'sha256:v1', '{}
             await command.ExecuteNonQueryAsync();
         }
 
+        var before = await File.ReadAllBytesAsync(storagePaths.DatabasePath);
         var repository = new SqliteExtensionRepository(new SqliteDatabase(storagePaths));
-        await repository.InitializeAsync();
-
-        var stored = await repository.GetPackageAsync(ExtensionKind.Plugin, "office");
-        stored.Should().NotBeNull();
-        stored!.SourcePath.Should().BeNull();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.InitializeAsync());
+        (await File.ReadAllBytesAsync(storagePaths.DatabasePath)).Should().Equal(before);
     }
 
     public void Dispose()

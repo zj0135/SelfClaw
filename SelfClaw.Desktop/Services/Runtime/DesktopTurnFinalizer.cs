@@ -7,13 +7,15 @@ namespace SelfClaw.Desktop.Services.Runtime;
 internal sealed class DesktopTurnFinalizer : IRecordedTurnCommitter
 {
     private static readonly TimeSpan PersistenceTimeout = TimeSpan.FromSeconds(5);
-    private readonly ITurnFinalizationRepository _repository;
+    private readonly IConversationTurnRepository _repository;
     private readonly ILogger<DesktopTurnFinalizer> _logger;
 
     public DesktopTurnFinalizer(
-        ITurnFinalizationRepository repository,
+        IConversationTurnRepository repository,
         ILogger<DesktopTurnFinalizer> logger)
     {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(logger);
         _repository = repository;
         _logger = logger;
     }
@@ -38,11 +40,11 @@ internal sealed class DesktopTurnFinalizer : IRecordedTurnCommitter
 
                 return true;
             }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
                 _logger.LogWarning(
-                    "Timed out while persisting terminal state for turn {TurnId}.",
-                    finalization.AssistantMessage.Id);
+                    "Canceled while persisting terminal state for turn {TurnId}.",
+                    finalization.Turn.Id);
                 throw;
             }
             catch (Exception exception) when (attempt == 1)
@@ -50,7 +52,7 @@ internal sealed class DesktopTurnFinalizer : IRecordedTurnCommitter
                 _logger.LogWarning(
                     exception,
                     "Retrying terminal-state persistence for turn {TurnId}.",
-                    finalization.AssistantMessage.Id);
+                    finalization.Turn.Id);
             }
         }
 

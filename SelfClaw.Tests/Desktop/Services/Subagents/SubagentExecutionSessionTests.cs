@@ -25,7 +25,46 @@ public sealed class SubagentExecutionSessionTests
         persisted.Status.Should().Be(SubagentTaskStatus.Failed);
         persisted.ErrorCode.Should().Be(SubagentErrorCodes.BlockedByHook);
         persisted.ErrorMessage.Should().Contain("blocked by hook 'alpha/a'");
+        var turn = (await context.Turns.ListTurnsAsync(task.ChildConversationId)).Should().ContainSingle().Which;
+        turn.Status.Should().Be(ConversationTurnStatus.Blocked);
+        (await context.Conversations.ListMessagesAsync(task.ChildConversationId)).Should().ContainSingle().Which.Role.Should().Be(MessageRole.User);
+        var detail = await context.Service.GetDetailAsync(task.ParentConversationId, task.Id)
+            ?? throw new InvalidOperationException("Missing blocked detail.");
+        detail.Content.Message.Should().BeNull();
+        detail.Content.Turn?.Status.Should().Be(ConversationTurnStatus.Blocked);
+        detail.Content.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Complete);
         await session.DisposeAsync();
+    }
+
+    [Theory]
+    [InlineData(RunCompletionStatus.Succeeded, ConversationTurnStatus.Succeeded)]
+    [InlineData(RunCompletionStatus.Failed, ConversationTurnStatus.Failed)]
+    public async Task No_output_terminal_keeps_unknown_usage_without_an_assistant(
+        RunCompletionStatus completion, ConversationTurnStatus status)
+    {
+        using var context = new SubagentActivityTestContext();
+        var task = await context.CreateTaskAsync();
+        var session = await context.RegisterSessionAsync(task);
+        await session.BeginAsync();
+        await session.ApplyEventAsync(new RunStartedEvent("child", "model", null), CancellationToken.None);
+        var initial = await session.CaptureSnapshotAsync() ?? throw new InvalidOperationException("Missing live snapshot.");
+        initial.Message.Should().BeNull();
+        initial.Turn.Status.Should().Be(ConversationTurnStatus.Running);
+        await session.ApplyEventAsync(new UsageReportedEvent(new TurnUsage(InputTokens: 3, OutputTokens: 4)), CancellationToken.None);
+        await session.ApplyEventAsync(new RunCompletedEvent(completion, null), CancellationToken.None);
+
+        var detail = await context.Service.GetDetailAsync(task.ParentConversationId, task.Id)
+            ?? throw new InvalidOperationException("Missing terminal detail.");
+        detail.Content.Message.Should().BeNull();
+        detail.Content.Turn?.Status.Should().Be(status);
+        detail.Content.Turn?.Usage?.InputTokens.Should().Be(3);
+        detail.Content.Turn?.Usage?.OutputTokens.Should().Be(4);
+        detail.Content.Turn?.Usage?.TotalTokens.Should().BeNull();
+        detail.Content.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Complete);
+        (await context.Conversations.ListMessagesAsync(task.ChildConversationId)).Should().ContainSingle().Which.Role.Should().Be(MessageRole.User);
+        initial.Turn.Status.Should().Be(ConversationTurnStatus.Running);
+        initial.Turn.Usage.Should().BeNull();
+        await context.Registry.UnregisterAsync(session);
     }
 
     [Fact]

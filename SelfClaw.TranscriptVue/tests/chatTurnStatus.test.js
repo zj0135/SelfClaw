@@ -23,13 +23,13 @@ it('keeps time through text updates, resets on conversation changes, and stops i
 	expect(vi.getTimerCount()).toBe(0);
 });
 
-it('does not duplicate the preparing indicator and hides when the turn completes', async () => {
+it('shows the active run before any assistant output and hides when the turn completes', async () => {
 	vi.useFakeTimers();
-	const session = reactive({ isBusy: true, selectedConversationId: 'first', items: [{ role: 'assistant', isThinking: true, segments: [] }] });
+	const session = reactive({ isBusy: true, selectedConversationId: 'first', items: [] });
 	scope = effectScope();
 	const status = scope.run(() => useChatTurnStatus(session));
-	expect(status.value).toBeNull();
-	session.items[0].segments.push({ kind: 'content', markdown: 'progress' });
+	expect(status.value.label).toBe('执行中');
+	session.items.push({ kind: 'turn-outcome', role: 'system', segments: [], turnOutcome: { status: 'running' } });
 	expect(status.value.label).toBe('执行中');
 	session.isBusy = false;
 	await nextTick();

@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Runtime;
 
 namespace SelfClaw.Tests.Desktop.Services.Runtime;
@@ -12,12 +13,8 @@ public sealed class DesktopTurnFinalizerTests
     public async Task TryCommitAsync_persists_the_recorded_finalization()
     {
         var repository = new RecordingRepository();
-        var finalizer = CreateFinalizer(repository);
         var finalization = CreateFinalization();
-
-        var written = await CommitAsync(finalizer, finalization);
-
-        written.Should().BeTrue();
+        (await CommitAsync(CreateFinalizer(repository), finalization)).Should().BeTrue();
         repository.Calls.Should().ContainSingle().Which.Should().BeSameAs(finalization);
     }
 
@@ -25,11 +22,7 @@ public sealed class DesktopTurnFinalizerTests
     public async Task TryCommitAsync_retries_one_transient_failure()
     {
         var repository = new RecordingRepository(failuresBeforeSuccess: 1);
-        var finalizer = CreateFinalizer(repository);
-
-        var written = await CommitAsync(finalizer, CreateFinalization());
-
-        written.Should().BeTrue();
+        (await CommitAsync(CreateFinalizer(repository), CreateFinalization())).Should().BeTrue();
         repository.Attempts.Should().Be(2);
     }
 
@@ -39,84 +32,73 @@ public sealed class DesktopTurnFinalizerTests
         var repository = new RecordingRepository(results: [true, false]);
         var finalizer = CreateFinalizer(repository);
         var finalization = CreateFinalization();
-
-        var first = await CommitAsync(finalizer, finalization);
-        var second = await CommitAsync(finalizer, finalization);
-
-        first.Should().BeTrue();
-        second.Should().BeFalse();
+        (await CommitAsync(finalizer, finalization)).Should().BeTrue();
+        (await CommitAsync(finalizer, finalization)).Should().BeFalse();
         repository.Calls.Should().HaveCount(2);
     }
 
-    private static DesktopTurnFinalizer CreateFinalizer(ITurnFinalizationRepository repository)
+    [Fact]
+    public async Task TryCommitAsync_propagates_cancellation_without_retrying_it_as_a_transient_failure()
+    {
+        var repository = new RecordingRepository(cancel: true);
+        await FluentActions.Awaiting(() => CommitAsync(CreateFinalizer(repository), CreateFinalization()))
+            .Should().ThrowAsync<OperationCanceledException>();
+        repository.Attempts.Should().Be(1);
+    }
+
+    private static DesktopTurnFinalizer CreateFinalizer(IConversationTurnRepository repository)
         => new(repository, NullLogger<DesktopTurnFinalizer>.Instance);
 
-    private static Task<bool> CommitAsync(
-        DesktopTurnFinalizer finalizer,
-        TurnFinalization finalization)
-        => finalizer.TryCommitAsync(new RecordedTurnCommit(
-            finalization,
-            TurnFinalizationKind.Succeeded,
-            finalization.AssistantMessage.MarkdownContent,
-            ErrorMessage: null));
+    private static Task<bool> CommitAsync(DesktopTurnFinalizer finalizer, ConversationTurnCommit finalization)
+        => finalizer.TryCommitAsync(new RecordedTurnCommit(finalization, TurnFinalizationKind.Succeeded,
+            finalization.Messages.LastOrDefault()?.MarkdownContent, null));
 
-    private static TurnFinalization CreateFinalization()
+    private static ConversationTurnCommit CreateFinalization()
     {
         var now = DateTimeOffset.UtcNow;
         var conversationId = Guid.NewGuid();
-        var assistant = new MessageRecord(
-            Guid.NewGuid(),
-            conversationId,
-            MessageRole.Assistant,
-            "done",
-            MessageStatus.Completed,
-            now,
-            now);
-        var tool = new ToolExecutionRecord(
-            Guid.NewGuid(),
-            conversationId,
-            "read_file",
-            "{}",
-            ToolExecutionStatus.Completed,
-            ResultSummary: "done",
-            CorrelationId: "call-1",
-            DurationMs: 1,
-            now,
-            now,
-            MessageId: assistant.Id);
-        return new TurnFinalization(assistant, [tool]);
+        var turnId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var assistant = new MessageRecord(messageId, conversationId, turnId, 2, MessageRole.Assistant,
+            "done", MessageStatus.Sealed, now, now,
+            Segments: [new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Text, "done", null)]);
+        return new ConversationTurnCommit(new ConversationTurnRecord(turnId, conversationId, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Interactive, ConversationTurnStatus.Succeeded, now, now), [assistant], []);
     }
 
-    private sealed class RecordingRepository : ITurnFinalizationRepository
+    private sealed class RecordingRepository : IConversationTurnRepository
     {
         private readonly Queue<bool> _results;
+        private readonly bool _cancel;
         private int _failuresBeforeSuccess;
 
-        public RecordingRepository(
-            IEnumerable<bool>? results = null,
-            int failuresBeforeSuccess = 0)
+        public RecordingRepository(IEnumerable<bool>? results = null, int failuresBeforeSuccess = 0, bool cancel = false)
         {
             _results = new Queue<bool>(results ?? [true]);
             _failuresBeforeSuccess = failuresBeforeSuccess;
+            _cancel = cancel;
         }
 
         public int Attempts { get; private set; }
+        public List<ConversationTurnCommit> Calls { get; } = [];
 
-        public List<TurnFinalization> Calls { get; } = [];
-
-        public Task<bool> TryFinalizeTurnAsync(
-            TurnFinalization finalization,
-            CancellationToken cancellationToken = default)
+        public Task<bool> TryFinalizeTurnAsync(ConversationTurnCommit finalization, CancellationToken cancellationToken = default)
         {
             Attempts++;
-            if (_failuresBeforeSuccess > 0)
-            {
-                _failuresBeforeSuccess--;
+            if (_cancel) return Task.FromException<bool>(new OperationCanceledException());
+            if (_failuresBeforeSuccess-- > 0)
                 return Task.FromException<bool>(new InvalidOperationException("transient"));
-            }
-
             Calls.Add(finalization);
             return Task.FromResult(_results.Count == 0 || _results.Dequeue());
         }
+
+        public Task<ConversationTurnCommit> StartTurnAsync(ConversationTurnStart start, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+        public Task<long> ReserveMessageSequenceAsync(Guid conversationId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+        public Task<IReadOnlyList<ConversationTurnRecord>> ListTurnsAsync(Guid conversationId, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+        public Task CommitProgressAsync(ConversationTurnCommit progress, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
     }
 }

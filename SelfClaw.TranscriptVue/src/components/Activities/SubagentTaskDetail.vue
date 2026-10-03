@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { ArrowDown, ArrowUp, X } from 'lucide-vue-next';
 import MessageBlocks from '../Chat/transcript/MessageBlocks.vue';
+import TurnOutcome from '../Chat/transcript/TurnOutcome.vue';
 import ActivityContentReader from './ActivityContentReader.vue';
 import { useActivityDetailScroll } from '../../composables/useActivityDetailScroll.js';
 import { activityStatusLabel, deliveryStatusLabel, activityErrorLabel } from '../../renderers/activityLabels.js';
@@ -10,7 +11,7 @@ const emit = defineEmits(['preview-image']);
 const scroll = ref(null);
 const { onScroll } = useActivityDetailScroll(props.detail, scroll);
 const displayed = props.detail.displayed;
-const unplacedMessage = computed(() => ({ id: `${displayed.value?.taskId}:unplaced`, role: 'assistant', status: 'completed', segments: displayed.value?.unplacedTools || [] }));
+const unplacedMessage = computed(() => ({ id: `${displayed.value?.taskId}:unplaced`, role: 'assistant', status: 'sealed', segments: displayed.value?.unplacedTools || [] }));
 </script>
 
 <template>
@@ -29,6 +30,7 @@ const unplacedMessage = computed(() => ({ id: `${displayed.value?.taskId}:unplac
 				<MessageBlocks v-if="displayed.message" :item="displayed.message" :collapse="collapse" compact @preview-image="emit('preview-image', $event)" />
 				<template v-if="displayed.unplacedTools.length"><h4>已记录工具</h4><MessageBlocks :item="unplacedMessage" :collapse="collapse" compact /></template>
 				<button v-if="displayed.laterOffset != null" class="window-link" type="button" :disabled="detail.loading.value" @click="detail.readLater"><ArrowDown :size="12" />后续内容</button>
+				<TurnOutcome v-if="displayed.laterOffset == null" :outcome="displayed.message?.turnOutcome ?? displayed.turnOutcome" />
 				<ActivityContentReader :detail="displayed" :read-content="detail.readContent" />
 			</template>
 			</div>

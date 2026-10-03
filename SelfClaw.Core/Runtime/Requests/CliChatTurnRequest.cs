@@ -14,10 +14,11 @@ public sealed record CliChatTurnRequest(
     WorkspaceRoot? WorkspaceRoot,
     AgentRuntimeDefinition Agent,
     IReadOnlyList<MessageRecord> Messages,
+    IReadOnlyList<ConversationTurnRecord> Turns,
     CliAgentKind? CliAgent,
     string? CliModel,
     string? CliReasoningEffort)
-    : ChatTurnRequest(TurnId, ConversationId, WorkspaceRoot, Agent, Messages)
+    : ChatTurnRequest(TurnId, ConversationId, WorkspaceRoot, Agent, Messages, Turns)
 {
     public override AgentExecutionMode Mode => AgentExecutionMode.Cli;
 }

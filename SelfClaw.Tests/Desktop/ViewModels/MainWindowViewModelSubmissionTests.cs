@@ -1,3 +1,4 @@
+using SelfClaw.Tests.TestDoubles;
 using SelfClaw.Desktop.Services.Agents;
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using SelfClaw.Desktop.Services.Notifications;
@@ -45,8 +46,11 @@ public sealed class MainWindowViewModelSubmissionTests
             var notificationService = new DesktopNotificationService(
                 NullLogger<DesktopNotificationService>.Instance);
             var settingsStore = new DesktopSettingsJsonStore(storagePaths);
+            var turns = new RecordingConversationTurnRepository(repository);
+            var inputs = new EmptyConversationInputRepository();
+            using var runs = new ConversationRunCoordinator(inputs, NullLogger<ConversationRunCoordinator>.Instance);
             var turnFinalizer = new DesktopTurnFinalizer(
-                new NoOpTurnFinalizationRepository(),
+                turns,
                 NullLogger<DesktopTurnFinalizer>.Instance);
             var projection = new TranscriptProjection(storagePaths);
             using var delivery = new TranscriptDelivery(new WebViewHostChannel(), Dispatcher.CurrentDispatcher);
@@ -54,15 +58,15 @@ public sealed class MainWindowViewModelSubmissionTests
                 projection,
                 delivery,
                 Dispatcher.CurrentDispatcher);
-            using var sessions = new ConversationSessionCoordinator(repository, transcriptPublisher);
-            using var turnEngine = new ConversationTurnEngine(
-                repository,
+            using var sessions = new ConversationSessionCoordinator(repository, turns, runs, transcriptPublisher);
+            var turnEngine = new ConversationTurnEngine(
+                turns,
                 turnFinalizer,
                 new ConversationTurnRecorder(
-                    repository,
+                    repository, turns, inputs,
                     NullLogger<ConversationTurnRecorder>.Instance),
                 runtime,
-                sessions,
+                sessions, runs,
                 activityCoordinator,
                 toolApprovalHandler,
                 SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore),
@@ -72,7 +76,7 @@ public sealed class MainWindowViewModelSubmissionTests
             var workspaces = new ConversationWorkspaceService(repository);
             var vm = new MainWindowViewModel(
                 repository,
-                turnEngine,
+                turnEngine, runs,
                 sessions,
                 activityCoordinator,
                 transcriptPublisher,
@@ -82,7 +86,7 @@ public sealed class MainWindowViewModelSubmissionTests
                 new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier(),
                 settingsStore,
                 workspaces,
-                new ConversationDeletionService(turnEngine, sessions, new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(), workspaces, repository),
+                new ConversationDeletionService(runs, sessions, new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(), workspaces, repository),
                 NullLogger<MainWindowViewModel>.Instance);
 
             await vm.InitializeAsync();
@@ -100,10 +104,11 @@ public sealed class MainWindowViewModelSubmissionTests
             runtime.Requests.Should().ContainSingle();
             runtime.Requests[0].Messages
                 .Should().ContainSingle(message => message.MarkdownContent == "first prompt");
-            repository.UpsertedMessages
-                .Should().ContainSingle(message => message.MarkdownContent == "first prompt");
+            turns.Starts.Should().ContainSingle(start => start.Prompt == "first prompt");
 
+            var handle = runs.GetActiveRun(conversation.Id) ?? throw new InvalidOperationException();
             runtime.Release();
+            await handle.Completion;
             await firstSubmission;
             await selection;
         }
@@ -166,8 +171,6 @@ public sealed class MainWindowViewModelSubmissionTests
         public TaskCompletionSource MessagesRequested { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public List<MessageRecord> UpsertedMessages { get; } = [];
-
         public void CompleteMessages(Guid conversationId, IReadOnlyList<MessageRecord> messages)
             => _messagesSource.TrySetResult(messages);
 
@@ -194,17 +197,8 @@ public sealed class MainWindowViewModelSubmissionTests
             return _messagesSource.Task.WaitAsync(cancellationToken);
         }
 
-        public Task<MessageRecord> UpsertMessageAsync(MessageRecord message, CancellationToken cancellationToken = default)
-        {
-            UpsertedMessages.Add(message);
-            return Task.FromResult(message);
-        }
-
         public Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(Guid conversationId, CancellationToken cancellationToken = default)
             => _toolRunsSource.Task.WaitAsync(cancellationToken);
-
-        public Task<ToolExecutionRecord> UpsertToolExecutionAsync(ToolExecutionRecord record, CancellationToken cancellationToken = default)
-            => Task.FromResult(record);
 
         public Task<IReadOnlyList<WorkspaceRoot>> ListWorkspaceRootsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<WorkspaceRoot>>([]);
@@ -216,11 +210,4 @@ public sealed class MainWindowViewModelSubmissionTests
             => Task.CompletedTask;
     }
 
-    private sealed class NoOpTurnFinalizationRepository : ITurnFinalizationRepository
-    {
-        public Task<bool> TryFinalizeTurnAsync(
-            TurnFinalization finalization,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(true);
-    }
 }

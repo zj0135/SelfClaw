@@ -2,7 +2,7 @@ namespace SelfClaw.Core.Models;
 
 public sealed record SubagentTaskCompletion(
     SubagentTaskStatus Status,
-    TurnFinalization TurnFinalization,
+    ConversationTurnCommit TurnFinalization,
     string? FinalText,
     string? ErrorCode,
     string? ErrorMessage,

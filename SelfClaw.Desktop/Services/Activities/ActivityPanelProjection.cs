@@ -57,7 +57,9 @@ internal sealed class ActivityPanelProjection
         }
 
         _messages.PruneToolSegmentCache(detail.ToolRuns);
-        var message = detail.Message is null ? null : _messages.Build(detail.Message, detail.ToolRuns);
+        var message = detail.Message is null ? null : _messages.Build(detail.Message,
+            detail.Turn ?? throw new InvalidOperationException("Activity output has no turn."), detail.ToolRuns);
+        var outcome = message is null && detail.Turn is not null ? _messages.BuildTurnOutcome(detail.Turn).TurnOutcome : null;
         var placed = message?.Segments ?? [];
         var unplaced = detail.UnplacedToolRuns.Select(TranscriptToolRunPresenter.BuildToolSegment).ToArray();
         var total = placed.Count + unplaced.Length;
@@ -83,7 +85,7 @@ internal sealed class ActivityPanelProjection
             offset, total, offset > 0 ? Math.Max(0, offset - MaximumBlocks) : null,
             offset + window.Length < total ? offset + window.Length : null,
             message is null ? null : message with { Segments = window.Take(placedCount).ToArray(), Attachments = null },
-            window.Skip(placedCount).ToArray(), content);
+            outcome, window.Skip(placedCount).ToArray(), content);
     }
 
     private static void AddReferences(List<ActivityContentReference> content, SubagentContentSnapshot detail,
@@ -128,8 +130,9 @@ internal sealed class ActivityPanelProjection
                 Task = LimitTask(detail.Task, maximum), TaskText = taskText,
                 Message = detail.Message is null ? null : detail.Message with
                 {
-                    Segments = segments, ErrorMessage = ClipNullable(detail.Message.ErrorMessage, maximum)
+                    Segments = segments, TurnOutcome = LimitOutcome(detail.Message.TurnOutcome, maximum)
                 },
+                TurnOutcome = LimitOutcome(detail.TurnOutcome, maximum),
                 UnplacedTools = tools, Content = references
             };
         }
@@ -144,6 +147,9 @@ internal sealed class ActivityPanelProjection
             }]
         };
     }
+
+    private static TranscriptTurnOutcome? LimitOutcome(TranscriptTurnOutcome? outcome, int maximum)
+        => outcome is null ? null : outcome with { ErrorMessage = ClipNullable(outcome.ErrorMessage, maximum) };
 
     private static TranscriptRenderSegment LimitSegment(TranscriptRenderSegment segment, int maximum)
         => segment with

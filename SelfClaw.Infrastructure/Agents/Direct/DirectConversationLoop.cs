@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Models;
@@ -20,6 +22,7 @@ internal sealed class DirectConversationLoop
         for (var requestIndex = 0; requestIndex < MaximumProviderRequestsPerTurn; requestIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            await ConsumeAvailableInputsAsync(setup.InputSession, context, output, cancellationToken).ConfigureAwait(false);
             var response = await ReadResponseAsync(setup, context, output, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             if (GetTerminalOutcome(response) is { } terminal)
@@ -31,7 +34,17 @@ internal sealed class DirectConversationLoop
             }
 
             var calls = context.AppendResponse(response, setup.CapabilityLease.Bindings);
-            if (calls.Length == 0) return DirectLoopOutcome.Completed;
+            if (calls.Length == 0)
+            {
+                var batch = setup.InputSession is { } inputs
+                    ? await inputs.ReadBoundaryAsync(cancellationToken).ConfigureAwait(false)
+                    : null;
+                if (batch is null) return DirectLoopOutcome.Completed;
+                if (requestIndex + 1 == MaximumProviderRequestsPerTurn) return DirectLoopOutcome.BudgetExhausted;
+                await ConsumeInputAsync(setup.InputSession ?? throw new InvalidOperationException("Missing turn input session."),
+                    batch, context, output, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
             if (requestIndex + 1 == MaximumProviderRequestsPerTurn)
             {
                 CancelCalls(setup, output, calls, "BudgetExhausted",
@@ -42,6 +55,24 @@ internal sealed class DirectConversationLoop
             context.AppendResults(await ExecuteToolsAsync(setup, output, calls, requestIndex, cancellationToken).ConfigureAwait(false));
         }
         throw new InvalidOperationException("The provider request budget was not resolved.");
+    }
+
+    private static async Task ConsumeAvailableInputsAsync(IDirectTurnInputSession? inputs,
+        DirectConversationContext context, DirectEventTranslator output, CancellationToken cancellationToken)
+    {
+        if (inputs is null) return;
+        while (await inputs.ReadBoundaryAsync(cancellationToken).ConfigureAwait(false) is { } batch)
+            await ConsumeInputAsync(inputs, batch, context, output, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task ConsumeInputAsync(IDirectTurnInputSession inputs, ConversationInputBatch batch,
+        DirectConversationContext context, DirectEventTranslator output, CancellationToken cancellationToken)
+    {
+        output.PublishInputBoundary(batch);
+        var consumed = await inputs.WaitForCommitAsync(batch, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        context.AppendInputs(consumed.Messages);
+        output.BeginInputSegment();
     }
 
     private static DirectLoopOutcome? GetTerminalOutcome(ChatResponse response)

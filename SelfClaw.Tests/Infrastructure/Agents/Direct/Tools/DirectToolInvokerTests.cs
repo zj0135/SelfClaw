@@ -193,6 +193,7 @@ public sealed class DirectToolInvokerTests
                 "direct-test", "Direct", "test", AgentExecutionMode.Direct,
                 AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], "Follow project instructions."),
             [],
+            [],
             null,
             permissionMode,
             approvalHandler,

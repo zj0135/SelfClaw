@@ -13,5 +13,6 @@ internal sealed record ActivityPanelWireDetail(
     int? EarlierOffset,
     int? LaterOffset,
     TranscriptRenderItem? Message,
+    TranscriptTurnOutcome? TurnOutcome,
     IReadOnlyList<TranscriptRenderSegment> UnplacedTools,
     IReadOnlyList<ActivityContentReference> Content);

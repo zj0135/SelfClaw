@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue';
 import MessageContent from './transcript/MessageContent.vue';
+import TurnOutcome from './transcript/TurnOutcome.vue';
 
 defineProps({
 	items: {
@@ -17,7 +18,7 @@ defineProps({
 		type: Object,
 		default: null,
 	},
-	// 「准备中」指示器文案，透传给正在思考的助手消息。
+	// 活动运行文案不依赖 assistant 消息是否已经存在。
 	activityText: {
 		type: String,
 		default: '',
@@ -59,12 +60,13 @@ defineExpose({
 				     其余消息的 DOM（文本选区、图片、动画）保持不动。展开折叠块只重渲该块。 -->
 				<div v-for="item in items" :key="item.id" class="message-row" :class="[item.role, item.status]"
 					:data-message-id="item.id">
-					<MessageContent :item="item" :activity-text="activityText" :collapse="collapse"
+					<TurnOutcome v-if="item.kind === 'turn-outcome'" :outcome="item.turnOutcome" />
+					<MessageContent v-else :item="item" :collapse="collapse"
 						@preview-image="emit('preview-image', $event)" />
 				</div>
 				<div v-if="turnStatus" class="turn-status-row" role="status" aria-live="polite">
 					<span class="turn-status-dot" aria-hidden="true"></span>
-					<span class="turn-status-label">{{ turnStatus.label }}</span>
+					<span class="turn-status-label">{{ activityText || turnStatus.label }}</span>
 					<span v-if="turnStatus.elapsedText" class="turn-status-time">{{ turnStatus.elapsedText }}</span>
 				</div>
 			</div>

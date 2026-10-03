@@ -1,4 +1,4 @@
-﻿using SelfClaw.Tests.Infrastructure.Agents.Direct.Capabilities;
+using SelfClaw.Tests.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Tests.Infrastructure.Agents.Direct.Hooks.TestDoubles;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
@@ -122,11 +122,13 @@ public sealed class DirectAgentChatRuntimeTests
         client.LastMessages.Select(message => message.Role).Should().Equal(
             ChatRole.System,
             ChatRole.User,
-            ChatRole.Assistant);
+            ChatRole.Assistant,
+            ChatRole.User);
         client.LastMessages.Select(message => message.Text).Should().Equal(
             "Follow project instructions.",
-            "user prompt",
-            "prior answer");
+            "prior prompt",
+            "prior answer",
+            "user prompt");
         factory.LastTools.Should().HaveCount(7);
     }
 
@@ -155,6 +157,7 @@ public sealed class DirectAgentChatRuntimeTests
         var conversationId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var assistantId = Guid.NewGuid();
+        var priorTurnId = Guid.NewGuid();
         var run = new ToolExecutionRecord(
             Guid.NewGuid(),
             conversationId,
@@ -169,11 +172,11 @@ public sealed class DirectAgentChatRuntimeTests
             MessageId: assistantId,
             ResultContent: "file body");
         var user = new MessageRecord(
-            Guid.NewGuid(), conversationId, MessageRole.User, "list the files",
-            MessageStatus.Completed, now, now);
+            Guid.NewGuid(), conversationId, priorTurnId, 1, MessageRole.User, "list the files",
+            MessageStatus.Sealed, now, now);
         var assistant = new MessageRecord(
-            assistantId, conversationId, MessageRole.Assistant, "Here you go.",
-            MessageStatus.Completed, now, now,
+            assistantId, conversationId, priorTurnId, 2, MessageRole.Assistant, "Here you go.",
+            MessageStatus.Sealed, now, now,
             Segments:
             [
                 new MessageSegmentRecord(assistantId, 0, MessageSegmentKind.Text, "Here you go.", null),
@@ -187,6 +190,7 @@ public sealed class DirectAgentChatRuntimeTests
                 "direct-test", "Direct", "test", AgentExecutionMode.Direct,
                 AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], "Follow project instructions."),
             [user, assistant],
+            [new ConversationTurnRecord(priorTurnId, conversationId, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive, ConversationTurnStatus.Succeeded, now, now)],
             factory.Profile.Id,
             ToolPermissionMode.FullAccess,
             ToolApprovalHandler: null,
@@ -318,7 +322,7 @@ public sealed class DirectAgentChatRuntimeTests
         ]);
         var factory = new FakeChatClientFactory(client);
         var request = (DirectChatTurnRequest)CreateRequest(factory.Profile.Id);
-        var userMessage = request.Messages.Single(message => message.Role == MessageRole.User);
+        var userMessage = request.Messages.Single(message => message.Role == MessageRole.User && message.TurnId == request.TurnId);
         var capabilityLease = new DirectTurnCapabilityLease(
             ["Capability policy."],
             [new DirectToolBinding(tool, new(tool.Name, ToolCallKind.Search))],
@@ -330,7 +334,7 @@ public sealed class DirectAgentChatRuntimeTests
 
         factory.LastTools.Should().ContainSingle().Which.Name.Should().Be("custom_tool");
         client.LastMessages[0].Text.Should().Be("Follow project instructions.\n\nCapability policy.");
-        client.LastMessages[1].Text.Should().Be("adjusted prompt");
+        client.LastMessages.Last(message => message.Role == ChatRole.User).Text.Should().Be("adjusted prompt");
         events.OfType<ToolCallStartedEvent>().Should().ContainSingle().Which.Kind.Should().Be(ToolCallKind.Search);
     }
 
@@ -751,26 +755,26 @@ public sealed class DirectAgentChatRuntimeTests
     {
         var conversationId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        MessageRecord Message(MessageRole role, string text, MessageStatus status = MessageStatus.Completed)
-            => new(Guid.NewGuid(), conversationId, role, text, status, now, now);
-
-        return new DirectChatTurnRequest(
-            Guid.NewGuid(),
-            conversationId,
-            workspace,
-            new AgentRuntimeDefinition(
-                "direct-test", "Direct", "test", AgentExecutionMode.Direct,
+        var turnId = Guid.NewGuid();
+        var priorTurnId = Guid.NewGuid();
+        var priorId = Guid.NewGuid();
+        var turns = new[]
+        {
+            new ConversationTurnRecord(priorTurnId, conversationId, AgentExecutionMode.Direct,
+                DirectTurnOrigin.Interactive, ConversationTurnStatus.Succeeded, now.AddMinutes(-1), now),
+            new ConversationTurnRecord(turnId, conversationId, AgentExecutionMode.Direct,
+                DirectTurnOrigin.Interactive, ConversationTurnStatus.Running, now)
+        };
+        return new DirectChatTurnRequest(turnId, conversationId, workspace,
+            new AgentRuntimeDefinition("direct-test", "Direct", "test", AgentExecutionMode.Direct,
                 AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], "Follow project instructions."),
             [
-                Message(MessageRole.System, "ignored system history"),
-                Message(MessageRole.User, "user prompt"),
-                Message(MessageRole.Assistant, "failed answer", MessageStatus.Failed),
-                Message(MessageRole.Assistant, "cancelled answer", MessageStatus.Cancelled),
-                Message(MessageRole.Assistant, "prior answer")
-            ],
-            modelProfileId,
-            ToolPermissionMode.FullAccess,
-            ToolApprovalHandler: null,
+                new MessageRecord(Guid.NewGuid(), conversationId, priorTurnId, 1, MessageRole.System, "ignored system history", MessageStatus.Sealed, now, now),
+                new MessageRecord(Guid.NewGuid(), conversationId, priorTurnId, 2, MessageRole.User, "prior prompt", MessageStatus.Sealed, now, now),
+                new MessageRecord(priorId, conversationId, priorTurnId, 3, MessageRole.Assistant, "prior answer", MessageStatus.Sealed, now, now,
+                    Segments: [new MessageSegmentRecord(priorId, 0, MessageSegmentKind.Text, "prior answer", null)]),
+                new MessageRecord(Guid.NewGuid(), conversationId, turnId, 4, MessageRole.User, "user prompt", MessageStatus.Sealed, now, now)
+            ], turns, modelProfileId, ToolPermissionMode.FullAccess, null,
             new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));
     }
 

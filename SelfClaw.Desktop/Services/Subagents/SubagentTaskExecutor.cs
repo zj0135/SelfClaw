@@ -13,6 +13,7 @@ namespace SelfClaw.Desktop.Services.Subagents;
 internal sealed class SubagentTaskExecutor
 {
     private readonly IConversationRepository _conversationRepository;
+    private readonly IConversationTurnRepository _turnRepository;
     private readonly ISubagentTaskExecutionStore _taskStore;
     private readonly IAgentChatRuntime _chatRuntime;
     private readonly ConversationTurnRecorder _turnRecorder;
@@ -26,6 +27,7 @@ internal sealed class SubagentTaskExecutor
 
     public SubagentTaskExecutor(
         IConversationRepository conversationRepository,
+        IConversationTurnRepository turnRepository,
         ISubagentTaskExecutionStore taskStore,
         IAgentChatRuntime chatRuntime,
         ConversationTurnRecorder turnRecorder,
@@ -37,6 +39,7 @@ internal sealed class SubagentTaskExecutor
         SubagentActivityRegistry? activityRegistry = null)
         : this(
             conversationRepository,
+            turnRepository,
             taskStore,
             chatRuntime,
             turnRecorder,
@@ -52,6 +55,7 @@ internal sealed class SubagentTaskExecutor
 
     internal SubagentTaskExecutor(
         IConversationRepository conversationRepository,
+        IConversationTurnRepository turnRepository,
         ISubagentTaskExecutionStore taskStore,
         IAgentChatRuntime chatRuntime,
         ConversationTurnRecorder turnRecorder,
@@ -64,6 +68,7 @@ internal sealed class SubagentTaskExecutor
         SubagentActivityRegistry? activityRegistry = null)
     {
         _conversationRepository = conversationRepository;
+        _turnRepository = turnRepository;
         _taskStore = taskStore;
         _chatRuntime = chatRuntime;
         _turnRecorder = turnRecorder;
@@ -162,7 +167,8 @@ internal sealed class SubagentTaskExecutor
     private async Task ExecuteSessionAsync(SubagentTaskRecord task, SubagentExecutionSession session, CancellationToken cancellationToken)
     {
         await session.BeginAsync(cancellationToken).ConfigureAwait(false);
-        var request = await CreateRequestAsync(task, session.ProviderMessages, session.InitialToolRuns, cancellationToken).ConfigureAwait(false);
+        var request = await CreateRequestAsync(task, session.InitialMessages, session.InitialTurns,
+            session.InitialToolRuns, cancellationToken).ConfigureAwait(false);
         await foreach (var streamEvent in _chatRuntime.StreamTurnAsync(request, cancellationToken).ConfigureAwait(false))
         {
             await session.ApplyEventAsync(streamEvent, cancellationToken).ConfigureAwait(false);
@@ -178,12 +184,13 @@ internal sealed class SubagentTaskExecutor
     private async Task<DirectChatTurnRequest> CreateRequestAsync(
         SubagentTaskRecord task,
         IReadOnlyList<MessageRecord> messages,
+        IReadOnlyList<ConversationTurnRecord> turns,
         IReadOnlyList<ToolExecutionRecord> toolExecutions,
         CancellationToken cancellationToken)
     {
         var definition = _snapshotSerializer.DeserializeDefinition(task.DefinitionSnapshotJson);
         var parent = _snapshotSerializer.DeserializeParent(task.ParentExecutionSnapshotJson);
-        ValidateSnapshots(task, definition, parent, messages);
+        ValidateSnapshots(task, definition, parent, messages, turns);
         var resolvedModelProfileId = task.ResolvedModelProfileId
             ?? throw new InvalidDataException("The Subagent task has no resolved model snapshot.");
         var preflightRequest = new SubagentTaskStartRequest(
@@ -223,6 +230,7 @@ internal sealed class SubagentTaskExecutor
             parent.WorkspaceRoot,
             agent,
             messages,
+            turns,
             resolvedModelProfileId,
             parent.ToolPermissionMode,
             _approvalHandler,
@@ -237,9 +245,10 @@ internal sealed class SubagentTaskExecutor
     {
         var conversation = await _conversationRepository.GetConversationAsync(task.ChildConversationId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidDataException("The Subagent child conversation is missing.");
+        var turns = await _turnRepository.ListTurnsAsync(task.ChildConversationId, cancellationToken).ConfigureAwait(false);
         var messages = await _conversationRepository.ListMessagesAsync(task.ChildConversationId, cancellationToken).ConfigureAwait(false);
         var tools = await _conversationRepository.ListToolExecutionsAsync(task.ChildConversationId, cancellationToken).ConfigureAwait(false);
-        return new SubagentExecutionInput(conversation, messages, tools);
+        return new SubagentExecutionInput(conversation, turns, messages, tools);
     }
 
     private SubagentExecutionInput CreateFallbackInput(SubagentTaskRecord task)
@@ -247,7 +256,10 @@ internal sealed class SubagentTaskExecutor
         var conversation = new ConversationRecord(task.ChildConversationId, $"Subagent: {task.SubagentName}",
             null, ConversationMode.Programming, ToolPermissionMode.RequireApproval, task.SubagentId,
             task.CreatedAtUtc, _timeProvider.GetUtcNow(), Kind: ConversationKind.Subagent, ParentConversationId: task.ParentConversationId);
-        return new SubagentExecutionInput(conversation, [], []);
+        var turn = new ConversationTurnRecord(task.ChildTurnId, task.ChildConversationId,
+            AgentExecutionMode.Direct, DirectTurnOrigin.Subagent, ConversationTurnStatus.Running,
+            task.StartedAtUtc ?? throw new InvalidDataException("The claimed Subagent task has no start time."));
+        return new SubagentExecutionInput(conversation, [turn], [], []);
     }
 
     private Task FinalizeCancellationAsync(SubagentTaskRecord task, SubagentExecutionSession session, bool timedOut, bool applicationStopping)
@@ -266,16 +278,25 @@ internal sealed class SubagentTaskExecutor
         SubagentTaskRecord task,
         SubagentDefinitionSnapshot definition,
         SubagentParentExecutionSnapshot parent,
-        IReadOnlyList<MessageRecord> messages)
+        IReadOnlyList<MessageRecord> messages,
+        IReadOnlyList<ConversationTurnRecord> turns)
     {
         var valid = definition.Version == 1 &&
                     parent.Version == 1 &&
                     string.Equals(definition.Id, task.SubagentId, StringComparison.Ordinal) &&
                     task.ResolvedModelProfileId is not null &&
                     parent.ModelProfileId != Guid.Empty &&
+                    turns.Count == 1 &&
+                    turns[0].Id == task.ChildTurnId &&
+                    turns[0].ConversationId == task.ChildConversationId &&
+                    turns[0].Status == ConversationTurnStatus.Running &&
+                    turns[0].ExecutionMode == AgentExecutionMode.Direct &&
+                    turns[0].Origin == DirectTurnOrigin.Subagent &&
                     messages.Count == 1 &&
+                    messages[0].TurnId == task.ChildTurnId &&
+                    messages[0].ConversationId == task.ChildConversationId &&
                     messages[0].Role == MessageRole.User &&
-                    messages[0].Status == MessageStatus.Completed &&
+                    messages[0].Status == MessageStatus.Sealed &&
                     string.Equals(messages[0].MarkdownContent, task.TaskText, StringComparison.Ordinal);
         if (!valid)
         {

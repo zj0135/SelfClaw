@@ -19,45 +19,14 @@ public sealed class SqliteSubagentSchemaTests : IDisposable
     private Guid _taskId;
 
     [Fact]
-    public async Task Upgrade_marks_v26_leases_without_execution_evidence_as_unsafe()
-    {
-        var database = CreateDatabase();
-        var conversations = new SqliteConversationRepository(database);
-        var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
-        var deliveries = new SqliteSubagentDeliveryRepository(database);
-        await tasks.InitializeAsync();
-        var task = await SubagentTaskTestData.CreateRunningTaskAsync(conversations, tasks);
-        var now = DateTimeOffset.UtcNow;
-        await tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Running, new SubagentTaskCompletion(
-            SubagentTaskStatus.Succeeded, new TurnFinalization(new MessageRecord(task.ChildTurnId, task.ChildConversationId,
-                MessageRole.Assistant, "result", MessageStatus.Completed, now, now), []), "result", null, null, now));
-        var mailbox = await deliveries.PeekReadyMailboxAsync(now.AddSeconds(3), now.AddSeconds(3))
-            ?? throw new InvalidOperationException("Missing mailbox.");
-        await deliveries.TryLeaseBatchAsync(mailbox, Guid.NewGuid(), Guid.NewGuid(), now.AddSeconds(3), now.AddSeconds(45), 65536);
-        await using (var connection = await database.OpenConnectionAsync())
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = "ALTER TABLE subagent_deliveries DROP COLUMN tool_execution_started_at_utc; DELETE FROM schema_versions WHERE version = 27;";
-            await command.ExecuteNonQueryAsync();
-        }
-
-        var upgraded = CreateDatabase();
-        await upgraded.EnsureInitializedAsync();
-        var recovered = await new SqliteSubagentDeliveryRepository(upgraded).RecoverExpiredLeasesAsync(now.AddMinutes(1));
-
-        recovered.Should().ContainSingle().Which.ToolExecutionStartedAtUtc.Should().NotBeNull();
-        recovered[0].Status.Should().Be(SubagentDeliveryStatus.DeadLetter);
-    }
-
-    [Fact]
-    public async Task Fresh_database_creates_schema_v29_with_subagent_tables_and_indexes()
+    public async Task Fresh_database_creates_schema_v30_with_subagent_tables_and_indexes()
     {
         var database = CreateDatabase();
         await database.EnsureInitializedAsync();
         await using var connection = await database.OpenConnectionAsync();
 
         (await ExecuteScalarAsync<long>(connection, "SELECT MAX(version) FROM schema_versions;"))
-            .Should().Be(29);
+            .Should().Be(30);
         (await ReadNamesAsync(connection, "table", "subagent_%"))
             .Should().BeEquivalentTo("subagent_tasks", "subagent_deliveries");
         (await ReadNamesAsync(connection, "index", "ix_subagent_%"))

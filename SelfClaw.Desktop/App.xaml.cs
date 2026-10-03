@@ -159,12 +159,12 @@ public sealed partial class App : System.Windows.Application
         {
             var services = _host.Services;
             var routing = services.GetRequiredService<WebViewMessageRouter>().StopAsync(cancellationToken);
-            await services.GetRequiredService<ConversationTurnEngine>().StopAdmissionsAsync(cancellationToken);
+            services.GetRequiredService<ConversationRunCoordinator>().StopAdmissions();
             services.GetRequiredService<DesktopToolApprovalHandler>().RejectAll();
             await Task.WhenAll(routing, _host.StopAsync(cancellationToken),
                 services.GetRequiredService<PluginViewHostController>().StopAsync(cancellationToken),
                 services.GetRequiredService<TerminalHostController>().DisposeAsync().AsTask(),
-                services.GetRequiredService<ConversationSessionCoordinator>().StopAsync(cancellationToken),
+                services.GetRequiredService<ConversationRunCoordinator>().StopAsync(cancellationToken),
                 services.GetRequiredService<PetHost>().StopAsync(cancellationToken));
         }
         else await _host.StopAsync(cancellationToken);

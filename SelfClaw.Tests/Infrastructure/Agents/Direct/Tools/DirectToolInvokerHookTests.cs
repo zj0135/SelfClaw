@@ -267,6 +267,7 @@ public sealed class DirectToolInvokerHookTests
                     "build", "Build", "test", AgentExecutionMode.Direct,
                     AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], "instructions"),
                 [],
+                [],
                 null,
                 permissionMode,
                 approvalHandler,

@@ -22,9 +22,7 @@ export function useChatTurnStatus(session) {
 	onScopeDispose(stopClock);
 
 	return computed(() => {
-		const last = session.items.at(-1);
-		const preparing = last?.role === 'assistant' && last.isThinking && !(Array.isArray(last.segments) && last.segments.length);
-		if (!session.isBusy || startedAt.value == null || preparing) return null;
+		if (!session.isBusy || startedAt.value == null) return null;
 		return { label: session.isContinuation ? '正在处理子代理结果' : '执行中', elapsedText: formatElapsedTime(now.value - startedAt.value) };
 	});
 }

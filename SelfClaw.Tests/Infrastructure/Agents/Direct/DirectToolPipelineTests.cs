@@ -49,10 +49,13 @@ public sealed class DirectToolPipelineTests : IDisposable
         await context.Tasks.InitializeAsync();
         var parent = new ConversationRecord(request.ConversationId, "Tool pipeline", null, ConversationMode.Programming,
             request.ToolPermissionMode, "build", now, now);
-        await context.Conversations.UpsertConversationAsync(parent);
-        using var state = new ConversationRuntimeState(parent, [], []);
-        var turn = new AgentTurnState(request.TurnId, request.Agent);
-        var committer = new DesktopTurnFinalizer(context.Conversations, NullLogger<DesktopTurnFinalizer>.Instance);
+        var started = await context.Turns.StartTurnAsync(new ConversationTurnStart(parent,
+            new ConversationTurnRecord(request.TurnId, parent.Id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive,
+                ConversationTurnStatus.Running, now), "user prompt", Guid.NewGuid()));
+        var state = new ConversationRuntimeState(parent, [started.Turn], started.Messages, []);
+        request = request with { Messages = state.Messages, Turns = state.Turns };
+        var turn = new AgentTurnState(started.Turn, request.Agent);
+        var committer = new DesktopTurnFinalizer(context.Turns, NullLogger<DesktopTurnFinalizer>.Instance);
         context.Recorder.BeginTurn(state, turn);
         var completed = new List<ToolCallCompletedEvent>();
         await foreach (var item in runtime.StreamTurnAsync(request))

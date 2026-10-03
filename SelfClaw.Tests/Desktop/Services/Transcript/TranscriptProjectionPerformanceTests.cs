@@ -1,6 +1,7 @@
 using SelfClaw.Desktop.Services.Transcript.Views;
 using System.Diagnostics;
 using FluentAssertions;
+using SelfClaw.Tests.TestDoubles;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Infrastructure.Options;
@@ -31,13 +32,13 @@ public sealed class TranscriptProjectionPerformanceTests
         {
             var id = Guid.NewGuid();
             var toolId = Guid.NewGuid();
-            messages[index] = new(id, conversation, MessageRole.Assistant, "answer", MessageStatus.Completed, now.AddSeconds(index), now,
+            messages[index] = new(id, conversation, Guid.NewGuid(), index + 1, MessageRole.Assistant, "answer", MessageStatus.Sealed, now.AddSeconds(index), now,
                 Segments: [new(id, 0, MessageSegmentKind.ToolCall, null, toolId), new(id, 1, MessageSegmentKind.Text, "answer", null)]);
             tools[index] = new(toolId, conversation, "read_file", "{}", ToolExecutionStatus.Completed, "read", null, 1, now, now,
                 MessageId: id, ResultContent: "stable output");
         }
         var projection = new TranscriptProjection(StoragePathDefaults.CreateDefault());
-        var request = new TranscriptProjectionRequest(messages, tools, [], [], conversation, false, false, null, "direct", "build", "Build", 0, "require-approval");
+        var request = new TranscriptProjectionRequest(messages, PresentationHistory.Turns(messages), tools, [], [], conversation, false, false, null, "direct", "build", "Build", 0, "require-approval");
         var original = projection.Build(request) ?? throw new InvalidOperationException("Missing initial projection.");
         var allocations = new List<long>();
         var timings = new List<double>();

@@ -25,6 +25,7 @@ public sealed class ChatTurnRequestTests
                 [],
                 string.Empty),
             Messages: [],
+            Turns: [],
             ModelProfileId: null,
             ToolPermissionMode.RequireApproval,
             ToolApprovalHandler: null,

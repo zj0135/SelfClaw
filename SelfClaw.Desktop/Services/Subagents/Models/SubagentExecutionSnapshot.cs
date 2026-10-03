@@ -5,6 +5,7 @@ namespace SelfClaw.Desktop.Services.Subagents.Models;
 internal sealed record SubagentExecutionSnapshot(
     Guid TaskId,
     Guid ParentConversationId,
+    ConversationTurnRecord Turn,
     MessageRecord? Message,
     IReadOnlyList<ToolExecutionRecord> ToolRuns,
     SubagentExecutionActivity Activity);

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using SelfClaw.Tests.TestDoubles;
 using SelfClaw.Infrastructure.Extensions.Models;
 using SelfClaw.Infrastructure.Extensions.Plugins;
 using SelfClaw.Infrastructure.Extensions.Plugins.Models;
@@ -14,8 +15,7 @@ public sealed class HookExamplesPluginTests
     [Fact]
     public async Task The_example_hook_plugin_passes_manifest_validation()
     {
-        var pluginRoot = Path.GetFullPath(
-            Path.Combine(AppContext.BaseDirectory, "../../../../", "plugins", "hook-examples"));
+        var pluginRoot = TestRepositoryRoot.GetPath("plugins", "hook-examples");
         Directory.Exists(pluginRoot).Should().BeTrue("the example plugin is checked into the repository");
 
         var reader = new PluginManifestReader(new ExtensionPackageLimits(

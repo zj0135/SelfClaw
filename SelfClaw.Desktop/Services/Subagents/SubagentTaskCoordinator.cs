@@ -317,14 +317,6 @@ internal sealed class SubagentTaskCoordinator : ISubagentTaskCoordinator, ISubag
             now,
             Kind: ConversationKind.Subagent,
             ParentConversationId: parentConversationId);
-        var taskMessage = new MessageRecord(
-            Guid.NewGuid(),
-            childConversationId,
-            MessageRole.User,
-            taskText,
-            MessageStatus.Completed,
-            now,
-            now);
         var task = new SubagentTaskRecord(
             Guid.NewGuid(),
             parentConversationId,
@@ -360,7 +352,7 @@ internal sealed class SubagentTaskCoordinator : ISubagentTaskCoordinator, ISubag
                 failure.ErrorCode,
                 failure.ErrorMessage,
                 now);
-        return new SubagentTaskCreation(child, taskMessage, task, initialCompletion);
+        return new SubagentTaskCreation(child, task, initialCompletion);
     }
 
     private static SubagentTaskCompletion CreateTerminalCompletion(
@@ -370,24 +362,22 @@ internal sealed class SubagentTaskCoordinator : ISubagentTaskCoordinator, ISubag
         string errorMessage,
         DateTimeOffset completedAtUtc)
     {
-        var messageStatus = status == SubagentTaskStatus.Cancelled
-            ? MessageStatus.Cancelled
-            : MessageStatus.Failed;
+        var turnStatus = status == SubagentTaskStatus.Cancelled
+            ? ConversationTurnStatus.Cancelled
+            : ConversationTurnStatus.Failed;
         var normalizedError = NormalizeErrorMessage(errorMessage);
-        var assistant = new MessageRecord(
+        var turn = new ConversationTurnRecord(
             task.ChildTurnId,
             task.ChildConversationId,
-            MessageRole.Assistant,
-            string.Empty,
-            messageStatus,
+            AgentExecutionMode.Direct,
+            DirectTurnOrigin.Subagent,
+            turnStatus,
+            task.StartedAtUtc ?? completedAtUtc,
             completedAtUtc,
-            completedAtUtc,
-            AgentName: task.SubagentName,
-            AgentRole: "Subagent",
-            ErrorMessage: normalizedError);
+            normalizedError);
         return new SubagentTaskCompletion(
             status,
-            new TurnFinalization(assistant, []),
+            new ConversationTurnCommit(turn, [], []),
             FinalText: null,
             errorCode,
             normalizedError,

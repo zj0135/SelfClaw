@@ -47,9 +47,12 @@ internal sealed class SkillCapabilitySource
         TurnDiagnostics diagnostics,
         CancellationToken cancellationToken)
     {
-        var latestUserMessage = request.Messages.LastOrDefault(message =>
-            message.Role == MessageRole.User &&
-            message.Status is not (MessageStatus.Failed or MessageStatus.Cancelled));
+        ArgumentNullException.ThrowIfNull(request);
+        var latestUserMessage = request.Messages
+            .Where(message => message.TurnId == request.TurnId &&
+                              message.ConversationId == request.ConversationId &&
+                              message.Role == MessageRole.User && message.Status == MessageStatus.Sealed)
+            .MaxBy(message => message.Sequence);
         var explicitTokens = latestUserMessage is null
             ? []
             : _tokenParser.Parse(latestUserMessage.MarkdownContent);

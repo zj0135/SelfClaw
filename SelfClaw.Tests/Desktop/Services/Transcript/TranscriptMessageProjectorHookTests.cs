@@ -1,4 +1,5 @@
 using FluentAssertions;
+using SelfClaw.Tests.TestDoubles;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Transcript;
@@ -15,13 +16,13 @@ public sealed class TranscriptMessageProjectorHookTests
         var message = Message(
             messageId,
             MessageRole.Assistant,
-            MessageStatus.Completed,
+            MessageStatus.Sealed,
             [
                 new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Notice, "Hook added context (3 chars).", null),
                 new MessageSegmentRecord(messageId, 1, MessageSegmentKind.Text, "answer", null)
             ]);
 
-        var item = Projector().Build(message, []);
+        var item = Projector().Build(message, PresentationHistory.Turn(message), []);
 
         item.Segments.Should().SatisfyRespectively(
             segment =>
@@ -34,16 +35,16 @@ public sealed class TranscriptMessageProjectorHookTests
     }
 
     [Fact]
-    public void A_blocked_message_exposes_its_error_message()
+    public void A_blocked_turn_without_an_assistant_exposes_its_outcome()
     {
-        var message = Message(Guid.NewGuid(), MessageRole.Assistant, MessageStatus.Blocked, null) with
-        {
-            ErrorMessage = "Blocked by hook 'alpha/a': no."
-        };
-        var item = Projector().Build(message, []);
-
-        item.Status.Should().Be("blocked");
-        item.ErrorMessage.Should().Be("Blocked by hook 'alpha/a': no.");
+        var now = DateTimeOffset.UtcNow;
+        var turn = new ConversationTurnRecord(Guid.NewGuid(), Guid.NewGuid(), AgentExecutionMode.Direct,
+            DirectTurnOrigin.Interactive, ConversationTurnStatus.Blocked, now, now, "Blocked by hook 'alpha/a': no.");
+        var item = Projector().BuildTurnOutcome(turn);
+        item.Kind.Should().Be("turn-outcome");
+        item.TurnOutcome.Should().NotBeNull();
+        item.TurnOutcome?.ErrorMessage.Should().Be("Blocked by hook 'alpha/a': no.");
+        item.Segments.Should().BeEmpty();
     }
 
     [Fact]
@@ -56,9 +57,10 @@ public sealed class TranscriptMessageProjectorHookTests
         var message = new MessageRecord(
             messageId,
             conversationId,
+            Guid.NewGuid(), 1,
             MessageRole.Assistant,
             "answer",
-            MessageStatus.Completed,
+            MessageStatus.Sealed,
             now,
             now,
             Segments:
@@ -89,7 +91,7 @@ public sealed class TranscriptMessageProjectorHookTests
                 [new HookFeedback(modifier, "Rewritten.")],
                 [new HookFailureNotice(modifier, "timedOut", "too slow")]));
 
-        var item = Projector().Build(message, [toolRun]);
+        var item = Projector().Build(message, PresentationHistory.Turn(message), [toolRun]);
 
         var hook = item.Segments.Single().Hook;
         hook.Should().NotBeNull();
@@ -119,6 +121,6 @@ public sealed class TranscriptMessageProjectorHookTests
     {
         var now = DateTimeOffset.UtcNow;
         return new MessageRecord(
-            messageId, Guid.NewGuid(), role, "answer", status, now, now, Segments: segments);
+            messageId, Guid.NewGuid(), Guid.NewGuid(), 1, role, "answer", status, now, now, Segments: segments);
     }
 }

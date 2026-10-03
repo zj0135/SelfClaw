@@ -3,11 +3,13 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Subagents;
+using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Agents.Direct;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
@@ -26,22 +28,16 @@ public sealed class DirectUsagePersistenceTests
     [InlineData("incremental-complete")]
     public async Task Interactive_usage_survives_runtime_recorder_finalization_and_sqlite(string scenario)
     {
-        using var context = new SubagentActivityTestContext();
-        await context.Tasks.InitializeAsync();
-        var (runtime, request) = CreateRuntime(scenario);
-        var now = DateTimeOffset.UtcNow;
-        var conversation = new ConversationRecord(request.ConversationId, "usage", null,
-            ConversationMode.Programming, request.ToolPermissionMode, "build", now, now);
-        await context.Conversations.UpsertConversationAsync(conversation);
-        using var state = new ConversationRuntimeState(conversation, [], []);
-        var turn = new AgentTurnState(request.TurnId, request.Agent);
-        var committer = new DesktopTurnFinalizer(context.Conversations, NullLogger<DesktopTurnFinalizer>.Instance);
-        context.Recorder.BeginTurn(state, turn);
-        var reported = await RecordAsync(runtime, request, item =>
-            context.Recorder.ApplyEventAsync(state, turn, item, committer, CancellationToken.None));
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var (runtime, initial) = CreateRuntime(scenario);
+        var request = new DirectChatTurnRequest(context.Record.Id, context.Conversation.Id, initial.WorkspaceRoot,
+            initial.Agent, context.State.Messages, context.State.Turns, initial.ModelProfileId,
+            initial.ToolPermissionMode, initial.ToolApprovalHandler, initial.ExecutionContext);
+        var reported = await RecordAsync(runtime, request, context.ApplyAsync);
 
-        state.Messages.Single(message => message.Id == request.TurnId).Usage.Should().BeEquivalentTo(reported);
-        await AssertStoredAsync(context, request.ConversationId, request.TurnId, reported, scenario);
+        context.State.Turns.Single(turn => turn.Id == request.TurnId).Usage.Should().BeEquivalentTo(reported);
+        await AssertStoredAsync(context.Database, context.Turns, request.ConversationId, request.TurnId, reported, scenario);
     }
 
     [Theory]
@@ -56,15 +52,19 @@ public sealed class DirectUsagePersistenceTests
         await session.BeginAsync();
         var (runtime, initial) = CreateRuntime(scenario);
         var request = new DirectChatTurnRequest(task.ChildTurnId, task.ChildConversationId, initial.WorkspaceRoot,
-            initial.Agent, session.ProviderMessages, initial.ModelProfileId, initial.ToolPermissionMode, initial.ToolApprovalHandler,
+            initial.Agent, session.InitialMessages, session.InitialTurns, initial.ModelProfileId, initial.ToolPermissionMode, initial.ToolApprovalHandler,
             new(DirectTurnOrigin.Subagent, new DirectCapabilityCeiling("system", [], [], [], []), null));
         var reported = await RecordAsync(runtime, request, async item =>
         {
             await session.ApplyEventAsync(item, CancellationToken.None);
             if (item is UsageReportedEvent usage)
-                (await session.CaptureSnapshotAsync())!.Message!.Usage.Should().BeEquivalentTo(usage.Usage);
+            {
+                var snapshot = await session.CaptureSnapshotAsync() ?? throw new InvalidOperationException("Missing live snapshot.");
+                var liveTurn = snapshot.Turn ?? throw new InvalidOperationException("Missing live turn.");
+                liveTurn.Usage.Should().BeEquivalentTo(usage.Usage);
+            }
         });
-        await AssertStoredAsync(context, task.ChildConversationId, task.ChildTurnId, reported, scenario);
+        await AssertStoredAsync(context.Database, context.Turns, task.ChildConversationId, task.ChildTurnId, reported, scenario);
         var persistedTask = await context.Tasks.GetAsync(task.ParentConversationId, task.Id);
         persistedTask!.InputTokens.Should().Be(reported.InputTokens);
         persistedTask.OutputTokens.Should().Be(reported.OutputTokens);
@@ -80,9 +80,15 @@ public sealed class DirectUsagePersistenceTests
         using var context = new SubagentActivityTestContext();
         var task = await context.CreateTaskAsync();
         var now = DateTimeOffset.UtcNow;
+        var childTurn = (await context.Turns.ListTurnsAsync(task.ChildConversationId)).Single();
+        var childMessageId = Guid.NewGuid();
+        var childMessage = new MessageRecord(childMessageId, task.ChildConversationId, task.ChildTurnId,
+            await context.Turns.ReserveMessageSequenceAsync(task.ChildConversationId), MessageRole.Assistant,
+            "child result", MessageStatus.Sealed, now, now,
+            Segments: [new MessageSegmentRecord(childMessageId, 0, MessageSegmentKind.Text, "child result", null)]);
         await context.Tasks.TryCompleteAsync(task.Id, SubagentTaskStatus.Running, new SubagentTaskCompletion(
-            SubagentTaskStatus.Succeeded, new TurnFinalization(new MessageRecord(task.ChildTurnId, task.ChildConversationId,
-                MessageRole.Assistant, "child result", MessageStatus.Completed, now, now), []), "child result", null, null, now));
+            SubagentTaskStatus.Succeeded, new ConversationTurnCommit(childTurn with
+            { Status = ConversationTurnStatus.Succeeded, CompletedAtUtc = now }, [childMessage], []), "child result", null, null, now));
         var deliveries = new SqliteSubagentDeliveryRepository(context.Database);
         var mailbox = await deliveries.PeekReadyMailboxAsync(now.AddSeconds(3), now.AddSeconds(3))
             ?? throw new InvalidOperationException("Missing mailbox.");
@@ -91,21 +97,31 @@ public sealed class DirectUsagePersistenceTests
         var parent = await context.Conversations.GetConversationAsync(task.ParentConversationId)
             ?? throw new InvalidOperationException("Missing parent.");
         var committer = new SubagentContinuationTurnCommitter(deliveries, lease, TimeProvider.System);
-        using var state = new ConversationRuntimeState(parent, [], [], isDetached: true);
+        var detachedTurn = new ConversationTurnRecord(lease.ContinuationTurnId, parent.Id, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Continuation, ConversationTurnStatus.Running, now);
+        var state = new ConversationRuntimeState(parent, [detachedTurn], [], [], isDetached: true);
         var (runtime, initial) = CreateRuntime(scenario);
         var request = new DirectChatTurnRequest(lease.ContinuationTurnId, parent.Id, initial.WorkspaceRoot,
-            initial.Agent, initial.Messages, initial.ModelProfileId, initial.ToolPermissionMode, initial.ToolApprovalHandler,
+            initial.Agent, state.Messages, state.Turns, initial.ModelProfileId, initial.ToolPermissionMode, initial.ToolApprovalHandler,
             new(DirectTurnOrigin.Continuation, new DirectCapabilityCeiling("system", [], [], [], []), null),
             ToolExecutionCheckpoint: committer);
-        var turn = new AgentTurnState(request.TurnId, request.Agent);
+        var turn = new AgentTurnState(detachedTurn, request.Agent);
         context.Recorder.BeginTurn(state, turn);
         var reported = await RecordAsync(runtime, request, async item =>
         {
             if (item is RunCompletedEvent)
+            {
                 (await context.Conversations.ListMessagesAsync(parent.Id)).Should().BeEmpty("the continuation has not committed yet");
+                (await context.Turns.ListTurnsAsync(parent.Id)).Should().BeEmpty("even the detached Running turn is not persisted");
+                await using var connection = await context.Database.OpenConnectionAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT COUNT(*) FROM turn_usage WHERE turn_id = $id";
+                command.Parameters.AddWithValue("$id", request.TurnId.ToString());
+                (await command.ExecuteScalarAsync()).Should().Be(0L);
+            }
             await context.Recorder.ApplyDetachedEventAsync(state, turn, item, committer, CancellationToken.None);
         });
-        await AssertStoredAsync(context, parent.Id, request.TurnId, reported, scenario);
+        await AssertStoredAsync(context.Database, context.Turns, parent.Id, request.TurnId, reported, scenario);
         var delivery = await deliveries.GetAsync(parent.Id, task.Id);
         delivery!.Status.Should().Be(scenario == "cumulative-partial-error" ? SubagentDeliveryStatus.DeadLetter : SubagentDeliveryStatus.Delivered);
     }
@@ -125,20 +141,20 @@ public sealed class DirectUsagePersistenceTests
         return reports.Should().ContainSingle().Subject;
     }
 
-    private static async Task AssertStoredAsync(SubagentActivityTestContext context, Guid conversationId, Guid messageId,
+    private static async Task AssertStoredAsync(SqliteDatabase database, IConversationTurnRepository turns, Guid conversationId, Guid turnId,
         TurnUsage reported, string scenario)
     {
         reported.TotalTokens.Should().Be(scenario == "incremental-complete" ? 17 : null);
         reported.InputTokens.Should().Be(scenario == "cumulative-partial-error" ? 17 : 3);
         reported.OutputTokens.Should().Be(scenario == "cumulative-partial-error" ? 2 : 4);
         reported.ProviderCalls.Should().Be(scenario == "cumulative-partial-error" ? 2 : 1);
-        var persisted = (await context.Conversations.ListMessagesAsync(conversationId)).Single(message => message.Id == messageId);
+        var persisted = (await turns.ListTurnsAsync(conversationId)).Single(turn => turn.Id == turnId);
         persisted.Usage.Should().BeEquivalentTo(reported);
-        persisted.Status.Should().Be(scenario == "cumulative-partial-error" ? MessageStatus.Failed : MessageStatus.Completed);
-        await using var connection = await context.Database.OpenConnectionAsync();
+        persisted.Status.Should().Be(scenario == "cumulative-partial-error" ? ConversationTurnStatus.Failed : ConversationTurnStatus.Succeeded);
+        await using var connection = await database.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT total_tokens FROM turn_usage WHERE message_id = $id";
-        command.Parameters.AddWithValue("$id", messageId.ToString());
+        command.CommandText = "SELECT total_tokens FROM turn_usage WHERE turn_id = $id";
+        command.Parameters.AddWithValue("$id", turnId.ToString());
         var value = await command.ExecuteScalarAsync();
         if (scenario == "incremental-complete") value.Should().Be(17L);
         else value.Should().Be(DBNull.Value, "SQL NULL must survive the actual writer, not just DTO projection");

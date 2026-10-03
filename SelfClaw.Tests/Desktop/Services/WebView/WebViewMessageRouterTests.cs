@@ -1,4 +1,5 @@
-﻿using SelfClaw.Desktop.Services.Agents;
+using SelfClaw.Tests.TestDoubles;
+using SelfClaw.Desktop.Services.Agents;
 using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Settings;
 using SelfClaw.Desktop.Services.Tools;
@@ -304,6 +305,7 @@ public sealed class WebViewMessageRouterTests
         private readonly PluginViewHostController _pluginViewHostController;
         private readonly ConversationSessionCoordinator _sessions;
         private readonly ConversationTurnEngine _turnEngine;
+        private readonly ConversationRunCoordinator _runs;
 
         public RouterTestContext(IReadOnlyList<WorkspaceRoot>? workspaceRoots = null)
         {
@@ -329,19 +331,22 @@ public sealed class WebViewMessageRouterTests
                 new TranscriptProjection(storagePaths),
                 _transcriptDelivery,
                 Dispatcher.CurrentDispatcher);
-            _sessions = new ConversationSessionCoordinator(ConversationRepository, _transcriptPublisher);
+            var turns = new RecordingConversationTurnRepository(ConversationRepository);
+            var inputs = new EmptyConversationInputRepository();
+            _runs = new ConversationRunCoordinator(inputs, NullLogger<ConversationRunCoordinator>.Instance);
+            _sessions = new ConversationSessionCoordinator(ConversationRepository, turns, _runs, _transcriptPublisher);
             var programmingSettings = SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore);
             AgentRuntime = new RecordingAgentChatRuntime();
             _turnEngine = new ConversationTurnEngine(
-                ConversationRepository,
+                turns,
                 new DesktopTurnFinalizer(
-                    new NoOpTurnFinalizationRepository(),
+                    turns,
                     NullLogger<DesktopTurnFinalizer>.Instance),
                 new ConversationTurnRecorder(
-                    ConversationRepository,
+                    ConversationRepository, turns, inputs,
                     NullLogger<ConversationTurnRecorder>.Instance),
                 AgentRuntime,
-                _sessions,
+                _sessions, _runs,
                 _activityCoordinator,
                 approvalHandler,
                 programmingSettings,
@@ -356,7 +361,7 @@ public sealed class WebViewMessageRouterTests
             var workspaces = new ConversationWorkspaceService(ConversationRepository);
             var viewModel = new MainWindowViewModel(
                 ConversationRepository,
-                _turnEngine,
+                _turnEngine, _runs,
                 _sessions,
                 _activityCoordinator,
                 _transcriptPublisher,
@@ -364,7 +369,7 @@ public sealed class WebViewMessageRouterTests
                 ExtensionStateChangeNotifier,
                 settingsStore,
                 workspaces,
-                new ConversationDeletionService(_turnEngine, _sessions, new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(), workspaces, ConversationRepository),
+                new ConversationDeletionService(_runs, _sessions, new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(), workspaces, ConversationRepository),
                 NullLogger<MainWindowViewModel>.Instance);
             viewModel.InitializeAsync().GetAwaiter().GetResult();
 
@@ -447,7 +452,7 @@ public sealed class WebViewMessageRouterTests
         {
             Router.Dispose();
             _approvalPresenter.Dispose();
-            _turnEngine.Dispose();
+            _runs.Dispose();
             _sessions.Dispose();
             _terminalHostController.Dispose();
             _pluginViewHostController.Dispose();
@@ -587,20 +592,10 @@ public sealed class WebViewMessageRouterTests
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<MessageRecord>>([]);
 
-        public Task<MessageRecord> UpsertMessageAsync(
-            MessageRecord message,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(message);
-
         public Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(
             Guid conversationId,
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<ToolExecutionRecord>>([]);
-
-        public Task<ToolExecutionRecord> UpsertToolExecutionAsync(
-            ToolExecutionRecord record,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(record);
 
         public Task<IReadOnlyList<WorkspaceRoot>> ListWorkspaceRootsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<WorkspaceRoot>>(WorkspaceRoots.ToArray());
@@ -638,17 +633,9 @@ public sealed class WebViewMessageRouterTests
         }
     }
 
-    private sealed class NoOpTurnFinalizationRepository : ITurnFinalizationRepository
-    {
-        public Task<bool> TryFinalizeTurnAsync(
-            TurnFinalization finalization,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult(true);
-    }
-
     private sealed class NoOpCompletionNotifier : IConversationCompletionNotifier
     {
-        public void Notify(ConversationRecord conversation, IReadOnlyList<MessageRecord> messages)
+        public void Notify(ConversationRecord conversation, ConversationTurnRecord turn, IReadOnlyList<MessageRecord> messages)
         {
         }
     }

@@ -33,4 +33,15 @@ internal sealed class DirectConversationContext(IReadOnlyList<ChatMessage> messa
     }
 
     public void AppendResults(IList<AIContent> results) => _messages.Add(new ChatMessage(ChatRole.Tool, results));
+
+    public void AppendInputs(IReadOnlyList<SelfClaw.Core.Models.MessageRecord> messages)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        foreach (var message in messages.OrderBy(message => message.Sequence))
+        {
+            if (message.Role != SelfClaw.Core.Models.MessageRole.User)
+                throw new InvalidDataException("A consumed input must be a user message.");
+            _messages.Add(new ChatMessage(ChatRole.User, message.MarkdownContent));
+        }
+    }
 }

@@ -7,42 +7,58 @@ namespace SelfClaw.Desktop.Services.Runtime;
 internal sealed class ConversationDeletionService
 {
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(8);
-    private readonly ConversationTurnEngine _engine;
+    private readonly ConversationRunCoordinator _runs;
     private readonly ConversationSessionCoordinator _sessions;
     private readonly ISubagentConversationLifecycle _subagents;
     private readonly ConversationWorkspaceService _workspaces;
     private readonly IConversationRepository _conversations;
+    private readonly SubagentActivityService? _activity;
 
-    public ConversationDeletionService(ConversationTurnEngine engine, ConversationSessionCoordinator sessions,
-        ISubagentConversationLifecycle subagents, ConversationWorkspaceService workspaces, IConversationRepository conversations)
+    public ConversationDeletionService(ConversationRunCoordinator runs, ConversationSessionCoordinator sessions,
+        ISubagentConversationLifecycle subagents, ConversationWorkspaceService workspaces, IConversationRepository conversations,
+        SubagentActivityService? activity = null)
     {
-        _engine = engine;
+        _runs = runs;
         _sessions = sessions;
         _subagents = subagents;
         _workspaces = workspaces;
         _conversations = conversations;
+        _activity = activity;
     }
 
     public async Task DeleteAsync(IReadOnlyCollection<Guid> conversationIds, bool removeWorktree)
     {
         ArgumentNullException.ThrowIfNull(conversationIds);
-        foreach (var id in conversationIds) _engine.BeginConversationDeletion(id);
+        var reservations = new List<ConversationDeletionReservation>();
+        var deleted = new HashSet<Guid>();
         try
         {
-            foreach (var id in conversationIds)
+            foreach (var id in conversationIds.Distinct())
             {
-                await _sessions.StopAndRemoveAsync(id, StopTimeout).ConfigureAwait(false);
-                await _subagents.CancelAndWaitAsync(id, StopTimeout).ConfigureAwait(false);
+                reservations.Add(_runs.BeginDeletion(id));
+                _activity?.SetScopeClosed(id, true);
             }
-            foreach (var id in conversationIds)
+            foreach (var reservation in reservations)
             {
-                await _workspaces.ReleaseAsync(id, removeWorktree).ConfigureAwait(false);
-                await _conversations.DeleteConversationAsync(id).ConfigureAwait(false);
+                await _runs.StopAndWaitAsync(reservation.ConversationId, StopTimeout).ConfigureAwait(false);
+                await _subagents.CancelAndWaitAsync(reservation.ConversationId, StopTimeout).ConfigureAwait(false);
+            }
+            foreach (var reservation in reservations)
+            {
+                await _workspaces.ReleaseAsync(reservation.ConversationId, removeWorktree).ConfigureAwait(false);
+                await _conversations.DeleteConversationAsync(reservation.ConversationId).ConfigureAwait(false);
+                deleted.Add(reservation.ConversationId);
+                _sessions.ForgetTranscript(reservation.ConversationId);
             }
         }
         finally
         {
-            foreach (var id in conversationIds) _engine.EndConversationDeletion(id);
+            foreach (var reservation in reservations)
+            {
+                var wasDeleted = deleted.Contains(reservation.ConversationId);
+                _runs.EndDeletion(reservation, wasDeleted);
+                if (!wasDeleted) _activity?.SetScopeClosed(reservation.ConversationId, false);
+            }
         }
     }
 }

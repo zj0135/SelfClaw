@@ -1,4 +1,5 @@
 using FluentAssertions;
+using SelfClaw.Tests.TestDoubles;
 using SelfClaw.Infrastructure.Extensions.Models;
 using SelfClaw.Infrastructure.Extensions.Plugins;
 using SelfClaw.Infrastructure.Extensions.Plugins.Models;
@@ -14,8 +15,7 @@ public sealed class HookAllEventsPluginTests
     [Fact]
     public async Task The_all_events_example_passes_manifest_validation_for_every_event()
     {
-        var pluginRoot = Path.GetFullPath(
-            Path.Combine(AppContext.BaseDirectory, "../../../../", "plugins", "hook-all-events"));
+        var pluginRoot = TestRepositoryRoot.GetPath("plugins", "hook-all-events");
         Directory.Exists(pluginRoot).Should().BeTrue("the all-events example is checked into the repository");
 
         var reader = new PluginManifestReader(new ExtensionPackageLimits(

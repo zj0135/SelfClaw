@@ -33,14 +33,31 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     private string? _usageModel;
     private int? _contextWindowTokens;
     private bool _usageWritten;
+    private bool _hasFinalText;
+    private string? _previousFragmentText;
 
     public string FinalText => _finalText.ToString();
 
     public string? FinalTextOrNull => _finalText.Length == 0 ? null : _finalText.ToString();
 
-    public bool HasFinalText => _finalText.Length > 0;
+    public bool HasFinalText => _hasFinalText;
+
+    public string? SummaryText => _finalText.Length > 0 ? _finalText.ToString() : _previousFragmentText;
 
     public TurnUsage? Usage => BuildUsage();
+
+    public void PublishInputBoundary(ConversationInputBatch batch)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        if (!_writer.TryWrite(new TurnInputBoundaryEvent(batch, BuildUsage())))
+            throw new InvalidOperationException("The event consumer closed before the input boundary was published.");
+    }
+
+    public void BeginInputSegment()
+    {
+        if (_finalText.Length > 0) _previousFragmentText = _finalText.ToString();
+        _finalText.Clear();
+    }
 
     /// <summary>
     /// Supplies the pricing, model id and context window the accumulated usage is reported with.
@@ -68,6 +85,7 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
             {
                 case TextContent text when !string.IsNullOrEmpty(text.Text):
                     _finalText.Append(text.Text);
+                    _hasFinalText = true;
                     _writer.TryWrite(new AssistantTextDeltaEvent(blockId, text.Text));
                     break;
 
@@ -77,6 +95,7 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
 
                 case ErrorContent { ErrorCode: "Refusal" } refusal when !string.IsNullOrEmpty(refusal.Message):
                     _finalText.Append(refusal.Message);
+                    _hasFinalText = true;
                     _writer.TryWrite(new AssistantTextDeltaEvent(blockId, refusal.Message));
                     break;
 

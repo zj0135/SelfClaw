@@ -1,3 +1,4 @@
+using SelfClaw.Core.Interfaces;
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
@@ -24,6 +25,7 @@ internal abstract record DirectTurnSetup(DirectTurnCapabilityLease CapabilityLea
         DirectTurnCapabilityLease CapabilityLease,
         AiChatClientLease ProviderLease,
         DirectToolInvoker Invoker,
-        IReadOnlyList<ChatMessage> Messages)
+        IReadOnlyList<ChatMessage> Messages,
+        IDirectTurnInputSession? InputSession = null)
         : DirectTurnSetup(CapabilityLease);
 }

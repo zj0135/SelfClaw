@@ -5,7 +5,7 @@ using SelfClaw.Infrastructure.Data.Sqlite;
 
 namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
-public sealed class SqliteConversationRepository : IConversationRepository, ITurnFinalizationRepository
+public sealed class SqliteConversationRepository : IConversationRepository
 {
     private readonly SqliteDatabase _database;
 
@@ -48,44 +48,9 @@ LIMIT 1;";
         ValidateConversationOwnership(conversation);
 
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
-INSERT INTO conversations(
-    id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
-    channel_kind, channel_conversation_id, channel_display_name,
-    created_at_utc, updated_at_utc, kind, parent_conversation_id)
-VALUES(
-    $id, $title, $workspaceRootId, $mode, $toolPermissionMode, $agentId,
-    $channelKind, $channelConversationId, $channelDisplayName,
-    $createdAt, $updatedAt, $kind, $parentConversationId)
-ON CONFLICT(id) DO UPDATE SET
-    title = excluded.title,
-    workspace_root_id = excluded.workspace_root_id,
-    mode = excluded.mode,
-    tool_permission_mode = excluded.tool_permission_mode,
-    agent_id = excluded.agent_id,
-    channel_kind = excluded.channel_kind,
-    channel_conversation_id = excluded.channel_conversation_id,
-    channel_display_name = excluded.channel_display_name,
-    kind = excluded.kind,
-    parent_conversation_id = excluded.parent_conversation_id,
-    updated_at_utc = excluded.updated_at_utc;";
-        command.Parameters.AddWithValue("$id", conversation.Id.ToString("D"));
-        command.Parameters.AddWithValue("$title", conversation.Title);
-        command.Parameters.AddWithValue("$workspaceRootId", conversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$mode", (int)conversation.Mode);
-        command.Parameters.AddWithValue("$toolPermissionMode", (int)conversation.ToolPermissionMode);
-        command.Parameters.AddWithValue("$agentId", conversation.AgentId);
-        command.Parameters.AddWithValue("$channelKind", conversation.ChannelKind ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$channelConversationId", conversation.ChannelConversationId ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$channelDisplayName", conversation.ChannelDisplayName ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$createdAt", conversation.CreatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$updatedAt", conversation.UpdatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$kind", (int)conversation.Kind);
-        command.Parameters.AddWithValue(
-            "$parentConversationId",
-            conversation.ParentConversationId?.ToString("D") ?? (object)DBNull.Value);
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await SqliteConversationTurnWriter.UpsertConversationAsync(connection, transaction, conversation, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return conversation;
     }
 
@@ -105,9 +70,8 @@ ON CONFLICT(id) DO UPDATE SET
         command.CommandText = $@"
 SELECT {SqliteMappings.MessageSelectColumns}
 FROM messages m
-LEFT JOIN turn_usage u ON u.message_id = m.id
 WHERE m.conversation_id = $conversationId
-ORDER BY m.created_at_utc ASC;";
+ORDER BY m.sequence ASC;";
         command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
 
         var results = new List<MessageRecord>();
@@ -144,30 +108,6 @@ ORDER BY m.created_at_utc ASC;";
                     : null
             })
             .ToArray();
-    }
-
-    public async Task<MessageRecord> UpsertMessageAsync(MessageRecord message, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await SqliteTurnFinalizationWriter.UpsertMessageAsync(
-                connection,
-                transaction: null,
-                message,
-                onlyIfStreaming: false,
-                cancellationToken)
-            .ConfigureAwait(false);
-
-        if (message.Attachments is not null)
-        {
-            await ReplaceMessageAttachmentsAsync(connection, message, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (message.Segments is not null)
-        {
-            await ReplaceMessageSegmentsAsync(connection, message, cancellationToken).ConfigureAwait(false);
-        }
-
-        return message;
     }
 
     private static async Task<Dictionary<Guid, IReadOnlyList<MessageSegmentRecord>>> ReadMessageSegmentsAsync(
@@ -219,40 +159,6 @@ ORDER BY message_id, ordinal ASC;";
             item => (IReadOnlyList<MessageSegmentRecord>)item.Value.ToArray());
     }
 
-    private static async Task ReplaceMessageSegmentsAsync(
-        SqliteConnection connection,
-        MessageRecord message,
-        CancellationToken cancellationToken)
-    {
-        await using (var deleteCommand = connection.CreateCommand())
-        {
-            deleteCommand.CommandText = "DELETE FROM message_segments WHERE message_id = $messageId;";
-            deleteCommand.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
-            await deleteCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        if (message.Segments is not { Count: > 0 } segments)
-        {
-            return;
-        }
-
-        foreach (var segment in segments)
-        {
-            await using var insertCommand = connection.CreateCommand();
-            insertCommand.CommandText = @"
-INSERT INTO message_segments(message_id, ordinal, kind, text, tool_run_id)
-VALUES($messageId, $ordinal, $kind, $text, $toolRunId);";
-            insertCommand.Parameters.AddWithValue("$messageId", segment.MessageId.ToString("D"));
-            insertCommand.Parameters.AddWithValue("$ordinal", segment.Ordinal);
-            insertCommand.Parameters.AddWithValue("$kind", (int)segment.Kind);
-            insertCommand.Parameters.AddWithValue("$text", (object?)segment.Text ?? DBNull.Value);
-            insertCommand.Parameters.AddWithValue("$toolRunId", segment.ToolRunId.HasValue
-                ? segment.ToolRunId.Value.ToString("D")
-                : DBNull.Value);
-            await insertCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-    }
-
     private static async Task<Dictionary<Guid, IReadOnlyList<MessageAttachmentRecord>>> ReadMessageAttachmentsAsync(
         SqliteConnection connection,
         IReadOnlyList<Guid> messageIds,
@@ -297,41 +203,6 @@ ORDER BY created_at_utc ASC;";
             item => (IReadOnlyList<MessageAttachmentRecord>)item.Value.ToArray());
     }
 
-    private static async Task ReplaceMessageAttachmentsAsync(
-        SqliteConnection connection,
-        MessageRecord message,
-        CancellationToken cancellationToken)
-    {
-        await using (var deleteCommand = connection.CreateCommand())
-        {
-            deleteCommand.CommandText = "DELETE FROM message_attachments WHERE message_id = $messageId;";
-            deleteCommand.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
-            await deleteCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        if (message.Attachments is not { Count: > 0 } attachments)
-        {
-            return;
-        }
-
-        foreach (var attachment in attachments)
-        {
-            await using var insertCommand = connection.CreateCommand();
-            insertCommand.CommandText = @"
-INSERT INTO message_attachments(id, message_id, kind, file_name, media_type, storage_path, byte_length, created_at_utc)
-VALUES($id, $messageId, $kind, $fileName, $mediaType, $storagePath, $byteLength, $createdAt);";
-            insertCommand.Parameters.AddWithValue("$id", attachment.Id.ToString("D"));
-            insertCommand.Parameters.AddWithValue("$messageId", message.Id.ToString("D"));
-            insertCommand.Parameters.AddWithValue("$kind", (int)attachment.Kind);
-            insertCommand.Parameters.AddWithValue("$fileName", attachment.FileName);
-            insertCommand.Parameters.AddWithValue("$mediaType", attachment.MediaType);
-            insertCommand.Parameters.AddWithValue("$storagePath", attachment.StoragePath);
-            insertCommand.Parameters.AddWithValue("$byteLength", attachment.ByteLength);
-            insertCommand.Parameters.AddWithValue("$createdAt", attachment.CreatedAtUtc.ToString("O"));
-            await insertCommand.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-    }
-
     public async Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -351,43 +222,6 @@ ORDER BY created_at_utc ASC;";
         }
 
         return results;
-    }
-
-    public async Task<ToolExecutionRecord> UpsertToolExecutionAsync(ToolExecutionRecord record, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await SqliteTurnFinalizationWriter.UpsertToolExecutionAsync(
-                connection,
-                transaction: null,
-                record,
-                cancellationToken)
-            .ConfigureAwait(false);
-        return record;
-    }
-
-    public async Task<bool> TryFinalizeTurnAsync(
-        TurnFinalization finalization,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(finalization);
-
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        var sqliteTransaction = (SqliteTransaction)transaction;
-        var messageWritten = await SqliteTurnFinalizationWriter.TryWriteAsync(
-                connection,
-                sqliteTransaction,
-                finalization,
-                cancellationToken)
-            .ConfigureAwait(false);
-        if (!messageWritten)
-        {
-            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-            return false;
-        }
-
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        return true;
     }
 
     private static async Task<List<ConversationRecord>> ReadConversationsAsync(

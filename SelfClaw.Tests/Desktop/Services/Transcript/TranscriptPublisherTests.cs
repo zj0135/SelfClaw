@@ -132,8 +132,37 @@ public sealed class TranscriptPublisherTests
         payload.RootElement.GetProperty("isContinuation").GetBoolean().Should().BeTrue();
     }
 
+    [Fact]
+    public void Publish_patches_a_no_output_turn_outcome_without_inserting_an_assistant()
+    {
+        var sent = new List<string>();
+        var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
+        channel.Attach(sent.Add);
+        channel.MarkReady();
+        using var publisher = new TranscriptPublisher(new TranscriptProjection(StoragePathDefaults.CreateDefault()), delivery, Dispatcher.CurrentDispatcher);
+        var now = DateTimeOffset.UtcNow;
+        var turn = new SelfClaw.Core.Models.ConversationTurnRecord(Guid.NewGuid(), Guid.NewGuid(),
+            SelfClaw.Core.Runtime.AgentExecutionMode.Direct, SelfClaw.Core.Runtime.DirectTurnOrigin.Interactive,
+            SelfClaw.Core.Models.ConversationTurnStatus.Running, now);
+        var request = CreateRequest("build", false) with { Turns = [turn] };
+        publisher.Attach(_ => request);
+        publisher.PublishNow(false);
+        delivery.Acknowledge(ReadRevision(sent.Single())).Should().BeTrue();
+        request = request with { Turns = [turn with { Status = SelfClaw.Core.Models.ConversationTurnStatus.Failed, ErrorMessage = "no output", CompletedAtUtc = now }] };
+        publisher.PublishNow(false);
+        using var payload = JsonDocument.Parse(sent.Last());
+        payload.RootElement.GetProperty("type").GetString().Should().Be("patchState");
+        var changed = payload.RootElement.GetProperty("upsertItems").EnumerateArray().Single();
+        changed.GetProperty("kind").GetString().Should().Be("turn-outcome");
+        changed.GetProperty("role").GetString().Should().Be("system");
+        changed.GetProperty("turnOutcome").GetProperty("errorMessage").GetString().Should().Be("no output");
+        changed.GetProperty("segments").GetArrayLength().Should().Be(0);
+    }
+
     private static TranscriptProjectionRequest CreateRequest(string agentName, bool autoScroll)
         => new(
+            [],
             [],
             [],
             [],

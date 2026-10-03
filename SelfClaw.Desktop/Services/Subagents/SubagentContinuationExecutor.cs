@@ -21,7 +21,8 @@ internal sealed class SubagentContinuationExecutor
     private readonly DesktopToolApprovalHandler _approvalHandler;
     private readonly SubagentTaskSnapshotSerializer _snapshotSerializer;
     private readonly SubagentCompletionBatchSerializer _batchSerializer;
-    private readonly ConversationTurnEngine _turnEngine;
+    private readonly ConversationRunCoordinator _runs;
+    private readonly ConversationSessionCoordinator _sessions;
     private readonly DesktopNotificationService _notificationService;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SubagentContinuationExecutor> _logger;
@@ -33,7 +34,8 @@ internal sealed class SubagentContinuationExecutor
         DesktopToolApprovalHandler approvalHandler,
         SubagentTaskSnapshotSerializer snapshotSerializer,
         SubagentCompletionBatchSerializer batchSerializer,
-        ConversationTurnEngine turnEngine,
+        ConversationRunCoordinator runs,
+        ConversationSessionCoordinator sessions,
         DesktopNotificationService notificationService,
         ILogger<SubagentContinuationExecutor> logger)
         : this(
@@ -43,7 +45,8 @@ internal sealed class SubagentContinuationExecutor
             approvalHandler,
             snapshotSerializer,
             batchSerializer,
-            turnEngine,
+            runs,
+            sessions,
             notificationService,
             TimeProvider.System,
             logger)
@@ -57,7 +60,8 @@ internal sealed class SubagentContinuationExecutor
         DesktopToolApprovalHandler approvalHandler,
         SubagentTaskSnapshotSerializer snapshotSerializer,
         SubagentCompletionBatchSerializer batchSerializer,
-        ConversationTurnEngine turnEngine,
+        ConversationRunCoordinator runs,
+        ConversationSessionCoordinator sessions,
         DesktopNotificationService notificationService,
         TimeProvider timeProvider,
         ILogger<SubagentContinuationExecutor> logger)
@@ -68,7 +72,8 @@ internal sealed class SubagentContinuationExecutor
         _approvalHandler = approvalHandler;
         _snapshotSerializer = snapshotSerializer;
         _batchSerializer = batchSerializer;
-        _turnEngine = turnEngine;
+        _runs = runs;
+        _sessions = sessions;
         _notificationService = notificationService;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -76,16 +81,17 @@ internal sealed class SubagentContinuationExecutor
 
     internal async Task ExecuteAsync(
         ConversationRecord parentConversation,
-        ConversationRuntimeState runtimeState,
+        ConversationRunHandle handle,
         SubagentDeliveryLease lease,
         CancellationToken hostCancellationToken)
     {
         ArgumentNullException.ThrowIfNull(parentConversation);
-        ArgumentNullException.ThrowIfNull(runtimeState);
+        ArgumentNullException.ThrowIfNull(handle);
         ArgumentNullException.ThrowIfNull(lease);
+        _runs.BeginExecution(handle);
         using var execution = CancellationTokenSource.CreateLinkedTokenSource(
             hostCancellationToken,
-            runtimeState.CancellationTokenSource.Token);
+            handle.CancellationToken);
         using var heartbeatCancellation = CancellationTokenSource.CreateLinkedTokenSource(execution.Token);
         var leaseLost = 0;
         var heartbeat = RenewLeaseAsync(
@@ -96,28 +102,37 @@ internal sealed class SubagentContinuationExecutor
                 Interlocked.Exchange(ref leaseLost, 1);
                 execution.Cancel();
             });
+        ConversationRuntimeState? runtimeState = null;
         AgentTurnState? turn = null;
         SubagentContinuationTurnCommitter? committer = null;
         var publishPersistedTurn = false;
         var notifyDeadLetter = false;
         try
         {
+            if (handle.Origin != DirectTurnOrigin.Continuation || handle.ConversationId != parentConversation.Id ||
+                handle.ConversationId != lease.ParentConversationId || handle.TurnId != lease.ContinuationTurnId)
+                throw new InvalidDataException("The continuation lease does not belong to this run.");
+            runtimeState = await _sessions.PrepareRuntimeStateAsync(parentConversation, true, execution.Token);
             committer = new SubagentContinuationTurnCommitter(_deliveryStore, lease, _timeProvider);
+            var record = new ConversationTurnRecord(handle.TurnId, handle.ConversationId, AgentExecutionMode.Direct,
+                DirectTurnOrigin.Continuation, ConversationTurnStatus.Running, _timeProvider.GetUtcNow());
+            runtimeState.ReplaceTurn(record);
             var request = CreateRequest(runtimeState, lease, committer);
-            turn = new AgentTurnState(lease.ContinuationTurnId, request.Agent);
+            turn = new AgentTurnState(record, request.Agent);
             _turnRecorder.BeginTurn(runtimeState, turn);
+            _runs.AttachState(handle, runtimeState);
+            execution.Token.ThrowIfCancellationRequested();
             await foreach (var streamEvent in _chatRuntime.StreamTurnAsync(request, execution.Token))
             {
-                var recordedEvent = RewriteTerminalEvent(committer, streamEvent);
                 await _turnRecorder.ApplyDetachedEventAsync(
                     runtimeState,
                     turn,
-                    recordedEvent,
+                    streamEvent,
                     committer,
                     execution.Token);
             }
 
-            if (!turn.Completed)
+            if (!turn.Completed && turn.PendingFinalization is null)
             {
                 await _turnRecorder.FinalizeInterruptedAsync(
                     runtimeState,
@@ -139,15 +154,21 @@ internal sealed class SubagentContinuationExecutor
         }
         catch (OperationCanceledException)
         {
-            if (turn is not null && committer is not null)
+            if (runtimeState is not null && turn is not null && committer is not null && turn.PendingFinalization is null)
             {
                 await _turnRecorder.FinalizeInterruptedAsync(
                     runtimeState,
                     turn,
-                    TurnFinalizationKind.Failed,
+                    TurnFinalizationKind.Cancelled,
                     "The application stopped the Subagent continuation.",
                     committer);
                 (publishPersistedTurn, notifyDeadLetter) = ReadDisposition(committer);
+            }
+            else if (turn is null)
+            {
+                await _deliveryStore.TryResolveAsync(lease,
+                    new SubagentDeliveryResolution(SubagentDeliveryResolutionKind.RetryableFailure, null,
+                        "The continuation was cancelled during preparation.", _timeProvider.GetUtcNow()));
             }
             throw;
         }
@@ -174,7 +195,7 @@ internal sealed class SubagentContinuationExecutor
                 "Subagent continuation failed. ParentConversationId={ParentConversationId} ContinuationTurnId={ContinuationTurnId}",
                 lease.ParentConversationId,
                 lease.ContinuationTurnId);
-            if (turn is not null && committer is not null)
+            if (runtimeState is not null && turn is not null && committer is not null && turn.PendingFinalization is null)
             {
                 await _turnRecorder.FinalizeInterruptedAsync(
                     runtimeState,
@@ -184,7 +205,7 @@ internal sealed class SubagentContinuationExecutor
                     committer);
                 (publishPersistedTurn, notifyDeadLetter) = ReadDisposition(committer);
             }
-            else
+            else if (turn is null)
             {
                 var result = await _deliveryStore.TryResolveAsync(
                     lease,
@@ -205,10 +226,9 @@ internal sealed class SubagentContinuationExecutor
             }
             finally
             {
-                await _turnEngine.CompleteContinuationAsync(
-                    runtimeState,
-                    publishPersistedTurn,
-                    CancellationToken.None);
+                if (committer is { Disposition: not SubagentContinuationDisposition.None })
+                    (publishPersistedTurn, notifyDeadLetter) = ReadDisposition(committer);
+                _runs.Complete(handle, publishPersistedTurn);
             }
         }
 
@@ -220,37 +240,6 @@ internal sealed class SubagentContinuationExecutor
                 committer?.BlockedReason ??
                 "Subagent results could not be continued safely. Open the conversation for details.");
         }
-    }
-
-    /// <summary>
-    /// The durable delivery model has no blocked terminal, so both rewrites hand a failed terminal to
-    /// the recorder while the committer decides whether the delivery may be retried.
-    /// </summary>
-    private static AgentStreamEvent RewriteTerminalEvent(
-        SubagentContinuationTurnCommitter committer,
-        AgentStreamEvent streamEvent)
-    {
-        if (streamEvent is RunCompletedEvent { Status: RunCompletionStatus.Truncated } truncated)
-        {
-            return truncated with
-            {
-                Status = RunCompletionStatus.Failed,
-                ErrorMessage = string.IsNullOrWhiteSpace(truncated.ErrorMessage)
-                    ? "The continuation reached the model output limit. Partial output was preserved when tools ran."
-                    : truncated.ErrorMessage
-            };
-        }
-
-        if (streamEvent is RunCompletedEvent { Status: RunCompletionStatus.Blocked } blocked)
-        {
-            var reason = string.IsNullOrWhiteSpace(blocked.ErrorMessage)
-                ? "A Plugin hook blocked the continuation."
-                : blocked.ErrorMessage;
-            committer.MarkBlocked(reason);
-            return blocked with { Status = RunCompletionStatus.Failed, ErrorMessage = reason };
-        }
-
-        return streamEvent;
     }
 
     private DirectChatTurnRequest CreateRequest(
@@ -271,6 +260,7 @@ internal sealed class SubagentContinuationExecutor
             parent.WorkspaceRoot,
             parent.Agent,
             runtimeState.Messages.ToArray(),
+            runtimeState.Turns.ToArray(),
             parent.ModelProfileId,
             parent.ToolPermissionMode,
             _approvalHandler,

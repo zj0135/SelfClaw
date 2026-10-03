@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
@@ -152,6 +153,10 @@ WHERE id = $taskId AND status = $queued;";
             return null;
         }
 
+        var turn = new ConversationTurnRecord(task.ChildTurnId, task.ChildConversationId, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Subagent, ConversationTurnStatus.Running, startedAtUtc);
+        await SqliteConversationTurnWriter.InsertTurnAsync(connection, transaction, turn, cancellationToken).ConfigureAwait(false);
+        await SqliteConversationTurnWriter.InsertUserAsync(connection, transaction, turn, Guid.NewGuid(), task.TaskText, null, cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         _changeNotifier?.Publish(task.ParentConversationId, task.Id, SubagentStateChangeKind.Task);
         return task with
@@ -227,16 +232,23 @@ WHERE id = $taskId AND status = $running;";
         }
 
         ValidateFinalizationOwnership(task, completion.TurnFinalization);
-        var finalizationWritten = await SqliteTurnFinalizationWriter.TryWriteAsync(
+        var finalizationWritten = await SqliteConversationTurnWriter.TryWriteAsync(
                 connection,
                 transaction,
                 completion.TurnFinalization,
-                cancellationToken)
+                cancellationToken,
+                allowInsert: expectedStatus == SubagentTaskStatus.Queued)
             .ConfigureAwait(false);
         if (!finalizationWritten)
         {
             await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             return null;
+        }
+
+        if (expectedStatus == SubagentTaskStatus.Queued)
+        {
+            await SqliteConversationTurnWriter.InsertUserAsync(connection, transaction, completion.TurnFinalization.Turn,
+                Guid.NewGuid(), task.TaskText, null, cancellationToken).ConfigureAwait(false);
         }
 
         var terminal = CreateTerminalTask(task, completion);
@@ -255,7 +267,7 @@ WHERE id = $taskId AND status = $running;";
         await InsertDeliveryAsync(
                 connection,
                 transaction,
-                _envelopeFactory.Create(terminal, completion.TurnFinalization.AssistantMessage.Usage),
+                _envelopeFactory.Create(terminal, completion.TurnFinalization.Turn.Usage),
                 cancellationToken)
             .ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -268,10 +280,15 @@ WHERE id = $taskId AND status = $running;";
     {
         var task = creation.Task;
         await EnsureInteractiveParentExistsAsync(connection, transaction, task.ParentConversationId, cancellationToken).ConfigureAwait(false);
+        var parentTurn = await SqliteConversationTurnWriter.ReadTurnAsync(connection, transaction, task.ParentTurnId, cancellationToken).ConfigureAwait(false);
+        if (parentTurn is not null && parentTurn.ConversationId != task.ParentConversationId)
+        {
+            throw new ArgumentException("The parent turn belongs to another conversation.", nameof(creation));
+        }
+
         await EnsureParentTurnCapacityAsync(connection, transaction, task.ParentConversationId, task.ParentTurnId, cancellationToken).ConfigureAwait(false);
         await ValidateRetryLineageAsync(connection, transaction, task, cancellationToken).ConfigureAwait(false);
         await InsertChildConversationAsync(connection, transaction, creation.ChildConversation, cancellationToken).ConfigureAwait(false);
-        await InsertTaskMessageAsync(connection, transaction, creation.TaskMessage, cancellationToken).ConfigureAwait(false);
         await InsertTaskAsync(connection, transaction, task, cancellationToken).ConfigureAwait(false);
         if (creation.InitialCompletion is not SubagentTaskCompletion completion)
         {
@@ -280,18 +297,20 @@ WHERE id = $taskId AND status = $running;";
 
         ValidateCompletion(completion, SubagentTaskStatus.Queued);
         ValidateFinalizationOwnership(task, completion.TurnFinalization);
-        if (!await SqliteTurnFinalizationWriter.TryWriteAsync(connection, transaction, completion.TurnFinalization, cancellationToken).ConfigureAwait(false))
+        if (!await SqliteConversationTurnWriter.TryWriteAsync(connection, transaction, completion.TurnFinalization, cancellationToken, allowInsert: true).ConfigureAwait(false))
         {
             throw new InvalidOperationException("The initial Subagent terminal state could not be recorded.");
         }
 
+        await SqliteConversationTurnWriter.InsertUserAsync(connection, transaction, completion.TurnFinalization.Turn,
+            Guid.NewGuid(), task.TaskText, null, cancellationToken).ConfigureAwait(false);
         var terminal = CreateTerminalTask(task, completion);
         if (!await TryUpdateTerminalTaskAsync(connection, transaction, terminal, SubagentTaskStatus.Queued, cancellationToken).ConfigureAwait(false))
         {
             throw new InvalidOperationException("The initial Subagent terminal state was not accepted.");
         }
 
-        await InsertDeliveryAsync(connection, transaction, _envelopeFactory.Create(terminal, completion.TurnFinalization.AssistantMessage.Usage), cancellationToken).ConfigureAwait(false);
+        await InsertDeliveryAsync(connection, transaction, _envelopeFactory.Create(terminal, completion.TurnFinalization.Turn.Usage), cancellationToken).ConfigureAwait(false);
         return terminal;
     }
 
@@ -299,20 +318,11 @@ WHERE id = $taskId AND status = $running;";
     {
         var task = creation.Task;
         var child = creation.ChildConversation;
-        var message = creation.TaskMessage;
-        var valid = child.Kind == ConversationKind.Subagent &&
-                    child.ParentConversationId == task.ParentConversationId &&
-                    child.Id == task.ChildConversationId &&
-                    message.ConversationId == child.Id &&
-                    message.Role == MessageRole.User &&
-                    message.Status == MessageStatus.Completed &&
-                    string.Equals(message.MarkdownContent, task.TaskText, StringComparison.Ordinal) &&
-                    task.Status == SubagentTaskStatus.Queued;
-        if (!valid)
+        if (child.Kind != ConversationKind.Subagent || child.ParentConversationId != task.ParentConversationId ||
+            child.Id != task.ChildConversationId || task.Status != SubagentTaskStatus.Queued ||
+            task.ChildTurnId == Guid.Empty || task.ParentTurnId == Guid.Empty)
         {
-            throw new ArgumentException(
-                "Subagent task creation requires a queued task, its owned child conversation, and a completed task message.",
-                nameof(creation));
+            throw new ArgumentException("Subagent creation requires a queued task and its owned child conversation.", nameof(creation));
         }
     }
 
@@ -426,36 +436,6 @@ VALUES(
             "$parentConversationId",
             conversation.ParentConversationId?.ToString("D")
             ?? throw new InvalidOperationException("The child conversation has no parent."));
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async Task InsertTaskMessageAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        MessageRecord message,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = @"
-INSERT INTO messages(
-    id, conversation_id, role, markdown_content, status, created_at_utc, updated_at_utc,
-    agent_id, agent_name, agent_role, duration_ms, error_message)
-VALUES(
-    $id, $conversationId, $role, $markdownContent, $status, $createdAt, $updatedAt,
-    $agentId, $agentName, $agentRole, $durationMs, $errorMessage);";
-        command.Parameters.AddWithValue("$id", message.Id.ToString("D"));
-        command.Parameters.AddWithValue("$conversationId", message.ConversationId.ToString("D"));
-        command.Parameters.AddWithValue("$role", (int)message.Role);
-        command.Parameters.AddWithValue("$markdownContent", message.MarkdownContent);
-        command.Parameters.AddWithValue("$status", (int)message.Status);
-        command.Parameters.AddWithValue("$createdAt", message.CreatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$updatedAt", message.UpdatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$agentId", message.AgentId?.ToString("D") ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$agentName", message.AgentName ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$agentRole", message.AgentRole ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$durationMs", message.DurationMs ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$errorMessage", message.ErrorMessage ?? (object)DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -615,8 +595,8 @@ VALUES(
         {
             Status = completion.Status,
             FinalText = completion.FinalText,
-            InputTokens = completion.TurnFinalization.AssistantMessage.Usage?.InputTokens,
-            OutputTokens = completion.TurnFinalization.AssistantMessage.Usage?.OutputTokens,
+            InputTokens = completion.TurnFinalization.Turn.Usage?.InputTokens,
+            OutputTokens = completion.TurnFinalization.Turn.Usage?.OutputTokens,
             ErrorCode = completion.ErrorCode,
             ErrorMessage = completion.ErrorMessage,
             CompletedAtUtc = completion.CompletedAtUtc,
@@ -643,32 +623,28 @@ VALUES(
             throw new ArgumentException("A task completion requires a terminal status.", nameof(completion));
         }
 
-        var expectedMessageStatus = completion.Status switch
+        var turnStatus = completion.TurnFinalization.Turn.Status;
+        var valid = completion.Status switch
         {
-            SubagentTaskStatus.Succeeded => MessageStatus.Completed,
-            SubagentTaskStatus.Cancelled => MessageStatus.Cancelled,
-            SubagentTaskStatus.Failed or SubagentTaskStatus.Interrupted => MessageStatus.Failed,
-            _ => throw new ArgumentOutOfRangeException(nameof(completion), completion.Status, null)
+            SubagentTaskStatus.Succeeded => turnStatus == ConversationTurnStatus.Succeeded,
+            SubagentTaskStatus.Cancelled => turnStatus == ConversationTurnStatus.Cancelled,
+            SubagentTaskStatus.Interrupted => turnStatus == ConversationTurnStatus.Interrupted,
+            SubagentTaskStatus.Failed => turnStatus is ConversationTurnStatus.Failed or ConversationTurnStatus.Blocked or ConversationTurnStatus.Truncated,
+            _ => false
         };
-        if (completion.TurnFinalization.AssistantMessage.Status != expectedMessageStatus)
+        if (!valid || (expectedStatus == SubagentTaskStatus.Queued &&
+            (completion.TurnFinalization.Messages.Count != 0 || completion.TurnFinalization.ToolExecutions.Count != 0)))
         {
-            throw new ArgumentException(
-                "The Subagent task status and assistant terminal status are inconsistent.",
-                nameof(completion));
+            throw new ArgumentException("The task outcome must match its turn; queued completion cannot manufacture assistant output.", nameof(completion));
         }
     }
 
-    private static void ValidateFinalizationOwnership(
-        SubagentTaskRecord task,
-        TurnFinalization finalization)
+    private static void ValidateFinalizationOwnership(SubagentTaskRecord task, ConversationTurnCommit finalization)
     {
-        if (finalization.AssistantMessage.Id != task.ChildTurnId ||
-            finalization.AssistantMessage.ConversationId != task.ChildConversationId ||
-            finalization.ToolExecutions.Any(tool => tool.ConversationId != task.ChildConversationId))
+        if (finalization.Turn.Id != task.ChildTurnId || finalization.Turn.ConversationId != task.ChildConversationId ||
+            finalization.Turn.Origin != DirectTurnOrigin.Subagent || finalization.Turn.ExecutionMode != AgentExecutionMode.Direct)
         {
-            throw new ArgumentException(
-                "The turn finalization does not belong to the Subagent task.",
-                nameof(finalization));
+            throw new ArgumentException("The turn commit does not belong to the Subagent task.", nameof(finalization));
         }
     }
 

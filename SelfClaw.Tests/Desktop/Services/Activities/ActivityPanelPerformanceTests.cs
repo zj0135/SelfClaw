@@ -16,17 +16,24 @@ public sealed class ActivityPanelPerformanceTests(ITestOutputHelper output)
         using var activity = new SubagentActivityTestContext();
         var first = await activity.CreateTaskAsync();
         var parent = await activity.Conversations.GetConversationAsync(first.ParentConversationId) ?? throw new InvalidOperationException();
-        var tasks = new[] { first, await activity.CreateTaskAsync(parent), await activity.CreateTaskAsync(parent), await activity.CreateTaskAsync() };
         for (var index = 0; index < 1000; index++)
         {
-            var historical = await activity.CreateTaskAsync(parent, claim: false);
+            var historical = await activity.CreateTaskAsync(parent);
             var now = DateTimeOffset.UtcNow;
-            var message = new MessageRecord(historical.ChildTurnId, historical.ChildConversationId, MessageRole.Assistant,
-                "History result", MessageStatus.Completed, now, now,
-                Segments: [new MessageSegmentRecord(historical.ChildTurnId, 0, MessageSegmentKind.Text, "History result", null)]);
-            await activity.Tasks.TryCompleteAsync(historical.Id, SubagentTaskStatus.Queued,
-                new SubagentTaskCompletion(SubagentTaskStatus.Succeeded, new TurnFinalization(message, []), "History result", null, null, now));
+            var turn = (await activity.Turns.ListTurnsAsync(historical.ChildConversationId)).Single() with
+            {
+                Status = ConversationTurnStatus.Succeeded,
+                CompletedAtUtc = now
+            };
+            var messageId = Guid.NewGuid();
+            var sequence = await activity.Turns.ReserveMessageSequenceAsync(historical.ChildConversationId);
+            var message = new MessageRecord(messageId, historical.ChildConversationId, turn.Id, sequence, MessageRole.Assistant,
+                "History result", MessageStatus.Sealed, now, now,
+                Segments: [new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Text, "History result", null)]);
+            await activity.Tasks.TryCompleteAsync(historical.Id, SubagentTaskStatus.Running,
+                new SubagentTaskCompletion(SubagentTaskStatus.Succeeded, new ConversationTurnCommit(turn, [message], []), "History result", null, null, now));
         }
+        var tasks = new[] { first, await activity.CreateTaskAsync(parent), await activity.CreateTaskAsync(parent), await activity.CreateTaskAsync() };
         var runtimes = tasks.Select(_ => new ControlledSubagentRuntime()).ToArray();
         var executions = tasks.Select((task, index) => activity.CreateExecutor(task, runtimes[index]).ExecuteAsync(task, CancellationToken.None)).ToArray();
         await Task.WhenAll(runtimes.Select(runtime => runtime.Started.Task));

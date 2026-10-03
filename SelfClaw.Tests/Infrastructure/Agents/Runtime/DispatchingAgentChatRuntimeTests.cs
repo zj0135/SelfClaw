@@ -164,6 +164,7 @@ public sealed class DispatchingAgentChatRuntimeTests
                 WorkspaceRoot: null,
                 agent,
                 Messages: [],
+            Turns: [],
                 CliAgent: null,
                 CliModel: null,
                 CliReasoningEffort: null)
@@ -173,6 +174,7 @@ public sealed class DispatchingAgentChatRuntimeTests
                 WorkspaceRoot: null,
                 agent,
                 Messages: [],
+            Turns: [],
                 ModelProfileId: null,
                 ToolPermissionMode.RequireApproval,
                 ToolApprovalHandler: null,

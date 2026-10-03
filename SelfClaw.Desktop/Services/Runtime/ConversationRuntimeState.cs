@@ -2,35 +2,34 @@ using SelfClaw.Core.Models;
 
 namespace SelfClaw.Desktop.Services.Runtime;
 
-/// <summary>
-/// Per-conversation turn state: the transcript projection (messages, tool runs) plus the
-/// run lifecycle (cancellation source, running flag, completion signal). Mutation of the transcript happens
-/// through the methods here so the reduction rules stay one place and are testable without WPF; the owner
-/// subscribes to <see cref="TranscriptChanged"/> to publish snapshots. Reads are surfaced back to the
-/// selected conversation only when it is the one on screen.
-/// </summary>
-internal sealed class ConversationRuntimeState : IDisposable
+/// <summary>Serializes transcript content mutations and materializes immutable snapshots.</summary>
+internal sealed class ConversationRuntimeState
 {
-    private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _gate = new();
+    private readonly List<ConversationTurnRecord> _turns = [];
     private readonly List<MessageRecord> _messages = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
     private ConversationTranscriptSnapshot? _snapshot;
-    private int _disposed;
-    private int _running = 1;
     private readonly Dictionary<Guid, (StreamingAssistantContent Stream, long MaterializedRevision)> _messageStreams = [];
 
     public ConversationRuntimeState(
         ConversationRecord conversation,
-        IEnumerable<MessageRecord> messages,
-        IEnumerable<ToolExecutionRecord> toolRuns,
+        IReadOnlyList<ConversationTurnRecord> turns,
+        IReadOnlyList<MessageRecord> messages,
+        IReadOnlyList<ToolExecutionRecord> toolRuns,
         bool isDetached = false)
     {
+        ArgumentNullException.ThrowIfNull(conversation);
+        ArgumentNullException.ThrowIfNull(turns);
+        ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(toolRuns);
         Conversation = conversation;
         IsDetached = isDetached;
-        var initialMessages = messages.ToArray();
+        var initialTurns = turns.ToArray();
+        var initialMessages = messages.OrderBy(message => message.Sequence).ToArray();
         var initialToolRuns = toolRuns.ToArray();
-        InitialSnapshot = new ConversationTranscriptSnapshot(initialMessages, initialToolRuns);
+        InitialSnapshot = new ConversationTranscriptSnapshot(initialTurns, initialMessages, initialToolRuns);
+        _turns.AddRange(initialTurns);
         _messages.AddRange(initialMessages);
         _toolRuns.AddRange(initialToolRuns);
     }
@@ -47,6 +46,8 @@ internal sealed class ConversationRuntimeState : IDisposable
     /// </summary>
     public ConversationTranscriptSnapshot InitialSnapshot { get; }
 
+    public IReadOnlyList<ConversationTurnRecord> Turns => CaptureSnapshot().Turns;
+
     public IReadOnlyList<MessageRecord> Messages => CaptureSnapshot().Messages;
 
     public IReadOnlyList<ToolExecutionRecord> ToolRuns => CaptureSnapshot().ToolRuns;
@@ -57,22 +58,13 @@ internal sealed class ConversationRuntimeState : IDisposable
         {
             if (_snapshot is not null) return _snapshot;
             MaterializeStreamingMessages();
-            return _snapshot = new ConversationTranscriptSnapshot(_messages.ToArray(), _toolRuns.ToArray());
+            return _snapshot = new ConversationTranscriptSnapshot(
+                _turns.ToArray(), _messages.OrderBy(message => message.Sequence).ToArray(), _toolRuns.ToArray());
         }
     }
 
     /// <summary>Latest RunStatusEvent text, shown while the streaming message has no content yet.</summary>
     public string? ActivityText { get; set; }
-
-    public CancellationTokenSource CancellationTokenSource { get; } = new();
-
-    public bool IsRunning
-    {
-        get => Volatile.Read(ref _running) != 0;
-        set => Volatile.Write(ref _running, value ? 1 : 0);
-    }
-
-    public Task Completion => _completion.Task;
 
     /// <summary>
     /// Raised after a transcript mutation. <c>true</c> requests an immediate publish (terminal snapshot);
@@ -82,11 +74,33 @@ internal sealed class ConversationRuntimeState : IDisposable
 
     public void RaiseTranscriptChanged(bool immediate) => TranscriptChanged?.Invoke(immediate);
 
-    public void MarkCompleted() => _completion.TrySetResult();
-
-    public void Dispose()
+    public void ReplaceTurn(ConversationTurnRecord turn)
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0) CancellationTokenSource.Dispose();
+        ArgumentNullException.ThrowIfNull(turn);
+        if (turn.ConversationId != ConversationId) throw new ArgumentException("The turn belongs to another conversation.", nameof(turn));
+        lock (_gate)
+        {
+            _snapshot = null;
+            var index = _turns.FindIndex(item => item.Id == turn.Id);
+            if (index >= 0) _turns[index] = turn;
+            else _turns.Add(turn);
+        }
+    }
+
+    public void ReplaceTurnContent(ConversationTurnCommit commit)
+    {
+        ArgumentNullException.ThrowIfNull(commit);
+        if (commit.Turn.ConversationId != ConversationId) throw new ArgumentException("The turn belongs to another conversation.", nameof(commit));
+        lock (_gate)
+        {
+            var removed = _messages.Where(message => message.TurnId == commit.Turn.Id).Select(message => message.Id).ToHashSet();
+            _messages.RemoveAll(message => removed.Contains(message.Id));
+            _toolRuns.RemoveAll(tool => tool.MessageId is Guid id && removed.Contains(id));
+            foreach (var id in removed) _messageStreams.Remove(id);
+            ReplaceTurn(commit.Turn);
+            foreach (var message in commit.Messages) ReplaceMessage(message);
+            foreach (var tool in commit.ToolExecutions) UpsertToolRun(tool);
+        }
     }
 
     public void ReplaceMessage(MessageRecord message)

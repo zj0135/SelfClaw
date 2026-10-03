@@ -16,10 +16,6 @@ public interface IConversationRepository
 
     Task<IReadOnlyList<MessageRecord>> ListMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
-    Task<MessageRecord> UpsertMessageAsync(MessageRecord message, CancellationToken cancellationToken = default);
-
     Task<IReadOnlyList<ToolExecutionRecord>> ListToolExecutionsAsync(Guid conversationId, CancellationToken cancellationToken = default);
-
-    Task<ToolExecutionRecord> UpsertToolExecutionAsync(ToolExecutionRecord record, CancellationToken cancellationToken = default);
 
 }
