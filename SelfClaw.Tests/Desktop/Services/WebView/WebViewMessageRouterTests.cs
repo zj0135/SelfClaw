@@ -114,6 +114,19 @@ public sealed class WebViewMessageRouterTests
     }
 
     [Fact]
+    public async Task RouteAsync_drops_conversation_input_actions_from_a_plugin_view_origin()
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.RouteAsync(
+            $$"""{"type":"conversation-input/promote","requestId":"r1","inputId":"{{Guid.NewGuid():D}}","expectedRevision":1,"targetTurnId":"{{Guid.NewGuid():D}}"}""",
+            PluginOrigin);
+
+        command.Should().BeNull();
+        context.PostedJson.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task RouteAsync_dispatches_shell_intent_to_the_view_model()
     {
         using var context = new RouterTestContext();

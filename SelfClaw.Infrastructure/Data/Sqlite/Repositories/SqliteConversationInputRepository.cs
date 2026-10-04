@@ -187,6 +187,68 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
             """, ("$snapshot", SerializeSnapshot(executionSnapshot)), cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<ConversationInputUpdateResult> PromoteAsync(
+        ConversationInputPromoteRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var input = await ReadByIdAsync(connection, transaction, request.InputId, cancellationToken).ConfigureAwait(false);
+        if (input is null)
+        {
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Missing, null, 0);
+        }
+
+        var queueRevision = await ReadQueueRevisionAsync(connection, transaction, input.ConversationId, cancellationToken).ConfigureAwait(false);
+        if (input.Status != ConversationInputStatus.Pending || input.Kind != ConversationInputKind.FollowUp ||
+            input.Revision != request.ExpectedRevision)
+        {
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Conflict, input, queueRevision);
+        }
+
+        // A promoted item carries the same explicit-activation rule as an accepted steer: it waits
+        // as a follow-up instead of entering a turn that never resolved the Skill.
+        if (_skillTokenDetector?.ContainsExplicitActivation(input.Prompt) == true)
+        {
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Invalid, input, queueRevision,
+                ConversationInputReason.SkillRequiresNewTurn);
+        }
+
+        if (!await IsLiveSteerTargetAsync(connection, transaction, input.ConversationId, request.TargetTurnId, cancellationToken).ConfigureAwait(false))
+        {
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Invalid, input, queueRevision,
+                ConversationInputReason.TargetTurnClosed);
+        }
+
+        int changed;
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                UPDATE conversation_inputs SET kind = 1, target_turn_id = $turn, reason_code = NULL,
+                    revision = revision + 1, updated_at_utc = $at
+                WHERE id = $id AND revision = $revision AND status = 0 AND kind = 0;
+                """;
+            command.Parameters.AddWithValue("$turn", request.TargetTurnId.ToString("D"));
+            command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            command.Parameters.AddWithValue("$id", request.InputId.ToString("D"));
+            command.Parameters.AddWithValue("$revision", request.ExpectedRevision);
+            changed = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        if (changed != 1)
+        {
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Conflict, null, queueRevision);
+        }
+
+        await AdvanceQueueRevisionAsync(connection, transaction, input.ConversationId, cancellationToken).ConfigureAwait(false);
+        var promoted = await ReadByIdAsync(connection, transaction, request.InputId, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The promoted input disappeared within its transaction.");
+        queueRevision = await ReadQueueRevisionAsync(connection, transaction, input.ConversationId, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Applied, promoted, queueRevision);
+    }
+
     public async Task<ConversationInputRecord?> FindRequestAsync(Guid conversationId, string clientRequestId,
         CancellationToken cancellationToken = default)
     {

@@ -186,6 +186,108 @@ public sealed class ConversationInputSteerServiceTests
         stored!.ReasonCode.Should().Be(ConversationInputReason.TurnFailed);
     }
 
+    [Fact]
+    public async Task Promote_converts_a_pending_follow_up_into_a_steer_for_the_live_turn()
+    {
+        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        var id = await h.CreateConversationAsync();
+        var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
+        await h.StartReservedTurnAsync(id, handle.TurnId);
+        var followUp = await h.SubmitAsync(id, "promote me");
+        followUp.Accepted.Should().BeTrue();
+        followUp.Outcome.Should().Be(ConversationInputSubmitOutcome.Queued);
+        var stored = (await h.Fixture.Inputs.GetInputAsync(followUp.InputId!.Value))!;
+
+        var result = await h.Queue.PromoteAsync(followUp.InputId!.Value, followUp.Revision, handle.TurnId);
+
+        result.Status.Should().Be(ConversationInputUpdateStatus.Applied);
+        result.Input!.Id.Should().Be(followUp.InputId!.Value);
+        result.Input.Sequence.Should().Be(stored.Sequence);
+        result.Input.Kind.Should().Be(ConversationInputKind.Steer);
+        result.Input.TargetTurnId.Should().Be(handle.TurnId);
+        result.Input.Status.Should().Be(ConversationInputStatus.Pending);
+        (await h.Fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(1L);
+        handle.InputSession!.HasSupersedingSteer.Should().BeFalse("the loop has not claimed the batch yet");
+        await handle.InputSession.WaitForSteerPulseAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        h.Runs.Complete(handle, false);
+    }
+
+    [Fact]
+    public async Task Promote_rejects_a_stale_revision_or_a_target_that_is_not_the_live_turn()
+    {
+        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        var id = await h.CreateConversationAsync();
+        var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
+        await h.StartReservedTurnAsync(id, handle.TurnId);
+        var followUp = await h.SubmitAsync(id, "stay a follow-up");
+
+        var stale = await h.Queue.PromoteAsync(followUp.InputId!.Value, followUp.Revision + 5, handle.TurnId);
+        stale.Status.Should().Be(ConversationInputUpdateStatus.Conflict);
+
+        var wrongTurn = await h.Queue.PromoteAsync(followUp.InputId!.Value, followUp.Revision, Guid.NewGuid());
+        wrongTurn.Status.Should().Be(ConversationInputUpdateStatus.Invalid);
+        wrongTurn.Reason.Should().Be(ConversationInputReason.TargetTurnClosed);
+
+        var stored = (await h.Fixture.Inputs.GetInputAsync(followUp.InputId!.Value))!;
+        stored.Kind.Should().Be(ConversationInputKind.FollowUp);
+        stored.TargetTurnId.Should().BeNull();
+        h.Runs.Complete(handle, false);
+    }
+
+    [Fact]
+    public async Task Promote_respects_the_published_policy_and_the_explicit_skill_rule()
+    {
+        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        var id = await h.CreateConversationAsync();
+        var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
+        await h.StartReservedTurnAsync(id, handle.TurnId);
+        await handle.InputSession!.SetSteerPolicyAsync(ConversationInputReason.HookRequiresNewTurn);
+        var blocked = await h.SubmitAsync(id, "blocked promote");
+
+        var blockedResult = await h.Queue.PromoteAsync(blocked.InputId!.Value, blocked.Revision, handle.TurnId);
+
+        blockedResult.Status.Should().Be(ConversationInputUpdateStatus.Invalid);
+        blockedResult.Reason.Should().Be(ConversationInputReason.HookRequiresNewTurn);
+
+        using var other = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        var otherId = await other.CreateConversationAsync();
+        var otherHandle = other.Runs.TryReserve(otherId, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
+        await other.StartReservedTurnAsync(otherId, otherHandle.TurnId);
+        var skill = await other.SubmitAsync(otherId, "[/pdf] summarize");
+
+        var skillResult = await other.Queue.PromoteAsync(skill.InputId!.Value, skill.Revision, otherHandle.TurnId);
+
+        skillResult.Status.Should().Be(ConversationInputUpdateStatus.Invalid);
+        skillResult.Reason.Should().Be(ConversationInputReason.SkillRequiresNewTurn);
+        (await other.Fixture.Inputs.GetInputAsync(skill.InputId!.Value))!.Kind.Should().Be(ConversationInputKind.FollowUp);
+        h.Runs.Complete(handle, false);
+        other.Runs.Complete(otherHandle, false);
+    }
+
+    [Fact]
+    public async Task Promote_that_loses_the_close_race_stays_a_follow_up_and_is_rejected_when_disabled()
+    {
+        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        var id = await h.CreateConversationAsync();
+        var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
+        await h.StartReservedTurnAsync(id, handle.TurnId);
+        var followUp = await h.SubmitAsync(id, "close race");
+        (await handle.InputSession!.ReadFinalBoundaryAsync()).Should().BeNull();
+
+        var result = await h.Queue.PromoteAsync(followUp.InputId!.Value, followUp.Revision, handle.TurnId);
+
+        result.Status.Should().Be(ConversationInputUpdateStatus.Invalid);
+        result.Reason.Should().Be(ConversationInputReason.TargetTurnClosed);
+        (await h.Fixture.Inputs.GetInputAsync(followUp.InputId!.Value))!.Kind.Should().Be(ConversationInputKind.FollowUp);
+        h.Runs.Complete(handle, false);
+
+        using var disabled = new ConversationInputTestHarness(steerEnabled: false, queueEnabled: true);
+        var disabledId = await disabled.CreateConversationAsync();
+        var disabledInput = await disabled.SubmitAsync(disabledId, "no switch");
+        await Assert.ThrowsAsync<ConversationInputRejectedException>(() =>
+            disabled.Queue.PromoteAsync(disabledInput.InputId!.Value, disabledInput.Revision, Guid.NewGuid()));
+    }
+
     private sealed class FailingGatedRuntime : IAgentChatRuntime
     {
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

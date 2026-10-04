@@ -15,5 +15,7 @@ public interface IConversationInputUpdateStore
     Task<ConversationInputUpdateResult> RetryAsync(Guid inputId, int expectedRevision, ConversationInputExecutionSnapshot executionSnapshot,
         CancellationToken cancellationToken = default);
 
+    Task<ConversationInputUpdateResult> PromoteAsync(ConversationInputPromoteRequest request, CancellationToken cancellationToken = default);
+
     Task<ConversationInputQueueState> SetPausedAsync(ConversationInputPauseRequest request, CancellationToken cancellationToken = default);
 }

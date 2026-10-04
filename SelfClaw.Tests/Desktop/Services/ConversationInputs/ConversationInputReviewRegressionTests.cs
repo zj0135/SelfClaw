@@ -122,7 +122,7 @@ public sealed class ConversationInputReviewRegressionTests
             var channel = new SelfClaw.Desktop.Services.WebView.WebViewHostChannel();
             var posted = new List<string>();
             channel.Attach(posted.Add);
-            using var publisher = new ConversationInputPublisher(h.Fixture.Inputs, h.Changes, channel,
+            using var publisher = new ConversationInputPublisher(h.Fixture.Inputs, h.Changes, h.Runs, h.Switch, channel,
                 System.Windows.Threading.Dispatcher.CurrentDispatcher,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<ConversationInputPublisher>.Instance);
             var bridge = new ConversationInputBridge(h.Service, publisher, channel, System.Windows.Threading.Dispatcher.CurrentDispatcher);

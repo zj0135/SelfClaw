@@ -1,12 +1,13 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
-import { ArrowRight, LoaderCircle, Square, ShieldAlert, Check, X, Webhook } from 'lucide-vue-next';
+import { ArrowRight, CornerDownRight, LoaderCircle, Square, ShieldAlert, Check, X, Webhook } from 'lucide-vue-next';
 import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import PermissionSelector from './PermissionSelector.vue';
 import ComposerAddMenu from './ComposerAddMenu.vue';
 import { formatHookSource } from '../../renderers/shared.js';
+import { describeInputReason } from '../../renderers/conversationInputReasons.js';
 
 const props = defineProps({
 	busy: {
@@ -23,6 +24,19 @@ const props = defineProps({
 	queueable: {
 		type: Boolean,
 		default: false,
+	},
+	// 能否把当前输入直接用于调整正在执行的回合；由宿主发布，界面不自判。
+	canSteer: {
+		type: Boolean,
+		default: false,
+	},
+	steerReason: {
+		type: String,
+		default: '',
+	},
+	notice: {
+		type: String,
+		default: '',
 	},
 	workspaceSelection: {
 		type: Object,
@@ -124,17 +138,26 @@ const workspaceMode = ref('local');
 const shellRef = ref(null);
 const textareaRef = ref(null);
 
+const steerTitle = computed(() => props.canSteer
+	? '调整当前任务'
+	: describeInputReason(props.steerReason, '当前回合不能调整'));
+
 const canSend = computed(() => composerText.value.trim().length > 0 && (!props.busy || props.queueable));
 
-function submit() {
+function submit(mode = 'follow-up') {
 	const prompt = composerText.value.trim();
 	if (!prompt || (props.busy && !props.queueable)) {
+		return;
+	}
+
+	if (mode === 'steer' && !props.canSteer) {
 		return;
 	}
 
 	emit('submit', {
 		prompt,
 		workspaceMode: workspaceMode.value,
+		mode,
 		accept() {
 			if (composerText.value.trim() === prompt) composerText.value = '';
 		},
@@ -245,6 +268,7 @@ defineExpose({
 			<textarea ref="textareaRef" v-model="composerText" class="composer-input" rows="3"
 				placeholder="让助手帮你处理项目..." @keydown="onKeydown"></textarea>
 			<p v-if="submitError" class="composer-error" role="alert">{{ submitError }}</p>
+			<p v-if="props.notice" class="composer-notice" role="status">{{ props.notice }}</p>
 			<div class="composer-toolbar">
 				<!-- 左侧只保留「+ / 代理 / 模型」三个无框入口；权限与发送靠右 -->
 				<div class="composer-tools-left">
@@ -258,8 +282,12 @@ defineExpose({
 					<PermissionSelector :mode="toolPermissionMode" align="end"
 						@select="emit('select-permission-mode', $event)" />
 					<button v-if="props.busy && props.queueable" class="send-btn queue" type="button" :disabled="!canSend"
-						title="加入队列" aria-label="加入队列" @click="submit">
+						title="加入队列" aria-label="加入队列" @click="submit('follow-up')">
 						<ArrowRight :size="17" :stroke-width="2.2" aria-hidden="true" />
+					</button>
+					<button v-if="props.busy && props.queueable" class="send-btn steer" type="button" :disabled="!canSend || !canSteer"
+						:title="steerTitle" aria-label="调整当前任务" @click="submit('steer')">
+						<CornerDownRight :size="16" :stroke-width="2.2" aria-hidden="true" />
 					</button>
 					<button v-if="props.busy && props.stoppable" class="send-btn stop" type="button" title="停止生成" aria-label="停止生成"
 						@click="stop">
@@ -269,7 +297,7 @@ defineExpose({
 						<LoaderCircle :size="16" class="spin" aria-hidden="true" />
 					</span>
 					<button v-else class="send-btn" type="button" :disabled="!canSend" title="发送" aria-label="发送"
-						@click="submit">
+						@click="submit('follow-up')">
 						<ArrowRight :size="17" :stroke-width="2.2" aria-hidden="true" />
 					</button>
 				</div>
@@ -339,6 +367,14 @@ defineExpose({
 	align-self: end;
 	margin: 2px 2px 7px;
 	color: var(--err-text);
+	font-size: var(--fs-115);
+	line-height: 1.35;
+}
+
+.composer-notice {
+	align-self: end;
+	margin: 2px 2px 7px;
+	color: var(--accent);
 	font-size: var(--fs-115);
 	line-height: 1.35;
 }
@@ -555,6 +591,28 @@ defineExpose({
 .send-btn.stop {
 	background: var(--text);
 	box-shadow: none;
+}
+
+.send-btn.steer {
+	background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+	color: var(--accent);
+	box-shadow: none;
+}
+
+.send-btn.steer:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--accent) 20%, var(--panel));
+	box-shadow: none;
+	transform: translateY(-1px);
+}
+
+.send-btn.steer:disabled {
+	background: var(--border-strong);
+	color: var(--muted);
+}
+
+.send-btn.steer:disabled:hover {
+	background: var(--border-strong);
+	transform: none;
 }
 
 .send-btn.background-busy {

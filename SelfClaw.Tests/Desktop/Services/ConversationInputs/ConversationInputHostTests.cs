@@ -3,7 +3,9 @@ using System.Windows.Threading;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.ConversationInputs;
+using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Tests.TestDoubles;
 
@@ -94,7 +96,7 @@ public sealed class ConversationInputHostTests
         });
 
     [Fact]
-    public Task Steer_and_promote_are_rejected_explicitly()
+    public Task Steer_and_promote_are_rejected_while_the_switch_is_off()
         => WpfDispatcherTest.RunAsync(async () =>
         {
             using var context = new HostContext();
@@ -104,6 +106,8 @@ public sealed class ConversationInputHostTests
             {
                 subscriptionId = context.SubscriptionId, conversationId = conversation
             }), CancellationToken.None);
+            context.LastState().GetProperty("canSteer").GetBoolean().Should().BeFalse();
+            context.LastState().TryGetProperty("steerReason", out _).Should().BeFalse();
 
             await context.Bridge.HandleAsync("conversation-input/promote", context.Payload(new
             {
@@ -116,6 +120,52 @@ public sealed class ConversationInputHostTests
                 inputId = Guid.NewGuid(), expectedRevision = 1, targetTurnId = Guid.NewGuid()
             }), CancellationToken.None);
             context.LastResult().GetProperty("errorCode").GetString().Should().Be("steer-not-enabled");
+        });
+
+    [Fact]
+    public Task Promote_publishes_the_host_verdict_and_keeps_the_input_identity()
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            using var context = new HostContext(steerEnabled: true);
+            var conversation = await context.CreateConversationAsync();
+            await context.AcceptAsync(conversation, "queued for promote");
+            await context.Bridge.HandleAsync("conversation-input/subscribe", context.Payload(new
+            {
+                subscriptionId = context.SubscriptionId, conversationId = conversation
+            }), CancellationToken.None);
+            var item = context.LastState().GetProperty("items")[0];
+            var inputId = item.GetProperty("inputId").GetString()!;
+            var revision = item.GetProperty("revision").GetInt32();
+            context.LastState().GetProperty("canSteer").GetBoolean().Should().BeFalse("no live turn yet");
+
+            var handle = await context.StartTurnAsync(conversation);
+            await context.WaitForStateAsync(state => state.GetProperty("canSteer").GetBoolean());
+            var steerable = context.LastState();
+            steerable.TryGetProperty("steerReason", out var steerReason).Should().BeFalse();
+            steerable.GetProperty("steerTargetTurnId").GetString().Should().Be(handle.TurnId.ToString("D"));
+
+            await context.Bridge.HandleAsync("conversation-input/promote", context.Payload(new
+            {
+                inputId, expectedRevision = revision, targetTurnId = handle.TurnId
+            }), CancellationToken.None);
+            var result = context.LastResult();
+            result.GetProperty("ok").GetBoolean().Should().BeTrue();
+            result.GetProperty("inputId").GetString().Should().Be(inputId);
+            result.GetProperty("revision").GetInt32().Should().Be(revision + 1);
+
+            await context.WaitForStateAsync(state => state.GetProperty("items")[0].GetProperty("kind").GetString() == "steer");
+            var promoted = context.LastState().GetProperty("items")[0];
+            promoted.GetProperty("inputId").GetString().Should().Be(inputId);
+            promoted.GetProperty("sequence").GetInt64().Should().Be(item.GetProperty("sequence").GetInt64());
+
+            await context.Bridge.HandleAsync("conversation-input/promote", context.Payload(new
+            {
+                inputId, expectedRevision = revision, targetTurnId = handle.TurnId
+            }), CancellationToken.None);
+            context.LastResult().GetProperty("conflict").GetBoolean().Should().BeTrue();
+            (await context.StoredKindAsync(Guid.Parse(inputId))).Should().Be("steer", "a stale promote must not create a second input");
+
+            context.Harness.Runs.Complete(handle, false);
         });
 
     [Fact]
@@ -148,12 +198,13 @@ public sealed class ConversationInputHostTests
 
     private sealed class HostContext : IDisposable
     {
-        private readonly ConversationInputTestHarness _harness = new();
+        private readonly ConversationInputTestHarness _harness;
         private readonly List<JsonDocument> _posted = [];
         private readonly WebViewHostChannel _channel = new();
 
-        public HostContext()
+        public HostContext(bool steerEnabled = false)
         {
+            _harness = new ConversationInputTestHarness(queueEnabled: true, steerEnabled: steerEnabled);
             Channel = _channel;
             Changes = _harness.Changes;
             Bridge = new ConversationInputBridge(_harness.Service, Publisher, _channel, Dispatcher.CurrentDispatcher);
@@ -171,8 +222,10 @@ public sealed class ConversationInputHostTests
         public WebViewHostChannel Channel { get; }
         public ConversationInputChangeNotifier Changes { get; }
         public ConversationInputBridge Bridge { get; }
+        public ConversationInputTestHarness Harness => _harness;
         public ConversationInputPublisher Publisher => _publisher ??= new ConversationInputPublisher(
-            _harness.Fixture.Inputs, Changes, _channel, Dispatcher.CurrentDispatcher, NullLogger<ConversationInputPublisher>.Instance);
+            _harness.Fixture.Inputs, Changes, _harness.Runs, _harness.Switch, _channel, Dispatcher.CurrentDispatcher,
+            NullLogger<ConversationInputPublisher>.Instance);
         private ConversationInputPublisher? _publisher;
 
         public Task<Guid> CreateConversationAsync()
@@ -215,6 +268,33 @@ public sealed class ConversationInputHostTests
             }
 
             throw new TimeoutException($"Expected {expected} state pushes but saw {StateCount}.");
+        }
+
+        public async Task<ConversationRunHandle> StartTurnAsync(Guid conversationId)
+        {
+            var handle = _harness.Runs.TryReserve(conversationId, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)
+                ?? throw new InvalidOperationException("The turn could not be reserved.");
+            await _harness.StartReservedTurnAsync(conversationId, handle.TurnId);
+            return handle;
+        }
+
+        public async Task<string> StoredKindAsync(Guid inputId)
+        {
+            var kind = await _harness.Fixture.ScalarAsync("SELECT kind FROM conversation_inputs WHERE id = $id;",
+                ("$id", inputId.ToString("D")));
+            return (long)kind! == 1 ? "steer" : "follow-up";
+        }
+
+        public async Task WaitForStateAsync(Func<JsonElement, bool> predicate)
+        {
+            for (var attempt = 0; attempt < 200; attempt++)
+            {
+                if (_posted.Any(document => document.RootElement.GetProperty("type").GetString() == "conversation-input/state" &&
+                    predicate(document.RootElement))) return;
+                await Task.Delay(10);
+            }
+
+            throw new TimeoutException("The expected queue state was not published.");
         }
 
         public void Dispose()

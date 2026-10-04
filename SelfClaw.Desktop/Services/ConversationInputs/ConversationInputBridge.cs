@@ -7,9 +7,8 @@ namespace SelfClaw.Desktop.Services.ConversationInputs;
 
 /// <summary>
 /// Maps <c>conversation-input/*</c> operations onto the input service. Submission stays on the
-/// existing <c>send-prompt</c> entry (P4 adds <c>kind=steer</c> + <c>targetTurnId</c> there); this
-/// bridge owns only the queue's list, edit, cancel, pause/resume and detail operations. The UI
-/// steer/promote operations still belong to P5 and are rejected here.
+/// existing <c>send-prompt</c> entry with <c>kind=steer</c> + <c>targetTurnId</c>; this bridge owns
+/// the queue's list, edit, cancel, promote, pause/resume and detail operations.
 /// </summary>
 internal sealed class ConversationInputBridge
 {
@@ -73,6 +72,10 @@ internal sealed class ConversationInputBridge
                     await ReplyDetailAsync(requestId, ReadGuid(payload, "inputId"), cancellationToken);
                     break;
                 case "conversation-input/promote":
+                    await ReplyUpdateAsync("promote", requestId,
+                        await _inputs.PromoteAsync(ReadGuid(payload, "inputId"), ReadInteger(payload, "expectedRevision"),
+                            ReadGuid(payload, "targetTurnId"), cancellationToken));
+                    break;
                 case "conversation-input/steer":
                     throw new ConversationInputRejectedException(ConversationInputReason.SteerNotEnabled);
                 default:
@@ -100,6 +103,7 @@ internal sealed class ConversationInputBridge
         {
             type = "conversation-input/result", requestId, operation, ok = result.Status == ConversationInputUpdateStatus.Applied,
             status = result.Status.ToString().ToLowerInvariant(), conflict,
+            reason = result.Reason ?? (conflict ? ConversationInputReason.QueueRevisionConflict : null),
             inputId = result.Input?.Id, revision = result.Input?.Revision, queueRevision = result.QueueRevision
         })).Task;
     }

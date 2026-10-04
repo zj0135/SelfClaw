@@ -3,6 +3,7 @@ using System.Windows.Threading;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.WebView;
 
 namespace SelfClaw.Desktop.Services.ConversationInputs;
@@ -10,12 +11,14 @@ namespace SelfClaw.Desktop.Services.ConversationInputs;
 /// <summary>
 /// Publishes the bounded queue snapshot for the single active subscription. Notifications are
 /// invalidations only; every push re-reads the durable store, so an old revision can never roll a
-/// newer selection back.
+/// newer selection back. Run changes re-publish so the host-owned steer verdict follows the turn.
 /// </summary>
 internal sealed class ConversationInputPublisher : IDisposable
 {
     private readonly IConversationInputStore _store;
     private readonly ConversationInputChangeNotifier _changes;
+    private readonly ConversationRunCoordinator _runs;
+    private readonly ConversationInputFeatureSwitch _featureSwitch;
     private readonly WebViewHostChannel _channel;
     private readonly Dispatcher _dispatcher;
     private readonly ILogger<ConversationInputPublisher> _logger;
@@ -24,14 +27,18 @@ internal sealed class ConversationInputPublisher : IDisposable
     private bool _disposed;
 
     public ConversationInputPublisher(IConversationInputStore store, ConversationInputChangeNotifier changes,
+        ConversationRunCoordinator runs, ConversationInputFeatureSwitch featureSwitch,
         WebViewHostChannel channel, Dispatcher dispatcher, ILogger<ConversationInputPublisher> logger)
     {
         _store = store;
         _changes = changes;
+        _runs = runs;
+        _featureSwitch = featureSwitch;
         _channel = channel;
         _dispatcher = dispatcher;
         _logger = logger;
         _changes.Changed += OnChanged;
+        _runs.Changed += OnRunChanged;
         _channel.ReadyChanged += OnReadyChanged;
     }
 
@@ -71,6 +78,7 @@ internal sealed class ConversationInputPublisher : IDisposable
         if (_disposed) return;
         _disposed = true;
         _changes.Changed -= OnChanged;
+        _runs.Changed -= OnRunChanged;
         _channel.ReadyChanged -= OnReadyChanged;
         _subscriptionId = null;
         _conversationId = null;
@@ -86,6 +94,13 @@ internal sealed class ConversationInputPublisher : IDisposable
         if (_disposed || _conversationId != conversationId) return;
         if (!_channel.IsReady || _dispatcher.HasShutdownStarted) return;
         SchedulePush(conversationId);
+    }
+
+    private void OnRunChanged(ConversationRunChange change)
+    {
+        if (_disposed || _conversationId != change.Handle.ConversationId) return;
+        if (!_channel.IsReady || _dispatcher.HasShutdownStarted) return;
+        SchedulePush(change.Handle.ConversationId);
     }
 
     private void OnReadyChanged(bool ready)
@@ -123,6 +138,9 @@ internal sealed class ConversationInputPublisher : IDisposable
         {
             if (_disposed || _conversationId != conversationId || _subscriptionId != subscriptionId) return;
             if (CurrentState is { } newer && newer.QueueRevision > state.QueueRevision) state = newer;
+            var (canSteer, steerReason, steerTargetTurnId) = ConversationInputSteerPolicy.Evaluate(
+                _runs.GetActiveRun(conversationId), _featureSwitch.SteerEnabled);
+            state = state with { CanSteer = canSteer, SteerReason = steerReason, SteerTargetTurnId = steerTargetTurnId };
             CurrentState = state;
             var payload = ConversationQueueStateFormatter.Create(subscriptionId, state, requestId);
 

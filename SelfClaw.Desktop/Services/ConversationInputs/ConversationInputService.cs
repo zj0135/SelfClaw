@@ -158,6 +158,10 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
     public Task<ConversationInputUpdateResult> RetryAsync(Guid inputId, int expectedRevision, CancellationToken cancellationToken = default)
         => _queue.RetryAsync(inputId, expectedRevision, cancellationToken);
 
+    public Task<ConversationInputUpdateResult> PromoteAsync(Guid inputId, int expectedRevision, Guid targetTurnId,
+        CancellationToken cancellationToken = default)
+        => _queue.PromoteAsync(inputId, expectedRevision, targetTurnId, cancellationToken);
+
     public Task<ConversationInputQueueState> GetStateAsync(Guid conversationId, CancellationToken cancellationToken = default)
         => _queue.GetStateAsync(conversationId, cancellationToken);
 
@@ -169,25 +173,13 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
     {
         if (!requestsSteer) return (ConversationInputKind.FollowUp, null, null, null);
         var handle = _runs.GetActiveRun(submission.ConversationId);
-        var session = handle?.InputSession;
-        if (handle is null || handle.TurnId != submission.TargetTurnId || session is null)
+        var (canSteer, reason, targetTurnId) = ConversationInputSteerPolicy.Evaluate(handle, _featureSwitch.SteerEnabled);
+        if (!canSteer || targetTurnId != submission.TargetTurnId)
         {
-            var reason = handle?.Origin == DirectTurnOrigin.Continuation
-                ? ConversationInputReason.ContinuationActive : ConversationInputReason.TargetTurnClosed;
-            return (ConversationInputKind.FollowUp, null, reason, null);
+            return (ConversationInputKind.FollowUp, null, reason ?? ConversationInputReason.TargetTurnClosed, null);
         }
 
-        if (session.SteerIntakeClosed)
-        {
-            return (ConversationInputKind.FollowUp, null, ConversationInputReason.TargetTurnClosed, null);
-        }
-
-        if (session.SteerBlockReason is { } blocked)
-        {
-            return (ConversationInputKind.FollowUp, null, blocked, null);
-        }
-
-        return (ConversationInputKind.Steer, submission.TargetTurnId, null, session);
+        return (ConversationInputKind.Steer, targetTurnId, null, handle!.InputSession);
     }
 
     private async Task<ConversationInputExecutionSnapshot?> CaptureAsync(ConversationInputSubmission submission, CancellationToken token)

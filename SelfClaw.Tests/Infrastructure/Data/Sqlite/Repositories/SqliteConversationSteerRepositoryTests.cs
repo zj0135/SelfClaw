@@ -191,4 +191,43 @@ public sealed class SqliteConversationSteerRepositoryTests
             .Should().Be(ConversationInputReason.HookRequiresNewTurn);
         (await fixture.Inputs.ReadConsumptionAsync(claimed!)).Should().BeNull();
     }
+
+    [Fact]
+    public async Task Promote_converts_the_same_pending_row_and_rejects_closed_or_skill_targets()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var input = await fixture.AcceptFollowUpAsync(start.Turn.ConversationId, "promote me");
+
+        var promoted = await fixture.Inputs.PromoteAsync(new ConversationInputPromoteRequest(input.Id, input.Revision, start.Turn.Id));
+
+        promoted.Status.Should().Be(ConversationInputUpdateStatus.Applied);
+        promoted.Input!.Id.Should().Be(input.Id);
+        promoted.Input.Sequence.Should().Be(input.Sequence);
+        promoted.Input.Kind.Should().Be(ConversationInputKind.Steer);
+        promoted.Input.TargetTurnId.Should().Be(start.Turn.Id);
+        promoted.Input.Status.Should().Be(ConversationInputStatus.Pending);
+        promoted.QueueRevision.Should().BeGreaterThan(0);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(1L);
+
+        var stale = await fixture.Inputs.PromoteAsync(new ConversationInputPromoteRequest(input.Id, input.Revision, start.Turn.Id));
+        stale.Status.Should().Be(ConversationInputUpdateStatus.Conflict);
+
+        var skill = await fixture.AcceptFollowUpAsync(start.Turn.ConversationId, "[/pdf] summarize");
+        var skillResult = await fixture.Inputs.PromoteAsync(new ConversationInputPromoteRequest(skill.Id, skill.Revision, start.Turn.Id));
+        skillResult.Status.Should().Be(ConversationInputUpdateStatus.Invalid);
+        skillResult.Reason.Should().Be(ConversationInputReason.SkillRequiresNewTurn);
+        (await fixture.Inputs.GetInputAsync(skill.Id))!.Kind.Should().Be(ConversationInputKind.FollowUp);
+
+        await fixture.Turns.TryFinalizeTurnAsync(new(start.Turn with
+        {
+            Status = ConversationTurnStatus.Succeeded,
+            CompletedAtUtc = DateTimeOffset.UtcNow
+        }, [], []));
+        var late = await fixture.AcceptFollowUpAsync(start.Turn.ConversationId, "after close");
+        var lateResult = await fixture.Inputs.PromoteAsync(new ConversationInputPromoteRequest(late.Id, late.Revision, start.Turn.Id));
+        lateResult.Status.Should().Be(ConversationInputUpdateStatus.Invalid);
+        lateResult.Reason.Should().Be(ConversationInputReason.TargetTurnClosed);
+        (await fixture.Inputs.GetInputAsync(late.Id))!.Kind.Should().Be(ConversationInputKind.FollowUp);
+    }
 }

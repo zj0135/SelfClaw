@@ -57,14 +57,14 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - **Plan mode**：已删除；只有 `AgentExecutionMode.Direct` / `Cli`。
 - **Channel conversations**：数据模型保留；UI 与调度只接受 `ConversationKind.Interactive`。
 - **Legacy provider profiles**（`ProviderProfile`、`IProfileRepository`、`profiles` 表、`ChatTurnRequest.Profile/ApiKey`）：已删除；Direct 只用 `ModelProfileId`。
-- **Direct Queue 默认关闭**（`SELFCLAW_QUEUE_ENABLED`）；**Steer 已停用**（枚举存在，受理/执行不可用）。
+- **Direct Queue 与 Steer 默认关闭**（`SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`）；后端与 Vue 交互已实现（P4/P5），真实桌面 WebView2 验收在 P6。
 - **附件**：只保留持久化/转录渲染/虚拟主机（`message_attachments`、`https://attachments.selfclaw.local`）；输入入口一律拒绝（`ConversationInputReason.AttachmentsUnsupported`），不要再引用已不存在的 6 张 / 10 MB / 30 MB 限制。
 - **设置页**：AI 提供商 / 模型管理 / 编程助手 / 代理助手 / 插件 / 宠物已接宿主；其余页面（自动化、图像生成、翻译等）是前端 mock。
 
 ## 深入阅读
 
 - 端到端主干：`docs/pipeline-architecture.md`（全局图）→ `docs/runtime-execution-flow.md`（当前调用链、回合/准入/消费基线）。
-- Direct 证据链：`docs/direct-agent-architecture-review.md`、`docs/direct-message-input-p{1,2}-implementation-review.md`、`docs/direct-message-input-p3-review-fixes.md`。
+- Direct 证据链：`docs/direct-agent-architecture-review.md`、`docs/direct-message-input-p{1,2,3,4,5}-implementation-review.md`、`docs/direct-message-input-p3-review-fixes.md`。
 - 桌面/前端：`docs/desktop-architecture-review.md`（§5 剩余验证限制、§7 窗口动画、§8 关闭延迟）、`docs/plugin-view-system-design.md`、`docs/message-segments-system-design.md`。
 - 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/direct-hooks-system-design.md`、`docs/ai-provider-system-design.md`、`docs/pet-system-design.md`、`docs/usage-tracking-design.md`。
 - 规则：spec/issue 写 `.scratch/<feature-slug>/`（git 忽略）；耐久结论写 `docs/`；被取代的设计要么更新要么删除，不留"历史保留"。

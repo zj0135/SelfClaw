@@ -6,4 +6,6 @@ public sealed record ConversationInputQueueState(
     bool Paused,
     string? PauseReason,
     bool CanSteer,
-    IReadOnlyList<ConversationInputQueueItem> Items);
+    IReadOnlyList<ConversationInputQueueItem> Items,
+    string? SteerReason = null,
+    Guid? SteerTargetTurnId = null);

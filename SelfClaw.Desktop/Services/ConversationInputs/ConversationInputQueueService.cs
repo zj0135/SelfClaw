@@ -100,6 +100,56 @@ internal sealed class ConversationInputQueueService
         return result;
     }
 
+    /// <summary>
+    /// Atomically converts a pending follow-up into a steer for the live turn. The session gate is
+    /// shared with the boundary claim, so a promote that loses the close race stays a follow-up
+    /// instead of leaving a steer bound to a turn that can no longer consume it.
+    /// </summary>
+    public async Task<ConversationInputUpdateResult> PromoteAsync(Guid inputId, int expectedRevision, Guid targetTurnId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_featureSwitch.SteerEnabled) throw new ConversationInputRejectedException(ConversationInputReason.SteerNotEnabled);
+        if (!_featureSwitch.QueueEnabled) throw new ConversationInputRejectedException(ConversationInputReason.QueueDisabled);
+        if (targetTurnId == Guid.Empty) throw new ArgumentException("A promote requires a target turn.", nameof(targetTurnId));
+        var input = await _store.GetInputAsync(inputId, cancellationToken).ConfigureAwait(false);
+        if (input is null) return new(ConversationInputUpdateStatus.Missing, null, 0);
+        if (input.Status != ConversationInputStatus.Pending || input.Kind != ConversationInputKind.FollowUp)
+        {
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Conflict, input,
+                await RevisionAsync(input.ConversationId, cancellationToken).ConfigureAwait(false));
+        }
+
+        var handle = _runs.GetActiveRun(input.ConversationId);
+        var (canSteer, reason, activeTurnId) = ConversationInputSteerPolicy.Evaluate(handle, _featureSwitch.SteerEnabled);
+        if (!canSteer || activeTurnId != targetTurnId)
+        {
+            // The published verdict may have gone stale with the turn; refresh the list on the way out.
+            _changes.Notify(input.ConversationId);
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Invalid, input,
+                await RevisionAsync(input.ConversationId, cancellationToken).ConfigureAwait(false),
+                reason ?? ConversationInputReason.TargetTurnClosed);
+        }
+
+        using var operation = _runs.TryBeginInputOperation(input.ConversationId, cancellationToken)
+            ?? throw new ConversationInputRejectedException(ConversationInputReason.ConversationUnavailable);
+        var session = handle!.InputSession!;
+        var result = await session.TryAcceptSteerAsync(
+                token => _updates.PromoteAsync(new ConversationInputPromoteRequest(inputId, expectedRevision, targetTurnId), token),
+                operation.CancellationToken)
+            .ConfigureAwait(false);
+        if (result is null)
+        {
+            _changes.Notify(input.ConversationId);
+            return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Invalid, input,
+                await RevisionAsync(input.ConversationId, cancellationToken).ConfigureAwait(false),
+                ConversationInputReason.TargetTurnClosed);
+        }
+
+        _changes.Notify(input.ConversationId);
+        if (result.Status == ConversationInputUpdateStatus.Applied) session.NotifySteerAccepted();
+        return result;
+    }
+
     public Task<ConversationInputQueueState> GetStateAsync(Guid conversationId, CancellationToken cancellationToken = default)
         => _store.GetQueueStateAsync(conversationId, cancellationToken);
 
@@ -111,4 +161,7 @@ internal sealed class ConversationInputQueueService
 
     private static ConversationInputUpdateResult Invalid(ConversationInputRecord input, string? reason)
         => new(ConversationInputUpdateStatus.Invalid, input, 0, reason);
+
+    private async Task<long> RevisionAsync(Guid conversationId, CancellationToken cancellationToken)
+        => (await _store.GetQueueStateAsync(conversationId, cancellationToken).ConfigureAwait(false)).QueueRevision;
 }

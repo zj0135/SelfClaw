@@ -174,8 +174,8 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession, IDirectT
     /// commits before the close (and the close claims it) or it observes the closed intake and the
     /// caller falls back to a follow-up.
     /// </summary>
-    internal async Task<ConversationInputAcceptResult?> TryAcceptSteerAsync(
-        Func<CancellationToken, Task<ConversationInputAcceptResult>> accept, CancellationToken cancellationToken)
+    internal async Task<T?> TryAcceptSteerAsync<T>(
+        Func<CancellationToken, Task<T>> accept, CancellationToken cancellationToken) where T : class
     {
         await _claimGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
