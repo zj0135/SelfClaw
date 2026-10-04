@@ -63,8 +63,11 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
         services.AddSingleton<IConversationInputStore>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
+        services.AddSingleton<IConversationInputUpdateStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
         services.AddSingleton<IConversationInputSchedulerStore>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
+        services.AddSingleton<SqliteStartupRecovery>();
         services.AddSingleton<IUsageStatisticsReader, SqliteUsageStatisticsReader>();
         services.AddSingleton<SqliteWorkspaceRepository>();
         services.AddSingleton<IWorkspaceRootRepository>(serviceProvider => serviceProvider.GetRequiredService<SqliteWorkspaceRepository>());
@@ -205,6 +208,7 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         await services.GetRequiredService<IConversationRepository>().InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await services.GetRequiredService<SqliteStartupRecovery>().RecoverAsync(cancellationToken).ConfigureAwait(false);
         await services.GetRequiredService<IAiProviderRepository>().InitializeAsync(cancellationToken).ConfigureAwait(false);
         await services.GetRequiredService<IExtensionPackageRepository>().InitializeAsync(cancellationToken).ConfigureAwait(false);
         await services.GetRequiredService<ExtensionCatalog>().ReconcileAsync(cancellationToken).ConfigureAwait(false);

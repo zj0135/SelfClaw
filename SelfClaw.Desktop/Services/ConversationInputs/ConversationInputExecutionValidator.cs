@@ -1,6 +1,7 @@
 using System.IO;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Agents;
 
 namespace SelfClaw.Desktop.Services.ConversationInputs;
@@ -11,35 +12,39 @@ internal sealed class ConversationInputExecutionValidator
     private readonly IAiModelCatalog _models;
     private readonly AgentSettingsService _agents;
 
-    internal ConversationInputExecutionValidator(IWorkspaceRootRepository roots, IAiModelCatalog models, AgentSettingsService agents)
+    public ConversationInputExecutionValidator(IWorkspaceRootRepository roots, IAiModelCatalog models, AgentSettingsService agents)
     {
         _roots = roots;
         _models = models;
         _agents = agents;
     }
 
-    internal async Task<PreparedFollowUp> PrepareAsync(ConversationRecord conversation,
+    internal async Task<ConversationInputPreparation> PrepareAsync(ConversationRecord conversation,
         ConversationInputExecutionSnapshot snapshot, CancellationToken token)
     {
-        var current = ConversationInputSnapshots.ReadAgent(_agents, snapshot.AgentId)
-            ?? throw new InvalidOperationException(ConversationInputReason.AgentMissing);
+        ArgumentNullException.ThrowIfNull(conversation);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var current = ConversationInputSnapshots.ReadAgent(_agents, snapshot.AgentId);
+        if (current is null) return Unavailable(ConversationInputReason.AgentMissing);
         if (snapshot.Version != 1 || snapshot.AgentDefinition is null || snapshot.DefinitionHash is null ||
-            snapshot.Mode != SelfClaw.Core.Runtime.AgentExecutionMode.Direct ||
+            snapshot.Mode != AgentExecutionMode.Direct ||
             ConversationInputSnapshots.Hash(snapshot.AgentDefinition) != snapshot.DefinitionHash ||
             ConversationInputSnapshots.Hash(current) != snapshot.DefinitionHash)
-            throw new InvalidOperationException(ConversationInputReason.AgentChanged);
+            return Unavailable(ConversationInputReason.AgentChanged);
         if (snapshot.ModelProfileId is not { } modelId || !await _models.IsModelAvailableAsync(modelId, token).ConfigureAwait(false))
-            throw new InvalidOperationException(ConversationInputReason.ModelDisabled);
-        WorkspaceRoot? root = null;
+            return Unavailable(ConversationInputReason.ModelDisabled);
         if (conversation.WorkspaceRootId != snapshot.WorkspaceRootId)
-            throw new InvalidOperationException(ConversationInputReason.WorkspaceMissing);
+            return Unavailable(ConversationInputReason.WorkspaceMissing);
+        WorkspaceRoot? root = null;
         if (snapshot.WorkspaceRootId is { } rootId)
         {
             root = (await _roots.ListWorkspaceRootsAsync(token).ConfigureAwait(false)).FirstOrDefault(item => item.Id == rootId);
             if (root is null || !string.Equals(root.RootPath, snapshot.WorkspaceRootPath, StringComparison.OrdinalIgnoreCase) ||
                 !Directory.Exists(root.RootPath))
-                throw new InvalidOperationException(ConversationInputReason.WorkspaceMissing);
+                return Unavailable(ConversationInputReason.WorkspaceMissing);
         }
-        return new(snapshot.AgentDefinition with { Mode = snapshot.Mode }, root);
+        return new(new PreparedFollowUp(snapshot.AgentDefinition with { Mode = snapshot.Mode }, root), null);
     }
+
+    private static ConversationInputPreparation Unavailable(string reason) => new(null, reason);
 }

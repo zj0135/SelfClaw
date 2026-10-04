@@ -32,8 +32,8 @@ internal sealed partial class SqliteConversationInputRepository
         return state;
     }
 
-    public async Task<ConversationInputRecord?> TryClaimNextFollowUpAsync(
-        Guid conversationId, Guid ownerRunId, Guid claimId, CancellationToken cancellationToken = default)
+    public async Task<ConversationInputRecord?> TryClaimNextFollowUpAsync(Guid conversationId, Guid ownerRunId, Guid claimId,
+        Guid? immediateInputId = null, CancellationToken cancellationToken = default)
     {
         if (ownerRunId == Guid.Empty || claimId == Guid.Empty)
         {
@@ -43,7 +43,7 @@ internal sealed partial class SqliteConversationInputRepository
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = connection.BeginTransaction(deferred: false);
         var state = await ReadStateAsync(connection, transaction, conversationId, cancellationToken).ConfigureAwait(false);
-        if (state.Paused)
+        if (state.Paused && immediateInputId is null)
         {
             return null;
         }
@@ -64,12 +64,16 @@ internal sealed partial class SqliteConversationInputRepository
             candidate = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is string value ? Guid.Parse(value) : null;
         }
 
-        if (candidate is not { } inputId)
+        if (candidate is not { } inputId || (state.Paused && inputId != immediateInputId))
         {
             return null;
         }
 
-        int revision;
+        if (state.Paused)
+        {
+            await ResumeQueueAsync(connection, transaction, conversationId, cancellationToken).ConfigureAwait(false);
+        }
+
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
@@ -86,8 +90,6 @@ internal sealed partial class SqliteConversationInputRepository
             {
                 return null;
             }
-
-            revision = await ReadRevisionAsync(connection, transaction, inputId, cancellationToken).ConfigureAwait(false);
         }
 
         await AdvanceQueueRevisionAsync(connection, transaction, conversationId, cancellationToken).ConfigureAwait(false);
@@ -126,90 +128,24 @@ internal sealed partial class SqliteConversationInputRepository
         return ids;
     }
 
-    public async Task<IReadOnlyList<ConversationInputQueueState>> RecoverStartupAsync(CancellationToken cancellationToken = default)
+    public async Task<ConversationInputUpdateResult> HoldAsync(
+        Guid inputId, int expectedRevision, string reasonCode, CancellationToken cancellationToken = default)
     {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var transaction = connection.BeginTransaction(deferred: false);
-        await using (var interrupted = connection.CreateCommand())
-        {
-            interrupted.Transaction = transaction;
-            interrupted.CommandText = """
-                UPDATE conversation_turns SET status = 6, completed_at_utc = $at, error_message = 'Interrupted by restart'
-                WHERE status = 0 AND execution_mode = 0 AND origin = 0;
-                UPDATE messages SET status = 2
-                WHERE status = 1 AND turn_id IN (SELECT id FROM conversation_turns
-                    WHERE status = 6 AND error_message = 'Interrupted by restart');
-                """;
-            interrupted.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-            await interrupted.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-        var conversationIds = new List<Guid>();
-        await using (var command = connection.CreateCommand())
-        {
-            command.Transaction = transaction;
-            command.CommandText = "SELECT DISTINCT conversation_id FROM conversation_inputs WHERE status IN (0, 1, 3);";
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                conversationIds.Add(Guid.Parse(reader.GetString(0)));
-            }
-        }
-
-        var now = DateTimeOffset.UtcNow.ToString("O");
-        var states = new List<ConversationInputQueueState>();
-        foreach (var conversationId in conversationIds)
-        {
-            await using (var command = connection.CreateCommand())
-            {
-                command.Transaction = transaction;
-                command.CommandText = """
-                    UPDATE conversation_inputs SET status = 3, reason_code = $reason, error_message = NULL,
-                        revision = revision + 1, updated_at_utc = $at
-                    WHERE conversation_id = $id AND status = 1;
-                    """;
-                command.Parameters.AddWithValue("$reason", ConversationInputReason.InterruptedByRestart);
-                command.Parameters.AddWithValue("$at", now);
-                command.Parameters.AddWithValue("$id", conversationId.ToString("D"));
-                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            await using (var command = connection.CreateCommand())
-            {
-                command.Transaction = transaction;
-                command.CommandText = """
-                    UPDATE conversation_inputs SET status = 3, reason_code = $reason, error_message = NULL,
-                        revision = revision + 1, updated_at_utc = $at
-                    WHERE conversation_id = $id AND kind = 1 AND status = 0
-                        ;
-                    """;
-                command.Parameters.AddWithValue("$reason", ConversationInputReason.StaleSteerTarget);
-                command.Parameters.AddWithValue("$at", now);
-                command.Parameters.AddWithValue("$id", conversationId.ToString("D"));
-                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            await using (var command = connection.CreateCommand())
-            {
-                command.Transaction = transaction;
-                command.CommandText = """
-                    INSERT INTO conversation_input_state(conversation_id, next_input_sequence, queue_revision, paused, pause_reason)
-                    VALUES($id, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM conversation_inputs WHERE conversation_id = $id), 1, 1, $reason)
-                    ON CONFLICT(conversation_id) DO UPDATE SET paused = 1,
-                        pause_reason = CASE WHEN conversation_input_state.paused = 1 THEN conversation_input_state.pause_reason ELSE $reason END,
-                        queue_revision = queue_revision + 1;
-                    """;
-                command.Parameters.AddWithValue("$id", conversationId.ToString("D"));
-                command.Parameters.AddWithValue("$reason", ConversationInputReason.InterruptedByRestart);
-                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            states.Add(await ReadQueueStateAsync(connection, transaction, conversationId, cancellationToken).ConfigureAwait(false));
-        }
-
-        if (_beforeCommit is not null)
-            await _beforeCommit("recovery-before-commit", cancellationToken).ConfigureAwait(false);
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        return states;
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
+        return await ConditionalUpdateAsync(inputId, expectedRevision, """
+            UPDATE conversation_inputs SET status = 3, reason_code = $reason, error_message = NULL,
+                revision = revision + 1, updated_at_utc = $at
+            WHERE id = $id AND revision = $revision AND status IN (0, 1);
+            """, ("$reason", reasonCode), cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
+    private static async Task ResumeQueueAsync(
+        SqliteConnection connection, SqliteTransaction transaction, Guid conversationId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "UPDATE conversation_input_state SET paused = 0, pause_reason = NULL WHERE conversation_id = $id;";
+        command.Parameters.AddWithValue("$id", conversationId.ToString("D"));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 }

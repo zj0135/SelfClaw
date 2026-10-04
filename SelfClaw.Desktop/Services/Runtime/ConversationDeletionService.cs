@@ -8,18 +8,17 @@ namespace SelfClaw.Desktop.Services.Runtime;
 internal sealed class ConversationDeletionService
 {
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(8);
-    private const int PauseAttempts = 3;
     private readonly ConversationRunCoordinator _runs;
     private readonly ConversationSessionCoordinator _sessions;
     private readonly ISubagentConversationLifecycle _subagents;
     private readonly ConversationWorkspaceService _workspaces;
     private readonly IConversationRepository _conversations;
-    private readonly IConversationInputStore? _inputs;
+    private readonly IConversationInputSchedulerStore? _inputs;
     private readonly SubagentActivityService? _activity;
 
     public ConversationDeletionService(ConversationRunCoordinator runs, ConversationSessionCoordinator sessions,
         ISubagentConversationLifecycle subagents, ConversationWorkspaceService workspaces, IConversationRepository conversations,
-        SubagentActivityService? activity = null, IConversationInputStore? inputs = null)
+        SubagentActivityService? activity = null, IConversationInputSchedulerStore? inputs = null)
     {
         _runs = runs;
         _sessions = sessions;
@@ -73,19 +72,6 @@ internal sealed class ConversationDeletionService
     private async Task PauseQueueAsync(Guid conversationId)
     {
         if (_inputs is null) return;
-        if (_inputs is IConversationInputSchedulerStore scheduler)
-        {
-            await scheduler.PauseQueueAsync(conversationId, ConversationInputReason.QueuePaused).ConfigureAwait(false);
-            return;
-        }
-        for (var attempt = 0; attempt < PauseAttempts; attempt++)
-        {
-            var state = await _inputs.GetQueueStateAsync(conversationId).ConfigureAwait(false);
-            if (state.Paused) return;
-            var paused = await _inputs.SetPausedAsync(new ConversationInputPauseRequest(
-                conversationId, state.QueueRevision, true, ConversationInputReason.QueuePaused)).ConfigureAwait(false);
-            if (paused.Paused) return;
-        }
-        throw new InvalidOperationException("The queue could not be paused before deletion.");
+        await _inputs.PauseQueueAsync(conversationId, ConversationInputReason.QueuePaused).ConfigureAwait(false);
     }
 }

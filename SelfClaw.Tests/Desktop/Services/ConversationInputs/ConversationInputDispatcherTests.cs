@@ -175,7 +175,7 @@ public sealed class ConversationInputDispatcherTests
     public async Task A_terminal_persistence_failure_pauses_the_queue_with_the_persist_reason()
     {
         using var harness = new ConversationInputTestHarness();
-        harness.Fixture.Turns.BeforeFinalizeCommit = (stage, _) => throw new IOException(stage);
+        harness.Fixture.CommitGate.BeforeFinalize = (stage, _) => throw new IOException(stage);
         var conversation = await harness.CreateConversationAsync();
         await harness.SubmitAsync(conversation, "A");
         await harness.SubmitAsync(conversation, "B");
@@ -365,7 +365,7 @@ public sealed class ConversationInputDispatcherTests
         var head = await harness.Fixture.AcceptFollowUpAsync(conversation, "A", snapshot: harness.Snapshot());
         await harness.Fixture.AcceptFollowUpAsync(conversation, "B", snapshot: harness.Snapshot());
         (await harness.Fixture.Inputs.ListDispatchableConversationIdsAsync()).Should().Contain(conversation);
-        (await harness.Fixture.Inputs.HoldAsync(head.Id, head.Revision, ConversationInputReason.AgentChanged, null))
+        (await harness.Fixture.Inputs.HoldAsync(head.Id, head.Revision, ConversationInputReason.AgentChanged))
             .Status.Should().Be(ConversationInputUpdateStatus.Applied);
 
         (await harness.Fixture.Inputs.ListDispatchableConversationIdsAsync()).Should().NotContain(conversation,
@@ -412,5 +412,66 @@ public sealed class ConversationInputDispatcherTests
         harness.Runtime.Prompts.Should().BeEmpty();
         (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Items.Select(item => item.Preview)
             .Should().Equal("B", "D");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_failed_turn_then_idle_send_starts_immediately(bool queueEnabled)
+    {
+        using var harness = new ConversationInputTestHarness(queueEnabled);
+        harness.Runtime.FailPrompts.Add("A");
+        var conversation = await harness.CreateConversationAsync();
+        await harness.SubmitAsync(conversation, "A");
+        await harness.WaitForAsync(async () => (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Paused
+            && !harness.Runs.IsRunning(conversation));
+
+        harness.Runtime.FailPrompts.Clear();
+        var second = await harness.SubmitAsync(conversation, "B");
+        second.Accepted.Should().BeTrue();
+        await harness.WaitForAsync(async () => !harness.Runs.IsRunning(conversation)
+            && (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Items.Count == 0);
+
+        harness.Runtime.Prompts.Should().Equal("A", "B");
+        (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Paused.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_user_stop_then_idle_send_starts_immediately(bool queueEnabled)
+    {
+        using var harness = new ConversationInputTestHarness(queueEnabled, new GatedAgentChatRuntime());
+        var gated = harness.Gated!;
+        var conversation = await harness.CreateConversationAsync();
+        await harness.SubmitAsync(conversation, "A");
+        await gated.EnteredAsync("A");
+        await harness.Service.StopAsync(conversation);
+        await harness.WaitForAsync(async () => !harness.Runs.IsRunning(conversation));
+
+        gated.Release("B");
+        (await harness.SubmitAsync(conversation, "B")).Accepted.Should().BeTrue();
+        await harness.WaitForAsync(async () => !harness.Runs.IsRunning(conversation)
+            && (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Items.Count == 0);
+
+        gated.Prompts.Should().Equal("A", "B");
+        (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Paused.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_blocked_continuation_does_not_churn_run_changes()
+    {
+        using var harness = new ConversationInputTestHarness();
+        var conversationId = await harness.CreateConversationAsync();
+        var held = await harness.Fixture.AcceptFollowUpAsync(conversationId, "held", snapshot: harness.Snapshot());
+        await harness.Fixture.Inputs.HoldAsync(held.Id, held.Revision, ConversationInputReason.AgentChanged);
+        var conversation = (await harness.Fixture.Conversations.GetConversationAsync(conversationId))!;
+        var changes = 0;
+        harness.Runs.Changed += _ => Interlocked.Increment(ref changes);
+
+        for (var scan = 0; scan < 4; scan++)
+            (await harness.Runs.TryReserveContinuationAsync(conversation)).Should().BeNull();
+
+        changes.Should().Be(0);
     }
 }

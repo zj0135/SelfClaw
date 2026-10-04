@@ -193,12 +193,12 @@ internal sealed partial class SqliteConversationInputRepository
         {
             if (reader.GetInt32(11) != 1 || reader.IsDBNull(4) || reader.IsDBNull(6))
             {
-                throw new InvalidOperationException("P2 can only consume an already-claimed Steer batch.");
+                throw new InvalidOperationException("A boundary batch must be a claimed Steer bound to its turn.");
             }
 
             rows.Add(new SqliteConversationInputRow(Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)),
                 reader.GetInt64(2), reader.GetInt32(3), Guid.Parse(reader.GetString(4)), Guid.Parse(reader.GetString(5)),
-                Guid.Parse(reader.GetString(6)), reader.GetInt32(7), ReadPrompt(reader.GetString(8)),
+                Guid.Parse(reader.GetString(6)), reader.GetInt32(7), ReadPayload(reader.GetString(8)).Prompt,
                 reader.IsDBNull(9) ? null : Guid.Parse(reader.GetString(9)),
                 reader.IsDBNull(10) ? null : Guid.Parse(reader.GetString(10))));
         }

@@ -96,8 +96,9 @@ it('does not apply a partial pause result as a complete snapshot', () => {
     expect(result.state.items).toHaveLength(1);
 });
 
-it('normalizes a numeric historical status while preserving string wire status', () => {
+it('keeps the host string status', () => {
     const state = { ...createQueueState(), conversationId: 'A' };
-    const result = reduceQueueState(state, { conversationId: 'A', items: [{ status: 3 }, { status: 'claimed' }] });
+    const result = reduceQueueState(state, { conversationId: 'A', items: [{ status: 'held' }, { status: 'claimed' }] });
     expect(result.state.items.map(item => item.status)).toEqual(['held', 'claimed']);
+    expect(createQueueState().error).toBe('');
 });

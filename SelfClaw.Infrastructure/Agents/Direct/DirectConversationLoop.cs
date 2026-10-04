@@ -48,7 +48,7 @@ internal sealed class DirectConversationLoop
             if (requestIndex + 1 == MaximumProviderRequestsPerTurn)
             {
                 CancelCalls(setup, output, calls, "BudgetExhausted",
-                    "The turn reached its 128 provider request limit before this tool could execute.");
+                    $"The turn reached its {MaximumProviderRequestsPerTurn} provider request limit before this tool could execute.");
                 return DirectLoopOutcome.BudgetExhausted;
             }
 

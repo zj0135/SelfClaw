@@ -36,13 +36,14 @@ public sealed class ConversationRunCoordinatorTests
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var inputs = new EmptyConversationInputRepository
         {
-            HasUnprocessed = async (_, token) => { entered.SetResult(); await release.Task.WaitAsync(token); return false; }
+            HasUnprocessed = async (_, token) => { entered.TrySetResult(); await release.Task.WaitAsync(token); return false; }
         };
         using var runs = Create(inputs);
         var first = Conversation();
         var pending = runs.TryReserveContinuationAsync(first);
         await entered.Task;
-        runs.IsRunning(first.Id).Should().BeTrue();
+        runs.IsRunning(first.Id).Should().BeFalse(
+            "the unprocessed-input check must not occupy the run slot before admission");
         var other = runs.TryReserve(Guid.NewGuid(), AgentExecutionMode.Direct, DirectTurnOrigin.Interactive);
         other.Should().NotBeNull();
         pending.IsCompleted.Should().BeFalse();
@@ -58,8 +59,11 @@ public sealed class ConversationRunCoordinatorTests
     {
         using var runs = Create(new() { HasUnprocessed = (_, _) => Task.FromResult(true) });
         var conversation = Conversation();
+        var changes = 0;
+        runs.Changed += _ => Interlocked.Increment(ref changes);
         (await runs.TryReserveContinuationAsync(conversation)).Should().BeNull();
         runs.IsRunning(conversation.Id).Should().BeFalse();
+        changes.Should().Be(0, "a blocked continuation must not reserve and release a run handle");
         var next = Reserve(runs, conversation.Id);
         runs.Complete(next);
     }
@@ -123,9 +127,10 @@ public sealed class ConversationRunCoordinatorTests
             HasUnprocessed = (_, token) => { entered.SetResult(); return never.Task.WaitAsync(token); }
         });
         var parent = Conversation();
-        var preparing = runs.TryReserveContinuationAsync(parent);
+        using var admission = new CancellationTokenSource();
+        var preparing = runs.TryReserveContinuationAsync(parent, admission.Token);
         await entered.Task;
-        runs.Stop(parent.Id);
+        admission.Cancel();
         await FluentActions.Awaiting(() => preparing).Should().ThrowAsync<OperationCanceledException>();
         runs.IsRunning(parent.Id).Should().BeFalse();
     }

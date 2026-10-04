@@ -8,13 +8,7 @@ namespace SelfClaw.Desktop.Services.ConversationInputs;
 /// </summary>
 internal interface IConversationInputCoordinator
 {
-    bool QueueEnabled { get; }
-
     Task StopAsync(Guid conversationId);
 
     Task<ConversationInputSubmitResult> SubmitAsync(ConversationInputSubmission submission, CancellationToken cancellationToken = default);
-
-    Task<ConversationInputQueueState> GetStateAsync(Guid conversationId, CancellationToken cancellationToken = default);
-
-    Task<ConversationInputQueueState> PauseAsync(Guid conversationId, long expectedQueueRevision, string? reason, CancellationToken cancellationToken = default);
 }

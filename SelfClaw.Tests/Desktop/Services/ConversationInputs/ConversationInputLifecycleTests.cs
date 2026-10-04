@@ -19,7 +19,7 @@ public sealed class ConversationInputLifecycleTests
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var h = new ConversationInputTestHarness(fixture: new(boundaryBeforeCommit: async (stage, token) => {
+        using var h = new ConversationInputTestHarness(fixture: new(recoveryBeforeCommit: async (stage, token) => {
             if (stage == "recovery-before-commit") { entered.TrySetResult(); await release.Task.WaitAsync(token); }
         }));
         var id = await h.CreateConversationAsync(recover: false);
@@ -46,7 +46,7 @@ public sealed class ConversationInputLifecycleTests
         await h.Gated!.EnteredAsync("A").WaitAsync(TimeSpan.FromSeconds(10));
         await h.SubmitAsync(id, "B");
         var handle = h.Runs.GetActiveRun(id)!;
-        h.Fixture.Turns.BeforeFinalizeCommit = (stage, _) => throw new System.IO.IOException(stage);
+        h.Fixture.CommitGate.BeforeFinalize = (stage, _) => throw new System.IO.IOException(stage);
         await h.Service.StopAsync(id);
         await handle.Completion.WaitAsync(TimeSpan.FromSeconds(10));
         (await h.Service.GetStateAsync(id)).PauseReason.Should().Be(ConversationInputReason.PersistFailed);
@@ -60,7 +60,7 @@ public sealed class ConversationInputLifecycleTests
         var turn = await fixture.StartAsync();
         await fixture.SeedClaimAsync(turn.Turn, Guid.NewGuid(), 1, "old steer");
         await fixture.ExecuteAsync("UPDATE conversation_inputs SET status = 0;");
-        await fixture.Inputs.RecoverStartupAsync();
+        await fixture.RecoverStartupAsync();
         (await fixture.ScalarAsync("SELECT status FROM conversation_inputs;")).Should().Be(3L);
         (await fixture.ScalarAsync("SELECT status FROM conversation_turns;")).Should().Be(6L);
     }
@@ -81,7 +81,7 @@ public sealed class ConversationInputLifecycleTests
         duplicate.InputId.Should().Be(first.InputId);
         var conflict = await h.Service.SubmitAsync(submission with { Prompt = "changed prompt" });
         conflict.Accepted.Should().BeFalse();
-        conflict.Reason.Should().Be("request-conflict");
+        conflict.Reason.Should().Be(ConversationInputReason.RequestConflict);
         (await h.Fixture.ScalarAsync("SELECT COUNT(*) FROM messages WHERE role = 1;")).Should().Be(1L);
         h.Gated.Prompts.Should().Equal("A");
     }
@@ -140,12 +140,14 @@ public sealed class ConversationInputLifecycleTests
         var restarted = new AgentSettingsService(new DesktopAgentDefinitionService(h.Fixture.Paths),
             new SubagentDefinitionCatalog(h.Fixture.Paths), new EmptyExtensionSettingsService(), new ExtensionStateChangeNotifier());
         var validator = new ConversationInputExecutionValidator(h.Roots, h.Models, restarted);
-        (await validator.PrepareAsync(conversation, snapshot, CancellationToken.None)).Agent.Should().BeEquivalentTo(snapshot.AgentDefinition);
+        (await validator.PrepareAsync(conversation, snapshot, CancellationToken.None)).FollowUp!.Agent
+            .Should().BeEquivalentTo(snapshot.AgentDefinition);
         var agent = h.Agents.ListAgents().Single(a => a.Id == "build");
         h.Agents.SaveAgent(new(agent.Id, agent.Name, agent.Description, agent.Mode, agent.Instructions + "\nnew"));
         restarted.Revision.Should().Be(snapshot.AgentRevision);
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => validator.PrepareAsync(conversation, snapshot, CancellationToken.None));
-        error.Message.Should().Be(ConversationInputReason.AgentChanged);
+        var preparation = await validator.PrepareAsync(conversation, snapshot, CancellationToken.None);
+        preparation.FollowUp.Should().BeNull();
+        preparation.Reason.Should().Be(ConversationInputReason.AgentChanged);
     }
 
     [Fact]

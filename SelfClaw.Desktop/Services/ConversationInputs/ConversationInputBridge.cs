@@ -60,7 +60,7 @@ internal sealed class ConversationInputBridge
                             ConversationInputReason.QueuePaused, CancellationToken.None));
                     break;
                 case "conversation-input/resume":
-                    if (!_inputs.QueueEnabled) throw new InvalidOperationException(ConversationInputReason.QueueDisabled);
+                    if (!_inputs.QueueEnabled) throw new ConversationInputRejectedException(ConversationInputReason.QueueDisabled);
                     await ReplyStateAsync("resume", requestId,
                         await _inputs.ResumeAsync(ReadGuid(payload, "conversationId"), ReadLong(payload, "expectedQueueRevision"), CancellationToken.None));
                     break;
@@ -73,7 +73,7 @@ internal sealed class ConversationInputBridge
                     break;
                 case "conversation-input/promote":
                 case "conversation-input/steer":
-                    throw new InvalidOperationException("steer-not-enabled");
+                    throw new ConversationInputRejectedException(ConversationInputReason.SteerNotEnabled);
                 default:
                     throw new ArgumentException("unsupported-conversation-input-operation");
             }
@@ -127,18 +127,9 @@ internal sealed class ConversationInputBridge
         _channel.PostResponse(response);
     }
 
-    private static string Describe(Exception exception) => exception.Message switch
-    {
-        "steer-not-enabled" => "当前版本未开放 Steer。",
-        "conversation-input-subscription-invalid" => "队列订阅已失效，请重新打开。",
-        "queue-revision-conflict" => "队列已变化，请根据最新列表重试。",
-        "conversation-unavailable" => "该会话正在删除或应用正在退出。",
-        "queue-disabled" => "队列功能未启用，待发送内容仍会保留。",
-        "model-disabled" => "所选模型不可用，请启用后重试。",
-        "workspace-missing" => "原工作目录不可用，请恢复目录后重试。",
-        "agent-missing" => "原代理不可用，请恢复定义后重试。",
-        _ => "队列操作失败，请重试。"
-    };
+    private static string Describe(Exception exception)
+        => ConversationInputReasonText.Describe(exception is ConversationInputRejectedException rejected
+            ? rejected.Reason : exception.Message);
 
     private static string? ReadString(JsonElement payload, string name, int maximum)
     {

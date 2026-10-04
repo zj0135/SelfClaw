@@ -54,6 +54,35 @@ internal sealed class ConversationRunCoordinator : IDisposable
 
     internal ConversationRunHandle? TryReserve(Guid conversationId, AgentExecutionMode mode,
         DirectTurnOrigin origin, CancellationToken cancellationToken = default)
+        => ReserveCore(conversationId, mode, origin, cancellationToken, notify: true);
+
+    internal async Task<ConversationRunHandle?> TryReserveContinuationAsync(ConversationRecord conversation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(conversation);
+        if (conversation.Kind != ConversationKind.Interactive) return null;
+        // Read first so a parent with leftover queue items never occupies the run slot (and never
+        // republishes the transcript) on every delivery scan.
+        if (await _inputs.HasUnprocessedInputsAsync(conversation.Id, cancellationToken).ConfigureAwait(false)) return null;
+        var handle = ReserveCore(conversation.Id, AgentExecutionMode.Direct, DirectTurnOrigin.Continuation, cancellationToken, notify: false);
+        if (handle is null) return null;
+        var admitted = false;
+        try
+        {
+            if (await _inputs.HasUnprocessedInputsAsync(conversation.Id, handle.CancellationToken).ConfigureAwait(false)) return null;
+            handle.CancellationToken.ThrowIfCancellationRequested();
+            Publish(new(handle, false));
+            admitted = true;
+            return handle;
+        }
+        finally
+        {
+            if (!admitted) Complete(handle, publishPersistedContent: false, notify: false);
+        }
+    }
+
+    private ConversationRunHandle? ReserveCore(Guid conversationId, AgentExecutionMode mode,
+        DirectTurnOrigin origin, CancellationToken cancellationToken, bool notify)
     {
         if (conversationId == Guid.Empty) throw new ArgumentException("A run requires a conversation id.", nameof(conversationId));
         if (origin == DirectTurnOrigin.Subagent)
@@ -70,6 +99,7 @@ internal sealed class ConversationRunCoordinator : IDisposable
             handle = new ConversationRunHandle(conversationId, mode, origin, ++_generation, input, runId, turnId, cancellationToken);
             _runs.Add(conversationId, handle);
         }
+        if (!notify) return handle;
         try
         {
             Publish(new(handle, false));
@@ -79,27 +109,6 @@ internal sealed class ConversationRunCoordinator : IDisposable
         {
             Complete(handle, false);
             throw;
-        }
-    }
-
-    internal async Task<ConversationRunHandle?> TryReserveContinuationAsync(ConversationRecord conversation,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(conversation);
-        if (conversation.Kind != ConversationKind.Interactive) return null;
-        var handle = TryReserve(conversation.Id, AgentExecutionMode.Direct, DirectTurnOrigin.Continuation, cancellationToken);
-        if (handle is null) return null;
-        var admitted = false;
-        try
-        {
-            if (await _inputs.HasUnprocessedInputsAsync(conversation.Id, handle.CancellationToken).ConfigureAwait(false)) return null;
-            handle.CancellationToken.ThrowIfCancellationRequested();
-            admitted = true;
-            return handle;
-        }
-        finally
-        {
-            if (!admitted) Complete(handle, false);
         }
     }
 
@@ -127,7 +136,7 @@ internal sealed class ConversationRunCoordinator : IDisposable
         }
     }
 
-    internal bool Complete(ConversationRunHandle handle, bool publishPersistedContent = true)
+    internal bool Complete(ConversationRunHandle handle, bool publishPersistedContent = true, bool notify = true)
     {
         ArgumentNullException.ThrowIfNull(handle);
         lock (_gate)
@@ -139,7 +148,10 @@ internal sealed class ConversationRunCoordinator : IDisposable
         finally
         {
             lock (_gate) _runs.Remove(handle.ConversationId);
-            try { Publish(new(handle, true, publishPersistedContent)); }
+            try
+            {
+                if (notify) Publish(new(handle, true, publishPersistedContent));
+            }
             finally { handle.MarkCompleted(); }
         }
         return true;

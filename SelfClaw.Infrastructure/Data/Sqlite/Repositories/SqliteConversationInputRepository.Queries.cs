@@ -72,7 +72,7 @@ internal sealed partial class SqliteConversationInputRepository
                 (ConversationInputKind)reader.GetInt32(2),
                 (ConversationInputStatus)reader.GetInt32(3),
                 reader.GetInt32(4),
-                CreatePreview(ReadPrompt(reader.GetString(5))),
+                CreatePreview(ReadPayload(reader.GetString(5)).Prompt),
                 reader.IsDBNull(6) ? null : reader.GetString(6),
                 reader.IsDBNull(7) ? null : reader.GetString(7)));
         }
@@ -114,18 +114,10 @@ internal sealed partial class SqliteConversationInputRepository
         return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is string value ? Guid.Parse(value) : null;
     }
 
-    private static async Task<int> ReadRevisionAsync(
-        SqliteConnection connection, SqliteTransaction transaction, Guid inputId, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = "SELECT revision FROM conversation_inputs WHERE id = $id;";
-        command.Parameters.AddWithValue("$id", inputId.ToString("D"));
-        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0);
-    }
-
     private static ConversationInputRecord ReadRecord(SqliteDataReader reader)
-        => new(
+    {
+        var payload = ReadPayload(reader.GetString(8));
+        return new(
             Guid.Parse(reader.GetString(0)),
             Guid.Parse(reader.GetString(1)),
             reader.GetString(2),
@@ -134,7 +126,7 @@ internal sealed partial class SqliteConversationInputRepository
             reader.IsDBNull(5) ? null : Guid.Parse(reader.GetString(5)),
             (ConversationInputStatus)reader.GetInt32(6),
             reader.GetInt32(7),
-            ReadPrompt(reader.GetString(8)),
+            payload.Prompt,
             reader.IsDBNull(9) ? null : DeserializeSnapshot(reader.GetString(9)),
             reader.IsDBNull(10) ? null : Guid.Parse(reader.GetString(10)),
             reader.IsDBNull(11) ? null : Guid.Parse(reader.GetString(11)),
@@ -145,15 +137,20 @@ internal sealed partial class SqliteConversationInputRepository
             reader.IsDBNull(16) ? null : DateTimeOffset.Parse(reader.GetString(16)),
             reader.IsDBNull(17) ? null : reader.GetString(17),
             reader.IsDBNull(18) ? null : reader.GetString(18),
-            ReadPayload(reader.GetString(8)).RequestPrompt,
-            ReadPayload(reader.GetString(8)).RequestFingerprint);
+            payload.RequestPrompt,
+            payload.RequestFingerprint);
+    }
 
     private static string SerializePayload(string prompt, string? fingerprint = null)
         => JsonSerializer.Serialize(new ConversationInputPayload(1, prompt, prompt, fingerprint), PayloadJson);
 
     private static ConversationInputPayload ReadPayload(string json)
-        => JsonSerializer.Deserialize<ConversationInputPayload>(json, PayloadJson)
-            ?? throw new InvalidOperationException("Invalid input payload.");
+    {
+        var payload = JsonSerializer.Deserialize<ConversationInputPayload>(json, PayloadJson);
+        return payload is { Version: 1, Prompt: not null }
+            ? payload
+            : throw new InvalidOperationException("The input payload format is not supported.");
+    }
 
     private static string SerializeSnapshot(ConversationInputExecutionSnapshot snapshot)
         => JsonSerializer.Serialize(snapshot, SnapshotJson);
@@ -170,17 +167,5 @@ internal sealed partial class SqliteConversationInputRepository
     {
         var normalized = prompt.ReplaceLineEndings(" ").Trim();
         return normalized.Length <= MaximumPreviewLength ? normalized : normalized[..MaximumPreviewLength];
-    }
-
-    private static string ReadPrompt(string payload)
-    {
-        using var document = JsonDocument.Parse(payload);
-        if (!document.RootElement.TryGetProperty("version", out var version) || !version.TryGetInt32(out var value) || value != 1 ||
-            !document.RootElement.TryGetProperty("prompt", out var prompt) || prompt.ValueKind != JsonValueKind.String)
-        {
-            throw new InvalidOperationException("The input payload format is not supported.");
-        }
-
-        return prompt.GetString() ?? throw new InvalidOperationException("An input prompt cannot be null.");
     }
 }

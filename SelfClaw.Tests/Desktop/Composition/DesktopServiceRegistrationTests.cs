@@ -36,10 +36,12 @@ public sealed class DesktopServiceRegistrationTests
                 var store = provider.GetRequiredService<IConversationInputStore>();
                 store.Should().BeOfType<SqliteConversationInputRepository>();
                 provider.GetRequiredService<IConversationInputSchedulerStore>().Should().BeSameAs(store);
+                provider.GetRequiredService<IConversationInputUpdateStore>().Should().BeSameAs(store);
                 provider.GetRequiredService<IConversationInputRepository>().Should().BeSameAs(store);
 
                 provider.GetRequiredService<IConversationInputCoordinator>().Should().BeOfType<ConversationInputService>();
                 provider.GetRequiredService<ConversationInputDispatcher>().Should().NotBeNull();
+                provider.GetRequiredService<ConversationInputQueueService>().Should().NotBeNull();
                 provider.GetRequiredService<ConversationInputBridge>().Should().NotBeNull();
                 provider.GetRequiredService<ConversationInputPublisher>().Should().NotBeNull();
                 provider.GetRequiredService<ConversationDeletionService>().Should().NotBeNull();

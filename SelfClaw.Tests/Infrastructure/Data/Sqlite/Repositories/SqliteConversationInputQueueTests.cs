@@ -133,18 +133,16 @@ public sealed class SqliteConversationInputQueueTests
         var start = await fixture.StartAsync();
         var input = await fixture.AcceptFollowUpAsync(start.Turn.ConversationId, "held");
 
-        var held = await fixture.Inputs.HoldAsync(input.Id, input.Revision, ConversationInputReason.AgentChanged, "changed");
+        var held = await fixture.Inputs.HoldAsync(input.Id, input.Revision, ConversationInputReason.AgentChanged);
         held.Status.Should().Be(ConversationInputUpdateStatus.Applied);
         held.Input!.Status.Should().Be(ConversationInputStatus.Held);
 
         var edited = await fixture.Inputs.EditAsync(new ConversationInputEditRequest(input.Id, held.Input.Revision, "retry body"));
         edited.Status.Should().Be(ConversationInputUpdateStatus.Applied);
-        edited.Input!.Status.Should().Be(ConversationInputStatus.Pending);
-        edited.Input.ReasonCode.Should().BeNull();
+        edited.Input!.Status.Should().Be(ConversationInputStatus.Held);
+        edited.Input.Prompt.Should().Be("retry body");
 
-        var heldAgain = await fixture.Inputs.HoldAsync(edited.Input.Id, edited.Input.Revision, ConversationInputReason.AgentChanged, "changed");
-        heldAgain.Input!.Status.Should().Be(ConversationInputStatus.Held);
-        var retried = await fixture.Inputs.RetryAsync(heldAgain.Input.Id, heldAgain.Input.Revision);
+        var retried = await fixture.Inputs.RetryAsync(held.Input.Id, edited.Input.Revision, input.ExecutionSnapshot!);
         retried.Status.Should().Be(ConversationInputUpdateStatus.Applied);
         retried.Input!.Status.Should().Be(ConversationInputStatus.Pending);
     }
@@ -278,9 +276,10 @@ public sealed class SqliteConversationInputQueueTests
             ("$at", DateTimeOffset.UtcNow.ToString("O")));
         await fixture.Turns.TryFinalizeTurnAsync(new(active.Turn with { Status = ConversationTurnStatus.Succeeded, CompletedAtUtc = DateTimeOffset.UtcNow }, [], []));
 
-        var states = await fixture.Inputs.RecoverStartupAsync();
-        states.Should().NotBeEmpty();
-        states.Should().OnlyContain(state => state.Paused);
+        await fixture.RecoverStartupAsync();
+        (await fixture.Inputs.GetQueueStateAsync(claimedConversation)).Paused.Should().BeTrue();
+        (await fixture.Inputs.GetQueueStateAsync(pendingConversation)).Paused.Should().BeTrue();
+        (await fixture.Inputs.GetQueueStateAsync(active.Turn.ConversationId)).Paused.Should().BeTrue();
 
         (await fixture.Inputs.GetInputAsync(claimed.Id))!.Status.Should().Be(ConversationInputStatus.Held);
         var pendingStatus = (long)(await fixture.ScalarAsync(
@@ -302,7 +301,7 @@ public sealed class SqliteConversationInputQueueTests
         var rejected = await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
             conversationId, "second", ConversationInputKind.FollowUp, null, "second", fixture.Snapshot(), null, false));
         rejected.Status.Should().Be(ConversationInputAcceptStatus.Rejected);
-        rejected.Reason.Should().Be(ConversationInputReason.QueueDisabled);
+        rejected.Reason.Should().Be(ConversationInputReason.PendingInputs);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(1L);
     }
 }

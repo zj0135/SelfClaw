@@ -37,8 +37,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         "The response reached the configured output-token limit. Continue the message to " +
         "have the model resume from where it stopped.";
 
-    private const string ToolLoopExhaustedMessage =
-        "BudgetExhausted: the turn reached its 128 provider request limit before it could continue.";
+    private static readonly string ToolLoopExhaustedMessage =
+        $"BudgetExhausted: the turn reached its {DirectConversationLoop.MaximumProviderRequestsPerTurn} provider request limit before it could continue.";
 
     /// <summary>
     /// Reported when the output-token cap is hit before any text is produced. There is no
@@ -392,7 +392,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
         if (outcome == DirectLoopOutcome.BudgetExhausted)
         {
-            _logger.LogWarning("Direct AI agent turn exhausted its 128 provider request budget.");
+            _logger.LogWarning("Direct AI agent turn exhausted its {RequestLimit} provider request budget.",
+                DirectConversationLoop.MaximumProviderRequestsPerTurn);
             var failed = new RunCompletedEvent(
                 RunCompletionStatus.Failed,
                 output.FinalTextOrNull,

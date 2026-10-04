@@ -27,7 +27,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     #region 字段与构造函数 —— 依赖注入字段、运行时集合状态、流式发布定时器初始化
 
     private readonly IConversationRepository _conversationRepository;
-    private readonly ConversationTurnEngine _turnEngine;
+    private readonly CliConversationSubmitter _cliSubmitter;
     private readonly ConversationRunCoordinator _runs;
     private readonly IConversationInputCoordinator _conversationInputs;
     private readonly ConversationSessionCoordinator _conversationSessions;
@@ -78,7 +78,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         Dispatcher? dispatcher = null)
     {
         _conversationRepository = conversationRepository;
-        _turnEngine = turnEngine;
+        _cliSubmitter = new CliConversationSubmitter(runs, turnEngine, workspaces, logger);
         _runs = runs;
         _conversationInputs = conversationInputs;
         _conversationSessions = conversationSessions;
@@ -621,89 +621,25 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     private async Task<PromptSubmissionResult> SubmitCliAsync(PromptSubmissionSnapshot submission,
         AgentRuntimeDefinition agent, Guid conversationId)
     {
-        PreparedConversationWorkspace? prepared = null;
-        ConversationRunHandle? handle = null;
-        var handedOff = false;
-        var started = false;
-        try
-        {
-            handle = _runs.TryReserve(conversationId, agent.Mode, DirectTurnOrigin.Interactive);
-            if (handle is null)
-                return new PromptSubmissionResult(false, "当前会话正在执行或应用正在退出，请稍候。");
-            prepared = await _workspaces.PrepareAsync(conversationId, submission.Conversation, submission.WorkspaceRoot,
-                submission.WorkspaceMode, submission.Prompt, handle.CancellationToken);
-            handle.CancellationToken.ThrowIfCancellationRequested();
-            if (submission.SelectionVersion != _selectionVersion)
-                return new PromptSubmissionResult(false, "当前选择已改变，请重试。");
-            var request = new DesktopConversationTurnRequest(submission.Conversation, agent, submission.Prompt,
-                submission.ModelProfileId, prepared.WorkspaceRoot, submission.ToolPermissionMode, conversationId);
-            handedOff = true;
-            _ = ExecuteAcceptedTurnAsync(handle, request);
-            var conversation = await handle.Started;
-            if (conversation is null)
-                return new PromptSubmissionResult(false, "无法开始回合，请重试。");
-            started = true;
-            if (prepared.Provisioned && prepared.WorkspaceRoot is { } root) _workspaceRoots.Add(root);
-            ApplyAdmittedConversation(conversation, submission.SelectionVersion == _selectionVersion);
-            return new PromptSubmissionResult(true);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "Failed to prepare the chat turn.");
-            return new PromptSubmissionResult(false, exception.Message);
-        }
-        finally
-        {
-            try
-            {
-                if (!started && prepared?.Provisioned == true) await _workspaces.DiscardAsync(prepared);
-            }
-            finally
-            {
-                if (!handedOff && handle is not null) _runs.Complete(handle, false);
-            }
-        }
+        var result = await _cliSubmitter.SubmitAsync(submission, agent, conversationId,
+            () => submission.SelectionVersion == _selectionVersion);
+        if (!result.Accepted || result.Conversation is not { } conversation)
+            return new PromptSubmissionResult(false, result.Error);
+        if (result.ProvisionedRoot is { } root) _workspaceRoots.Add(root);
+        ApplyAdmittedConversation(conversation, submission.SelectionVersion == _selectionVersion);
+        return new PromptSubmissionResult(true);
     }
 
     private static ConversationRecord CreateConversationRecord(Guid conversationId, PromptSubmissionSnapshot submission,
         AgentRuntimeDefinition agent, WorkspaceRoot? workspaceRoot)
     {
         var now = DateTimeOffset.UtcNow;
-        var title = submission.Prompt.ReplaceLineEndings(" ").Trim();
-        return new ConversationRecord(conversationId, title.Length > 48 ? title[..48] + "..." : title,
+        return new ConversationRecord(conversationId, ConversationTitles.FromPrompt(submission.Prompt),
             workspaceRoot?.Id, ConversationMode.Programming, submission.ToolPermissionMode, agent.Id, now, now);
     }
 
     private static string DescribeInputRejection(ConversationInputSubmitResult result)
-        => result.Reason switch
-        {
-            ConversationInputReason.QueueDisabled => "当前回合执行中，队列功能未启用，请稍后再发送。",
-            ConversationInputReason.Capacity => "队列已满，请先等待或取消部分输入。",
-            "request-conflict" => "该请求与已存在的输入冲突，请重试。",
-            ConversationInputReason.AttachmentsUnsupported => "当前版本不支持在队列中发送附件。",
-            _ => "输入未被接受，请重试。"
-        };
-
-
-    private async Task ExecuteAcceptedTurnAsync(ConversationRunHandle handle, DesktopConversationTurnRequest request)
-    {
-        try
-        {
-            await _turnEngine.ExecuteAsync(handle, request);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(exception, "Accepted chat turn failed outside the turn engine.");
-        }
-    }
+        => ConversationInputReasonText.Describe(result.Reason);
 
     #endregion
 

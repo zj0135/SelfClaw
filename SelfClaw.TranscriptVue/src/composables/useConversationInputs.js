@@ -10,7 +10,7 @@ function normalizeItem(item) {
 		inputId: item.inputId,
 		sequence: Number(item.sequence) || 0,
 		kind: item.kind || 'follow-up',
-		status: typeof item.status === 'number' ? ['pending', 'claimed', 'consumed', 'held', 'cancelled'][item.status] : (item.status || 'pending'),
+		status: item.status || 'pending',
 		revision: Number(item.revision) || 0,
 		preview: item.preview || '',
 		reasonCode: item.reasonCode || null,
@@ -21,7 +21,7 @@ function normalizeItem(item) {
 export function createQueueState() {
 	return {
 		conversationId: null, subscriptionId: null, queueRevision: 0, paused: false,
-		pauseReason: null, canSteer: false, items: [], loaded: false, truncated: false,
+		pauseReason: null, canSteer: false, items: [], loaded: false, truncated: false, error: '',
 	};
 }
 

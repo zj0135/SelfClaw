@@ -14,8 +14,6 @@ namespace SelfClaw.Desktop.Services.ConversationInputs;
 /// </summary>
 internal sealed class ConversationInputPublisher : IDisposable
 {
-    internal const int MaximumSnapshotBytes = 256 * 1024;
-
     private readonly IConversationInputStore _store;
     private readonly ConversationInputChangeNotifier _changes;
     private readonly WebViewHostChannel _channel;

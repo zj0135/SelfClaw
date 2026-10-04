@@ -1,4 +1,3 @@
-using System.Reflection;
 using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
@@ -88,7 +87,7 @@ public sealed class ConversationInputReviewRegressionTests
         using var h = new ConversationInputTestHarness();
         var c = await h.Fixture.CreateConversationAsync(); var other = await h.Fixture.CreateConversationAsync();
         var input = await h.Fixture.AcceptFollowUpAsync(c.Id, "A");
-        await h.Fixture.Inputs.HoldAsync(input.Id, input.Revision, "held", null);
+        await h.Fixture.Inputs.HoldAsync(input.Id, input.Revision, "held");
         var s = await h.Service.GetStateAsync(c.Id); await h.Service.PauseAsync(c.Id, s.QueueRevision, "paused");
         (await h.Runs.TryReserveContinuationAsync(c)).Should().BeNull();
         var handle = await h.Runs.TryReserveContinuationAsync(other);
@@ -201,7 +200,7 @@ public sealed class ConversationInputReviewRegressionTests
         using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var a = await h.Fixture.AcceptFollowUpAsync(id, "A", snapshot: Snapshot(h));
-        await h.Fixture.Inputs.HoldAsync(a.Id, a.Revision, "held", null);
+        await h.Fixture.Inputs.HoldAsync(a.Id, a.Revision, "held");
         await h.Fixture.AcceptFollowUpAsync(id, "B", snapshot: Snapshot(h));
         var claimed = await h.Fixture.Inputs.TryClaimNextFollowUpAsync(id, Guid.NewGuid(), Guid.NewGuid());
         claimed.Should().BeNull("Held A must block B even when the queue is unpaused");
@@ -215,8 +214,8 @@ public sealed class ConversationInputReviewRegressionTests
         await h.Fixture.AcceptFollowUpAsync(id, "A", snapshot: Snapshot(h));
         await h.Dispatcher.RecoverOnceAsync(CancellationToken.None);
         var state = await h.Service.GetStateAsync(id);
-        await h.Service.ResumeAsync(id, state.QueueRevision);
-        var record = await h.Fixture.Inputs.GetQueueStateAsync(id);
+        await Assert.ThrowsAsync<ConversationInputRejectedException>(() => h.Service.ResumeAsync(id, state.QueueRevision));
+        (await h.Fixture.Inputs.GetQueueStateAsync(id)).Items.Should().ContainSingle();
         h.Runs.IsRunning(id).Should().BeFalse("a disabled Queue must not dispatch a persisted backlog through resume");
     }
 
@@ -235,9 +234,8 @@ public sealed class ConversationInputReviewRegressionTests
             var s = await h.Service.GetStateAsync(id);
             await h.Service.PauseAsync(id, s.QueueRevision, "paused");
         }
-        var scan = typeof(ConversationInputDispatcher).GetMethod("ScanOnceAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         for (var n = 0; n < 3; n++)
-            await (Task<bool>)scan.Invoke(h.Dispatcher, [CancellationToken.None])!;
+            await h.Dispatcher.ScanOnceAsync(CancellationToken.None);
         h.Runs.IsRunning(ids[32]).Should().BeTrue("completed scans must not starve the 33rd parent behind paused parents");
     }
 
@@ -247,7 +245,7 @@ public sealed class ConversationInputReviewRegressionTests
     public async Task Failed_terminal_must_pause_before_releasing_admission(bool persistFailure)
     {
         using var h = new ConversationInputTestHarness();
-        if (persistFailure) h.Fixture.Turns.BeforeFinalizeCommit = (stage, _) => throw new System.IO.IOException(stage);
+        if (persistFailure) h.Fixture.CommitGate.BeforeFinalize = (stage, _) => throw new System.IO.IOException(stage);
         else h.Runtime.FailPrompts.Add("A");
         var id = await h.CreateConversationAsync();
         await h.Fixture.AcceptFollowUpAsync(id, "A", snapshot: Snapshot(h));
@@ -311,7 +309,8 @@ public sealed class ConversationInputReviewRegressionTests
         await h.Fixture.AcceptFollowUpAsync(id, "A", snapshot: Snapshot(h));
         var state = await h.Service.GetStateAsync(id);
         await h.Fixture.AcceptFollowUpAsync(id, "B", snapshot: Snapshot(h));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => h.Service.PauseAsync(id, state.QueueRevision, "stop"));
+        var conflict = await Assert.ThrowsAsync<ConversationInputRejectedException>(() => h.Service.PauseAsync(id, state.QueueRevision, "stop"));
+        conflict.Reason.Should().Be(ConversationInputReason.QueueRevisionConflict);
         await h.Service.StopAsync(id);
         (await h.Service.GetStateAsync(id)).Paused.Should().BeTrue("system stop uses an unconditional durable pause");
     }

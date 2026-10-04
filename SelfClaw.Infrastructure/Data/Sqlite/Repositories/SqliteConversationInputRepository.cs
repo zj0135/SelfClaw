@@ -8,7 +8,8 @@ using SelfClaw.Infrastructure.Data.Sqlite.Models;
 
 namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
-internal sealed partial class SqliteConversationInputRepository : IConversationInputRepository, IConversationInputStore, IConversationInputSchedulerStore
+internal sealed partial class SqliteConversationInputRepository : IConversationInputRepository, IConversationInputStore,
+    IConversationInputUpdateStore, IConversationInputSchedulerStore
 {
     internal const int MaximumInputsPerConversation = 20;
     internal const int MaximumInputsPerApplication = 500;
@@ -70,12 +71,12 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
                 duplicate ? ConversationInputAcceptStatus.Duplicate : ConversationInputAcceptStatus.Conflict,
                 duplicate ? existing : null,
                 revision,
-                duplicate ? null : "request-conflict");
+                duplicate ? null : ConversationInputReason.RequestConflict);
         }
 
         if (request.Conversation is { } conversation)
         {
-            await EnsureConversationAsync(connection, transaction, conversation, cancellationToken).ConfigureAwait(false);
+            await SqliteConversationTurnWriter.EnsureConversationAsync(connection, transaction, conversation, cancellationToken).ConfigureAwait(false);
         }
 
         var state = await ReadStateAsync(connection, transaction, request.ConversationId, cancellationToken).ConfigureAwait(false);
@@ -83,7 +84,7 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
         {
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return new ConversationInputAcceptResult(ConversationInputAcceptStatus.Rejected, null,
-                state.QueueRevision, ConversationInputReason.QueueDisabled);
+                state.QueueRevision, ConversationInputReason.PendingInputs);
         }
 
         var globalUnprocessed = await CountGlobalUnprocessedAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
@@ -135,8 +136,9 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
             return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Invalid, null, 0);
         }
 
+        // A Held item stays Held: only Retry revalidates its frozen execution snapshot.
         return await ConditionalUpdateAsync(request.InputId, request.ExpectedRevision, """
-            UPDATE conversation_inputs SET payload_json = json_set(payload_json, '$.prompt', $prompt), status = 0, reason_code = NULL, error_message = NULL,
+            UPDATE conversation_inputs SET payload_json = json_set(payload_json, '$.prompt', $prompt),
                 revision = revision + 1, updated_at_utc = $at
             WHERE id = $id AND revision = $revision AND status IN (0, 3);
             """, ("$prompt", request.Prompt), cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -152,27 +154,15 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
             """, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<ConversationInputUpdateResult> HoldAsync(
-        Guid inputId, int expectedRevision, string reasonCode, string? errorMessage, CancellationToken cancellationToken = default)
+    public async Task<ConversationInputUpdateResult> RetryAsync(Guid inputId, int expectedRevision,
+        ConversationInputExecutionSnapshot executionSnapshot, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
-        return await ConditionalUpdateAsync(inputId, expectedRevision, """
-            UPDATE conversation_inputs SET status = 3, reason_code = $reason, error_message = $error,
-                revision = revision + 1, updated_at_utc = $at
-            WHERE id = $id AND revision = $revision AND status IN (0, 1);
-            """, ("$reason", reasonCode), ("$error", errorMessage ?? (object)DBNull.Value), cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task<ConversationInputUpdateResult> RetryAsync(
-        Guid inputId, int expectedRevision, CancellationToken cancellationToken = default,
-        ConversationInputExecutionSnapshot? executionSnapshot = null)
-    {
+        ArgumentNullException.ThrowIfNull(executionSnapshot);
         return await ConditionalUpdateAsync(inputId, expectedRevision, """
             UPDATE conversation_inputs SET status = 0, reason_code = NULL, error_message = NULL,
-                execution_snapshot_json = COALESCE($snapshot, execution_snapshot_json),
-                revision = revision + 1, updated_at_utc = $at
+                execution_snapshot_json = $snapshot, revision = revision + 1, updated_at_utc = $at
             WHERE id = $id AND revision = $revision AND status = 3;
-            """, ("$snapshot", executionSnapshot is null ? DBNull.Value : SerializeSnapshot(executionSnapshot)), cancellationToken: cancellationToken).ConfigureAwait(false);
+            """, ("$snapshot", SerializeSnapshot(executionSnapshot)), cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<ConversationInputRecord?> FindRequestAsync(Guid conversationId, string clientRequestId,
@@ -228,8 +218,7 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
 
 
     private async Task<ConversationInputUpdateResult> ConditionalUpdateAsync(
-        Guid inputId, int expectedRevision, string sql,
-        (string Name, object Value)? extra1 = null, (string Name, object Value)? extra2 = null,
+        Guid inputId, int expectedRevision, string sql, (string Name, object Value)? parameter = null,
         CancellationToken cancellationToken = default)
     {
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -248,8 +237,7 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
             command.Parameters.AddWithValue("$id", inputId.ToString("D"));
             command.Parameters.AddWithValue("$revision", expectedRevision);
             command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
-            if (extra1 is { } first) command.Parameters.AddWithValue(first.Name, first.Value);
-            if (extra2 is { } second) command.Parameters.AddWithValue(second.Name, second.Value);
+            if (parameter is { } extra) command.Parameters.AddWithValue(extra.Name, extra.Value);
             changed = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -264,34 +252,6 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
         var revision = await ReadQueueRevisionAsync(connection, transaction, conversationId.Value, cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return new ConversationInputUpdateResult(ConversationInputUpdateStatus.Applied, record, revision);
-    }
-
-    private static async Task EnsureConversationAsync(
-        SqliteConnection connection, SqliteTransaction transaction, ConversationRecord conversation, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO conversations(id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
-                channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc, kind, parent_conversation_id)
-            VALUES($id, $title, $workspaceRootId, $mode, $permission, $agentId, $channelKind, $channelId, $channelName,
-                $createdAt, $updatedAt, $kind, $parent)
-            ON CONFLICT(id) DO NOTHING;
-            """;
-        command.Parameters.AddWithValue("$id", conversation.Id.ToString("D"));
-        command.Parameters.AddWithValue("$title", conversation.Title);
-        command.Parameters.AddWithValue("$workspaceRootId", conversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$mode", (int)conversation.Mode);
-        command.Parameters.AddWithValue("$permission", (int)conversation.ToolPermissionMode);
-        command.Parameters.AddWithValue("$agentId", conversation.AgentId);
-        command.Parameters.AddWithValue("$channelKind", conversation.ChannelKind ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$channelId", conversation.ChannelConversationId ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$channelName", conversation.ChannelDisplayName ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$createdAt", conversation.CreatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$updatedAt", conversation.UpdatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$kind", (int)conversation.Kind);
-        command.Parameters.AddWithValue("$parent", conversation.ParentConversationId?.ToString("D") ?? (object)DBNull.Value);
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<long> AllocateSequenceAsync(
@@ -311,7 +271,7 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
             ?? throw new InvalidOperationException("Input sequence allocation returned no value."));
     }
 
-    private static async Task AdvanceQueueRevisionAsync(
+    internal static async Task AdvanceQueueRevisionAsync(
         SqliteConnection connection, SqliteTransaction transaction, Guid conversationId, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -330,16 +290,11 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
         if (request.ConversationId == Guid.Empty)
             throw new ArgumentException("An input requires a conversation id.", nameof(request));
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientRequestId);
-        if (request.Kind != ConversationInputKind.FollowUp || request.ExecutionSnapshot?.Mode != AgentExecutionMode.Direct)
-            throw new ArgumentException("Only Direct follow-ups can be accepted.", nameof(request));
         if (request.ClientRequestId.Length > 128)
             throw new ArgumentException("The client request id is too long.", nameof(request));
-        if (request.Kind == ConversationInputKind.FollowUp && request.TargetTurnId is not null)
-            throw new ArgumentException("A follow-up cannot target a turn.", nameof(request));
-        if (request.Kind == ConversationInputKind.Steer && request.TargetTurnId is null)
-            throw new ArgumentException("A steer requires a target turn.", nameof(request));
-        if (request.Kind == ConversationInputKind.FollowUp && request.ExecutionSnapshot is null)
-            throw new ArgumentException("A follow-up requires an execution snapshot.", nameof(request));
+        if (request.Kind != ConversationInputKind.FollowUp || request.TargetTurnId is not null ||
+            request.ExecutionSnapshot?.Mode != AgentExecutionMode.Direct)
+            throw new ArgumentException("Only untargeted Direct follow-ups with an execution snapshot can be accepted.", nameof(request));
         if (request.Prompt.Length == 0)
             throw new ArgumentException("An input prompt cannot be empty.", nameof(request));
         if (Encoding.UTF8.GetByteCount(request.Prompt) > MaximumPromptBytes)

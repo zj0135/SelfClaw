@@ -67,11 +67,8 @@ internal static class SqliteConversationTurnWriter
             throw new InvalidOperationException("The follow-up claim no longer permits consumption.");
         }
 
-        await using var revision = connection.CreateCommand();
-        revision.Transaction = transaction;
-        revision.CommandText = "UPDATE conversation_input_state SET queue_revision = queue_revision + 1 WHERE conversation_id = $id;";
-        revision.Parameters.AddWithValue("$id", start.Turn.ConversationId.ToString("D"));
-        await revision.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await SqliteConversationInputRepository.AdvanceQueueRevisionAsync(connection, transaction,
+            start.Turn.ConversationId, cancellationToken).ConfigureAwait(false);
         return user;
     }
 
@@ -190,6 +187,33 @@ internal static class SqliteConversationTurnWriter
                 channel_display_name = excluded.channel_display_name, updated_at_utc = excluded.updated_at_utc
             WHERE conversations.kind = excluded.kind AND conversations.parent_conversation_id IS excluded.parent_conversation_id;
             """;
+        AddConversationParameters(command, conversation);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new InvalidOperationException("Conversation ownership cannot be changed.");
+        }
+    }
+
+    /// <summary>Creates the conversation when it does not exist yet; an existing row is left untouched.</summary>
+    internal static async Task EnsureConversationAsync(
+        SqliteConnection connection, SqliteTransaction transaction, ConversationRecord conversation, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(conversation);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO conversations(id, title, workspace_root_id, mode, tool_permission_mode, agent_id,
+                channel_kind, channel_conversation_id, channel_display_name, created_at_utc, updated_at_utc, kind, parent_conversation_id)
+            VALUES($id, $title, $workspaceRootId, $mode, $permission, $agentId, $channelKind, $channelId, $channelName,
+                $createdAt, $updatedAt, $kind, $parent)
+            ON CONFLICT(id) DO NOTHING;
+            """;
+        AddConversationParameters(command, conversation);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void AddConversationParameters(SqliteCommand command, ConversationRecord conversation)
+    {
         command.Parameters.AddWithValue("$id", conversation.Id.ToString("D"));
         command.Parameters.AddWithValue("$title", conversation.Title);
         command.Parameters.AddWithValue("$workspaceRootId", conversation.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
@@ -203,10 +227,6 @@ internal static class SqliteConversationTurnWriter
         command.Parameters.AddWithValue("$updatedAt", conversation.UpdatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$kind", (int)conversation.Kind);
         command.Parameters.AddWithValue("$parent", conversation.ParentConversationId?.ToString("D") ?? (object)DBNull.Value);
-        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
-        {
-            throw new InvalidOperationException("Conversation ownership cannot be changed.");
-        }
     }
 
     private static async Task WriteContentAsync(

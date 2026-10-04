@@ -3,11 +3,14 @@ using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
-using SelfClaw.Desktop.Services.Agents;
 using SelfClaw.Desktop.Services.Runtime;
 
 namespace SelfClaw.Desktop.Services.ConversationInputs;
 
+/// <summary>
+/// Discovers dispatchable conversations, asks the run coordinator for admission, claims the FIFO
+/// head and runs it. Any non-successful outcome pauses the queue before the run releases admission.
+/// </summary>
 internal sealed class ConversationInputDispatcher : BackgroundService
 {
     private static readonly TimeSpan ScanInterval = TimeSpan.FromMilliseconds(250);
@@ -19,59 +22,53 @@ internal sealed class ConversationInputDispatcher : BackgroundService
     private readonly ConversationInputExecutionValidator _validator;
     private readonly ConversationInputFeatureSwitch _featureSwitch;
     private readonly ConversationInputChangeNotifier _changes;
-    private readonly TimeProvider _timeProvider;
     private readonly ILogger<ConversationInputDispatcher> _logger;
+    private readonly Func<CancellationToken, Task> _recover;
     private readonly object _taskGate = new();
+    private readonly object _recoveryGate = new();
     private readonly HashSet<Task> _running = [];
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _recovery;
 
     public ConversationInputDispatcher(IConversationInputStore store, IConversationInputSchedulerStore scheduler,
-        IConversationRepository conversations, IWorkspaceRootRepository roots, ConversationRunCoordinator runs,
-        ConversationTurnEngine engine, IAiModelCatalog models, AgentSettingsService agents,
-        ConversationInputFeatureSwitch featureSwitch, ConversationInputChangeNotifier changes,
-        ILogger<ConversationInputDispatcher> logger)
-        : this(store, scheduler, conversations, roots, runs, engine, models, agents, featureSwitch, changes, TimeProvider.System, logger) { }
-
-    internal ConversationInputDispatcher(IConversationInputStore store, IConversationInputSchedulerStore scheduler,
-        IConversationRepository conversations, IWorkspaceRootRepository roots, ConversationRunCoordinator runs,
-        ConversationTurnEngine engine, IAiModelCatalog models, AgentSettingsService agents,
-        ConversationInputFeatureSwitch featureSwitch, ConversationInputChangeNotifier changes,
-        TimeProvider timeProvider, ILogger<ConversationInputDispatcher> logger)
+        IConversationRepository conversations, ConversationRunCoordinator runs, ConversationTurnEngine engine,
+        ConversationInputExecutionValidator validator, ConversationInputFeatureSwitch featureSwitch,
+        ConversationInputChangeNotifier changes, ILogger<ConversationInputDispatcher> logger,
+        Func<CancellationToken, Task>? recover = null)
     {
         _store = store;
         _scheduler = scheduler;
         _conversations = conversations;
         _runs = runs;
         _engine = engine;
-        _validator = new(roots, models, agents);
+        _validator = validator;
         _featureSwitch = featureSwitch;
         _changes = changes;
-        _timeProvider = timeProvider;
         _logger = logger;
+        _recover = recover ?? (_ => Task.CompletedTask);
     }
 
-    internal Task RecoverOnceAsync(CancellationToken token)
-    {
-        Task recovery;
-        lock (_taskGate) recovery = _recovery ??= Task.Run(() => _scheduler.RecoverStartupAsync(_shutdown.Token));
-        return recovery.WaitAsync(token);
-    }
-
-    internal void RequestStart(Guid conversationId, Guid? immediateInputId = null)
+    internal void RequestStart(Guid conversationId, Guid? immediateInputId = null, ConversationRunHandle? reserved = null)
     {
         lock (_taskGate)
         {
-            if (_shutdown.IsCancellationRequested) return;
-            var task = Task.Run(() => TryStartConversationAsync(conversationId, _shutdown.Token, immediateInputId));
-            _running.Add(task);
-            _ = task.ContinueWith(ObserveCompletion, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            if (_shutdown.IsCancellationRequested)
+            {
+                if (reserved is not null) _runs.Complete(reserved, false);
+                return;
+            }
+            Track(Task.Run(() => TryStartConversationAsync(conversationId, _shutdown.Token, immediateInputId, reserved)));
         }
+    }
+
+    internal Task RecoverOnceAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_recoveryGate) return _recovery ??= _recover(CancellationToken.None);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await RecoverOnceAsync(stoppingToken).ConfigureAwait(false);
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -80,7 +77,7 @@ internal sealed class ConversationInputDispatcher : BackgroundService
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception exception) { _logger.LogError(exception, "Input queue scan failed."); }
-            await Task.Delay(ScanInterval, _timeProvider, stoppingToken).ConfigureAwait(false);
+            await Task.Delay(ScanInterval, stoppingToken).ConfigureAwait(false);
         }
     }
 
@@ -115,87 +112,95 @@ internal sealed class ConversationInputDispatcher : BackgroundService
     }
 
     internal async Task<ConversationInputStartAttempt> TryStartConversationAsync(Guid conversationId, CancellationToken token,
-        Guid? immediateInputId = null)
+        Guid? immediateInputId = null, ConversationRunHandle? reserved = null)
     {
         await RecoverOnceAsync(token).ConfigureAwait(false);
-        if (_shutdown.IsCancellationRequested || conversationId == Guid.Empty || _runs.IsRunning(conversationId))
+        if (_shutdown.IsCancellationRequested || conversationId == Guid.Empty ||
+            (reserved is null && _runs.IsRunning(conversationId)))
+        {
+            if (reserved is not null) _runs.Complete(reserved, false);
             return new(ConversationInputStartStatus.Idle);
-        if (!_featureSwitch.QueueEnabled && immediateInputId is null) return new(ConversationInputStartStatus.Blocked);
+        }
         // Never reserve a run handle for work that cannot be claimed: a paused queue or a non-Pending
         // FIFO head would otherwise churn admission on every scan and republish the transcript.
         var preview = await _store.GetQueueStateAsync(conversationId, token).ConfigureAwait(false);
-        if (!IsDispatchable(preview, immediateInputId)) return new(ConversationInputStartStatus.Blocked);
-        var handle = _runs.TryReserve(conversationId, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive, token);
+        if (!IsDispatchable(preview, immediateInputId))
+        {
+            if (reserved is not null) _runs.Complete(reserved, false);
+            return new(ConversationInputStartStatus.Blocked);
+        }
+        var handle = reserved ?? _runs.TryReserve(conversationId, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive, token);
         if (handle is null) return new(ConversationInputStartStatus.Idle);
         var handedOff = false;
-        ConversationInputRecord? claimed = null;
         try
         {
-            var conversation = await _conversations.GetConversationAsync(conversationId, handle.CancellationToken).ConfigureAwait(false);
-            if (conversation is not { Kind: ConversationKind.Interactive }) return new(ConversationInputStartStatus.Idle);
-            claimed = await _scheduler.TryClaimNextFollowUpAsync(conversationId, handle.RunId, Guid.NewGuid(), handle.CancellationToken).ConfigureAwait(false);
-            if (claimed is null) return new(ConversationInputStartStatus.Blocked);
-            var snapshot = claimed.ExecutionSnapshot ?? throw new InvalidOperationException(ConversationInputReason.AgentChanged);
-            var prepared = await _validator.PrepareAsync(conversation, snapshot, handle.CancellationToken).ConfigureAwait(false);
-            var claimId = claimed.ClaimId ?? throw new InvalidOperationException("Missing durable claim identity.");
-            var claim = new ConversationInputClaim(claimed.Id, conversationId, claimed.Revision, claimId,
-                handle.RunId, ConversationInputMessageId.Compute(claimId, claimed.Id));
-            var request = new DesktopConversationTurnRequest(conversation, prepared.Agent, claimed.Prompt,
-                snapshot.ModelProfileId, prepared.WorkspaceRoot, snapshot.ToolPermissionMode, conversationId, claim);
-            lock (_taskGate)
-            {
-                _shutdown.Token.ThrowIfCancellationRequested();
-                var task = Task.Run(() => RunAsync(handle, request), CancellationToken.None);
-                _running.Add(task);
-                _ = task.ContinueWith(ObserveCompletion, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
-            }
-            handedOff = true;
-            _changes.Notify(conversationId);
-            return new(ConversationInputStartStatus.Started, claimed.Id);
-        }
-        catch (OperationCanceledException)
-        {
-            if (claimed is not null) await HoldAsync(claimed, ConversationInputReason.TurnCancelled).ConfigureAwait(false);
-            throw;
-        }
-        catch (Exception exception)
-        {
-            if (claimed is null) throw;
-            var reason = exception.Message is ConversationInputReason.AgentMissing or ConversationInputReason.AgentChanged
-                or ConversationInputReason.ModelDisabled or ConversationInputReason.WorkspaceMissing
-                ? exception.Message : ConversationInputReason.ExecutionStartFailed;
-            await HoldAsync(claimed, reason).ConfigureAwait(false);
-            return new(ConversationInputStartStatus.Failed, claimed.Id, reason);
+            var attempt = await ClaimAndLaunchAsync(handle, immediateInputId).ConfigureAwait(false);
+            handedOff = attempt.Status == ConversationInputStartStatus.Started;
+            return attempt;
         }
         finally { if (!handedOff) _runs.Complete(handle, false); }
     }
 
     private bool IsDispatchable(ConversationInputQueueState state, Guid? immediateInputId)
     {
-        if (state.Paused || state.Items.Count == 0) return false;
-        if (_featureSwitch.QueueEnabled)
-            return state.Items[0] is { Kind: ConversationInputKind.FollowUp, Status: ConversationInputStatus.Pending };
-        // The disabled switch may still run the one input it just accepted, and nothing else.
-        return immediateInputId is { } id && state.Items.Count == 1 && state.Items[0].InputId == id;
+        if (state.Items.Count == 0 || state.Items[0] is not { Kind: ConversationInputKind.FollowUp, Status: ConversationInputStatus.Pending } head)
+            return false;
+        // A send made while idle runs at once when nothing waits ahead of it: a pause only holds back
+        // items queued before it, and the disabled switch still runs that single immediate input.
+        if (head.InputId == immediateInputId) return true;
+        return _featureSwitch.QueueEnabled && !state.Paused;
     }
 
-    private async Task HoldAsync(ConversationInputRecord input, string reason)
+    private async Task<ConversationInputStartAttempt> ClaimAndLaunchAsync(ConversationRunHandle handle, Guid? immediateInputId)
     {
-        await _store.HoldAsync(input.Id, input.Revision, reason, null, CancellationToken.None).ConfigureAwait(false);
-        await PauseQueueAsync(input.ConversationId, reason).ConfigureAwait(false);
+        var token = handle.CancellationToken;
+        var conversation = await _conversations.GetConversationAsync(handle.ConversationId, token).ConfigureAwait(false);
+        if (conversation is not { Kind: ConversationKind.Interactive }) return new(ConversationInputStartStatus.Idle);
+        var claimed = await _scheduler.TryClaimNextFollowUpAsync(handle.ConversationId, handle.RunId, Guid.NewGuid(),
+            immediateInputId, token).ConfigureAwait(false);
+        if (claimed is null) return new(ConversationInputStartStatus.Blocked);
+        try
+        {
+            if (claimed.ExecutionSnapshot is not { } snapshot || claimed.ClaimId is not { } claimId)
+                return await HoldAsync(claimed, ConversationInputReason.AgentChanged).ConfigureAwait(false);
+            var preparation = await _validator.PrepareAsync(conversation, snapshot, token).ConfigureAwait(false);
+            if (preparation.FollowUp is not { } prepared)
+                return await HoldAsync(claimed, preparation.Reason ?? ConversationInputReason.ExecutionStartFailed).ConfigureAwait(false);
+            var claim = new ConversationInputClaim(claimed.Id, conversation.Id, claimed.Revision, claimId,
+                handle.RunId, ConversationInputMessageId.Compute(claimId, claimed.Id));
+            var request = new DesktopConversationTurnRequest(conversation, prepared.Agent, claimed.Prompt,
+                snapshot.ModelProfileId, prepared.WorkspaceRoot, snapshot.ToolPermissionMode, conversation.Id, claim);
+            lock (_taskGate)
+            {
+                _shutdown.Token.ThrowIfCancellationRequested();
+                Track(Task.Run(() => RunAsync(handle, request), CancellationToken.None));
+            }
+            _changes.Notify(conversation.Id);
+            return new(ConversationInputStartStatus.Started, claimed.Id);
+        }
+        catch (OperationCanceledException)
+        {
+            await HoldAsync(claimed, ConversationInputReason.TurnCancelled).ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to start input {InputId}.", claimed.Id);
+            return await HoldAsync(claimed, ConversationInputReason.ExecutionStartFailed).ConfigureAwait(false);
+        }
     }
 
-    internal async Task PauseQueueAsync(Guid conversationId, string reason)
+    private async Task<ConversationInputStartAttempt> HoldAsync(ConversationInputRecord input, string reason)
+    {
+        await _scheduler.HoldAsync(input.Id, input.Revision, reason, CancellationToken.None).ConfigureAwait(false);
+        await PauseQueueAsync(input.ConversationId, reason).ConfigureAwait(false);
+        return new(ConversationInputStartStatus.Failed, input.Id, reason);
+    }
+
+    private async Task PauseQueueAsync(Guid conversationId, string reason)
     {
         await _scheduler.PauseQueueAsync(conversationId, reason, CancellationToken.None).ConfigureAwait(false);
         _changes.Notify(conversationId);
-    }
-
-    internal async Task ValidateRetryAsync(Guid conversationId, ConversationInputExecutionSnapshot snapshot, CancellationToken token)
-    {
-        var conversation = await _conversations.GetConversationAsync(conversationId, token).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("conversation-unavailable");
-        await _validator.PrepareAsync(conversation, snapshot, token).ConfigureAwait(false);
     }
 
     private async Task RunAsync(ConversationRunHandle handle, DesktopConversationTurnRequest request)
@@ -239,9 +244,15 @@ internal sealed class ConversationInputDispatcher : BackgroundService
             {
                 _logger.LogError(exception, "Keeping input admission until {ConversationId} is durably paused.", conversationId);
                 // Shutdown stops coordinator admission before cancelling this retry.
-                await Task.Delay(ScanInterval, _timeProvider, _shutdown.Token).ConfigureAwait(false);
+                await Task.Delay(ScanInterval, _shutdown.Token).ConfigureAwait(false);
             }
         }
+    }
+
+    private void Track(Task task)
+    {
+        _running.Add(task);
+        _ = task.ContinueWith(ObserveCompletion, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
 
     private void ObserveCompletion(Task task)

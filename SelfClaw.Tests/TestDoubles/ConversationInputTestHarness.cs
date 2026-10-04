@@ -16,6 +16,7 @@ using SelfClaw.Desktop.Services.Settings;
 using SelfClaw.Desktop.Services.Tools;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.WebView;
+using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Extensions;
 
@@ -59,9 +60,13 @@ internal sealed class ConversationInputTestHarness : IDisposable
             NullLogger<ConversationTurnEngine>.Instance);
         Switch = new ConversationInputFeatureSwitch(queueEnabled ? "1" : "0");
         Changes = new ConversationInputChangeNotifier();
-        Dispatcher = new ConversationInputDispatcher(Fixture.Inputs, Fixture.Inputs, Fixture.Conversations, Roots,
-            Runs, Engine, Models, Agents, Switch, Changes, NullLogger<ConversationInputDispatcher>.Instance);
-        Service = new ConversationInputService(Fixture.Inputs, Dispatcher, Runs, Models, Agents, Switch, Changes,
+        var validator = new ConversationInputExecutionValidator(Roots, Models, Agents);
+        var recovery = new SqliteStartupRecovery(Fixture.Database, Fixture.RecoveryBeforeCommit);
+        Dispatcher = new ConversationInputDispatcher(Fixture.Inputs, Fixture.Inputs, Fixture.Conversations,
+            Runs, Engine, validator, Switch, Changes, NullLogger<ConversationInputDispatcher>.Instance, recovery.RecoverAsync);
+        Queue = new ConversationInputQueueService(Fixture.Inputs, Fixture.Inputs, Fixture.Conversations, validator,
+            Dispatcher, Runs, Agents, Switch, Changes);
+        Service = new ConversationInputService(Fixture.Inputs, Fixture.Inputs, Queue, Dispatcher, Runs, Models, Agents, Switch, Changes,
             NullLogger<ConversationInputService>.Instance);
     }
 
@@ -76,6 +81,7 @@ internal sealed class ConversationInputTestHarness : IDisposable
     public ConversationInputFeatureSwitch Switch { get; }
     public ConversationInputChangeNotifier Changes { get; }
     public ConversationInputDispatcher Dispatcher { get; }
+    public ConversationInputQueueService Queue { get; }
     public ConversationInputService Service { get; }
 
     public async Task<Guid> CreateConversationAsync(bool recover = true)

@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
@@ -31,7 +30,7 @@ internal sealed class DirectToolInvoker
     private readonly DirectChatTurnRequest _request;
     private readonly IReadOnlyDictionary<string, DirectToolBinding> _bindings;
     private readonly DirectTurnHooks _hooks;
-    private readonly ConcurrentDictionary<string, ToolHookOutcome> _outcomes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ToolHookOutcome> _outcomes = new(StringComparer.Ordinal);
     private int _callCount;
     private int _consecutiveToolFaults;
 
@@ -45,7 +44,7 @@ internal sealed class DirectToolInvoker
         _hooks = hooks;
     }
 
-    public int CallCount => Volatile.Read(ref _callCount);
+    public int CallCount => _callCount;
 
     public async ValueTask<object?> InvokeAsync(
         FunctionCallContent callContent,
@@ -60,7 +59,7 @@ internal sealed class DirectToolInvoker
             throw new InvalidOperationException($"Direct tool '{toolName}' is not bound to this turn.");
         }
 
-        Interlocked.Increment(ref _callCount);
+        _callCount++;
         var callId = callContent.CallId;
         var originalArguments = new AIFunctionArguments(callContent.Arguments ?? new Dictionary<string, object?>());
         var stopwatch = Stopwatch.StartNew();
@@ -157,11 +156,11 @@ internal sealed class DirectToolInvoker
 
         if (fault is null)
         {
-            Interlocked.Exchange(ref _consecutiveToolFaults, 0);
+            _consecutiveToolFaults = 0;
         }
         else
         {
-            var consecutiveFaults = Interlocked.Increment(ref _consecutiveToolFaults);
+            var consecutiveFaults = ++_consecutiveToolFaults;
             if (consecutiveFaults > MaximumConsecutiveToolFaults)
             {
                 // The explicit loop terminates on this exception; it never retries the broken tool.
@@ -177,7 +176,7 @@ internal sealed class DirectToolInvoker
     /// every translated <c>FunctionResultContent</c>, including exception results.
     /// </summary>
     public ToolHookOutcome? TryTakeOutcome(string callId)
-        => _outcomes.TryRemove(callId, out var outcome) ? outcome : null;
+        => _outcomes.Remove(callId, out var outcome) ? outcome : null;
 
     private async Task<bool> RequestApprovalAsync(
         DirectToolBinding binding,

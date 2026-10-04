@@ -11,24 +11,31 @@ namespace SelfClaw.Tests.TestDoubles;
 internal sealed class ConversationPersistenceFixture : IDisposable
 {
     public ConversationPersistenceFixture(Func<string, CancellationToken, Task>? boundaryBeforeCommit = null,
-        Func<string, CancellationToken, Task>? startBeforeCommit = null)
+        Func<string, CancellationToken, Task>? startBeforeCommit = null,
+        Func<string, CancellationToken, Task>? recoveryBeforeCommit = null)
     {
         RootPath = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
         Paths = StoragePathDefaults.Create(RootPath, Path.Combine(RootPath, "p2.db"), Path.Combine(RootPath, "secrets"));
         Database = new SqliteDatabase(Paths);
         Conversations = new SqliteConversationRepository(Database);
-        Turns = startBeforeCommit is null
-            ? new SqliteConversationTurnRepository(Database)
-            : new SqliteConversationTurnRepository(Database, startBeforeCommit);
+        CommitGate = new SqliteTurnCommitGate { BeforeStart = startBeforeCommit };
+        Turns = new SqliteConversationTurnRepository(Database, CommitGate);
         Inputs = boundaryBeforeCommit is null
             ? new SqliteConversationInputRepository(Database)
             : new SqliteConversationInputRepository(Database, boundaryBeforeCommit);
+        RecoveryBeforeCommit = recoveryBeforeCommit;
     }
+
+    internal Func<string, CancellationToken, Task>? RecoveryBeforeCommit { get; }
+
+    internal Task RecoverStartupAsync()
+        => new SqliteStartupRecovery(Database, RecoveryBeforeCommit).RecoverAsync();
 
     internal string RootPath { get; }
     internal StoragePaths Paths { get; }
     internal SqliteDatabase Database { get; }
     internal SqliteConversationRepository Conversations { get; }
+    internal SqliteTurnCommitGate CommitGate { get; }
     internal SqliteConversationTurnRepository Turns { get; }
     internal SqliteConversationInputRepository Inputs { get; }
 

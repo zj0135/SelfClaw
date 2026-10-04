@@ -22,7 +22,7 @@ function statusLabel(item) {
 	<section v-if="visible" class="conversation-queue" aria-label="待发送队列">
 		<header class="queue-head">
 			<span class="queue-title"><ListOrdered :size="14" /> 队列</span>
-            <span v-if="state.paused" class="queue-pause-reason" role="status">{{ describeInputReason(state.pauseReason) }}</span>
+			<span v-if="state.paused" class="queue-pause-reason" role="status">{{ describeInputReason(state.pauseReason) }}</span>
 			<button v-if="state.paused && canResume" class="queue-action" type="button" title="恢复队列"
 				aria-label="恢复队列" @click="emit('resume')"><CirclePlay :size="14" /></button>
 			<button v-else-if="!state.paused" class="queue-action" type="button" title="暂停队列"
@@ -38,8 +38,8 @@ function statusLabel(item) {
 					title="取消" aria-label="取消" @click="emit('cancel', item)"><X :size="13" /></button>
 			</li>
 		</ul>
-        <p v-if="state.truncated" class="queue-truncated">仅显示部分输入。</p>
-        <p v-if="state.error" role="alert">{{ state.error }}</p>
+		<p v-if="state.truncated" class="queue-truncated">仅显示部分输入。</p>
+		<p v-if="state.error" role="alert">{{ state.error }}</p>
 	</section>
 </template>
 
