@@ -330,10 +330,12 @@ public sealed class DirectToolInvokerHookTests
 
         public List<ToolApprovalRequest> Requests { get; } = [];
 
-        public Task<bool> RequestApprovalAsync(ToolApprovalRequest request, CancellationToken cancellationToken = default)
+        public Task<ToolApprovalDecision> RequestApprovalAsync(ToolApprovalRequest request, CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
-            return Task.FromResult(_approved);
+            return Task.FromResult(_approved ? ToolApprovalDecision.Approved : ToolApprovalDecision.Denied);
         }
+
+        public bool TryResolve(Guid toolExecutionId, ToolApprovalDecision decision) => false;
     }
 }

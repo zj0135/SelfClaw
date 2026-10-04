@@ -5,19 +5,25 @@ using SelfClaw.Core.Models;
 
 namespace SelfClaw.Desktop.Services.ConversationInputs;
 
-internal sealed class DirectTurnInputSession : IDirectTurnInputSession
+internal sealed class DirectTurnInputSession : IDirectTurnInputSession, IDirectTurnSteering
 {
     private readonly Guid _conversationId;
     private readonly Guid _turnId;
     private readonly Guid _ownerRunId;
     private readonly IConversationInputRepository _repository;
+    private readonly IConversationInputSteeringStore _steeringStore;
     private readonly object _gate = new();
+    private readonly SemaphoreSlim _claimGate = new(1, 1);
     private ConversationInputBatch? _boundary;
     private TaskCompletionSource<ConversationInputConsumption>? _completion;
     private ConversationInputConsumption? _confirmed;
     private Exception? _failure;
     private CancellationToken _cancellationToken;
     private DirectTurnInputSessionState _state;
+    private TaskCompletionSource _steerPulse = NewPulse();
+    private string? _steerBlockReason;
+    private bool _steerSignaled;
+    private bool _steerIntakeClosed;
     private bool _reading;
     private bool _waitRegistered;
 
@@ -25,9 +31,11 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession
         Guid conversationId,
         Guid turnId,
         Guid ownerRunId,
-        IConversationInputRepository repository)
+        IConversationInputRepository repository,
+        IConversationInputSteeringStore steeringStore)
     {
         ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(steeringStore);
         if (conversationId == Guid.Empty || turnId == Guid.Empty || ownerRunId == Guid.Empty)
             throw new ArgumentException("An input session requires conversation, turn and run identities.");
 
@@ -35,6 +43,7 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession
         _turnId = turnId;
         _ownerRunId = ownerRunId;
         _repository = repository;
+        _steeringStore = steeringStore;
     }
 
     internal int PendingWaiterCount
@@ -46,12 +55,38 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession
         }
     }
 
-    public async Task<ConversationInputBatch?> ReadBoundaryAsync(CancellationToken cancellationToken = default)
+    public string? SteerBlockReason
+    {
+        get { lock (_gate) return _steerBlockReason; }
+    }
+
+    public bool HasSupersedingSteer
+    {
+        get { lock (_gate) return _boundary is not null; }
+    }
+
+    internal bool SteerIntakeClosed
+    {
+        get { lock (_gate) return _steerIntakeClosed; }
+    }
+
+    public Task<ConversationInputBatch?> ReadBoundaryAsync(CancellationToken cancellationToken = default)
+        => ReadBoundaryCoreAsync(closeWhenEmpty: false, cancellationToken);
+
+    public Task<ConversationInputBatch?> ReadFinalBoundaryAsync(CancellationToken cancellationToken = default)
+        => ReadBoundaryCoreAsync(closeWhenEmpty: true, cancellationToken);
+
+    private async Task<ConversationInputBatch?> ReadBoundaryCoreAsync(bool closeWhenEmpty, CancellationToken cancellationToken)
     {
         lock (_gate)
         {
             ThrowIfTerminated();
-            if (_boundary is not null && _confirmed is null) return _boundary;
+            if (_boundary is not null && _confirmed is null)
+            {
+                RegisterBoundary(_boundary);
+                return _boundary;
+            }
+
             if (_reading) throw new InvalidOperationException("Only one boundary read may be in progress.");
             _boundary = null;
             _completion = null;
@@ -62,8 +97,7 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession
 
         try
         {
-            var batch = await _repository.ReadClaimedBatchAsync(
-                _conversationId, _turnId, _ownerRunId, cancellationToken);
+            var batch = await TryClaimAsync(cancellationToken, closeWhenEmpty).ConfigureAwait(false);
             lock (_gate)
             {
                 ThrowIfTerminated();
@@ -129,6 +163,89 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession
         }
     }
 
+    public async Task<bool> TryBeginToolExecutionAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_gate) ThrowIfTerminated();
+        return await TryClaimAsync(cancellationToken).ConfigureAwait(false) is null;
+    }
+
+    /// <summary>
+    /// Runs a steer acceptance under the same gate as the claim/close decision: either the accept
+    /// commits before the close (and the close claims it) or it observes the closed intake and the
+    /// caller falls back to a follow-up.
+    /// </summary>
+    internal async Task<ConversationInputAcceptResult?> TryAcceptSteerAsync(
+        Func<CancellationToken, Task<ConversationInputAcceptResult>> accept, CancellationToken cancellationToken)
+    {
+        await _claimGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (_gate)
+            {
+                if (_state != DirectTurnInputSessionState.Open || _steerIntakeClosed) return null;
+            }
+
+            return await accept(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _claimGate.Release();
+        }
+    }
+
+    public Task WaitForSteerPulseAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            ThrowIfTerminated();
+            if (_steerSignaled)
+            {
+                // A pulse that landed before this wait still wakes it exactly once.
+                _steerSignaled = false;
+                return Task.CompletedTask;
+            }
+
+            return _steerPulse.Task.WaitAsync(cancellationToken);
+        }
+    }
+
+    public async Task SetSteerPolicyAsync(string? blockReason, CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            ThrowIfTerminated();
+            if (_steerBlockReason == blockReason) return;
+            _steerBlockReason = blockReason;
+        }
+
+        if (blockReason is not null)
+        {
+            await _steeringStore.ReleasePendingSteersToFollowUpAsync(_conversationId, _turnId, blockReason, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    internal void NotifySteerAccepted()
+    {
+        TaskCompletionSource pulse;
+        lock (_gate)
+        {
+            if (_state != DirectTurnInputSessionState.Open) return;
+            _steerSignaled = true;
+            pulse = _steerPulse;
+            _steerPulse = NewPulse();
+        }
+
+        pulse.TrySetResult();
+    }
+
+    internal async Task HoldUnconsumedSteersAsync(string reasonCode, CancellationToken cancellationToken = default)
+        => await _steeringStore.HoldUnconsumedSteersAsync(_conversationId, _turnId, reasonCode, cancellationToken)
+            .ConfigureAwait(false);
+
+    public Task HoldUnconsumedAsync(string reasonCode, CancellationToken cancellationToken = default)
+        => HoldUnconsumedSteersAsync(reasonCode, cancellationToken);
+
     internal void Confirm(ConversationInputConsumption result)
     {
         ArgumentNullException.ThrowIfNull(result);
@@ -162,6 +279,7 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession
             _state = DirectTurnInputSessionState.Failed;
             _failure = exception;
             _completion?.TrySetException(exception);
+            _steerPulse.TrySetResult();
         }
     }
 
@@ -173,6 +291,7 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession
             _state = DirectTurnInputSessionState.Cancelled;
             _cancellationToken = cancellationToken;
             _completion?.TrySetCanceled(cancellationToken);
+            _steerPulse.TrySetResult();
         }
     }
 
@@ -183,7 +302,58 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession
             if (_state != DirectTurnInputSessionState.Open) return;
             _state = DirectTurnInputSessionState.Closed;
             _completion?.TrySetException(new InvalidOperationException("The turn input session is closed."));
+            _steerPulse.TrySetResult();
         }
+    }
+
+    private async Task<ConversationInputBatch?> TryClaimAsync(CancellationToken cancellationToken, bool closeWhenEmpty = false)
+    {
+        await _claimGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            string? blockReason;
+            lock (_gate)
+            {
+                ThrowIfTerminated();
+                if (_boundary is not null) return _boundary;
+                if (_steerIntakeClosed) return null;
+                blockReason = _steerBlockReason;
+            }
+
+            if (blockReason is not null)
+            {
+                // A blocked turn never consumes a steer: anything accepted before the policy was
+                // published becomes an ordinary follow-up instead of waiting forever.
+                await _steeringStore.ReleasePendingSteersToFollowUpAsync(_conversationId, _turnId, blockReason, cancellationToken)
+                    .ConfigureAwait(false);
+                if (closeWhenEmpty) CloseIntake();
+                return null;
+            }
+
+            var batch = await _steeringStore.TryClaimPendingSteersAsync(_conversationId, _turnId, _ownerRunId, cancellationToken)
+                .ConfigureAwait(false);
+            if (batch is null)
+            {
+                // The empty final claim is the close: a steer cannot enter the turn after it.
+                if (closeWhenEmpty) CloseIntake();
+                return null;
+            }
+            lock (_gate)
+            {
+                ThrowIfTerminated();
+                _boundary ??= batch;
+                return _boundary;
+            }
+        }
+        finally
+        {
+            _claimGate.Release();
+        }
+    }
+
+    private void CloseIntake()
+    {
+        lock (_gate) _steerIntakeClosed = true;
     }
 
     private void RegisterBoundary(ConversationInputBatch batch)
@@ -201,6 +371,7 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession
                 throw new InvalidOperationException("Only one pending boundary waiter per turn is allowed.");
             if (!_boundary.Inputs.SequenceEqual(batch.Inputs))
                 throw new InvalidDataException("The claimed input batch changed while awaiting consumption.");
+            _completion ??= new TaskCompletionSource<ConversationInputConsumption>(TaskCreationOptions.RunContinuationsAsynchronously);
             return;
         }
 
@@ -216,4 +387,7 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession
         if (_state == DirectTurnInputSessionState.Closed)
             throw new InvalidOperationException("The turn input session is closed.");
     }
+
+    private static TaskCompletionSource NewPulse()
+        => new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

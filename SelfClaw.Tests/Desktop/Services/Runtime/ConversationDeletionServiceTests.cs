@@ -71,7 +71,7 @@ public sealed class ConversationDeletionServiceTests
         var conversation = await fixture.CreateConversationAsync();
         await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
             "queued", ConversationInputKind.FollowUp, null, "queued", fixture.Snapshot(), null, true));
-        using var runs = new ConversationRunCoordinator(fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var runs = new ConversationRunCoordinator(fixture.Inputs, fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
         using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, runs, new Sink());
         var children = new Children();
         var service = new ConversationDeletionService(runs, sessions, children,
@@ -100,7 +100,7 @@ public sealed class ConversationDeletionServiceTests
         var conversation = await fixture.CreateConversationAsync();
         await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
             "queued", ConversationInputKind.FollowUp, null, "queued", fixture.Snapshot(), null, true));
-        using var runs = new ConversationRunCoordinator(fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var runs = new ConversationRunCoordinator(fixture.Inputs, fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
         using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, runs, new Sink());
         var service = new ConversationDeletionService(runs, sessions, new Children { AutoRelease = true },
             new ConversationWorkspaceService(new EmptyRoots()), fixture.Conversations, null, fixture.Inputs);
@@ -127,7 +127,7 @@ public sealed class ConversationDeletionServiceTests
         private readonly ConversationSessionCoordinator _sessions;
         public Context()
         {
-            Runs = new(new EmptyConversationInputRepository(), NullLogger<ConversationRunCoordinator>.Instance);
+            Runs = new(new EmptyConversationInputRepository(), new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
             _sessions = new(Repository, new RecordingConversationTurnRepository(), Runs, new Sink());
             Service = new(Runs, _sessions, Children, new ConversationWorkspaceService(Repository), Repository);
         }

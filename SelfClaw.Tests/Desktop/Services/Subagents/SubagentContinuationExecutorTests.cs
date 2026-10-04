@@ -30,7 +30,7 @@ public sealed class SubagentContinuationExecutorTests
         var parent = await context.Conversations.GetConversationAsync(task.ParentConversationId)
             ?? throw new InvalidOperationException("Missing parent.");
         var deliveries = new SqliteSubagentDeliveryRepository(context.Database);
-        using var runs = new ConversationRunCoordinator(context.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var runs = new ConversationRunCoordinator(context.Inputs, context.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
         using var sessions = new ConversationSessionCoordinator(context.Conversations, context.Turns, runs, new Sink());
         var runtime = new TerminalRuntime(completion, hasTool, async request =>
         {

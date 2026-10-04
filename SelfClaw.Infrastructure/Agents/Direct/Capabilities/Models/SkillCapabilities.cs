@@ -7,4 +7,5 @@ internal sealed record SkillCapabilities(
     IReadOnlyList<string> Instructions,
     IReadOnlyList<DirectToolBinding> Tools,
     IReadOnlyDictionary<Guid, string> MessageAdjustments,
-    IReadOnlyList<string> ResolvedSkillIds);
+    IReadOnlyList<string> ResolvedSkillIds,
+    IReadOnlyList<string> ExplicitSkillIds);

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Tests.TestDoubles;
 
@@ -110,6 +111,25 @@ public sealed class DirectTurnInputSessionTests
         context.InputSession.Close();
         await FluentActions.Awaiting(() => context.InputSession.WaitForCommitAsync(batch))
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*closed*");
+    }
+
+    [Fact]
+    public async Task The_final_boundary_read_closes_steer_intake_for_late_acceptance()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+
+        (await context.InputSession.ReadFinalBoundaryAsync()).Should().BeNull();
+        context.InputSession.SteerIntakeClosed.Should().BeTrue();
+        var accepted = await context.InputSession.TryAcceptSteerAsync(token => context.Inputs.AcceptAsync(
+            new ConversationInputAcceptRequest(context.Conversation.Id, Guid.NewGuid().ToString("N"),
+                ConversationInputKind.Steer, context.Record.Id, "late",
+                new ConversationInputExecutionSnapshot("build", 1, AgentExecutionMode.Direct, Guid.NewGuid(), null, null,
+                    ToolPermissionMode.RequireApproval), null, true), token), CancellationToken.None);
+
+        accepted.Should().BeNull();
+        (await context.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(0L);
+        (await context.InputSession.ReadBoundaryAsync()).Should().BeNull();
     }
 
     [Fact]

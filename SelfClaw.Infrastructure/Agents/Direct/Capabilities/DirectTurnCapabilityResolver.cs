@@ -143,7 +143,8 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             leases,
             plugins.Hooks,
             plugins.HookNotices,
-            plugins.HookBlockReason);
+            plugins.HookBlockReason,
+            skills.ExplicitSkillIds);
     }
 
     internal static IReadOnlyList<DirectToolBinding> BindTools(

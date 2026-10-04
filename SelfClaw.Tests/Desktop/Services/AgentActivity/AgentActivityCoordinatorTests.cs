@@ -64,13 +64,13 @@ public sealed class AgentActivityCoordinatorTests
         coordinator.CurrentSnapshot.Headline.Should().Be("等待「Run command」审批…");
         coordinator.CurrentSnapshot.Detail.Should().BeNull();
 
-        handler.TryResolve(first.ToolExecutionId, approved: true).Should().BeTrue();
-        (await firstDecision).Should().BeTrue();
+        handler.TryResolve(first.ToolExecutionId, ToolApprovalDecision.Approved).Should().BeTrue();
+        (await firstDecision).Should().Be(ToolApprovalDecision.Approved);
         coordinator.CurrentSnapshot.Approval.Should().Be(second);
         coordinator.CurrentSnapshot.Headline.Should().Be("等待「Write file」审批…");
 
-        handler.TryResolve(second.ToolExecutionId, approved: false).Should().BeTrue();
-        (await secondDecision).Should().BeFalse();
+        handler.TryResolve(second.ToolExecutionId, ToolApprovalDecision.Denied).Should().BeTrue();
+        (await secondDecision).Should().Be(ToolApprovalDecision.Denied);
         coordinator.CurrentSnapshot.Approval.Should().BeNull();
         coordinator.CurrentSnapshot.Phase.Should().Be(AgentActivityPhase.Thinking);
     }
@@ -122,8 +122,8 @@ public sealed class AgentActivityCoordinatorTests
         var decision = handler.RequestApprovalAsync(request);
 
         decision.IsCompleted.Should().BeFalse();
-        handler.TryResolve(request.ToolExecutionId, approved: true).Should().BeTrue();
-        (await decision).Should().BeTrue();
+        handler.TryResolve(request.ToolExecutionId, ToolApprovalDecision.Approved).Should().BeTrue();
+        (await decision).Should().Be(ToolApprovalDecision.Approved);
     }
 
     private static AgentActivityCoordinator CreateCoordinator(DesktopToolApprovalHandler handler)

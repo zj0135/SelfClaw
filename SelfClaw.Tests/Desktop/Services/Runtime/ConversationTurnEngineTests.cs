@@ -214,7 +214,7 @@ public sealed class ConversationTurnEngineTests
         public Context(IAgentChatRuntime runtime)
         {
             Turns = new(Repository);
-            Runs = new(Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+            Runs = new(Inputs, new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
             Sessions = new(Repository, Turns, Runs, new SilentSink());
             var approval = new DesktopToolApprovalHandler();
             _activity = new(approval, NullLogger<AgentActivityCoordinator>.Instance);

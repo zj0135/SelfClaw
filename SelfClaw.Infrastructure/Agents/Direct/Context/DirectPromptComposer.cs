@@ -31,7 +31,7 @@ internal sealed class DirectPromptComposer
     /// Output space held back when the profile declares a context window but no output cap: without a
     /// reserve, a full history can leave the model no room to answer. Matches the SDK's own low default.
     /// </summary>
-    private const int DefaultOutputTokenReserve = 4096;
+    internal const int DefaultOutputTokenReserve = 4096;
 
     /// <summary>Per-message wire overhead (role markers and framing), counted conservatively.</summary>
     private const int PerMessageOverheadTokens = 8;
@@ -380,6 +380,13 @@ internal sealed class DirectPromptComposer
                                             EstimateTokens(result.Exception?.Message),
             _ => 0L
         }));
+
+    /// <summary>The same heuristic the initial history composer uses, exposed to the runtime budget guard.</summary>
+    internal static long EstimateMessages(IReadOnlyList<ChatMessage> messages) => EstimateMessageTokens(messages);
+
+    internal static long EstimateTools(IEnumerable<AITool>? tools) => EstimateToolTokens(tools);
+
+    internal static long EstimateUserPrompt(string prompt) => PerMessageOverheadTokens + EstimateTokens(prompt);
 
     private static ChatMessage CreateToolResultMessage(string callId, ToolExecutionRecord run)
     {

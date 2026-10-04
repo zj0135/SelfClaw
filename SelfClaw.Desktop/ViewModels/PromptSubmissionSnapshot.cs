@@ -14,4 +14,6 @@ internal sealed record PromptSubmissionSnapshot(
     GitWorkspaceMode WorkspaceMode,
     int SelectionVersion,
     Guid? ConversationId = null,
-    string? ClientRequestId = null);
+    string? ClientRequestId = null,
+    ConversationInputKind Kind = ConversationInputKind.FollowUp,
+    Guid? TargetTurnId = null);

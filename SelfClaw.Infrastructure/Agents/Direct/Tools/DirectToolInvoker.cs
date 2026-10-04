@@ -20,6 +20,13 @@ internal sealed class DirectToolInvoker
     internal const string DeniedResult = "User denied this tool call.";
 
     /// <summary>
+    /// The model-visible reason for a call the invoker refused to start because a steer batch was
+    /// durably claimed first. It is distinct from a user denial so transcripts and hooks can tell
+    /// an adjustment from a rejection, and it never counts as a tool fault.
+    /// </summary>
+    internal const string SupersededBySteerReason = "SupersededBySteer";
+
+    /// <summary>
     /// How many consecutive tool faults are converted into a model-visible failure before the next one
     /// aborts the turn. An uncaught fault ends the explicit loop: a permanently broken tool costs
     /// at most this many attempts plus one
@@ -30,6 +37,7 @@ internal sealed class DirectToolInvoker
     private readonly DirectChatTurnRequest _request;
     private readonly IReadOnlyDictionary<string, DirectToolBinding> _bindings;
     private readonly DirectTurnHooks _hooks;
+    private readonly IDirectTurnSteering? _steering;
     private readonly Dictionary<string, ToolHookOutcome> _outcomes = new(StringComparer.Ordinal);
     private int _callCount;
     private int _consecutiveToolFaults;
@@ -42,6 +50,7 @@ internal sealed class DirectToolInvoker
         _request = request;
         _bindings = bindings;
         _hooks = hooks;
+        _steering = request.Steering;
     }
 
     public int CallCount => _callCount;
@@ -61,6 +70,14 @@ internal sealed class DirectToolInvoker
 
         _callCount++;
         var callId = callContent.CallId;
+
+        // Pending phase: a steer claimed before this call starts skips the call outright, without
+        // pretending a toolExecuting/toolExecuted pair happened for a hook that never ran.
+        if (_steering?.HasSupersedingSteer == true)
+        {
+            return SupersededBySteerResult();
+        }
+
         var originalArguments = new AIFunctionArguments(callContent.Arguments ?? new Dictionary<string, object?>());
         var stopwatch = Stopwatch.StartNew();
         var call = new ToolHookCall(
@@ -74,6 +91,7 @@ internal sealed class DirectToolInvoker
         object? raw = null;
         string? deniedBy = null;
         Exception? fault = null;
+        var superseded = false;
         if (pre.BlockedBy is not null)
         {
             deniedBy = "hook";
@@ -87,8 +105,10 @@ internal sealed class DirectToolInvoker
             var needsApproval =
                 (binding.RequiresApproval && _request.ToolPermissionMode != ToolPermissionMode.FullAccess) ||
                 pre.ApprovalRequiredBy.Count > 0;
-            if (needsApproval && !await RequestApprovalAsync(binding, arguments, pre, cancellationToken)
-                    .ConfigureAwait(false))
+            var decision = needsApproval
+                ? await RequestApprovalAsync(binding, arguments, pre, cancellationToken).ConfigureAwait(false)
+                : ToolApprovalDecision.Approved;
+            if (decision == ToolApprovalDecision.Denied)
             {
                 deniedBy = "user";
                 result = new DirectToolResult(
@@ -96,6 +116,21 @@ internal sealed class DirectToolInvoker
                     DeniedResult,
                     JsonSerializer.SerializeToElement(DeniedResult),
                     DeniedResult);
+            }
+            else if (decision == ToolApprovalDecision.Superseded)
+            {
+                deniedBy = "steer";
+                superseded = true;
+                result = SupersededBySteerResult();
+            }
+            else if (_steering is not null &&
+                     !await _steering.TryBeginToolExecutionAsync(cancellationToken).ConfigureAwait(false))
+            {
+                // ReadyToExecute lost to a steer claim: the checkpoint and the tool never run, so the
+                // permit stays irrevocable once granted.
+                deniedBy = "steer";
+                superseded = true;
+                result = SupersededBySteerResult();
             }
             else
             {
@@ -156,7 +191,8 @@ internal sealed class DirectToolInvoker
 
         if (fault is null)
         {
-            _consecutiveToolFaults = 0;
+            // A steer skip neither increments nor resets the consecutive-fault budget.
+            if (!superseded) _consecutiveToolFaults = 0;
         }
         else
         {
@@ -178,20 +214,22 @@ internal sealed class DirectToolInvoker
     public ToolHookOutcome? TryTakeOutcome(string callId)
         => _outcomes.Remove(callId, out var outcome) ? outcome : null;
 
-    private async Task<bool> RequestApprovalAsync(
+    private async Task<ToolApprovalDecision> RequestApprovalAsync(
         DirectToolBinding binding,
         AIFunctionArguments arguments,
         ToolExecutingOutcome pre,
         CancellationToken cancellationToken)
     {
-        if (_request.ToolApprovalHandler is null)
+        var handler = _request.ToolApprovalHandler;
+        if (handler is null)
         {
-            return false;
+            return ToolApprovalDecision.Denied;
         }
 
-        return await _request.ToolApprovalHandler.RequestApprovalAsync(
+        var approvalId = Guid.NewGuid();
+        var approval = handler.RequestApprovalAsync(
                 new ToolApprovalRequest(
-                    Guid.NewGuid(),
+                    approvalId,
                     binding.Tool.Name,
                     binding.Descriptor.DisplayName ?? binding.Tool.Name,
                     binding.Tool.Description,
@@ -204,9 +242,41 @@ internal sealed class DirectToolInvoker
                     pre.ApprovalRequiredBy,
                     pre.ApprovalReason,
                     pre.ArgumentsModifiedBy),
-                cancellationToken)
-            .ConfigureAwait(false);
+                cancellationToken);
+        if (_steering is null)
+        {
+            return await approval.ConfigureAwait(false);
+        }
+
+        while (true)
+        {
+            var winner = await Task.WhenAny(approval, _steering.WaitForSteerPulseAsync(cancellationToken)).ConfigureAwait(false);
+            if (winner == approval)
+            {
+                return await approval.ConfigureAwait(false);
+            }
+
+            if (await _steering.TryBeginToolExecutionAsync(cancellationToken).ConfigureAwait(false))
+            {
+                // The claim failed, so nothing may be revoked on behalf of an unconfirmed input.
+                continue;
+            }
+
+            // The steer claim is durable: revoke a still-pending approval. If the user decided first
+            // that decision stays the winner, but the claimed steer still wins execution admission.
+            var revoked = handler.TryResolve(approvalId, ToolApprovalDecision.Superseded);
+            var decided = await approval.ConfigureAwait(false);
+            return revoked || decided != ToolApprovalDecision.Denied
+                ? ToolApprovalDecision.Superseded : ToolApprovalDecision.Denied;
+        }
     }
+
+    private static DirectToolResult SupersededBySteerResult()
+        => new(
+            ToolCallStatus.Canceled,
+            "Skipped because the user adjusted the current task.",
+            JsonSerializer.SerializeToElement(new { reason = SupersededBySteerReason }),
+            SupersededBySteerReason);
 
     private void RecordOutcome(string callId, ToolExecutingOutcome pre, ToolExecutedOutcome post)
     {

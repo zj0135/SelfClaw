@@ -21,7 +21,8 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
         DirectTurnLeaseScope? scope = null,
         IReadOnlyList<ResolvedPluginHook>? hooks = null,
         IReadOnlyList<string>? hookNotices = null,
-        string? hookBlockReason = null)
+        string? hookBlockReason = null,
+        IReadOnlyList<string>? explicitSkillIds = null)
     {
         SystemInstructions = systemInstructions;
         Tools = tools.Select(binding => (AITool)binding.Tool).ToArray();
@@ -31,6 +32,7 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
         Hooks = hooks ?? [];
         HookNotices = hookNotices ?? [];
         HookBlockReason = hookBlockReason;
+        ExplicitSkillIds = explicitSkillIds ?? [];
         _scope = scope;
     }
 
@@ -42,6 +44,9 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
     public IReadOnlyList<ResolvedPluginHook> Hooks { get; }
     public IReadOnlyList<string> HookNotices { get; }
     public string? HookBlockReason { get; }
+
+    /// <summary>Skills the user explicitly activated for this turn; a steer cannot re-run that activation.</summary>
+    public IReadOnlyList<string> ExplicitSkillIds { get; }
 
     public ValueTask DisposeAsync() => _scope?.DisposeAsync() ?? ValueTask.CompletedTask;
 }

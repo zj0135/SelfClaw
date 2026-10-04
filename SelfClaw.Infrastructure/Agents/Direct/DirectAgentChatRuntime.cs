@@ -212,8 +212,9 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         TurnState state,
         CancellationToken cancellationToken)
     {
-        if (request.InputSession is not null && request.ExecutionContext.Origin != DirectTurnOrigin.Interactive)
-            throw new InvalidDataException("Only Interactive Direct turns can consume input boundaries.");
+        if ((request.InputSession is not null || request.Steering is not null) &&
+            request.ExecutionContext.Origin != DirectTurnOrigin.Interactive)
+            throw new InvalidDataException("Only Interactive Direct turns can consume input boundaries or steer.");
 
         if (DirectTurnPolicy.For(request).RequiresToolExecutionCheckpoint && request.ToolExecutionCheckpoint is null)
         {
@@ -259,6 +260,18 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                     preparation.Profile.Model),
                 capabilityLease.Hooks);
             state.Hooks = hooks;
+            // Publish the steer policy before runStarting runs: an input accepted during initialization
+            // is converted to a follow-up here rather than bypassing the hook review mid-turn.
+            if (request.Steering is not null)
+            {
+                var steerBlockReason = hooks.HasRunStartingHooks
+                    ? ConversationInputReason.HookRequiresNewTurn
+                    : capabilityLease.ExplicitSkillIds.Count > 0
+                        ? ConversationInputReason.SkillRequiresNewTurn
+                        : null;
+                await request.Steering.SetSteerPolicyAsync(steerBlockReason, cancellationToken).ConfigureAwait(false);
+            }
+
             if (hooks.HasRunStartingHooks)
             {
                 writer.TryWrite(new RunStatusEvent(
@@ -386,6 +399,17 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 RunCompletionStatus.Failed,
                 ErrorMessage: TruncatedWithoutOutputMessage,
                 FinalText: null);
+            writer.TryWrite(failed);
+            return failed;
+        }
+
+        if (outcome == DirectLoopOutcome.ContextBudgetExceeded)
+        {
+            _logger.LogWarning("Direct AI agent turn could not fit a steer batch into the model context window.");
+            var failed = new RunCompletedEvent(
+                RunCompletionStatus.Failed,
+                output.FinalTextOrNull,
+                "ContextBudgetExceeded: the queued steer could not fit in the model context window; the unconsumed input was held.");
             writer.TryWrite(failed);
             return failed;
         }

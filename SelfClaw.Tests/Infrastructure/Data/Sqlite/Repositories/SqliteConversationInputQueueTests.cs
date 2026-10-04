@@ -265,7 +265,7 @@ public sealed class SqliteConversationInputQueueTests
         var claimed = await fixture.ClaimNextAsync(claimedConversation, Guid.NewGuid(), Guid.NewGuid());
         await fixture.AcceptFollowUpAsync(pendingConversation, "pending item");
 
-        // A stale steer targets an already-terminal turn.
+        // A steer accepted in a dead process stays bound to its still-Running turn; recovery holds it.
         await fixture.ExecuteAsync("""
             INSERT INTO conversation_inputs(id, conversation_id, client_request_id, sequence, kind, target_turn_id,
                 payload_json, status, revision, created_at_utc, updated_at_utc)
@@ -274,7 +274,6 @@ public sealed class SqliteConversationInputQueueTests
             ("$request", "steer-1"), ("$turn", active.Turn.Id.ToString("D")),
             ("$payload", JsonSerializer.Serialize(new { version = 1, prompt = "stale steer" })),
             ("$at", DateTimeOffset.UtcNow.ToString("O")));
-        await fixture.Turns.TryFinalizeTurnAsync(new(active.Turn with { Status = ConversationTurnStatus.Succeeded, CompletedAtUtc = DateTimeOffset.UtcNow }, [], []));
 
         await fixture.RecoverStartupAsync();
         (await fixture.Inputs.GetQueueStateAsync(claimedConversation)).Paused.Should().BeTrue();

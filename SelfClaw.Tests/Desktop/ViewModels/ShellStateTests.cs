@@ -183,7 +183,7 @@ public sealed class ShellStateTests
             _publisher = new TranscriptPublisher(new TranscriptProjection(paths), _delivery, Dispatcher.CurrentDispatcher);
             var turns = new SqliteConversationTurnRepository(database);
             var inputs = new SqliteConversationInputRepository(database);
-            _runs = new ConversationRunCoordinator(inputs, NullLogger<ConversationRunCoordinator>.Instance);
+            _runs = new ConversationRunCoordinator(inputs, inputs, NullLogger<ConversationRunCoordinator>.Instance);
             _sessions = new ConversationSessionCoordinator(conversations, turns, _runs, _publisher);
             _engine = new ConversationTurnEngine(turns, new DesktopTurnFinalizer(turns, NullLogger<DesktopTurnFinalizer>.Instance),
                 new ConversationTurnRecorder(conversations, turns, inputs, NullLogger<ConversationTurnRecorder>.Instance), Runtime,

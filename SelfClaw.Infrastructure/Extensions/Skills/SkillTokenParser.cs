@@ -1,11 +1,14 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Infrastructure.Extensions.Skills.Models;
 
 namespace SelfClaw.Infrastructure.Extensions.Skills;
 
-internal sealed partial class SkillTokenParser
+internal sealed partial class SkillTokenParser : ISkillTokenDetector
 {
+    public bool ContainsExplicitActivation(string text) => Parse(text).Count > 0;
+
     public IReadOnlyList<SkillToken> Parse(string text)
     {
         if (string.IsNullOrEmpty(text))

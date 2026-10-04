@@ -95,7 +95,8 @@ internal sealed class SkillCapabilitySource
             instructions,
             tools,
             CreateMessageAdjustments(request.Messages, latestUserMessage, explicitTokens, resolvedSkills),
-            resolvedSkills.Keys.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToArray());
+            resolvedSkills.Keys.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToArray(),
+            explicitIds);
     }
 
     private string[] ReadExplicitIds(IReadOnlyList<SkillToken> explicitTokens)

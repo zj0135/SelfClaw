@@ -78,6 +78,7 @@ internal sealed class ConversationTurnEngine
         catch (OperationCanceledException)
         {
             handle.InputSession?.Cancel(handle.CancellationToken);
+            await HoldUnconsumedSteersAsync(handle, ConversationInputReason.TurnCancelled).ConfigureAwait(false);
             if (state is not null && turn is not null && !turn.Completed && turn.PendingFinalization is null)
                 await FinalizeInterruptedAsync(state, turn, TurnFinalizationKind.Cancelled, AgentActivityOutcome.Cancelled, "Generation stopped.");
             throw;
@@ -87,6 +88,7 @@ internal sealed class ConversationTurnEngine
             error = exception.Message;
             handle.InputSession?.Fail(exception);
             _logger.LogError(exception, "Chat turn failed. RunId={RunId}", handle.RunId);
+            await HoldUnconsumedSteersAsync(handle, ConversationInputReason.TurnFailed).ConfigureAwait(false);
             if (state is not null && turn is not null && !turn.Completed && turn.PendingFinalization is null)
                 await FinalizeInterruptedAsync(state, turn, TurnFinalizationKind.Failed, AgentActivityOutcome.Failed, exception.Message);
         }
@@ -136,6 +138,20 @@ internal sealed class ConversationTurnEngine
         }
     }
 
+    private async Task HoldUnconsumedSteersAsync(ConversationRunHandle handle, string reasonCode)
+    {
+        if (handle.InputSession is not { } session) return;
+        try
+        {
+            await session.HoldUnconsumedSteersAsync(reasonCode).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            // The turn's real failure must not be masked by a settlement failure; startup recovery holds leftovers.
+            _logger.LogError(exception, "Failed to hold unconsumed steer inputs for turn {TurnId}.", handle.TurnId);
+        }
+    }
+
     private async Task FinalizeInterruptedAsync(ConversationRuntimeState state, AgentTurnState turn,
         TurnFinalizationKind kind, AgentActivityOutcome outcome, string message)
     {
@@ -155,7 +171,8 @@ internal sealed class ConversationTurnEngine
         }
         return new DirectChatTurnRequest(handle.TurnId, handle.ConversationId, request.WorkspaceRoot, request.Agent,
             snapshot.Messages, snapshot.Turns, request.ModelProfileId, request.ToolPermissionMode, _approval,
-            new(DirectTurnOrigin.Interactive, null, null), snapshot.ToolRuns, InputSession: handle.InputSession);
+            new(DirectTurnOrigin.Interactive, null, null), snapshot.ToolRuns, InputSession: handle.InputSession,
+            Steering: handle.InputSession);
     }
 
     private void BeginActivity(ConversationRecord conversation, AgentRuntimeDefinition agent, AgentTurnState turn)

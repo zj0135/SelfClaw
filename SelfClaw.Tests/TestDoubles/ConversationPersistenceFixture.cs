@@ -3,6 +3,7 @@ using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
+using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
 
@@ -21,7 +22,7 @@ internal sealed class ConversationPersistenceFixture : IDisposable
         CommitGate = new SqliteTurnCommitGate { BeforeStart = startBeforeCommit };
         Turns = new SqliteConversationTurnRepository(Database, CommitGate);
         Inputs = boundaryBeforeCommit is null
-            ? new SqliteConversationInputRepository(Database)
+            ? new SqliteConversationInputRepository(Database, new SkillTokenParser())
             : new SqliteConversationInputRepository(Database, boundaryBeforeCommit);
         RecoveryBeforeCommit = recoveryBeforeCommit;
     }
@@ -80,6 +81,30 @@ internal sealed class ConversationPersistenceFixture : IDisposable
         return result.Input!;
     }
 
+    internal async Task<ConversationInputAcceptResult> AcceptSteerAsync(Guid conversationId, Guid targetTurnId, string prompt,
+        string? requestId = null, string? reasonCode = null)
+        => await Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversationId,
+            requestId ?? Guid.NewGuid().ToString("N"), ConversationInputKind.Steer, targetTurnId, prompt,
+            Snapshot(), null, true, ReasonCode: reasonCode));
+
+    /// <summary>Seeds a Pending steer with a valid snapshot, bypassing acceptance conversion.</summary>
+    internal async Task<Guid> SeedRawPendingSteerAsync(ConversationTurnRecord turn, string prompt, long sequence = 1)
+    {
+        var inputId = Guid.NewGuid();
+        var snapshot = JsonSerializer.Serialize(new ConversationInputExecutionSnapshot("build", 1,
+            AgentExecutionMode.Direct, Guid.NewGuid(), null, null, ToolPermissionMode.RequireApproval),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        await ExecuteAsync("""
+            INSERT INTO conversation_inputs(id, conversation_id, client_request_id, sequence, kind, target_turn_id,
+                payload_json, execution_snapshot_json, status, revision, claim_id, claim_owner_run_id, created_at_utc, updated_at_utc)
+            VALUES($id, $conversation, $request, $sequence, 1, $turn, $payload, $snapshot, 0, 1, NULL, NULL, $at, $at);
+            """, ("$id", inputId.ToString("D")), ("$conversation", turn.ConversationId.ToString("D")),
+            ("$request", Guid.NewGuid().ToString("D")), ("$sequence", sequence),
+            ("$turn", turn.Id.ToString("D")), ("$payload", JsonSerializer.Serialize(new { version = 1, prompt })),
+            ("$snapshot", snapshot), ("$at", DateTimeOffset.UtcNow.ToString("O")));
+        return inputId;
+    }
+
     internal async Task<ConversationInputRecord> ClaimNextAsync(Guid conversationId, Guid ownerRunId, Guid claimId)
         => await Inputs.TryClaimNextFollowUpAsync(conversationId, ownerRunId, claimId)
            ?? throw new InvalidOperationException("No pending follow-up could be claimed.");
@@ -99,21 +124,23 @@ internal sealed class ConversationPersistenceFixture : IDisposable
     internal async Task<ConversationInputBatch> SeedClaimAsync(
         ConversationTurnRecord turn, Guid ownerRunId, long firstSequence = 1, params string[] prompts)
     {
-        var claimId = Guid.NewGuid();
+        var snapshot = JsonSerializer.Serialize(new ConversationInputExecutionSnapshot("build", 1,
+            AgentExecutionMode.Direct, Guid.NewGuid(), null, null, ToolPermissionMode.RequireApproval),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         for (var index = 0; index < prompts.Length; index++)
         {
             await ExecuteAsync("""
                 INSERT INTO conversation_inputs(id, conversation_id, client_request_id, sequence, kind, target_turn_id,
-                    payload_json, status, revision, claim_id, claim_owner_run_id, created_at_utc, updated_at_utc)
-                VALUES($id, $conversation, $request, $sequence, 1, $turn, $payload, 1, 1, $claim, $owner, $at, $at);
+                    payload_json, execution_snapshot_json, status, revision, claim_id, claim_owner_run_id, created_at_utc, updated_at_utc)
+                VALUES($id, $conversation, $request, $sequence, 1, $turn, $payload, $snapshot, 0, 1, NULL, NULL, $at, $at);
                 """, ("$id", Guid.NewGuid().ToString("D")), ("$conversation", turn.ConversationId.ToString("D")),
                 ("$request", Guid.NewGuid().ToString("D")), ("$sequence", firstSequence + index),
                 ("$turn", turn.Id.ToString("D")), ("$payload", JsonSerializer.Serialize(new { version = 1, prompt = prompts[index] })),
-                ("$claim", claimId.ToString("D")), ("$owner", ownerRunId.ToString("D")), ("$at", DateTimeOffset.UtcNow.ToString("O")));
+                ("$snapshot", snapshot), ("$at", DateTimeOffset.UtcNow.ToString("O")));
         }
 
-        return await Inputs.ReadClaimedBatchAsync(turn.ConversationId, turn.Id, ownerRunId)
-            ?? throw new InvalidOperationException("The seeded claim was not returned.");
+        return await Inputs.TryClaimPendingSteersAsync(turn.ConversationId, turn.Id, ownerRunId)
+            ?? throw new InvalidOperationException("The seeded pending steer was not claimable.");
     }
 
     internal async Task ExecuteAsync(string sql, params (string Name, object Value)[] parameters)

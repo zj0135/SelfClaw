@@ -39,7 +39,7 @@ internal sealed class ToolApprovalPresenter : IDisposable
             approval = snapshot.Approval, conversationTitle = snapshot.ConversationTitle };
     }
 
-    public bool Resolve(Guid id, bool approved) => _handler.TryResolve(id, approved);
+    public bool Resolve(Guid id, ToolApprovalDecision decision) => _handler.TryResolve(id, decision);
 
     public void Dispose()
     {

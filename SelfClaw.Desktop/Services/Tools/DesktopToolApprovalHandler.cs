@@ -13,8 +13,8 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
     public event Action<ToolApprovalRequest>? ApprovalRequested;
 
     /// <summary>
-    /// Raised whenever a pending approval leaves the queue for any reason (resolved, cancelled,
-    /// or rejected in bulk). Lets the UI advance a single-slot approval indicator without
+    /// Raised whenever a pending approval leaves the queue for any reason (resolved, superseded,
+    /// cancelled, or rejected in bulk). Lets the UI advance a single-slot approval indicator without
     /// caring how the request was closed.
     /// </summary>
     public event Action<Guid>? ApprovalCompleted;
@@ -22,14 +22,14 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
     internal IReadOnlyList<ToolApprovalRequest> GetPendingRequests()
         => _pendingApprovals.Values.Select(pending => pending.Request).ToImmutableArray();
 
-    public Task<bool> RequestApprovalAsync(
+    public Task<ToolApprovalDecision> RequestApprovalAsync(
         ToolApprovalRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var completionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completionSource = new TaskCompletionSource<ToolApprovalDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
         CancellationTokenRegistration registration = default;
 
         if (cancellationToken.CanBeCanceled)
@@ -66,13 +66,13 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
         }
         catch
         {
-            TryResolve(request.ToolExecutionId, approved: false);
+            TryResolve(request.ToolExecutionId, ToolApprovalDecision.Denied);
         }
 
         return AwaitApprovalAsync(pendingApproval);
     }
 
-    public bool TryResolve(Guid toolExecutionId, bool approved)
+    public bool TryResolve(Guid toolExecutionId, ToolApprovalDecision decision)
     {
         if (!_pendingApprovals.TryRemove(toolExecutionId, out var pending))
         {
@@ -80,7 +80,7 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
         }
 
         DisposeRegistrations(pending);
-        var resolved = pending.CompletionSource.TrySetResult(approved);
+        var resolved = pending.CompletionSource.TrySetResult(decision);
         RaiseApprovalCompleted(toolExecutionId);
         return resolved;
     }
@@ -89,7 +89,7 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
     {
         foreach (var toolExecutionId in _pendingApprovals.Keys)
         {
-            TryResolve(toolExecutionId, approved: false);
+            TryResolve(toolExecutionId, ToolApprovalDecision.Denied);
         }
     }
 
@@ -104,7 +104,7 @@ public sealed class DesktopToolApprovalHandler : IToolApprovalHandler
         }
     }
 
-    private static async Task<bool> AwaitApprovalAsync(PendingToolApproval pendingApproval)
+    private static async Task<ToolApprovalDecision> AwaitApprovalAsync(PendingToolApproval pendingApproval)
     {
         try
         {

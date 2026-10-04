@@ -64,7 +64,7 @@ public sealed class SqliteConversationInputRepositoryTests
         (await fixture.Conversations.ListMessagesAsync(final.ConversationId)).Should().HaveCount(4).And.OnlyContain(message => message.Role == MessageRole.User);
         (await fixture.ScalarAsync("SELECT input_tokens FROM turn_usage;")).Should().Be(40L);
         (await fixture.ScalarAsync("SELECT provider_calls FROM turn_usage;")).Should().Be(3L);
-        (await fixture.ScalarAsync("SELECT queue_revision FROM conversation_input_state;")).Should().Be(2L);
+        (await fixture.ScalarAsync("SELECT queue_revision FROM conversation_input_state;")).Should().Be(4L);
         (await fixture.Inputs.HasUnprocessedInputsAsync(final.ConversationId)).Should().BeFalse();
         (await fixture.Inputs.ReadConsumptionAsync(first)).Should().NotBeNull();
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM messages WHERE role = 2;")).Should().Be(0L);
@@ -110,7 +110,8 @@ public sealed class SqliteConversationInputRepositoryTests
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM messages;")).Should().Be(2L);
         (await fixture.ScalarAsync("SELECT next_sequence FROM conversation_message_sequences;")).Should().Be(3L);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM turn_usage;")).Should().Be(0L);
-        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_input_state;")).Should().Be(0L);
+        // The P4 claim itself is durable: the fixture claim transaction already created the queue state row.
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_input_state;")).Should().Be(1L);
         (await fixture.Conversations.ListMessagesAsync(message.ConversationId)).Last().Status.Should().Be(MessageStatus.Streaming);
         (await fixture.Conversations.ListToolExecutionsAsync(message.ConversationId)).Single().Status.Should().Be(tool.Status);
         (await fixture.Inputs.ReadConsumptionAsync(batch)).Should().BeNull();
@@ -123,13 +124,12 @@ public sealed class SqliteConversationInputRepositoryTests
         var start = await fixture.StartAsync();
         var owner = Guid.NewGuid();
         var batch = await fixture.SeedClaimAsync(start.Turn, owner, 1, "one", "two");
-        var repeated = await fixture.Inputs.ReadClaimedBatchAsync(start.Turn.ConversationId, start.Turn.Id, owner);
-        repeated.Should().BeEquivalentTo(batch);
-        (await fixture.Inputs.ReadClaimedBatchAsync(start.Turn.ConversationId, start.Turn.Id, Guid.NewGuid())).Should().BeNull();
+        (await fixture.Inputs.TryClaimPendingSteersAsync(start.Turn.ConversationId, start.Turn.Id, owner)).Should().BeNull();
+        (await fixture.Inputs.TryClaimPendingSteersAsync(start.Turn.ConversationId, start.Turn.Id, Guid.NewGuid())).Should().BeNull();
         var mutations = new[]
         {
             batch with { OwnerRunId = Guid.NewGuid() },
-            batch with { Inputs = [batch.Inputs[0] with { Revision = 2 }, batch.Inputs[1]] },
+            batch with { Inputs = [batch.Inputs[0] with { Revision = batch.Inputs[0].Revision + 1 }, batch.Inputs[1]] },
             batch with { Inputs = [batch.Inputs[0]] },
             batch with { TurnId = Guid.NewGuid() }
         };

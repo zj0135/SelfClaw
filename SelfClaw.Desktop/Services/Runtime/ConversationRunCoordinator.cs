@@ -9,6 +9,7 @@ namespace SelfClaw.Desktop.Services.Runtime;
 internal sealed class ConversationRunCoordinator : IDisposable
 {
     private readonly IConversationInputRepository _inputs;
+    private readonly IConversationInputSteeringStore _steering;
     private readonly ILogger<ConversationRunCoordinator> _logger;
     private readonly object _gate = new();
     private readonly Dictionary<Guid, ConversationRunHandle> _runs = [];
@@ -17,11 +18,14 @@ internal sealed class ConversationRunCoordinator : IDisposable
     private long _generation;
     private bool _stopping;
 
-    public ConversationRunCoordinator(IConversationInputRepository inputs, ILogger<ConversationRunCoordinator> logger)
+    public ConversationRunCoordinator(IConversationInputRepository inputs, IConversationInputSteeringStore steering,
+        ILogger<ConversationRunCoordinator> logger)
     {
         ArgumentNullException.ThrowIfNull(inputs);
+        ArgumentNullException.ThrowIfNull(steering);
         ArgumentNullException.ThrowIfNull(logger);
         _inputs = inputs;
+        _steering = steering;
         _logger = logger;
     }
 
@@ -95,7 +99,7 @@ internal sealed class ConversationRunCoordinator : IDisposable
             var runId = Guid.NewGuid();
             var turnId = Guid.NewGuid();
             var input = mode == AgentExecutionMode.Direct && origin == DirectTurnOrigin.Interactive
-                ? new DirectTurnInputSession(conversationId, turnId, runId, _inputs) : null;
+                ? new DirectTurnInputSession(conversationId, turnId, runId, _inputs, _steering) : null;
             handle = new ConversationRunHandle(conversationId, mode, origin, ++_generation, input, runId, turnId, cancellationToken);
             _runs.Add(conversationId, handle);
         }

@@ -224,7 +224,7 @@ public sealed class ConversationRunCoordinatorTests
     }
 
     private static ConversationRunCoordinator Create(EmptyConversationInputRepository? inputs = null)
-        => new(inputs ?? new(), NullLogger<ConversationRunCoordinator>.Instance);
+        => new(inputs ?? new(), new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
 
     private static ConversationRunHandle Reserve(ConversationRunCoordinator runs, Guid? id = null)
         => runs.TryReserve(id ?? Guid.NewGuid(), AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)

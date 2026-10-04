@@ -26,11 +26,13 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
     private static readonly JsonSerializerOptions PayloadJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly SqliteDatabase _database;
+    private readonly ISkillTokenDetector? _skillTokenDetector;
     private readonly Func<string, CancellationToken, Task>? _beforeCommit;
 
-    public SqliteConversationInputRepository(SqliteDatabase database)
+    public SqliteConversationInputRepository(SqliteDatabase database, ISkillTokenDetector? skillTokenDetector = null)
     {
         _database = database;
+        _skillTokenDetector = skillTokenDetector;
     }
 
     internal SqliteConversationInputRepository(SqliteDatabase database, Func<string, CancellationToken, Task> beforeCommit)
@@ -98,6 +100,25 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
         var sequence = await AllocateSequenceAsync(connection, transaction, request.ConversationId, cancellationToken).ConfigureAwait(false);
         var now = DateTimeOffset.UtcNow;
         var inputId = Guid.NewGuid();
+        var kind = request.Kind;
+        Guid? targetTurnId = request.TargetTurnId;
+        string? reasonCode = request.ReasonCode;
+        // A steer accepted after its turn closed is not lost: it becomes an ordinary follow-up.
+        if (kind == ConversationInputKind.Steer &&
+            !await IsLiveSteerTargetAsync(connection, transaction, request.ConversationId, targetTurnId!.Value, cancellationToken).ConfigureAwait(false))
+        {
+            kind = ConversationInputKind.FollowUp;
+            targetTurnId = null;
+            reasonCode = request.ReasonCode ?? ConversationInputReason.TargetTurnClosed;
+        }
+        else if (kind == ConversationInputKind.Steer && _skillTokenDetector?.ContainsExplicitActivation(request.Prompt) == true)
+        {
+            // Explicit Skill activation only runs from a fresh turn setup, so the steer waits as a follow-up.
+            kind = ConversationInputKind.FollowUp;
+            targetTurnId = null;
+            reasonCode = ConversationInputReason.SkillRequiresNewTurn;
+        }
+
         await using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
@@ -106,17 +127,18 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
                     payload_json, execution_snapshot_json, status, revision, claim_id, claim_owner_run_id,
                     consumed_turn_id, message_id, created_at_utc, updated_at_utc, consumed_at_utc, reason_code, error_message)
                 VALUES($id, $conversationId, $request, $sequence, $kind, $target, $payload, $snapshot, 0, 1,
-                    NULL, NULL, NULL, NULL, $at, $at, NULL, NULL, NULL);
+                    NULL, NULL, NULL, NULL, $at, $at, NULL, $reason, NULL);
                 """;
             insert.Parameters.AddWithValue("$id", inputId.ToString("D"));
             insert.Parameters.AddWithValue("$conversationId", request.ConversationId.ToString("D"));
             insert.Parameters.AddWithValue("$request", request.ClientRequestId);
             insert.Parameters.AddWithValue("$sequence", sequence);
-            insert.Parameters.AddWithValue("$kind", (int)request.Kind);
-            insert.Parameters.AddWithValue("$target", request.TargetTurnId?.ToString("D") ?? (object)DBNull.Value);
+            insert.Parameters.AddWithValue("$kind", (int)kind);
+            insert.Parameters.AddWithValue("$target", targetTurnId?.ToString("D") ?? (object)DBNull.Value);
             insert.Parameters.AddWithValue("$payload", SerializePayload(request.Prompt, request.RequestFingerprint));
             insert.Parameters.AddWithValue("$snapshot", request.ExecutionSnapshot is { } snapshot ? SerializeSnapshot(snapshot) : (object)DBNull.Value);
             insert.Parameters.AddWithValue("$at", now.ToString("O"));
+            insert.Parameters.AddWithValue("$reason", reasonCode ?? (object)DBNull.Value);
             await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -124,7 +146,7 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
             ?? throw new InvalidOperationException("The accepted input disappeared within its transaction.");
         var queueRevision = await ReadQueueRevisionAsync(connection, transaction, request.ConversationId, cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        return new ConversationInputAcceptResult(ConversationInputAcceptStatus.Accepted, record, queueRevision);
+        return new ConversationInputAcceptResult(ConversationInputAcceptStatus.Accepted, record, queueRevision, reasonCode);
     }
 
     public async Task<ConversationInputUpdateResult> EditAsync(
@@ -292,9 +314,14 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientRequestId);
         if (request.ClientRequestId.Length > 128)
             throw new ArgumentException("The client request id is too long.", nameof(request));
-        if (request.Kind != ConversationInputKind.FollowUp || request.TargetTurnId is not null ||
-            request.ExecutionSnapshot?.Mode != AgentExecutionMode.Direct)
-            throw new ArgumentException("Only untargeted Direct follow-ups with an execution snapshot can be accepted.", nameof(request));
+        if (request.Kind is not (ConversationInputKind.FollowUp or ConversationInputKind.Steer))
+            throw new ArgumentException("Unsupported input kind.", nameof(request));
+        if (request.Kind == ConversationInputKind.FollowUp && request.TargetTurnId is not null)
+            throw new ArgumentException("Only a steer can target a turn.", nameof(request));
+        if (request.Kind == ConversationInputKind.Steer && request.TargetTurnId is null)
+            throw new ArgumentException("A steer requires a target turn.", nameof(request));
+        if (request.ExecutionSnapshot?.Mode != AgentExecutionMode.Direct)
+            throw new ArgumentException("Direct inputs require a Direct execution snapshot.", nameof(request));
         if (request.Prompt.Length == 0)
             throw new ArgumentException("An input prompt cannot be empty.", nameof(request));
         if (Encoding.UTF8.GetByteCount(request.Prompt) > MaximumPromptBytes)

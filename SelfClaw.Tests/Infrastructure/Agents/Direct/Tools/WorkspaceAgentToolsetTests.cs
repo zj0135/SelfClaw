@@ -221,13 +221,15 @@ public sealed class WorkspaceAgentToolsetTests
         public bool Approved { get; init; }
         public List<ToolApprovalRequest> Requests { get; } = [];
 
-        public Task<bool> RequestApprovalAsync(
+        public Task<ToolApprovalDecision> RequestApprovalAsync(
             ToolApprovalRequest request,
             CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
-            return Task.FromResult(Approved);
+            return Task.FromResult(Approved ? ToolApprovalDecision.Approved : ToolApprovalDecision.Denied);
         }
+
+        public bool TryResolve(Guid toolExecutionId, ToolApprovalDecision decision) => false;
     }
 
     private sealed class FakeWorkspaceToolService : IWorkspaceToolService

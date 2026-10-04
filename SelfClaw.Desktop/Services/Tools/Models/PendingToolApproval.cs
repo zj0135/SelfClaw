@@ -4,5 +4,5 @@ namespace SelfClaw.Desktop.Services.Tools.Models;
 
 internal sealed record PendingToolApproval(
     ToolApprovalRequest Request,
-    TaskCompletionSource<bool> CompletionSource,
+    TaskCompletionSource<ToolApprovalDecision> CompletionSource,
     CancellationTokenRegistration CancellationRegistration);

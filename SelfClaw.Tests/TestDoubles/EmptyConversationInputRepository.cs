@@ -7,9 +7,6 @@ internal sealed class EmptyConversationInputRepository : IConversationInputRepos
 {
     public Func<Guid, CancellationToken, Task<bool>>? HasUnprocessed { get; set; }
 
-    public Task<ConversationInputBatch?> ReadClaimedBatchAsync(Guid conversationId, Guid turnId, Guid ownerRunId, CancellationToken cancellationToken = default)
-        => Task.FromResult<ConversationInputBatch?>(null);
-
     public Task<ConversationInputConsumption?> ReadConsumptionAsync(ConversationInputBatch batch, CancellationToken cancellationToken = default)
         => Task.FromResult<ConversationInputConsumption?>(null);
 

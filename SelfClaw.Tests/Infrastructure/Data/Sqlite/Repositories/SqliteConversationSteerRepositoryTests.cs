@@ -1,0 +1,194 @@
+using FluentAssertions;
+using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
+using SelfClaw.Tests.TestDoubles;
+
+namespace SelfClaw.Tests.Infrastructure.Data.Sqlite.Repositories;
+
+/// <summary>
+/// P4.1/P4.7 repository contracts: the pending high-water claim, the atomic close inside the
+/// terminal transaction, and the acceptance fallback for a steer whose target already closed.
+/// </summary>
+public sealed class SqliteConversationSteerRepositoryTests
+{
+    [Fact]
+    public async Task Pending_steers_are_claimed_as_one_ordered_high_water_batch_and_later_inputs_stay_pending()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var owner = Guid.NewGuid();
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "S1");
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "S2");
+
+        var batch = await fixture.Inputs.TryClaimPendingSteersAsync(start.Turn.ConversationId, start.Turn.Id, owner);
+
+        batch.Should().NotBeNull();
+        batch!.Inputs.Select(input => input.Prompt).Should().Equal("S1", "S2");
+        batch.Inputs.Select(input => input.Sequence).Should().BeInAscendingOrder();
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "S3");
+        var firstBatchClaim = batch.ClaimId;
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs WHERE status = 1;")).Should().Be(2L);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs WHERE status = 0;")).Should().Be(1L);
+
+        var second = await fixture.Inputs.TryClaimPendingSteersAsync(start.Turn.ConversationId, start.Turn.Id, owner);
+
+        second!.ClaimId.Should().NotBe(firstBatchClaim);
+        second.Inputs.Select(input => input.Prompt).Should().Equal("S3");
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs WHERE status = 1;")).Should().Be(3L);
+    }
+
+    [Fact]
+    public async Task A_closed_target_turn_cannot_be_claimed_again()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "S1");
+        await fixture.Turns.TryFinalizeTurnAsync(new(start.Turn with
+        {
+            Status = ConversationTurnStatus.Failed,
+            CompletedAtUtc = DateTimeOffset.UtcNow
+        }, [], []));
+
+        (await fixture.Inputs.TryClaimPendingSteersAsync(start.Turn.ConversationId, start.Turn.Id, Guid.NewGuid()))
+            .Should().BeNull();
+        (await fixture.ScalarAsync("SELECT status FROM conversation_inputs;")).Should().Be(3L);
+        (await fixture.ScalarAsync("SELECT reason_code FROM conversation_inputs;")).Should().Be(ConversationInputReason.TurnFailed);
+    }
+
+    [Fact]
+    public async Task Steer_acceptance_falls_back_to_a_follow_up_when_the_target_is_not_a_live_direct_turn()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        await fixture.Turns.TryFinalizeTurnAsync(new(start.Turn with
+        {
+            Status = ConversationTurnStatus.Succeeded,
+            CompletedAtUtc = DateTimeOffset.UtcNow
+        }, [], []));
+
+        var closed = await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "late");
+        closed.Status.Should().Be(ConversationInputAcceptStatus.Accepted);
+        closed.Input!.Kind.Should().Be(ConversationInputKind.FollowUp);
+        closed.Input.TargetTurnId.Should().BeNull();
+        closed.Input.ReasonCode.Should().Be(ConversationInputReason.TargetTurnClosed);
+
+        var missing = await fixture.AcceptSteerAsync(start.Turn.ConversationId, Guid.NewGuid(), "unknown target",
+            reasonCode: ConversationInputReason.HookRequiresNewTurn);
+        missing.Input!.Kind.Should().Be(ConversationInputKind.FollowUp);
+        missing.Reason.Should().Be(ConversationInputReason.HookRequiresNewTurn);
+    }
+
+    [Fact]
+    public async Task A_successful_close_holds_unconsumed_steers_instead_of_reopening_them()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var owner = Guid.NewGuid();
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "S1");
+        var claimed = await fixture.Inputs.TryClaimPendingSteersAsync(start.Turn.ConversationId, start.Turn.Id, owner);
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "S2");
+
+        await fixture.Turns.TryFinalizeTurnAsync(new(start.Turn with
+        {
+            Status = ConversationTurnStatus.Succeeded,
+            CompletedAtUtc = DateTimeOffset.UtcNow
+        }, [], []));
+
+        claimed.Should().NotBeNull();
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs WHERE status = 3;"))
+            .Should().Be(2L, "a claimed input must not silently become a cancellable follow-up");
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs WHERE kind = 1;"))
+            .Should().Be(2L, "a never-consumed steer stays a steer until the user resolves it");
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs WHERE reason_code = 'target-turn-closed';"))
+            .Should().Be(2L);
+        (await fixture.Inputs.HasUnprocessedInputsAsync(start.Turn.ConversationId)).Should().BeTrue();
+        (await fixture.Inputs.TryClaimNextFollowUpAsync(start.Turn.ConversationId, Guid.NewGuid(), Guid.NewGuid()))
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task An_explicit_skill_token_steer_is_converted_to_a_follow_up_at_acceptance()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+
+        var accepted = await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "please [/pdf] now");
+
+        accepted.Status.Should().Be(ConversationInputAcceptStatus.Accepted);
+        accepted.Reason.Should().Be(ConversationInputReason.SkillRequiresNewTurn);
+        accepted.Input!.Kind.Should().Be(ConversationInputKind.FollowUp);
+        accepted.Input.TargetTurnId.Should().BeNull();
+        accepted.Input.ReasonCode.Should().Be(ConversationInputReason.SkillRequiresNewTurn);
+        (await fixture.ScalarAsync("SELECT status FROM conversation_inputs;")).Should().Be(0L);
+    }
+
+    [Fact]
+    public async Task An_explicit_skill_token_steer_is_converted_to_a_follow_up_at_claim_time()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var owner = Guid.NewGuid();
+        await fixture.SeedRawPendingSteerAsync(start.Turn, "please [/pdf] now", 2);
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "plain steer");
+
+        var batch = await fixture.Inputs.TryClaimPendingSteersAsync(start.Turn.ConversationId, start.Turn.Id, owner);
+
+        batch!.Inputs.Select(input => input.Prompt).Should().Equal("plain steer");
+        (await fixture.ScalarAsync("SELECT kind FROM conversation_inputs WHERE reason_code = 'skill-requires-new-turn';"))
+            .Should().Be(0L);
+        (await fixture.ScalarAsync("SELECT status FROM conversation_inputs WHERE reason_code = 'skill-requires-new-turn';"))
+            .Should().Be(0L);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs WHERE status = 1;"))
+            .Should().Be(1L, "only the plain steer stays claimed");
+    }
+
+    [Theory]
+    [InlineData(ConversationTurnStatus.Cancelled, ConversationInputReason.TurnCancelled)]
+    [InlineData(ConversationTurnStatus.Failed, ConversationInputReason.TurnFailed)]
+    [InlineData(ConversationTurnStatus.Truncated, ConversationInputReason.TurnTruncated)]
+    [InlineData(ConversationTurnStatus.Blocked, ConversationInputReason.TurnBlocked)]
+    [InlineData(ConversationTurnStatus.Interrupted, ConversationInputReason.TurnInterrupted)]
+    public async Task An_abnormal_close_holds_pending_and_claimed_steers_with_the_mapped_reason(
+        ConversationTurnStatus status, string expectedReason)
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var owner = Guid.NewGuid();
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "S1");
+        await fixture.Inputs.TryClaimPendingSteersAsync(start.Turn.ConversationId, start.Turn.Id, owner);
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "S2");
+
+        await fixture.Turns.TryFinalizeTurnAsync(new(start.Turn with
+        {
+            Status = status,
+            CompletedAtUtc = DateTimeOffset.UtcNow
+        }, [], []));
+
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs WHERE status = 3;")).Should().Be(2L);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs WHERE reason_code = $reason;",
+            ("$reason", expectedReason))).Should().Be(2L);
+        (await fixture.Inputs.HasUnprocessedInputsAsync(start.Turn.ConversationId)).Should().BeTrue();
+        (await fixture.Inputs.TryClaimNextFollowUpAsync(start.Turn.ConversationId, Guid.NewGuid(), Guid.NewGuid()))
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Releasing_for_a_blocked_policy_only_touches_unclaimed_pending_steers()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var owner = Guid.NewGuid();
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "claimed");
+        var claimed = await fixture.Inputs.TryClaimPendingSteersAsync(start.Turn.ConversationId, start.Turn.Id, owner);
+        await fixture.AcceptSteerAsync(start.Turn.ConversationId, start.Turn.Id, "pending");
+
+        var changed = await fixture.Inputs.ReleasePendingSteersToFollowUpAsync(start.Turn.ConversationId, start.Turn.Id,
+            ConversationInputReason.HookRequiresNewTurn);
+
+        changed.Should().Be(1);
+        (await fixture.ScalarAsync("SELECT kind FROM conversation_inputs WHERE status = 1;")).Should().Be(1L);
+        (await fixture.ScalarAsync("SELECT reason_code FROM conversation_inputs WHERE status = 0;"))
+            .Should().Be(ConversationInputReason.HookRequiresNewTurn);
+        (await fixture.Inputs.ReadConsumptionAsync(claimed!)).Should().BeNull();
+    }
+}

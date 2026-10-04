@@ -207,12 +207,17 @@ public sealed class DirectInputBoundaryIntegrationTests
         internal TaskCompletionSource<Task<ConversationInputConsumption>> WaitStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<ConversationInputBatch?> ReadBoundaryAsync(CancellationToken cancellationToken = default)
             => inner.ReadBoundaryAsync(cancellationToken);
+        public Task<ConversationInputBatch?> ReadFinalBoundaryAsync(CancellationToken cancellationToken = default)
+            => inner.ReadFinalBoundaryAsync(cancellationToken);
         public Task<ConversationInputConsumption> WaitForCommitAsync(ConversationInputBatch batch, CancellationToken cancellationToken = default)
         {
             var pending = inner.WaitForCommitAsync(batch, cancellationToken);
             WaitStarted.TrySetResult(pending);
             return pending;
         }
+
+        public Task HoldUnconsumedAsync(string reasonCode, CancellationToken cancellationToken = default)
+            => inner.HoldUnconsumedAsync(reasonCode, cancellationToken);
     }
 
     private sealed class GatedProgress(IConversationTurnRepository inner) : IConversationTurnRepository

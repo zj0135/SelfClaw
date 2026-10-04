@@ -35,7 +35,7 @@ internal sealed class ConversationInputTestHarness : IDisposable
     private readonly ConversationSessionCoordinator _sessions;
 
     public ConversationInputTestHarness(bool queueEnabled = true, IAgentChatRuntime? runtime = null,
-        ConversationPersistenceFixture? fixture = null)
+        ConversationPersistenceFixture? fixture = null, bool steerEnabled = false)
     {
         Fixture = fixture ?? new ConversationPersistenceFixture();
         Gated = runtime as GatedAgentChatRuntime;
@@ -50,7 +50,7 @@ internal sealed class ConversationInputTestHarness : IDisposable
         Agents = new AgentSettingsService(new DesktopAgentDefinitionService(Fixture.Paths),
             new SubagentDefinitionCatalog(Fixture.Paths), new EmptyExtensionSettingsService(),
             new ExtensionStateChangeNotifier());
-        Runs = new ConversationRunCoordinator(Fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        Runs = new ConversationRunCoordinator(Fixture.Inputs, Fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
         _sessions = new ConversationSessionCoordinator(Fixture.Conversations, Fixture.Turns, Runs, _publisher);
         Engine = new ConversationTurnEngine(Fixture.Turns,
             new DesktopTurnFinalizer(Fixture.Turns, NullLogger<DesktopTurnFinalizer>.Instance),
@@ -58,7 +58,7 @@ internal sealed class ConversationInputTestHarness : IDisposable
             activeRuntime, _sessions, Runs, _activity, approval, ProgrammingSettingsTestFactory.Create(settings),
             new ConversationCompletionNotifier(new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance)),
             NullLogger<ConversationTurnEngine>.Instance);
-        Switch = new ConversationInputFeatureSwitch(queueEnabled ? "1" : "0");
+        Switch = new ConversationInputFeatureSwitch(queueEnabled ? "1" : "0", steerEnabled ? "1" : "0");
         Changes = new ConversationInputChangeNotifier();
         var validator = new ConversationInputExecutionValidator(Roots, Models, Agents);
         var recovery = new SqliteStartupRecovery(Fixture.Database, Fixture.RecoveryBeforeCommit);
@@ -102,8 +102,24 @@ internal sealed class ConversationInputTestHarness : IDisposable
     public Task<ConversationInputSubmitResult> SubmitAsync(Guid conversationId, string prompt)
         => Service.SubmitAsync(Submission(conversationId, prompt));
 
+    public Task<ConversationInputSubmitResult> SubmitSteerAsync(Guid conversationId, Guid targetTurnId, string prompt)
+        => Service.SubmitAsync(Submission(conversationId, prompt) with
+        {
+            Kind = ConversationInputKind.Steer, TargetTurnId = targetTurnId
+        });
+
     public Task<ConversationInputStartAttempt> StartAsync(Guid conversationId)
         => Dispatcher.TryStartConversationAsync(conversationId, CancellationToken.None);
+
+    /// <summary>Persists a Running turn with the reserved handle's identity so target validation can succeed.</summary>
+    public async Task StartReservedTurnAsync(Guid conversationId, Guid turnId)
+    {
+        var conversation = await Fixture.Conversations.GetConversationAsync(conversationId)
+            ?? throw new InvalidOperationException("The conversation must exist before its turn starts.");
+        var turn = new ConversationTurnRecord(turnId, conversationId, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Interactive, ConversationTurnStatus.Running, DateTimeOffset.UtcNow);
+        await Fixture.Turns.StartTurnAsync(new ConversationTurnStart(conversation, turn, "headless", Guid.NewGuid()));
+    }
 
     public async Task WaitForAsync(Func<Task<bool>> predicate)
     {

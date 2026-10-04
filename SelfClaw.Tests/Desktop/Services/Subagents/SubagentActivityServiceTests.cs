@@ -1,4 +1,4 @@
-﻿using System.Threading.Channels;
+using System.Threading.Channels;
 using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
@@ -174,9 +174,9 @@ public sealed class SubagentActivityServiceTests
         waiting.Activity.PendingApprovalCount.Should().Be(1);
         waiting.Content.ToolRuns.Should().BeEmpty();
 
-        context.Approvals.TryResolve(request.ToolExecutionId, approved).Should().BeTrue();
+        context.Approvals.TryResolve(request.ToolExecutionId, approved ? ToolApprovalDecision.Approved : ToolApprovalDecision.Denied).Should().BeTrue();
 
-        (await approval.WaitAsync(TimeSpan.FromSeconds(3))).Should().Be(approved);
+        (await approval.WaitAsync(TimeSpan.FromSeconds(3))).Should().Be(approved ? ToolApprovalDecision.Approved : ToolApprovalDecision.Denied);
         var resumed = await DetailAsync(context, task);
         resumed.Activity.PendingApprovalCount.Should().Be(0);
         resumed.Activity.Phase.Should().NotBe("waiting-approval");

@@ -1,5 +1,6 @@
 using SelfClaw.Desktop.Services.Tools;
 using Microsoft.Extensions.Logging;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Windowing;
 
 namespace SelfClaw.Desktop.Services.Notifications;
@@ -28,7 +29,8 @@ internal sealed class DesktopNotificationActivationService
             case DesktopNotificationArguments.RejectToolAction:
                 if (!arguments.TryGetValue(DesktopNotificationArguments.ToolExecutionIdKey, out var rawExecutionId) ||
                     !Guid.TryParse(rawExecutionId, out var executionId)) return false;
-                var resolved = _approvals.TryResolve(executionId, action == DesktopNotificationArguments.ApproveToolAction);
+                var resolved = _approvals.TryResolve(executionId, action == DesktopNotificationArguments.ApproveToolAction
+                    ? ToolApprovalDecision.Approved : ToolApprovalDecision.Denied);
                 await _activation.ActivateAsync();
                 return resolved;
             case DesktopNotificationArguments.OpenConversationAction:

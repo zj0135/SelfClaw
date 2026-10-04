@@ -8,6 +8,7 @@ using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Infrastructure;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
+using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Tests.TestDoubles;
 
@@ -38,6 +39,12 @@ public sealed class DesktopServiceRegistrationTests
                 provider.GetRequiredService<IConversationInputSchedulerStore>().Should().BeSameAs(store);
                 provider.GetRequiredService<IConversationInputUpdateStore>().Should().BeSameAs(store);
                 provider.GetRequiredService<IConversationInputRepository>().Should().BeSameAs(store);
+                provider.GetRequiredService<IConversationInputSteeringStore>().Should().BeSameAs(store);
+                provider.GetRequiredService<ISkillTokenDetector>().Should().BeOfType<SkillTokenParser>();
+
+                var featureSwitch = provider.GetRequiredService<ConversationInputFeatureSwitch>();
+                featureSwitch.QueueEnabled.Should().BeFalse("the queue switch is host-controlled and off by default");
+                featureSwitch.SteerEnabled.Should().BeFalse("P4 never enables steer by default");
 
                 provider.GetRequiredService<IConversationInputCoordinator>().Should().BeOfType<ConversationInputService>();
                 provider.GetRequiredService<ConversationInputDispatcher>().Should().NotBeNull();

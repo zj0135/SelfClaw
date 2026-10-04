@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Tools;
 using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.AiProviders;
@@ -285,7 +286,10 @@ internal sealed class WebViewMessageRouter : IDisposable
                     Guid.TryParse(ReadOptionalString(payload, "modelProfileId"), out var modelProfileId) ? modelProfileId : null,
                     ReadOptionalString(payload, "conversationId") is null ? null : ReadRequiredGuid(payload, "conversationId"),
                     ReadOptionalString(payload, "clientRequestId") ?? ReadOptionalString(payload, "requestId"),
-                    payload.TryGetProperty("newConversation", out var newConversation) && newConversation.ValueKind == JsonValueKind.True);
+                    payload.TryGetProperty("newConversation", out var newConversation) && newConversation.ValueKind == JsonValueKind.True,
+                    ReadOptionalString(payload, "kind"),
+                    ReadOptionalString(payload, "targetTurnId") is { } rawTarget && Guid.TryParse(rawTarget, out var targetTurnId)
+                        ? targetTurnId : null);
                 var requestId = ReadOptionalString(payload, "requestId");
                 if (requestId is not null)
                 {
@@ -295,7 +299,8 @@ internal sealed class WebViewMessageRouter : IDisposable
                         requestId,
                         result.Accepted,
                         result.ConversationId,
-                        result.Error
+                        result.Error,
+                        reason = result.Reason
                     });
                 }
 
@@ -364,7 +369,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         var id = ReadRequiredGuid(payload, "toolExecutionId");
         if (!payload.TryGetProperty("approved", out var approval) || approval.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
             throw new ArgumentException("A boolean approval decision is required.");
-        if (!_approvals.Resolve(id, approval.GetBoolean()))
+        if (!_approvals.Resolve(id, approval.GetBoolean() ? ToolApprovalDecision.Approved : ToolApprovalDecision.Denied))
             throw new InvalidOperationException("This approval has already completed or expired.");
     }
 

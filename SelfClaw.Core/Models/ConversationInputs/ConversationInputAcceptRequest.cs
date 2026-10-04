@@ -9,4 +9,5 @@ public sealed record ConversationInputAcceptRequest(
     ConversationInputExecutionSnapshot? ExecutionSnapshot,
     ConversationRecord? Conversation,
     bool QueueEnabled,
-    string? RequestFingerprint = null);
+    string? RequestFingerprint = null,
+    string? ReasonCode = null);

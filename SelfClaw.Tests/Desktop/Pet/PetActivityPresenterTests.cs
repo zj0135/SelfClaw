@@ -87,12 +87,12 @@ public sealed class PetActivityPresenterTests
         presenter.Current.IsVisible.Should().BeTrue();
 
         // Vue and the Windows toast own the decision; the pet only follows the outcome.
-        handler.TryResolve(first.ToolExecutionId, approved: true).Should().BeTrue();
-        (await firstDecision).Should().BeTrue();
+        handler.TryResolve(first.ToolExecutionId, ToolApprovalDecision.Approved).Should().BeTrue();
+        (await firstDecision).Should().Be(ToolApprovalDecision.Approved);
         presenter.Current.Headline.Should().Be("等待「Write file」审批…");
 
-        handler.TryResolve(second.ToolExecutionId, approved: false).Should().BeTrue();
-        (await secondDecision).Should().BeFalse();
+        handler.TryResolve(second.ToolExecutionId, ToolApprovalDecision.Denied).Should().BeTrue();
+        (await secondDecision).Should().Be(ToolApprovalDecision.Denied);
         presenter.Current.IsPinned.Should().BeFalse();
     }
 

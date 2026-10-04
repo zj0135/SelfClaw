@@ -94,6 +94,11 @@ internal sealed class SqliteConversationTurnRepository : IConversationTurnReposi
             return false;
         }
 
+        // Closing steer intake is part of the same transaction as the terminal turn: a steer accepted
+        // while the turn was still Running is either released to the queue or explicitly held here.
+        await SqliteConversationInputRepository.SettleSteerIntakeAsync(connection, transaction, commit.Turn, cancellationToken)
+            .ConfigureAwait(false);
+
         if (_commitGate?.BeforeFinalize is { } beforeFinalize)
         {
             await beforeFinalize("finalize-before-commit", cancellationToken).ConfigureAwait(false);

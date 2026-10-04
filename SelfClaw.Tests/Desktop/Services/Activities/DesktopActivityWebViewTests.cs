@@ -94,8 +94,8 @@ public sealed class DesktopActivityWebViewTests(ITestOutputHelper output)
                 webView.Reload();
                 await WaitForScriptAsync(webView, "document.querySelectorAll('.task-row').length === 3");
                 await WaitForScriptAsync(webView, "document.querySelector('.task-row')?.textContent.includes('等待审批') === true");
-                activity.Approvals.TryResolve(approvalId, approved: false).Should().BeTrue();
-                (await approval).Should().BeFalse();
+                activity.Approvals.TryResolve(approvalId, ToolApprovalDecision.Denied).Should().BeTrue();
+                (await approval).Should().Be(ToolApprovalDecision.Denied);
                 await webView.ExecuteScriptAsync("document.querySelector('.task-select').click()");
                 await WaitForScriptAsync(webView, "Boolean(document.querySelector('.thinking-summary'))");
                 await runtimes[0].EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "result 0"));

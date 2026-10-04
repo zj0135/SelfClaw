@@ -55,10 +55,17 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
         var token = operation.CancellationToken;
         await _dispatcher.RecoverOnceAsync(token).ConfigureAwait(false);
         var existing = await _store.FindRequestAsync(submission.ConversationId, submission.ClientRequestId, token).ConfigureAwait(false);
+        var requestsSteer = submission.Kind == ConversationInputKind.Steer;
+        if (existing is null && requestsSteer)
+        {
+            if (!_featureSwitch.SteerEnabled) return Rejected(ConversationInputReason.SteerNotEnabled);
+            if (!_featureSwitch.QueueEnabled) return Rejected(ConversationInputReason.QueueDisabled);
+        }
+
         // With the queue closed, hold the run slot across acceptance. A check-then-accept would let a
         // second send land while the first turn is still starting, and that extra item would never run.
         ConversationRunHandle? reserved = null;
-        if (existing is null && !_featureSwitch.QueueEnabled)
+        if (existing is null && !requestsSteer && !_featureSwitch.QueueEnabled)
         {
             var state = await _store.GetQueueStateAsync(submission.ConversationId, token).ConfigureAwait(false);
             if (state.Items.Count > 0) return Rejected(ConversationInputReason.PendingInputs);
@@ -68,23 +75,53 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
         var transferred = false;
         try
         {
+            var (kind, targetTurnId, fallbackReason, session) = existing is not null
+                ? (existing.Kind, existing.TargetTurnId, (string?)null, (DirectTurnInputSession?)null)
+                : ResolveSteerIntent(submission, requestsSteer);
             var snapshot = existing?.ExecutionSnapshot ?? await CaptureAsync(submission, token).ConfigureAwait(false);
             if (snapshot is null) return Rejected(ConversationInputReason.ModelUnavailable);
-            var result = await _store.AcceptAsync(new(submission.ConversationId, submission.ClientRequestId,
-                ConversationInputKind.FollowUp, null, submission.Prompt, snapshot, submission.Conversation,
-                _featureSwitch.QueueEnabled, Fingerprint(submission)), token).ConfigureAwait(false);
+            var acceptRequest = new ConversationInputAcceptRequest(submission.ConversationId, submission.ClientRequestId,
+                kind, targetTurnId, submission.Prompt, snapshot, submission.Conversation,
+                _featureSwitch.QueueEnabled, Fingerprint(submission), fallbackReason);
+            ConversationInputAcceptResult result;
+            if (kind == ConversationInputKind.Steer && session is not null)
+            {
+                // Accept under the session gate: either the steer commits before the final close and the
+                // loop claims it, or the closed intake turns it into a follow-up here.
+                result = await session.TryAcceptSteerAsync(
+                        acceptToken => _store.AcceptAsync(acceptRequest, acceptToken), token).ConfigureAwait(false)
+                    ?? await _store.AcceptAsync(acceptRequest with
+                    {
+                        Kind = ConversationInputKind.FollowUp,
+                        TargetTurnId = null,
+                        ReasonCode = fallbackReason ?? ConversationInputReason.TargetTurnClosed
+                    }, token).ConfigureAwait(false);
+            }
+            else
+            {
+                result = await _store.AcceptAsync(acceptRequest, token).ConfigureAwait(false);
+            }
             if (result.Input is not { } input)
                 return new(false, null, 0, result.QueueRevision, ConversationInputSubmitOutcome.Rejected, result.Reason);
             _logger.LogInformation("Input {InputId} accepted for {ConversationId}: {Status}.", input.Id, input.ConversationId, result.Status);
             _changes.Notify(submission.ConversationId);
             if (result.Status == ConversationInputAcceptStatus.Accepted)
             {
-                transferred = reserved is not null;
-                _dispatcher.RequestStart(submission.ConversationId, input.Id, reserved);
+                if (input.Kind == ConversationInputKind.Steer)
+                {
+                    session?.NotifySteerAccepted();
+                }
+                else
+                {
+                    transferred = reserved is not null;
+                    _dispatcher.RequestStart(submission.ConversationId, input.Id, reserved);
+                }
             }
+
             return new(true, input.Id, input.Revision, result.QueueRevision,
                 input.Status is ConversationInputStatus.Claimed or ConversationInputStatus.Consumed
-                    ? ConversationInputSubmitOutcome.Started : ConversationInputSubmitOutcome.Queued);
+                    ? ConversationInputSubmitOutcome.Started : ConversationInputSubmitOutcome.Queued,
+                result.Reason);
         }
         finally
         {
@@ -96,6 +133,13 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
     {
         await _scheduler.PauseQueueAsync(conversationId, ConversationInputReason.TurnCancelled, CancellationToken.None).ConfigureAwait(false);
         _changes.Notify(conversationId);
+        // Stop closes steer intake and settles unconsumed steers before the run token is cancelled:
+        // an accepted steer can no longer be consumed after this point.
+        if (_runs.GetActiveRun(conversationId)?.InputSession is { } session)
+        {
+            await session.HoldUnconsumedSteersAsync(ConversationInputReason.TurnCancelled).ConfigureAwait(false);
+        }
+
         _runs.Stop(conversationId);
     }
 
@@ -119,6 +163,32 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
 
     public Task<ConversationInputDetail?> GetDetailAsync(Guid inputId, CancellationToken cancellationToken = default)
         => _queue.GetDetailAsync(inputId, cancellationToken);
+
+    private (ConversationInputKind Kind, Guid? TargetTurnId, string? FallbackReason, DirectTurnInputSession? Session)
+        ResolveSteerIntent(ConversationInputSubmission submission, bool requestsSteer)
+    {
+        if (!requestsSteer) return (ConversationInputKind.FollowUp, null, null, null);
+        var handle = _runs.GetActiveRun(submission.ConversationId);
+        var session = handle?.InputSession;
+        if (handle is null || handle.TurnId != submission.TargetTurnId || session is null)
+        {
+            var reason = handle?.Origin == DirectTurnOrigin.Continuation
+                ? ConversationInputReason.ContinuationActive : ConversationInputReason.TargetTurnClosed;
+            return (ConversationInputKind.FollowUp, null, reason, null);
+        }
+
+        if (session.SteerIntakeClosed)
+        {
+            return (ConversationInputKind.FollowUp, null, ConversationInputReason.TargetTurnClosed, null);
+        }
+
+        if (session.SteerBlockReason is { } blocked)
+        {
+            return (ConversationInputKind.FollowUp, null, blocked, null);
+        }
+
+        return (ConversationInputKind.Steer, submission.TargetTurnId, null, session);
+    }
 
     private async Task<ConversationInputExecutionSnapshot?> CaptureAsync(ConversationInputSubmission submission, CancellationToken token)
     {

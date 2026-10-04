@@ -7,6 +7,7 @@ using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
+using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
 
@@ -23,14 +24,14 @@ internal sealed class ConversationTurnTestContext : IDisposable
         Database = new SqliteDatabase(StoragePathDefaults.Create(_root, Path.Combine(_root, "turns.db"), Path.Combine(_root, "secrets")));
         Conversations = new SqliteConversationRepository(Database);
         Turns = new SqliteConversationTurnRepository(Database);
-        Inputs = new SqliteConversationInputRepository(Database);
+        Inputs = new SqliteConversationInputRepository(Database, new SkillTokenParser());
         var now = DateTimeOffset.UtcNow;
         Conversation = new ConversationRecord(Guid.NewGuid(), "P2 fixture", null, ToolPermissionMode.RequireApproval, "build", now, now);
         Record = new ConversationTurnRecord(Guid.NewGuid(), Conversation.Id, AgentExecutionMode.Direct,
             DirectTurnOrigin.Interactive, ConversationTurnStatus.Running, now);
         Agent = new AgentRuntimeDefinition("build", "Builder", "fixture", AgentExecutionMode.Direct,
             AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], string.Empty);
-        InputSession = new DirectTurnInputSession(Conversation.Id, Record.Id, RunId, Inputs);
+        InputSession = new DirectTurnInputSession(Conversation.Id, Record.Id, RunId, Inputs, Inputs);
         Turn = new AgentTurnState(Record, Agent, InputSession);
         Recorder = CreateRecorder();
         Finalizer = new DesktopTurnFinalizer(Turns, NullLogger<DesktopTurnFinalizer>.Instance);
@@ -65,7 +66,17 @@ internal sealed class ConversationTurnTestContext : IDisposable
 
     internal async Task<ConversationInputBatch> SeedClaimAsync(params string[] prompts)
     {
-        var claimId = Guid.NewGuid();
+        await SeedPendingSteerAsync(prompts);
+        return await InputSession.ReadBoundaryAsync()
+            ?? throw new InvalidOperationException("The pending fixture batch was not claimable.");
+    }
+
+    /// <summary>Inserts Pending steers targeted at this turn without claiming them.</summary>
+    internal async Task SeedPendingSteerAsync(params string[] prompts)
+    {
+        var snapshot = JsonSerializer.Serialize(new ConversationInputExecutionSnapshot("build", 1,
+            AgentExecutionMode.Direct, Guid.NewGuid(), null, null, ToolPermissionMode.RequireApproval),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         await using var connection = await Database.OpenConnectionAsync();
         await using var transaction = connection.BeginTransaction();
         foreach (var prompt in prompts)
@@ -77,7 +88,7 @@ internal sealed class ConversationTurnTestContext : IDisposable
                     (id, conversation_id, client_request_id, sequence, kind, target_turn_id,
                      payload_json, execution_snapshot_json, status, revision, claim_id, claim_owner_run_id,
                      created_at_utc, updated_at_utc)
-                VALUES ($id, $conversation, $request, $sequence, 1, $turn, $payload, NULL, 1, 1, $claim, $owner, $now, $now);
+                VALUES ($id, $conversation, $request, $sequence, 1, $turn, $payload, $snapshot, 0, 1, NULL, NULL, $now, $now);
                 """;
             command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString());
             command.Parameters.AddWithValue("$conversation", Conversation.Id.ToString());
@@ -85,26 +96,11 @@ internal sealed class ConversationTurnTestContext : IDisposable
             command.Parameters.AddWithValue("$sequence", ++_inputSequence);
             command.Parameters.AddWithValue("$turn", Record.Id.ToString());
             command.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(new { version = 1, prompt }));
-            command.Parameters.AddWithValue("$claim", claimId.ToString());
-            command.Parameters.AddWithValue("$owner", RunId.ToString());
+            command.Parameters.AddWithValue("$snapshot", snapshot);
             command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
             await command.ExecuteNonQueryAsync();
         }
-        await using (var state = connection.CreateCommand())
-        {
-            state.Transaction = transaction;
-            state.CommandText = """
-                INSERT INTO conversation_input_state (conversation_id, next_input_sequence, queue_revision, paused, pause_reason)
-                VALUES ($conversation, $next, 1, 0, NULL)
-                ON CONFLICT(conversation_id) DO UPDATE SET next_input_sequence = $next, queue_revision = queue_revision + 1;
-                """;
-            state.Parameters.AddWithValue("$conversation", Conversation.Id.ToString());
-            state.Parameters.AddWithValue("$next", _inputSequence + 1);
-            await state.ExecuteNonQueryAsync();
-        }
         await transaction.CommitAsync();
-        return await Inputs.ReadClaimedBatchAsync(Conversation.Id, Record.Id, RunId)
-            ?? throw new InvalidOperationException("The claimed fixture batch was not readable.");
     }
 
     internal async Task ExecuteSqlAsync(string sql)

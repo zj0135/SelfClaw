@@ -10,43 +10,6 @@ namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
 internal sealed partial class SqliteConversationInputRepository
 {
-    public async Task<ConversationInputBatch?> ReadClaimedBatchAsync(
-        Guid conversationId, Guid turnId, Guid ownerRunId, CancellationToken cancellationToken = default)
-    {
-        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await using var transaction = connection.BeginTransaction(deferred: true);
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT i.claim_id FROM conversation_inputs i
-            JOIN conversation_turns t ON t.id = i.target_turn_id AND t.conversation_id = i.conversation_id
-            WHERE i.conversation_id = $conversationId AND i.target_turn_id = $turnId
-                AND i.claim_owner_run_id = $owner AND i.status = 1 AND i.kind = 1
-                AND t.status = 0 AND t.execution_mode = 0 AND t.origin = 0
-            ORDER BY i.sequence LIMIT 1;
-            """;
-        command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
-        command.Parameters.AddWithValue("$turnId", turnId.ToString("D"));
-        command.Parameters.AddWithValue("$owner", ownerRunId.ToString("D"));
-        if (await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not string claim)
-        {
-            return null;
-        }
-
-        var claimId = Guid.Parse(claim);
-        var rows = await ReadClaimAsync(connection, transaction, claimId, cancellationToken).ConfigureAwait(false);
-        var batch = new ConversationInputBatch(conversationId, turnId, ownerRunId, claimId,
-            rows.Select(row => new ConversationInputItem(row.Id, row.Sequence, row.Revision,
-                ConversationInputMessageId.Compute(claimId, row.Id), row.Prompt)).ToArray());
-        ValidateRows(batch, rows);
-        if (rows.Any(row => row.Status != 1))
-        {
-            throw new InvalidOperationException("A claimed input batch must have one consistent durable state.");
-        }
-
-        return batch;
-    }
-
     public async Task<ConversationInputConsumption?> ReadConsumptionAsync(
         ConversationInputBatch batch, CancellationToken cancellationToken = default)
     {

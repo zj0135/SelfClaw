@@ -61,6 +61,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SqliteConversationInputRepository>();
         services.AddSingleton<IConversationInputRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
+        services.AddSingleton<IConversationInputSteeringStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
         services.AddSingleton<IConversationInputStore>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
         services.AddSingleton<IConversationInputUpdateStore>(serviceProvider =>
@@ -112,6 +114,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPluginVersionLeaseManager>(serviceProvider =>
             serviceProvider.GetRequiredService<PluginVersionLeaseManager>());
         services.AddSingleton<SkillTokenParser>();
+        services.AddSingleton<ISkillTokenDetector>(serviceProvider =>
+            serviceProvider.GetRequiredService<SkillTokenParser>());
         services.AddSingleton<SkillRuntimeToolset>();
         services.AddSingleton<McpToolAdapter>();
         services.AddSingleton<PluginContributionService>();

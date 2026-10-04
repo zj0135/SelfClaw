@@ -21,7 +21,8 @@ public sealed record DirectChatTurnRequest(
     DirectTurnExecutionContext ExecutionContext,
     IReadOnlyList<ToolExecutionRecord>? ToolExecutions = null,
     IToolExecutionCheckpoint? ToolExecutionCheckpoint = null,
-    IDirectTurnInputSession? InputSession = null)
+    IDirectTurnInputSession? InputSession = null,
+    IDirectTurnSteering? Steering = null)
     : ChatTurnRequest(TurnId, ConversationId, WorkspaceRoot, Agent, Messages, Turns)
 {
     public override AgentExecutionMode Mode => AgentExecutionMode.Direct;

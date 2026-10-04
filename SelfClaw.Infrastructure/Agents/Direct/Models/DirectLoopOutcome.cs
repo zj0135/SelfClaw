@@ -5,5 +5,6 @@ internal enum DirectLoopOutcome
     Completed,
     Length,
     ContentFiltered,
-    BudgetExhausted
+    BudgetExhausted,
+    ContextBudgetExceeded
 }

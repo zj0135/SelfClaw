@@ -7,8 +7,9 @@ namespace SelfClaw.Desktop.Services.ConversationInputs;
 
 /// <summary>
 /// Maps <c>conversation-input/*</c> operations onto the input service. Submission stays on the
-/// existing <c>send-prompt</c> entry; this bridge owns only the queue's list, edit, cancel,
-/// pause/resume and detail operations. Steer is not enabled in P3 and is rejected explicitly.
+/// existing <c>send-prompt</c> entry (P4 adds <c>kind=steer</c> + <c>targetTurnId</c> there); this
+/// bridge owns only the queue's list, edit, cancel, pause/resume and detail operations. The UI
+/// steer/promote operations still belong to P5 and are rejected here.
 /// </summary>
 internal sealed class ConversationInputBridge
 {

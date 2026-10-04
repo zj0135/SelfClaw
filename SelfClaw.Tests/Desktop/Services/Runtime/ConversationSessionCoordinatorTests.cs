@@ -183,7 +183,7 @@ public sealed class ConversationSessionCoordinatorTests
     {
         public Context()
         {
-            Runs = new(new EmptyConversationInputRepository(), NullLogger<ConversationRunCoordinator>.Instance);
+            Runs = new(new EmptyConversationInputRepository(), new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
             Sessions = new(Repository, new RecordingConversationTurnRepository(), Runs, Sink);
         }
         public ControlledRepository Repository { get; } = new();

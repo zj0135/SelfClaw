@@ -22,7 +22,8 @@ internal sealed class DirectConversationLoop
         for (var requestIndex = 0; requestIndex < MaximumProviderRequestsPerTurn; requestIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await ConsumeAvailableInputsAsync(setup.InputSession, context, output, cancellationToken).ConfigureAwait(false);
+            if (await ConsumeAvailableInputsAsync(setup, context, output, cancellationToken).ConfigureAwait(false) is { } budgetOutcome)
+                return budgetOutcome;
             var response = await ReadResponseAsync(setup, context, output, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             if (GetTerminalOutcome(response) is { } terminal)
@@ -36,13 +37,20 @@ internal sealed class DirectConversationLoop
             var calls = context.AppendResponse(response, setup.CapabilityLease.Bindings);
             if (calls.Length == 0)
             {
-                var batch = setup.InputSession is { } inputs
-                    ? await inputs.ReadBoundaryAsync(cancellationToken).ConfigureAwait(false)
-                    : null;
+                if (setup.InputSession is not { } inputs) return DirectLoopOutcome.Completed;
+                // The plain read catches a batch without closing; the final read then either claims one
+                // more accepted steer or closes the intake, so an accept during the check is not lost.
+                var batch = await inputs.ReadBoundaryAsync(cancellationToken).ConfigureAwait(false);
+                batch ??= await inputs.ReadFinalBoundaryAsync(cancellationToken).ConfigureAwait(false);
                 if (batch is null) return DirectLoopOutcome.Completed;
                 if (requestIndex + 1 == MaximumProviderRequestsPerTurn) return DirectLoopOutcome.BudgetExhausted;
-                await ConsumeInputAsync(setup.InputSession ?? throw new InvalidOperationException("Missing turn input session."),
-                    batch, context, output, cancellationToken).ConfigureAwait(false);
+                if (!FitsBudget(setup, context, batch))
+                {
+                    await inputs.HoldUnconsumedAsync(ConversationInputReason.ContextBudgetExceeded, cancellationToken).ConfigureAwait(false);
+                    return DirectLoopOutcome.ContextBudgetExceeded;
+                }
+
+                await ConsumeInputAsync(inputs, batch, context, output, cancellationToken).ConfigureAwait(false);
                 continue;
             }
             if (requestIndex + 1 == MaximumProviderRequestsPerTurn)
@@ -57,12 +65,40 @@ internal sealed class DirectConversationLoop
         throw new InvalidOperationException("The provider request budget was not resolved.");
     }
 
-    private static async Task ConsumeAvailableInputsAsync(IDirectTurnInputSession? inputs,
+    private static async Task<DirectLoopOutcome?> ConsumeAvailableInputsAsync(DirectTurnSetup.Ready setup,
         DirectConversationContext context, DirectEventTranslator output, CancellationToken cancellationToken)
     {
-        if (inputs is null) return;
+        if (setup.InputSession is not { } inputs) return null;
         while (await inputs.ReadBoundaryAsync(cancellationToken).ConfigureAwait(false) is { } batch)
+        {
+            if (!FitsBudget(setup, context, batch))
+            {
+                // The turn cannot carry the claimed batch without silently dropping protected content.
+                await inputs.HoldUnconsumedAsync(ConversationInputReason.ContextBudgetExceeded, cancellationToken)
+                    .ConfigureAwait(false);
+                return DirectLoopOutcome.ContextBudgetExceeded;
+            }
+
             await ConsumeInputAsync(inputs, batch, context, output, cancellationToken).ConfigureAwait(false);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The runtime budget guard shares the composer's UTF-8 heuristic. Only when the provider declares a
+    /// context window is the batch refused before consumption; the already-consumed transcript is never
+    /// trimmed to make room.
+    /// </summary>
+    private static bool FitsBudget(DirectTurnSetup.Ready setup, DirectConversationContext context, ConversationInputBatch batch)
+    {
+        if (AiChatOptions.ResolveContextWindowTokens(setup.ProviderLease.Profile) is not int contextWindow)
+            return true;
+        var reserve = setup.ProviderLease.Options.MaxOutputTokens ?? DirectPromptComposer.DefaultOutputTokenReserve;
+        var used = DirectPromptComposer.EstimateMessages(context.Messages) +
+                   DirectPromptComposer.EstimateTools(setup.ProviderLease.Options.Tools) + reserve;
+        var batchTokens = batch.Inputs.Sum(input => DirectPromptComposer.EstimateUserPrompt(input.Prompt));
+        return used + batchTokens <= contextWindow;
     }
 
     private static async Task ConsumeInputAsync(IDirectTurnInputSession inputs, ConversationInputBatch batch,

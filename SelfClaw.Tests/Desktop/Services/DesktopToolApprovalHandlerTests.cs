@@ -7,9 +7,9 @@ namespace SelfClaw.Tests.Desktop.Services;
 public sealed class DesktopToolApprovalHandlerTests
 {
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task RequestApprovalAsync_completes_with_the_resolved_decision(bool approved)
+    [InlineData(ToolApprovalDecision.Approved)]
+    [InlineData(ToolApprovalDecision.Denied)]
+    public async Task RequestApprovalAsync_completes_with_the_resolved_decision(ToolApprovalDecision decision)
     {
         var handler = new DesktopToolApprovalHandler();
         var request = CreateRequest();
@@ -19,9 +19,25 @@ public sealed class DesktopToolApprovalHandlerTests
         var pending = handler.RequestApprovalAsync(request);
 
         published.Should().Be(request);
-        handler.TryResolve(request.ToolExecutionId, approved).Should().BeTrue();
-        (await pending).Should().Be(approved);
-        handler.TryResolve(request.ToolExecutionId, !approved).Should().BeFalse();
+        handler.TryResolve(request.ToolExecutionId, decision).Should().BeTrue();
+        (await pending).Should().Be(decision);
+        handler.TryResolve(request.ToolExecutionId, decision == ToolApprovalDecision.Approved
+            ? ToolApprovalDecision.Denied : ToolApprovalDecision.Approved).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Supersede_wins_exactly_once_and_a_late_click_cannot_execute()
+    {
+        var handler = new DesktopToolApprovalHandler();
+        var request = CreateRequest();
+        var completed = 0;
+        handler.ApprovalCompleted += _ => completed++;
+        var pending = handler.RequestApprovalAsync(request);
+
+        handler.TryResolve(request.ToolExecutionId, ToolApprovalDecision.Superseded).Should().BeTrue();
+        (await pending).Should().Be(ToolApprovalDecision.Superseded);
+        handler.TryResolve(request.ToolExecutionId, ToolApprovalDecision.Approved).Should().BeFalse();
+        completed.Should().Be(1);
     }
 
     [Fact]
@@ -36,7 +52,7 @@ public sealed class DesktopToolApprovalHandlerTests
 
         Func<Task> awaitPending = async () => await pending;
         await awaitPending.Should().ThrowAsync<OperationCanceledException>();
-        handler.TryResolve(request.ToolExecutionId, approved: true).Should().BeFalse();
+        handler.TryResolve(request.ToolExecutionId, ToolApprovalDecision.Approved).Should().BeFalse();
     }
 
     [Fact]
@@ -46,8 +62,8 @@ public sealed class DesktopToolApprovalHandlerTests
         var request = CreateRequest();
         handler.ApprovalRequested += _ => throw new InvalidOperationException("UI failed");
 
-        (await handler.RequestApprovalAsync(request)).Should().BeFalse();
-        handler.TryResolve(request.ToolExecutionId, approved: true).Should().BeFalse();
+        (await handler.RequestApprovalAsync(request)).Should().Be(ToolApprovalDecision.Denied);
+        handler.TryResolve(request.ToolExecutionId, ToolApprovalDecision.Approved).Should().BeFalse();
     }
 
     [Fact]
@@ -59,8 +75,8 @@ public sealed class DesktopToolApprovalHandlerTests
 
         handler.RejectAll();
 
-        (await first).Should().BeFalse();
-        (await second).Should().BeFalse();
+        (await first).Should().Be(ToolApprovalDecision.Denied);
+        (await second).Should().Be(ToolApprovalDecision.Denied);
     }
 
     [Fact]
@@ -73,8 +89,8 @@ public sealed class DesktopToolApprovalHandlerTests
         Action duplicate = () => handler.RequestApprovalAsync(request);
         duplicate.Should().Throw<InvalidOperationException>().WithMessage("*already pending*");
 
-        handler.TryResolve(request.ToolExecutionId, approved: true).Should().BeTrue();
-        (await first).Should().BeTrue();
+        handler.TryResolve(request.ToolExecutionId, ToolApprovalDecision.Approved).Should().BeTrue();
+        (await first).Should().Be(ToolApprovalDecision.Approved);
     }
 
     private static ToolApprovalRequest CreateRequest()
