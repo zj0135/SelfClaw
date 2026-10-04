@@ -10,8 +10,6 @@ internal static class ConversationInputReasonText
 {
     internal static string Describe(string? reason) => reason switch
     {
-        ConversationInputReason.QueueDisabled => "当前回合执行中，队列功能未启用，请等待完成后再发送。",
-        ConversationInputReason.PendingInputs => "该会话还有未处理的输入，请等待其执行或在队列中取消后再发送。",
         ConversationInputReason.Capacity => "队列已满，请先等待或取消部分输入。",
         ConversationInputReason.AttachmentsUnsupported => "当前版本不支持发送附件。",
         ConversationInputReason.DirectOnly => "只有 Direct 代理支持该输入。",
@@ -19,7 +17,6 @@ internal static class ConversationInputReasonText
         ConversationInputReason.RequestConflict => "该请求与已存在的输入冲突，请重试。",
         ConversationInputReason.ConversationUnavailable => "该会话正在删除或应用正在退出。",
         ConversationInputReason.QueueRevisionConflict => "队列已变化，请根据最新列表重试。",
-        ConversationInputReason.SteerNotEnabled => "当前版本未开放 Steer。",
         ConversationInputReason.SubscriptionInvalid => "队列订阅已失效，请重新打开会话。",
         ConversationInputReason.QueuePaused => "队列已暂停。",
         ConversationInputReason.TurnCancelled => "已停止生成，队列已暂停。",

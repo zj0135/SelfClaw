@@ -18,13 +18,11 @@ internal sealed class ConversationInputQueueService
     private readonly ConversationInputDispatcher _dispatcher;
     private readonly ConversationRunCoordinator _runs;
     private readonly AgentSettingsService _agents;
-    private readonly ConversationInputFeatureSwitch _featureSwitch;
     private readonly ConversationInputChangeNotifier _changes;
 
     public ConversationInputQueueService(IConversationInputStore store, IConversationInputUpdateStore updates,
         IConversationRepository conversations, ConversationInputExecutionValidator validator, ConversationInputDispatcher dispatcher,
-        ConversationRunCoordinator runs, AgentSettingsService agents, ConversationInputFeatureSwitch featureSwitch,
-        ConversationInputChangeNotifier changes)
+        ConversationRunCoordinator runs, AgentSettingsService agents, ConversationInputChangeNotifier changes)
     {
         _store = store;
         _updates = updates;
@@ -33,11 +31,8 @@ internal sealed class ConversationInputQueueService
         _dispatcher = dispatcher;
         _runs = runs;
         _agents = agents;
-        _featureSwitch = featureSwitch;
         _changes = changes;
     }
-
-    public bool QueueEnabled => _featureSwitch.QueueEnabled;
 
     public async Task<ConversationInputUpdateResult> EditAsync(Guid inputId, int expectedRevision, string prompt, CancellationToken cancellationToken = default)
     {
@@ -67,7 +62,6 @@ internal sealed class ConversationInputQueueService
     public async Task<ConversationInputQueueState> ResumeAsync(Guid conversationId, long expectedQueueRevision, CancellationToken cancellationToken = default)
     {
         await _dispatcher.RecoverOnceAsync(cancellationToken).ConfigureAwait(false);
-        if (!_featureSwitch.QueueEnabled) throw new ConversationInputRejectedException(ConversationInputReason.QueueDisabled);
         using var operation = _runs.TryBeginInputOperation(conversationId, cancellationToken)
             ?? throw new ConversationInputRejectedException(ConversationInputReason.ConversationUnavailable);
         var state = await _updates.SetPausedAsync(new(conversationId, expectedQueueRevision, false, null), operation.CancellationToken).ConfigureAwait(false);
@@ -85,7 +79,6 @@ internal sealed class ConversationInputQueueService
     {
         var input = await _store.GetInputAsync(inputId, cancellationToken).ConfigureAwait(false);
         if (input is null) return new(ConversationInputUpdateStatus.Missing, null, 0);
-        if (!_featureSwitch.QueueEnabled) return Invalid(input, ConversationInputReason.QueueDisabled);
         using var operation = _runs.TryBeginInputOperation(input.ConversationId, cancellationToken)
             ?? throw new ConversationInputRejectedException(ConversationInputReason.ConversationUnavailable);
         var token = operation.CancellationToken;
@@ -108,8 +101,6 @@ internal sealed class ConversationInputQueueService
     public async Task<ConversationInputUpdateResult> PromoteAsync(Guid inputId, int expectedRevision, Guid targetTurnId,
         CancellationToken cancellationToken = default)
     {
-        if (!_featureSwitch.SteerEnabled) throw new ConversationInputRejectedException(ConversationInputReason.SteerNotEnabled);
-        if (!_featureSwitch.QueueEnabled) throw new ConversationInputRejectedException(ConversationInputReason.QueueDisabled);
         if (targetTurnId == Guid.Empty) throw new ArgumentException("A promote requires a target turn.", nameof(targetTurnId));
         var input = await _store.GetInputAsync(inputId, cancellationToken).ConfigureAwait(false);
         if (input is null) return new(ConversationInputUpdateStatus.Missing, null, 0);
@@ -120,7 +111,7 @@ internal sealed class ConversationInputQueueService
         }
 
         var handle = _runs.GetActiveRun(input.ConversationId);
-        var (canSteer, reason, activeTurnId) = ConversationInputSteerPolicy.Evaluate(handle, _featureSwitch.SteerEnabled);
+        var (canSteer, reason, activeTurnId) = ConversationInputSteerPolicy.Evaluate(handle);
         if (!canSteer || activeTurnId != targetTurnId)
         {
             // The published verdict may have gone stale with the turn; refresh the list on the way out.

@@ -72,11 +72,11 @@ internal sealed class ConversationPersistenceFixture : IDisposable
             workspaceRootId, workspaceRootPath, ToolPermissionMode.RequireApproval);
 
     internal async Task<ConversationInputRecord> AcceptFollowUpAsync(Guid conversationId, string prompt,
-        string? requestId = null, ConversationInputExecutionSnapshot? snapshot = null, bool queueEnabled = true)
+        string? requestId = null, ConversationInputExecutionSnapshot? snapshot = null)
     {
         var result = await Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversationId,
             requestId ?? Guid.NewGuid().ToString("N"), ConversationInputKind.FollowUp, null, prompt,
-            snapshot ?? Snapshot(), null, queueEnabled));
+            snapshot ?? Snapshot(), null));
         result.Status.Should().Be(ConversationInputAcceptStatus.Accepted);
         return result.Input!;
     }
@@ -85,7 +85,7 @@ internal sealed class ConversationPersistenceFixture : IDisposable
         string? requestId = null, string? reasonCode = null)
         => await Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversationId,
             requestId ?? Guid.NewGuid().ToString("N"), ConversationInputKind.Steer, targetTurnId, prompt,
-            Snapshot(), null, true, ReasonCode: reasonCode));
+            Snapshot(), null, ReasonCode: reasonCode));
 
     /// <summary>Seeds a Pending steer with a valid snapshot, bypassing acceptance conversion.</summary>
     internal async Task<Guid> SeedRawPendingSteerAsync(ConversationTurnRecord turn, string prompt, long sequence = 1)

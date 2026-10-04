@@ -82,13 +82,6 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
         }
 
         var state = await ReadStateAsync(connection, transaction, request.ConversationId, cancellationToken).ConfigureAwait(false);
-        if (!request.QueueEnabled && state.UnprocessedCount > 0)
-        {
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            return new ConversationInputAcceptResult(ConversationInputAcceptStatus.Rejected, null,
-                state.QueueRevision, ConversationInputReason.PendingInputs);
-        }
-
         var globalUnprocessed = await CountGlobalUnprocessedAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         if (state.UnprocessedCount >= MaximumInputsPerConversation || globalUnprocessed >= MaximumInputsPerApplication)
         {

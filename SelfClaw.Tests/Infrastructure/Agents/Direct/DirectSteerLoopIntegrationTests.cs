@@ -210,7 +210,7 @@ public sealed class DirectSteerLoopIntegrationTests
         var result = await context.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
             context.Conversation.Id, Guid.NewGuid().ToString("N"), ConversationInputKind.Steer, context.Record.Id, prompt,
             new ConversationInputExecutionSnapshot("build", 1, AgentExecutionMode.Direct, Guid.NewGuid(), null, null,
-                ToolPermissionMode.RequireApproval), null, true));
+                ToolPermissionMode.RequireApproval), null));
         result.Status.Should().Be(ConversationInputAcceptStatus.Accepted, result.Reason);
         return result.Input!;
     }

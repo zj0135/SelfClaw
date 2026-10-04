@@ -13,7 +13,7 @@ namespace SelfClaw.Tests.Desktop.Services.ConversationInputs;
 
 /// <summary>
 /// Host-boundary coverage for the queue bridge and publisher: bounded state, revision-bound
-/// mutations, scope isolation and explicit Steer rejection.
+/// mutations, scope isolation and unsupported legacy operations.
 /// </summary>
 public sealed class ConversationInputHostTests
 {
@@ -96,7 +96,7 @@ public sealed class ConversationInputHostTests
         });
 
     [Fact]
-    public Task Steer_and_promote_are_rejected_while_the_switch_is_off()
+    public Task Legacy_steer_operation_is_unsupported_and_promote_without_a_live_turn_is_invalid()
         => WpfDispatcherTest.RunAsync(async () =>
         {
             using var context = new HostContext();
@@ -106,27 +106,28 @@ public sealed class ConversationInputHostTests
             {
                 subscriptionId = context.SubscriptionId, conversationId = conversation
             }), CancellationToken.None);
-            context.LastState().GetProperty("canSteer").GetBoolean().Should().BeFalse();
+            context.LastState().GetProperty("canSteer").GetBoolean().Should().BeFalse("no live turn yet");
             context.LastState().TryGetProperty("steerReason", out _).Should().BeFalse();
-
-            await context.Bridge.HandleAsync("conversation-input/promote", context.Payload(new
-            {
-                inputId = Guid.NewGuid(), expectedRevision = 1, targetTurnId = Guid.NewGuid()
-            }), CancellationToken.None);
-            context.LastResult().GetProperty("errorCode").GetString().Should().Be("steer-not-enabled");
 
             await context.Bridge.HandleAsync("conversation-input/steer", context.Payload(new
             {
                 inputId = Guid.NewGuid(), expectedRevision = 1, targetTurnId = Guid.NewGuid()
             }), CancellationToken.None);
-            context.LastResult().GetProperty("errorCode").GetString().Should().Be("steer-not-enabled");
+            context.LastResult().GetProperty("errorCode").GetString().Should().Be("unsupported-conversation-input-operation");
+
+            await context.Bridge.HandleAsync("conversation-input/promote", context.Payload(new
+            {
+                inputId = Guid.NewGuid(), expectedRevision = 1, targetTurnId = Guid.NewGuid()
+            }), CancellationToken.None);
+            context.LastResult().GetProperty("ok").GetBoolean().Should().BeFalse();
+            context.LastResult().GetProperty("status").GetString().Should().Be("missing");
         });
 
     [Fact]
     public Task Promote_publishes_the_host_verdict_and_keeps_the_input_identity()
         => WpfDispatcherTest.RunAsync(async () =>
         {
-            using var context = new HostContext(steerEnabled: true);
+            using var context = new HostContext();
             var conversation = await context.CreateConversationAsync();
             await context.AcceptAsync(conversation, "queued for promote");
             await context.Bridge.HandleAsync("conversation-input/subscribe", context.Payload(new
@@ -202,9 +203,9 @@ public sealed class ConversationInputHostTests
         private readonly List<JsonDocument> _posted = [];
         private readonly WebViewHostChannel _channel = new();
 
-        public HostContext(bool steerEnabled = false)
+        public HostContext()
         {
-            _harness = new ConversationInputTestHarness(queueEnabled: true, steerEnabled: steerEnabled);
+            _harness = new ConversationInputTestHarness();
             Channel = _channel;
             Changes = _harness.Changes;
             Bridge = new ConversationInputBridge(_harness.Service, Publisher, _channel, Dispatcher.CurrentDispatcher);
@@ -224,7 +225,7 @@ public sealed class ConversationInputHostTests
         public ConversationInputBridge Bridge { get; }
         public ConversationInputTestHarness Harness => _harness;
         public ConversationInputPublisher Publisher => _publisher ??= new ConversationInputPublisher(
-            _harness.Fixture.Inputs, Changes, _harness.Runs, _harness.Switch, _channel, Dispatcher.CurrentDispatcher,
+            _harness.Fixture.Inputs, Changes, _harness.Runs, _channel, Dispatcher.CurrentDispatcher,
             NullLogger<ConversationInputPublisher>.Instance);
         private ConversationInputPublisher? _publisher;
 
@@ -238,7 +239,7 @@ public sealed class ConversationInputHostTests
         {
             var result = await _harness.Fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversationId,
                 Guid.NewGuid().ToString("N"), ConversationInputKind.FollowUp, null, prompt,
-                _harness.Snapshot(), null, true));
+                _harness.Snapshot(), null));
             if (result.Status != ConversationInputAcceptStatus.Accepted)
                 throw new InvalidOperationException(result.Reason);
         }

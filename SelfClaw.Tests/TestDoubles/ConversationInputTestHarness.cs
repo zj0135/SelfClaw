@@ -34,8 +34,8 @@ internal sealed class ConversationInputTestHarness : IDisposable
     private readonly TranscriptPublisher _publisher;
     private readonly ConversationSessionCoordinator _sessions;
 
-    public ConversationInputTestHarness(bool queueEnabled = true, IAgentChatRuntime? runtime = null,
-        ConversationPersistenceFixture? fixture = null, bool steerEnabled = false)
+    public ConversationInputTestHarness(IAgentChatRuntime? runtime = null,
+        ConversationPersistenceFixture? fixture = null)
     {
         Fixture = fixture ?? new ConversationPersistenceFixture();
         Gated = runtime as GatedAgentChatRuntime;
@@ -58,15 +58,14 @@ internal sealed class ConversationInputTestHarness : IDisposable
             activeRuntime, _sessions, Runs, _activity, approval, ProgrammingSettingsTestFactory.Create(settings),
             new ConversationCompletionNotifier(new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance)),
             NullLogger<ConversationTurnEngine>.Instance);
-        Switch = new ConversationInputFeatureSwitch(queueEnabled ? "1" : "0", steerEnabled ? "1" : "0");
-        Changes = new ConversationInputChangeNotifier();
         var validator = new ConversationInputExecutionValidator(Roots, Models, Agents);
+        Changes = new ConversationInputChangeNotifier();
         var recovery = new SqliteStartupRecovery(Fixture.Database, Fixture.RecoveryBeforeCommit);
         Dispatcher = new ConversationInputDispatcher(Fixture.Inputs, Fixture.Inputs, Fixture.Conversations,
-            Runs, Engine, validator, Switch, Changes, NullLogger<ConversationInputDispatcher>.Instance, recovery.RecoverAsync);
+            Runs, Engine, validator, Changes, NullLogger<ConversationInputDispatcher>.Instance, recovery.RecoverAsync);
         Queue = new ConversationInputQueueService(Fixture.Inputs, Fixture.Inputs, Fixture.Conversations, validator,
-            Dispatcher, Runs, Agents, Switch, Changes);
-        Service = new ConversationInputService(Fixture.Inputs, Fixture.Inputs, Queue, Dispatcher, Runs, Models, Agents, Switch, Changes,
+            Dispatcher, Runs, Agents, Changes);
+        Service = new ConversationInputService(Fixture.Inputs, Fixture.Inputs, Queue, Dispatcher, Runs, Models, Agents, Changes,
             NullLogger<ConversationInputService>.Instance);
     }
 
@@ -78,7 +77,6 @@ internal sealed class ConversationInputTestHarness : IDisposable
     public AgentSettingsService Agents { get; }
     public ConversationRunCoordinator Runs { get; }
     public ConversationTurnEngine Engine { get; }
-    public ConversationInputFeatureSwitch Switch { get; }
     public ConversationInputChangeNotifier Changes { get; }
     public ConversationInputDispatcher Dispatcher { get; }
     public ConversationInputQueueService Queue { get; }

@@ -60,7 +60,6 @@ internal sealed class ConversationInputBridge
                             ConversationInputReason.QueuePaused, CancellationToken.None));
                     break;
                 case "conversation-input/resume":
-                    if (!_inputs.QueueEnabled) throw new ConversationInputRejectedException(ConversationInputReason.QueueDisabled);
                     await ReplyStateAsync("resume", requestId,
                         await _inputs.ResumeAsync(ReadGuid(payload, "conversationId"), ReadLong(payload, "expectedQueueRevision"), CancellationToken.None));
                     break;
@@ -76,8 +75,6 @@ internal sealed class ConversationInputBridge
                         await _inputs.PromoteAsync(ReadGuid(payload, "inputId"), ReadInteger(payload, "expectedRevision"),
                             ReadGuid(payload, "targetTurnId"), cancellationToken));
                     break;
-                case "conversation-input/steer":
-                    throw new ConversationInputRejectedException(ConversationInputReason.SteerNotEnabled);
                 default:
                     throw new ArgumentException("unsupported-conversation-input-operation");
             }

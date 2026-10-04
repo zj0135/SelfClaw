@@ -6,8 +6,6 @@ namespace SelfClaw.Core.Models;
 /// </summary>
 public static class ConversationInputReason
 {
-    public const string QueueDisabled = "queue-disabled";
-    public const string PendingInputs = "pending-inputs";
     public const string Capacity = "capacity";
     public const string AttachmentsUnsupported = "attachments-unsupported";
     public const string DirectOnly = "direct-only";
@@ -15,7 +13,6 @@ public static class ConversationInputReason
     public const string RequestConflict = "request-conflict";
     public const string ConversationUnavailable = "conversation-unavailable";
     public const string QueueRevisionConflict = "queue-revision-conflict";
-    public const string SteerNotEnabled = "steer-not-enabled";
     public const string SubscriptionInvalid = "conversation-input-subscription-invalid";
     public const string InterruptedByRestart = "interrupted-by-restart";
     public const string StaleSteerTarget = "stale-steer-target";

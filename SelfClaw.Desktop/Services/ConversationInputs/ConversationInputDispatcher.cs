@@ -20,7 +20,6 @@ internal sealed class ConversationInputDispatcher : BackgroundService
     private readonly ConversationRunCoordinator _runs;
     private readonly ConversationTurnEngine _engine;
     private readonly ConversationInputExecutionValidator _validator;
-    private readonly ConversationInputFeatureSwitch _featureSwitch;
     private readonly ConversationInputChangeNotifier _changes;
     private readonly ILogger<ConversationInputDispatcher> _logger;
     private readonly Func<CancellationToken, Task> _recover;
@@ -32,9 +31,8 @@ internal sealed class ConversationInputDispatcher : BackgroundService
 
     public ConversationInputDispatcher(IConversationInputStore store, IConversationInputSchedulerStore scheduler,
         IConversationRepository conversations, ConversationRunCoordinator runs, ConversationTurnEngine engine,
-        ConversationInputExecutionValidator validator, ConversationInputFeatureSwitch featureSwitch,
-        ConversationInputChangeNotifier changes, ILogger<ConversationInputDispatcher> logger,
-        Func<CancellationToken, Task>? recover = null)
+        ConversationInputExecutionValidator validator, ConversationInputChangeNotifier changes,
+        ILogger<ConversationInputDispatcher> logger, Func<CancellationToken, Task>? recover = null)
     {
         _store = store;
         _scheduler = scheduler;
@@ -42,7 +40,6 @@ internal sealed class ConversationInputDispatcher : BackgroundService
         _runs = runs;
         _engine = engine;
         _validator = validator;
-        _featureSwitch = featureSwitch;
         _changes = changes;
         _logger = logger;
         _recover = recover ?? (_ => Task.CompletedTask);
@@ -73,7 +70,7 @@ internal sealed class ConversationInputDispatcher : BackgroundService
         {
             try
             {
-                if (_featureSwitch.QueueEnabled) await ScanOnceAsync(stoppingToken).ConfigureAwait(false);
+                await ScanOnceAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception exception) { _logger.LogError(exception, "Input queue scan failed."); }
@@ -146,9 +143,9 @@ internal sealed class ConversationInputDispatcher : BackgroundService
         if (state.Items.Count == 0 || state.Items[0] is not { Kind: ConversationInputKind.FollowUp, Status: ConversationInputStatus.Pending } head)
             return false;
         // A send made while idle runs at once when nothing waits ahead of it: a pause only holds back
-        // items queued before it, and the disabled switch still runs that single immediate input.
+        // items queued before it.
         if (head.InputId == immediateInputId) return true;
-        return _featureSwitch.QueueEnabled && !state.Paused;
+        return !state.Paused;
     }
 
     private async Task<ConversationInputStartAttempt> ClaimAndLaunchAsync(ConversationRunHandle handle, Guid? immediateInputId)
@@ -230,7 +227,7 @@ internal sealed class ConversationInputDispatcher : BackgroundService
         finally { _runs.Complete(handle); }
 
         _changes.Notify(handle.ConversationId);
-        if (succeeded && _featureSwitch.QueueEnabled && !_shutdown.IsCancellationRequested)
+        if (succeeded && !_shutdown.IsCancellationRequested)
             await TryStartConversationAsync(handle.ConversationId, _shutdown.Token).ConfigureAwait(false);
     }
 

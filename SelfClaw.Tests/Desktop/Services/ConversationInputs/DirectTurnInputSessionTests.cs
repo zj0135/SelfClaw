@@ -125,7 +125,7 @@ public sealed class DirectTurnInputSessionTests
             new ConversationInputAcceptRequest(context.Conversation.Id, Guid.NewGuid().ToString("N"),
                 ConversationInputKind.Steer, context.Record.Id, "late",
                 new ConversationInputExecutionSnapshot("build", 1, AgentExecutionMode.Direct, Guid.NewGuid(), null, null,
-                    ToolPermissionMode.RequireApproval), null, true), token), CancellationToken.None);
+                    ToolPermissionMode.RequireApproval), null), token), CancellationToken.None);
 
         accepted.Should().BeNull();
         (await context.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(0L);

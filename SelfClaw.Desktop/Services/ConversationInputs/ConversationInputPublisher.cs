@@ -18,7 +18,6 @@ internal sealed class ConversationInputPublisher : IDisposable
     private readonly IConversationInputStore _store;
     private readonly ConversationInputChangeNotifier _changes;
     private readonly ConversationRunCoordinator _runs;
-    private readonly ConversationInputFeatureSwitch _featureSwitch;
     private readonly WebViewHostChannel _channel;
     private readonly Dispatcher _dispatcher;
     private readonly ILogger<ConversationInputPublisher> _logger;
@@ -27,13 +26,12 @@ internal sealed class ConversationInputPublisher : IDisposable
     private bool _disposed;
 
     public ConversationInputPublisher(IConversationInputStore store, ConversationInputChangeNotifier changes,
-        ConversationRunCoordinator runs, ConversationInputFeatureSwitch featureSwitch,
-        WebViewHostChannel channel, Dispatcher dispatcher, ILogger<ConversationInputPublisher> logger)
+        ConversationRunCoordinator runs, WebViewHostChannel channel, Dispatcher dispatcher,
+        ILogger<ConversationInputPublisher> logger)
     {
         _store = store;
         _changes = changes;
         _runs = runs;
-        _featureSwitch = featureSwitch;
         _channel = channel;
         _dispatcher = dispatcher;
         _logger = logger;
@@ -139,7 +137,7 @@ internal sealed class ConversationInputPublisher : IDisposable
             if (_disposed || _conversationId != conversationId || _subscriptionId != subscriptionId) return;
             if (CurrentState is { } newer && newer.QueueRevision > state.QueueRevision) state = newer;
             var (canSteer, steerReason, steerTargetTurnId) = ConversationInputSteerPolicy.Evaluate(
-                _runs.GetActiveRun(conversationId), _featureSwitch.SteerEnabled);
+                _runs.GetActiveRun(conversationId));
             state = state with { CanSteer = canSteer, SteerReason = steerReason, SteerTargetTurnId = steerTargetTurnId };
             CurrentState = state;
             var payload = ConversationQueueStateFormatter.Create(subscriptionId, state, requestId);

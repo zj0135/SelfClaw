@@ -9,30 +9,15 @@ using SelfClaw.Tests.TestDoubles;
 namespace SelfClaw.Tests.Desktop.Services.ConversationInputs;
 
 /// <summary>
-/// P4.6/P4.7/P4.8 host acceptance: target validation, the follow-up fallbacks, the steer switch,
-/// and the stop ordering that settles unconsumed steers before cancellation.
+/// P4.6/P4.7/P4.8 host acceptance: target validation, the follow-up fallbacks and the stop
+/// ordering that settles unconsumed steers before cancellation.
 /// </summary>
 public sealed class ConversationInputSteerServiceTests
 {
     [Fact]
-    public async Task Explicit_steer_is_rejected_while_the_steer_switch_is_off()
-    {
-        using var h = new ConversationInputTestHarness(steerEnabled: false);
-        var id = await h.CreateConversationAsync();
-        var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
-
-        var result = await h.SubmitSteerAsync(id, handle.TurnId, "adjust");
-
-        result.Accepted.Should().BeFalse();
-        result.Reason.Should().Be(ConversationInputReason.SteerNotEnabled);
-        (await h.Fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(0L);
-        h.Runs.Complete(handle, false);
-    }
-
-    [Fact]
     public async Task A_steer_without_a_matching_live_turn_becomes_a_follow_up()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var busy = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
 
@@ -50,7 +35,7 @@ public sealed class ConversationInputSteerServiceTests
     [Fact]
     public async Task A_steer_during_a_continuation_becomes_a_follow_up()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var conversation = (await h.Fixture.Conversations.GetConversationAsync(id))!;
         var continuation = (await h.Runs.TryReserveContinuationAsync(conversation))!;
@@ -68,7 +53,7 @@ public sealed class ConversationInputSteerServiceTests
     [Fact]
     public async Task A_steer_during_a_live_direct_turn_is_durably_targeted_and_pulses_the_session()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
         await h.StartReservedTurnAsync(id, handle.TurnId);
@@ -89,7 +74,7 @@ public sealed class ConversationInputSteerServiceTests
     [Fact]
     public async Task A_blocked_steer_policy_accepts_the_input_as_a_follow_up()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
         await h.StartReservedTurnAsync(id, handle.TurnId);
@@ -108,7 +93,7 @@ public sealed class ConversationInputSteerServiceTests
     [Fact]
     public async Task Stop_pauses_and_holds_unconsumed_steers_before_cancelling_the_run()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
         await h.StartReservedTurnAsync(id, handle.TurnId);
@@ -128,7 +113,7 @@ public sealed class ConversationInputSteerServiceTests
     [Fact]
     public async Task A_cli_agent_cannot_submit_a_steer()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var submission = h.Submission(id, "cli steer") with
         {
@@ -147,7 +132,7 @@ public sealed class ConversationInputSteerServiceTests
     [Fact]
     public async Task A_steer_submitted_after_the_session_close_becomes_a_follow_up()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
         await h.StartReservedTurnAsync(id, handle.TurnId);
@@ -170,7 +155,7 @@ public sealed class ConversationInputSteerServiceTests
     public async Task A_provider_failure_holds_an_unconsumed_steer_and_pauses_the_queue()
     {
         var runtime = new FailingGatedRuntime();
-        using var h = new ConversationInputTestHarness(runtime: runtime, steerEnabled: true);
+        using var h = new ConversationInputTestHarness(runtime: runtime);
         var id = await h.CreateConversationAsync();
         await h.SubmitAsync(id, "A");
         await runtime.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -189,7 +174,7 @@ public sealed class ConversationInputSteerServiceTests
     [Fact]
     public async Task Promote_converts_a_pending_follow_up_into_a_steer_for_the_live_turn()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
         await h.StartReservedTurnAsync(id, handle.TurnId);
@@ -215,7 +200,7 @@ public sealed class ConversationInputSteerServiceTests
     [Fact]
     public async Task Promote_rejects_a_stale_revision_or_a_target_that_is_not_the_live_turn()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
         await h.StartReservedTurnAsync(id, handle.TurnId);
@@ -237,7 +222,7 @@ public sealed class ConversationInputSteerServiceTests
     [Fact]
     public async Task Promote_respects_the_published_policy_and_the_explicit_skill_rule()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
         await h.StartReservedTurnAsync(id, handle.TurnId);
@@ -249,7 +234,7 @@ public sealed class ConversationInputSteerServiceTests
         blockedResult.Status.Should().Be(ConversationInputUpdateStatus.Invalid);
         blockedResult.Reason.Should().Be(ConversationInputReason.HookRequiresNewTurn);
 
-        using var other = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var other = new ConversationInputTestHarness();
         var otherId = await other.CreateConversationAsync();
         var otherHandle = other.Runs.TryReserve(otherId, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
         await other.StartReservedTurnAsync(otherId, otherHandle.TurnId);
@@ -265,9 +250,9 @@ public sealed class ConversationInputSteerServiceTests
     }
 
     [Fact]
-    public async Task Promote_that_loses_the_close_race_stays_a_follow_up_and_is_rejected_when_disabled()
+    public async Task Promote_that_loses_the_close_race_stays_a_follow_up()
     {
-        using var h = new ConversationInputTestHarness(steerEnabled: true, queueEnabled: true);
+        using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
         await h.StartReservedTurnAsync(id, handle.TurnId);
@@ -280,12 +265,6 @@ public sealed class ConversationInputSteerServiceTests
         result.Reason.Should().Be(ConversationInputReason.TargetTurnClosed);
         (await h.Fixture.Inputs.GetInputAsync(followUp.InputId!.Value))!.Kind.Should().Be(ConversationInputKind.FollowUp);
         h.Runs.Complete(handle, false);
-
-        using var disabled = new ConversationInputTestHarness(steerEnabled: false, queueEnabled: true);
-        var disabledId = await disabled.CreateConversationAsync();
-        var disabledInput = await disabled.SubmitAsync(disabledId, "no switch");
-        await Assert.ThrowsAsync<ConversationInputRejectedException>(() =>
-            disabled.Queue.PromoteAsync(disabledInput.InputId!.Value, disabledInput.Revision, Guid.NewGuid()));
     }
 
     private sealed class FailingGatedRuntime : IAgentChatRuntime

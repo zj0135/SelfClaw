@@ -42,17 +42,12 @@ public sealed class DesktopServiceRegistrationTests
                 provider.GetRequiredService<IConversationInputSteeringStore>().Should().BeSameAs(store);
                 provider.GetRequiredService<ISkillTokenDetector>().Should().BeOfType<SkillTokenParser>();
 
-                var featureSwitch = provider.GetRequiredService<ConversationInputFeatureSwitch>();
-                featureSwitch.QueueEnabled.Should().BeFalse("the queue switch is host-controlled and off by default");
-                featureSwitch.SteerEnabled.Should().BeFalse("P4 never enables steer by default");
-
                 provider.GetRequiredService<IConversationInputCoordinator>().Should().BeOfType<ConversationInputService>();
                 provider.GetRequiredService<ConversationInputDispatcher>().Should().NotBeNull();
                 provider.GetRequiredService<ConversationInputQueueService>().Should().NotBeNull();
                 provider.GetRequiredService<ConversationInputBridge>().Should().NotBeNull();
                 provider.GetRequiredService<ConversationInputPublisher>().Should().NotBeNull();
                 provider.GetRequiredService<ConversationDeletionService>().Should().NotBeNull();
-                provider.GetRequiredService<ConversationInputFeatureSwitch>().Should().NotBeNull();
                 await Task.CompletedTask;
             }
             finally

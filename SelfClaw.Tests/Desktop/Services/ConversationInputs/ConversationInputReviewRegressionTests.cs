@@ -102,7 +102,7 @@ public sealed class ConversationInputReviewRegressionTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var jobs = Enumerable.Range(0, 22).Select(n => Task.Run(async () => {
             await gate.Task;
-            return await f.Inputs.AcceptAsync(new(c.Id, n.ToString(), ConversationInputKind.FollowUp, null, "A", f.Snapshot(), null, true));
+            return await f.Inputs.AcceptAsync(new(c.Id, n.ToString(), ConversationInputKind.FollowUp, null, "A", f.Snapshot(), null));
         })).ToArray();
         gate.SetResult(); var results = await Task.WhenAll(jobs);
         results.Count(r => r.Status == ConversationInputAcceptStatus.Accepted).Should().Be(20);
@@ -110,7 +110,7 @@ public sealed class ConversationInputReviewRegressionTests
         var other = await f.CreateConversationAsync();
         await f.AcceptFollowUpAsync(other.Id, new string('中', 21845) + "x");
         await Assert.ThrowsAsync<ArgumentException>(() => f.Inputs.AcceptAsync(new(other.Id, "too-big", ConversationInputKind.FollowUp, null,
-            new string('中', 21845) + "xx", f.Snapshot(), null, true)));
+            new string('中', 21845) + "xx", f.Snapshot(), null)));
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public sealed class ConversationInputReviewRegressionTests
             var channel = new SelfClaw.Desktop.Services.WebView.WebViewHostChannel();
             var posted = new List<string>();
             channel.Attach(posted.Add);
-            using var publisher = new ConversationInputPublisher(h.Fixture.Inputs, h.Changes, h.Runs, h.Switch, channel,
+            using var publisher = new ConversationInputPublisher(h.Fixture.Inputs, h.Changes, h.Runs, channel,
                 System.Windows.Threading.Dispatcher.CurrentDispatcher,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<ConversationInputPublisher>.Instance);
             var bridge = new ConversationInputBridge(h.Service, publisher, channel, System.Windows.Threading.Dispatcher.CurrentDispatcher);
@@ -207,19 +207,6 @@ public sealed class ConversationInputReviewRegressionTests
     }
 
     [Fact]
-    public async Task Disabled_feature_must_not_resume_persisted_backlog()
-    {
-        using var h = new ConversationInputTestHarness(queueEnabled: false, runtime: new GatedAgentChatRuntime());
-        var id = await h.CreateConversationAsync();
-        await h.Fixture.AcceptFollowUpAsync(id, "A", snapshot: Snapshot(h));
-        await h.Dispatcher.RecoverOnceAsync(CancellationToken.None);
-        var state = await h.Service.GetStateAsync(id);
-        await Assert.ThrowsAsync<ConversationInputRejectedException>(() => h.Service.ResumeAsync(id, state.QueueRevision));
-        (await h.Fixture.Inputs.GetQueueStateAsync(id)).Items.Should().ContainSingle();
-        h.Runs.IsRunning(id).Should().BeFalse("a disabled Queue must not dispatch a persisted backlog through resume");
-    }
-
-    [Fact]
     public async Task Scan_must_reach_candidate_after_32_paused_parents()
     {
         using var h = new ConversationInputTestHarness(runtime: new GatedAgentChatRuntime());
@@ -297,7 +284,7 @@ public sealed class ConversationInputReviewRegressionTests
             for (var j = 0; j < 20; j++) await f.AcceptFollowUpAsync(c.Id, "A");
         }
         var extra = await f.CreateConversationAsync();
-        var result = await f.Inputs.AcceptAsync(new(extra.Id, "extra", ConversationInputKind.FollowUp, null, "A", f.Snapshot(), null, true));
+        var result = await f.Inputs.AcceptAsync(new(extra.Id, "extra", ConversationInputKind.FollowUp, null, "A", f.Snapshot(), null));
         result.Status.Should().Be(ConversationInputAcceptStatus.Full);
     }
 

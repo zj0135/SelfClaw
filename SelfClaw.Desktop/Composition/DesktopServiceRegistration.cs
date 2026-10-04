@@ -89,7 +89,6 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<IConversationCompletionNotifier, ConversationCompletionNotifier>();
         services.AddSingleton<ConversationRunCoordinator>();
         services.AddSingleton<ConversationTurnEngine>();
-        services.AddSingleton<ConversationInputFeatureSwitch>();
         services.AddSingleton<ConversationInputChangeNotifier>();
         services.AddSingleton<ConversationInputExecutionValidator>();
         services.AddSingleton<ConversationInputDispatcher>();

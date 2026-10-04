@@ -1,7 +1,5 @@
 const reasons = {
     'queue-paused': '队列已暂停',
-    'queue-disabled': '队列功能未启用',
-    'pending-inputs': '还有未处理的输入',
     'turn-cancelled': '已停止生成，队列暂停',
     'turn-failed': '上一项执行失败，请检查后恢复',
     'turn-blocked': '上一项被阻止，请检查后恢复',
@@ -17,7 +15,6 @@ const reasons = {
     'request-conflict': '该请求与已有输入冲突',
     'conversation-unavailable': '会话正在删除或应用正在退出',
     'queue-revision-conflict': '队列已变化，请根据最新列表重试',
-    'steer-not-enabled': '当前回合未开放调整',
     'direct-only': '当前回合不支持调整',
     'target-turn-closed': '目标回合已结束，已转为排队',
     'continuation-active': '后台续写期间不能调整，已转为排队',

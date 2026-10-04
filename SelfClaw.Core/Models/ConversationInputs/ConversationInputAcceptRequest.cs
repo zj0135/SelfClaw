@@ -8,6 +8,5 @@ public sealed record ConversationInputAcceptRequest(
     string Prompt,
     ConversationInputExecutionSnapshot? ExecutionSnapshot,
     ConversationRecord? Conversation,
-    bool QueueEnabled,
     string? RequestFingerprint = null,
     string? ReasonCode = null);

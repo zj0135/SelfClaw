@@ -23,15 +23,15 @@ public sealed class SqliteConversationInputQueueTests
 
         var snapshot = fixture.Snapshot();
         var first = await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-            conversationId, requestId, ConversationInputKind.FollowUp, null, "hello", snapshot, null, true));
+            conversationId, requestId, ConversationInputKind.FollowUp, null, "hello", snapshot, null));
         var retry = await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-            conversationId, requestId, ConversationInputKind.FollowUp, null, "hello", snapshot, null, true));
+            conversationId, requestId, ConversationInputKind.FollowUp, null, "hello", snapshot, null));
         first.Status.Should().Be(ConversationInputAcceptStatus.Accepted);
         retry.Status.Should().Be(ConversationInputAcceptStatus.Duplicate);
         retry.Input!.Id.Should().Be(first.Input!.Id);
 
         var conflict = await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-            conversationId, requestId, ConversationInputKind.FollowUp, null, "different", snapshot, null, true));
+            conversationId, requestId, ConversationInputKind.FollowUp, null, "different", snapshot, null));
         conflict.Status.Should().Be(ConversationInputAcceptStatus.Conflict);
         conflict.Reason.Should().Be("request-conflict");
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(1L);
@@ -46,22 +46,22 @@ public sealed class SqliteConversationInputQueueTests
 
         var oversized = new string('x', 64 * 1024 + 1);
         await Assert.ThrowsAsync<ArgumentException>(() => fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-            conversationId, "big", ConversationInputKind.FollowUp, null, oversized, fixture.Snapshot(), null, true)));
+            conversationId, "big", ConversationInputKind.FollowUp, null, oversized, fixture.Snapshot(), null)));
 
         var accepted = new string('y', 64 * 1024);
         var edge = await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-            conversationId, "edge", ConversationInputKind.FollowUp, null, accepted, fixture.Snapshot(), null, true));
+            conversationId, "edge", ConversationInputKind.FollowUp, null, accepted, fixture.Snapshot(), null));
         edge.Status.Should().Be(ConversationInputAcceptStatus.Accepted);
 
         for (var index = 0; index < 19; index++)
         {
             var result = await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-                conversationId, $"filler-{index}", ConversationInputKind.FollowUp, null, $"p{index}", fixture.Snapshot(), null, true));
+                conversationId, $"filler-{index}", ConversationInputKind.FollowUp, null, $"p{index}", fixture.Snapshot(), null));
             result.Status.Should().Be(ConversationInputAcceptStatus.Accepted);
         }
 
         var full = await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-            conversationId, "overflow", ConversationInputKind.FollowUp, null, "overflow", fixture.Snapshot(), null, true));
+            conversationId, "overflow", ConversationInputKind.FollowUp, null, "overflow", fixture.Snapshot(), null));
         full.Status.Should().Be(ConversationInputAcceptStatus.Full);
         full.Reason.Should().Be(ConversationInputReason.Capacity);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(20L);
@@ -83,13 +83,13 @@ public sealed class SqliteConversationInputQueueTests
             for (var index = 0; index < 20; index++)
             {
                 var result = await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-                    conversationId, $"r-{index}", ConversationInputKind.FollowUp, null, "p", fixture.Snapshot(), null, true));
+                    conversationId, $"r-{index}", ConversationInputKind.FollowUp, null, "p", fixture.Snapshot(), null));
                 result.Status.Should().Be(ConversationInputAcceptStatus.Accepted);
             }
         }
 
         var overflow = await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-            conversations[0], "global-overflow", ConversationInputKind.FollowUp, null, "p", fixture.Snapshot(), null, true));
+            conversations[0], "global-overflow", ConversationInputKind.FollowUp, null, "p", fixture.Snapshot(), null));
         overflow.Status.Should().Be(ConversationInputAcceptStatus.Full);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(500L);
     }
@@ -287,20 +287,5 @@ public sealed class SqliteConversationInputQueueTests
         ((ConversationInputStatus)pendingStatus).Should().Be(ConversationInputStatus.Pending);
         (await fixture.ScalarAsync("SELECT status FROM conversation_inputs WHERE client_request_id = 'steer-1';")).Should().Be(3L);
         (await fixture.Inputs.TryClaimNextFollowUpAsync(pendingConversation, Guid.NewGuid(), Guid.NewGuid())).Should().BeNull();
-    }
-
-    [Fact]
-    public async Task Queue_disabled_rejects_a_busy_conversation_but_keeps_existing_inputs()
-    {
-        using var fixture = new ConversationPersistenceFixture();
-        var start = await fixture.StartAsync();
-        var conversationId = start.Turn.ConversationId;
-        await fixture.AcceptFollowUpAsync(conversationId, "first", queueEnabled: true);
-
-        var rejected = await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-            conversationId, "second", ConversationInputKind.FollowUp, null, "second", fixture.Snapshot(), null, false));
-        rejected.Status.Should().Be(ConversationInputAcceptStatus.Rejected);
-        rejected.Reason.Should().Be(ConversationInputReason.PendingInputs);
-        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(1L);
     }
 }
