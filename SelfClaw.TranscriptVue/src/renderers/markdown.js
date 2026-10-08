@@ -112,12 +112,13 @@ markdownIt.renderer.rules.skill_token = (tokens, index) => {
 	return `<span class="composer-inline-skill message-skill-chip" role="text"><span class="composer-inline-skill-name">${name}</span></span>`;
 };
 
-const defaultLinkOpen = markdownIt.renderer.rules.link_open;
+// markdown-it 默认规则表里没有 link_open（只有 image/code/fence 等），所以这里不能用
+// "保存默认规则再调用" 的写法——那会调用 undefined。renderToken 才是 link_open 的默认渲染。
 markdownIt.renderer.rules.link_open = (tokens, index, options, env, self) => {
 	const token = tokens[index];
 	if (token.attrIndex('target') < 0) token.attrSet('target', '_blank');
 	if (token.attrIndex('rel') < 0) token.attrSet('rel', 'noopener noreferrer');
-	return defaultLinkOpen(tokens, index, options, env, self);
+	return self.renderToken(tokens, index, options);
 };
 
 const defaultImage = markdownIt.renderer.rules.image;
@@ -160,6 +161,9 @@ const sanitizeOptions = {
 		'div',
 	],
 	ALLOWED_ATTR: ['class', 'href', 'src', 'alt', 'title', 'loading', 'rel', 'target', 'role'],
+	// DOMPurify 对不在 URI_SAFE_ATTRIBUTES 里的属性也拿 URI 正则校验值，target/rel/loading
+	// 的值不是 URL，不登记就会被静默删除——上面 link_open/image 规则加的目标属性等于白加。
+	ADD_URI_SAFE_ATTR: ['target', 'rel', 'loading'],
 	FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'textarea'],
 	FORBID_ATTR: [/^on/i],
 	ALLOW_UNKNOWN_PROTOCOLS: false,
@@ -181,7 +185,16 @@ export function renderMarkdown(source, { context = 'content' } = {}) {
 		return cached;
 	}
 
-	const rendered = sanitize(markdownIt.render(markdownSource, { context }));
+	let rendered;
+	try {
+		rendered = sanitize(markdownIt.render(markdownSource, { context }));
+	} catch (error) {
+		// Markdown 渲染发生在每个正文段的 setup/watch 里：抛异常会被 Vue 换成注释节点，
+		// 且流式更新时反复重抛，最终让整条转录卡死。单段渲染失败只降级成纯文本。
+		console.error('Markdown render failed; falling back to plain text.', error);
+		rendered = `<p>${markdownIt.utils.escapeHtml(markdownSource).replace(/\r?\n/g, '<br>')}</p>`;
+	}
+
 	if (cache.size >= cacheLimit) {
 		const first = cache.keys().next().value;
 		if (first !== undefined) cache.delete(first);
