@@ -107,6 +107,29 @@ it('keeps a non-worktree conversation on the single-prompt path', async () => {
 	wrapper.unmount();
 });
 
+it('sends a trimmed title when renaming a conversation', async () => {
+	const wrapper = mountNavigation();
+	const conversationId = '44444444-4444-4444-4444-444444444444';
+
+	await wrapper.vm.navigation.onSidebarAction({ id: 'rename-conversation', conversationId, title: '  新标题  ' });
+
+	expect(bridge.request).toHaveBeenCalledWith('rename-conversation', { conversationId, title: '新标题' });
+	wrapper.unmount();
+});
+
+it('ignores a rename with a blank title', async () => {
+	const wrapper = mountNavigation();
+
+	await wrapper.vm.navigation.onSidebarAction({
+		id: 'rename-conversation',
+		conversationId: '55555555-5555-5555-5555-555555555555',
+		title: '   ',
+	});
+
+	expect(bridge.request).not.toHaveBeenCalled();
+	wrapper.unmount();
+});
+
 it('deletes a git branch only after the global dialog is confirmed', async () => {
 	const wrapper = mount(GitWorkspaceControl, {
 		props: {

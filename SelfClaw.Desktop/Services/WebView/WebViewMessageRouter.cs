@@ -324,6 +324,9 @@ internal sealed class WebViewMessageRouter : IDisposable
             case "delete-conversation":
                 await DeleteConversationAsync(payload);
                 return null;
+            case "rename-conversation":
+                await RenameConversationAsync(payload);
+                return null;
             case "clear-conversations":
                 await DeleteConversationsAsync(payload);
                 return null;
@@ -379,6 +382,9 @@ internal sealed class WebViewMessageRouter : IDisposable
     private Task DeleteConversationAsync(JsonElement payload)
         => _viewModel.DeleteConversationAsync(ReadRequiredGuid(payload, "conversationId"), ReadBoolean(payload, "removeManagedWorktree"));
 
+    private Task RenameConversationAsync(JsonElement payload)
+        => _viewModel.RenameConversationAsync(ReadRequiredGuid(payload, "conversationId"), ReadRequiredString(payload, "title"));
+
     private Task DeleteConversationsAsync(JsonElement payload)
     {
         if (!payload.TryGetProperty("conversationIds", out var values) || values.ValueKind != JsonValueKind.Array)
@@ -392,6 +398,9 @@ internal sealed class WebViewMessageRouter : IDisposable
     private static Guid ReadRequiredGuid(JsonElement payload, string property)
         => Guid.TryParse(ReadOptionalString(payload, property), out var value) && value != Guid.Empty ? value :
             throw new ArgumentException($"{property} must be a non-empty GUID.");
+
+    private static string ReadRequiredString(JsonElement payload, string property)
+        => ReadOptionalString(payload, property) ?? throw new ArgumentException($"{property} is required.");
 
     private static string? ReadOptionalString(JsonElement payload, string propertyName)
     {

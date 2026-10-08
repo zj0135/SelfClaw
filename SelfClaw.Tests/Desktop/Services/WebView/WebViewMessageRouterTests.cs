@@ -45,6 +45,7 @@ public sealed class WebViewMessageRouterTests
     [Theory]
     [InlineData("delete-conversation", "not-a-guid", "invalid-request")]
     [InlineData("select-conversation", "not-a-guid", "invalid-request")]
+    [InlineData("rename-conversation", "not-a-guid", "invalid-request")]
     [InlineData("select-conversation", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "operation-failed")]
     public async Task Conversation_command_failures_are_correlated_instead_of_reporting_success(string type, string id, string errorCode)
     {
@@ -136,6 +137,23 @@ public sealed class WebViewMessageRouterTests
             $$"""{"type":"delete-workspace-root","workspaceRootId":"{{workspaceRootId:D}}"}""");
 
         context.ConversationRepository.DeletedWorkspaceRootIds.Should().Equal(workspaceRootId);
+    }
+
+    [Fact]
+    public async Task RouteAsync_renames_a_conversation_and_reports_success()
+    {
+        var conversation = new ConversationRecord(Guid.NewGuid(), "旧标题", null, ConversationMode.Programming,
+            ToolPermissionMode.RequireApproval, DesktopAgentDefinitionService.BuildAgentId,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        using var context = new RouterTestContext(conversations: [conversation]);
+
+        await context.RouteAsync(
+            $$"""{"type":"rename-conversation","requestId":"rename-1","conversationId":"{{conversation.Id:D}}","title":"  新标题  "}""");
+
+        context.ConversationRepository.UpsertedConversations.Should().ContainSingle().Which.Title.Should().Be("新标题");
+        var response = context.PostedJson.Select(json => JsonDocument.Parse(json).RootElement)
+            .Single(value => value.TryGetProperty("requestId", out var request) && request.GetString() == "rename-1");
+        response.GetProperty("ok").GetBoolean().Should().BeTrue();
     }
 
     [Fact]
@@ -330,7 +348,8 @@ public sealed class WebViewMessageRouterTests
         private readonly ConversationTurnEngine _turnEngine;
         private readonly ConversationRunCoordinator _runs;
 
-        public RouterTestContext(IReadOnlyList<WorkspaceRoot>? workspaceRoots = null)
+        public RouterTestContext(IReadOnlyList<WorkspaceRoot>? workspaceRoots = null,
+            IReadOnlyList<ConversationRecord>? conversations = null)
         {
             _storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
             var storagePaths = StoragePathDefaults.Create(
@@ -342,6 +361,11 @@ public sealed class WebViewMessageRouterTests
             if (workspaceRoots is not null)
             {
                 ConversationRepository.WorkspaceRoots.AddRange(workspaceRoots);
+            }
+
+            if (conversations is not null)
+            {
+                ConversationRepository.Conversations.AddRange(conversations);
             }
             var approvalHandler = new DesktopToolApprovalHandler();
             _activityCoordinator = new AgentActivityCoordinator(
@@ -596,20 +620,30 @@ public sealed class WebViewMessageRouterTests
 
         public List<WorkspaceRoot> WorkspaceRoots { get; } = [];
 
+        public List<ConversationRecord> Conversations { get; } = [];
+
+        public List<ConversationRecord> UpsertedConversations { get; } = [];
+
         public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task<IReadOnlyList<ConversationRecord>> ListConversationsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<ConversationRecord>>([]);
+            => Task.FromResult<IReadOnlyList<ConversationRecord>>(Conversations.ToArray());
 
         public Task<ConversationRecord?> GetConversationAsync(
             Guid conversationId,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<ConversationRecord?>(null);
+            => Task.FromResult(Conversations.FirstOrDefault(item => item.Id == conversationId));
 
         public Task<ConversationRecord> UpsertConversationAsync(
             ConversationRecord conversation,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(conversation);
+        {
+            UpsertedConversations.Add(conversation);
+            var index = Conversations.FindIndex(item => item.Id == conversation.Id);
+            if (index >= 0) Conversations[index] = conversation;
+            else Conversations.Add(conversation);
+            return Task.FromResult(conversation);
+        }
 
         public Task DeleteConversationAsync(Guid conversationId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;

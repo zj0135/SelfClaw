@@ -64,6 +64,76 @@ it('emits the workspace root id when opening a project folder in explorer', asyn
 	wrapper.unmount();
 });
 
+async function openRenameEditor(wrapper, selector = '.subfolder-body .node') {
+	await wrapper.get(selector).trigger('contextmenu');
+	await menuButton(wrapper, '重命名').trigger('click');
+	return wrapper.get('.node.renaming input.rename-input');
+}
+
+it('renders an inline editor with confirm and cancel when renaming a conversation', async () => {
+	const wrapper = mountSidebar(projectItems());
+
+	const input = await openRenameEditor(wrapper);
+
+	expect(input.element.value).toBe('会话 A');
+	expect(wrapper.find('.node.renaming .rename-action.confirm').exists()).toBe(true);
+	expect(wrapper.find('.node.renaming .rename-action.cancel').exists()).toBe(true);
+	expect(wrapper.find('.context-menu').exists()).toBe(false);
+	wrapper.unmount();
+});
+
+it('emits the rename action with the trimmed title on confirm', async () => {
+	const wrapper = mountSidebar(projectItems());
+
+	const input = await openRenameEditor(wrapper);
+	await input.setValue('  会话 B  ');
+	await wrapper.get('.node.renaming .rename-action.confirm').trigger('click');
+
+	expect(wrapper.emitted('action')).toEqual([
+		[{ id: 'rename-conversation', conversationId: 'c-1', title: '会话 B' }],
+	]);
+	expect(wrapper.find('.node.renaming').exists()).toBe(false);
+	wrapper.unmount();
+});
+
+it('confirms the rename when Enter is pressed', async () => {
+	const wrapper = mountSidebar(projectItems());
+
+	const input = await openRenameEditor(wrapper);
+	await input.setValue('会话 C');
+	await input.trigger('keydown', { key: 'Enter' });
+
+	expect(wrapper.emitted('action')).toEqual([
+		[{ id: 'rename-conversation', conversationId: 'c-1', title: '会话 C' }],
+	]);
+	wrapper.unmount();
+});
+
+it('drops the edit without emitting when rename is cancelled', async () => {
+	const wrapper = mountSidebar(projectItems());
+
+	const input = await openRenameEditor(wrapper);
+	await input.setValue('丢弃');
+	await wrapper.get('.node.renaming .rename-action.cancel').trigger('click');
+
+	expect(wrapper.emitted('action')).toBeUndefined();
+	expect(wrapper.find('.node.renaming').exists()).toBe(false);
+	expect(wrapper.get('.subfolder-body .node .ntext').text()).toBe('会话 A');
+	wrapper.unmount();
+});
+
+it('drops the edit without emitting when Escape is pressed', async () => {
+	const wrapper = mountSidebar(projectItems());
+
+	const input = await openRenameEditor(wrapper);
+	await input.setValue('丢弃');
+	await input.trigger('keydown', { key: 'Escape' });
+
+	expect(wrapper.emitted('action')).toBeUndefined();
+	expect(wrapper.find('.node.renaming').exists()).toBe(false);
+	wrapper.unmount();
+});
+
 it('hides workspace actions for conversations without a workspace root', async () => {
 	const wrapper = mountSidebar([
 		{

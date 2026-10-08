@@ -152,6 +152,11 @@ async function onSidebarAction(action) {
 				await request('clear-conversations', { conversationIds: action.conversationIds });
 			}
 			break;
+		case 'rename-conversation':
+			if (action?.conversationId && typeof action.title === 'string' && action.title.trim()) {
+				await request('rename-conversation', { conversationId: action.conversationId, title: action.title.trim() });
+			}
+			break;
 		case 'open-in-explorer':
 			if (action?.workspaceRootId) {
 				await request('open-in-explorer', { workspaceRootId: action.workspaceRootId });

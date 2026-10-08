@@ -335,6 +335,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     private const string ComposerSettingsNode = "composer";
 
+    // 用户重命名的标题上限，与前端输入框 maxlength 对齐；自动标题仍由 ConversationTitles 截断。
+    private const int MaximumConversationTitleLength = 120;
+
     public Task StartNewConversationAsync()
         => SelectConversationCoreAsync(null, clearWorkspace: true);
 
@@ -371,6 +374,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             else await ReloadWorkspaceRootListAsync();
             await ReloadConversationsAsync();
         }
+    }
+
+    public async Task RenameConversationAsync(Guid conversationId, string title)
+    {
+        _dispatcher?.VerifyAccess();
+        var normalized = title?.Trim() ?? string.Empty;
+        if (conversationId == Guid.Empty || normalized.Length == 0) return;
+        if (normalized.Length > MaximumConversationTitleLength)
+            normalized = normalized[..MaximumConversationTitleLength];
+        var existing = _allConversations.FirstOrDefault(item => item.Id == conversationId);
+        if (existing is null || string.Equals(existing.Title, normalized, StringComparison.Ordinal)) return;
+
+        // 只改标题，不碰 updated_at_utc：重命名不是会话活动，不该改写侧栏排序。
+        await _conversationRepository.UpsertConversationAsync(existing with { Title = normalized });
+        await ReloadConversationsAsync();
     }
 
     public async Task DeleteWorkspaceRootAsync(Guid workspaceRootId)

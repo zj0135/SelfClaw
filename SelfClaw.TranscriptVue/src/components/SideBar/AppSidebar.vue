@@ -23,6 +23,7 @@ import {
 	RotateCw,
 } from 'lucide-vue-next';
 import { useWorkspaceTree } from '../../composables/useWorkspaceTree.js';
+import ConversationRenameEditor from './ConversationRenameEditor.vue';
 
 const props = defineProps({
 	items: {
@@ -97,6 +98,7 @@ const contextMenu = ref({
 	y: 0,
 	target: null,
 });
+const renameTargetId = ref(null);
 
 const actionItems = computed(() => props.items.filter((i) => i.type === 'action'));
 const groupItems = computed(() => props.items.filter((i) => i.type === 'group'));
@@ -147,6 +149,7 @@ function isActionOpen(actionId) {
 }
 
 function selectNode(nodeId) {
+	renameTargetId.value = null;
 	emit('select', nodeId);
 }
 
@@ -202,6 +205,8 @@ function openFolderMenu(event, folder) {
 }
 
 function openContextMenu(event, target) {
+	// 新菜单意味着用户把注意力移到别的节点上，未提交的重命名直接丢弃。
+	renameTargetId.value = null;
 	const menuWidth = 208;
 	const menuHeight = 160;
 	const padding = 8;
@@ -251,9 +256,24 @@ function onContextMenuItem(item) {
 		});
 	} else if (item.id === 'working-directory') {
 		openWorkingDirectory(target.node);
+	} else if (item.id === 'rename' && target.kind === 'conversation') {
+		renameTargetId.value = target.node.id;
 	}
 
 	closeContextMenu();
+}
+
+function confirmRename(node, title) {
+	renameTargetId.value = null;
+	emit('action', {
+		id: 'rename-conversation',
+		conversationId: node.id,
+		title,
+	});
+}
+
+function cancelRename() {
+	renameTargetId.value = null;
 }
 
 // 会话节点带的是工作区根的名字与路径（不是会话标题）；项目分组节点的 label 可能是
@@ -562,15 +582,18 @@ onUnmounted(() => {
 									</span>
 								</button>
 								<div class="subfolder-body">
-									<button v-for="(session, si) in folder.children" :key="session.id"
-										class="node kind-chat sc-rise" :style="{ '--i': si }"
-										:class="{ active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
-										type="button" @click="selectNode(session.id)"
-										@contextmenu.prevent.stop="openConversationMenu($event, session)">
-										<span class="dot" aria-hidden="true"></span>
-										<span class="ntext">{{ session.label }}</span>
-										<span v-if="session.time" class="ntime">{{ session.time }}</span>
-									</button>
+									<template v-for="(session, si) in folder.children" :key="session.id">
+										<ConversationRenameEditor v-if="renameTargetId === session.id" :initial="session.label"
+											@confirm="confirmRename(session, $event)" @cancel="cancelRename" />
+										<button v-else class="node kind-chat sc-rise" :style="{ '--i': si }"
+											:class="{ active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
+											type="button" @click="selectNode(session.id)"
+											@contextmenu.prevent.stop="openConversationMenu($event, session)">
+											<span class="dot" aria-hidden="true"></span>
+											<span class="ntext">{{ session.label }}</span>
+											<span v-if="session.time" class="ntime">{{ session.time }}</span>
+										</button>
+									</template>
 								</div>
 							</div>
 							<div v-if="!group.children?.length" class="empty-group">暂无项目会话</div>
@@ -578,15 +601,18 @@ onUnmounted(() => {
 
 						<template v-else>
 							<!-- 普通对话节点：二级结构 -->
-							<button v-for="(child, ci) in group.children" :key="child.id"
-								class="node kind-chat sc-rise" :style="{ '--i': ci }"
-								:class="{ active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
-								type="button" @click="selectNode(child.id)"
-								@contextmenu.prevent.stop="openConversationMenu($event, child)">
-								<span class="dot" aria-hidden="true"></span>
-								<span class="ntext">{{ child.label }}</span>
-								<span v-if="child.time" class="ntime">{{ child.time }}</span>
-							</button>
+							<template v-for="(child, ci) in group.children" :key="child.id">
+								<ConversationRenameEditor v-if="renameTargetId === child.id" :initial="child.label"
+									@confirm="confirmRename(child, $event)" @cancel="cancelRename" />
+								<button v-else class="node kind-chat sc-rise" :style="{ '--i': ci }"
+									:class="{ active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
+									type="button" @click="selectNode(child.id)"
+									@contextmenu.prevent.stop="openConversationMenu($event, child)">
+									<span class="dot" aria-hidden="true"></span>
+									<span class="ntext">{{ child.label }}</span>
+									<span v-if="child.time" class="ntime">{{ child.time }}</span>
+								</button>
+							</template>
 							<div v-if="!group.children?.length" class="empty-group">暂无会话记录</div>
 						</template>
 					</div>
