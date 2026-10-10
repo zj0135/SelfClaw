@@ -57,7 +57,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - **Plan mode**：已删除；只有 `AgentExecutionMode.Direct` / `Cli`。
 - **Channel conversations**：数据模型保留；UI 与调度只接受 `ConversationKind.Interactive`。
 - **Legacy provider profiles**（`ProviderProfile`、`IProfileRepository`、`profiles` 表、`ChatTurnRequest.Profile/ApiKey`）：已删除；Direct 只用 `ModelProfileId`。
-- **Direct Queue 与 Steer 默认关闭**（`SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`）；后端与 Vue 交互已实现（P4/P5），真实桌面 WebView2 验收在 P6。
+- **Queue / Steer 功能开关**（`ConversationInputFeatureSwitch`、`SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`）：已删除，队列与 steer 始终开启；不要再引入默认关闭开关、`queue-disabled` / `steer-not-enabled` / `pending-inputs` 分支或宿主「未启用」文案，暂停只由每会话队列状态表达。P6 验收门槛见 `docs/direct-message-input-implementation.md` §9。
 - **附件**：只保留持久化/转录渲染/虚拟主机（`message_attachments`、`https://attachments.selfclaw.local`）；输入入口一律拒绝（`ConversationInputReason.AttachmentsUnsupported`），不要再引用已不存在的 6 张 / 10 MB / 30 MB 限制。
 - **设置页**：AI 提供商 / 模型管理 / 编程助手 / 代理助手 / 插件 / 宠物已接宿主；其余页面（自动化、图像生成、翻译等）是前端 mock。
 

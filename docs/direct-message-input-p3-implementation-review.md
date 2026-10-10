@@ -2,6 +2,8 @@
 
 日期：2026-10-03。基线：`17243f9`（P2 独立审核通过）。范围：只实现 P3；未开放 Steer。
 
+> **开关状态更新（2026-10-08）：** 本文所记 Queue／Steer 功能开关已在 `8ad27da` 删除、两者始终开启；下文保持当时原文。权威记录见 [分阶段实施与验收](direct-message-input-implementation.md) 文末「2026-10-08 功能开关移除」。
+
 设计与任务见 [设计](direct-message-input-design.md)、[分阶段实施与验收](direct-message-input-implementation.md)、
 [P2 实施报告](direct-message-input-p2-implementation-review.md)。本报告由实施者编写，**不代表独立审核通过**。
 

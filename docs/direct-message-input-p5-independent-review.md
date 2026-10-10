@@ -2,6 +2,8 @@
 
 日期：2026-10-04。基线 `8d72122eb72a8d7b6c85418142cd6ac71829c46a`。审核对象是该 HEAD 上的 P5 工作区，包括未跟踪的队列界面与宿主桥接。没有修改生产代码，没有启动用户 Desktop，没有提交或推送。
 
+> **开关状态更新（2026-10-08）：** 本文所记 Queue／Steer 功能开关已在 `8ad27da` 删除、两者始终开启；下文保持当时原文。权威记录见 [分阶段实施与验收](direct-message-input-implementation.md) 文末「2026-10-08 功能开关移除」。
+
 **结论：U01–U10 的主路径成立，P5 不能记为无缺陷。** 取消冲突会吞掉后来的「已加入上下文」（IR-P5-01）。这不破坏草稿、投递目标、已领取行或会话隔离，但 P5.6 的消费反馈还没完成。Queue `SELFCLAW_QUEUE_ENABLED` 与 Steer `SELFCLAW_STEER_ENABLED` 仍默认关闭。本轮没有真实 WebView2、真实 provider、toast 或进程恢复，不能据此宣布 Steer 已发布。
 
 ## 1. 方法与执行结果

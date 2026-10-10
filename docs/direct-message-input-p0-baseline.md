@@ -2,6 +2,8 @@
 
 状态：P0 G01–G04 补证通过；复审历史见 §9，补证及缺口修复见 §10。Queue / Steer 均未开放。日期：2026-10-02。配套实施文档：[direct-message-input-implementation.md](direct-message-input-implementation.md)；配套设计：[direct-message-input-design.md](direct-message-input-design.md)。
 
+> **开关状态更新（2026-10-08）：** 本文所记 Queue／Steer 功能开关已在 `8ad27da` 删除、两者始终开启；下文保持当时原文。权威记录见 [分阶段实施与验收](direct-message-input-implementation.md) 文末「2026-10-08 功能开关移除」。
+
 本报告是 P0 的验收证据，不含 P1 及以后的实现。结论只对本文记录的命令、提交和工具版本成立。2026-10-02 复审重新运行了新增的 13 项测试并核对 TRX、resolved packages 与源码；通过数量成立，但测试通过不代表每项原定验收范围都已覆盖。
 
 ## 1. 基线快照（P0.1）

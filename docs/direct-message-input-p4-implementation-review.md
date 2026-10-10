@@ -2,6 +2,8 @@
 
 状态：实现与自测完成；独立审核发现 IR-P4-01（S06 末尾竞争）与 IR-P4-02（S11 显式 Skill token）已修复并加入回归，**待独立复审**。基线 `17b73a4`（P3 验收修复提交），P4 未改 schema（仍为 v30）、未新增迁移、未开放 Queue/Steer 默认开关、未开始 P5/P6。本报告只记录实施者自测证据，不代表独立审核通过。
 
+> **开关状态更新（2026-10-08）：** 本文所记 Queue／Steer 功能开关已在 `8ad27da` 删除、两者始终开启；下文保持当时原文。权威记录见 [分阶段实施与验收](direct-message-input-implementation.md) 文末「2026-10-08 功能开关移除」。
+
 ## 1. 范围与开放条件
 
 - 对应设计：[Direct 消息队列与 Steer 设计](direct-message-input-design.md) §3、§6、§7、§8；任务见[分阶段实施与验收](direct-message-input-implementation.md) §7。

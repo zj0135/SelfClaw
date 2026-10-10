@@ -4,6 +4,8 @@
 
 **IR-P3-01–11 已修复并完成自动回归。最终同一代码连续两次 .NET 全量为 1490 通过 / 0 失败 / 4 门控跳过；Vue 106 通过，Playwright 17 通过。** 原审核失败及其原始证据保留，不改写成当时已通过。这里是修复与验证记录，不冒充新的独立复审；Queue 开关保持默认关闭，Steer 未开放，P4–P6 未开始。
 
+> **开关状态更新（2026-10-08）：** 本文所记 Queue／Steer 功能开关已在 `8ad27da` 删除、两者始终开启；下文保持当时原文。权威记录见 [分阶段实施与验收](direct-message-input-implementation.md) 文末「2026-10-08 功能开关移除」。
+
 ## 修复落点与验证
 
 路径基于仓库根；`Inputs` = `SelfClaw.Desktop/Services/ConversationInputs/`，`Runtime` = `SelfClaw.Desktop/Services/Runtime/`，`Sql` = `SelfClaw.Infrastructure/Data/Sqlite/Repositories/`。

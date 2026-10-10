@@ -2,6 +2,8 @@
 
 状态：实现与自测完成，独立审核发现 IR-P5-01（取消冲突吞掉后续「已加入上下文」）已修复并加入回归。基线 `8d72122`（P4 交付提交），P5 未改 schema（仍为 v30）、未新增迁移；Queue `SELFCLAW_QUEUE_ENABLED` 与 Steer `SELFCLAW_STEER_ENABLED` 默认关闭。本报告只记录实施者自测证据；真实桌面 WebView2、真实 provider、toast 与进程恢复留给 P6，均不计为通过。P4 的后端仍**待独立复审**，本报告不改变该结论。独立审核原文见 [P5 独立审核](direct-message-input-p5-independent-review.md)。
 
+> **开关状态更新（2026-10-08）：** 本文所记 Queue／Steer 功能开关已在 `8ad27da` 删除、两者始终开启；下文保持当时原文。权威记录见 [分阶段实施与验收](direct-message-input-implementation.md) 文末「2026-10-08 功能开关移除」。
+
 ## 1. 范围与开放条件
 
 - 对应设计：[Direct 消息队列与 Steer 设计](direct-message-input-design.md) §3、§10；任务见[分阶段实施与验收](direct-message-input-implementation.md) §8。
