@@ -46,12 +46,12 @@ function updatePlacement() {
 const selectedAgent = computed(() =>
 	agents.value.find((agent) => agent.id === props.selectedAgentId) || null);
 
-const label = computed(() => {
-	if (!loaded.value) {
-		return '加载中…';
-	}
-	return props.selectedAgentName || selectedAgent.value?.name || '未选择代理';
-});
+// 代理列表是按需拉取的（首次展开面板才请求），但选中代理名由 transcript 每次推送带过来，
+// 因此标签不能以列表是否加载为门槛，否则首次渲染与切换会话后会一直停在「加载中…」。
+const label = computed(() =>
+	props.selectedAgentName
+	|| selectedAgent.value?.name
+	|| (loaded.value ? '未选择代理' : '加载中…'));
 
 async function requestAgents() {
 	try {
