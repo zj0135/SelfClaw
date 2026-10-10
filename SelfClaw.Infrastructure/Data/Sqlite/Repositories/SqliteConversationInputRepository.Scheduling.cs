@@ -10,6 +10,33 @@ namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
 internal sealed partial class SqliteConversationInputRepository
 {
+    public async Task<int> DiscardQueuedAsync(Guid conversationId, string reasonCode, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reasonCode);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        int discarded;
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                UPDATE conversation_inputs SET status = 4, reason_code = $reason, error_message = NULL,
+                    revision = revision + 1, updated_at_utc = $at
+                WHERE conversation_id = $id AND status IN (0, 3);
+                """;
+            command.Parameters.AddWithValue("$id", conversationId.ToString("D"));
+            command.Parameters.AddWithValue("$reason", reasonCode);
+            command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            discarded = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        // Nothing waits anymore, so leaving the pause behind would only strand the next send.
+        await ResumeQueueAsync(connection, transaction, conversationId, cancellationToken).ConfigureAwait(false);
+        await AdvanceQueueRevisionAsync(connection, transaction, conversationId, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return discarded;
+    }
+
     public async Task<ConversationInputQueueState> PauseQueueAsync(Guid conversationId, string reason,
         CancellationToken cancellationToken = default)
     {

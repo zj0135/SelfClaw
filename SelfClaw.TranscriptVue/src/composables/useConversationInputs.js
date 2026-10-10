@@ -26,7 +26,7 @@ export function createQueueState() {
 	return {
 		conversationId: null, subscriptionId: null, queueRevision: 0, paused: false,
 		pauseReason: null, canSteer: false, steerReason: null, steerTargetTurnId: null,
-		items: [], loaded: false, truncated: false, error: '',
+		items: [], cancelledInputIds: [], loaded: false, truncated: false, error: '',
 	};
 }
 
@@ -53,6 +53,7 @@ export function reduceQueueState(state, payload) {
 			steerReason: payload.steerReason || null,
 			steerTargetTurnId: payload.steerTargetTurnId || null,
 			items: Array.isArray(payload.items) ? payload.items.map(normalizeItem) : [],
+			cancelledInputIds: Array.isArray(payload.cancelledInputIds) ? payload.cancelledInputIds.map(String) : [],
 			truncated: Boolean(payload.truncated),
 			loaded: true,
 		},
@@ -82,11 +83,14 @@ export function useConversationInputs(bridge) {
 		notice.value = '';
 	}
 
-	function announceConsumedSteers(previous, next) {
+	function announceConsumedSteers(previous, next, cancelledInputIds) {
 		const remaining = new Set(next.map(item => item.inputId));
+		const cancelled = new Set(cancelledInputIds || []);
 		for (const item of previous) {
 			if (item.kind !== 'steer' || remaining.has(item.inputId)) continue;
 			if (locallyCancelled.delete(item.inputId)) continue;
+			// 用户停止会丢弃整个队列，此时消失的 steer 是被取消而非消费，不能谎报“已加入上下文”。
+			if (cancelled.has(item.inputId)) continue;
 			showNotice('已加入上下文');
 		}
 	}
@@ -97,7 +101,7 @@ export function useConversationInputs(bridge) {
 		if (!result.accepted) return;
 		const previous = state.items;
 		Object.assign(state, result.state);
-		announceConsumedSteers(previous, state.items);
+		announceConsumedSteers(previous, state.items, state.cancelledInputIds);
 	}
 
 	function onState(payload) { apply(payload); }
@@ -119,6 +123,7 @@ export function useConversationInputs(bridge) {
 		state.steerTargetTurnId = null;
 		state.error = '';
 		state.items = [];
+		state.cancelledInputIds = [];
 		if (!conversationId) return;
 		const subscriptionId = crypto.randomUUID();
 		state.subscriptionId = subscriptionId;

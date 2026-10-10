@@ -14,6 +14,7 @@ internal sealed class ConversationRunHandle
     private ConversationTurnExecutionResult? _executionResult;
     private int _executionStarted;
     private int _completed;
+    private int _userInitiatedStop;
 
     internal ConversationRunHandle(Guid conversationId, AgentExecutionMode mode, DirectTurnOrigin origin,
         long generation, DirectTurnInputSession? inputSession, Guid runId, Guid turnId, CancellationToken cancellationToken)
@@ -43,6 +44,14 @@ internal sealed class ConversationRunHandle
     public Task Completion => _completion.Task;
     public Task<ConversationRecord?> Started => _started.Task;
     internal ConversationTurnExecutionResult? ExecutionResult => Volatile.Read(ref _executionResult);
+
+    /// <summary>
+    /// A user stop (composer stop button / Esc) drops the queue backlog instead of pausing it, so
+    /// the dispatcher must not re-pause the conversation when this run settles.
+    /// </summary>
+    internal bool UserInitiatedStop => Volatile.Read(ref _userInitiatedStop) != 0;
+
+    internal void MarkUserInitiatedStop() => Interlocked.Exchange(ref _userInitiatedStop, 1);
 
     internal void SetExecutionResult(ConversationTurnExecutionResult result)
     {

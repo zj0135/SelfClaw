@@ -152,6 +152,20 @@ it('does not announce a locally cancelled steer as consumed', async () => {
 	expect(queue.notice.value).toBe('');
 });
 
+it('does not announce a steer the host discarded on a user stop', async () => {
+	const { bridge, queue } = run((type, payload) => {
+		return { type: 'conversation-input/state', conversationId: payload.conversationId, subscriptionId: payload.subscriptionId,
+			queueRevision: 1, canSteer: true, steerTargetTurnId: 'turn-1',
+			items: [{ inputId: 'steer-1', sequence: 1, kind: 'steer', status: 'pending', revision: 1, preview: 'adjust' }] };
+	});
+	await queue.subscribe('A');
+
+	// The user stopped the turn: the host cancelled the steer and reports it in cancelledInputIds.
+	bridge.push(statePayload('A', queue.state.subscriptionId, { queueRevision: 2, cancelledInputIds: ['steer-1'], items: [] }));
+
+	expect(queue.notice.value).toBe('');
+});
+
 it('still reports consumption after a cancelled steer loses the revision conflict', async () => {
 	const { bridge, queue } = run((type, payload) => {
 		if (type === 'conversation-input/cancel') {

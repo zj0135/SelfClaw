@@ -91,7 +91,7 @@ public sealed class ConversationInputSteerServiceTests
     }
 
     [Fact]
-    public async Task Stop_pauses_and_holds_unconsumed_steers_before_cancelling_the_run()
+    public async Task Stop_settles_unconsumed_steers_and_cancels_the_run()
     {
         using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
@@ -104,9 +104,10 @@ public sealed class ConversationInputSteerServiceTests
 
         handle.CancellationToken.IsCancellationRequested.Should().BeTrue();
         var stored = await h.Fixture.Inputs.GetInputAsync(steer.InputId!.Value);
-        stored!.Status.Should().Be(ConversationInputStatus.Held);
-        stored.ReasonCode.Should().Be(ConversationInputReason.TurnCancelled);
-        (await h.Service.GetStateAsync(id)).Paused.Should().BeTrue();
+        stored!.Status.Should().Be(ConversationInputStatus.Cancelled);
+        var state = await h.Service.GetStateAsync(id);
+        state.Paused.Should().BeFalse();
+        state.CancelledInputIds.Should().Contain(steer.InputId!.Value);
         h.Runs.Complete(handle, false);
     }
 

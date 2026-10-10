@@ -1,6 +1,6 @@
 # Direct 消息队列与 Steer：分阶段实施与验收
 
-状态：P0 补证通过；P1 已发现的审核问题全部修复，最终正式全量 1329 通过／0 失败／4 门控跳过。IR02 由原 reviewer 按用户要求直接修复，证据见 [P1 实施报告 §8](direct-message-input-p1-implementation-review.md)及[审核历史 §9](direct-message-input-p1-independent-review.md)。P2 实现与独立审核通过（IR-P2-01 测试夹具竞态已修复，6 次全量稳定）。P3 独立审核阻塞项与默认关闭开关下的失败/停止卡死已修复，自动回归通过（.NET 1500/0/4 连续两次、Vue 106）。P4 实现与自测完成，独立审核发现的 S06 末尾竞争与 S11 显式 Skill token 已修复并加入回归（.NET 全量 1542/0/4；新增 41 项 Steer 用例），见 [P4 实施报告](direct-message-input-p4-implementation-review.md)，**待独立复审**。P5 实现与自测完成（.NET 全量 1549/0/4、Vitest 126、Playwright 25、Vue build 通过），独立审核发现的 IR-P5-01（取消冲突吞掉后续消费提示）已修复并由原探针 22/22 复核，见 [P5 报告](direct-message-input-p5-implementation-review.md)；Queue 与 Steer 默认关闭，P6 未实施。更新：2026-10-04。
+状态：P0 补证通过；P1 已发现的审核问题全部修复，最终正式全量 1329 通过／0 失败／4 门控跳过。IR02 由原 reviewer 按用户要求直接修复，证据见 [P1 实施报告 §8](direct-message-input-p1-implementation-review.md)及[审核历史 §9](direct-message-input-p1-independent-review.md)。P2 实现与独立审核通过（IR-P2-01 测试夹具竞态已修复，6 次全量稳定）。P3 独立审核阻塞项与失败/停止后的空闲发送卡死已修复，自动回归通过（.NET 1500/0/4 连续两次、Vue 106）。P4 实现与自测完成，独立审核发现的 S06 末尾竞争与 S11 显式 Skill token 已修复并加入回归（.NET 全量 1542/0/4；新增 41 项 Steer 用例），见 [P4 实施报告](direct-message-input-p4-implementation-review.md)，**待独立复审**。P5 实现与自测完成（.NET 全量 1549/0/4、Vitest 126、Playwright 25、Vue build 通过），独立审核发现的 IR-P5-01（取消冲突吞掉后续消费提示）已修复并由原探针 22/22 复核，见 [P5 报告](direct-message-input-p5-implementation-review.md)；队列与 steer 始终开启（功能开关已在 `8ad27da` 删除，见文末开关移除记录），P6 未实施。更新：2026-10-08。
 
 本文是可执行的任务与验收清单，不是已完成报告。代码路径相对仓库根目录；拟新增类名可以按实现调整，但验收行为及设计不变量不能隐式改变。设计的 I01–I16 是跨阶段完成条件。
 
@@ -27,7 +27,7 @@ P0 基线与职责审查 → P1 显式 Direct 循环
 | P5 | 队列编辑、提升 Steer、完整反馈和恢复 | P4 | 候选版本，进入桌面验收 | **实现与自测完成，待独立审核**；见 [P5 报告](direct-message-input-p5-implementation-review.md) |
 | P6 | 故障恢复、跨模式回归及发布证据 | P5 | 所有发布门槛满足后启用 | 未开始 |
 
-P3 完成后可以独立交付 Queue。P2 的最终 turn/message 模型与统一运行准入必须先落地，不能先在首条 assistant 上挂回合状态或给 Engine 增加第二套队列执行逻辑。P4 是 Steer 正式开放的前置条件。P5 的组件开发可以提前，最终验收依赖真实后端。
+P2 的最终 turn/message 模型与统一运行准入必须先落地，不能先在首条 assistant 上挂回合状态或给 Engine 增加第二套队列执行逻辑。表中 P0–P5 的「功能开放条件」是当时的阶段计划：Queue 与 Steer 的功能开关已在 `8ad27da` 删除、两者始终开启，该列不再作为启用依据，剩余门槛只有 P6。P5 的组件开发可以提前，最终验收依赖真实后端。
 
 每个阶段建议拆成数个可独立审查的提交。此文不规定工期；P0 核实 SDK 行为后再根据真实改动估算，不能用未验证的实现假设承诺日期。
 
@@ -118,7 +118,7 @@ P0 实际新增：`ProtocolBaselineProbeTests`（四个适配器的离线协议 
 | L08 | 增量 usage、累计快照、无 usage、跨请求缓存和成本 | 每个有观测请求最多计一次 ProviderCalls；正确总量不受碎片数影响，累计快照不重复加；无 usage 不伪造报告；只一份最终结果 |
 | L09 | CLI、child、continuation 原有用例 | CLI 无新增行为；child 结果和 continuation 原子交付不回归 |
 
-退出条件：L01–L09 通过，.NET 全量回归通过，A03／A05 对本阶段通过；证据明确记录旧 SDK 129 次到新硬上限 128 次的差异，以及 usage 重复计数修正。默认串行已核对。Queue／Steer 开关仍关闭。
+退出条件：L01–L09 通过，.NET 全量回归通过，A03／A05 对本阶段通过；证据明确记录旧 SDK 129 次到新硬上限 128 次的差异，以及 usage 重复计数修正。默认串行已核对；该阶段验收时 Queue／Steer 尚未开放，相关开关判定已随 `8ad27da` 删除（见文末开关移除记录）。
 
 ## 5. P2：回合模型、运行准入与提交基础
 
@@ -185,8 +185,9 @@ P0 实际新增：`ProtocolBaselineProbeTests`（四个适配器的离线协议 
 | Q03 | ACK 丢失，同 requestId 重试；同 ID 改正文 | 前者同 inputId 且只一条 user；后者 RequestConflict |
 | Q04 | 编辑／取消与领取同时发生，分别控制两种先后 | 仅条件更新胜者生效；Claimed 不可改；不出现执行旧正文却展示新正文 |
 | Q05 | A 成功事件已到，但终态事务失败 | B 不启动，queue 暂停，显示持久化失败原因 |
-| Q06 | A Failed / Blocked / Truncated / Cancelled | 均暂停；Pending 保留；不自动执行 B |
-| Q07 | 点击停止与 A 结束同时发生 | 停止先赢则 B 不启动；若 B 已准入，按同一会话 stop 规则停止实际活动回合并暂停 |
+| Q06 | A Failed / Blocked / Truncated，或非用户发起的 Cancelled | 均暂停；Pending 保留；不自动执行 B |
+| Q07 | 点击停止与 A 结束同时发生 | 用户停止先赢则丢弃 B（Pending／Held 转 Cancelled）且队列不暂停；若 B 已准入，按同一会话 stop 规则停止实际活动回合并清理其后的队列 |
+| Q17 | 用户停止 A 且 B／C 排队中 | B／C 转 Cancelled、不再出现在队列；队列未暂停；下一次空闲发送立即启动 |
 | Q08 | 模型被禁用、Agent revision 变更、Workspace Root 丢失 | 输入 Held、后项不越过；不切默认模型、不使用另一会话目录 |
 | Q09 | queue 与 continuation 同时申请准入 | 同一 gate 下唯一所有者；已受理用户输入优先，另一父会话不被阻塞 |
 | Q10 | 在 A 会话入队后切到 B 会话 | 输入仍投递 A，执行快照不读取 B 的模型／目录／权限 |
@@ -195,9 +196,9 @@ P0 实际新增：`ProtocolBaselineProbeTests`（四个适配器的离线协议 
 | Q13 | 条数 20/21、全局 500/501、正文 64 KiB 边界 | 上限内可接受，超限明确拒绝；并发提交不突破限制 |
 | Q14 | FollowUp 消费事务中逐点注入写入失败 | 不出现孤立 Consumed／重复 user；重新加载能解释消费状态 |
 | Q15 | 两个会话有队列，一个持续失败或暂停 | 另一个照常推进；调度非全局阻塞，无忙循环 |
-| Q16 | 含附件的首版提交、功能开关关闭 | 附件明确 UnsupportedAttachments；关闭开关不丢已有输入、不继续调度 |
+| Q16 | 含附件的首版提交；队列处于暂停 | 附件明确 UnsupportedAttachments；暂停不丢已有输入、不继续调度 |
 
-退出条件：Q01–Q16 及相关 Vue 用例通过；A01／A04／A06 通过；用临时库展示受理→统一准入→消费→终态的记录，确认没有空闲 Direct 的旁路。目标 schema 沿用 P2，队列开关方可在验收环境启用。
+退出条件：Q01–Q16 及相关 Vue 用例通过；A01／A04／A06 通过；用临时库展示受理→统一准入→消费→终态的记录，确认没有空闲 Direct 的旁路。目标 schema 沿用 P2；队列与 steer 始终开启，本阶段验收不需要任何功能开关。
 
 ## 7. P4：Steer 执行语义与竞争处理
 
@@ -230,7 +231,8 @@ P0 实际新增：`ProtocolBaselineProbeTests`（四个适配器的离线协议 
 | S10 | 模型反复工具调用，同时持续提交 steer | 不重置 128 预算；超限 Failed，剩余输入 Held；故障预算同样不重置 |
 | S11 | runStarting hooks／显式 Skill token 的 steer | 转 FollowUp，给出原因；新回合完整执行原审查／Skill 校验 |
 | S12 | continuation、child、CLI 或旧 targetTurn | continuation／已关闭目标按设计入队；child／CLI 明确不支持；绝不注入另一 Turn |
-| S13 | 用户停止、provider 失败、Length 时有 pending steer | 入口关闭、未消费项 Held、队列暂停；没有额外 provider 请求掩盖失败 |
+| S13 | 用户停止时有 pending steer | 入口关闭、未消费项转 Cancelled、队列保持未暂停 |
+| S13b | provider 失败、Length 时有 pending steer | 入口关闭、未消费项 Held、队列暂停；没有额外 provider 请求掩盖失败 |
 | S14 | 原生 reasoning + 工具批次 + steer 后续请求 | provider 协议 fixture 通过，签名与 callId 正确，用户文本仍为 User 角色 |
 | S15 | skip、deny、tool fault、cancel 四类调用交错 | 模型结果和 UI 原因区分；故障预算、hook 审计、OCE 语义均正确 |
 
@@ -277,7 +279,7 @@ P0 实际新增：`ProtocolBaselineProbeTests`（四个适配器的离线协议 
 - [ ] P6.3 .NET、Vue、Playwright 全量回归；WPF／WebView2、toast 和进程恢复 smoke。
 - [ ] P6.4 使用至少一个已启用、支持 reasoning 的真实 provider 验证工具→steer→后续请求；记录协议格式与模型，不保存凭据。
 - [ ] P6.5 核验容量、候选公平性、快照字节数、日志字段和 waiter／lease 清理；记录宿主开销，不把 provider 等待算成 queue 处理耗时。
-- [ ] P6.6 演练关闭功能开关后的保留／暂停行为；更新运行链路、用量设计及必要的项目上下文，记录最终 schema 版本。
+- [ ] P6.6 演练暂停／恢复、重启保留与失败暂停行为（不设功能开关）；更新运行链路、用量设计及必要的项目上下文，记录最终 schema 版本。
 - [ ] P6.7 在功能实现完成后的数据清理工作中记录实际清理范围、完成状态和目标 schema 初始化结果；正式使用前满足该数据前提，不增加旧数据兼容路径。
 - [ ] P6.8 对设计 §13 删除清单逐项给出代码位置和搜索证据；检查 DI、引用方向、重复状态和所有实际入口，完成 A01–A08，不以旧路径“暂时不用”代替删除。
 
@@ -296,7 +298,7 @@ P0 实际新增：`ProtocolBaselineProbeTests`（四个适配器的离线协议 
 | R09 | stop／shutdown 与等待 ACK 交错 | admission、producer、consumer、waiter 全部有界结束，无后台孤儿任务 |
 | R10 | 运行中删除会话，或 child 等待取消超时 | 删除成功不再重建队列；删除失败保留会话且暂停，无跨会话误删除 |
 | R11 | 输入索引唤醒丢失、某会话不可执行 | 重扫可恢复工作，其他会话不饥饿，后台无持续空转 |
-| R12 | 关闭 Queue／Steer 开关再重启 | 输入仍可查且暂停；不会让旧 Pending Steer 自动命中新回合 |
+| R12 | 带 Pending Steer 重启进程 | 输入仍可查且暂停；旧 Pending Steer 保持 Held，不会自动命中新回合 |
 
 ### 桌面手动验收脚本
 
@@ -304,12 +306,12 @@ P0 实际新增：`ProtocolBaselineProbeTests`（四个适配器的离线协议 
 2. 再启动三工具调用任务，在第一工具执行时 steer；确认已执行工具的结果保留，后续工具显示真实跳过原因，回答遵循新输入。
 3. 使用需要审批的写文件工具，审批等待时 steer；确认审批消失，旧 toast 的允许操作失效，文件没有被该调用修改。
 4. 入队后切换会话并重载 WebView，检查队列归属、草稿和 reading position；回到原会话确认状态一致。
-5. 入队后停止生成，等待超过一次调度扫描，确认队列保持暂停；手动恢复后再执行。
+5. 入队后停止生成，确认队列已被清空且未暂停；下一次空闲发送立即执行（不再需要手动恢复）。
 6. 在测试宿主的指定故障点终止进程并重启，核对 R02–R08，检查正式消息顺序与 input 消费映射。
 7. 用真实 provider 完成 reasoning、工具、steer 和一次新回合回放；核查请求合法、usage 不重复，明确未覆盖的 provider 格式。
 8. 运行一次 CLI、一次 child + continuation，核查现有审批边界、activity panel 和 delivery 结果；不对 CLI 声称支持 steer。
 
-发布退出条件：所有对应自动用例通过，R01–R12 和 A01–A08 有证据，桌面脚本完成；功能实现完成后，正式使用前完成旧数据清理并初始化目标 schema。恢复用例均使用新系统生成的数据。未运行的原生或真实 provider 检查必须列为未完成门槛，跳过不折算为通过。Queue 独立版本需完成 P0–P3、对应架构及恢复／桌面用例，不能据此标记 Steer 已验收。
+发布退出条件：所有对应自动用例通过，R01–R12 和 A01–A08 有证据，桌面脚本完成；功能实现完成后，正式使用前完成旧数据清理并初始化目标 schema。恢复用例均使用新系统生成的数据。未运行的原生或真实 provider 检查必须列为未完成门槛，跳过不折算为通过。Queue 与 Steer 不再分别交付（功能开关已删除，两者同时开启），上述门槛对两者一并生效，不能用 Queue 的自动用例替代 Steer 的桌面／provider 验收。
 
 ## 10. 测试运行入口
 
@@ -564,3 +566,19 @@ P0 证据复审记录：2026-10-02 复跑新增 13 项全部通过，核对归�
 - 结论：U01–U10 主路径成立，P5 不能记为无缺陷。IR-P5-01：取消冲突会把该 steer 记成已本地结束，之后真正消费时不再提示「已加入上下文」。详见 [P5 独立审核](direct-message-input-p5-independent-review.md)。
 - 本轮运行：Vitest 124/0；Vue build 成功（输出在审核用目录，未覆盖 Desktop 资源）；官方 Playwright 25/0，23.6 秒正常退出；生产 composable 探针 21 通过 / 1 失败；独立浏览器点击 7/0。
 - 未运行：.NET 全量、真实 WebView2、真实 provider、toast、进程恢复。Queue 与 Steer 仍默认关闭。未改生产代码，未提交或推送。
+
+### 2026-10-08 功能开关移除（文档同步，当前）
+
+- 代码变更 `8ad27da`（2026-10-04）已完成：删除 `ConversationInputFeatureSwitch` 与 `SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`；dispatcher 始终扫描 backlog；受理与 retry／resume／promote 不再有 queue-disabled / steer-not-enabled 分支；`ConversationInputSteerPolicy.Evaluate` 去掉开关参数；存储层不再以 pending-inputs 拒绝积压；`QueueDisabled`／`PendingInputs`／`SteerNotEnabled` 原因常量及宿主与 Vue 的「未启用」文案一并删除，旧 `conversation-input/steer` 操作改报 `unsupported-conversation-input-operation`。
+- 恢复用例改为 `ConversationInputRecoveryTests` R01–R12；R12 由「关闭开关再重启」改为重启不变量 `R12_a_pending_steer_after_restart_stays_held_and_never_enters_a_new_turn`。
+- 该提交自测证据：build 0 警告／0 错误；.NET 全量 **1556 通过／0 失败／4 门控跳过**；定向 231/0；Vitest 126；Vite build 成功；Playwright 25。
+- 文档同步复核（2026-10-08）：仓库内已无 `SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED` / `queue-disabled` / `steer-not-enabled` / `pending-inputs` 引用；定向套件 145 通过／0 失败。
+- 本文所有「Queue / Steer 开关默认关闭」「steer-not-enabled」「pending-inputs 拒绝」以及「Queue 独立交付」的表述自本条起作废：两者始终开启，暂停只由每会话队列状态承担。
+- 仍未完成：P6 的真实 provider、WPF／WebView2、toast、进程恢复 smoke 与桌面手动脚本；跳过不折算为通过。
+
+### 2026-10-08 用户停止清空队列（当前）
+
+- 语义修正：`Esc`／停止按钮是「取消当前回合并清空未开始队列」，不再是「暂停队列等用户手动恢复」。Esc 在无活动回合时是 no-op，不会弹出或暂停空闲队列。
+- 代码：`ConversationRunHandle.UserInitiatedStop` 标记用户停止；`ConversationInputService.StopAsync` 先 hold 未消费 steer，再 `DiscardQueuedAsync`（Pending／Held 转 Cancelled 且清 paused，单事务），最后取消 run；`ConversationInputDispatcher` 对用户停止的 clean `TurnCancelled` 不再补暂停（终态落库失败仍暂停并保留 `PersistFailed` 原因）；`MainWindowViewModel.StopSelectedConversation` 仅在存在活动 Interactive run 时动作。
+- 存储新增 `IConversationInputSchedulerStore.DiscardQueuedAsync`（无 DDL，schema 仍为 v30）；`ConversationInputQueueState`／`conversation-input/state` 快照新增有界 `cancelledInputIds`，让 Vue 区分「被取消」与「已消费」的 steer，避免停止后误报「已加入上下文」。
+- 用例调整：`Stopping_a_running_turn_discards_the_backlog_and_leaves_the_queue_idle`、`Stop_settles_unconsumed_steers_and_cancels_the_run`、`Pause_revision_conflict_must_not_be_treated_as_paused` 已按新契约更新；.NET 全量 1558 通过／0 失败／4 门控跳过。

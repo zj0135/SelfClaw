@@ -77,7 +77,26 @@ internal sealed partial class SqliteConversationInputRepository
                 reader.IsDBNull(7) ? null : reader.GetString(7)));
         }
 
-        return new ConversationInputQueueState(conversationId, state.QueueRevision, state.Paused, state.PauseReason, false, items);
+        var cancelled = new List<Guid>();
+        await using (var cancelledCommand = connection.CreateCommand())
+        {
+            cancelledCommand.Transaction = transaction;
+            // Only the most recent cancellations matter: the client uses them to tell a discarded
+            // input apart from a consumed one across a single snapshot transition.
+            cancelledCommand.CommandText = """
+                SELECT id FROM conversation_inputs WHERE conversation_id = $id AND status = 4
+                ORDER BY sequence DESC LIMIT 32;
+                """;
+            cancelledCommand.Parameters.AddWithValue("$id", conversationId.ToString("D"));
+            await using var cancelledReader = await cancelledCommand.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await cancelledReader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                cancelled.Add(Guid.Parse(cancelledReader.GetString(0)));
+            }
+        }
+
+        return new ConversationInputQueueState(conversationId, state.QueueRevision, state.Paused, state.PauseReason, false, items,
+            CancelledInputIds: cancelled);
     }
 
     private static async Task<ConversationInputRecord?> ReadByIdentityAsync(

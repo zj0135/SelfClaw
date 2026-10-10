@@ -175,6 +175,28 @@ public sealed class SqliteConversationInputQueueTests
     }
 
     [Fact]
+    public async Task Discard_queued_cancels_unstarted_items_lifts_the_pause_and_reports_them()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var conversationId = start.Turn.ConversationId;
+        var pending = await fixture.AcceptFollowUpAsync(conversationId, "pending");
+        var held = await fixture.AcceptFollowUpAsync(conversationId, "held");
+        await fixture.Inputs.HoldAsync(held.Id, held.Revision, ConversationInputReason.AgentChanged);
+        await fixture.Inputs.PauseQueueAsync(conversationId, ConversationInputReason.TurnFailed);
+
+        var discarded = await fixture.Inputs.DiscardQueuedAsync(conversationId, ConversationInputReason.TurnCancelled);
+
+        discarded.Should().Be(2);
+        var state = await fixture.Inputs.GetQueueStateAsync(conversationId);
+        state.Paused.Should().BeFalse();
+        state.Items.Should().BeEmpty();
+        state.CancelledInputIds.Should().Contain([pending.Id, held.Id]);
+        (await fixture.Inputs.GetInputAsync(pending.Id))!.Status.Should().Be(ConversationInputStatus.Cancelled);
+        (await fixture.Inputs.GetInputAsync(held.Id))!.Status.Should().Be(ConversationInputStatus.Cancelled);
+    }
+
+    [Fact]
     public async Task Claim_and_start_atomically_write_one_user_and_mark_the_input_consumed()
     {
         using var fixture = new ConversationPersistenceFixture();

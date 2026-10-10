@@ -299,6 +299,8 @@ public sealed class ConversationInputReviewRegressionTests
         var conflict = await Assert.ThrowsAsync<ConversationInputRejectedException>(() => h.Service.PauseAsync(id, state.QueueRevision, "stop"));
         conflict.Reason.Should().Be(ConversationInputReason.QueueRevisionConflict);
         await h.Service.StopAsync(id);
-        (await h.Service.GetStateAsync(id)).Paused.Should().BeTrue("system stop uses an unconditional durable pause");
+        var idle = await h.Service.GetStateAsync(id);
+        idle.Paused.Should().BeFalse("a stop with no live turn is a no-op, not an unconditional pause");
+        idle.Items.Select(item => item.Preview).Should().Equal("A", "B");
     }
 }

@@ -209,13 +209,19 @@ internal sealed class ConversationInputDispatcher : BackgroundService
             {
                 var result = await _engine.ExecuteAsync(handle, request).ConfigureAwait(false);
                 succeeded = result.Persisted && result.Turn?.Status == ConversationTurnStatus.Succeeded;
-                if (!succeeded) await PauseBeforeReleaseAsync(handle.ConversationId, MapFailureReason(result)).ConfigureAwait(false);
+                if (!succeeded && !IsUserCancellation(handle, MapFailureReason(result)))
+                    await PauseBeforeReleaseAsync(handle.ConversationId, MapFailureReason(result)).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 var reason = handle.ExecutionResult?.Persisted == true
                     ? ConversationInputReason.TurnCancelled : ConversationInputReason.PersistFailed;
-                await PauseBeforeReleaseAsync(handle.ConversationId, reason).ConfigureAwait(false);
+                // A clean user stop already discarded the queue and lifted the pause: re-pausing would
+                // strand the next send behind a manual resume. A failed terminal commit still pauses,
+                // because the turn's cancelled state was never durably recorded.
+                if (!IsUserCancellation(handle, reason))
+                    await PauseBeforeReleaseAsync(handle.ConversationId, reason).ConfigureAwait(false);
+
                 throw;
             }
             catch (Exception)
@@ -271,4 +277,7 @@ internal sealed class ConversationInputDispatcher : BackgroundService
             _ => ConversationInputReason.PersistFailed
         };
     }
+
+    private static bool IsUserCancellation(ConversationRunHandle handle, string reason)
+        => handle.UserInitiatedStop && reason == ConversationInputReason.TurnCancelled;
 }

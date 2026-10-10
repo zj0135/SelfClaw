@@ -1,8 +1,8 @@
 # Direct 消息队列与 Steer 设计
 
-状态：P0/P1 保留已验收基线；P2 独立审核通过（IR-P2-01 测试夹具竞态已修复，6 次全量稳定 1419/0/4）。P3（持久化 Queue）独立审核发现的问题已修复并通过自动回归；P4（Steer 执行语义与竞争处理）实现与自测完成，独立审核发现的末尾竞争与显式 Skill token 问题已修复（.NET 全量 1542/0/4），**待独立复审**；P5（完整 Vue 交互和传输恢复）实现与自测完成（.NET 1549/0/4、Vitest 126、Playwright 25、Vue build 通过），独立审核 IR-P5-01 已修复并由原探针 22/22 复核。Queue 与 Steer 开关默认关闭，P6 未实施。更新：2026-10-04。P2 基线提交 ca42646，当前目标 SQLite schema v30（P3/P4/P5 未新增 DDL）。P2 独立审核见 [P2 独立审核](direct-message-input-p2-independent-review.md)，P3 实施见 [P3 实施报告](direct-message-input-p3-implementation-review.md)，P4 实施见 [P4 实施报告](direct-message-input-p4-implementation-review.md)，P5 实施见 [P5 报告](direct-message-input-p5-implementation-review.md) 与 [P5 独立审核](direct-message-input-p5-independent-review.md)。
+状态：P0/P1 保留已验收基线；P2 独立审核通过（IR-P2-01 测试夹具竞态已修复，6 次全量稳定 1419/0/4）。P3（持久化 Queue）独立审核发现的问题已修复并通过自动回归；P4（Steer 执行语义与竞争处理）实现与自测完成，独立审核发现的末尾竞争与显式 Skill token 问题已修复（.NET 全量 1542/0/4），**待独立复审**；P5（完整 Vue 交互和传输恢复）实现与自测完成（.NET 1549/0/4、Vitest 126、Playwright 25、Vue build 通过），独立审核 IR-P5-01 已修复并由原探针 22/22 复核。队列与 steer 始终开启（功能开关已在 `8ad27da` 删除，见 §11），P6 未实施。更新：2026-10-08。P2 基线提交 ca42646，当前目标 SQLite schema v30（P3/P4/P5 未新增 DDL）。P2 独立审核见 [P2 独立审核](direct-message-input-p2-independent-review.md)，P3 实施见 [P3 实施报告](direct-message-input-p3-implementation-review.md)，P4 实施见 [P4 实施报告](direct-message-input-p4-implementation-review.md)，P5 实施见 [P5 报告](direct-message-input-p5-implementation-review.md) 与 [P5 独立审核](direct-message-input-p5-independent-review.md)。
 
-本文定义完整目标行为；P2 基础、P3 Queue 受理/调度已实现，P4 Steer 执行语义与竞争处理已实现但开关默认关闭、待独立审核，P5 Vue 完整交互与传输恢复已实现、待独立审核。实际实现及验证见 [P2 实施报告](direct-message-input-p2-implementation-review.md)、[P4 实施报告](direct-message-input-p4-implementation-review.md) 与 [P5 报告](direct-message-input-p5-implementation-review.md)。配套任务、用例和证据记录见 [分阶段实施与验收](direct-message-input-implementation.md)。现有机制参见 [运行链路](runtime-execution-flow.md)、[用量归一化](usage-tracking-design.md)、[Direct hooks](direct-hooks-system-design.md) 和 [Subagent 设计](direct-subagent-system-design.md)。
+本文定义完整目标行为；P2 基础、P3 Queue 受理/调度已实现，P4 Steer 执行语义与竞争处理已实现、待独立审核（功能开关已删除，Queue 与 Steer 始终开启），P5 Vue 完整交互与传输恢复已实现、待独立审核。实际实现及验证见 [P2 实施报告](direct-message-input-p2-implementation-review.md)、[P4 实施报告](direct-message-input-p4-implementation-review.md) 与 [P5 报告](direct-message-input-p5-implementation-review.md)。配套任务、用例和证据记录见 [分阶段实施与验收](direct-message-input-implementation.md)。现有机制参见 [运行链路](runtime-execution-flow.md)、[用量归一化](usage-tracking-design.md)、[Direct hooks](direct-hooks-system-design.md) 和 [Subagent 设计](direct-subagent-system-design.md)。
 
 P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未知，生产方负责推导，共享累加器和 recorder 只合并并保留该语义；CLI 也在 parser 发出事件前归一化。P2 的回合模型与存储重构应继续沿用这一契约，不重新引入消费端 total 回退。
 
@@ -73,8 +73,8 @@ P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未�
 | Steer 到达时目标回合刚关闭或已不存在 | 转 FollowUp，返回／发布 `TargetTurnClosed`；不注入后来启动的另一个回合 |
 | Steer 到达时运行的是 continuation | 转 FollowUp，原因 `ContinuationActive` |
 | 当前回合成功且终态已提交 | 自动启动下一个 FollowUp |
-| Failed / Blocked / Truncated / Cancelled 或终态落库失败 | 暂停该会话队列，不自动启动**已在队中的**下一项。若暂停后队列为空，下一次空闲发送仍立即启动，并在领取时解除暂停 |
-| 停止生成 | 先暂停队列并关闭本轮 steer 入口，再取消当前回合 |
+| Failed / Blocked / Truncated，或非用户发起的 Cancelled，或终态落库失败 | 暂停该会话队列，不自动启动**已在队中的**下一项。若暂停后队列为空，下一次空闲发送仍立即启动，并在领取时解除暂停 |
+| 停止生成（用户取消当前回合） | 丢弃全部未开始的队列项（Pending／Held 转 Cancelled），队列保持未暂停并关闭本轮 steer 入口，再取消当前回合；下一次空闲发送立即启动，不需要手动恢复。若取消过程中终态落库失败，仍按上一条暂停并显示失败原因 |
 | 暂停队列 | 只暂停新的 FollowUp；不撤回已经接收的 steer，不取消当前执行 |
 | 恢复队列 | 允许 Pending FollowUp 调度；Held 项仍需明确处理 |
 | 编辑／删除 | 只允许尚未领取的项，必须匹配 revision |
@@ -407,7 +407,7 @@ P0 发现 child／continuation repository 还强制 AssistantMessage.Id 等于 C
 | `conversation-input/retry` | Held inputId、expectedRevision，重新校验后转 Pending |
 | `conversation-input/detail` | inputId，返回受限正文供编辑 |
 | `conversation-input/subscribe` | conversationId、subscriptionId，立即返回完整快照 |
-| `conversation-input/state` | subscriptionId、conversationId、queueRevision、paused、canSteer、reason、items |
+| `conversation-input/state` | subscriptionId、conversationId、queueRevision、paused、canSteer、reason、items、cancelledInputIds |
 
 submit 返回 inputId、item revision 和实际 `Started / Queued / SteerPending`，以及必要的 fallback reason。Started 只表示已经启动准入，不表示任务成功。超时重试复用 requestId；首次 ACK 前不清空编辑器。
 
@@ -419,6 +419,8 @@ Vue 新增 `useConversationInputs` 和独立队列组件；`ChatView` 只接线�
 
 P5 实现补充：状态快照在 `canSteer` 外附带 `steerReason` 和当前活动回合 `steerTargetTurnId`，UI 只回传后者的值，不自行推导权限；`promote` 仅接受尚未领取的 Pending FollowUp，Held 项必须先经 retry 重新校验冻结定义。
 
+用户停止（Esc／停止按钮）会清空队列，快照额外附带最近被取消的 `cancelledInputIds`（有界，最新 32 条）：UI 靠列表差分提示「已加入上下文」，必须用该字段区分被丢弃的 steer 与真正被消费的 steer，否则停止后会误报消费提示。
+
 ## 11. Schema 变更、数据清理与发布
 
 先在实施 P2 建立一套完整目标 schema：conversation_turns、messages.turn_id / sequence、turn_usage.turn_id、conversation_message_sequences、conversation_inputs 和 conversation_input_state。P3 再接入 Queue 调度与 UI，不先发布仍把回合挂在消息上的临时结构。
@@ -429,7 +431,7 @@ P5 实现补充：状态快照在 `canSteer` 外附带 `steerReason` 和当前�
 
 所有消息写入路径，包括 CLI、child、continuation，统一分配 sequence。序号预留和提交可分离并允许空洞，绝不依靠最大时间戳生成序号。DDL 失败整体回滚；同一版本初始化可重复运行。各阶段使用独立测试库，不要求保留前一阶段的测试数据。
 
-queue 和 steer 分别使用 host 控制的功能开关；默认关闭直至对应阶段验收。关闭开关暂停接收／调度并保留新系统已经产生的数据，不清空队列。发布基于完成旧数据清理后的目标 schema，不设计旧版本二进制或旧数据格式的兼容回退。新系统正常运行时的重启恢复、消费幂等和事务一致性仍按本文要求验收。
+本功能不设 host 功能开关：队列与 steer 始终开启，接收／调度的收放只由每会话队列状态（`conversation_input_state.paused`）和回合自身的 steer 入口关闭表达，不存在「关闭开关停止受理／调度」的全局模式，也不保留对应的拒绝原因或宿主「未启用」文案。发布基于完成旧数据清理后的目标 schema，不设计旧版本二进制或旧数据格式的兼容回退。新系统正常运行时的重启恢复、消费幂等和事务一致性仍按本文要求验收。
 
 ## 12. 诊断与不变量
 
@@ -489,3 +491,5 @@ P3 验收修复（2026-10-04）：失败暂停不再让默认关闭开关下的�
 
 P4 实施记录（2026-10-04）：[P4 实施报告](direct-message-input-p4-implementation-review.md)。Steer 通过 P2 的输入会话/writer/回合模型消费；工具执行准入唯一归 `DirectToolInvoker`，审批显式 Approved/Denied/Superseded；runStarting hooks 或显式 Skill 激活的 turn 转 FollowUp；未改 schema，`SELFCLAW_STEER_ENABLED` 默认关闭。
 P4 复核修复（2026-10-04）：最终边界读与受理共用同一临界区（空领取即关闭入口，关闭前受理由该读领取并在本轮消费）；成功收口的未消费 steer 一律 Held；`ISkillTokenDetector` 在受理与领取两处把含显式 Skill token 的 steer 转 FollowUp。
+
+开关移除（2026-10-04 代码，`8ad27da`；文档同步 2026-10-08）：本节其他位置的「开关默认关闭」表述自本条起作废。删除 `ConversationInputFeatureSwitch` 与 `SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`；dispatcher 始终扫描 backlog；受理与 retry/resume/promote 不再有 queue-disabled / steer-not-enabled 分支，`ConversationInputSteerPolicy.Evaluate` 去掉开关参数，存储层不再以 pending-inputs 拒绝积压，`QueueDisabled`／`PendingInputs`／`SteerNotEnabled` 原因常量与宿主、Vue 的「未启用」文案一并删除。队列与 steer 始终开启，设计要求见 §11。

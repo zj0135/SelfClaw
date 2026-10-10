@@ -10,6 +10,13 @@ public interface IConversationInputSchedulerStore
     Task<ConversationInputQueueState> PauseQueueAsync(Guid conversationId, string reason, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Discards every queued item that has not started (Pending or Held) and lifts the pause in one
+    /// transaction. A user stop uses this so cancelling a turn also drops the backlog and leaves the
+    /// queue idle: the next send starts normally instead of waiting behind a manual Resume.
+    /// </summary>
+    Task<int> DiscardQueuedAsync(Guid conversationId, string reasonCode, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Claims the FIFO head when it is a Pending FollowUp. A paused queue yields nothing, except
     /// for <paramref name="immediateInputId"/>: an input submitted while the conversation was idle
     /// starts when nothing waits ahead of it, and lifts the pause because no earlier item is held back.

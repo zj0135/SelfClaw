@@ -206,17 +206,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     }
 
     /// <summary>
-    /// Cancels the selected conversation's running turn (WebView "stop-generation" / Esc).
-    /// The turn engine observes the cancellation and persists the cancelled terminal state.
+    /// Cancels the selected conversation's running turn (WebView "stop-generation" / Esc). A Direct
+    /// stop also discards the queue backlog and leaves the queue idle, so the next send runs at once.
+    /// When nothing is running this is a no-op: Esc must not pause an idle queue.
     /// </summary>
     public void StopSelectedConversation()
     {
         if (SelectedConversation is not { } conversation) return;
-        if (_runs.GetActiveRun(conversation.Id)?.Mode == AgentExecutionMode.Cli) _runs.Stop(conversation.Id);
-        else _ = PauseThenStopAsync(conversation.Id);
+        if (_runs.GetActiveRun(conversation.Id) is not { } handle) return;
+        if (handle.Mode == AgentExecutionMode.Cli) _runs.Stop(conversation.Id);
+        else _ = StopDirectTurnAsync(conversation.Id);
     }
 
-    private async Task PauseThenStopAsync(Guid conversationId)
+    private async Task StopDirectTurnAsync(Guid conversationId)
     {
         try
         {
@@ -228,7 +230,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
         catch (Exception exception)
         {
-            _logger.LogError(exception, "Failed to pause the input queue before stopping {ConversationId}.", conversationId);
+            _logger.LogError(exception, "Failed to stop the input queue for {ConversationId}.", conversationId);
         }
     }
 

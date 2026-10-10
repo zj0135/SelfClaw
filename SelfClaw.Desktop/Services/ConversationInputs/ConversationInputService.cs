@@ -96,16 +96,29 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
 
     public async Task StopAsync(Guid conversationId)
     {
-        await _scheduler.PauseQueueAsync(conversationId, ConversationInputReason.TurnCancelled, CancellationToken.None).ConfigureAwait(false);
-        _changes.Notify(conversationId);
         // Stop closes steer intake and settles unconsumed steers before the run token is cancelled:
-        // an accepted steer can no longer be consumed after this point.
-        if (_runs.GetActiveRun(conversationId)?.InputSession is { } session)
+        // an accepted steer can no longer be consumed after this point. A user stop also drops the
+        // backlog so nothing queued before the cancelled turn runs after it and the next send is not
+        // stranded behind a manual resume. With no live turn there is nothing to stop: Esc must not
+        // pause or mutate an idle queue.
+        if (_runs.GetActiveRun(conversationId) is not { } handle) return;
+        try
         {
-            await session.HoldUnconsumedSteersAsync(ConversationInputReason.TurnCancelled).ConfigureAwait(false);
-        }
+            if (handle.InputSession is { } session)
+            {
+                await session.HoldUnconsumedSteersAsync(ConversationInputReason.TurnCancelled).ConfigureAwait(false);
+            }
 
-        _runs.Stop(conversationId);
+            await _scheduler.DiscardQueuedAsync(conversationId, ConversationInputReason.TurnCancelled, CancellationToken.None).ConfigureAwait(false);
+            _changes.Notify(conversationId);
+            // Only a durably cleared queue may skip the dispatcher's failure pause; if the discard threw,
+            // the run still ends below but the surviving backlog keeps the pause-on-cancel protection.
+            handle.MarkUserInitiatedStop();
+        }
+        finally
+        {
+            _runs.Stop(conversationId);
+        }
     }
 
     public Task<ConversationInputUpdateResult> EditAsync(Guid inputId, int expectedRevision, string prompt, CancellationToken cancellationToken = default)

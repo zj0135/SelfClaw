@@ -300,7 +300,7 @@ public sealed class ConversationInputDispatcherTests
     }
 
     [Fact]
-    public async Task Stopping_a_running_turn_then_resuming_delivers_queued_items_in_order_without_scan_churn()
+    public async Task Stopping_a_running_turn_discards_the_backlog_and_leaves_the_queue_idle()
     {
         using var harness = new ConversationInputTestHarness(runtime: new GatedAgentChatRuntime());
         var gated = harness.Gated!;
@@ -310,29 +310,28 @@ public sealed class ConversationInputDispatcherTests
         await harness.SubmitAsync(conversation, "C");
         await gated.EnteredAsync("A");
 
-        // User cancels A while B/C wait: pause the durable queue, then cancel the live turn.
+        // User cancels A while B/C wait: the backlog is dropped and the queue is left idle.
         await harness.Service.StopAsync(conversation);
         await harness.WaitForAsync(async () => !harness.Runs.IsRunning(conversation));
 
-        var paused = await harness.Fixture.Inputs.GetQueueStateAsync(conversation);
-        paused.Paused.Should().BeTrue();
-        paused.Items.Select(item => item.Preview).Should().Equal("B", "C");
+        var stopped = await harness.Fixture.Inputs.GetQueueStateAsync(conversation);
+        stopped.Paused.Should().BeFalse("a user stop must not strand the next send behind a manual resume");
+        stopped.Items.Should().BeEmpty("a user stop clears the backlog instead of running it after the cancelled turn");
         gated.Prompts.Should().Equal("A");
 
-        // The scanner must not reserve/release handles for the paused queue (the UI-flicker cause).
+        // With nothing queued the scanner has no candidate and never churns admission (the UI-flicker cause).
         var changes = 0;
         harness.Runs.Changed += _ => Interlocked.Increment(ref changes);
         for (var scan = 0; scan < 3; scan++) await harness.Dispatcher.ScanOnceAsync(CancellationToken.None);
         changes.Should().Be(0);
 
-        // Resuming runs the backlog in FIFO order.
-        gated.Release("B");
-        gated.Release("C");
-        await harness.Service.ResumeAsync(conversation,
-            (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).QueueRevision);
-        await harness.WaitForAsync(async () => (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Items.Count == 0);
+        // The next idle send starts at once, without a manual Resume.
+        gated.Release("D");
+        (await harness.SubmitAsync(conversation, "D")).Accepted.Should().BeTrue();
+        await harness.WaitForAsync(async () => !harness.Runs.IsRunning(conversation)
+            && (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Items.Count == 0);
 
-        gated.Prompts.Should().Equal("A", "B", "C");
+        gated.Prompts.Should().Equal("A", "D");
     }
 
     [Fact]
