@@ -28,13 +28,6 @@ const workspace = useWorkspaceSelection(computed(() => state.selectedConversatio
 const composer = useChatComposer(state, workspace, transcriptScroll, bridge);
 const conversationQueue = useConversationInputs(bridge);
 watch(() => state.selectedConversationId, (id) => conversationQueue.subscribe(id), { immediate: true });
-
-function submitPrompt(submission) {
-	composer.submit({
-		...submission,
-		targetTurnId: submission.mode === 'steer' ? conversationQueue.state.steerTargetTurnId : null,
-	});
-}
 const approvals = useChatApprovals(bridge);
 const terminal = useChatTerminal(terminalPanelRef, bridge);
 const turnStatus = useChatTurnStatus(state);
@@ -71,15 +64,12 @@ defineExpose({
 		</ActivityStage>
 		<ComposerPanel ref="composerShellRef" :busy="state.isBusy || composer.submitting.value"
 			:queueable="state.agentMode === 'direct'"
-			:can-steer="conversationQueue.state.canSteer"
-			:steer-reason="conversationQueue.state.steerReason"
-			:notice="composer.notice.value"
 			:stoppable="!state.isContinuation"
 			:workspace-selection="workspace.state" :git-loading="workspace.state.gitLoading"
 			:git-error="workspace.state.gitError" :submit-error="composer.error.value" :agent-mode="state.agentMode"
 			:selected-agent-id="state.selectedAgentId" :selected-agent-name="state.selectedAgentName"
 			:capability-revision="state.capabilityRevision" :pending-approval="approvals.pending.value"
-			:tool-permission-mode="state.toolPermissionMode" @submit="submitPrompt" @stop="composer.stop"
+			:tool-permission-mode="state.toolPermissionMode" @submit="composer.submit" @stop="composer.stop"
 			@request-workspace="workspace.refresh" @select-workspace-root="workspace.selectRoot"
 			@delete-workspace-root="workspace.deleteRoot" @browse-workspace-folder="workspace.browseFolder"
 			@git-action="workspace.runGitAction" @approve-tool="(id) => approvals.resolve(id, true)"

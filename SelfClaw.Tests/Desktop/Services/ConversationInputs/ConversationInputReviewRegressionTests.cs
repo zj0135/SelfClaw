@@ -102,14 +102,14 @@ public sealed class ConversationInputReviewRegressionTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var jobs = Enumerable.Range(0, 22).Select(n => Task.Run(async () => {
             await gate.Task;
-            return await f.Inputs.AcceptAsync(new(c.Id, n.ToString(), ConversationInputKind.FollowUp, null, "A", f.Snapshot(), null));
+            return await f.Inputs.AcceptAsync(new(c.Id, n.ToString(), "A", f.Snapshot(), null));
         })).ToArray();
         gate.SetResult(); var results = await Task.WhenAll(jobs);
         results.Count(r => r.Status == ConversationInputAcceptStatus.Accepted).Should().Be(20);
         results.Count(r => r.Status == ConversationInputAcceptStatus.Full).Should().Be(2);
         var other = await f.CreateConversationAsync();
         await f.AcceptFollowUpAsync(other.Id, new string('中', 21845) + "x");
-        await Assert.ThrowsAsync<ArgumentException>(() => f.Inputs.AcceptAsync(new(other.Id, "too-big", ConversationInputKind.FollowUp, null,
+        await Assert.ThrowsAsync<ArgumentException>(() => f.Inputs.AcceptAsync(new(other.Id, "too-big",
             new string('中', 21845) + "xx", f.Snapshot(), null)));
     }
 
@@ -284,7 +284,7 @@ public sealed class ConversationInputReviewRegressionTests
             for (var j = 0; j < 20; j++) await f.AcceptFollowUpAsync(c.Id, "A");
         }
         var extra = await f.CreateConversationAsync();
-        var result = await f.Inputs.AcceptAsync(new(extra.Id, "extra", ConversationInputKind.FollowUp, null, "A", f.Snapshot(), null));
+        var result = await f.Inputs.AcceptAsync(new(extra.Id, "extra", "A", f.Snapshot(), null));
         result.Status.Should().Be(ConversationInputAcceptStatus.Full);
     }
 

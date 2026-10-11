@@ -10,13 +10,16 @@ const props = defineProps({
 });
 const emit = defineEmits(['cancel', 'retry', 'promote', 'pause', 'resume', 'edit', 'save-edit', 'cancel-edit', 'update:prompt']);
 
-const visible = computed(() => props.state.items.length > 0 || props.state.paused || props.state.error || props.notice);
-const canResume = computed(() => props.state.paused && props.state.items.length > 0);
+// 队列卡片只呈现“等待中”的输入：正在执行（claimed）的输入属于当前回合、由转录呈现，不在卡片里显示。
+// 它仍保留在宿主快照里，供 composable 判断 steer 何时真正离开列表（消费 vs 转 Held）。
+const waitingItems = computed(() => props.state.items.filter(item => item.status !== 'claimed'));
+const visible = computed(() => waitingItems.value.length > 0 || props.state.paused || props.state.error || props.notice);
+const canResume = computed(() => props.state.paused && waitingItems.value.length > 0);
 const steerHint = computed(() => props.state.steerReason ? describeInputReason(props.state.steerReason, '') : '');
 const promoteTip = computed(() => props.state.canSteer ? '调整当前任务' : (steerHint.value || '当前回合不能调整'));
 
+// 卡片只渲染等待中的项，因此这里没有“执行中”态。
 function statusLabel(item) {
-	if (item.status === 'claimed') return '执行中';
 	if (item.status === 'held') return '待处理';
 	return item.kind === 'steer' ? '等待生效' : '待发送';
 }
@@ -35,7 +38,7 @@ function editPrompt(event) {
 		<header class="queue-head">
 			<span class="queue-title">
 				<ListOrdered :size="14" aria-hidden="true" />
-				队列<template v-if="state.items.length"> · {{ state.items.length }}</template>
+				队列<template v-if="waitingItems.length"> · {{ waitingItems.length }}</template>
 			</span>
 			<span v-if="state.paused" class="queue-pause-reason" role="status">
 				{{ describeInputReason(state.pauseReason, '队列已暂停，请检查待发送项') }}
@@ -47,7 +50,7 @@ function editPrompt(event) {
 				aria-label="暂停队列" @click="emit('pause')"><CirclePause :size="14" aria-hidden="true" /></button>
 		</header>
 		<ul class="queue-list">
-			<li v-for="item in state.items" :key="item.inputId" class="queue-item" :data-status="item.status"
+			<li v-for="item in waitingItems" :key="item.inputId" class="queue-item" :data-status="item.status"
 				:data-kind="item.kind">
 				<template v-if="editing && editing.inputId === item.inputId">
 					<textarea class="queue-editor" rows="2" :value="editing.prompt" :disabled="editing.saving"
@@ -68,7 +71,7 @@ function editPrompt(event) {
 					<span class="queue-status">{{ statusLabel(item) }}</span>
 					<button v-if="item.status === 'held'" class="queue-action" type="button" title="重试" aria-label="重试"
 						@click="emit('retry', item)"><RotateCcw :size="13" aria-hidden="true" /></button>
-					<button v-if="item.kind === 'follow-up' && item.status !== 'claimed'" class="queue-action" type="button"
+					<button v-if="item.kind === 'follow-up'" class="queue-action" type="button"
 						title="编辑" aria-label="编辑" @click="emit('edit', item)"><Pencil :size="13"
 							aria-hidden="true" /></button>
 					<button v-if="item.kind === 'follow-up' && item.status === 'pending'" class="queue-action"

@@ -169,7 +169,7 @@ public sealed class DirectSteerLoopIntegrationTests
         ConversationInputRecord? accepted = null;
         var provider = new SteerProvider { ToolNames = [] };
         var session = new AcceptOnSecondEmptyInputSession(context.InputSession, async () =>
-            accepted = await AcceptSteerAsync(context, "after-empty-check"));
+            accepted = await PromoteSteerAsync(context, "after-empty-check"));
         var runtime = CreateRuntime(context, provider, out var request, inputSession: session);
 
         var result = await RecordAsync(runtime, request, context).WaitAsync(Timeout);
@@ -184,35 +184,17 @@ public sealed class DirectSteerLoopIntegrationTests
         stored.ConsumedTurnId.Should().Be(context.Record.Id);
     }
 
-    [Fact]
-    public async Task An_explicit_skill_token_steer_is_not_injected_and_waits_as_a_follow_up()
+    private static async Task<ConversationInputRecord> PromoteSteerAsync(ConversationTurnTestContext context, string prompt)
     {
-        using var context = new ConversationTurnTestContext();
-        await context.StartAsync();
-        var steer = await AcceptSteerAsync(context, "please [/pdf] now");
-        var provider = new SteerProvider { ToolNames = [] };
-        var runtime = CreateRuntime(context, provider, out var request);
-
-        var result = await RecordAsync(runtime, request, context).WaitAsync(Timeout);
-
-        result.Terminals.Should().Be(1);
-        provider.Requests.Should().HaveCount(1);
-        provider.Requests[0].SelectMany(message => message.Contents).OfType<TextContent>()
-            .Select(text => text.Text).Should().NotContain(text => text.Contains("[/pdf]"));
-        var stored = (await context.Inputs.GetInputAsync(steer.Id))!;
-        stored.Kind.Should().Be(ConversationInputKind.FollowUp);
-        stored.ReasonCode.Should().Be(ConversationInputReason.SkillRequiresNewTurn);
-        stored.Status.Should().Be(ConversationInputStatus.Pending);
-    }
-
-    private static async Task<ConversationInputRecord> AcceptSteerAsync(ConversationTurnTestContext context, string prompt)
-    {
-        var result = await context.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
-            context.Conversation.Id, Guid.NewGuid().ToString("N"), ConversationInputKind.Steer, context.Record.Id, prompt,
+        var accepted = await context.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
+            context.Conversation.Id, Guid.NewGuid().ToString("N"), prompt,
             new ConversationInputExecutionSnapshot("build", 1, AgentExecutionMode.Direct, Guid.NewGuid(), null, null,
                 ToolPermissionMode.RequireApproval), null));
-        result.Status.Should().Be(ConversationInputAcceptStatus.Accepted, result.Reason);
-        return result.Input!;
+        accepted.Status.Should().Be(ConversationInputAcceptStatus.Accepted, accepted.Reason);
+        var promoted = await context.Inputs.PromoteAsync(
+            new ConversationInputPromoteRequest(accepted.Input!.Id, accepted.Input.Revision, context.Record.Id));
+        promoted.Status.Should().Be(ConversationInputUpdateStatus.Applied);
+        return promoted.Input!;
     }
 
     /// <summary>Accepts a steer exactly after the second empty plain boundary read, before the loop's atomic close.</summary>

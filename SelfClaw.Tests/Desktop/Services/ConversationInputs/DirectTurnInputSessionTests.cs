@@ -122,8 +122,7 @@ public sealed class DirectTurnInputSessionTests
         (await context.InputSession.ReadFinalBoundaryAsync()).Should().BeNull();
         context.InputSession.SteerIntakeClosed.Should().BeTrue();
         var accepted = await context.InputSession.TryAcceptSteerAsync(token => context.Inputs.AcceptAsync(
-            new ConversationInputAcceptRequest(context.Conversation.Id, Guid.NewGuid().ToString("N"),
-                ConversationInputKind.Steer, context.Record.Id, "late",
+            new ConversationInputAcceptRequest(context.Conversation.Id, Guid.NewGuid().ToString("N"), "late",
                 new ConversationInputExecutionSnapshot("build", 1, AgentExecutionMode.Direct, Guid.NewGuid(), null, null,
                     ToolPermissionMode.RequireApproval), null), token), CancellationToken.None);
 

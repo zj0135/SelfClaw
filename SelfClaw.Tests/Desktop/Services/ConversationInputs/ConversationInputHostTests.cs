@@ -197,6 +197,56 @@ public sealed class ConversationInputHostTests
             context.LastState().GetProperty("items")[0].GetProperty("preview").GetString().Should().Be("scoped");
         });
 
+    [Fact]
+    public Task A_run_hides_the_input_it_started_for_but_keeps_the_waiting_backlog()
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            using var context = new HostContext();
+            var conversation = await context.CreateConversationAsync();
+            await context.AcceptAsync(conversation, "immediate send");
+            await context.AcceptAsync(conversation, "queued behind");
+            await context.Bridge.HandleAsync("conversation-input/subscribe", context.Payload(new
+            {
+                subscriptionId = context.SubscriptionId, conversationId = conversation
+            }), CancellationToken.None);
+            var items = context.LastState().GetProperty("items");
+            items.GetArrayLength().Should().Be(2);
+            var starting = items[0].GetProperty("inputId").GetString()!;
+
+            // The input a run was started for is that run's trigger, not backlog: the snapshot must not
+            // surface it (otherwise an idle send flashes a card as it is claimed and consumed) while the
+            // follow-up waiting behind it stays visible.
+            var handle = context.Harness.Runs.TryReserve(conversation, AgentExecutionMode.Direct,
+                DirectTurnOrigin.Interactive, CancellationToken.None, Guid.Parse(starting))!;
+            await context.WaitForStateAsync(state => state.GetProperty("items").GetArrayLength() == 1 &&
+                state.GetProperty("items")[0].GetProperty("inputId").GetString() != starting);
+
+            context.Harness.Runs.Complete(handle, false);
+        });
+
+    [Fact]
+    public Task A_claimed_input_stays_in_the_snapshot_so_the_client_can_time_consumption()
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            using var context = new HostContext();
+            var conversation = await context.CreateConversationAsync();
+            await context.Harness.Fixture.AcceptFollowUpAsync(conversation, "executing", snapshot: context.Harness.Snapshot());
+            await context.Harness.Fixture.AcceptFollowUpAsync(conversation, "waiting", snapshot: context.Harness.Snapshot());
+            await context.Harness.Fixture.ClaimNextAsync(conversation, Guid.NewGuid(), Guid.NewGuid());
+
+            await context.Bridge.HandleAsync("conversation-input/subscribe", context.Payload(new
+            {
+                subscriptionId = context.SubscriptionId, conversationId = conversation
+            }), CancellationToken.None);
+
+            // The card hides claimed inputs client-side, but the snapshot must still carry them: the
+            // client needs the claimed steer present to tell a later "left the list" apart from a Held one.
+            var items = context.LastState().GetProperty("items");
+            items.GetArrayLength().Should().Be(2);
+            items[0].GetProperty("status").GetString().Should().Be("claimed");
+            items[1].GetProperty("preview").GetString().Should().Be("waiting");
+        });
+
     private sealed class HostContext : IDisposable
     {
         private readonly ConversationInputTestHarness _harness;
@@ -238,8 +288,7 @@ public sealed class ConversationInputHostTests
         public async Task AcceptAsync(Guid conversationId, string prompt)
         {
             var result = await _harness.Fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversationId,
-                Guid.NewGuid().ToString("N"), ConversationInputKind.FollowUp, null, prompt,
-                _harness.Snapshot(), null));
+                Guid.NewGuid().ToString("N"), prompt, _harness.Snapshot(), null));
             if (result.Status != ConversationInputAcceptStatus.Accepted)
                 throw new InvalidOperationException(result.Reason);
         }

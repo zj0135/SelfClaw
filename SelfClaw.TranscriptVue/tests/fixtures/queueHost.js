@@ -9,7 +9,6 @@ export function installQueueHost() {
     let canSteer = false;
     let steerReason = null;
     let steerTargetTurnId = null;
-    let steerFallbackReason = null;
     let conflictNextEdit = false;
     let ack = null;
     let holdAck = false;
@@ -100,18 +99,15 @@ export function installQueueHost() {
             host.requests.push(request);
             const target = request.conversationId || parent;
             const list = itemsFor(target);
-            const steer = request.kind === 'steer';
-            const fallback = steer && steerFallbackReason;
             if (!list.some(item => item.clientRequestId === request.clientRequestId)) {
                 list.push({ inputId: crypto.randomUUID(), clientRequestId: request.clientRequestId, sequence: list.length + 1,
-                    kind: steer && !fallback ? 'steer' : 'followup', status: 'pending', revision: 1, preview: request.prompt });
+                    kind: 'followup', status: 'pending', revision: 1, preview: request.prompt });
                 revision += 1;
                 save();
                 if (target === scope) state();
             }
-            steerFallbackReason = null;
             ack = () => send({ type: 'prompt-submission', requestId: request.requestId, accepted: true,
-                conversationId: target, reason: fallback || undefined });
+                conversationId: target });
             if (!holdAck) ack();
             return;
         }
@@ -127,13 +123,6 @@ export function installQueueHost() {
             steerTargetTurnId = targetTurnId;
             state();
         },
-        blockSteer(reason = 'hook-requires-new-turn') {
-            canSteer = false;
-            steerReason = reason;
-            steerTargetTurnId = null;
-            state();
-        },
-        steerFallback(reason = 'hook-requires-new-turn') { steerFallbackReason = reason; },
         conflictNextEdit() { conflictNextEdit = true; },
         consumeSteer(inputId) {
             const list = itemsFor(scope);

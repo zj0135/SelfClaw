@@ -51,41 +51,20 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
         var token = operation.CancellationToken;
         await _dispatcher.RecoverOnceAsync(token).ConfigureAwait(false);
         var existing = await _store.FindRequestAsync(submission.ConversationId, submission.ClientRequestId, token).ConfigureAwait(false);
-        var requestsSteer = submission.Kind == ConversationInputKind.Steer;
-        var (kind, targetTurnId, fallbackReason, session) = existing is not null
-            ? (existing.Kind, existing.TargetTurnId, (string?)null, (DirectTurnInputSession?)null)
-            : ResolveSteerIntent(submission, requestsSteer);
         var snapshot = existing?.ExecutionSnapshot ?? await CaptureAsync(submission, token).ConfigureAwait(false);
         if (snapshot is null) return Rejected(ConversationInputReason.ModelUnavailable);
         var acceptRequest = new ConversationInputAcceptRequest(submission.ConversationId, submission.ClientRequestId,
-            kind, targetTurnId, submission.Prompt, snapshot, submission.Conversation,
-            Fingerprint(submission), fallbackReason);
-        ConversationInputAcceptResult result;
-        if (kind == ConversationInputKind.Steer && session is not null)
-        {
-            // Accept under the session gate: either the steer commits before the final close and the
-            // loop claims it, or the closed intake turns it into a follow-up here.
-            result = await session.TryAcceptSteerAsync(
-                    acceptToken => _store.AcceptAsync(acceptRequest, acceptToken), token).ConfigureAwait(false)
-                ?? await _store.AcceptAsync(acceptRequest with
-                {
-                    Kind = ConversationInputKind.FollowUp,
-                    TargetTurnId = null,
-                    ReasonCode = fallbackReason ?? ConversationInputReason.TargetTurnClosed
-                }, token).ConfigureAwait(false);
-        }
-        else
-        {
-            result = await _store.AcceptAsync(acceptRequest, token).ConfigureAwait(false);
-        }
+            submission.Prompt, snapshot, submission.Conversation, Fingerprint(submission));
+        var result = await _store.AcceptAsync(acceptRequest, token).ConfigureAwait(false);
         if (result.Input is not { } input)
             return new(false, null, 0, result.QueueRevision, ConversationInputSubmitOutcome.Rejected, result.Reason);
         _logger.LogInformation("Input {InputId} accepted for {ConversationId}: {Status}.", input.Id, input.ConversationId, result.Status);
-        _changes.Notify(submission.ConversationId);
+        // A send that starts at once is not backlog: it is claimed and consumed inside the run it
+        // launches, so publishing on accept would flash a queue card. The dispatcher publishes instead,
+        // once it knows the input started, queued behind a run or was blocked by a paused queue.
         if (result.Status == ConversationInputAcceptStatus.Accepted)
         {
-            if (input.Kind == ConversationInputKind.Steer) session?.NotifySteerAccepted();
-            else _dispatcher.RequestStart(submission.ConversationId, input.Id);
+            _dispatcher.RequestStart(submission.ConversationId, input.Id);
         }
 
         return new(true, input.Id, input.Revision, result.QueueRevision,
@@ -145,20 +124,6 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
 
     public Task<ConversationInputDetail?> GetDetailAsync(Guid inputId, CancellationToken cancellationToken = default)
         => _queue.GetDetailAsync(inputId, cancellationToken);
-
-    private (ConversationInputKind Kind, Guid? TargetTurnId, string? FallbackReason, DirectTurnInputSession? Session)
-        ResolveSteerIntent(ConversationInputSubmission submission, bool requestsSteer)
-    {
-        if (!requestsSteer) return (ConversationInputKind.FollowUp, null, null, null);
-        var handle = _runs.GetActiveRun(submission.ConversationId);
-        var (canSteer, reason, targetTurnId) = ConversationInputSteerPolicy.Evaluate(handle);
-        if (!canSteer || targetTurnId != submission.TargetTurnId)
-        {
-            return (ConversationInputKind.FollowUp, null, reason ?? ConversationInputReason.TargetTurnClosed, null);
-        }
-
-        return (ConversationInputKind.Steer, targetTurnId, null, handle!.InputSession);
-    }
 
     private async Task<ConversationInputExecutionSnapshot?> CaptureAsync(ConversationInputSubmission submission, CancellationToken token)
     {

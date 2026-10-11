@@ -2,7 +2,7 @@
 
 状态：P0/P1 保留已验收基线；P2 独立审核通过（IR-P2-01 测试夹具竞态已修复，6 次全量稳定 1419/0/4）。P3（持久化 Queue）独立审核发现的问题已修复并通过自动回归；P4（Steer 执行语义与竞争处理）实现与自测完成，独立审核发现的末尾竞争与显式 Skill token 问题已修复（.NET 全量 1542/0/4），**待独立复审**；P5（完整 Vue 交互和传输恢复）实现与自测完成（.NET 1549/0/4、Vitest 126、Playwright 25、Vue build 通过），独立审核 IR-P5-01 已修复并由原探针 22/22 复核。队列与 steer 始终开启（功能开关已在 `8ad27da` 删除，见 §11），P6 未实施。更新：2026-10-08。P2 基线提交 ca42646，当前目标 SQLite schema v30（P3/P4/P5 未新增 DDL）。P2 独立审核见 [P2 独立审核](direct-message-input-p2-independent-review.md)，P3 实施见 [P3 实施报告](direct-message-input-p3-implementation-review.md)，P4 实施见 [P4 实施报告](direct-message-input-p4-implementation-review.md)，P5 实施见 [P5 报告](direct-message-input-p5-implementation-review.md) 与 [P5 独立审核](direct-message-input-p5-independent-review.md)。
 
-本文定义完整目标行为；P2 基础、P3 Queue 受理/调度已实现，P4 Steer 执行语义与竞争处理已实现、待独立审核（功能开关已删除，Queue 与 Steer 始终开启），P5 Vue 完整交互与传输恢复已实现、待独立审核。实际实现及验证见 [P2 实施报告](direct-message-input-p2-implementation-review.md)、[P4 实施报告](direct-message-input-p4-implementation-review.md) 与 [P5 报告](direct-message-input-p5-implementation-review.md)。配套任务、用例和证据记录见 [分阶段实施与验收](direct-message-input-implementation.md)。现有机制参见 [运行链路](runtime-execution-flow.md)、[用量归一化](usage-tracking-design.md)、[Direct hooks](direct-hooks-system-design.md) 和 [Subagent 设计](direct-subagent-system-design.md)。
+本文定义完整目标行为；P2 基础、P3 Queue 受理/调度已实现，P4 Steer 执行语义与竞争处理已实现、待独立审核（功能开关已删除，Queue 与 Steer 始终开启），P5 Vue 完整交互与传输恢复已实现、待独立审核。UI 调整（2026-10）：composer 只保留一个角落按钮，空闲即发送；Direct 忙碌时输入框有内容则同一按钮变成发送（入队）、为空则显示「停止生成」（不可停止的后台续跑显示进度）；steer 只在队列面板对 Pending FollowUp 点「调整当前任务」（promote），不再由 composer 直接提交 steer。实际实现及验证见 [P2 实施报告](direct-message-input-p2-implementation-review.md)、[P4 实施报告](direct-message-input-p4-implementation-review.md) 与 [P5 报告](direct-message-input-p5-implementation-review.md)。配套任务、用例和证据记录见 [分阶段实施与验收](direct-message-input-implementation.md)。现有机制参见 [运行链路](runtime-execution-flow.md)、[用量归一化](usage-tracking-design.md)、[Direct hooks](direct-hooks-system-design.md) 和 [Subagent 设计](direct-subagent-system-design.md)。
 
 P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未知，生产方负责推导，共享累加器和 recorder 只合并并保留该语义；CLI 也在 parser 发出事件前归一化。P2 的回合模型与存储重构应继续沿用这一契约，不重新引入消费端 total 回退。
 
@@ -67,11 +67,11 @@ P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未�
 | 操作／情形 | 行为 |
 | --- | --- |
 | 空闲、无待执行项时发送 | 经过同一输入受理与消费事务，立即启动 |
-| Direct 忙碌时普通发送 | 默认 FollowUp，界面显示“加入队列” |
+| Direct 忙碌时普通发送 | 默认 FollowUp，与空闲发送共用同一个「发送」按钮并入队（不再单独提供「加入队列」按钮）；输入框为空时该位置显示「停止生成」，输入内容后切换为「发送」 |
 | 空闲但已有可执行队列 | 新输入追加队尾，不越过已接受项 |
-| 对活动 Interactive Direct 提交 Steer | 精确绑定 `targetTurnId`，显示“等待生效” |
-| Steer 到达时目标回合刚关闭或已不存在 | 转 FollowUp，返回／发布 `TargetTurnClosed`；不注入后来启动的另一个回合 |
-| Steer 到达时运行的是 continuation | 转 FollowUp，原因 `ContinuationActive` |
+| 把 Pending FollowUp 提升为 Steer（唯一 steer 入口） | 精确绑定当前活动回合 `targetTurnId`，原子修改原项，保留 inputId 和 sequence；成功后该项显示“等待生效” |
+| 提升时目标回合刚关闭或已不存在 | 不改写该项，返回 `TargetTurnClosed`；不注入后来启动的另一个回合 |
+| 提升时运行的是 continuation／CLI／已关闭 steer 入口 | 不改写该项，返回对应原因（`ContinuationActive`／`DirectOnly`／`TargetTurnClosed`） |
 | 当前回合成功且终态已提交 | 自动启动下一个 FollowUp |
 | Failed / Blocked / Truncated，或非用户发起的 Cancelled，或终态落库失败 | 暂停该会话队列，不自动启动**已在队中的**下一项。若暂停后队列为空，下一次空闲发送仍立即启动，并在领取时解除暂停 |
 | 停止生成（用户取消当前回合） | 丢弃全部未开始的队列项（Pending／Held 转 Cancelled），队列保持未暂停并关闭本轮 steer 入口，再取消当前回合；下一次空闲发送立即启动，不需要手动恢复。若取消过程中终态落库失败，仍按上一条暂停并显示失败原因 |
@@ -307,9 +307,9 @@ steer 批次领取提交后，可以跳过 Pending，在 Preparing 的 hook 退�
 
 ### 7.4 Hooks、Skills 与能力边界
 
-原始 runStarting hook 可能承担提示词审查，不能让 steer 绕过这条规则。首版采取明确边界：本轮存在 runStarting hooks 时 steer 转 FollowUp，reason `HookRequiresNewTurn`，下一回合走完整 runStarting。只有 HTTP／tool／runCompleted hooks 的回合仍可 steer。初始化期间先接受 Pending，能力确定后再发布必要的模式转换。
+原始 runStarting hook 可能承担提示词审查，不能让 steer 绕过这条规则。首版采取明确边界：提升（promote）在存在 `HookRequiresNewTurn` 阻塞原因时拒绝改写，返回 `HookRequiresNewTurn`，输入保持 Pending FollowUp，下一回合走完整 runStarting。只有 HTTP／tool／runCompleted hooks 的回合仍可 steer。
 
-首版遇到显式 Skill 激活 token 的 steer 同样转 FollowUp，reason `SkillRequiresNewTurn`，沿用既有 token 校验与预加载。普通文本 steer 保持原文作为 User 角色，不作为 System 指令。未来若增加逐输入 hook，需扩展 hook 协议和策略能力声明，不重复触发 runStarting 冒充生命周期。
+首版对含显式 Skill 激活 token 的输入拒绝提升，返回 `SkillRequiresNewTurn`，沿用既有 token 校验与预加载，输入保持 Pending FollowUp。普通文本 steer 保持原文作为 User 角色，不作为 System 指令。未来若增加逐输入 hook，需扩展 hook 协议和策略能力声明，不重复触发 runStarting 冒充生命周期。
 
 ### 7.5 上下文预算
 
@@ -399,7 +399,7 @@ P0 发现 child／continuation repository 还强制 AssistantMessage.Id 等于 C
 
 | 消息 | 载荷重点 |
 | --- | --- |
-| `conversation-input/submit` | requestId、conversationId、mode、targetTurnId、prompt、selectionGeneration；空闲创建由现有入口先获得会话 |
+| `conversation-input/submit` | requestId、conversationId、prompt、selectionGeneration；空闲创建由现有入口先获得会话 |
 | `conversation-input/edit` | inputId、expectedRevision、prompt；模型等快照变更需显式重新捕获 |
 | `conversation-input/cancel` | inputId、expectedRevision |
 | `conversation-input/promote` | inputId、expectedRevision、targetTurnId；原子 Queue → Steer |
@@ -409,15 +409,17 @@ P0 发现 child／continuation repository 还强制 AssistantMessage.Id 等于 C
 | `conversation-input/subscribe` | conversationId、subscriptionId，立即返回完整快照 |
 | `conversation-input/state` | subscriptionId、conversationId、queueRevision、paused、canSteer、reason、items、cancelledInputIds |
 
-submit 返回 inputId、item revision 和实际 `Started / Queued / SteerPending`，以及必要的 fallback reason。Started 只表示已经启动准入，不表示任务成功。超时重试复用 requestId；首次 ACK 前不清空编辑器。
+submit 返回 inputId、item revision 和实际 `Started / Queued`，以及必要的拒绝原因。Started 只表示已经启动准入，不表示任务成功。超时重试复用 requestId；首次 ACK 前不清空编辑器。宿主只受理普通发送（FollowUp）；steer 没有独立提交入口，只在队列面板经 `promote` 产生。
 
 状态通道使用有界完整快照及单调 revision，丢失后重新 subscribe 拉取当前状态；不复用 transcript patch base 或 activity-panel ACK。旧 subscription 或旧 revision 的响应不能覆盖新选择。请求成功仍按提交时的 conversationId 生效，不能因之后导航把输入转投另一个会话。
 
-Vue 新增 `useConversationInputs` 和独立队列组件；`ChatView` 只接线。Direct 忙碌时提供“加入队列”和“调整当前任务”；依据 host 的 canSteer 展示可用性与退回队列原因。CLI 界面不展示可用 steer。
+Vue 新增 `useConversationInputs` 和独立队列组件；`ChatView` 只接线。composer 只保留一个角落按钮：空闲时是「发送」；Direct 忙碌且输入框有内容时同一按钮变成「发送」把输入入队，输入框为空时显示「停止生成」（不可停止的后台续跑显示进度）；steer 不再由 composer 直接提交，改为在队列面板对某个 Pending FollowUp 点击「调整当前任务」（promote），依据 host 的 canSteer 展示可用性与退回队列原因。CLI 界面不展示可用 steer。
 
 队列列表变化不强制 transcript follow；消费成正式消息以后走原 transcript 发布。沿用 Lucide、scoped styles 和组件拆分约束。
 
 P5 实现补充：状态快照在 `canSteer` 外附带 `steerReason` 和当前活动回合 `steerTargetTurnId`，UI 只回传后者的值，不自行推导权限；`promote` 仅接受尚未领取的 Pending FollowUp，Held 项必须先经 retry 重新校验冻结定义。
+
+队列卡片只呈现**仍在等待**的输入：宿主快照 `items` 仍包含 Pending / Claimed / Held，但**排除当前活动运行自身触发的那条输入**（运行保留 `StartingInputId`，由派发器启动该输入时记录），前端渲染时再隐藏 Claimed 项——正在执行（claimed）的输入属于当前回合、由转录呈现，不属于队列卡片。快照保留 Claimed 项是必要的：composable 靠它判断某条 steer 是“真正离开列表（消费）”还是“转 Held”，否则会在领取时误报「已加入上下文」。运行自己的触发项则连 Pending 窗口都不显示，否则一次空闲发送会在受理→领取→消费的瞬间挂出卡片又立刻撤掉（闪烁）。运行时 `RunCoordinator` 记录、`Publisher` 过滤、卡片渲染过滤，三者都不改变存储语义。
 
 用户停止（Esc／停止按钮）会清空队列，快照额外附带最近被取消的 `cancelledInputIds`（有界，最新 32 条）：UI 靠列表差分提示「已加入上下文」，必须用该字段区分被丢弃的 steer 与真正被消费的 steer，否则停止后会误报消费提示。
 

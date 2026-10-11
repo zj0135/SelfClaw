@@ -57,8 +57,8 @@ internal sealed class ConversationRunCoordinator : IDisposable
     }
 
     internal ConversationRunHandle? TryReserve(Guid conversationId, AgentExecutionMode mode,
-        DirectTurnOrigin origin, CancellationToken cancellationToken = default)
-        => ReserveCore(conversationId, mode, origin, cancellationToken, notify: true);
+        DirectTurnOrigin origin, CancellationToken cancellationToken = default, Guid? startingInputId = null)
+        => ReserveCore(conversationId, mode, origin, cancellationToken, notify: true, startingInputId);
 
     internal async Task<ConversationRunHandle?> TryReserveContinuationAsync(ConversationRecord conversation,
         CancellationToken cancellationToken = default)
@@ -86,7 +86,7 @@ internal sealed class ConversationRunCoordinator : IDisposable
     }
 
     private ConversationRunHandle? ReserveCore(Guid conversationId, AgentExecutionMode mode,
-        DirectTurnOrigin origin, CancellationToken cancellationToken, bool notify)
+        DirectTurnOrigin origin, CancellationToken cancellationToken, bool notify, Guid? startingInputId = null)
     {
         if (conversationId == Guid.Empty) throw new ArgumentException("A run requires a conversation id.", nameof(conversationId));
         if (origin == DirectTurnOrigin.Subagent)
@@ -100,7 +100,8 @@ internal sealed class ConversationRunCoordinator : IDisposable
             var turnId = Guid.NewGuid();
             var input = mode == AgentExecutionMode.Direct && origin == DirectTurnOrigin.Interactive
                 ? new DirectTurnInputSession(conversationId, turnId, runId, _inputs, _steering) : null;
-            handle = new ConversationRunHandle(conversationId, mode, origin, ++_generation, input, runId, turnId, cancellationToken);
+            handle = new ConversationRunHandle(conversationId, mode, origin, ++_generation, input, runId, turnId, cancellationToken,
+                startingInputId);
             _runs.Add(conversationId, handle);
         }
         if (!notify) return handle;

@@ -28,7 +28,7 @@ public sealed class ConversationInputRecoveryTests
         await fixture.ExecuteAsync(
             "CREATE TRIGGER fail_input BEFORE INSERT ON conversation_inputs BEGIN SELECT RAISE(ABORT, 'r01'); END;");
         var request = new ConversationInputAcceptRequest(conversationId, "r01-request",
-            ConversationInputKind.FollowUp, null, "queued", fixture.Snapshot(), null);
+            "queued", fixture.Snapshot(), null);
 
         await Assert.ThrowsAsync<SqliteException>(() => fixture.Inputs.AcceptAsync(request));
 
@@ -50,7 +50,7 @@ public sealed class ConversationInputRecoveryTests
         var start = await fixture.StartAsync("U0");
         var conversationId = start.Turn.ConversationId;
         var request = new ConversationInputAcceptRequest(conversationId, "r02-request",
-            ConversationInputKind.FollowUp, null, "durable", fixture.Snapshot(), null);
+            "durable", fixture.Snapshot(), null);
         var accepted = await fixture.Inputs.AcceptAsync(request);
         accepted.Status.Should().Be(ConversationInputAcceptStatus.Accepted);
 
@@ -266,7 +266,7 @@ public sealed class ConversationInputRecoveryTests
         using var fixture = new ConversationPersistenceFixture();
         var conversation = await fixture.CreateConversationAsync();
         await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
-            "r10", ConversationInputKind.FollowUp, null, "queued", fixture.Snapshot(), null));
+            "r10", "queued", fixture.Snapshot(), null));
 
         var state = await fixture.Inputs.GetQueueStateAsync(conversation.Id);
         await fixture.Inputs.SetPausedAsync(new ConversationInputPauseRequest(conversation.Id,
@@ -278,7 +278,7 @@ public sealed class ConversationInputRecoveryTests
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(0L);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_input_state;")).Should().Be(0L);
         await Assert.ThrowsAsync<SqliteException>(() => fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
-            "late", ConversationInputKind.FollowUp, null, "late", fixture.Snapshot(), null)));
+            "late", "late", fixture.Snapshot(), null)));
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs;")).Should().Be(0L,
             "a deleted conversation must not rebuild its queue from a late acceptance");
     }

@@ -116,6 +116,7 @@ internal sealed class ConversationInputDispatcher : BackgroundService
             (reserved is null && _runs.IsRunning(conversationId)))
         {
             if (reserved is not null) _runs.Complete(reserved, false);
+            PublishBacklog(conversationId, immediateInputId);
             return new(ConversationInputStartStatus.Idle);
         }
         // Never reserve a run handle for work that cannot be claimed: a paused queue or a non-Pending
@@ -124,9 +125,11 @@ internal sealed class ConversationInputDispatcher : BackgroundService
         if (!IsDispatchable(preview, immediateInputId))
         {
             if (reserved is not null) _runs.Complete(reserved, false);
+            PublishBacklog(conversationId, immediateInputId);
             return new(ConversationInputStartStatus.Blocked);
         }
-        var handle = reserved ?? _runs.TryReserve(conversationId, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive, token);
+        var handle = reserved ?? _runs.TryReserve(conversationId, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive,
+            token, immediateInputId);
         if (handle is null) return new(ConversationInputStartStatus.Idle);
         var handedOff = false;
         try
@@ -146,6 +149,14 @@ internal sealed class ConversationInputDispatcher : BackgroundService
         // items queued before it.
         if (head.InputId == immediateInputId) return true;
         return !state.Paused;
+    }
+
+    // A submitted input that did not start is real backlog, so the client must see it. Only a caller
+    // that started for a specific input publishes here; the 250 ms scan passes none, so this cannot
+    // reintroduce the scan-churn flicker.
+    private void PublishBacklog(Guid conversationId, Guid? immediateInputId)
+    {
+        if (immediateInputId is not null) _changes.Notify(conversationId);
     }
 
     private async Task<ConversationInputStartAttempt> ClaimAndLaunchAsync(ConversationRunHandle handle, Guid? immediateInputId)

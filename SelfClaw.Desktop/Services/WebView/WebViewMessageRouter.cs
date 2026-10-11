@@ -286,10 +286,7 @@ internal sealed class WebViewMessageRouter : IDisposable
                     Guid.TryParse(ReadOptionalString(payload, "modelProfileId"), out var modelProfileId) ? modelProfileId : null,
                     ReadOptionalString(payload, "conversationId") is null ? null : ReadRequiredGuid(payload, "conversationId"),
                     ReadOptionalString(payload, "clientRequestId") ?? ReadOptionalString(payload, "requestId"),
-                    payload.TryGetProperty("newConversation", out var newConversation) && newConversation.ValueKind == JsonValueKind.True,
-                    ReadOptionalString(payload, "kind"),
-                    ReadOptionalString(payload, "targetTurnId") is { } rawTarget && Guid.TryParse(rawTarget, out var targetTurnId)
-                        ? targetTurnId : null);
+                    payload.TryGetProperty("newConversation", out var newConversation) && newConversation.ValueKind == JsonValueKind.True);
                 var requestId = ReadOptionalString(payload, "requestId");
                 if (requestId is not null)
                 {
@@ -299,8 +296,7 @@ internal sealed class WebViewMessageRouter : IDisposable
                         requestId,
                         result.Accepted,
                         result.ConversationId,
-                        result.Error,
-                        reason = result.Reason
+                        result.Error
                     });
                 }
 

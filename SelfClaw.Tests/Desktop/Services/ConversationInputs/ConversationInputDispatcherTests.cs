@@ -98,7 +98,7 @@ public sealed class ConversationInputDispatcherTests
         var model = Guid.NewGuid();
         harness.Models.Available.Remove(model);
         await harness.Fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation,
-            "req", ConversationInputKind.FollowUp, null, "blocked", harness.Snapshot() with { ModelProfileId = model },
+            "req", "blocked", harness.Snapshot() with { ModelProfileId = model },
             null));
 
         await harness.StartAsync(conversation);
@@ -122,9 +122,9 @@ public sealed class ConversationInputDispatcherTests
         using var harness = new ConversationInputTestHarness();
         var conversation = await harness.CreateConversationAsync();
         await harness.Fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation,
-            "a", ConversationInputKind.FollowUp, null, "A", harness.Snapshot(), null));
+            "a", "A", harness.Snapshot(), null));
         await harness.Fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation,
-            "b", ConversationInputKind.FollowUp, null, "B", harness.Snapshot(), null));
+            "b", "B", harness.Snapshot(), null));
 
         var state = await harness.Fixture.Inputs.GetQueueStateAsync(conversation);
         await harness.Fixture.Inputs.SetPausedAsync(new ConversationInputPauseRequest(
@@ -157,7 +157,7 @@ public sealed class ConversationInputDispatcherTests
         using var harness = new ConversationInputTestHarness();
         var conversation = await harness.CreateConversationAsync(recover: false);
         await harness.Fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation,
-            "queued", ConversationInputKind.FollowUp, null, "queued", harness.Snapshot(), null));
+            "queued", "queued", harness.Snapshot(), null));
 
         // Restart recovery pauses without dropping the item.
         await harness.Dispatcher.RecoverOnceAsync(CancellationToken.None);
@@ -210,7 +210,7 @@ public sealed class ConversationInputDispatcherTests
         using var harness = new ConversationInputTestHarness();
         var conversation = await harness.CreateConversationAsync();
         await harness.Fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation,
-            "req", ConversationInputKind.FollowUp, null, "changed", harness.Snapshot() with { DefinitionHash = "outdated" }, null));
+            "req", "changed", harness.Snapshot() with { DefinitionHash = "outdated" }, null));
 
         await harness.StartAsync(conversation);
         await harness.WaitForAsync(async () => (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Paused);
@@ -278,9 +278,9 @@ public sealed class ConversationInputDispatcherTests
         using var harness = new ConversationInputTestHarness();
         var conversation = await harness.CreateConversationAsync(recover: false);
         await harness.Fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation,
-            "a", ConversationInputKind.FollowUp, null, "A", harness.Snapshot(), null));
+            "a", "A", harness.Snapshot(), null));
         await harness.Fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation,
-            "b", ConversationInputKind.FollowUp, null, "B", harness.Snapshot(), null));
+            "b", "B", harness.Snapshot(), null));
 
         // A previous process claimed A and exited before consuming it.
         var claimed = await harness.Fixture.Inputs.TryClaimNextFollowUpAsync(conversation, Guid.NewGuid(), Guid.NewGuid());
@@ -411,6 +411,30 @@ public sealed class ConversationInputDispatcherTests
         harness.Runtime.Prompts.Should().BeEmpty();
         (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Items.Select(item => item.Preview)
             .Should().Equal("B", "D");
+    }
+
+    [Fact]
+    public async Task A_submitted_input_that_cannot_start_publishes_the_backlog_but_the_scan_does_not()
+    {
+        using var harness = new ConversationInputTestHarness();
+        var conversation = await harness.CreateConversationAsync();
+        await harness.Fixture.AcceptFollowUpAsync(conversation, "B", snapshot: harness.Snapshot());
+        await harness.Service.PauseAsync(conversation,
+            (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).QueueRevision, ConversationInputReason.TurnCancelled);
+        var queued = await harness.Fixture.AcceptFollowUpAsync(conversation, "D", snapshot: harness.Snapshot());
+
+        var notifications = 0;
+        harness.Changes.Changed += _ => Interlocked.Increment(ref notifications);
+
+        // A submitted input that cannot start is real backlog: the client must be told so its queue card
+        // shows the input instead of it silently waiting behind a paused queue.
+        var blocked = await harness.Dispatcher.TryStartConversationAsync(conversation, CancellationToken.None, queued.Id);
+        blocked.Status.Should().Be(ConversationInputStartStatus.Blocked);
+        notifications.Should().Be(1);
+
+        // The periodic scan passes no immediate input, so it never republishes and cannot reintroduce churn.
+        await harness.Dispatcher.TryStartConversationAsync(conversation, CancellationToken.None);
+        notifications.Should().Be(1);
     }
 
     [Fact]

@@ -136,9 +136,18 @@ internal sealed class ConversationInputPublisher : IDisposable
         {
             if (_disposed || _conversationId != conversationId || _subscriptionId != subscriptionId) return;
             if (CurrentState is { } newer && newer.QueueRevision > state.QueueRevision) state = newer;
-            var (canSteer, steerReason, steerTargetTurnId) = ConversationInputSteerPolicy.Evaluate(
-                _runs.GetActiveRun(conversationId));
+            var run = _runs.GetActiveRun(conversationId);
+            var (canSteer, steerReason, steerTargetTurnId) = ConversationInputSteerPolicy.Evaluate(run);
             state = state with { CanSteer = canSteer, SteerReason = steerReason, SteerTargetTurnId = steerTargetTurnId };
+            // The input a run was started for is that run's own trigger, not queue backlog: listing it
+            // would make an immediately-dispatched send mount a queue card that unmounts the moment it
+            // is consumed. Claimed inputs stay in the snapshot (the client hides them and still needs
+            // them to time the "consumed steer" notice); the card only renders what is still waiting.
+            if (run?.StartingInputId is { } starting && state.Items.Count > 0)
+            {
+                state = state with { Items = state.Items.Where(item => item.InputId != starting).ToArray() };
+            }
+
             CurrentState = state;
             var payload = ConversationQueueStateFormatter.Create(subscriptionId, state, requestId);
 

@@ -45,36 +45,21 @@ test('reload restores the accepted queue through a new GUID subscription', async
 });
 
 test('enables adjustment only after the host publishes canSteer and reports consumed steers', async ({ page }) => {
-    const steer = page.getByRole('button', { name: '调整当前任务', exact: true });
-    await expect(steer).toBeDisabled();
-
-    await page.evaluate(() => window.queueFixture.setSteerable('turn-42'));
     const editor = page.locator('textarea').first();
     await editor.fill('focus on tests');
-    await expect(steer).toBeEnabled();
-    await steer.click();
+    await editor.press('Enter');
+    const promote = page.locator('.queue-item [aria-label="调整当前任务"]');
+    await expect(promote).toBeDisabled();
+
+    await page.evaluate(() => window.queueFixture.setSteerable('turn-42'));
+    await expect(promote).toBeEnabled();
+    await promote.click();
 
     await expect(page.locator('.queue-item[data-kind="steer"]')).toContainText('等待生效');
-    const sent = await page.evaluate(() => window.activityFixture.requests.find(request => request.type === 'send-prompt' && request.kind === 'steer'));
-    expect(sent.targetTurnId).toBe('turn-42');
 
     const [inputId] = await queuedItemIds(page);
     await page.evaluate(id => window.queueFixture.consumeSteer(id), inputId);
     await expect(page.locator('.queue-notice')).toHaveText('已加入上下文');
-});
-
-test('keeps the steer draft and shows the host fallback when the turn cannot accept it', async ({ page }) => {
-    await page.evaluate(() => window.queueFixture.setSteerable('turn-7'));
-    await page.evaluate(() => window.queueFixture.steerFallback('hook-requires-new-turn'));
-    const editor = page.locator('textarea').first();
-    await editor.fill('must wait for a new turn');
-    await page.getByRole('button', { name: '调整当前任务', exact: true }).click();
-
-    await expect(page.locator('.composer-notice')).toContainText('完整审查');
-    await expect(editor).toHaveValue('');
-    // The host stored it as an ordinary follow-up, not as a steer.
-    await expect(page.locator('.queue-item[data-kind="steer"]')).toHaveCount(0);
-    await expect(page.locator('.queue-preview')).toHaveText('must wait for a new turn');
 });
 
 test('keeps the approval bar independent from steering and drops it after supersede', async ({ page }) => {
@@ -85,7 +70,8 @@ test('keeps the approval bar independent from steering and drops it after supers
     await page.evaluate(() => window.queueFixture.setSteerable('turn-3'));
     const editor = page.locator('textarea').first();
     await editor.fill('skip that write');
-    await page.getByRole('button', { name: '调整当前任务', exact: true }).click();
+    await editor.press('Enter');
+    await page.locator('.queue-item [aria-label="调整当前任务"]').click();
     await expect(page.locator('.queue-item[data-kind="steer"]')).toHaveCount(1);
     await expect(page.locator('.tool-approval-bar')).toBeVisible();
 

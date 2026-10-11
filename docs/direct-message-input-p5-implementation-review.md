@@ -60,7 +60,7 @@
 - `reduceQueueState` 只接受 `conversation-input/state` 完整快照；局部操作结果永不清空列表。订阅身份不匹配、会话不匹配、revision 回退均丢弃。
 - 切换会话时 composable 递增 generation；旧请求的 ACK/错误/冲突不会写入新会话的 error、编辑器或列表；`subscribe` 重置编辑态与提示。
 - 编辑冲突：保留用户正文，`get-state` 刷新列表并采用最新 item revision，用户可直接再次保存；成功保存提示“已更新待发送内容”。
-- steer 消费检测：仅当宿主推送中某条 `kind=steer` 从列表消失且不是本地 cancel 时提示“已加入上下文”；Claimed 状态仍显示“执行中”，Held 仍显示阻塞原因。
+- steer 消费检测：仅当宿主推送中某条 `kind=steer` 从列表消失且不是本地 cancel 时提示“已加入上下文”；正在执行（Claimed）的项已不再出现在队列卡片中，Held 仍显示阻塞原因。
 
 ## 6. 构建与测试
 

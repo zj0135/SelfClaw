@@ -17,7 +17,8 @@ internal sealed class ConversationRunHandle
     private int _userInitiatedStop;
 
     internal ConversationRunHandle(Guid conversationId, AgentExecutionMode mode, DirectTurnOrigin origin,
-        long generation, DirectTurnInputSession? inputSession, Guid runId, Guid turnId, CancellationToken cancellationToken)
+        long generation, DirectTurnInputSession? inputSession, Guid runId, Guid turnId, CancellationToken cancellationToken,
+        Guid? startingInputId = null)
     {
         ConversationId = conversationId;
         Mode = mode;
@@ -26,6 +27,7 @@ internal sealed class ConversationRunHandle
         RunId = runId;
         TurnId = turnId;
         InputSession = inputSession;
+        StartingInputId = startingInputId;
         _cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         CancellationToken = _cancellation.Token;
         if (inputSession is not null)
@@ -40,6 +42,13 @@ internal sealed class ConversationRunHandle
     public long Generation { get; }
     public CancellationToken CancellationToken { get; }
     public DirectTurnInputSession? InputSession { get; }
+
+    /// <summary>
+    /// The queue input this run was started for, when the dispatcher started it for a specific input.
+    /// The queue snapshot omits it because it is the run's own trigger rather than waiting backlog.
+    /// </summary>
+    internal Guid? StartingInputId { get; }
+
     public ConversationRuntimeState? RuntimeState => Volatile.Read(ref _runtimeState);
     public Task Completion => _completion.Task;
     public Task<ConversationRecord?> Started => _started.Task;

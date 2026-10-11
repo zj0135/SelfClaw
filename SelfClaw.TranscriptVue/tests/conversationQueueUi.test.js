@@ -71,6 +71,21 @@ it('labels a pending steer as waiting and never offers queue conversion actions'
 	expect(row.find('[aria-label="取消"]').exists()).toBe(true);
 });
 
+it('hides a claimed input from the card while keeping it out of the rendered list', () => {
+	const wrapper = attach(ConversationQueue, {
+		state: queueState({ items: [
+			followUp({ inputId: 'run-1', status: 'claimed', preview: 'executing now' }),
+			followUp({ inputId: 'q-1', preview: 'still waiting' }),
+		] }),
+	});
+	expect(wrapper.find('.queue-item[data-status="claimed"]').exists()).toBe(false);
+	expect(wrapper.findAll('.queue-item')).toHaveLength(1);
+	expect(wrapper.text()).not.toContain('执行中');
+	expect(wrapper.text()).toContain('still waiting');
+	// The count reflects only the waiting items.
+	expect(wrapper.find('.queue-title').text()).toContain('· 1');
+});
+
 it('renders the edit draft from the composable and saves without clearing it', async () => {
 	const wrapper = attach(ConversationQueue, {
 		state: queueState({ items: [followUp()] }),
@@ -97,46 +112,53 @@ it('shows the consumed steer notice and keeps the pause/resume control independe
 	expect(paused.emitted('resume')).toHaveLength(1);
 });
 
-it('offers separate queue, steer and stop actions while a Direct turn is busy', async () => {
+it('toggles the single button between stop and send while a Direct turn is busy', async () => {
 	const wrapper = attach(ComposerPanel, {
-		busy: true, queueable: true, canSteer: true, stoppable: true,
+		busy: true, queueable: true, stoppable: true,
 		pendingApproval: { toolExecutionId: 'tool-1', displayName: 'Write file' },
 	});
-	await wrapper.find('textarea').setValue('adjust the current task');
-	expect(wrapper.find('[aria-label="加入队列"]').exists()).toBe(true);
-	expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(true);
 	expect(wrapper.find('.tool-approval-bar').exists()).toBe(true);
 
-	await wrapper.find('[aria-label="调整当前任务"]').trigger('click');
-	expect(wrapper.emitted('submit')).toHaveLength(1);
-	expect(wrapper.emitted('submit')[0][0].mode).toBe('steer');
-
-	await wrapper.find('[aria-label="加入队列"]').trigger('click');
-	expect(wrapper.emitted('submit')[1][0].mode).toBe('follow-up');
-});
-
-it('disables steering with the host reason and renders the fallback notice', () => {
-	const wrapper = attach(ComposerPanel, {
-		busy: true, queueable: true, canSteer: false, steerReason: 'target-turn-closed',
-		notice: '目标回合已结束，已转为排队',
-	});
-	const steer = wrapper.find('[aria-label="调整当前任务"]');
-	expect(steer.attributes('disabled')).toBeDefined();
-	expect(steer.attributes('title')).toContain('目标回合已结束');
-	expect(wrapper.find('[role="status"]').text()).toContain('已转为排队');
-	expect(wrapper.find('[aria-label="加入队列"]').exists()).toBe(true);
-});
-
-it('never renders queue or steer actions for a busy CLI turn', () => {
-	const wrapper = attach(ComposerPanel, { busy: true, queueable: false, canSteer: false, stoppable: true });
-	expect(wrapper.find('[aria-label="调整当前任务"]').exists()).toBe(false);
-	expect(wrapper.find('[aria-label="加入队列"]').exists()).toBe(false);
+	// Empty composer: only the stop button is present.
 	expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(true);
+	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(false);
+
+	// Typing turns the same slot into the send (queue) button.
+	await wrapper.find('textarea').setValue('adjust the current task');
+	expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(false);
+	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(true);
+
+	await wrapper.find('[aria-label="发送"]').trigger('click');
+	expect(wrapper.emitted('submit')).toHaveLength(1);
+	expect(wrapper.emitted('submit')[0][0].prompt).toBe('adjust the current task');
+
+	// Clearing the draft brings the stop button back.
+	await wrapper.find('textarea').setValue('   ');
+	expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(true);
+	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(false);
+});
+
+it('never turns the CLI stop button into a submit and keeps steering out of the composer', async () => {
+	const wrapper = attach(ComposerPanel, {
+		busy: true, queueable: false, stoppable: true,
+	});
+	await wrapper.find('textarea').setValue('cli busy text');
+	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(false);
+	expect(wrapper.find('[aria-label="调整当前任务"]').exists()).toBe(false);
+	expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(true);
+});
+
+it('shows only progress for a busy background continuation', () => {
+	const wrapper = attach(ComposerPanel, { busy: true, queueable: true, stoppable: false });
+	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(false);
+	expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(false);
+	expect(wrapper.find('[aria-label="正在处理子代理结果"]').exists()).toBe(true);
 });
 
 it('keeps the normal send action for an idle composer', async () => {
-	const wrapper = attach(ComposerPanel, { busy: false, queueable: true, canSteer: false });
+	const wrapper = attach(ComposerPanel, { busy: false, queueable: true });
+	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(true);
 	await wrapper.find('textarea').setValue('ordinary');
 	await wrapper.find('[aria-label="发送"]').trigger('click');
-	expect(wrapper.emitted('submit')[0][0].mode).toBe('follow-up');
+	expect(wrapper.emitted('submit')[0][0].prompt).toBe('ordinary');
 });

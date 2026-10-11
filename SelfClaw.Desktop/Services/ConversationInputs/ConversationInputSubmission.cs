@@ -12,6 +12,4 @@ internal sealed record ConversationInputSubmission(
     WorkspaceRoot? WorkspaceRoot,
     ToolPermissionMode ToolPermissionMode,
     ConversationRecord? Conversation,
-    IReadOnlyList<MessageAttachmentRecord>? Attachments = null,
-    ConversationInputKind Kind = ConversationInputKind.FollowUp,
-    Guid? TargetTurnId = null);
+    IReadOnlyList<MessageAttachmentRecord>? Attachments = null);

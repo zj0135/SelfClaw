@@ -70,7 +70,7 @@ public sealed class ConversationDeletionServiceTests
         using var fixture = new ConversationPersistenceFixture();
         var conversation = await fixture.CreateConversationAsync();
         await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
-            "queued", ConversationInputKind.FollowUp, null, "queued", fixture.Snapshot(), null));
+            "queued", "queued", fixture.Snapshot(), null));
         using var runs = new ConversationRunCoordinator(fixture.Inputs, fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
         using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, runs, new Sink());
         var children = new Children();
@@ -99,7 +99,7 @@ public sealed class ConversationDeletionServiceTests
         using var fixture = new ConversationPersistenceFixture();
         var conversation = await fixture.CreateConversationAsync();
         await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
-            "queued", ConversationInputKind.FollowUp, null, "queued", fixture.Snapshot(), null));
+            "queued", "queued", fixture.Snapshot(), null));
         using var runs = new ConversationRunCoordinator(fixture.Inputs, fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
         using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, runs, new Sink());
         var service = new ConversationDeletionService(runs, sessions, new Children { AutoRelease = true },

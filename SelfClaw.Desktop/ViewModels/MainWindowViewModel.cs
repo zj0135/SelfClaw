@@ -160,8 +160,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     /// WebView 的 "send-prompt" 消息经宿主路由后落到这里，触发一次发送回合。
     /// </summary>
     public Task<PromptSubmissionResult> SubmitPromptAsync(string prompt, string? workspaceMode = null, Guid? modelProfileId = null,
-        Guid? conversationId = null, string? clientRequestId = null, bool newConversation = false,
-        string? kind = null, Guid? targetTurnId = null)
+        Guid? conversationId = null, string? clientRequestId = null, bool newConversation = false)
     {
         ArgumentNullException.ThrowIfNull(prompt);
 
@@ -171,10 +170,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             return Task.FromResult(new PromptSubmissionResult(false));
         }
 
-        var inputKind = string.Equals(kind, "steer", StringComparison.OrdinalIgnoreCase)
-            ? ConversationInputKind.Steer : ConversationInputKind.FollowUp;
         if (conversationId is { } target && SelectedConversation?.Id != target)
-            return SubmitToTargetAsync(target, clientRequestId, normalizedPrompt, workspaceMode, modelProfileId, newConversation, inputKind, targetTurnId);
+            return SubmitToTargetAsync(target, clientRequestId, normalizedPrompt, workspaceMode, modelProfileId, newConversation);
         return SendAsync(new PromptSubmissionSnapshot(
             normalizedPrompt,
             SelectedConversation,
@@ -184,12 +181,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             _selectedAgentId,
             _composerModeOverride,
             ParseWorkspaceMode(workspaceMode),
-            _selectionVersion, conversationId, clientRequestId, inputKind, targetTurnId));
+            _selectionVersion, conversationId, clientRequestId));
     }
 
     private async Task<PromptSubmissionResult> SubmitToTargetAsync(Guid target, string? requestId, string prompt,
-        string? workspaceMode, Guid? modelId, bool isNew, ConversationInputKind kind = ConversationInputKind.FollowUp,
-        Guid? targetTurnId = null)
+        string? workspaceMode, Guid? modelId, bool isNew)
     {
         var selectedRoot = _selectedWorkspaceRoot;
         var selectedPermission = _selectedToolPermissionMode;
@@ -202,7 +198,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             : (await _workspaces.ListRootsAsync()).FirstOrDefault(item => item.Id == conversation.WorkspaceRootId);
         return await SendAsync(new(prompt, conversation, root, conversation?.ToolPermissionMode ?? selectedPermission,
             modelId, conversation?.AgentId ?? selectedAgent, selectedMode, ParseWorkspaceMode(workspaceMode),
-            selectionVersion, target, requestId, kind, targetTurnId));
+            selectionVersion, target, requestId));
     }
 
     /// <summary>
@@ -609,9 +605,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         var persisted = false;
         try
         {
-            // A steer binds to the running turn's conversation: it never prepares a workspace or a new worktree.
-            if (submission.Kind == ConversationInputKind.Steer)
-                return await SubmitSteerAsync(submission, agent, conversationId, operation.CancellationToken);
             prepared = await _workspaces.PrepareAsync(conversationId, submission.Conversation, submission.WorkspaceRoot,
                 submission.WorkspaceMode, submission.Prompt, operation.CancellationToken);
             var conversation = submission.Conversation ?? CreateConversationRecord(conversationId, submission, agent, prepared.WorkspaceRoot);
@@ -643,23 +636,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
                 catch (Exception exception) { _logger.LogError(exception, "Failed to discard a rejected workspace root."); }
             }
         }
-    }
-
-    private async Task<PromptSubmissionResult> SubmitSteerAsync(PromptSubmissionSnapshot submission,
-        AgentRuntimeDefinition agent, Guid conversationId, CancellationToken cancellationToken)
-    {
-        // A steer binds to the running conversation, so its fallback snapshot uses that conversation's
-        // workspace root rather than whatever the composer currently has selected.
-        var root = submission.Conversation?.WorkspaceRootId is { } rootId
-            ? _workspaceRoots.FirstOrDefault(item => item.Id == rootId)
-            : submission.WorkspaceRoot;
-        var result = await _conversationInputs.SubmitAsync(new ConversationInputSubmission(
-            conversationId, submission.ClientRequestId ?? Guid.NewGuid().ToString("N"), submission.Prompt, agent,
-            submission.ModelProfileId, root, submission.ToolPermissionMode, submission.Conversation,
-            Kind: ConversationInputKind.Steer, TargetTurnId: submission.TargetTurnId), cancellationToken);
-        return result.Accepted
-            ? new PromptSubmissionResult(true, ConversationId: conversationId, Reason: result.Reason)
-            : new PromptSubmissionResult(false, DescribeInputRejection(result));
     }
 
     private async Task<PromptSubmissionResult> SubmitCliAsync(PromptSubmissionSnapshot submission,

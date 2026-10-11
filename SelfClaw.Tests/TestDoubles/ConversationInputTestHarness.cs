@@ -100,12 +100,6 @@ internal sealed class ConversationInputTestHarness : IDisposable
     public Task<ConversationInputSubmitResult> SubmitAsync(Guid conversationId, string prompt)
         => Service.SubmitAsync(Submission(conversationId, prompt));
 
-    public Task<ConversationInputSubmitResult> SubmitSteerAsync(Guid conversationId, Guid targetTurnId, string prompt)
-        => Service.SubmitAsync(Submission(conversationId, prompt) with
-        {
-            Kind = ConversationInputKind.Steer, TargetTurnId = targetTurnId
-        });
-
     public Task<ConversationInputStartAttempt> StartAsync(Guid conversationId)
         => Dispatcher.TryStartConversationAsync(conversationId, CancellationToken.None);
 

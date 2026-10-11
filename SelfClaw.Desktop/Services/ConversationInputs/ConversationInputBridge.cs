@@ -6,9 +6,10 @@ using SelfClaw.Desktop.Services.WebView;
 namespace SelfClaw.Desktop.Services.ConversationInputs;
 
 /// <summary>
-/// Maps <c>conversation-input/*</c> operations onto the input service. Submission stays on the
-/// existing <c>send-prompt</c> entry with <c>kind=steer</c> + <c>targetTurnId</c>; this bridge owns
-/// the queue's list, edit, cancel, promote, pause/resume and detail operations.
+/// Maps <c>conversation-input/*</c> operations onto the input service. Ordinary submission stays on
+/// the existing <c>send-prompt</c> entry; this bridge owns the queue's list, edit, cancel, promote,
+/// pause/resume and detail operations. Steer has no separate submission entry: it is produced only by
+/// promoting a Pending FollowUp through the queue.
 /// </summary>
 internal sealed class ConversationInputBridge
 {
