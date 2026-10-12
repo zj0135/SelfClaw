@@ -162,15 +162,22 @@ internal sealed class WebViewMessageRouter : IDisposable
     private void PostFailure(JsonElement payload, string errorCode, string error)
     {
         if (payload.ValueKind != JsonValueKind.Object) return;
-        _hostChannel.PostResponse(new { type = "operation-result", requestId = ReadOptionalString(payload, "requestId"),
-            command = ReadOptionalString(payload, "type"), ok = false, errorCode, error });
+        _hostChannel.PostResponse(new
+        {
+            type = "operation-result",
+            requestId = ReadOptionalString(payload, "requestId"),
+            command = ReadOptionalString(payload, "type"),
+            ok = false,
+            errorCode,
+            error
+        });
     }
 
-    // Every message type below acts on the user's behalf — sending prompts, deleting extensions, closing
-    // the window. Plugin panels run in cross-origin iframes inside the same WebView2, so the router
-    // cannot assume a message came from the application shell. Identity is the frame's own origin, which
-    // the page cannot forge; anything else is dropped before `type` is even read. This holds regardless
-    // of whether WebView2 exposes chrome.webview inside iframes.
+    // Every message type below acts on the user's behalf — sending prompts, deleting extensions, hiding
+    // the window to the tray. Plugin panels run in cross-origin iframes inside the same WebView2, so
+    // the router cannot assume a message came from the application shell. Identity is the frame's own
+    // origin, which the page cannot forge; anything else is dropped before `type` is even read. This
+    // holds regardless of whether WebView2 exposes chrome.webview inside iframes.
     public static bool IsApplicationOrigin(string? sourceUri)
         => sourceUri is not null &&
            Uri.TryCreate(sourceUri, UriKind.Absolute, out var uri) &&
@@ -279,29 +286,29 @@ internal sealed class WebViewMessageRouter : IDisposable
         switch (type)
         {
             case "send-prompt":
-            {
-                var result = await _viewModel.SubmitPromptAsync(
-                    ReadOptionalString(payload, "prompt") ?? string.Empty,
-                    ReadOptionalString(payload, "workspaceMode"),
-                    Guid.TryParse(ReadOptionalString(payload, "modelProfileId"), out var modelProfileId) ? modelProfileId : null,
-                    ReadOptionalString(payload, "conversationId") is null ? null : ReadRequiredGuid(payload, "conversationId"),
-                    ReadOptionalString(payload, "clientRequestId") ?? ReadOptionalString(payload, "requestId"),
-                    payload.TryGetProperty("newConversation", out var newConversation) && newConversation.ValueKind == JsonValueKind.True);
-                var requestId = ReadOptionalString(payload, "requestId");
-                if (requestId is not null)
                 {
-                    _hostChannel.PostResponse(new
+                    var result = await _viewModel.SubmitPromptAsync(
+                        ReadOptionalString(payload, "prompt") ?? string.Empty,
+                        ReadOptionalString(payload, "workspaceMode"),
+                        Guid.TryParse(ReadOptionalString(payload, "modelProfileId"), out var modelProfileId) ? modelProfileId : null,
+                        ReadOptionalString(payload, "conversationId") is null ? null : ReadRequiredGuid(payload, "conversationId"),
+                        ReadOptionalString(payload, "clientRequestId") ?? ReadOptionalString(payload, "requestId"),
+                        payload.TryGetProperty("newConversation", out var newConversation) && newConversation.ValueKind == JsonValueKind.True);
+                    var requestId = ReadOptionalString(payload, "requestId");
+                    if (requestId is not null)
                     {
-                        type = "prompt-submission",
-                        requestId,
-                        result.Accepted,
-                        result.ConversationId,
-                        result.Error
-                    });
-                }
+                        _hostChannel.PostResponse(new
+                        {
+                            type = "prompt-submission",
+                            requestId,
+                            result.Accepted,
+                            result.ConversationId,
+                            result.Error
+                        });
+                    }
 
-                return null;
-            }
+                    return null;
+                }
             case "stop-generation":
                 _viewModel.StopSelectedConversation();
                 return null;
@@ -343,8 +350,6 @@ internal sealed class WebViewMessageRouter : IDisposable
                     _workspaceSelectionBridge.ResolveWorkspaceRootPath(ReadRequiredGuid(payload, "workspaceRootId")));
             case "window-drag":
                 return new WebViewHostCommand(WebViewHostCommandKind.StartWindowDrag);
-            // 缩放热区在网页四周（WebView2 铺满整个窗口，父窗口拿不到边缘的鼠标消息）。
-            // edge 是方位名，宿主侧再映射到 HT* 码；这里不校验，交给宿主的白名单。
             case "window-resize":
                 return new WebViewHostCommand(
                     WebViewHostCommandKind.StartWindowResize,
@@ -353,8 +358,8 @@ internal sealed class WebViewMessageRouter : IDisposable
                 return new WebViewHostCommand(WebViewHostCommandKind.MinimizeWindow);
             case "window-toggle-maximize":
                 return new WebViewHostCommand(WebViewHostCommandKind.ToggleMaximizeWindow);
-            case "window-close":
-                return new WebViewHostCommand(WebViewHostCommandKind.CloseWindow);
+            case "window-minimize-to-tray":
+                return new WebViewHostCommand(WebViewHostCommandKind.MinimizeToTray);
             case "toggle-terminal":
                 return new WebViewHostCommand(WebViewHostCommandKind.ToggleTerminal);
             default:

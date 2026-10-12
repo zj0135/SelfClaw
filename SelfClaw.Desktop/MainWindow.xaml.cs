@@ -383,8 +383,8 @@ public sealed partial class MainWindow : Window
             case WebViewHostCommandKind.ToggleMaximizeWindow:
                 ToggleWindowState();
                 break;
-            case WebViewHostCommandKind.CloseWindow:
-                Close();
+            case WebViewHostCommandKind.MinimizeToTray:
+                Hide();
                 break;
             case WebViewHostCommandKind.ToggleTerminal:
                 await ToggleTerminalToolAsync();

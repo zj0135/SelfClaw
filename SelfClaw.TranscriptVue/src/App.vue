@@ -181,14 +181,18 @@ function openPluginSettings() {
 
 // 视图上下文由宿主推送（plugin-host/context），usePluginViews 自行订阅。外壳这里只转发
 // transcript：它本来就是外壳收到的负载，没有第二个来源可以跟它对不上。
-transcript.on((payload) => {
-	pluginViews.publishTranscript({ items: payload.items || [], revision: payload.revision });
-}, { critical: false });
+transcript.on(
+	(payload) => {
+		pluginViews.publishTranscript({ items: payload.items || [], revision: payload.revision });
+	},
+	{ critical: false }
+);
 
 pluginViews.onInsertPrompt.value = (text) => chatViewRef.value?.insertPrompt?.(text);
 
-const { navItems, sidebarActiveId, onSidebarAction, onSidebarSelect } = useConversationNavigation(
-	currentViewId, chatViewRef, () => { launcherOpen.value = true; });
+const { navItems, sidebarActiveId, onSidebarAction, onSidebarSelect } = useConversationNavigation(currentViewId, chatViewRef, () => {
+	launcherOpen.value = true;
+});
 
 on('window-state', (payload) => {
 	windowChrome.isMaximized = Boolean(payload.isMaximized);
@@ -203,9 +207,6 @@ function onWindowDragPointerDown(event) {
 	post({ type: event.detail > 1 ? 'window-toggle-maximize' : 'window-drag' });
 }
 
-// 缩放热区做在网页里：WPF 侧留白已归零，WebView2 铺满整个窗口，父窗口在它上面收不到鼠标。
-// 落到边缘的 pointerdown 交给宿主发 WM_NCLBUTTONDOWN + 方位码，走系统自己的 resize 循环——
-// 与标题栏拖动同一条路。指针要在按下瞬间就交给系统，所以不做 setPointerCapture。
 function onResizePointerDown(event, edge) {
 	if (event.button !== 0) {
 		return;
@@ -220,7 +221,6 @@ function onWindowControlAction(action) {
 		case 'terminal':
 			post({ type: 'toggle-terminal' });
 			break;
-		// 右栏显隐全在前端，不必往宿主跑一趟。
 		case 'toggle-panel':
 			toggleDock();
 			break;
@@ -233,8 +233,8 @@ function onWindowControlAction(action) {
 		case 'toggle-maximize':
 			post({ type: 'window-toggle-maximize' });
 			break;
-		case 'close':
-			post({ type: 'window-close' });
+		case 'minimize-to-tray':
+			post({ type: 'window-minimize-to-tray' });
 			break;
 	}
 }
@@ -280,17 +280,26 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<div class="app" :class="{ 'sidebar-collapsed': sidebarCollapsed, resizing }"
-		:style="{ '--dock-width': `${dockWidth}px` }">
-		<AppSidebar :items="navItems" :active-id="sidebarActiveId" :collapsed="sidebarCollapsed"
-			@select="onSidebarSelect" @action="onSidebarAction" @toggle-collapse="toggleSidebarCollapsed" />
+	<div class="app" :class="{ 'sidebar-collapsed': sidebarCollapsed, resizing }" :style="{ '--dock-width': `${dockWidth}px` }">
+		<AppSidebar
+			:items="navItems"
+			:active-id="sidebarActiveId"
+			:collapsed="sidebarCollapsed"
+			@select="onSidebarSelect"
+			@action="onSidebarAction"
+			@toggle-collapse="toggleSidebarCollapsed"
+		/>
 		<main class="main">
 			<div class="main-header" data-anchor="titlebar">
 				<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>
-				<WindowControls :is-maximized="windowChrome.isMaximized" :panel-visible="dockVisible"
-					:panel-available="dockAvailable" :floating-visible="floatsVisible"
+				<WindowControls
+					:is-maximized="windowChrome.isMaximized"
+					:panel-visible="dockVisible"
+					:panel-available="dockAvailable"
+					:floating-visible="floatsVisible"
 					:floating-available="floatsAvailable"
-					@action="onWindowControlAction" />
+					@action="onWindowControlAction"
+				/>
 			</div>
 			<div v-if="transcript.error.value" class="transcript-recovery" role="alert">
 				{{ transcript.error.value }} <button type="button" @click="transcript.resynchronize">Reload</button>
@@ -298,26 +307,43 @@ onUnmounted(() => {
 			<div class="main-body">
 				<div class="main-content">
 					<component :is="activeViewComponent" ref="chatViewRef" @preview-image="openImagePreview" />
-					<!-- 悬浮层只覆盖主对话区：它不能盖住侧栏与右栏。这不只是视觉要求——实测指针在子 iframe
-						 上时父文档收不到任何 pointermove，悬浮层若与右栏的插件帧重叠，命中测试就永远不会
-						 运行，那一帧也就永远不会被唤醒（点了没反应）。见 docs/plugin-view-system-design.md §2.3。 -->
-					<PluginFloatingLayer :hidden="!floatsVisible" :views="pluginViews.floatingViews.value"
-						:armed-key="pluginViews.armedKey.value" @register="pluginViews.registerFrame" />
+					<PluginFloatingLayer
+						:hidden="!floatsVisible"
+						:views="pluginViews.floatingViews.value"
+						:armed-key="pluginViews.armedKey.value"
+						@register="pluginViews.registerFrame"
+					/>
 				</div>
-				<div v-if="dockVisible" class="dock-resizer" role="separator" aria-orientation="vertical"
-					aria-label="调整面板宽度" @pointerdown="startDockResize"></div>
-				<!-- v-show 而非 v-if：隐藏不该卸载 iframe，否则每次收起都要让插件重新加载并重走
-					 握手，收起再展开就不再是一个廉价动作。没有停靠视图时 dockVisible 同样为假，
-					 这一列就只是个不占位的空壳。 -->
-				<PluginDockHost v-show="dockVisible" :views="pluginViews.dockedViews.value"
-					:active-key="pluginViews.activeKey.value" :error="pluginViews.error.value"
-					@activate="pluginViews.activate" @close="pluginViews.close" @hide="hideDock"
-					@register="pluginViews.registerFrame" />
+				<div
+					v-if="dockVisible"
+					class="dock-resizer"
+					role="separator"
+					aria-orientation="vertical"
+					aria-label="调整面板宽度"
+					@pointerdown="startDockResize"
+				></div>
+				<PluginDockHost
+					v-show="dockVisible"
+					:views="pluginViews.dockedViews.value"
+					:active-key="pluginViews.activeKey.value"
+					:error="pluginViews.error.value"
+					@activate="pluginViews.activate"
+					@close="pluginViews.close"
+					@hide="hideDock"
+					@register="pluginViews.registerFrame"
+				/>
 			</div>
 		</main>
-		<PluginLauncher :open="launcherOpen" :views="pluginViews.available.value" :open-keys="openViewKeys"
-			:error="pluginViews.error.value" @close="launcherOpen = false" @select="openPluginView"
-			@close-view="pluginViews.close" @manage="openPluginSettings" />
+		<PluginLauncher
+			:open="launcherOpen"
+			:views="pluginViews.available.value"
+			:open-keys="openViewKeys"
+			:error="pluginViews.error.value"
+			@close="launcherOpen = false"
+			@select="openPluginView"
+			@close-view="pluginViews.close"
+			@manage="openPluginSettings"
+		/>
 		<div v-if="imagePreview" class="image-preview-backdrop" @click.self="closeImagePreview">
 			<div class="image-preview-dialog">
 				<img :src="imagePreview.src" :alt="imagePreview.alt || 'Preview image'" />
@@ -325,7 +351,6 @@ onUnmounted(() => {
 		</div>
 		<AppConfirmDialog />
 		<AppToast />
-		<!-- 最大化时窗口贴满工作区，边缘不该再能拖，所以整组热区连同 DOM 一起摘掉。 -->
 		<template v-if="!windowChrome.isMaximized">
 			<div class="resize-edge resize-top" @pointerdown="onResizePointerDown($event, 'top')"></div>
 			<div class="resize-edge resize-bottom" @pointerdown="onResizePointerDown($event, 'bottom')"></div>
@@ -334,8 +359,7 @@ onUnmounted(() => {
 			<div class="resize-edge resize-top-left" @pointerdown="onResizePointerDown($event, 'top-left')"></div>
 			<div class="resize-edge resize-top-right" @pointerdown="onResizePointerDown($event, 'top-right')"></div>
 			<div class="resize-edge resize-bottom-left" @pointerdown="onResizePointerDown($event, 'bottom-left')"></div>
-			<div class="resize-edge resize-bottom-right" @pointerdown="onResizePointerDown($event, 'bottom-right')">
-			</div>
+			<div class="resize-edge resize-bottom-right" @pointerdown="onResizePointerDown($event, 'bottom-right')"></div>
 		</template>
 	</div>
 </template>
@@ -477,7 +501,7 @@ button {
 	overflow: hidden;
 }
 
-.main-body>.plugin-dock-host {
+.main-body > .plugin-dock-host {
 	width: var(--dock-width, 380px);
 	flex: none;
 }
@@ -725,7 +749,7 @@ button {
 	line-height: 1.6;
 }
 
-.body>* {
+.body > * {
 	max-width: 100%;
 }
 
@@ -810,7 +834,7 @@ code {
 	font-size: var(--fs-13);
 }
 
-:not(pre)>code {
+:not(pre) > code {
 	padding: 2px 6px;
 	border-radius: 5px;
 	background: var(--data-inline-surface);
@@ -1053,7 +1077,6 @@ a:hover {
 }
 
 @media (max-width: 960px) {
-
 	.message-main,
 	.message-row.user .message-main {
 		max-width: 100%;

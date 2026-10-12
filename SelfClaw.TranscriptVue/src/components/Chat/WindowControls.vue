@@ -23,11 +23,7 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
-	// 悬浮层是否被用户收起。它与右栏分开：插件盖住主对话区时，这颗按钮是宿主侧最直接的那条退路。
-	floatingVisible: {
-		type: Boolean,
-		default: true,
-	},
+	// 悬浮视图是否有可显隐的内容。与右栏同理：没打开的视图时禁用，而不是退回启动器。
 	floatingAvailable: {
 		type: Boolean,
 		default: false,
@@ -54,35 +50,56 @@ function send(action) {
 <template>
 	<div class="window-controls" aria-label="Window controls">
 		<div class="window-tool-group" aria-label="Workspace tools">
-			<button class="chrome-button tool-button" type="button" title="命令行" aria-label="Terminal"
-				@click="send('terminal')">
+			<button class="chrome-button tool-button" type="button" title="命令行" aria-label="Terminal" @click="send('terminal')">
 				<SquareTerminal :size="15" :stroke-width="1.7" />
 			</button>
-			<button class="chrome-button tool-button" :class="{ on: props.panelVisible }" type="button"
-				:title="panelTitle" :aria-label="panelTitle" :aria-pressed="props.panelAvailable ? props.panelVisible : undefined"
-				:disabled="!props.panelAvailable" @click="send('toggle-panel')">
+			<button
+				class="chrome-button tool-button"
+				:class="{ on: props.panelVisible }"
+				type="button"
+				:title="panelTitle"
+				:aria-label="panelTitle"
+				:aria-pressed="props.panelAvailable ? props.panelVisible : undefined"
+				:disabled="!props.panelAvailable"
+				@click="send('toggle-panel')"
+			>
 				<PanelRight :size="15" :stroke-width="1.7" />
 			</button>
-			<button class="chrome-button tool-button" :class="{ on: props.floatingAvailable && props.floatingVisible }"
-				type="button" :title="floatingTitle" :aria-label="floatingTitle"
+			<button
+				class="chrome-button tool-button"
+				:class="{ on: props.floatingAvailable && props.floatingVisible }"
+				type="button"
+				:title="floatingTitle"
+				:aria-label="floatingTitle"
 				:aria-pressed="props.floatingAvailable ? props.floatingVisible : undefined"
-				:disabled="!props.floatingAvailable" @click="send('toggle-floating')">
+				:disabled="!props.floatingAvailable"
+				@click="send('toggle-floating')"
+			>
 				<Layers :size="15" :stroke-width="1.7" />
 			</button>
 		</div>
 
 		<div class="caption-group" aria-label="Window actions">
-			<button class="chrome-button caption-button" type="button" title="最小化" aria-label="Minimize"
-				@click="send('minimize')">
+			<button class="chrome-button caption-button" type="button" title="最小化" aria-label="Minimize" @click="send('minimize')">
 				<Minus :size="15" :stroke-width="1.8" />
 			</button>
-			<button class="chrome-button caption-button" type="button" :title="props.isMaximized ? '还原' : '最大化'"
-				:aria-label="props.isMaximized ? '还原' : '最大化'" @click="send('toggle-maximize')">
+			<button
+				class="chrome-button caption-button"
+				type="button"
+				:title="props.isMaximized ? '还原' : '最大化'"
+				:aria-label="props.isMaximized ? '还原' : '最大化'"
+				@click="send('toggle-maximize')"
+			>
 				<Copy v-if="props.isMaximized" :size="13" :stroke-width="1.8" />
 				<Square v-else :size="13" :stroke-width="1.8" />
 			</button>
-			<button class="chrome-button caption-button close-button" type="button" title="关闭" aria-label="Close"
-				@click="send('close')">
+			<button
+				class="chrome-button caption-button close-button"
+				type="button"
+				title="关闭"
+				aria-label="Minimize to tray"
+				@click="send('minimize-to-tray')"
+			>
 				<X :size="16" :stroke-width="1.8" />
 			</button>
 		</div>
@@ -125,7 +142,9 @@ function send(action) {
 	border-radius: 6px;
 	background: transparent;
 	color: inherit;
-	transition: background 0.14s, color 0.14s;
+	transition:
+		background 0.14s,
+		color 0.14s;
 }
 
 .chrome-button:hover {

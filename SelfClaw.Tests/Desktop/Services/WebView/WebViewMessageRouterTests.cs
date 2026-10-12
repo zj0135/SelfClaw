@@ -79,7 +79,7 @@ public sealed class WebViewMessageRouterTests
     // Plugin panels are cross-origin iframes inside the same WebView2. Every type below acts on the
     // user's behalf, so identity has to be the sending frame's own origin — not anything in the payload.
     [Theory]
-    [InlineData("""{"type":"window-close"}""")]
+    [InlineData("""{"type":"window-minimize-to-tray"}""")]
     [InlineData("""{"type":"send-prompt","prompt":"exfiltrate"}""")]
     [InlineData("""{"type":"extensions/delete","kind":"plugin","id":"rival"}""")]
     [InlineData("""{"type":"delete-workspace-root","workspaceRootId":"11111111-1111-1111-1111-111111111111"}""")]
@@ -109,7 +109,7 @@ public sealed class WebViewMessageRouterTests
     {
         using var context = new RouterTestContext();
 
-        var command = await context.RouteAsync("""{"type":"window-close"}""", sourceUri);
+        var command = await context.RouteAsync("""{"type":"window-minimize-to-tray"}""", sourceUri);
 
         command.Should().BeNull();
     }
@@ -170,15 +170,27 @@ public sealed class WebViewMessageRouterTests
         context.PostedJson.Should().BeEmpty();
     }
 
+    // 关闭按钮是「收起到托盘」而不是退出：宿主只 Hide() 窗口，进程与会话继续活着。
+    [Fact]
+    public async Task RouteAsync_maps_the_close_button_to_minimize_to_tray()
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.RouteAsync("""{"type":"window-minimize-to-tray"}""");
+
+        command.Should().Be(new WebViewHostCommand(WebViewHostCommandKind.MinimizeToTray));
+        context.PostedJson.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Window_commands_are_silently_ignored_while_shutdown_is_draining()
     {
         using var context = new RouterTestContext();
         await context.Router.StopAsync(CancellationToken.None);
 
-        // The window is hidden the moment the close starts, so a second click on the title bar can
-        // still land here. It is not a failed operation and must not surface as one.
-        var command = await context.RouteAsync("""{"type":"window-close"}""");
+        // The window is hidden the moment shutdown starts, so a click on a title bar button can still
+        // land here. It is not a failed operation and must not surface as one.
+        var command = await context.RouteAsync("""{"type":"window-minimize-to-tray"}""");
 
         command.Should().BeNull();
         context.PostedJson.Should().BeEmpty();
