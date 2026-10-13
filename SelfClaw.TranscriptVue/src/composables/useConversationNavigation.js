@@ -107,9 +107,12 @@ async function onSidebarAction(action) {
 	const actionId = typeof action === 'string' ? action : action?.id;
 	switch (actionId) {
 		case 'new-chat':
+			currentViewId.value = 'chat';
+			await request('new-chat', { keepWorkspace: true });
+			break;
 		case 'add-conversations':
 			currentViewId.value = 'chat';
-						await request('new-chat', { });
+			await request('new-chat', { });
 			break;
 		case 'add-projects':
 			currentViewId.value = 'chat';

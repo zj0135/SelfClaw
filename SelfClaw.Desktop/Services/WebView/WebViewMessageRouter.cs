@@ -319,7 +319,7 @@ internal sealed class WebViewMessageRouter : IDisposable
                 ResolveToolApproval(payload);
                 return null;
             case "new-chat":
-                await _viewModel.StartNewConversationAsync();
+                await _viewModel.StartNewConversationAsync(ReadBoolean(payload, "keepWorkspace"));
                 return null;
             case "select-conversation":
                 await SelectConversationAsync(payload);

@@ -56,6 +56,25 @@ public sealed class ShellStateTests
         });
 
     [Fact]
+    public Task New_chat_keeps_the_selected_workspace_only_for_the_sidebar_top_button()
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            using var context = new ShellContext();
+            var workspace = await context.AddRootAsync("first");
+            var conversation = await context.AddConversationAsync("build", workspace.Id);
+            await context.ViewModel.InitializeAsync();
+            await context.ViewModel.SelectConversationAsync(conversation.Id);
+            context.ViewModel.SelectedWorkspaceRoot?.Id.Should().Be(workspace.Id);
+
+            await context.ViewModel.StartNewConversationAsync(keepWorkspace: true);
+            ((SelfClaw.Desktop.Services.Plugins.IPluginViewContextSource)context.ViewModel).CaptureContext().ConversationId.Should().BeNull();
+            context.ViewModel.SelectedWorkspaceRoot?.Id.Should().Be(workspace.Id);
+
+            await context.ViewModel.StartNewConversationAsync();
+            context.ViewModel.SelectedWorkspaceRoot.Should().BeNull();
+        });
+
+    [Fact]
     public Task Agent_refresh_preserves_display_context_and_runtime_and_deleted_definitions_fail_explicitly()
         => WpfDispatcherTest.RunAsync(async () =>
         {

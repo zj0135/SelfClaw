@@ -56,8 +56,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     private ToolPermissionMode _selectedToolPermissionMode = ToolPermissionMode.RequireApproval;
     private bool _disposed;
     private readonly SemaphoreSlim _composerModeGate = new(1, 1);
-    // Composer-level execution mode override ("本地 CLI" / "提供商"). Null defers to the
-    // active agent's own mode; a value forces every sent turn onto that runtime branch.
     private AgentExecutionMode? _composerModeOverride;
     private long _capabilityRevision;
 
@@ -147,8 +145,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
         finally { _composerModeGate.Release(); }
         ReloadAgents();
-        // First render must not wait for git probing: the root list comes from the database and the
-        // selected root's git state is fetched on demand by the selection bridge.
         await ReloadWorkspaceRootListAsync();
         await ReloadConversationsAsync();
         await _selectionLoadTask;
@@ -201,11 +197,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             selectionVersion, target, requestId));
     }
 
-    /// <summary>
-    /// Cancels the selected conversation's running turn (WebView "stop-generation" / Esc). A Direct
-    /// stop also discards the queue backlog and leaves the queue idle, so the next send runs at once.
-    /// When nothing is running this is a no-op: Esc must not pause an idle queue.
-    /// </summary>
     public void StopSelectedConversation()
     {
         if (SelectedConversation is not { } conversation) return;
@@ -230,11 +221,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
     }
 
-    /// <summary>
-    /// Applies the composer's mode pick ("cli" / "direct") as a persisted override on top of the
-    /// active agent's own mode, so provider models can be exercised without a Direct-mode agent.
-    /// Unknown values clear the override and fall back to the agent definition.
-    /// </summary>
     public async Task SelectComposerModeAsync(string? mode)
     {
         await _composerModeGate.WaitAsync();
@@ -257,13 +243,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         finally { _composerModeGate.Release(); }
     }
 
-    /// <summary>
-    /// Applies the composer's agent pick as the VM's current selection. The conversation record is the
-    /// persistence unit: agent id is bound at conversation creation and is immutable for the
-    /// conversation's lifetime, so this only governs the next new conversation and the conversation list
-    /// filter (which narrows to the selected agent's history). The capability/skill/mcp/prompt for any
-    /// running or selected conversation remain driven by that conversation's own bound agent id.
-    /// </summary>
     public Task SelectAgentAsync(string? agentId)
     {
         var normalizedAgentId = NormalizeAgentId(agentId);
@@ -280,11 +259,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Applies the composer's tool permission pick ("require-approval" / "full-access") as the mode for
-    /// the next admitted turn. The conversation record itself is the persistence unit: the turn engine
-    /// writes this mode onto the conversation, and loading a conversation resyncs this field.
-    /// </summary>
     public Task SelectToolPermissionModeAsync(string? mode)
     {
         var parsed = ParseToolPermissionMode(mode);
@@ -333,11 +307,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     private const string ComposerSettingsNode = "composer";
 
-    // 用户重命名的标题上限，与前端输入框 maxlength 对齐；自动标题仍由 ConversationTitles 截断。
     private const int MaximumConversationTitleLength = 120;
 
-    public Task StartNewConversationAsync()
-        => SelectConversationCoreAsync(null, clearWorkspace: true);
+    public Task StartNewConversationAsync(bool keepWorkspace = false)
+        => SelectConversationCoreAsync(null, clearWorkspace: !keepWorkspace || _selectedWorkspaceRoot?.IsManagedWorktree == true);
 
     public Task SelectConversationAsync(Guid conversationId)
     {
