@@ -92,7 +92,6 @@ const sections = computed(() => [
 		key: 'basic',
 		kicker: 'BASIC',
 		title: '基本能力',
-		hint: '配置代理的基本信息和系统指令',
 		icon: Bot,
 		items: [],
 		emptyText: '',
@@ -102,16 +101,14 @@ const sections = computed(() => [
 		key: 'plugin',
 		kicker: 'PLUGINS',
 		title: '插件',
-		hint: '仅全局已启用且状态可用的插件会在 Direct 回合中生效',
 		icon: Puzzle,
 		items: pluginItems.value,
-		emptyText: '尚未安装任何插件，可前往「插件」设置页导入',
+		emptyText: '尚未安装任何插件',
 	},
 	{
 		key: 'skill',
 		kicker: 'SKILLS',
 		title: '技能',
-		hint: '插件贡献的技能随插件绑定自动生效，运行时可显式激活',
 		icon: Wrench,
 		items: skillItems.value,
 		emptyText: '尚未安装任何技能',
@@ -120,19 +117,17 @@ const sections = computed(() => [
 		key: 'mcpServer',
 		kicker: 'MCP SERVERS',
 		title: 'MCP 服务器',
-		hint: '插件托管的 MCP 服务器随插件绑定自动生效，不能独立绑定',
 		icon: Network,
 		items: mcpItems.value,
-		emptyText: '尚未配置任何 MCP 服务器，可前往「插件」设置页添加',
+		emptyText: '尚未配置任何 MCP 服务器',
 	},
 	{
 		key: 'subagent',
 		kicker: 'SUBAGENTS',
 		title: '子代理白名单',
-		hint: '绑定后，Direct 回合可通过 delegate_to_subagent 委派任务',
 		icon: Workflow,
 		items: subagentItems.value,
-		emptyText: '暂无子代理定义，可在左侧切换到「子代理」面板查看',
+		emptyText: '暂无子代理定义',
 	},
 ]);
 
@@ -183,7 +178,7 @@ function onBasicSave(form) {
 				<div class="dh-title">
 					<h2 :title="agent.name">{{ agent.name }}</h2>
 				</div>
-				<p :title="agent.description || '暂无描述'">{{ agent.description || '暂无描述' }}</p>
+				<p v-if="agent.description" :title="agent.description">{{ agent.description }}</p>
 			</div>
 			<button v-if="!agent.isBuiltIn" class="m-icon agent-delete" type="button"
 				title="删除代理" aria-label="删除代理" :disabled="saving" @click="$emit('delete')">
@@ -209,13 +204,13 @@ function onBasicSave(form) {
 				<Bot :size="15" :stroke-width="2" aria-hidden="true" />
 				<div>
 					<strong>CLI 模式</strong>
-					<p>CLI 回合仅使用系统指令作为附加提示；插件、技能、MCP 与子代理由 CLI 子进程自身的配置与权限策略接管。</p>
+					<p>外部 CLI 子进程自主持有环境配置与能力策略。</p>
 				</div>
 			</div>
 		</div>
 
 		<BindingDialog :open="Boolean(openSection)" :kicker="openSection?.kicker || ''"
-			:title="openSection ? `绑定${openSection.title}` : ''" :hint="openSection?.hint || ''"
+			:title="openSection ? `绑定${openSection.title}` : ''"
 			:items="openSection?.items || []" :empty-text="openSection?.emptyText || ''" :pending="dialogPending"
 			@close="openSectionKey = ''" @toggle="onDialogToggle" />
 

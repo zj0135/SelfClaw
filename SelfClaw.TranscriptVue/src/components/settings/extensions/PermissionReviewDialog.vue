@@ -22,7 +22,7 @@ const showsHookNotice = computed(() => hasHookPermissions(props.plugin?.permissi
 </script>
 
 <template>
-	<div v-if="open && plugin" class="backdrop" @mousedown.self="$emit('close')">
+	<div v-if="open && plugin" class="backdrop sc-root" @mousedown.self="$emit('close')">
 		<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="permission-review-title">
 			<header>
 				<div class="mark">
@@ -36,11 +36,6 @@ const showsHookNotice = computed(() => hasHookPermissions(props.plugin?.permissi
 					<X :size="16" aria-hidden="true" />
 				</button>
 			</header>
-
-			<div class="notice">
-				<AlertTriangle :size="15" aria-hidden="true" />
-				<span>启用后，插件贡献的 Skill 与 MCP 将在已绑定的 Agent 中生效。</span>
-			</div>
 
 			<div class="permissions">
 				<div v-for="permission in permissions" :key="permission.token" class="permission"
@@ -58,10 +53,7 @@ const showsHookNotice = computed(() => hasHookPermissions(props.plugin?.permissi
 
 			<div v-if="showsHookNotice" class="hook-notice">
 				<Webhook :size="15" aria-hidden="true" />
-				<span>
-					hook 命令以当前用户身份运行并继承环境变量；hooks 对该 agent 发起的子代理与续跑回合同样生效。
-					确认前该插件不在交互回合中生效；继承它的子代理/续跑回合会被阻止。
-				</span>
+				<span>Hook 命令以当前用户权限运行，确认后在关联 Agent 及子代理中生效。</span>
 			</div>
 
 			<footer>
@@ -84,16 +76,17 @@ const showsHookNotice = computed(() => hasHookPermissions(props.plugin?.permissi
 	display: grid;
 	place-items: center;
 	padding: 20px;
-	background: var(--overlay-heavy);
+	background: var(--overlay);
+	backdrop-filter: blur(8px);
 	animation: sc-fade 140ms ease-out both;
 }
 
 .dialog {
 	width: min(500px, 100%);
 	border: 1px solid var(--sc-line-2);
-	border-radius: 7px;
-	background: var(--sc-panel);
-	box-shadow: 0 24px 70px var(--overlay-shadow);
+	border-radius: 14px;
+	background: var(--sc-panel, var(--panel, #ffffff));
+	box-shadow: 0 32px 90px rgba(var(--shadow-ink), 0.25);
 	color: var(--sc-text);
 }
 

@@ -31,7 +31,6 @@ const formatNames = {
 					<div>
 						<div class="dlg-kicker">NEW CONNECTION</div>
 						<h3 id="provider-dialog-title">添加自定义服务商</h3>
-						<p>添加一个 OpenAI 兼容或 Anthropic 协议的自定义 AI 服务商</p>
 					</div>
 					<button type="button" class="close" aria-label="关闭" @click="emit('close-provider')">
 						<X :size="16" :stroke-width="2" />
@@ -54,7 +53,6 @@ const formatNames = {
 					<span>Base URL</span>
 					<input v-model.trim="providerDraft.base" required autocomplete="off" class="mono"
 						placeholder="https://api.example.com" />
-					<small class="hint">API 接口的基础地址</small>
 				</label>
 
 				<footer>
@@ -72,9 +70,8 @@ const formatNames = {
 				aria-labelledby="model-dialog-title" @submit.prevent="emit('submit-model')">
 				<header>
 					<div>
-						<div class="dlg-kicker">NEW MODEL</div>
+						<div class="dlg-kicker">{{ provider?.name ? `NEW MODEL · ${provider.name.toUpperCase()}` : 'NEW MODEL' }}</div>
 						<h3 id="model-dialog-title">手动添加模型</h3>
-						<p>{{ provider?.name }} · 模型 id 将原样发送给 API。</p>
 					</div>
 					<button type="button" class="close" aria-label="关闭" @click="emit('close-model')">
 						<X :size="16" :stroke-width="2" />
@@ -121,7 +118,7 @@ const formatNames = {
 	place-items: center;
 	padding: 24px;
 	background: var(--overlay);
-	backdrop-filter: blur(4px);
+	backdrop-filter: blur(8px);
 	animation: sc-fade 160ms ease-out;
 	font-family: var(--sc-sans);
 }
@@ -133,8 +130,8 @@ const formatNames = {
 	padding: 24px;
 	border: 1px solid var(--sc-line-2);
 	border-radius: 16px;
-	background: var(--sc-panel);
-	box-shadow: 0 32px 90px rgba(var(--shadow-ink), 0.2);
+	background: var(--sc-panel, var(--panel, #ffffff));
+	box-shadow: 0 32px 90px rgba(var(--shadow-ink), 0.25);
 	color: var(--sc-text);
 	animation: sc-pop 240ms var(--sc-ease-out);
 }

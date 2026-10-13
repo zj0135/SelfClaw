@@ -32,7 +32,6 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 						{{ section.title }}
 						<span class="cap-kicker">{{ section.kicker }}</span>
 					</span>
-					<span class="cap-hint">{{ section.hint }}</span>
 				</span>
 				<span v-if="!section.isBasic" class="count-pill" :class="{ off: boundCount(section) === 0 }">
 					{{ boundCount(section) }} / {{ section.items.length }}

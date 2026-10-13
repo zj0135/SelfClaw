@@ -90,7 +90,7 @@ function submit() {
 
 <template>
 	<Teleport to="body">
-		<div v-if="open" class="overlay" @click="$emit('close')">
+		<div v-if="open" class="overlay sc-root" @click="$emit('close')">
 			<div class="dialog basic-dialog" @click.stop>
 				<header class="dialog-head">
 					<div>
@@ -103,8 +103,6 @@ function submit() {
 				</header>
 
 				<div class="dialog-body">
-					<p class="hint">配置子代理的基本信息和系统指令</p>
-
 					<div class="form-grid">
 						<div class="field">
 							<label class="fl" for="subagent-basic-name">名称</label>
@@ -114,7 +112,7 @@ function submit() {
 							<label class="fl" for="subagent-basic-model">模型配置</label>
 							<div class="select">
 								<select id="subagent-basic-model" v-model="form.modelProfileId" aria-label="模型配置">
-									<option value="">继承父级 Agent 的模型</option>
+									<option value="">继承父级模型</option>
 									<option v-for="model in enabledModels" :key="model.modelProfileId"
 										:value="model.modelProfileId">
 										{{ model.name }} · {{ model.providerName }}
@@ -126,15 +124,15 @@ function submit() {
 						<div class="field span-2">
 							<label class="fl" for="subagent-basic-desc">描述</label>
 							<input id="subagent-basic-desc" v-model="form.description" class="input" type="text"
-								placeholder="一句话说明该子代理的职责" />
+								placeholder="子代理职责描述" />
 						</div>
 						<div class="field">
 							<label class="fl" for="subagent-basic-tools">工具策略</label>
 							<div class="select">
 								<select id="subagent-basic-tools" v-model="form.toolPolicy" aria-label="工具策略">
-									<option value="none">none — 不注入工作区工具</option>
-									<option value="read-only">read-only — 仅只读工具</option>
-									<option value="system">system — 完整系统工具</option>
+									<option value="none">无工具 (none)</option>
+									<option value="read-only">只读工具 (read-only)</option>
+									<option value="system">系统工具 (system)</option>
 								</select>
 								<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
 							</div>
@@ -146,9 +144,9 @@ function submit() {
 							<p v-if="!maxRunValid" class="field-error">取值需在 30 到 3600 秒之间。</p>
 						</div>
 						<div class="field span-2">
-							<label class="fl" for="subagent-basic-instructions">系统指令（Instructions）</label>
+							<label class="fl" for="subagent-basic-instructions">系统指令</label>
 							<textarea id="subagent-basic-instructions" v-model="form.instructions" class="input mono instructions"
-								rows="8" placeholder="写入该子代理执行任务时使用的系统提示"></textarea>
+								rows="8" placeholder="输入系统指令..."></textarea>
 						</div>
 					</div>
 				</div>
@@ -176,9 +174,11 @@ function submit() {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: color-mix(in srgb, var(--sc-base) 40%, transparent);
-	backdrop-filter: blur(12px);
+	padding: 24px;
+	background: var(--overlay);
+	backdrop-filter: blur(8px);
 	animation: sc-fade-in 0.18s var(--sc-ease-out);
+	font-family: var(--sc-sans);
 }
 
 .dialog {
@@ -186,23 +186,14 @@ function submit() {
 	display: flex;
 	flex-direction: column;
 	width: min(640px, calc(100vw - 32px));
-	max-height: calc(100vh - 64px);
-	border: 1px solid rgba(19, 27, 45, 0.14);
+	max-height: min(720px, calc(100vh - 48px));
+	border: 1px solid var(--sc-line-2);
 	border-radius: 16px;
-	background: #ffffff;
-	box-shadow:
-		0 0 0 1px rgba(0, 0, 0, 0.12),
-		0 20px 80px rgba(23, 26, 31, 0.28);
+	background: var(--sc-panel, var(--panel, #ffffff));
+	color: var(--sc-text);
+	box-shadow: 0 32px 90px rgba(var(--shadow-ink), 0.25);
 	overflow: hidden;
 	animation: sc-slide-up 0.22s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-html[data-theme='dark'] .dialog {
-	background: #16191f;
-	border-color: rgba(255, 255, 255, 0.08);
-	box-shadow:
-		0 0 0 1px rgba(255, 255, 255, 0.1),
-		0 20px 80px rgba(0, 0, 0, 0.6);
 }
 
 .dialog-head {
@@ -211,36 +202,24 @@ html[data-theme='dark'] .dialog {
 	justify-content: space-between;
 	gap: 1rem;
 	padding: 24px 28px 20px;
-	border-bottom: 1px solid rgba(19, 27, 45, 0.08);
-}
-
-html[data-theme='dark'] .dialog-head {
-	border-bottom-color: rgba(255, 255, 255, 0.06);
+	border-bottom: 1px solid var(--sc-line);
 }
 
 .dh-kicker {
 	margin-bottom: 6px;
-	color: #9aa1ad;
-	font-family: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
 	font-size: var(--fs-10);
 	font-weight: 600;
 	letter-spacing: 0.22em;
 }
 
-html[data-theme='dark'] .dh-kicker {
-	color: #666e7d;
-}
-
 .dialog-head h2 {
+	margin: 0;
 	font-size: var(--fs-18);
 	font-weight: 640;
 	letter-spacing: -0.015em;
-	color: #171a1f;
-	margin: 0;
-}
-
-html[data-theme='dark'] .dialog-head h2 {
-	color: #e9ebf0;
+	color: var(--sc-text);
 }
 
 .close-btn {
@@ -249,38 +228,27 @@ html[data-theme='dark'] .dialog-head h2 {
 	width: 32px;
 	height: 32px;
 	place-items: center;
-	border: 0;
+	border: 1px solid var(--sc-line);
 	border-radius: 8px;
 	background: transparent;
-	color: #b9c0cc;
+	color: var(--sc-mute);
 	cursor: pointer;
-	transition: background 0.15s, color 0.15s;
-}
-
-html[data-theme='dark'] .close-btn {
-	color: #b9c0cc;
+	transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .close-btn:hover:not(:disabled) {
-	background: #eef0f4;
-	color: #171a1f;
-}
-
-html[data-theme='dark'] .close-btn:hover:not(:disabled) {
-	background: #1c2027;
-	color: #e9ebf0;
+	border-color: var(--sc-line-2);
+	background: var(--sc-hover);
+	color: var(--sc-text);
 }
 
 .dialog-body {
 	flex: 1;
+	min-height: 0;
 	padding: 24px 28px;
 	overflow-y: auto;
 	scrollbar-width: thin;
-	scrollbar-color: #9aa1ad transparent;
-}
-
-html[data-theme='dark'] .dialog-body {
-	scrollbar-color: #666e7d transparent;
+	scrollbar-color: var(--sc-faint) transparent;
 }
 
 .dialog-body::-webkit-scrollbar {
@@ -288,34 +256,14 @@ html[data-theme='dark'] .dialog-body {
 }
 
 .dialog-body::-webkit-scrollbar-thumb {
-	background: #f1f3f6;
+	background: var(--sc-raise);
 	background-clip: padding-box;
 	border: 2px solid transparent;
 	border-radius: 99px;
 }
 
-html[data-theme='dark'] .dialog-body::-webkit-scrollbar-thumb {
-	background: #22262e;
-}
-
 .dialog-body::-webkit-scrollbar-thumb:hover {
-	background: #9aa1ad;
-	background-clip: padding-box;
-}
-
-html[data-theme='dark'] .dialog-body::-webkit-scrollbar-thumb:hover {
-	background: #666e7d;
-}
-
-.hint {
-	font-size: var(--fs-13);
-	color: #6b7280;
-	margin: 0 0 1.5rem;
-	line-height: 1.5;
-}
-
-html[data-theme='dark'] .hint {
-	color: #8d95a4;
+	background: var(--sc-faint);
 }
 
 .form-grid {
@@ -335,52 +283,33 @@ html[data-theme='dark'] .hint {
 }
 
 .fl {
-	color: #b9c0cc;
+	color: var(--sc-soft);
 	font-size: var(--fs-13);
-	font-weight: 560;
-}
-
-html[data-theme='dark'] .fl {
-	color: #b9c0cc;
+	font-weight: 600;
 }
 
 .input {
 	width: 100%;
+	box-sizing: border-box;
 	padding: 10px 12px;
 	font-family: var(--sc-sans);
 	font-size: var(--fs-135);
-	color: #171a1f;
-	background: #f1f3f6;
-	border: 1px solid rgba(19, 27, 45, 0.08);
+	color: var(--sc-text);
+	background: var(--sc-raise);
+	border: 1px solid var(--sc-line-2);
 	border-radius: 8px;
 	outline: none;
 	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
 }
 
-html[data-theme='dark'] .input {
-	border-color: rgba(255, 255, 255, 0.06);
-	background: #22262e;
-	color: #e9ebf0;
-}
-
 .input::placeholder {
-	color: #9aa1ad;
-}
-
-html[data-theme='dark'] .input::placeholder {
-	color: #666e7d;
+	color: var(--sc-faint);
 }
 
 .input:focus {
-	border-color: rgba(59, 91, 253, 0.55);
-	background: #ffffff;
-	box-shadow: 0 0 0 3px rgba(59, 91, 253, 0.08);
-}
-
-html[data-theme='dark'] .input:focus {
-	border-color: rgba(59, 91, 253, 0.55);
-	background: #16191f;
-	box-shadow: 0 0 0 3px rgba(59, 91, 253, 0.08);
+	border-color: var(--sc-acid);
+	background: var(--sc-panel);
+	box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
 
 .input.mono {
@@ -403,12 +332,14 @@ html[data-theme='dark'] .input:focus {
 
 .select select {
 	flex: 1;
+	width: 100%;
+	box-sizing: border-box;
 	padding: 10px 34px 10px 12px;
 	font-family: var(--sc-sans);
 	font-size: var(--fs-135);
-	color: #171a1f;
-	background: #f1f3f6;
-	border: 1px solid rgba(19, 27, 45, 0.08);
+	color: var(--sc-text);
+	background: var(--sc-raise);
+	border: 1px solid var(--sc-line-2);
 	border-radius: 8px;
 	outline: none;
 	appearance: none;
@@ -416,43 +347,23 @@ html[data-theme='dark'] .input:focus {
 	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
 }
 
-html[data-theme='dark'] .select select {
-	border-color: rgba(255, 255, 255, 0.06);
-	background: #22262e;
-	color: #e9ebf0;
-}
-
 .select select:focus {
-	border-color: rgba(59, 91, 253, 0.55);
-	background: #ffffff;
-	box-shadow: 0 0 0 3px rgba(59, 91, 253, 0.08);
-}
-
-html[data-theme='dark'] .select select:focus {
-	border-color: rgba(59, 91, 253, 0.55);
-	background: #16191f;
-	box-shadow: 0 0 0 3px rgba(59, 91, 253, 0.08);
+	border-color: var(--sc-acid);
+	background: var(--sc-panel);
+	box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
 
 .select .chev {
 	position: absolute;
 	right: 12px;
-	color: #9aa1ad;
+	color: var(--sc-mute);
 	pointer-events: none;
-}
-
-html[data-theme='dark'] .select .chev {
-	color: #666e7d;
 }
 
 .field-error {
 	margin: 0;
-	color: #dc4545;
+	color: var(--sc-err);
 	font-size: var(--fs-12);
-}
-
-html[data-theme='dark'] .field-error {
-	color: #f2777a;
 }
 
 .dialog-foot {
@@ -461,11 +372,7 @@ html[data-theme='dark'] .field-error {
 	justify-content: flex-end;
 	gap: 10px;
 	padding: 18px 28px;
-	border-top: 1px solid rgba(19, 27, 45, 0.08);
-}
-
-html[data-theme='dark'] .dialog-foot {
-	border-top-color: rgba(255, 255, 255, 0.06);
+	border-top: 1px solid var(--sc-line);
 }
 
 .btn {
@@ -476,51 +383,35 @@ html[data-theme='dark'] .dialog-foot {
 	height: 38px;
 	padding: 0 18px;
 	font-family: var(--sc-sans);
-	font-size: var(--fs-135);
-	font-weight: 560;
-	border: none;
-	border-radius: 999px;
+	font-size: var(--fs-13);
+	font-weight: 600;
+	border: 1px solid transparent;
+	border-radius: 8px;
 	cursor: pointer;
 	transition: all 0.16s;
 	outline: none;
 }
 
 .btn.secondary {
-	background: transparent;
-	color: #b9c0cc;
-}
-
-html[data-theme='dark'] .btn.secondary {
-	color: #b9c0cc;
+	border-color: var(--sc-line-2);
+	background: var(--sc-panel);
+	color: var(--sc-mute);
 }
 
 .btn.secondary:hover:not(:disabled) {
-	background: #eef0f4;
-	color: #171a1f;
-}
-
-html[data-theme='dark'] .btn.secondary:hover:not(:disabled) {
-	background: #1c2027;
-	color: #e9ebf0;
+	border-color: var(--sc-faint);
+	background: var(--sc-hover);
+	color: var(--sc-text);
 }
 
 .btn.primary {
-	background: #3b5bfd;
-	color: #ffffff;
-	font-weight: 600;
-}
-
-html[data-theme='dark'] .btn.primary {
-	background: #3b5bfd;
-	color: #ffffff;
+	border-color: var(--sc-acid);
+	background: var(--sc-acid);
+	color: var(--sc-acid-ink);
 }
 
 .btn.primary:hover:not(:disabled) {
-	background: #2f49d1;
-}
-
-html[data-theme='dark'] .btn.primary:hover:not(:disabled) {
-	background: #4a6aff;
+	background: color-mix(in srgb, var(--accent) 86%, var(--ink-1));
 }
 
 .btn:disabled {

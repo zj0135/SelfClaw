@@ -346,6 +346,7 @@ html[data-theme='dark'] {
  * 各设置组件的 scoped 块后，选择器会带上 [data-v-x] 属性，特异度高于全局 .sc-root，
  * 会把这里的定义压掉。原定义已从那两个文件删除。
  */
+:root,
 .sc-root {
 	--sc-bg: var(--bg-canvas);
 	--sc-panel: var(--panel);

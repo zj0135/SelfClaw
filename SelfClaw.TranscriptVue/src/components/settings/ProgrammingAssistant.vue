@@ -13,7 +13,6 @@ const { cliTools, isLoading, isRescanning, scanError, selectedCliId, pending, sc
 			<div>
 				<span class="sc-page-kicker">LOCAL CLI RUNTIMES</span>
 				<h1 class="sc-page-title">编程助手</h1>
-				<p class="sc-page-sub">检测本机安装的智能体 CLI，选择默认运行时与模型。</p>
 			</div>
 			<button class="pa-btn scan-btn" :class="{ 'is-rescanning': isRescanning }" type="button"
 				:disabled="isRescanning" @click="rescanCliTools">

@@ -78,7 +78,6 @@ const sections = computed(() => [
 		key: 'basic',
 		kicker: 'BASIC',
 		title: '基本能力',
-		hint: '配置子代理的基本信息和系统指令',
 		icon: Workflow,
 		items: [],
 		isBasic: true,
@@ -87,16 +86,14 @@ const sections = computed(() => [
 		key: 'plugin',
 		kicker: 'PLUGINS',
 		title: '插件',
-		hint: '仅全局已启用且状态可用的插件会在子代理回合中生效',
 		icon: Puzzle,
 		items: pluginItems.value,
-		emptyText: '尚未安装任何插件，可前往「插件」设置页导入',
+		emptyText: '尚未安装任何插件',
 	},
 	{
 		key: 'skill',
 		kicker: 'SKILLS',
 		title: '技能',
-		hint: '插件贡献的技能随插件绑定自动生效',
 		icon: Wrench,
 		items: skillItems.value,
 		emptyText: '尚未安装任何技能',
@@ -105,10 +102,9 @@ const sections = computed(() => [
 		key: 'mcpServer',
 		kicker: 'MCP SERVERS',
 		title: 'MCP 服务器',
-		hint: '插件托管的 MCP 服务器随插件绑定自动生效，不能独立绑定',
 		icon: Network,
 		items: mcpItems.value,
-		emptyText: '尚未配置任何 MCP 服务器，可前往「插件」设置页添加',
+		emptyText: '尚未配置任何 MCP 服务器',
 	},
 ]);
 
@@ -151,7 +147,7 @@ function onBasicSave(data) {
 				<div class="dh-title">
 					<h2 :title="subagent.name">{{ subagent.name }}</h2>
 				</div>
-				<p :title="subagent.description || '暂无描述'">{{ subagent.description || '暂无描述' }}</p>
+				<p v-if="subagent.description" :title="subagent.description">{{ subagent.description }}</p>
 			</div>
 			<button class="m-icon agent-delete" type="button"
 				title="删除子代理" aria-label="删除子代理" :disabled="saving" @click="$emit('delete')">
@@ -175,7 +171,7 @@ function onBasicSave(data) {
 		</div>
 
 		<BindingDialog :open="Boolean(openSection)" :kicker="openSection?.kicker || ''"
-			:title="openSection ? `绑定${openSection.title}` : ''" :hint="openSection?.hint || ''"
+			:title="openSection ? `绑定${openSection.title}` : ''"
 			:items="openSection?.items || []" :empty-text="openSection?.emptyText || ''" :pending="dialogPending"
 			@close="openSectionKey = ''" @toggle="onDialogToggle" />
 

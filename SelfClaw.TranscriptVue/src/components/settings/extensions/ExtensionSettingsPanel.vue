@@ -172,7 +172,6 @@ async function confirmPermissions() {
 			<div>
 				<span>EXTENSION REGISTRY</span>
 				<h1>扩展</h1>
-				<p>管理插件、技能与 Direct 模式使用的 MCP 服务器。</p>
 			</div>
 			<code>REV {{ state.revision }}</code>
 		</header>

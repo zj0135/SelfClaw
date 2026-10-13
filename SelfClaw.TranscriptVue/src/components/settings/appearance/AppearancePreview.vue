@@ -7,25 +7,21 @@
 	<div class="preview sc-rise" :style="{ '--i': 1 }">
 		<div class="pv-head">
 			<span class="pv-kicker">LIVE PREVIEW</span>
-			<span class="pv-note">下面这块用的是真实 token，改动即时生效</span>
 		</div>
 
 		<div class="pv-body">
 			<h3 class="pv-title">界面排版预览</h3>
 			<p class="pv-para">
-				这一段是正文字号，用于判断阅读密度是否合适。混排一段 English text 与数字 1234567890
-				可以看出字族的西文与数字部分。
+				The quick brown fox jumps over the lazy dog · 0123456789
 			</p>
 			<div class="pv-meta-row">
-				<span class="pv-meta">辅助说明文字</span>
 				<span class="pv-mono">MONO · 09:42:17</span>
 			</div>
 
 			<!-- 外层必须是 .markdown-content：markdown.css 里的规则是
 				 `.markdown-content pre`，pre 得是它的后代而不是它本身。 -->
 			<div class="markdown-content pv-code">
-				<pre><code><span class="hljs-comment">// 代码块预览：字族、字号与配色都独立于界面设置</span>
-<span class="hljs-keyword">export function</span> <span class="hljs-title">resolveTheme</span>(mode) {
+				<pre><code><span class="hljs-keyword">export function</span> <span class="hljs-title">resolveTheme</span>(mode) {
   <span class="hljs-keyword">const</span> dark = mode === <span class="hljs-string">'dark'</span>;
   <span class="hljs-keyword">return</span> { dark, level: <span class="hljs-number">2</span>, kind: <span class="hljs-type">ThemeKind</span>.Resolved };
 }</code></pre>

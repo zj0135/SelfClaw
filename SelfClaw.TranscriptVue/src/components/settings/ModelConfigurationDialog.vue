@@ -101,7 +101,8 @@ function close() {
 	letter-spacing: 0;
 }
 .model-dialog::backdrop {
-	background: rgba(20, 24, 32, 0.4);
+	background: var(--overlay-heavy);
+	backdrop-filter: blur(4px);
 }
 form {
 	display: flex;

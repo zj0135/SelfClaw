@@ -9,7 +9,7 @@ defineEmits(['close']);
 </script>
 
 <template>
-	<div v-if="open && result" class="backdrop" @mousedown.self="$emit('close')">
+	<div v-if="open && result" class="backdrop sc-root" @mousedown.self="$emit('close')">
 		<section class="dialog" role="dialog" aria-modal="true" aria-labelledby="package-import-title">
 			<header>
 				<div class="success">
@@ -63,15 +63,16 @@ defineEmits(['close']);
 	display: grid;
 	place-items: center;
 	padding: 20px;
-	background: var(--overlay-heavy);
+	background: var(--overlay);
+	backdrop-filter: blur(8px);
 }
 
 .dialog {
 	width: min(480px, 100%);
 	border: 1px solid var(--sc-line-2);
-	border-radius: 7px;
-	background: var(--sc-panel);
-	box-shadow: 0 24px 70px var(--overlay-shadow);
+	border-radius: 14px;
+	background: var(--sc-panel, var(--panel, #ffffff));
+	box-shadow: 0 32px 90px rgba(var(--shadow-ink), 0.25);
 	color: var(--sc-text);
 }
 

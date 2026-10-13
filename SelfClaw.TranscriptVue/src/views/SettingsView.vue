@@ -93,7 +93,6 @@ function selectItem(id) {
 			<div class="sb-head sc-rise" style="--i: 0">
 				<div class="sb-kicker">SELFCLAW · CONTROL DECK</div>
 				<h1>设置</h1>
-				<p>偏好、模型与扩展的控制舱</p>
 			</div>
 
 			<nav class="sb-nav">

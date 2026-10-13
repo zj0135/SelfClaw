@@ -50,7 +50,7 @@ function submit(testAfterSave = false) {
 </script>
 
 <template>
-	<div v-if="open" class="backdrop" @click.self="$emit('close')">
+	<div v-if="open" class="backdrop sc-root" @click.self="$emit('close')">
 		<form class="dialog sc-root" @submit.prevent="submit(false)">
 			<header>
 				<div>
@@ -169,7 +169,7 @@ function submit(testAfterSave = false) {
 	place-items: center;
 	padding: 22px;
 	background: var(--overlay);
-	backdrop-filter: blur(6px);
+	backdrop-filter: blur(8px);
 }
 
 .dialog {
@@ -179,9 +179,9 @@ function submit(testAfterSave = false) {
 	max-height: min(820px, 92vh);
 	overflow: hidden;
 	border: 1px solid var(--sc-line-2);
-	border-radius: 8px;
-	background: var(--sc-bg);
-	box-shadow: 0 24px 70px var(--overlay-shadow);
+	border-radius: 14px;
+	background: var(--sc-panel, var(--panel, #ffffff));
+	box-shadow: 0 32px 90px rgba(var(--shadow-ink), 0.25);
 	animation: sc-pop 180ms var(--sc-ease-out) both;
 }
 

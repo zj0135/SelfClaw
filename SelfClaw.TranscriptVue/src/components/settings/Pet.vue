@@ -30,7 +30,6 @@ function initials(name) {
       <div>
         <span class="sc-page-kicker">DESKTOP COMPANION</span>
         <h1 class="sc-page-title">宠物</h1>
-        <p class="sc-page-sub">驻留桌面的像素伙伴，选择一位默认出场。</p>
       </div>
 
       <button type="button" class="pet-toggle" :disabled="syncPending" :aria-pressed="petVisible ? 'true' : 'false'"

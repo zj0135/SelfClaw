@@ -11,9 +11,9 @@ const emit = defineEmits(['select']);
 // preview 的取值决定卡片缩略图用哪套色：'system' 卡片要同时露出两半，
 // 所以它不是一个主题名，而是一个专门的拼接态。
 const modes = [
-	{ id: 'light', label: '浅色', en: 'LIGHT', icon: Sun, note: '始终使用浅色界面' },
-	{ id: 'dark', label: '暗色', en: 'DARK', icon: Moon, note: '始终使用深色界面' },
-	{ id: 'system', label: '跟随系统', en: 'AUTO', icon: MonitorSmartphone, note: '随系统外观自动切换' },
+	{ id: 'light', label: '浅色', en: 'LIGHT', icon: Sun },
+	{ id: 'dark', label: '暗色', en: 'DARK', icon: Moon },
+	{ id: 'system', label: '跟随系统', en: 'AUTO', icon: MonitorSmartphone },
 ];
 </script>
 
@@ -35,11 +35,10 @@ const modes = [
 				<span class="mc-head">
 					<component :is="item.icon" :size="15" :stroke-width="1.9" class="mc-ico" aria-hidden="true" />
 					<span class="mc-label">{{ item.label }}</span>
+					<span v-if="item.id === 'system'" class="mc-resolved-tag">
+						{{ props.resolved === 'dark' ? 'DARK' : 'LIGHT' }}
+					</span>
 					<span class="mc-en">{{ item.en }}</span>
-				</span>
-				<span class="mc-note">{{ item.note }}</span>
-				<span v-if="item.id === 'system'" class="mc-resolved">
-					当前解析为 {{ props.resolved === 'dark' ? '暗色' : '浅色' }}
 				</span>
 			</span>
 
@@ -232,17 +231,18 @@ const modes = [
 	letter-spacing: 0.18em;
 }
 
-.mc-note {
+.mc-resolved-tag {
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 6px;
+	border: 1px solid var(--sc-line-2);
+	border-radius: 4px;
 	color: var(--sc-mute);
-	font-size: var(--fs-12);
-	line-height: 1.5;
-}
-
-.mc-resolved {
-	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: var(--fs-95);
-	letter-spacing: 0.04em;
+	font-size: var(--fs-9);
+	font-weight: 600;
+	letter-spacing: 0.1em;
+	background: var(--sc-raise);
 }
 
 .mc-check {

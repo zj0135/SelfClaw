@@ -48,7 +48,6 @@ const boundCount = computed(() => props.items.filter((item) => item.bound).lengt
 					<div class="head-meta">
 						<div class="dlg-kicker">{{ kicker }}</div>
 						<h3>{{ title }}</h3>
-						<p v-if="hint">{{ hint }}</p>
 					</div>
 					<span class="count-pill" :class="{ off: boundCount === 0 }">{{ boundCount }} / {{ items.length
 					}}</span>
@@ -74,10 +73,10 @@ const boundCount = computed(() => props.items.filter((item) => item.bound).lengt
 							<span class="r-title">
 								<span class="r-name">{{ item.name }}</span>
 								<span class="r-id">{{ item.id }}</span>
+								<span v-if="item.managedBy" class="r-managed-tag">VIA {{ item.managedBy.toUpperCase() }}</span>
 								<ExtensionStatusBadge v-if="item.status" :status="item.status" />
 							</span>
 							<span v-if="item.description" class="r-desc">{{ item.description }}</span>
-							<span v-if="item.managedBy" class="r-managed">随插件 {{ item.managedBy }} 的绑定自动生效</span>
 						</span>
 						<LoaderCircle v-if="pending(item.id)" :size="15" :stroke-width="2.2" class="spin"
 							aria-hidden="true" />
@@ -103,7 +102,7 @@ const boundCount = computed(() => props.items.filter((item) => item.bound).lengt
 	place-items: center;
 	padding: 24px;
 	background: var(--overlay);
-	backdrop-filter: blur(4px);
+	backdrop-filter: blur(8px);
 	animation: sc-fade 160ms ease-out;
 	font-family: var(--sc-sans);
 }
@@ -116,8 +115,8 @@ const boundCount = computed(() => props.items.filter((item) => item.bound).lengt
 	overflow: hidden;
 	border: 1px solid var(--sc-line-2);
 	border-radius: 16px;
-	background: var(--sc-panel);
-	box-shadow: 0 32px 90px rgba(var(--shadow-ink), 0.2);
+	background: var(--sc-panel, var(--panel, #ffffff));
+	box-shadow: 0 32px 90px rgba(var(--shadow-ink), 0.25);
 	color: var(--sc-text);
 	animation: sc-pop 240ms var(--sc-ease-out);
 }
@@ -347,9 +346,18 @@ h3 {
 	-webkit-box-orient: vertical;
 }
 
-.r-managed {
+.r-managed-tag {
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 6px;
+	border: 1px solid var(--sc-line-2);
+	border-radius: 4px;
+	background: var(--sc-raise);
 	color: var(--sc-faint);
-	font-size: var(--fs-11);
+	font-family: var(--sc-mono);
+	font-size: var(--fs-9);
+	font-weight: 600;
+	letter-spacing: 0.1em;
 }
 
 .spin {

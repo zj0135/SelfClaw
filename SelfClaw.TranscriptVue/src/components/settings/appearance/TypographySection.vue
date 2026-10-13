@@ -11,16 +11,16 @@ const { state, revision, setUiFontFamily, setUiFontScale, setTextColor } = useAp
 
 <template>
 	<div class="section">
-		<AppearanceRow label="界面字体" hint="所选字族会插到默认字体栈最前面，缺字时自动回落" :index="0">
+		<AppearanceRow label="界面字体" :index="0">
 			<FontSelect :value="state.uiFontFamily" :choices="UI_FONT_CHOICES"
 				@change="setUiFontFamily" />
 		</AppearanceRow>
 
-		<AppearanceRow label="界面字号" hint="按档位整体缩放，装饰性大字号不参与" :index="1">
+		<AppearanceRow label="界面字号" :index="1">
 			<ScaleSteps :value="state.uiFontScale" @select="setUiFontScale" />
 		</AppearanceRow>
 
-		<AppearanceRow label="正文颜色" hint="仅覆盖主文本色，次级与辅助文字仍跟随主题" :index="2">
+		<AppearanceRow label="正文颜色" :index="2">
 			<ColorField :value="state.textColor" fallback-token="--ink-1" :revision="revision"
 				@change="setTextColor" @reset="setTextColor('')" />
 		</AppearanceRow>

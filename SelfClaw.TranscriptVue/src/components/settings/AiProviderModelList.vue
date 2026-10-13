@@ -23,7 +23,6 @@ const filteredModels = computed(() => {
 		<header>
 			<div>
 				<h3>模型列表</h3>
-				<p>共 {{ provider.models.length }} 个模型，已启用 {{ enabledCount }}</p>
 			</div>
 			<span class="count">{{ enabledCount }} / {{ provider.models.length }}</span>
 		</header>

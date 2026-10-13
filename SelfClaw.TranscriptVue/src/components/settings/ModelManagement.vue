@@ -10,9 +10,10 @@ const { models, search, loading, error, editing, deleting, filteredModels, load,
 <template>
 	<main class="sc-root sc-stage sc-page management">
 		<header class="sc-page-head">
+			<span class="sc-page-ghost" aria-hidden="true">Models</span>
 			<div>
+				<span class="sc-page-kicker">SHARED PROFILES · {{ models.length }}</span>
 				<h1 class="sc-page-title">模型管理</h1>
-				<p class="sc-page-sub">{{ models.length }} 个模型配置</p>
 			</div>
 		</header>
 		<div class="sc-page-body">

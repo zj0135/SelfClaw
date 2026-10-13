@@ -9,10 +9,10 @@ import { useAppearance } from '../../composables/useAppearance.js';
 const { state, resolvedTheme, setMode, resetAll } = useAppearance();
 
 const groups = [
-	{ id: 'theme', label: '主题', en: 'THEME', icon: Palette, hint: '整套调色板的明暗基调' },
-	{ id: 'typography', label: '界面排版', en: 'TYPOGRAPHY', icon: Type, hint: '字族、字号与正文颜色' },
-	{ id: 'code', label: '代码块', en: 'CODE', icon: Code2, hint: '代码与终端的独立排版设置' },
-	{ id: 'preview', label: '预览', en: 'PREVIEW', icon: Eye, hint: '' },
+	{ id: 'theme', label: '主题', en: 'THEME', icon: Palette },
+	{ id: 'typography', label: '界面排版', en: 'TYPOGRAPHY', icon: Type },
+	{ id: 'code', label: '代码块', en: 'CODE', icon: Code2 },
+	{ id: 'preview', label: '预览', en: 'PREVIEW', icon: Eye },
 ];
 </script>
 
@@ -23,7 +23,6 @@ const groups = [
 			<div>
 				<span class="sc-page-kicker">GENERAL · APPEARANCE</span>
 				<h1 class="sc-page-title">系统设置</h1>
-				<p class="sc-page-sub">主题、字体与代码块外观</p>
 			</div>
 
 			<button type="button" class="reset-all" title="把全部外观设置恢复为默认" @click="resetAll">
@@ -38,7 +37,6 @@ const groups = [
 				<div class="group-head">
 					<component :is="group.icon" :size="15" :stroke-width="1.9" class="gh-ico" aria-hidden="true" />
 					<span class="gh-label">{{ group.label }}</span>
-					<span v-if="group.hint" class="gh-hint">{{ group.hint }}</span>
 					<span class="gh-en">{{ group.en }}</span>
 				</div>
 
@@ -116,14 +114,6 @@ const groups = [
 	letter-spacing: 0.01em;
 }
 
-.gh-hint {
-	min-width: 0;
-	overflow: hidden;
-	color: var(--sc-mute);
-	font-size: var(--fs-115);
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
 
 .gh-en {
 	margin-left: auto;

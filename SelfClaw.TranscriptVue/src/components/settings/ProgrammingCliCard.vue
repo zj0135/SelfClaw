@@ -41,7 +41,7 @@ defineEmits(['toggle', 'test', 'select', 'model', 'reasoning']);
 						<div class="cli-config__inner">
 							<div class="cli-config__label">
 								模型
-								<span class="badge badge--live">LIVE · 来自 CLI 的实时列表</span>
+								<span class="badge badge--live">LIVE</span>
 							</div>
 
 							<div class="cli-config__controls">
@@ -78,10 +78,6 @@ defineEmits(['toggle', 'test', 'select', 'model', 'reasoning']);
 									设为默认
 								</button>
 							</div>
-
-							<p class="cli-config__hint">
-								先将此 CLI 设为默认，再调整模型或推理等级。“默认”沿用 CLI 自身配置。
-							</p>
 
 							<div class="test-toast" :class="{ show: cli.showToast, err: cli.testError }">
 								<span class="tt-led" aria-hidden="true"></span>

@@ -208,7 +208,7 @@ function configurationSaved() {
 					<div class="dh-meta">
 						<div class="dh-kicker">PROVIDER / {{ activeIndex }}</div>
 						<h2>{{ activeProvider.name }}</h2>
-						<p>{{ activeProvider.sub }}</p>
+						<p v-if="activeProvider.sub">{{ activeProvider.sub }}</p>
 					</div>
 					<button v-if="activeProvider.connectionId" class="m-icon provider-delete" type="button"
 						title="删除服务商连接" aria-label="删除服务商连接" :disabled="mutating" @click="deleteProvider">
@@ -251,7 +251,6 @@ function configurationSaved() {
 						</div>
 						<input id="api-base" v-model="activeProvider.base" class="input mono" type="text"
 							aria-label="API 代理地址" @change="saveApiBaseToHost" />
-						<p class="field-hint">自定义端点，用于代理或第三方兼容服务</p>
 					</div>
 
 					<div class="field sc-rise" style="--i: 3">
