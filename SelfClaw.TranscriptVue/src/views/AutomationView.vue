@@ -220,32 +220,27 @@ watch(runStatus, (status) => {
 
 <template>
 	<main class="automation-view">
-		<header class="automation-head">
-			<div class="automation-head-text">
-				<span class="automation-kicker">AUTOMATION</span>
-				<h1>自动化</h1>
-				<p>定时 LLM 任务与个人待办。时间一律按本地时区（{{ timeZone }}）计算。</p>
-			</div>
-			<div class="automation-head-actions">
-				<button type="button" class="automation-ghost" :class="{ 'is-on': settings.notifyOnSuccess }"
-					:title="settings.notifyOnSuccess ? '关闭成功通知' : '开启成功通知'" @click="toggleNotify">
-					<Bell v-if="settings.notifyOnSuccess" aria-hidden="true" />
-					<BellOff v-else aria-hidden="true" />
-					<span>成功通知</span>
-				</button>
-				<button type="button" class="automation-ghost" :disabled="loading" title="刷新" @click="refresh">
-					<RefreshCw :class="{ 'is-spinning': loading }" aria-hidden="true" />
-					<span>刷新</span>
-				</button>
-			</div>
-		</header>
-
 		<p v-if="error" class="automation-banner" role="alert">{{ error }}</p>
 
 		<div class="automation-body">
 			<AutomationCalendar :events="calendar.events" :truncated="calendar.truncated"
 				@range-change="loadCalendar" @event-click="onEventClick" @date-click="onDateClick"
-				@event-drop="onEventDrop" />
+				@event-drop="onEventDrop">
+				<template #actions>
+					<div class="automation-actions">
+						<button type="button" class="automation-ghost" :class="{ 'is-on': settings.notifyOnSuccess }"
+							:title="settings.notifyOnSuccess ? '关闭成功通知' : '开启成功通知'" @click="toggleNotify">
+							<Bell v-if="settings.notifyOnSuccess" aria-hidden="true" />
+							<BellOff v-else aria-hidden="true" />
+							<span>成功通知</span>
+						</button>
+						<button type="button" class="automation-ghost" :disabled="loading" title="刷新" @click="refresh">
+							<RefreshCw :class="{ 'is-spinning': loading }" aria-hidden="true" />
+							<span>刷新</span>
+						</button>
+					</div>
+				</template>
+			</AutomationCalendar>
 			<AutomationTaskPanel :tasks="visibleTasks" :runs="visibleRuns" :active-tab="activeTab"
 				:query="query" :run-status="runStatus" :time-zone="timeZone" :pending="pending"
 				:deleting="deleting" :history-bytes="historyBytes"
@@ -276,63 +271,53 @@ watch(runStatus, (status) => {
 	background: var(--bg);
 }
 
-.automation-head {
+.automation-actions {
 	display: flex;
-	flex: none;
-	align-items: flex-end;
-	justify-content: space-between;
-	gap: 16px;
-	padding: 20px 24px 14px;
-	border-bottom: 1px solid var(--border);
-}
-
-.automation-kicker {
-	color: var(--muted);
-	font-size: var(--fs-11);
-	font-weight: 650;
-	letter-spacing: 0.14em;
-}
-
-.automation-head h1 {
-	margin: 6px 0 0;
-	font-family: var(--font-display);
-	font-size: var(--fs-24);
-	line-height: 1.1;
-}
-
-.automation-head p {
-	margin: 4px 0 0;
-	color: var(--muted);
-	font-size: var(--fs-12);
-}
-
-.automation-head-actions {
-	display: flex;
-	flex: none;
-	gap: 8px;
+	align-items: center;
+	gap: 6px;
 }
 
 .automation-ghost {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
-	padding: 7px 12px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
-	background: var(--panel-soft);
+	gap: 5px;
+	height: 28px;
+	padding: 0 10px;
+	border: 1px solid var(--line-1);
+	border-radius: 7px;
+	background: var(--panel);
 	color: var(--muted);
 	font-size: var(--fs-12);
-	font-weight: 650;
+	font-weight: 600;
+	cursor: pointer;
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.03);
+	transition: background 0.16s, border-color 0.16s, color 0.16s, transform 0.16s var(--ease-spring);
+}
+
+.automation-ghost:hover:not(:disabled) {
+	background: var(--panel-hover);
+	border-color: var(--line-2);
+	color: var(--text);
+}
+
+.automation-ghost:active:not(:disabled) {
+	transform: scale(0.96);
 }
 
 .automation-ghost.is-on {
 	border-color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
 	color: var(--accent-2);
 }
 
+.automation-ghost:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+
 .automation-ghost svg {
-	width: 14px;
-	height: 14px;
+	width: 13px;
+	height: 13px;
 }
 
 .automation-ghost .is-spinning {
@@ -340,7 +325,7 @@ watch(runStatus, (status) => {
 }
 
 .automation-banner {
-	margin: 10px 24px 0;
+	margin: 10px 16px 0;
 	padding: 8px 12px;
 	border: 1px solid color-mix(in srgb, var(--danger) 32%, transparent);
 	border-radius: 10px;
@@ -353,7 +338,6 @@ watch(runStatus, (status) => {
 	display: flex;
 	min-height: 0;
 	flex: 1 1 auto;
-	padding-top: 10px;
 }
 
 @keyframes automation-spin {

@@ -73,19 +73,19 @@ function submit() {
 				<section class="ac-section">
 					<label class="ac-field">
 						<span class="ac-field-label">标题 <em>必填</em></span>
-						<input v-model="form.title" type="text" maxlength="120" placeholder="例如：每日代码审查" />
+						<input v-model="form.title" type="text" maxlength="120" placeholder="输入任务标题…" />
 					</label>
 					<label class="ac-field">
 						<span class="ac-field-label">备注</span>
-						<textarea v-model="form.notes" rows="2" placeholder="可选说明"></textarea>
+						<textarea v-model="form.notes" rows="2" placeholder="添加备注…"></textarea>
 					</label>
 				</section>
 
 				<section class="ac-section">
 					<AutomationScheduleFields :form="form" />
 					<p class="ac-preview" :class="{ 'is-error': previewState.errorCode }" role="status">
-						<template v-if="form.kind === 'none'">手动触发：不自动运行。</template>
-						<template v-else-if="previewState.errorCode">{{ previewState.errorCode === 'IntervalTooShort' ? '触发间隔不能小于 5 分钟。' : '触发器配置无效。' }}</template>
+						<template v-if="form.kind === 'none'">手动触发：不自动运行</template>
+						<template v-else-if="previewState.errorCode">{{ previewState.errorCode === 'IntervalTooShort' ? '触发间隔不能小于 5 分钟' : '触发器配置无效' }}</template>
 						<template v-else-if="previewState.text">下次触发：{{ previewState.text }}</template>
 						<template v-else>正在计算下次触发…</template>
 					</p>
@@ -94,10 +94,10 @@ function submit() {
 				<section class="ac-section">
 					<label class="ac-field">
 						<span class="ac-field-label">提示词 <em v-if="form.kind !== 'none'">必填</em></span>
-						<textarea v-model="form.prompt" rows="5" placeholder="留空则只是待办，不会调用模型。"></textarea>
+						<textarea v-model="form.prompt" rows="5" placeholder="输入任务提示词…"></textarea>
 					</label>
 					<label v-if="form.kind === 'none'" class="ac-field">
-						<span class="ac-field-label">截止日期（待办，可选）</span>
+						<span class="ac-field-label">截止日期</span>
 						<input v-model="form.dueAtLocal" type="date" />
 					</label>
 					<label v-if="hasPrompt" class="ac-confirm">
@@ -113,7 +113,7 @@ function submit() {
 
 				<label class="ac-field">
 					<span class="ac-field-label">自定义指令</span>
-					<textarea v-model="form.instructions" rows="3" placeholder="可选的系统提示词"></textarea>
+					<textarea v-model="form.instructions" rows="2" placeholder="自定义指令…"></textarea>
 				</label>
 			</div>
 
@@ -139,8 +139,10 @@ function submit() {
 	align-items: center;
 	justify-content: center;
 	padding: 24px;
-	background: color-mix(in srgb, var(--bg) 46%, transparent);
-	backdrop-filter: blur(3px);
+	background: var(--overlay, rgba(0, 0, 0, 0.45));
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+	animation: ac-fade-in 0.18s ease-out;
 }
 
 .ac-dialog {
@@ -149,10 +151,12 @@ function submit() {
 	max-height: 100%;
 	flex-direction: column;
 	overflow: hidden;
-	border: 1px solid var(--border);
+	border: 1px solid var(--line-1);
 	border-radius: 16px;
-	background: var(--panel);
-	box-shadow: 0 26px 80px var(--overlay-shadow);
+	background: var(--panel, #ffffff);
+	color: var(--text);
+	box-shadow: 0 28px 80px rgba(var(--shadow-ink), 0.26);
+	animation: ac-slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .ac-dialog-head {
@@ -160,15 +164,16 @@ function submit() {
 	align-items: flex-start;
 	justify-content: space-between;
 	gap: 12px;
-	padding: 16px 20px 12px;
-	border-bottom: 1px solid var(--border);
+	padding: 16px 20px 14px;
+	border-bottom: 1px solid var(--line-1);
 }
 
 .ac-dialog-kicker {
 	color: var(--muted);
-	font-size: var(--fs-11);
+	font-family: var(--font-code, monospace);
+	font-size: var(--fs-10);
 	font-weight: 650;
-	letter-spacing: 0.08em;
+	letter-spacing: 0.18em;
 	text-transform: uppercase;
 }
 
@@ -176,6 +181,9 @@ function submit() {
 	margin: 4px 0 0;
 	font-family: var(--font-display);
 	font-size: var(--fs-18);
+	font-weight: 650;
+	letter-spacing: -0.015em;
+	color: var(--text);
 }
 
 .ac-dialog-close {
@@ -185,15 +193,27 @@ function submit() {
 	width: 28px;
 	height: 28px;
 	flex: none;
-	border: 1px solid var(--border);
+	border: 1px solid var(--line-1);
 	border-radius: 8px;
 	background: var(--panel-soft);
 	color: var(--muted);
+	cursor: pointer;
+	transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s var(--ease-spring);
+}
+
+.ac-dialog-close:hover {
+	background: var(--panel-hover);
+	color: var(--text);
+	border-color: var(--line-2);
+}
+
+.ac-dialog-close:active {
+	transform: scale(0.92);
 }
 
 .ac-dialog-close svg {
-	width: 15px;
-	height: 15px;
+	width: 14px;
+	height: 14px;
 }
 
 .ac-dialog-body {
@@ -202,7 +222,7 @@ function submit() {
 	flex: 1 1 auto;
 	flex-direction: column;
 	gap: 16px;
-	padding: 16px 20px;
+	padding: 18px 20px;
 	overflow-y: auto;
 }
 
@@ -221,9 +241,10 @@ function submit() {
 
 .ac-field-label {
 	color: var(--muted);
-	font-size: var(--fs-11);
+	font-family: var(--font-code, monospace);
+	font-size: var(--fs-10);
 	font-weight: 650;
-	letter-spacing: 0.04em;
+	letter-spacing: 0.08em;
 	text-transform: uppercase;
 }
 
@@ -237,23 +258,33 @@ function submit() {
 .ac-field textarea {
 	width: 100%;
 	padding: 8px 10px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
+	border: 1px solid var(--line-1);
+	border-radius: 8px;
 	background: var(--panel-soft);
 	color: var(--text);
 	font-family: inherit;
-	font-size: var(--fs-13);
+	font-size: var(--fs-12);
+	transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ac-field input:focus,
+.ac-field textarea:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
+	outline: none;
 }
 
 .ac-field textarea {
 	resize: vertical;
-	line-height: 1.6;
+	line-height: 1.55;
 }
 
 .ac-preview {
 	margin: 0;
 	color: var(--muted);
-	font-size: var(--fs-12);
+	font-family: var(--font-code, monospace);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
 }
 
 .ac-preview.is-error {
@@ -267,6 +298,7 @@ function submit() {
 	color: var(--text);
 	font-size: var(--fs-12);
 	line-height: 1.5;
+	cursor: pointer;
 }
 
 .ac-dialog-foot {
@@ -275,7 +307,7 @@ function submit() {
 	justify-content: space-between;
 	gap: 12px;
 	padding: 12px 20px 16px;
-	border-top: 1px solid var(--border);
+	border-top: 1px solid var(--line-1);
 }
 
 .ac-dialog-error {
@@ -293,25 +325,63 @@ function submit() {
 
 .ac-secondary,
 .ac-primary {
-	padding: 8px 16px;
-	border-radius: 9px;
-	font-size: var(--fs-13);
-	font-weight: 650;
+	padding: 7px 16px;
+	border-radius: 8px;
+	font-size: var(--fs-12);
+	font-weight: 600;
+	cursor: pointer;
+	transition: filter 0.15s, background 0.15s, border-color 0.15s, transform 0.15s var(--ease-spring);
 }
 
 .ac-secondary {
-	border: 1px solid var(--border);
+	border: 1px solid var(--line-1);
 	background: var(--panel-soft);
 	color: var(--text);
+}
+
+.ac-secondary:hover {
+	background: var(--panel-hover);
+	border-color: var(--line-2);
+}
+
+.ac-secondary:active {
+	transform: scale(0.96);
 }
 
 .ac-primary {
 	border: 0;
 	background: var(--accent);
-	color: #fff;
+	color: var(--accent-ink-on, #fff);
+	box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.ac-primary:hover:not(:disabled) {
+	filter: brightness(1.05);
+	box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.ac-primary:active:not(:disabled) {
+	transform: scale(0.96);
 }
 
 .ac-primary:disabled {
-	opacity: 0.55;
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+@keyframes ac-fade-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+@keyframes ac-slide-up {
+	from {
+		opacity: 0;
+		transform: translateY(12px) scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
 }
 </style>

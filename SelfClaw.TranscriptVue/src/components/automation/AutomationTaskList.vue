@@ -17,7 +17,7 @@ function isPending(id) {
 </script>
 
 <template>
-	<p v-if="!tasks.length" class="automation-empty">还没有任务。点击「新建任务」创建待办或定时任务。</p>
+	<p v-if="!tasks.length" class="automation-empty">暂无任务</p>
 	<article v-for="task in tasks" :key="task.id" class="automation-task" :class="{ 'is-done': task.status === 'done' }">
 		<button v-if="isUserCheckableTask(task)" type="button" class="automation-check" :aria-pressed="task.status === 'done'"
 			:title="task.status === 'done' ? '标记为未完成' : '标记为完成'" @click="emit('toggle-status', task)">
@@ -65,10 +65,9 @@ function isPending(id) {
 
 <style scoped>
 .automation-empty {
-	margin: 18px 6px;
-	color: var(--muted);
+	margin: 28px 6px;
+	color: var(--faint);
 	font-size: var(--fs-12);
-	line-height: 1.6;
 	text-align: center;
 }
 
@@ -76,16 +75,18 @@ function isPending(id) {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 9px 10px;
-	border: 1px solid var(--border);
-	border-radius: 11px;
+	padding: 8px 10px;
+	border: 1px solid var(--line-1);
+	border-radius: 9px;
 	background: var(--panel-soft);
-	transition: border-color 0.16s, background 0.16s;
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.02);
+	transition: border-color 0.16s, background 0.16s, box-shadow 0.16s;
 }
 
 .automation-task:hover {
-	border-color: var(--border-strong);
+	border-color: var(--line-2);
 	background: var(--panel);
+	box-shadow: 0 2px 8px rgba(var(--shadow-ink), 0.05);
 }
 
 .automation-task.is-done .automation-task-title {
@@ -101,25 +102,41 @@ function isPending(id) {
 	width: 26px;
 	height: 26px;
 	flex: none;
-	border: 1px solid var(--border);
-	border-radius: 8px;
+	border: 1px solid var(--line-1);
+	border-radius: 7px;
 	background: var(--panel);
 	color: var(--muted);
+	cursor: pointer;
+	transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s var(--ease-spring);
+}
+
+.automation-check:hover,
+.automation-icon-btn:hover:not(:disabled) {
+	background: var(--panel-hover);
+	color: var(--text);
+	border-color: var(--line-2);
+}
+
+.automation-check:active,
+.automation-icon-btn:active:not(:disabled) {
+	transform: scale(0.92);
 }
 
 .automation-check svg,
 .automation-icon-btn svg {
-	width: 14px;
-	height: 14px;
+	width: 13.5px;
+	height: 13.5px;
 }
 
 .automation-icon-btn:disabled {
-	opacity: 0.55;
+	opacity: 0.45;
+	cursor: not-allowed;
 }
 
 .automation-icon-btn.is-danger:hover:not(:disabled) {
 	border-color: color-mix(in srgb, var(--danger) 32%, transparent);
 	color: var(--danger);
+	background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .automation-icon-btn .is-spinning {
@@ -139,7 +156,8 @@ function isPending(id) {
 	overflow: hidden;
 	color: var(--text);
 	font-size: var(--fs-13);
-	font-weight: 650;
+	font-weight: 600;
+	letter-spacing: -0.01em;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -147,17 +165,28 @@ function isPending(id) {
 .automation-task-meta {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 4px 8px;
+	gap: 4px 6px;
 	color: var(--muted);
 	font-size: var(--fs-11);
+	align-items: center;
 }
 
 .automation-kind {
-	padding: 0 6px;
-	border-radius: 999px;
-	background: color-mix(in srgb, var(--accent) 14%, transparent);
+	padding: 0 5px;
+	height: 17px;
+	line-height: 17px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
 	color: var(--accent-2);
-	font-weight: 650;
+	font-family: var(--font-code, monospace);
+	font-size: 10px;
+	font-weight: 600;
+}
+
+.automation-meta-item {
+	font-family: var(--font-code, monospace);
+	font-size: 10.5px;
+	font-variant-numeric: tabular-nums;
 }
 
 .automation-meta-item.is-warning {
@@ -176,10 +205,11 @@ function isPending(id) {
 	height: 18px;
 	flex: none;
 	padding: 0;
-	border: 1px solid var(--border);
+	border: 1px solid var(--line-1);
 	border-radius: 999px;
 	background: var(--panel-muted);
-	transition: background 0.16s;
+	cursor: pointer;
+	transition: background 0.18s, border-color 0.18s;
 }
 
 .automation-switch-knob {
@@ -190,10 +220,12 @@ function isPending(id) {
 	height: 12px;
 	border-radius: 50%;
 	background: var(--muted);
-	transition: transform 0.16s, background 0.16s;
+	box-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.15);
+	transition: transform 0.18s var(--ease-spring), background 0.18s;
 }
 
 .automation-switch.is-on {
+	border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 	background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 

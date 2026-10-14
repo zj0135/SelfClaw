@@ -98,7 +98,7 @@ const tabs = computed(() => [
 	flex: none;
 	flex-direction: column;
 	overflow: hidden;
-	border-left: 1px solid var(--border);
+	border-left: 1px solid var(--line-1);
 	background: var(--panel);
 }
 
@@ -108,15 +108,16 @@ const tabs = computed(() => [
 	flex-direction: column;
 	gap: 10px;
 	padding: 14px 14px 12px;
-	border-bottom: 1px solid var(--border);
+	border-bottom: 1px solid var(--line-1);
 }
 
 .automation-tabs {
 	display: flex;
-	gap: 4px;
+	gap: 3px;
 	padding: 3px;
 	border-radius: 10px;
 	background: var(--panel-muted);
+	border: 1px solid var(--line-1);
 }
 
 .automation-tab {
@@ -127,19 +128,29 @@ const tabs = computed(() => [
 	gap: 6px;
 	padding: 6px 10px;
 	border: 0;
-	border-radius: 8px;
+	border-radius: 7px;
 	background: transparent;
 	color: var(--muted);
 	font-size: var(--fs-12);
-	font-weight: 650;
+	font-weight: 600;
 	justify-content: center;
-	transition: background 0.16s, color 0.16s;
+	cursor: pointer;
+	transition: background 0.16s, color 0.16s, box-shadow 0.16s, transform 0.16s var(--ease-spring);
+}
+
+.automation-tab:hover:not(.is-active) {
+	color: var(--text);
+	background: color-mix(in srgb, var(--panel) 45%, transparent);
 }
 
 .automation-tab.is-active {
 	background: var(--panel);
 	color: var(--text);
-	box-shadow: var(--card-shadow);
+	box-shadow: 0 1px 4px rgba(var(--shadow-ink), 0.08);
+}
+
+.automation-tab:active {
+	transform: scale(0.97);
 }
 
 .automation-tab-icon {
@@ -149,10 +160,14 @@ const tabs = computed(() => [
 
 .automation-tab-count {
 	padding: 0 5px;
+	height: 16px;
+	line-height: 16px;
 	border-radius: 999px;
 	background: var(--panel-soft);
-	font-size: var(--fs-11);
+	font-family: var(--font-code, monospace);
+	font-size: 10.5px;
 	font-variant-numeric: tabular-nums;
+	color: var(--muted);
 }
 
 .automation-primary {
@@ -160,18 +175,31 @@ const tabs = computed(() => [
 	align-items: center;
 	justify-content: center;
 	gap: 6px;
-	padding: 8px 12px;
+	height: 34px;
+	padding: 0 14px;
 	border: 0;
-	border-radius: 10px;
+	border-radius: 9px;
 	background: var(--accent);
-	color: #fff;
-	font-size: var(--fs-13);
+	color: var(--accent-ink-on, #fff);
+	font-size: var(--fs-12);
 	font-weight: 650;
+	cursor: pointer;
+	box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 30%, transparent);
+	transition: filter 0.16s, box-shadow 0.16s, transform 0.16s var(--ease-spring);
+}
+
+.automation-primary:hover {
+	filter: brightness(1.05);
+	box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.automation-primary:active {
+	transform: scale(0.97);
 }
 
 .automation-primary-icon {
-	width: 15px;
-	height: 15px;
+	width: 14px;
+	height: 14px;
 }
 
 .automation-filters {
@@ -185,16 +213,23 @@ const tabs = computed(() => [
 	min-width: 0;
 	flex: 1 1 auto;
 	gap: 6px;
-	padding: 6px 9px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
+	padding: 5px 9px;
+	border: 1px solid var(--line-1);
+	border-radius: 8px;
 	background: var(--panel-soft);
+	transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.automation-search:focus-within {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 .automation-search-icon {
-	width: 14px;
-	height: 14px;
+	width: 13.5px;
+	height: 13.5px;
 	color: var(--muted);
+	flex: none;
 }
 
 .automation-search input {
@@ -207,13 +242,24 @@ const tabs = computed(() => [
 	outline: none;
 }
 
+.automation-search input::placeholder {
+	color: var(--faint);
+}
+
 .automation-select {
-	padding: 6px 8px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
+	padding: 5px 8px;
+	border: 1px solid var(--line-1);
+	border-radius: 8px;
 	background: var(--panel-soft);
 	color: var(--text);
 	font-size: var(--fs-12);
+	cursor: pointer;
+	transition: border-color 0.15s;
+}
+
+.automation-select:focus {
+	border-color: var(--accent);
+	outline: none;
 }
 
 .automation-panel-body {
@@ -231,15 +277,16 @@ const tabs = computed(() => [
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
-	padding: 6px 8px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
+	padding: 6px 10px;
+	border: 1px solid var(--line-1);
+	border-radius: 8px;
 	background: var(--panel-soft);
 }
 
 .automation-history-size {
 	color: var(--muted);
-	font-size: var(--fs-11);
+	font-family: var(--font-code, monospace);
+	font-size: 11px;
 	font-variant-numeric: tabular-nums;
 }
 
@@ -247,18 +294,24 @@ const tabs = computed(() => [
 	display: inline-flex;
 	align-items: center;
 	gap: 5px;
-	padding: 4px 8px;
-	border: 1px solid var(--border);
-	border-radius: 8px;
+	padding: 3px 8px;
+	border: 1px solid var(--line-1);
+	border-radius: 6px;
 	background: var(--panel);
 	color: var(--muted);
 	font-size: var(--fs-11);
-	font-weight: 650;
+	font-weight: 600;
+	cursor: pointer;
+	transition: border-color 0.15s, color 0.15s, transform 0.15s var(--ease-spring);
+}
+
+.automation-history-clear:active:not(:disabled) {
+	transform: scale(0.96);
 }
 
 .automation-history-clear svg {
-	width: 13px;
-	height: 13px;
+	width: 12px;
+	height: 12px;
 }
 
 .automation-history-clear:hover:not(:disabled) {
@@ -268,5 +321,6 @@ const tabs = computed(() => [
 
 .automation-history-clear:disabled {
 	opacity: 0.55;
+	cursor: not-allowed;
 }
 </style>

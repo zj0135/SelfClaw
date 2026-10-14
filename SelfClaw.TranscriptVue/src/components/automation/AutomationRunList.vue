@@ -20,14 +20,14 @@ function isTerminal(run) {
 </script>
 
 <template>
-	<p v-if="!runs.length" class="automation-empty">没有符合条件的运行记录。</p>
+	<p v-if="!runs.length" class="automation-empty">暂无运行记录</p>
 	<div v-for="run in runs" :key="run.id" class="automation-run" :class="`is-${run.status}`">
 		<button type="button" class="automation-run-open" @click="emit('open-run', run)">
 			<span class="automation-run-dot" aria-hidden="true"></span>
 			<span class="automation-run-main">
 				<span class="automation-run-title">{{ run.taskTitle || '自动化任务' }}</span>
 				<span class="automation-run-meta">
-					<span>{{ runStatusLabel(run.status) }}</span>
+					<span class="automation-run-badge">{{ runStatusLabel(run.status) }}</span>
 					<span v-if="run.trigger">{{ runTriggerLabel(run.trigger) }}</span>
 					<span>{{ formatLocalDateTime(runStartedAt(run), timeZone) }}</span>
 					<span v-if="run.durationMs">{{ formatDuration(run.durationMs) }}</span>
@@ -46,10 +46,9 @@ function isTerminal(run) {
 
 <style scoped>
 .automation-empty {
-	margin: 18px 6px;
-	color: var(--muted);
+	margin: 28px 6px;
+	color: var(--faint);
 	font-size: var(--fs-12);
-	line-height: 1.6;
 	text-align: center;
 }
 
@@ -58,15 +57,18 @@ function isTerminal(run) {
 	align-items: flex-start;
 	width: 100%;
 	gap: 4px;
-	padding: 6px;
-	border: 1px solid var(--border);
-	border-radius: 11px;
+	padding: 5px;
+	border: 1px solid var(--line-1);
+	border-radius: 9px;
 	background: var(--panel-soft);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.02);
+	transition: border-color 0.16s, background 0.16s, box-shadow 0.16s;
 }
 
 .automation-run:hover {
-	border-color: var(--border-strong);
+	border-color: var(--line-2);
 	background: var(--panel);
+	box-shadow: 0 2px 8px rgba(var(--shadow-ink), 0.05);
 }
 
 .automation-run-open {
@@ -75,34 +77,38 @@ function isTerminal(run) {
 	min-width: 0;
 	flex: 1 1 auto;
 	gap: 8px;
-	padding: 4px 5px;
+	padding: 4px 6px;
 	border: 0;
-	border-radius: 8px;
+	border-radius: 6px;
 	background: transparent;
 	text-align: left;
+	cursor: pointer;
 }
 
 .automation-run-dot {
-	width: 8px;
-	height: 8px;
+	width: 7px;
+	height: 7px;
 	flex: none;
-	margin-top: 5px;
+	margin-top: 6px;
 	border-radius: 50%;
 	background: var(--muted);
 }
 
 .automation-run.is-completed .automation-run-dot {
 	background: var(--success);
+	box-shadow: 0 0 6px color-mix(in srgb, var(--success) 45%, transparent);
 }
 
 .automation-run.is-failed .automation-run-dot,
 .automation-run.is-interrupted .automation-run-dot,
 .automation-run.is-cancelled .automation-run-dot {
 	background: var(--danger);
+	box-shadow: 0 0 6px color-mix(in srgb, var(--danger) 45%, transparent);
 }
 
 .automation-run.is-running .automation-run-dot {
 	background: var(--accent);
+	box-shadow: 0 0 8px var(--accent);
 	animation: ac-pulse 1.6s ease-out infinite;
 }
 
@@ -117,7 +123,8 @@ function isTerminal(run) {
 .automation-run-title {
 	color: var(--text);
 	font-size: var(--fs-13);
-	font-weight: 650;
+	font-weight: 600;
+	letter-spacing: -0.01em;
 }
 
 .automation-run-meta {
@@ -125,7 +132,15 @@ function isTerminal(run) {
 	flex-wrap: wrap;
 	gap: 4px 8px;
 	color: var(--muted);
-	font-size: var(--fs-11);
+	font-family: var(--font-code, monospace);
+	font-size: 10.5px;
+	font-variant-numeric: tabular-nums;
+	align-items: center;
+}
+
+.automation-run-badge {
+	font-family: inherit;
+	font-weight: 600;
 }
 
 .automation-run-error {
@@ -142,23 +157,31 @@ function isTerminal(run) {
 	height: 26px;
 	flex: none;
 	border: 1px solid transparent;
-	border-radius: 8px;
+	border-radius: 7px;
 	background: transparent;
 	color: var(--muted);
+	cursor: pointer;
+	transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s var(--ease-spring);
 }
 
 .automation-run-delete:hover:not(:disabled) {
 	border-color: color-mix(in srgb, var(--danger) 32%, transparent);
 	color: var(--danger);
+	background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.automation-run-delete:active:not(:disabled) {
+	transform: scale(0.92);
 }
 
 .automation-run-delete:disabled {
-	opacity: 0.55;
+	opacity: 0.45;
+	cursor: not-allowed;
 }
 
 .automation-run-delete svg {
-	width: 14px;
-	height: 14px;
+	width: 13px;
+	height: 13px;
 }
 
 @keyframes ac-pulse {

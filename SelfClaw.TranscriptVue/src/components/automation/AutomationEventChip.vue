@@ -46,19 +46,22 @@ const durationText = computed(() => (props.event.kind === 'run' ? formatDuration
 	align-items: center;
 	min-width: 0;
 	gap: 5px;
-	padding: 1px 2px;
+	padding: 2px 6px;
+	border-radius: 5px;
 	overflow: hidden;
-	color: inherit;
-	font-size: var(--fs-12);
-	line-height: 1.5;
+	color: var(--text);
+	font-size: var(--fs-11);
+	line-height: 1.4;
 	white-space: nowrap;
+	transition: background 0.14s ease, color 0.14s ease;
 }
 
 .ac-chip-icon,
 .ac-chip-overdue {
 	flex: none;
-	width: 13px;
-	height: 13px;
+	width: 12px;
+	height: 12px;
+	opacity: 0.85;
 }
 
 .ac-chip--projected .ac-chip-icon {
@@ -66,6 +69,15 @@ const durationText = computed(() => (props.event.kind === 'run' ? formatDuration
 }
 
 .ac-chip--todo .ac-chip-icon {
+	color: var(--muted);
+}
+
+.ac-chip--todo.ac-status-done {
+	opacity: 0.72;
+}
+
+.ac-chip--todo.ac-status-done .ac-chip-title {
+	text-decoration: line-through;
 	color: var(--muted);
 }
 
@@ -82,7 +94,7 @@ const durationText = computed(() => (props.event.kind === 'run' ? formatDuration
 
 .ac-chip--run.ac-status-running .ac-chip-icon {
 	color: var(--accent);
-	animation: ac-chip-spin 1.1s linear infinite;
+	animation: ac-chip-spin 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 .ac-chip--run.ac-status-skipped .ac-chip-icon {
@@ -97,25 +109,33 @@ const durationText = computed(() => (props.event.kind === 'run' ? formatDuration
 .ac-chip-time {
 	flex: none;
 	color: var(--muted);
+	font-family: var(--font-code, monospace);
+	font-size: 10.5px;
 	font-variant-numeric: tabular-nums;
+	letter-spacing: -0.02em;
 }
 
 .ac-chip-title {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	font-weight: 600;
+	font-weight: 580;
+	letter-spacing: -0.01em;
 }
 
 .ac-chip-badge,
 .ac-chip-duration {
 	flex: none;
-	padding: 0 5px;
-	border-radius: 999px;
-	background: var(--panel-muted);
+	padding: 0 4px;
+	height: 16px;
+	line-height: 16px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--panel-muted) 80%, transparent);
 	color: var(--muted);
-	font-size: var(--fs-11);
+	font-family: var(--font-code, monospace);
+	font-size: 10px;
 	font-weight: 600;
+	font-variant-numeric: tabular-nums;
 }
 
 @keyframes ac-chip-spin {

@@ -34,6 +34,7 @@ test('open automation, create a recurring task, project it onto the calendar, an
 
 	await expect(page.locator('.automation-drawer')).toBeVisible();
 	await expect(page.locator('.automation-drawer')).toContainText('Seed transcript content');
+	await page.waitForTimeout(300);
 	await page.screenshot({ path: 'test-results/automation-drawer.png', fullPage: true });
 	expect(errors).toEqual([]);
 });

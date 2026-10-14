@@ -35,14 +35,14 @@ function toggleWeekday(value) {
 
 	<div v-if="form.kind === 'once'" class="ac-schedule-row">
 		<label class="ac-field">
-			<span class="ac-field-label">触发时间（本地时间）</span>
+			<span class="ac-field-label">触发时间</span>
 			<input v-model="form.schedule.runAtLocal" type="datetime-local" />
 		</label>
 	</div>
 
 	<div v-else-if="form.kind === 'daily' || form.kind === 'weekly' || form.kind === 'monthly'" class="ac-schedule-row">
 		<label class="ac-field">
-			<span class="ac-field-label">时间（本地时间）</span>
+			<span class="ac-field-label">时间</span>
 			<input v-model="form.schedule.time" type="time" />
 		</label>
 		<div v-if="form.kind === 'weekly'" class="ac-field">
@@ -54,14 +54,14 @@ function toggleWeekday(value) {
 			</div>
 		</div>
 		<label v-if="form.kind === 'monthly'" class="ac-field">
-			<span class="ac-field-label">每月第几天</span>
+			<span class="ac-field-label">每月日期</span>
 			<input v-model.number="form.schedule.dayOfMonth" type="number" min="1" max="31" />
 		</label>
 	</div>
 
 	<div v-else-if="form.kind === 'cron'" class="ac-schedule-row">
 		<label class="ac-field ac-field-wide">
-			<span class="ac-field-label">Cron 表达式（最小间隔 5 分钟）</span>
+			<span class="ac-field-label">Cron 表达式</span>
 			<input v-model="form.schedule.cron" type="text" placeholder="*/15 * * * *" spellcheck="false" />
 		</label>
 	</div>
@@ -81,9 +81,10 @@ function toggleWeekday(value) {
 
 .ac-field-label {
 	color: var(--muted);
-	font-size: var(--fs-11);
+	font-family: var(--font-code, monospace);
+	font-size: var(--fs-10);
 	font-weight: 650;
-	letter-spacing: 0.04em;
+	letter-spacing: 0.08em;
 	text-transform: uppercase;
 }
 
@@ -92,13 +93,20 @@ function toggleWeekday(value) {
 .ac-field input[type='number'],
 .ac-field input[type='datetime-local'] {
 	width: 100%;
-	padding: 8px 10px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
+	padding: 7px 10px;
+	border: 1px solid var(--line-1);
+	border-radius: 8px;
 	background: var(--panel-soft);
 	color: var(--text);
 	font-family: inherit;
-	font-size: var(--fs-13);
+	font-size: var(--fs-12);
+	transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ac-field input:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
+	outline: none;
 }
 
 .ac-kind-row {
@@ -108,19 +116,32 @@ function toggleWeekday(value) {
 }
 
 .ac-kind {
-	padding: 6px 11px;
-	border: 1px solid var(--border);
+	padding: 5px 12px;
+	border: 1px solid var(--line-1);
 	border-radius: 999px;
 	background: var(--panel-soft);
 	color: var(--muted);
 	font-size: var(--fs-12);
-	font-weight: 650;
+	font-weight: 600;
+	cursor: pointer;
+	transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s var(--ease-spring);
+}
+
+.ac-kind:hover:not(.is-on) {
+	border-color: var(--line-2);
+	color: var(--text);
+	background: var(--panel);
+}
+
+.ac-kind:active {
+	transform: scale(0.96);
 }
 
 .ac-kind.is-on {
 	border-color: var(--accent);
-	background: color-mix(in srgb, var(--accent) 16%, transparent);
+	background: color-mix(in srgb, var(--accent) 15%, transparent);
 	color: var(--accent-2);
+	font-weight: 650;
 }
 
 .ac-schedule-row {
@@ -135,19 +156,32 @@ function toggleWeekday(value) {
 }
 
 .ac-weekday {
-	width: 30px;
-	height: 30px;
-	border: 1px solid var(--border);
-	border-radius: 8px;
+	width: 28px;
+	height: 28px;
+	border: 1px solid var(--line-1);
+	border-radius: 7px;
 	background: var(--panel-soft);
 	color: var(--muted);
-	font-size: var(--fs-12);
-	font-weight: 650;
+	font-size: var(--fs-11);
+	font-weight: 600;
+	cursor: pointer;
+	transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s var(--ease-spring);
+}
+
+.ac-weekday:hover:not(.is-on) {
+	background: var(--panel);
+	color: var(--text);
+	border-color: var(--line-2);
+}
+
+.ac-weekday:active {
+	transform: scale(0.92);
 }
 
 .ac-weekday.is-on {
 	border-color: var(--accent);
-	background: color-mix(in srgb, var(--accent) 16%, transparent);
+	background: color-mix(in srgb, var(--accent) 18%, transparent);
 	color: var(--accent-2);
+	font-weight: 650;
 }
 </style>
