@@ -254,12 +254,13 @@ ORDER BY updated_at_utc DESC;";
         {
             ConversationKind.Interactive => conversation.ParentConversationId is null,
             ConversationKind.Subagent => conversation.ParentConversationId is not null,
+            ConversationKind.Automation => conversation.ParentConversationId is null,
             _ => false
         };
         if (!valid)
         {
             throw new ArgumentException(
-                "Interactive conversations cannot have a parent and Subagent conversations require one.",
+                "Interactive and Automation conversations cannot have a parent and Subagent conversations require one.",
                 nameof(conversation));
         }
     }

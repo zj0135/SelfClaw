@@ -24,6 +24,7 @@ using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Plugins;
+using SelfClaw.Desktop.Services.Automation;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
 using SelfClaw.Desktop.Services.Subagents;
@@ -45,6 +46,8 @@ using SelfClaw.Infrastructure.Extensions.Discovery;
 using SelfClaw.Infrastructure.Options;
 using Serilog;
 using Serilog.Events;
+using TickerQ.DependencyInjection;
+using TickerQ.Utilities.Enums;
 
 namespace SelfClaw.Desktop.Composition;
 
@@ -81,6 +84,7 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<SubagentTaskBackgroundHost>();
         services.AddHostedService(services =>
             services.GetRequiredService<SubagentTaskBackgroundHost>());
+        services.AddAutomationScheduler();
         services.AddSingleton<SubagentContinuationExecutor>();
         services.AddSingleton<SubagentDeliveryDispatcher>();
         services.AddHostedService(services =>
@@ -222,5 +226,39 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<StoragePaths>(),
             services.GetRequiredService<DesktopConversationActivationService>(),
             services.GetRequiredService<ILogger<MainWindow>>()));
+    }
+
+    internal static IServiceCollection AddAutomationScheduler(this IServiceCollection services)
+    {
+        services.AddSingleton<AutomationRunCancellationRegistry>();
+        services.AddSingleton<IAutomationRunExecutor, AutomationRunPlaceholderExecutor>();
+        services.AddSingleton<IAutomationScheduleRegistrar, TickerQAutomationScheduleRegistrar>();
+        services.AddSingleton<AutomationSchedulerHost>();
+        services.AddHostedService(services =>
+            services.GetRequiredService<AutomationSchedulerHost>());
+        services.AddTickerQ(options =>
+        {
+            options.ConfigureScheduler(scheduler =>
+            {
+                scheduler.SchedulerTimeZone = TimeZoneInfo.Local;
+                scheduler.MaxConcurrency = 1;
+                scheduler.MinPollingInterval = TimeSpan.FromSeconds(1);
+            });
+        });
+        services.MapTicker<AutomationTickerPayload>(
+            TickerQAutomationScheduleRegistrar.FunctionName,
+            (context, provider, cancellationToken) =>
+            {
+                var payload = context.Request;
+                var scheduledFor = payload.ScheduledForUtc ?? new DateTimeOffset(
+                    context.ScheduledFor.Kind == DateTimeKind.Utc
+                        ? context.ScheduledFor
+                        : TimeZoneInfo.ConvertTimeToUtc(
+                            DateTime.SpecifyKind(context.ScheduledFor, DateTimeKind.Unspecified),
+                            TimeZoneInfo.Local));
+                return provider.GetRequiredService<AutomationSchedulerHost>()
+                    .HandleTickerAsync(payload, scheduledFor, cancellationToken);
+            });
+        return services;
     }
 }

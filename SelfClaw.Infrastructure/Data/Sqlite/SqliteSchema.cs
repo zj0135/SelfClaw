@@ -26,7 +26,9 @@ internal static class SqliteSchema
         "conversation_turns",
         "conversation_message_sequences",
         "conversation_inputs",
-        "conversation_input_state"
+        "conversation_input_state",
+        "automation_tasks",
+        "automation_runs"
     ];
 
     internal const string CreateSql = """
@@ -100,7 +102,9 @@ internal static class SqliteSchema
             updated_at_utc TEXT NOT NULL,
             kind INTEGER NOT NULL DEFAULT 0,
             parent_conversation_id TEXT NULL,
-            CHECK((kind = 0 AND parent_conversation_id IS NULL) OR (kind = 1 AND parent_conversation_id IS NOT NULL)),
+            CHECK((kind = 0 AND parent_conversation_id IS NULL)
+               OR (kind = 1 AND parent_conversation_id IS NOT NULL)
+               OR (kind = 2 AND parent_conversation_id IS NULL)),
             FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL,
             FOREIGN KEY(parent_conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
@@ -321,7 +325,7 @@ internal static class SqliteSchema
             id TEXT NOT NULL PRIMARY KEY,
             conversation_id TEXT NOT NULL,
             execution_mode INTEGER NOT NULL CHECK(execution_mode IN (0, 1)),
-            origin INTEGER NOT NULL CHECK(origin BETWEEN 0 AND 2),
+            origin INTEGER NOT NULL CHECK(origin BETWEEN 0 AND 3),
             status INTEGER NOT NULL CHECK(status BETWEEN 0 AND 6),
             started_at_utc TEXT NOT NULL,
             completed_at_utc TEXT NULL,
@@ -382,6 +386,57 @@ internal static class SqliteSchema
             FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE automation_tasks (
+            id TEXT NOT NULL PRIMARY KEY,
+            title TEXT NOT NULL,
+            notes TEXT NOT NULL DEFAULT '',
+            kind INTEGER NOT NULL CHECK(kind BETWEEN 0 AND 5),
+            schedule_json TEXT NULL,
+            next_run_at_utc TEXT NULL,
+            prompt TEXT NULL,
+            instructions TEXT NOT NULL DEFAULT '',
+            tool_policy TEXT NOT NULL DEFAULT 'system',
+            plugin_ids_json TEXT NOT NULL DEFAULT '[]',
+            skill_ids_json TEXT NOT NULL DEFAULT '[]',
+            mcp_server_ids_json TEXT NOT NULL DEFAULT '[]',
+            model_profile_id TEXT NULL,
+            workspace_root_id TEXT NULL,
+            tool_permission_mode INTEGER NOT NULL DEFAULT 1,
+            status INTEGER NOT NULL DEFAULT 0 CHECK(status BETWEEN 0 AND 1),
+            completed_at_utc TEXT NULL,
+            due_at_utc TEXT NULL,
+            is_enabled INTEGER NOT NULL DEFAULT 1,
+            last_run_at_utc TEXT NULL,
+            last_run_status INTEGER NULL,
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL,
+            CHECK(kind = 0 OR prompt IS NOT NULL),
+            CHECK(kind = 0 OR schedule_json IS NOT NULL),
+            FOREIGN KEY(workspace_root_id) REFERENCES workspace_roots(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE automation_runs (
+            id TEXT NOT NULL PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            conversation_id TEXT NULL,
+            trigger INTEGER NOT NULL CHECK(trigger BETWEEN 0 AND 2),
+            scheduled_for_utc TEXT NULL,
+            status INTEGER NOT NULL CHECK(status BETWEEN 0 AND 6),
+            skip_reason INTEGER NULL,
+            attempt INTEGER NOT NULL DEFAULT 1,
+            model_profile_id TEXT NULL,
+            capability_snapshot_json TEXT NULL,
+            workspace_root_id TEXT NULL,
+            workspace_path_snapshot TEXT NULL,
+            started_at_utc TEXT NULL,
+            completed_at_utc TEXT NULL,
+            error_code TEXT NULL,
+            error_message TEXT NULL,
+            created_at_utc TEXT NOT NULL,
+            FOREIGN KEY(task_id) REFERENCES automation_tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        );
+
         CREATE INDEX ix_conversations_updated ON conversations(updated_at_utc DESC);
         CREATE INDEX ix_turn_usage_conversation_created ON turn_usage(conversation_id, created_at_utc);
         CREATE INDEX ix_message_attachments_message ON message_attachments(message_id, created_at_utc);
@@ -401,6 +456,11 @@ internal static class SqliteSchema
         CREATE INDEX ix_conversation_turns_conversation ON conversation_turns(conversation_id, started_at_utc);
         CREATE INDEX ix_conversation_inputs_status ON conversation_inputs(conversation_id, status, kind, sequence);
         CREATE INDEX ix_conversation_inputs_claim ON conversation_inputs(claim_id, claim_owner_run_id);
+        CREATE UNIQUE INDEX ux_automation_runs_scheduled
+            ON automation_runs(task_id, scheduled_for_utc) WHERE scheduled_for_utc IS NOT NULL;
+        CREATE INDEX ix_automation_runs_task_created ON automation_runs(task_id, created_at_utc DESC);
+        CREATE INDEX ix_automation_runs_status ON automation_runs(status, scheduled_for_utc);
+        CREATE INDEX ix_automation_tasks_next_run ON automation_tasks(is_enabled, next_run_at_utc);
 
         CREATE TRIGGER tool_runs_assistant_insert BEFORE INSERT ON tool_runs
         WHEN NOT EXISTS (SELECT 1 FROM messages WHERE id = NEW.message_id AND role = 2)

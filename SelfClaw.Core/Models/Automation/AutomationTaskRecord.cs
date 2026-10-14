@@ -1,0 +1,26 @@
+namespace SelfClaw.Core.Models;
+
+public sealed record AutomationTaskRecord(
+    Guid Id,
+    string Title,
+    string Notes,
+    AutomationTaskKind Kind,
+    AutomationScheduleSpec? Schedule,
+    DateTimeOffset? NextRunAtUtc,
+    string? Prompt,
+    string Instructions,
+    string ToolPolicy,
+    IReadOnlyList<string> PluginIds,
+    IReadOnlyList<string> SkillIds,
+    IReadOnlyList<string> McpServerIds,
+    Guid? ModelProfileId,
+    Guid? WorkspaceRootId,
+    ToolPermissionMode ToolPermissionMode,
+    AutomationTaskStatus Status,
+    DateTimeOffset? CompletedAtUtc,
+    DateTimeOffset? DueAtUtc,
+    bool IsEnabled,
+    DateTimeOffset? LastRunAtUtc,
+    AutomationRunStatus? LastRunStatus,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc);

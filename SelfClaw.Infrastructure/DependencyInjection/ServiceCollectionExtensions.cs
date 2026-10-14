@@ -38,6 +38,7 @@ using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
+using SelfClaw.Infrastructure.Automation;
 
 namespace SelfClaw.Infrastructure;
 
@@ -67,6 +68,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IConversationInputSchedulerStore>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
         services.AddSingleton<SqliteStartupRecovery>();
+        services.AddSingleton<AutomationStartupRecovery>();
+        services.AddSingleton<IAutomationStartupRecovery>(serviceProvider =>
+            serviceProvider.GetRequiredService<AutomationStartupRecovery>());
+        services.AddSingleton(new AutomationScheduleCalculator(TimeZoneInfo.Local));
+        services.AddSingleton<SqliteAutomationTaskRepository>();
+        services.AddSingleton<IAutomationTaskStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteAutomationTaskRepository>());
+        services.AddSingleton<SqliteAutomationRunRepository>();
+        services.AddSingleton<IAutomationRunStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteAutomationRunRepository>());
         services.AddSingleton<IUsageStatisticsReader, SqliteUsageStatisticsReader>();
         services.AddSingleton<SqliteWorkspaceRepository>();
         services.AddSingleton<IWorkspaceRootRepository>(serviceProvider => serviceProvider.GetRequiredService<SqliteWorkspaceRepository>());

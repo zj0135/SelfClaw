@@ -22,6 +22,8 @@ using SelfClaw.Infrastructure;
 using SelfClaw.Infrastructure.Options;
 using Serilog;
 using Serilog.Events;
+using TickerQ.DependencyInjection;
+using TickerQ.Utilities.Enums;
 
 namespace SelfClaw.Desktop;
 
@@ -59,6 +61,7 @@ public sealed partial class App : System.Windows.Application
             builder.Services.AddSelfClawInfrastructure(_storagePaths);
             builder.Services.AddSelfClawDesktop(Dispatcher);
             _host = builder.Build();
+            _host.UseTickerQ(TickerQStartMode.Immediate);
 
             Log.Information("SelfClaw starting. LogsDirectory={LogsDirectory}", _storagePaths.LogsDirectory);
 

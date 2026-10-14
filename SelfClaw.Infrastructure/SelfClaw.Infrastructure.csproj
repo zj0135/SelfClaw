@@ -10,6 +10,7 @@
     <PackageReference Include="Microsoft.Extensions.AI" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="NCrontab" />
     <PackageReference Include="OllamaSharp" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />

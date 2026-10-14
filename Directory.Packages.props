@@ -7,6 +7,8 @@
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageVersion Include="FluentAssertions" Version="8.11.0" />
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.2.0" />
+    <PackageVersion Include="NCrontab" Version="3.3.0" />
+    <PackageVersion Include="TickerQ" Version="10.4.0" />
     <PackageVersion Include="Anthropic" Version="12.49.0" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.AI" Version="10.10.0" />
