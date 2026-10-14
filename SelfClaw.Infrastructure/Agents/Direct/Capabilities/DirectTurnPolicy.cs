@@ -4,7 +4,7 @@ using SelfClaw.Core.Runtime;
 namespace SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 
 /// <summary>
-/// The single place that answers "what may this turn do". The three Direct origins differ in which
+/// The single place that answers "what may this turn do". The Direct origins differ in which
 /// capability boundary applies, whether a captured capability must still resolve, and which turn-scoped
 /// inputs exist; those rules used to be re-derived at eleven call sites across seven files. The policy is a
 /// pure function of the request, so every consumer reads the same answer.
@@ -14,8 +14,8 @@ internal sealed record DirectTurnPolicy(DirectTurnOrigin Origin, DirectCapabilit
     internal static DirectTurnPolicy For(DirectChatTurnRequest request)
         => new(request.ExecutionContext.Origin, request.ExecutionContext.CapabilityCeiling);
 
-    /// <summary>An interactive turn is bounded by its Agent's bindings; a delegated turn by the captured ceiling.</summary>
-    internal bool IsDelegated => Origin is not DirectTurnOrigin.Interactive;
+    /// <summary>An interactive or automation turn is bounded by its own Agent bindings; a delegated turn by the captured ceiling.</summary>
+    internal bool IsDelegated => Origin is DirectTurnOrigin.Subagent or DirectTurnOrigin.Continuation;
 
     /// <summary>A Subagent child must still satisfy the captured ceiling, so a missing or changed capability is fatal.</summary>
     internal bool RequiresCapturedCapabilities => Origin == DirectTurnOrigin.Subagent;
@@ -29,10 +29,10 @@ internal sealed record DirectTurnPolicy(DirectTurnOrigin Origin, DirectCapabilit
     /// <summary>A continuation resumes the parent's completion batch instead of a fresh user message.</summary>
     internal bool HasFreshUserMessage => Origin != DirectTurnOrigin.Continuation;
 
-    /// <summary>A Subagent child cannot delegate further.</summary>
-    internal bool CanDelegateToSubagent => Origin != DirectTurnOrigin.Subagent;
+    /// <summary>A Subagent child cannot delegate further, and v1 automation never delegates either.</summary>
+    internal bool CanDelegateToSubagent => Origin is not (DirectTurnOrigin.Subagent or DirectTurnOrigin.Automation);
 
-    /// <summary>Interactive turns see every Skill their Agent binds; delegated turns only those inside the ceiling.</summary>
+    /// <summary>Interactive and automation turns see every Skill their Agent binds; delegated turns only those inside the ceiling.</summary>
     internal bool AllowsSkill(string skillId)
         => !IsDelegated ||
            Ceiling?.Skills.Any(captured =>

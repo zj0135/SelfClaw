@@ -125,6 +125,55 @@ public sealed class SqliteAutomationRepositoryTests : IDisposable
         (await runStore.TryCompleteAsync(run.Id, claimed)).Should().BeNull();
     }
 
+    [Fact]
+    public async Task Saving_a_task_with_a_prompt_forces_full_access_while_a_todo_keeps_its_mode()
+    {
+        var (taskStore, _, _) = await CreateStoresAsync();
+        var prompted = CreateTask() with { ToolPermissionMode = ToolPermissionMode.RequireApproval };
+        var todo = CreateTask() with { Kind = AutomationTaskKind.None, Prompt = null, ToolPermissionMode = ToolPermissionMode.RequireApproval };
+
+        await taskStore.SaveAsync(prompted);
+        await taskStore.SaveAsync(todo);
+
+        (await taskStore.GetAsync(prompted.Id))!.ToolPermissionMode.Should().Be(ToolPermissionMode.FullAccess);
+        (await taskStore.GetAsync(todo.Id))!.ToolPermissionMode.Should().Be(ToolPermissionMode.RequireApproval);
+    }
+
+    [Fact]
+    public async Task Record_attempt_persists_the_resolved_model_snapshot_and_workspace()
+    {
+        var (taskStore, runStore, database) = await CreateStoresAsync();
+        var task = CreateTask();
+        await taskStore.SaveAsync(task);
+        var run = CreateRun(task.Id, AutomationRunStatus.Queued, DateTimeOffset.UtcNow);
+        await runStore.TryInsertAsync(run, skipWhenTaskActive: false);
+        var claimed = await runStore.TryClaimAsync(run.Id, DateTimeOffset.UtcNow);
+        var conversation = new ConversationRecord(
+            Guid.NewGuid(),
+            "Automation",
+            null,
+            ConversationMode.Programming,
+            ToolPermissionMode.FullAccess,
+            "automation:fixture",
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            Kind: ConversationKind.Automation);
+        await new SqliteConversationRepository(database).UpsertConversationAsync(conversation);
+        var attemptStore = (IAutomationRunAttemptStore)runStore;
+        var modelProfileId = Guid.NewGuid();
+
+        var recorded = await attemptStore.RecordAttemptAsync(new AutomationRunAttempt(
+            run.Id, 2, conversation.Id, modelProfileId, "{\"version\":1}", null, null, DateTimeOffset.UtcNow));
+
+        recorded.Should().NotBeNull();
+        recorded!.ConversationId.Should().Be(conversation.Id);
+        recorded.Attempt.Should().Be(2);
+        recorded.ModelProfileId.Should().Be(modelProfileId);
+        recorded.CapabilitySnapshotJson.Should().Be("{\"version\":1}");
+        (await attemptStore.RecordAttemptAsync(new AutomationRunAttempt(
+            claimed!.Id, 3, conversation.Id, modelProfileId, "{}", null, null, DateTimeOffset.UtcNow))).Should().NotBeNull();
+    }
+
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))

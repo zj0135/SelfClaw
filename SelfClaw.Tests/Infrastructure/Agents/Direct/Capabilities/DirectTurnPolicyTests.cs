@@ -12,6 +12,10 @@ namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Capabilities;
 public sealed class DirectTurnPolicyTests
 {
     [Fact]
+    public void Automation_origin_keeps_its_existing_numeric_value()
+        => ((int)DirectTurnOrigin.Automation).Should().Be(3);
+
+    [Fact]
     public void Interactive_turns_use_their_agent_bindings()
     {
         var policy = DirectTurnPolicy.For(Request(DirectTurnOrigin.Interactive, ceiling: null));
@@ -61,6 +65,24 @@ public sealed class DirectTurnPolicyTests
         policy.AllowsMcpServer(Server("git", revision: 3)).Should().BeTrue();
         policy.AllowsMcpServer(Server("git", revision: 4)).Should().BeFalse();
         policy.DiagnosesRemovedCapabilities.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Automation_turns_self_bound_like_interactive_and_never_delegate()
+    {
+        var policy = DirectTurnPolicy.For(Request(DirectTurnOrigin.Automation, ceiling: null));
+
+        policy.IsDelegated.Should().BeFalse();
+        policy.RequiresCapturedCapabilities.Should().BeFalse();
+        policy.ShrinksToCapturedCapabilities.Should().BeFalse();
+        policy.RequiresToolExecutionCheckpoint.Should().BeFalse();
+        policy.HasFreshUserMessage.Should().BeTrue();
+        policy.CanDelegateToSubagent.Should().BeFalse();
+        // A sampled skill/MCP must survive even though no ceiling is captured, or the task runs silently
+        // without the tools it was configured with.
+        policy.AllowsSkill("anything/skill").Should().BeTrue();
+        policy.AllowsMcpServer(Server("git", revision: 99)).Should().BeTrue();
+        policy.DiagnosesRemovedCapabilities.Should().BeFalse();
     }
 
     private static DirectCapabilityCeiling Ceiling()

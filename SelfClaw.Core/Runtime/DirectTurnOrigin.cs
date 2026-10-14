@@ -4,5 +4,6 @@ public enum DirectTurnOrigin
 {
     Interactive = 0,
     Subagent = 1,
-    Continuation = 2
+    Continuation = 2,
+    Automation = 3
 }

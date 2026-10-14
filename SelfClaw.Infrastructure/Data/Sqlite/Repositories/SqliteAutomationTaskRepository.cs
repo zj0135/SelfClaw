@@ -45,6 +45,7 @@ internal sealed class SqliteAutomationTaskRepository : IAutomationTaskStore
     public async Task<AutomationTaskRecord> SaveAsync(AutomationTaskRecord task, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(task);
+        task = Normalize(task);
         await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -123,6 +124,12 @@ internal sealed class SqliteAutomationTaskRepository : IAutomationTaskStore
         command.Parameters.AddWithValue("$id", taskId.ToString("D"));
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
     }
+
+    private static AutomationTaskRecord Normalize(AutomationTaskRecord task)
+        // A task that will run an unattended Direct turn may not gate its tools behind an approval no one
+        // can answer: the single explicit confirmation happens when the prompt is saved. Pure todos keep
+        // whatever mode they carry because they never invoke a tool.
+        => task.Prompt is null ? task : task with { ToolPermissionMode = ToolPermissionMode.FullAccess };
 
     private static SqliteCommand CreateSelectCommand(SqliteConnection connection, SqliteTransaction? transaction = null)
     {

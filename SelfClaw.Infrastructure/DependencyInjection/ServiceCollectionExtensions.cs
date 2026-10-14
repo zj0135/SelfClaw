@@ -78,6 +78,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SqliteAutomationRunRepository>();
         services.AddSingleton<IAutomationRunStore>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteAutomationRunRepository>());
+        services.AddSingleton<IAutomationRunAttemptStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<SqliteAutomationRunRepository>());
         services.AddSingleton<IUsageStatisticsReader, SqliteUsageStatisticsReader>();
         services.AddSingleton<SqliteWorkspaceRepository>();
         services.AddSingleton<IWorkspaceRootRepository>(serviceProvider => serviceProvider.GetRequiredService<SqliteWorkspaceRepository>());

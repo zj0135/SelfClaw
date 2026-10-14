@@ -240,6 +240,35 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
     }
 
     [Fact]
+    public async Task ResolveAsync_automation_binds_its_skill_and_mcp_tools_without_a_ceiling()
+    {
+        var skill = await CreatePackageAsync("review", true);
+        var server = CreateMcpRecord("fixture");
+        var resolver = CreateResolver(
+            new PackageRepository([skill]),
+            CreateMcpSource(new McpRepository([server]), new RecordingMcpClientManager(string.Empty, [CreateMcpTool("echo")])));
+        var now = DateTimeOffset.UtcNow;
+        var request = CreateRequest(["review"], "[/review] run the review", mcpServerIds: [server.Id]) with
+        {
+            WorkspaceRoot = new WorkspaceRoot(Guid.NewGuid(), "Workspace", _rootPath, now, now),
+            ExecutionContext = new DirectTurnExecutionContext(
+                DirectTurnOrigin.Automation,
+                CapabilityCeiling: null,
+                CompletionBatch: null)
+        };
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        // The whole point of the policy change: an automation turn with no captured ceiling must still see
+        // the skill and MCP tools it was configured with instead of silently binding none.
+        lease.Tools.Select(tool => tool.Name).Should().Contain("activate_skill")
+            .And.Contain("read_skill_resource")
+            .And.Contain("mcp__fixture__echo")
+            .And.Contain("read_file");
+        lease.Diagnostics.Should().NotContain(item => item.Contains("removed"));
+    }
+
+    [Fact]
     public async Task ResolveAsync_expands_acknowledged_plugin_instructions_and_namespaced_skills()
     {
         var limits = CreateLimits();

@@ -7,6 +7,7 @@ using System.Text.Json;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Desktop.Services.Automation;
 using SelfClaw.Infrastructure.Agents.Runtime;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Tools;
@@ -23,6 +24,21 @@ public sealed class DirectToolInvokerTests
 
         result.Should().BeOfType<JsonElement>().Which.GetString().Should().Be("ok");
         handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AutomationFullAccess_executesAnApprovalGatedToolWithoutPrompting()
+    {
+        var handler = new AutomationToolApprovalHandler(Microsoft.Extensions.Logging.Abstractions.NullLogger<AutomationToolApprovalHandler>.Instance);
+        var pipeline = CreatePipeline(
+            ToolPermissionMode.FullAccess,
+            handler,
+            origin: DirectTurnOrigin.Automation);
+
+        var result = await pipeline.InvokeAsync();
+
+        result.Should().BeOfType<JsonElement>().Which.GetString().Should().Be("ok");
+        pipeline.Order.Should().Equal("tool");
     }
 
     [Fact]
@@ -150,7 +166,8 @@ public sealed class DirectToolInvokerTests
         ToolPermissionMode permissionMode,
         IToolApprovalHandler? approvalHandler,
         Func<List<string>, IToolExecutionCheckpoint>? checkpointFactory = null,
-        bool requiresApproval = true)
+        bool requiresApproval = true,
+        DirectTurnOrigin origin = DirectTurnOrigin.Interactive)
     {
         var order = new List<string>();
         var function = AIFunctionFactory.Create(
@@ -167,7 +184,7 @@ public sealed class DirectToolInvokerTests
             requiresApproval,
             "stdio: node",
             "{\"readOnlyHint\":true}");
-        var request = CreateRequest(permissionMode, approvalHandler, checkpointFactory?.Invoke(order));
+        var request = CreateRequest(permissionMode, approvalHandler, checkpointFactory?.Invoke(order), origin);
         var invoker = new DirectToolInvoker(
             request,
             new Dictionary<string, DirectToolBinding>(StringComparer.Ordinal)
@@ -180,7 +197,8 @@ public sealed class DirectToolInvokerTests
     private static DirectChatTurnRequest CreateRequest(
         ToolPermissionMode permissionMode,
         IToolApprovalHandler? approvalHandler,
-        IToolExecutionCheckpoint? checkpoint)
+        IToolExecutionCheckpoint? checkpoint,
+        DirectTurnOrigin origin = DirectTurnOrigin.Interactive)
     {
         var now = DateTimeOffset.UtcNow;
         return new DirectChatTurnRequest(
@@ -195,7 +213,7 @@ public sealed class DirectToolInvokerTests
             null,
             permissionMode,
             approvalHandler,
-            new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null),
+            new DirectTurnExecutionContext(origin, null, null),
             ToolExecutionCheckpoint: checkpoint);
     }
 

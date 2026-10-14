@@ -18,5 +18,4 @@ public static class AutomationErrorCodes
     public const string ProcessInterrupted = "ProcessInterrupted";
     public const string CancelledByUser = "CancelledByUser";
     public const string ApplicationStopping = "ApplicationStopping";
-    public const string NotImplemented = "NotImplemented";
 }

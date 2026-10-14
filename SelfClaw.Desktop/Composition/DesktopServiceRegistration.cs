@@ -231,7 +231,9 @@ internal static class DesktopServiceRegistration
     internal static IServiceCollection AddAutomationScheduler(this IServiceCollection services)
     {
         services.AddSingleton<AutomationRunCancellationRegistry>();
-        services.AddSingleton<IAutomationRunExecutor, AutomationRunPlaceholderExecutor>();
+        services.AddSingleton<AutomationRunSnapshotSerializer>();
+        services.AddSingleton<AutomationToolApprovalHandler>();
+        services.AddSingleton<IAutomationRunExecutor, AutomationRunExecutor>();
         services.AddSingleton<IAutomationScheduleRegistrar, TickerQAutomationScheduleRegistrar>();
         services.AddSingleton<AutomationSchedulerHost>();
         services.AddHostedService(services =>

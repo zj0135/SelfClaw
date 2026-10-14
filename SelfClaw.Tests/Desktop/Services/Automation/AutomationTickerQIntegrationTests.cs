@@ -23,7 +23,7 @@ public sealed class AutomationTickerQIntegrationTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public async Task Once_ticker_fires_through_tickerq_and_the_placeholder_executor_records_the_run()
+    public async Task Once_ticker_fires_through_tickerq_and_the_executor_records_the_run()
     {
         var database = new SqliteDatabase(StoragePathDefaults.Create(
             _rootPath,
@@ -40,6 +40,8 @@ public sealed class AutomationTickerQIntegrationTests : IDisposable
         builder.Services.AddSingleton(new AutomationScheduleCalculator(TimeZoneInfo.Local));
         builder.Services.AddSingleton<IAutomationStartupRecovery>(new AutomationStartupRecovery(database));
         builder.Services.AddAutomationScheduler();
+        // This test only proves TickerQ wakes the scheduler and a claimed run reaches its executor.
+        builder.Services.AddSingleton<IAutomationRunExecutor, CompletingExecutor>();
         var host = builder.Build();
         host.UseTickerQ(TickerQStartMode.Immediate);
         await host.StartAsync();
@@ -54,8 +56,7 @@ public sealed class AutomationTickerQIntegrationTests : IDisposable
             var recorded = await WaitForRunAsync(runStore, task.Id, TimeSpan.FromSeconds(30));
 
             recorded.Should().NotBeNull();
-            recorded!.Status.Should().Be(AutomationRunStatus.Failed);
-            recorded.ErrorCode.Should().Be(SelfClaw.Core.Runtime.AutomationErrorCodes.NotImplemented);
+            recorded!.Status.Should().Be(AutomationRunStatus.Completed);
             recorded.Trigger.Should().Be(AutomationRunTrigger.Scheduled);
         }
         finally
@@ -128,5 +129,22 @@ public sealed class AutomationTickerQIntegrationTests : IDisposable
             null,
             now,
             now);
+    }
+
+    private sealed class CompletingExecutor : IAutomationRunExecutor
+    {
+        private readonly IAutomationRunStore _runStore;
+
+        public CompletingExecutor(IAutomationRunStore runStore)
+        {
+            _runStore = runStore;
+        }
+
+        public Task ExecuteAsync(AutomationRunRecord run, AutomationTaskRecord task, CancellationToken cancellationToken)
+            => _runStore.TryCompleteAsync(run.Id, run with
+            {
+                Status = AutomationRunStatus.Completed,
+                CompletedAtUtc = DateTimeOffset.UtcNow
+            }, cancellationToken);
     }
 }

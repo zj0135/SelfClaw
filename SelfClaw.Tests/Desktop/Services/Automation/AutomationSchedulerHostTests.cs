@@ -128,28 +128,46 @@ public sealed class AutomationSchedulerHostTests : IDisposable
     }
 
     [Fact]
-    public async Task Placeholder_executor_marks_the_run_failed_with_not_implemented()
+    public async Task Once_task_success_marks_the_task_done_and_stops_rescheduling()
     {
         var harness = await CreateHarnessAsync();
         var now = DateTimeOffset.UtcNow;
-        var task = CreateTask(AutomationTaskKind.Daily, new AutomationScheduleSpec(Time: "09:00"), now);
+        var task = CreateTask(AutomationTaskKind.Once, new AutomationScheduleSpec(RunAtUtc: now.AddMinutes(-1)), now.AddMinutes(-1));
         await harness.TaskStore.SaveAsync(task);
-        var run = CreateRun(task.Id, AutomationRunTrigger.Scheduled, AutomationRunStatus.Running, now);
-        await harness.RunStore.TryInsertAsync(run, skipWhenTaskActive: false);
-        var executor = new AutomationRunPlaceholderExecutor(harness.RunStore);
+        await harness.Host.StartSchedulingAsync(CancellationToken.None);
 
-        await executor.ExecuteAsync(run, task, CancellationToken.None);
+        await harness.Host.SweepMissedRunsAsync(CancellationToken.None);
 
-        var completed = await harness.RunStore.GetAsync(run.Id);
-        completed!.Status.Should().Be(AutomationRunStatus.Failed);
-        completed.ErrorCode.Should().Be(AutomationErrorCodes.NotImplemented);
+        var reloaded = await harness.TaskStore.GetAsync(task.Id);
+        reloaded!.Status.Should().Be(AutomationTaskStatus.Done);
+        reloaded.CompletedAtUtc.Should().NotBeNull();
+        reloaded.NextRunAtUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Once_task_failure_keeps_it_open_without_rescheduling()
+    {
+        var harness = await CreateHarnessAsync(runStore => new FailingExecutor(runStore));
+        var now = DateTimeOffset.UtcNow;
+        var task = CreateTask(AutomationTaskKind.Once, new AutomationScheduleSpec(RunAtUtc: now.AddMinutes(-1)), now.AddMinutes(-1));
+        await harness.TaskStore.SaveAsync(task);
+        await harness.Host.StartSchedulingAsync(CancellationToken.None);
+
+        await harness.Host.SweepMissedRunsAsync(CancellationToken.None);
+
+        var reloaded = await harness.TaskStore.GetAsync(task.Id);
+        reloaded!.Status.Should().Be(AutomationTaskStatus.Open);
+        reloaded.CompletedAtUtc.Should().BeNull();
+        reloaded.NextRunAtUtc.Should().BeNull();
+        (await harness.RunStore.ListAsync(task.Id, 10)).Should().ContainSingle()
+            .Which.Status.Should().Be(AutomationRunStatus.Failed);
     }
 
     [Fact]
     public async Task Cancellation_registry_cancels_a_running_run_and_the_host_records_application_stopping()
     {
         var executor = new BlockingExecutor();
-        var harness = await CreateHarnessAsync(executor);
+        var harness = await CreateHarnessAsync(_ => executor);
         var now = DateTimeOffset.UtcNow;
         var task = CreateTask(AutomationTaskKind.Daily, new AutomationScheduleSpec(Time: "09:00"), now.AddMinutes(-1));
         await harness.TaskStore.SaveAsync(task);
@@ -187,7 +205,7 @@ public sealed class AutomationSchedulerHostTests : IDisposable
         }
     }
 
-    private async Task<Harness> CreateHarnessAsync(IAutomationRunExecutor? executor = null)
+    private async Task<Harness> CreateHarnessAsync(Func<IAutomationRunStore, IAutomationRunExecutor>? executorFactory = null)
     {
         var database = new SqliteDatabase(StoragePathDefaults.Create(
             _rootPath,
@@ -199,7 +217,7 @@ public sealed class AutomationSchedulerHostTests : IDisposable
         var registrar = new FakeAutomationScheduleRegistrar();
         var cancellations = new AutomationRunCancellationRegistry();
         var fakeExecutor = new FakeAutomationRunExecutor(runStore);
-        var runExecutor = executor ?? fakeExecutor;
+        var runExecutor = executorFactory?.Invoke(runStore) ?? fakeExecutor;
         var host = new AutomationSchedulerHost(
             taskStore,
             runStore,
@@ -336,5 +354,23 @@ public sealed class AutomationSchedulerHostTests : IDisposable
             Started.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         }
+    }
+
+    private sealed class FailingExecutor : IAutomationRunExecutor
+    {
+        private readonly IAutomationRunStore _runStore;
+
+        public FailingExecutor(IAutomationRunStore runStore)
+        {
+            _runStore = runStore;
+        }
+
+        public Task ExecuteAsync(AutomationRunRecord run, AutomationTaskRecord task, CancellationToken cancellationToken)
+            => _runStore.TryCompleteAsync(run.Id, run with
+            {
+                Status = AutomationRunStatus.Failed,
+                ErrorCode = AutomationErrorCodes.ProviderFailed,
+                CompletedAtUtc = DateTimeOffset.UtcNow
+            }, cancellationToken);
     }
 }

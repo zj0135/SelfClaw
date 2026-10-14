@@ -6,7 +6,7 @@ using SelfClaw.Infrastructure.Data.Sqlite;
 
 namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 
-internal sealed class SqliteAutomationRunRepository : IAutomationRunStore
+internal sealed class SqliteAutomationRunRepository : IAutomationRunStore, IAutomationRunAttemptStore
 {
     private const string SelectColumns = """
         id, task_id, conversation_id, trigger, scheduled_for_utc, status, skip_reason, attempt,
@@ -123,6 +123,46 @@ internal sealed class SqliteAutomationRunRepository : IAutomationRunStore
         var claimed = await ReadRunAsync(connection, transaction, runId, cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return claimed;
+    }
+
+    public async Task<AutomationRunRecord?> RecordAttemptAsync(
+        AutomationRunAttempt attempt,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(attempt);
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE automation_runs SET
+                conversation_id = $conversationId,
+                attempt = $attempt,
+                model_profile_id = $modelProfileId,
+                capability_snapshot_json = $capabilitySnapshot,
+                workspace_root_id = $workspaceRootId,
+                workspace_path_snapshot = $workspacePath,
+                started_at_utc = COALESCE(started_at_utc, $startedAt)
+            WHERE id = $id AND status = $running;
+            """;
+        command.Parameters.AddWithValue("$conversationId", attempt.ConversationId.ToString("D"));
+        command.Parameters.AddWithValue("$attempt", attempt.Attempt);
+        command.Parameters.AddWithValue("$modelProfileId", attempt.ModelProfileId.ToString("D"));
+        command.Parameters.AddWithValue("$capabilitySnapshot", attempt.CapabilitySnapshotJson);
+        command.Parameters.AddWithValue("$workspaceRootId", attempt.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$workspacePath", attempt.WorkspacePathSnapshot ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$startedAt", attempt.StartedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$id", attempt.RunId.ToString("D"));
+        command.Parameters.AddWithValue("$running", (int)AutomationRunStatus.Running);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        var recorded = await ReadRunAsync(connection, transaction, attempt.RunId, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return recorded;
     }
 
     public async Task<AutomationRunRecord?> TryCompleteAsync(
