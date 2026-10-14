@@ -64,49 +64,15 @@ public sealed class PluginCommandTemplateTests : IDisposable
         action.Should().Throw<InvalidDataException>().WithMessage("*escapes the package root*");
     }
 
-    [Theory]
-    [InlineData("node")]
-    [InlineData("C:/tools/guard.exe")]
-    [InlineData("C:\\tools\\guard.exe")]
-    public void ValidateCommand_accepts_path_unambiguous_commands(string value)
-        => FluentActions.Invoking(() => PluginCommandTemplate.ValidateCommand(_packageRoot, value, "Hook command"))
-            .Should().NotThrow();
-
-    [Fact]
-    public void ValidateCommand_accepts_a_plugin_relative_entry()
-    {
-        File.WriteAllText(Path.Combine(_packageRoot, "guard.js"), string.Empty);
-
-        FluentActions.Invoking(() => PluginCommandTemplate.ValidateCommand(
-                _packageRoot,
-                "${pluginRoot}/guard.js",
-                "Hook command"))
-            .Should().NotThrow();
-    }
-
-    [Theory]
-    [InlineData("hooks/guard.exe")]
-    [InlineData("hooks\\guard.exe")]
-    [InlineData("./guard.exe")]
-    [InlineData("${workspaceRoot}/guard.exe")]
-    [InlineData("C:guard.exe")]
-    [InlineData("\\tools\\guard.exe")]
-    public void ValidateCommand_rejects_relative_paths(string value)
-    {
-        var action = () => PluginCommandTemplate.ValidateCommand(_packageRoot, value, "Hook command");
-
-        action.Should().Throw<InvalidDataException>().WithMessage("*must be a bare executable name*");
-    }
-
     [Fact]
     public void TryExpand_replaces_both_variables()
     {
         var expanded = PluginCommandTemplate.TryExpand(
-            "${pluginRoot}/hooks/run.js --root ${workspaceRoot}",
+            "${pluginRoot}/scripts/run.js --root ${workspaceRoot}",
             @"D:\workspace",
             @"D:\plugins\guard");
 
-        expanded.Should().Be(@"D:\plugins\guard/hooks/run.js --root D:\workspace");
+        expanded.Should().Be(@"D:\plugins\guard/scripts/run.js --root D:\workspace");
     }
 
     [Fact]

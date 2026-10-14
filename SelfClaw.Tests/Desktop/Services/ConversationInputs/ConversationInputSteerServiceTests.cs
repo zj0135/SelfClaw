@@ -107,19 +107,12 @@ public sealed class ConversationInputSteerServiceTests
     }
 
     [Fact]
-    public async Task Promote_respects_the_published_policy_and_the_explicit_skill_rule()
+    public async Task Promote_respects_the_explicit_skill_rule()
     {
         using var h = new ConversationInputTestHarness();
         var id = await h.CreateConversationAsync();
         var handle = h.Runs.TryReserve(id, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)!;
         await h.StartReservedTurnAsync(id, handle.TurnId);
-        await handle.InputSession!.SetSteerPolicyAsync(ConversationInputReason.HookRequiresNewTurn);
-        var blocked = await h.SubmitAsync(id, "blocked promote");
-
-        var blockedResult = await h.Queue.PromoteAsync(blocked.InputId!.Value, blocked.Revision, handle.TurnId);
-
-        blockedResult.Status.Should().Be(ConversationInputUpdateStatus.Invalid);
-        blockedResult.Reason.Should().Be(ConversationInputReason.HookRequiresNewTurn);
 
         using var other = new ConversationInputTestHarness();
         var otherId = await other.CreateConversationAsync();

@@ -144,12 +144,12 @@ public sealed class SqliteConversationSteerRepositoryTests
         await fixture.SeedRawPendingSteerAsync(start.Turn, "pending", 2);
 
         var changed = await fixture.Inputs.ReleasePendingSteersToFollowUpAsync(start.Turn.ConversationId, start.Turn.Id,
-            ConversationInputReason.HookRequiresNewTurn);
+            ConversationInputReason.SkillRequiresNewTurn);
 
         changed.Should().Be(1);
         (await fixture.ScalarAsync("SELECT kind FROM conversation_inputs WHERE status = 1;")).Should().Be(1L);
         (await fixture.ScalarAsync("SELECT reason_code FROM conversation_inputs WHERE status = 0;"))
-            .Should().Be(ConversationInputReason.HookRequiresNewTurn);
+            .Should().Be(ConversationInputReason.SkillRequiresNewTurn);
         (await fixture.Inputs.ReadConsumptionAsync(claimed!)).Should().BeNull();
     }
 

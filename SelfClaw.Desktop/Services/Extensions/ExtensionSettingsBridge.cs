@@ -4,10 +4,9 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using SelfClaw.Core.Interfaces;
-using SelfClaw.Core.Interfaces.Extensions;
 using SelfClaw.Core.Models;
-using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Desktop.Services.WebView;
 
 namespace SelfClaw.Desktop.Services.Extensions;
@@ -25,8 +24,6 @@ internal sealed class ExtensionSettingsBridge : IDisposable
     private readonly IExtensionSettingsService _settingsService;
     private readonly IExtensionPackageRepository _packageRepository;
     private readonly DesktopAgentDefinitionService _agentDefinitionService;
-    private readonly IExtensionPackagePicker _packagePicker;
-    private readonly IPluginHookExecutionLog _hookExecutionLog;
     private readonly IExtensionStateChangeNotifier _stateChangeNotifier;
     private readonly WebViewHostChannel _channel;
     private readonly Dispatcher _dispatcher;
@@ -36,8 +33,6 @@ internal sealed class ExtensionSettingsBridge : IDisposable
         IExtensionSettingsService settingsService,
         IExtensionPackageRepository packageRepository,
         DesktopAgentDefinitionService agentDefinitionService,
-        IExtensionPackagePicker packagePicker,
-        IPluginHookExecutionLog hookExecutionLog,
         IExtensionStateChangeNotifier stateChangeNotifier,
         WebViewHostChannel channel,
         Dispatcher dispatcher)
@@ -45,8 +40,6 @@ internal sealed class ExtensionSettingsBridge : IDisposable
         _settingsService = settingsService;
         _packageRepository = packageRepository;
         _agentDefinitionService = agentDefinitionService;
-        _packagePicker = packagePicker;
-        _hookExecutionLog = hookExecutionLog;
         _stateChangeNotifier = stateChangeNotifier;
         _channel = channel;
         _dispatcher = dispatcher;
@@ -90,7 +83,7 @@ internal sealed class ExtensionSettingsBridge : IDisposable
                 case "extensions/import-package":
                 {
                     var kind = ReadRequiredEnum<ExtensionKind>(payload, "kind");
-                    var selectedPath = _packagePicker.PickPackage(kind);
+                    var selectedPath = PickPackageFile(kind);
                     if (selectedPath is null)
                     {
                         response = new { type, requestId, ok = false, cancelled = true };
@@ -101,53 +94,10 @@ internal sealed class ExtensionSettingsBridge : IDisposable
                     response = await BuildImportResponseAsync(type, requestId, kind, package, cancellationToken);
                     break;
                 }
-                case "extensions/import-plugin-folder":
-                {
-                    var folderPath = _packagePicker.PickPluginFolder();
-                    if (folderPath is null)
-                    {
-                        response = new { type, requestId, ok = false, cancelled = true };
-                        break;
-                    }
-
-                    var package = await _settingsService.ImportPluginFolderAsync(folderPath, cancellationToken);
-                    response = await BuildImportResponseAsync(
-                        type,
-                        requestId,
-                        ExtensionKind.Plugin,
-                        package,
-                        cancellationToken);
-                    break;
-                }
-                case "extensions/reload-plugin":
-                {
-                    var result = await _settingsService.ReloadPluginAsync(
-                        ReadRequiredString(payload, "id"),
-                        cancellationToken);
-                    var revision = result.Changed
-                        ? await AdvanceMutationRevisionAsync(cancellationToken)
-                        : _stateChangeNotifier.CurrentRevision;
-                    response = new
-                    {
-                        type,
-                        requestId,
-                        ok = true,
-                        changed = result.Changed,
-                        package = result.Package,
-                        revision
-                    };
-                    break;
-                }
                 case "extensions/get-state":
                 {
                     var state = await GetStateAsync(activeAgentId, cancellationToken);
                     response = new { type, requestId, state };
-                    break;
-                }
-                case "extensions/get-hook-log":
-                {
-                    var entries = _hookExecutionLog.GetRecent(ReadRequiredString(payload, "id"));
-                    response = new { type, requestId, entries };
                     break;
                 }
                 case "extensions/list-effective-skills":
@@ -465,4 +415,21 @@ internal sealed class ExtensionSettingsBridge : IDisposable
         => Directory.Exists(installPath)
             ? Directory.EnumerateFiles(installPath, "*", SearchOption.AllDirectories).Count()
             : 0;
+
+    private static string? PickPackageFile(ExtensionKind kind)
+    {
+        var dialog = new OpenFileDialog
+        {
+            AddExtension = true,
+            CheckFileExists = true,
+            CheckPathExists = true,
+            Multiselect = false,
+            Title = kind == ExtensionKind.Skill ? "导入技能" : "导入插件",
+            Filter = kind == ExtensionKind.Skill
+                ? "技能包 (*.zip;*.selfclaw-skill;SKILL.md)|*.zip;*.selfclaw-skill;SKILL.md|所有文件 (*.*)|*.*"
+                : "插件包 (*.zip;*.selfclaw-plugin)|*.zip;*.selfclaw-plugin|所有文件 (*.*)|*.*"
+        };
+
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
 }

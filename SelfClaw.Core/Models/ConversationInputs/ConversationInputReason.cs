@@ -30,7 +30,6 @@ public static class ConversationInputReason
     public const string QueuePaused = "queue-paused";
     public const string TargetTurnClosed = "target-turn-closed";
     public const string ContinuationActive = "continuation-active";
-    public const string HookRequiresNewTurn = "hook-requires-new-turn";
     public const string SkillRequiresNewTurn = "skill-requires-new-turn";
     public const string SupersededBySteer = "superseded-by-steer";
     public const string ContextBudgetExceeded = "context-budget-exceeded";

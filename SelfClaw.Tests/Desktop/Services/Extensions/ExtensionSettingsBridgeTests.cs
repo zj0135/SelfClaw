@@ -4,10 +4,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
-using SelfClaw.Core.Interfaces.Extensions;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Extensions;
-using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Extensions;
@@ -162,66 +160,6 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
         await action.Should().ThrowAsync<OperationCanceledException>();
     }
 
-    [Fact]
-    public async Task ImportPackage_returns_a_correlated_cancelled_result_when_picker_is_cancelled()
-    {
-        var bridge = CreateBridge(new RecordingExtensionSettingsService());
-        using var document = JsonDocument.Parse("{\"requestId\":\"import-request\",\"kind\":\"skill\"}");
-
-        var response = await bridge.TryHandleAsync("extensions/import-package", document.RootElement);
-
-        var json = SerializeResponse(response);
-        json.GetProperty("requestId").GetString().Should().Be("import-request");
-        json.GetProperty("ok").GetBoolean().Should().BeFalse();
-        json.GetProperty("cancelled").GetBoolean().Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task ImportPluginFolder_returns_a_correlated_cancelled_result_when_picker_is_cancelled()
-    {
-        var bridge = CreateBridge(new RecordingExtensionSettingsService());
-        using var document = JsonDocument.Parse("{\"requestId\":\"folder-request\"}");
-
-        var response = await bridge.TryHandleAsync("extensions/import-plugin-folder", document.RootElement);
-
-        var json = SerializeResponse(response);
-        json.GetProperty("requestId").GetString().Should().Be("folder-request");
-        json.GetProperty("ok").GetBoolean().Should().BeFalse();
-        json.GetProperty("cancelled").GetBoolean().Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task ReloadPlugin_returns_the_changed_package()
-    {
-        var bridge = CreateBridge(new RecordingExtensionSettingsService());
-        using var document = JsonDocument.Parse("{\"requestId\":\"reload-request\",\"id\":\"office\"}");
-
-        var response = await bridge.TryHandleAsync("extensions/reload-plugin", document.RootElement);
-
-        var json = SerializeResponse(response);
-        json.GetProperty("requestId").GetString().Should().Be("reload-request");
-        json.GetProperty("ok").GetBoolean().Should().BeTrue();
-        json.GetProperty("changed").GetBoolean().Should().BeTrue();
-        json.GetProperty("package").GetProperty("id").GetString().Should().Be("office");
-    }
-
-    [Fact]
-    public async Task GetHookLog_returns_recent_entries_for_the_requested_plugin()
-    {
-        var log = new RecordingHookExecutionLog();
-        log.Append(new PluginHookExecutionEntry(
-            DateTimeOffset.UnixEpoch, "office", "guard", "toolExecuting", null, "blocked", 12, 0, null, null));
-        var bridge = CreateBridge(new RecordingExtensionSettingsService(), hookExecutionLog: log);
-        using var document = JsonDocument.Parse("{\"requestId\":\"log-request\",\"id\":\"office\"}");
-
-        var response = await bridge.TryHandleAsync("extensions/get-hook-log", document.RootElement);
-
-        var json = SerializeResponse(response);
-        json.GetProperty("requestId").GetString().Should().Be("log-request");
-        json.GetProperty("entries")[0].GetProperty("hookId").GetString().Should().Be("guard");
-        log.RequestedPluginId.Should().Be("office");
-    }
-
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))
@@ -241,8 +179,7 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
     private ExtensionSettingsBridge CreateBridge(
         IExtensionSettingsService settingsService,
         DesktopAgentDefinitionService? agentDefinitionService = null,
-        IExtensionStateChangeNotifier? stateChangeNotifier = null,
-        IPluginHookExecutionLog? hookExecutionLog = null)
+        IExtensionStateChangeNotifier? stateChangeNotifier = null)
     {
         var storagePaths = CreateStoragePaths();
         var repository = new SqliteExtensionRepository(new SqliteDatabase(storagePaths));
@@ -250,8 +187,6 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
             settingsService,
             repository,
             agentDefinitionService ?? CreateAgentService(),
-            new CancelledPackagePicker(),
-            hookExecutionLog ?? new RecordingHookExecutionLog(),
             stateChangeNotifier ?? new ExtensionStateChangeNotifier(),
             new SelfClaw.Desktop.Services.WebView.WebViewHostChannel(), System.Windows.Threading.Dispatcher.CurrentDispatcher);
     }
@@ -323,8 +258,6 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
                     [],
                     ExtensionStatus.Ready,
                     [],
-                    [],
-                    null,
                     [])],
                 [CreateMcpView()],
                 []));
@@ -335,34 +268,6 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
             string selectedPath,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
-
-        public Task<ExtensionPackageView> ImportPluginFolderAsync(
-            string folderPath,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<PluginReloadResult> ReloadPluginAsync(
-            string pluginId,
-            CancellationToken cancellationToken = default)
-        {
-            Observe(cancellationToken);
-            return Task.FromResult(new PluginReloadResult(
-                new ExtensionPackageView(
-                    ExtensionKind.Plugin,
-                    pluginId,
-                    "Office",
-                    "1.0.0",
-                    "Office tools",
-                    true,
-                    null,
-                    [],
-                    ExtensionStatus.Ready,
-                    [],
-                    [],
-                    null,
-                    []),
-                Changed: true));
-        }
 
         public Task SetEnabledAsync(
             ExtensionItemKey key,
@@ -442,27 +347,5 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
                 null,
                 null,
                 []);
-    }
-
-    private sealed class CancelledPackagePicker : IExtensionPackagePicker
-    {
-        public string? PickPackage(ExtensionKind kind) => null;
-
-        public string? PickPluginFolder() => null;
-    }
-
-    private sealed class RecordingHookExecutionLog : IPluginHookExecutionLog
-    {
-        private readonly List<PluginHookExecutionEntry> _entries = [];
-
-        public string? RequestedPluginId { get; private set; }
-
-        public void Append(PluginHookExecutionEntry entry) => _entries.Add(entry);
-
-        public IReadOnlyList<PluginHookExecutionEntry> GetRecent(string pluginId)
-        {
-            RequestedPluginId = pluginId;
-            return _entries.Where(entry => entry.PluginId == pluginId).ToArray();
-        }
     }
 }

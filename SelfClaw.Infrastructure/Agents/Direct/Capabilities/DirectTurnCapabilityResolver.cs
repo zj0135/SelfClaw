@@ -87,7 +87,6 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
                 effectiveRequest.Agent,
                 packages,
                 effectiveSkills,
-                policy.InheritedHookPlugins,
                 leases,
                 diagnostics,
                 cancellationToken)
@@ -141,9 +140,6 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             skills.MessageAdjustments,
             diagnostics.Messages,
             leases,
-            plugins.Hooks,
-            plugins.HookNotices,
-            plugins.HookBlockReason,
             skills.ExplicitSkillIds);
     }
 
@@ -169,10 +165,10 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
     }
 
     /// <summary>
-    /// The child turn's single authority on captured capabilities: a delegated turn may only use Plugins,
-    /// Skills and hook Plugins that are still inside its ceiling and unchanged since acceptance. A capability
-    /// that no longer qualifies fails the turn here; a continuation does not reach this method because it
-    /// shrinks instead (see <see cref="DirectTurnPolicy.ShrinksToCapturedCapabilities"/>).
+    /// The child turn's single authority on captured capabilities: a delegated turn may only use Plugins and
+    /// Skills that are still inside its ceiling and unchanged since acceptance. A capability that no longer
+    /// qualifies fails the turn here; a continuation does not reach this method because it shrinks instead
+    /// (see <see cref="DirectTurnPolicy.ShrinksToCapturedCapabilities"/>).
     /// </summary>
     private static void ValidateCapturedPackageCeiling(
         DirectChatTurnRequest request,
@@ -355,22 +351,12 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             : request.Agent.SubagentIds
                 .Where(id => capturedSubagents.Contains(id, StringComparer.OrdinalIgnoreCase))
                 .ToArray();
-        // Only Plugins whose hooks actually resolved survive into the next delegation: they are the
-        // policy an inherited turn must keep enforcing.
-        var hookPlugins = plugins.Hooks
-            .Select(hook => hook.PluginId)
-            .Distinct(StringComparer.Ordinal)
-            .Select(id => CreatePackageCapability(packages, ExtensionKind.Plugin, id))
-            .Where(capability => capability is not null)
-            .Cast<DirectExtensionCapability>()
-            .ToArray();
         return new DirectCapabilityCeiling(
             request.Agent.ToolPolicy,
             pluginCapabilities,
             skillCapabilities,
             mcpCapabilities.Capabilities,
-            subagentIds,
-            hookPlugins);
+            subagentIds);
     }
 
     private static DirectExtensionCapability? CreatePackageCapability(

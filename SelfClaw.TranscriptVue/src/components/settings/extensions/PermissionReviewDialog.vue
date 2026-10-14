@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
-import { AlertTriangle, Check, ShieldCheck, Webhook, X } from 'lucide-vue-next';
-import { describePluginPermission, hasHookPermissions, isSensitivePluginPermission } from '../../../renderers/pluginPermissions.js';
+import { Check, ShieldCheck, X } from 'lucide-vue-next';
+import { describePluginPermission } from '../../../renderers/pluginPermissions.js';
 
 const props = defineProps({
 	open: { type: Boolean, default: false },
@@ -14,11 +14,9 @@ const permissions = computed(() =>
 	(props.plugin?.permissions || []).map((token) => ({
 		token,
 		description: describePluginPermission(token),
-		sensitive: isSensitivePluginPermission(token),
 		added: Boolean(props.plugin?.unacknowledgedPermissions?.includes(token)),
 	})),
 );
-const showsHookNotice = computed(() => hasHookPermissions(props.plugin?.permissions));
 </script>
 
 <template>
@@ -38,10 +36,8 @@ const showsHookNotice = computed(() => hasHookPermissions(props.plugin?.permissi
 			</header>
 
 			<div class="permissions">
-				<div v-for="permission in permissions" :key="permission.token" class="permission"
-					:class="{ sensitive: permission.sensitive }">
-					<AlertTriangle v-if="permission.sensitive" :size="14" aria-hidden="true" />
-					<Check v-else :size="14" aria-hidden="true" />
+				<div v-for="permission in permissions" :key="permission.token" class="permission">
+					<Check :size="14" aria-hidden="true" />
 					<div class="permission-body">
 						<code>{{ permission.token }}</code>
 						<span class="permission-description">{{ permission.description }}</span>
@@ -49,11 +45,6 @@ const showsHookNotice = computed(() => hasHookPermissions(props.plugin?.permissi
 					<span v-if="permission.added">新增</span>
 				</div>
 				<p v-if="!permissions.length">此插件未声明额外权限。</p>
-			</div>
-
-			<div v-if="showsHookNotice" class="hook-notice">
-				<Webhook :size="15" aria-hidden="true" />
-				<span>Hook 命令以当前用户权限运行，确认后在关联 Agent 及子代理中生效。</span>
 			</div>
 
 			<footer>
@@ -184,10 +175,6 @@ button:disabled {
 	color: var(--sc-ok);
 }
 
-.permission.sensitive svg {
-	color: var(--caution-icon);
-}
-
 .permission-body {
 	display: grid;
 	gap: 2px;
@@ -213,24 +200,6 @@ button:disabled {
 	border-radius: 4px;
 	color: var(--caution-icon);
 	font-size: var(--fs-9);
-}
-
-.hook-notice {
-	display: grid;
-	grid-template-columns: 18px minmax(0, 1fr);
-	gap: 8px;
-	margin: 0 20px 18px;
-	padding: 10px 11px;
-	border-left: 2px solid var(--sc-acid);
-	background: var(--sc-raise);
-	color: var(--sc-mute);
-	font-size: var(--fs-11);
-	line-height: 1.55;
-}
-
-.hook-notice svg {
-	margin-top: 2px;
-	color: var(--sc-acid);
 }
 
 .permissions p {

@@ -17,16 +17,6 @@ internal sealed record DirectTurnPolicy(DirectTurnOrigin Origin, DirectCapabilit
     /// <summary>An interactive turn is bounded by its Agent's bindings; a delegated turn by the captured ceiling.</summary>
     internal bool IsDelegated => Origin is not DirectTurnOrigin.Interactive;
 
-    /// <summary>Hook Plugins captured by the parent turn keep enforcing their policy in delegated turns.</summary>
-    internal bool InheritsHookPlugins => Origin is DirectTurnOrigin.Subagent or DirectTurnOrigin.Continuation;
-
-    /// <summary>
-    /// The hook Plugins an inherited turn must keep enforcing. They are policy rather than capability, so a
-    /// missing or changed one blocks the turn instead of being filtered out.
-    /// </summary>
-    internal IReadOnlyList<DirectExtensionCapability> InheritedHookPlugins
-        => InheritsHookPlugins ? Ceiling?.HookPlugins ?? [] : [];
-
     /// <summary>A Subagent child must still satisfy the captured ceiling, so a missing or changed capability is fatal.</summary>
     internal bool RequiresCapturedCapabilities => Origin == DirectTurnOrigin.Subagent;
 

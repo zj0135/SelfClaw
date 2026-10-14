@@ -21,7 +21,6 @@ using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
-using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Plugins;
@@ -155,7 +154,6 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<ExtensionSettingsBridge>();
         services.AddSingleton<AgentSettingsService>();
         services.AddSingleton<AgentSettingsBridge>();
-        services.AddSingleton<IExtensionPackagePicker, ExtensionPackagePicker>();
         services.AddSingleton<PetPackageCatalog>();
         services.AddSingleton<PetActivityPresenter>();
         services.AddSingleton<IPetSettingsRepository, DesktopPetSettingsRepository>();

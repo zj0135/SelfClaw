@@ -1,4 +1,3 @@
-using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 
 namespace SelfClaw.Core.Models;
@@ -19,8 +18,7 @@ public sealed record ToolExecutionRecord(
     string? ResultContent = null,
     ToolSourceKind? SourceKind = null,
     string? SourceId = null,
-    string? DisplayName = null,
-    ToolHookOutcome? HookOutcome = null)
+    string? DisplayName = null)
 {
     public ToolExecutionRecord(
         Guid id,
@@ -37,8 +35,7 @@ public sealed record ToolExecutionRecord(
         string? resultContent = null,
         ToolSourceKind? sourceKind = null,
         string? sourceId = null,
-        string? displayName = null,
-        ToolHookOutcome? hookOutcome = null)
+        string? displayName = null)
         : this(
             id,
             conversationId,
@@ -55,8 +52,7 @@ public sealed record ToolExecutionRecord(
             resultContent,
             sourceKind,
             sourceId,
-            displayName,
-            hookOutcome)
+            displayName)
     {
     }
 }

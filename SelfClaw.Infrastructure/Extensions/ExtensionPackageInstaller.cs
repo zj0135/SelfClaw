@@ -120,48 +120,13 @@ internal sealed class ExtensionPackageInstaller
     {
         var payloadPath = await StagePluginPackageAsync(sourcePath, operationPath, cancellationToken)
             .ConfigureAwait(false);
-        return await InstallStagedPluginAsync(payloadPath, expectedPluginId: null, sourcePath: null, cancellationToken)
+        return await InstallStagedPluginAsync(payloadPath, expectedPluginId: null, cancellationToken)
             .ConfigureAwait(false);
-    }
-
-    public async Task<ExtensionPackageInstallResult> InstallPluginFolderAsync(
-        string folderPath,
-        string? expectedPluginId,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(folderPath);
-        var sourcePath = Path.GetFullPath(folderPath);
-        if (!Directory.Exists(sourcePath))
-        {
-            throw new DirectoryNotFoundException($"The Plugin folder '{sourcePath}' was not found.");
-        }
-
-        if (!File.Exists(Path.Combine(sourcePath, PluginManifestName)))
-        {
-            throw new InvalidDataException("The selected folder must contain plugin.json at its root.");
-        }
-
-        RejectAppDataOverlap(sourcePath);
-        RejectGitEntry(sourcePath, cancellationToken);
-        var operationPath = CreateOperationPath();
-        Directory.CreateDirectory(operationPath);
-        try
-        {
-            var payloadPath = Path.Combine(operationPath, "payload");
-            await CopyDirectoryAsync(sourcePath, payloadPath, cancellationToken).ConfigureAwait(false);
-            return await InstallStagedPluginAsync(payloadPath, expectedPluginId, sourcePath, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        finally
-        {
-            TryDeleteDirectoryWithin(operationPath, StagingRoot);
-        }
     }
 
     private async Task<ExtensionPackageInstallResult> InstallStagedPluginAsync(
         string payloadPath,
         string? expectedPluginId,
-        string? sourcePath,
         CancellationToken cancellationToken)
     {
         var manifestPath = Path.Combine(payloadPath, PluginManifestName);
@@ -191,7 +156,6 @@ internal sealed class ExtensionPackageInstaller
                 payloadPath,
                 contentHash,
                 manifestJson,
-                sourcePath,
                 cancellationToken)
             .ConfigureAwait(false);
         return new ExtensionPackageInstallResult(installed, fileCount);
@@ -433,7 +397,6 @@ internal sealed class ExtensionPackageInstaller
         string payloadPath,
         string contentHash,
         string manifestJson,
-        string? sourcePath,
         CancellationToken cancellationToken)
     {
         var pluginsRoot = Path.Combine(_storagePaths.AppDataDirectory, "plugins");
@@ -476,8 +439,7 @@ internal sealed class ExtensionPackageInstaller
             previous?.AcknowledgedPermissionsJson,
             previous?.AcknowledgedAtUtc,
             previous?.InstalledAtUtc ?? now,
-            now,
-            sourcePath);
+            now);
         try
         {
             await WriteCurrentPointerAsync(currentPath, package, cancellationToken).ConfigureAwait(false);
@@ -690,67 +652,6 @@ internal sealed class ExtensionPackageInstaller
         {
             throw new InvalidDataException($"Package contains a symbolic link or reparse point: {path}");
         }
-    }
-
-    // CopyDirectoryAsync copies while it walks, so a source folder that contains (or is contained by)
-    // AppData would either copy the staging output into itself or snapshot SelfClaw's own storage.
-    private void RejectAppDataOverlap(string sourcePath)
-    {
-        var appData = Path.GetFullPath(_storagePaths.AppDataDirectory);
-        if (IsSameOrDescendant(sourcePath, appData) || IsSameOrDescendant(appData, sourcePath))
-        {
-            throw new InvalidDataException(
-                "The Plugin folder must be outside the SelfClaw AppData directory.");
-        }
-    }
-
-    // A .git entry changes the content hash on every git operation and consumes the file-count quota,
-    // so folder installs reject it rather than silently excluding it. The scan runs over the whole
-    // tree before the copy, so it must honour the caller's cancellation and report the same file-count
-    // limit as CopyDirectoryAsync — otherwise a node_modules-sized Plugin would walk fully before failing.
-    private void RejectGitEntry(string sourceRoot, CancellationToken cancellationToken)
-    {
-        var pending = new Stack<string>();
-        pending.Push(sourceRoot);
-        var fileCount = 0;
-        while (pending.Count > 0)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var directory = pending.Pop();
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
-            {
-                if (Path.GetFileName(entry).Equals(".git", StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidDataException(
-                        "The Plugin folder contains a .git entry. Install from a build output directory, or keep the Plugin in a subdirectory of the repository.");
-                }
-
-                var attributes = File.GetAttributes(entry);
-                if (attributes.HasFlag(FileAttributes.Directory))
-                {
-                    if (!attributes.HasFlag(FileAttributes.ReparsePoint))
-                    {
-                        pending.Push(entry);
-                    }
-
-                    continue;
-                }
-
-                fileCount++;
-                if (fileCount > _limits.MaximumFileCount)
-                {
-                    throw new InvalidDataException($"Package exceeds the {_limits.MaximumFileCount} file limit.");
-                }
-            }
-        }
-    }
-
-    private static bool IsSameOrDescendant(string candidate, string root)
-    {
-        var rootPath = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var candidatePath = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar) +
-            Path.DirectorySeparatorChar;
-        return candidatePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void EnsureSafeInstallAncestors(string rootPath, string directoryPath)

@@ -1,8 +1,8 @@
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Extensions.Skills.Models;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks;
 using SelfClaw.Core.Models;
+using System.Text;
 
 namespace SelfClaw.Infrastructure.Agents.Direct.Context;
 
@@ -89,14 +89,45 @@ internal static class CapabilitySections
 
     private static string FormatSubagent(SubagentCatalogEntry subagent)
     {
-        var (description, _) = HookProtocol.Truncate(
+        var description = TruncateUtf8(
             subagent.Description.ReplaceLineEndings(" ").Trim(),
-            MaximumSubagentDescriptionBytes);
+            MaximumSubagentDescriptionBytes).Text;
         var detail = description.Length == 0 ? string.Empty : $" - {EndSentence(description)}";
         var policy = string.IsNullOrWhiteSpace(subagent.ToolPolicy)
             ? string.Empty
             : $" Tools: {subagent.ToolPolicy}.";
         return $"- {subagent.Id}: {subagent.Name}{detail}{policy}";
+    }
+
+    /// <summary>
+    /// Truncates to <paramref name="maxBytes"/> UTF-8 bytes without splitting a multi-byte code point,
+    /// so a cut description never renders as a replacement character.
+    /// </summary>
+    private static (string Text, bool Truncated) TruncateUtf8(string text, int maxBytes)
+    {
+        if (Encoding.UTF8.GetByteCount(text) <= maxBytes)
+        {
+            return (text, false);
+        }
+
+        var span = text.AsSpan();
+        var remaining = maxBytes;
+        var length = 0;
+        while (length < span.Length)
+        {
+            var runeLength = char.IsHighSurrogate(span[length]) &&
+                             length + 1 < span.Length && char.IsLowSurrogate(span[length + 1]) ? 2 : 1;
+            var encoded = Encoding.UTF8.GetByteCount(span.Slice(length, runeLength));
+            if (encoded > remaining)
+            {
+                break;
+            }
+
+            remaining -= encoded;
+            length += runeLength;
+        }
+
+        return (span[..length].ToString(), true);
     }
 
     private static string EndSentence(string text)

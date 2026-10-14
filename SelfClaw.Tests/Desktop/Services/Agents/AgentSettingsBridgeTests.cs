@@ -297,8 +297,6 @@ public sealed class AgentSettingsBridgeTests : IDisposable
                     [],
                     ExtensionStatus.Ready,
                     [],
-                    [],
-                    null,
                     [])],
                 [new McpServerView(
                     "local",
@@ -325,16 +323,6 @@ public sealed class AgentSettingsBridgeTests : IDisposable
         public Task<ExtensionPackageView> ImportPackageAsync(
             ExtensionKind kind,
             string selectedPath,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<ExtensionPackageView> ImportPluginFolderAsync(
-            string folderPath,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<PluginReloadResult> ReloadPluginAsync(
-            string pluginId,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 

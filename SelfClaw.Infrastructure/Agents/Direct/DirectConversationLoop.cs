@@ -195,11 +195,11 @@ internal sealed class DirectConversationLoop
             context.Messages, setup.ProviderLease.Options, cancellationToken).ConfigureAwait(false))
         {
             foreach (var content in update.Contents.OfType<UsageContent>()) usage.Observe(content.Details);
-            output.TranslateUpdate(update, setup.CapabilityLease.Bindings, setup.Invoker);
+            output.TranslateUpdate(update, setup.CapabilityLease.Bindings);
             yield return update;
         }
     }
 
     private static void PublishResult(DirectTurnSetup.Ready setup, DirectEventTranslator output, FunctionResultContent result)
-        => output.TranslateUpdate(new ChatResponseUpdate(ChatRole.Tool, [result]), setup.CapabilityLease.Bindings, setup.Invoker);
+        => output.TranslateUpdate(new ChatResponseUpdate(ChatRole.Tool, [result]), setup.CapabilityLease.Bindings);
 }

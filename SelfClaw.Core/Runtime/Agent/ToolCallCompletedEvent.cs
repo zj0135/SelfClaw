@@ -5,5 +5,4 @@ public sealed record ToolCallCompletedEvent(
     string ToolCallId,
     ToolCallStatus Status,
     string? ResultSummary,
-    string? ResultContent,
-    ToolHookOutcome? HookOutcome = null) : AgentStreamEvent;
+    string? ResultContent) : AgentStreamEvent;

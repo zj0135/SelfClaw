@@ -42,7 +42,7 @@ public sealed class ProtocolBaselineProbeTests
         using var http = new AiProviderHttpClientProvider(() => new SseHandler(BuildChatCompletionsSse()));
         var adapter = new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, httpClientProvider: http);
         var request = CreateOpenAiRequest(AiProviderApiFormat.OpenAIChatCompletions);
-        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var httpClient = http.CreateTurnClient(request.Connection);
         var client = adapter.CreateChatClient(request, httpClient);
         var options = adapter.CreateChatOptions(request, []);
 
@@ -80,7 +80,7 @@ public sealed class ProtocolBaselineProbeTests
         using var http = new AiProviderHttpClientProvider(() => new SseHandler(BuildAnthropicSse()));
         var adapter = new AnthropicProviderAdapter(httpClientProvider: http);
         var request = CreateAnthropicRequest();
-        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var httpClient = http.CreateTurnClient(request.Connection);
         var client = adapter.CreateChatClient(request, httpClient);
         var options = adapter.CreateChatOptions(request, []);
 
@@ -114,7 +114,7 @@ public sealed class ProtocolBaselineProbeTests
         using var http = new AiProviderHttpClientProvider(() => new SseHandler(BuildResponsesSse()));
         var adapter = new OpenAiProviderAdapter(AiProviderKind.OpenAI, httpClientProvider: http);
         var request = CreateOpenAiRequest(AiProviderApiFormat.OpenAIResponses);
-        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var httpClient = http.CreateTurnClient(request.Connection);
         var client = adapter.CreateChatClient(request, httpClient);
         var options = adapter.CreateChatOptions(request, []);
 
@@ -144,7 +144,7 @@ public sealed class ProtocolBaselineProbeTests
         using var http = new AiProviderHttpClientProvider(() => new SseHandler(BuildOllamaNdjson(), "application/x-ndjson"));
         var adapter = new OllamaProviderAdapter(http);
         var request = CreateOllamaRequest();
-        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var httpClient = http.CreateTurnClient(request.Connection);
         var client = adapter.CreateChatClient(request, httpClient);
         var options = adapter.CreateChatOptions(request, []);
 
@@ -183,7 +183,7 @@ public sealed class ProtocolBaselineProbeTests
             : new OpenAiProviderAdapter(httpClientProvider: http);
         var request = format == AiProviderApiFormat.AnthropicMessages
             ? CreateAnthropicRequest() : CreateOpenAiRequest(format);
-        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var httpClient = http.CreateTurnClient(request.Connection);
         using var client = adapter.CreateChatClient(request, httpClient);
         var options = adapter.CreateChatOptions(request, []);
         // Full native aggregation; no display models participate in the replay.
@@ -218,7 +218,7 @@ public sealed class ProtocolBaselineProbeTests
             : new OpenAiProviderAdapter(httpClientProvider: http);
         var preparation = format == AiProviderApiFormat.AnthropicMessages
             ? CreateAnthropicRequest() : CreateOpenAiRequest(format);
-        using var httpClient = http.CreateTurnClient(preparation.Connection, null);
+        using var httpClient = http.CreateTurnClient(preparation.Connection);
         var native = adapter.CreateChatClient(preparation, httpClient);
         var count = 0;
         DirectToolResult Result()

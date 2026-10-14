@@ -29,30 +29,20 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
         => GetClient(connection);
 
     /// <summary>
-    /// Builds the per-turn client over the shared pooled handler. The optional <paramref name="outerHandler"/>
-    /// sits in front of the shared chain so a turn can observe every request the SDK sends.
+    /// Builds the per-turn client over the shared pooled handler, so every turn reuses the same
+    /// connection pool while owning its own <see cref="HttpClient"/> lifetime.
     /// </summary>
-    public HttpClient CreateTurnClient(AiProviderConnection connection, DelegatingHandler? outerHandler)
+    public HttpClient CreateTurnClient(AiProviderConnection connection)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var shared = GetSharedStreamingHandler(connection);
-        HttpMessageHandler handler = shared;
-        if (outerHandler is not null)
-        {
-            outerHandler.InnerHandler = shared;
-            handler = outerHandler;
-        }
-
         // disposeHandler: false — DelegatingHandler.Dispose would cascade into the shared pooled handler.
-        return new HttpClient(handler, disposeHandler: false)
+        return new HttpClient(shared, disposeHandler: false)
         {
             BaseAddress = connection.Endpoint,
             Timeout = Timeout.InfiniteTimeSpan
         };
     }
-
-    internal static IReadOnlySet<string> ReadExtraHeaderNames(AiProviderConnection connection)
-        => ReadExtraHeaders(connection.ConnectionOptions).Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     public TimeSpan GetNonStreamingTimeout(AiProviderConnection connection)
         => ReadConfiguration(connection).Timeout;

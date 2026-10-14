@@ -5,5 +5,4 @@ public sealed record DirectCapabilityCeiling(
     IReadOnlyList<DirectExtensionCapability> Plugins,
     IReadOnlyList<DirectExtensionCapability> Skills,
     IReadOnlyList<DirectMcpCapability> McpServers,
-    IReadOnlyList<string> SubagentIds,
-    IReadOnlyList<DirectExtensionCapability>? HookPlugins = null);
+    IReadOnlyList<string> SubagentIds);

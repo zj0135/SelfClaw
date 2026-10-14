@@ -351,16 +351,12 @@ internal static class SqliteConversationTurnWriter
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO tool_runs(id, conversation_id, tool_name, arguments_json, status, result_summary, correlation_id, duration_ms,
-                created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name,
-                effective_arguments_json, hook_feedback_json, hook_outcome_json)
+                created_at_utc, updated_at_utc, agent_id, message_id, result_content, source_kind, source_id, display_name)
             VALUES($id, $conversationId, $name, $arguments, $status, $summary, $correlation, $duration,
-                $createdAt, $updatedAt, $agentId, $messageId, $content, $sourceKind, $sourceId, $displayName,
-                $effectiveArguments, $feedback, $outcome)
+                $createdAt, $updatedAt, $agentId, $messageId, $content, $sourceKind, $sourceId, $displayName)
             ON CONFLICT(id) DO UPDATE SET status = excluded.status, result_summary = excluded.result_summary,
                 result_content = COALESCE(excluded.result_content, tool_runs.result_content), duration_ms = excluded.duration_ms,
-                updated_at_utc = excluded.updated_at_utc, effective_arguments_json = COALESCE(excluded.effective_arguments_json, tool_runs.effective_arguments_json),
-                hook_feedback_json = COALESCE(excluded.hook_feedback_json, tool_runs.hook_feedback_json),
-                hook_outcome_json = COALESCE(excluded.hook_outcome_json, tool_runs.hook_outcome_json)
+                updated_at_utc = excluded.updated_at_utc
             WHERE tool_runs.message_id = excluded.message_id AND tool_runs.conversation_id = excluded.conversation_id
                 AND tool_runs.tool_name = excluded.tool_name AND tool_runs.arguments_json = excluded.arguments_json;
             """;
@@ -380,10 +376,6 @@ internal static class SqliteConversationTurnWriter
         command.Parameters.AddWithValue("$sourceKind", tool.SourceKind is { } kind ? (int)kind : DBNull.Value);
         command.Parameters.AddWithValue("$sourceId", tool.SourceId ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$displayName", tool.DisplayName ?? (object)DBNull.Value);
-        var hooks = ToolHookOutcomeColumns.Split(tool.HookOutcome);
-        command.Parameters.AddWithValue("$effectiveArguments", hooks.EffectiveArgumentsJson ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$feedback", hooks.FeedbackJson ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$outcome", hooks.OutcomeJson ?? (object)DBNull.Value);
         if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
         {
             throw new InvalidOperationException("A tool cannot change its fragment or call identity.");

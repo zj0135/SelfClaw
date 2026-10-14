@@ -11,41 +11,6 @@ namespace SelfClaw.Tests.Desktop.Services.Subagents;
 public sealed class SubagentActivityContentTests
 {
     [Fact]
-    public void A_notice_segment_is_readable_as_content()
-    {
-        var messageId = Guid.NewGuid();
-        var now = DateTimeOffset.UtcNow;
-        var turn = new ConversationTurnRecord(Guid.NewGuid(), Guid.NewGuid(), AgentExecutionMode.Direct,
-            DirectTurnOrigin.Subagent, ConversationTurnStatus.Blocked, now, now);
-        var message = new MessageRecord(
-            messageId,
-            turn.ConversationId,
-            turn.Id,
-            1,
-            MessageRole.Assistant,
-            string.Empty,
-            MessageStatus.Sealed,
-            now,
-            now,
-            Segments:
-            [
-                new MessageSegmentRecord(messageId, 0, MessageSegmentKind.Notice, "hook notice", null),
-                new MessageSegmentRecord(messageId, 1, MessageSegmentKind.Text, "answer", null)
-            ]);
-        var snapshot = SubagentActivityContent.Create(SubagentTaskStatus.Failed, "task", turn, message, []);
-        var task = new SubagentActivityTask(
-            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), turn.ConversationId, turn.Id,
-            "child", "Child", "task", SubagentTaskStatus.Failed, 1, null, null, null,
-            now, now, now, null, null, null, null, null, null, 0, null);
-        var query = new SubagentContentQuery(
-            task.ParentConversationId, task.TaskId, snapshot.ContentVersion, "segment/0");
-
-        var page = SubagentActivityContent.Read(task, snapshot, query);
-
-        page.Text.Should().Be("hook notice");
-    }
-
-    [Fact]
     public void A_no_output_terminal_is_complete_and_turn_only_changes_invalidate_the_content_version()
     {
         var now = DateTimeOffset.UtcNow;

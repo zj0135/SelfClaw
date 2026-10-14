@@ -17,8 +17,6 @@ public sealed class DirectTurnPolicyTests
         var policy = DirectTurnPolicy.For(Request(DirectTurnOrigin.Interactive, ceiling: null));
 
         policy.IsDelegated.Should().BeFalse();
-        policy.InheritsHookPlugins.Should().BeFalse();
-        policy.InheritedHookPlugins.Should().BeEmpty();
         policy.RequiresCapturedCapabilities.Should().BeFalse();
         policy.ShrinksToCapturedCapabilities.Should().BeFalse();
         policy.RequiresToolExecutionCheckpoint.Should().BeFalse();
@@ -35,8 +33,6 @@ public sealed class DirectTurnPolicyTests
         var policy = DirectTurnPolicy.For(Request(DirectTurnOrigin.Subagent, Ceiling()));
 
         policy.IsDelegated.Should().BeTrue();
-        policy.InheritsHookPlugins.Should().BeTrue();
-        policy.InheritedHookPlugins.Should().ContainSingle().Which.Id.Should().Be("alpha");
         policy.RequiresCapturedCapabilities.Should().BeTrue();
         policy.ShrinksToCapturedCapabilities.Should().BeFalse();
         policy.RequiresToolExecutionCheckpoint.Should().BeFalse();
@@ -55,8 +51,6 @@ public sealed class DirectTurnPolicyTests
         var policy = DirectTurnPolicy.For(Request(DirectTurnOrigin.Continuation, Ceiling()));
 
         policy.IsDelegated.Should().BeTrue();
-        policy.InheritsHookPlugins.Should().BeTrue();
-        policy.InheritedHookPlugins.Should().ContainSingle().Which.Id.Should().Be("alpha");
         policy.RequiresCapturedCapabilities.Should().BeFalse();
         policy.ShrinksToCapturedCapabilities.Should().BeTrue();
         policy.RequiresToolExecutionCheckpoint.Should().BeTrue();
@@ -75,8 +69,7 @@ public sealed class DirectTurnPolicyTests
             [new DirectExtensionCapability("alpha", "1.0.0", "hash")],
             [new DirectExtensionCapability("alpha/skill", "1.0.0", "hash")],
             [new DirectMcpCapability("git", 3)],
-            ["reviewer"],
-            [new DirectExtensionCapability("alpha", "1.0.0", "hash")]);
+            ["reviewer"]);
 
     private static DirectChatTurnRequest Request(DirectTurnOrigin origin, DirectCapabilityCeiling? ceiling)
         => new(

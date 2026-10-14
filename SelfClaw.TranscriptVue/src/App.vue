@@ -1037,10 +1037,6 @@ a:hover {
 	color: var(--danger);
 }
 
-.tool-status-icon.blocked {
-	color: var(--accent-2);
-}
-
 .tool-status-icon.cancelled {
 	color: var(--muted-soft);
 }

@@ -19,14 +19,14 @@ public sealed class SqliteSubagentSchemaTests : IDisposable
     private Guid _taskId;
 
     [Fact]
-    public async Task Fresh_database_creates_schema_v30_with_subagent_tables_and_indexes()
+    public async Task Fresh_database_creates_schema_v31_with_subagent_tables_and_indexes()
     {
         var database = CreateDatabase();
         await database.EnsureInitializedAsync();
         await using var connection = await database.OpenConnectionAsync();
 
         (await ExecuteScalarAsync<long>(connection, "SELECT MAX(version) FROM schema_versions;"))
-            .Should().Be(30);
+            .Should().Be(31);
         (await ReadNamesAsync(connection, "table", "subagent_%"))
             .Should().BeEquivalentTo("subagent_tasks", "subagent_deliveries");
         (await ReadNamesAsync(connection, "index", "ix_subagent_%"))

@@ -1,4 +1,4 @@
-﻿using SelfClaw.Core.Models;
+using SelfClaw.Core.Models;
 using System.ClientModel.Primitives;
 using System.Text.Json;
 using FluentAssertions;
@@ -57,7 +57,7 @@ public sealed class OpenAiProviderAdapterTests
         var request = CreateRequest(
             AiProviderKind.OpenAICompatible,
             AiProviderApiFormat.OpenAIChatCompletions);
-        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var httpClient = http.CreateTurnClient(request.Connection);
         var client = adapter.CreateChatClient(request, httpClient);
         var options = adapter.CreateChatOptions(request, []);
 
@@ -94,7 +94,7 @@ public sealed class OpenAiProviderAdapterTests
         var request = CreateRequest(
             AiProviderKind.OpenAICompatible,
             AiProviderApiFormat.OpenAIChatCompletions);
-        using var httpClient = http.CreateTurnClient(request.Connection, null);
+        using var httpClient = http.CreateTurnClient(request.Connection);
         var client = adapter.CreateChatClient(request, httpClient);
         var options = adapter.CreateChatOptions(request, []);
 

@@ -8,7 +8,6 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Runtime;
-using SelfClaw.Tests.Infrastructure.Agents.Direct.Hooks.TestDoubles;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Tools;
 
@@ -174,8 +173,7 @@ public sealed class DirectToolInvokerTests
             new Dictionary<string, DirectToolBinding>(StringComparer.Ordinal)
             {
                 [function.Name] = binding
-            },
-            HookTestFactory.Create([]));
+            });
         return new TestPipeline(invoker, function, order);
     }
 

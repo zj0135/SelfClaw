@@ -163,13 +163,11 @@ public sealed class AgentActivityCoordinator : IDisposable
                     return false;
                 }
 
-                if (toolCompleted.Status is ToolCallStatus.Failed or ToolCallStatus.Blocked)
+                if (toolCompleted.Status is ToolCallStatus.Failed)
                 {
                     return turn.SetPhase(
                         AgentActivityPhase.UsingTool,
-                        toolCompleted.Status == ToolCallStatus.Blocked
-                            ? "工具被 hook 拦截"
-                            : "工具执行失败，正在继续处理",
+                        "工具执行失败，正在继续处理",
                         toolCompleted.ResultSummary,
                         turn.ToolKind);
                 }

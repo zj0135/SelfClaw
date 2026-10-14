@@ -1,12 +1,11 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
-import { ArrowRight, LoaderCircle, Square, ShieldAlert, Check, X, Webhook } from 'lucide-vue-next';
+import { ArrowRight, LoaderCircle, Square, ShieldAlert, Check, X } from 'lucide-vue-next';
 import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import PermissionSelector from './PermissionSelector.vue';
 import ComposerAddMenu from './ComposerAddMenu.vue';
-import { formatHookSource } from '../../renderers/shared.js';
 
 const props = defineProps({
 	busy: {
@@ -94,14 +93,6 @@ const approvalSource = computed(() => {
 		: numericLabels[approval.sourceKind] || '扩展';
 	return `${kind.toUpperCase()} · ${approval.sourceId}${approval.transportSummary ? ` · ${approval.transportSummary}` : ''}`;
 });
-
-const approvalHookSources = computed(() =>
-	(props.pendingApproval?.approvalRequiredBy || []).map(formatHookSource).filter(Boolean),
-);
-const approvalReason = computed(() => props.pendingApproval?.approvalReason || '');
-const argumentsModifiedBy = computed(() =>
-	(props.pendingApproval?.argumentsModifiedBy || []).map(formatHookSource).filter(Boolean),
-);
 
 function approveTool() {
 	if (!props.pendingApproval) {
@@ -218,15 +209,6 @@ defineExpose({
 						请求执行 <strong>{{ approvalTitle }}</strong>
 					</span>
 					<span v-if="approvalSource" class="tool-approval-source">{{ approvalSource }}</span>
-					<span v-if="approvalHookSources.length" class="tool-approval-hook">
-						<Webhook :size="12" :stroke-width="1.9" aria-hidden="true" />
-						由 <code>{{ approvalHookSources.join(', ') }}</code> 要求确认
-						<template v-if="approvalReason">：{{ approvalReason }}</template>
-					</span>
-					<span v-if="argumentsModifiedBy.length" class="tool-approval-hook">
-						<Webhook :size="12" :stroke-width="1.9" aria-hidden="true" />
-						参数已被 <code>{{ argumentsModifiedBy.join(', ') }}</code> 修改
-					</span>
 					<span v-if="approvalDetail" class="tool-approval-detail" :title="approvalDetail">{{ approvalDetail
 						}}</span>
 				</div>
@@ -404,20 +386,6 @@ defineExpose({
 	color: var(--caution-text-faint);
 	font-size: var(--fs-10);
 	font-weight: 600;
-}
-
-.tool-approval-hook {
-	display: inline-flex;
-	align-items: center;
-	gap: 5px;
-	color: var(--caution-text-soft);
-	font-size: var(--fs-11);
-	line-height: 1.4;
-}
-
-.tool-approval-hook code {
-	font-family: var(--font-mono);
-	font-size: var(--fs-10);
 }
 
 .tool-approval-actions {

@@ -1,4 +1,3 @@
-using SelfClaw.Infrastructure.Extensions.Plugins.Models;
 using SelfClaw.Infrastructure.Agents.Direct;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
@@ -148,59 +147,6 @@ public sealed class DirectConversationLoopTests
         for (var i = 1; i <= 2; i++)
             events.FindIndex(e => e is ToolCallStartedEvent started && started.ToolCallId == $"call-{i}")
                 .Should().BeLessThan(events.FindIndex(e => e is ToolCallCompletedEvent ended && ended.ToolCallId == $"call-{i}"));
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(2)]
-    public async Task Logical_turn_delivers_one_lifecycle_and_one_hook_pair_per_executed_tool(int toolRounds)
-    {
-        var payloads = new System.Collections.Concurrent.ConcurrentQueue<JsonElement>();
-        var log = new SelfClaw.Infrastructure.Agents.Direct.Hooks.PluginHookExecutionLog();
-        var executor = new SelfClaw.Infrastructure.Agents.Direct.Hooks.AsyncHookExecutor(
-            (_, payload, _, _) =>
-            {
-                payloads.Enqueue(JsonDocument.Parse(payload).RootElement.Clone());
-                return Task.FromResult(Hooks.TestDoubles.HookTestFactory.Success(""));
-            }, log, new SelfClaw.Infrastructure.Extensions.PluginVersionLeaseManager());
-        await executor.StartAsync(CancellationToken.None);
-        try
-        {
-            var provider = new RoundTripChatClient(toolRounds);
-            var factory = CreateFactory(provider);
-            var tool = CreateProbeTool(() => new DirectToolResult(ToolCallStatus.Completed, "ok",
-                JsonSerializer.SerializeToElement("ok"), "ok"));
-            var hooks = new[]
-            {
-                Hooks.TestDoubles.HookTestFactory.CreateHook("loop-audit", "start", PluginHookEvent.RunStarting,
-                    command: "cmd.exe", arguments: ["/d", "/c", "more >nul & echo {}"]) with { PluginRoot = Path.GetTempPath() },
-                Hooks.TestDoubles.HookTestFactory.CreateHook("loop-audit", "before", PluginHookEvent.ToolExecuting,
-                    command: "cmd.exe", arguments: ["/d", "/c", "more >nul & echo {}"]) with { PluginRoot = Path.GetTempPath() },
-                Hooks.TestDoubles.HookTestFactory.CreateHook("loop-audit", "after", PluginHookEvent.ToolExecuted, runAsync: true),
-                Hooks.TestDoubles.HookTestFactory.CreateHook("loop-audit", "complete", PluginHookEvent.RunCompleted, runAsync: true)
-            };
-            var lease = new DirectTurnCapabilityLease([], [new DirectToolBinding(tool, new(tool.Name, ToolCallKind.Other))],
-                new Dictionary<Guid, string>(), [], hooks: hooks);
-            var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory, new FixedCapabilityResolver(lease),
-                Hooks.TestDoubles.HookTestFactory.CreateFactory(executor, log));
-            var terminal = await RunAsync(runtime, factory.Profile.Id);
-            terminal.Status.Should().Be(RunCompletionStatus.Succeeded);
-            await executor.StopAsync(CancellationToken.None);
-            log.GetRecent("loop-audit").Where(entry => entry.Event == "runStarting").Should().ContainSingle()
-                .Which.Outcome.Should().Be("continued");
-            log.GetRecent("loop-audit").Where(entry => entry.Event == "toolExecuting").Should().HaveCount(toolRounds)
-                .And.OnlyContain(entry => entry.Outcome == "continued");
-            payloads.Count(payload => payload.GetProperty("event").GetString() == "toolExecuted").Should().Be(toolRounds);
-            var completion = payloads.Where(payload => payload.GetProperty("event").GetString() == "runCompleted")
-                .Should().ContainSingle().Subject;
-            completion.GetProperty("status").GetString().Should().Be("succeeded");
-            completion.GetProperty("toolCallCount").GetInt32().Should().Be(toolRounds);
-            provider.Histories.Should().HaveCount(toolRounds + 1);
-        }
-        finally
-        {
-            await executor.StopAsync(CancellationToken.None);
-        }
     }
 
     private sealed class RoundTripChatClient(int toolRounds = 2) : IChatClient

@@ -1,15 +1,12 @@
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks;
-using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct;
+using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
-using SelfClaw.Core.Interfaces.Extensions;
 using SelfClaw.Infrastructure.Agents.Cli;
 using SelfClaw.Infrastructure.Agents.Cli.Adapters;
 using SelfClaw.Infrastructure.Agents.Cli.Adapters.Abstractions;
@@ -188,13 +185,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<CliAgentAdapterRegistry>();
         services.AddSingleton<ICliAgentSessionStore, SqliteCliAgentSessionStore>();
         services.AddSingleton<CliAgentChatRuntime>();
-        services.AddSingleton<CommandHookRunner>();
-        services.AddSingleton<PluginHookExecutionLog>();
-        services.AddSingleton<IPluginHookExecutionLog>(serviceProvider =>
-            serviceProvider.GetRequiredService<PluginHookExecutionLog>());
-        services.AddSingleton<AsyncHookExecutor>();
-        services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<AsyncHookExecutor>());
-        services.AddSingleton<DirectTurnHooksFactory>();
         services.AddSingleton<DirectAgentChatRuntime>();
         services.AddSingleton<IAgentRuntimeAdapter>(serviceProvider =>
             serviceProvider.GetRequiredService<CliAgentChatRuntime>());

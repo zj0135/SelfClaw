@@ -18,7 +18,6 @@ const reasons = {
     'direct-only': '当前回合不支持调整',
     'target-turn-closed': '目标回合已结束，已转为排队',
     'continuation-active': '后台续写期间不能调整，已转为排队',
-    'hook-requires-new-turn': '当前回合要求完整审查，已转为排队',
     'skill-requires-new-turn': '该输入需要新回合，已转为排队',
     'stale-steer-target': '引导目标已失效，已转为排队',
     'execution-start-failed': '启动执行失败，请重试或取消该项',

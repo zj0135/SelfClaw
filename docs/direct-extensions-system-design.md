@@ -2,7 +2,7 @@
 
 > 2026-09-13 实现更新：本文保留原设计/阶段记录。当前目录、默认模型准备、工具契约与 continuation 恢复边界见 [运行流程](runtime-execution-flow.md) 和 [Direct 整改结果](direct-agent-architecture-review.md)。
 >
-> 2026-09-26 接缝勘误：本文后来描述的以下接缝已由 Direct hooks 阶段一重构（见 [hooks 设计](direct-hooks-system-design.md)）替换，本文中对应示例/调用链已同步为当前实现，其余历史阶段内容仅作设计记录：`DirectTurnCapabilityLease.ToolDescriptors` → `Bindings`（`IReadOnlyDictionary<string, DirectToolBinding>`）；审批与执行检查点包装 `ApprovedAIFunction` → `DirectToolInvoker`（M.E.AI `FunctionInvoker`）；适配器内部取共享 HttpClient → `AiChatClientFactory.Create(preparation, AiChatClientPipelineOptions)` 按回合在共享 pooled handler 上构造 `HttpClient` 并注入适配器。
+> 2026-09-26 接缝勘误：本文后来描述的以下接缝已被重构替换，本文中对应示例/调用链已同步为当前实现，其余历史阶段内容仅作设计记录：`DirectTurnCapabilityLease.ToolDescriptors` → `Bindings`（`IReadOnlyDictionary<string, DirectToolBinding>`）；审批与执行检查点包装 `ApprovedAIFunction` → `DirectToolInvoker`（M.E.AI `FunctionInvoker`）；适配器内部取共享 HttpClient → `AiChatClientFactory.Create(preparation, AiChatClientPipelineOptions)` 按回合在共享 pooled handler 上构造 `HttpClient` 并注入适配器。
 
 > 状态：设计稿 v1.1（2026-07-26；v1.1 按当前代码逐链路核对后补充事实修正与缺口：现状行为 §1.2–§1.4、ToolPolicy §5.4、权限确认持久化 §6.2、跨回合与 token 规则 §8.4、stdio 环境事实修正 §9.1、结果映射 §9.5、审批载体 §9.4、投影链 §10.2、桥接推送与超时 §11.2、DI 接线 §15）
 >
@@ -605,7 +605,7 @@ Http
 
 - stdio 使用 `StdioClientTransport`。
 - HTTP 使用 `HttpClientTransport`，默认 `HttpTransportMode.AutoDetect`。
-- stdio 继承宿主全部环境变量（SDK 默认 `InheritEnvironmentVariables = true`），再叠加用户显式配置；`McpTransportFactory` 不维护额外的最小基线集合。（2026-09-25 决策：hooks 与 MCP 均继承宿主环境。）
+- stdio 继承宿主全部环境变量（SDK 默认 `InheritEnvironmentVariables = true`），再叠加用户显式配置；`McpTransportFactory` 不维护额外的最小基线集合。（2026-09-25 决策：MCP 继承宿主环境。）
 - stdio 的 stderr 通过 SDK 的 `StdioClientTransportOptions.StandardErrorLines` 回调接入 §13.3 的限长诊断缓冲；`ShutdownTimeout`（SDK 默认 5 秒）即 §9.2 graceful shutdown 的“短超时”。
 - 有 workspace 时只把所选 workspace 作为工作目录/roots；没有 workspace 而 server 标记 `requiresWorkspace` 时，该 server 本轮不可用。
 - v1 不实现 MCP sampling、elicitation；client capabilities 不注册对应 handler。

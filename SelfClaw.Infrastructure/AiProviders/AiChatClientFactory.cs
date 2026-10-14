@@ -85,7 +85,7 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
         ArgumentNullException.ThrowIfNull(preparation);
         ArgumentNullException.ThrowIfNull(pipeline);
         var adapter = _registry.GetRequiredAdapter(preparation.Connection.ProviderKind);
-        var httpClient = _httpClientProvider.CreateTurnClient(preparation.Connection, pipeline.HttpHandler);
+        var httpClient = _httpClientProvider.CreateTurnClient(preparation.Connection);
         IChatClient? nativeClient = null;
 
         try

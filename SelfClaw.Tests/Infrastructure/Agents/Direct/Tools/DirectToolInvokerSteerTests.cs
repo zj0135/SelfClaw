@@ -1,4 +1,3 @@
-using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using SelfClaw.Core.Interfaces;
@@ -6,31 +5,26 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Tools;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks.Models;
-using SelfClaw.Infrastructure.Extensions.Plugins.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
-using SelfClaw.Tests.Infrastructure.Agents.Direct.Hooks.TestDoubles;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Tools;
 
 /// <summary>
 /// P4.3–P4.5/P4.8: the invoker owns the only tool execution-admission state machine, a claimed
 /// steer wins every phase before Executing, and a superseded call is a model-visible Canceled
-/// result that neither fakes hooks nor resets the consecutive-fault budget.
+/// result that never resets the consecutive-fault budget.
 /// </summary>
 public sealed class DirectToolInvokerSteerTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     [Fact]
-    public async Task A_steer_claimed_before_the_call_starts_skips_it_without_running_any_hook()
+    public async Task A_steer_claimed_before_the_call_starts_skips_it()
     {
-        var recorder = new HookRecorder();
         var steering = new FakeSteering { HasSupersedingSteer = true };
         var executions = new ExecutionCounter();
-        var pipeline = CreatePipeline(steering, recorder, executions);
+        var pipeline = CreatePipeline(steering, executions);
 
         var result = await pipeline.InvokeAsync();
 
@@ -38,47 +32,17 @@ public sealed class DirectToolInvokerSteerTests
         tool.Status.Should().Be(ToolCallStatus.Canceled);
         tool.Detail.Should().Be(DirectToolInvoker.SupersededBySteerReason);
         executions.Count.Should().Be(0);
-        recorder.Payloads.Should().BeEmpty("no hook ran for a call that never left Pending");
-        pipeline.Invoker.TryTakeOutcome("call-1").Should().BeNull();
-    }
-
-    [Fact]
-    public async Task A_steer_claim_during_the_pre_hook_finishes_the_hook_then_skips_approval_and_execution()
-    {
-        var recorder = new HookRecorder { GateExecuting = true };
-        var steering = new FakeSteering();
-        var handler = new DesktopToolApprovalHandler();
-        var executions = new ExecutionCounter();
-        var pipeline = CreatePipeline(steering, recorder, executions, approvalHandler: handler,
-            requiresApproval: true);
-        var invoke = pipeline.InvokeAsync();
-        await recorder.Entered.Task.WaitAsync(Timeout);
-
-        // The batch is claimed while the unavoidable pre-hook is still running.
-        steering.Admit = false;
-        steering.Pulse();
-        recorder.Release.TrySetResult();
-
-        var result = await invoke.AsTask().WaitAsync(Timeout);
-
-        result.Should().BeOfType<DirectToolResult>().Which.Status.Should().Be(ToolCallStatus.Canceled);
-        executions.Count.Should().Be(0);
-        handler.GetPendingRequests().Should().BeEmpty("no approval was ever requested after the steer claim");
-        var executed = recorder.Payloads.Single(payload => payload.GetProperty("event").GetString() == "toolExecuted");
-        executed.GetProperty("status").GetString().Should().Be("canceled");
-        executed.GetProperty("deniedBy").GetString().Should().Be("steer");
     }
 
     [Fact]
     public async Task A_steer_claim_while_approval_waits_revokes_the_pending_approval_and_a_late_click_fails()
     {
-        var recorder = new HookRecorder();
         var steering = new FakeSteering();
         var handler = new DesktopToolApprovalHandler();
         var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         handler.ApprovalRequested += _ => requested.TrySetResult();
         var executions = new ExecutionCounter();
-        var pipeline = CreatePipeline(steering, recorder, executions, approvalHandler: handler,
+        var pipeline = CreatePipeline(steering, executions, approvalHandler: handler,
             requiresApproval: true);
         var invoke = pipeline.InvokeAsync();
         await requested.Task.WaitAsync(Timeout);
@@ -98,13 +62,12 @@ public sealed class DirectToolInvokerSteerTests
     [Fact]
     public async Task A_failed_steer_claim_does_not_close_the_pending_approval()
     {
-        var recorder = new HookRecorder();
         var steering = new FakeSteering();
         var handler = new DesktopToolApprovalHandler();
         var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         handler.ApprovalRequested += _ => requested.TrySetResult();
         var executions = new ExecutionCounter();
-        var pipeline = CreatePipeline(steering, recorder, executions, approvalHandler: handler,
+        var pipeline = CreatePipeline(steering, executions, approvalHandler: handler,
             requiresApproval: true);
         var invoke = pipeline.InvokeAsync();
         await requested.Task.WaitAsync(Timeout);
@@ -123,11 +86,10 @@ public sealed class DirectToolInvokerSteerTests
     [Fact]
     public async Task An_approved_call_still_loses_to_a_steer_claim_at_the_execution_admission()
     {
-        var recorder = new HookRecorder();
         var steering = new FakeSteering { Admit = false };
         var handler = new RecordingApprovalHandler(ToolApprovalDecision.Approved);
         var executions = new ExecutionCounter();
-        var pipeline = CreatePipeline(steering, recorder, executions, approvalHandler: handler,
+        var pipeline = CreatePipeline(steering, executions, approvalHandler: handler,
             requiresApproval: true);
 
         var result = await pipeline.InvokeAsync();
@@ -140,12 +102,11 @@ public sealed class DirectToolInvokerSteerTests
     [Fact]
     public async Task A_call_already_executing_is_not_revoked_by_a_later_steer_claim()
     {
-        var recorder = new HookRecorder();
         var steering = new FakeSteering();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var executions = new ExecutionCounter();
-        var pipeline = CreatePipeline(steering, recorder, executions, tool: async () =>
+        var pipeline = CreatePipeline(steering, executions, tool: async () =>
         {
             entered.TrySetResult();
             await release.Task.WaitAsync(Timeout);
@@ -167,10 +128,9 @@ public sealed class DirectToolInvokerSteerTests
     [Fact]
     public async Task A_superseded_call_neither_resets_nor_increments_the_consecutive_fault_budget()
     {
-        var recorder = new HookRecorder();
         var steering = new FakeSteering();
         var executions = new ExecutionCounter();
-        var pipeline = CreatePipeline(steering, recorder, executions, tool: () => throw new InvalidOperationException("broken"));
+        var pipeline = CreatePipeline(steering, executions, tool: () => throw new InvalidOperationException("broken"));
         var invoke = (string callId) => pipeline.Invoker
             .InvokeAsync(new FunctionCallContent(callId, "probe_tool", new AIFunctionArguments()), 0, CancellationToken.None)
             .AsTask();
@@ -190,11 +150,10 @@ public sealed class DirectToolInvokerSteerTests
     [Fact]
     public async Task Denied_approval_still_returns_the_user_canceled_result_without_executing()
     {
-        var recorder = new HookRecorder();
         var steering = new FakeSteering();
         var handler = new RecordingApprovalHandler(ToolApprovalDecision.Denied);
         var executions = new ExecutionCounter();
-        var pipeline = CreatePipeline(steering, recorder, executions, approvalHandler: handler,
+        var pipeline = CreatePipeline(steering, executions, approvalHandler: handler,
             requiresApproval: true);
 
         var result = await pipeline.InvokeAsync();
@@ -203,11 +162,9 @@ public sealed class DirectToolInvokerSteerTests
         tool.Status.Should().Be(ToolCallStatus.Canceled);
         tool.Summary.Should().Be(DirectToolInvoker.DeniedResult);
         executions.Count.Should().Be(0);
-        var executed = recorder.Payloads.Single(payload => payload.GetProperty("event").GetString() == "toolExecuted");
-        executed.GetProperty("deniedBy").GetString().Should().Be("user");
     }
 
-    private static TestPipeline CreatePipeline(FakeSteering steering, HookRecorder recorder, ExecutionCounter executions,
+    private static TestPipeline CreatePipeline(FakeSteering steering, ExecutionCounter executions,
         Func<ValueTask<object?>>? tool = null, IToolApprovalHandler? approvalHandler = null, bool requiresApproval = false)
     {
         var function = AIFunctionFactory.Create(async () =>
@@ -224,16 +181,9 @@ public sealed class DirectToolInvokerSteerTests
         });
         var binding = new DirectToolBinding(function, new DirectToolDescriptor("probe_tool", ToolCallKind.Other),
             requiresApproval);
-        var hooks = HookTestFactory.Create(
-            HookTestFactory.CreateContext(),
-            [
-                HookTestFactory.CreateHook("steer-audit", "before", PluginHookEvent.ToolExecuting),
-                HookTestFactory.CreateHook("steer-audit", "after", PluginHookEvent.ToolExecuted)
-            ],
-            runner: recorder.RunAsync);
         var request = CreateRequest(approvalHandler) with { Steering = steering };
         var invoker = new DirectToolInvoker(request,
-            new Dictionary<string, DirectToolBinding>(StringComparer.Ordinal) { ["probe_tool"] = binding }, hooks);
+            new Dictionary<string, DirectToolBinding>(StringComparer.Ordinal) { ["probe_tool"] = binding });
         return new TestPipeline(invoker);
     }
 
@@ -304,28 +254,6 @@ public sealed class DirectToolInvokerSteerTests
             }
 
             pulse.TrySetResult();
-        }
-    }
-
-    internal sealed class HookRecorder
-    {
-        internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal List<JsonElement> Payloads { get; } = [];
-        internal bool GateExecuting { get; init; }
-
-        internal async Task<HookProcessResult> RunAsync(HookProcessStart start, ReadOnlyMemory<byte> input, TimeSpan timeout,
-            CancellationToken cancellationToken)
-        {
-            var payload = JsonDocument.Parse(input).RootElement.Clone();
-            lock (Payloads) Payloads.Add(payload);
-            if (GateExecuting && payload.GetProperty("event").GetString() == "toolExecuting")
-            {
-                Entered.TrySetResult();
-                await Release.Task.WaitAsync(cancellationToken);
-            }
-
-            return HookTestFactory.Success("");
         }
     }
 

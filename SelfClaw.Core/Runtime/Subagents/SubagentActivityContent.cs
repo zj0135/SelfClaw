@@ -100,7 +100,7 @@ public static class SubagentActivityContent
             int.TryParse(ordinalText, NumberStyles.None, CultureInfo.InvariantCulture, out var ordinal))
         {
             var segment = detail.Message?.Segments?.FirstOrDefault(item => item.Ordinal == ordinal);
-            if (segment is { Kind: MessageSegmentKind.Text or MessageSegmentKind.Thinking or MessageSegmentKind.Notice })
+            if (segment is { Kind: MessageSegmentKind.Text or MessageSegmentKind.Thinking })
             {
                 return segment.Text ?? string.Empty;
             }

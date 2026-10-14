@@ -50,7 +50,6 @@ internal sealed class SubagentChildTurnCommitter : IRecordedTurnCommitter
             : _overrideErrorCode ?? commit.Finalization.Turn.Status switch
             {
                 ConversationTurnStatus.Truncated => SubagentErrorCodes.OutputTruncated,
-                ConversationTurnStatus.Blocked => SubagentErrorCodes.BlockedByHook,
                 _ => SubagentErrorCodes.ProviderFailed
             };
         var errorMessage = status == SubagentTaskStatus.Succeeded

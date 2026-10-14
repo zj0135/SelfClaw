@@ -2,7 +2,7 @@
 
 状态：P0/P1 保留已验收基线；P2 独立审核通过（IR-P2-01 测试夹具竞态已修复，6 次全量稳定 1419/0/4）。P3（持久化 Queue）独立审核发现的问题已修复并通过自动回归；P4（Steer 执行语义与竞争处理）实现与自测完成，独立审核发现的末尾竞争与显式 Skill token 问题已修复（.NET 全量 1542/0/4），**待独立复审**；P5（完整 Vue 交互和传输恢复）实现与自测完成（.NET 1549/0/4、Vitest 126、Playwright 25、Vue build 通过），独立审核 IR-P5-01 已修复并由原探针 22/22 复核。队列与 steer 始终开启（功能开关已在 `8ad27da` 删除，见 §11），P6 未实施。更新：2026-10-08。P2 基线提交 ca42646，当前目标 SQLite schema v30（P3/P4/P5 未新增 DDL）。P2 独立审核见 [P2 独立审核](direct-message-input-p2-independent-review.md)，P3 实施见 [P3 实施报告](direct-message-input-p3-implementation-review.md)，P4 实施见 [P4 实施报告](direct-message-input-p4-implementation-review.md)，P5 实施见 [P5 报告](direct-message-input-p5-implementation-review.md) 与 [P5 独立审核](direct-message-input-p5-independent-review.md)。
 
-本文定义完整目标行为；P2 基础、P3 Queue 受理/调度已实现，P4 Steer 执行语义与竞争处理已实现、待独立审核（功能开关已删除，Queue 与 Steer 始终开启），P5 Vue 完整交互与传输恢复已实现、待独立审核。UI 调整（2026-10）：composer 只保留一个角落按钮，空闲即发送；Direct 忙碌时输入框有内容则同一按钮变成发送（入队）、为空则显示「停止生成」（不可停止的后台续跑显示进度）；steer 只在队列面板对 Pending FollowUp 点「调整当前任务」（promote），不再由 composer 直接提交 steer。实际实现及验证见 [P2 实施报告](direct-message-input-p2-implementation-review.md)、[P4 实施报告](direct-message-input-p4-implementation-review.md) 与 [P5 报告](direct-message-input-p5-implementation-review.md)。配套任务、用例和证据记录见 [分阶段实施与验收](direct-message-input-implementation.md)。现有机制参见 [运行链路](runtime-execution-flow.md)、[用量归一化](usage-tracking-design.md)、[Direct hooks](direct-hooks-system-design.md) 和 [Subagent 设计](direct-subagent-system-design.md)。
+本文定义完整目标行为；P2 基础、P3 Queue 受理/调度已实现，P4 Steer 执行语义与竞争处理已实现、待独立审核（功能开关已删除，Queue 与 Steer 始终开启），P5 Vue 完整交互与传输恢复已实现、待独立审核。UI 调整（2026-10）：composer 只保留一个角落按钮，空闲即发送；Direct 忙碌时输入框有内容则同一按钮变成发送（入队）、为空则显示「停止生成」（不可停止的后台续跑显示进度）；steer 只在队列面板对 Pending FollowUp 点「调整当前任务」（promote），不再由 composer 直接提交 steer。实际实现及验证见 [P2 实施报告](direct-message-input-p2-implementation-review.md)、[P4 实施报告](direct-message-input-p4-implementation-review.md) 与 [P5 报告](direct-message-input-p5-implementation-review.md)。配套任务、用例和证据记录见 [分阶段实施与验收](direct-message-input-implementation.md)。现有机制参见 [运行链路](runtime-execution-flow.md)、[用量归一化](usage-tracking-design.md) 和 [Subagent 设计](direct-subagent-system-design.md)。
 
 P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未知，生产方负责推导，共享累加器和 recorder 只合并并保留该语义；CLI 也在 parser 发出事件前归一化。P2 的回合模型与存储重构应继续沿用这一契约，不重新引入消费端 total 回退。
 
@@ -52,7 +52,7 @@ P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未�
 | `SelfClaw.Desktop/Services/Runtime/ConversationSessionCoordinator.cs` | 选择／加载之外还持有运行注册及启动锁 | 保留选择、历史加载和展示；活动运行只读新的唯一注册源 |
 | `SelfClaw.Infrastructure/AiProviders/AiChatClientFactory.cs` | `UseFunctionInvocation` 驱动内部工具循环 | Direct 获得单次调用的 provider 管线 |
 | `SelfClaw.Infrastructure/Agents/Direct/DirectAgentChatRuntime.cs` | 一次 SDK 枚举、事件翻译、终态处理 | 将迭代控制交给显式 `DirectConversationLoop` |
-| `SelfClaw.Infrastructure/Agents/Direct/Tools/DirectToolInvoker.cs` | SDK `FunctionInvocationContext` 入口，统一 hooks／审批／checkpoint | 提取可直接调用的入口，保留唯一工具执行边界 |
+| `SelfClaw.Infrastructure/Agents/Direct/Tools/DirectToolInvoker.cs` | SDK `FunctionInvocationContext` 入口，统一审批／checkpoint | 提取可直接调用的入口，保留唯一工具执行边界 |
 | `SelfClaw.Desktop/Services/Runtime/ConversationTurnRecorder.cs` | `TurnId` 同时是 assistant ID 和工具所属消息 ID | 区分逻辑 TurnId 与当前 AssistantMessageId |
 | `SelfClaw.Infrastructure/Agents/Direct/Context/DirectPromptComposer.cs` | 回合开始时构造预算内历史 | 提供可复用预算选择规则，支持运行中追加输入 |
 | `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteConversationRepository.cs` | 按 `created_at_utc` 排消息 | 按持久化会话序号排序 |
@@ -254,10 +254,10 @@ dispatcher 使用受控后台任务和公平候选扫描；一会话失败不能
 
 ### 7.1 单次 provider 管线
 
-将自动函数调用从 Direct provider factory 移出，保留 adapter、HTTP hooks、日志过滤和 lease 释放顺序。`DirectAgentChatRuntime` 仍负责准备与唯一终态；`DirectConversationLoop` 负责迭代。
+将自动函数调用从 Direct provider factory 移出，保留 adapter、日志过滤和 lease 释放顺序。`DirectAgentChatRuntime` 仍负责准备与唯一终态；`DirectConversationLoop` 负责迭代。
 
 ```text
-Prepare model → Resolve capabilities → runStarting → Build context
+Prepare model → Resolve capabilities → Build context
 loop:
     领取边界内 steer，等待有序持久化 ACK，追加 user messages
     构造本次预算内 provider messages
@@ -282,38 +282,38 @@ loop:
 - 必须完整枚举单次响应后再决定工具分支及终态。P0 Chat Completions fixture 中，完整 FunctionCallContent 晚于 finish_reason 到达；不能因此提前 break。使用当前 SDK ToChatResponse 等价语义增量聚合消息、元数据和 usage，避免长期保存原始 delta 列表。三个 SSE fixture 验证了参数分片，Ollama fixture 参数一次给全，不能声称验证了四者的分片行为。
 - 运行中保留原生内容、callId、响应 ID、推理签名／加密 reasoning 和 adapter 元数据。Anthropic 签名在独立 update 的 ProtectedData 中，合并后才与 thinking text 结合；Responses 的 MessageId 可以为空，不能强行当作 ResponseId。实际下一请求序列化由 P0 G02 捕获 HTTP body 验证，不经过显示 DTO 往返。
 - 明确区分客户端 AIFunction 调用和 provider 侧内置工具；只执行当前 bindings 中的客户端工具。未知客户端工具与格式损坏响应按协议失败处理，不伪造成功。
-- 完整枚举后先分类：ContentFilter 或原生 Refusal 返回 Blocked，取消本响应提出但尚未执行的工具；其他 provider ErrorContent、未知 finish reason 返回 Failed。Length 仍按原截断规则处理。零响应、只有 usage/元数据/空内容且没有完成标记均 Failed；明确 Stop 的合法无正文响应、有效 text/reasoning/ProtectedData 和其他支持的原生内容仍可完成。不能用前一请求的输出掩盖后一请求的空响应。以上均发生在工具 hooks、审批、checkpoint 之前，保留已经观察到的内容与用量。
+- 完整枚举后先分类：ContentFilter 或原生 Refusal 返回 Blocked，取消本响应提出但尚未执行的工具；其他 provider ErrorContent、未知 finish reason 返回 Failed。Length 仍按原截断规则处理。零响应、只有 usage/元数据/空内容且没有完成标记均 Failed；明确 Stop 的合法无正文响应、有效 text/reasoning/ProtectedData 和其他支持的原生内容仍可完成。不能用前一请求的输出掩盖后一请求的空响应。以上均发生在审批、checkpoint 之前，保留已经观察到的内容与用量。
 - 通过响应分类后，再看合并内容中是否有完整客户端 function call；存在调用时即使 finish_reason=Stop 也进入工具分支。Ollama fixture 已观测到这种组合，Stop/ToolCalls 的新预算路径均有回归。显式循环返回正常完成／截断／内容过滤／预算耗尽，协议错误抛出并由 runtime 收尾为 Failed，不凭最后一个 finish reason 反推预算耗尽。
 - usage 先按单请求及 adapter 的增量／累计契约归一化，再跨请求累加；不把 UsageContent 碎片数当 ProviderCalls，也不把所有 raw usage 一律相加。无 usage 保留未知，详见 §9。
 - 新循环固定 `MaximumProviderRequestsPerTurn = 128`，含首次及 steer 请求，每次开始调用前预占一次，取消／失败不退回；SDK 内部 HTTP 重试不是新的逻辑 IChatClient 请求。旧配置 128 的实测结果是 129 次请求，因此新硬上限是明确收紧一次，不能写成保持旧请求数。
 - 第 128 次请求给出纯最终回答可正常成功；若仍要求客户端工具，禁止执行它们，补齐本地 Canceled／BudgetExhausted 结果以终结调用记录并 Failed；未消费 steer 转 Held。耗尽后不能再请求一次模型收尾。
 - 保留 `MaximumConsecutiveToolFaults = 2` 的现有行为（基线实测连续故障 3 次后终止），调用预算和连续故障预算独立；审批拒绝、steer 跳过不算工具故障。
 - Length 保持有有效输出则 Truncated、无有效输出则 Failed；不能因有 pending steer 自动掩盖截断并继续收费。
-- 单逻辑回合只执行一次 runStarting / runCompleted、一次完成通知；Steer 不重新建立 provider 或 capability lease。
+- 单逻辑回合只执行一次完成通知；Steer 不重新建立 provider 或 capability lease。
 
 ### 7.3 Steer 与工具执行
 
-每个调用存在 `Pending → Preparing → AwaitingApproval → ReadyToExecute → Executing → Terminal` 的内部执行状态；不需批准时跳过 AwaitingApproval。Preparing 表示前置 hook 正在执行，必须等它退出后再处理后续阶段；前置 hook 自身的副作用不提供回滚。
+每个调用存在 `Pending → Preparing → AwaitingApproval → ReadyToExecute → Executing → Terminal` 的内部执行状态；不需批准时跳过 AwaitingApproval。Preparing 为过渡状态，前置准备完成后再处理后续阶段。
 
-执行过程继续集中在 `DirectToolInvoker`：toolExecuting hooks → 必要审批 → 最后执行准入裁决 → awaited checkpoint → 实际 AIFunction → toolExecuted hooks。invoker 独占上述流程状态；输入控制端只在会话裁决点授予“此调用可开始”的不可撤回许可，不复制 Preparing／审批／执行的整套状态机。授予许可即 `ReadyToExecute → Executing` 的线性化点，发生在 checkpoint 之前；此后不再承诺因 steer 抢占。实际 hook、checkpoint 和工具都在准入 gate 外运行。
+执行过程继续集中在 `DirectToolInvoker`：必要审批 → 最后执行准入裁决 → awaited checkpoint → 实际 AIFunction。invoker 独占上述流程状态；输入控制端只在会话裁决点授予“此调用可开始”的不可撤回许可，不复制 Preparing／审批／执行的整套状态机。授予许可即 `ReadyToExecute → Executing` 的线性化点，发生在 checkpoint 之前；此后不再承诺因 steer 抢占。实际 checkpoint 和工具都在准入 gate 外运行。
 
-steer 批次领取提交后，可以跳过 Pending，在 Preparing 的 hook 退出后停止后续阶段，定向结束 AwaitingApproval，或在 ReadyToExecute 的裁决中获胜。各路径都由 invoker 统一形成终结结果；不要让 loop 再实现一套审批或 hook 规则。领取失败则不能以未确认输入为由关闭审批或跳过工具。
+steer 批次领取提交后，可以跳过 Pending，在 Preparing 完成后停止后续阶段，定向结束 AwaitingApproval，或在 ReadyToExecute 的裁决中获胜。各路径都由 invoker 统一形成终结结果；不要让 loop 再实现一套审批规则。领取失败则不能以未确认输入为由关闭审批或跳过工具。
 
 未开始的调用必须生成模型可见 `Canceled` 结果，reason 使用 `SupersededBySteer`，显示“因用户调整而跳过”。每个已提出调用仍恰好有一个结果，全部闭合后才插入 user steer。跳过不伪装为 shell 返回非零，也不伪装为用户拒绝；Superseded 既不增加也不清零连续工具故障计数。
 
 现有 `IToolApprovalHandler` 的 bool 返回不能表达上述差别。演进为显式 Approved / Denied / Superseded 决策（普通取消仍抛 `OperationCanceledException`），由 `DesktopToolApprovalHandler` 唯一裁决 pending 状态。新增定向 supersede 操作，关闭 Vue/toast 上的旧审批；过期点击不能让调用重新执行。不得 catch 取消异常并转换成 steer 成功结果。
 
-对未运行前置 hook 的跳过调用，不伪造 toolExecuting/toolExecuted 配对；若前置 hook 已实际开始并完成，后置审计带真实 Superseded outcome。验收验证 hook 次数和参数，而非仅验证 UI 文案。
+对跳过的调用不伪造执行记录；已实际开始并完成的调用带真实 Superseded outcome。验收验证实际执行次数和参数，而非仅验证 UI 文案。
 
-### 7.4 Hooks、Skills 与能力边界
+### 7.4 Skills 与能力边界
 
-原始 runStarting hook 可能承担提示词审查，不能让 steer 绕过这条规则。首版采取明确边界：提升（promote）在存在 `HookRequiresNewTurn` 阻塞原因时拒绝改写，返回 `HookRequiresNewTurn`，输入保持 Pending FollowUp，下一回合走完整 runStarting。只有 HTTP／tool／runCompleted hooks 的回合仍可 steer。
+提升（promote）不绕过回合级输入策略：需新回合的能力边界在提升时拒绝改写，输入保持 Pending FollowUp，下一回合走完整回合入口。
 
-首版对含显式 Skill 激活 token 的输入拒绝提升，返回 `SkillRequiresNewTurn`，沿用既有 token 校验与预加载，输入保持 Pending FollowUp。普通文本 steer 保持原文作为 User 角色，不作为 System 指令。未来若增加逐输入 hook，需扩展 hook 协议和策略能力声明，不重复触发 runStarting 冒充生命周期。
+首版对含显式 Skill 激活 token 的输入拒绝提升，返回 `SkillRequiresNewTurn`，沿用既有 token 校验与预加载，输入保持 Pending FollowUp。普通文本 steer 保持原文作为 User 角色，不作为 System 指令。未来若增加逐输入策略，需扩展策略能力声明，不重复触发回合级策略冒充生命周期。
 
 ### 7.5 上下文预算
 
-将 `DirectPromptComposer` 的估算／选择规则提取为可复用服务，运行上下文使用同一规则。新输入批次、系统 sections、现有 hook context、当前尚需解释的完整工具调用／结果单元必须被预留；历史按完整单元裁剪。
+将 `DirectPromptComposer` 的估算／选择规则提取为可复用服务，运行上下文使用同一规则。新输入批次、系统 sections、当前尚需解释的完整工具调用／结果单元必须被预留；历史按完整单元裁剪。
 
 边界提交前校验本批次必需上下文能否放入预算；不能放入时该批尚未消费的输入从 Pending 或 Claimed 转 Held，并明确暂停／收尾，不标记已消费。已经提交的 steer 在本回合内作为受保护输入，不能在之后迭代中被静默裁掉；若受保护内容继续增长超预算，终止并提示用户。
 
@@ -343,7 +343,7 @@ conversation_turns T
 
 messages 增加必填 `turn_id` 外键与 `sequence`，UNIQUE(conversation_id, sequence)。消息与回合的 conversation_id 一致性由复合约束或同事务校验保证。messages 不添加 turn_status；回合状态、时长、错误和 usage 由 turn snapshot 提供。原 MessageRecord 中承担回合职责的 Usage / DurationMs / ErrorMessage 随相关读写和投影一并重构，不能为减少调用点继续双写。
 
-工具的 `message_id` 仍关联实际包含 ToolCall 块的 assistant 片段，不关联 TurnId。`AgentTurnState` 保留逻辑 TurnId 和可空 CurrentAssistantMessageId。首次收到正文、thinking、工具或 notice 时才创建 assistant 消息；片段封存后清空当前 ID，下次有输出再新建。首个响应前的多条 steer 直接顺序写 user，无空消息移位或修改已分配序号。
+工具的 `message_id` 仍关联实际包含 ToolCall 块的 assistant 片段，不关联 TurnId。`AgentTurnState` 保留逻辑 TurnId 和可空 CurrentAssistantMessageId。首次收到正文、thinking 或工具时才创建 assistant 消息；片段封存后清空当前 ID，下次有输出再新建。首个响应前的多条 steer 直接顺序写 user，无空消息移位或修改已分配序号。
 
 `MessageStatus` 只表达片段是否流式、封存或中断；回合级 Blocked / Truncated / Failed 的判断迁到 ConversationTurnRecord。不得因为枚举旧值方便而保留双重真值。回合在产生输出前失败时，可以只有 turn record 和原 user；由投影渲染回合错误，不为挂状态制造空 assistant。具体片段枚举精简与各投影同时完成。
 
@@ -449,8 +449,8 @@ P5 实现补充：状态快照在 `canSteer` 外附带 `steerReason` 和当前�
 | I04 | function call/result 完整闭合后才能插入 steer |
 | I05 | 消费事务和前序事件处理完成后，才能开始下一次 provider 请求 |
 | I06 | 正式消息顺序在流式显示、重载和下一回合回放中一致 |
-| I07 | 单逻辑回合只有一个终态、一组生命周期 hooks、一份聚合用量 |
-| I08 | steer 不绕过审批、checkpoint、能力边界或 runStarting 输入策略 |
+| I07 | 单逻辑回合只有一个终态、一组生命周期、一份聚合用量 |
+| I08 | steer 不绕过审批、checkpoint、能力边界或回合级输入策略 |
 | I09 | stop、故障、崩溃后不自动执行不确定的输入；已消费输入不回队重跑 |
 | I10 | 待确认边界在取消／异常／关闭时可退出，无永久 waiter 或 admission 泄漏 |
 | I11 | CLI、child、continuation 的既有终态与原子交付语义保持 |
@@ -491,7 +491,7 @@ P3 审核修复证据（2026-10-03）：[修复记录](direct-message-input-p3-r
 
 P3 验收修复（2026-10-04）：失败暂停不再让默认关闭开关下的空闲发送永久卡死；continuation 在确认无未处理输入之前不占用运行句柄。Queue 开关仍默认关闭，Steer 未开放。
 
-P4 实施记录（2026-10-04）：[P4 实施报告](direct-message-input-p4-implementation-review.md)。Steer 通过 P2 的输入会话/writer/回合模型消费；工具执行准入唯一归 `DirectToolInvoker`，审批显式 Approved/Denied/Superseded；runStarting hooks 或显式 Skill 激活的 turn 转 FollowUp；未改 schema，`SELFCLAW_STEER_ENABLED` 默认关闭。
+P4 实施记录（2026-10-04）：[P4 实施报告](direct-message-input-p4-implementation-review.md)。Steer 通过 P2 的输入会话/writer/回合模型消费；工具执行准入唯一归 `DirectToolInvoker`，审批显式 Approved/Denied/Superseded；含显式 Skill 激活的 turn 转 FollowUp；未改 schema，`SELFCLAW_STEER_ENABLED` 默认关闭。
 P4 复核修复（2026-10-04）：最终边界读与受理共用同一临界区（空领取即关闭入口，关闭前受理由该读领取并在本轮消费）；成功收口的未消费 steer 一律 Held；`ISkillTokenDetector` 在受理与领取两处把含显式 Skill token 的 steer 转 FollowUp。
 
 开关移除（2026-10-04 代码，`8ad27da`；文档同步 2026-10-08）：本节其他位置的「开关默认关闭」表述自本条起作废。删除 `ConversationInputFeatureSwitch` 与 `SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`；dispatcher 始终扫描 backlog；受理与 retry/resume/promote 不再有 queue-disabled / steer-not-enabled 分支，`ConversationInputSteerPolicy.Evaluate` 去掉开关参数，存储层不再以 pending-inputs 拒绝积压，`QueueDisabled`／`PendingInputs`／`SteerNotEnabled` 原因常量与宿主、Vue 的「未启用」文案一并删除。队列与 steer 始终开启，设计要求见 §11。

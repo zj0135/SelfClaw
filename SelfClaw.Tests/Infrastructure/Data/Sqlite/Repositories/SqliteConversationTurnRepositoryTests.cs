@@ -147,27 +147,6 @@ public sealed class SqliteConversationTurnRepositoryTests
         (await fixture.Conversations.ListMessagesAsync(message.ConversationId)).Should().ContainSingle();
     }
 
-    [Fact]
-    public async Task Tool_hook_outcome_survives_atomic_progress_and_completion()
-    {
-        using var fixture = new ConversationPersistenceFixture();
-        var start = await fixture.StartAsync();
-        var message = await fixture.AssistantAsync(start.Turn);
-        var tool = CreateTool(message);
-        message = WithTool(message, tool);
-        await fixture.Turns.CommitProgressAsync(new ConversationTurnCommit(start.Turn, [message], [tool]));
-        var source = new HookSource("guard", "check");
-        var completed = tool with
-        {
-            Status = ToolExecutionStatus.Failed,
-            HookOutcome = new ToolHookOutcome("{\"command\":\"ls\"}", [source], [source], source, "blocked",
-                [new HookFeedback(source, "feedback")], [new HookFailureNotice(source, "timedOut", "timeout")])
-        };
-        await fixture.Turns.CommitProgressAsync(new ConversationTurnCommit(start.Turn, [message], [completed]));
-        var loaded = (await fixture.Conversations.ListToolExecutionsAsync(message.ConversationId)).Single();
-        loaded.HookOutcome.Should().BeEquivalentTo(completed.HookOutcome);
-    }
-
     private static ToolExecutionRecord CreateTool(MessageRecord message)
         => new(Guid.NewGuid(), message.ConversationId, "read_file", "{}", ToolExecutionStatus.Running,
             null, "call-1", null, message.CreatedAtUtc, message.UpdatedAtUtc, MessageId: message.Id);

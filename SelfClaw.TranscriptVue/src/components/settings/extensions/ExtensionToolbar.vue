@@ -1,11 +1,11 @@
 <script setup>
-import { FolderInput, PackageOpen, Plus, RefreshCw, Search, X } from 'lucide-vue-next';
+import { PackageOpen, Plus, RefreshCw, Search, X } from 'lucide-vue-next';
 defineProps({
 	modelValue: { type: String, default: '' },
 	category: { type: String, required: true },
 	loading: { type: Boolean, default: false },
 });
-defineEmits(['update:modelValue', 'refresh', 'add-mcp', 'import-package', 'import-plugin-folder']);
+defineEmits(['update:modelValue', 'refresh', 'add-mcp', 'import-package']);
 </script>
 
 <template>
@@ -24,10 +24,6 @@ defineEmits(['update:modelValue', 'refresh', 'add-mcp', 'import-package', 'impor
 		<button v-if="category !== 'mcpServer'" type="button" class="primary"
 			:title="category === 'plugin' ? '导入插件' : '导入技能'" @click="$emit('import-package')">
 			<PackageOpen :size="15" aria-hidden="true" /><span class="label">{{ category === 'plugin' ? '导入插件' : '导入技能' }}</span>
-		</button>
-		<button v-if="category === 'plugin'" type="button" class="primary" title="从文件夹安装"
-			@click="$emit('import-plugin-folder')">
-			<FolderInput :size="15" aria-hidden="true" /><span class="label">从文件夹安装</span>
 		</button>
 		<button v-if="category === 'mcpServer'" type="button" class="primary" title="新增服务器" @click="$emit('add-mcp')">
 			<Plus :size="15" aria-hidden="true" /><span class="label">新增服务器</span>

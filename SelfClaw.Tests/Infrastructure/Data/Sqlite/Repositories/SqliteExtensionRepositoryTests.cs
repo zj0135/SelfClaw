@@ -235,38 +235,6 @@ VALUES($toolRunId, $conversationId, 'read_file', '{}', 2, $createdAt, $createdAt
     }
 
     [Fact]
-    public async Task Package_round_trips_source_path_and_a_zip_reinstall_clears_it()
-    {
-        var repository = CreateRepository();
-        var now = DateTimeOffset.UtcNow;
-        var sourcePath = Path.Combine(_rootPath, "source", "office");
-        var package = new ExtensionPackageRecord(
-            ExtensionKind.Plugin,
-            "office",
-            "Office",
-            "1.0.0",
-            "Office tools",
-            Path.Combine(_rootPath, "plugins", "office", "versions", "v1"),
-            "sha256:v1",
-            "{}",
-            null,
-            false,
-            null,
-            null,
-            now,
-            now,
-            sourcePath);
-
-        await repository.UpsertPackageAsync(package);
-
-        (await repository.GetPackageAsync(ExtensionKind.Plugin, "office"))!.SourcePath.Should().Be(sourcePath);
-
-        await repository.UpsertPackageAsync(package with { SourcePath = null, UpdatedAtUtc = now.AddMinutes(1) });
-
-        (await repository.GetPackageAsync(ExtensionKind.Plugin, "office"))!.SourcePath.Should().BeNull();
-    }
-
-    [Fact]
     public async Task Initialize_rejects_v27_without_adding_extension_source_path()
     {
         var storagePaths = CreateStoragePaths();

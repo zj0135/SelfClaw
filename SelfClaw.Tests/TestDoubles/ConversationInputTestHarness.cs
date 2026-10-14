@@ -167,7 +167,6 @@ internal sealed class ScriptedAgentChatRuntime : IAgentChatRuntime
         {
             RunCompletionStatus.Succeeded => new RunCompletedEvent(status, "done"),
             RunCompletionStatus.Truncated => new RunCompletedEvent(status, "partial", "length"),
-            RunCompletionStatus.Blocked => new RunCompletedEvent(status, null, "blocked"),
             _ => new RunCompletedEvent(status, null, "provider failed"),
         };
     }

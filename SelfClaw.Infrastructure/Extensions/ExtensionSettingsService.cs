@@ -3,7 +3,6 @@ using System.Net;
 using System.Text.Json;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
 using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Plugins;
@@ -23,7 +22,6 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
     private readonly IExtensionStateChangeNotifier _stateChangeNotifier;
     private readonly IPluginVersionLeaseManager? _pluginVersionLeaseManager;
     private readonly IPluginViewSessionRegistry? _pluginViewSessionRegistry;
-    private readonly AsyncHookExecutor? _asyncHookExecutor;
 
     public ExtensionSettingsService(
         IExtensionPackageRepository packageRepository,
@@ -36,8 +34,7 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         PluginContributionService pluginContributionService,
         IExtensionStateChangeNotifier stateChangeNotifier,
         IPluginVersionLeaseManager? pluginVersionLeaseManager = null,
-        IPluginViewSessionRegistry? pluginViewSessionRegistry = null,
-        AsyncHookExecutor? asyncHookExecutor = null)
+        IPluginViewSessionRegistry? pluginViewSessionRegistry = null)
     {
         _packageRepository = packageRepository;
         _mcpServerRepository = mcpServerRepository;
@@ -50,7 +47,6 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         _stateChangeNotifier = stateChangeNotifier;
         _pluginVersionLeaseManager = pluginVersionLeaseManager;
         _pluginViewSessionRegistry = pluginViewSessionRegistry;
-        _asyncHookExecutor = asyncHookExecutor;
     }
 
     public async Task<ExtensionSettingsState> GetStateAsync(CancellationToken cancellationToken = default)
@@ -87,60 +83,6 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
         return await _catalog.CreatePackageViewAsync(result.Package, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<ExtensionPackageView> ImportPluginFolderAsync(
-        string folderPath,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await _packageInstaller
-            .InstallPluginFolderAsync(folderPath, expectedPluginId: null, cancellationToken)
-            .ConfigureAwait(false);
-        await _pluginContributionService.SynchronizeMcpServersAsync(result.Package, cancellationToken)
-            .ConfigureAwait(false);
-        _stateChangeNotifier.Advance();
-        return await _catalog.CreatePackageViewAsync(result.Package, cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task<PluginReloadResult> ReloadPluginAsync(
-        string pluginId,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
-        var record = await _packageRepository.GetPackageAsync(ExtensionKind.Plugin, pluginId, cancellationToken)
-            .ConfigureAwait(false);
-        if (record is null)
-        {
-            throw new InvalidOperationException($"Plugin '{pluginId}' was not found.");
-        }
-
-        if (string.IsNullOrWhiteSpace(record.SourcePath))
-        {
-            throw new InvalidOperationException("Plugin was not installed from a folder.");
-        }
-
-        if (!Directory.Exists(record.SourcePath))
-        {
-            throw new DirectoryNotFoundException(
-                $"Plugin source folder '{record.SourcePath}' was not found.");
-        }
-
-        var result = await _packageInstaller
-            .InstallPluginFolderAsync(record.SourcePath, pluginId, cancellationToken)
-            .ConfigureAwait(false);
-        if (!result.Changed)
-        {
-            return new PluginReloadResult(
-                await _catalog.CreatePackageViewAsync(record, cancellationToken).ConfigureAwait(false),
-                Changed: false);
-        }
-
-        await _pluginContributionService.SynchronizeMcpServersAsync(result.Package, cancellationToken)
-            .ConfigureAwait(false);
-        _stateChangeNotifier.Advance();
-        return new PluginReloadResult(
-            await _catalog.CreatePackageViewAsync(result.Package, cancellationToken).ConfigureAwait(false),
-            Changed: true);
-    }
-
     public async Task SetEnabledAsync(
         ExtensionItemKey key,
         bool enabled,
@@ -165,7 +107,6 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
                 if (!enabled)
                 {
                     await ClosePluginViewsAsync(key.Id, cancellationToken).ConfigureAwait(false);
-                    await EvictAsyncHookWorkAsync(key.Id, cancellationToken).ConfigureAwait(false);
                 }
 
                 break;
@@ -239,9 +180,6 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
                 // Open views hold a version lease, so they have to be closed before the drain rather
                 // than after it — otherwise the drain waits on a lease only the UI can release.
                 await ClosePluginViewsAsync(key.Id, cancellationToken).ConfigureAwait(false);
-                // Eviction terminates in-flight hook processes; the drain below then only waits for
-                // the turn's own leases instead of a whole async queue.
-                await EvictAsyncHookWorkAsync(key.Id, cancellationToken).ConfigureAwait(false);
                 using var versionDrain = _pluginVersionLeaseManager is null
                     ? null
                     : await _pluginVersionLeaseManager.AcquireDrainsAsync(versionPaths, cancellationToken)
@@ -472,9 +410,6 @@ internal sealed class ExtensionSettingsService : IExtensionSettingsService
 
     private Task ClosePluginViewsAsync(string pluginId, CancellationToken cancellationToken)
         => _pluginViewSessionRegistry?.CloseAsync(pluginId, cancellationToken) ?? Task.CompletedTask;
-
-    private Task EvictAsyncHookWorkAsync(string pluginId, CancellationToken cancellationToken)
-        => _asyncHookExecutor?.EvictPluginAsync(pluginId, cancellationToken) ?? Task.CompletedTask;
 
     private async Task<ExtensionPackageRecord> GetRequiredPackageAsync(
         ExtensionKind kind,

@@ -123,8 +123,8 @@ public sealed class AnthropicProviderAdapterTests
         var adapter = new AnthropicProviderAdapter(httpClientProvider: provider);
         var request = CreateRequest();
 
-        var firstHttpClient = provider.CreateTurnClient(request.Connection, null);
-        var secondHttpClient = provider.CreateTurnClient(request.Connection, null);
+        var firstHttpClient = provider.CreateTurnClient(request.Connection);
+        var secondHttpClient = provider.CreateTurnClient(request.Connection);
         var first = adapter.CreateAnthropicClient(request, firstHttpClient);
         var second = adapter.CreateAnthropicClient(request, secondHttpClient);
         try

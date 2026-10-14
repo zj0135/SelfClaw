@@ -106,10 +106,6 @@ internal sealed class ConversationTurnRecorder
                 case TurnInputBoundaryEvent boundary:
                     await CommitBoundaryAsync(session, turn, boundary, cancellationToken);
                     break;
-                case RunNoticeEvent notice when !string.IsNullOrWhiteSpace(notice.Text):
-                    var noticeMessage = await EnsureAssistantAsync(session, turn, cancellationToken);
-                    if (session.ApplyAssistantNotice(noticeMessage, notice.Text)) session.RaiseTranscriptChanged(false);
-                    break;
                 case RunStatusEvent status:
                     session.ActivityText = MapRunStatusText(status.Status);
                     session.RaiseTranscriptChanged(false);
@@ -190,8 +186,7 @@ internal sealed class ConversationTurnRecorder
             ResultSummary = completed.ResultSummary ?? started.ResultSummary,
             ResultContent = completed.ResultContent is null ? started.ResultContent : TranscriptToolResultLimiter.LimitStored(completed.ResultContent),
             DurationMs = (now - started.CreatedAtUtc).TotalMilliseconds,
-            UpdatedAtUtc = now,
-            HookOutcome = completed.HookOutcome ?? started.HookOutcome
+            UpdatedAtUtc = now
         };
         turn.ToolRunsByCallId[completed.ToolCallId] = tool;
         session.ApplyStreamedToolRun(tool);
@@ -390,7 +385,6 @@ internal sealed class ConversationTurnRecorder
         ToolCallStatus.Completed => ToolExecutionStatus.Completed,
         ToolCallStatus.Failed => ToolExecutionStatus.Failed,
         ToolCallStatus.Canceled => ToolExecutionStatus.Cancelled,
-        ToolCallStatus.Blocked => ToolExecutionStatus.Blocked,
         _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unsupported tool call status.")
     };
 

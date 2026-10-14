@@ -301,7 +301,6 @@ public enum DirectTurnOrigin { Interactive = 0, Subagent = 1, Continuation = 2, 
 | `RequiresToolExecutionCheckpoint` | false（不参与 continuation） |
 | `HasFreshUserMessage` | true（每次触发都是新的用户消息） |
 | `CanDelegateToSubagent` | **false（v1 不委派）** |
-| `InheritsHookPlugins` | false |
 
 这条修正必须有显式断言测试：**带 skill + MCP 的自动化回合，绑定出的工具列表非空且包含预期工具**。
 
@@ -360,7 +359,7 @@ run 启动时写入 `capability_snapshot_json`（当次使用的完整配置）+
 
 ### 4.6 终态与错误码
 
-`AutomationErrorCodes`（`SelfClaw.Core/Runtime/Automation/`）：`TriggerRequiresPrompt`、`InvalidSchedule`、`IntervalTooShort`、`RunConflict`、`UnknownTask`、`UnknownRun`、`DeleteTimeout`、`ModelUnavailable`、`CapabilityUnavailable`、`WorkspaceUnavailable`、`ProviderFailed`、`TimedOut`、`ToolFaultLimit`、`ApprovalDeniedByHook`、`ProcessInterrupted`、`CancelledByUser`、`ApplicationStopping`。
+`AutomationErrorCodes`（`SelfClaw.Core/Runtime/Automation/`）：`TriggerRequiresPrompt`、`InvalidSchedule`、`IntervalTooShort`、`RunConflict`、`UnknownTask`、`UnknownRun`、`DeleteTimeout`、`ModelUnavailable`、`CapabilityUnavailable`、`WorkspaceUnavailable`、`ProviderFailed`、`TimedOut`、`ToolFaultLimit`、`ProcessInterrupted`、`CancelledByUser`、`ApplicationStopping`。
 
 `Skipped` 用 `skip_reason`（`Overlap` / `Stale`）区分，`error_code` 保持 NULL。三种取消来源必须可区分：用户停止 `Cancelled(CancelledByUser)`、应用停止 `Cancelled(ApplicationStopping)`、进程中断 `Interrupted(ProcessInterrupted)`。UI 据此显示不同文案，与子代理错误码风格一致。
 

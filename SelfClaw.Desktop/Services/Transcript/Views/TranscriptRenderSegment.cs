@@ -13,5 +13,4 @@ public sealed record TranscriptRenderSegment(
     string? SourceKind = null,
     string? SourceId = null,
     string? DisplayName = null,
-    int? SegmentOrdinal = null,
-    TranscriptToolHookView? Hook = null);
+    int? SegmentOrdinal = null);

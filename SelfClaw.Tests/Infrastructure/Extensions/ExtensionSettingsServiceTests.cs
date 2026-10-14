@@ -1,10 +1,8 @@
-﻿using SelfClaw.Core.Runtime;
+﻿﻿using SelfClaw.Core.Runtime;
 using System.IO.Compression;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks.Models;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Extensions;
@@ -22,7 +20,6 @@ namespace SelfClaw.Tests.Infrastructure.Extensions;
 public sealed class ExtensionSettingsServiceTests : IDisposable
 {
     private readonly string _rootPath;
-    private readonly List<string> _sourceRoots = [];
 
     public ExtensionSettingsServiceTests()
     {
@@ -320,61 +317,6 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         (await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "git-inspector")).Should().BeNull();
     }
 
-    // The async hook queue holds a version lease per item. If the deletion drained before evicting,
-    // the drain would block on a lease only the executor can release, and this test would time out.
-    [Fact]
-    public async Task Deleting_a_plugin_evicts_queued_async_hooks_before_draining()
-    {
-        var context = CreateContext();
-        var pluginPath = await CreateViewPluginAsync("git-inspector");
-        var now = DateTimeOffset.UtcNow;
-        await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
-            ExtensionKind.Plugin,
-            "git-inspector",
-            "Git Inspector",
-            "1.0.0",
-            "Inspects git",
-            pluginPath,
-            "sha256:v1",
-            await File.ReadAllTextAsync(Path.Combine(pluginPath, "plugin.json")),
-            null,
-            true,
-            """["network.fetch:https://api.github.com","ui.panel"]""",
-            now,
-            now,
-            now));
-        await context.AsyncHookExecutor.StartAsync(CancellationToken.None);
-        context.AsyncHookExecutor.TryEnqueue(new AsyncHookWork(
-            new ResolvedPluginHook(
-                "git-inspector",
-                "1.0.0",
-                pluginPath,
-                new PluginHookContribution(
-                    "audit",
-                    PluginHookEvent.RunCompleted,
-                    new PluginHookMatcher([], [], [], [], [], []),
-                    "node",
-                    [],
-                    TimeSpan.FromSeconds(30),
-                    PluginHookFailurePolicy.Continue,
-                    RunAsync: false,
-                    IncludeRequestBody: false),
-                DeclarationOrder: 0,
-                Inherited: false),
-            "runCompleted",
-            ReadOnlyMemory<byte>.Empty,
-            Guid.NewGuid(),
-            new HookProcessStart("node", [], pluginPath, new Dictionary<string, string>(StringComparer.Ordinal))))
-            .Should().BeTrue();
-
-        await context.Service.DeleteAsync(new ExtensionItemKey(ExtensionKind.Plugin, "git-inspector"))
-            .WaitAsync(TimeSpan.FromSeconds(10));
-
-        context.HookLog.GetRecent("git-inspector").Should().Contain(entry => entry.Outcome == "evicted");
-        (await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "git-inspector")).Should().BeNull();
-        await context.AsyncHookExecutor.StopAsync(CancellationToken.None);
-    }
-
     [Fact]
     public async Task Plugin_enable_requires_current_manifest_permissions_to_be_acknowledged()
     {
@@ -627,133 +569,8 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         stored.LastCheckedAtUtc.Should().NotBeNull();
     }
 
-    [Fact]
-    public async Task ImportPluginFolderAsync_reports_hooks_and_the_source_path()
-    {
-        var context = CreateContext();
-        var sourceRoot = await CreateHookSourceFolderAsync();
-
-        var view = await context.Service.ImportPluginFolderAsync(sourceRoot);
-
-        view.SourcePath.Should().Be(Path.GetFullPath(sourceRoot));
-        view.Hooks.Should().HaveCount(2);
-        var guard = view.Hooks[0];
-        guard.Id.Should().Be("guard");
-        guard.Event.Should().Be("toolExecuting");
-        guard.MatcherSummary.Should().Be("tools=run_shell_command,mcp__github__*; kinds=run");
-        guard.CommandLine.Should().Be("node ${pluginRoot}/guard.js \"--strict flag\"");
-        guard.TimeoutSeconds.Should().Be(15);
-        guard.OnFailure.Should().Be("block");
-        guard.IsAsync.Should().BeFalse();
-        guard.IncludeRequestBody.Should().BeFalse();
-
-        var audit = view.Hooks[1];
-        audit.Event.Should().Be("toolExecuted");
-        audit.MatcherSummary.Should().Be("*");
-        audit.OnFailure.Should().BeNull();
-        audit.IsAsync.Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task ReloadPluginAsync_preserves_enabled_state_and_acknowledged_permissions()
-    {
-        var context = CreateContext();
-        var sourceRoot = await CreateHookSourceFolderAsync();
-        var imported = await context.Service.ImportPluginFolderAsync(sourceRoot);
-        await context.Service.AcknowledgePluginPermissionsAsync("shell-guard", imported.Permissions);
-        await context.Service.SetEnabledAsync(new ExtensionItemKey(ExtensionKind.Plugin, "shell-guard"), true);
-        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "guard.js"), "// updated");
-
-        var reload = await context.Service.ReloadPluginAsync("shell-guard");
-
-        reload.Changed.Should().BeTrue();
-        reload.Package.Enabled.Should().BeTrue();
-        reload.Package.UnacknowledgedPermissions.Should().BeEmpty();
-        reload.Package.Status.Should().Be(ExtensionStatus.Ready);
-        var stored = await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "shell-guard");
-        stored!.IsEnabled.Should().BeTrue();
-        stored.SourcePath.Should().Be(Path.GetFullPath(sourceRoot));
-    }
-
-    [Fact]
-    public async Task ReloadPluginAsync_reports_unchanged_content_without_a_new_version()
-    {
-        var context = CreateContext();
-        var sourceRoot = await CreateHookSourceFolderAsync();
-        var imported = await context.Service.ImportPluginFolderAsync(sourceRoot);
-
-        var reload = await context.Service.ReloadPluginAsync("shell-guard");
-
-        reload.Changed.Should().BeFalse();
-        reload.Package.Version.Should().Be(imported.Version);
-    }
-
-    [Fact]
-    public async Task ReloadPluginAsync_surfaces_a_changed_permission_list_as_unacknowledged()
-    {
-        var context = CreateContext();
-        var sourceRoot = await CreateHookSourceFolderAsync();
-        var imported = await context.Service.ImportPluginFolderAsync(sourceRoot);
-        await context.Service.AcknowledgePluginPermissionsAsync("shell-guard", imported.Permissions);
-        await context.Service.SetEnabledAsync(new ExtensionItemKey(ExtensionKind.Plugin, "shell-guard"), true);
-        var manifest = (await File.ReadAllTextAsync(Path.Combine(sourceRoot, "plugin.json")))
-            .Replace("\"hooks.run\"", "\"hooks.run\", \"hooks.http\"", StringComparison.Ordinal);
-        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "plugin.json"), manifest);
-
-        var reload = await context.Service.ReloadPluginAsync("shell-guard");
-
-        reload.Changed.Should().BeTrue();
-        reload.Package.UnacknowledgedPermissions.Should().Equal("hooks.http");
-        reload.Package.Status.Should().Be(ExtensionStatus.NeedsPermission);
-    }
-
-    [Fact]
-    public async Task ReloadPluginAsync_rejects_a_plugin_without_a_source_path()
-    {
-        var context = CreateContext();
-        var pluginPath = Path.Combine(_rootPath, "plugins", "office", "versions", "v1");
-        Directory.CreateDirectory(pluginPath);
-        var now = DateTimeOffset.UtcNow;
-        await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
-            ExtensionKind.Plugin, "office", "Office", "1.0.0", "", pluginPath,
-            "sha256:v1", "{}", null, false, null, null, now, now));
-
-        var action = () => context.Service.ReloadPluginAsync("office");
-
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*was not installed from a folder*");
-    }
-
-    [Fact]
-    public async Task ReloadPluginAsync_rejects_a_missing_source_folder()
-    {
-        var context = CreateContext();
-        var sourceRoot = await CreateHookSourceFolderAsync();
-        await context.Service.ImportPluginFolderAsync(sourceRoot);
-        Directory.Delete(sourceRoot, true);
-
-        var action = () => context.Service.ReloadPluginAsync("shell-guard");
-
-        await action.Should().ThrowAsync<DirectoryNotFoundException>()
-            .WithMessage($"*{Path.GetFullPath(sourceRoot)}*");
-    }
-
-    [Fact]
-    public async Task ReloadPluginAsync_rejects_an_unknown_plugin()
-    {
-        var context = CreateContext();
-
-        var action = () => context.Service.ReloadPluginAsync("missing");
-
-        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*'missing' was not found*");
-    }
-
     public void Dispose()
     {
-        foreach (var sourceRoot in _sourceRoots)
-        {
-            TryDeleteDirectory(sourceRoot);
-        }
         if (!Directory.Exists(_rootPath))
         {
             return;
@@ -762,65 +579,6 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         try
         {
             Directory.Delete(_rootPath, true);
-        }
-        catch (IOException)
-        {
-        }
-    }
-
-    private async Task<string> CreateHookSourceFolderAsync()
-    {
-        var sourceRoot = Path.Combine(
-            Path.GetTempPath(),
-            "SelfClawPluginSources",
-            Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(sourceRoot);
-        _sourceRoots.Add(sourceRoot);
-        var manifest = """
-            {
-              "schemaVersion": 1,
-              "id": "shell-guard",
-              "name": "Shell Guard",
-              "version": "1.0.0",
-              "permissions": ["hooks.tool", "hooks.run"],
-              "contributes": {
-                "hooks": [
-                  {
-                    "id": "guard",
-                    "event": "toolExecuting",
-                    "matcher": { "tools": ["run_shell_command", "mcp__github__*"], "kinds": ["run"] },
-                    "command": "node",
-                    "arguments": ["${pluginRoot}/guard.js", "--strict flag"],
-                    "timeoutSeconds": 15,
-                    "onFailure": "block"
-                  },
-                  {
-                    "id": "audit",
-                    "event": "toolExecuted",
-                    "command": "node",
-                    "arguments": ["${pluginRoot}/audit.js"],
-                    "async": true
-                  }
-                ]
-              }
-            }
-            """;
-        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "plugin.json"), manifest);
-        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "guard.js"), "// guard");
-        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "audit.js"), "// audit");
-        return sourceRoot;
-    }
-
-    private static void TryDeleteDirectory(string path)
-    {
-        if (!Directory.Exists(path))
-        {
-            return;
-        }
-
-        try
-        {
-            Directory.Delete(path, true);
         }
         catch (IOException)
         {
@@ -869,16 +627,6 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
             pluginReader);
         var stateChangeNotifier = new ExtensionStateChangeNotifier();
         var panelSessions = new RecordingViewSessionRegistry();
-        var hookLog = new PluginHookExecutionLog();
-        var asyncHookExecutor = new AsyncHookExecutor(
-            async (_, _, _, cancellationToken) =>
-            {
-                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-                return new HookProcessResult(
-                    HookProcessExit.Exited, 0, string.Empty, string.Empty, TimeSpan.Zero, null);
-            },
-            hookLog,
-            pluginVersionLeaseManager);
         return new TestContext(
             new ExtensionSettingsService(
                 repository,
@@ -891,15 +639,12 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
                 pluginContributionService,
                 stateChangeNotifier,
                 pluginVersionLeaseManager,
-                panelSessions,
-                asyncHookExecutor),
+                panelSessions),
             repository,
             protector,
             mcpClientManager,
             pluginVersionLeaseManager,
-            panelSessions,
-            hookLog,
-            asyncHookExecutor);
+            panelSessions);
     }
 
     private static SaveMcpServerCommand CreateStdioCommand(
@@ -925,9 +670,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         FakeSecretProtector SecretProtector,
         FakeMcpClientManager McpClientManager,
         PluginVersionLeaseManager PluginVersionLeaseManager,
-        RecordingViewSessionRegistry PanelSessions,
-        PluginHookExecutionLog HookLog,
-        AsyncHookExecutor AsyncHookExecutor);
+        RecordingViewSessionRegistry PanelSessions);
 
     private sealed class RecordingViewSessionRegistry : IPluginViewSessionRegistry
     {

@@ -7,37 +7,17 @@ using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Direct;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks;
-using SelfClaw.Infrastructure.Extensions.Plugins.Models;
-using SelfClaw.Tests.Infrastructure.Agents.Direct.Hooks.TestDoubles;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct;
 
 /// <summary>
-/// P4.6: the runtime publishes the steer policy before runStarting hooks run, so a steer can never
-/// bypass a runStarting review or re-run an explicit Skill activation.
+/// P4.6: the runtime publishes the steer policy before the request starts, so a steer can never
+/// re-run an explicit Skill activation.
 /// </summary>
 public sealed class DirectSteerPolicyTests
 {
     [Fact]
-    public async Task RunStarting_hooks_block_steering_for_the_whole_turn()
-    {
-        var steering = new RecordingSteering();
-        var hook = HookTestFactory.CreateHook("policy-audit", "start", PluginHookEvent.RunStarting,
-            command: "cmd.exe", arguments: ["/d", "/c", "more >nul & echo {}"]) with { PluginRoot = Path.GetTempPath() };
-        var lease = new DirectTurnCapabilityLease([], [], new Dictionary<Guid, string>(), [], hooks: [hook]);
-        var provider = new OneShotChatClient();
-        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(provider);
-        var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory, new FixedResolver(lease));
-
-        var terminal = await RunAsync(runtime, factory.Profile.Id, steering);
-
-        terminal.Status.Should().Be(RunCompletionStatus.Succeeded);
-        steering.Policies.Should().Equal(ConversationInputReason.HookRequiresNewTurn);
-    }
-
-    [Fact]
-    public async Task Explicit_skill_activation_blocks_steering_without_a_run_starting_hook()
+    public async Task Explicit_skill_activation_blocks_steering()
     {
         var steering = new RecordingSteering();
         var lease = new DirectTurnCapabilityLease([], [], new Dictionary<Guid, string>(), [], explicitSkillIds: ["pdf"]);

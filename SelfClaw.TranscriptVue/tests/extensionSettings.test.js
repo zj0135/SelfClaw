@@ -26,42 +26,21 @@ beforeEach(() => {
 	bridge.requestLatest.mockResolvedValue({ state: registryState() });
 });
 
-it('imports a plugin folder without a timeout and refreshes the registry', async () => {
+it('imports a package without a timeout and refreshes the registry', async () => {
 	const settings = useExtensionSettings();
-	const response = { ok: true, cancelled: false, package: { id: 'hook-examples' }, revision: 2 };
+	const response = { ok: true, cancelled: false, package: { id: 'office' }, revision: 2 };
 	bridge.request.mockResolvedValueOnce(response);
 
-	const result = await settings.importPluginFolder();
+	const result = await settings.importPackage('plugin');
 
-	expect(bridge.request).toHaveBeenCalledWith('extensions/import-plugin-folder', {}, { timeout: 0 });
+	expect(bridge.request).toHaveBeenCalledWith('extensions/import-package', { kind: 'plugin' }, { timeout: 0 });
 	expect(result).toBe(response);
 	expect(bridge.requestLatest).toHaveBeenCalledWith('extensions/get-state', 'extensions/get-state');
 });
 
-it('returns null when the folder picker is cancelled', async () => {
+it('returns null when the package import is cancelled', async () => {
 	const settings = useExtensionSettings();
 	bridge.request.mockResolvedValueOnce({ ok: false, cancelled: true });
 
-	expect(await settings.importPluginFolder()).toBeNull();
-});
-
-it('reports a reload that left the content unchanged', async () => {
-	const settings = useExtensionSettings();
-	const response = { ok: true, changed: false, package: { id: 'office' }, revision: 3 };
-	bridge.request.mockResolvedValueOnce(response);
-
-	const result = await settings.reloadPlugin('office');
-
-	expect(bridge.request).toHaveBeenCalledWith('extensions/reload-plugin', { id: 'office' }, { timeout: 0 });
-	expect(result.changed).toBe(false);
-});
-
-it('returns hook log entries and surfaces a transport failure', async () => {
-	const settings = useExtensionSettings();
-	bridge.request.mockResolvedValueOnce({ entries: [{ hookId: 'guard' }] });
-	expect(await settings.getHookLog('office')).toEqual([{ hookId: 'guard' }]);
-
-	bridge.request.mockRejectedValueOnce(new Error('host offline'));
-	expect(await settings.getHookLog('office')).toBeNull();
-	expect(settings.error.value).toBe('host offline');
+	expect(await settings.importPackage('plugin')).toBeNull();
 });

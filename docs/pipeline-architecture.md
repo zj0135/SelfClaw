@@ -112,25 +112,23 @@ flowchart TB
     end
 
     S3 --> CAP
-    CAP --> S4["④ DirectTurnHooksFactory.Create<br/>runStarting hooks<br/>→ Blocked 则直接终态"]
-    S4 --> S5["⑤ DirectToolInvoker<br/>M.E.AI FunctionInvoker 唯一调用缝"]
-    S5 --> S6["⑥ AiChatClientFactory.Create<br/>按回合 HttpClient (共享 pooled handler)<br/>provider adapter → CreateChatOptions/Client<br/>ChatClientBuilder: UseFunctionInvocation(128)<br/>+ UseLogging → AiChatClientLease"]
-    S6 --> S7["⑦ RunStartedEvent(direct-{guid}, model)<br/>+ RunStatusEvent(Requesting)"]
-    S7 --> S8["⑧ DirectPromptComposer.BuildMessages<br/>System(agent+扩展+policy)<br/>→ History 反向预算裁剪(工具调用/结果不可拆)<br/>→ HookContext → 续写提示 → CompletionBatch"]
-    S8 --> S9["⑨ GetStreamingResponseAsync<br/>TurnOutputStream.TranslateUpdate"]
-    S9 --> S10["⑩ 终态判定<br/>Length+文本=Truncated / Length 空=Failed<br/>ToolCalls=Failed(循环耗尽) / 其余=Succeeded"]
-    S10 --> S11["⑪ runCompleted hook<br/>释放 provider lease → 释放 capability lease"]
+    CAP --> S4["④ DirectToolInvoker<br/>M.E.AI FunctionInvoker 唯一调用缝"]
+    S4 --> S5["⑤ AiChatClientFactory.Create<br/>按回合 HttpClient (共享 pooled handler)<br/>provider adapter → CreateChatOptions/Client<br/>ChatClientBuilder: UseFunctionInvocation(128)<br/>+ UseLogging → AiChatClientLease"]
+    S5 --> S6["⑥ RunStartedEvent(direct-{guid}, model)<br/>+ RunStatusEvent(Requesting)"]
+    S6 --> S7["⑦ DirectPromptComposer.BuildMessages<br/>System(agent+扩展+policy)<br/>→ History 反向预算裁剪(工具调用/结果不可拆)<br/>→ 续写提示 → CompletionBatch"]
+    S7 --> S8["⑧ GetStreamingResponseAsync<br/>TurnOutputStream.TranslateUpdate"]
+    S8 --> S9["⑨ 终态判定<br/>Length+文本=Truncated / Length 空=Failed<br/>ToolCalls=Failed(循环耗尽) / 其余=Succeeded"]
+    S9 --> S10["⑩ 释放 provider lease → 释放 capability lease"]
 
     subgraph TOOL["工具调用一次经过的全部关卡"]
         direction TB
-        T1["toolExecuting hook<br/>可改参数 / 强制审批 / 阻断"]
-        T2["审批判定<br/>RequiresApproval &&!=FullAccess<br/>→ DesktopToolApprovalHandler"]
-        T3["ToolExecutionCheckpoint<br/>BeforeExecutionAsync（续写屏障）"]
-        T4["AIFunction.InvokeAsync<br/>Workspace / Skill / MCP / Subagent"]
-        T5["toolExecuted hook + HookFeedback<br/>→ DirectToolResult(Status/Summary/Content/Detail)"]
-        T1 --> T2 --> T3 --> T4 --> T5
+        T1["审批判定<br/>RequiresApproval &&!=FullAccess<br/>→ DesktopToolApprovalHandler"]
+        T2["ToolExecutionCheckpoint<br/>BeforeExecutionAsync（续写屏障）"]
+        T3["AIFunction.InvokeAsync<br/>Workspace / Skill / MCP / Subagent"]
+        T4["DirectToolResult(Status/Summary/Content/Detail)"]
+        T1 --> T2 --> T3 --> T4
     end
-    S5 -.-> TOOL
+    S4 -.-> TOOL
 ```
 
 要点：
@@ -187,14 +185,13 @@ flowchart LR
         E4["AssistantThinkingDeltaEvent"]
         E5["ToolCallStartedEvent / ToolCallCompletedEvent"]
         E6["UsageReportedEvent"]
-        E7["RunNoticeEvent"]
         E8["PermissionRequestedEvent / RawOutputEvent"]
         E9["RunCompletedEvent (唯一终态)"]
     end
     EV --> TYPES
 
     TYPES --> GATE["DispatchingAgentChatRuntime 协议强制<br/>终态只发一次；终态后事件丢弃<br/>5s 内未收尾则取消 adapter"]
-    GATE --> REC["ConversationTurnRecorder.ApplyEventAsync<br/>文本/思考增量 → StreamingAssistantContent<br/>工具事件 → ToolExecutionRecord<br/>usage / notice / status / 终态"]
+    GATE --> REC["ConversationTurnRecorder.ApplyEventAsync<br/>文本/思考增量 → StreamingAssistantContent<br/>工具事件 → ToolExecutionRecord<br/>usage / status / 终态"]
     REC --> TERM["CompleteAssistantTurnAsync<br/>MessageSegment 分块(Text/Thinking/ToolCall 有序)"]
     TERM --> FIN["DesktopTurnFinalizer.TryCommitAsync<br/>ITurnFinalizationRepository<br/>2 次尝试 / 5s 超时"]
     REC --> ACT["AgentActivityCoordinator.ApplyEvent<br/>Pet / 托盘 / Agent 活动态"]
@@ -293,7 +290,7 @@ flowchart TB
 | Workspace Root / Worktree | `ConversationWorkspaceService` | 准备与释放；提交回合自带捕获值 |
 | Direct 能力与 lease | `DirectTurnCapabilityResolver` → `DirectTurnCapabilityLease` | 每回合；`DirectTurnLeaseScope` 统一回收 Plugin/MCP |
 | Provider pipeline | `AiChatClientFactory` → `AiChatClientLease` | 每回合 HttpClient；共享 pooled handler 长存 |
-| 工具调用唯一缝 | `DirectToolInvoker`（M.E.AI `FunctionInvoker`） | hook → 审批 → checkpoint → 执行 → 反馈 |
+| 工具调用唯一缝 | `DirectToolInvoker`（M.E.AI `FunctionInvoker`） | 审批 → checkpoint → 执行 → 反馈 |
 | 事件契约与终态 | `DispatchingAgentChatRuntime` | 终态只发一次；终态后事件丢弃 |
 | 内容录制与快照 | `ConversationRuntimeState` / `SubagentExecutionSession` | 串行写入；取消后等终态再释放 |
 | 持久化终态 | `DesktopTurnFinalizer` | 原子提交，2 次尝试，5s 超时 |

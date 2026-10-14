@@ -11,7 +11,6 @@ using System.Windows.Threading;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
-using SelfClaw.Core.Interfaces.Extensions;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Core.Runtime;
@@ -21,7 +20,6 @@ using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Extensions;
-using SelfClaw.Desktop.Services.Extensions.Abstractions;
 using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
@@ -440,8 +438,6 @@ public sealed class WebViewMessageRouterTests
                 Unused<IExtensionSettingsService>(),
                 Unused<IExtensionPackageRepository>(),
                 agentDefinitions,
-                Unused<IExtensionPackagePicker>(),
-                Unused<IPluginHookExecutionLog>(),
                 ExtensionStateChangeNotifier, HostChannel, Dispatcher.CurrentDispatcher);
             var petHost = new PetHost(
                 new NoOpPetSettingsRepository(),

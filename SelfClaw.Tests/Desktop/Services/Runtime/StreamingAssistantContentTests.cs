@@ -63,22 +63,6 @@ public sealed class StreamingAssistantContentTests
     }
 
     [Fact]
-    public void Notice_blocks_stay_separate_and_are_excluded_from_markdown()
-    {
-        var stream = CreateStream();
-
-        stream.AppendNotice("first", DateTimeOffset.UtcNow);
-        stream.AppendNotice("second", DateTimeOffset.UtcNow);
-        stream.AppendText("answer", DateTimeOffset.UtcNow);
-
-        stream.BuildSegments().Should().SatisfyRespectively(
-            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Notice, Text = "first" }),
-            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Notice, Text = "second" }),
-            segment => segment.Should().BeEquivalentTo(new { Kind = MessageSegmentKind.Text, Text = "answer" }));
-        stream.BuildMarkdown().Should().Be("answer");
-    }
-
-    [Fact]
     public void Whitespace_only_deltas_do_not_open_a_new_block()
     {
         var stream = CreateStream();

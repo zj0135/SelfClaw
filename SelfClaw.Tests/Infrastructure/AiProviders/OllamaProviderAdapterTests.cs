@@ -27,9 +27,9 @@ public sealed class OllamaProviderAdapterTests
         adapter.SupportsApiFormat(AiProviderApiFormat.OpenAIResponses).Should().BeFalse();
 
         using var nativeClient = adapter.CreateChatClient(
-            nativeRequest, httpClientProvider.CreateTurnClient(connection, null));
+            nativeRequest, httpClientProvider.CreateTurnClient(connection));
         using var compatibleClient = adapter.CreateChatClient(
-            compatibleRequest, httpClientProvider.CreateTurnClient(connection, null));
+            compatibleRequest, httpClientProvider.CreateTurnClient(connection));
         nativeClient.Should().NotBeNull();
         compatibleClient.Should().NotBeNull();
         httpClientProvider.CachedSharedHandlerCount.Should().Be(1);

@@ -150,44 +150,16 @@ public sealed class ConversationTurnRecorderTests
     }
 
     [Fact]
-    public async Task ApplyEventAsync_records_a_run_notice_as_a_notice_segment()
-    {
-        using var context = new ConversationTurnTestContext();
-        await context.StartAsync();
-        await context.ApplyAsync(new RunNoticeEvent("Hook 'alpha/a' failed (timedOut); ignored."));
-        await context.ApplyAsync(new AssistantTextDeltaEvent("text", "answer"));
-        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "answer"));
-        (context.State.Messages.Last().Segments ?? []).Select(segment => segment.Kind).Should().Equal(MessageSegmentKind.Notice, MessageSegmentKind.Text);
-        context.State.Messages.Last().MarkdownContent.Should().Be("answer");
-    }
-
-    [Fact]
     public async Task ApplyEventAsync_records_a_blocked_turn_without_creating_an_assistant()
     {
         using var context = new ConversationTurnTestContext();
         await context.StartAsync();
-        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Blocked, null, "Blocked by hook 'alpha/a': no."));
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Blocked, null, "Blocked by the content filter."));
         context.State.Messages.Should().ContainSingle().Which.Role.Should().Be(MessageRole.User);
         var turn = (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Single();
         turn.Status.Should().Be(ConversationTurnStatus.Blocked);
-        turn.ErrorMessage.Should().Be("Blocked by hook 'alpha/a': no.");
+        turn.ErrorMessage.Should().Be("Blocked by the content filter.");
         turn.CompletedAtUtc.Should().NotBeNull();
-    }
-
-    [Fact]
-    public async Task ApplyEventAsync_persists_a_tool_hook_outcome_and_maps_a_blocked_tool()
-    {
-        using var context = new ConversationTurnTestContext();
-        await context.StartAsync();
-        var outcome = new ToolHookOutcome("""{"value":"changed"}""", [new HookSource("alpha", "a")],
-            [new HookSource("alpha", "b")], new HookSource("alpha", "c"), "stop",
-            [new HookFeedback(new HookSource("alpha", "d"), "note")], []);
-        await context.ApplyAsync(new ToolCallStartedEvent("call-1", "write_file", "{}", ToolCallKind.Edit));
-        await context.ApplyAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Blocked, "blocked", "blocked", outcome));
-        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Blocked, null, "stop"));
-        var tool = (await context.Conversations.ListToolExecutionsAsync(context.Conversation.Id)).Single();
-        tool.Status.Should().Be(ToolExecutionStatus.Blocked);
-        tool.HookOutcome.Should().BeEquivalentTo(outcome);
     }
 
     [Fact]

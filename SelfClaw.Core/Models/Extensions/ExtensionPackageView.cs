@@ -11,6 +11,4 @@ public sealed record ExtensionPackageView(
     IReadOnlyList<string> AssignedAgentIds,
     ExtensionStatus Status,
     IReadOnlyList<string> Permissions,
-    IReadOnlyList<string> UnacknowledgedPermissions,
-    string? SourcePath,
-    IReadOnlyList<PluginHookView> Hooks);
+    IReadOnlyList<string> UnacknowledgedPermissions);

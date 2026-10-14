@@ -1,4 +1,3 @@
-using SelfClaw.Infrastructure.Agents.Direct.Hooks.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using Microsoft.Extensions.AI;
 
@@ -19,9 +18,6 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
         IReadOnlyDictionary<Guid, string> messageAdjustments,
         IReadOnlyList<string> diagnostics,
         DirectTurnLeaseScope? scope = null,
-        IReadOnlyList<ResolvedPluginHook>? hooks = null,
-        IReadOnlyList<string>? hookNotices = null,
-        string? hookBlockReason = null,
         IReadOnlyList<string>? explicitSkillIds = null)
     {
         SystemInstructions = systemInstructions;
@@ -29,9 +25,6 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
         Bindings = tools.ToDictionary(binding => binding.Tool.Name, StringComparer.Ordinal);
         MessageAdjustments = messageAdjustments;
         Diagnostics = diagnostics;
-        Hooks = hooks ?? [];
-        HookNotices = hookNotices ?? [];
-        HookBlockReason = hookBlockReason;
         ExplicitSkillIds = explicitSkillIds ?? [];
         _scope = scope;
     }
@@ -41,9 +34,6 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
     public IReadOnlyDictionary<string, DirectToolBinding> Bindings { get; }
     public IReadOnlyDictionary<Guid, string> MessageAdjustments { get; }
     public IReadOnlyList<string> Diagnostics { get; }
-    public IReadOnlyList<ResolvedPluginHook> Hooks { get; }
-    public IReadOnlyList<string> HookNotices { get; }
-    public string? HookBlockReason { get; }
 
     /// <summary>Skills the user explicitly activated for this turn; a steer cannot re-run that activation.</summary>
     public IReadOnlyList<string> ExplicitSkillIds { get; }

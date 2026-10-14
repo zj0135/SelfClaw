@@ -41,9 +41,9 @@ it('offers edit, promote and cancel for a pending follow-up only when the host a
 	expect(enabled.find('[aria-label="取消"]').exists()).toBe(true);
 	expect(enabled.text()).toContain('待发送');
 
-	const disabled = attach(ConversationQueue, { state: queueState({ canSteer: false, steerReason: 'hook-requires-new-turn', items: [followUp()] }) });
+	const disabled = attach(ConversationQueue, { state: queueState({ canSteer: false, steerReason: 'skill-requires-new-turn', items: [followUp()] }) });
 	expect(disabled.find('[aria-label="调整当前任务"]').attributes('disabled')).toBeDefined();
-	expect(disabled.text()).toContain('完整审查');
+	expect(disabled.text()).toContain('新回合');
 });
 
 it('shows Held items as blocking with their host reason and a retry path', () => {

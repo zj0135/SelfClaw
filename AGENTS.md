@@ -26,7 +26,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 7. **工具审批**：Direct 工具审批（默认 `RequireApproval`）只有 Vue 审批栏或 Windows toast 能裁决；没有超时自动拒绝；订阅者失败、调用方取消或关闭即拒绝。
 8. **WPF**：`WindowStyle` 必须保持 `SingleBorderWindow`；插件视图 UI 在 Vue，不在 WPF。
 9. **会话删除**：先墓碑 → 停回合 → 取消并限时等待子任务 → 才做 SQLite 级联；超时中止删除；列表与导航只接受 `ConversationKind.Interactive`。
-10. **数据库**：schema 版本 **30**；非 v30 或未版本化数据库只读拒绝，绝不迁移、回填或隐式删除。
+10. **数据库**：schema 版本 **31**；非 v31 或未版本化数据库只读拒绝，绝不迁移、回填或隐式删除。
 11. **子代理活动面板**：与主转录、输入区互相独立；子内容不得进入父转录项或影响 composer 忙碌态；摘要页 ≤50 条、详情窗口 ≤64 块、序列化 ≤256 KiB；文本更新不得触发 per-token SQL。
 
 ## 代码约定
@@ -66,5 +66,5 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - 端到端主干：`docs/pipeline-architecture.md`（全局图）→ `docs/runtime-execution-flow.md`（当前调用链、回合/准入/消费基线）。
 - Direct 证据链：`docs/direct-agent-architecture-review.md`、`docs/direct-message-input-p{1,2,3,4,5}-implementation-review.md`、`docs/direct-message-input-p3-review-fixes.md`。
 - 桌面/前端：`docs/desktop-architecture-review.md`（§5 剩余验证限制、§7 窗口动画、§8 关闭延迟）、`docs/plugin-view-system-design.md`、`docs/message-segments-system-design.md`。
-- 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/direct-hooks-system-design.md`、`docs/ai-provider-system-design.md`、`docs/pet-system-design.md`、`docs/usage-tracking-design.md`。
+- 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/ai-provider-system-design.md`、`docs/pet-system-design.md`、`docs/usage-tracking-design.md`。
 - 规则：spec/issue 写 `.scratch/<feature-slug>/`（git 忽略）；耐久结论写 `docs/`；被取代的设计要么更新要么删除，不留"历史保留"。

@@ -16,26 +16,10 @@ export function toolStatusLabel(status) {
 			return '成功';
 		case 'failed':
 			return '失败';
-		case 'blocked':
-			return '已拦截';
 		case 'cancelled':
 			return '已取消';
 		default:
 			// 未知状态原样显示，不再伪装成“成功”。
 			return status ? String(status) : '';
 	}
-}
-
-// Hook sources reach Vue as HookSource records ({pluginId, hookId}), but the tool
-// transcript pre-formats them as strings; accept either so both call sites share one shape.
-export function formatHookSource(source) {
-	if (!source) {
-		return '';
-	}
-
-	if (typeof source === 'string') {
-		return source;
-	}
-
-	return source.hookId ? `${source.pluginId}/${source.hookId}` : String(source.pluginId || '');
 }

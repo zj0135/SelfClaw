@@ -1,6 +1,4 @@
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities.Models;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks.Models;
 using SelfClaw.Infrastructure.Extensions;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Core.Interfaces;
@@ -15,11 +13,9 @@ using SelfClaw.Infrastructure.Extensions.Skills.Models;
 namespace SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 
 /// <summary>
-/// Expands the Agent's bound Plugins into instructions, namespaced Skills, the plugin roots that
-/// plugin-contributed MCP servers resolve against, and the turn's hooks. A broken or unconfirmed
-/// Plugin degrades this turn instead of failing it; every Plugin that does contribute holds a version
-/// lease for the turn. Subagent and continuation turns additionally inherit the parent's hook Plugins
-/// (policy, not capability); an inherited Plugin that cannot be loaded blocks the turn.
+/// Expands the Agent's bound Plugins into instructions, namespaced Skills and the plugin roots that
+/// plugin-contributed MCP servers resolve against. A broken or unconfirmed Plugin degrades this turn
+/// instead of failing it; every Plugin that does contribute holds a version lease for the turn.
 /// </summary>
 internal sealed class PluginCapabilitySource
 {
@@ -44,7 +40,6 @@ internal sealed class PluginCapabilitySource
         AgentRuntimeDefinition agent,
         IReadOnlyList<ExtensionPackageRecord> packages,
         IReadOnlyDictionary<string, ExtensionPackageRecord> effectiveStandaloneSkills,
-        IReadOnlyList<DirectExtensionCapability> inheritedHookPlugins,
         DirectTurnLeaseScope leases,
         TurnDiagnostics diagnostics,
         CancellationToken cancellationToken)
@@ -52,9 +47,6 @@ internal sealed class PluginCapabilitySource
         var instructions = new List<string>();
         var skills = new Dictionary<string, ResolvedSkill>(StringComparer.OrdinalIgnoreCase);
         var pluginRoots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var hooks = new List<ResolvedPluginHook>();
-        var hookNotices = new List<string>();
-        var resolvedPluginIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var plugin in packages
                      .Where(package => package.Kind == ExtensionKind.Plugin &&
                                        package.IsEnabled &&
@@ -68,13 +60,6 @@ internal sealed class PluginCapabilitySource
                 diagnostics.Degrade(load.UnconfirmedPermissions
                     ? $"Plugin '{plugin.Id}' was skipped because permissions require confirmation: {reason}."
                     : $"Plugin '{plugin.Id}' was skipped because it is broken: {reason}");
-                if (load.Manifest is { Contributions.Hooks.Count: > 0 })
-                {
-                    hookNotices.Add(HookNotes.PluginSkipped(
-                        plugin.Id,
-                        load.UnconfirmedPermissions ? $"permissions require confirmation: {reason}" : reason));
-                }
-
                 continue;
             }
 
@@ -113,16 +98,6 @@ internal sealed class PluginCapabilitySource
                 // Nothing is published until every contribution validated, so a half-expanded Plugin never
                 // reaches the model.
                 pluginRoots.Add(plugin.Id, plugin.InstallPath);
-                for (var index = 0; index < manifest.Contributions.Hooks.Count; index++)
-                {
-                    hooks.Add(new ResolvedPluginHook(
-                        plugin.Id,
-                        plugin.Version,
-                        plugin.InstallPath,
-                        manifest.Contributions.Hooks[index],
-                        DeclarationOrder: index,
-                        Inherited: false));
-                }
 
                 if (instructionSection is not null)
                 {
@@ -133,8 +108,6 @@ internal sealed class PluginCapabilitySource
                 {
                     skills.Add(contributedSkill.Id, contributedSkill);
                 }
-
-                resolvedPluginIds.Add(plugin.Id);
 
                 // The scope owns the lease once the plugin contributed; until then the local finally
                 // releases it when this plugin fails and degrades out of the turn.
@@ -150,10 +123,6 @@ internal sealed class PluginCapabilitySource
             catch (Exception exception)
             {
                 diagnostics.Degrade($"Plugin '{plugin.Id}' was skipped because it is broken: {exception.Message}");
-                if (manifest is { Contributions.Hooks.Count: > 0 })
-                {
-                    hookNotices.Add(HookNotes.PluginSkipped(plugin.Id, exception.Message));
-                }
             }
             finally
             {
@@ -164,99 +133,13 @@ internal sealed class PluginCapabilitySource
             }
         }
 
-        var hookBlockReason = await ResolveInheritedHooksAsync(
-                packages,
-                inheritedHookPlugins,
-                resolvedPluginIds,
-                hooks,
-                leases,
-                cancellationToken)
-            .ConfigureAwait(false);
-        return new PluginCapabilities(
-            instructions,
-            skills,
-            pluginRoots,
-            hooks.OrderBy(hook => hook.PluginId, StringComparer.Ordinal)
-                .ThenBy(hook => hook.DeclarationOrder)
-                .ToArray(),
-            hookNotices,
-            hookBlockReason);
+        return new PluginCapabilities(instructions, skills, pluginRoots);
     }
 
     /// <summary>
-    /// Resolves the hook Plugins captured by the parent turn that this turn does not bind itself.
-    /// It contributes only the hooks and holds the version lease; a failure is fatal for the turn.
-    /// </summary>
-    private async Task<string?> ResolveInheritedHooksAsync(
-        IReadOnlyList<ExtensionPackageRecord> packages,
-        IReadOnlyList<DirectExtensionCapability> inheritedHookPlugins,
-        HashSet<string> resolvedPluginIds,
-        List<ResolvedPluginHook> hooks,
-        DirectTurnLeaseScope leases,
-        CancellationToken cancellationToken)
-    {
-        foreach (var inherited in inheritedHookPlugins.OrderBy(capability => capability.Id, StringComparer.Ordinal))
-        {
-            if (resolvedPluginIds.Contains(inherited.Id))
-            {
-                continue;
-            }
-
-            var plugin = packages.FirstOrDefault(package =>
-                package.Kind == ExtensionKind.Plugin &&
-                string.Equals(package.Id, inherited.Id, StringComparison.OrdinalIgnoreCase));
-            if (!DirectCapabilityRules.IsPackageCurrent(plugin, inherited))
-            {
-                return HookNotes.InheritedHookPluginBlocked(inherited.Id);
-            }
-
-            var (manifest, versionLease, skipReason, _) =
-                await LoadPluginAsync(plugin!, cancellationToken).ConfigureAwait(false);
-            try
-            {
-                if (skipReason is not null || manifest is null || versionLease is null)
-                {
-                    return HookNotes.InheritedHookPluginBlocked(inherited.Id);
-                }
-
-                for (var index = 0; index < manifest.Contributions.Hooks.Count; index++)
-                {
-                    hooks.Add(new ResolvedPluginHook(
-                        plugin!.Id,
-                        plugin.Version,
-                        plugin.InstallPath,
-                        manifest.Contributions.Hooks[index],
-                        DeclarationOrder: index,
-                        Inherited: true));
-                }
-
-                if (leases.Add(versionLease))
-                {
-                    versionLease = null;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception)
-            {
-                return HookNotes.InheritedHookPluginBlocked(inherited.Id);
-            }
-            finally
-            {
-                versionLease?.Dispose();
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Reads one Plugin's manifest and permissions and takes its version lease, so the Agent-bound path and
-    /// the inherited-hook path cannot drift on integrity, identity, permission or lease rules. A skipped
-    /// Plugin reports the detail and whether permissions were the cause; the caller owns the returned lease
-    /// and decides whether a skip degrades or blocks the turn.
+    /// Reads one Plugin's manifest and permissions and takes its version lease. A skipped Plugin reports the
+    /// detail and whether permissions were the cause; the caller owns the returned lease and decides whether
+    /// a skip degrades the turn.
     /// </summary>
     private async Task<(PluginManifest? Manifest, IDisposable? Lease, string? SkipReason, bool UnconfirmedPermissions)>
         LoadPluginAsync(ExtensionPackageRecord plugin, CancellationToken cancellationToken)

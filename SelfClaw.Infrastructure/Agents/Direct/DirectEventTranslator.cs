@@ -6,7 +6,6 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.AiProviders;
-using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Direct;
@@ -72,8 +71,7 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
 
     public void TranslateUpdate(
         ChatResponseUpdate update,
-        IReadOnlyDictionary<string, DirectToolBinding> bindings,
-        DirectToolInvoker? invoker)
+        IReadOnlyDictionary<string, DirectToolBinding> bindings)
     {
         var blockId = string.IsNullOrWhiteSpace(update.MessageId)
             ? "direct-response"
@@ -119,8 +117,7 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
                         result.CallId,
                         status,
                         summary,
-                        detail,
-                        invoker?.TryTakeOutcome(result.CallId)));
+                        detail));
                     break;
 
             }

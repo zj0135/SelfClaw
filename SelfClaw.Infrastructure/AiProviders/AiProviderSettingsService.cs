@@ -439,7 +439,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IA
 
         var secrets = await ResolveSecretsAsync(connection, cancellationToken).ConfigureAwait(false);
         var request = new AiProviderClientRequest(connection, profile, secrets, false);
-        using var httpClient = _httpClientProvider.CreateTurnClient(connection, null);
+        using var httpClient = _httpClientProvider.CreateTurnClient(connection);
         using var client = adapter.CreateChatClient(request, httpClient);
         var options = adapter.CreateChatOptions(request, []);
         options.MaxOutputTokens = 1;

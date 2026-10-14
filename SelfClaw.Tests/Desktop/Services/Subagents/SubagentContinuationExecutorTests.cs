@@ -54,7 +54,7 @@ public sealed class SubagentContinuationExecutorTests
             var delivery = await context.Tasks.GetDeliveryAsync(parent.Id, task.Id) ?? throw new InvalidOperationException();
             delivery.Status.Should().Be(attempt == attempts ? SubagentDeliveryStatus.DeadLetter : SubagentDeliveryStatus.Pending);
             delivery.AttemptCount.Should().Be(attempt);
-            delivery.LastError.Should().Contain(completion == RunCompletionStatus.Blocked ? "Blocked by hook" : "output limit");
+            delivery.LastError.Should().Contain(completion == RunCompletionStatus.Blocked ? "content filter" : "output limit");
         }
         runtime.Runs.Should().Be(attempts);
         runtime.ToolCalls.Should().Be(hasTool ? 1 : 0);
@@ -113,7 +113,7 @@ public sealed class SubagentContinuationExecutorTests
                 yield return new ToolCallCompletedEvent("call", ToolCallStatus.Completed, "written", "done");
             }
             await verifyDetached(request);
-            yield return new RunCompletedEvent(status, "partial answer", status == RunCompletionStatus.Blocked ? "Blocked by hook 'alpha/a': no." : null);
+            yield return new RunCompletedEvent(status, "partial answer", status == RunCompletionStatus.Blocked ? "Blocked by the content filter." : null);
         }
     }
 

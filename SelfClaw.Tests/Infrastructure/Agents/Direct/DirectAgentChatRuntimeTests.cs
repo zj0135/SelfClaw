@@ -1,11 +1,8 @@
 using SelfClaw.Tests.Infrastructure.Agents.Direct.Capabilities;
-using SelfClaw.Tests.Infrastructure.Agents.Direct.Hooks.TestDoubles;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct;
 using System.Runtime.CompilerServices;
@@ -21,7 +18,6 @@ using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
-using SelfClaw.Infrastructure.Extensions.Plugins.Models;
 using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Mcp.Models;
 using SelfClaw.Infrastructure.Extensions.Models;
@@ -489,101 +485,17 @@ public sealed class DirectAgentChatRuntimeTests
     }
 
     [Fact]
-    public async Task A_blocking_runStarting_hook_ends_the_turn_before_any_model_call()
-    {
-        var factory = new FakeChatClientFactory(new ScriptedChatClient([]));
-        var lease = new DirectTurnCapabilityLease(
-            [],
-            [],
-            new Dictionary<Guid, string>(),
-            [],
-            hooks:
-            [
-                HookTestFactory.CreateHook(
-                    "alpha",
-                    "a",
-                    PluginHookEvent.RunStarting,
-                    onFailure: PluginHookFailurePolicy.Block)
-            ]);
-        var request = CreateRequest(factory.Profile.Id);
-
-        var events = await CollectAsync(CreateRuntime(factory, new FakeCapabilityResolver(lease)).StreamTurnAsync(request));
-
-        factory.CreateCalls.Should().Be(0);
-        var completed = events.OfType<RunCompletedEvent>().Should().ContainSingle().Which;
-        completed.Status.Should().Be(RunCompletionStatus.Blocked);
-        completed.ErrorMessage.Should().Contain("failed (launchFailed) and is configured to block");
-    }
-
-    [Fact]
-    public async Task An_ignored_runStarting_failure_emits_a_notice_and_continues()
-    {
-        var factory = new FakeChatClientFactory(new ScriptedChatClient([FinishUpdate("done", ChatFinishReason.Stop)]));
-        var lease = new DirectTurnCapabilityLease(
-            [],
-            [],
-            new Dictionary<Guid, string>(),
-            [],
-            hooks:
-            [
-                HookTestFactory.CreateHook(
-                    "alpha",
-                    "a",
-                    PluginHookEvent.RunStarting)
-            ]);
-        var request = CreateRequest(factory.Profile.Id);
-
-        var events = await CollectAsync(CreateRuntime(factory, new FakeCapabilityResolver(lease)).StreamTurnAsync(request));
-
-        events.OfType<RunNoticeEvent>().Should().ContainSingle().Which.Text.Should()
-            .Be("Hook 'alpha/a' failed (launchFailed); ignored.");
-        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status
-            .Should().Be(RunCompletionStatus.Succeeded);
-    }
-
-    [Fact]
-    public async Task An_unavailable_inherited_hook_plugin_blocks_the_turn_and_emits_the_capability_notices()
-    {
-        var factory = new FakeChatClientFactory(new ScriptedChatClient([]));
-        var lease = new DirectTurnCapabilityLease(
-            [],
-            [],
-            new Dictionary<Guid, string>(),
-            [],
-            hooks: [],
-            hookNotices: ["Plugin 'alpha' declares hooks but was skipped (broken); its hooks are not active in this turn."],
-            hookBlockReason: "Inherited hook plugin 'alpha' is unavailable or changed since delegation; the turn was blocked.");
-        var request = CreateRequest(factory.Profile.Id);
-
-        var events = await CollectAsync(CreateRuntime(factory, new FakeCapabilityResolver(lease)).StreamTurnAsync(request));
-
-        factory.CreateCalls.Should().Be(0);
-        events.OfType<RunNoticeEvent>().Should().ContainSingle();
-        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status
-            .Should().Be(RunCompletionStatus.Blocked);
-    }
-
-    [Fact]
-    public async Task Cancellation_delivers_runCompleted_with_the_cancelled_status()
+    public async Task Cancellation_propagates_without_a_success_terminal()
     {
         var client = new ScriptedChatClient(
             [Update("m", new TextContent("partial"))],
             new OperationCanceledException());
         var factory = new FakeChatClientFactory(client);
-        await using var observing = new ObservingRunCompletedHooks();
-        await observing.StartAsync();
-        var runtime = CreateRuntime(
-            factory,
-            new FakeCapabilityResolver(LeaseWithRunCompletedHook()),
-            observing.Factory);
+        var runtime = CreateRuntime(factory);
 
         var action = () => CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
 
         await action.Should().ThrowAsync<OperationCanceledException>();
-        await observing.WaitForDeliveryAsync();
-        var payload = observing.Payloads.Should().ContainSingle().Subject;
-        payload.GetProperty("event").GetString().Should().Be("runCompleted");
-        payload.GetProperty("status").GetString().Should().Be("cancelled");
     }
 
     [Theory]
@@ -595,38 +507,23 @@ public sealed class DirectAgentChatRuntimeTests
             ? [FinishUpdate("m", ChatFinishReason.ContentFilter, new TextContent("filtered"))]
             : []);
         var factory = new FakeChatClientFactory(client);
-        await using var observing = new ObservingRunCompletedHooks();
-        await observing.StartAsync();
-        var runtime = CreateRuntime(factory, new FakeCapabilityResolver(LeaseWithRunCompletedHook()), observing.Factory);
+        var runtime = CreateRuntime(factory);
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status
             .Should().Be(filtered ? RunCompletionStatus.Blocked : RunCompletionStatus.Failed);
-        await observing.WaitForDeliveryAsync();
-        var payload = observing.Payloads.Should().ContainSingle().Subject;
-        payload.GetProperty("status").GetString().Should().Be(filtered ? "blocked" : "failed");
-        payload.GetProperty("toolCallCount").GetInt32().Should().Be(0);
         client.IsDisposed.Should().BeTrue();
     }
 
     [Fact]
-    public async Task A_budget_failure_after_runStarting_delivers_runCompleted_failed_exactly_once()
+    public async Task A_budget_failure_before_any_request_delivers_one_failed_lifecycle()
     {
         var factory = new FakeChatClientFactory(new ScriptedChatClient([]), contextWindowTokens: 1);
-        await using var observing = new ObservingRunCompletedHooks();
-        await observing.StartAsync();
-        var runtime = CreateRuntime(
-            factory,
-            new FakeCapabilityResolver(LeaseWithRunCompletedHook()),
-            observing.Factory);
+        var runtime = CreateRuntime(factory);
 
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
 
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status
             .Should().Be(RunCompletionStatus.Failed);
-        await observing.WaitForDeliveryAsync();
-        var payload = observing.Payloads.Should().ContainSingle().Subject;
-        payload.GetProperty("status").GetString().Should().Be("failed");
-        payload.GetProperty("toolCallCount").GetInt32().Should().Be(0);
     }
 
     /// <summary>A capability scope holding one lease that records when it was released.</summary>
@@ -646,78 +543,13 @@ public sealed class DirectAgentChatRuntimeTests
         }
     }
 
-    private static DirectTurnCapabilityLease LeaseWithRunCompletedHook()
-        => new(
-            [],
-            [],
-            new Dictionary<Guid, string>(),
-            [],
-            hooks:
-            [
-                HookTestFactory.CreateHook("alpha", "audit", PluginHookEvent.RunCompleted, runAsync: true)
-            ]);
-
-    private sealed class ObservingRunCompletedHooks : IAsyncDisposable
-    {
-        private readonly PluginHookExecutionLog _log = new();
-        private readonly AsyncHookExecutor _executor;
-
-        internal ObservingRunCompletedHooks()
-        {
-            _executor = new AsyncHookExecutor(
-                (_, payload, _, _) =>
-                {
-                    lock (Payloads)
-                    {
-                        Payloads.Add(JsonDocument.Parse(payload).RootElement.Clone());
-                    }
-
-                    return Task.FromResult(HookTestFactory.Success(string.Empty));
-                },
-                _log,
-                new PluginVersionLeaseManager());
-        }
-
-        internal List<JsonElement> Payloads { get; } = [];
-
-        internal DirectTurnHooksFactory Factory => HookTestFactory.CreateFactory(_executor, _log);
-
-        internal Task StartAsync() => _executor.StartAsync(CancellationToken.None);
-
-        internal async Task WaitForDeliveryAsync()
-        {
-            var deadline = DateTime.UtcNow.AddSeconds(10);
-            while (true)
-            {
-                lock (Payloads)
-                {
-                    if (Payloads.Count > 0)
-                    {
-                        return;
-                    }
-                }
-
-                if (DateTime.UtcNow > deadline)
-                {
-                    throw new TimeoutException("runCompleted was not delivered in time.");
-                }
-
-                await Task.Delay(20);
-            }
-        }
-
-        public async ValueTask DisposeAsync() => await _executor.StopAsync(CancellationToken.None);
-    }
-
     internal static DirectAgentChatRuntime CreateRuntime(
         FakeChatClientFactory factory,
-        IDirectTurnCapabilityResolver? capabilityResolver = null,
-        DirectTurnHooksFactory? hooksFactory = null)
+        IDirectTurnCapabilityResolver? capabilityResolver = null)
         => new(
             factory,
             capabilityResolver ?? CreateCapabilityResolver(),
-            new DirectPromptComposer(),
-            hooksFactory ?? HookTestFactory.CreateFactory());
+            new DirectPromptComposer());
 
     /// <summary>
     /// The real resolver over empty repositories: these tests assert how the runtime projects a resolved

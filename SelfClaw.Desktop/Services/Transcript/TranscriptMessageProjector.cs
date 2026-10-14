@@ -111,14 +111,6 @@ internal sealed class TranscriptMessageProjector
                             SegmentId: $"{message.Id:D}:thinking:{thinkingIndex}",
                             SegmentOrdinal: segment.Ordinal));
                         break;
-                    case MessageSegmentKind.Notice when !string.IsNullOrWhiteSpace(segment.Text):
-                        renderSegments.Add(new TranscriptRenderSegment(
-                            "notice",
-                            segment.Text,
-                            false,
-                            SegmentId: $"{message.Id:D}:notice:{segment.Ordinal}",
-                            SegmentOrdinal: segment.Ordinal));
-                        break;
                     case MessageSegmentKind.ToolCall when segment.ToolRunId is Guid toolRunId:
                         if (toolRunsById.TryGetValue(toolRunId, out var toolRun))
                         {

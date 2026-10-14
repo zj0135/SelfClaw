@@ -7,7 +7,7 @@ namespace SelfClaw.Desktop.Services.Runtime;
 /// Aligns the terminal FinalText against the streamed block sequence. Fast path keeps the
 /// streamed blocks when the visible text already matches; slow path maps each ToolCall block's
 /// character offset in the streamed text onto the final text and rebuilds Text/ToolCall blocks.
-/// Notice and Thinking blocks are preserved from the stream and prepended, notices first.
+/// Thinking blocks are preserved from the stream and prepended.
 /// </summary>
 internal static class TerminalBlockAligner
 {
@@ -104,9 +104,9 @@ internal static class TerminalBlockAligner
         IReadOnlyList<MessageSegmentRecord> streamedSegments,
         List<MessageSegmentRecord> result)
     {
-        // Notices keep their streamed order ahead of thinking; the rebuild only replaces visible content.
+        // Thinking keeps its streamed position ahead of the rebuilt visible content.
         var prefix = streamedSegments
-            .Where(segment => segment.Kind is MessageSegmentKind.Notice or MessageSegmentKind.Thinking)
+            .Where(segment => segment.Kind == MessageSegmentKind.Thinking)
             .ToList();
         if (prefix.Count == 0)
         {

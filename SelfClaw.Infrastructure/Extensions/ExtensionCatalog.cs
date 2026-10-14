@@ -75,10 +75,11 @@ internal sealed class ExtensionCatalog : IPluginViewCatalog
     {
         try
         {
-            var manifest = await _pluginManifestReader!
+            // Reading the manifest validates it; an unreadable manifest (but intact install) is Broken.
+            _ = await _pluginManifestReader!
                 .ReadAsync(ExtensionInstallation.PluginManifestPath(package), cancellationToken)
                 .ConfigureAwait(false);
-            return CreatePackageView(package, manifest);
+            return CreatePackageView(package);
         }
         catch (OperationCanceledException)
         {
@@ -119,8 +120,6 @@ internal sealed class ExtensionCatalog : IPluginViewCatalog
                         [],
                         pluginView.Status,
                         [],
-                        [],
-                        null,
                         []));
                 }
             }
@@ -308,9 +307,7 @@ internal sealed class ExtensionCatalog : IPluginViewCatalog
         => JsonSerializer.Deserialize<McpServerSettings>(settingsJson, JsonOptions)
             ?? throw new JsonException("MCP settings are empty.");
 
-    internal static ExtensionPackageView CreatePackageView(
-        ExtensionPackageRecord package,
-        PluginManifest? manifest = null)
+    internal static ExtensionPackageView CreatePackageView(ExtensionPackageRecord package)
     {
         var permissions = package.Kind == ExtensionKind.Plugin
             ? ReadStringArray(package.ManifestJson, "permissions")
@@ -335,60 +332,8 @@ internal sealed class ExtensionCatalog : IPluginViewCatalog
             [],
             status,
             permissions,
-            unacknowledged,
-            package.SourcePath,
-            CreateHookViews(manifest));
+            unacknowledged);
     }
-
-    private static IReadOnlyList<PluginHookView> CreateHookViews(PluginManifest? manifest)
-        => manifest is null
-            ? []
-            : manifest.Contributions.Hooks.Select(CreateHookView).ToArray();
-
-    private static PluginHookView CreateHookView(PluginHookContribution hook)
-        => new(
-            hook.Id,
-            ToCamelCase(hook.Event.ToString()),
-            FormatMatcherSummary(hook.Matcher),
-            FormatCommandLine(hook),
-            (int)hook.Timeout.TotalSeconds,
-            hook.Event is PluginHookEvent.RunStarting or PluginHookEvent.ToolExecuting
-                ? ToCamelCase(hook.OnFailure.ToString())
-                : null,
-            hook.RunAsync,
-            hook.IncludeRequestBody);
-
-    private static string FormatMatcherSummary(PluginHookMatcher matcher)
-    {
-        var parts = new List<string>();
-        AddMatcherPart(parts, "origins", matcher.Origins.Select(origin => ToCamelCase(origin.ToString())));
-        AddMatcherPart(parts, "tools", matcher.ToolPatterns);
-        AddMatcherPart(parts, "sourceIds", matcher.SourceIdPatterns);
-        AddMatcherPart(parts, "kinds", matcher.Kinds.Select(kind => ToCamelCase(kind.ToString())));
-        AddMatcherPart(parts, "sources", matcher.Sources.Select(source => ToCamelCase(source.ToString())));
-        AddMatcherPart(parts, "hosts", matcher.HostPatterns);
-        return parts.Count == 0 ? "*" : string.Join("; ", parts);
-    }
-
-    private static void AddMatcherPart(List<string> parts, string name, IEnumerable<string> values)
-    {
-        var array = values.ToArray();
-        if (array.Length > 0)
-        {
-            parts.Add($"{name}={string.Join(",", array)}");
-        }
-    }
-
-    private static string FormatCommandLine(PluginHookContribution hook)
-        => string.Join(" ", new[] { hook.Command }.Concat(hook.Arguments).Select(QuoteCommandPart));
-
-    private static string QuoteCommandPart(string value)
-        => value.Contains(' ') ? $"\"{value}\"" : value;
-
-    private static string ToCamelCase(string value)
-        => value.Length == 0 || char.IsLower(value[0])
-            ? value
-            : char.ToLowerInvariant(value[0]) + value[1..];
 
     internal static IReadOnlyList<string> ReadAcknowledgedPermissions(string? json)
     {

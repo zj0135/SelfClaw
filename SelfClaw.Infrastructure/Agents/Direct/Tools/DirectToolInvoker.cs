@@ -1,19 +1,16 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks;
-using SelfClaw.Infrastructure.Agents.Direct.Hooks.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Direct.Tools;
 
 /// <summary>
-/// The single tool-invocation seam for a Direct turn: it owns the tool hooks, approval, the durable
-/// execution checkpoint and the turn's consecutive-fault budget. The explicit loop calls it once per call.
+/// The single tool-invocation seam for a Direct turn: it owns approval, the durable execution checkpoint
+/// and the turn's consecutive-fault budget. The explicit loop calls it once per call.
 /// </summary>
 internal sealed class DirectToolInvoker
 {
@@ -21,7 +18,7 @@ internal sealed class DirectToolInvoker
 
     /// <summary>
     /// The model-visible reason for a call the invoker refused to start because a steer batch was
-    /// durably claimed first. It is distinct from a user denial so transcripts and hooks can tell
+    /// durably claimed first. It is distinct from a user denial so transcripts can tell
     /// an adjustment from a rejection, and it never counts as a tool fault.
     /// </summary>
     internal const string SupersededBySteerReason = "SupersededBySteer";
@@ -36,24 +33,17 @@ internal sealed class DirectToolInvoker
 
     private readonly DirectChatTurnRequest _request;
     private readonly IReadOnlyDictionary<string, DirectToolBinding> _bindings;
-    private readonly DirectTurnHooks _hooks;
     private readonly IDirectTurnSteering? _steering;
-    private readonly Dictionary<string, ToolHookOutcome> _outcomes = new(StringComparer.Ordinal);
-    private int _callCount;
     private int _consecutiveToolFaults;
 
     public DirectToolInvoker(
         DirectChatTurnRequest request,
-        IReadOnlyDictionary<string, DirectToolBinding> bindings,
-        DirectTurnHooks hooks)
+        IReadOnlyDictionary<string, DirectToolBinding> bindings)
     {
         _request = request;
         _bindings = bindings;
-        _hooks = hooks;
         _steering = request.Steering;
     }
-
-    public int CallCount => _callCount;
 
     public async ValueTask<object?> InvokeAsync(
         FunctionCallContent callContent,
@@ -68,126 +58,75 @@ internal sealed class DirectToolInvoker
             throw new InvalidOperationException($"Direct tool '{toolName}' is not bound to this turn.");
         }
 
-        _callCount++;
-        var callId = callContent.CallId;
-
-        // Pending phase: a steer claimed before this call starts skips the call outright, without
-        // pretending a toolExecuting/toolExecuted pair happened for a hook that never ran.
+        // Pending phase: a steer claimed before this call starts skips the call outright.
         if (_steering?.HasSupersedingSteer == true)
         {
             return SupersededBySteerResult();
         }
 
-        var originalArguments = new AIFunctionArguments(callContent.Arguments ?? new Dictionary<string, object?>());
-        var stopwatch = Stopwatch.StartNew();
-        var call = new ToolHookCall(
-            callId,
-            requestIndex,
-            binding,
-            originalArguments,
-            _request.ToolPermissionMode);
-        var pre = await _hooks.ToolExecutingAsync(call, cancellationToken).ConfigureAwait(false);
+        var arguments = new AIFunctionArguments(callContent.Arguments ?? new Dictionary<string, object?>());
         DirectToolResult? result = null;
         object? raw = null;
-        string? deniedBy = null;
         Exception? fault = null;
         var superseded = false;
-        if (pre.BlockedBy is not null)
+        var needsApproval =
+            binding.RequiresApproval && _request.ToolPermissionMode != ToolPermissionMode.FullAccess;
+        var decision = needsApproval
+            ? await RequestApprovalAsync(binding, arguments, cancellationToken).ConfigureAwait(false)
+            : ToolApprovalDecision.Approved;
+        if (decision == ToolApprovalDecision.Denied)
         {
-            deniedBy = "hook";
-            var message = pre.BlockReason ?? HookNotes.Blocked(pre.BlockedBy, null);
             result = new DirectToolResult(
-                ToolCallStatus.Blocked, message, JsonSerializer.SerializeToElement(message), message);
+                ToolCallStatus.Canceled,
+                DeniedResult,
+                JsonSerializer.SerializeToElement(DeniedResult),
+                DeniedResult);
+        }
+        else if (decision == ToolApprovalDecision.Superseded)
+        {
+            superseded = true;
+            result = SupersededBySteerResult();
+        }
+        else if (_steering is not null &&
+                 !await _steering.TryBeginToolExecutionAsync(cancellationToken).ConfigureAwait(false))
+        {
+            // ReadyToExecute lost to a steer claim: the checkpoint and the tool never run, so the
+            // permit stays irrevocable once granted.
+            superseded = true;
+            result = SupersededBySteerResult();
         }
         else
         {
-            var arguments = pre.EffectiveArguments ?? originalArguments;
-            var needsApproval =
-                (binding.RequiresApproval && _request.ToolPermissionMode != ToolPermissionMode.FullAccess) ||
-                pre.ApprovalRequiredBy.Count > 0;
-            var decision = needsApproval
-                ? await RequestApprovalAsync(binding, arguments, pre, cancellationToken).ConfigureAwait(false)
-                : ToolApprovalDecision.Approved;
-            if (decision == ToolApprovalDecision.Denied)
+            if (_request.ToolExecutionCheckpoint is not null)
             {
-                deniedBy = "user";
+                await _request.ToolExecutionCheckpoint.BeforeExecutionAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                raw = await binding.Tool.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // A faulting tool is a failure the model must see, not a turn failure: the real error
+                // reaches it as a result, so the model can correct itself. Detail carries the message
+                // rather than the stack trace because it is also persisted as the tool result and replayed
+                // on later turns, where a stack trace is permanent prompt noise that leaks local paths.
+                fault = exception;
                 result = new DirectToolResult(
-                    ToolCallStatus.Canceled,
-                    DeniedResult,
-                    JsonSerializer.SerializeToElement(DeniedResult),
-                    DeniedResult);
+                    ToolCallStatus.Failed,
+                    exception.Message,
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        type = exception.GetType().Name,
+                        message = exception.Message
+                    }),
+                    exception.Message);
             }
-            else if (decision == ToolApprovalDecision.Superseded)
-            {
-                deniedBy = "steer";
-                superseded = true;
-                result = SupersededBySteerResult();
-            }
-            else if (_steering is not null &&
-                     !await _steering.TryBeginToolExecutionAsync(cancellationToken).ConfigureAwait(false))
-            {
-                // ReadyToExecute lost to a steer claim: the checkpoint and the tool never run, so the
-                // permit stays irrevocable once granted.
-                deniedBy = "steer";
-                superseded = true;
-                result = SupersededBySteerResult();
-            }
-            else
-            {
-                if (_request.ToolExecutionCheckpoint is not null)
-                {
-                    await _request.ToolExecutionCheckpoint.BeforeExecutionAsync(cancellationToken).ConfigureAwait(false);
-                }
 
-                cancellationToken.ThrowIfCancellationRequested();
-                try
-                {
-                    raw = await binding.Tool.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    // A faulting tool is a failure the model must see, not a turn failure: the real error
-                    // reaches it as a result, so the model can correct itself. Fault metadata stays in the
-                    // hook outcome. Detail carries the message rather than the stack trace because it is
-                    // also persisted as the tool result and replayed on later turns, where a stack trace
-                    // is permanent prompt noise that leaks local paths.
-                    fault = exception;
-                    result = new DirectToolResult(
-                        ToolCallStatus.Failed,
-                        exception.Message,
-                        JsonSerializer.SerializeToElement(new
-                        {
-                            type = exception.GetType().Name,
-                            message = exception.Message
-                        }),
-                        exception.Message);
-                }
-
-                result ??= raw as DirectToolResult;
-            }
+            result ??= raw as DirectToolResult;
         }
-
-        // A faulted call keeps reporting Error with no summary or content, so what plugins observe through
-        // toolExecuted is unchanged; only the returned result differs.
-        var hookResult = fault is not null
-            ? new ToolHookResult(
-                ToolCallStatus.Failed,
-                deniedBy,
-                Summary: null,
-                Content: null,
-                Error: fault.Message,
-                EffectiveArgumentsJson: pre.EffectiveArgumentsJson,
-                Duration: stopwatch.Elapsed)
-            : new ToolHookResult(
-                result?.Status ?? ToolCallStatus.Completed,
-                deniedBy,
-                Summary: result?.Summary,
-                Content: result?.Content,
-                Error: null,
-                EffectiveArgumentsJson: pre.EffectiveArgumentsJson,
-                Duration: stopwatch.Elapsed);
-        var post = await _hooks.ToolExecutedAsync(call, hookResult, cancellationToken).ConfigureAwait(false);
-        RecordOutcome(callId, pre, post);
 
         if (fault is null)
         {
@@ -204,20 +143,12 @@ internal sealed class DirectToolInvoker
             }
         }
 
-        return result is not null ? AttachFeedback(result, pre, post) : raw;
+        return result is not null ? result : raw;
     }
-
-    /// <summary>
-    /// Removes and returns the hook outcome recorded for a call. The turn translator calls this for
-    /// every translated <c>FunctionResultContent</c>, including exception results.
-    /// </summary>
-    public ToolHookOutcome? TryTakeOutcome(string callId)
-        => _outcomes.Remove(callId, out var outcome) ? outcome : null;
 
     private async Task<ToolApprovalDecision> RequestApprovalAsync(
         DirectToolBinding binding,
         AIFunctionArguments arguments,
-        ToolExecutingOutcome pre,
         CancellationToken cancellationToken)
     {
         var handler = _request.ToolApprovalHandler;
@@ -238,10 +169,7 @@ internal sealed class DirectToolInvoker
                     binding.Descriptor.SourceKind ?? ToolSourceKind.BuiltIn,
                     binding.Descriptor.SourceId,
                     binding.TransportSummary,
-                    binding.AnnotationsJson,
-                    pre.ApprovalRequiredBy,
-                    pre.ApprovalReason,
-                    pre.ArgumentsModifiedBy),
+                    binding.AnnotationsJson),
                 cancellationToken);
         if (_steering is null)
         {
@@ -277,44 +205,4 @@ internal sealed class DirectToolInvoker
             "Skipped because the user adjusted the current task.",
             JsonSerializer.SerializeToElement(new { reason = SupersededBySteerReason }),
             SupersededBySteerReason);
-
-    private void RecordOutcome(string callId, ToolExecutingOutcome pre, ToolExecutedOutcome post)
-    {
-        var failures = pre.IgnoredFailures.Concat(post.IgnoredFailures).ToArray();
-        if (failures.Length == 0 &&
-            post.Feedback.Count == 0 &&
-            pre.ArgumentsModifiedBy.Count == 0 &&
-            pre.ApprovalRequiredBy.Count == 0 &&
-            pre.BlockedBy is null)
-        {
-            return;
-        }
-
-        _outcomes[callId] = new ToolHookOutcome(
-            pre.EffectiveArgumentsJson,
-            pre.ArgumentsModifiedBy,
-            pre.ApprovalRequiredBy,
-            pre.BlockedBy,
-            pre.BlockReason,
-            post.Feedback,
-            failures);
-    }
-
-    private static DirectToolResult AttachFeedback(
-        DirectToolResult result,
-        ToolExecutingOutcome pre,
-        ToolExecutedOutcome post)
-    {
-        var feedback = new List<DirectToolHookFeedback>();
-        if (pre.EffectiveArgumentsJson is not null && pre.ArgumentsModifiedBy.Count > 0)
-        {
-            feedback.Add(new DirectToolHookFeedback(
-                "selfclaw",
-                HookNotes.ArgumentsModified(pre.EffectiveArgumentsJson, pre.ArgumentsModifiedBy)));
-        }
-
-        feedback.AddRange(post.Feedback.Select(item =>
-            new DirectToolHookFeedback(HookNotes.Describe(item.Source), item.Text)));
-        return feedback.Count == 0 ? result : result with { HookFeedback = feedback };
-    }
 }

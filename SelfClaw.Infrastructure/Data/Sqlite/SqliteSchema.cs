@@ -200,9 +200,6 @@ internal static class SqliteSchema
             source_kind INTEGER NULL,
             source_id TEXT NULL,
             display_name TEXT NULL,
-            effective_arguments_json TEXT NULL,
-            hook_feedback_json TEXT NULL,
-            hook_outcome_json TEXT NULL,
             UNIQUE(id, message_id),
             FOREIGN KEY(message_id, conversation_id) REFERENCES messages(id, conversation_id) ON DELETE CASCADE
         );
@@ -222,7 +219,6 @@ internal static class SqliteSchema
             acknowledged_at_utc TEXT NULL,
             installed_at_utc TEXT NOT NULL,
             updated_at_utc TEXT NOT NULL,
-            source_path TEXT NULL,
             PRIMARY KEY(kind, id)
         );
 

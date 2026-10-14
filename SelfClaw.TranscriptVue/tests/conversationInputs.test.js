@@ -236,10 +236,10 @@ it('promotes with the host-published target and refuses locally when the host sa
 		{ inputId: 'i-1', expectedRevision: 3, targetTurnId: 'turn-9' });
 
 	bridge.push(statePayload('A', queue.state.subscriptionId, { queueRevision: 2, canSteer: false,
-		steerReason: 'hook-requires-new-turn', items: [{ inputId: 'i-1', sequence: 1, kind: 'followup', status: 'pending', revision: 3, preview: 'queued' }] }));
+		steerReason: 'skill-requires-new-turn', items: [{ inputId: 'i-1', sequence: 1, kind: 'followup', status: 'pending', revision: 3, preview: 'queued' }] }));
 	await queue.promote('i-1', 3);
 	expect(bridge.request).toHaveBeenCalledTimes(2);
-	expect(queue.state.error).toContain('完整审查');
+	expect(queue.state.error).toContain('新回合');
 });
 
 it('ignores an old conversation result after switching subscriptions', async () => {

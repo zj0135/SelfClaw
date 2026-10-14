@@ -8,34 +8,6 @@ namespace SelfClaw.Tests.Desktop.Services.Subagents;
 
 public sealed class SubagentExecutionSessionTests
 {
-    [Fact]
-    public async Task A_blocked_child_turn_is_persisted_as_a_failed_task_with_the_hook_error()
-    {
-        using var context = new SubagentActivityTestContext();
-        var task = await context.CreateTaskAsync();
-        var session = await context.RegisterSessionAsync(task);
-        await session.BeginAsync();
-
-        await session.ApplyEventAsync(
-            new RunCompletedEvent(RunCompletionStatus.Blocked, FinalText: null, ErrorMessage: "blocked by hook 'alpha/a'"),
-            CancellationToken.None);
-
-        var persisted = await context.Tasks.GetAsync(task.ParentConversationId, task.Id)
-            ?? throw new InvalidOperationException("Missing completed task.");
-        persisted.Status.Should().Be(SubagentTaskStatus.Failed);
-        persisted.ErrorCode.Should().Be(SubagentErrorCodes.BlockedByHook);
-        persisted.ErrorMessage.Should().Contain("blocked by hook 'alpha/a'");
-        var turn = (await context.Turns.ListTurnsAsync(task.ChildConversationId)).Should().ContainSingle().Which;
-        turn.Status.Should().Be(ConversationTurnStatus.Blocked);
-        (await context.Conversations.ListMessagesAsync(task.ChildConversationId)).Should().ContainSingle().Which.Role.Should().Be(MessageRole.User);
-        var detail = await context.Service.GetDetailAsync(task.ParentConversationId, task.Id)
-            ?? throw new InvalidOperationException("Missing blocked detail.");
-        detail.Content.Message.Should().BeNull();
-        detail.Content.Turn?.Status.Should().Be(ConversationTurnStatus.Blocked);
-        detail.Content.HistoryCompleteness.Should().Be(SubagentHistoryCompleteness.Complete);
-        await session.DisposeAsync();
-    }
-
     [Theory]
     [InlineData(RunCompletionStatus.Succeeded, ConversationTurnStatus.Succeeded)]
     [InlineData(RunCompletionStatus.Failed, ConversationTurnStatus.Failed)]
