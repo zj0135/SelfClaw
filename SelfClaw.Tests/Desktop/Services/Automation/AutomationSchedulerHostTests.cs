@@ -226,6 +226,7 @@ public sealed class AutomationSchedulerHostTests : IDisposable
             runExecutor,
             registrar,
             cancellations,
+            new AutomationChangeNotifier(),
             TimeProvider.System,
             NullLogger<AutomationSchedulerHost>.Instance);
         return new Harness(host, taskStore, runStore, registrar, fakeExecutor, cancellations);

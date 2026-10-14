@@ -198,6 +198,12 @@ on('window-state', (payload) => {
 	windowChrome.isMaximized = Boolean(payload.isMaximized);
 });
 
+// 通知激活：宿主只负责还原窗口与推事件，视图切换发生在外壳；抽屉由 AutomationView 的
+// sticky 订阅（replayLast）接管，所以这里只切视图。
+on('automation/open-run', () => {
+	currentViewId.value = 'automation';
+});
+
 function onWindowDragPointerDown(event) {
 	if (event.button !== 0) {
 		return;

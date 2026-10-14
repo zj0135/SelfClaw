@@ -40,13 +40,7 @@ internal sealed class DesktopConversationActivationService
         if (!_dispatcher.CheckAccess())
             return await (await _dispatcher.InvokeAsync(() => ActivateAsync(conversationId)));
         var generation = ++_generation;
-        if (_window is { } window)
-        {
-            if (!window.IsVisible) window.Show();
-            if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
-            window.Activate();
-            window.Focus();
-        }
+        RestoreWindow();
         if (conversationId is not Guid id) return true;
         try
         {
@@ -68,5 +62,28 @@ internal sealed class DesktopConversationActivationService
                 errorCode = "conversation-unavailable", error = exception.Message });
             return false;
         }
+    }
+
+    /// <summary>
+    /// Brings the shell forward and asks it to switch to the automation view with the given run open. The
+    /// view switch happens in Vue; the host only restores the window and pushes the intent.
+    /// </summary>
+    public async Task<bool> ActivateAutomationAsync(Guid runId)
+    {
+        if (_dispatcher.HasShutdownStarted) return false;
+        if (!_dispatcher.CheckAccess())
+            return await (await _dispatcher.InvokeAsync(() => ActivateAutomationAsync(runId)));
+        RestoreWindow();
+        _channel.PostPush(new { type = "automation/open-run", runId = runId.ToString("D") });
+        return true;
+    }
+
+    private void RestoreWindow()
+    {
+        if (_window is not { } window) return;
+        if (!window.IsVisible) window.Show();
+        if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+        window.Activate();
+        window.Focus();
     }
 }

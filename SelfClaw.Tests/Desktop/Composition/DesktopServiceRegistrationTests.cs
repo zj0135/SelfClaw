@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Desktop.Composition;
+using SelfClaw.Desktop.Services.Automation;
 using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Infrastructure;
@@ -48,6 +49,35 @@ public sealed class DesktopServiceRegistrationTests
                 provider.GetRequiredService<ConversationInputBridge>().Should().NotBeNull();
                 provider.GetRequiredService<ConversationInputPublisher>().Should().NotBeNull();
                 provider.GetRequiredService<ConversationDeletionService>().Should().NotBeNull();
+                await Task.CompletedTask;
+            }
+            finally
+            {
+                SqliteTestPools.ClearFor(paths.DatabasePath);
+                if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            }
+        });
+
+    [Fact]
+    public Task Desktop_registration_resolves_the_automation_graph()
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
+            var paths = StoragePathDefaults.Create(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets"));
+            try
+            {
+                var services = new ServiceCollection();
+                services.AddLogging();
+                services.AddSelfClawInfrastructure(paths);
+                services.AddSelfClawDesktop(Dispatcher.CurrentDispatcher);
+                await using var provider = services.BuildServiceProvider();
+
+                var bridge = provider.GetRequiredService<AutomationBridge>();
+                bridge.Should().NotBeNull();
+                provider.GetRequiredService<AutomationChangeNotifier>().Should().NotBeNull();
+                provider.GetRequiredService<AutomationSchedulerHost>().Should().NotBeNull();
+                // The router factory takes the bridge; resolving it catches a broken automation branch wiring.
+                provider.GetRequiredService<SelfClaw.Desktop.Services.WebView.WebViewMessageRouter>().Should().NotBeNull();
                 await Task.CompletedTask;
             }
             finally

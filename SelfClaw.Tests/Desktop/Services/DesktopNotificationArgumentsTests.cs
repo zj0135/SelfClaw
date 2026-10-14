@@ -22,6 +22,23 @@ public sealed class DesktopNotificationArgumentsTests
     }
 
     [Fact]
+    public void Build_and_parse_round_trip_the_automation_run_action()
+    {
+        var taskId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+
+        var encoded = DesktopNotificationArguments.Build(
+            (DesktopNotificationArguments.ActionKey, DesktopNotificationArguments.OpenAutomationRunAction),
+            (DesktopNotificationArguments.TaskIdKey, taskId.ToString("D")),
+            (DesktopNotificationArguments.RunIdKey, runId.ToString("D")));
+        var parsed = DesktopNotificationArguments.Parse(encoded);
+
+        parsed[DesktopNotificationArguments.ActionKey].Should().Be(DesktopNotificationArguments.OpenAutomationRunAction);
+        parsed[DesktopNotificationArguments.TaskIdKey].Should().Be(taskId.ToString("D"));
+        parsed[DesktopNotificationArguments.RunIdKey].Should().Be(runId.ToString("D"));
+    }
+
+    [Fact]
     public void Build_and_parse_escape_values_and_treat_keys_case_insensitively()
     {
         var encoded = DesktopNotificationArguments.Build(("Action", "open app & inspect"));

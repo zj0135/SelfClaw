@@ -79,6 +79,23 @@ public sealed class DesktopNotificationService
         });
     }
 
+    public void ShowAutomationRunFailed(Guid taskId, Guid runId, string title, string message)
+    {
+        var openArguments = DesktopNotificationArguments.Build(
+            (DesktopNotificationArguments.ActionKey, DesktopNotificationArguments.OpenAutomationRunAction),
+            (DesktopNotificationArguments.TaskIdKey, taskId.ToString()),
+            (DesktopNotificationArguments.RunIdKey, runId.ToString()));
+
+        ShowCore(builder =>
+        {
+            builder.AddArgument(DesktopNotificationArguments.ActionKey, DesktopNotificationArguments.OpenAutomationRunAction);
+            builder.AddArgument(DesktopNotificationArguments.TaskIdKey, taskId.ToString());
+            builder.AddArgument(DesktopNotificationArguments.RunIdKey, runId.ToString());
+            AddNotificationText(builder, title, message);
+            builder.AddButton(new ToastButton("查看", openArguments));
+        });
+    }
+
     private void ShowCore(Action<ToastContentBuilder> configure)
     {
         if (!ShouldShowNotification())

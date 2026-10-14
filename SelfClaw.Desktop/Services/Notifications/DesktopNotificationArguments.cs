@@ -7,9 +7,12 @@ internal static class DesktopNotificationArguments
     public const string ActionKey = "action";
     public const string ConversationIdKey = "conversationId";
     public const string ToolExecutionIdKey = "toolExecutionId";
+    public const string TaskIdKey = "taskId";
+    public const string RunIdKey = "runId";
 
     public const string OpenAppAction = "openApp";
     public const string OpenConversationAction = "openConversation";
+    public const string OpenAutomationRunAction = "openAutomationRun";
     public const string ApproveToolAction = "approveTool";
     public const string RejectToolAction = "rejectTool";
 

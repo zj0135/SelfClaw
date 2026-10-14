@@ -3,6 +3,7 @@ namespace SelfClaw.Core.Runtime;
 public static class AutomationErrorCodes
 {
     public const string TriggerRequiresPrompt = "TriggerRequiresPrompt";
+    public const string InvalidTitle = "InvalidTitle";
     public const string InvalidSchedule = "InvalidSchedule";
     public const string IntervalTooShort = "IntervalTooShort";
     public const string RunConflict = "RunConflict";

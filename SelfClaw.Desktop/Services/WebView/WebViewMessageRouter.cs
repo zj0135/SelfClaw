@@ -9,6 +9,7 @@ using SelfClaw.Desktop.Services.Tools;
 using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Appearance;
+using SelfClaw.Desktop.Services.Automation;
 using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
@@ -42,6 +43,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly WebViewHostChannel _hostChannel;
     private readonly TranscriptDelivery _transcriptDelivery;
     private readonly ActivityPanelBridge? _activityPanelBridge;
+    private readonly AutomationBridge? _automationBridge;
     private int _disposeStarted;
     private readonly ILogger<WebViewMessageRouter> _logger;
     private readonly object _lifecycleGate = new();
@@ -67,6 +69,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         GitWorkspaceBridge? gitWorkspaceBridge = null,
         ConversationInputBridge? conversationInputBridge = null,
         ActivityPanelBridge? activityPanelBridge = null,
+        AutomationBridge? automationBridge = null,
         ILogger<WebViewMessageRouter>? logger = null)
     {
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
@@ -86,6 +89,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _hostChannel = hostChannel;
         _transcriptDelivery = transcriptDelivery;
         _activityPanelBridge = activityPanelBridge;
+        _automationBridge = automationBridge;
         _logger = logger ?? NullLogger<WebViewMessageRouter>.Instance;
 
     }
@@ -223,6 +227,14 @@ internal sealed class WebViewMessageRouter : IDisposable
         if (type.StartsWith("conversation-input/", StringComparison.Ordinal) && _conversationInputBridge is not null)
         {
             await _conversationInputBridge.HandleAsync(type, payload, cancellationToken);
+            return null;
+        }
+
+        if (type.StartsWith("automation/", StringComparison.Ordinal) && _automationBridge is not null)
+        {
+            var automation = await _automationBridge.TryHandleAsync(type, payload, cancellationToken);
+            if (automation is null) throw new ArgumentException("Unsupported automation message.");
+            _hostChannel.PostResponse(automation);
             return null;
         }
 

@@ -37,6 +37,10 @@ internal sealed class DesktopNotificationActivationService
                 if (arguments.TryGetValue(DesktopNotificationArguments.ConversationIdKey, out var rawId) && Guid.TryParse(rawId, out var id))
                     return await _activation.ActivateAsync(id);
                 return false;
+            case DesktopNotificationArguments.OpenAutomationRunAction:
+                if (arguments.TryGetValue(DesktopNotificationArguments.RunIdKey, out var rawRunId) && Guid.TryParse(rawRunId, out var runId))
+                    return await _activation.ActivateAutomationAsync(runId);
+                return false;
             case null:
             case "":
             case DesktopNotificationArguments.OpenAppAction:

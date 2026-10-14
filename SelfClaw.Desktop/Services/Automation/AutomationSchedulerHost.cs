@@ -22,6 +22,7 @@ internal sealed class AutomationSchedulerHost : BackgroundService
     private readonly IAutomationRunExecutor _executor;
     private readonly IAutomationScheduleRegistrar _registrar;
     private readonly AutomationRunCancellationRegistry _cancellations;
+    private readonly AutomationChangeNotifier _notifier;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<AutomationSchedulerHost> _logger;
     private readonly TaskCompletionSource _recoveryCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -36,8 +37,9 @@ internal sealed class AutomationSchedulerHost : BackgroundService
         IAutomationRunExecutor executor,
         IAutomationScheduleRegistrar registrar,
         AutomationRunCancellationRegistry cancellations,
+        AutomationChangeNotifier notifier,
         ILogger<AutomationSchedulerHost> logger)
-        : this(taskStore, runStore, calculator, recovery, executor, registrar, cancellations, TimeProvider.System, logger)
+        : this(taskStore, runStore, calculator, recovery, executor, registrar, cancellations, notifier, TimeProvider.System, logger)
     {
     }
 
@@ -49,6 +51,7 @@ internal sealed class AutomationSchedulerHost : BackgroundService
         IAutomationRunExecutor executor,
         IAutomationScheduleRegistrar registrar,
         AutomationRunCancellationRegistry cancellations,
+        AutomationChangeNotifier notifier,
         TimeProvider timeProvider,
         ILogger<AutomationSchedulerHost> logger)
     {
@@ -59,6 +62,7 @@ internal sealed class AutomationSchedulerHost : BackgroundService
         _executor = executor;
         _registrar = registrar;
         _cancellations = cancellations;
+        _notifier = notifier;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -144,16 +148,24 @@ internal sealed class AutomationSchedulerHost : BackgroundService
         {
             await InsertSkippedAsync(task, AutomationRunTrigger.Scheduled, scheduledForUtc, AutomationRunSkipReason.Stale, now, cancellationToken).ConfigureAwait(false);
             await AdvanceTaskAsync(task, null, now, cancellationToken).ConfigureAwait(false);
+            _notifier.Notify("run-skipped", task.Id);
             return;
         }
 
         var queued = CreateRun(task, AutomationRunTrigger.Scheduled, scheduledForUtc, now);
         var inserted = await _runStore.TryInsertAsync(queued, skipWhenTaskActive: true, cancellationToken).ConfigureAwait(false);
-        if (inserted is null || inserted.Status == AutomationRunStatus.Skipped)
+        if (inserted is null)
         {
             return;
         }
 
+        if (inserted.Status == AutomationRunStatus.Skipped)
+        {
+            _notifier.Notify("run-skipped", task.Id, inserted.Id);
+            return;
+        }
+
+        _notifier.Notify("run-queued", task.Id, inserted.Id);
         await ClaimAndExecuteAsync(task, inserted, cancellationToken).ConfigureAwait(false);
     }
 
@@ -177,16 +189,24 @@ internal sealed class AutomationSchedulerHost : BackgroundService
             {
                 await InsertSkippedAsync(task, AutomationRunTrigger.CatchUp, due, AutomationRunSkipReason.Stale, now, cancellationToken).ConfigureAwait(false);
                 await AdvanceTaskAsync(task, null, now, cancellationToken).ConfigureAwait(false);
+                _notifier.Notify("run-skipped", task.Id);
                 continue;
             }
 
             var queued = CreateRun(task, AutomationRunTrigger.CatchUp, due, now);
             var inserted = await _runStore.TryInsertAsync(queued, skipWhenTaskActive: true, cancellationToken).ConfigureAwait(false);
-            if (inserted is null || inserted.Status == AutomationRunStatus.Skipped)
+            if (inserted is null)
             {
                 continue;
             }
 
+            if (inserted.Status == AutomationRunStatus.Skipped)
+            {
+                _notifier.Notify("run-skipped", task.Id, inserted.Id);
+                continue;
+            }
+
+            _notifier.Notify("run-queued", task.Id, inserted.Id);
             await ClaimAndExecuteAsync(task, inserted, cancellationToken).ConfigureAwait(false);
         }
 
@@ -256,6 +276,55 @@ internal sealed class AutomationSchedulerHost : BackgroundService
         await _registrar.UpsertCronAsync(task.Id, expression, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Converges the TickerQ registration with the task table. Called after any task mutation so the
+    /// schedule reflects the new definition immediately instead of on the next sweep.
+    /// </summary>
+    internal async Task RequestRescheduleAsync(CancellationToken cancellationToken)
+    {
+        await _recoveryCompleted.Task.ConfigureAwait(false);
+        await RebuildScheduleAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Queues and starts a manual run. When the task already has a Queued/Running run the returned record
+    /// is the Skipped(Overlap) row, which lets the bridge answer RunConflict without queuing behind it.
+    /// </summary>
+    internal async Task<AutomationRunRecord?> TryStartManualRunAsync(Guid taskId, CancellationToken cancellationToken)
+    {
+        var task = await _taskStore.GetAsync(taskId, cancellationToken).ConfigureAwait(false);
+        if (task is null || string.IsNullOrWhiteSpace(task.Prompt))
+        {
+            return null;
+        }
+
+        await _recoveryCompleted.Task.ConfigureAwait(false);
+        var now = _timeProvider.GetUtcNow();
+        var queued = CreateRun(task, AutomationRunTrigger.Manual, null, now);
+        var inserted = await _runStore.TryInsertAsync(queued, skipWhenTaskActive: true, cancellationToken).ConfigureAwait(false);
+        if (inserted is null)
+        {
+            return null;
+        }
+
+        if (inserted.Status == AutomationRunStatus.Skipped)
+        {
+            _notifier.Notify("run-skipped", task.Id, inserted.Id);
+            return inserted;
+        }
+
+        _notifier.Notify("run-queued", task.Id, inserted.Id);
+        var claimed = await _runStore.TryClaimAsync(inserted.Id, now, cancellationToken).ConfigureAwait(false);
+        if (claimed is null)
+        {
+            return inserted;
+        }
+
+        _notifier.Notify("run-started", task.Id, claimed.Id);
+        StartExecution(task, claimed, cancellationToken);
+        return claimed;
+    }
+
     private async Task ClaimAndExecuteAsync(
         AutomationTaskRecord task,
         AutomationRunRecord queuedRun,
@@ -267,6 +336,7 @@ internal sealed class AutomationSchedulerHost : BackgroundService
             return;
         }
 
+        _notifier.Notify("run-started", task.Id, claimed.Id);
         var execution = ExecuteClaimedAsync(task, claimed, cancellationToken);
         _runningExecutions[claimed.Id] = execution;
         try
@@ -277,6 +347,17 @@ internal sealed class AutomationSchedulerHost : BackgroundService
         {
             _runningExecutions.TryRemove(claimed.Id, out _);
         }
+    }
+
+    private void StartExecution(AutomationTaskRecord task, AutomationRunRecord run, CancellationToken cancellationToken)
+    {
+        var execution = ExecuteClaimedAsync(task, run, cancellationToken);
+        _runningExecutions[run.Id] = execution;
+        _ = execution.ContinueWith(
+            _ => _runningExecutions.TryRemove(run.Id, out Task? _),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private async Task ExecuteClaimedAsync(
@@ -310,6 +391,7 @@ internal sealed class AutomationSchedulerHost : BackgroundService
             _cancellations.CompleteRun(run.Id);
             var terminal = await _runStore.GetAsync(run.Id, CancellationToken.None).ConfigureAwait(false);
             await AdvanceTaskAsync(task, terminal, _timeProvider.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
+            _notifier.Notify("run-finished", task.Id, run.Id);
         }
     }
 

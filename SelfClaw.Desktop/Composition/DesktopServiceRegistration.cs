@@ -158,6 +158,7 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<ExtensionSettingsBridge>();
         services.AddSingleton<AgentSettingsService>();
         services.AddSingleton<AgentSettingsBridge>();
+        services.AddSingleton<AutomationBridge>();
         services.AddSingleton<PetPackageCatalog>();
         services.AddSingleton<PetActivityPresenter>();
         services.AddSingleton<IPetSettingsRepository, DesktopPetSettingsRepository>();
@@ -214,6 +215,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<GitWorkspaceBridge>(),
             services.GetRequiredService<ConversationInputBridge>(),
             services.GetRequiredService<ActivityPanelBridge>(),
+            services.GetRequiredService<AutomationBridge>(),
             services.GetRequiredService<ILogger<WebViewMessageRouter>>()));
         services.AddSingleton(services => new MainWindow(
             services.GetRequiredService<MainWindowViewModel>(),
@@ -231,6 +233,7 @@ internal static class DesktopServiceRegistration
     internal static IServiceCollection AddAutomationScheduler(this IServiceCollection services)
     {
         services.AddSingleton<AutomationRunCancellationRegistry>();
+        services.AddSingleton<AutomationChangeNotifier>();
         services.AddSingleton<AutomationRunSnapshotSerializer>();
         services.AddSingleton<AutomationToolApprovalHandler>();
         services.AddSingleton<IAutomationRunExecutor, AutomationRunExecutor>();

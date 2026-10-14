@@ -3,8 +3,7 @@ using SelfClaw.Core.Models;
 namespace SelfClaw.Desktop.Services.Automation;
 
 /// <summary>
-/// Execution seam. P1 ships <see cref="AutomationRunPlaceholderExecutor"/>; the real headless Direct turn
-/// replaces it without touching the scheduler.
+/// Execution seam: the scheduler owns when a run starts, the executor owns what running it means.
 /// </summary>
 internal interface IAutomationRunExecutor
 {
