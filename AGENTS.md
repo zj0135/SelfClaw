@@ -28,6 +28,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 9. **会话删除**：先墓碑 → 停回合 → 取消并限时等待子任务 → 才做 SQLite 级联；超时中止删除；列表与导航只接受 `ConversationKind.Interactive`。
 10. **数据库**：schema 版本 **31**；非 v31 或未版本化数据库只读拒绝，绝不迁移、回填或隐式删除。
 11. **子代理活动面板**：与主转录、输入区互相独立；子内容不得进入父转录项或影响 composer 忙碌态；摘要页 ≤50 条、详情窗口 ≤64 块、序列化 ≤256 KiB；文本更新不得触发 per-token SQL。
+12. **自动化历史**：转录永久保留、回收只靠手动删除；删除单条 run / 清空历史只删终态 run 并级联其会话（在跑先停止）；删除任务先取消 → 限时等待（`AutomationDefaults.DeleteWait`）→ 级联，超时返回 `DeleteTimeout` 且绝不半删。体积显示是 SQL `LENGTH()` 只读粗算，不得为此改 schema（仍 v31）。
 
 ## 代码约定
 
@@ -59,7 +60,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - **Legacy provider profiles**（`ProviderProfile`、`IProfileRepository`、`profiles` 表、`ChatTurnRequest.Profile/ApiKey`）：已删除；Direct 只用 `ModelProfileId`。
 - **Queue / Steer 功能开关**（`ConversationInputFeatureSwitch`、`SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`）：已删除，队列与 steer 始终开启；不要再引入默认关闭开关、`queue-disabled` / `steer-not-enabled` / `pending-inputs` 分支或宿主「未启用」文案，暂停只由每会话队列状态表达。P6 验收门槛见 `docs/direct-message-input-implementation.md` §9。
 - **附件**：只保留持久化/转录渲染/虚拟主机（`message_attachments`、`https://attachments.selfclaw.local`）；输入入口一律拒绝（`ConversationInputReason.AttachmentsUnsupported`），不要再引用已不存在的 6 张 / 10 MB / 30 MB 限制。
-- **设置页**：AI 提供商 / 模型管理 / 编程助手 / 代理助手 / 插件 / 宠物已接宿主；其余页面（自动化、图像生成、翻译等）是前端 mock。
+- **设置页**：AI 提供商 / 模型管理 / 编程助手 / 代理助手 / 插件 / 宠物已接宿主；自动化已接宿主（`AutomationView` + `AutomationBridge`，含删除/清空历史与体积显示）；其余页面（图像生成、翻译等）是前端 mock。
 
 ## 深入阅读
 

@@ -30,4 +30,17 @@ public interface IAutomationRunStore
         Guid runId,
         AutomationRunRecord terminal,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes terminal runs and the conversations they own (the transcript travels with the run).
+    /// A runId targets one run, a taskId targets that task's terminal runs, and neither clears all
+    /// terminal runs. Active (Queued/Running) runs are never touched. Returns the number deleted.
+    /// </summary>
+    Task<int> DeleteTerminalRunsAsync(Guid? taskId, Guid? runId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rough retained transcript size per task plus the global total, computed from SQL text lengths.
+    /// Read-only observation aid for the automation workspace.
+    /// </summary>
+    Task<AutomationHistoryUsage> GetHistoryUsageAsync(CancellationToken cancellationToken = default);
 }

@@ -80,6 +80,12 @@ public sealed class DesktopNotificationService
     }
 
     public void ShowAutomationRunFailed(Guid taskId, Guid runId, string title, string message)
+        => ShowAutomationRun(taskId, runId, title, message);
+
+    public void ShowAutomationRunSucceeded(Guid taskId, Guid runId, string title, string message)
+        => ShowAutomationRun(taskId, runId, title, message);
+
+    private void ShowAutomationRun(Guid taskId, Guid runId, string title, string message)
     {
         var openArguments = DesktopNotificationArguments.Build(
             (DesktopNotificationArguments.ActionKey, DesktopNotificationArguments.OpenAutomationRunAction),

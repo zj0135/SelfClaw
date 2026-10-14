@@ -236,6 +236,8 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<AutomationChangeNotifier>();
         services.AddSingleton<AutomationRunSnapshotSerializer>();
         services.AddSingleton<AutomationToolApprovalHandler>();
+        services.AddSingleton<IAutomationRunNotifier, AutomationRunNotifier>();
+        services.AddSingleton<IAutomationTaskService, AutomationTaskService>();
         services.AddSingleton<IAutomationRunExecutor, AutomationRunExecutor>();
         services.AddSingleton<IAutomationScheduleRegistrar, TickerQAutomationScheduleRegistrar>();
         services.AddSingleton<AutomationSchedulerHost>();

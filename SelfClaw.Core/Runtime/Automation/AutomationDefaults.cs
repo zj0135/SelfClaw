@@ -9,4 +9,5 @@ public static class AutomationDefaults
     public static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(30);
     public static readonly TimeSpan ShutdownCancelWait = TimeSpan.FromSeconds(5);
     public const int ProjectionLimit = 300;
+    public const int MaximumTitleLength = 120;
 }

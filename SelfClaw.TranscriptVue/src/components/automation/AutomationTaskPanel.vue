@@ -1,9 +1,9 @@
 <script setup>
 import { computed } from 'vue';
-import { History, ListTodo, Plus, Search } from 'lucide-vue-next';
+import { History, ListTodo, Plus, Search, Trash2 } from 'lucide-vue-next';
 import AutomationRunList from './AutomationRunList.vue';
 import AutomationTaskList from './AutomationTaskList.vue';
-import { runStatusLabel } from '../../renderers/automationEvents';
+import { formatBytes, runStatusLabel } from '../../renderers/automationEvents';
 
 const props = defineProps({
 	tasks: { type: Array, default: () => [] },
@@ -13,6 +13,8 @@ const props = defineProps({
 	runStatus: { type: String, default: 'all' },
 	timeZone: { type: String, default: '' },
 	pending: { type: Object, default: () => ({}) },
+	deleting: { type: Object, default: () => ({}) },
+	historyBytes: { type: Number, default: 0 },
 });
 
 const emit = defineEmits([
@@ -25,6 +27,9 @@ const emit = defineEmits([
 	'toggle-enabled',
 	'toggle-status',
 	'open-run',
+	'delete-run',
+	'clear-history',
+	'delete-task',
 ]);
 
 const runStatuses = ['all', 'queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted', 'skipped'];
@@ -67,10 +72,20 @@ const tabs = computed(() => [
 		</header>
 
 		<div class="automation-panel-body" role="tabpanel">
+			<div v-if="activeTab === 'runs'" class="automation-history-bar">
+				<span class="automation-history-size">历史体积 {{ formatBytes(historyBytes) }}</span>
+				<button type="button" class="automation-history-clear" :disabled="Boolean(deleting.all)"
+					@click="emit('clear-history')">
+					<Trash2 aria-hidden="true" />
+					<span>清空全部历史</span>
+				</button>
+			</div>
 			<AutomationTaskList v-if="activeTab === 'tasks'" :tasks="tasks" :time-zone="timeZone" :pending="pending"
-				@edit="emit('edit', $event)" @run-now="emit('run-now', $event)"
-				@toggle-enabled="emit('toggle-enabled', $event)" @toggle-status="emit('toggle-status', $event)" />
-			<AutomationRunList v-else :runs="runs" :time-zone="timeZone" @open-run="emit('open-run', $event)" />
+				:deleting="deleting" @edit="emit('edit', $event)" @run-now="emit('run-now', $event)"
+				@toggle-enabled="emit('toggle-enabled', $event)" @toggle-status="emit('toggle-status', $event)"
+				@clear-history="emit('clear-history', $event)" @delete-task="emit('delete-task', $event)" />
+			<AutomationRunList v-else :runs="runs" :time-zone="timeZone" :deleting="deleting"
+				@open-run="emit('open-run', $event)" @delete-run="emit('delete-run', $event)" />
 		</div>
 	</aside>
 </template>
@@ -209,5 +224,49 @@ const tabs = computed(() => [
 	gap: 6px;
 	padding: 10px;
 	overflow-y: auto;
+}
+
+.automation-history-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 6px 8px;
+	border: 1px solid var(--border);
+	border-radius: 9px;
+	background: var(--panel-soft);
+}
+
+.automation-history-size {
+	color: var(--muted);
+	font-size: var(--fs-11);
+	font-variant-numeric: tabular-nums;
+}
+
+.automation-history-clear {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 4px 8px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--panel);
+	color: var(--muted);
+	font-size: var(--fs-11);
+	font-weight: 650;
+}
+
+.automation-history-clear svg {
+	width: 13px;
+	height: 13px;
+}
+
+.automation-history-clear:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--danger) 32%, transparent);
+	color: var(--danger);
+}
+
+.automation-history-clear:disabled {
+	opacity: 0.55;
 }
 </style>

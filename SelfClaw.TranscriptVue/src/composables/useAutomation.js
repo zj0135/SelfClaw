@@ -25,6 +25,7 @@ export function useAutomation() {
 	const tasks = ref([]);
 	const calendar = ref({ events: [], truncated: false });
 	const runs = ref([]);
+	const historyBytes = ref(0);
 	const settings = ref({ notifyOnSuccess: false });
 	const loading = ref(false);
 	const error = ref('');
@@ -39,6 +40,7 @@ export function useAutomation() {
 	async function loadTasks() {
 		const response = await request('automation/list-tasks');
 		tasks.value = response.tasks || [];
+		historyBytes.value = Number(response.historyBytes) || 0;
 		return tasks.value;
 	}
 
@@ -118,6 +120,26 @@ export function useAutomation() {
 		await refresh();
 	}
 
+	async function deleteRun(runId) {
+		unwrap(await request('automation/delete-run', { runId }), '删除运行记录失败。');
+		await refresh();
+	}
+
+	async function clearTaskHistory(taskId) {
+		unwrap(await request('automation/clear-task-history', { taskId }), '清空任务历史失败。');
+		await refresh();
+	}
+
+	async function clearHistory() {
+		unwrap(await request('automation/clear-history'), '清空历史失败。');
+		await refresh();
+	}
+
+	async function deleteTask(taskId) {
+		unwrap(await request('automation/delete-task', { taskId }), '删除任务失败。');
+		await refresh();
+	}
+
 	async function updateSettings(notifyOnSuccess) {
 		const response = unwrap(
 			await request('automation/set-settings', { notifyOnSuccess }),
@@ -153,6 +175,7 @@ export function useAutomation() {
 		tasks,
 		calendar,
 		runs,
+		historyBytes,
 		settings,
 		loading,
 		error,
@@ -168,6 +191,10 @@ export function useAutomation() {
 		setTaskEnabled,
 		runTaskNow,
 		cancelRun,
+		deleteRun,
+		clearTaskHistory,
+		clearHistory,
+		deleteTask,
 		updateSettings,
 		openRun,
 		closeRun,

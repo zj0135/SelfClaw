@@ -66,6 +66,32 @@ describe('AutomationTaskPanel', () => {
 		await wrapper.find('.automation-switch').trigger('click');
 		expect(wrapper.emitted('toggle-enabled')?.at(-1)?.[0]).toMatchObject({ id: 't-daily' });
 	});
+
+	it('shows the history volume and emits reclaim intents for runs and tasks', async () => {
+		const tasks = [
+			task({ historyBytes: 2048 }),
+			task({ id: 't-todo', title: '交周报', kind: 'none', prompt: null, historyBytes: 0 }),
+		];
+		const wrapper = mount(AutomationTaskPanel, {
+			props: { tasks, runs: [run({ taskTitle: '每日代码审查' })], activeTab: 'tasks', query: '', runStatus: 'all', timeZone: 'UTC', historyBytes: 4096 },
+		});
+
+		expect(wrapper.text()).toContain('历史：2.0 KB');
+		const clearTaskHistory = wrapper.findAll('.automation-icon-btn').find((button) => button.attributes('title') === '清空该任务历史');
+		await clearTaskHistory.trigger('click');
+		expect(wrapper.emitted('clear-history')?.[0]?.[0]).toMatchObject({ id: 't-daily' });
+
+		const deleteTask = wrapper.findAll('.automation-icon-btn').find((button) => button.attributes('title') === '删除任务');
+		await deleteTask.trigger('click');
+		expect(wrapper.emitted('delete-task')?.[0]?.[0]).toMatchObject({ id: 't-daily' });
+
+		await wrapper.setProps({ activeTab: 'runs' });
+		expect(wrapper.text()).toContain('历史体积 4.0 KB');
+		await wrapper.find('.automation-run-delete').trigger('click');
+		expect(wrapper.emitted('delete-run')?.[0]?.[0]).toMatchObject({ id: 'r-1' });
+		await wrapper.find('.automation-history-clear').trigger('click');
+		expect(wrapper.emitted('clear-history')?.at(-1)).toEqual([]);
+	});
 });
 
 describe('AutomationRunDrawer', () => {

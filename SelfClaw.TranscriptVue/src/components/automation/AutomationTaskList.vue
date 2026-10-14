@@ -1,14 +1,15 @@
 <script setup>
-import { Check, Loader, Pencil, Play, Square } from 'lucide-vue-next';
-import { isManualAiTask, isUserCheckableTask, runStatusLabel, taskKindLabel, taskNextRunText } from '../../renderers/automationEvents';
+import { Check, Eraser, Loader, Pencil, Play, Square, Trash2 } from 'lucide-vue-next';
+import { formatBytes, isManualAiTask, isUserCheckableTask, runStatusLabel, taskKindLabel, taskNextRunText } from '../../renderers/automationEvents';
 
 const props = defineProps({
 	tasks: { type: Array, default: () => [] },
 	timeZone: { type: String, default: '' },
 	pending: { type: Object, default: () => ({}) },
+	deleting: { type: Object, default: () => ({}) },
 });
 
-const emit = defineEmits(['edit', 'run-now', 'toggle-enabled', 'toggle-status']);
+const emit = defineEmits(['edit', 'run-now', 'toggle-enabled', 'toggle-status', 'clear-history', 'delete-task']);
 
 function isPending(id) {
 	return Boolean(props.pending?.[id]);
@@ -31,6 +32,7 @@ function isPending(id) {
 				<span v-if="task.kind !== 'none'" class="automation-meta-item">下次：{{ taskNextRunText(task, { timeZone }) }}</span>
 				<span v-else-if="isManualAiTask(task)" class="automation-meta-item">手动 AI 任务</span>
 				<span v-if="task.lastRunStatus" class="automation-meta-item">上次：{{ runStatusLabel(task.lastRunStatus) }}</span>
+				<span v-if="task.historyBytes" class="automation-meta-item">历史：{{ formatBytes(task.historyBytes) }}</span>
 				<span v-if="task.kind !== 'none' && !task.isEnabled" class="automation-meta-item is-warning">已停用</span>
 			</span>
 		</div>
@@ -47,6 +49,15 @@ function isPending(id) {
 				:class="{ 'is-on': task.isEnabled }" :aria-pressed="task.isEnabled"
 				:title="task.isEnabled ? '停用任务' : '启用任务'" @click="emit('toggle-enabled', task)">
 				<span class="automation-switch-knob"></span>
+			</button>
+			<button v-if="task.historyBytes" type="button" class="automation-icon-btn"
+				:disabled="Boolean(deleting[task.id])" title="清空该任务历史" @click="emit('clear-history', task)">
+				<Loader v-if="deleting[task.id]" class="is-spinning" aria-hidden="true" />
+				<Eraser v-else aria-hidden="true" />
+			</button>
+			<button type="button" class="automation-icon-btn is-danger"
+				:disabled="Boolean(deleting[task.id])" title="删除任务" @click="emit('delete-task', task)">
+				<Trash2 aria-hidden="true" />
 			</button>
 		</div>
 	</article>
@@ -104,6 +115,11 @@ function isPending(id) {
 
 .automation-icon-btn:disabled {
 	opacity: 0.55;
+}
+
+.automation-icon-btn.is-danger:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--danger) 32%, transparent);
+	color: var(--danger);
 }
 
 .automation-icon-btn .is-spinning {

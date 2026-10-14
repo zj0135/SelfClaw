@@ -23,6 +23,7 @@ internal sealed class AutomationSchedulerHost : BackgroundService
     private readonly IAutomationScheduleRegistrar _registrar;
     private readonly AutomationRunCancellationRegistry _cancellations;
     private readonly AutomationChangeNotifier _notifier;
+    private readonly IAutomationRunNotifier _runNotifier;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<AutomationSchedulerHost> _logger;
     private readonly TaskCompletionSource _recoveryCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -38,8 +39,9 @@ internal sealed class AutomationSchedulerHost : BackgroundService
         IAutomationScheduleRegistrar registrar,
         AutomationRunCancellationRegistry cancellations,
         AutomationChangeNotifier notifier,
+        IAutomationRunNotifier runNotifier,
         ILogger<AutomationSchedulerHost> logger)
-        : this(taskStore, runStore, calculator, recovery, executor, registrar, cancellations, notifier, TimeProvider.System, logger)
+        : this(taskStore, runStore, calculator, recovery, executor, registrar, cancellations, notifier, runNotifier, TimeProvider.System, logger)
     {
     }
 
@@ -52,6 +54,7 @@ internal sealed class AutomationSchedulerHost : BackgroundService
         IAutomationScheduleRegistrar registrar,
         AutomationRunCancellationRegistry cancellations,
         AutomationChangeNotifier notifier,
+        IAutomationRunNotifier runNotifier,
         TimeProvider timeProvider,
         ILogger<AutomationSchedulerHost> logger)
     {
@@ -63,6 +66,7 @@ internal sealed class AutomationSchedulerHost : BackgroundService
         _registrar = registrar;
         _cancellations = cancellations;
         _notifier = notifier;
+        _runNotifier = runNotifier;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -125,9 +129,18 @@ internal sealed class AutomationSchedulerHost : BackgroundService
 
     internal async Task StartSchedulingAsync(CancellationToken cancellationToken)
     {
-        await _recovery.RecoverAsync(cancellationToken).ConfigureAwait(false);
+        var interrupted = await _recovery.RecoverAsync(cancellationToken).ConfigureAwait(false);
         await RebuildScheduleAsync(cancellationToken).ConfigureAwait(false);
         _recoveryCompleted.TrySetResult();
+        foreach (var run in interrupted)
+        {
+            var task = await _taskStore.GetAsync(run.TaskId, cancellationToken).ConfigureAwait(false);
+            if (task is not null)
+            {
+                await NotifyRunAsync(task, run with { Status = AutomationRunStatus.Interrupted }, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
     }
 
     internal async Task HandleTickerAsync(
@@ -391,7 +404,31 @@ internal sealed class AutomationSchedulerHost : BackgroundService
             _cancellations.CompleteRun(run.Id);
             var terminal = await _runStore.GetAsync(run.Id, CancellationToken.None).ConfigureAwait(false);
             await AdvanceTaskAsync(task, terminal, _timeProvider.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
+            if (terminal is not null)
+            {
+                await NotifyRunAsync(task, terminal, CancellationToken.None).ConfigureAwait(false);
+            }
+
             _notifier.Notify("run-finished", task.Id, run.Id);
+        }
+    }
+
+    private async Task NotifyRunAsync(
+        AutomationTaskRecord task,
+        AutomationRunRecord run,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _runNotifier.NotifyAsync(task, run, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Automation run notification for {RunId} failed.", run.Id);
         }
     }
 

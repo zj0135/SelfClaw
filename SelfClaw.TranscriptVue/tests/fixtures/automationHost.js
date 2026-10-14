@@ -11,7 +11,7 @@ export function installAutomationHost() {
 		schedule: { version: 1, time: '09:00' }, nextRunAtUtc: iso(Date.now() + 3_600_000),
 		prompt: 'produce the daily digest', instructions: '', toolPolicy: 'system',
 		pluginIds: [], skillIds: [], mcpServerIds: [], modelProfileId: null, workspaceRootId: null,
-		toolPermissionMode: 'fullAccess', status: 'open', isEnabled: true,
+		toolPermissionMode: 'fullAccess', status: 'open', isEnabled: true, historyBytes: 2048,
 	}];
 	const runs = [{
 		id: seedRunId, taskId: seedTaskId, trigger: 'scheduled', status: 'completed',
@@ -78,7 +78,7 @@ export function installAutomationHost() {
 	function handle(request) {
 		switch (request.type) {
 			case 'automation/list-tasks':
-				return reply(request, { ok: true, tasks });
+				return reply(request, { ok: true, tasks, historyBytes: 2048 });
 			case 'automation/list-calendar':
 				return listCalendar(request);
 			case 'automation/list-runs':
@@ -103,6 +103,44 @@ export function installAutomationHost() {
 				return reply(request, { ok: false, errorCode: 'RunConflict', errorMessage: 'busy' });
 			case 'automation/cancel-run':
 				return reply(request, { ok: true, run: runs[0] });
+			case 'automation/delete-run': {
+				const index = runs.findIndex((run) => run.id === request.runId);
+				if (index < 0) return reply(request, { ok: false, deleted: 0, errorCode: 'UnknownRun', errorMessage: 'missing' });
+				const [removed] = runs.splice(index, 1);
+				reply(request, { ok: true, deleted: 1 });
+				send({ type: 'automation/changed', reason: 'run-deleted', taskId: removed.taskId, runId: removed.id });
+				return undefined;
+			}
+			case 'automation/clear-task-history': {
+				const remaining = runs.filter((run) => run.taskId !== request.taskId);
+				const deleted = runs.length - remaining.length;
+				runs.length = 0;
+				runs.push(...remaining);
+				const task = tasks.find((item) => item.id === request.taskId);
+				if (task) task.historyBytes = 0;
+				reply(request, { ok: true, deleted });
+				send({ type: 'automation/changed', reason: 'history-cleared', taskId: request.taskId });
+				return undefined;
+			}
+			case 'automation/clear-history': {
+				const deleted = runs.length;
+				runs.length = 0;
+				for (const task of tasks) task.historyBytes = 0;
+				reply(request, { ok: true, deleted });
+				send({ type: 'automation/changed', reason: 'history-cleared' });
+				return undefined;
+			}
+			case 'automation/delete-task': {
+				const index = tasks.findIndex((task) => task.id === request.taskId);
+				if (index < 0) return reply(request, { ok: false, errorCode: 'UnknownTask', errorMessage: 'missing' });
+				tasks.splice(index, 1);
+				for (let cursor = runs.length - 1; cursor >= 0; cursor -= 1) {
+					if (runs[cursor].taskId === request.taskId) runs.splice(cursor, 1);
+				}
+				reply(request, { ok: true });
+				send({ type: 'automation/changed', reason: 'task-deleted', taskId: request.taskId });
+				return undefined;
+			}
 			case 'automation/get-settings':
 				return reply(request, { ok: true, settings: { notifyOnSuccess: false } });
 			case 'automation/set-settings':
@@ -117,5 +155,5 @@ export function installAutomationHost() {
 		removeEventListener(type, listener) { if (type === 'message') listeners.delete(listener); },
 		postMessage(request) { requests.push(request); queueMicrotask(() => handle(request)); },
 	} };
-	window.automationFixture = { requests, send };
+	window.automationFixture = { requests, send, runs, tasks };
 }

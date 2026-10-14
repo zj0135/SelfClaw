@@ -36,6 +36,10 @@ const ERROR_MESSAGES = {
 	FullAccessRequired: '请确认该任务可在无人值守时读写文件并执行命令。',
 	InvalidSchedule: '触发器配置无效。',
 	IntervalTooShort: `触发间隔不能小于 ${MINIMUM_INTERVAL_MINUTES} 分钟。`,
+	RunConflict: '正在进行的运行必须先停止。',
+	DeleteTimeout: '在限定时间内未能停止运行，删除已中止。',
+	UnknownRun: '该运行记录已不存在。',
+	UnknownTask: '该任务已不存在。',
 };
 
 export function taskKindLabel(kind) {
@@ -265,6 +269,20 @@ export function formatDuration(durationMs) {
 	if (seconds < 60) return `${seconds} 秒`;
 	const minutes = Math.floor(seconds / 60);
 	return `${minutes} 分 ${seconds % 60} 秒`;
+}
+
+// host 用 SQL LENGTH() 粗算的转录体积，这里只做人类可读换算。
+export function formatBytes(bytes) {
+	const value = Number(bytes) || 0;
+	if (value < 1024) return `${value} B`;
+	const units = ['KB', 'MB', 'GB', 'TB'];
+	let size = value / 1024;
+	let index = 0;
+	while (size >= 1024 && index < units.length - 1) {
+		size /= 1024;
+		index += 1;
+	}
+	return `${size >= 100 ? Math.round(size) : size.toFixed(1)} ${units[index]}`;
 }
 
 // ===== 任务表单 ↔ 宿主 wire 形状 =====

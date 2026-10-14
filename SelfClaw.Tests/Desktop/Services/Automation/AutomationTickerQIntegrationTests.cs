@@ -42,6 +42,7 @@ public sealed class AutomationTickerQIntegrationTests : IDisposable
         builder.Services.AddAutomationScheduler();
         // This test only proves TickerQ wakes the scheduler and a claimed run reaches its executor.
         builder.Services.AddSingleton<IAutomationRunExecutor, CompletingExecutor>();
+        builder.Services.AddSingleton<IAutomationRunNotifier, NoopRunNotifier>();
         var host = builder.Build();
         host.UseTickerQ(TickerQStartMode.Immediate);
         await host.StartAsync();
@@ -146,5 +147,11 @@ public sealed class AutomationTickerQIntegrationTests : IDisposable
                 Status = AutomationRunStatus.Completed,
                 CompletedAtUtc = DateTimeOffset.UtcNow
             }, cancellationToken);
+    }
+
+    private sealed class NoopRunNotifier : IAutomationRunNotifier
+    {
+        public Task NotifyAsync(AutomationTaskRecord task, AutomationRunRecord run, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

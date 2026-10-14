@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Options;
@@ -174,6 +175,62 @@ public sealed class SqliteAutomationRepositoryTests : IDisposable
             claimed!.Id, 3, conversation.Id, modelProfileId, "{}", null, null, DateTimeOffset.UtcNow))).Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task Delete_terminal_runs_removes_the_conversation_and_transcript_but_keeps_active_runs()
+    {
+        var (taskStore, runStore, database) = await CreateStoresAsync();
+        var task = CreateTask();
+        await taskStore.SaveAsync(task);
+        var seeded = await SeedTerminalRunWithConversationAsync(database, task.Id, "summarize the nightly diff");
+        var active = CreateRun(task.Id, AutomationRunStatus.Running, DateTimeOffset.UtcNow.AddMinutes(-1));
+        await runStore.TryInsertAsync(active, skipWhenTaskActive: false);
+        var conversations = new SqliteConversationRepository(database);
+
+        var deleted = await runStore.DeleteTerminalRunsAsync(null, seeded.Run.Id);
+
+        deleted.Should().Be(1);
+        (await runStore.GetAsync(seeded.Run.Id)).Should().BeNull();
+        (await runStore.GetAsync(active.Id)).Should().NotBeNull();
+        (await conversations.GetConversationAsync(seeded.ConversationId)).Should().BeNull();
+        (await conversations.ListMessagesAsync(seeded.ConversationId)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Delete_terminal_runs_scoped_to_a_task_leaves_other_tasks_untouched()
+    {
+        var (taskStore, runStore, database) = await CreateStoresAsync();
+        var taskA = CreateTask();
+        var taskB = CreateTask();
+        await taskStore.SaveAsync(taskA);
+        await taskStore.SaveAsync(taskB);
+        var runA = await SeedTerminalRunWithConversationAsync(database, taskA.Id, "a");
+        var runB = await SeedTerminalRunWithConversationAsync(database, taskB.Id, "b");
+
+        var deleted = await runStore.DeleteTerminalRunsAsync(taskA.Id, null);
+
+        deleted.Should().Be(1);
+        (await runStore.GetAsync(runA.Run.Id)).Should().BeNull();
+        (await runStore.GetAsync(runB.Run.Id)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task History_usage_sums_message_text_per_task_and_globally()
+    {
+        var (taskStore, runStore, database) = await CreateStoresAsync();
+        var taskA = CreateTask();
+        var taskB = CreateTask();
+        await taskStore.SaveAsync(taskA);
+        await taskStore.SaveAsync(taskB);
+        await SeedTerminalRunWithConversationAsync(database, taskA.Id, "abcdefghij");
+        await SeedTerminalRunWithConversationAsync(database, taskB.Id, "12345");
+
+        var usage = await runStore.GetHistoryUsageAsync();
+
+        usage.TotalBytes.Should().Be(15);
+        usage.Tasks.Should().Contain(item => item.TaskId == taskA.Id && item.Bytes == 10);
+        usage.Tasks.Should().Contain(item => item.TaskId == taskB.Id && item.Bytes == 5);
+    }
+
     public void Dispose()
     {
         if (!Directory.Exists(_rootPath))
@@ -227,6 +284,42 @@ public sealed class SqliteAutomationRepositoryTests : IDisposable
             AutomationRunStatus.Completed,
             now,
             now);
+    }
+
+    private static async Task<(AutomationRunRecord Run, Guid ConversationId, int PromptLength)> SeedTerminalRunWithConversationAsync(
+        SqliteDatabase database,
+        Guid taskId,
+        string prompt)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversation = new ConversationRecord(
+            Guid.NewGuid(),
+            "Automation",
+            null,
+            ConversationMode.Programming,
+            ToolPermissionMode.FullAccess,
+            $"automation:{taskId:D}",
+            now,
+            now,
+            Kind: ConversationKind.Automation);
+        var conversations = new SqliteConversationRepository(database);
+        await conversations.UpsertConversationAsync(conversation);
+        var turns = new SqliteConversationTurnRepository(database, new SqliteTurnCommitGate());
+        var turn = new ConversationTurnRecord(
+            Guid.NewGuid(),
+            conversation.Id,
+            AgentExecutionMode.Direct,
+            DirectTurnOrigin.Automation,
+            ConversationTurnStatus.Running,
+            now);
+        await turns.StartTurnAsync(new ConversationTurnStart(conversation, turn, prompt, Guid.NewGuid()));
+        var run = CreateRun(taskId, AutomationRunStatus.Completed, now.AddMinutes(-1)) with
+        {
+            ConversationId = conversation.Id,
+            CompletedAtUtc = now
+        };
+        await new SqliteAutomationRunRepository(database).TryInsertAsync(run, skipWhenTaskActive: false);
+        return (run, conversation.Id, prompt.Length);
     }
 
     private static AutomationRunRecord CreateRun(Guid taskId, AutomationRunStatus status, DateTimeOffset scheduledForUtc)

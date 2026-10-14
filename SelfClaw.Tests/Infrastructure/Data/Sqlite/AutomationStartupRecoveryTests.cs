@@ -77,7 +77,8 @@ public sealed class AutomationStartupRecoveryTests : IDisposable
             await command.ExecuteNonQueryAsync();
         }
 
-        await new AutomationStartupRecovery(database).RecoverAsync();
+        var interrupted = await new AutomationStartupRecovery(database).RecoverAsync();
+        interrupted.Select(run => run.Id).Should().BeEquivalentTo([queuedRunId, runningRunId]);
 
         await using var verification = await database.OpenConnectionAsync();
         (await ReadStatusAsync(verification, "automation_runs", queuedRunId)).Should().Be(5);

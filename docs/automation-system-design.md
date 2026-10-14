@@ -32,9 +32,11 @@ flowchart TD
 
 | 入口 | 职责 | 删除它会发生什么 |
 | --- | --- | --- |
-| `IAutomationTaskService` | 任务 CRUD、启停、立即运行、取消、删除、历史回收、schedule 预览 | 校验规则散进 bridge 与 UI |
-| `AutomationSchedulerHost` | 注册/重建调度、过期扫描与补跑、重叠跳过、启动恢复、关闭收尾 | 时序与恢复逻辑散进 App 生命周期 |
+| `IAutomationTaskService`（Core 契约 + Desktop 实现） | 任务保存校验与持久化副作用（重建调度 + 变更通知）、启停、删除（取消 → 限时等待 → 级联）、历史回收、历史体积查询 | 校验规则散进 bridge 与 UI |
+| `AutomationSchedulerHost` | 注册/重建调度、过期扫描与补跑、重叠跳过、启动恢复、立即运行/取消、关闭收尾 | 时序与恢复逻辑散进 App 生命周期 |
 | `AutomationRunExecutor` | headless Direct 回合、快照、审批策略、重试、终态与 usage | Direct 调用细节散进调度器与 bridge |
+
+> 边界澄清（P4 定稿）：`立即运行`/`取消` 归 `AutomationSchedulerHost`（它拥有 run 生命周期与并发），`schedule 预览`与只读列表/日历投影留在 `AutomationBridge`（纯 wire 解析 + 纯计算，无校验规则）。`IAutomationTaskService` 只承载需要「校验 + 副作用」的任务级操作，因此不提供裸读方法。
 
 三个**明确否掉**的替代方案（理由在对应章节）：
 
@@ -261,7 +263,7 @@ UPDATE automation_runs SET status = 5, error_code = 'ProcessInterrupted', comple
 WHERE status IN (0, 1);   -- Queued / Running
 ```
 
-中断的 run **保守不重放**（对齐子代理纪律）：有工具执行证据时重放可能重复副作用；无证据时也只是标 `Interrupted` 等用户手动"立即运行"。
+中断的 run **本身不恢复**（对齐子代理纪律）：有工具执行证据时续跑可能重复副作用，所以既不动它的转录也不重放工具调用，只标 `Interrupted`。但恢复**不修改 `automation_tasks.next_run_at_utc`**，因此进程被杀造成的错过仍走同一个补偿判定：重启后若被错过的那次仍在 `MissedRunGrace` 内，补偿扫描会新建一条 `CatchUp` run（是新 run，不是恢复旧 run）；超出宽限则写 `Skipped(Stale)`。这是 v1 已确认接受的行为。
 
 **顺序硬保证**：恢复必须早于任何 run 开始。`AutomationSchedulerHost.ExecuteAsync` 第一件事是执行恢复，并且 ticker 函数入口 `await _recoveryCompleted` 之后再执行——避免 TickerQ 的调度宿主先于我们注册完成时抢跑。
 
@@ -353,7 +355,7 @@ run 启动时写入 `capability_snapshot_json`（当次使用的完整配置）+
 | 无工具执行（`tool_runs` 为 0）且失败属 provider/网络/超时类 | 可重试：最多 3 次尝试，退避 10s / 30s |
 | 已执行过任何工具 | 立即终态失败，不重试 |
 | 模型不可用、skill/MCP 缺失、工作区不存在、工具连续故障达上限、钩子拒绝 | 立即终态失败 |
-| 应用关闭导致的 `Interrupted` | 保守不重放，由用户决定 |
+| 应用关闭导致的 `Interrupted` | run 本身不恢复（转录停在中断处）；若被错过的那次仍在 6h 宽限内，重启后的补偿扫描会**新建一条 `CatchUp` run**，超出宽限则 `Skipped(Stale)` |
 
 重试不新建 run 行，只累加 `attempt`；每次重试**重新解析**模型与能力快照（不沿用上一轮失败时的解析结果）。退避用注入的 `TimeProvider`，便于单测。
 
@@ -374,6 +376,8 @@ run 启动时写入 `capability_snapshot_json`（当次使用的完整配置）+
 | 删除任务 | 取消在跑的 run 并限时等待（30s）→ 删任务 + run + 会话级联；超时中止删除并提示（`DeleteTimeout`） |
 | 删除单条 run | 已终态的 run 直接删（含会话）；在跑的必须先停止 |
 | 清空历史 | 按任务或全局删除所有终态 run + 会话，保留任务定义 |
+
+历史回收的实现边界：`IAutomationRunStore.DeleteTerminalRunsAsync(taskId?, runId?)` 只删终态 run，并在同一事务里删除其会话（消息/工具记录随会话级联，run 行再随会话级联）。`IAutomationTaskService` 只做语义分派与「取消 → 限时等待」编排；删除任务超时返回 `DeleteTimeout` 并保持任务与 run 原样（`is_enabled` 会被置 0，避免等待期间被重新排队——这不是删除，任务定义仍完整）。
 
 ---
 
@@ -416,7 +420,7 @@ renderers/automationEvents.js                  事件模型 → FullCalendar 事
 
 | 消息 | 请求 | 响应 |
 | --- | --- | --- |
-| `automation/list-tasks` | — | `{ tasks }` |
+| `automation/list-tasks` | — | `{ tasks, historyBytes }`（每个 task 带 `historyBytes`） |
 | `automation/list-calendar` | `{ fromUtc, toUtc }` | `{ events, truncated }` |
 | `automation/list-runs` | `{ taskId?, status?, limit }` | `{ runs }` |
 | `automation/get-run` | `{ runId }` | `{ run, transcript }` |
@@ -425,19 +429,22 @@ renderers/automationEvents.js                  事件模型 → FullCalendar 事
 | `automation/set-task-enabled` | `{ taskId, isEnabled }` | `{ task }` |
 | `automation/run-task-now` | `{ taskId }` | `{ runId }` 或 `{ ok: false, errorCode: "RunConflict" }` |
 | `automation/cancel-run` | `{ runId }` | `{ run }` |
-| `automation/delete-run` / `automation/clear-task-history` / `automation/clear-history` | | `{ deleted }` |
-| `automation/delete-task` | `{ taskId }` | `{ ok }` / `{ ok: false, errorCode }` |
+| `automation/delete-run` | `{ runId }` | `{ deleted }` / `{ ok: false, errorCode: "RunConflict" }` |
+| `automation/clear-task-history` | `{ taskId }` | `{ deleted }` |
+| `automation/clear-history` | — | `{ deleted }` |
+| `automation/delete-task` | `{ taskId }` | `{ ok }` / `{ ok: false, errorCode }`（超时为 `DeleteTimeout`） |
 | `automation/get-settings` / `automation/set-settings` | `{ notifyOnSuccess }` | `{ settings }` |
 
 - `transcript` 直接产出 `TranscriptPanel` 可消费的 `items` 形状（host 侧复用 `TranscriptProjection`），**前端不再为 run 详情写第二套渲染**。
+- `historyBytes` 是 SQL `LENGTH()` 的只读粗算（每任务 + 全局总量），前端只在运行历史页签与任务卡片展示，不参与任何写入路径。
 - "从 Agent 预设填充"复用现有 `agents/` bridge，不新增消息。
-- 推送事件：`automation/changed { reason, taskId?, runId? }`（任务增删改、run 状态迁移、调度触发时发）；通知激活时 `automation/open-run { runId }`。
+- 推送事件：`automation/changed { reason, taskId?, runId? }`（任务增删改、run 状态迁移、调度触发时发；回收后发 `run-deleted` / `history-cleared` / `task-deleted`）；通知激活时 `automation/open-run { runId }`。
 
 ### 5.4 实时性与通知
 
 - **粗粒度事件 + 重拉**：收到 `automation/changed` 后按当前可视范围重拉日历 + 清单；页面激活/窗口聚焦补拉一次。不做增量 patch，不做流式转录。
 - run 详情是静态快照 + 状态徽标；run 终态时收到事件自动刷新。
-- **通知**：失败必通知（含重试耗尽与 `Interrupted`）；成功通知默认关闭，`automation/set-settings` 可开；`Skipped` 不通知。
+- **通知**：失败必通知（含重试耗尽与 `Interrupted`）；启动恢复标记为 `Interrupted(ProcessInterrupted)` 的 run 也会在恢复后逐条通知（宿主空时 `ShouldShowNotification` 放行）；成功通知默认关闭，`automation/set-settings` 可开；`Skipped` 不通知。通知器为 Desktop `AutomationRunNotifier`，由 `AutomationSchedulerHost` 在 run 终态与启动恢复后调用。
 - 新增 `DesktopNotificationArguments.OpenAutomationRunAction` + `taskId`/`runId` 键；`DesktopNotificationActivationService` 增加分支：还原窗口 → `MainWindowViewModel` 切换到自动化视图 → 推 `automation/open-run`。自动化**不复用**"打开会话"动作（自动化会话不是交互会话）。
 
 ---
@@ -488,7 +495,7 @@ P1/P2 不合并：内核与执行必须能被分开定位。P3 只需 P1 的 bri
 | 项 | 说明 |
 | --- | --- |
 | v30 → v31 破坏性 | 已确认接受；已有本地库需删除重建，`SqliteDatabase` 会明确拒绝而不是损坏 |
-| 转录永久保留 | 已确认选择不做自动清理；回收手段是手动删除。**磁盘增长是本设计最大的长期风险**，MCP 单次结果上限 64KB，日更任务年增可达 GB 级；P4 的体积显示是唯一的观测手段 |
+| 转录永久保留 | 已确认选择不做自动清理；回收手段是手动删除。**磁盘增长是本设计最大的长期风险**，MCP 单次结果上限 64KB，日更任务年增可达 GB 级；P4 已提供每任务/全局体积显示（SQL `LENGTH()` 只读粗算，不改 schema）与手动回收入口 |
 | 单实例 | 与现有子代理调度一致，不加跨进程锁 |
 | TickerQ 版本面 | 只依赖公开的 `AddTickerQ`/`MapTicker`/`ITimeTickerManager`/`ICronTickerManager` 与默认内存 provider；**不实现其内部 persistence 接口**，升级风险可控 |
 | 前端版本面 | FullCalendar v7 需 `temporal-polyfill` 与 `preact` peer（离线可用）；v7 的 Sub-Path 插件与主题随 Vue 适配器发布，版本自洽 |

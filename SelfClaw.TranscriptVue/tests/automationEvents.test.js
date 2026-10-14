@@ -5,6 +5,7 @@ import {
 	filterRuns,
 	filterTasks,
 	formToWireTask,
+	formatBytes,
 	localInputToUtcIso,
 	runStatusLabel,
 	taskNextRunText,
@@ -149,5 +150,15 @@ describe('automation list filtering', () => {
 		expect(filterRuns(runs, { query: 'provider' }).map((run) => run.id)).toEqual(['r2']);
 		expect(filterRuns(runs, { status: 'all', query: '' })).toHaveLength(2);
 		expect(runStatusLabel('skipped')).toBe('已跳过');
+	});
+});
+
+describe('automation history volume formatting', () => {
+	it('renders bytes, kilobytes, megabytes and gigabytes', () => {
+		expect(formatBytes(512)).toBe('512 B');
+		expect(formatBytes(2048)).toBe('2.0 KB');
+		expect(formatBytes(1536 * 1024)).toBe('1.5 MB');
+		expect(formatBytes(3 * 1024 * 1024 * 1024)).toBe('3.0 GB');
+		expect(formatBytes(0)).toBe('0 B');
 	});
 });

@@ -217,6 +217,110 @@ internal sealed class SqliteAutomationRunRepository : IAutomationRunStore, IAuto
         return completed;
     }
 
+    public async Task<int> DeleteTerminalRunsAsync(
+        Guid? taskId,
+        Guid? runId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var targets = new List<(Guid RunId, Guid? ConversationId)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            var filters = new List<string> { "status NOT IN ($queued, $running)" };
+            if (runId is Guid id)
+            {
+                filters.Add("id = $runId");
+                select.Parameters.AddWithValue("$runId", id.ToString("D"));
+            }
+
+            if (taskId is Guid task)
+            {
+                filters.Add("task_id = $taskId");
+                select.Parameters.AddWithValue("$taskId", task.ToString("D"));
+            }
+
+            select.Parameters.AddWithValue("$queued", (int)AutomationRunStatus.Queued);
+            select.Parameters.AddWithValue("$running", (int)AutomationRunStatus.Running);
+            select.CommandText = $"SELECT id, conversation_id FROM automation_runs WHERE {string.Join(" AND ", filters)};";
+            await using var reader = await select.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                targets.Add((ReadGuid(reader, 0), ReadNullableGuid(reader, 1)));
+            }
+        }
+
+        foreach (var conversationId in targets.Where(item => item.ConversationId is not null).Select(item => item.ConversationId!.Value).Distinct())
+        {
+            await using var deleteConversation = connection.CreateCommand();
+            deleteConversation.Transaction = transaction;
+            // The run row cascades with its conversation, so only conversationless runs need an explicit delete.
+            deleteConversation.CommandText = "DELETE FROM conversations WHERE id = $id;";
+            deleteConversation.Parameters.AddWithValue("$id", conversationId.ToString("D"));
+            await deleteConversation.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var target in targets.Where(item => item.ConversationId is null))
+        {
+            await using var deleteRun = connection.CreateCommand();
+            deleteRun.Transaction = transaction;
+            deleteRun.CommandText = "DELETE FROM automation_runs WHERE id = $id;";
+            deleteRun.Parameters.AddWithValue("$id", target.RunId.ToString("D"));
+            await deleteRun.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return targets.Count;
+    }
+
+    public async Task<AutomationHistoryUsage> GetHistoryUsageAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var bytesByTask = new Dictionary<Guid, long>();
+        await AccumulateAsync(
+            connection,
+            """
+            SELECT r.task_id, COALESCE(SUM(LENGTH(m.markdown_content)), 0)
+            FROM automation_runs r JOIN messages m ON m.conversation_id = r.conversation_id
+            GROUP BY r.task_id;
+            """,
+            bytesByTask,
+            cancellationToken).ConfigureAwait(false);
+        await AccumulateAsync(
+            connection,
+            """
+            SELECT r.task_id,
+                   COALESCE(SUM(LENGTH(t.arguments_json) + LENGTH(COALESCE(t.result_summary, '')) + LENGTH(COALESCE(t.result_content, ''))), 0)
+            FROM automation_runs r JOIN tool_runs t ON t.conversation_id = r.conversation_id
+            GROUP BY r.task_id;
+            """,
+            bytesByTask,
+            cancellationToken).ConfigureAwait(false);
+        var tasks = bytesByTask
+            .Select(pair => new AutomationTaskHistoryUsage(pair.Key, pair.Value))
+            .OrderByDescending(item => item.Bytes)
+            .ToArray();
+        return new AutomationHistoryUsage(tasks, tasks.Sum(item => item.Bytes));
+    }
+
+    private static async Task AccumulateAsync(
+        SqliteConnection connection,
+        string sql,
+        Dictionary<Guid, long> bytesByTask,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var taskId = ReadGuid(reader, 0);
+            var bytes = reader.IsDBNull(1) ? 0L : Convert.ToInt64(reader.GetValue(1));
+            bytesByTask[taskId] = bytesByTask.GetValueOrDefault(taskId) + bytes;
+        }
+    }
+
     private static async Task<bool> HasActiveRunAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,

@@ -33,6 +33,7 @@ public sealed class AutomationSchedulerHostTests : IDisposable
         await harness.Host.HandleTickerAsync(new AutomationTickerPayload(task.Id, null), now, CancellationToken.None);
 
         harness.FakeExecutor.ExecutedRuns.Should().BeEmpty();
+        harness.RunNotifier.Runs.Should().BeEmpty();
         var runs = await harness.RunStore.ListAsync(task.Id, 10);
         runs.Should().Contain(run => run.Status == AutomationRunStatus.Skipped && run.SkipReason == AutomationRunSkipReason.Overlap);
         runs.Should().NotContain(run => run.Status == AutomationRunStatus.Queued);
@@ -161,6 +162,41 @@ public sealed class AutomationSchedulerHostTests : IDisposable
         reloaded.NextRunAtUtc.Should().BeNull();
         (await harness.RunStore.ListAsync(task.Id, 10)).Should().ContainSingle()
             .Which.Status.Should().Be(AutomationRunStatus.Failed);
+        harness.RunNotifier.Runs.Should().ContainSingle().Which.Status.Should().Be(AutomationRunStatus.Failed);
+    }
+
+    [Fact]
+    public async Task Startup_recovery_notifies_about_the_runs_it_interrupts()
+    {
+        var harness = await CreateHarnessAsync();
+        var now = DateTimeOffset.UtcNow;
+        var task = CreateTask(AutomationTaskKind.Daily, new AutomationScheduleSpec(Time: "09:00"), now.AddHours(-1));
+        await harness.TaskStore.SaveAsync(task);
+        var running = CreateRun(task.Id, AutomationRunTrigger.Scheduled, AutomationRunStatus.Running, now.AddMinutes(-1));
+        await harness.RunStore.TryInsertAsync(running, skipWhenTaskActive: false);
+
+        await harness.Host.StartSchedulingAsync(CancellationToken.None);
+
+        harness.RunNotifier.Runs.Should().ContainSingle(item => item.RunId == running.Id && item.Status == AutomationRunStatus.Interrupted);
+    }
+
+    [Fact]
+    public async Task Restarting_within_grace_after_a_hard_kill_starts_a_fresh_catch_up_run_without_resuming_the_interrupted_one()
+    {
+        var harness = await CreateHarnessAsync();
+        var now = DateTimeOffset.UtcNow;
+        var task = CreateTask(AutomationTaskKind.Daily, new AutomationScheduleSpec(Time: "09:00"), now.AddMinutes(-10));
+        await harness.TaskStore.SaveAsync(task);
+        var running = CreateRun(task.Id, AutomationRunTrigger.Scheduled, AutomationRunStatus.Running, now.AddMinutes(-5));
+        await harness.RunStore.TryInsertAsync(running, skipWhenTaskActive: false);
+
+        await harness.Host.StartSchedulingAsync(CancellationToken.None);
+        await harness.Host.SweepMissedRunsAsync(CancellationToken.None);
+
+        var runs = await harness.RunStore.ListAsync(task.Id, 10);
+        runs.Should().Contain(run => run.Id == running.Id && run.Status == AutomationRunStatus.Interrupted);
+        runs.Should().ContainSingle(run => run.Trigger == AutomationRunTrigger.CatchUp && run.Status == AutomationRunStatus.Completed);
+        harness.FakeExecutor.ExecutedRuns.Should().ContainSingle().Which.Should().NotBe(running.Id);
     }
 
     [Fact]
@@ -216,6 +252,7 @@ public sealed class AutomationSchedulerHostTests : IDisposable
         var runStore = new SqliteAutomationRunRepository(database);
         var registrar = new FakeAutomationScheduleRegistrar();
         var cancellations = new AutomationRunCancellationRegistry();
+        var runNotifier = new RecordingRunNotifier();
         var fakeExecutor = new FakeAutomationRunExecutor(runStore);
         var runExecutor = executorFactory?.Invoke(runStore) ?? fakeExecutor;
         var host = new AutomationSchedulerHost(
@@ -227,9 +264,10 @@ public sealed class AutomationSchedulerHostTests : IDisposable
             registrar,
             cancellations,
             new AutomationChangeNotifier(),
+            runNotifier,
             TimeProvider.System,
             NullLogger<AutomationSchedulerHost>.Instance);
-        return new Harness(host, taskStore, runStore, registrar, fakeExecutor, cancellations);
+        return new Harness(host, taskStore, runStore, registrar, fakeExecutor, cancellations, runNotifier);
     }
 
     private static AutomationTaskRecord CreateTask(
@@ -294,7 +332,19 @@ public sealed class AutomationSchedulerHostTests : IDisposable
         IAutomationRunStore RunStore,
         FakeAutomationScheduleRegistrar Registrar,
         FakeAutomationRunExecutor FakeExecutor,
-        AutomationRunCancellationRegistry Cancellations);
+        AutomationRunCancellationRegistry Cancellations,
+        RecordingRunNotifier RunNotifier);
+
+    private sealed class RecordingRunNotifier : IAutomationRunNotifier
+    {
+        public List<(Guid RunId, AutomationRunStatus Status)> Runs { get; } = [];
+
+        public Task NotifyAsync(AutomationTaskRecord task, AutomationRunRecord run, CancellationToken cancellationToken = default)
+        {
+            Runs.Add((run.Id, run.Status));
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class FakeAutomationScheduleRegistrar : IAutomationScheduleRegistrar
     {

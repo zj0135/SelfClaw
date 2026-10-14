@@ -47,3 +47,27 @@ test('rejects a trigger without a prompt in the dialog', async ({ page }) => {
 	await expect(page.getByRole('button', { name: '保存任务' })).toBeDisabled();
 	await expect(page.locator('.ac-dialog-error')).toContainText('必须填写提示词');
 });
+
+test('deletes a run record and clears task history through confirmation', async ({ page }) => {
+	const errors = [];
+	page.on('pageerror', (error) => errors.push(error.message));
+
+	await page.locator('.sidebar .tool-btn').filter({ hasText: '自动化' }).click();
+	await page.getByRole('tab', { name: /运行历史/ }).click();
+	await expect(page.locator('.automation-run').first()).toBeVisible();
+	await expect(page.locator('.automation-history-size')).toContainText('历史体积');
+
+	await page.locator('.automation-run-delete').first().click();
+	await expect(page.locator('.confirm')).toBeVisible();
+	await page.locator('.confirm-btn.primary').click();
+	await expect(page.locator('.automation-run')).toHaveCount(0);
+
+	await page.getByRole('tab', { name: /清单/ }).click();
+	await expect(page.locator('.automation-meta-item').filter({ hasText: '历史：' })).toHaveCount(1);
+	await page.locator('.automation-icon-btn[title="清空该任务历史"]').first().click();
+	await expect(page.locator('.confirm')).toBeVisible();
+	await page.locator('.confirm-btn.primary').click();
+	await expect(page.locator('.automation-meta-item').filter({ hasText: '历史：' })).toHaveCount(0);
+
+	expect(errors).toEqual([]);
+});

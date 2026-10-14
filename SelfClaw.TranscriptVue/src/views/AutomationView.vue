@@ -6,15 +6,18 @@ import AutomationRunDrawer from '../components/automation/AutomationRunDrawer.vu
 import AutomationTaskDialog from '../components/automation/AutomationTaskDialog.vue';
 import AutomationTaskPanel from '../components/automation/AutomationTaskPanel.vue';
 import { browserTimeZone, useAutomation } from '../composables/useAutomation';
+import { useConfirm } from '../composables/useConfirm';
 import { useToast } from '../composables/useToast';
 import { createTaskForm, filterRuns, filterTasks, taskToForm, utcIsoToLocalInput } from '../renderers/automationEvents';
 
 const {
-	tasks, calendar, runs, settings, loading, error, record, recordLoading,
+	tasks, calendar, runs, settings, historyBytes, loading, error, record, recordLoading,
 	loadCalendar, loadRuns, loadSettings, refresh, previewSchedule,
 	saveTask, setTaskEnabled, runTaskNow, openRun, closeRun, updateSettings,
+	deleteRun, clearTaskHistory, clearHistory, deleteTask,
 } = useAutomation();
 const { showToast } = useToast();
+const { confirm } = useConfirm();
 
 const timeZone = browserTimeZone();
 const dialog = ref({ open: false, saving: false, form: createTaskForm({ timeZone }) });
@@ -22,6 +25,7 @@ const activeTab = ref('tasks');
 const query = ref('');
 const runStatus = ref('all');
 const pending = ref({});
+const deleting = ref({});
 
 const taskTitleById = computed(() => Object.fromEntries(tasks.value.map((task) => [task.id, task.title])));
 const visibleTasks = computed(() => filterTasks(tasks.value, { query: query.value }));
@@ -133,6 +137,64 @@ async function toggleNotify() {
 	}
 }
 
+async function withDeleting(key, action, fallback, successMessage) {
+	deleting.value = { ...deleting.value, [key]: true };
+	try {
+		await action();
+		showToast(successMessage);
+	} catch (cause) {
+		showToast(cause?.message || fallback);
+	} finally {
+		const next = { ...deleting.value };
+		delete next[key];
+		deleting.value = next;
+	}
+}
+
+async function confirmDeleteRun(run) {
+	const approved = await confirm({
+		title: '删除运行记录',
+		message: `删除「${run.taskTitle || '该运行'}」的运行记录？其转录会一并删除，且不可撤销。`,
+		confirmText: '删除',
+		danger: true,
+	});
+	if (!approved) return;
+	await withDeleting(run.id, () => deleteRun(run.id), '删除运行记录失败。', '运行记录已删除。');
+}
+
+async function confirmClearTaskHistory(task) {
+	const approved = await confirm({
+		title: '清空任务历史',
+		message: `清空「${task.title}」的全部运行历史与转录？任务定义会保留，操作不可撤销。`,
+		confirmText: '清空',
+		danger: true,
+	});
+	if (!approved) return;
+	await withDeleting(task.id, () => clearTaskHistory(task.id), '清空任务历史失败。', '任务历史已清空。');
+}
+
+async function confirmClearHistory() {
+	const approved = await confirm({
+		title: '清空全部历史',
+		message: '清空所有任务的运行历史与转录？任务定义会保留，操作不可撤销。',
+		confirmText: '清空',
+		danger: true,
+	});
+	if (!approved) return;
+	await withDeleting('all', () => clearHistory(), '清空历史失败。', '全部历史已清空。');
+}
+
+async function confirmDeleteTask(task) {
+	const approved = await confirm({
+		title: '删除任务',
+		message: `删除「${task.title}」？任务、运行记录与转录都会被删除，且不可撤销。`,
+		confirmText: '删除',
+		danger: true,
+	});
+	if (!approved) return;
+	await withDeleting(task.id, () => deleteTask(task.id), '删除任务失败。', '任务已删除。');
+}
+
 function onWindowFocus() {
 	refresh();
 }
@@ -186,10 +248,12 @@ watch(runStatus, (status) => {
 				@event-drop="onEventDrop" />
 			<AutomationTaskPanel :tasks="visibleTasks" :runs="visibleRuns" :active-tab="activeTab"
 				:query="query" :run-status="runStatus" :time-zone="timeZone" :pending="pending"
+				:deleting="deleting" :history-bytes="historyBytes"
 				@update:active-tab="activeTab = $event" @update:query="query = $event"
 				@update:run-status="runStatus = $event" @create="openCreate()" @edit="openEdit"
 				@run-now="runNow" @toggle-enabled="toggleEnabled" @toggle-status="toggleStatus"
-				@open-run="openRun($event.id)" />
+				@open-run="openRun($event.id)" @delete-run="confirmDeleteRun"
+				@clear-history="confirmClearTaskHistory" @delete-task="confirmDeleteTask" />
 		</div>
 
 		<AutomationRunDrawer v-if="drawerOpen" :record="record" :loading="recordLoading" :time-zone="timeZone"

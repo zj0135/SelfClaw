@@ -115,6 +115,71 @@ public sealed class AutomationBridgeTests : IDisposable
     }
 
     [Fact]
+    public async Task List_tasks_surfaces_per_task_and_total_history_bytes()
+    {
+        var harness = await CreateHarnessAsync();
+        var task = CreateTask(AutomationTaskKind.Daily, new AutomationScheduleSpec(Time: "09:00"), "Daily review");
+        await harness.TaskStore.SaveAsync(task);
+        var terminal = await SeedTerminalRunAsync(harness, task, "1234567890");
+
+        var response = await InvokeAsync(harness.Bridge, "automation/list-tasks", "{}");
+
+        response.GetProperty("historyBytes").GetInt64().Should().Be(terminal.PromptLength);
+        var taskJson = response.GetProperty("tasks").EnumerateArray().Single();
+        taskJson.GetProperty("historyBytes").GetInt64().Should().Be(terminal.PromptLength);
+    }
+
+    [Fact]
+    public async Task Delete_run_clear_task_history_and_clear_history_report_the_deleted_count()
+    {
+        var harness = await CreateHarnessAsync();
+        var task = CreateTask(AutomationTaskKind.Daily, new AutomationScheduleSpec(Time: "09:00"), "Daily review");
+        var other = CreateTask(AutomationTaskKind.Daily, new AutomationScheduleSpec(Time: "10:00"), "Other review");
+        await harness.TaskStore.SaveAsync(task);
+        await harness.TaskStore.SaveAsync(other);
+        var first = await SeedTerminalRunAsync(harness, task, "first");
+        await SeedTerminalRunAsync(harness, task, "second");
+        await SeedTerminalRunAsync(harness, other, "third");
+
+        var single = await InvokeAsync(harness.Bridge, "automation/delete-run", $$"""{"runId":"{{first.RunId:D}}"}""");
+        single.GetProperty("ok").GetBoolean().Should().BeTrue();
+        single.GetProperty("deleted").GetInt32().Should().Be(1);
+
+        var taskHistory = await InvokeAsync(harness.Bridge, "automation/clear-task-history", $$"""{"taskId":"{{task.Id:D}}"}""");
+        taskHistory.GetProperty("ok").GetBoolean().Should().BeTrue();
+        taskHistory.GetProperty("deleted").GetInt32().Should().Be(1);
+        (await harness.TaskStore.GetAsync(task.Id)).Should().NotBeNull();
+
+        var all = await InvokeAsync(harness.Bridge, "automation/clear-history", "{}");
+        all.GetProperty("ok").GetBoolean().Should().BeTrue();
+        all.GetProperty("deleted").GetInt32().Should().Be(1);
+        (await harness.RunStore.ListAsync(null, 10)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Delete_run_rejects_an_active_run_and_delete_task_removes_the_definition()
+    {
+        var harness = await CreateHarnessAsync();
+        var task = CreateTask(AutomationTaskKind.Daily, new AutomationScheduleSpec(Time: "09:00"), "Daily review");
+        await harness.TaskStore.SaveAsync(task);
+        var active = CreateRun(task.Id, AutomationRunStatus.Running, DateTimeOffset.UtcNow.AddMinutes(-1));
+        await harness.RunStore.TryInsertAsync(active, skipWhenTaskActive: false);
+
+        var conflict = await InvokeAsync(harness.Bridge, "automation/delete-run", $$"""{"runId":"{{active.Id:D}}"}""");
+        conflict.GetProperty("ok").GetBoolean().Should().BeFalse();
+        conflict.GetProperty("errorCode").GetString().Should().Be(AutomationErrorCodes.RunConflict);
+
+        var deletable = CreateTask(AutomationTaskKind.Daily, new AutomationScheduleSpec(Time: "10:00"), "Deletable");
+        await harness.TaskStore.SaveAsync(deletable);
+        await SeedTerminalRunAsync(harness, deletable, "terminal");
+        var deleted = await InvokeAsync(harness.Bridge, "automation/delete-task", $$"""{"taskId":"{{deletable.Id:D}}"}""");
+        deleted.GetProperty("ok").GetBoolean().Should().BeTrue();
+        (await harness.TaskStore.GetAsync(deletable.Id)).Should().BeNull();
+        (await harness.TaskStore.GetAsync(task.Id)).Should().NotBeNull();
+        (await harness.RunStore.GetAsync(active.Id)).Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task Get_run_returns_the_transcript_items_projected_for_the_automation_conversation()
     {
         var harness = await CreateHarnessAsync();
@@ -187,27 +252,40 @@ public sealed class AutomationBridgeTests : IDisposable
         var taskStore = new SqliteAutomationTaskRepository(database);
         var runStore = new SqliteAutomationRunRepository(database);
         var notifier = new AutomationChangeNotifier();
+        var calculator = new AutomationScheduleCalculator(TimeZoneInfo.Local);
+        var cancellations = new AutomationRunCancellationRegistry();
+        var runNotifier = new RecordingRunNotifier();
         var host = new AutomationSchedulerHost(
             taskStore,
             runStore,
-            new AutomationScheduleCalculator(TimeZoneInfo.Local),
+            calculator,
             new NoopRecovery(),
             new CompletingExecutor(runStore),
             new NoopRegistrar(),
-            new AutomationRunCancellationRegistry(),
+            cancellations,
             notifier,
+            runNotifier,
             TimeProvider.System,
             NullLogger<AutomationSchedulerHost>.Instance);
         await host.StartSchedulingAsync(CancellationToken.None);
         var conversations = new SqliteConversationRepository(database);
         var turns = new SqliteConversationTurnRepository(database, new SqliteTurnCommitGate());
+        var taskService = new AutomationTaskService(
+            taskStore,
+            runStore,
+            calculator,
+            host,
+            notifier,
+            cancellations,
+            NullLogger<AutomationTaskService>.Instance);
         var bridge = new AutomationBridge(
             taskStore,
             runStore,
-            new AutomationScheduleCalculator(TimeZoneInfo.Local),
+            taskService,
+            calculator,
             host,
             notifier,
-            new AutomationRunCancellationRegistry(),
+            cancellations,
             conversations,
             turns,
             new SqliteUsageStatisticsReader(database),
@@ -217,6 +295,22 @@ public sealed class AutomationBridgeTests : IDisposable
             Dispatcher.CurrentDispatcher,
             NullLogger<AutomationBridge>.Instance);
         return new Harness(taskStore, runStore, turns, notifier, bridge);
+    }
+
+    private static async Task<(Guid RunId, Guid ConversationId, long PromptLength)> SeedTerminalRunAsync(
+        Harness harness,
+        AutomationTaskRecord task,
+        string prompt)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversation = new ConversationRecord(Guid.NewGuid(), task.Title, null, ConversationMode.Programming,
+            ToolPermissionMode.FullAccess, $"automation:{task.Id:D}", now, now, Kind: ConversationKind.Automation);
+        var turn = new ConversationTurnRecord(Guid.NewGuid(), conversation.Id, AgentExecutionMode.Direct,
+            DirectTurnOrigin.Automation, ConversationTurnStatus.Running, now);
+        await harness.Turns.StartTurnAsync(new ConversationTurnStart(conversation, turn, prompt, Guid.NewGuid()));
+        var run = CreateRun(task.Id, AutomationRunStatus.Completed, now.AddMinutes(-1)) with { ConversationId = conversation.Id };
+        await harness.RunStore.TryInsertAsync(run, false);
+        return (run.Id, conversation.Id, prompt.Length);
     }
 
     private static async Task<JsonElement> InvokeAsync(AutomationBridge bridge, string type, string json)
@@ -254,7 +348,8 @@ public sealed class AutomationBridgeTests : IDisposable
 
     private sealed class NoopRecovery : IAutomationStartupRecovery
     {
-        public Task RecoverAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<AutomationRunRecord>> RecoverAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<AutomationRunRecord>>([]);
     }
 
     private sealed class NoopRegistrar : IAutomationScheduleRegistrar
@@ -264,6 +359,17 @@ public sealed class AutomationBridgeTests : IDisposable
         public Task UpsertOnceAsync(Guid taskId, DateTimeOffset scheduledForUtc, CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task RemoveAsync(Guid taskId, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class RecordingRunNotifier : IAutomationRunNotifier
+    {
+        public List<(Guid TaskId, Guid RunId, AutomationRunStatus Status)> Runs { get; } = [];
+
+        public Task NotifyAsync(AutomationTaskRecord task, AutomationRunRecord run, CancellationToken cancellationToken = default)
+        {
+            Runs.Add((task.Id, run.Id, run.Status));
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class CompletingExecutor : IAutomationRunExecutor

@@ -14,20 +14,21 @@ using SelfClaw.Infrastructure.Options;
 namespace SelfClaw.Desktop.Services.Automation;
 
 /// <summary>
-/// WebView bridge for the automation module. Reads and writes go straight through the stores; every
-/// scheduling side effect is delegated to <see cref="AutomationSchedulerHost"/> so TickerQ stays
-/// rebuildable from the task table. Deletion/history reclamation is intentionally absent here.
+/// WebView bridge for the automation module. It parses and serializes the wire protocol; validation,
+/// persistence side effects and history reclamation are delegated to <see cref="IAutomationTaskService"/>,
+/// and scheduling side effects to <see cref="AutomationSchedulerHost"/> so TickerQ stays rebuildable from
+/// the task table.
 /// </summary>
 internal sealed class AutomationBridge : IDisposable
 {
     private const string MessagePrefix = "automation/";
     private const string SettingsNodeName = "automation";
-    private const int MaximumTitleLength = 120;
 
     private static readonly JsonSerializerOptions SettingsJsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IAutomationTaskStore _taskStore;
     private readonly IAutomationRunStore _runStore;
+    private readonly IAutomationTaskService _taskService;
     private readonly AutomationScheduleCalculator _calculator;
     private readonly AutomationSchedulerHost _scheduler;
     private readonly AutomationChangeNotifier _notifier;
@@ -45,6 +46,7 @@ internal sealed class AutomationBridge : IDisposable
     public AutomationBridge(
         IAutomationTaskStore taskStore,
         IAutomationRunStore runStore,
+        IAutomationTaskService taskService,
         AutomationScheduleCalculator calculator,
         AutomationSchedulerHost scheduler,
         AutomationChangeNotifier notifier,
@@ -60,6 +62,7 @@ internal sealed class AutomationBridge : IDisposable
     {
         _taskStore = taskStore;
         _runStore = runStore;
+        _taskService = taskService;
         _calculator = calculator;
         _scheduler = scheduler;
         _notifier = notifier;
@@ -105,6 +108,10 @@ internal sealed class AutomationBridge : IDisposable
                 "automation/set-task-enabled" => await SetTaskEnabledAsync(type, requestId, payload, cancellationToken).ConfigureAwait(false),
                 "automation/run-task-now" => await RunTaskNowAsync(type, requestId, payload, cancellationToken).ConfigureAwait(false),
                 "automation/cancel-run" => await CancelRunAsync(type, requestId, payload, cancellationToken).ConfigureAwait(false),
+                "automation/delete-run" => await DeleteRunAsync(type, requestId, payload, cancellationToken).ConfigureAwait(false),
+                "automation/clear-task-history" => await ClearTaskHistoryAsync(type, requestId, payload, cancellationToken).ConfigureAwait(false),
+                "automation/clear-history" => await ClearHistoryAsync(type, requestId, cancellationToken).ConfigureAwait(false),
+                "automation/delete-task" => await DeleteTaskAsync(type, requestId, payload, cancellationToken).ConfigureAwait(false),
                 "automation/get-settings" => await GetSettingsAsync(type, requestId, cancellationToken).ConfigureAwait(false),
                 "automation/set-settings" => await SetSettingsAsync(type, requestId, payload, cancellationToken).ConfigureAwait(false),
                 _ => Failure(type, requestId, "Unsupported", $"Unsupported automation message '{type}'.")
@@ -146,7 +153,16 @@ internal sealed class AutomationBridge : IDisposable
     private async Task<object> ListTasksAsync(string type, string? requestId, CancellationToken cancellationToken)
     {
         var tasks = await _taskStore.ListAsync(cancellationToken).ConfigureAwait(false);
-        return new { type, requestId, ok = true, tasks = tasks.Select(ToTask).ToArray() };
+        var usage = await _taskService.GetHistoryUsageAsync(cancellationToken).ConfigureAwait(false);
+        var bytesByTask = usage.Tasks.ToDictionary(item => item.TaskId, item => item.Bytes);
+        return new
+        {
+            type,
+            requestId,
+            ok = true,
+            tasks = tasks.Select(task => ToTask(task, bytesByTask.GetValueOrDefault(task.Id))).ToArray(),
+            historyBytes = usage.TotalBytes
+        };
     }
 
     private async Task<object> ListCalendarAsync(
@@ -289,38 +305,16 @@ internal sealed class AutomationBridge : IDisposable
             return Failure(type, requestId, "InvalidTask", "task is required.");
         }
 
-        var title = (ReadOptionalString(element, "title") ?? string.Empty).Trim();
-        if (title.Length == 0)
-        {
-            return Failure(type, requestId, AutomationErrorCodes.InvalidTitle, "任务标题必填。");
-        }
-
-        if (title.Length > MaximumTitleLength)
-        {
-            return Failure(type, requestId, AutomationErrorCodes.InvalidTitle, $"任务标题不能超过 {MaximumTitleLength} 个字符。");
-        }
-
-        var kind = ReadTaskKind(element);
-        var prompt = ReadOptionalString(element, "prompt");
-        if (kind != AutomationTaskKind.None && string.IsNullOrWhiteSpace(prompt))
-        {
-            return Failure(type, requestId, AutomationErrorCodes.TriggerRequiresPrompt, "带触发器的任务必须填写提示词。");
-        }
-
         var requestedId = ReadOptionalGuid(element, "id");
         var existing = requestedId is Guid id
             ? await _taskStore.GetAsync(id, cancellationToken).ConfigureAwait(false)
             : null;
+        var title = (ReadOptionalString(element, "title") ?? existing?.Title ?? string.Empty).Trim();
+        var kind = ReadTaskKind(element);
+        var prompt = ReadOptionalString(element, "prompt");
         var schedule = ReadSchedule(element);
         var isEnabled = ReadOptionalBoolean(element, "isEnabled") ?? existing?.IsEnabled ?? true;
         var now = DateTimeOffset.UtcNow;
-        DateTimeOffset? nextRunAtUtc = null;
-        if (isEnabled && kind != AutomationTaskKind.None &&
-            !_calculator.TryComputeNextRun(kind, schedule, now, out nextRunAtUtc, out var errorCode))
-        {
-            return Failure(type, requestId, errorCode ?? AutomationErrorCodes.InvalidSchedule, ScheduleMessage(errorCode));
-        }
-
         var status = ReadTaskStatus(element) ?? existing?.Status ?? AutomationTaskStatus.Open;
         var task = new AutomationTaskRecord(
             existing?.Id ?? requestedId ?? Guid.NewGuid(),
@@ -328,7 +322,7 @@ internal sealed class AutomationBridge : IDisposable
             ReadOptionalString(element, "notes") ?? existing?.Notes ?? string.Empty,
             kind,
             kind == AutomationTaskKind.None ? null : schedule,
-            nextRunAtUtc,
+            existing?.NextRunAtUtc,
             prompt,
             ReadOptionalString(element, "instructions") ?? existing?.Instructions ?? string.Empty,
             ReadOptionalString(element, "toolPolicy") ?? existing?.ToolPolicy ?? "system",
@@ -349,9 +343,12 @@ internal sealed class AutomationBridge : IDisposable
             existing?.CreatedAtUtc ?? now,
             now);
 
-        var saved = await _taskStore.SaveAsync(task, cancellationToken).ConfigureAwait(false);
-        _notifier.Notify("task-saved", saved.Id);
-        await _scheduler.RequestRescheduleAsync(cancellationToken).ConfigureAwait(false);
+        var result = await _taskService.SaveAsync(task, cancellationToken).ConfigureAwait(false);
+        if (result.Task is not { } saved)
+        {
+            return Failure(type, requestId, result.ErrorCode ?? AutomationErrorCodes.InvalidSchedule, result.ErrorMessage ?? ScheduleMessage(result.ErrorCode));
+        }
+
         return new
         {
             type,
@@ -390,25 +387,12 @@ internal sealed class AutomationBridge : IDisposable
         }
 
         var isEnabled = ReadRequiredBoolean(payload, "isEnabled");
-        var existing = await _taskStore.GetAsync(taskId, cancellationToken).ConfigureAwait(false);
-        if (existing is null)
+        var saved = await _taskService.SetEnabledAsync(taskId, isEnabled, cancellationToken).ConfigureAwait(false);
+        if (saved is null)
         {
             return Failure(type, requestId, AutomationErrorCodes.UnknownTask, "The automation task no longer exists.");
         }
 
-        var now = DateTimeOffset.UtcNow;
-        DateTimeOffset? nextRunAtUtc = null;
-        if (isEnabled && existing.Kind != AutomationTaskKind.None &&
-            _calculator.TryComputeNextRun(existing.Kind, existing.Schedule, now, out var computed, out _))
-        {
-            nextRunAtUtc = computed;
-        }
-
-        var saved = await _taskStore.SaveAsync(
-            existing with { IsEnabled = isEnabled, NextRunAtUtc = nextRunAtUtc, UpdatedAtUtc = now },
-            cancellationToken).ConfigureAwait(false);
-        _notifier.Notify("task-enabled", saved.Id);
-        await _scheduler.RequestRescheduleAsync(cancellationToken).ConfigureAwait(false);
         return new { type, requestId, ok = true, task = ToTask(saved) };
     }
 
@@ -461,6 +445,70 @@ internal sealed class AutomationBridge : IDisposable
 
         var current = await _runStore.GetAsync(runId, cancellationToken).ConfigureAwait(false) ?? run;
         return new { type, requestId, ok = true, run = ToRun(current) };
+    }
+
+    private async Task<object> DeleteRunAsync(
+        string type,
+        string? requestId,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        if (ReadOptionalGuid(payload, "runId") is not Guid runId)
+        {
+            return Failure(type, requestId, AutomationErrorCodes.UnknownRun, "runId is required.");
+        }
+
+        var result = await _taskService
+            .ReclaimHistoryAsync(AutomationHistoryReclaimMode.Run, null, runId, cancellationToken)
+            .ConfigureAwait(false);
+        return ReclaimResponse(type, requestId, result);
+    }
+
+    private async Task<object> ClearTaskHistoryAsync(
+        string type,
+        string? requestId,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        if (ReadOptionalGuid(payload, "taskId") is not Guid taskId)
+        {
+            return Failure(type, requestId, AutomationErrorCodes.UnknownTask, "taskId is required.");
+        }
+
+        var result = await _taskService
+            .ReclaimHistoryAsync(AutomationHistoryReclaimMode.TaskHistory, taskId, null, cancellationToken)
+            .ConfigureAwait(false);
+        return ReclaimResponse(type, requestId, result);
+    }
+
+    private async Task<object> ClearHistoryAsync(string type, string? requestId, CancellationToken cancellationToken)
+    {
+        var result = await _taskService
+            .ReclaimHistoryAsync(AutomationHistoryReclaimMode.AllHistory, null, null, cancellationToken)
+            .ConfigureAwait(false);
+        return ReclaimResponse(type, requestId, result);
+    }
+
+    private static object ReclaimResponse(string type, string? requestId, AutomationHistoryReclaimResult result)
+        => result.ErrorCode is null
+            ? new { type, requestId, ok = true, deleted = result.DeletedRuns }
+            : new { type, requestId, ok = false, deleted = result.DeletedRuns, errorCode = result.ErrorCode, errorMessage = result.ErrorMessage };
+
+    private async Task<object> DeleteTaskAsync(
+        string type,
+        string? requestId,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        if (ReadOptionalGuid(payload, "taskId") is not Guid taskId)
+        {
+            return Failure(type, requestId, AutomationErrorCodes.UnknownTask, "taskId is required.");
+        }
+
+        var result = await _taskService.DeleteAsync(taskId, cancellationToken).ConfigureAwait(false);
+        return result.Deleted
+            ? new { type, requestId, ok = true }
+            : Failure(type, requestId, result.ErrorCode ?? AutomationErrorCodes.UnknownTask, result.ErrorMessage ?? "删除任务失败。");
     }
 
     private async Task<object> GetSettingsAsync(string type, string? requestId, CancellationToken cancellationToken)
@@ -524,7 +572,7 @@ internal sealed class AutomationBridge : IDisposable
     private static object Failure(string type, string? requestId, string errorCode, string errorMessage)
         => new { type, requestId, ok = false, errorCode, errorMessage };
 
-    private static object ToTask(AutomationTaskRecord task)
+    private static object ToTask(AutomationTaskRecord task, long historyBytes = 0)
         => new
         {
             id = task.Id.ToString("D"),
@@ -549,7 +597,8 @@ internal sealed class AutomationBridge : IDisposable
             lastRunAtUtc = task.LastRunAtUtc?.ToString("O"),
             lastRunStatus = task.LastRunStatus is AutomationRunStatus status ? RunStatusWire(status) : null,
             createdAtUtc = task.CreatedAtUtc.ToString("O"),
-            updatedAtUtc = task.UpdatedAtUtc.ToString("O")
+            updatedAtUtc = task.UpdatedAtUtc.ToString("O"),
+            historyBytes
         };
 
     private static object ToRun(AutomationRunRecord run)
