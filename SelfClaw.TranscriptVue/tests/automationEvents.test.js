@@ -65,6 +65,18 @@ describe('automation calendar projection', () => {
 		const flagged = toCalendarEvents([projected()], { truncated: true });
 		expect(flagged.truncated).toBe(true);
 	});
+
+	it('deduplicates projected occurrence when an executed run already exists for the same schedule', () => {
+		const targetUtc = '2026-10-15T12:01:00.000Z';
+		const { events } = toCalendarEvents([
+			{ kind: 'projected', taskId: 't-frog', taskKind: 'once', atUtc: targetUtc, title: '完全的青蛙' },
+			{ kind: 'run', taskId: 't-frog', runId: 'r-fail', atUtc: targetUtc, title: '完全的青蛙', status: 'failed' },
+		]);
+
+		expect(events).toHaveLength(1);
+		expect(events[0].extendedProps.kind).toBe('run');
+		expect(events[0].extendedProps.status).toBe('failed');
+	});
 });
 
 describe('automation task form validation', () => {

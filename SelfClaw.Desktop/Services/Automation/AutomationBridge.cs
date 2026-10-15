@@ -180,8 +180,32 @@ internal sealed class AutomationBridge : IDisposable
         var limit = AutomationDefaults.ProjectionLimit;
         var tasks = await _taskStore.ListAsync(cancellationToken).ConfigureAwait(false);
         var tasksById = tasks.ToDictionary(task => task.Id);
+        var allRuns = await _runStore.ListAsync(null, limit, cancellationToken).ConfigureAwait(false);
+        var runsByTask = allRuns.GroupBy(run => run.TaskId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<AutomationRunRecord>)group.ToArray());
+
         var events = new List<AutomationCalendarEvent>();
         var truncated = false;
+
+        foreach (var run in allRuns)
+        {
+            var atUtc = run.CompletedAtUtc ?? run.StartedAtUtc ?? run.CreatedAtUtc;
+            if (atUtc < fromUtc || atUtc > toUtc)
+            {
+                continue;
+            }
+
+            events.Add(new AutomationCalendarEvent(
+                "run",
+                run.TaskId,
+                atUtc,
+                false,
+                tasksById.TryGetValue(run.TaskId, out var task) ? task.Title : "自动化任务",
+                RunId: run.Id,
+                Status: RunStatusWire(run.Status),
+                DurationMs: DurationMs(run)));
+        }
+
         foreach (var task in tasks)
         {
             if (events.Count >= limit)
@@ -192,8 +216,16 @@ internal sealed class AutomationBridge : IDisposable
 
             if (task.IsEnabled && task.Kind != AutomationTaskKind.None)
             {
+                runsByTask.TryGetValue(task.Id, out var taskRuns);
+                taskRuns ??= [];
+
                 foreach (var atUtc in _calculator.ProjectOccurrences(task.Kind, task.Schedule, fromUtc, toUtc, limit - events.Count))
                 {
+                    if (IsOccurrenceAlreadyExecuted(task, atUtc, taskRuns, now))
+                    {
+                        continue;
+                    }
+
                     events.Add(new AutomationCalendarEvent("projected", task.Id, atUtc, false, task.Title, TaskKind: TaskKindWire(task.Kind)));
                 }
 
@@ -215,25 +247,6 @@ internal sealed class AutomationBridge : IDisposable
             }
         }
 
-        foreach (var run in await _runStore.ListAsync(null, limit, cancellationToken).ConfigureAwait(false))
-        {
-            var atUtc = run.CompletedAtUtc ?? run.StartedAtUtc ?? run.CreatedAtUtc;
-            if (atUtc < fromUtc || atUtc > toUtc)
-            {
-                continue;
-            }
-
-            events.Add(new AutomationCalendarEvent(
-                "run",
-                run.TaskId,
-                atUtc,
-                false,
-                tasksById.TryGetValue(run.TaskId, out var task) ? task.Title : "自动化任务",
-                RunId: run.Id,
-                Status: RunStatusWire(run.Status),
-                DurationMs: DurationMs(run)));
-        }
-
         events.Sort((left, right) => left.AtUtc.CompareTo(right.AtUtc));
         if (events.Count > limit)
         {
@@ -242,6 +255,53 @@ internal sealed class AutomationBridge : IDisposable
         }
 
         return new { type, requestId, ok = true, events = events.ToArray(), truncated };
+    }
+
+    private static bool IsOccurrenceAlreadyExecuted(
+        AutomationTaskRecord task,
+        DateTimeOffset atUtc,
+        IReadOnlyList<AutomationRunRecord> taskRuns,
+        DateTimeOffset now)
+    {
+        if (atUtc < task.CreatedAtUtc.AddSeconds(-30))
+        {
+            return true;
+        }
+
+        foreach (var run in taskRuns)
+        {
+            if (run.ScheduledForUtc is DateTimeOffset scheduled &&
+                Math.Abs((scheduled - atUtc).TotalSeconds) < 60)
+            {
+                return true;
+            }
+
+            var runAtUtc = run.CompletedAtUtc ?? run.StartedAtUtc ?? run.CreatedAtUtc;
+            if (Math.Abs((runAtUtc - atUtc).TotalSeconds) < 60)
+            {
+                return true;
+            }
+        }
+
+        if (task.Kind == AutomationTaskKind.Once)
+        {
+            if (task.Status == AutomationTaskStatus.Done)
+            {
+                return true;
+            }
+
+            if (taskRuns.Count > 0 && atUtc <= now)
+            {
+                return true;
+            }
+        }
+
+        if (task.Kind != AutomationTaskKind.Once && atUtc < now.AddMinutes(-5))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private async Task<object> ListRunsAsync(

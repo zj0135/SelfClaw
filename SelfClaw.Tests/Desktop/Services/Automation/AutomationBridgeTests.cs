@@ -47,6 +47,42 @@ public sealed class AutomationBridgeTests : IDisposable
     }
 
     [Fact]
+    public async Task List_calendar_shows_projected_when_not_executed_and_only_run_after_execution()
+    {
+        var harness = await CreateHarnessAsync();
+        var now = DateTimeOffset.UtcNow;
+        var runAt = now.AddMinutes(10);
+        var onceTask = CreateTask(AutomationTaskKind.Once, new AutomationScheduleSpec(RunAtUtc: runAt), "一次性备份") with
+        {
+            CreatedAtUtc = now.AddMinutes(-5)
+        };
+        await harness.TaskStore.SaveAsync(onceTask);
+
+        // 1. 未执行时：应该只显示 projected
+        var beforeRun = await InvokeAsync(harness.Bridge, "automation/list-calendar",
+            $$"""{"fromUtc":"{{now.AddDays(-1):O}}","toUtc":"{{now.AddDays(1):O}}"}""");
+
+        beforeRun.GetProperty("ok").GetBoolean().Should().BeTrue();
+        var beforeEvents = beforeRun.GetProperty("events").EnumerateArray().ToArray();
+        beforeEvents.Should().ContainSingle();
+        beforeEvents[0].GetProperty("kind").GetString().Should().Be("projected");
+        beforeEvents[0].GetProperty("taskId").GetString().Should().Be(onceTask.Id.ToString("D"));
+
+        // 2. 执行后（比如失败了）：只显示执行后的 run，不再显示 projected
+        await harness.RunStore.TryInsertAsync(CreateRun(onceTask.Id, AutomationRunStatus.Failed, runAt), false);
+
+        var afterRun = await InvokeAsync(harness.Bridge, "automation/list-calendar",
+            $$"""{"fromUtc":"{{now.AddDays(-1):O}}","toUtc":"{{now.AddDays(1):O}}"}""");
+
+        afterRun.GetProperty("ok").GetBoolean().Should().BeTrue();
+        var afterEvents = afterRun.GetProperty("events").EnumerateArray().ToArray();
+        afterEvents.Should().ContainSingle();
+        afterEvents[0].GetProperty("kind").GetString().Should().Be("run");
+        afterEvents[0].GetProperty("taskId").GetString().Should().Be(onceTask.Id.ToString("D"));
+        afterEvents[0].GetProperty("status").GetString().Should().Be("failed");
+    }
+
+    [Fact]
     public async Task Save_task_rejects_a_missing_title_a_trigger_without_prompt_and_a_short_interval()
     {
         var harness = await CreateHarnessAsync();

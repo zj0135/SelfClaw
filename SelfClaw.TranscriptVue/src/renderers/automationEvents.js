@@ -164,9 +164,25 @@ function toCalendarEvent(event) {
 // events 是 host 的 AutomationCalendarEvent[]；limit 兜底防止 host 侧截断失效。
 export function toCalendarEvents(events = [], { truncated = false, limit = DEFAULT_PROJECTION_LIMIT } = {}) {
 	const list = Array.isArray(events) ? events : [];
+	const runs = list.filter((e) => e && e.kind === 'run' && e.taskId && e.atUtc);
+	const now = Date.now();
+	const deduplicated = list.filter((e) => {
+		if (e && e.kind === 'projected' && e.taskId && e.atUtc) {
+			const projectedTime = new Date(e.atUtc).getTime();
+			const hasExecutedRun = runs.some((r) => {
+				if (r.taskId !== e.taskId) return false;
+				const runTime = new Date(r.atUtc).getTime();
+				if (Math.abs(runTime - projectedTime) < 60_000) return true;
+				if (e.taskKind === 'once' && projectedTime <= now) return true;
+				return false;
+			});
+			if (hasExecutedRun) return false;
+		}
+		return true;
+	});
 	return {
-		events: list.slice(0, limit).map(toCalendarEvent),
-		truncated: truncated || list.length > limit,
+		events: deduplicated.slice(0, limit).map(toCalendarEvent),
+		truncated: truncated || deduplicated.length > limit,
 	};
 }
 
