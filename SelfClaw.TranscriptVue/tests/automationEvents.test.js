@@ -6,7 +6,9 @@ import {
 	filterTasks,
 	formToWireTask,
 	formatBytes,
+	formatScheduleRule,
 	localInputToUtcIso,
+	parseCalendarTitle,
 	runStatusLabel,
 	taskNextRunText,
 	taskToForm,
@@ -162,3 +164,42 @@ describe('automation history volume formatting', () => {
 		expect(formatBytes(0)).toBe('0 B');
 	});
 });
+
+describe('automation schedule rule formatting', () => {
+	it('formats daily, weekly, monthly, cron, and once tasks into readable rule strings', () => {
+		expect(formatScheduleRule({ kind: 'daily', schedule: { time: '09:00' } })).toBe('每天 09:00');
+		expect(formatScheduleRule({ kind: 'weekly', schedule: { time: '14:30', weekdays: [1, 3] } })).toBe('每周一、三 14:30');
+		expect(formatScheduleRule({ kind: 'monthly', schedule: { time: '10:00', dayOfMonth: 15 } })).toBe('每月 15 日 10:00');
+		expect(formatScheduleRule({ kind: 'cron', schedule: { cron: '0 * * * *' } })).toBe('Cron: 0 * * * *');
+		expect(formatScheduleRule({ kind: 'once' })).toBe('一次性触发');
+		expect(formatScheduleRule({ kind: 'none' })).toBe('');
+		expect(formatScheduleRule(null)).toBe('');
+	});
+});
+
+describe('automation calendar title parsing', () => {
+	it('parses and condenses raw FullCalendar titles for month, week, day, and listWeek views', () => {
+		// Month view
+		expect(parseCalendarTitle('2026年10月')).toEqual({ kicker: '2026', title: '10月' });
+
+		// Day view
+		expect(parseCalendarTitle('2026年10月15日')).toEqual({ kicker: '2026', title: '10月15日' });
+
+		// Week view (Chinese)
+		expect(parseCalendarTitle('2026年10月12日 – 18日')).toEqual({ kicker: '2026', title: '10月12日 – 18日' });
+		expect(parseCalendarTitle('2026年10月26日 – 11月1日')).toEqual({ kicker: '2026', title: '10月26日 – 11月1日' });
+		expect(parseCalendarTitle('2026年10月12日 – 2026年10月18日')).toEqual({ kicker: '2026', title: '10月12日 – 10月18日' });
+
+		// ListWeek view (slashes in zh-cn locale)
+		expect(parseCalendarTitle('2026/10/12 – 2026/10/18')).toEqual({ kicker: '2026', title: '10月12日 – 18日' });
+		expect(parseCalendarTitle('2026/10/26 – 2026/11/01')).toEqual({ kicker: '2026', title: '10月26日 – 11月1日' });
+		expect(parseCalendarTitle('2026/12/28 – 2027/01/03')).toEqual({ kicker: '2026 – 2027', title: '2026年12月28日 – 2027年1月3日' });
+		expect(parseCalendarTitle('2026/10/15')).toEqual({ kicker: '2026', title: '10月15日' });
+
+		// Empty / non-matching fallback
+		expect(parseCalendarTitle('')).toEqual({ kicker: 'CALENDAR', title: '日历' });
+		expect(parseCalendarTitle('Calendar')).toEqual({ kicker: 'CALENDAR', title: 'Calendar' });
+	});
+});
+
+

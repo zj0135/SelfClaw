@@ -46,6 +46,68 @@ export function taskKindLabel(kind) {
 	return KIND_LABELS[kind] || kind || '';
 }
 
+const WEEKDAY_SHORT = ['', '一', '二', '三', '四', '五', '六', '日'];
+
+export function formatScheduleRule(task) {
+	if (!task || task.kind === 'none') return '';
+	const s = task.schedule || {};
+	switch (task.kind) {
+		case 'daily':
+			return `每天 ${s.time || ''}`.trim();
+		case 'weekly': {
+			const days = (s.weekdays || []).map((d) => WEEKDAY_SHORT[d] || d).join('、');
+			return `每周${days} ${s.time || ''}`.trim();
+		}
+		case 'monthly':
+			return `每月 ${s.dayOfMonth || 1} 日 ${s.time || ''}`.trim();
+		case 'cron':
+			return `Cron: ${s.cron || ''}`.trim();
+		case 'once':
+			return '一次性触发';
+		default:
+			return '';
+	}
+}
+
+export function parseCalendarTitle(rawTitle) {
+	const raw = String(rawTitle ?? '').trim();
+	if (!raw) return { kicker: 'CALENDAR', title: '日历' };
+
+	// 1. Chinese year format: "2026年10月", "2026年10月15日", "2026年10月12日 – 18日", "2026年10月12日 – 2026年10月18日"
+	const cnMatch = raw.match(/^(\d{4})年\s*(.+)$/);
+	if (cnMatch) {
+		const year = cnMatch[1];
+		let rest = cnMatch[2].trim();
+		// If rest has a repeated year e.g. "10月12日 – 2026年10月18日"
+		rest = rest.replace(new RegExp(`[–—-]\\s*${year}年`, 'g'), '– ');
+		return { kicker: year, title: rest };
+	}
+
+	// 2. Slash or hyphen date range format (e.g. listWeek in zh-cn: "2026/10/12 – 2026/10/18" or "2026/10/12 - 2026/10/18")
+	const slashRangeMatch = raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})\s*[-–—]\s*(?:(\d{4})[/-])?(\d{1,2})[/-](\d{1,2})$/);
+	if (slashRangeMatch) {
+		const [, y1, m1, d1, y2, m2, d2] = slashRangeMatch;
+		const endYear = y2 || y1;
+		const kicker = y1 === endYear ? y1 : `${y1} – ${endYear}`;
+		if (y1 === endYear && m1 === m2) {
+			return { kicker, title: `${Number(m1)}月${Number(d1)}日 – ${Number(d2)}日` };
+		} else if (y1 === endYear) {
+			return { kicker, title: `${Number(m1)}月${Number(d1)}日 – ${Number(m2)}月${Number(d2)}日` };
+		} else {
+			return { kicker, title: `${y1}年${Number(m1)}月${Number(d1)}日 – ${endYear}年${Number(m2)}月${Number(d2)}日` };
+		}
+	}
+
+	// 3. Single slash date: "2026/10/15"
+	const singleSlashMatch = raw.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+	if (singleSlashMatch) {
+		const [, y, m, d] = singleSlashMatch;
+		return { kicker: y, title: `${Number(m)}月${Number(d)}日` };
+	}
+
+	return { kicker: 'CALENDAR', title: raw };
+}
+
 export function runStatusLabel(status) {
 	return RUN_STATUS_LABELS[status] || status || '';
 }

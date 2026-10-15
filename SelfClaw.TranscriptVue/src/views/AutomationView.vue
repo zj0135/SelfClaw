@@ -223,7 +223,7 @@ watch(runStatus, (status) => {
 		<p v-if="error" class="automation-banner" role="alert">{{ error }}</p>
 
 		<div class="automation-body">
-			<AutomationCalendar :events="calendar.events" :truncated="calendar.truncated"
+			<AutomationCalendar :events="calendar.events" :tasks="tasks" :time-zone="timeZone" :truncated="calendar.truncated"
 				@range-change="loadCalendar" @event-click="onEventClick" @date-click="onDateClick"
 				@event-drop="onEventDrop">
 				<template #actions>
@@ -232,11 +232,11 @@ watch(runStatus, (status) => {
 							:title="settings.notifyOnSuccess ? '关闭成功通知' : '开启成功通知'" @click="toggleNotify">
 							<Bell v-if="settings.notifyOnSuccess" aria-hidden="true" />
 							<BellOff v-else aria-hidden="true" />
-							<span>成功通知</span>
+							<span class="automation-ghost-label">成功通知</span>
 						</button>
 						<button type="button" class="automation-ghost" :disabled="loading" title="刷新" @click="refresh">
 							<RefreshCw :class="{ 'is-spinning': loading }" aria-hidden="true" />
-							<span>刷新</span>
+							<span class="automation-ghost-label">刷新</span>
 						</button>
 					</div>
 				</template>
@@ -275,6 +275,7 @@ watch(runStatus, (status) => {
 	display: flex;
 	align-items: center;
 	gap: 6px;
+	flex: none;
 }
 
 .automation-ghost {
@@ -289,9 +290,48 @@ watch(runStatus, (status) => {
 	color: var(--muted);
 	font-size: var(--fs-12);
 	font-weight: 600;
+	white-space: nowrap;
+	flex: none;
 	cursor: pointer;
 	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.03);
-	transition: background 0.16s, border-color 0.16s, color 0.16s, transform 0.16s var(--ease-spring);
+	transition: background 0.16s, border-color 0.16s, color 0.16s, width 0.16s, padding 0.16s, transform 0.16s var(--ease-spring);
+}
+
+.automation-ghost-label {
+	white-space: nowrap;
+}
+
+@container calendar (max-width: 600px) {
+	.automation-ghost {
+		width: 28px;
+		padding: 0;
+		justify-content: center;
+	}
+	.automation-ghost-label {
+		display: none;
+	}
+}
+
+@container (max-width: 600px) {
+	.automation-ghost {
+		width: 28px;
+		padding: 0;
+		justify-content: center;
+	}
+	.automation-ghost-label {
+		display: none;
+	}
+}
+
+@media (max-width: 1080px) {
+	.automation-ghost {
+		width: 28px;
+		padding: 0;
+		justify-content: center;
+	}
+	.automation-ghost-label {
+		display: none;
+	}
 }
 
 .automation-ghost:hover:not(:disabled) {

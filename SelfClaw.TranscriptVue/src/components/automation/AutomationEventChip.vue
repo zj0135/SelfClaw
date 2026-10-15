@@ -8,6 +8,8 @@ const props = defineProps({
 	timeText: { type: String, default: '' },
 });
 
+const emit = defineEmits(['hover', 'leave']);
+
 const icon = computed(() => {
 	const event = props.event;
 	if (event.kind === 'todo') return event.status === 'done' ? CircleCheck : CircleDashed;
@@ -30,7 +32,12 @@ const durationText = computed(() => (props.event.kind === 'run' ? formatDuration
 </script>
 
 <template>
-	<span class="ac-chip" :class="[`ac-chip--${event.kind}`, `ac-status-${event.status || 'none'}`, { 'is-overdue': event.isOverdue }]">
+	<span
+		class="ac-chip"
+		:class="[`ac-chip--${event.kind}`, `ac-status-${event.status || 'none'}`, { 'is-overdue': event.isOverdue }]"
+		@mouseenter="emit('hover', $event)"
+		@mouseleave="emit('leave', $event)"
+	>
 		<component :is="icon" class="ac-chip-icon" aria-hidden="true" />
 		<span v-if="timeText" class="ac-chip-time">{{ timeText }}</span>
 		<span class="ac-chip-title">{{ event.title }}</span>
