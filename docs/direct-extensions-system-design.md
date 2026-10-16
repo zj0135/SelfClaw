@@ -138,14 +138,18 @@ DirectTurnCapabilityLease
 
 ### 3.1 Skill
 
-Skill 是受信任的指令与参考资料包，入口为 `SKILL.md`。它本身不执行代码。
+Skill 是受信任的指令与参考资料包，入口为 `SKILL.md`。SelfClaw 不在进程内加载 Skill 代码：脚本一律作为 `run_skill_script` 的子进程执行，其余文件只能读取。
 
 - 独立 Skill 安装在 `%LocalAppData%/SelfClaw/skills/<skill-id>/`。
 - Plugin 内 Skill 使用规范 id：`<plugin-id>/<skill-id>`。
 - Agent 的 `skills` 是允许使用的 Skill 集合。
 - 用户在 composer 中选择 Skill 时插入 `[/<skill-id>]`，仅显式激活本轮。
 - 未显式激活的已绑定 Skill 只以紧凑目录暴露，模型可调用 `activate_skill` 按需加载。
-- Skill 引用的附加文件通过 `read_skill_resource` 分页读取，路径被限制在该 Skill 根目录内。
+- 附加文件按扩展名分成两类，各有独立白名单：**资源**（`.md`/`.txt`/`.json`/`.yaml`/`.csv` 等）用 `read_skill_resource` 分页读取；**脚本**（`.ps1`/`.psm1`/`.sh`/`.py`/`.js`/`.mjs`/`.cjs`/`.cmd`/`.bat`）用 `run_skill_script` 执行。脚本也允许用 `read_skill_resource` 查看（便于确认参数），但返回文本带 `[script]` 标记与 `run_skill_script` 执行指引：**读取不等于执行**，不得以 shell 复刻脚本体。二进制扩展名两类都不收录。
+- `SkillResourceIndexer` 在包内容哈希下缓存一份清单（递归深度 ≤ 3、条目 ≤ 200，跳过 reparse point 与 `node_modules`/`__pycache__` 等噪声目录）；`activate_skill` 返回 `SKILL.md` 时一并附上清单，`list_skill_resources` 用于分页浏览完整清单。没有清单时模型只能从正文猜文件名。
+- 所有读取与执行路径都经 `SkillPathGuard`：拒绝绝对路径与 `..`、要求候选路径落在 Skill 根内、逐级拒绝 reparse point。
+- `allowed-tools` 按规范解析并保留，但**不强制**：SelfClaw 的工具策略是回合级而非 Skill 级，无法在回合中途替换工具集。声明了 `allowed-tools` 的 Skill 会产生一条 `TurnDiagnostics.Degrade` 说明该限制未被强制执行。
+- frontmatter 的 `license`/`compatibility`/`metadata` 一并解析保留；无法识别的字段进入 `Warnings` 并转成降级提示，不再静默丢弃。
 
 ### 3.2 MCP Server
 
@@ -543,18 +547,22 @@ v1 接受 `.selfclaw-plugin`（ZIP 容器）和普通 `.zip`；包根必须有 `
 
 #### 按需激活
 
-对所有有效但未显式激活的 Skill，仅注入紧凑目录：id、name、description、triggers；同时注册两个只读工具：
+对所有有效但未显式激活的 Skill，仅注入紧凑目录：id、name、description 与 `Use when:` 触发提示；同时注册四个工具：
 
 ```text
 activate_skill(skillId)
 read_skill_resource(skillId, relativePath, startLine?, lineCount?)
+run_skill_script(skillId, relativePath, arguments?, timeoutSeconds?)
+list_skill_resources(skillId, relativeDirectory?, startIndex?, count?)
 ```
 
-- `activate_skill` 返回完整 `SKILL.md`，使模型能在同一 function loop 中继续执行。
-- `read_skill_resource` 只能访问已激活且有效 Skill 的根目录，做路径归一化、分页和文本大小限制。
-- 两个工具只读本地已安装内容，不触发桌面审批，但仍记录普通 tool run 以便审计。
+- `activate_skill` 返回完整 `SKILL.md`，并在其后附上该 Skill 的资源/脚本清单，使模型能在同一 function loop 中继续执行。
+- `read_skill_resource` / `list_skill_resources` 只能访问已激活且有效 Skill 的根目录，做路径归一化、分页和文本大小限制。
+- `run_skill_script` 以 Skill 根为工作目录、只注入最小环境变量集执行脚本；`ToolCallKind` 为 `Run`，**需要桌面审批**，因此 `read-only` / `none` 策略的回合拿不到它——此时 `SkillCapabilitySource` 对带脚本的 Skill 生成降级说明，而不是让清单凭空少一项。`.cs`/`.csx` 明确拒绝；`.sh` 只接受 PATH 上的 `bash`，不回落 WSL。
+- activate / read / list 三个只读工具不触发审批，但仍记录普通 tool run 以便审计。
 - **每轮激活上限**：显式 + 按需合计不超过 5 个；超限时 `activate_skill` 返回“本轮激活数已达上限”的说明文本而不是内容。对已激活（含显式激活）的 Skill 再次调用 `activate_skill` 幂等返回“已激活”提示，不重复注入全文。
-- Agent 本轮没有任何有效 Skill 时，两个工具与紧凑目录都不注册，不给模型制造空目录噪音。
+- **triggers 不参与激活**：frontmatter 的 `triggers` 只作为目录里的 `Use when:` 提示交给模型判断，没有任何匹配逻辑，也不会自动激活；显式激活只由 `[/<skill-id>]` token 触发。
+- Agent 本轮没有任何有效 Skill 时，四个工具与紧凑目录都不注册，不给模型制造空目录噪音。
 
 ### 8.3 Prompt 顺序
 
@@ -565,11 +573,13 @@ Direct system message 使用稳定顺序：
 2. SelfClaw capability usage policy
 3. 有效 Plugin directInstructions（按 plugin id 排序）
 4. 显式激活 Skill instructions（按用户 token 顺序）
-5. 可用 Skill compact catalog + activate/read 使用说明
+5. 可用 Skill compact catalog + activate/read/run/list 使用说明
 6. 能力降级摘要（如可选 MCP 暂不可用）
 ```
 
 每个第三方 section 带来源和不可伪造的边界标题。MCP `ServerInstructions` 默认不注入 system prompt，因为 remote server 不应自行获得 system-level 指令权。
+
+固定 policy section 明确要求用 `run_skill_script` 执行 Skill 脚本，且不得重建 Skill 安装路径或用 shell 复刻脚本体；`WorkspaceToolService` 对命中 `SelfClaw\skills` / `SelfClaw\plugins` 的 workspace shell 命令记录 Warning 作为事后审计信号。
 
 ### 8.4 跨回合语义与历史 token
 

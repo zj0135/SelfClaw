@@ -8,6 +8,13 @@ namespace SelfClaw.Infrastructure.Extensions.Skills;
 internal sealed partial class SkillPackageReader
 {
     private const string DefaultVersion = "0.0.0";
+    private const string AllowedToolsKey = "allowed-tools";
+
+    private static readonly HashSet<string> KnownScalarKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "name", "description", "version", "license", "compatibility"
+    };
+
     private readonly ExtensionPackageLimits _limits;
 
     public SkillPackageReader(ExtensionPackageLimits limits)
@@ -61,7 +68,12 @@ internal sealed partial class SkillPackageReader
             description.Trim(),
             string.IsNullOrWhiteSpace(version) ? DefaultVersion : Unquote(version),
             values.Triggers,
-            markdown);
+            markdown,
+            values.License,
+            values.Compatibility,
+            values.AllowedTools,
+            values.Metadata,
+            values.Warnings);
     }
 
     public static string NormalizeSkillId(string skillId)
@@ -90,6 +102,9 @@ internal sealed partial class SkillPackageReader
     {
         var scalars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var triggers = new List<string>();
+        var allowedTools = new List<string>();
+        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var warnings = new List<string>();
         var lines = frontMatter.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         for (var index = 0; index < lines.Length; index++)
         {
@@ -113,36 +128,62 @@ internal sealed partial class SkillPackageReader
                 continue;
             }
 
+            if (key.Equals(AllowedToolsKey, StringComparison.OrdinalIgnoreCase))
+            {
+                ParseAllowedTools(lines, ref index, value, allowedTools);
+                continue;
+            }
+
+            if (key.Equals("metadata", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseMetadata(lines, ref index, value, metadata, warnings);
+                continue;
+            }
+
             if (value is ">" or ">-" or "|" or "|-")
             {
                 value = ReadBlockScalar(lines, ref index, value.StartsWith('>'));
             }
 
             scalars[key] = Unquote(value);
+            if (!KnownScalarKeys.Contains(key))
+            {
+                warnings.Add($"Unrecognized front matter field '{key}' was ignored.");
+            }
         }
 
-        return new ParsedFrontMatter(scalars, triggers.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+        return new ParsedFrontMatter(
+            scalars,
+            triggers.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            scalars.GetValueOrDefault("license"),
+            scalars.GetValueOrDefault("compatibility"),
+            allowedTools.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            metadata,
+            warnings);
     }
 
-    private static void ParseTriggers(
+    /// <summary>
+    /// Accepts the specification's space-delimited form, the comma-delimited form that is common in the
+    /// wild, and the inline <c>[a, b]</c> and block-sequence shapes.
+    /// </summary>
+    private static void ParseAllowedTools(
         IReadOnlyList<string> lines,
         ref int index,
         string value,
-        ICollection<string> triggers)
+        ICollection<string> allowedTools)
     {
-        if (value.StartsWith('[') && value.EndsWith(']'))
-        {
-            foreach (var item in value[1..^1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                AddTrigger(triggers, item);
-            }
-
-            return;
-        }
-
         if (!string.IsNullOrWhiteSpace(value))
         {
-            AddTrigger(triggers, value);
+            var items = value.StartsWith('[') && value.EndsWith(']')
+                ? value[1..^1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                : value.Split(
+                    [',', ' ', '\t'],
+                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var item in items)
+            {
+                AddEntry(allowedTools, item);
+            }
+
             return;
         }
 
@@ -156,7 +197,85 @@ internal sealed partial class SkillPackageReader
             }
 
             index++;
-            AddTrigger(triggers, trimmed[2..]);
+            AddEntry(allowedTools, trimmed[2..]);
+        }
+    }
+
+    private static void ParseMetadata(
+        IReadOnlyList<string> lines,
+        ref int index,
+        string value,
+        IDictionary<string, string> metadata,
+        ICollection<string> warnings)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            warnings.Add("Front matter field 'metadata' must be a block mapping; the inline value was ignored.");
+            return;
+        }
+
+        while (index + 1 < lines.Count)
+        {
+            var next = lines[index + 1];
+            var trimmed = next.TrimStart();
+            if (!char.IsWhiteSpace(next.FirstOrDefault()) || trimmed.StartsWith("- ", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            var separator = trimmed.IndexOf(':');
+            if (separator <= 0)
+            {
+                break;
+            }
+
+            index++;
+            metadata[trimmed[..separator].Trim()] = Unquote(trimmed[(separator + 1)..].Trim());
+        }
+    }
+
+    private static void AddEntry(ICollection<string> target, string value)
+    {
+        var entry = Unquote(value.Trim());
+        if (!string.IsNullOrWhiteSpace(entry))
+        {
+            target.Add(entry);
+        }
+    }
+
+    private static void ParseTriggers(
+        IReadOnlyList<string> lines,
+        ref int index,
+        string value,
+        ICollection<string> triggers)
+    {
+        if (value.StartsWith('[') && value.EndsWith(']'))
+        {
+            foreach (var item in value[1..^1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                AddEntry(triggers, item);
+            }
+
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            AddEntry(triggers, value);
+            return;
+        }
+
+        while (index + 1 < lines.Count)
+        {
+            var next = lines[index + 1];
+            var trimmed = next.TrimStart();
+            if (!char.IsWhiteSpace(next.FirstOrDefault()) || !trimmed.StartsWith("- ", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            index++;
+            AddEntry(triggers, trimmed[2..]);
         }
     }
 
@@ -171,15 +290,6 @@ internal sealed partial class SkillPackageReader
         }
 
         return string.Join(fold ? " " : "\n", values).Trim();
-    }
-
-    private static void AddTrigger(ICollection<string> triggers, string value)
-    {
-        var trigger = Unquote(value.Trim());
-        if (!string.IsNullOrWhiteSpace(trigger))
-        {
-            triggers.Add(trigger);
-        }
     }
 
     private static string GetRequiredScalar(ParsedFrontMatter values, string key)
@@ -208,5 +318,10 @@ internal sealed partial class SkillPackageReader
 
     private sealed record ParsedFrontMatter(
         IReadOnlyDictionary<string, string> Scalars,
-        IReadOnlyList<string> Triggers);
+        IReadOnlyList<string> Triggers,
+        string? License,
+        string? Compatibility,
+        IReadOnlyList<string> AllowedTools,
+        IReadOnlyDictionary<string, string> Metadata,
+        IReadOnlyList<string> Warnings);
 }

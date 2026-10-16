@@ -317,23 +317,28 @@
 
 ---
 
-### T12 `SkillRuntimeToolset`（activate_skill / read_skill_resource）
+### T12 `SkillRuntimeToolset`（activate_skill / read_skill_resource / run_skill_script / list_skill_resources）
 
-**目标**：按需激活双工具 + 紧凑目录注入。（§8.2 按需激活）
+**目标**：按需激活 + 紧凑目录注入 + 资源发现 + 脚本执行。（§3.1、§8.2）
 
 **改动文件**
 
-- `SelfClaw.Infrastructure\Extensions\Skills\SkillRuntimeToolset.cs`：两个 `AIFunctionFactory.Create` 工具
-- `DirectTurnCapabilityResolver.cs`：目录 section + 工具注册
+- `SelfClaw.Infrastructure\Agents\Direct\Tools\SkillRuntimeToolset.cs`：四个 `AIFunctionFactory.Create` 工具
+- `SelfClaw.Infrastructure\Extensions\Skills\SkillPathGuard.cs`：路径限制（绝对路径/`..`/reparse point）
+- `SelfClaw.Infrastructure\Extensions\Skills\SkillResourceIndexer.cs`：资源/脚本清单与扩展名分类
+- `SelfClaw.Infrastructure\Agents\Direct\Tools\` 下的 `SkillResourceFormatter.cs`、`SkillScriptRunner.cs`、`DirectToolSource.cs`
+- `CapabilitySections.cs`：目录与固定 policy 文本
 
 **步骤**
 
-1. 紧凑目录只含 id/name/description/triggers；Agent 无有效 Skill 时目录与两工具都不注册（§8.2）。
-2. `activate_skill`：返回全文；每轮显式 + 按需合计 ≤ 5，超限返回说明文本；对已激活 id 幂等返回"已激活"（§8.2）。
-3. `read_skill_resource`：路径归一化限制在该 Skill 根目录内（复用 installer 的路径防护语义）、文本扩展名白名单、分页与大小上限（§13.4）。
-4. 两工具不走审批，但作为普通 function call 自然产生 tool run 记录（§8.2）；工具名进入 reserved names 清单（§9.3.1）。
+1. 紧凑目录只含 id/name/description 与 `Use when:` 触发提示（triggers 不参与激活，§8.2）；Agent 无有效 Skill 时目录与四个工具都不注册。
+2. `activate_skill`：返回全文 + 资源/脚本清单；每轮显式 + 按需合计 ≤ 5，超限返回说明文本；对已激活 id 幂等返回“已激活”（§8.2）。
+3. `read_skill_resource` / `list_skill_resources`：路径归一化限制在 Skill 根内、扩展名分类白名单、分页与大小上限（§13.4）。
+4. `run_skill_script`：`ToolCallKind.Run` + `RequiresApproval`；以 Skill 根为 cwd、只注入最小环境变量集；`.cs`/`.csx` 拒绝，`.sh` 不回落 WSL；`read-only`/`none` 策略下被过滤并由 `SkillCapabilitySource` 生成降级说明。
+5. 工具名进入 reserved names 清单（§9.3.1）；三个只读工具不走审批但仍产生 tool run 记录。
+6. `DirectToolSource` 从调用的 `skillId` 参数解析来源 id，使转录与审批栏显示 `Skill · <skill-id>`。
 
-**测试**：路径逃逸拒绝、白名单、分页、上限与幂等、未激活 Skill 的 resource 访问拒绝、无 Skill 时零注入。
+**测试**：路径逃逸/reparse point 拒绝、两类扩展名分类、清单缓存与截断标记、分页、上限与幂等、未激活访问拒绝、无 Skill 时零注入、解释器映射与缺失报错、非零退出与输出截断、最小环境变量、read-only 策略降级。
 
 ---
 

@@ -42,6 +42,62 @@ public sealed class SkillPackageReaderTests : IDisposable
         result.Version.Should().Be("1.2.3");
         result.Triggers.Should().Equal("review", "check diff");
         result.Content.Should().Be(markdown);
+        result.AllowedTools.Should().BeEmpty();
+        result.Metadata.Should().BeEmpty();
+        result.Warnings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReadAsync_parses_specification_fields_and_warns_about_unknown_ones()
+    {
+        Directory.CreateDirectory(_rootPath);
+        var path = Path.Combine(_rootPath, "SKILL.md");
+        await File.WriteAllTextAsync(path, """
+            ---
+            name: deploy
+            description: Deploys the site
+            license: MIT
+            compatibility: Requires PowerShell 7
+            allowed-tools:
+              - Bash(git:*)
+              - Edit
+            metadata:
+              author: platform-team
+              stability: experimental
+            unknown-field: ignored
+            ---
+            Body
+            """);
+        var reader = new SkillPackageReader(CreateLimits());
+
+        var result = await reader.ReadAsync(path);
+
+        result.License.Should().Be("MIT");
+        result.Compatibility.Should().Be("Requires PowerShell 7");
+        result.AllowedTools.Should().Equal("Bash(git:*)", "Edit");
+        result.Metadata.Should().Contain("author", "platform-team");
+        result.Metadata.Should().Contain("stability", "experimental");
+        result.Warnings.Should().ContainSingle().Which.Should().Contain("unknown-field");
+    }
+
+    [Theory]
+    [InlineData("allowed-tools: Read Write")]
+    [InlineData("allowed-tools: Read, Write")]
+    [InlineData("allowed-tools: [Read, Write]")]
+    [InlineData("allowed-tools:\n  - Read\n  - Write")]
+    public async Task ReadAsync_accepts_every_allowed_tools_shape(string allowedTools)
+    {
+        Directory.CreateDirectory(_rootPath);
+        var path = Path.Combine(_rootPath, "SKILL.md");
+        await File.WriteAllTextAsync(
+            path,
+            $"---\nname: deploy\ndescription: Deploys\n{allowedTools}\n---\nBody");
+        var reader = new SkillPackageReader(CreateLimits());
+
+        var result = await reader.ReadAsync(path);
+
+        result.AllowedTools.Should().Equal("Read", "Write");
+        result.Warnings.Should().BeEmpty();
     }
 
     [Theory]

@@ -89,6 +89,7 @@ internal sealed class SkillCapabilitySource
         {
             instructions.Add(CapabilitySections.SkillCatalog(resolvedSkills.Values, explicitIds));
             tools.AddRange(_runtimeToolset.CreateTools(resolvedSkills.Values.ToArray(), explicitIds));
+            ReportUnavailableScripts(resolvedSkills.Values, request.Agent.ToolPolicy, diagnostics);
         }
 
         return new SkillCapabilities(
@@ -129,12 +130,17 @@ internal sealed class SkillCapabilitySource
         {
             try
             {
+                var manifestPath = ExtensionInstallation.SkillManifestPath(package);
                 var metadata = await _contentCache.GetSkillMetadataAsync(
                         package,
-                        ExtensionInstallation.SkillManifestPath(package),
-                        token => _packageReader.ReadAsync(
-                            ExtensionInstallation.SkillManifestPath(package),
-                            token),
+                        manifestPath,
+                        token => _packageReader.ReadAsync(manifestPath, token),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                var resources = await _contentCache.GetSkillIndexAsync(
+                        package,
+                        package.InstallPath,
+                        token => SkillResourceIndexer.IndexAsync(package.InstallPath, token),
                         cancellationToken)
                     .ConfigureAwait(false);
                 resolvedSkills[package.Id] = new ResolvedSkill(
@@ -143,7 +149,9 @@ internal sealed class SkillCapabilitySource
                     metadata.Description,
                     metadata.Triggers,
                     package.InstallPath,
-                    metadata.Content);
+                    metadata.Content,
+                    resources);
+                ReportFrontMatterDiagnostics(package.Id, metadata, diagnostics);
             }
             catch (OperationCanceledException)
             {
@@ -195,6 +203,59 @@ internal sealed class SkillCapabilitySource
         }
 
         return adjustments;
+    }
+
+    /// <summary>
+    /// A policy that forbids running commands removes run_skill_script before the model ever sees it,
+    /// which would otherwise read as "this Skill has no scripts". The inventory still lists them, so the
+    /// gap is stated explicitly instead of leaving the model to rediscover it by trial and error.
+    /// </summary>
+    private static void ReportUnavailableScripts(
+        IEnumerable<ResolvedSkill> skills,
+        string toolPolicy,
+        TurnDiagnostics diagnostics)
+    {
+        if (DirectCapabilityRules.Allows(ToolCallKind.Run, toolPolicy))
+        {
+            return;
+        }
+
+        foreach (var skill in skills)
+        {
+            var scriptCount = skill.Resources.Entries.Count(entry => entry.Kind == SkillResourceKind.Script);
+            if (scriptCount > 0)
+            {
+                diagnostics.Degrade(
+                    $"Skill '{skill.Id}' ships {scriptCount} script file(s), but this turn's tool policy does not allow running commands.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The Agent Skills specification lets a Skill declare <c>allowed-tools</c>, but SelfClaw's tool policy is
+    /// per turn rather than per Skill and function invocation cannot swap the tool set mid-turn. Ignoring the
+    /// declaration silently would leave the author assuming a restriction that is not in force, so the
+    /// mismatch is surfaced as a degradation instead.
+    /// </summary>
+    /// <summary>
+    /// Shared with <see cref="PluginCapabilitySource"/>: a Plugin-contributed Skill parses the same
+    /// front matter, so it must report the same unsupported declarations instead of passing silently.
+    /// </summary>
+    internal static void ReportFrontMatterDiagnostics(
+        string skillId,
+        SkillPackageMetadata metadata,
+        TurnDiagnostics diagnostics)
+    {
+        if (metadata.AllowedTools.Count > 0)
+        {
+            diagnostics.Degrade(
+                $"Skill '{skillId}' declares allowed-tools ({string.Join(", ", metadata.AllowedTools)}), which SelfClaw cannot enforce per Skill; the turn's ToolPolicy governs tool use.");
+        }
+
+        foreach (var warning in metadata.Warnings)
+        {
+            diagnostics.Degrade($"Skill '{skillId}': {warning}");
+        }
     }
 
     private static void ValidateExplicit(

@@ -115,7 +115,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         lease.SystemInstructions[0].Should().StartWith("[SelfClaw Capability Policy]");
         lease.SystemInstructions[1].Should().Contain("BEGIN SELFCLAW SKILL review").And.Contain("# review instructions");
         lease.SystemInstructions[2].Should().Contain("SelfClaw Available Skills");
-        lease.Tools.Select(tool => tool.Name).Should().Equal("activate_skill", "read_skill_resource");
+        lease.Tools.Select(tool => tool.Name).Should().Equal("activate_skill", "read_skill_resource", "run_skill_script", "list_skill_resources");
         lease.Diagnostics.Should().ContainSingle(item => item.Contains("activated Skill 'review'"));
         lease.MessageAdjustments[request.Messages[0].Id].Should().Be("history  [/unknown]");
         lease.MessageAdjustments[request.Messages[1].Id].Should().Be("run  and ");
@@ -315,7 +315,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         lease.SystemInstructions[0].Should().Contain("Capability Policy");
         lease.SystemInstructions[1].Should().Contain("BEGIN SELFCLAW PLUGIN office");
         lease.SystemInstructions[2].Should().Contain("BEGIN SELFCLAW SKILL office/slides");
-        lease.Tools.Select(tool => tool.Name).Should().Equal("activate_skill", "read_skill_resource");
+        lease.Tools.Select(tool => tool.Name).Should().Equal("activate_skill", "read_skill_resource", "run_skill_script", "list_skill_resources");
         lease.MessageAdjustments[request.Messages.Single().Id].Should().BeEmpty();
         var drainTask = versionLeases.DrainAsync(pluginRoot);
         drainTask.IsCompleted.Should().BeFalse();
@@ -528,7 +528,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             new SkillCapabilitySource(
                 new SkillPackageReader(limits),
                 new SkillTokenParser(),
-                new SkillRuntimeToolset(),
+                new SkillRuntimeToolset(new SkillScriptRunner()),
                 contentCache),
             new PluginCapabilitySource(
                 pluginManifestReader ?? new PluginManifestReader(limits),
@@ -557,6 +557,89 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
 
     private static ExtensionPackageLimits CreateLimits()
         => new(1024 * 1024, 1024 * 1024, 100, 512 * 1024, 256 * 1024);
+
+    [Fact]
+    public async Task ResolveAsync_degrades_a_skill_that_declares_allowed_tools()
+    {
+        var installPath = Path.Combine(_rootPath, "skills", "restricted");
+        Directory.CreateDirectory(installPath);
+        await File.WriteAllTextAsync(Path.Combine(installPath, "SKILL.md"), """
+            ---
+            name: restricted
+            description: restricted description
+            allowed-tools: Read
+            ---
+            # restricted instructions
+            """);
+        var resolver = CreateResolver(new PackageRepository([CreatePackageRecord("restricted", true, installPath)]));
+
+        await using var lease = await resolver.ResolveAsync(CreateRequest(["restricted"], "run it"));
+
+        lease.Diagnostics.Should().ContainSingle(item =>
+            item.Contains("allowed-tools") && item.Contains("cannot enforce"));
+    }
+
+    [Theory]
+    [InlineData(AgentRuntimeDefinition.ReadOnlyToolPolicy)]
+    [InlineData(AgentRuntimeDefinition.NoneToolPolicy)]
+    public async Task ResolveAsync_degrades_skills_whose_scripts_the_tool_policy_cannot_run(string toolPolicy)
+    {
+        var installPath = Path.Combine(_rootPath, "skills", "deploy");
+        Directory.CreateDirectory(Path.Combine(installPath, "scripts"));
+        await File.WriteAllTextAsync(Path.Combine(installPath, "SKILL.md"), "---\nname: deploy\ndescription: Deploys\n---\n# deploy");
+        await File.WriteAllTextAsync(Path.Combine(installPath, "scripts", "run.ps1"), "exit 0");
+        var baseRequest = CreateRequest(["deploy"], "deploy it");
+        var resolver = CreateResolver(new PackageRepository([CreatePackageRecord("deploy", true, installPath)]));
+        var request = baseRequest with
+        {
+            Agent = baseRequest.Agent with { ToolPolicy = toolPolicy }
+        };
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        lease.Tools.Select(tool => tool.Name).Should().NotContain(SkillRuntimeToolset.RunSkillScriptToolName);
+        lease.Diagnostics.Should().ContainSingle(item => item.Contains("does not allow running commands"));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_degrades_a_plugin_skill_that_declares_allowed_tools()
+    {
+        var pluginRoot = Path.Combine(_rootPath, "plugins", "office", "versions", "v1");
+        Directory.CreateDirectory(Path.Combine(pluginRoot, "skills", "slides"));
+        await File.WriteAllTextAsync(Path.Combine(pluginRoot, "skills", "slides", "SKILL.md"), """
+            ---
+            name: slides
+            description: Build slides
+            allowed-tools: Read
+            ---
+            # Slide instructions
+            """);
+        var manifestJson = """
+            {
+              "schemaVersion": 1,
+              "id": "office",
+              "name": "Office",
+              "version": "1.0.0",
+              "permissions": ["workspace.read"],
+              "contributes": { "skills": [{ "id": "slides", "path": "skills/slides" }], "mcpServers": [] }
+            }
+            """;
+        await File.WriteAllTextAsync(Path.Combine(pluginRoot, "plugin.json"), manifestJson);
+        var now = DateTimeOffset.UtcNow;
+        var plugin = new ExtensionPackageRecord(
+            ExtensionKind.Plugin, "office", "Office", "1.0.0", "", pluginRoot,
+            "sha256:office", manifestJson, null, true, "[\"workspace.read\"]", now, now, now);
+        var resolver = CreateResolver(
+            new PackageRepository([plugin]),
+            new PluginManifestReader(CreateLimits()),
+            new PluginVersionLeaseManager());
+
+        await using var lease = await resolver.ResolveAsync(
+            CreateRequest([], "run it", pluginIds: ["office"]));
+
+        lease.Diagnostics.Should().ContainSingle(item =>
+            item.Contains("office/slides") && item.Contains("allowed-tools") && item.Contains("cannot enforce"));
+    }
 
     private async Task<ExtensionPackageRecord> CreatePackageAsync(string id, bool enabled)
     {

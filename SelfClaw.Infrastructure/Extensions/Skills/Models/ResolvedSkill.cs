@@ -6,4 +6,5 @@ internal sealed record ResolvedSkill(
     string Description,
     IReadOnlyList<string> Triggers,
     string InstallPath,
-    string Content);
+    string Content,
+    SkillResourceIndex Resources);

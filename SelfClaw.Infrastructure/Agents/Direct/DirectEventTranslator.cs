@@ -6,6 +6,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.AiProviders;
+using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Direct;
@@ -107,7 +108,7 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
                         JsonSerializer.Serialize(call.Arguments),
                         toolKind,
                         descriptor?.SourceKind ?? ToolSourceKind.BuiltIn,
-                        descriptor?.SourceId,
+                        descriptor is null ? null : DirectToolSource.ResolveId(descriptor, call.Arguments),
                         descriptor?.DisplayName));
                     break;
 

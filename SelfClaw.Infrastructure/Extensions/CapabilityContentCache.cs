@@ -7,7 +7,8 @@ namespace SelfClaw.Infrastructure.Extensions;
 
 /// <summary>
 /// Caches the static package content the Direct capability assembly would otherwise re-read on every
-/// turn: parsed Plugin manifests, Plugin instruction bodies, and Skill metadata. Entries are keyed by
+/// turn: parsed Plugin manifests, Plugin instruction bodies, Skill metadata, and Skill resource
+/// inventories. Entries are keyed by
 /// package identity, version, content hash, and install path. Health and binding changes do not alter
 /// package content. Reads that fail are never cached, so a transient I/O error cannot poison later turns.
 /// </summary>
@@ -20,6 +21,7 @@ internal sealed class CapabilityContentCache : IDisposable
     private readonly ConcurrentDictionary<string, Lazy<Task<PluginManifest>>> _manifests = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Lazy<Task<string>>> _instructionBodies = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Lazy<Task<SkillPackageMetadata>>> _skills = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Lazy<Task<SkillResourceIndex>>> _skillIndexes = new(StringComparer.Ordinal);
     private int _disposed;
 
     public CapabilityContentCache()
@@ -58,6 +60,13 @@ internal sealed class CapabilityContentCache : IDisposable
         Func<CancellationToken, Task<SkillPackageMetadata>> read,
         CancellationToken cancellationToken)
         => GetAsync(_skills, CreateKey(package, skillManifestPath), read, cancellationToken);
+
+    public Task<SkillResourceIndex> GetSkillIndexAsync(
+        ExtensionPackageRecord package,
+        string skillRoot,
+        Func<CancellationToken, Task<SkillResourceIndex>> read,
+        CancellationToken cancellationToken)
+        => GetAsync(_skillIndexes, CreateKey(package, skillRoot), read, cancellationToken);
 
     private static string CreateKey(ExtensionPackageRecord package, string relativePath)
         => string.Join('\0', package.Kind, package.Id, package.Version, package.ContentHash, package.InstallPath, relativePath);
@@ -113,5 +122,6 @@ internal sealed class CapabilityContentCache : IDisposable
         _manifests.Clear();
         _instructionBodies.Clear();
         _skills.Clear();
+        _skillIndexes.Clear();
     }
 }

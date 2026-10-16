@@ -231,7 +231,12 @@ public sealed class CapabilityContentCacheTests
                     "Create slides",
                     "1.0.0",
                     [],
-                    "# slides"));
+                    "# slides",
+                    null,
+                    null,
+                    [],
+                    new Dictionary<string, string>(),
+                    []));
             };
     }
 }

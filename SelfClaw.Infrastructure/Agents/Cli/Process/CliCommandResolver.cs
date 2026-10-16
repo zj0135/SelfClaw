@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
+using SelfClaw.Infrastructure.Processes;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Process;
 
@@ -39,7 +40,7 @@ public sealed partial class CliCommandResolver
         _path = path ?? Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         _pathExt = pathExt
             ?? Environment.GetEnvironmentVariable("PATHEXT")
-            ?? (_isWindows ? ".COM;.EXE;.BAT;.CMD" : string.Empty);
+            ?? (_isWindows ? ExecutableResolver.DefaultWindowsPathExtensions : string.Empty);
         _comSpec = comSpec
             ?? Environment.GetEnvironmentVariable("ComSpec")
             ?? "cmd.exe";
@@ -59,7 +60,7 @@ public sealed partial class CliCommandResolver
             throw new ArgumentException("Command must be a non-empty value.", nameof(command));
 
         var args = arguments ?? Array.Empty<string>();
-        var resolved = ResolveExecutablePath(command)
+        var resolved = ExecutableResolver.ResolvePath(command, _path, _pathExt, _isWindows, _fileExists)
             ?? throw new FileNotFoundException(
                 $"Could not locate executable '{command}' on PATH.", command);
 
@@ -72,87 +73,6 @@ public sealed partial class CliCommandResolver
             ArgumentList = args.ToArray(),
         };
     }
-
-    /// <summary>
-    /// Locates the absolute path of <paramref name="command"/>, returning <c>null</c> if not found.
-    /// An explicit path (containing a directory separator) is resolved directly; a bare name is
-    /// searched across every PATH directory and PATHEXT extension.
-    /// </summary>
-    private string? ResolveExecutablePath(string command)
-    {
-        var hasDirectory = command.IndexOf('/') >= 0 || command.IndexOf('\\') >= 0;
-        if (hasDirectory)
-        {
-            var full = Path.GetFullPath(command);
-            return ProbeWithExtensions(full);
-        }
-
-        foreach (var dir in _path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var trimmed = dir.Trim().Trim('"');
-            if (trimmed.Length == 0)
-                continue;
-
-            string candidate;
-            try
-            {
-                candidate = Path.Combine(trimmed, command);
-            }
-            catch (ArgumentException)
-            {
-                // Skip PATH entries containing invalid path characters.
-                continue;
-            }
-
-            var hit = ProbeWithExtensions(candidate);
-            if (hit is not null)
-                return hit;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Probes a candidate path for a launchable file, mirroring how the Windows shell resolves a name.
-    /// A candidate that already carries a recognised executable extension is probed as-is. A bare name
-    /// (or one with an unrecognised extension) resolves through PATHEXT <em>first</em> — the shell never
-    /// launches an extensionless file, so we must not either: npm installs a POSIX <c>claude</c> shell
-    /// shim right next to the launchable <c>claude.cmd</c>, and probing as-is first would wrongly pick the
-    /// shim and hand <c>CreateProcess</c> a script it cannot run. The as-is probe is kept only as a last
-    /// resort for an extensionless path given explicitly.
-    /// </summary>
-    private string? ProbeWithExtensions(string candidate)
-    {
-        if (!_isWindows)
-            return _fileExists(candidate) ? candidate : null;
-
-        // A recognised executable extension is launchable directly; use it verbatim.
-        var existingExt = Path.GetExtension(candidate);
-        if (existingExt.Length > 0 && PathExtContains(existingExt))
-            return _fileExists(candidate) ? candidate : null;
-
-        foreach (var ext in _pathExt.Split(';', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var normalized = ext.Trim();
-            if (normalized.Length == 0)
-                continue;
-            if (!normalized.StartsWith('.'))
-                normalized = "." + normalized;
-
-            var withExt = candidate + normalized;
-            if (_fileExists(withExt))
-                return withExt;
-        }
-
-        // No PATHEXT match: fall back to an exact extensionless file only as a last resort, so a real
-        // launchable target (e.g. claude.cmd) is always preferred over a non-executable sibling.
-        return _fileExists(candidate) ? candidate : null;
-    }
-
-    private bool PathExtContains(string extension) =>
-        _pathExt
-            .Split(';', StringSplitOptions.RemoveEmptyEntries)
-            .Any(e => string.Equals(e.Trim(), extension, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsBatchScript(string path)
     {

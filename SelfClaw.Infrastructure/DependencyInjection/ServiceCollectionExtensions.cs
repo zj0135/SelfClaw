@@ -127,6 +127,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISkillTokenDetector>(serviceProvider =>
             serviceProvider.GetRequiredService<SkillTokenParser>());
         services.AddSingleton<SkillRuntimeToolset>();
+        services.AddSingleton<SkillScriptRunner>();
         services.AddSingleton<McpToolAdapter>();
         services.AddSingleton<PluginContributionService>();
         services.AddSingleton<ExtensionStateChangeNotifier>();

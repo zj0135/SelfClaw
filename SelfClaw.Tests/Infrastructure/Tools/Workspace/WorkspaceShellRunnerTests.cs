@@ -47,5 +47,19 @@ public sealed class WorkspaceShellRunnerTests : IDisposable
         timer.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(8));
     }
 
+    [Theory]
+    [InlineData("Get-ChildItem \"$env:LOCALAPPDATA\\SelfClaw\\skills\\review\\scripts\"")]
+    [InlineData("Get-ChildItem $env:LOCALAPPDATA/SelfClaw/skills/review")]
+    [InlineData("dir %LOCALAPPDATA%\\SelfClaw\\plugins\\office")]
+    [InlineData("Get-ChildItem C:\\Users\\me\\AppData\\Local\\selfclaw\\SKILLS")]
+    public void TargetsSkillOrPluginInstall_recognizes_an_installation_path(string command)
+        => WorkspaceShellRunner.TargetsSkillOrPluginInstall(command).Should().BeTrue();
+
+    [Theory]
+    [InlineData("Get-ChildItem .\\skills")]
+    [InlineData("dotnet test SelfClaw.slnx")]
+    public void TargetsSkillOrPluginInstall_ignores_an_ordinary_command(string command)
+        => WorkspaceShellRunner.TargetsSkillOrPluginInstall(command).Should().BeFalse();
+
     public void Dispose() => Directory.Delete(_root, recursive: true);
 }

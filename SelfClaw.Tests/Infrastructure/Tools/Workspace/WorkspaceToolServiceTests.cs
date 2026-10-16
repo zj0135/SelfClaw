@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Tools.Workspace;
 
@@ -383,11 +384,45 @@ public sealed class WorkspaceToolServiceTests : IDisposable
         await action.Should().ThrowAsync<InvalidOperationException>();
     }
 
+    [Fact]
+    public async Task Run_shell_command_warns_when_it_reaches_into_a_skill_installation()
+    {
+        var logger = new RecordingLogger();
+        var service = new WorkspaceToolService(
+            new WorkspaceFileService(), new WorkspaceSearchService(), new WorkspaceShellRunner(), logger);
+
+        await service.RunShellCommandAsync(_rootPath, "Write-Output \"SelfClaw/skills\"", 30);
+
+        logger.Warnings.Should().ContainSingle().Which.Should().Contain("Skill or Plugin installation directory");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_rootPath))
         {
             Directory.Delete(_rootPath, true);
+        }
+    }
+
+    private sealed class RecordingLogger : ILogger<WorkspaceToolService>
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
         }
     }
 }

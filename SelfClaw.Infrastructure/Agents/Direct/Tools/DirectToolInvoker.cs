@@ -167,7 +167,7 @@ internal sealed class DirectToolInvoker
                     JsonSerializer.Serialize(arguments, binding.Tool.JsonSerializerOptions),
                     _request.ConversationId,
                     binding.Descriptor.SourceKind ?? ToolSourceKind.BuiltIn,
-                    binding.Descriptor.SourceId,
+                    DirectToolSource.ResolveId(binding.Descriptor, arguments),
                     binding.TransportSummary,
                     binding.AnnotationsJson),
                 cancellationToken);

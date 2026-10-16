@@ -79,7 +79,7 @@ internal sealed class PluginCapabilitySource
                     instructionSection = CapabilitySections.Plugin(plugin.Id, content);
                 }
 
-                var contributedSkills = await ReadSkillsAsync(plugin, manifest, cancellationToken)
+                var contributedSkills = await ReadSkillsAsync(plugin, manifest, diagnostics, cancellationToken)
                     .ConfigureAwait(false);
                 foreach (var contributedSkill in contributedSkills)
                 {
@@ -192,18 +192,24 @@ internal sealed class PluginCapabilitySource
     private async Task<IReadOnlyList<ResolvedSkill>> ReadSkillsAsync(
         ExtensionPackageRecord plugin,
         PluginManifest manifest,
+        TurnDiagnostics diagnostics,
         CancellationToken cancellationToken)
     {
         var skills = new List<ResolvedSkill>();
         foreach (var contribution in manifest.Contributions.Skills.OrderBy(skill => skill.Id, StringComparer.Ordinal))
         {
             var root = Path.Combine(plugin.InstallPath, contribution.Path);
+            var manifestPath = Path.Combine(root, ExtensionInstallation.SkillManifestName);
             var metadata = await _contentCache.GetSkillMetadataAsync(
                     plugin,
                     ExtensionInstallation.SkillManifestName + "/" + contribution.Id,
-                    token => _skillPackageReader.ReadAsync(
-                        Path.Combine(root, ExtensionInstallation.SkillManifestName),
-                        token),
+                    token => _skillPackageReader.ReadAsync(manifestPath, token),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            var resources = await _contentCache.GetSkillIndexAsync(
+                    plugin,
+                    root,
+                    token => SkillResourceIndexer.IndexAsync(root, token),
                     cancellationToken)
                 .ConfigureAwait(false);
             skills.Add(new ResolvedSkill(
@@ -212,7 +218,10 @@ internal sealed class PluginCapabilitySource
                 metadata.Description,
                 metadata.Triggers,
                 root,
-                metadata.Content));
+                metadata.Content,
+                resources));
+            SkillCapabilitySource.ReportFrontMatterDiagnostics(
+                $"{plugin.Id}/{contribution.Id}", metadata, diagnostics);
         }
 
         return skills;

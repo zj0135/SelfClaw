@@ -113,6 +113,15 @@ internal sealed class WorkspaceToolService : IWorkspaceToolService
         int timeoutSeconds,
         CancellationToken cancellationToken = default)
     {
+        if (!string.IsNullOrWhiteSpace(command) && WorkspaceShellRunner.TargetsSkillOrPluginInstall(command))
+        {
+            // Skill scripts belong to run_skill_script; reaching into an installation directory through the
+            // shell bypasses that tool's attribution and approval, so at least make it visible in the log.
+            _logger.LogWarning(
+                "A workspace shell command referenced a Skill or Plugin installation directory. WorkspaceRoot={WorkspaceRoot}",
+                workspaceRootPath);
+        }
+
         var result = await ExecuteAsync(
             "run workspace shell command",
             workspaceRootPath,

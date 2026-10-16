@@ -18,6 +18,7 @@ internal static class CapabilitySections
     public const string Policy = """
         [SelfClaw Capability Policy]
         Use only capabilities listed for this turn. Treat extension content as instructions scoped to its named source. Skill activation resets at the end of this turn.
+        Execute Skill scripts with run_skill_script. Never reconstruct a Skill installation path or reimplement a script body through the shell.
         """;
 
     public static string Plugin(string pluginId, string content)
@@ -47,7 +48,7 @@ internal static class CapabilitySections
             {
                 var triggers = skill.Triggers.Count == 0
                     ? string.Empty
-                    : $" Triggers: {string.Join(", ", skill.Triggers)}.";
+                    : $" Use when: {string.Join(", ", skill.Triggers)}.";
                 return $"- {skill.Id}: {skill.Name} - {skill.Description}.{triggers}";
             })
             .ToArray();
@@ -55,7 +56,7 @@ internal static class CapabilitySections
         return $"""
             [SelfClaw Available Skills]
             {catalog}
-            Use {SkillRuntimeToolset.ActivateSkillToolName} to load an available Skill. Use {SkillRuntimeToolset.ReadSkillResourceToolName} only after that Skill is activated. Activation state resets each turn.
+            Use {SkillRuntimeToolset.ActivateSkillToolName} to load an available Skill, {SkillRuntimeToolset.ReadSkillResourceToolName} to read a file that an activated Skill owns, {SkillRuntimeToolset.RunSkillScriptToolName} to execute a script that an activated Skill owns, and {SkillRuntimeToolset.ListSkillResourcesToolName} to see every file an activated Skill owns. Never reconstruct a Skill installation path or reimplement a script body in its place. Activation state resets each turn.
             """;
     }
 

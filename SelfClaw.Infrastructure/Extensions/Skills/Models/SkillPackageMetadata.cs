@@ -6,4 +6,9 @@ internal sealed record SkillPackageMetadata(
     string Description,
     string Version,
     IReadOnlyList<string> Triggers,
-    string Content);
+    string Content,
+    string? License,
+    string? Compatibility,
+    IReadOnlyList<string> AllowedTools,
+    IReadOnlyDictionary<string, string> Metadata,
+    IReadOnlyList<string> Warnings);
