@@ -243,7 +243,7 @@ public sealed class ProtocolBaselineProbeTests
         ];
         var lease = new DirectTurnCapabilityLease([],
             tools.Select(tool => new DirectToolBinding(tool,
-                new(tool.Name, ToolCallKind.Read))).ToArray(), new Dictionary<Guid, string>(), []);
+                new(ToolCallKind.Read))).ToArray(), new Dictionary<Guid, string>(), []);
         var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(native)
         { Options = adapter.CreateChatOptions(preparation, tools) };
         var request = (DirectChatTurnRequest)

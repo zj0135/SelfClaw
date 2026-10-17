@@ -199,7 +199,7 @@ public sealed class DirectConversationLoopTests
     private static DirectTurnCapabilityLease Lease(params AIFunction[] tools)
         => new(
             [],
-            tools.Select(tool => new DirectToolBinding(tool, new DirectToolDescriptor(tool.Name, ToolCallKind.Other))).ToArray(),
+            tools.Select(tool => new DirectToolBinding(tool, new DirectToolDescriptor(ToolCallKind.Other))).ToArray(),
             new Dictionary<Guid, string>(),
             []);
 

@@ -79,21 +79,6 @@ internal static class DirectCapabilityRules
         => server is { IsEnabled: true } && ceiling.McpServers.Any(captured =>
             string.Equals(captured.Id, server.Id, StringComparison.OrdinalIgnoreCase) && captured.ConfigRevision == server.ConfigRevision);
 
-    internal static SubagentPreflightFailure? CheckMcpServers(IReadOnlyList<string> serverIds,
-        DirectCapabilityCeiling ceiling, IReadOnlyList<McpServerConfigRecord> servers)
-    {
-        foreach (var id in serverIds)
-        {
-            if (!ceiling.McpServers.Any(captured => string.Equals(captured.Id, id, StringComparison.OrdinalIgnoreCase)))
-                return NotAuthorized($"MCP server '{id}' is not authorized by the captured ceiling.");
-            var server = servers.FirstOrDefault(item => string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
-            if (!IsMcpCurrent(server, ceiling))
-                return Unavailable($"MCP server '{id}' is unavailable or changed after task acceptance.");
-        }
-
-        return null;
-    }
-
     private static ExtensionPackageRecord? FindPackage(IReadOnlyList<ExtensionPackageRecord> packages, ExtensionKind kind, string id)
         => packages.FirstOrDefault(package => package.Kind == kind && string.Equals(package.Id, id, StringComparison.OrdinalIgnoreCase));
 

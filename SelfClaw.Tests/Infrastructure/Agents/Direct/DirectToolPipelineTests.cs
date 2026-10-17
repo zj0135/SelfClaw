@@ -79,7 +79,7 @@ public sealed class DirectToolPipelineTests : IDisposable
     {
         var request = (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(Guid.NewGuid());
         var function = AIFunctionFactory.Create(() => "ok", "same");
-        var binding = new DirectToolBinding(function, new DirectToolDescriptor("same", ToolCallKind.Read));
+        var binding = new DirectToolBinding(function, new DirectToolDescriptor(ToolCallKind.Read));
         Action duplicate = () => DirectTurnCapabilityResolver.BindTools(request, [binding, binding]);
         duplicate.Should().Throw<InvalidDataException>().WithMessage("*collision*");
         DirectTurnCapabilityResolver.BindTools(request, []).Should().BeEmpty();
@@ -92,7 +92,7 @@ public sealed class DirectToolPipelineTests : IDisposable
         // resolver must hand the runtime the same tool instance it was given.
         var request = (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(Guid.NewGuid());
         var function = AIFunctionFactory.Create(() => "ok", "same");
-        var binding = new DirectToolBinding(function, new DirectToolDescriptor("same", ToolCallKind.Read));
+        var binding = new DirectToolBinding(function, new DirectToolDescriptor(ToolCallKind.Read));
 
         var bound = DirectTurnCapabilityResolver.BindTools(request, [binding]).Should().ContainSingle().Subject;
 
@@ -152,7 +152,7 @@ public sealed class DirectToolPipelineTests : IDisposable
             ExcludeResultSchema = true,
             MarshalResult = (value, _, _) => ValueTask.FromResult(value)
         });
-        var binding = new DirectToolBinding(function, new DirectToolDescriptor("probe_tool", ToolCallKind.Other));
+        var binding = new DirectToolBinding(function, new DirectToolDescriptor(ToolCallKind.Other));
         var lease = new DirectTurnCapabilityLease([], [binding], new Dictionary<Guid, string>(), []);
         var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory, new FixedCapabilityResolver(lease));
         var request = (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(factory.Profile.Id);

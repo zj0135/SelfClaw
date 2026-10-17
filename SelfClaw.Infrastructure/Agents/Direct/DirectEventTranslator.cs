@@ -34,17 +34,12 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     private int? _contextWindowTokens;
     private bool _usageWritten;
     private bool _hasFinalText;
-    private string? _previousFragmentText;
 
     public string FinalText => _finalText.ToString();
 
     public string? FinalTextOrNull => _finalText.Length == 0 ? null : _finalText.ToString();
 
     public bool HasFinalText => _hasFinalText;
-
-    public string? SummaryText => _finalText.Length > 0 ? _finalText.ToString() : _previousFragmentText;
-
-    public TurnUsage? Usage => BuildUsage();
 
     public void PublishInputBoundary(ConversationInputBatch batch)
     {
@@ -53,11 +48,7 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
             throw new InvalidOperationException("The event consumer closed before the input boundary was published.");
     }
 
-    public void BeginInputSegment()
-    {
-        if (_finalText.Length > 0) _previousFragmentText = _finalText.ToString();
-        _finalText.Clear();
-    }
+    public void BeginInputSegment() => _finalText.Clear();
 
     /// <summary>
     /// Supplies the pricing, model id and context window the accumulated usage is reported with.

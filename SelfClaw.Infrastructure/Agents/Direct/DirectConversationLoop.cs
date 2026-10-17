@@ -60,7 +60,7 @@ internal sealed class DirectConversationLoop
                 return DirectLoopOutcome.BudgetExhausted;
             }
 
-            context.AppendResults(await ExecuteToolsAsync(setup, output, calls, requestIndex, cancellationToken).ConfigureAwait(false));
+            context.AppendResults(await ExecuteToolsAsync(setup, output, calls, cancellationToken).ConfigureAwait(false));
         }
         throw new InvalidOperationException("The provider request budget was not resolved.");
     }
@@ -145,7 +145,7 @@ internal sealed class DirectConversationLoop
     }
 
     private static async Task<IList<AIContent>> ExecuteToolsAsync(DirectTurnSetup.Ready setup,
-        DirectEventTranslator output, FunctionCallContent[] calls, int requestIndex, CancellationToken cancellationToken)
+        DirectEventTranslator output, FunctionCallContent[] calls, CancellationToken cancellationToken)
     {
         var results = new List<AIContent>();
         foreach (var call in calls)
@@ -154,7 +154,7 @@ internal sealed class DirectConversationLoop
             try
             {
                 result = new FunctionResultContent(call.CallId,
-                    await setup.Invoker.InvokeAsync(call, requestIndex, cancellationToken).ConfigureAwait(false));
+                    await setup.Invoker.InvokeAsync(call, cancellationToken).ConfigureAwait(false));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -177,7 +177,6 @@ internal sealed class DirectConversationLoop
             // It consumes through the END of the response, including calls emitted after finish_reason.
             var response = await TranslateResponseAsync(setup, context, output, usage, cancellationToken)
                 .ToChatResponseAsync(cancellationToken).ConfigureAwait(false);
-            response.Usage = usage.Build();
             return response;
         }
         finally

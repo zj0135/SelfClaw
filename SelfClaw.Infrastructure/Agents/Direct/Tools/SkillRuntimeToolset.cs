@@ -86,7 +86,7 @@ internal sealed class SkillRuntimeToolset
         {
             Name = name, Description = description, ExcludeResultSchema = true,
             MarshalResult = (value, _, _) => ValueTask.FromResult(value)
-        }), new DirectToolDescriptor(name, kind, ToolSourceKind.Skill, DisplayName: displayName), requiresApproval);
+        }), new DirectToolDescriptor(kind, ToolSourceKind.Skill, DisplayName: displayName), requiresApproval);
 
     private sealed class BoundSkillTools
     {

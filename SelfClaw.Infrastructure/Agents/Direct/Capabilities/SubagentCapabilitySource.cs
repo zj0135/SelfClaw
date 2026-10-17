@@ -117,7 +117,6 @@ internal sealed class SubagentCapabilitySource
         return new DirectToolBinding(
             new EnumeratedSubagentFunction(tool, EnumerateSubagentIds(tool.JsonSchema, subagentIds)),
             new DirectToolDescriptor(
-                DelegateToolName,
                 ToolCallKind.Run,
                 ToolSourceKind.BuiltIn,
                 DisplayName: DelegateDisplayName));
@@ -158,7 +157,7 @@ internal sealed class SubagentCapabilitySource
         {
             Name = name, Description = description, ExcludeResultSchema = true,
             MarshalResult = MarshalDirectResult(name)
-        }), new DirectToolDescriptor(name, kind, ToolSourceKind.BuiltIn, DisplayName: displayName));
+        }), new DirectToolDescriptor(kind, ToolSourceKind.BuiltIn, DisplayName: displayName));
 
     private static Func<object?, Type?, CancellationToken, ValueTask<object?>> MarshalDirectResult(string toolName)
         => (value, _, _) => value is DirectToolResult result

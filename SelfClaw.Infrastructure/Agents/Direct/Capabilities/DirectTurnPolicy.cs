@@ -26,9 +26,6 @@ internal sealed record DirectTurnPolicy(DirectTurnOrigin Origin, DirectCapabilit
     /// <summary>A continuation must have committed its durable execution checkpoint before any tool runs.</summary>
     internal bool RequiresToolExecutionCheckpoint => Origin == DirectTurnOrigin.Continuation;
 
-    /// <summary>A continuation resumes the parent's completion batch instead of a fresh user message.</summary>
-    internal bool HasFreshUserMessage => Origin != DirectTurnOrigin.Continuation;
-
     /// <summary>A Subagent child cannot delegate further, and v1 automation never delegates either.</summary>
     internal bool CanDelegateToSubagent => Origin is not (DirectTurnOrigin.Subagent or DirectTurnOrigin.Automation);
 

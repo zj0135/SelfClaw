@@ -47,7 +47,6 @@ internal sealed class DirectToolInvoker
 
     public async ValueTask<object?> InvokeAsync(
         FunctionCallContent callContent,
-        int requestIndex,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(callContent);

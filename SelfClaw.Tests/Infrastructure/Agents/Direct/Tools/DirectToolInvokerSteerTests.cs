@@ -132,7 +132,7 @@ public sealed class DirectToolInvokerSteerTests
         var executions = new ExecutionCounter();
         var pipeline = CreatePipeline(steering, executions, tool: () => throw new InvalidOperationException("broken"));
         var invoke = (string callId) => pipeline.Invoker
-            .InvokeAsync(new FunctionCallContent(callId, "probe_tool", new AIFunctionArguments()), 0, CancellationToken.None)
+            .InvokeAsync(new FunctionCallContent(callId, "probe_tool", new AIFunctionArguments()), CancellationToken.None)
             .AsTask();
 
         var first = await invoke("call-1");
@@ -179,7 +179,7 @@ public sealed class DirectToolInvokerSteerTests
             ExcludeResultSchema = true,
             MarshalResult = (value, _, _) => ValueTask.FromResult(value)
         });
-        var binding = new DirectToolBinding(function, new DirectToolDescriptor("probe_tool", ToolCallKind.Other),
+        var binding = new DirectToolBinding(function, new DirectToolDescriptor(ToolCallKind.Other),
             requiresApproval);
         var request = CreateRequest(approvalHandler) with { Steering = steering };
         var invoker = new DirectToolInvoker(request,
@@ -206,7 +206,7 @@ public sealed class DirectToolInvokerSteerTests
         internal DirectToolInvoker Invoker { get; } = invoker;
 
         internal ValueTask<object?> InvokeAsync(CancellationToken cancellationToken = default)
-            => Invoker.InvokeAsync(new FunctionCallContent("call-1", "probe_tool", new AIFunctionArguments()), 0, cancellationToken);
+            => Invoker.InvokeAsync(new FunctionCallContent("call-1", "probe_tool", new AIFunctionArguments()), cancellationToken);
     }
 
     internal sealed class FakeSteering : IDirectTurnSteering

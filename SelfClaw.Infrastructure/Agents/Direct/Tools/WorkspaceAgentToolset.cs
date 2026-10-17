@@ -78,7 +78,7 @@ internal sealed class WorkspaceAgentToolset
             MarshalResult = (value, _, _) => value is TResult result
                 ? ValueTask.FromResult<object?>(format(result))
                 : throw new InvalidOperationException($"Tool '{name}' returned an invalid result.")
-        }), new DirectToolDescriptor(name, kind, ToolSourceKind.BuiltIn, DisplayName: displayName), requiresApproval);
+        }), new DirectToolDescriptor(kind, ToolSourceKind.BuiltIn, DisplayName: displayName), requiresApproval);
 
     private static DirectToolResult FormatEntries(IReadOnlyList<WorkspaceFileEntry> entries)
         => new(ToolCallStatus.Completed, WorkspaceToolSummaries.Summarize(entries),

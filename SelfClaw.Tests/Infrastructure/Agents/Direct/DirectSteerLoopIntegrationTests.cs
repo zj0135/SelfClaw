@@ -243,7 +243,7 @@ public sealed class DirectSteerLoopIntegrationTests
                     ExcludeResultSchema = true,
                     MarshalResult = (value, _, _) => ValueTask.FromResult(value)
                 });
-                return new DirectToolBinding(function, new(name, ToolCallKind.Other));
+                return new DirectToolBinding(function, new(ToolCallKind.Other));
             })
             .ToArray();
         var lease = new DirectTurnCapabilityLease([], bindings, new Dictionary<Guid, string>(), []);

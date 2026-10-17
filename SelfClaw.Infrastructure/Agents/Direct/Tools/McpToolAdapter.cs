@@ -41,7 +41,6 @@ internal sealed class McpToolAdapter
             ? ToolCallKind.Read
             : ToolCallKind.Other;
         var descriptor = new DirectToolDescriptor(
-            providerName,
             kind,
             ToolSourceKind.Mcp,
             configuration.Id,

@@ -321,7 +321,7 @@ public sealed class DirectAgentChatRuntimeTests
         var userMessage = request.Messages.Single(message => message.Role == MessageRole.User && message.TurnId == request.TurnId);
         var capabilityLease = new DirectTurnCapabilityLease(
             ["Capability policy."],
-            [new DirectToolBinding(tool, new(tool.Name, ToolCallKind.Search))],
+            [new DirectToolBinding(tool, new(ToolCallKind.Search))],
             new Dictionary<Guid, string> { [userMessage.Id] = "adjusted prompt" },
             []);
         var runtime = CreateRuntime(factory, new FakeCapabilityResolver(capabilityLease));

@@ -401,7 +401,7 @@ public sealed class DirectConversationLoopContractTests
     {
         var scope = new DirectTurnLeaseScope();
         if (dispose is not null) scope.Add(new Resource(dispose));
-        return new([], [new DirectToolBinding(tool, new("probe", ToolCallKind.Other))], new Dictionary<Guid, string>(), [], scope);
+        return new([], [new DirectToolBinding(tool, new(ToolCallKind.Other))], new Dictionary<Guid, string>(), [], scope);
     }
 
     private static AIFunction Tool(Func<object> call) => AIFunctionFactory.Create(call,

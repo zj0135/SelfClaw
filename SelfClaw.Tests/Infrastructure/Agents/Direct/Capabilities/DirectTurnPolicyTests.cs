@@ -24,7 +24,6 @@ public sealed class DirectTurnPolicyTests
         policy.RequiresCapturedCapabilities.Should().BeFalse();
         policy.ShrinksToCapturedCapabilities.Should().BeFalse();
         policy.RequiresToolExecutionCheckpoint.Should().BeFalse();
-        policy.HasFreshUserMessage.Should().BeTrue();
         policy.CanDelegateToSubagent.Should().BeTrue();
         policy.AllowsSkill("alpha/skill").Should().BeTrue();
         policy.AllowsMcpServer(Server("git", revision: 99)).Should().BeTrue();
@@ -40,7 +39,6 @@ public sealed class DirectTurnPolicyTests
         policy.RequiresCapturedCapabilities.Should().BeTrue();
         policy.ShrinksToCapturedCapabilities.Should().BeFalse();
         policy.RequiresToolExecutionCheckpoint.Should().BeFalse();
-        policy.HasFreshUserMessage.Should().BeTrue();
         policy.CanDelegateToSubagent.Should().BeFalse();
         policy.AllowsSkill("alpha/skill").Should().BeTrue();
         policy.AllowsSkill("other/skill").Should().BeFalse();
@@ -58,7 +56,6 @@ public sealed class DirectTurnPolicyTests
         policy.RequiresCapturedCapabilities.Should().BeFalse();
         policy.ShrinksToCapturedCapabilities.Should().BeTrue();
         policy.RequiresToolExecutionCheckpoint.Should().BeTrue();
-        policy.HasFreshUserMessage.Should().BeFalse();
         policy.CanDelegateToSubagent.Should().BeTrue();
         policy.AllowsSkill("alpha/skill").Should().BeTrue();
         policy.AllowsSkill("other/skill").Should().BeFalse();
@@ -76,7 +73,6 @@ public sealed class DirectTurnPolicyTests
         policy.RequiresCapturedCapabilities.Should().BeFalse();
         policy.ShrinksToCapturedCapabilities.Should().BeFalse();
         policy.RequiresToolExecutionCheckpoint.Should().BeFalse();
-        policy.HasFreshUserMessage.Should().BeTrue();
         policy.CanDelegateToSubagent.Should().BeFalse();
         // A sampled skill/MCP must survive even though no ceiling is captured, or the task runs silently
         // without the tools it was configured with.

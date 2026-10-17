@@ -172,7 +172,7 @@ public sealed class DirectInputBoundaryIntegrationTests
             if (Interlocked.Increment(ref calls) == 1) await context.SeedClaimAsync("U1");
             return new DirectToolResult(ToolCallStatus.Completed, "ok", JsonSerializer.SerializeToElement("ok"), "ok");
         }, new AIFunctionFactoryOptions { Name = "probe", MarshalResult = (value, _, _) => ValueTask.FromResult(value) });
-        var lease = new DirectTurnCapabilityLease([], [new DirectToolBinding(function, new("probe", ToolCallKind.Other))],
+        var lease = new DirectTurnCapabilityLease([], [new DirectToolBinding(function, new(ToolCallKind.Other))],
             new Dictionary<Guid, string>(), []);
         var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(provider);
         request = new DirectChatTurnRequest(context.Record.Id, context.Conversation.Id, null, context.Agent,

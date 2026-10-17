@@ -154,7 +154,6 @@ public sealed class DirectToolInvokerTests
         var action = () => pipeline.Invoker
             .InvokeAsync(
                 new FunctionCallContent("call-1", "other", new AIFunctionArguments()),
-                0,
                 CancellationToken.None)
             .AsTask();
 
@@ -180,7 +179,7 @@ public sealed class DirectToolInvokerTests
             "Echo a value.");
         var binding = new DirectToolBinding(
             function,
-            new DirectToolDescriptor("mcp__git__echo", ToolCallKind.Run, ToolSourceKind.Mcp, "git", "echo"),
+            new DirectToolDescriptor(ToolCallKind.Run, ToolSourceKind.Mcp, "git", "echo"),
             requiresApproval,
             "stdio: node",
             "{\"readOnlyHint\":true}");
@@ -227,7 +226,6 @@ public sealed class DirectToolInvokerTests
             var arguments = new AIFunctionArguments { ["value"] = "ok" };
             return Invoker.InvokeAsync(
                 new FunctionCallContent("call-1", function.Name, arguments),
-                0,
                 cancellationToken);
         }
     }

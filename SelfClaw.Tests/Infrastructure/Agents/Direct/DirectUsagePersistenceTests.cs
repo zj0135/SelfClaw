@@ -167,7 +167,7 @@ public sealed class DirectUsagePersistenceTests
         var tool = AIFunctionFactory.Create(() => new DirectToolResult(ToolCallStatus.Completed, "ok",
             JsonSerializer.SerializeToElement("ok"), "ok"), new AIFunctionFactoryOptions
             { Name = "probe", MarshalResult = (value, _, _) => ValueTask.FromResult(value) });
-        var lease = new DirectTurnCapabilityLease([], [new DirectToolBinding(tool, new("probe", ToolCallKind.Other))],
+        var lease = new DirectTurnCapabilityLease([], [new DirectToolBinding(tool, new(ToolCallKind.Other))],
             new Dictionary<Guid, string>(), []);
         return (DirectAgentChatRuntimeTests.CreateRuntime(factory, new Resolver(lease)),
             (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(factory.Profile.Id));
