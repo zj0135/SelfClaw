@@ -11,16 +11,17 @@ using SelfClaw.Infrastructure.AiProviders;
 
 namespace SelfClaw.Infrastructure.Agents.Direct;
 
-internal sealed class DirectConversationLoop
+internal static class DirectConversationLoop
 {
     internal const int MaximumProviderRequestsPerTurn = 128;
 
-    public async Task<DirectLoopOutcome> RunAsync(DirectTurnSetup.Ready setup, DirectEventTranslator output,
+    public static async Task<DirectLoopOutcome> RunAsync(DirectTurnSetup setup, DirectEventTranslator output,
         CancellationToken cancellationToken)
     {
         var context = new DirectConversationContext(setup.Messages);
         for (var requestIndex = 0; requestIndex < MaximumProviderRequestsPerTurn; requestIndex++)
         {
+            var isLastRequest = requestIndex + 1 == MaximumProviderRequestsPerTurn;
             cancellationToken.ThrowIfCancellationRequested();
             if (await ConsumeAvailableInputsAsync(setup, context, output, cancellationToken).ConfigureAwait(false) is { } budgetOutcome)
                 return budgetOutcome;
@@ -43,17 +44,13 @@ internal sealed class DirectConversationLoop
                 var batch = await inputs.ReadBoundaryAsync(cancellationToken).ConfigureAwait(false);
                 batch ??= await inputs.ReadFinalBoundaryAsync(cancellationToken).ConfigureAwait(false);
                 if (batch is null) return DirectLoopOutcome.Completed;
-                if (requestIndex + 1 == MaximumProviderRequestsPerTurn) return DirectLoopOutcome.BudgetExhausted;
-                if (!FitsBudget(setup, context, batch))
-                {
-                    await inputs.HoldUnconsumedAsync(ConversationInputReason.ContextBudgetExceeded, cancellationToken).ConfigureAwait(false);
-                    return DirectLoopOutcome.ContextBudgetExceeded;
-                }
-
-                await ConsumeInputAsync(inputs, batch, context, output, cancellationToken).ConfigureAwait(false);
+                if (isLastRequest) return DirectLoopOutcome.BudgetExhausted;
+                if (await TryConsumeBatchAsync(setup, inputs, batch, context, output, cancellationToken)
+                        .ConfigureAwait(false) is { } held)
+                    return held;
                 continue;
             }
-            if (requestIndex + 1 == MaximumProviderRequestsPerTurn)
+            if (isLastRequest)
             {
                 CancelCalls(setup, output, calls, "BudgetExhausted",
                     $"The turn reached its {MaximumProviderRequestsPerTurn} provider request limit before this tool could execute.");
@@ -65,23 +62,41 @@ internal sealed class DirectConversationLoop
         throw new InvalidOperationException("The provider request budget was not resolved.");
     }
 
-    private static async Task<DirectLoopOutcome?> ConsumeAvailableInputsAsync(DirectTurnSetup.Ready setup,
+    private static async Task<DirectLoopOutcome?> ConsumeAvailableInputsAsync(DirectTurnSetup setup,
         DirectConversationContext context, DirectEventTranslator output, CancellationToken cancellationToken)
     {
         if (setup.InputSession is not { } inputs) return null;
         while (await inputs.ReadBoundaryAsync(cancellationToken).ConfigureAwait(false) is { } batch)
         {
-            if (!FitsBudget(setup, context, batch))
-            {
-                // The turn cannot carry the claimed batch without silently dropping protected content.
-                await inputs.HoldUnconsumedAsync(ConversationInputReason.ContextBudgetExceeded, cancellationToken)
-                    .ConfigureAwait(false);
-                return DirectLoopOutcome.ContextBudgetExceeded;
-            }
-
-            await ConsumeInputAsync(inputs, batch, context, output, cancellationToken).ConfigureAwait(false);
+            if (await TryConsumeBatchAsync(setup, inputs, batch, context, output, cancellationToken)
+                    .ConfigureAwait(false) is { } held)
+                return held;
         }
 
+        return null;
+    }
+
+    /// <summary>
+    /// Carries one claimed input batch into the turn. A batch that no longer fits is held for the next turn
+    /// instead of being consumed; the null return means the turn may continue with it.
+    /// </summary>
+    private static async Task<DirectLoopOutcome?> TryConsumeBatchAsync(DirectTurnSetup setup, IDirectTurnInputSession inputs,
+        ConversationInputBatch batch, DirectConversationContext context, DirectEventTranslator output,
+        CancellationToken cancellationToken)
+    {
+        if (!FitsBudget(setup, context, batch))
+        {
+            // The turn cannot carry the claimed batch without silently dropping protected content.
+            await inputs.HoldUnconsumedAsync(ConversationInputReason.ContextBudgetExceeded, cancellationToken)
+                .ConfigureAwait(false);
+            return DirectLoopOutcome.ContextBudgetExceeded;
+        }
+
+        output.PublishInputBoundary(batch);
+        var consumed = await inputs.WaitForCommitAsync(batch, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        context.AppendInputs(consumed.Messages);
+        output.BeginInputSegment();
         return null;
     }
 
@@ -90,7 +105,7 @@ internal sealed class DirectConversationLoop
     /// context window is the batch refused before consumption; the already-consumed transcript is never
     /// trimmed to make room.
     /// </summary>
-    private static bool FitsBudget(DirectTurnSetup.Ready setup, DirectConversationContext context, ConversationInputBatch batch)
+    private static bool FitsBudget(DirectTurnSetup setup, DirectConversationContext context, ConversationInputBatch batch)
     {
         if (AiChatOptions.ResolveContextWindowTokens(setup.ProviderLease.Profile) is not int contextWindow)
             return true;
@@ -99,16 +114,6 @@ internal sealed class DirectConversationLoop
                    DirectPromptComposer.EstimateTools(setup.ProviderLease.Options.Tools) + reserve;
         var batchTokens = batch.Inputs.Sum(input => DirectPromptComposer.EstimateUserPrompt(input.Prompt));
         return used + batchTokens <= contextWindow;
-    }
-
-    private static async Task ConsumeInputAsync(IDirectTurnInputSession inputs, ConversationInputBatch batch,
-        DirectConversationContext context, DirectEventTranslator output, CancellationToken cancellationToken)
-    {
-        output.PublishInputBoundary(batch);
-        var consumed = await inputs.WaitForCommitAsync(batch, cancellationToken).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        context.AppendInputs(consumed.Messages);
-        output.BeginInputSegment();
     }
 
     private static DirectLoopOutcome? GetTerminalOutcome(ChatResponse response)
@@ -136,7 +141,7 @@ internal sealed class DirectConversationLoop
         _ => content.RawRepresentation is not null
     };
 
-    private static void CancelCalls(DirectTurnSetup.Ready setup, DirectEventTranslator output,
+    private static void CancelCalls(DirectTurnSetup setup, DirectEventTranslator output,
         IEnumerable<FunctionCallContent> calls, string reason, string detail)
     {
         foreach (var call in calls.DistinctBy(call => call.CallId))
@@ -144,7 +149,7 @@ internal sealed class DirectConversationLoop
                 ToolCallStatus.Canceled, reason, JsonSerializer.SerializeToElement(new { reason }), detail)));
     }
 
-    private static async Task<IList<AIContent>> ExecuteToolsAsync(DirectTurnSetup.Ready setup,
+    private static async Task<IList<AIContent>> ExecuteToolsAsync(DirectTurnSetup setup,
         DirectEventTranslator output, FunctionCallContent[] calls, CancellationToken cancellationToken)
     {
         var results = new List<AIContent>();
@@ -167,7 +172,7 @@ internal sealed class DirectConversationLoop
         return results;
     }
 
-    private static async Task<ChatResponse> ReadResponseAsync(DirectTurnSetup.Ready setup,
+    private static async Task<ChatResponse> ReadResponseAsync(DirectTurnSetup setup,
         DirectConversationContext context, DirectEventTranslator output, CancellationToken cancellationToken)
     {
         var usage = new RequestUsageAccumulator(setup.ProviderLease.UsageUpdateKind);
@@ -186,7 +191,7 @@ internal sealed class DirectConversationLoop
         }
     }
 
-    private static async IAsyncEnumerable<ChatResponseUpdate> TranslateResponseAsync(DirectTurnSetup.Ready setup,
+    private static async IAsyncEnumerable<ChatResponseUpdate> TranslateResponseAsync(DirectTurnSetup setup,
         DirectConversationContext context, DirectEventTranslator output, RequestUsageAccumulator usage,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -199,6 +204,6 @@ internal sealed class DirectConversationLoop
         }
     }
 
-    private static void PublishResult(DirectTurnSetup.Ready setup, DirectEventTranslator output, FunctionResultContent result)
+    private static void PublishResult(DirectTurnSetup setup, DirectEventTranslator output, FunctionResultContent result)
         => output.TranslateUpdate(new ChatResponseUpdate(ChatRole.Tool, [result]), setup.CapabilityLease.Bindings);
 }

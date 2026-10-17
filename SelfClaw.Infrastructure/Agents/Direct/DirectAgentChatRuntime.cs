@@ -113,12 +113,11 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         try
         {
             setup = await SetupTurnAsync(request, writer, cancellationToken).ConfigureAwait(false);
-            var ready = (DirectTurnSetup.Ready)setup;
             output.ConfigureUsage(
-                ready.ProviderLease.Profile.Configuration,
-                ready.ProviderLease.Profile.Model,
-                AiChatOptions.ResolveContextWindowTokens(ready.ProviderLease.Profile));
-            var outcome = await new DirectConversationLoop().RunAsync(ready, output, cancellationToken).ConfigureAwait(false);
+                setup.ProviderLease.Profile.Configuration,
+                setup.ProviderLease.Profile.Model,
+                AiChatOptions.ResolveContextWindowTokens(setup.ProviderLease.Profile));
+            var outcome = await DirectConversationLoop.RunAsync(setup, output, cancellationToken).ConfigureAwait(false);
             output.ReportUsage();
             WriteTerminalOutcome(writer, outcome, output);
         }
@@ -139,10 +138,9 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         }
         finally
         {
-            var ready = setup as DirectTurnSetup.Ready;
             if (setup is not null)
             {
-                await DisposeResourcesAsync(ready?.ProviderLease, setup.CapabilityLease).ConfigureAwait(false);
+                await DisposeResourcesAsync(setup.ProviderLease, setup.CapabilityLease).ConfigureAwait(false);
             }
 
             // Every path above writes exactly one terminal; the dispatcher synthesizes one if a future
@@ -212,7 +210,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                     AiChatOptions.ResolveContextWindowTokens(providerLease.Profile),
                     providerLease.Options.MaxOutputTokens),
                 providerLease.Options.Tools);
-            return new DirectTurnSetup.Ready(capabilityLease, providerLease, invoker, messages, request.InputSession);
+            return new DirectTurnSetup(capabilityLease, providerLease, invoker, messages, request.InputSession);
         }
         catch
         {
@@ -228,73 +226,56 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     /// history, so the model can resume from it if the user continues); a length stop without text
     /// and an exhausted tool loop are both reported as Failed.
     /// </summary>
-    private RunCompletedEvent WriteTerminalOutcome(
+    private void WriteTerminalOutcome(
         ChannelWriter<AgentStreamEvent> writer,
         DirectLoopOutcome outcome,
         DirectEventTranslator output)
     {
         if (outcome == DirectLoopOutcome.ContentFiltered)
         {
-            var blocked = new RunCompletedEvent(RunCompletionStatus.Blocked, output.FinalTextOrNull,
+            Write(writer, RunCompletionStatus.Blocked, output.FinalTextOrNull,
                 "The provider filtered or refused the response (ContentFilter).");
-            writer.TryWrite(blocked);
-            return blocked;
+            return;
         }
 
         if (outcome == DirectLoopOutcome.Length && output.HasFinalText)
         {
             _logger.LogInformation(
                 "Direct AI agent turn stopped at the output-token cap; reporting it as truncated.");
-            var truncated = new RunCompletedEvent(
-                RunCompletionStatus.Truncated,
-                output.FinalText,
-                TruncatedMessage);
-            writer.TryWrite(truncated);
-            return truncated;
+            Write(writer, RunCompletionStatus.Truncated, output.FinalText, TruncatedMessage);
+            return;
         }
 
         if (outcome == DirectLoopOutcome.Length)
         {
             _logger.LogWarning(
                 "Direct AI agent turn hit the output-token cap without producing any text.");
-            var failed = new RunCompletedEvent(
-                RunCompletionStatus.Failed,
-                ErrorMessage: TruncatedWithoutOutputMessage,
-                FinalText: null);
-            writer.TryWrite(failed);
-            return failed;
+            Write(writer, RunCompletionStatus.Failed, null, TruncatedWithoutOutputMessage);
+            return;
         }
 
         if (outcome == DirectLoopOutcome.ContextBudgetExceeded)
         {
             _logger.LogWarning("Direct AI agent turn could not fit a steer batch into the model context window.");
-            var failed = new RunCompletedEvent(
-                RunCompletionStatus.Failed,
-                output.FinalTextOrNull,
+            Write(writer, RunCompletionStatus.Failed, output.FinalTextOrNull,
                 "ContextBudgetExceeded: the queued steer could not fit in the model context window; the unconsumed input was held.");
-            writer.TryWrite(failed);
-            return failed;
+            return;
         }
 
         if (outcome == DirectLoopOutcome.BudgetExhausted)
         {
             _logger.LogWarning("Direct AI agent turn exhausted its {RequestLimit} provider request budget.",
                 DirectConversationLoop.MaximumProviderRequestsPerTurn);
-            var failed = new RunCompletedEvent(
-                RunCompletionStatus.Failed,
-                output.FinalTextOrNull,
-                ToolLoopExhaustedMessage);
-            writer.TryWrite(failed);
-            return failed;
+            Write(writer, RunCompletionStatus.Failed, output.FinalTextOrNull, ToolLoopExhaustedMessage);
+            return;
         }
 
-        var succeeded = new RunCompletedEvent(
-            RunCompletionStatus.Succeeded,
-            output.FinalText,
-            ErrorMessage: null);
-        writer.TryWrite(succeeded);
-        return succeeded;
+        Write(writer, RunCompletionStatus.Succeeded, output.FinalText, null);
     }
+
+    private static void Write(ChannelWriter<AgentStreamEvent> writer, RunCompletionStatus status,
+        string? finalText, string? errorMessage = null)
+        => writer.TryWrite(new RunCompletedEvent(status, finalText, errorMessage));
 
     private async Task DisposeResourcesAsync(
         AiChatClientLease? providerLease,
