@@ -58,14 +58,14 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - **Plan mode**：已删除；只有 `AgentExecutionMode.Direct` / `Cli`。
 - **Channel conversations**：数据模型保留；UI 与调度只接受 `ConversationKind.Interactive`。
 - **Legacy provider profiles**（`ProviderProfile`、`IProfileRepository`、`profiles` 表、`ChatTurnRequest.Profile/ApiKey`）：已删除；Direct 只用 `ModelProfileId`。
-- **Queue / Steer 功能开关**（`ConversationInputFeatureSwitch`、`SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`）：已删除，队列与 steer 始终开启；不要再引入默认关闭开关、`queue-disabled` / `steer-not-enabled` / `pending-inputs` 分支或宿主「未启用」文案，暂停只由每会话队列状态表达。P6 验收门槛见 `docs/direct-message-input-implementation.md` §9。
+- **Queue / Steer 开关**（`ConversationInputFeatureSwitch`、`SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`）：已删除，队列与 steer 始终开启；不要再引入默认关闭开关、`queue-disabled` / `steer-not-enabled` / `pending-inputs` 分支或宿主「未启用」文案，暂停只由每会话队列状态表达。设计要求见 `docs/direct-message-input-design.md` §11。
 - **附件**：只保留持久化/转录渲染/虚拟主机（`message_attachments`、`https://attachments.selfclaw.local`）；输入入口一律拒绝（`ConversationInputReason.AttachmentsUnsupported`），不要再引用已不存在的 6 张 / 10 MB / 30 MB 限制。
 - **设置页**：AI 提供商 / 模型管理 / 编程助手 / 代理助手 / 插件 / 宠物已接宿主；自动化已接宿主（`AutomationView` + `AutomationBridge`，含删除/清空历史与体积显示）；其余页面（图像生成、翻译等）是前端 mock。
 
 ## 深入阅读
 
 - 端到端主干：`docs/pipeline-architecture.md`（全局图）→ `docs/runtime-execution-flow.md`（当前调用链、回合/准入/消费基线）。
-- Direct 证据链：`docs/direct-agent-architecture-review.md`、`docs/direct-message-input-p{1,2,3,4,5}-implementation-review.md`、`docs/direct-message-input-p3-review-fixes.md`。
-- 桌面/前端：`docs/desktop-architecture-review.md`（§5 剩余验证限制、§7 窗口动画、§8 关闭延迟）、`docs/plugin-view-system-design.md`、`docs/message-segments-system-design.md`。
-- 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/ai-provider-system-design.md`、`docs/pet-system-design.md`、`docs/usage-tracking-design.md`。
+- Direct 输入与队列 / steer 语义：`docs/direct-message-input-design.md`。
+- 桌面/前端：`docs/plugin-view-system-design.md`、`docs/message-segments-system-design.md`。
+- 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/pet-system-design.md`、`docs/automation-system-design.md`。
 - 规则：spec/issue 写 `.scratch/<feature-slug>/`（git 忽略）；耐久结论写 `docs/`；被取代的设计要么更新要么删除，不留"历史保留"。

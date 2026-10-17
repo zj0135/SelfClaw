@@ -76,10 +76,7 @@ internal static class DirectConversationLoop
         return null;
     }
 
-    /// <summary>
-    /// Carries one claimed input batch into the turn. A batch that no longer fits is held for the next turn
-    /// instead of being consumed; the null return means the turn may continue with it.
-    /// </summary>
+    // Null means the claimed batch was consumed and the turn may continue; a non-null outcome ends the turn.
     private static async Task<DirectLoopOutcome?> TryConsumeBatchAsync(DirectTurnSetup setup, IDirectTurnInputSession inputs,
         ConversationInputBatch batch, DirectConversationContext context, DirectEventTranslator output,
         CancellationToken cancellationToken)

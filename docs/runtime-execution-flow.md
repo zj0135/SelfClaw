@@ -1,6 +1,6 @@
 # SelfClaw 运行流程与 Direct / CLI 调用链
 
-更新：2026-09-14。以当前源码为准；逐项证据见 [Direct 架构审查与整改](direct-agent-architecture-review.md) 与 [Desktop 架构整改](desktop-architecture-review.md)。较早的设计文档保留为设计历史。
+更新：2026-09-14（2026-10 同步：工具循环为显式循环）。以当前源码为准；模块证据见 §2 模块表。较早的设计文档保留为设计历史。
 
 ## 1. 公共回合入口
 
@@ -47,9 +47,9 @@ Direct 依赖扩展资源与 provider 服务；Extensions 不引用 Direct 编�
 1. continuation 请求必须带 `IToolExecutionCheckpoint`。
 2. `AiChatClientFactory.PrepareAsync(ModelProfileId)` 确定具体模型。显式 id 与空 id 的 `desktop-default` 都在这里处理；校验档案、连接、协议并解析凭据，得到 `AiProviderClientRequest`。
 3. 用确定的模型 id 调用 `DirectTurnCapabilityResolver.ResolveAsync()`。子代理工具捕获的父模型始终具体，禁用或无效模型不会先触发 MCP 连接。
-4. `AiChatClientFactory.Create(preparation, pipeline)` 按回合在共享 pooled handler 上构造 `HttpClient`，将工具与 `FunctionInvoker` 交给 provider adapter，创建 options 和带 function invocation / logging 的 SDK 管线。
+4. `AiChatClientFactory.Create(preparation, pipeline)` 按回合在共享 pooled handler 上构造 `HttpClient`，把工具定义交给 provider adapter 并创建 options；SDK 管线只挂 `UseLogging`，工具循环不在管线内。
 5. `DirectPromptComposer.BuildMessages()` 构建预算内历史与必需输入。
-6. 消费 SDK 流、产生共享事件；先释放 provider pipeline，再释放 capability lease。
+6. `DirectConversationLoop` 显式消费 SDK 流（每回合上限 128 次 provider 请求）：翻译事件 → 按 `FinishReason` 判终态 → 串行执行工具 → 追加结果进入下一轮。终态后先释放 provider pipeline，再释放 capability lease。
 
 Desktop 不再补齐默认模型。排队 child 与 continuation 使用捕获的具体模型 id；模型禁用使准备失败，不会悄悄切换默认模型。reasoning 来自共享模型配置；没有显式配置时保持 provider 默认行为。
 
@@ -67,7 +67,7 @@ Desktop 不再补齐默认模型。排队 child 与 continuation 使用捕获的
 
 `DirectToolResult` 携带 `Status`、`Summary`、模型 `Content` 与展示 `Detail`；`Detail` 不参与 provider JSON 序列化。工作区、Skill 与子代理函数使用 SDK `MarshalResult`；MCP 在自己的适配层规范化结果。主循环只解释统一契约和 SDK 异常，未知结果不再默认成功。
 
-审批拒绝返回 `Canceled` 和拒绝摘要，recorder 持久化为 `Cancelled`；实际取消异常沿异步调用传播。`DirectToolInvoker`（M.E.AI `FunctionInvoker`）负责审批与执行准入，MCP 大小限制不再注入审批包装。工具自身抛出的非取消异常不再中止回合：它被转成 `Failed` 的 `DirectToolResult`（模型可见真实错误，`Detail` 保留仅展示的堆栈），并由 invoker 自持连续故障预算 `MaximumConsecutiveToolFaults = 2`；连续故障超过预算时抛 `DirectToolFaultLimitException`，配合管线显式设置的 `MaximumConsecutiveErrorsPerRequest = 0` 立即终止回合。因此持续损坏的工具最多消耗 3 次尝试（预算 + 1）与 3 次 provider 往返，而不是 `MaximumIterationsPerRequest = 128` 次迭代上限。同一设置也让 invoker 层其他异常（未绑定工具、执行 checkpoint 失败）立即终止，而不是被管线重试。返回 `Failed` 但不抛异常的常规失败（如 shell 非零退出）不计入预算，仍可反复执行。
+审批拒绝返回 `Canceled` 和拒绝摘要，recorder 持久化为 `Cancelled`；实际取消异常沿异步调用传播。`DirectToolInvoker` 负责审批、steer 执行准入与 checkpoint，是唯一的工具执行缝，MCP 大小限制不再注入审批包装。工具自身抛出的非取消异常不再中止回合：它被转成 `Failed` 的 `DirectToolResult`（模型可见真实错误，`Detail` 保留仅展示的堆栈），并由 invoker 自持连续故障预算 `MaximumConsecutiveToolFaults = 2`；连续故障超过预算时抛 `DirectToolFaultLimitException` 并终止回合——机制是显式循环，SDK 管线没有 `UseFunctionInvocation`，也不存在 `MaximumConsecutiveErrorsPerRequest` / `MaximumIterationsPerRequest` 这类管线设置。因此持续损坏的工具最多消耗 3 次尝试（预算 + 1）与 3 次 provider 往返，而不是 128 次请求预算。未绑定工具、执行 checkpoint 失败等 invoker 层其他异常同样直接沿异步调用传播并终止回合。返回 `Failed` 但不抛异常的常规失败（如 shell 非零退出）不计入预算，仍可反复执行。
 
 ## 4. Continuation 恢复与所有权
 

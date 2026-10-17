@@ -1,12 +1,12 @@
 # Direct 消息队列与 Steer 设计
 
-状态：P0/P1 保留已验收基线；P2 独立审核通过（IR-P2-01 测试夹具竞态已修复，6 次全量稳定 1419/0/4）。P3（持久化 Queue）独立审核发现的问题已修复并通过自动回归；P4（Steer 执行语义与竞争处理）实现与自测完成，独立审核发现的末尾竞争与显式 Skill token 问题已修复（.NET 全量 1542/0/4），**待独立复审**；P5（完整 Vue 交互和传输恢复）实现与自测完成（.NET 1549/0/4、Vitest 126、Playwright 25、Vue build 通过），独立审核 IR-P5-01 已修复并由原探针 22/22 复核。队列与 steer 始终开启（功能开关已在 `8ad27da` 删除，见 §11），P6 未实施。更新：2026-10-08。P2 基线提交 ca42646，当前目标 SQLite schema v30（P3/P4/P5 未新增 DDL）。P2 独立审核见 [P2 独立审核](direct-message-input-p2-independent-review.md)，P3 实施见 [P3 实施报告](direct-message-input-p3-implementation-review.md)，P4 实施见 [P4 实施报告](direct-message-input-p4-implementation-review.md)，P5 实施见 [P5 报告](direct-message-input-p5-implementation-review.md) 与 [P5 独立审核](direct-message-input-p5-independent-review.md)。
+状态：队列与 steer 始终开启（功能开关已在 `8ad27da` 删除，见 §11），P6 未实施。更新：2026-10-08。当前 SQLite schema v31（队列 / steer 各阶段未新增 DDL）。当前实现与验证基线见 [运行链路](runtime-execution-flow.md) 与 [Direct 架构图](pipeline-architecture.md)；本文保留目标行为定义与各阶段语义结论。
 
-本文定义完整目标行为；P2 基础、P3 Queue 受理/调度已实现，P4 Steer 执行语义与竞争处理已实现、待独立审核（功能开关已删除，Queue 与 Steer 始终开启），P5 Vue 完整交互与传输恢复已实现、待独立审核。UI 调整（2026-10）：composer 只保留一个角落按钮，空闲即发送；Direct 忙碌时输入框有内容则同一按钮变成发送（入队）、为空则显示「停止生成」（不可停止的后台续跑显示进度）；steer 只在队列面板对 Pending FollowUp 点「调整当前任务」（promote），不再由 composer 直接提交 steer。实际实现及验证见 [P2 实施报告](direct-message-input-p2-implementation-review.md)、[P4 实施报告](direct-message-input-p4-implementation-review.md) 与 [P5 报告](direct-message-input-p5-implementation-review.md)。配套任务、用例和证据记录见 [分阶段实施与验收](direct-message-input-implementation.md)。现有机制参见 [运行链路](runtime-execution-flow.md)、[用量归一化](usage-tracking-design.md) 和 [Subagent 设计](direct-subagent-system-design.md)。
+本文定义完整目标行为；Queue 受理/调度、Steer 执行语义与竞争处理、Vue 完整交互与传输恢复均已实现（功能开关已删除，Queue 与 Steer 始终开启）。UI 调整（2026-10）：composer 只保留一个角落按钮，空闲即发送；Direct 忙碌时输入框有内容则同一按钮变成发送（入队）、为空则显示「停止生成」（不可停止的后台续跑显示进度）；steer 只在队列面板对 Pending FollowUp 点「调整当前任务」（promote），不再由 composer 直接提交 steer。现有机制参见 [运行链路](runtime-execution-flow.md) 与 [Subagent 设计](direct-subagent-system-design.md)。
 
 P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未知，生产方负责推导，共享累加器和 recorder 只合并并保留该语义；CLI 也在 parser 发出事件前归一化。P2 的回合模型与存储重构应继续沿用这一契约，不重新引入消费端 total 回退。
 
-技术证据见 [P0 基线与复审报告](direct-message-input-p0-baseline.md) §10。已补齐两轮工具往返、第二次 HTTP 请求序列化和确定性屏障；修复 Chat Completions 出站 reasoning 丢失及 Responses 原生 function item 丢失。下文仍包含后续阶段的目标行为，不把离线合成 fixture 等同于真实 provider 验证。
+技术证据见本文件各阶段的语义结论。已补齐两轮工具往返、第二次 HTTP 请求序列化和确定性屏障；修复 Chat Completions 出站 reasoning 丢失及 Responses 原生 function item 丢失。下文仍包含后续阶段的目标行为，不把离线合成 fixture 等同于真实 provider 验证。
 
 数据前提（2026-10-02 确认）：本功能完成后由用户统一清理旧数据，按新 schema 初始化使用。不实现旧格式数据搬迁、字段回填或兼容读取；开发和验收使用当前阶段 schema 创建的测试数据。CLI、Subagent、continuation 是当前仍在使用的执行链路，仍需适配新模型并验证功能正确性。本次文档修订不执行数据清理。
 
@@ -50,9 +50,9 @@ P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未�
 | `SelfClaw.Desktop/ViewModels/MainWindowViewModel.cs` | 捕获选择、准备 Workspace Root、请求准入 | 保留空闲准备入口；繁忙输入绑定明确会话，不重新准备工作树 |
 | `SelfClaw.Desktop/Services/Runtime/ConversationTurnEngine.cs` | 同时拥有准入、删除屏障及回合执行 | 准入移交 ConversationRunCoordinator；Engine 只执行已准入回合 |
 | `SelfClaw.Desktop/Services/Runtime/ConversationSessionCoordinator.cs` | 选择／加载之外还持有运行注册及启动锁 | 保留选择、历史加载和展示；活动运行只读新的唯一注册源 |
-| `SelfClaw.Infrastructure/AiProviders/AiChatClientFactory.cs` | `UseFunctionInvocation` 驱动内部工具循环 | Direct 获得单次调用的 provider 管线 |
+| `SelfClaw.Infrastructure/AiProviders/AiChatClientFactory.cs` | SDK 管线只挂 `UseLogging`；工具循环由 `DirectConversationLoop` 显式驱动 | 已实现（单次调用的 provider 管线） |
 | `SelfClaw.Infrastructure/Agents/Direct/DirectAgentChatRuntime.cs` | 一次 SDK 枚举、事件翻译、终态处理 | 将迭代控制交给显式 `DirectConversationLoop` |
-| `SelfClaw.Infrastructure/Agents/Direct/Tools/DirectToolInvoker.cs` | SDK `FunctionInvocationContext` 入口，统一审批／checkpoint | 提取可直接调用的入口，保留唯一工具执行边界 |
+| `SelfClaw.Infrastructure/Agents/Direct/Tools/DirectToolInvoker.cs` | 显式循环调用的唯一工具执行缝，统一审批／checkpoint | 保留唯一工具执行边界（已实现） |
 | `SelfClaw.Desktop/Services/Runtime/ConversationTurnRecorder.cs` | `TurnId` 同时是 assistant ID 和工具所属消息 ID | 区分逻辑 TurnId 与当前 AssistantMessageId |
 | `SelfClaw.Infrastructure/Agents/Direct/Context/DirectPromptComposer.cs` | 回合开始时构造预算内历史 | 提供可复用预算选择规则，支持运行中追加输入 |
 | `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteConversationRepository.cs` | 按 `created_at_utc` 排消息 | 按持久化会话序号排序 |
@@ -470,7 +470,7 @@ P5 实现补充：状态快照在 `canSteer` 外附带 `steerReason` 和当前�
 | SessionCoordinator 的启动锁、活动运行字典和独立 IsRunning 写入 | 注册和运行状态归 run coordinator；SessionCoordinator 只读运行快照并保留选择锁／加载合并 |
 | VM 的空闲 Direct 直接执行，与 Queue dispatcher 双入口 | 统一走输入受理及 dispatcher；空闲只触发立即唤醒，不绕过 FIFO；CLI 仍走同一运行准入 |
 | AddUserMessageAsync 与排队消费各写一次 user | 由一次开始回合事务取代；Engine 读取 committed startup，不再补写 |
-| UseFunctionInvocation 及仅用于它的 pipeline FunctionInvoker 配置 | 显式循环生效后删除无消费者的装配；不同时运行 SDK 循环与自有循环 |
+| UseFunctionInvocation 及仅用于它的 pipeline FunctionInvoker 配置 | 已删除：SDK 管线只挂 `UseLogging`，工具循环由显式 `DirectConversationLoop` 驱动，不同时运行两条循环 |
 | MessageId = TurnId、消息上的回合 usage／状态／错误 | 迁入 conversation_turns 与 turn_usage.turn_id，修改全部查询及投影 |
 | SqliteTurnFinalizationWriter 单 assistant 写入假设 | 重构为 SqliteConversationTurnWriter；输入和 delivery 使用同一事务内规则 |
 | 只按一条 assistant 状态推断历史与结束的逻辑 | 统一改为 turn record + message fragments；不保留旧格式 fallback |
@@ -479,7 +479,7 @@ P5 实现补充：状态快照在 `canSteer` 外附带 `steerReason` 和当前�
 
 ## 14. P2 实施落点（2026-10-03）
 
-- 实际 schema v30，拒绝而非升级旧库；没有执行数据清理。完整 DDL/版本标记同事务，使用真实 SQLite 验证。
+- 实际 schema v31，拒绝而非升级旧库；没有执行数据清理。完整 DDL/版本标记同事务，使用真实 SQLite 验证。
 - 一个短 metadata lock 维护唯一 run-handle 注册和删除屏障；所有会话 I/O、准备、provider、工具及 ACK 在锁外。不同会话长任务不互相串行，不引入额外 keyed-lock 生命周期。
 - 保留“实际片段 + tools + blocks”原子进度事务，替换裸工具写入，避免强外键下的孤立工具；detached continuation 不走此路径。
 - ConversationTurnRecord 读取时包含用量，SQL 仍分表；复用 DirectTurnOrigin 三个值（CLI 使用 Interactive），不复制 origin 枚举。消息状态仅 Sealed/Streaming/Interrupted。
@@ -487,11 +487,11 @@ P5 实现补充：状态快照在 `canSteer` 外附带 `steerReason` 和当前�
 - child 活动详情保留可空单个实际 assistant 并携带 turn；child 不产生边界，无需重写 Activity 分页。统一终态 commit 使用片段集合。
 - Queue 受理/恢复、Steer 领取和工具抢占、运行中输入预算保护及用户 UI 仍按 P3–P6 交付，不把 P2 fixture 消费当成已经发布这些功能。
 
-P3 审核修复证据（2026-10-03）：[修复记录](direct-message-input-p3-review-fixes.md)。完整定义内容指纹承担跨进程 revision 校验；输入受理/准备由统一 run coordinator 管理生命周期，失败暂停提交后才释放排队句柄。没有改变目标 schema 或启动 Steer。
+P3 审核修复证据（2026-10-03）：完整定义内容指纹承担跨进程 revision 校验；输入受理/准备由统一 run coordinator 管理生命周期，失败暂停提交后才释放排队句柄。没有改变目标 schema 或启动 Steer。
 
 P3 验收修复（2026-10-04）：失败暂停不再让默认关闭开关下的空闲发送永久卡死；continuation 在确认无未处理输入之前不占用运行句柄。Queue 开关仍默认关闭，Steer 未开放。
 
-P4 实施记录（2026-10-04）：[P4 实施报告](direct-message-input-p4-implementation-review.md)。Steer 通过 P2 的输入会话/writer/回合模型消费；工具执行准入唯一归 `DirectToolInvoker`，审批显式 Approved/Denied/Superseded；含显式 Skill 激活的 turn 转 FollowUp；未改 schema，`SELFCLAW_STEER_ENABLED` 默认关闭。
+P4 实施记录（2026-10-04）：Steer 通过 P2 的输入会话/writer/回合模型消费；工具执行准入唯一归 `DirectToolInvoker`，审批显式 Approved/Denied/Superseded；含显式 Skill 激活的 turn 转 FollowUp；未改 schema。
 P4 复核修复（2026-10-04）：最终边界读与受理共用同一临界区（空领取即关闭入口，关闭前受理由该读领取并在本轮消费）；成功收口的未消费 steer 一律 Held；`ISkillTokenDetector` 在受理与领取两处把含显式 Skill token 的 steer 转 FollowUp。
 
 开关移除（2026-10-04 代码，`8ad27da`；文档同步 2026-10-08）：本节其他位置的「开关默认关闭」表述自本条起作废。删除 `ConversationInputFeatureSwitch` 与 `SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`；dispatcher 始终扫描 backlog；受理与 retry/resume/promote 不再有 queue-disabled / steer-not-enabled 分支，`ConversationInputSteerPolicy.Evaluate` 去掉开关参数，存储层不再以 pending-inputs 拒绝积压，`QueueDisabled`／`PendingInputs`／`SteerNotEnabled` 原因常量与宿主、Vue 的「未启用」文案一并删除。队列与 steer 始终开启，设计要求见 §11。

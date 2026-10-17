@@ -64,10 +64,27 @@ internal sealed class DirectToolInvoker
         }
 
         var arguments = new AIFunctionArguments(callContent.Arguments ?? new Dictionary<string, object?>());
-        DirectToolResult? result = null;
-        object? raw = null;
-        Exception? fault = null;
-        var superseded = false;
+        var (gate, gateResult) = await ResolveGateAsync(binding, arguments, cancellationToken).ConfigureAwait(false);
+        if (gate == GateOutcome.Superseded)
+        {
+            // A steer skip neither increments nor resets the consecutive-fault budget.
+            return gateResult;
+        }
+
+        if (gate == GateOutcome.Denied)
+        {
+            // A user denial is a decision, not a fault: it closes the streak like a clean execution.
+            _consecutiveToolFaults = 0;
+            return gateResult;
+        }
+
+        return await ExecuteAsync(binding, arguments, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Denied and Superseded carry the model-visible result to report instead of executing; Execute leaves it null.
+    private async Task<(GateOutcome Outcome, DirectToolResult? Result)> ResolveGateAsync(
+        DirectToolBinding binding, AIFunctionArguments arguments, CancellationToken cancellationToken)
+    {
         var needsApproval =
             binding.RequiresApproval && _request.ToolPermissionMode != ToolPermissionMode.FullAccess;
         var decision = needsApproval
@@ -75,74 +92,67 @@ internal sealed class DirectToolInvoker
             : ToolApprovalDecision.Approved;
         if (decision == ToolApprovalDecision.Denied)
         {
-            result = new DirectToolResult(
-                ToolCallStatus.Canceled,
-                DeniedResult,
-                JsonSerializer.SerializeToElement(DeniedResult),
-                DeniedResult);
+            return (GateOutcome.Denied, DeniedByUserResult());
         }
-        else if (decision == ToolApprovalDecision.Superseded)
+
+        if (decision == ToolApprovalDecision.Superseded)
         {
-            superseded = true;
-            result = SupersededBySteerResult();
+            return (GateOutcome.Superseded, SupersededBySteerResult());
         }
-        else if (_steering is not null &&
-                 !await _steering.TryBeginToolExecutionAsync(cancellationToken).ConfigureAwait(false))
+
+        if (_steering is not null &&
+            !await _steering.TryBeginToolExecutionAsync(cancellationToken).ConfigureAwait(false))
         {
             // ReadyToExecute lost to a steer claim: the checkpoint and the tool never run, so the
             // permit stays irrevocable once granted.
-            superseded = true;
-            result = SupersededBySteerResult();
+            return (GateOutcome.Superseded, SupersededBySteerResult());
         }
-        else
+
+        return (GateOutcome.Execute, null);
+    }
+
+    private async ValueTask<object?> ExecuteAsync(
+        DirectToolBinding binding, AIFunctionArguments arguments, CancellationToken cancellationToken)
+    {
+        if (_request.ToolExecutionCheckpoint is not null)
         {
-            if (_request.ToolExecutionCheckpoint is not null)
-            {
-                await _request.ToolExecutionCheckpoint.BeforeExecutionAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                raw = await binding.Tool.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                // A faulting tool is a failure the model must see, not a turn failure: the real error
-                // reaches it as a result, so the model can correct itself. Detail carries the message
-                // rather than the stack trace because it is also persisted as the tool result and replayed
-                // on later turns, where a stack trace is permanent prompt noise that leaks local paths.
-                fault = exception;
-                result = new DirectToolResult(
-                    ToolCallStatus.Failed,
-                    exception.Message,
-                    JsonSerializer.SerializeToElement(new
-                    {
-                        type = exception.GetType().Name,
-                        message = exception.Message
-                    }),
-                    exception.Message);
-            }
-
-            result ??= raw as DirectToolResult;
+            await _request.ToolExecutionCheckpoint.BeforeExecutionAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        if (fault is null)
+        cancellationToken.ThrowIfCancellationRequested();
+        try
         {
-            // A steer skip neither increments nor resets the consecutive-fault budget.
-            if (!superseded) _consecutiveToolFaults = 0;
+            var raw = await binding.Tool.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
+            _consecutiveToolFaults = 0;
+            return raw;
         }
-        else
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            var consecutiveFaults = ++_consecutiveToolFaults;
-            if (consecutiveFaults > MaximumConsecutiveToolFaults)
-            {
-                // The explicit loop terminates on this exception; it never retries the broken tool.
-                throw new DirectToolFaultLimitException(binding.Tool.Name, consecutiveFaults, fault);
-            }
+            // A faulting tool is a failure the model must see, not a turn failure: the real error
+            // reaches it as a result, so the model can correct itself. Detail carries the message
+            // rather than the stack trace because it is also persisted as the tool result and replayed
+            // on later turns, where a stack trace is permanent prompt noise that leaks local paths.
+            RecordConsecutiveFault(binding, exception);
+            return new DirectToolResult(
+                ToolCallStatus.Failed,
+                exception.Message,
+                JsonSerializer.SerializeToElement(new
+                {
+                    type = exception.GetType().Name,
+                    message = exception.Message
+                }),
+                exception.Message);
         }
+    }
 
-        return result is not null ? result : raw;
+    private void RecordConsecutiveFault(DirectToolBinding binding, Exception fault)
+    {
+        var consecutiveFaults = ++_consecutiveToolFaults;
+        if (consecutiveFaults > MaximumConsecutiveToolFaults)
+        {
+            // The explicit loop terminates on this exception; it never retries the broken tool.
+            throw new DirectToolFaultLimitException(binding.Tool.Name, consecutiveFaults, fault);
+        }
     }
 
     private async Task<ToolApprovalDecision> RequestApprovalAsync(
@@ -197,6 +207,21 @@ internal sealed class DirectToolInvoker
                 ? ToolApprovalDecision.Superseded : ToolApprovalDecision.Denied;
         }
     }
+
+    /// <summary>Admission states for one call: execute it, report a user denial, or report a steer skip.</summary>
+    private enum GateOutcome
+    {
+        Execute,
+        Denied,
+        Superseded
+    }
+
+    private static DirectToolResult DeniedByUserResult()
+        => new(
+            ToolCallStatus.Canceled,
+            DeniedResult,
+            JsonSerializer.SerializeToElement(DeniedResult),
+            DeniedResult);
 
     private static DirectToolResult SupersededBySteerResult()
         => new(

@@ -1,6 +1,6 @@
 # SelfClaw 桌宠系统设计文档
 
-> 2026-09-14 实现更新：配置与实际包/可见性/加载错误由 `PetHost` 统一协调；Catalog 在后台准备冻结位图，Window adapter 只安装资源，ViewModel 不再读取文件或吞加载失败。设置页消费 Host 变更，退出前 flush 待保存位置；窗口仅由注入路径创建。当前代码、验证及原生实机限制见 [Desktop 架构整改 R03/R05/R12/R15](desktop-architecture-review.md)。下文保留原始设计，涉及初始化和加载的旧调用链以该整改记录为准。
+> 2026-09-14 实现更新：配置与实际包/可见性/加载错误由 `PetHost` 统一协调；Catalog 在后台准备冻结位图，Window adapter 只安装资源，ViewModel 不再读取文件或吞加载失败。设置页消费 Host 变更，退出前 flush 待保存位置；窗口仅由注入路径创建。下文保留原始设计。
 
 > 2026-09-29 更新：宠物不再参与审批裁决。待审批时 `PetActivityPresenter` 固定显示 `等待「工具名」审批…` 并保持 waiting 动画，点击气泡仅激活对应会话；审批只保留 Vue 审批栏与 Windows toast。`DesktopToolApprovalHandler` 同时移除 5 分钟自动拒绝，未决审批不再超时终止（取消、`RejectAll` 与订阅失败仍安全拒绝）。
 

@@ -226,13 +226,46 @@ public sealed class DirectSteerLoopIntegrationTests
     private static DirectToolResult Result(string value)
         => new(ToolCallStatus.Completed, value, System.Text.Json.JsonSerializer.SerializeToElement(value), value);
 
+    [Fact]
+    public async Task A_length_stop_without_text_after_an_input_boundary_reports_failed_instead_of_an_empty_truncated_segment()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var provider = new LengthAfterBoundaryProvider();
+        var runtime = CreateRuntime(context, provider, [], out var request);
+        var recording = RecordAsync(runtime, request, context);
+        await provider.FirstStreamStarted.Task.WaitAsync(Timeout);
+        await context.SeedPendingSteerAsync("U1");
+        provider.ReleaseFirstStream.TrySetResult();
+
+        var result = await recording.WaitAsync(Timeout);
+
+        provider.Requests.Should().HaveCount(2, "the claimed steer extends the turn with a second provider request");
+        result.Boundaries.Should().Be(1);
+        var terminal = result.Terminal.Should().BeOfType<RunCompletedEvent>().Subject;
+        terminal.Status.Should().Be(RunCompletionStatus.Failed,
+            "the segment after the boundary produced no text to resume from");
+        terminal.FinalText.Should().BeNull("the terminal text describes the current segment only");
+        terminal.ErrorMessage.Should().Contain("without producing any output");
+        var assistant = (await context.Conversations.ListMessagesAsync(context.Conversation.Id))
+            .Where(message => message.Role == MessageRole.Assistant);
+        assistant.Select(message => message.MarkdownContent).Should().Equal(["A0 "],
+            "the sealed segment before the boundary keeps its own text");
+    }
+
     private static DirectAgentChatRuntime CreateRuntime(ConversationTurnTestContext context, SteerProvider provider,
         out DirectChatTurnRequest request, Func<string, Func<Task<object?>>>? tools = null,
         IDirectTurnSteering? steering = null, int? contextWindowTokens = null,
         IDirectTurnInputSession? inputSession = null)
+        => CreateRuntime(context, provider, provider.ToolNames, out request, tools, steering, contextWindowTokens, inputSession);
+
+    private static DirectAgentChatRuntime CreateRuntime(ConversationTurnTestContext context, IChatClient provider,
+        IReadOnlyList<string> toolNames, out DirectChatTurnRequest request,
+        Func<string, Func<Task<object?>>>? tools = null, IDirectTurnSteering? steering = null,
+        int? contextWindowTokens = null, IDirectTurnInputSession? inputSession = null)
     {
         var session = inputSession ?? context.InputSession;
-        var bindings = provider.ToolNames
+        var bindings = toolNames
             .Select(name =>
             {
                 var invoke = tools?.Invoke(name) ?? (() => Task.FromResult<object?>(name));
@@ -305,6 +338,41 @@ public sealed class DirectSteerLoopIntegrationTests
 
         public Task SetSteerPolicyAsync(string? blockReason, CancellationToken cancellationToken = default)
             => inner.SetSteerPolicyAsync(blockReason, cancellationToken);
+    }
+
+    /// <summary>First request answers with text, the post-boundary request stops at the cap without text.</summary>
+    private sealed class LengthAfterBoundaryProvider : IChatClient
+    {
+        internal List<ChatMessage[]> Requests { get; } = [];
+        internal TaskCompletionSource FirstStreamStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseFirstStream { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Requests.Add(messages.ToArray());
+            if (Requests.Count == 1)
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("A0 ")])
+                { FinishReason = ChatFinishReason.Stop };
+                FirstStreamStarted.TrySetResult();
+                await ReleaseFirstStream.Task.WaitAsync(cancellationToken);
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 })]);
+                yield break;
+            }
+
+            yield return new ChatResponseUpdate(ChatRole.Assistant, [])
+            { FinishReason = ChatFinishReason.Length };
+            yield return new ChatResponseUpdate(ChatRole.Assistant,
+                [new UsageContent(new UsageDetails { InputTokenCount = 20, OutputTokenCount = 0 })]);
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
     }
 
     private sealed class SteerProvider : IChatClient

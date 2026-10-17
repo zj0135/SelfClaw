@@ -1,6 +1,6 @@
 # 插件视图系统设计（Plugin Views：右侧面板 + 窗口悬浮视图）
 
-> 状态：**已实施**（2026-09-30）。实施后的状态、测试证据与未实机验收的限制见 `docs/desktop-architecture-review.md` §6。
+> 状态：**已实施**（2026-09-30）。下文即当前设计；插件视图的 origin 隔离、信任边界与权限见 §2。
 > 本文**取代** `docs/plugin-panel-system-design.md`（已删除；其中仍然有效的内容——三层信任边界、CSP、版本租约与文件钉死、测试要求——已并入本文）。
 > 前提：当前是开发阶段，**不做任何数据兼容**。`desktop-settings.json` 的相关节点、localStorage 偏好键、旧的 `panel-demo.zip` 夹具都可以直接清空/重建。
 

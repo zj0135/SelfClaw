@@ -1,6 +1,6 @@
 # SelfClaw 全链路架构图：Input → Direct / CLI → Output
 
-更新：2026-09-29。以当前源码为准；逐项证据见文末「证据文件」。运行顺序与契约细节另见 [运行流程与 Direct / CLI 调用链](runtime-execution-flow.md)、[Direct 架构审查](direct-agent-architecture-review.md)、[Desktop 架构整改](desktop-architecture-review.md)。
+更新：2026-09-29（2026-10 同步：工具循环为显式循环，SDK 管线不含 function invocation）。以当前源码为准；逐项证据见文末「证据文件」。运行顺序与契约细节另见 [运行流程与 Direct / CLI 调用链](runtime-execution-flow.md)。
 
 本文只描述一条交互回合从输入到渲染的端到端主干，以及两条独立执行分支和它们的旁路通道。
 
@@ -112,12 +112,12 @@ flowchart TB
     end
 
     S3 --> CAP
-    CAP --> S4["④ DirectToolInvoker<br/>M.E.AI FunctionInvoker 唯一调用缝"]
-    S4 --> S5["⑤ AiChatClientFactory.Create<br/>按回合 HttpClient (共享 pooled handler)<br/>provider adapter → CreateChatOptions/Client<br/>ChatClientBuilder: UseFunctionInvocation(128)<br/>+ UseLogging → AiChatClientLease"]
+    CAP --> S4["④ DirectToolInvoker<br/>审批 / steer 执行准入 / checkpoint / 连续故障预算<br/>唯一工具执行缝"]
+    S4 --> S5["⑤ AiChatClientFactory.Create<br/>按回合 HttpClient (共享 pooled handler)<br/>provider adapter → CreateChatOptions/Client<br/>ChatClientBuilder: 仅 UseLogging → AiChatClientLease"]
     S5 --> S6["⑥ RunStartedEvent(direct-{guid}, model)<br/>+ RunStatusEvent(Requesting)"]
     S6 --> S7["⑦ DirectPromptComposer.BuildMessages<br/>System(agent+扩展+policy)<br/>→ History 反向预算裁剪(工具调用/结果不可拆)<br/>→ 续写提示 → CompletionBatch"]
-    S7 --> S8["⑧ GetStreamingResponseAsync<br/>TurnOutputStream.TranslateUpdate"]
-    S8 --> S9["⑨ 终态判定<br/>Length+文本=Truncated / Length 空=Failed<br/>ToolCalls=Failed(循环耗尽) / 其余=Succeeded"]
+    S7 --> S8["⑧ DirectConversationLoop.RunAsync（显式循环，每回合 ≤128 次 provider 请求）<br/>GetStreamingResponseAsync → DirectEventTranslator.TranslateUpdate<br/>FinishReason 判终态 → 串行执行工具 → 追加结果进入下一轮"]
+    S8 --> S9["⑨ WriteTerminalOutcome<br/>Length+文本=Truncated / Length 空=Failed / ContentFilter=Blocked<br/>预算耗尽、上下文不 fit=Failed / 其余=Succeeded"]
     S9 --> S10["⑩ 释放 provider lease → 释放 capability lease"]
 
     subgraph TOOL["工具调用一次经过的全部关卡"]
@@ -136,6 +136,7 @@ flowchart TB
 - `DirectToolResult.Detail` 只用于展示，不参与 provider JSON 序列化；MCP 模型结果序列化后硬上限 **65,536 字节**。
 - 审批拒绝返回 `Canceled` + 拒绝摘要 → recorder 落库为 `Cancelled`，不抛异常。
 - provider pipeline **先于** capability lease 释放，避免 HTTP 流仍在消费时回收 MCP 连接。
+- 工具循环由显式 `DirectConversationLoop` 驱动（每回合最多 128 次 provider 请求），SDK 管线只挂 `UseLogging`；`DirectToolInvoker` 自持连续故障预算 `MaximumConsecutiveToolFaults = 2`，超预算抛 `DirectToolFaultLimitException` 终止回合。
 - `PrepareAsync` 与 `ResolveAsync` 之间有顺序依赖：能力解析使用已确定的具体模型 id，禁用或无效模型不会先触发 MCP 连接。
 
 ## 3. CLI 分支：子进程 JSONL 全链路
@@ -290,7 +291,7 @@ flowchart TB
 | Workspace Root / Worktree | `ConversationWorkspaceService` | 准备与释放；提交回合自带捕获值 |
 | Direct 能力与 lease | `DirectTurnCapabilityResolver` → `DirectTurnCapabilityLease` | 每回合；`DirectTurnLeaseScope` 统一回收 Plugin/MCP |
 | Provider pipeline | `AiChatClientFactory` → `AiChatClientLease` | 每回合 HttpClient；共享 pooled handler 长存 |
-| 工具调用唯一缝 | `DirectToolInvoker`（M.E.AI `FunctionInvoker`） | 审批 → checkpoint → 执行 → 反馈 |
+| 工具调用唯一缝 | `DirectToolInvoker`（显式循环调用） | 审批 / steer 准入 → checkpoint → 执行 → 故障预算 → 反馈 |
 | 事件契约与终态 | `DispatchingAgentChatRuntime` | 终态只发一次；终态后事件丢弃 |
 | 内容录制与快照 | `ConversationRuntimeState` / `SubagentExecutionSession` | 串行写入；取消后等终态再释放 |
 | 持久化终态 | `DesktopTurnFinalizer` | 原子提交，2 次尝试，5s 超时 |
