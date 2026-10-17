@@ -60,7 +60,7 @@ public sealed class MainWindowViewModelSubmissionTests
                 projection,
                 delivery,
                 Dispatcher.CurrentDispatcher);
-            using var sessions = new ConversationSessionCoordinator(repository, turns, runs, transcriptPublisher);
+            using var sessions = new ConversationSessionCoordinator(repository, turns, new EmptyConversationCompactionRepository(), runs, transcriptPublisher);
             var turnEngine = new ConversationTurnEngine(
                 turns,
                 turnFinalizer,

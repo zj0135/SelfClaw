@@ -72,7 +72,7 @@ public sealed class ConversationDeletionServiceTests
         await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
             "queued", "queued", fixture.Snapshot(), null));
         using var runs = new ConversationRunCoordinator(fixture.Inputs, fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
-        using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, runs, new Sink());
+        using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, new EmptyConversationCompactionRepository(), runs, new Sink());
         var children = new Children();
         var service = new ConversationDeletionService(runs, sessions, children,
             new ConversationWorkspaceService(new EmptyRoots()), fixture.Conversations, null, fixture.Inputs);
@@ -101,7 +101,7 @@ public sealed class ConversationDeletionServiceTests
         await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
             "queued", "queued", fixture.Snapshot(), null));
         using var runs = new ConversationRunCoordinator(fixture.Inputs, fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
-        using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, runs, new Sink());
+        using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, new EmptyConversationCompactionRepository(), runs, new Sink());
         var service = new ConversationDeletionService(runs, sessions, new Children { AutoRelease = true },
             new ConversationWorkspaceService(new EmptyRoots()), fixture.Conversations, null, fixture.Inputs);
 
@@ -128,7 +128,7 @@ public sealed class ConversationDeletionServiceTests
         public Context()
         {
             Runs = new(new EmptyConversationInputRepository(), new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
-            _sessions = new(Repository, new RecordingConversationTurnRepository(), Runs, new Sink());
+            _sessions = new(Repository, new RecordingConversationTurnRepository(), new EmptyConversationCompactionRepository(), Runs, new Sink());
             Service = new(Runs, _sessions, Children, new ConversationWorkspaceService(Repository), Repository);
         }
         public Repository Repository { get; } = new();

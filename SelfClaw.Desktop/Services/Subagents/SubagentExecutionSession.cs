@@ -33,7 +33,7 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
         ISubagentStateChangeNotifier? changes)
     {
         _task = task;
-        _state = new ConversationRuntimeState(input.Conversation, input.Turns, input.Messages, input.ToolRuns);
+        _state = new ConversationRuntimeState(input.Conversation, input.Turns, input.Messages, input.ToolRuns, input.Compactions);
         _turn = CreateTurn(task, _state);
         _recorder = recorder;
         _committer = new SubagentChildTurnCommitter(store, task.Id, timeProvider);
@@ -41,6 +41,7 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
         InitialMessages = input.Messages.ToImmutableArray();
         InitialTurns = input.Turns.ToImmutableArray();
         InitialToolRuns = input.ToolRuns.ToImmutableArray();
+        InitialCompactions = input.Compactions.ToImmutableArray();
         _state.TranscriptChanged += OnTranscriptChanged;
     }
 
@@ -50,6 +51,7 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
     internal IReadOnlyList<MessageRecord> InitialMessages { get; }
     internal IReadOnlyList<ConversationTurnRecord> InitialTurns { get; }
     internal IReadOnlyList<ToolExecutionRecord> InitialToolRuns { get; }
+    internal IReadOnlyList<ConversationCompactionRecord> InitialCompactions { get; }
     internal SubagentExecutionActivity Activity => Volatile.Read(ref _activity);
 
     internal Task BeginAsync(CancellationToken cancellationToken = default)

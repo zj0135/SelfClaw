@@ -3,12 +3,14 @@ import { computed } from 'vue';
 import { Monitor, Waypoints } from 'lucide-vue-next';
 import ComposerWorkspacePicker from './ComposerWorkspacePicker.vue';
 import GitWorkspaceControl from './GitWorkspaceControl.vue';
+import { formatContextUsage } from '../../renderers/usageMeter.js';
 
 const props = defineProps({
 	workspaceSelection: { type: Object, default: () => ({}) },
 	workspaceMode: { type: String, default: 'local' },
 	gitLoading: { type: Boolean, default: false },
 	gitError: { type: String, default: '' },
+	usage: { type: Object, default: null },
 });
 
 const emit = defineEmits([
@@ -24,6 +26,7 @@ const gitState = computed(() => props.workspaceSelection?.current?.git || null);
 const isGitRepository = computed(() => Boolean(gitState.value?.isRepository));
 const isManagedWorktree = computed(() => Boolean(gitState.value?.isManagedWorktree));
 const effectiveMode = computed(() => (isManagedWorktree.value ? 'worktree' : props.workspaceMode));
+const usageMeter = computed(() => formatContextUsage(props.usage));
 
 function setWorkspaceMode(mode) {
 	if (isManagedWorktree.value || !isGitRepository.value) return;
@@ -56,6 +59,23 @@ function setWorkspaceMode(mode) {
 
 		<GitWorkspaceControl v-if="isGitRepository" :state="gitState" :loading="gitLoading" :error="gitError"
 			@action="emit('git-action', $event)" />
+
+		<span v-if="usageMeter" class="usage-meter" :title="usageMeter.contextTitle">
+			<span class="usage-part">
+				<span class="usage-label">上下文</span>
+				<span class="usage-value">{{ usageMeter.contextText }}</span>
+			</span>
+			<template v-if="usageMeter.totals.length">
+				<span class="usage-divider" aria-hidden="true">·</span>
+				<span class="usage-part usage-totals">
+					<span class="usage-label">累计</span>
+					<span v-for="part in usageMeter.totals" :key="part.label" class="usage-total">
+						<span class="usage-label">{{ part.label }}</span>
+						<span class="usage-value">{{ part.value }}</span>
+					</span>
+				</span>
+			</template>
+		</span>
 	</div>
 
 	<p v-if="effectiveMode === 'worktree' && gitState?.isDirty && !isManagedWorktree" class="dirty-warning">
@@ -130,6 +150,44 @@ function setWorkspaceMode(mode) {
 	font-size: var(--fs-12);
 }
 
+.usage-meter {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-left: auto;
+	min-width: 0;
+	color: var(--muted);
+	font-size: var(--fs-115);
+	white-space: nowrap;
+}
+
+.usage-part {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.usage-divider {
+	color: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+
+.usage-value {
+	color: var(--text);
+	font-variant-numeric: tabular-nums;
+	font-weight: 500;
+}
+
+.usage-total {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.usage-total + .usage-total::before {
+	content: '·';
+	color: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+
 .dirty-warning {
 	position: absolute;
 	right: 12px;
@@ -153,6 +211,11 @@ function setWorkspaceMode(mode) {
 	}
 
 	.mode-option svg {
+		display: none;
+	}
+
+	.usage-totals,
+	.usage-meter > .usage-divider {
 		display: none;
 	}
 }

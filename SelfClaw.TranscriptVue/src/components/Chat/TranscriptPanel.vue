@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue';
 import MessageContent from './transcript/MessageContent.vue';
+import CompressionNotice from './transcript/CompressionNotice.vue';
 import TurnOutcome from './transcript/TurnOutcome.vue';
 
 defineProps({
@@ -61,6 +62,7 @@ defineExpose({
 				<div v-for="item in items" :key="item.id" class="message-row" :class="[item.role, item.status]"
 					:data-message-id="item.id">
 					<TurnOutcome v-if="item.kind === 'turn-outcome'" :outcome="item.turnOutcome" />
+					<CompressionNotice v-else-if="item.kind === 'compression'" :notice="item.compaction" />
 					<MessageContent v-else :item="item" :collapse="collapse"
 						@preview-image="emit('preview-image', $event)" />
 				</div>

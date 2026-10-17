@@ -203,7 +203,7 @@ public sealed class ShellStateTests
             var turns = new SqliteConversationTurnRepository(database);
             var inputs = new SqliteConversationInputRepository(database);
             _runs = new ConversationRunCoordinator(inputs, inputs, NullLogger<ConversationRunCoordinator>.Instance);
-            _sessions = new ConversationSessionCoordinator(conversations, turns, _runs, _publisher);
+            _sessions = new ConversationSessionCoordinator(conversations, turns, new EmptyConversationCompactionRepository(), _runs, _publisher);
             _engine = new ConversationTurnEngine(turns, new DesktopTurnFinalizer(turns, NullLogger<DesktopTurnFinalizer>.Instance),
                 new ConversationTurnRecorder(conversations, turns, inputs, NullLogger<ConversationTurnRecorder>.Instance), Runtime,
                 _sessions, _runs, _activity, approval, SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settings), new SilentCompletion(),

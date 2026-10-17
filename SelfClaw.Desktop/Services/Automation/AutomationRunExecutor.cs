@@ -42,6 +42,7 @@ internal sealed class AutomationRunExecutor : IAutomationRunExecutor
 
     private readonly IConversationRepository _conversations;
     private readonly IConversationTurnRepository _turns;
+    private readonly IConversationCompactionRepository _compactions;
     private readonly IAutomationRunStore _runStore;
     private readonly IAutomationRunAttemptStore _attemptStore;
     private readonly IWorkspaceRootRepository _workspaces;
@@ -58,6 +59,7 @@ internal sealed class AutomationRunExecutor : IAutomationRunExecutor
     public AutomationRunExecutor(
         IConversationRepository conversations,
         IConversationTurnRepository turns,
+        IConversationCompactionRepository compactions,
         IAutomationRunStore runStore,
         IAutomationRunAttemptStore attemptStore,
         IWorkspaceRootRepository workspaces,
@@ -72,6 +74,7 @@ internal sealed class AutomationRunExecutor : IAutomationRunExecutor
         : this(
             conversations,
             turns,
+            compactions,
             runStore,
             attemptStore,
             workspaces,
@@ -90,6 +93,7 @@ internal sealed class AutomationRunExecutor : IAutomationRunExecutor
     internal AutomationRunExecutor(
         IConversationRepository conversations,
         IConversationTurnRepository turns,
+        IConversationCompactionRepository compactions,
         IAutomationRunStore runStore,
         IAutomationRunAttemptStore attemptStore,
         IWorkspaceRootRepository workspaces,
@@ -105,6 +109,7 @@ internal sealed class AutomationRunExecutor : IAutomationRunExecutor
     {
         _conversations = conversations;
         _turns = turns;
+        _compactions = compactions;
         _runStore = runStore;
         _attemptStore = attemptStore;
         _workspaces = workspaces;
@@ -347,7 +352,8 @@ internal sealed class AutomationRunExecutor : IAutomationRunExecutor
         var turns = await _turns.ListTurnsAsync(conversation.Id, cancellationToken).ConfigureAwait(false);
         var messages = await _conversations.ListMessagesAsync(conversation.Id, cancellationToken).ConfigureAwait(false);
         var toolRuns = await _conversations.ListToolExecutionsAsync(conversation.Id, cancellationToken).ConfigureAwait(false);
-        return new ConversationRuntimeState(conversation, turns, messages, toolRuns);
+        var compactions = await _compactions.ListAsync(conversation.Id, cancellationToken).ConfigureAwait(false);
+        return new ConversationRuntimeState(conversation, turns, messages, toolRuns, compactions);
     }
 
     private DirectChatTurnRequest CreateRequest(
@@ -366,7 +372,8 @@ internal sealed class AutomationRunExecutor : IAutomationRunExecutor
             ToolPermissionMode.FullAccess,
             _approval,
             new DirectTurnExecutionContext(DirectTurnOrigin.Automation, CapabilityCeiling: null, CompletionBatch: null),
-            state.ToolRuns);
+            state.ToolRuns,
+            Compression: ConversationCompactionSelector.SelectLatest(state.Compactions));
 
     private Task FinalizeTurnAsync(
         ConversationRuntimeState state,

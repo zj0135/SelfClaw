@@ -56,6 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IConversationRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
         services.AddSingleton<IConversationTurnRepository, SqliteConversationTurnRepository>();
+        services.AddSingleton<IConversationCompactionRepository, SqliteConversationCompactionRepository>();
         services.AddSingleton<SqliteConversationInputRepository>();
         services.AddSingleton<IConversationInputRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
@@ -151,6 +152,17 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<McpClientManager>());
         services.AddSingleton<IExtensionSettingsService, ExtensionSettingsService>();
         services.AddSingleton<DirectPromptComposer>();
+        services.AddSingleton(serviceProvider => new DirectContextCompressor(
+            serviceProvider.GetRequiredService<IAiChatClientFactory>(),
+            serviceProvider.GetRequiredService<IAiModelCatalog>(),
+            serviceProvider.GetRequiredService<IDirectTokenCounter>(),
+            serviceProvider.GetService<ILogger<DirectContextCompressor>>()));
+        // A host that owns the compaction settings replaces this registration with its own policy source.
+        services.AddSingleton<IDirectCompressionPolicySource>(DisabledDirectCompressionPolicySource.Instance);
+        services.AddSingleton(serviceProvider =>
+            new DirectConversationLoop(serviceProvider.GetRequiredService<IDirectTokenCounter>()));
+        services.AddSingleton<IDirectTokenCounter>(serviceProvider =>
+            new DirectTokenCounter(serviceProvider.GetService<ILogger<DirectTokenCounter>>()));
         services.AddSingleton<CapabilityContentCache>();
         services.AddSingleton<SkillCapabilitySource>();
         services.AddSingleton<PluginCapabilitySource>();

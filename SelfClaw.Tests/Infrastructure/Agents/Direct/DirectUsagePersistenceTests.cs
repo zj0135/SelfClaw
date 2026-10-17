@@ -26,6 +26,7 @@ public sealed class DirectUsagePersistenceTests
     [InlineData("incremental-unknown")]
     [InlineData("cumulative-partial-error")]
     [InlineData("incremental-complete")]
+    [InlineData("no-input-observed")]
     public async Task Interactive_usage_survives_runtime_recorder_finalization_and_sqlite(string scenario)
     {
         using var context = new ConversationTurnTestContext();
@@ -44,6 +45,7 @@ public sealed class DirectUsagePersistenceTests
     [InlineData("incremental-unknown")]
     [InlineData("cumulative-partial-error")]
     [InlineData("incremental-complete")]
+    [InlineData("no-input-observed")]
     public async Task Child_usage_survives_live_snapshot_and_atomic_task_completion(string scenario)
     {
         using var context = new SubagentActivityTestContext();
@@ -75,6 +77,7 @@ public sealed class DirectUsagePersistenceTests
     [InlineData("incremental-unknown")]
     [InlineData("cumulative-partial-error")]
     [InlineData("incremental-complete")]
+    [InlineData("no-input-observed")]
     public async Task Continuation_usage_stays_detached_until_atomic_delivery_resolution(string scenario)
     {
         using var context = new SubagentActivityTestContext();
@@ -144,8 +147,17 @@ public sealed class DirectUsagePersistenceTests
     private static async Task AssertStoredAsync(SqliteDatabase database, IConversationTurnRepository turns, Guid conversationId, Guid turnId,
         TurnUsage reported, string scenario)
     {
+        // The latest request's input size is never summed: ten then seven tokens of input stay seven.
+        int? expectedInput = scenario == "cumulative-partial-error" ? 17 : scenario == "no-input-observed" ? null : 3;
+        int? expectedLastRequestInput = scenario switch
+        {
+            "cumulative-partial-error" => 7,
+            "no-input-observed" => null,
+            _ => 3
+        };
         reported.TotalTokens.Should().Be(scenario == "incremental-complete" ? 17 : null);
-        reported.InputTokens.Should().Be(scenario == "cumulative-partial-error" ? 17 : 3);
+        reported.InputTokens.Should().Be(expectedInput);
+        reported.LastRequestInputTokens.Should().Be(expectedLastRequestInput);
         reported.OutputTokens.Should().Be(scenario == "cumulative-partial-error" ? 2 : 4);
         reported.ProviderCalls.Should().Be(scenario == "cumulative-partial-error" ? 2 : 1);
         var persisted = (await turns.ListTurnsAsync(conversationId)).Single(turn => turn.Id == turnId);
@@ -153,12 +165,18 @@ public sealed class DirectUsagePersistenceTests
         persisted.Status.Should().Be(scenario == "cumulative-partial-error" ? ConversationTurnStatus.Failed : ConversationTurnStatus.Succeeded);
         await using var connection = await database.OpenConnectionAsync();
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT total_tokens FROM turn_usage WHERE turn_id = $id";
+        command.CommandText = "SELECT total_tokens, input_tokens, last_request_input_tokens FROM turn_usage WHERE turn_id = $id";
         command.Parameters.AddWithValue("$id", turnId.ToString());
-        var value = await command.ExecuteScalarAsync();
-        if (scenario == "incremental-complete") value.Should().Be(17L);
-        else value.Should().Be(DBNull.Value, "SQL NULL must survive the actual writer, not just DTO projection");
+        await using var reader = await command.ExecuteReaderAsync();
+        (await reader.ReadAsync()).Should().BeTrue("the usage row is written with the turn in one transaction");
+        if (scenario == "incremental-complete") reader.GetInt64(0).Should().Be(17L);
+        else reader.IsDBNull(0).Should().BeTrue("SQL NULL must survive the actual writer, not just DTO projection");
+        ReadNullableInt(reader, 1).Should().Be(expectedInput);
+        ReadNullableInt(reader, 2).Should().Be(expectedLastRequestInput);
     }
+
+    private static int? ReadNullableInt(System.Data.Common.DbDataReader reader, int ordinal)
+        => reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
 
     private static (DirectAgentChatRuntime Runtime, DirectChatTurnRequest Request) CreateRuntime(string scenario)
     {
@@ -188,7 +206,12 @@ public sealed class DirectUsagePersistenceTests
             ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             var request = ++_requests;
-            if (scenario != "cumulative-partial-error")
+            if (scenario == "no-input-observed")
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new UsageContent(new UsageDetails { OutputTokenCount = 4 }), new TextContent("done")]) { FinishReason = ChatFinishReason.Stop };
+            }
+            else if (scenario != "cumulative-partial-error")
             {
                 yield return Update(new UsageContent(new UsageDetails { TotalTokenCount = 10 }));
                 yield return Update(new UsageContent(new UsageDetails { InputTokenCount = 3,

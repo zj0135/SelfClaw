@@ -83,6 +83,23 @@ public sealed class TurnUsageAccumulatorTests
     }
 
     [Fact]
+    public void Last_request_input_tokens_stays_null_until_observed_and_then_keeps_the_latest_value()
+    {
+        var accumulator = new TurnUsageAccumulator();
+        accumulator.Observe(new TurnUsage(InputTokens: 100, ContextTokens: 120));
+        accumulator.Build()!.LastRequestInputTokens.Should().BeNull();
+
+        accumulator.Observe(new TurnUsage(InputTokens: 200, LastRequestInputTokens: 1_500));
+        accumulator.Observe(new TurnUsage(InputTokens: 300, LastRequestInputTokens: 1_800));
+        accumulator.Observe(new TurnUsage(InputTokens: 400));
+
+        var usage = accumulator.Build()!;
+
+        usage.LastRequestInputTokens.Should().Be(1_800, "the last request size is observed, never summed");
+        usage.InputTokens.Should().Be(1_000);
+    }
+
+    [Fact]
     public void Observe_prefers_a_provider_reported_cost_over_summed_estimates()
     {
         var accumulator = new TurnUsageAccumulator();

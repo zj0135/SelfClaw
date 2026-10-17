@@ -19,7 +19,12 @@ internal static class SqliteMappings
         t.id, t.conversation_id, t.execution_mode, t.origin, t.status, t.started_at_utc, t.completed_at_utc, t.error_message,
         u.model, u.input_tokens, u.uncached_input_tokens, u.cached_input_tokens, u.cache_write_input_tokens,
         u.output_tokens, u.reasoning_tokens, u.total_tokens, u.provider_calls, u.context_tokens,
-        u.context_window_tokens, u.cost_usd_micros, u.cost_source, u.additional_counts_json
+        u.context_window_tokens, u.cost_usd_micros, u.cost_source, u.additional_counts_json, u.last_request_input_tokens
+        """;
+
+    internal const string CompactionSelectColumns = """
+        c.id, c.conversation_id, c.turn_id, c.through_sequence, c.summary, c.model,
+        c.source_message_count, c.source_tokens, c.summary_tokens, c.created_at_utc
         """;
     public static AiProviderConnection ReadAiProviderConnection(SqliteDataReader reader)
         => new(
@@ -128,8 +133,22 @@ internal static class SqliteMappings
             ContextWindowTokens: ReadNullableInt(reader, offset + 10),
             CostUsdMicros: reader.IsDBNull(offset + 11) ? null : reader.GetInt64(offset + 11),
             CostSource: (TurnUsageCostSource)reader.GetInt32(offset + 12),
-            AdditionalCountsJson: reader.IsDBNull(offset + 13) ? null : reader.GetString(offset + 13));
+            AdditionalCountsJson: reader.IsDBNull(offset + 13) ? null : reader.GetString(offset + 13),
+            LastRequestInputTokens: ReadNullableInt(reader, offset + 14));
     }
+
+    public static ConversationCompactionRecord ReadCompaction(SqliteDataReader reader)
+        => new(
+            ReadGuid(reader, 0),
+            ReadGuid(reader, 1),
+            ReadGuid(reader, 2),
+            reader.GetInt64(3),
+            reader.GetString(4),
+            reader.IsDBNull(5) ? null : reader.GetString(5),
+            reader.GetInt32(6),
+            ReadNullableInt(reader, 7),
+            ReadNullableInt(reader, 8),
+            ReadDateTimeOffset(reader, 9));
 
     public static MessageAttachmentRecord ReadMessageAttachment(SqliteDataReader reader)
         => new(

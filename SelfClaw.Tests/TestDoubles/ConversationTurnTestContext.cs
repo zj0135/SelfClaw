@@ -24,6 +24,7 @@ internal sealed class ConversationTurnTestContext : IDisposable
         Database = new SqliteDatabase(StoragePathDefaults.Create(_root, Path.Combine(_root, "turns.db"), Path.Combine(_root, "secrets")));
         Conversations = new SqliteConversationRepository(Database);
         Turns = new SqliteConversationTurnRepository(Database);
+        Compactions = new SqliteConversationCompactionRepository(Database);
         Inputs = new SqliteConversationInputRepository(Database, new SkillTokenParser());
         var now = DateTimeOffset.UtcNow;
         Conversation = new ConversationRecord(Guid.NewGuid(), "P2 fixture", null, ToolPermissionMode.RequireApproval, "build", now, now);
@@ -40,6 +41,7 @@ internal sealed class ConversationTurnTestContext : IDisposable
     internal SqliteDatabase Database { get; }
     internal SqliteConversationRepository Conversations { get; }
     internal SqliteConversationTurnRepository Turns { get; }
+    internal SqliteConversationCompactionRepository Compactions { get; }
     internal SqliteConversationInputRepository Inputs { get; }
     internal ConversationRecord Conversation { get; }
     internal ConversationTurnRecord Record { get; }
@@ -50,6 +52,12 @@ internal sealed class ConversationTurnTestContext : IDisposable
     internal ConversationTurnRecorder Recorder { get; }
     internal DesktopTurnFinalizer Finalizer { get; }
     internal ConversationRuntimeState State => _state ?? throw new InvalidOperationException("Start the fixture first.");
+
+    internal Task<IReadOnlyList<ConversationCompactionRecord>> ListCompactionsAsync()
+        => Compactions.ListAsync(Conversation.Id);
+
+    internal Task<ConversationCompactionRecord?> LatestCompactionAsync()
+        => Compactions.GetLatestAsync(Conversation.Id);
 
     internal async Task StartAsync(string prompt = "U0")
     {

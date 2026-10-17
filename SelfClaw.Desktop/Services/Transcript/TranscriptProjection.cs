@@ -9,6 +9,7 @@ public sealed class TranscriptProjection
     private readonly TranscriptMessageProjector _messageProjector;
     private readonly Dictionary<Guid, (MessageRecord Message, ConversationTurnRecord Turn, bool IncludeOutcome, IReadOnlyList<ToolExecutionRecord> Tools, TranscriptRenderItem Item)> _messageCache = [];
     private readonly Dictionary<Guid, (ConversationTurnRecord Turn, TranscriptRenderItem Item)> _outcomeCache = [];
+    private readonly Dictionary<Guid, (ConversationCompactionRecord Compaction, TranscriptRenderItem Item)> _compactionCache = [];
     private IReadOnlyList<ConversationRecord> _navigationSource = [];
     private IReadOnlyList<WorkspaceRoot> _workspaceSource = [];
     private IReadOnlyList<TranscriptConversationItem> _navigation = [];
@@ -28,7 +29,8 @@ public sealed class TranscriptProjection
         var stableItems = _lastState is { } previous && SameReferences(previous.Items, items) ? previous.Items : items;
         var state = new TranscriptRenderState(stableItems, request.AutoScroll, _navigation,
             request.SelectedConversationId?.ToString("D"), request.IsBusy, request.IsContinuation, request.ActivityText, request.AgentMode,
-            request.SelectedAgentId, request.SelectedAgentName, request.CapabilityRevision, request.ToolPermissionMode);
+            request.SelectedAgentId, request.SelectedAgentName, request.CapabilityRevision, request.ToolPermissionMode,
+            BuildUsageSummary(request.Turns));
         if (state == _lastState) return null;
         _lastState = state;
         return state;
@@ -39,6 +41,7 @@ public sealed class TranscriptProjection
         _lastState = null;
         _messageCache.Clear();
         _outcomeCache.Clear();
+        _compactionCache.Clear();
     }
 
     private IReadOnlyList<TranscriptRenderItem> BuildItems(TranscriptProjectionRequest request)
@@ -49,7 +52,12 @@ public sealed class TranscriptProjection
         var lastAssistants = messages.Where(message => message.Role == MessageRole.Assistant)
             .GroupBy(message => message.TurnId).ToDictionary(group => group.Key, group => group.Last().Id);
         var toolsByMessage = IndexTools(request.ToolRuns);
-        var items = new List<TranscriptRenderItem>(messages.Length + turns.Count);
+        var compactions = (request.Compactions ?? [])
+            .OrderBy(compaction => compaction.ThroughSequence)
+            .ThenBy(compaction => compaction.CreatedAtUtc)
+            .ToArray();
+        var nextCompaction = 0;
+        var items = new List<TranscriptRenderItem>(messages.Length + turns.Count + compactions.Length);
         long previousSequence = 0;
         foreach (var message in messages)
         {
@@ -62,11 +70,19 @@ public sealed class TranscriptProjection
             var includeOutcome = lastAssistants.GetValueOrDefault(turn.Id) == message.Id;
             IReadOnlyList<ToolExecutionRecord> tools = toolsByMessage.TryGetValue(message.Id, out var found) ? found : [];
             items.Add(BuildMessageItem(message, turn, tools, includeOutcome));
+            while (nextCompaction < compactions.Length && compactions[nextCompaction].ThroughSequence <= message.Sequence)
+            {
+                items.Add(BuildCompactionItem(compactions[nextCompaction++]));
+            }
+
             if (!lastAssistants.ContainsKey(turn.Id) && lastMessages[turn.Id] == message.Id)
             {
                 items.Add(BuildOutcomeItem(turn));
             }
         }
+
+        // A boundary without a loaded message (automation history) still shows its divider after the history.
+        while (nextCompaction < compactions.Length) items.Add(BuildCompactionItem(compactions[nextCompaction++]));
 
         foreach (var turn in request.Turns.Where(turn => !lastMessages.ContainsKey(turn.Id)))
         {
@@ -74,9 +90,23 @@ public sealed class TranscriptProjection
         }
 
         var liveMessages = messages.Select(message => message.Id).ToHashSet();
+        var liveCompactions = compactions.Select(compaction => compaction.Id).ToHashSet();
         foreach (var id in _messageCache.Keys.Where(id => !liveMessages.Contains(id)).ToArray()) _messageCache.Remove(id);
         foreach (var id in _outcomeCache.Keys.Where(id => !turns.ContainsKey(id) || lastAssistants.ContainsKey(id)).ToArray()) _outcomeCache.Remove(id);
+        foreach (var id in _compactionCache.Keys.Where(id => !liveCompactions.Contains(id)).ToArray()) _compactionCache.Remove(id);
         return items;
+    }
+
+    private TranscriptRenderItem BuildCompactionItem(ConversationCompactionRecord compaction)
+    {
+        if (_compactionCache.TryGetValue(compaction.Id, out var cached) && ReferenceEquals(cached.Compaction, compaction))
+            return cached.Item;
+        var item = new TranscriptRenderItem($"compression:{compaction.Id:D}", "compression", "system", "sealed", [],
+            false, compaction.CreatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"),
+            Compaction: new TranscriptCompactionNotice(compaction.Id.ToString("D"), compaction.SourceMessageCount,
+                compaction.SourceTokens, compaction.SummaryTokens, compaction.Model, compaction.Summary));
+        _compactionCache[compaction.Id] = (compaction, item);
+        return item;
     }
 
     private TranscriptRenderItem BuildMessageItem(MessageRecord message, ConversationTurnRecord turn,
@@ -96,6 +126,30 @@ public sealed class TranscriptProjection
         var item = _messageProjector.BuildTurnOutcome(turn);
         _outcomeCache[turn.Id] = (turn, item);
         return item;
+    }
+
+    private static TranscriptUsageSummary? BuildUsageSummary(IReadOnlyList<ConversationTurnRecord> turns)
+    {
+        long inputTokens = 0;
+        long outputTokens = 0;
+        int? lastRequestInputTokens = null;
+        int? lastContextTokens = null;
+        int? contextWindowTokens = null;
+        foreach (var turn in turns.OrderBy(turn => turn.StartedAtUtc))
+        {
+            if (turn.Usage is not { } usage) continue;
+            inputTokens += usage.InputTokens ?? 0;
+            outputTokens += usage.OutputTokens ?? 0;
+            // Context, window and last request input describe one provider call, so the latest wins
+            // instead of being summed. Subagent usage is not part of the session totals.
+            if (usage.LastRequestInputTokens is int requestInputTokens) lastRequestInputTokens = requestInputTokens;
+            if (usage.ContextTokens is int contextTokens) lastContextTokens = contextTokens;
+            if (usage.ContextWindowTokens is int windowTokens) contextWindowTokens = windowTokens;
+        }
+
+        var context = lastRequestInputTokens ?? lastContextTokens;
+        if (context is null) return null;
+        return new TranscriptUsageSummary(inputTokens, outputTokens, context, contextWindowTokens, ContextIsEstimated: false);
     }
 
     private void UpdateNavigation(TranscriptProjectionRequest request)

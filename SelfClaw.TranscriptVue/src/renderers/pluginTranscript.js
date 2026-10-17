@@ -1,5 +1,31 @@
 export const maximumPluginTranscriptBytes = 256 * 1024;
 const encoder = new TextEncoder();
+const maxMetadataChars = 2048;
+// 分隔项与回合终态没有正文：超限时只能退化成带元数据的精简项，写成 content 段会让插件把说明/摘要当成消息正文。
+const metadataOnlyKinds = new Set(['turn-outcome', 'compression']);
+
+function truncateTurnOutcome(outcome) {
+    if (!outcome) return null;
+    return { ...outcome,
+        errorMessage: typeof outcome.errorMessage === 'string' ? outcome.errorMessage.slice(0, maxMetadataChars) : null,
+        usage: outcome.usage ? { totalTokens: outcome.usage.totalTokens ?? null } : null };
+}
+
+function truncateCompaction(compaction) {
+    if (!compaction) return null;
+    return { compactionId: compaction.compactionId ?? null, messageCount: compaction.messageCount ?? 0,
+        sourceTokens: compaction.sourceTokens ?? null, summaryTokens: compaction.summaryTokens ?? null,
+        model: typeof compaction.model === 'string' ? compaction.model : null,
+        summary: typeof compaction.summary === 'string' ? compaction.summary.slice(0, maxMetadataChars) : '' };
+}
+
+function truncateItem(item) {
+    const truncated = { id: item.id, kind: item.kind, role: item.role, status: item.status,
+        turnOutcome: truncateTurnOutcome(item.turnOutcome), contentTruncated: true,
+        segments: metadataOnlyKinds.has(item.kind) ? [] : [{ kind: 'content', markdown: '此消息超过插件摘要窗口的大小限制。' }] };
+    if (item.kind === 'compression') truncated.compaction = truncateCompaction(item.compaction);
+    return truncated;
+}
 
 export function createPluginTranscriptProjector() {
     const cache = new WeakMap();
@@ -11,11 +37,7 @@ export function createPluginTranscriptProjector() {
         let truncated = false;
         if (bytes > maximumPluginTranscriptBytes - 1024) {
             truncated = true;
-            json = JSON.stringify({ id: item.id, kind: item.kind, role: item.role, status: item.status,
-                turnOutcome: item.turnOutcome ? { ...item.turnOutcome,
-                    errorMessage: typeof item.turnOutcome.errorMessage === 'string' ? item.turnOutcome.errorMessage.slice(0, 2048) : null,
-                    usage: item.turnOutcome.usage ? { totalTokens: item.turnOutcome.usage.totalTokens ?? null } : null } : null,
-                contentTruncated: true, segments: item.kind === 'turn-outcome' ? [] : [{ kind: 'content', markdown: '此消息超过插件摘要窗口的大小限制。' }] });
+            json = JSON.stringify(truncateItem(item));
             bytes = encoder.encode(json).length;
         }
         projected = { item: JSON.parse(json), bytes, truncated };

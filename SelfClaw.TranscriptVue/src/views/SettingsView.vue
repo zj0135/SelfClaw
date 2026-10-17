@@ -6,6 +6,7 @@ import {
 	Layers,
 	Code2,
 	Bot,
+	Shrink,
 	Puzzle,
 	PawPrint,
 	Info,
@@ -32,6 +33,7 @@ const navGroups = [
 			{ id: 'models', label: '模型管理', en: 'MODELS', icon: Layers },
 			{ id: 'coding-assistant', label: '编程助手', en: 'ASSISTANT', icon: Code2 },
 			{ id: 'agents', label: '代理助手', en: 'AGENTS', icon: Bot },
+			{ id: 'compression', label: '上下文压缩', en: 'COMPRESSION', icon: Shrink },
 		],
 	},
 	{
@@ -65,6 +67,7 @@ const componentMap = markRaw({
 	models: defineAsyncComponent(() => import('../components/settings/ModelManagement.vue')),
 	'coding-assistant': defineAsyncComponent(() => import('../components/settings/ProgrammingAssistant.vue')),
 	agents: defineAsyncComponent(() => import('../components/settings/agents/AgentSettingsPanel.vue')),
+	compression: defineAsyncComponent(() => import('../components/settings/Compression.vue')),
 	plugins: defineAsyncComponent(() => import('../components/settings/extensions/ExtensionSettingsPanel.vue')),
 	pet: defineAsyncComponent(() => import('../components/settings/Pet.vue')),
 	about: defineAsyncComponent(() => import('../components/settings/About.vue')),

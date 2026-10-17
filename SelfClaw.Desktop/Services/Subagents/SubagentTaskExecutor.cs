@@ -14,6 +14,7 @@ internal sealed class SubagentTaskExecutor
 {
     private readonly IConversationRepository _conversationRepository;
     private readonly IConversationTurnRepository _turnRepository;
+    private readonly IConversationCompactionRepository _compactionRepository;
     private readonly ISubagentTaskExecutionStore _taskStore;
     private readonly IAgentChatRuntime _chatRuntime;
     private readonly ConversationTurnRecorder _turnRecorder;
@@ -28,6 +29,7 @@ internal sealed class SubagentTaskExecutor
     public SubagentTaskExecutor(
         IConversationRepository conversationRepository,
         IConversationTurnRepository turnRepository,
+        IConversationCompactionRepository compactionRepository,
         ISubagentTaskExecutionStore taskStore,
         IAgentChatRuntime chatRuntime,
         ConversationTurnRecorder turnRecorder,
@@ -40,6 +42,7 @@ internal sealed class SubagentTaskExecutor
         : this(
             conversationRepository,
             turnRepository,
+            compactionRepository,
             taskStore,
             chatRuntime,
             turnRecorder,
@@ -56,6 +59,7 @@ internal sealed class SubagentTaskExecutor
     internal SubagentTaskExecutor(
         IConversationRepository conversationRepository,
         IConversationTurnRepository turnRepository,
+        IConversationCompactionRepository compactionRepository,
         ISubagentTaskExecutionStore taskStore,
         IAgentChatRuntime chatRuntime,
         ConversationTurnRecorder turnRecorder,
@@ -69,6 +73,7 @@ internal sealed class SubagentTaskExecutor
     {
         _conversationRepository = conversationRepository;
         _turnRepository = turnRepository;
+        _compactionRepository = compactionRepository;
         _taskStore = taskStore;
         _chatRuntime = chatRuntime;
         _turnRecorder = turnRecorder;
@@ -168,7 +173,7 @@ internal sealed class SubagentTaskExecutor
     {
         await session.BeginAsync(cancellationToken).ConfigureAwait(false);
         var request = await CreateRequestAsync(task, session.InitialMessages, session.InitialTurns,
-            session.InitialToolRuns, cancellationToken).ConfigureAwait(false);
+            session.InitialToolRuns, session.InitialCompactions, cancellationToken).ConfigureAwait(false);
         await foreach (var streamEvent in _chatRuntime.StreamTurnAsync(request, cancellationToken).ConfigureAwait(false))
         {
             await session.ApplyEventAsync(streamEvent, cancellationToken).ConfigureAwait(false);
@@ -186,6 +191,7 @@ internal sealed class SubagentTaskExecutor
         IReadOnlyList<MessageRecord> messages,
         IReadOnlyList<ConversationTurnRecord> turns,
         IReadOnlyList<ToolExecutionRecord> toolExecutions,
+        IReadOnlyList<ConversationCompactionRecord> compactions,
         CancellationToken cancellationToken)
     {
         var definition = _snapshotSerializer.DeserializeDefinition(task.DefinitionSnapshotJson);
@@ -238,7 +244,8 @@ internal sealed class SubagentTaskExecutor
                 DirectTurnOrigin.Subagent,
                 parent.CapabilityCeiling,
                 CompletionBatch: null),
-            toolExecutions);
+            toolExecutions,
+            Compression: ConversationCompactionSelector.SelectLatest(compactions));
     }
 
     private async Task<SubagentExecutionInput> LoadInputAsync(SubagentTaskRecord task, CancellationToken cancellationToken)
@@ -248,7 +255,8 @@ internal sealed class SubagentTaskExecutor
         var turns = await _turnRepository.ListTurnsAsync(task.ChildConversationId, cancellationToken).ConfigureAwait(false);
         var messages = await _conversationRepository.ListMessagesAsync(task.ChildConversationId, cancellationToken).ConfigureAwait(false);
         var tools = await _conversationRepository.ListToolExecutionsAsync(task.ChildConversationId, cancellationToken).ConfigureAwait(false);
-        return new SubagentExecutionInput(conversation, turns, messages, tools);
+        var compactions = await _compactionRepository.ListAsync(task.ChildConversationId, cancellationToken).ConfigureAwait(false);
+        return new SubagentExecutionInput(conversation, turns, messages, tools, compactions);
     }
 
     private SubagentExecutionInput CreateFallbackInput(SubagentTaskRecord task)
@@ -259,7 +267,7 @@ internal sealed class SubagentTaskExecutor
         var turn = new ConversationTurnRecord(task.ChildTurnId, task.ChildConversationId,
             AgentExecutionMode.Direct, DirectTurnOrigin.Subagent, ConversationTurnStatus.Running,
             task.StartedAtUtc ?? throw new InvalidDataException("The claimed Subagent task has no start time."));
-        return new SubagentExecutionInput(conversation, [turn], [], []);
+        return new SubagentExecutionInput(conversation, [turn], [], [], []);
     }
 
     private Task FinalizeCancellationAsync(SubagentTaskRecord task, SubagentExecutionSession session, bool timedOut, bool applicationStopping)

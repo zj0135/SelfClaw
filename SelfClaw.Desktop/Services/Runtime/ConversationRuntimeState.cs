@@ -9,6 +9,7 @@ internal sealed class ConversationRuntimeState
     private readonly List<ConversationTurnRecord> _turns = [];
     private readonly List<MessageRecord> _messages = [];
     private readonly List<ToolExecutionRecord> _toolRuns = [];
+    private readonly List<ConversationCompactionRecord> _compactions = [];
     private ConversationTranscriptSnapshot? _snapshot;
     private readonly Dictionary<Guid, (StreamingAssistantContent Stream, long MaterializedRevision)> _messageStreams = [];
 
@@ -17,6 +18,7 @@ internal sealed class ConversationRuntimeState
         IReadOnlyList<ConversationTurnRecord> turns,
         IReadOnlyList<MessageRecord> messages,
         IReadOnlyList<ToolExecutionRecord> toolRuns,
+        IReadOnlyList<ConversationCompactionRecord>? compactions = null,
         bool isDetached = false)
     {
         ArgumentNullException.ThrowIfNull(conversation);
@@ -28,10 +30,12 @@ internal sealed class ConversationRuntimeState
         var initialTurns = turns.ToArray();
         var initialMessages = messages.OrderBy(message => message.Sequence).ToArray();
         var initialToolRuns = toolRuns.ToArray();
-        InitialSnapshot = new ConversationTranscriptSnapshot(initialTurns, initialMessages, initialToolRuns);
+        var initialCompactions = compactions?.ToArray() ?? [];
+        InitialSnapshot = new ConversationTranscriptSnapshot(initialTurns, initialMessages, initialToolRuns, initialCompactions);
         _turns.AddRange(initialTurns);
         _messages.AddRange(initialMessages);
         _toolRuns.AddRange(initialToolRuns);
+        _compactions.AddRange(initialCompactions);
     }
 
     public ConversationRecord Conversation { get; set; }
@@ -52,6 +56,8 @@ internal sealed class ConversationRuntimeState
 
     public IReadOnlyList<ToolExecutionRecord> ToolRuns => CaptureSnapshot().ToolRuns;
 
+    public IReadOnlyList<ConversationCompactionRecord> Compactions => CaptureSnapshot().Compactions ?? [];
+
     public ConversationTranscriptSnapshot CaptureSnapshot()
     {
         lock (_gate)
@@ -59,7 +65,8 @@ internal sealed class ConversationRuntimeState
             if (_snapshot is not null) return _snapshot;
             MaterializeStreamingMessages();
             return _snapshot = new ConversationTranscriptSnapshot(
-                _turns.ToArray(), _messages.OrderBy(message => message.Sequence).ToArray(), _toolRuns.ToArray());
+                _turns.ToArray(), _messages.OrderBy(message => message.Sequence).ToArray(), _toolRuns.ToArray(),
+                _compactions.ToArray());
         }
     }
 
@@ -119,6 +126,21 @@ internal sealed class ConversationRuntimeState
             }
 
             _messageStreams.Remove(message.Id);
+        }
+    }
+
+    /// <summary>Makes a freshly persisted summary visible immediately, before the turn reaches its terminal state.</summary>
+    public void ReplaceCompaction(ConversationCompactionRecord compaction)
+    {
+        ArgumentNullException.ThrowIfNull(compaction);
+        if (compaction.ConversationId != ConversationId)
+            throw new ArgumentException("The compaction belongs to another conversation.", nameof(compaction));
+        lock (_gate)
+        {
+            _snapshot = null;
+            var index = _compactions.FindIndex(item => item.Id == compaction.Id);
+            if (index >= 0) _compactions[index] = compaction;
+            else _compactions.Add(compaction);
         }
     }
 

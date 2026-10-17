@@ -19,6 +19,7 @@ using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Appearance;
+using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
@@ -56,6 +57,22 @@ public sealed class WebViewMessageRouterTests
         response.GetProperty("error").GetString().Should().NotBeNullOrEmpty();
     }
 
+    [Fact]
+    public async Task RouteAsync_routes_direct_compression_messages_to_the_bridge()
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.RouteAsync(
+            """{"type":"direct-compression/get","requestId":"compression-1"}""");
+
+        command.Should().BeNull();
+        context.PostedJson.Should().ContainSingle();
+        using var response = JsonDocument.Parse(context.PostedJson[0]);
+        response.RootElement.GetProperty("type").GetString().Should().Be("direct-compression/state");
+        response.RootElement.GetProperty("requestId").GetString().Should().Be("compression-1");
+        response.RootElement.GetProperty("policy").TryGetProperty("thresholdRatio", out _).Should().BeTrue();
+    }
+
     private const string ApplicationOrigin = "https://appassets.selfclaw.local/TranscriptVue/index.html";
     private const string PluginOrigin = "https://git-inspector.plugin.selfclaw.local/ui/index.html";
 
@@ -85,6 +102,7 @@ public sealed class WebViewMessageRouterTests
     [InlineData("""{"type":"activity-panel/subscribe","subscriptionId":"11111111-1111-4111-8111-111111111111"}""")]
     [InlineData("""{"type":"activity-panel/cancel-task","subscriptionId":"11111111-1111-4111-8111-111111111111","taskId":"22222222-2222-4222-8222-222222222222"}""")]
     [InlineData("""{"type":"get-programming-assistant-settings","requestId":"request-1"}""")]
+    [InlineData("""{"type":"direct-compression/save","requestId":"request-1","policy":{"enabled":false}}""")]
     public async Task RouteAsync_drops_messages_that_do_not_come_from_the_application_origin(string messageJson)
     {
         using var context = new RouterTestContext();
@@ -391,7 +409,7 @@ public sealed class WebViewMessageRouterTests
             var turns = new RecordingConversationTurnRepository(ConversationRepository);
             var inputs = new EmptyConversationInputRepository();
             _runs = new ConversationRunCoordinator(inputs, new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
-            _sessions = new ConversationSessionCoordinator(ConversationRepository, turns, _runs, _transcriptPublisher);
+            _sessions = new ConversationSessionCoordinator(ConversationRepository, turns, new EmptyConversationCompactionRepository(), _runs, _transcriptPublisher);
             var programmingSettings = SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore);
             AgentRuntime = new RecordingAgentChatRuntime();
             _turnEngine = new ConversationTurnEngine(
@@ -466,6 +484,11 @@ public sealed class WebViewMessageRouterTests
                 new AgentSettingsBridge(agentSettings),
                 new ProgrammingAssistantSettingsBridge(programmingSettings, HostChannel, Dispatcher.CurrentDispatcher),
                 new AppearanceSettingsBridge(new AppearanceSettingsService(settingsStore)),
+                new DirectCompressionSettingsBridge(
+                    new DirectCompressionSettingsService(settingsStore, new StubAiModelCatalog()),
+                    HostChannel,
+                    Dispatcher.CurrentDispatcher,
+                    Microsoft.Extensions.Logging.Abstractions.NullLogger<DirectCompressionSettingsBridge>.Instance),
                 new PetSettingsBridge(petHost, new SelfClaw.Desktop.Services.WebView.WebViewHostChannel(), System.Windows.Threading.Dispatcher.CurrentDispatcher, Microsoft.Extensions.Logging.Abstractions.NullLogger<PetSettingsBridge>.Instance),
                 new WorkspaceSelectionBridge(
                     viewModel,

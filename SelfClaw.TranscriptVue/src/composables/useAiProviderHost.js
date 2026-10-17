@@ -1,15 +1,7 @@
 import { onMounted, reactive, ref } from 'vue';
 import { useHostBridge, isSuperseded } from './hostBridge.js';
 import { useConfirm } from './useConfirm.js';
-
-export function formatTokens(value) {
-	if (typeof value === 'string' && /^(?:\d+(?:\.\d+)?)(?:K|M)$/.test(value)) return value;
-	const number = Number(value);
-	if (!Number.isFinite(number) || number <= 0) return '—';
-	if (number >= 1_000_000) return `${trimNumber(number / 1_000_000)}M`;
-	if (number >= 1_000) return `${trimNumber(number / 1_000)}K`;
-	return String(number);
-}
+import { formatTokenCount } from '../renderers/usageMeter.js';
 
 export function formatPrice(value) {
 	if (value === null || value === undefined || value === '') return '—';
@@ -453,8 +445,8 @@ function normalizeModel(raw) {
 		name: raw?.name || raw?.model || 'Model',
 		id: raw?.model || raw?.id || '',
 		apiFormat: Number(raw?.apiFormat ?? 0),
-		ctx: formatTokens(raw?.contextLength ?? raw?.ctx),
-		out: formatTokens(raw?.maxOutputTokens ?? raw?.out),
+		ctx: formatTokenCount(raw?.contextLength ?? raw?.ctx),
+		out: formatTokenCount(raw?.maxOutputTokens ?? raw?.out),
 		inp: formatPrice(raw?.priceInPerMTok ?? raw?.inp),
 		outp: formatPrice(raw?.priceOutPerMTok ?? raw?.outp),
 		cacheW: nullablePrice(raw?.priceCacheWritePerMTok ?? raw?.cacheW),

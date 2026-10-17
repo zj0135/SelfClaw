@@ -24,6 +24,13 @@ internal static class AiChatOptions
     public const string ContextWindowTokensKey = "context_window_tokens";
 
     /// <summary>
+    /// Model option pinning the tokenizer encoding used to count prompt tokens. Accepted values are
+    /// <c>o200k_base</c> and <c>cl100k_base</c>; when it is unset or unknown the encoding is inferred
+    /// from the model name, defaulting to <c>o200k_base</c>.
+    /// </summary>
+    public const string TokenizerEncodingKey = "tokenizer.encoding";
+
+    /// <summary>
     /// Display metadata written by model-list refresh from the provider's own catalog. It holds
     /// the model's true output ceiling, which is a far better default than whatever the provider
     /// SDK falls back to.

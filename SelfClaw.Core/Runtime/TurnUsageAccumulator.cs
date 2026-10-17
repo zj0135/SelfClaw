@@ -24,6 +24,7 @@ public sealed class TurnUsageAccumulator
     private long? _estimatedCostUsdMicros;
     private long? _providerReportedCostUsdMicros;
     private string? _additionalCountsJson;
+    private int? _lastRequestInputTokens;
 
     public bool HasObservations { get; private set; }
 
@@ -51,6 +52,12 @@ public sealed class TurnUsageAccumulator
         if (usage.ContextTokens is int contextTokens)
         {
             _contextTokens = contextTokens;
+        }
+
+        // Deliberately not summed: this describes the size of the last request, not a turn total.
+        if (usage.LastRequestInputTokens is int lastRequestInputTokens)
+        {
+            _lastRequestInputTokens = lastRequestInputTokens;
         }
 
         if (usage.ContextWindowTokens is int contextWindowTokens)
@@ -107,7 +114,8 @@ public sealed class TurnUsageAccumulator
             _contextWindowTokens,
             costUsdMicros,
             costSource,
-            _additionalCountsJson);
+            _additionalCountsJson,
+            _lastRequestInputTokens);
     }
 
     private static int? Add(int? left, int? right)

@@ -46,6 +46,7 @@ export function createTranscriptBridge(transport, afterRender = async () => {
 		// 这类 null 广播能真正生效。
 		transcriptState.selectedConversationId = payload.selectedConversationId ?? null;
         transcriptState.activityText = payload.activityText ?? null;
+		transcriptState.usage = payload.usage ?? null;
 		delete transcriptState.upsertItems;
 		delete transcriptState.removedItemIds;
 		delete transcriptState.itemOrder;

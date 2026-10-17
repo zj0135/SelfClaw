@@ -25,7 +25,7 @@ internal static class ConversationTurnFinalizationBuilder
         var messages = request.AssistantMessage is { } message
             ? new[] { CompleteMessage(message, request, now) }
             : Array.Empty<MessageRecord>();
-        return new ConversationTurnCommit(turn, messages, CompleteTools(request, now));
+        return new ConversationTurnCommit(turn, messages, CompleteTools(request, now), request.Compactions);
     }
 
     private static MessageRecord CompleteMessage(

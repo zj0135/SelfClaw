@@ -215,7 +215,7 @@ public sealed class ConversationTurnEngineTests
         {
             Turns = new(Repository);
             Runs = new(Inputs, new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
-            Sessions = new(Repository, Turns, Runs, new SilentSink());
+            Sessions = new(Repository, Turns, new EmptyConversationCompactionRepository(), Runs, new SilentSink());
             var approval = new DesktopToolApprovalHandler();
             _activity = new(approval, NullLogger<AgentActivityCoordinator>.Instance);
             var root = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));

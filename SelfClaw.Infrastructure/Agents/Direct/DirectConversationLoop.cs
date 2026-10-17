@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
@@ -11,11 +12,18 @@ using SelfClaw.Infrastructure.AiProviders;
 
 namespace SelfClaw.Infrastructure.Agents.Direct;
 
-internal static class DirectConversationLoop
+internal sealed class DirectConversationLoop
 {
     internal const int MaximumProviderRequestsPerTurn = 128;
 
-    public static async Task<DirectLoopOutcome> RunAsync(DirectTurnSetup setup, DirectEventTranslator output,
+    private readonly IDirectTokenCounter _tokenCounter;
+
+    internal DirectConversationLoop(IDirectTokenCounter tokenCounter)
+    {
+        _tokenCounter = tokenCounter;
+    }
+
+    public async Task<DirectLoopOutcome> RunAsync(DirectTurnSetup setup, DirectEventTranslator output,
         CancellationToken cancellationToken)
     {
         var context = new DirectConversationContext(setup.Messages);
@@ -62,7 +70,7 @@ internal static class DirectConversationLoop
         throw new InvalidOperationException("The provider request budget was not resolved.");
     }
 
-    private static async Task<DirectLoopOutcome?> ConsumeAvailableInputsAsync(DirectTurnSetup setup,
+    private async Task<DirectLoopOutcome?> ConsumeAvailableInputsAsync(DirectTurnSetup setup,
         DirectConversationContext context, DirectEventTranslator output, CancellationToken cancellationToken)
     {
         if (setup.InputSession is not { } inputs) return null;
@@ -77,7 +85,7 @@ internal static class DirectConversationLoop
     }
 
     // Null means the claimed batch was consumed and the turn may continue; a non-null outcome ends the turn.
-    private static async Task<DirectLoopOutcome?> TryConsumeBatchAsync(DirectTurnSetup setup, IDirectTurnInputSession inputs,
+    private async Task<DirectLoopOutcome?> TryConsumeBatchAsync(DirectTurnSetup setup, IDirectTurnInputSession inputs,
         ConversationInputBatch batch, DirectConversationContext context, DirectEventTranslator output,
         CancellationToken cancellationToken)
     {
@@ -98,19 +106,29 @@ internal static class DirectConversationLoop
     }
 
     /// <summary>
-    /// The runtime budget guard shares the composer's UTF-8 heuristic. Only when the provider declares a
-    /// context window is the batch refused before consumption; the already-consumed transcript is never
-    /// trimmed to make room.
+    /// Refuses a steer batch only when the declared window would be exceeded; the transcript that was already
+    /// consumed is never trimmed. Counting can be unavailable at runtime, and design §5.5 degrades fail-open
+    /// there: the batch is consumed and the provider decides whether the request fits.
     /// </summary>
-    private static bool FitsBudget(DirectTurnSetup setup, DirectConversationContext context, ConversationInputBatch batch)
+    private bool FitsBudget(DirectTurnSetup setup, DirectConversationContext context, ConversationInputBatch batch)
     {
-        if (AiChatOptions.ResolveContextWindowTokens(setup.ProviderLease.Profile) is not int contextWindow)
+        var profile = setup.ProviderLease.Profile;
+        if (AiChatOptions.ResolveContextWindowTokens(profile) is not int contextWindow)
+            return true;
+        if (context.CountTokens(_tokenCounter, profile) is not int used)
+            return true;
+        if (_tokenCounter.CountTools(setup.ProviderLease.Options.Tools, profile) is not int toolTokens)
             return true;
         var reserve = setup.ProviderLease.Options.MaxOutputTokens ?? DirectPromptComposer.DefaultOutputTokenReserve;
-        var used = DirectPromptComposer.EstimateMessages(context.Messages) +
-                   DirectPromptComposer.EstimateTools(setup.ProviderLease.Options.Tools) + reserve;
-        var batchTokens = batch.Inputs.Sum(input => DirectPromptComposer.EstimateUserPrompt(input.Prompt));
-        return used + batchTokens <= contextWindow;
+        var total = (long)used + toolTokens + reserve;
+        foreach (var input in batch.Inputs)
+        {
+            if (_tokenCounter.CountText(input.Prompt, profile) is not int promptTokens)
+                return true;
+            total += promptTokens;
+        }
+
+        return total <= contextWindow;
     }
 
     private static DirectLoopOutcome? GetTerminalOutcome(ChatResponse response)

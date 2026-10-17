@@ -10,6 +10,7 @@ using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Automation;
+using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
@@ -31,6 +32,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly AgentSettingsBridge _agentSettingsBridge;
     private readonly ProgrammingAssistantSettingsBridge _programmingAssistantSettingsBridge;
     private readonly AppearanceSettingsBridge _appearanceSettingsBridge;
+    private readonly DirectCompressionSettingsBridge _directCompressionSettingsBridge;
     private readonly PetSettingsBridge _petSettingsBridge;
     private readonly WorkspaceSelectionBridge _workspaceSelectionBridge;
     private readonly GitWorkspaceBridge? _gitWorkspaceBridge;
@@ -57,6 +59,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         AgentSettingsBridge agentSettingsBridge,
         ProgrammingAssistantSettingsBridge programmingAssistantSettingsBridge,
         AppearanceSettingsBridge appearanceSettingsBridge,
+        DirectCompressionSettingsBridge directCompressionSettingsBridge,
         PetSettingsBridge petSettingsBridge,
         WorkspaceSelectionBridge workspaceSelectionBridge,
         TerminalHostController terminalHostController,
@@ -77,6 +80,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _agentSettingsBridge = agentSettingsBridge;
         _programmingAssistantSettingsBridge = programmingAssistantSettingsBridge;
         _appearanceSettingsBridge = appearanceSettingsBridge;
+        _directCompressionSettingsBridge = directCompressionSettingsBridge;
         _petSettingsBridge = petSettingsBridge;
         _workspaceSelectionBridge = workspaceSelectionBridge;
         _gitWorkspaceBridge = gitWorkspaceBridge;
@@ -245,6 +249,13 @@ internal sealed class WebViewMessageRouter : IDisposable
             _hostChannel.PostResponse(appearance.Value.Response);
             return appearance.Value.IsDark is { } dark
                 ? new WebViewHostCommand(WebViewHostCommandKind.ApplyCaptionTheme, dark ? "dark" : "light") : null;
+        }
+        if (type.StartsWith("direct-compression/", StringComparison.Ordinal))
+        {
+            var compression = await _directCompressionSettingsBridge.TryHandleAsync(type, payload, cancellationToken);
+            if (compression is null) throw new ArgumentException("Unsupported direct compression message.");
+            _hostChannel.PostResponse(compression.Value.Response);
+            return compression.Value.Command;
         }
         if (type.StartsWith("terminal-", StringComparison.Ordinal))
         {

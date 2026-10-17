@@ -89,7 +89,7 @@ public enum AutomationRunSkipReason { Overlap = 0, Stale = 1 }
 
 ### 2.2 schema v31（破坏性升级）
 
-`SqliteDatabase` 只接受恰好等于当前版本的库，**不迁移、不回填**。因此本次升级到 v31 意味着已有 v30 库会被明确拒绝打开（用户需删除本地库重建）。这是已确认接受的代价。
+`SqliteDatabase` 只接受恰好等于当前版本的库，**不迁移、不回填**。因此本次升级到 v31 意味着已有 v30 库会被明确拒绝打开（用户需删除本地库重建）。这是已确认接受的代价。后续 schema 已升至 v32（上下文压缩），本节保留 v31 时间点原文。
 
 ```sql
 CREATE TABLE automation_tasks (

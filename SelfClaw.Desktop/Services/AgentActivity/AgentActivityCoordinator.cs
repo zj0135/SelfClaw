@@ -232,6 +232,7 @@ public sealed class AgentActivityCoordinator : IDisposable
             AgentRunStatus.Initializing => (AgentActivityPhase.Initializing, "正在初始化"),
             AgentRunStatus.Requesting => (AgentActivityPhase.Requesting, "正在连接模型"),
             AgentRunStatus.Thinking => (AgentActivityPhase.Thinking, "正在思考方案"),
+            AgentRunStatus.Compacting => (AgentActivityPhase.Thinking, "正在压缩上下文"),
             AgentRunStatus.Running => (AgentActivityPhase.Responding, "正在执行任务"),
             _ => (AgentActivityPhase.Starting, "正在准备任务"),
         };

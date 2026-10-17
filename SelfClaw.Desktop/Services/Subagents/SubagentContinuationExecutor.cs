@@ -269,7 +269,8 @@ internal sealed class SubagentContinuationExecutor
                 parent.CapabilityCeiling,
                 batch),
             runtimeState.ToolRuns.ToArray(),
-            checkpoint);
+            checkpoint,
+            Compression: ConversationCompactionSelector.SelectLatest(runtimeState.Compactions));
     }
 
     private async Task RenewLeaseAsync(

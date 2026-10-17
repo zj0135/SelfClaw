@@ -19,6 +19,7 @@ using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.Appearance;
+using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
@@ -154,6 +155,11 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<ProgrammingAssistantSettingsBridge>();
         services.AddSingleton<AppearanceSettingsService>();
         services.AddSingleton<AppearanceSettingsBridge>();
+        services.AddSingleton<DirectCompressionSettingsService>();
+        services.AddSingleton<DirectCompressionSettingsBridge>();
+        // Infrastructure 先注册了关闭压缩的默认策略；单服务解析取最后一次注册，这条覆盖它。
+        services.AddSingleton<IDirectCompressionPolicySource>(services =>
+            services.GetRequiredService<DirectCompressionSettingsService>());
         services.AddSingleton<AiProviderSettingsBridge>();
         services.AddSingleton<ExtensionSettingsBridge>();
         services.AddSingleton<AgentSettingsService>();
@@ -203,6 +209,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<AgentSettingsBridge>(),
             services.GetRequiredService<ProgrammingAssistantSettingsBridge>(),
             services.GetRequiredService<AppearanceSettingsBridge>(),
+            services.GetRequiredService<DirectCompressionSettingsBridge>(),
             services.GetRequiredService<PetSettingsBridge>(),
             services.GetRequiredService<WorkspaceSelectionBridge>(),
             services.GetRequiredService<TerminalHostController>(),

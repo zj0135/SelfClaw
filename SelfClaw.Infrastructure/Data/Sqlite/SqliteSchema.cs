@@ -28,7 +28,8 @@ internal static class SqliteSchema
         "conversation_inputs",
         "conversation_input_state",
         "automation_tasks",
-        "automation_runs"
+        "automation_runs",
+        "conversation_compactions"
     ];
 
     internal const string CreateSql = """
@@ -168,6 +169,7 @@ internal static class SqliteSchema
             provider_calls INTEGER NOT NULL DEFAULT 1,
             context_tokens INTEGER NULL,
             context_window_tokens INTEGER NULL,
+            last_request_input_tokens INTEGER NULL,
             cost_usd_micros INTEGER NULL,
             cost_source INTEGER NOT NULL DEFAULT 0,
             additional_counts_json TEXT NULL,
@@ -386,6 +388,21 @@ internal static class SqliteSchema
             FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE conversation_compactions (
+            id TEXT NOT NULL PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            turn_id TEXT NOT NULL,
+            through_sequence INTEGER NOT NULL CHECK(through_sequence >= 0),
+            summary TEXT NOT NULL,
+            model TEXT NULL,
+            source_message_count INTEGER NOT NULL,
+            source_tokens INTEGER NULL,
+            summary_tokens INTEGER NULL,
+            created_at_utc TEXT NOT NULL,
+            FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY(turn_id) REFERENCES conversation_turns(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE automation_tasks (
             id TEXT NOT NULL PRIMARY KEY,
             title TEXT NOT NULL,
@@ -461,6 +478,8 @@ internal static class SqliteSchema
         CREATE INDEX ix_automation_runs_task_created ON automation_runs(task_id, created_at_utc DESC);
         CREATE INDEX ix_automation_runs_status ON automation_runs(status, scheduled_for_utc);
         CREATE INDEX ix_automation_tasks_next_run ON automation_tasks(is_enabled, next_run_at_utc);
+        CREATE INDEX ix_conversation_compactions_conversation
+            ON conversation_compactions(conversation_id, created_at_utc DESC);
 
         CREATE TRIGGER tool_runs_assistant_insert BEFORE INSERT ON tool_runs
         WHEN NOT EXISTS (SELECT 1 FROM messages WHERE id = NEW.message_id AND role = 2)

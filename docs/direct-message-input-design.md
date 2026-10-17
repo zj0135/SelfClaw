@@ -1,6 +1,6 @@
 # Direct 消息队列与 Steer 设计
 
-状态：队列与 steer 始终开启（功能开关已在 `8ad27da` 删除，见 §11），P6 未实施。更新：2026-10-08。当前 SQLite schema v31（队列 / steer 各阶段未新增 DDL）。当前实现与验证基线见 [运行链路](runtime-execution-flow.md) 与 [Direct 架构图](pipeline-architecture.md)；本文保留目标行为定义与各阶段语义结论。
+状态：队列与 steer 始终开启（功能开关已在 `8ad27da` 删除，见 §11），P6 未实施。更新：2026-10-08。当前 SQLite schema v32（队列 / steer 各阶段未新增 DDL；v32 来自上下文压缩，见 [压缩设计](direct-context-compaction-design.md)）。当前实现与验证基线见 [运行链路](runtime-execution-flow.md) 与 [Direct 架构图](pipeline-architecture.md)；本文保留目标行为定义与各阶段语义结论。
 
 本文定义完整目标行为；Queue 受理/调度、Steer 执行语义与竞争处理、Vue 完整交互与传输恢复均已实现（功能开关已删除，Queue 与 Steer 始终开启）。UI 调整（2026-10）：composer 只保留一个角落按钮，空闲即发送；Direct 忙碌时输入框有内容则同一按钮变成发送（入队）、为空则显示「停止生成」（不可停止的后台续跑显示进度）；steer 只在队列面板对 Pending FollowUp 点「调整当前任务」（promote），不再由 composer 直接提交 steer。现有机制参见 [运行链路](runtime-execution-flow.md) 与 [Subagent 设计](direct-subagent-system-design.md)。
 
@@ -137,7 +137,7 @@ flowchart TD
 | Desktop `ConversationTurnEngine` / `ConversationSessionCoordinator` | 前者执行、归约及调用提交策略；后者选择、加载及展示；均不再次裁决准入 |
 | Desktop `ConversationInputBridge` / `ConversationInputPublisher` | 关联响应、选中会话状态订阅、版本和重载恢复 |
 | Infrastructure `Agents/Direct/DirectConversationLoop` | provider 调用、工具批次、steer 边界、调用预算 |
-| Infrastructure `Agents/Direct/Context/DirectConversationContext` | 有真实追加／裁剪行为的运行上下文服务；只有主循环可修改；与历史 composer 共用预算规则 |
+| Infrastructure `Agents/Direct/Context/DirectConversationContext` | 有真实追加行为的运行上下文服务；只有主循环可修改；与历史 composer 共用计数与压缩规则（不再裁剪历史） |
 
 `DirectChatTurnRequest` 增加可选 Core 输入会话契约，只给 Interactive Direct 绑定。不得把 Desktop 类型、SQLite 连接或 SDK `ChatMessage` 放进跨层 DTO。
 
@@ -313,11 +313,11 @@ steer 批次领取提交后，可以跳过 Pending，在 Preparing 完成后停�
 
 ### 7.5 上下文预算
 
-将 `DirectPromptComposer` 的估算／选择规则提取为可复用服务，运行上下文使用同一规则。新输入批次、系统 sections、当前尚需解释的完整工具调用／结果单元必须被预留；历史按完整单元裁剪。
+将 `DirectPromptComposer` 的估算／选择规则提取为可复用服务，运行上下文使用同一规则。新输入批次、系统 sections、当前尚需解释的完整工具调用／结果单元必须被预留；历史按完整单元划分（单元边界即压缩边界）。
 
 边界提交前校验本批次必需上下文能否放入预算；不能放入时该批尚未消费的输入从 Pending 或 Claimed 转 Held，并明确暂停／收尾，不标记已消费。已经提交的 steer 在本回合内作为受保护输入，不能在之后迭代中被静默裁掉；若受保护内容继续增长超预算，终止并提示用户。
 
-预算仍是 UTF-8 启发式估算，不能宣称真实 tokenizer 精确计数。provider 拒绝超长请求时保留错误和已经消费的位置。
+预算与裁剪已被上下文压缩取代（见 [压缩设计](direct-context-compaction-design.md)）：回合开始按模型 tokenizer 计数触发压缩，超出的旧历史由摘要代表、按边界重放，不再按字节估算裁剪。本节的批量准入语义（预留、Held、受保护 steer）保持不变，只是判定输入改为 tokenizer 计数。provider 拒绝超长请求时保留错误和已经消费的位置。
 
 ## 8. 消息交错与提交屏障
 
@@ -479,7 +479,7 @@ P5 实现补充：状态快照在 `canSteer` 外附带 `steerReason` 和当前�
 
 ## 14. P2 实施落点（2026-10-03）
 
-- 实际 schema v31，拒绝而非升级旧库；没有执行数据清理。完整 DDL/版本标记同事务，使用真实 SQLite 验证。
+- 实际 schema v31（当时），拒绝而非升级旧库；没有执行数据清理。完整 DDL/版本标记同事务，使用真实 SQLite 验证。后续 schema 已升至 v32（上下文压缩），版本断言以当前代码为准。
 - 一个短 metadata lock 维护唯一 run-handle 注册和删除屏障；所有会话 I/O、准备、provider、工具及 ACK 在锁外。不同会话长任务不互相串行，不引入额外 keyed-lock 生命周期。
 - 保留“实际片段 + tools + blocks”原子进度事务，替换裸工具写入，避免强外键下的孤立工具；detached continuation 不走此路径。
 - ConversationTurnRecord 读取时包含用量，SQL 仍分表；复用 DirectTurnOrigin 三个值（CLI 使用 Interactive），不复制 origin 枚举。消息状态仅 Sealed/Streaming/Interrupted。

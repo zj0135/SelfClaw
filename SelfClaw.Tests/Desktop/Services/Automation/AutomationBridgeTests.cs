@@ -306,6 +306,7 @@ public sealed class AutomationBridgeTests : IDisposable
         await host.StartSchedulingAsync(CancellationToken.None);
         var conversations = new SqliteConversationRepository(database);
         var turns = new SqliteConversationTurnRepository(database, new SqliteTurnCommitGate());
+        var compactions = new SqliteConversationCompactionRepository(database);
         var taskService = new AutomationTaskService(
             taskStore,
             runStore,
@@ -324,6 +325,7 @@ public sealed class AutomationBridgeTests : IDisposable
             cancellations,
             conversations,
             turns,
+            compactions,
             new SqliteUsageStatisticsReader(database),
             new DesktopSettingsJsonStore(paths),
             paths,

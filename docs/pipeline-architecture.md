@@ -115,7 +115,8 @@ flowchart TB
     CAP --> S4["④ DirectToolInvoker<br/>审批 / steer 执行准入 / checkpoint / 连续故障预算<br/>唯一工具执行缝"]
     S4 --> S5["⑤ AiChatClientFactory.Create<br/>按回合 HttpClient (共享 pooled handler)<br/>provider adapter → CreateChatOptions/Client<br/>ChatClientBuilder: 仅 UseLogging → AiChatClientLease"]
     S5 --> S6["⑥ RunStartedEvent(direct-{guid}, model)<br/>+ RunStatusEvent(Requesting)"]
-    S6 --> S7["⑦ DirectPromptComposer.BuildMessages<br/>System(agent+扩展+policy)<br/>→ History 反向预算裁剪(工具调用/结果不可拆)<br/>→ 续写提示 → CompletionBatch"]
+    S6 --> S6B["⑥b 计数 + 压缩（回合开始）<br/>读策略 → IDirectTokenCounter 计数 → PlanCompression<br/>→ Started + Compacting → 压缩 → Completed / Failed<br/>→ 用含摘要的 system 段重算 → EnsurePromptFitsWindow"]
+    S6B --> S7["⑦ DirectPromptComposer.BuildMessages<br/>System(agent+扩展+policy)<br/>→ 按 tokenizer 计数触发压缩 + 按边界重放（工具调用/结果不可拆）<br/>→ 续写提示 → CompletionBatch"]
     S7 --> S8["⑧ DirectConversationLoop.RunAsync（显式循环，每回合 ≤128 次 provider 请求）<br/>GetStreamingResponseAsync → DirectEventTranslator.TranslateUpdate<br/>FinishReason 判终态 → 串行执行工具 → 追加结果进入下一轮"]
     S8 --> S9["⑨ WriteTerminalOutcome<br/>Length+文本=Truncated / Length 空=Failed / ContentFilter=Blocked<br/>预算耗尽、上下文不 fit=Failed / 其余=Succeeded"]
     S9 --> S10["⑩ 释放 provider lease → 释放 capability lease"]
@@ -186,6 +187,7 @@ flowchart LR
         E4["AssistantThinkingDeltaEvent"]
         E5["ToolCallStartedEvent / ToolCallCompletedEvent"]
         E6["UsageReportedEvent"]
+        E7["ContextCompactionStartedEvent / ContextCompactionCompletedEvent / ContextCompactionFailedEvent"]
         E8["PermissionRequestedEvent / RawOutputEvent"]
         E9["RunCompletedEvent (唯一终态)"]
     end
@@ -208,11 +210,11 @@ flowchart TB
     MUT --> SIG["TranscriptChanged(immediate)"]
     SIG --> COORD["ConversationSessionCoordinator<br/>运行态 / 取消 / 选中会话同步"]
     COORD --> PUB["TranscriptPublisher<br/>Dispatcher 封送<br/>120ms 合流窗口 + autoScroll 合并"]
-    PUB --> PROJ["TranscriptProjection.Build<br/>Messages + ToolRuns + Shell → TranscriptRenderState"]
+    PUB --> PROJ["TranscriptProjection.Build<br/>Messages + ToolRuns + Shell + Compactions → TranscriptRenderState<br/>（含 TranscriptUsageSummary 用量摘要）"]
     PROJ --> DEL["TranscriptDelivery"]
     DEL --> D1{"与已 ACK 快照比较"}
-    D1 -->|首帧| D2["replaceState<br/>{items, conversations, isBusy,<br/>agentMode, toolPermissionMode, revision}"]
-    D1 -->|增量| D3["patchState<br/>{upsertItems, removedItemIds, itemOrder, baseRevision}"]
+    D1 -->|首帧| D2["replaceState<br/>{items, conversations, isBusy,<br/>agentMode, toolPermissionMode, usage, revision}"]
+    D1 -->|增量| D3["patchState<br/>{upsertItems, removedItemIds, itemOrder, usage, baseRevision}"]
     D2 --> CH["WebViewHostChannel.PostPush<br/>camelCase JSON"]
     D3 --> CH
     CH --> WV["CoreWebView2.PostWebMessageAsJson"]
@@ -223,7 +225,7 @@ flowchart TB
     ACK --> DEL
     TB --> UCT["useChatTranscript 响应式 state"]
     UCT --> TP["TranscriptPanel.vue"]
-    TP --> MB["MessageBlocks / MessageContent<br/>BodySegment / ThinkingBlock / ToolGroup / ToolCard"]
+    TP --> MB["MessageBlocks / MessageContent<br/>BodySegment / ThinkingBlock / ToolGroup / ToolCard<br/>CompressionNotice (kind=compression)"]
 
     DEL -.->|"2s 定时重试，最多 3 次"| DEL
     DEL -.->|"耗尽 → transcript-unavailable"| HB

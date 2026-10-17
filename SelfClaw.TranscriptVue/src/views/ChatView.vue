@@ -69,7 +69,7 @@ defineExpose({
 			:git-error="workspace.state.gitError" :submit-error="composer.error.value" :agent-mode="state.agentMode"
 			:selected-agent-id="state.selectedAgentId" :selected-agent-name="state.selectedAgentName"
 			:capability-revision="state.capabilityRevision" :pending-approval="approvals.pending.value"
-			:tool-permission-mode="state.toolPermissionMode" @submit="composer.submit" @stop="composer.stop"
+			:tool-permission-mode="state.toolPermissionMode" :usage="state.usage" @submit="composer.submit" @stop="composer.stop"
 			@request-workspace="workspace.refresh" @select-workspace-root="workspace.selectRoot"
 			@delete-workspace-root="workspace.deleteRoot" @browse-workspace-folder="workspace.browseFolder"
 			@git-action="workspace.runGitAction" @approve-tool="(id) => approvals.resolve(id, true)"

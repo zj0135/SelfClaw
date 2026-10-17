@@ -769,7 +769,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             selectedAgent.Name,
             _capabilityRevision,
             ToToolPermissionModeWire(_selectedToolPermissionMode),
-            isContinuation);
+            isContinuation,
+            transcript.Compactions);
     }
 
     Guid? SelfClaw.Desktop.Services.Activities.IActivityPanelScopeSource.CaptureActivityParent()

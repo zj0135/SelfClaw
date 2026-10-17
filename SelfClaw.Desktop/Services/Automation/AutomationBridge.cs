@@ -35,6 +35,7 @@ internal sealed class AutomationBridge : IDisposable
     private readonly AutomationRunCancellationRegistry _cancellations;
     private readonly IConversationRepository _conversations;
     private readonly IConversationTurnRepository _turns;
+    private readonly IConversationCompactionRepository _compactions;
     private readonly IUsageStatisticsReader _usage;
     private readonly DesktopSettingsJsonStore _settingsStore;
     private readonly TranscriptProjection _transcriptProjection;
@@ -53,6 +54,7 @@ internal sealed class AutomationBridge : IDisposable
         AutomationRunCancellationRegistry cancellations,
         IConversationRepository conversations,
         IConversationTurnRepository turns,
+        IConversationCompactionRepository compactions,
         IUsageStatisticsReader usage,
         DesktopSettingsJsonStore settingsStore,
         StoragePaths storagePaths,
@@ -69,6 +71,7 @@ internal sealed class AutomationBridge : IDisposable
         _cancellations = cancellations;
         _conversations = conversations;
         _turns = turns;
+        _compactions = compactions;
         _usage = usage;
         _settingsStore = settingsStore;
         _transcriptProjection = new TranscriptProjection(storagePaths);
@@ -610,6 +613,7 @@ internal sealed class AutomationBridge : IDisposable
 
         var turns = await _turns.ListTurnsAsync(conversationId, cancellationToken).ConfigureAwait(false);
         var toolRuns = await _conversations.ListToolExecutionsAsync(conversationId, cancellationToken).ConfigureAwait(false);
+        var compactions = await _compactions.ListAsync(conversationId, cancellationToken).ConfigureAwait(false);
         _transcriptProjection.Invalidate();
         var state = _transcriptProjection.Build(new TranscriptProjectionRequest(
             messages,
@@ -625,7 +629,8 @@ internal sealed class AutomationBridge : IDisposable
             SelectedAgentId: string.Empty,
             SelectedAgentName: string.Empty,
             CapabilityRevision: 0,
-            ToolPermissionMode: "fullAccess"));
+            ToolPermissionMode: "fullAccess",
+            Compactions: compactions));
         return new { items = state?.Items ?? [] };
     }
 

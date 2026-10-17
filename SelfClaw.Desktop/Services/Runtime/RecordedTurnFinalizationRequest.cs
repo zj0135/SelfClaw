@@ -9,4 +9,5 @@ internal sealed record RecordedTurnFinalizationRequest(
     TurnFinalizationKind Kind,
     string? FinalText,
     string? ErrorMessage,
-    TurnUsage? Usage);
+    TurnUsage? Usage,
+    IReadOnlyList<ConversationCompactionRecord>? Compactions = null);

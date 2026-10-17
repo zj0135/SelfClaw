@@ -17,4 +17,5 @@ internal sealed record TranscriptProjectionRequest(
     string SelectedAgentName,
     long CapabilityRevision,
     string ToolPermissionMode,
-    bool IsContinuation = false);
+    bool IsContinuation = false,
+    IReadOnlyList<ConversationCompactionRecord>? Compactions = null);

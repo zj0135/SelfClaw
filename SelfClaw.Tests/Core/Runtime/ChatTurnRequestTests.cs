@@ -34,4 +34,36 @@ public sealed class ChatTurnRequestTests
         action.Should().Throw<ArgumentException>()
             .WithParameterName("TurnId");
     }
+
+    [Fact]
+    public void Omitted_optional_direct_parameters_default_to_null()
+    {
+        var request = new DirectChatTurnRequest(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            WorkspaceRoot: null,
+            new AgentRuntimeDefinition(
+                "build",
+                "Builder",
+                "test",
+                AgentExecutionMode.Direct,
+                AgentRuntimeDefinition.SystemToolPolicy,
+                [],
+                [],
+                [],
+                [],
+                string.Empty),
+            Messages: [],
+            Turns: [],
+            ModelProfileId: null,
+            ToolPermissionMode.RequireApproval,
+            ToolApprovalHandler: null,
+            new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));
+
+        request.ToolExecutions.Should().BeNull();
+        request.ToolExecutionCheckpoint.Should().BeNull();
+        request.InputSession.Should().BeNull();
+        request.Steering.Should().BeNull();
+        request.Compression.Should().BeNull();
+    }
 }

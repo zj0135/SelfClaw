@@ -14,6 +14,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 
@@ -44,20 +45,41 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         "The response reached the configured output-token limit without producing any output. " +
         "Raise the output-token limit for this model and try again.";
 
+    private const string CompactionFailedReason =
+        "Context compaction failed; the turn continues with the uncompacted history.";
+
+    private const string CompactionFallbackDiagnostic =
+        "The configured compaction model was unavailable; the turn's own model produced the summary.";
+
+    private const string CountingUnavailableDiagnostic =
+        "Token counting is unavailable for this model, so context compaction and the window check are off for this turn.";
+
     private readonly IAiChatClientFactory _chatClientFactory;
     private readonly IDirectTurnCapabilityResolver _capabilityResolver;
     private readonly DirectPromptComposer _promptComposer;
     private readonly ILogger<DirectAgentChatRuntime> _logger;
+    private readonly DirectConversationLoop _conversationLoop;
+    private readonly IDirectTokenCounter _tokenCounter;
+    private readonly DirectContextCompressor _contextCompressor;
+    private readonly IDirectCompressionPolicySource _compressionPolicy;
 
     public DirectAgentChatRuntime(
         IAiChatClientFactory chatClientFactory,
         IDirectTurnCapabilityResolver capabilityResolver,
         DirectPromptComposer promptComposer,
+        DirectConversationLoop conversationLoop,
+        IDirectTokenCounter tokenCounter,
+        DirectContextCompressor contextCompressor,
+        IDirectCompressionPolicySource? compressionPolicy = null,
         ILogger<DirectAgentChatRuntime>? logger = null)
     {
         _chatClientFactory = chatClientFactory;
         _capabilityResolver = capabilityResolver;
         _promptComposer = promptComposer;
+        _conversationLoop = conversationLoop;
+        _tokenCounter = tokenCounter;
+        _contextCompressor = contextCompressor;
+        _compressionPolicy = compressionPolicy ?? DisabledDirectCompressionPolicySource.Instance;
         _logger = logger ?? NullLogger<DirectAgentChatRuntime>.Instance;
     }
 
@@ -117,7 +139,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 setup.ProviderLease.Profile.Configuration,
                 setup.ProviderLease.Profile.Model,
                 AiChatOptions.ResolveContextWindowTokens(setup.ProviderLease.Profile));
-            var outcome = await DirectConversationLoop.RunAsync(setup, output, cancellationToken).ConfigureAwait(false);
+            var outcome = await _conversationLoop.RunAsync(setup, output, cancellationToken).ConfigureAwait(false);
             output.ReportUsage();
             WriteTerminalOutcome(writer, outcome, output);
         }
@@ -196,6 +218,13 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 SessionId: null,
                 providerLease.Profile.Model,
                 AgentKind: null));
+
+            var budget = new DirectPromptBudget(
+                AiChatOptions.ResolveContextWindowTokens(providerLease.Profile),
+                providerLease.Options.MaxOutputTokens);
+            var (compression, countedTokens) = await ApplyCompactionAsync(
+                request, capabilityLease, providerLease, budget, writer, cancellationToken).ConfigureAwait(false);
+            EnsurePromptFitsWindow(budget, countedTokens);
             writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
 
             var messages = _promptComposer.BuildMessages(
@@ -206,10 +235,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 capabilityLease.SystemInstructions,
                 capabilityLease.MessageAdjustments,
                 request.ExecutionContext,
-                new DirectPromptBudget(
-                    AiChatOptions.ResolveContextWindowTokens(providerLease.Profile),
-                    providerLease.Options.MaxOutputTokens),
-                providerLease.Options.Tools);
+                compression);
             return new DirectTurnSetup(capabilityLease, providerLease, invoker, messages, request.InputSession);
         }
         catch
@@ -218,6 +244,157 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             await DisposeResourcesAsync(providerLease, capabilityLease).ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Decides and performs this turn's compaction: count, plan, summarize, and publish the events the
+    /// transcript needs. Runs before the first provider request, so the summary is part of that request.
+    /// Returns the compaction the prompt should replay against plus the token count of that prompt; a null
+    /// count means counting is unavailable and the turn degrades to an uncompacted, unchecked request (§5.5).
+    /// </summary>
+    private async Task<(ConversationCompactionRecord? Compression, int? PromptTokens)> ApplyCompactionAsync(
+        DirectChatTurnRequest request,
+        DirectTurnCapabilityLease capabilityLease,
+        AiChatClientLease providerLease,
+        DirectPromptBudget budget,
+        ChannelWriter<AgentStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        var policy = await _compressionPolicy.GetAsync(cancellationToken).ConfigureAwait(false);
+        // Without a declared window and with compaction off, there is nothing to count and nothing to decide.
+        if (budget.ContextWindowTokens is null && !policy.Enabled)
+        {
+            return (request.Compression, null);
+        }
+
+        var (promptTokens, units) = CountPromptTokens(request, capabilityLease, providerLease, request.Compression);
+        if (promptTokens is not int estimatedTokens)
+        {
+            writer.TryWrite(new RunStatusEvent(AgentRunStatus.Initializing, CountingUnavailableDiagnostic));
+            return (request.Compression, null);
+        }
+
+        var plan = _promptComposer.PlanCompression(units, request.Compression, policy, budget, estimatedTokens);
+        if (!plan.ShouldCompress || plan.ThroughSequence is not long throughSequence)
+        {
+            return (request.Compression, estimatedTokens);
+        }
+
+        // Started is written before the summarization call so the transcript never sees a lone terminal, and
+        // EstimatedTokens stays reserve-free to match the context-size readout (design §8.1).
+        writer.TryWrite(new ContextCompactionStartedEvent(estimatedTokens, plan.ThresholdTokens));
+        writer.TryWrite(new RunStatusEvent(AgentRunStatus.Compacting));
+        var result = await _contextCompressor.TryCompressAsync(new DirectCompressionRequest(
+                plan.PrefixUnits,
+                request.Compression?.Summary,
+                plan.SourceTokens ?? estimatedTokens,
+                policy.ModelProfileId,
+                providerLease,
+                request.ConversationId,
+                request.TurnId),
+            cancellationToken).ConfigureAwait(false);
+        if (result is null)
+        {
+            // A failed summary is a diagnostic, not a turn failure: the uncompacted history still goes out.
+            writer.TryWrite(new ContextCompactionFailedEvent(CompactionFailedReason));
+            return (request.Compression, estimatedTokens);
+        }
+
+        var compression = new ConversationCompactionRecord(
+            Guid.NewGuid(),
+            request.ConversationId,
+            request.TurnId,
+            throughSequence,
+            result.Summary,
+            result.Model,
+            result.SourceMessageCount,
+            result.SourceTokens,
+            result.SummaryTokens,
+            DateTimeOffset.UtcNow);
+        if (result.UsedFallbackModel)
+        {
+            writer.TryWrite(new RunStatusEvent(AgentRunStatus.Compacting, CompactionFallbackDiagnostic));
+        }
+
+        writer.TryWrite(new ContextCompactionCompletedEvent(compression));
+        // The window check bounds what is actually sent, so it is re-run against the prompt that now carries
+        // the summary section in its system text.
+        var (recountedTokens, _) = CountPromptTokens(request, capabilityLease, providerLease, compression);
+        return (compression, recountedTokens);
+    }
+
+    /// <summary>
+    /// Counts the prompt the composer is about to build: the system sections (including an existing summary),
+    /// the tool definitions and every unit that still gets replayed. Units an existing summary already covers
+    /// stay uncounted because they never reach the request. Null means counting is unavailable (§5.5).
+    /// </summary>
+    private (int? PromptTokens, IReadOnlyList<DirectPromptHistoryUnit> Units) CountPromptTokens(
+        DirectChatTurnRequest request,
+        DirectTurnCapabilityLease capabilityLease,
+        AiChatClientLease providerLease,
+        ConversationCompactionRecord? compression)
+    {
+        var profile = providerLease.Profile;
+        var systemText = _promptComposer.BuildSystemText(
+            request.Agent.Instructions,
+            capabilityLease.SystemInstructions,
+            request.ExecutionContext,
+            compression);
+        if (_tokenCounter.CountText(systemText, profile) is not int systemTokens ||
+            _tokenCounter.CountTools(providerLease.Options.Tools, profile) is not int toolTokens)
+        {
+            return (null, []);
+        }
+
+        var total = systemTokens + toolTokens;
+        var units = new List<DirectPromptHistoryUnit>();
+        foreach (var unit in _promptComposer.BuildUnits(
+                     request.Messages,
+                     request.Turns,
+                     request.ToolExecutions ?? [],
+                     capabilityLease.MessageAdjustments))
+        {
+            if (compression is not null && unit.SourceSequence <= compression.ThroughSequence)
+            {
+                units.Add(unit);
+                continue;
+            }
+
+            if (_tokenCounter.CountMessages(unit.Messages, profile) is not int unitTokens)
+            {
+                return (null, []);
+            }
+
+            units.Add(unit with { Tokens = unitTokens });
+            total += unitTokens;
+        }
+
+        return (total, units);
+    }
+
+    /// <summary>
+    /// Refuses a prompt that cannot fit even after compaction. Neither history nor instructions are trimmed
+    /// silently, so an oversized turn is reported instead of being sent. Without a count nothing is known
+    /// here and the provider decides (design §5.5).
+    /// </summary>
+    private static void EnsurePromptFitsWindow(DirectPromptBudget budget, int? countedTokens)
+    {
+        if (budget.ContextWindowTokens is not int contextWindow || countedTokens is not int counted)
+        {
+            return;
+        }
+
+        var required = counted + (budget.MaxOutputTokens ?? DirectPromptComposer.DefaultOutputTokenReserve);
+        if (required <= contextWindow)
+        {
+            return;
+        }
+
+        throw new InvalidDataException(
+            "The system instructions, tool definitions, and replayable history require approximately " +
+            $"{required} tokens once the output reserve is added, exceeding the model context window of " +
+            $"{contextWindow} tokens. Enable context compaction, lower the output limit, or use a model with " +
+            "a larger context window.");
     }
 
     /// <summary>

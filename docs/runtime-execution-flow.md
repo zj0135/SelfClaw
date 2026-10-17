@@ -48,8 +48,9 @@ Direct 依赖扩展资源与 provider 服务；Extensions 不引用 Direct 编�
 2. `AiChatClientFactory.PrepareAsync(ModelProfileId)` 确定具体模型。显式 id 与空 id 的 `desktop-default` 都在这里处理；校验档案、连接、协议并解析凭据，得到 `AiProviderClientRequest`。
 3. 用确定的模型 id 调用 `DirectTurnCapabilityResolver.ResolveAsync()`。子代理工具捕获的父模型始终具体，禁用或无效模型不会先触发 MCP 连接。
 4. `AiChatClientFactory.Create(preparation, pipeline)` 按回合在共享 pooled handler 上构造 `HttpClient`，把工具定义交给 provider adapter 并创建 options；SDK 管线只挂 `UseLogging`，工具循环不在管线内。
-5. `DirectPromptComposer.BuildMessages()` 构建预算内历史与必需输入。
-6. `DirectConversationLoop` 显式消费 SDK 流（每回合上限 128 次 provider 请求）：翻译事件 → 按 `FinishReason` 判终态 → 串行执行工具 → 追加结果进入下一轮。终态后先释放 provider pipeline，再释放 capability lease。
+5. 回合开始的计数与压缩（`RunStartedEvent` 之后、`Requesting` 之前）：读压缩策略 → `IDirectTokenCounter` 计数（跳过已被旧摘要覆盖的单元）→ `DirectPromptComposer.PlanCompression()` 判定是否触发 → 发 `ContextCompactionStartedEvent` 并置 `Compacting` → 调压缩模型 → 发 `Completed`／`Failed` → 用含摘要的 system 段重算 → `EnsurePromptFitsWindow()`（窗口校验的唯一归属）。
+6. `DirectPromptComposer.BuildMessages()` 按压缩边界重放历史与必需输入（不再裁剪）。
+7. `DirectConversationLoop` 显式消费 SDK 流（每回合上限 128 次 provider 请求）：翻译事件 → 按 `FinishReason` 判终态 → 串行执行工具 → 追加结果进入下一轮。终态后先释放 provider pipeline，再释放 capability lease。
 
 Desktop 不再补齐默认模型。排队 child 与 continuation 使用捕获的具体模型 id；模型禁用使准备失败，不会悄悄切换默认模型。reasoning 来自共享模型配置；没有显式配置时保持 provider 默认行为。
 
@@ -103,14 +104,14 @@ checkpoint 表示“工具可能已经开始”，不提供外部文件、Shell 
 | 已完成快照 | 只保留当前选中会话；切换后不缓存旧完成会话。运行会话由 runtime state 单独持有 |
 | provider pipeline | `AiChatClientLease` 每回合释放按回合 `HttpClient`；共享 pooled handler 继续由 provider 管理 |
 | Plugin / MCP lease | `DirectTurnLeaseScope` 统一拥有；来源只释放尚未移交的资源 |
-| 历史构建 | 从最近消息向前按需创建 SDK 单元，达到预算边界停止；调用与结果不可拆分 |
+| 历史构建 | 从最近消息向前按顺序组装 SDK 单元；超过压缩阈值的旧单元由摘要代表，边界之后整体重放（调用与结果同单元、不可拆分） |
 | Shell 输出 | 两路增量 drain，各保留前 24,000 个 UTF-16 字符；超额继续排空，超时/取消统一收尾 |
 | MCP 模型结果 | 检查完整 `DirectToolResult` 序列化后的 UTF-8 大小，最多 65,536 字节，包含包装、转义及截断提示 |
 | Glob | bundled ripgrep，大小写不敏感，匹配 Workspace Root 相对路径；有界 top-K 保留最近 250 项，时间相同按路径排序 |
 
 Glob 保留忽略 `.gitignore` 的路径枚举语义和隐藏文件可见性，排除隐藏目录及已知构建/依赖目录，不跟随目录链接。`relativePath` 只缩小遍历范围，不改变模式的根。
 
-token 预算仍是 UTF-8 大小的启发式估算，不是 provider tokenizer。数据库历史读取、当前会话内容本身及 Skill token 扫描没有变成常量成本。Direct 事件 Channel 仍无界；慢消费者积压与 warm MCP health 写入保留为待测量项。
+token 预算按 tokenizer 计数：超阈值由压缩（摘要 + 边界重放）处理，不再按字节估算裁剪。数据库历史读取、当前会话内容本身及 Skill token 扫描没有变成常量成本。Direct 事件 Channel 仍无界；慢消费者积压与 warm MCP health 写入保留为待测量项。
 
 ## 6. 持久化与配置边界
 

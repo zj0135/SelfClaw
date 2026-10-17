@@ -44,6 +44,7 @@ const props = defineProps({
 	},
 	gitLoading: { type: Boolean, default: false },
 	gitError: { type: String, default: '' },
+	usage: { type: Object, default: null },
 	submitError: { type: String, default: '' },
 });
 
@@ -258,7 +259,7 @@ defineExpose({
 			</div>
 		</section>
 		<ComposerStatusBar :workspace-selection="workspaceSelection" :workspace-mode="workspaceMode"
-			:git-loading="gitLoading" :git-error="gitError" @update:workspace-mode="workspaceMode = $event"
+			:git-loading="gitLoading" :git-error="gitError" :usage="usage" @update:workspace-mode="workspaceMode = $event"
 			@refresh="requestWorkspace" @select-root="selectWorkspaceRoot" @delete-root="deleteWorkspaceRoot"
 			@browse="browseWorkspaceFolder" @git-action="emit('git-action', $event)" />
 	</div>

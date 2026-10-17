@@ -27,6 +27,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
         Changes = new SubagentStateChangeNotifier(NullLogger<SubagentStateChangeNotifier>.Instance);
         Conversations = new SqliteConversationRepository(Database);
         Turns = new SqliteConversationTurnRepository(Database);
+        Compactions = new SqliteConversationCompactionRepository(Database);
         Inputs = new SqliteConversationInputRepository(Database);
         Tasks = new SqliteSubagentTaskRepository(Database, new SubagentCompletionEnvelopeFactory(), Changes);
         Store = new InterceptingSubagentExecutionStore(Tasks);
@@ -41,6 +42,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
     internal SubagentStateChangeNotifier Changes { get; }
     internal SqliteConversationRepository Conversations { get; }
     internal SqliteConversationTurnRepository Turns { get; }
+    internal SqliteConversationCompactionRepository Compactions { get; }
     internal SqliteConversationInputRepository Inputs { get; }
     internal SqliteSubagentTaskRepository Tasks { get; }
     internal InterceptingSubagentExecutionStore Store { get; }
@@ -67,7 +69,7 @@ internal sealed class SubagentActivityTestContext : IDisposable
         {
             EnabledModels = [new EnabledModelView(modelId, "Test", "test", "Fixture")]
         };
-        return new SubagentTaskExecutor(Conversations, Turns, Store, runtime, Recorder, Approvals,
+        return new SubagentTaskExecutor(Conversations, Turns, Compactions, Store, runtime, Recorder, Approvals,
             new SubagentTaskSnapshotSerializer(), new SubagentTaskPreflight(settings), Executions, timeProvider ?? TimeProvider.System,
             NullLogger<SubagentTaskExecutor>.Instance, Registry);
     }
@@ -77,7 +79,8 @@ internal sealed class SubagentActivityTestContext : IDisposable
         var conversation = await Conversations.GetConversationAsync(task.ChildConversationId)
             ?? throw new InvalidOperationException("Missing child.");
         var input = new SubagentExecutionInput(conversation, await Turns.ListTurnsAsync(task.ChildConversationId),
-            await Conversations.ListMessagesAsync(task.ChildConversationId), await Conversations.ListToolExecutionsAsync(task.ChildConversationId));
+            await Conversations.ListMessagesAsync(task.ChildConversationId), await Conversations.ListToolExecutionsAsync(task.ChildConversationId),
+            await Compactions.ListAsync(task.ChildConversationId));
         return await Registry.RegisterAsync(task, input, Recorder, Store, TimeProvider.System);
     }
 

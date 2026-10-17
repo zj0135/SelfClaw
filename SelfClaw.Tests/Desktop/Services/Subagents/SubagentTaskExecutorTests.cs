@@ -56,6 +56,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         var executor = new SubagentTaskExecutor(
             conversations,
             turns,
+            new SqliteConversationCompactionRepository(database),
             tasks,
             runtime,
             new ConversationTurnRecorder(
@@ -135,6 +136,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         var executor = new SubagentTaskExecutor(
             conversations,
             turns,
+            new SqliteConversationCompactionRepository(database),
             tasks,
             runtime,
             new ConversationTurnRecorder(
@@ -187,6 +189,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         var executor = new SubagentTaskExecutor(
             conversations,
             turns,
+            new SqliteConversationCompactionRepository(database),
             tasks,
             runtime,
             new ConversationTurnRecorder(
@@ -234,6 +237,7 @@ public sealed class SubagentTaskExecutorTests : IDisposable
         var executor = new SubagentTaskExecutor(
             conversations,
             turns,
+            new SqliteConversationCompactionRepository(database),
             tasks,
             runtime,
             new ConversationTurnRecorder(

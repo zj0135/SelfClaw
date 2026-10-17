@@ -33,5 +33,6 @@ internal sealed class AgentTurnState
     public bool HasVisibleDelta { get; set; }
     public bool Completed { get; set; }
     public RecordedTurnFinalizationRequest? PendingFinalization { get; set; }
+    public List<ConversationCompactionRecord> PendingCompactions { get; } = [];
     public Dictionary<string, ToolExecutionRecord> ToolRunsByCallId { get; } = new(StringComparer.Ordinal);
 }

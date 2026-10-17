@@ -36,7 +36,11 @@ internal sealed class TurnUsageReporter
         _contextWindowTokens = contextWindowTokens;
     }
 
-    /// <summary>Records one provider call; every observation counts as one request.</summary>
+    /// <summary>
+    /// Records one provider call; every observation counts as one request. The input count travels as
+    /// <see cref="TurnUsage.LastRequestInputTokens"/> because it is the real size of the replayed context;
+    /// the accumulator takes the latest observation and never sums it.
+    /// </summary>
     public void Observe(UsageDetails details)
     {
         var inputTokens = ClampTokensOrNull(details.InputTokenCount);
@@ -50,6 +54,7 @@ internal sealed class TurnUsageReporter
             TotalTokens: ClampTokensOrNull(details.TotalTokenCount),
             ProviderCalls: 1,
             ContextTokens: inputTokens is int input && outputTokens is int output ? input + output : null,
+            LastRequestInputTokens: inputTokens,
             AdditionalCountsJson: details.AdditionalCounts is { Count: > 0 } counts
                 ? JsonSerializer.Serialize(counts)
                 : null));

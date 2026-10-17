@@ -316,6 +316,7 @@ public sealed class AutomationRunExecutorTests : IDisposable
         var executor = new AutomationRunExecutor(
             conversations,
             turns,
+            new SqliteConversationCompactionRepository(database),
             runStore,
             runStore,
             workspaces,

@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Infrastructure.Data.Sqlite.Repositories;
@@ -146,6 +147,78 @@ public sealed class SqliteConversationTurnRepositoryTests
             start.Turn, [message], [CreateTool(message)])));
         (await fixture.Conversations.ListMessagesAsync(message.ConversationId)).Should().ContainSingle();
     }
+
+    [Fact]
+    public async Task Finalization_writes_the_compaction_boundary_in_the_same_commit_as_the_terminal_turn()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var compaction = Compaction(start.Turn, throughSequence: 1, "summary");
+        var terminal = Terminal(start.Turn, [compaction]);
+
+        (await fixture.Turns.TryFinalizeTurnAsync(terminal)).Should().BeTrue();
+
+        var stored = (await new SqliteConversationCompactionRepository(fixture.Database)
+            .ListAsync(start.Turn.ConversationId)).Should().ContainSingle().Subject;
+        stored.Should().BeEquivalentTo(compaction);
+        (await fixture.Turns.ListTurnsAsync(start.Turn.ConversationId)).Should().ContainSingle()
+            .Which.Status.Should().Be(ConversationTurnStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task Compaction_fault_rolls_back_the_terminal_turn_and_the_boundary()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var compaction = Compaction(start.Turn, throughSequence: 1, "summary");
+        await fixture.ExecuteAsync(
+            "CREATE TRIGGER fail_compaction BEFORE INSERT ON conversation_compactions BEGIN SELECT RAISE(ABORT, 'compaction fault'); END;");
+
+        await Assert.ThrowsAsync<SqliteException>(() => fixture.Turns.TryFinalizeTurnAsync(Terminal(start.Turn, [compaction])));
+
+        (await fixture.Turns.ListTurnsAsync(start.Turn.ConversationId)).Should().Equal(start.Turn);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_compactions;")).Should().Be(0L);
+    }
+
+    [Fact]
+    public async Task Repeating_a_progress_commit_does_not_duplicate_the_compaction_boundary()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var progress = new ConversationTurnCommit(start.Turn, [], [], [Compaction(start.Turn, throughSequence: 1, "summary")]);
+
+        await fixture.Turns.CommitProgressAsync(progress);
+        await fixture.Turns.CommitProgressAsync(progress);
+
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_compactions;")).Should().Be(1L);
+    }
+
+    [Fact]
+    public async Task Compactions_owned_by_another_conversation_or_turn_reject_the_commit()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var other = await fixture.StartAsync();
+        var foreignConversation = Compaction(start.Turn, throughSequence: 1, "foreign") with { ConversationId = other.Turn.ConversationId };
+        var foreignTurn = Compaction(start.Turn, throughSequence: 1, "foreign") with { TurnId = other.Turn.Id };
+        var blankSummary = Compaction(start.Turn, throughSequence: 1, " ");
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            fixture.Turns.TryFinalizeTurnAsync(Terminal(start.Turn, [foreignConversation])));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            fixture.Turns.TryFinalizeTurnAsync(Terminal(start.Turn, [foreignTurn])));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            fixture.Turns.CommitProgressAsync(new ConversationTurnCommit(start.Turn, [], [], [blankSummary])));
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM conversation_compactions;")).Should().Be(0L);
+        (await fixture.Turns.ListTurnsAsync(start.Turn.ConversationId)).Should().Equal(start.Turn);
+    }
+
+    private static ConversationTurnCommit Terminal(ConversationTurnRecord turn, IReadOnlyList<ConversationCompactionRecord> compactions)
+        => new(turn with { Status = ConversationTurnStatus.Succeeded, CompletedAtUtc = DateTimeOffset.UtcNow }, [], [], compactions);
+
+    private static ConversationCompactionRecord Compaction(ConversationTurnRecord turn, long throughSequence, string summary)
+        => new(Guid.NewGuid(), turn.ConversationId, turn.Id, throughSequence, summary, "test-model",
+            SourceMessageCount: 3, SourceTokens: 4_200, SummaryTokens: 120, DateTimeOffset.UtcNow);
 
     private static ToolExecutionRecord CreateTool(MessageRecord message)
         => new(Guid.NewGuid(), message.ConversationId, "read_file", "{}", ToolExecutionStatus.Running,

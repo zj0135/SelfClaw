@@ -10,6 +10,9 @@ namespace SelfClaw.Desktop.Services.Runtime;
 
 internal sealed class ConversationTurnRecorder
 {
+    private const string CompactingText = "正在压缩上下文...";
+    private const string CompactionFailedText = "上下文压缩失败，本回合继续使用未压缩的上下文";
+
     private readonly IConversationRepository _conversations;
     private readonly IConversationTurnRepository _turns;
     private readonly IConversationInputRepository _inputs;
@@ -108,6 +111,20 @@ internal sealed class ConversationTurnRecorder
                     break;
                 case RunStatusEvent status:
                     session.ActivityText = MapRunStatusText(status.Status);
+                    session.RaiseTranscriptChanged(false);
+                    break;
+                case ContextCompactionStartedEvent:
+                    session.ActivityText = CompactingText;
+                    session.RaiseTranscriptChanged(true);
+                    break;
+                case ContextCompactionCompletedEvent compaction:
+                    turn.PendingCompactions.Add(compaction.Compaction);
+                    session.ReplaceCompaction(compaction.Compaction);
+                    session.RaiseTranscriptChanged(true);
+                    break;
+                case ContextCompactionFailedEvent failed:
+                    _logger.LogWarning("Context compaction failed for turn {TurnId}: {Reason}", turn.TurnId, failed.Reason);
+                    session.ActivityText = CompactionFailedText;
                     session.RaiseTranscriptChanged(false);
                     break;
                 case RunCompletedEvent completed:
@@ -291,7 +308,8 @@ internal sealed class ConversationTurnRecorder
         if (turn.CurrentAssistantMessageId is { } messageId) session.CompleteAssistantStream(messageId);
         var currentTurn = GetTurn(session, turn);
         turn.PendingFinalization ??= new RecordedTurnFinalizationRequest(currentTurn, GetCurrentMessage(session, turn),
-            GetCurrentTools(turn), kind, finalText, errorMessage, turn.Usage.Build() ?? currentTurn.Usage);
+            GetCurrentTools(turn), kind, finalText, errorMessage, turn.Usage.Build() ?? currentTurn.Usage,
+            turn.PendingCompactions.Count == 0 ? null : turn.PendingCompactions.ToArray());
         var finalization = ConversationTurnFinalizationBuilder.Build(turn.PendingFinalization, _timeProvider.GetUtcNow());
         bool written;
         try
@@ -393,6 +411,7 @@ internal sealed class ConversationTurnRecorder
         AgentRunStatus.Initializing => "正在初始化...",
         AgentRunStatus.Requesting => "正在请求...",
         AgentRunStatus.Thinking => "正在思考...",
+        AgentRunStatus.Compacting => CompactingText,
         AgentRunStatus.Running => "正在执行...",
         _ => "准备中..."
     };

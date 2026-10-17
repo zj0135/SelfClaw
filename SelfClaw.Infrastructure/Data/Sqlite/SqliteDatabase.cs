@@ -7,7 +7,7 @@ namespace SelfClaw.Infrastructure.Data.Sqlite;
 
 public sealed class SqliteDatabase
 {
-    private const int CurrentSchemaVersion = 31;
+    private const int CurrentSchemaVersion = 32;
     private readonly StoragePaths _storagePaths;
     private readonly SemaphoreSlim _initializationGate = new(1, 1);
     private readonly ILogger<SqliteDatabase> _logger;
@@ -167,7 +167,7 @@ public sealed class SqliteDatabase
         {
             if (!objects.Contains(table))
             {
-                throw UnsupportedSchema($"incomplete v31 (missing {table})");
+                throw UnsupportedSchema($"incomplete v32 (missing {table})");
             }
         }
 
@@ -175,5 +175,5 @@ public sealed class SqliteDatabase
     }
 
     private static InvalidOperationException UnsupportedSchema(string version)
-        => new($"SQLite schema '{version}' is not supported. This build requires schema v31; the existing database was not modified. No migration or backfill is performed.");
+        => new($"SQLite schema '{version}' is not supported. This build requires schema v32; the existing database was not modified. No migration or backfill is performed.");
 }

@@ -172,7 +172,7 @@ internal sealed class ConversationTurnEngine
         return new DirectChatTurnRequest(handle.TurnId, handle.ConversationId, request.WorkspaceRoot, request.Agent,
             snapshot.Messages, snapshot.Turns, request.ModelProfileId, request.ToolPermissionMode, _approval,
             new(DirectTurnOrigin.Interactive, null, null), snapshot.ToolRuns, InputSession: handle.InputSession,
-            Steering: handle.InputSession);
+            Steering: handle.InputSession, Compression: ConversationCompactionSelector.SelectLatest(snapshot.Compactions));
     }
 
     private void BeginActivity(ConversationRecord conversation, AgentRuntimeDefinition agent, AgentTurnState turn)

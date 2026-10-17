@@ -45,6 +45,35 @@ public sealed class ConversationTurnRecorderTests
     }
 
     [Fact]
+    public async Task Terminal_commit_persists_pending_compactions_together_with_the_turn_status()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var compaction = Compaction(context, throughSequence: 1, "compressed history");
+        context.Turn.PendingCompactions.Add(compaction);
+        await context.ApplyAsync(new AssistantTextDeltaEvent("text", "answer"));
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "answer"));
+
+        var stored = (await context.ListCompactionsAsync()).Should().ContainSingle().Subject;
+        stored.Should().BeEquivalentTo(compaction);
+        (await context.LatestCompactionAsync()).Should().BeEquivalentTo(compaction);
+        (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Single().Status.Should().Be(ConversationTurnStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task Replaying_a_terminal_event_keeps_a_single_compaction_row()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        context.Turn.PendingCompactions.Add(Compaction(context, throughSequence: 1, "compressed history"));
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
+
+        (await context.ListCompactionsAsync()).Should().ContainSingle();
+        (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task ApplyEventAsync_coalesces_consecutive_thinking_deltas_into_one_internal_block()
     {
         using var context = new ConversationTurnTestContext();
@@ -176,4 +205,67 @@ public sealed class ConversationTurnRecorderTests
         turn.Status.Should().Be(ConversationTurnStatus.Failed);
         (await context.ScalarAsync("SELECT total_tokens FROM turn_usage")).Should().Be(DBNull.Value);
     }
+
+    [Fact]
+    public async Task Compaction_started_only_republishes_the_activity_text()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var immediates = new List<bool>();
+        context.State.TranscriptChanged += immediates.Add;
+
+        await context.ApplyAsync(new ContextCompactionStartedEvent(EstimatedTokens: 90_000, ThresholdTokens: 96_000));
+
+        context.State.ActivityText.Should().Be("正在压缩上下文...");
+        immediates.Should().Equal(true);
+        context.State.Compactions.Should().BeEmpty();
+        context.Turn.PendingCompactions.Should().BeEmpty();
+        context.State.Messages.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Compaction_completed_publishes_the_divider_immediately_and_commits_the_record()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var compaction = Compaction(context, throughSequence: 1, "compressed history");
+        var immediates = new List<bool>();
+        context.State.TranscriptChanged += immediates.Add;
+
+        await context.ApplyAsync(new ContextCompactionStartedEvent(EstimatedTokens: 90_000, ThresholdTokens: 96_000));
+        await context.ApplyAsync(new ContextCompactionCompletedEvent(compaction));
+
+        immediates.Should().Equal(true, true);
+        context.State.Compactions.Should().ContainSingle().Which.Should().BeEquivalentTo(compaction);
+        context.Turn.PendingCompactions.Should().ContainSingle().Which.Should().BeEquivalentTo(compaction);
+
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
+
+        (await context.ListCompactionsAsync()).Should().ContainSingle().Which.Should().BeEquivalentTo(compaction);
+        (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Single().Status.Should().Be(ConversationTurnStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task Compaction_failed_updates_the_activity_text_without_touching_the_transcript()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        await context.ApplyAsync(new ContextCompactionStartedEvent(EstimatedTokens: 90_000, ThresholdTokens: 96_000));
+
+        await context.ApplyAsync(new ContextCompactionFailedEvent(
+            "Context compaction failed; the turn continues with the uncompacted history."));
+
+        context.State.ActivityText.Should().Be("上下文压缩失败，本回合继续使用未压缩的上下文");
+        context.State.Compactions.Should().BeEmpty();
+        context.Turn.PendingCompactions.Should().BeEmpty();
+        context.State.Messages.Should().ContainSingle().Which.Role.Should().Be(MessageRole.User);
+
+        // The C7 status mapping wins again once the run moves on, so the diagnostic cannot linger.
+        await context.ApplyAsync(new RunStatusEvent(AgentRunStatus.Compacting));
+        context.State.ActivityText.Should().Be("正在压缩上下文...");
+    }
+
+    private static ConversationCompactionRecord Compaction(ConversationTurnTestContext context, long throughSequence, string summary)
+        => new(Guid.NewGuid(), context.Conversation.Id, context.Record.Id, throughSequence, summary, "test-model",
+            SourceMessageCount: 3, SourceTokens: 4_200, SummaryTokens: 120, DateTimeOffset.UtcNow);
 }

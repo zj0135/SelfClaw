@@ -5,4 +5,5 @@ namespace SelfClaw.Desktop.Services.Runtime;
 internal sealed record ConversationTranscriptSnapshot(
     IReadOnlyList<ConversationTurnRecord> Turns,
     IReadOnlyList<MessageRecord> Messages,
-    IReadOnlyList<ToolExecutionRecord> ToolRuns);
+    IReadOnlyList<ToolExecutionRecord> ToolRuns,
+    IReadOnlyList<ConversationCompactionRecord>? Compactions = null);

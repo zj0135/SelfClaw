@@ -160,6 +160,52 @@ public sealed class TranscriptPublisherTests
         changed.GetProperty("segments").GetArrayLength().Should().Be(0);
     }
 
+    [Fact]
+    public void Publish_delivers_the_usage_summary_on_both_replace_and_patch()
+    {
+        var sent = new List<string>();
+        var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
+        channel.Attach(sent.Add);
+        channel.MarkReady();
+        using var publisher = new TranscriptPublisher(new TranscriptProjection(StoragePathDefaults.CreateDefault()), delivery, Dispatcher.CurrentDispatcher);
+        var now = DateTimeOffset.UtcNow;
+        var firstTurn = UsageTurn(now, inputTokens: 1_000, outputTokens: 100);
+        var request = CreateRequest("build", false) with { Turns = [firstTurn] };
+        publisher.Attach(_ => request);
+
+        publisher.PublishNow(false);
+        delivery.Acknowledge(ReadRevision(sent.Single())).Should().BeTrue();
+
+        using var replace = JsonDocument.Parse(sent.Single());
+        replace.RootElement.GetProperty("type").GetString().Should().Be("replaceState");
+        AssertUsage(replace.RootElement.GetProperty("usage"), 1_000, 100, 1_000);
+
+        request = request with { Turns = [firstTurn, UsageTurn(now.AddMinutes(1), inputTokens: 500, outputTokens: 50)] };
+        publisher.PublishNow(false);
+
+        using var patch = JsonDocument.Parse(sent.Last());
+        patch.RootElement.GetProperty("type").GetString().Should().Be("patchState");
+        AssertUsage(patch.RootElement.GetProperty("usage"), 1_500, 150, 500);
+    }
+
+    private static SelfClaw.Core.Models.ConversationTurnRecord UsageTurn(DateTimeOffset startedAtUtc, int inputTokens, int outputTokens)
+        => new(Guid.NewGuid(), Guid.NewGuid(), SelfClaw.Core.Runtime.AgentExecutionMode.Direct,
+            SelfClaw.Core.Runtime.DirectTurnOrigin.Interactive, SelfClaw.Core.Models.ConversationTurnStatus.Succeeded,
+            startedAtUtc, startedAtUtc.AddMinutes(1), null,
+            new SelfClaw.Core.Models.TurnUsage(InputTokens: inputTokens, OutputTokens: outputTokens,
+                ContextTokens: inputTokens + outputTokens, ContextWindowTokens: 32_000,
+                LastRequestInputTokens: inputTokens));
+
+    private static void AssertUsage(JsonElement usage, long inputTokens, long outputTokens, int contextTokens)
+    {
+        usage.GetProperty("inputTokens").GetInt64().Should().Be(inputTokens);
+        usage.GetProperty("outputTokens").GetInt64().Should().Be(outputTokens);
+        usage.GetProperty("contextTokens").GetInt32().Should().Be(contextTokens);
+        usage.GetProperty("contextWindowTokens").GetInt32().Should().Be(32_000);
+        usage.GetProperty("contextIsEstimated").GetBoolean().Should().BeFalse();
+    }
+
     private static TranscriptProjectionRequest CreateRequest(string agentName, bool autoScroll)
         => new(
             [],

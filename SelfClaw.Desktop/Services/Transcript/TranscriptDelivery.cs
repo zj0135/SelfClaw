@@ -126,7 +126,8 @@ internal sealed class TranscriptDelivery : IDisposable
             state.SelectedAgentId,
             state.SelectedAgentName,
             state.CapabilityRevision,
-            state.ToolPermissionMode
+            state.ToolPermissionMode,
+            state.Usage
         };
 
     private static object CreateTranscriptPatch(
@@ -169,7 +170,8 @@ internal sealed class TranscriptDelivery : IDisposable
             current.SelectedAgentId,
             current.SelectedAgentName,
             current.CapabilityRevision,
-            current.ToolPermissionMode
+            current.ToolPermissionMode,
+            current.Usage
         };
     }
 

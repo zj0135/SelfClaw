@@ -5,7 +5,7 @@ export function useChatTranscript(scroll) {
 	const state = reactive({
 		items: [], selectedConversationId: null, isBusy: false, isContinuation: false,
 		agentMode: 'cli', selectedAgentId: '', selectedAgentName: '', capabilityRevision: 0,
-		activityText: '', toolPermissionMode: 'require-approval',
+		activityText: '', toolPermissionMode: 'require-approval', usage: null,
 	});
 	const isEmptyConversation = computed(() => state.items.length === 0 && !state.isBusy);
 
@@ -23,6 +23,7 @@ export function useChatTranscript(scroll) {
 		state.selectedAgentName = payload.selectedAgentName || '';
 		state.capabilityRevision = Number(payload.capabilityRevision) || 0;
 		state.toolPermissionMode = payload.toolPermissionMode || 'require-approval';
+		state.usage = payload.usage || null;
 		nextTick(() => scroll.settleAfterUpdate(autoScroll, before));
 	}
 

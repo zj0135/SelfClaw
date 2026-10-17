@@ -1,4 +1,5 @@
 using SelfClaw.Tests.Infrastructure.Agents.Direct.Capabilities;
+using SelfClaw.Tests.TestDoubles;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
@@ -545,11 +546,21 @@ public sealed class DirectAgentChatRuntimeTests
 
     internal static DirectAgentChatRuntime CreateRuntime(
         FakeChatClientFactory factory,
-        IDirectTurnCapabilityResolver? capabilityResolver = null)
-        => new(
+        IDirectTurnCapabilityResolver? capabilityResolver = null,
+        IDirectCompressionPolicySource? compressionPolicy = null,
+        IDirectTokenCounter? tokenCounter = null,
+        DirectContextCompressor? contextCompressor = null)
+    {
+        var counter = tokenCounter ?? new DirectTokenCounter();
+        return new(
             factory,
             capabilityResolver ?? CreateCapabilityResolver(),
-            new DirectPromptComposer());
+            new DirectPromptComposer(),
+            new DirectConversationLoop(counter),
+            counter,
+            contextCompressor ?? new DirectContextCompressor(factory, new StubAiModelCatalog(), counter),
+            compressionPolicy);
+    }
 
     /// <summary>
     /// The real resolver over empty repositories: these tests assert how the runtime projects a resolved

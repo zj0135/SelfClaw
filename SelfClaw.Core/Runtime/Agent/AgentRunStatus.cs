@@ -9,5 +9,6 @@ public enum AgentRunStatus
     Initializing = 0,
     Requesting = 1,
     Thinking = 2,
-    Running = 3
+    Running = 3,
+    Compacting = 4
 }

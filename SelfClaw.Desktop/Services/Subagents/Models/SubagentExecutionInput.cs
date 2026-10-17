@@ -6,4 +6,5 @@ internal sealed record SubagentExecutionInput(
     ConversationRecord Conversation,
     IReadOnlyList<ConversationTurnRecord> Turns,
     IReadOnlyList<MessageRecord> Messages,
-    IReadOnlyList<ToolExecutionRecord> ToolRuns);
+    IReadOnlyList<ToolExecutionRecord> ToolRuns,
+    IReadOnlyList<ConversationCompactionRecord> Compactions);

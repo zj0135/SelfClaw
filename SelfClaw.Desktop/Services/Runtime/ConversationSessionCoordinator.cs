@@ -9,6 +9,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
 {
     private readonly IConversationRepository _conversations;
     private readonly IConversationTurnRepository _turns;
+    private readonly IConversationCompactionRepository _compactions;
     private readonly ConversationRunCoordinator _runs;
     private readonly ITranscriptChangeSink _transcriptChangeSink;
     private readonly Dictionary<Guid, Task<ConversationTranscriptSnapshot>> _transcriptLoads = [];
@@ -22,10 +23,11 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     private int _disposed;
 
     public ConversationSessionCoordinator(IConversationRepository conversations, IConversationTurnRepository turns,
-        ConversationRunCoordinator runs, ITranscriptChangeSink transcriptChangeSink)
+        IConversationCompactionRepository compactions, ConversationRunCoordinator runs, ITranscriptChangeSink transcriptChangeSink)
     {
         _conversations = conversations;
         _turns = turns;
+        _compactions = compactions;
         _runs = runs;
         _transcriptChangeSink = transcriptChangeSink;
         _runs.Changed += OnRunChanged;
@@ -76,7 +78,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     {
         ArgumentNullException.ThrowIfNull(conversation);
         var snapshot = await GetTranscriptSnapshotAsync(conversation.Id, cancellationToken);
-        return new(conversation, snapshot.Turns, snapshot.Messages, snapshot.ToolRuns, isDetached);
+        return new(conversation, snapshot.Turns, snapshot.Messages, snapshot.ToolRuns, snapshot.Compactions, isDetached);
     }
 
     internal void ForgetTranscript(Guid conversationId)
@@ -191,7 +193,8 @@ internal sealed class ConversationSessionCoordinator : IDisposable
         var turnsTask = _turns.ListTurnsAsync(conversationId, cancellationToken);
         var messagesTask = _conversations.ListMessagesAsync(conversationId, cancellationToken);
         var toolsTask = _conversations.ListToolExecutionsAsync(conversationId, cancellationToken);
-        await Task.WhenAll(turnsTask, messagesTask, toolsTask);
-        return new(await turnsTask, await messagesTask, await toolsTask);
+        var compactionsTask = _compactions.ListAsync(conversationId, cancellationToken);
+        await Task.WhenAll(turnsTask, messagesTask, toolsTask, compactionsTask);
+        return new(await turnsTask, await messagesTask, await toolsTask, await compactionsTask);
     }
 }

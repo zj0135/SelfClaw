@@ -2,7 +2,8 @@
 import { Search, RefreshCw, SlidersHorizontal, Trash2, Image, Cpu } from 'lucide-vue-next';
 import ModelConfigurationDialog from './ModelConfigurationDialog.vue';
 import { useModelManagement } from '../../composables/useModelManagement.js';
-import { formatTokens, formatPrice } from '../../composables/useAiProviderHost.js';
+import { formatPrice } from '../../composables/useAiProviderHost.js';
+import { formatTokenCount } from '../../renderers/usageMeter.js';
 
 const { models, search, loading, error, editing, deleting, filteredModels, load, saved, remove } = useModelManagement();
 </script>
@@ -50,7 +51,7 @@ const { models, search, loading, error, editing, deleting, filteredModels, load,
 								</div>
 								<code>{{ model.model }}</code>
 							</td>
-							<td>{{ formatTokens(model.contextLength) }} / {{ formatTokens(model.maxOutputTokens) }}</td>
+							<td>{{ formatTokenCount(model.contextLength) }} / {{ formatTokenCount(model.maxOutputTokens) }}</td>
 							<td>{{ model.reasoningEffort || '默认' }}</td>
 							<td>{{ formatPrice(model.priceInPerMTok) }} / {{ formatPrice(model.priceOutPerMTok) }}</td>
 							<td>{{ formatPrice(model.priceCacheReadPerMTok) }} / {{ formatPrice(model.priceCacheWritePerMTok) }}</td>

@@ -51,7 +51,7 @@ internal sealed class ConversationInputTestHarness : IDisposable
             new SubagentDefinitionCatalog(Fixture.Paths), new EmptyExtensionSettingsService(),
             new ExtensionStateChangeNotifier());
         Runs = new ConversationRunCoordinator(Fixture.Inputs, Fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
-        _sessions = new ConversationSessionCoordinator(Fixture.Conversations, Fixture.Turns, Runs, _publisher);
+        _sessions = new ConversationSessionCoordinator(Fixture.Conversations, Fixture.Turns, new EmptyConversationCompactionRepository(), Runs, _publisher);
         Engine = new ConversationTurnEngine(Fixture.Turns,
             new DesktopTurnFinalizer(Fixture.Turns, NullLogger<DesktopTurnFinalizer>.Instance),
             new ConversationTurnRecorder(Fixture.Conversations, Fixture.Turns, Fixture.Inputs, NullLogger<ConversationTurnRecorder>.Instance),

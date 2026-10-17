@@ -1,5 +1,7 @@
 using Microsoft.Extensions.AI;
+using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
+using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Direct.Context;
 
@@ -9,8 +11,35 @@ internal sealed class DirectConversationContext(IReadOnlyList<ChatMessage> messa
 {
     private readonly List<ChatMessage> _messages = [.. messages];
     private readonly HashSet<string> _callIds = new(StringComparer.Ordinal);
+    private int _countedMessageCount;
+    private int _countedTokens;
 
     public IReadOnlyList<ChatMessage> Messages => _messages;
+
+    /// <summary>
+    /// Counts the history once and then only what was appended since. The loop asks whether the next
+    /// request still fits on every provider round-trip, and re-tokenizing the whole transcript each time
+    /// would make a long turn quadratic. Returns null when counting is unavailable for the model (§5.5).
+    /// </summary>
+    public int? CountTokens(IDirectTokenCounter tokenCounter, AiModelProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(tokenCounter);
+        var total = _countedTokens;
+        for (var index = _countedMessageCount; index < _messages.Count; index++)
+        {
+            if (tokenCounter.CountMessages([_messages[index]], profile) is not int tokens)
+            {
+                // The tally is not advanced, so a later request retries the same tail instead of double counting.
+                return null;
+            }
+
+            total += tokens;
+        }
+
+        _countedTokens = total;
+        _countedMessageCount = _messages.Count;
+        return total;
+    }
 
     public FunctionCallContent[] AppendResponse(ChatResponse response,
         IReadOnlyDictionary<string, DirectToolBinding> bindings)

@@ -137,6 +137,7 @@ internal static class SqliteConversationTurnWriter
         }
 
         await WriteContentAsync(connection, transaction, commit, cancellationToken).ConfigureAwait(false);
+        await UpsertCompactionsAsync(connection, transaction, commit, cancellationToken).ConfigureAwait(false);
         await UpsertUsageAsync(connection, transaction, commit.Turn, cancellationToken).ConfigureAwait(false);
         return true;
     }
@@ -249,6 +250,50 @@ internal static class SqliteConversationTurnWriter
         }
     }
 
+    /// <summary>
+    /// Upserts instead of inserting so a retried commit cannot duplicate a boundary; the summary and the
+    /// terminal turn are written in one transaction, so a crash cannot leave the two contradicting.
+    /// </summary>
+    private static async Task UpsertCompactionsAsync(
+        SqliteConnection connection, SqliteTransaction transaction, ConversationTurnCommit commit, CancellationToken cancellationToken)
+    {
+        if (commit.Compactions is not { Count: > 0 } compactions)
+        {
+            return;
+        }
+
+        foreach (var compaction in compactions)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO conversation_compactions(id, conversation_id, turn_id, through_sequence, summary, model,
+                    source_message_count, source_tokens, summary_tokens, created_at_utc)
+                VALUES($id, $conversationId, $turnId, $throughSequence, $summary, $model,
+                    $sourceMessageCount, $sourceTokens, $summaryTokens, $createdAt)
+                ON CONFLICT(id) DO UPDATE SET through_sequence = excluded.through_sequence, summary = excluded.summary,
+                    model = excluded.model, source_message_count = excluded.source_message_count,
+                    source_tokens = excluded.source_tokens, summary_tokens = excluded.summary_tokens
+                WHERE conversation_compactions.conversation_id = excluded.conversation_id
+                    AND conversation_compactions.turn_id = excluded.turn_id;
+                """;
+            command.Parameters.AddWithValue("$id", compaction.Id.ToString("D"));
+            command.Parameters.AddWithValue("$conversationId", compaction.ConversationId.ToString("D"));
+            command.Parameters.AddWithValue("$turnId", compaction.TurnId.ToString("D"));
+            command.Parameters.AddWithValue("$throughSequence", compaction.ThroughSequence);
+            command.Parameters.AddWithValue("$summary", compaction.Summary);
+            command.Parameters.AddWithValue("$model", compaction.Model ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("$sourceMessageCount", compaction.SourceMessageCount);
+            command.Parameters.AddWithValue("$sourceTokens", compaction.SourceTokens ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("$summaryTokens", compaction.SummaryTokens ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("$createdAt", compaction.CreatedAtUtc.ToString("O"));
+            if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+            {
+                throw new InvalidOperationException("A compaction cannot change its conversation or turn.");
+            }
+        }
+    }
+
     private static async Task UpdateTurnAsync(
         SqliteConnection connection, SqliteTransaction transaction, ConversationTurnRecord turn, CancellationToken cancellationToken)
     {
@@ -313,14 +358,18 @@ internal static class SqliteConversationTurnWriter
         command.CommandText = """
             INSERT INTO turn_usage(turn_id, conversation_id, model, input_tokens, uncached_input_tokens, cached_input_tokens,
                 cache_write_input_tokens, output_tokens, reasoning_tokens, total_tokens, provider_calls,
-                context_tokens, context_window_tokens, cost_usd_micros, cost_source, additional_counts_json, created_at_utc)
+                context_tokens, context_window_tokens, last_request_input_tokens, cost_usd_micros, cost_source,
+                additional_counts_json, created_at_utc)
             VALUES($turnId, $conversationId, $model, $input, $uncached, $cached, $cacheWrite, $output, $reasoning,
-                $total, $calls, $context, $window, $cost, $costSource, $additional, $createdAt)
+                $total, $calls, $context, $window, $lastRequestInput, $cost, $costSource, $additional, $createdAt)
             ON CONFLICT(turn_id) DO UPDATE SET model = excluded.model, input_tokens = excluded.input_tokens,
                 uncached_input_tokens = excluded.uncached_input_tokens, cached_input_tokens = excluded.cached_input_tokens,
                 cache_write_input_tokens = excluded.cache_write_input_tokens, output_tokens = excluded.output_tokens,
                 reasoning_tokens = excluded.reasoning_tokens, total_tokens = excluded.total_tokens, provider_calls = excluded.provider_calls,
                 context_tokens = excluded.context_tokens, context_window_tokens = excluded.context_window_tokens,
+                -- The only column that is not a snapshot overwrite: NULL means "not observed for this
+                -- request", and an unobserved retry must not erase a measurement already persisted.
+                last_request_input_tokens = COALESCE(excluded.last_request_input_tokens, turn_usage.last_request_input_tokens),
                 cost_usd_micros = excluded.cost_usd_micros, cost_source = excluded.cost_source,
                 additional_counts_json = excluded.additional_counts_json;
             """;
@@ -337,6 +386,7 @@ internal static class SqliteConversationTurnWriter
         command.Parameters.AddWithValue("$calls", usage.ProviderCalls);
         command.Parameters.AddWithValue("$context", usage.ContextTokens ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$window", usage.ContextWindowTokens ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$lastRequestInput", usage.LastRequestInputTokens ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$cost", usage.CostUsdMicros ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$costSource", (int)usage.CostSource);
         command.Parameters.AddWithValue("$additional", usage.AdditionalCountsJson ?? (object)DBNull.Value);
@@ -481,6 +531,35 @@ internal static class SqliteConversationTurnWriter
         if (calls.Any(call => !commit.ToolExecutions.Any(tool => tool.Id == call.ToolRunId && tool.MessageId == call.MessageId)))
         {
             throw new ArgumentException("Every ToolCall block requires its owned tool in the same commit.", nameof(commit));
+        }
+
+        ValidateCompactions(commit);
+    }
+
+    /// <summary>
+    /// Compactions are validated as a separate collection: they never travel as assistant fragments, so the
+    /// message role check above stays untouched.
+    /// </summary>
+    private static void ValidateCompactions(ConversationTurnCommit commit)
+    {
+        if (commit.Compactions is not { Count: > 0 } compactions)
+        {
+            return;
+        }
+
+        if (compactions.Select(compaction => compaction.Id).Distinct().Count() != compactions.Count)
+        {
+            throw new ArgumentException("A commit cannot contain duplicate compactions.", nameof(commit));
+        }
+
+        foreach (var compaction in compactions)
+        {
+            if (compaction.Id == Guid.Empty || compaction.ConversationId != commit.Turn.ConversationId ||
+                compaction.TurnId != commit.Turn.Id || string.IsNullOrWhiteSpace(compaction.Summary) ||
+                compaction.ThroughSequence < 0 || compaction.SourceMessageCount < 0)
+            {
+                throw new ArgumentException("A compaction requires owned identities, a summary and non-negative bounds.", nameof(commit));
+            }
         }
     }
 
