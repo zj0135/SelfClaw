@@ -269,6 +269,49 @@ public sealed class DirectContextCompressorTests
     }
 
     [Fact]
+    public async Task Returns_null_and_warns_when_the_stream_carries_no_updates()
+    {
+        // The malformed-endpoint case the streaming call is there to avoid: a 200 response with nothing in it.
+        var client = new RecordingChatClient { Updates = [] };
+        var logger = new CapturingLogger();
+
+        var outcome = await CreateCompressor(client, logger).TryCompressAsync(Request(
+            [Unit(new ChatMessage(ChatRole.User, "secret prompt text"))],
+            turnLease: CreateLease(client, "turn-model")));
+
+        outcome.Should().BeNull();
+        var warning = logger.Messages.Should().ContainSingle().Subject;
+        warning.Should().Contain(ConversationId.ToString()).And.Contain(TurnId.ToString());
+        warning.Should().NotContain("secret prompt text", "diagnostics must not echo prompt content");
+        _output.WriteLine(warning);
+    }
+
+    [Fact]
+    public async Task Aggregates_several_text_updates_into_the_same_summary_as_one()
+    {
+        const string text = "early history summarized";
+        var singleClient = new RecordingChatClient { Updates = [TextUpdate(text)] };
+        var splitClient = new RecordingChatClient
+        {
+            Updates = [TextUpdate("early "), TextUpdate("history "), TextUpdate("summarized")]
+        };
+        var units = new[] { Unit(new ChatMessage(ChatRole.User, "hello")) };
+
+        var single = await CreateCompressor(singleClient).TryCompressAsync(Request(
+            units,
+            turnLease: CreateLease(singleClient, "turn-model")));
+        var split = await CreateCompressor(splitClient).TryCompressAsync(Request(
+            units,
+            turnLease: CreateLease(splitClient, "turn-model")));
+
+        single.Should().NotBeNull();
+        split.Should().NotBeNull();
+        split.Summary.Should().Be(text);
+        split.Summary.Should().Be(single.Summary);
+        split.SummaryTokens.Should().Be(single.SummaryTokens);
+    }
+
+    [Fact]
     public async Task Returns_null_when_no_chat_client_is_available()
     {
         var logger = new CapturingLogger();
@@ -303,6 +346,8 @@ public sealed class DirectContextCompressorTests
 
     private static AiChatClientLease CreateLease(IChatClient client, string model)
         => CreateLease(client, CreateProfile(model));
+
+    private static ChatResponseUpdate TextUpdate(string text) => new(ChatRole.Assistant, [new TextContent(text)]);
 
     private static AiChatClientLease CreateLease(IChatClient client, AiModelProfile profile)
         => new(client, new ChatOptions(), profile, new HttpClient());
@@ -342,6 +387,9 @@ public sealed class DirectContextCompressorTests
             => _response = response ?? ((_, _, _) =>
                 Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "summarized history"))));
 
+        /// <summary>Overrides the script with exact updates, so a stream can be empty or split into segments.</summary>
+        internal IReadOnlyList<ChatResponseUpdate>? Updates { get; init; }
+
         internal List<Request> Requests { get; } = [];
 
         internal bool IsDisposed { get; private set; }
@@ -350,17 +398,31 @@ public sealed class DirectContextCompressorTests
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             var captured = messages.ToList();
             Requests.Add(new Request(captured, options));
-            return _response(captured, options, cancellationToken);
-        }
+            if (Updates is not null)
+            {
+                foreach (var update in Updates)
+                {
+                    yield return update;
+                }
 
-        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-            IEnumerable<ChatMessage> messages,
-            ChatOptions? options = null,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
+                yield break;
+            }
+
+            var response = await _response(captured, options, cancellationToken).ConfigureAwait(false);
+            foreach (var message in response.Messages)
+            {
+                yield return new ChatResponseUpdate(message.Role, message.Contents);
+            }
+        }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 

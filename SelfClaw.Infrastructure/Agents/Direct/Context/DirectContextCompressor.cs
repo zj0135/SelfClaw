@@ -80,7 +80,12 @@ internal sealed class DirectContextCompressor
                 producedProfile = turnLease.Profile;
             }
 
-            var response = await client.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+            // Streaming is the path every provider serves correctly: some OpenAI-compatible endpoints answer a
+            // non-streaming request with an empty choices array, which the SDK dereferences unguarded (2026-10-18 log).
+            var response = await client
+                .GetStreamingResponseAsync(messages, options, cancellationToken)
+                .ToChatResponseAsync(cancellationToken)
+                .ConfigureAwait(false);
             var summary = response.Text?.Trim();
             if (string.IsNullOrWhiteSpace(summary))
             {

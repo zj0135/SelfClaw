@@ -56,6 +56,38 @@ internal sealed class DirectPromptComposer
         DirectTurnExecutionContext executionContext,
         ConversationCompactionRecord? compression = null)
     {
+        var build = BuildRequest(messages, turns, toolExecutions, agentInstructions, systemInstructions,
+            messageAdjustments, executionContext, compression);
+        var result = new List<ChatMessage>();
+        if (build.SystemText is not null)
+        {
+            result.Add(new ChatMessage(ChatRole.System, build.SystemText));
+        }
+
+        foreach (var unit in build.Units)
+        {
+            result.AddRange(unit.Messages);
+        }
+
+        result.AddRange(build.TrailingProtectedMessages);
+        return result;
+    }
+
+    /// <summary>
+    /// Builds the structured prompt of one Direct request: the system text, the units that still get
+    /// replayed, and the protected messages that must survive. <see cref="BuildMessages"/> is its
+    /// flattened form.
+    /// </summary>
+    internal DirectPromptBuild BuildRequest(
+        IReadOnlyList<MessageRecord> messages,
+        IReadOnlyList<ConversationTurnRecord> turns,
+        IReadOnlyList<ToolExecutionRecord> toolExecutions,
+        string agentInstructions,
+        IReadOnlyList<string> systemInstructions,
+        IReadOnlyDictionary<Guid, string> messageAdjustments,
+        DirectTurnExecutionContext executionContext,
+        ConversationCompactionRecord? compression = null)
+    {
         ArgumentNullException.ThrowIfNull(messages);
         ArgumentNullException.ThrowIfNull(turns);
         ArgumentNullException.ThrowIfNull(toolExecutions);
@@ -66,13 +98,53 @@ internal sealed class DirectPromptComposer
         var orderedMessages = OrderAndValidateMessages(messages, turnsById);
         var units = BuildUnitsCore(orderedMessages, turnsById, toolExecutions, messageAdjustments);
         var systemText = BuildSystemText(agentInstructions, systemInstructions, executionContext, compression);
+        var trailing = CreateTrailingProtectedMessages(orderedMessages, turnsById, executionContext);
+        return Compose(units, systemText, trailing, compression);
+    }
 
-        var result = new List<ChatMessage>();
-        if (systemText is not null)
-        {
-            result.Add(new ChatMessage(ChatRole.System, systemText));
-        }
+    /// <summary>
+    /// Assembles a prompt from units the caller already built and counted, so a turn builds its history
+    /// once and shares it between counting, compaction planning and the request itself.
+    /// </summary>
+    internal static DirectPromptBuild Compose(
+        IReadOnlyList<DirectPromptHistoryUnit> units,
+        string? systemText,
+        IReadOnlyList<ChatMessage> trailingProtectedMessages,
+        ConversationCompactionRecord? compression)
+    {
+        ArgumentNullException.ThrowIfNull(units);
+        ArgumentNullException.ThrowIfNull(trailingProtectedMessages);
+        // Units at or before the boundary are represented by the summary; the caller supplies the protected
+        // messages already ordered after them.
+        var replay = compression is null
+            ? units
+            : units.Where(unit => unit.SourceSequence > compression.ThroughSequence).ToArray();
+        return new DirectPromptBuild(systemText, replay, trailingProtectedMessages);
+    }
 
+    /// <summary>
+    /// The messages that outlive compaction and therefore go after every unit: the continuation prompt
+    /// (only when the history ends on a truncated answer) and, for continuation turns, the Subagent
+    /// completion batch.
+    /// </summary>
+    internal static IReadOnlyList<ChatMessage> BuildTrailingProtectedMessages(
+        IReadOnlyList<MessageRecord> messages,
+        IReadOnlyList<ConversationTurnRecord> turns,
+        DirectTurnExecutionContext executionContext)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(turns);
+        ArgumentNullException.ThrowIfNull(executionContext);
+        var turnsById = turns.ToDictionary(turn => turn.Id);
+        return CreateTrailingProtectedMessages(OrderAndValidateMessages(messages, turnsById), turnsById, executionContext);
+    }
+
+    private static IReadOnlyList<ChatMessage> CreateTrailingProtectedMessages(
+        IReadOnlyList<MessageRecord> orderedMessages,
+        IReadOnlyDictionary<Guid, ConversationTurnRecord> turnsById,
+        DirectTurnExecutionContext executionContext)
+    {
+        // The completion batch is validated first so an oversized batch fails before anything else here.
         var completionBatchMessage = executionContext.CompletionBatch is SubagentCompletionBatch completionBatch
             ? CreateCompletionBatchMessage(completionBatch, executionContext.Origin)
             : null;
@@ -82,29 +154,18 @@ internal sealed class DirectPromptComposer
             ? new ChatMessage(ChatRole.User, ContinuationPrompt)
             : null;
 
-        // Units at or before the boundary are represented by the summary; the continuation prompt and the
-        // subagent completion batch are instructions that must survive compaction, so they stay after it.
-        foreach (var unit in units)
-        {
-            if (compression is not null && unit.SourceSequence <= compression.ThroughSequence)
-            {
-                continue;
-            }
-
-            result.AddRange(unit.Messages);
-        }
-
+        var trailing = new List<ChatMessage>(2);
         if (continuationMessage is not null)
         {
-            result.Add(continuationMessage);
+            trailing.Add(continuationMessage);
         }
 
         if (completionBatchMessage is not null)
         {
-            result.Add(completionBatchMessage);
+            trailing.Add(completionBatchMessage);
         }
 
-        return result;
+        return trailing;
     }
 
     /// <summary>
@@ -168,9 +229,7 @@ internal sealed class DirectPromptComposer
         ArgumentNullException.ThrowIfNull(policy);
         var existingBoundary = existing?.ThroughSequence ?? 0;
         var candidates = units.Where(unit => unit.SourceSequence > existingBoundary).ToArray();
-        var threshold = budget.ContextWindowTokens is int window
-            ? (int)(window * policy.ThresholdRatio)
-            : policy.AbsoluteThresholdTokens;
+        var threshold = ResolveThreshold(policy, budget);
         // The reserve belongs to the trigger side: on a small window a prompt just under the threshold can
         // still overflow once the response is written, and compacting is the only way to make room. Prompt
         // counts stay reserve-free because the context-size readout reports them that way.
@@ -228,6 +287,19 @@ internal sealed class DirectPromptComposer
         return new DirectCompressionPlan(true, prefix, prefix[^1].SourceSequence, retainedUnits, sourceTokens, threshold);
     }
 
+    /// <summary>
+    /// The single trigger formula: a share of the declared window, or the absolute threshold when the model
+    /// declares none. The turn-start planner and the in-turn checkpoint both call this, so the two can never
+    /// drift apart into different notions of "the context is getting large".
+    /// </summary>
+    internal static int ResolveThreshold(DirectCompressionPolicy policy, DirectPromptBudget budget)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        return budget.ContextWindowTokens is int window
+            ? (int)(window * policy.ThresholdRatio)
+            : policy.AbsoluteThresholdTokens;
+    }
+
     private static DirectCompressionPlan Decline(int candidateCount, int thresholdTokens)
         => new(false, [], null, candidateCount, null, thresholdTokens);
 
@@ -268,8 +340,15 @@ internal sealed class DirectPromptComposer
         return units;
     }
 
-    private static string CreateCompressionSection(ConversationCompactionRecord compression)
-        => $"{CompressionSectionNote}\n\n<selfclaw-context-summary version=\"1\">\n{compression.Summary}\n</selfclaw-context-summary>";
+    internal static string CreateCompressionSection(ConversationCompactionRecord compression)
+        => CreateSummarySection(compression.Summary);
+
+    /// <summary>
+    /// The single source of the summary section format: the turn-start compaction and the in-turn
+    /// compaction must produce byte-identical shells, or a chained summary would read differently.
+    /// </summary>
+    internal static string CreateSummarySection(string summary)
+        => $"{CompressionSectionNote}\n\n<selfclaw-context-summary version=\"1\">\n{summary}\n</selfclaw-context-summary>";
 
     private static ChatMessage CreateCompletionBatchMessage(
         SubagentCompletionBatch completionBatch,

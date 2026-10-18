@@ -45,10 +45,10 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         "The response reached the configured output-token limit without producing any output. " +
         "Raise the output-token limit for this model and try again.";
 
-    private const string CompactionFailedReason =
+    internal const string CompactionFailedReason =
         "Context compaction failed; the turn continues with the uncompacted history.";
 
-    private const string CompactionFallbackDiagnostic =
+    internal const string CompactionFallbackDiagnostic =
         "The configured compaction model was unavailable; the turn's own model produced the summary.";
 
     private const string CountingUnavailableDiagnostic =
@@ -222,21 +222,44 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             var budget = new DirectPromptBudget(
                 AiChatOptions.ResolveContextWindowTokens(providerLease.Profile),
                 providerLease.Options.MaxOutputTokens);
-            var (compression, countedTokens) = await ApplyCompactionAsync(
-                request, capabilityLease, providerLease, budget, writer, cancellationToken).ConfigureAwait(false);
-            EnsurePromptFitsWindow(budget, countedTokens);
-            writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
-
-            var messages = _promptComposer.BuildMessages(
+            // The units are built once and shared by counting, compaction planning and the prompt itself:
+            // rebuilding them per request would rescan the whole stored history on every turn.
+            var units = _promptComposer.BuildUnits(
                 request.Messages,
                 request.Turns,
                 request.ToolExecutions ?? [],
-                request.Agent.Instructions,
-                capabilityLease.SystemInstructions,
-                capabilityLease.MessageAdjustments,
-                request.ExecutionContext,
+                capabilityLease.MessageAdjustments);
+            var policy = await _compressionPolicy.GetAsync(cancellationToken).ConfigureAwait(false);
+            var (compression, countedTokens) = await ApplyCompactionAsync(
+                    request, capabilityLease, providerLease, budget, policy, units, writer, cancellationToken)
+                .ConfigureAwait(false);
+            EnsurePromptFitsWindow(budget, countedTokens);
+            writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
+
+            var build = DirectPromptComposer.Compose(
+                units,
+                _promptComposer.BuildSystemText(
+                    request.Agent.Instructions,
+                    capabilityLease.SystemInstructions,
+                    request.ExecutionContext,
+                    compression),
+                DirectPromptComposer.BuildTrailingProtectedMessages(
+                    request.Messages,
+                    request.Turns,
+                    request.ExecutionContext),
                 compression);
-            return new DirectTurnSetup(capabilityLease, providerLease, invoker, messages, request.InputSession);
+            return new DirectTurnSetup(
+                capabilityLease,
+                providerLease,
+                invoker,
+                build.SystemText,
+                build.Units,
+                build.TrailingProtectedMessages,
+                policy,
+                budget,
+                request.ConversationId,
+                request.TurnId,
+                request.InputSession);
         }
         catch
         {
@@ -257,24 +280,26 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         DirectTurnCapabilityLease capabilityLease,
         AiChatClientLease providerLease,
         DirectPromptBudget budget,
+        DirectCompressionPolicy policy,
+        IReadOnlyList<DirectPromptHistoryUnit> units,
         ChannelWriter<AgentStreamEvent> writer,
         CancellationToken cancellationToken)
     {
-        var policy = await _compressionPolicy.GetAsync(cancellationToken).ConfigureAwait(false);
         // Without a declared window and with compaction off, there is nothing to count and nothing to decide.
         if (budget.ContextWindowTokens is null && !policy.Enabled)
         {
             return (request.Compression, null);
         }
 
-        var (promptTokens, units) = CountPromptTokens(request, capabilityLease, providerLease, request.Compression);
+        var (promptTokens, countedUnits) = CountPromptTokens(
+            request, capabilityLease, providerLease, units, request.Compression);
         if (promptTokens is not int estimatedTokens)
         {
             writer.TryWrite(new RunStatusEvent(AgentRunStatus.Initializing, CountingUnavailableDiagnostic));
             return (request.Compression, null);
         }
 
-        var plan = _promptComposer.PlanCompression(units, request.Compression, policy, budget, estimatedTokens);
+        var plan = _promptComposer.PlanCompression(countedUnits, request.Compression, policy, budget, estimatedTokens);
         if (!plan.ShouldCompress || plan.ThroughSequence is not long throughSequence)
         {
             return (request.Compression, estimatedTokens);
@@ -319,7 +344,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         writer.TryWrite(new ContextCompactionCompletedEvent(compression));
         // The window check bounds what is actually sent, so it is re-run against the prompt that now carries
         // the summary section in its system text.
-        var (recountedTokens, _) = CountPromptTokens(request, capabilityLease, providerLease, compression);
+        var (recountedTokens, _) = CountPromptTokens(request, capabilityLease, providerLease, units, compression);
         return (compression, recountedTokens);
     }
 
@@ -332,6 +357,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         DirectChatTurnRequest request,
         DirectTurnCapabilityLease capabilityLease,
         AiChatClientLease providerLease,
+        IReadOnlyList<DirectPromptHistoryUnit> units,
         ConversationCompactionRecord? compression)
     {
         var profile = providerLease.Profile;
@@ -343,33 +369,29 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         if (_tokenCounter.CountText(systemText, profile) is not int systemTokens ||
             _tokenCounter.CountTools(providerLease.Options.Tools, profile) is not int toolTokens)
         {
-            return (null, []);
+            return (null, units);
         }
 
         var total = systemTokens + toolTokens;
-        var units = new List<DirectPromptHistoryUnit>();
-        foreach (var unit in _promptComposer.BuildUnits(
-                     request.Messages,
-                     request.Turns,
-                     request.ToolExecutions ?? [],
-                     capabilityLease.MessageAdjustments))
+        var counted = new List<DirectPromptHistoryUnit>(units.Count);
+        foreach (var unit in units)
         {
             if (compression is not null && unit.SourceSequence <= compression.ThroughSequence)
             {
-                units.Add(unit);
+                counted.Add(unit);
                 continue;
             }
 
             if (_tokenCounter.CountMessages(unit.Messages, profile) is not int unitTokens)
             {
-                return (null, []);
+                return (null, units);
             }
 
-            units.Add(unit with { Tokens = unitTokens });
+            counted.Add(unit with { Tokens = unitTokens });
             total += unitTokens;
         }
 
-        return (total, units);
+        return (total, counted);
     }
 
     /// <summary>

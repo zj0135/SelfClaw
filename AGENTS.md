@@ -67,5 +67,5 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - 端到端主干：`docs/pipeline-architecture.md`（全局图）→ `docs/runtime-execution-flow.md`（当前调用链、回合/准入/消费基线）。
 - Direct 输入与队列 / steer 语义：`docs/direct-message-input-design.md`。
 - 桌面/前端：`docs/plugin-view-system-design.md`、`docs/message-segments-system-design.md`。
-- 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/pet-system-design.md`、`docs/automation-system-design.md`、`docs/direct-context-compaction-design.md`（配套实施记录 `docs/direct-context-compaction-implementation-tasks.md`）。
+- 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/pet-system-design.md`、`docs/automation-system-design.md`、`docs/direct-context-compaction-design.md`（配套实施记录 `docs/direct-context-compaction-implementation-tasks.md`）、`docs/direct-in-turn-compaction-design.md`。
 - 规则：spec/issue 写 `.scratch/<feature-slug>/`（git 忽略）；耐久结论写 `docs/`；被取代的设计要么更新要么删除，不留"历史保留"。

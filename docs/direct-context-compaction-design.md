@@ -29,14 +29,14 @@
 | `SelfClaw.Infrastructure/Agents/Direct/Context/DirectPromptComposer.cs` | `BuildMessages` 组装 system → 历史 → 续写提示 → completion batch；`BuildHistoryWithinBudget` 从最新消息反向累积 `DirectPromptHistoryUnit`，预算耗尽即丢弃更旧单元；`EstimateTokens = (UTF8 字节数 + 2) / 3` |
 | 同上 | `BudgetFor` 用 `ContextWindowTokens - (system + tools + 输出预留)` 得到历史预算；`DefaultOutputTokenReserve = 4096` |
 | `Agents/Direct/DirectAgentChatRuntime.cs` | `SetupTurnAsync` 调用 composer（每回合一次）；`WriteTerminalOutcome` 映射终态 |
-| `Agents/Direct/DirectConversationLoop.cs` | 每回合 ≤128 次 provider 请求；`FitsBudget` 只用于 steer 批次准入，回合内工具结果增长**不做任何裁剪** |
+| `Agents/Direct/DirectConversationLoop.cs` | 每回合 ≤128 次 provider 请求；`FitsBudget` 只用于 steer 批次准入；回合内增长已由回合内压缩约束（见 `direct-in-turn-compaction-design.md`），回合开始压缩不变 |
 | `AiProviders/AiChatOptions.cs` | `ResolveContextWindowTokens`：`Configuration.ContextLength` 优先，其次 model option `context_window_tokens`，都没有则历史不受限 |
 | `AiProviders/RequestUsageAccumulator.cs`、`Agents/Direct/TurnUsageReporter.cs` | 每次 provider 调用的 usage 归一化后计入回合；`ContextTokens = 该次调用 input + output` |
 | `Desktop/Services/Runtime/ConversationTurnRecorder.cs` | 事件归约；`UsageReportedEvent` 累加到 `AgentTurnState.Usage`；终态提交带聚合 usage |
 | `Desktop/Services/Transcript/*` | 快照 → 差分 → `WebViewHostChannel` 推给 Vue |
 | `Core/Models/Usage/TurnUsage.cs` + `turn_usage` 表 | 每回合用量已持久化，含 `context_tokens` / `context_window_tokens` |
 
-关键事实：**当前只有“回合开始时”会裁剪历史，回合内（工具循环）的增长今天就不受约束**。因此本设计把压缩限定在回合开始时，是对现有裁剪点的等价替换，而不是新增一条回合内路径。
+关键事实：**回合内增长已由回合内压缩约束（见 `direct-in-turn-compaction-design.md`），回合开始压缩不变**；本设计只负责回合开始时的裁剪点，它与回合内压缩共用策略、阈值与压缩器。
 
 ## 2. 目标与非目标
 
@@ -51,7 +51,7 @@
 
 ### 2.2 非目标（本次不做，明确记录）
 
-- **回合内压缩**：工具循环期间的增长仍按现状处理（受 MCP 64 KiB、Shell 24k 字符等既有上限约束），回合内不做压缩、也不做裁剪。
+- **回合内压缩**：已另立设计（见 `direct-in-turn-compaction-design.md`），不在本设计范围内。
 - **CLI 链路**：CLI 自行持有上下文与会话恢复，不接入本机制。
 - **跨 provider 逐 token 精确**：Anthropic 与 Ollama 未公开 tokenizer，统一用 OpenAI 编码近似（默认 `o200k_base`），不承诺与 provider 自身分词完全一致；实测口径仍以 provider 回报为准。
 - **自动探测窗口**：模型窗口仍只来自模型配置（`ContextLength` / `context_window_tokens`）。
@@ -400,7 +400,7 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 | C03 | 压缩项与回合终态在同一事务提交；重试幂等，不产生重复边界 |
 | C04 | 压缩失败不影响回合终态语义；超窗时以可读错误失败 |
 | C05 | 子代理 completion batch、续写提示、steer 批次仍为受保护内容，不被压缩或丢弃 |
-| C06 | 每回合最多一次压缩；回合内工具增长沿用既有上限，不新增裁剪 |
+| C06 | 每回合开始最多一次压缩（不变）；回合内维护性压缩 ≤ `MaximumInTurnCompactionsPerTurn`（3 次），不落库、不裁剪（见 `direct-in-turn-compaction-design.md`） |
 | C07 | 压缩使用本回合 lease 或独立 lease，两者都在回合结束前释放 |
 | C08 | 设置不可用时回落默认策略；模型不可用时回退本回合模型并留诊断 |
 | C09 | 计数只有一个来源：tokenizer 计数 + provider 实测；字节估算不得作为触发依据 |
@@ -429,7 +429,7 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 | 额外延迟 | 压缩是一次同步模型调用 | 每回合最多一次；仅超阈值时发生；`Started` 事件让界面显示“正在压缩上下文…” |
 | schema 版本抬升 | v32 使旧库只读拒绝（既有策略，已确认接受） | 实施前明确告知；版本断言三处同步 |
 | continuation 提交路径 | detached 回合需要把压缩项带进原子事务 | 复用 `SqliteConversationTurnWriter`；若 committer 契约膨胀过大，退化为“continuation 不落压缩项，仅本回合生效”。**实际结果（C3）：未退化** —— `SubagentContinuationTurnCommitter` 的原子事务直接携带压缩项，child/continuation 与交互回合共用同一条写入路径，代价只是提交契约多一个可空集合 |
-| 回合内无压缩 | 极端长工具循环仍可能超窗 | 记录为后续方向（回合内压缩需重新定义边界与受保护内容），本次不作 |
+| 回合内无压缩 | 极端长工具循环仍可能超窗——**已解决**：回合内压缩已落地（见 `direct-in-turn-compaction-design.md`），复用同一阈值与保留比例、上限 3 次、零持久化 | 回合内压缩在循环顶部、steer 排空之前检查；压缩失败 / 计数不可用 / 上限用尽均回退为“本回合不再压缩” |
 
 ## 12. 验证入口
 

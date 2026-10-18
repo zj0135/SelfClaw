@@ -127,6 +127,14 @@ internal sealed class ConversationTurnRecorder
                     session.ActivityText = CompactionFailedText;
                     session.RaiseTranscriptChanged(false);
                     break;
+                case InTurnContextCompactionCompletedEvent inTurn:
+                    // In-turn compaction only rewrites this turn's request context, so there is nothing to
+                    // persist, replay or show as a divider; the nearby RunStatus event owns the activity text.
+                    _logger.LogInformation(
+                        "In-turn context compaction covered {CoveredUnitCount} units for turn {TurnId}: " +
+                        "{SourceTokens} source tokens, {SummaryTokens} summary tokens, model {Model}.",
+                        inTurn.CoveredUnitCount, turn.TurnId, inTurn.SourceTokens, inTurn.SummaryTokens, inTurn.Model);
+                    break;
                 case RunCompletedEvent completed:
                     await CompleteTurnAsync(session, turn, completed, committer, cancellationToken);
                     break;

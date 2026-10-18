@@ -552,13 +552,15 @@ public sealed class DirectAgentChatRuntimeTests
         DirectContextCompressor? contextCompressor = null)
     {
         var counter = tokenCounter ?? new DirectTokenCounter();
+        var promptComposer = new DirectPromptComposer();
+        var compressor = contextCompressor ?? new DirectContextCompressor(factory, new StubAiModelCatalog(), counter);
         return new(
             factory,
             capabilityResolver ?? CreateCapabilityResolver(),
-            new DirectPromptComposer(),
-            new DirectConversationLoop(counter),
+            promptComposer,
+            new DirectConversationLoop(counter, promptComposer, compressor),
             counter,
-            contextCompressor ?? new DirectContextCompressor(factory, new StubAiModelCatalog(), counter),
+            compressor,
             compressionPolicy);
     }
 

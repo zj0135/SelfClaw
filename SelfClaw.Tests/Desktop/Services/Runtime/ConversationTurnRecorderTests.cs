@@ -265,6 +265,29 @@ public sealed class ConversationTurnRecorderTests
         context.State.ActivityText.Should().Be("正在压缩上下文...");
     }
 
+    [Fact]
+    public async Task In_turn_compaction_completion_is_observation_only()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        await context.ApplyAsync(new RunStatusEvent(AgentRunStatus.Requesting));
+        var activity = context.State.ActivityText;
+        var immediates = new List<bool>();
+        context.State.TranscriptChanged += immediates.Add;
+
+        await context.ApplyAsync(new InTurnContextCompactionCompletedEvent(CoveredUnitCount: 4, SourceTokens: 88_000,
+            SummaryTokens: 700, Model: "summary-model"));
+
+        context.Turn.PendingCompactions.Should().BeEmpty();
+        context.State.Compactions.Should().BeEmpty();
+        context.State.ActivityText.Should().Be(activity);
+        immediates.Should().BeEmpty("an in-turn compaction leaves the transcript untouched");
+
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
+
+        (await context.ListCompactionsAsync()).Should().BeEmpty("an in-turn compaction is never persisted");
+    }
+
     private static ConversationCompactionRecord Compaction(ConversationTurnTestContext context, long throughSequence, string summary)
         => new(Guid.NewGuid(), context.Conversation.Id, context.Record.Id, throughSequence, summary, "test-model",
             SourceMessageCount: 3, SourceTokens: 4_200, SummaryTokens: 120, DateTimeOffset.UtcNow);

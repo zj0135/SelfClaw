@@ -35,9 +35,27 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     public void PublishInputBoundary(ConversationInputBatch batch)
     {
         ArgumentNullException.ThrowIfNull(batch);
-        if (!_writer.TryWrite(new TurnInputBoundaryEvent(batch, _usage.Build())))
-            throw new InvalidOperationException("The event consumer closed before the input boundary was published.");
+        Write(new TurnInputBoundaryEvent(batch, _usage.Build()));
     }
+
+    /// <summary>
+    /// Publishes a lifecycle phase. The in-turn compaction path reports through here so its activity text is
+    /// covered by the same overwrite rule as the turn-start path.
+    /// </summary>
+    public void PublishRunStatus(AgentRunStatus status, string? detail = null)
+        => Write(new RunStatusEvent(status, detail));
+
+    public void PublishInTurnCompactionStarted(int estimatedTokens, int thresholdTokens)
+        => Write(new ContextCompactionStartedEvent(estimatedTokens, thresholdTokens));
+
+    public void PublishInTurnCompactionCompleted(InTurnContextCompactionCompletedEvent compaction)
+    {
+        ArgumentNullException.ThrowIfNull(compaction);
+        Write(compaction);
+    }
+
+    public void PublishInTurnCompactionFailed(string reason)
+        => Write(new ContextCompactionFailedEvent(reason));
 
     public void BeginInputSegment() => _finalText.Clear();
 
@@ -106,6 +124,12 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
 
     /// <summary>Records one provider call; every observation counts as one request.</summary>
     public void ObserveUsage(UsageDetails details) => _usage.Observe(details);
+
+    private void Write(AgentStreamEvent streamEvent)
+    {
+        if (!_writer.TryWrite(streamEvent))
+            throw new InvalidOperationException("The event consumer closed before the event was published.");
+    }
 
     /// <summary>
     /// Reads the transcript-facing status, summary and display detail out of a tool result. A provider-side

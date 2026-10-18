@@ -160,7 +160,10 @@ public static class ServiceCollectionExtensions
         // A host that owns the compaction settings replaces this registration with its own policy source.
         services.AddSingleton<IDirectCompressionPolicySource>(DisabledDirectCompressionPolicySource.Instance);
         services.AddSingleton(serviceProvider =>
-            new DirectConversationLoop(serviceProvider.GetRequiredService<IDirectTokenCounter>()));
+            new DirectConversationLoop(
+                serviceProvider.GetRequiredService<IDirectTokenCounter>(),
+                serviceProvider.GetRequiredService<DirectPromptComposer>(),
+                serviceProvider.GetRequiredService<DirectContextCompressor>()));
         services.AddSingleton<IDirectTokenCounter>(serviceProvider =>
             new DirectTokenCounter(serviceProvider.GetService<ILogger<DirectTokenCounter>>()));
         services.AddSingleton<CapabilityContentCache>();

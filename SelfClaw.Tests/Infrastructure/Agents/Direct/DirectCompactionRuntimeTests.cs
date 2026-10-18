@@ -8,6 +8,7 @@ using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Direct;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
+using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using Xunit;
@@ -69,8 +70,11 @@ public sealed class DirectCompactionRuntimeTests
 
         var events = await CollectAsync(runtime.StreamTurnAsync(request));
 
+        // The turn-start pair only: a turn this far over its threshold also compacts in-turn between provider
+        // round trips, and those events belong to DirectInTurnCompactionTests.
         var compactionEvents = events
             .Where(item => item is ContextCompactionStartedEvent or ContextCompactionCompletedEvent)
+            .Take(2)
             .ToList();
         compactionEvents.Should().HaveCount(2);
         compactionEvents[0].Should().BeOfType<ContextCompactionStartedEvent>();
@@ -99,14 +103,17 @@ public sealed class DirectCompactionRuntimeTests
         compactingIndex.Should().BeLessThan(IndexOfStatus(events, AgentRunStatus.Requesting));
         client.Invocations.Should().HaveCount(2);
         client.Invocations[0].Should().NotContain(message => message.Text == "prior prompt");
+        client.Invocations[0].Should().Contain(message => message.Text == "user prompt",
+            "turn-start compaction replays the retained tail in the request it shapes");
 
-        // Every request of the turn replays the boundary and the summary section instead of the prefix.
+        // Every request of the turn replays the boundary and the summary section instead of the prefix. The
+        // second request may have been compacted again in-turn (this threshold is far below the prompt), which
+        // only tightens what it carries.
         var replayed = client.Invocations[1];
         replayed[0].Role.Should().Be(ChatRole.System);
         replayed[0].Text.Should().Contain("selfclaw-context-summary");
         replayed[0].Text.Should().Contain(Summary);
         replayed.Should().NotContain(message => message.Text == "prior prompt");
-        replayed.Should().Contain(message => message.Text == "user prompt");
         replayed.Count(message => message.Role == ChatRole.Tool).Should().Be(1);
     }
 
@@ -301,25 +308,33 @@ public sealed class DirectCompactionRuntimeTests
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
-        {
-            SummaryCalls.Add(messages.ToList());
-            if (ResponseException is not null)
-            {
-                return Task.FromException<ChatResponse>(ResponseException);
-            }
-
-            return SummaryText is null
-                ? Task.FromException<ChatResponse>(new NotSupportedException())
-                : Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, SummaryText)));
-        }
+            => throw new NotSupportedException("the compressor summarizes over the streaming path");
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            var captured = messages.ToList();
+            if (captured.Count > 0 && captured[0].Role == ChatRole.System && captured[0].Text == CompressionInstruction.Text)
+            {
+                SummaryCalls.Add(captured);
+                if (ResponseException is not null)
+                {
+                    throw ResponseException;
+                }
+
+                if (SummaryText is null)
+                {
+                    throw new NotSupportedException();
+                }
+
+                yield return new ChatResponseUpdate(ChatRole.Assistant, [new TextContent(SummaryText)]);
+                yield break;
+            }
+
             var index = Math.Min(Invocations.Count, _scripts.Count - 1);
-            Invocations.Add(messages.ToList());
+            Invocations.Add(captured);
             foreach (var update in _scripts[index])
             {
                 yield return update;

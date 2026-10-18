@@ -50,7 +50,7 @@ Direct 依赖扩展资源与 provider 服务；Extensions 不引用 Direct 编�
 4. `AiChatClientFactory.Create(preparation, pipeline)` 按回合在共享 pooled handler 上构造 `HttpClient`，把工具定义交给 provider adapter 并创建 options；SDK 管线只挂 `UseLogging`，工具循环不在管线内。
 5. 回合开始的计数与压缩（`RunStartedEvent` 之后、`Requesting` 之前）：读压缩策略 → `IDirectTokenCounter` 计数（跳过已被旧摘要覆盖的单元）→ `DirectPromptComposer.PlanCompression()` 判定是否触发 → 发 `ContextCompactionStartedEvent` 并置 `Compacting` → 调压缩模型 → 发 `Completed`／`Failed` → 用含摘要的 system 段重算 → `EnsurePromptFitsWindow()`（窗口校验的唯一归属）。
 6. `DirectPromptComposer.BuildMessages()` 按压缩边界重放历史与必需输入（不再裁剪）。
-7. `DirectConversationLoop` 显式消费 SDK 流（每回合上限 128 次 provider 请求）：翻译事件 → 按 `FinishReason` 判终态 → 串行执行工具 → 追加结果进入下一轮。终态后先释放 provider pipeline，再释放 capability lease。
+7. `DirectConversationLoop` 显式消费 SDK 流（每回合上限 128 次 provider 请求）：翻译事件 → 按 `FinishReason` 判终态 → 串行执行工具 → 追加结果进入下一轮。每轮迭代先在循环顶部做回合内压缩检查（`requestIndex ≥ 1`、steer 排空之前，同一阈值；摘要只在进程内生效，不落库、不进转录，每回合上限 3 次），再排空 steer。终态后先释放 provider pipeline，再释放 capability lease。
 
 Desktop 不再补齐默认模型。排队 child 与 continuation 使用捕获的具体模型 id；模型禁用使准备失败，不会悄悄切换默认模型。reasoning 来自共享模型配置；没有显式配置时保持 provider 默认行为。
 
@@ -111,7 +111,7 @@ checkpoint 表示“工具可能已经开始”，不提供外部文件、Shell 
 
 Glob 保留忽略 `.gitignore` 的路径枚举语义和隐藏文件可见性，排除隐藏目录及已知构建/依赖目录，不跟随目录链接。`relativePath` 只缩小遍历范围，不改变模式的根。
 
-token 预算按 tokenizer 计数：超阈值由压缩（摘要 + 边界重放）处理，不再按字节估算裁剪。数据库历史读取、当前会话内容本身及 Skill token 扫描没有变成常量成本。Direct 事件 Channel 仍无界；慢消费者积压与 warm MCP health 写入保留为待测量项。
+token 预算按 tokenizer 计数：超阈值由压缩（摘要 + 边界重放）处理，不再按字节估算裁剪。回合内增长同样在循环顶部、steer 排空之前按同一阈值检查（回合内压缩，见 `docs/direct-in-turn-compaction-design.md`），其摘要只留在进程内。数据库历史读取、当前会话内容本身及 Skill token 扫描没有变成常量成本。Direct 事件 Channel 仍无界；慢消费者积压与 warm MCP health 写入保留为待测量项。
 
 ## 6. 持久化与配置边界
 
