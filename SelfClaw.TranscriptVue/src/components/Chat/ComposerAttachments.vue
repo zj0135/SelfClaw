@@ -24,11 +24,11 @@ function preview(item) {
 			<TransitionGroup name="chip">
 				<li v-for="item in props.items" :key="item.attachmentId" class="attachment-chip">
 					<button v-if="item.previewUrl" class="chip-thumb" type="button"
-						:aria-label="`预览 ${item.fileName}`" :title="item.fileName" @click="preview(item)">
+						:aria-label="`预览 ${item.fileName}`" @click="preview(item)">
 						<img :src="item.previewUrl" :alt="item.fileName" loading="lazy" />
 					</button>
-					<span v-else class="chip-thumb missing" :title="`${item.fileName}（预览不可用）`" aria-hidden="true">
-						<ImageOff :size="17" :stroke-width="1.7" />
+					<span v-else class="chip-thumb missing" aria-hidden="true">
+						<ImageOff :size="11" :stroke-width="1.8" />
 					</span>
 					<span class="chip-copy">
 						<span class="chip-name" :title="item.fileName">{{ item.fileName }}</span>
@@ -36,7 +36,7 @@ function preview(item) {
 					</span>
 					<button class="chip-remove" type="button" :aria-label="`移除 ${item.fileName}`" title="移除图片"
 						@click="emit('remove', item.attachmentId)">
-						<X :size="12" :stroke-width="2.4" aria-hidden="true" />
+						<X :size="9" :stroke-width="2.6" aria-hidden="true" />
 					</button>
 				</li>
 			</TransitionGroup>
@@ -49,16 +49,16 @@ function preview(item) {
 .attachments {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
-	margin: 0 -2px 8px;
+	gap: 3px;
+	margin: 0 -2px 4px;
 }
 
 .attachment-strip {
 	display: flex;
-	align-items: stretch;
-	gap: 8px;
+	align-items: center;
+	gap: 5px;
 	margin: 0;
-	padding: 2px 2px 4px;
+	padding: 1px 2px;
 	list-style: none;
 	overflow-x: auto;
 	scrollbar-width: thin;
@@ -69,19 +69,20 @@ function preview(item) {
 	position: relative;
 	display: inline-flex;
 	align-items: center;
-	gap: 8px;
+	gap: 4px;
 	flex: none;
-	max-width: 216px;
-	padding: 5px 6px 5px 5px;
+	max-width: 135px;
+	height: 24px;
+	padding: 2px 5px 2px 2px;
 	border: 1px solid color-mix(in srgb, var(--text) 11%, transparent);
-	border-radius: 12px;
+	border-radius: 9999px;
 	background: var(--panel-muted);
 	scroll-snap-align: start;
 	transition: border-color 0.16s, background 0.16s, transform 0.16s cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 
 .attachment-chip:hover {
-	border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+	border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 	background: color-mix(in srgb, var(--accent) 6%, var(--panel-muted));
 	transform: translateY(-1px);
 }
@@ -89,65 +90,73 @@ function preview(item) {
 .chip-thumb {
 	display: inline-grid;
 	place-items: center;
-	width: 40px;
-	height: 40px;
+	width: 20px;
+	height: 20px;
 	flex: none;
 	padding: 0;
 	overflow: hidden;
 	border: 0;
-	border-radius: 8px;
+	border-radius: 50%;
 	background: color-mix(in srgb, var(--text) 7%, transparent);
 	color: var(--muted);
 	cursor: pointer;
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .chip-thumb img {
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
+	border-radius: 50%;
 	display: block;
+	transition: transform 0.14s ease;
+}
+
+.chip-thumb:hover img {
+	transform: scale(1.08);
 }
 
 .chip-thumb.missing {
 	cursor: default;
 	background:
 		repeating-linear-gradient(135deg,
-			color-mix(in srgb, var(--text) 7%, transparent) 0 6px,
-			color-mix(in srgb, var(--text) 3%, transparent) 6px 12px);
+			color-mix(in srgb, var(--text) 7%, transparent) 0 3px,
+			color-mix(in srgb, var(--text) 3%, transparent) 3px 6px);
 }
 
 .chip-copy {
-	display: flex;
-	flex-direction: column;
-	gap: 1px;
+	display: inline-flex;
+	align-items: baseline;
+	gap: 3px;
 	min-width: 0;
 }
 
 .chip-name {
 	overflow: hidden;
-	max-width: 132px;
+	max-width: 56px;
 	color: var(--text-soft);
-	font-size: var(--fs-115);
+	font-size: var(--fs-105);
 	font-weight: 550;
-	line-height: 1.3;
+	line-height: 1;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
 .chip-size {
+	flex: none;
 	color: var(--muted-soft);
-	font-size: var(--fs-10);
-	line-height: 1.2;
+	font-size: 9.5px;
+	line-height: 1;
 	letter-spacing: 0.01em;
 }
 
 .chip-remove {
 	display: inline-grid;
 	place-items: center;
-	width: 20px;
-	height: 20px;
+	width: 14px;
+	height: 14px;
 	flex: none;
-	margin-left: 2px;
+	margin-left: 1px;
 	padding: 0;
 	border: 0;
 	border-radius: 50%;

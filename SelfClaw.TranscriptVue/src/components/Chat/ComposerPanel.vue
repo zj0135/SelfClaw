@@ -324,7 +324,6 @@ defineExpose({
 		</transition>
 		<slot name="queue" />
 		<section class="composer-shell" :class="{ dragging }" aria-label="消息输入">
-			<div class="composer-grip" aria-hidden="true"></div>
 			<ComposerAttachments :items="props.attachments" :error="props.attachmentsError"
 				@remove="emit('remove-attachment', $event)" @preview-image="emit('preview-image', $event)" />
 			<textarea ref="textareaRef" v-model="composerText" class="composer-input" rows="3"
@@ -387,7 +386,7 @@ defineExpose({
 	min-height: 138px;
 	display: flex;
 	flex-direction: column;
-	padding: 22px 18px 12px;
+	padding: 16px 18px 12px;
 	border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
 	border-radius: 16px 16px 0 0;
 	background: var(--panel);
@@ -425,17 +424,6 @@ defineExpose({
 
 :global(.empty-workspace) .composer-shell {
 	min-height: 132px;
-}
-
-.composer-grip {
-	position: absolute;
-	top: 6px;
-	left: 50%;
-	width: 36px;
-	height: 3.5px;
-	border-radius: 99px;
-	background: var(--border-strong);
-	transform: translateX(-50%);
 }
 
 .composer-error {

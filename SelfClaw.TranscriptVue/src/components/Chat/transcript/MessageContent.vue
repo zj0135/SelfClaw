@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue';
-import { buildRenderBlocks, formatAttachmentSize } from '../../../renderers/transcript.js';
+import { ImageOff } from 'lucide-vue-next';
+import { buildRenderBlocks } from '../../../renderers/transcript.js';
 import MessageBlocks from './MessageBlocks.vue';
 import TurnOutcome from './TurnOutcome.vue';
 
@@ -20,7 +21,6 @@ const attachments = computed(() => {
 		.filter((attachment) => attachment && String(attachment.mediaType || '').startsWith('image/'))
 		.map((attachment) => ({
 			fileName: attachment.fileName || 'image',
-			size: formatAttachmentSize(attachment.byteLength),
 			sourceUrl: attachment.sourceUrl || attachment.dataUrl || '',
 		}));
 });
@@ -30,28 +30,30 @@ const hasContent = computed(() => blocks.value.length > 0);
 
 <template>
 	<div class="message-main">
-		<article class="item" :class="[item.kind, item.role, item.status]">
+		<article v-if="hasContent || item.role !== 'user'" class="item" :class="[item.kind, item.role, item.status]">
 			<div class="header" :class="item.role === 'user' ? 'user-time-header' : 'assistant-time-header'">
 				<span class="message-time">{{ item.timestamp }}</span>
 			</div>
 
-			<div v-if="hasContent || attachments.length" class="message-flow">
-				<div v-if="attachments.length" class="message-attachments">
-					<figure v-for="(attachment, index) in attachments" :key="index" class="message-attachment">
-						<img v-if="attachment.sourceUrl" class="message-attachment-image" :src="attachment.sourceUrl"
-							:alt="attachment.fileName" loading="lazy"
-							@click="emit('preview-image', { src: attachment.sourceUrl, alt: attachment.fileName })" />
-						<div v-else class="message-attachment-image missing" aria-hidden="true"></div>
-						<figcaption>
-							<span class="message-attachment-name">{{ attachment.fileName }}</span>
-							<span class="message-attachment-size">{{ attachment.size }}</span>
-						</figcaption>
-					</figure>
-				</div>
-
+			<div v-if="hasContent" class="message-flow">
 				<MessageBlocks :item="item" :collapse="collapse" @preview-image="emit('preview-image', $event)" />
 			</div>
 			<TurnOutcome :outcome="item.turnOutcome" />
 		</article>
+
+		<div v-else-if="item.role === 'user'" class="header user-time-header user-time-header-standalone">
+			<span class="message-time">{{ item.timestamp }}</span>
+		</div>
+
+		<div v-if="attachments.length" class="message-attachments" role="list" aria-label="消息附带图片">
+			<figure v-for="(attachment, index) in attachments" :key="index" class="message-attachment" role="listitem"
+				@click="attachment.sourceUrl && emit('preview-image', { src: attachment.sourceUrl, alt: attachment.fileName })">
+				<img v-if="attachment.sourceUrl" class="message-attachment-image" :src="attachment.sourceUrl"
+					:alt="attachment.fileName" loading="lazy" />
+				<div v-else class="message-attachment-image missing" aria-hidden="true">
+					<ImageOff :size="16" :stroke-width="1.8" />
+				</div>
+			</figure>
+		</div>
 	</div>
 </template>

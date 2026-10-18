@@ -644,8 +644,18 @@ button {
 }
 
 .message-row.user .message-main {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 6px;
 	flex: 0 1 auto;
 	max-width: min(58%, 620px);
+}
+
+.message-row.user .item.message.user {
+	width: fit-content;
+	max-width: 100%;
 }
 
 .item {
@@ -928,35 +938,64 @@ a:hover {
 }
 
 .message-attachments {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(128px, 184px));
-	gap: 10px;
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
 	padding: 0;
 }
 
+.message-row.user .message-attachments {
+	justify-content: flex-end;
+}
+
 .message-attachment {
+	position: relative;
+	width: 56px;
+	height: 56px;
+	flex: 0 0 56px;
 	margin: 0;
+	padding: 0;
 	overflow: hidden;
-	border: 1px solid var(--border);
+	border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
 	border-radius: 8px;
-	background: var(--panel);
+	background: var(--panel-muted);
+	cursor: pointer;
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.06);
+	transition: border-color 0.16s ease, transform 0.16s cubic-bezier(0.34, 1.4, 0.64, 1), box-shadow 0.16s ease;
+}
+
+.message-attachment:hover {
+	border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+	transform: translateY(-1px) scale(1.02);
+	box-shadow: 0 4px 10px rgba(var(--shadow-ink), 0.14);
 }
 
 .message-attachment-image {
 	display: block;
 	width: 100%;
-	max-height: min(280px, 42vh);
-	height: auto;
-	object-fit: contain;
+	height: 100%;
+	object-fit: cover;
 	object-position: center;
 	background: var(--panel-muted);
 	cursor: zoom-in;
+	transition: opacity 0.15s ease;
+}
+
+.message-attachment:hover .message-attachment-image {
+	opacity: 0.94;
 }
 
 .message-attachment-image.missing {
-	aspect-ratio: 4 / 3;
-	min-height: 128px;
-	background: var(--panel-muted);
+	display: grid;
+	place-items: center;
+	width: 100%;
+	height: 100%;
+	background: repeating-linear-gradient(135deg,
+		color-mix(in srgb, var(--text) 7%, transparent) 0 4px,
+		color-mix(in srgb, var(--text) 3%, transparent) 4px 8px);
+	color: var(--muted);
 }
 
 .body.body-segment img,
@@ -970,23 +1009,6 @@ a:hover {
 	border-radius: 8px;
 	object-fit: contain;
 	cursor: zoom-in;
-}
-
-.message-attachment figcaption {
-	display: grid;
-	gap: 2px;
-	padding: 8px 9px 9px;
-}
-
-.message-attachment-name {
-	color: var(--text);
-	font-size: var(--fs-12);
-	font-weight: 650;
-}
-
-.message-attachment-size {
-	color: var(--muted);
-	font-size: var(--fs-11);
 }
 
 /* ===== 思考 / 工具调用：无卡片文本行（状态图标 + 主副标签 + 右侧元信息） ===== */
