@@ -23,7 +23,7 @@ P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未�
 | Queue 先按旧消息结构落地，之后再替换持久化语义 | 先完成目标回合模型、准入和事务基础，再交付 Queue，不制作一次性过渡模型 |
 | input writer、finalization writer 和 continuation writer 容易分别实现相同消息／工具写入 | 重构为同一个事务内 writer，由不同用例选择事务边界；禁止相互嵌套独立提交 |
 | boundary ACK 容易扩展成另一套投递、重试和恢复系统 | 仅保留一个进程内、有界、顺序提交屏障，复用输入消费事实确认结果 |
-| 预留附件字段、双 provider 循环或双发送入口会形成长期遗留 | 首版只定义实际使用的文本输入；替换后删除无消费者的适配与重复路径 |
+| 预留附件字段、双 provider 循环或双发送入口会形成长期遗留 | 只定义有真实消费者的字段与路径；附件在存储、队列与模型调用同时具备消费者后才接入（见 [输入框图片附件设计](input-attachment-design.md)） |
 
 本文保留必要的跨模式行为约束，不冻结旧的内部实现形状。所有架构决策均需在实施文档中通过职责审查和删除清单验收。
 
@@ -36,7 +36,7 @@ P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未�
 
 采用每会话持久化输入队列、Desktop 统一准入、Direct 显式模型／工具循环。一个逻辑回合可以包含多条 assistant 消息；一个回合只有一次生命周期、一次终态和一份聚合用量。
 
-首版输入 DTO 只定义文本字段。含附件提交在附件持久化接入前明确返回 `UnsupportedAttachments`，不得静默丢弃；附件接入时再增加真实模型及清理职责。CLI 保持既有用户行为和子进程执行语义，内部准入与回合存储一并重构；Subagent child 不开放用户输入；父会话执行 detached continuation 时，新输入进入 FollowUp 队列，不注入 continuation。
+首版输入 DTO 只定义文本字段。附件已接入 Direct 交互式输入（仅图片、单文件 10 MiB、每条 6 张、模型须声明多模态），见 [输入框图片附件设计](input-attachment-design.md)；`attachments-unsupported` 仅作为历史 reason 保留，不再有新的产生点，CLI 与子代理继续拒绝附件。CLI 保持既有用户行为和子进程执行语义，内部准入与回合存储一并重构；Subagent child 不开放用户输入；父会话执行 detached continuation 时，新输入进入 FollowUp 队列，不注入 continuation。
 
 首版不取消正在读取的 provider 流，不抢占已经进入执行阶段的工具，不热切换模型、Workspace Root 或能力集合。后续若实现 HTTP 流抢占，另行设计不完整工具参数、推理签名和取消费用的处理。
 
@@ -159,7 +159,7 @@ flowchart TD
 | `sequence` | UNIQUE(conversation_id, sequence)，单调递增且不复用 |
 | `kind` | FollowUp / Steer |
 | `target_turn_id` | Steer 必填；转换 FollowUp 后清空 |
-| `payload_json` | 版本化正文载荷；不存完整历史、密钥或凭据 |
+| `payload_json` | 版本化正文载荷，含可选附件引用数组（见 [输入框图片附件设计](input-attachment-design.md)）；不存完整历史、密钥或凭据 |
 | `execution_snapshot_json` | FollowUp 的执行选择快照及格式版本 |
 | `status` | Pending / Claimed / Consumed / Held / Cancelled |
 | `revision` | 每次修改递增；条件更新版本 |
