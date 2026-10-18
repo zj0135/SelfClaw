@@ -1,3 +1,5 @@
+using SelfClaw.Core.Models;
+
 namespace SelfClaw.Infrastructure.Data.Sqlite.Models;
 
 internal sealed record SqliteConversationInputRow(
@@ -11,4 +13,5 @@ internal sealed record SqliteConversationInputRow(
     int Status,
     string Prompt,
     Guid? ConsumedTurnId,
-    Guid? MessageId);
+    Guid? MessageId,
+    IReadOnlyList<AttachmentReference>? Attachments = null);

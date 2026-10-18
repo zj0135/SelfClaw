@@ -11,6 +11,8 @@ import { useChatTranscript } from '../composables/useChatTranscript.js';
 import { useChatTurnStatus } from '../composables/useChatTurnStatus.js';
 import { useWorkspaceSelection } from '../composables/useWorkspaceSelection.js';
 import { useChatComposer } from '../composables/useChatComposer.js';
+import { useComposerAttachments } from '../composables/useComposerAttachments.js';
+import { getSelectedModelSupportsImages } from '../composables/useComposerModelSelection.js';
 import { useChatApprovals } from '../composables/useChatApprovals.js';
 import { useChatTerminal } from '../composables/useChatTerminal.js';
 import { useConversationInputs } from '../composables/useConversationInputs.js';
@@ -25,7 +27,11 @@ const collapse = useTranscriptCollapse();
 const transcriptScroll = useTranscriptScroll(() => transcriptPanelRef.value?.getScrollEl?.() ?? null);
 const { state, isEmptyConversation } = useChatTranscript(transcriptScroll);
 const workspace = useWorkspaceSelection(computed(() => state.selectedConversationId), bridge);
-const composer = useChatComposer(state, workspace, transcriptScroll, bridge);
+// 附件与提交共享同一个新对话 uuid：两者都在这里接上 transcript 的单会话选择。
+const composerAttachments = useComposerAttachments(bridge, () => state.selectedConversationId);
+const composer = useChatComposer(state, workspace, transcriptScroll, bridge, composerAttachments);
+// 图片入口 = Direct 模式 + 所选模型声明多模态；极少数配置下宿主仍会拒绝，那走提交错误提示。
+const imagesEnabled = computed(() => state.agentMode === 'direct' && getSelectedModelSupportsImages());
 const conversationQueue = useConversationInputs(bridge);
 watch(() => state.selectedConversationId, (id) => conversationQueue.subscribe(id), { immediate: true });
 const approvals = useChatApprovals(bridge);
@@ -70,6 +76,12 @@ defineExpose({
 			:selected-agent-id="state.selectedAgentId" :selected-agent-name="state.selectedAgentName"
 			:capability-revision="state.capabilityRevision" :pending-approval="approvals.pending.value"
 			:tool-permission-mode="state.toolPermissionMode" :usage="state.usage" @submit="composer.submit" @stop="composer.stop"
+			:attachments="composerAttachments.items.value" :attachments-error="composerAttachments.error.value"
+			:images-enabled="imagesEnabled"
+			@request-attachment-picker="composerAttachments.addFromPicker()"
+			@add-attachments="composerAttachments.addFromFiles($event)"
+			@remove-attachment="composerAttachments.remove($event)"
+			@preview-image="openImagePreview"
 			@request-workspace="workspace.refresh" @select-workspace-root="workspace.selectRoot"
 			@delete-workspace-root="workspace.deleteRoot" @browse-workspace-folder="workspace.browseFolder"
 			@git-action="workspace.runGitAction" @approve-tool="(id) => approvals.resolve(id, true)"

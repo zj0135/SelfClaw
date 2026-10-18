@@ -4,4 +4,5 @@ public sealed record EnabledModelView(
     Guid ModelProfileId,
     string Name,
     string Model,
-    string ProviderName);
+    string ProviderName,
+    bool? IsMultimodal = null);

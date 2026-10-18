@@ -21,4 +21,7 @@ internal sealed class StubAiModelCatalog : IAiModelCatalog
 
     public Task<bool> IsModelAvailableAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
         => Task.FromResult(EnabledModels.Any(model => model.ModelProfileId == modelProfileId));
+
+    public Task<bool> IsModelMultimodalAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
+        => Task.FromResult(EnabledModels.Any(model => model.ModelProfileId == modelProfileId && model.IsMultimodal == true));
 }

@@ -5,6 +5,8 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Agents;
 using SelfClaw.Desktop.Services.Runtime;
+using SelfClaw.Infrastructure.Attachments;
+using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop.Services.ConversationInputs;
 
@@ -15,6 +17,8 @@ namespace SelfClaw.Desktop.Services.ConversationInputs;
 /// </summary>
 internal sealed class ConversationInputService : IConversationInputCoordinator
 {
+    private const int MaximumAttachmentsPerInput = 6;
+
     private readonly IConversationInputStore _store;
     private readonly IConversationInputSchedulerStore _scheduler;
     private readonly ConversationInputQueueService _queue;
@@ -23,12 +27,13 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
     private readonly IAiModelCatalog _models;
     private readonly AgentSettingsService _agents;
     private readonly ConversationInputChangeNotifier _changes;
+    private readonly StoragePaths _storagePaths;
     private readonly ILogger<ConversationInputService> _logger;
 
     public ConversationInputService(IConversationInputStore store, IConversationInputSchedulerStore scheduler,
         ConversationInputQueueService queue, ConversationInputDispatcher dispatcher, ConversationRunCoordinator runs,
         IAiModelCatalog models, AgentSettingsService agents,
-        ConversationInputChangeNotifier changes, ILogger<ConversationInputService> logger)
+        ConversationInputChangeNotifier changes, StoragePaths storagePaths, ILogger<ConversationInputService> logger)
     {
         _store = store;
         _scheduler = scheduler;
@@ -38,14 +43,16 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
         _models = models;
         _agents = agents;
         _changes = changes;
+        _storagePaths = storagePaths;
         _logger = logger;
     }
 
     public async Task<ConversationInputSubmitResult> SubmitAsync(ConversationInputSubmission submission, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(submission);
-        if (submission.Attachments is { Count: > 0 }) return Rejected(ConversationInputReason.AttachmentsUnsupported);
         if (submission.Agent.Mode != AgentExecutionMode.Direct) return Rejected(ConversationInputReason.DirectOnly);
+        var (attachments, rejection) = MapAttachments(submission);
+        if (rejection is not null) return Rejected(rejection);
         using var operation = _runs.TryBeginInputOperation(submission.ConversationId, cancellationToken);
         if (operation is null) return Rejected(ConversationInputReason.ConversationUnavailable);
         var token = operation.CancellationToken;
@@ -53,8 +60,15 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
         var existing = await _store.FindRequestAsync(submission.ConversationId, submission.ClientRequestId, token).ConfigureAwait(false);
         var snapshot = existing?.ExecutionSnapshot ?? await CaptureAsync(submission, token).ConfigureAwait(false);
         if (snapshot is null) return Rejected(ConversationInputReason.ModelUnavailable);
+        // The image gate is checked against the model that will actually run, not the sender's claim.
+        if (attachments is not null
+            && !(snapshot.ModelProfileId is { } modelId
+                && await _models.IsModelMultimodalAsync(modelId, token).ConfigureAwait(false)))
+        {
+            return Rejected(ConversationInputReason.ImageUnsupportedByModel);
+        }
         var acceptRequest = new ConversationInputAcceptRequest(submission.ConversationId, submission.ClientRequestId,
-            submission.Prompt, snapshot, submission.Conversation, Fingerprint(submission));
+            submission.Prompt, snapshot, submission.Conversation, Fingerprint(submission), attachments);
         var result = await _store.AcceptAsync(acceptRequest, token).ConfigureAwait(false);
         if (result.Input is not { } input)
             return new(false, null, 0, result.QueueRevision, ConversationInputSubmitOutcome.Rejected, result.Reason);
@@ -135,6 +149,36 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
     private static string Fingerprint(ConversationInputSubmission submission)
         => JsonSerializer.Serialize(new { AgentId = submission.Agent.Id, submission.Agent.Mode, submission.ModelProfileId,
             RootId = submission.WorkspaceRoot?.Id, RootPath = submission.WorkspaceRoot?.RootPath, submission.ToolPermissionMode });
+
+    /// <summary>
+    /// Turns stored attachment records into the references the queue persists. The relative path is
+    /// derived from the root instead of trusting the sender's path, and a reference outside the root,
+    /// off the whitelist or over the size ceiling rejects the whole submission.
+    /// </summary>
+    private (IReadOnlyList<AttachmentReference>? References, string? Reason) MapAttachments(
+        ConversationInputSubmission submission)
+    {
+        if (submission.Attachments is not { Count: > 0 } attachments) return (null, null);
+        if (attachments.Count > MaximumAttachmentsPerInput) return (null, ConversationInputReason.AttachmentLimitExceeded);
+        var root = AttachmentPathResolver.ResolveRoot(_storagePaths.AppDataDirectory);
+        var references = new List<AttachmentReference>(attachments.Count);
+        foreach (var attachment in attachments)
+        {
+            if (attachment.Kind != MessageAttachmentKind.Image
+                || attachment.ByteLength is <= 0 or > AttachmentPathResolver.MaximumByteLength
+                || !AttachmentPathResolver.AllowedMediaTypes.Contains(attachment.MediaType)
+                || !AttachmentPathResolver.TryCreateRelativePath(root, attachment.StoragePath, out var relativePath)
+                || !AttachmentPathResolver.TryResolveExistingFile(root, relativePath, out _))
+            {
+                return (null, ConversationInputReason.AttachmentInvalid);
+            }
+
+            references.Add(new AttachmentReference(attachment.Id, attachment.FileName, attachment.MediaType,
+                attachment.ByteLength, relativePath));
+        }
+
+        return (references, null);
+    }
 
     private static ConversationInputSubmitResult Rejected(string reason) => new(false, null, 0, 0, ConversationInputSubmitOutcome.Rejected, reason);
 }

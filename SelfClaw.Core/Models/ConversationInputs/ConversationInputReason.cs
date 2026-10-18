@@ -8,6 +8,9 @@ public static class ConversationInputReason
 {
     public const string Capacity = "capacity";
     public const string AttachmentsUnsupported = "attachments-unsupported";
+    public const string AttachmentLimitExceeded = "attachment-limit-exceeded";
+    public const string AttachmentInvalid = "attachment-invalid";
+    public const string ImageUnsupportedByModel = "image-unsupported-by-model";
     public const string DirectOnly = "direct-only";
     public const string ModelUnavailable = "model-unavailable";
     public const string RequestConflict = "request-conflict";

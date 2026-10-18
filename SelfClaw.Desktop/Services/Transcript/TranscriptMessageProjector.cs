@@ -1,13 +1,13 @@
 using SelfClaw.Desktop.Services.Transcript.Views;
 using System.IO;
 using SelfClaw.Core.Models;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop.Services.Transcript;
 
 internal sealed class TranscriptMessageProjector
 {
-    private const string AttachmentHostName = "attachments.selfclaw.local";
     private readonly StoragePaths _storagePaths;
     private readonly Dictionary<Guid, (ToolExecutionRecord Record, TranscriptRenderSegment Segment)> _toolSegmentCache = [];
 
@@ -166,32 +166,10 @@ internal sealed class TranscriptMessageProjector
     }
 
     private string? TryCreateAttachmentSourceUrl(MessageAttachmentRecord attachment)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(attachment.StoragePath) || !File.Exists(attachment.StoragePath))
-            {
-                return null;
-            }
-
-            var attachmentsRoot = Path.GetFullPath(Path.Combine(_storagePaths.AppDataDirectory, "attachments"));
-            var attachmentPath = Path.GetFullPath(attachment.StoragePath);
-            var relativePath = Path.GetRelativePath(attachmentsRoot, attachmentPath);
-            if (relativePath.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativePath))
-            {
-                return null;
-            }
-
-            var normalizedPath = relativePath
-                .Replace(Path.DirectorySeparatorChar, '/')
-                .Replace(Path.AltDirectorySeparatorChar, '/');
-            return $"https://{AttachmentHostName}/{Uri.EscapeDataString(normalizedPath).Replace("%2F", "/", StringComparison.OrdinalIgnoreCase)}";
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-
+        => AttachmentPathResolver.TryCreateSourceUrl(
+            AttachmentPathResolver.ResolveRoot(_storagePaths.AppDataDirectory),
+            attachment.StoragePath,
+            out var sourceUrl)
+            ? sourceUrl
+            : null;
 }

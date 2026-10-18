@@ -14,4 +14,5 @@ internal sealed record PromptSubmissionSnapshot(
     GitWorkspaceMode WorkspaceMode,
     int SelectionVersion,
     Guid? ConversationId = null,
-    string? ClientRequestId = null);
+    string? ClientRequestId = null,
+    IReadOnlyList<MessageAttachmentRecord>? Attachments = null);

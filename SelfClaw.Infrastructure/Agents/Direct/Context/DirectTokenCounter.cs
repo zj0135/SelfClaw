@@ -32,6 +32,12 @@ internal sealed class DirectTokenCounter : IDirectTokenCounter
     /// </summary>
     internal const int PerToolFramingTokens = 8;
 
+    /// <summary>
+    /// A constant stand-in for one image. The tokenizer cannot size binary content, and leaving it at zero
+    /// would let an image-heavy prompt look small enough to skip compaction and the window check.
+    /// </summary>
+    internal const int PerImageTokens = 1024;
+
     internal const string DefaultEncodingName = "o200k_base";
 
     private const string Cl100kBaseEncodingName = "cl100k_base";
@@ -243,14 +249,14 @@ internal sealed class DirectTokenCounter : IDirectTokenCounter
 
     private int CountMessage(string encodingName, ChatMessage message, Func<string, int> countTokens)
     {
-        var parts = CollectMessageParts(message);
-        var key = CreateCacheKey(encodingName, message.MessageId, parts);
+        var parts = CollectMessageParts(message, out var imageCount);
+        var key = CreateCacheKey(encodingName, message.MessageId, parts, imageCount);
         if (TryGetCachedCount(_messageCounts, key, out var cached))
         {
             return cached;
         }
 
-        var tokens = PerMessageFramingTokens + parts.Sum(countTokens);
+        var tokens = PerMessageFramingTokens + parts.Sum(countTokens) + (imageCount * PerImageTokens);
         StoreCachedCount(_messageCounts, _messageCountOrder, key, tokens);
         return tokens;
     }
@@ -269,15 +275,20 @@ internal sealed class DirectTokenCounter : IDirectTokenCounter
         return tokens;
     }
 
-    private static List<string> CollectMessageParts(ChatMessage message)
+    private static List<string> CollectMessageParts(ChatMessage message, out int imageCount)
     {
         var parts = new List<string>();
+        imageCount = 0;
         foreach (var content in message.Contents)
         {
             switch (content)
             {
                 case TextContent text:
                     AddPart(parts, text.Text);
+                    break;
+                case DataContent:
+                    // Binary content has no text to tokenize. Every DataContent Direct sends is an image.
+                    imageCount++;
                     break;
                 case FunctionCallContent call:
                     AddPart(parts, call.CallId);
@@ -317,9 +328,12 @@ internal sealed class DirectTokenCounter : IDirectTokenCounter
     /// The key carries the encoding name and the content fingerprint: the same text counts differently
     /// per vocabulary, and message adjustments rewrite content under an unchanged message id.
     /// </summary>
-    private static string CreateCacheKey(string encodingName, string? identity, List<string> parts)
+    private static string CreateCacheKey(string encodingName, string? identity, List<string> parts, int imageCount = 0)
     {
         var builder = new StringBuilder();
+        // The image count is part of the fingerprint: bytes are not in the parts, so two messages with the
+        // same text but a different number of images would otherwise share one cached count.
+        builder.Append("\u001fimages:").Append(imageCount).Append('\u001f');
         foreach (var part in parts)
         {
             builder.Append(part).Append('\u001f');

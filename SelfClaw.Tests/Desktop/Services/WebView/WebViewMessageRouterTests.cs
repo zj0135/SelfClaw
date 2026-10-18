@@ -19,6 +19,8 @@ using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.Appearance;
+using SelfClaw.Desktop.Services.Attachments;
+using SelfClaw.Desktop.Services.Attachments.Abstractions;
 using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Plugins;
@@ -33,6 +35,7 @@ using SelfClaw.Desktop.Services.Workspace;
 using SelfClaw.Desktop.Services.Workspace.Abstractions;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Extensions;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
 using SelfClaw.Infrastructure.Options;
@@ -103,6 +106,7 @@ public sealed class WebViewMessageRouterTests
     [InlineData("""{"type":"activity-panel/cancel-task","subscriptionId":"11111111-1111-4111-8111-111111111111","taskId":"22222222-2222-4222-8222-222222222222"}""")]
     [InlineData("""{"type":"get-programming-assistant-settings","requestId":"request-1"}""")]
     [InlineData("""{"type":"direct-compression/save","requestId":"request-1","policy":{"enabled":false}}""")]
+    [InlineData("""{"type":"attachments/pick","requestId":"attachments-1","conversationId":"11111111-1111-4111-8111-111111111111"}""")]
     public async Task RouteAsync_drops_messages_that_do_not_come_from_the_application_origin(string messageJson)
     {
         using var context = new RouterTestContext();
@@ -363,6 +367,86 @@ public sealed class WebViewMessageRouterTests
             item.ClientRequestId == "durable-1" && item.ConversationId == Guid.Parse(id));
     }
 
+    [Fact]
+    public async Task RouteAsync_routes_attachment_operations_to_the_attachment_bridge()
+    {
+        using var context = new RouterTestContext();
+
+        await context.RouteAsync(
+            $$"""{"type":"attachments/discard","requestId":"attachment-1","conversationId":"{{Guid.NewGuid():D}}","attachmentId":"{{Guid.NewGuid():D}}"}""");
+
+        using var response = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        response.RootElement.GetProperty("type").GetString().Should().Be("attachments/result");
+        response.RootElement.GetProperty("requestId").GetString().Should().Be("attachment-1");
+        response.RootElement.GetProperty("operation").GetString().Should().Be("discard");
+        response.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Prompt_forwards_attachment_references_to_the_durable_queue()
+    {
+        using var context = new RouterTestContext();
+        var conversationId = Guid.NewGuid();
+        var store = new AttachmentStore(context.StoragePaths);
+        using var content = new MemoryStream([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02]);
+        var attachment = await store.IngestAsync(conversationId, content, "photo.png", "image/png");
+
+        await context.RouteAsync($$"""
+            {"type":"send-prompt","requestId":"attachment-prompt","conversationId":"{{conversationId:D}}","newConversation":true,
+             "prompt":"look at this","attachments":[{"attachmentId":"{{attachment.Id:D}}","fileName":"photo.png",
+             "mediaType":"image/png","byteLength":{{attachment.ByteLength}}}]}
+            """);
+
+        var submission = context.Inputs.Submissions.Should().ContainSingle().Which;
+        var stored = submission.Attachments.Should().ContainSingle().Which;
+        stored.Id.Should().Be(attachment.Id);
+        stored.MediaType.Should().Be("image/png");
+        stored.StoragePath.Should().Be(attachment.StoragePath);
+    }
+
+    [Theory]
+    [InlineData("image/tiff", 12)]
+    [InlineData("image/png", 20 * 1024 * 1024)]
+    public async Task Prompt_refuses_an_off_contract_attachment_reference_before_the_queue(
+        string mediaType, long byteLength)
+    {
+        using var context = new RouterTestContext();
+        var conversationId = Guid.NewGuid();
+        var store = new AttachmentStore(context.StoragePaths);
+        using var content = new MemoryStream([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02]);
+        var attachment = await store.IngestAsync(conversationId, content, "photo.png", "image/png");
+
+        await context.RouteAsync($$"""
+            {"type":"send-prompt","requestId":"attachment-rejected","conversationId":"{{conversationId:D}}","newConversation":true,
+             "prompt":"look at this","attachments":[{"attachmentId":"{{attachment.Id:D}}","fileName":"photo.png",
+             "mediaType":"{{mediaType}}","byteLength":{{byteLength}}}]}
+            """);
+
+        context.Inputs.Submissions.Should().BeEmpty();
+        using var response = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        response.RootElement.GetProperty("type").GetString().Should().Be("prompt-submission");
+        response.RootElement.GetProperty("accepted").GetBoolean().Should().BeFalse();
+        response.RootElement.GetProperty("reason").GetString().Should().Be(ConversationInputReason.AttachmentInvalid);
+    }
+
+    [Fact]
+    public async Task Prompt_refuses_an_attachment_that_is_not_on_disk()
+    {
+        using var context = new RouterTestContext();
+        var conversationId = Guid.NewGuid();
+
+        await context.RouteAsync($$"""
+            {"type":"send-prompt","requestId":"attachment-missing","conversationId":"{{conversationId:D}}","newConversation":true,
+             "prompt":"look at this","attachments":[{"attachmentId":"{{Guid.NewGuid():D}}","fileName":"photo.png",
+             "mediaType":"image/png","byteLength":10}]}
+            """);
+
+        context.Inputs.Submissions.Should().BeEmpty();
+        using var response = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        response.RootElement.GetProperty("accepted").GetBoolean().Should().BeFalse();
+        response.RootElement.GetProperty("error").GetString().Should().Be("图片已失效，请重新添加。");
+    }
+
     private sealed class RouterTestContext : IDisposable
     {
         private readonly string _storageRoot;
@@ -380,7 +464,7 @@ public sealed class WebViewMessageRouterTests
             IReadOnlyList<ConversationRecord>? conversations = null)
         {
             _storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
-            var storagePaths = StoragePathDefaults.Create(
+            var storagePaths = StoragePaths = StoragePathDefaults.Create(
                 _storageRoot,
                 Path.Combine(_storageRoot, "selfclaw.db"),
                 Path.Combine(_storageRoot, "secrets"));
@@ -405,6 +489,12 @@ public sealed class WebViewMessageRouterTests
             _transcriptPublisher = new TranscriptPublisher(
                 new TranscriptProjection(storagePaths),
                 _transcriptDelivery,
+                Dispatcher.CurrentDispatcher);
+            var attachmentBridge = new AttachmentBridge(
+                new AttachmentStore(storagePaths),
+                new NoOpImageFilePicker(),
+                HostChannel,
+                storagePaths,
                 Dispatcher.CurrentDispatcher);
             var turns = new RecordingConversationTurnRepository(ConversationRepository);
             var inputs = new EmptyConversationInputRepository();
@@ -507,7 +597,8 @@ public sealed class WebViewMessageRouterTests
                 viewModel,
                 _approvalPresenter,
                 HostChannel,
-                _transcriptDelivery);
+                _transcriptDelivery,
+                attachmentBridge: attachmentBridge);
         }
 
         /// <summary>
@@ -515,6 +606,8 @@ public sealed class WebViewMessageRouterTests
         /// </summary>
         public Task<WebViewHostCommand?> RouteAsync(string messageJson, string? sourceUri = ApplicationOrigin)
             => Router.RouteAsync(messageJson, ownerHandle: 0, sourceUri);
+
+        public StoragePaths StoragePaths { get; }
 
         public RecordingConversationRepository ConversationRepository { get; }
 
@@ -554,6 +647,11 @@ public sealed class WebViewMessageRouterTests
                 $"Unexpected call to test dependency '{targetMethod?.DeclaringType?.Name}.{targetMethod?.Name}'.");
     }
 
+    private sealed class NoOpImageFilePicker : IImageFilePicker
+    {
+        public IReadOnlyList<string> Pick(nint ownerHandle, string initialDirectory) => [];
+    }
+
     private sealed class RecordingAgentChatRuntime : IAgentChatRuntime
     {
         public List<ChatTurnRequest> Requests { get; } = [];
@@ -581,6 +679,9 @@ public sealed class WebViewMessageRouterTests
 
         public Task<bool> IsModelAvailableAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
             => Task.FromResult(modelProfileId == DefaultModelId);
+
+        public Task<bool> IsModelMultimodalAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
 
         public Task<IReadOnlyList<EnabledModelView>> ListEnabledModelsAsync(
             CancellationToken cancellationToken = default)

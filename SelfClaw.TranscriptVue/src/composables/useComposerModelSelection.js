@@ -6,6 +6,11 @@ const directModels = ref([]);
 const activeDirectModelProfileId = ref('');
 export function getSelectedModelProfileId() { return activeDirectModelProfileId.value || null; }
 
+// 图片入口只看「当前选中模型是否多模态」：字段缺失或 null 一律按不支持处理，不抛错也不默认放开。
+const selectedModelSupportsImages = computed(() => directModels.value
+    .find((model) => model.modelProfileId === activeDirectModelProfileId.value)?.isMultimodal === true);
+export function getSelectedModelSupportsImages() { return selectedModelSupportsImages.value; }
+
 export function useComposerModelSelection(executionMode, emit) {
     const bridge = useHostBridge();
     const cli = useProgrammingAssistantSelection();
@@ -64,7 +69,7 @@ export function useComposerModelSelection(executionMode, emit) {
     }
 
     watch(executionMode, (mode) => { selectedMode.value = mode === 'direct' ? 'direct' : 'cli'; });
-    return { selectedMode, isDirect, loaded, loadError, models, reasoningLevels,
+    return { selectedMode, isDirect, loaded, loadError, models, reasoningLevels, selectedModelSupportsImages,
         hasReasoning: computed(() => reasoningLevels.value.length > 1), pending: computed(() => saving.value || cli.pending.value),
         detectedAgents: cli.tools, selectedCliId: cli.selectedCliId, selectedAgent: cli.selectedTool,
         activeModel: cli.selectedModel, activeReasoning: cli.selectedReasoningLevel,

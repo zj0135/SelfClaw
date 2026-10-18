@@ -4,4 +4,5 @@ public sealed record ConversationInputDetail(
     Guid InputId,
     int Revision,
     string Prompt,
-    ConversationInputStatus Status);
+    ConversationInputStatus Status,
+    IReadOnlyList<AttachmentReference>? Attachments = null);

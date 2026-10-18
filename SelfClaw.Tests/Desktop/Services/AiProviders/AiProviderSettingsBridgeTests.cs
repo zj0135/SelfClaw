@@ -268,6 +268,9 @@ public sealed class AiProviderSettingsBridgeTests
         public Task<bool> IsModelAvailableAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
             => Task.FromResult(modelProfileId == ModelId);
 
+        public Task<bool> IsModelMultimodalAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
+
         public Task<IReadOnlyList<EnabledModelView>> ListEnabledModelsAsync(CancellationToken cancellationToken = default)
         {
             Record("list-enabled-models", cancellationToken);

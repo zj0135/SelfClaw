@@ -19,6 +19,7 @@ function normalizeItem(item) {
 		preview: item.preview || '',
 		reasonCode: item.reasonCode || null,
 		errorMessage: item.errorMessage || null,
+		attachmentCount: Number(item.attachmentCount) || 0,
 	};
 }
 

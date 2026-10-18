@@ -276,6 +276,45 @@ public sealed class SqliteConversationInputQueueTests
     }
 
     [Fact]
+    public async Task A_claimed_follow_up_carries_its_image_into_the_user_message_rows()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var conversationId = start.Turn.ConversationId;
+        var conversation = await fixture.Conversations.GetConversationAsync(conversationId) ?? throw new InvalidOperationException();
+        var reference = await fixture.StoreImageAsync(conversationId);
+        await fixture.AcceptFollowUpWithImageAsync(conversationId, "with image", reference);
+        var owner = Guid.NewGuid();
+        var claimId = Guid.NewGuid();
+        var claimed = await fixture.ClaimNextAsync(conversationId, owner, claimId);
+        claimed.Attachments.Should().ContainSingle().Which.Should().Be(reference);
+
+        var commit = await fixture.StartClaimedAsync(conversation, claimed, claimId, owner);
+
+        var message = commit.Messages.Should().ContainSingle().Which;
+        message.MarkdownContent.Should().Be("with image");
+        var stored = message.Attachments.Should().ContainSingle().Which;
+        stored.Id.Should().Be(reference.AttachmentId);
+        stored.MessageId.Should().Be(message.Id);
+        (await fixture.ScalarAsync("SELECT message_id FROM message_attachments;")).Should().Be(message.Id.ToString("D"));
+        (await fixture.ScalarAsync("SELECT byte_length FROM message_attachments;")).Should().Be(reference.ByteLength);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM messages WHERE role = 1;")).Should().Be(2L);
+    }
+
+    [Fact]
+    public void An_input_item_compares_its_attachment_references_by_value()
+    {
+        var reference = new AttachmentReference(Guid.NewGuid(), "photo.png", "image/png", 10, "c/p.png");
+        var item = new ConversationInputItem(Guid.NewGuid(), 1, 1, Guid.NewGuid(), "prompt", [reference]);
+
+        var copy = item with { Attachments = item.Attachments!.ToArray() };
+
+        ReferenceEquals(copy.Attachments, item.Attachments).Should().BeFalse();
+        copy.Should().Be(item);
+        (copy with { Attachments = null }).Should().NotBe(item);
+    }
+
+    [Fact]
     public async Task Startup_recovery_holds_old_claims_stale_steers_and_pauses_without_replaying()
     {
         using var fixture = new ConversationPersistenceFixture();

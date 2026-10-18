@@ -12,6 +12,9 @@ internal static class ConversationInputReasonText
     {
         ConversationInputReason.Capacity => "队列已满，请先等待或取消部分输入。",
         ConversationInputReason.AttachmentsUnsupported => "当前版本不支持发送附件。",
+        ConversationInputReason.AttachmentLimitExceeded => "最多可发送 6 张图片。",
+        ConversationInputReason.AttachmentInvalid => "图片已失效，请重新添加。",
+        ConversationInputReason.ImageUnsupportedByModel => "当前模型不支持图片输入，请在模型管理里确认多模态能力。",
         ConversationInputReason.DirectOnly => "只有 Direct 代理支持该输入。",
         ConversationInputReason.ModelUnavailable => "没有可用的模型，请先在模型管理中启用模型。",
         ConversationInputReason.RequestConflict => "该请求与已存在的输入冲突，请重试。",

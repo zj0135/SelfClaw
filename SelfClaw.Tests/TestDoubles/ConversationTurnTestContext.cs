@@ -6,6 +6,7 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Runtime;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
@@ -15,6 +16,8 @@ namespace SelfClaw.Tests.TestDoubles;
 
 internal sealed class ConversationTurnTestContext : IDisposable
 {
+    private static readonly byte[] PngBytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02];
+    private static readonly JsonSerializerOptions PayloadJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly string _root = Path.Combine(Path.GetTempPath(), "SelfClawP2Tests", Guid.NewGuid().ToString("N"));
     private ConversationRuntimeState? _state;
     private long _inputSequence;
@@ -80,7 +83,25 @@ internal sealed class ConversationTurnTestContext : IDisposable
     }
 
     /// <summary>Inserts Pending steers targeted at this turn without claiming them.</summary>
-    internal async Task SeedPendingSteerAsync(params string[] prompts)
+    internal Task SeedPendingSteerAsync(params string[] prompts)
+        => SeedPendingSteersAsync(null, prompts);
+
+    /// <summary>Seeds one Pending steer whose payload carries a real stored image reference.</summary>
+    internal async Task<AttachmentReference> SeedPendingSteerWithAttachmentAsync(string prompt)
+    {
+        var attachmentId = Guid.NewGuid();
+        var root = AttachmentPathResolver.ResolveRoot(Database.Paths.AppDataDirectory);
+        var relativePath = AttachmentPathResolver.CreateRelativePath(Conversation.Id, attachmentId,
+            AttachmentPathResolver.PngMediaType);
+        Directory.CreateDirectory(AttachmentPathResolver.ResolveConversationDirectory(root, Conversation.Id));
+        await File.WriteAllBytesAsync(Path.Combine(root, relativePath), PngBytes);
+        var reference = new AttachmentReference(attachmentId, "steer.png", AttachmentPathResolver.PngMediaType,
+            PngBytes.Length, relativePath);
+        await SeedPendingSteersAsync([reference], [prompt]);
+        return reference;
+    }
+
+    private async Task SeedPendingSteersAsync(IReadOnlyList<AttachmentReference>? attachments, params string[] prompts)
     {
         var snapshot = JsonSerializer.Serialize(new ConversationInputExecutionSnapshot("build", 1,
             AgentExecutionMode.Direct, Guid.NewGuid(), null, null, ToolPermissionMode.RequireApproval),
@@ -103,7 +124,7 @@ internal sealed class ConversationTurnTestContext : IDisposable
             command.Parameters.AddWithValue("$request", Guid.NewGuid().ToString());
             command.Parameters.AddWithValue("$sequence", ++_inputSequence);
             command.Parameters.AddWithValue("$turn", Record.Id.ToString());
-            command.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(new { version = 1, prompt }));
+            command.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(new { version = 1, prompt, attachments }, PayloadJson));
             command.Parameters.AddWithValue("$snapshot", snapshot);
             command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
             await command.ExecuteNonQueryAsync();

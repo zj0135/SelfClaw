@@ -90,7 +90,8 @@ internal sealed class DirectConversationContext
     /// </summary>
     public IReadOnlyList<DirectPromptHistoryUnit> BuildUnits()
         => _entries.Where(entry => !entry.IsProtected)
-            .Select(entry => new DirectPromptHistoryUnit(entry.Messages, entry.SourceSequence))
+            .Select(entry => new DirectPromptHistoryUnit(entry.Messages, entry.SourceSequence,
+                ContainsAttachments: entry.Messages.Any(ContainsAttachment)))
             .ToArray();
 
     public FunctionCallContent[] AppendResponse(ChatResponse response,
@@ -128,7 +129,8 @@ internal sealed class DirectConversationContext
         Recompose();
     }
 
-    public void AppendInputs(IReadOnlyList<MessageRecord> messages)
+    public void AppendInputs(IReadOnlyList<MessageRecord> messages,
+        IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>>? attachmentContents = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
         foreach (var message in messages.OrderBy(message => message.Sequence))
@@ -138,7 +140,8 @@ internal sealed class DirectConversationContext
             // A consumed steer is protected input for the rest of the turn (direct-message-input-design):
             // the model must still see it after any later compaction, and only the next turn's turn-start
             // compaction may fold it into a summary.
-            _entries.Add(new ContextEntry([new ChatMessage(ChatRole.User, message.MarkdownContent)], 0, IsProtected: true));
+            _entries.Add(new ContextEntry([BuildInputMessage(message, attachmentContents?.GetValueOrDefault(message.Id))],
+                0, IsProtected: true));
         }
 
         Recompose();
@@ -223,4 +226,25 @@ internal sealed class DirectConversationContext
 
         return maximum + 1;
     }
+
+    // A steer carrying images is replayed exactly like a replayed history message: attachments first, text last.
+    private static ChatMessage BuildInputMessage(MessageRecord message, IReadOnlyList<AIContent>? images)
+    {
+        if (images is not { Count: > 0 })
+        {
+            return new ChatMessage(ChatRole.User, message.MarkdownContent);
+        }
+
+        var contents = new List<AIContent>(images.Count + 1);
+        contents.AddRange(images);
+        if (!string.IsNullOrEmpty(message.MarkdownContent))
+        {
+            contents.Add(new TextContent(message.MarkdownContent));
+        }
+
+        return new ChatMessage(ChatRole.User, contents);
+    }
+
+    private static bool ContainsAttachment(ChatMessage message)
+        => message.Contents.Any(content => content is DataContent);
 }

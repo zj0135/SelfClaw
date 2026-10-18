@@ -117,10 +117,19 @@ internal sealed class ConversationInputBridge
     private async Task ReplyDetailAsync(string? requestId, Guid inputId, CancellationToken cancellationToken)
     {
         var detail = await _inputs.GetDetailAsync(inputId, cancellationToken).ConfigureAwait(false);
+        // The edit view shows the attachments read-only: references only, never a filesystem path.
+        var attachments = detail?.Attachments?.Select(attachment => new
+        {
+            attachmentId = attachment.AttachmentId,
+            fileName = attachment.FileName,
+            mediaType = attachment.MediaType,
+            byteLength = attachment.ByteLength
+        }).ToArray();
         await _dispatcher.InvokeAsync(() => Reply(new
         {
             type = "conversation-input/result", requestId, operation = "detail", ok = detail is not null,
-            inputId, revision = detail?.Revision, prompt = detail?.Prompt, status = detail?.Status.ToString().ToLowerInvariant()
+            inputId, revision = detail?.Revision, prompt = detail?.Prompt, status = detail?.Status.ToString().ToLowerInvariant(),
+            attachments
         }));
     }
 

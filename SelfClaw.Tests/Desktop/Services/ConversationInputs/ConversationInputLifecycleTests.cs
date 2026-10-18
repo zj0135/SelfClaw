@@ -7,6 +7,7 @@ using SelfClaw.Desktop.Services.Agents.Definitions;
 using SelfClaw.Desktop.Services.Agents.Models;
 using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.WebView;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Extensions;
 using SelfClaw.Tests.TestDoubles;
 
@@ -198,5 +199,35 @@ public sealed class ConversationInputLifecycleTests
         (await h.Fixture.Turns.ListTurnsAsync(id)).Single(t => t.Id == started.Turn.Id).Status.Should().Be(ConversationTurnStatus.Interrupted);
         (await h.Service.GetStateAsync(id)).Items.Should().BeEmpty();
         h.Runtime.Prompts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_follow_up_with_an_image_writes_its_user_message_and_attachment_row()
+    {
+        using var h = new ConversationInputTestHarness();
+        var id = await h.CreateConversationAsync();
+        h.Models.Multimodal.Add(h.Models.DefaultModel);
+        var attachment = await IngestAsync(h, id);
+
+        var submitted = await h.Service.SubmitAsync(
+            h.Submission(id, "look at this") with { Attachments = [attachment] });
+
+        submitted.Accepted.Should().BeTrue();
+        await h.WaitForAsync(async () =>
+            (long)(await h.Fixture.ScalarAsync("SELECT COUNT(*) FROM message_attachments;") ?? 0L) == 1L);
+        var user = (await h.Fixture.Conversations.ListMessagesAsync(id))
+            .Should().ContainSingle(message => message.Role == MessageRole.User).Which;
+        user.MarkdownContent.Should().Be("look at this");
+        user.Attachments.Should().ContainSingle().Which.Id.Should().Be(attachment.Id);
+        (await h.Fixture.ScalarAsync("SELECT message_id FROM message_attachments;")).Should().Be(user.Id.ToString("D"));
+        (await h.Fixture.ScalarAsync("SELECT byte_length FROM message_attachments;")).Should().Be(attachment.ByteLength);
+        (await h.Fixture.ScalarAsync("SELECT storage_path FROM message_attachments;")).Should().Be(attachment.StoragePath);
+    }
+
+    private static async Task<MessageAttachmentRecord> IngestAsync(ConversationInputTestHarness harness, Guid conversationId)
+    {
+        var store = new AttachmentStore(harness.Fixture.Paths);
+        using var content = new MemoryStream([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02]);
+        return await store.IngestAsync(conversationId, content, "photo.png", "image/png");
     }
 }

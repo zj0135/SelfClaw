@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
@@ -11,6 +12,8 @@ namespace SelfClaw.Tests.TestDoubles;
 
 internal sealed class ConversationPersistenceFixture : IDisposable
 {
+    private static readonly byte[] PngBytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02];
+
     public ConversationPersistenceFixture(Func<string, CancellationToken, Task>? boundaryBeforeCommit = null,
         Func<string, CancellationToken, Task>? startBeforeCommit = null,
         Func<string, CancellationToken, Task>? recoveryBeforeCommit = null)
@@ -80,6 +83,28 @@ internal sealed class ConversationPersistenceFixture : IDisposable
         return result.Input!;
     }
 
+    /// <summary>Writes one real image under the fixture attachment root and returns its queue reference.</summary>
+    internal async Task<AttachmentReference> StoreImageAsync(Guid conversationId)
+    {
+        var attachmentId = Guid.NewGuid();
+        var root = AttachmentPathResolver.ResolveRoot(Paths.AppDataDirectory);
+        var relativePath = AttachmentPathResolver.CreateRelativePath(conversationId, attachmentId,
+            AttachmentPathResolver.PngMediaType);
+        Directory.CreateDirectory(AttachmentPathResolver.ResolveConversationDirectory(root, conversationId));
+        await File.WriteAllBytesAsync(Path.Combine(root, relativePath), PngBytes);
+        return new AttachmentReference(attachmentId, "photo.png", AttachmentPathResolver.PngMediaType,
+            PngBytes.Length, relativePath);
+    }
+
+    internal async Task<ConversationInputRecord> AcceptFollowUpWithImageAsync(Guid conversationId, string prompt,
+        AttachmentReference reference)
+    {
+        var result = await Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversationId,
+            Guid.NewGuid().ToString("N"), prompt, Snapshot(), null, Attachments: [reference]));
+        result.Status.Should().Be(ConversationInputAcceptStatus.Accepted);
+        return result.Input!;
+    }
+
     /// <summary>Seeds a Pending steer with a valid snapshot, bypassing acceptance conversion.</summary>
     internal async Task<Guid> SeedRawPendingSteerAsync(ConversationTurnRecord turn, string prompt, long sequence = 1)
     {
@@ -111,7 +136,23 @@ internal sealed class ConversationPersistenceFixture : IDisposable
         var claim = new ConversationInputClaim(input.Id, conversation.Id, input.Revision, claimId, ownerRunId,
             ConversationInputMessageId.Compute(claimId, input.Id));
         return await Turns.StartTurnAsync(new ConversationTurnStart(conversation, turn, input.Prompt,
-            claim.MessageId, InputClaim: claim));
+            claim.MessageId, Attachments: MapAttachments(input.Attachments, claim.MessageId), InputClaim: claim));
+    }
+
+    // The dispatcher does this mapping in production; the fixture keeps the same relative-to-absolute
+    // rule so the persistence boundary is exercised with real stored files.
+    private IReadOnlyList<MessageAttachmentRecord>? MapAttachments(IReadOnlyList<AttachmentReference>? references, Guid messageId)
+    {
+        if (references is not { Count: > 0 }) return null;
+        var root = AttachmentPathResolver.ResolveRoot(Paths.AppDataDirectory);
+        var records = new List<MessageAttachmentRecord>(references.Count);
+        foreach (var reference in references)
+        {
+            if (!AttachmentPathResolver.TryResolveExistingFile(root, reference.RelativePath, out var fullPath)) continue;
+            records.Add(AttachmentPathResolver.CreateRecord(reference, fullPath, messageId, DateTimeOffset.UtcNow));
+        }
+
+        return records.Count == 0 ? null : records;
     }
 
     internal async Task<ConversationInputBatch> SeedClaimAsync(

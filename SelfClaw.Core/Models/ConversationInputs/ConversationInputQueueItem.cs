@@ -8,4 +8,5 @@ public sealed record ConversationInputQueueItem(
     int Revision,
     string Preview,
     string? ReasonCode,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    int AttachmentCount = 0);

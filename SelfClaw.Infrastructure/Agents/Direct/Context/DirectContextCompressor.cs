@@ -141,10 +141,35 @@ internal sealed class DirectContextCompressor
         // roles and the tool semantics instead of flattening everything into text.
         foreach (var unit in request.PrefixUnits)
         {
-            messages.AddRange(unit.Messages);
+            messages.AddRange(PlaceholderizeAttachments(unit.Messages));
         }
 
         return messages;
+    }
+
+    /// <summary>
+    /// The summarizer needs the meaning of an image, not its pixels: sending the bytes would blow its own
+    /// window and leak binary content into a summary. The planner already declines image-bearing units, so
+    /// this is the second line of defence.
+    /// </summary>
+    private static IEnumerable<ChatMessage> PlaceholderizeAttachments(IReadOnlyList<ChatMessage> messages)
+    {
+        foreach (var message in messages)
+        {
+            if (!message.Contents.Any(content => content is DataContent))
+            {
+                // Untouched messages are replayed as the same instance, exactly as before.
+                yield return message;
+                continue;
+            }
+
+            var contents = message.Contents
+                .Select(content => content is DataContent data
+                    ? new TextContent($"[image: {data.Name ?? data.MediaType}]")
+                    : content)
+                .ToArray();
+            yield return new ChatMessage(message.Role, contents);
+        }
     }
 
     private static int OutputTokenBudget(int sourceTokens)

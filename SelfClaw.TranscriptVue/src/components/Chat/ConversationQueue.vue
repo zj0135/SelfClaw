@@ -67,6 +67,7 @@ function editPrompt(event) {
 				<template v-else>
 					<span v-if="item.kind === 'steer'" class="queue-kind">调整</span>
 					<span class="queue-preview" :title="item.preview">{{ item.preview }}</span>
+					<span v-if="item.attachmentCount" class="queue-attachments">· {{ item.attachmentCount }} 张图</span>
 					<span v-if="item.status === 'held'" class="queue-reason">{{ heldReason(item) }}</span>
 					<span class="queue-status">{{ statusLabel(item) }}</span>
 					<button v-if="item.status === 'held'" class="queue-action" type="button" title="重试" aria-label="重试"
@@ -177,6 +178,12 @@ function editPrompt(event) {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.queue-attachments {
+	flex: none;
+	color: var(--muted-soft, #999);
+	font-variant-numeric: tabular-nums;
 }
 
 .queue-reason {

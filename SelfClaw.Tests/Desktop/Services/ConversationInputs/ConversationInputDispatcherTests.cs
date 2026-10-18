@@ -10,6 +10,7 @@ using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.Agents;
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using SelfClaw.Desktop.Services.ConversationInputs;
+using SelfClaw.Desktop.Services.ConversationInputs.Views;
 using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
@@ -18,6 +19,7 @@ using SelfClaw.Desktop.Services.Settings;
 using SelfClaw.Desktop.Services.Tools;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Tests.TestDoubles;
 
@@ -136,19 +138,135 @@ public sealed class ConversationInputDispatcherTests
     }
 
     [Fact]
-    public async Task Attachments_are_rejected_explicitly()
+    public async Task Attachments_are_rejected_when_the_model_is_not_multimodal()
     {
         using var harness = new ConversationInputTestHarness();
         var conversation = await harness.CreateConversationAsync();
-        var submission = harness.Submission(conversation, "with attachment");
+        var attachment = await IngestAsync(harness, conversation);
+
+        var rejected = await harness.Service.SubmitAsync(
+            harness.Submission(conversation, "with image") with { Attachments = [attachment] });
+
+        rejected.Accepted.Should().BeFalse();
+        rejected.Reason.Should().Be(ConversationInputReason.ImageUnsupportedByModel);
+        (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Attachments_are_rejected_in_cli_mode()
+    {
+        using var harness = new ConversationInputTestHarness();
+        var conversation = await harness.CreateConversationAsync();
+        var attachment = await IngestAsync(harness, conversation);
+        var submission = harness.Submission(conversation, "with image");
+
         var rejected = await harness.Service.SubmitAsync(submission with
         {
-            Attachments = [new MessageAttachmentRecord(Guid.NewGuid(), Guid.Empty, MessageAttachmentKind.Image,
-                "a.png", "image/png", "/tmp/a.png", 1, DateTimeOffset.UtcNow)]
+            Agent = submission.Agent with { Mode = AgentExecutionMode.Cli },
+            Attachments = [attachment]
         });
+
         rejected.Accepted.Should().BeFalse();
-        rejected.Reason.Should().Be(ConversationInputReason.AttachmentsUnsupported);
-        (await harness.Fixture.Inputs.GetQueueStateAsync(conversation)).Items.Should().BeEmpty();
+        rejected.Reason.Should().Be(ConversationInputReason.DirectOnly);
+    }
+
+    [Fact]
+    public async Task The_six_image_ceiling_accepts_six_and_refuses_the_seventh()
+    {
+        using var harness = new ConversationInputTestHarness();
+        var conversation = await harness.CreateConversationAsync();
+        harness.Models.Multimodal.Add(harness.Models.DefaultModel);
+        var images = new List<MessageAttachmentRecord>();
+        for (var index = 0; index < 7; index++) images.Add(await IngestAsync(harness, conversation));
+
+        var accepted = await harness.Service.SubmitAsync(
+            harness.Submission(conversation, "six images") with { Attachments = images.Take(6).ToArray() });
+
+        accepted.Accepted.Should().BeTrue();
+        var stored = await harness.Fixture.Inputs.GetInputAsync(accepted.InputId!.Value);
+        stored!.Attachments.Should().HaveCount(6);
+        stored.Attachments!.Select(attachment => attachment.AttachmentId)
+            .Should().BeEquivalentTo(images.Take(6).Select(image => image.Id));
+
+        var rejected = await harness.Service.SubmitAsync(
+            harness.Submission(conversation, "seven images") with { Attachments = images });
+        rejected.Accepted.Should().BeFalse();
+        rejected.Reason.Should().Be(ConversationInputReason.AttachmentLimitExceeded);
+    }
+
+    [Fact]
+    public async Task An_attachment_outside_the_store_is_refused_as_invalid()
+    {
+        using var harness = new ConversationInputTestHarness();
+        var conversation = await harness.CreateConversationAsync();
+        harness.Models.Multimodal.Add(harness.Models.DefaultModel);
+        var attachment = await IngestAsync(harness, conversation);
+
+        var rejected = await harness.Service.SubmitAsync(harness.Submission(conversation, "forged") with
+        {
+            Attachments = [attachment with { StoragePath = Path.Combine(Path.GetTempPath(), "outside.png") }]
+        });
+
+        rejected.Accepted.Should().BeFalse();
+        rejected.Reason.Should().Be(ConversationInputReason.AttachmentInvalid);
+    }
+
+    [Fact]
+    public async Task The_payload_round_trips_attachments_and_still_reads_a_legacy_row()
+    {
+        using var harness = new ConversationInputTestHarness();
+        var conversation = await harness.CreateConversationAsync();
+        harness.Models.Multimodal.Add(harness.Models.DefaultModel);
+        var attachment = await IngestAsync(harness, conversation);
+
+        var accepted = await harness.Service.SubmitAsync(
+            harness.Submission(conversation, "with image") with { Attachments = [attachment] });
+
+        var stored = await harness.Fixture.Inputs.GetInputAsync(accepted.InputId!.Value);
+        var reference = stored!.Attachments.Should().ContainSingle().Which;
+        reference.AttachmentId.Should().Be(attachment.Id);
+        reference.FileName.Should().Be("photo.png");
+        reference.MediaType.Should().Be("image/png");
+        reference.ByteLength.Should().Be(attachment.ByteLength);
+        reference.RelativePath.Should().Be(AttachmentPathResolver.CreateRelativePath(conversation, attachment.Id, "image/png"));
+
+        // A row written before the attachments field existed must keep reading as "no attachments".
+        await harness.Fixture.ExecuteAsync("""
+            INSERT INTO conversation_inputs(id, conversation_id, client_request_id, sequence, kind, target_turn_id,
+                payload_json, execution_snapshot_json, status, revision, claim_id, claim_owner_run_id, created_at_utc, updated_at_utc)
+            VALUES($id, $conversation, $request, 99, 0, NULL, $payload, $snapshot, 0, 1, NULL, NULL, $at, $at);
+            """, ("$id", Guid.NewGuid().ToString("D")), ("$conversation", conversation.ToString("D")),
+            ("$request", "legacy"), ("$payload", """{"version":1,"prompt":"legacy"}"""),
+            ("$snapshot", System.Text.Json.JsonSerializer.Serialize(harness.Snapshot(),
+                new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase })),
+            ("$at", DateTimeOffset.UtcNow.ToString("O")));
+
+        var legacy = await harness.Fixture.Inputs.FindRequestAsync(conversation, "legacy");
+        legacy!.Prompt.Should().Be("legacy");
+        legacy.Attachments.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task The_queue_item_attachment_count_reaches_the_view_formatter()
+    {
+        using var harness = new ConversationInputTestHarness();
+        var conversation = await harness.CreateConversationAsync();
+        harness.Models.Multimodal.Add(harness.Models.DefaultModel);
+        var attachment = await IngestAsync(harness, conversation);
+        await harness.Service.SubmitAsync(harness.Submission(conversation, "with image") with { Attachments = [attachment] });
+
+        var state = await harness.Fixture.Inputs.GetQueueStateAsync(conversation);
+        var response = ConversationQueueStateFormatter.Create(Guid.NewGuid(), state, null);
+
+        state.Items.Should().ContainSingle().Which.AttachmentCount.Should().Be(1);
+        response.Items.Should().ContainSingle().Which.AttachmentCount.Should().Be(1);
+    }
+
+    private static async Task<MessageAttachmentRecord> IngestAsync(ConversationInputTestHarness harness, Guid conversationId)
+    {
+        var store = new AttachmentStore(harness.Fixture.Paths);
+        using var content = new MemoryStream([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02]);
+        return await store.IngestAsync(conversationId, content, "photo.png", "image/png");
     }
 
     [Fact]

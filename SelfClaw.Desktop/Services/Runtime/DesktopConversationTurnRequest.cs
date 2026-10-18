@@ -11,4 +11,5 @@ internal sealed record DesktopConversationTurnRequest(
     WorkspaceRoot? WorkspaceRoot,
     ToolPermissionMode ToolPermissionMode,
     Guid? ConversationId = null,
-    ConversationInputClaim? InputClaim = null);
+    ConversationInputClaim? InputClaim = null,
+    IReadOnlyList<MessageAttachmentRecord>? Attachments = null);

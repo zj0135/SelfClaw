@@ -409,16 +409,30 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IA
                 profile.Id,
                 profile.Configuration?.Name ?? profile.Name,
                 profile.Model,
-                connections[profile.ProviderConnectionId].Name))
+                connections[profile.ProviderConnectionId].Name,
+                profile.Configuration?.IsMultimodal))
             .ToArray();
     }
 
+    public async Task<bool> IsModelMultimodalAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
+        => (await ResolveUsableModelAsync(modelProfileId, cancellationToken).ConfigureAwait(false))?.Configuration?.IsMultimodal == true;
+
     public async Task<bool> IsModelAvailableAsync(Guid modelProfileId, CancellationToken cancellationToken = default)
+        => await ResolveUsableModelAsync(modelProfileId, cancellationToken).ConfigureAwait(false) is not null;
+
+    /// <summary>
+    /// Resolves the model once and answers whether it can actually run: enabled model, enabled connection
+    /// and an adapter that speaks its API format. Availability and the image gate must agree, and neither
+    /// caller should read the profile three times to find out.
+    /// </summary>
+    private async Task<AiModelProfile?> ResolveUsableModelAsync(Guid modelProfileId, CancellationToken cancellationToken)
     {
         var profile = await _repository.GetModelProfileAsync(modelProfileId, cancellationToken).ConfigureAwait(false);
-        if (profile is not { IsEnabled: true }) return false;
+        if (profile is not { IsEnabled: true }) return null;
         var connection = await _repository.GetProviderConnectionAsync(profile.ProviderConnectionId, cancellationToken).ConfigureAwait(false);
-        return connection is { IsEnabled: true } && _registry.GetRequiredAdapter(connection.ProviderKind).SupportsApiFormat(profile.ApiFormat);
+        return connection is { IsEnabled: true } && _registry.GetRequiredAdapter(connection.ProviderKind).SupportsApiFormat(profile.ApiFormat)
+            ? profile
+            : null;
     }
 
     private async Task SendConnectivityProbeAsync(

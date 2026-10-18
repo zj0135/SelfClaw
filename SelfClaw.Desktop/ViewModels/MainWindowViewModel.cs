@@ -156,7 +156,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     /// WebView 的 "send-prompt" 消息经宿主路由后落到这里，触发一次发送回合。
     /// </summary>
     public Task<PromptSubmissionResult> SubmitPromptAsync(string prompt, string? workspaceMode = null, Guid? modelProfileId = null,
-        Guid? conversationId = null, string? clientRequestId = null, bool newConversation = false)
+        Guid? conversationId = null, string? clientRequestId = null, bool newConversation = false,
+        IReadOnlyList<MessageAttachmentRecord>? attachments = null)
     {
         ArgumentNullException.ThrowIfNull(prompt);
 
@@ -167,7 +168,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
 
         if (conversationId is { } target && SelectedConversation?.Id != target)
-            return SubmitToTargetAsync(target, clientRequestId, normalizedPrompt, workspaceMode, modelProfileId, newConversation);
+            return SubmitToTargetAsync(target, clientRequestId, normalizedPrompt, workspaceMode, modelProfileId, newConversation,
+                attachments);
         return SendAsync(new PromptSubmissionSnapshot(
             normalizedPrompt,
             SelectedConversation,
@@ -177,11 +179,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             _selectedAgentId,
             _composerModeOverride,
             ParseWorkspaceMode(workspaceMode),
-            _selectionVersion, conversationId, clientRequestId));
+            _selectionVersion, conversationId, clientRequestId, attachments));
     }
 
     private async Task<PromptSubmissionResult> SubmitToTargetAsync(Guid target, string? requestId, string prompt,
-        string? workspaceMode, Guid? modelId, bool isNew)
+        string? workspaceMode, Guid? modelId, bool isNew, IReadOnlyList<MessageAttachmentRecord>? attachments)
     {
         var selectedRoot = _selectedWorkspaceRoot;
         var selectedPermission = _selectedToolPermissionMode;
@@ -194,7 +196,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             : (await _workspaces.ListRootsAsync()).FirstOrDefault(item => item.Id == conversation.WorkspaceRootId);
         return await SendAsync(new(prompt, conversation, root, conversation?.ToolPermissionMode ?? selectedPermission,
             modelId, conversation?.AgentId ?? selectedAgent, selectedMode, ParseWorkspaceMode(workspaceMode),
-            selectionVersion, target, requestId));
+            selectionVersion, target, requestId, attachments));
     }
 
     public void StopSelectedConversation()
@@ -583,7 +585,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             var conversation = submission.Conversation ?? CreateConversationRecord(conversationId, submission, agent, prepared.WorkspaceRoot);
             var result = await _conversationInputs.SubmitAsync(new ConversationInputSubmission(
                 conversationId, submission.ClientRequestId ?? Guid.NewGuid().ToString("N"), submission.Prompt, agent, submission.ModelProfileId,
-                prepared.WorkspaceRoot, submission.ToolPermissionMode, conversation), operation.CancellationToken);
+                prepared.WorkspaceRoot, submission.ToolPermissionMode, conversation, submission.Attachments),
+                operation.CancellationToken);
             if (!result.Accepted)
                 return new PromptSubmissionResult(false, DescribeInputRejection(result));
             persisted = true;
@@ -614,6 +617,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     private async Task<PromptSubmissionResult> SubmitCliAsync(PromptSubmissionSnapshot submission,
         AgentRuntimeDefinition agent, Guid conversationId)
     {
+        // CLI transports send text only: attachment bytes have nowhere to go, so say so instead of
+        // silently dropping them.
+        if (submission.Attachments is { Count: > 0 })
+            return new PromptSubmissionResult(false, ConversationInputReasonText.Describe(ConversationInputReason.DirectOnly));
         var result = await _cliSubmitter.SubmitAsync(submission, agent, conversationId,
             () => submission.SelectionVersion == _selectionVersion);
         if (!result.Accepted || result.Conversation is not { } conversation)

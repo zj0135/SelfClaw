@@ -68,7 +68,7 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
 
         var batch = new ConversationInputBatch(conversationId, turnId, ownerRunId, claimId,
             claimedRows.Select(row => new ConversationInputItem(row.Id, row.Sequence, row.Revision,
-                ConversationInputMessageId.Compute(claimId, row.Id), row.Prompt)).ToArray());
+                ConversationInputMessageId.Compute(claimId, row.Id), row.Prompt, row.Attachments)).ToArray());
         ValidateRows(batch, claimedRows);
         await AdvanceQueueRevisionAsync(connection, transaction, conversationId, cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);

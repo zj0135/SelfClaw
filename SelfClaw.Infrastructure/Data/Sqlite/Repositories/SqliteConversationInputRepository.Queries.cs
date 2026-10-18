@@ -66,15 +66,17 @@ internal sealed partial class SqliteConversationInputRepository
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
+            var payload = ReadPayload(reader.GetString(5));
             items.Add(new ConversationInputQueueItem(
                 Guid.Parse(reader.GetString(0)),
                 reader.GetInt64(1),
                 (ConversationInputKind)reader.GetInt32(2),
                 (ConversationInputStatus)reader.GetInt32(3),
                 reader.GetInt32(4),
-                CreatePreview(ReadPayload(reader.GetString(5)).Prompt),
+                CreatePreview(payload.Prompt),
                 reader.IsDBNull(6) ? null : reader.GetString(6),
-                reader.IsDBNull(7) ? null : reader.GetString(7)));
+                reader.IsDBNull(7) ? null : reader.GetString(7),
+                payload.Attachments?.Count ?? 0));
         }
 
         var cancelled = new List<Guid>();
@@ -157,11 +159,13 @@ internal sealed partial class SqliteConversationInputRepository
             reader.IsDBNull(17) ? null : reader.GetString(17),
             reader.IsDBNull(18) ? null : reader.GetString(18),
             payload.RequestPrompt,
-            payload.RequestFingerprint);
+            payload.RequestFingerprint,
+            payload.Attachments);
     }
 
-    private static string SerializePayload(string prompt, string? fingerprint = null)
-        => JsonSerializer.Serialize(new ConversationInputPayload(1, prompt, prompt, fingerprint), PayloadJson);
+    private static string SerializePayload(string prompt, string? fingerprint = null,
+        IReadOnlyList<AttachmentReference>? attachments = null)
+        => JsonSerializer.Serialize(new ConversationInputPayload(1, prompt, prompt, fingerprint, attachments), PayloadJson);
 
     private static ConversationInputPayload ReadPayload(string json)
     {

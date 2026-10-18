@@ -62,6 +62,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     private readonly IDirectTokenCounter _tokenCounter;
     private readonly DirectContextCompressor _contextCompressor;
     private readonly IDirectCompressionPolicySource _compressionPolicy;
+    private readonly IAttachmentContentReader _attachmentContentReader;
 
     public DirectAgentChatRuntime(
         IAiChatClientFactory chatClientFactory,
@@ -70,6 +71,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         DirectConversationLoop conversationLoop,
         IDirectTokenCounter tokenCounter,
         DirectContextCompressor contextCompressor,
+        IAttachmentContentReader attachmentContentReader,
         IDirectCompressionPolicySource? compressionPolicy = null,
         ILogger<DirectAgentChatRuntime>? logger = null)
     {
@@ -79,6 +81,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         _conversationLoop = conversationLoop;
         _tokenCounter = tokenCounter;
         _contextCompressor = contextCompressor;
+        _attachmentContentReader = attachmentContentReader;
         _compressionPolicy = compressionPolicy ?? DisabledDirectCompressionPolicySource.Instance;
         _logger = logger ?? NullLogger<DirectAgentChatRuntime>.Instance;
     }
@@ -223,12 +226,16 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 AiChatOptions.ResolveContextWindowTokens(providerLease.Profile),
                 providerLease.Options.MaxOutputTokens);
             // The units are built once and shared by counting, compaction planning and the prompt itself:
-            // rebuilding them per request would rescan the whole stored history on every turn.
+            // rebuilding them per request would rescan the whole stored history on every turn. Images are
+            // read before the units so counting, planning and the request measure the same bytes.
+            var attachmentContents = await _attachmentContentReader.ReadAsync(request.Messages, cancellationToken)
+                .ConfigureAwait(false);
             var units = _promptComposer.BuildUnits(
                 request.Messages,
                 request.Turns,
                 request.ToolExecutions ?? [],
-                capabilityLease.MessageAdjustments);
+                capabilityLease.MessageAdjustments,
+                attachmentContents);
             var policy = await _compressionPolicy.GetAsync(cancellationToken).ConfigureAwait(false);
             var (compression, countedTokens) = await ApplyCompactionAsync(
                     request, capabilityLease, providerLease, budget, policy, units, writer, cancellationToken)

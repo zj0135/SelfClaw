@@ -268,6 +268,55 @@ public sealed class AiProviderSettingsServiceTests
     }
 
     [Fact]
+    public async Task Multimodal_support_requires_the_model_to_be_available_as_well()
+    {
+        var repository = new InMemoryAiProviderRepository();
+        var protector = new FakeSecretProtector();
+        var enabledConnection = CreateConnection("openai", AiProviderKind.OpenAI, "OpenAI");
+        var disabledConnection = CreateConnection("custom", AiProviderKind.OpenAICompatible, "Disabled gateway") with
+        {
+            IsEnabled = false
+        };
+        repository.Connections[enabledConnection.Id] = enabledConnection;
+        repository.Connections[disabledConnection.Id] = disabledConnection;
+        var vision = WithMultimodal(CreateProfile(enabledConnection.Id, "vision", enabled: true), isMultimodal: true);
+        var textOnly = WithMultimodal(CreateProfile(enabledConnection.Id, "text", enabled: true), isMultimodal: false);
+        var hiddenByProvider = WithMultimodal(
+            CreateProfile(disabledConnection.Id, "hidden-vision", enabled: true), isMultimodal: true);
+        repository.Models[vision.Id] = vision;
+        repository.Models[textOnly.Id] = textOnly;
+        repository.Models[hiddenByProvider.Id] = hiddenByProvider;
+        var service = CreateService(repository, protector,
+            new FakeAiProviderAdapter(AiProviderKind.OpenAI),
+            new FakeAiProviderAdapter(AiProviderKind.OpenAICompatible));
+
+        (await service.IsModelAvailableAsync(vision.Id)).Should().BeTrue();
+        (await service.IsModelMultimodalAsync(vision.Id)).Should().BeTrue();
+        (await service.IsModelMultimodalAsync(textOnly.Id)).Should().BeFalse();
+        // A stopped provider makes the image gate say no even though the flag is set.
+        (await service.IsModelAvailableAsync(hiddenByProvider.Id)).Should().BeFalse();
+        (await service.IsModelMultimodalAsync(hiddenByProvider.Id)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Multimodal_support_requires_an_adapter_that_speaks_the_model_api_format()
+    {
+        var repository = new InMemoryAiProviderRepository();
+        var protector = new FakeSecretProtector();
+        var connection = CreateConnection("custom", AiProviderKind.OpenAICompatible, "Gateway");
+        repository.Connections[connection.Id] = connection;
+        var vision = WithMultimodal(CreateProfile(connection.Id, "vision", enabled: true), isMultimodal: true);
+        repository.Models[vision.Id] = vision;
+        var service = CreateService(repository, protector, new FakeAiProviderAdapter(AiProviderKind.OpenAICompatible)
+        {
+            Formats = [AiProviderApiFormat.OpenAIChatCompletions]
+        });
+
+        (await service.IsModelAvailableAsync(vision.Id)).Should().BeFalse();
+        (await service.IsModelMultimodalAsync(vision.Id)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Provider_and_model_commands_persist_enable_disable_and_delete_changes()
     {
         var repository = new InMemoryAiProviderRepository();
@@ -582,6 +631,12 @@ public sealed class AiProviderSettingsServiceTests
             now,
             enabled);
     }
+
+    private static AiModelProfile WithMultimodal(AiModelProfile profile, bool? isMultimodal)
+        => profile with
+        {
+            Configuration = new AiModelConfiguration(profile.Model, profile.Name, profile.Sampling, isMultimodal)
+        };
 
     private static IReadOnlyDictionary<string, JsonElement> JsonObject(string json)
         => JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json) ?? [];

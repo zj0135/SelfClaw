@@ -21,4 +21,5 @@ public sealed record ConversationInputRecord(
     string? ReasonCode,
     string? ErrorMessage,
     string? RequestPrompt = null,
-    string? RequestFingerprint = null);
+    string? RequestFingerprint = null,
+    IReadOnlyList<AttachmentReference>? Attachments = null);

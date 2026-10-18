@@ -107,7 +107,7 @@ internal sealed partial class SqliteConversationInputRepository : IConversationI
             insert.Parameters.AddWithValue("$conversationId", request.ConversationId.ToString("D"));
             insert.Parameters.AddWithValue("$request", request.ClientRequestId);
             insert.Parameters.AddWithValue("$sequence", sequence);
-            insert.Parameters.AddWithValue("$payload", SerializePayload(request.Prompt, request.RequestFingerprint));
+            insert.Parameters.AddWithValue("$payload", SerializePayload(request.Prompt, request.RequestFingerprint, request.Attachments));
             insert.Parameters.AddWithValue("$snapshot", request.ExecutionSnapshot is { } snapshot ? SerializeSnapshot(snapshot) : (object)DBNull.Value);
             insert.Parameters.AddWithValue("$at", now.ToString("O"));
             await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);

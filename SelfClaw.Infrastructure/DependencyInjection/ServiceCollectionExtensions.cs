@@ -38,6 +38,7 @@ using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
 using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Automation;
 
 namespace SelfClaw.Infrastructure;
@@ -57,6 +58,12 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<SqliteConversationRepository>());
         services.AddSingleton<IConversationTurnRepository, SqliteConversationTurnRepository>();
         services.AddSingleton<IConversationCompactionRepository, SqliteConversationCompactionRepository>();
+        services.AddSingleton<AttachmentStore>();
+        services.AddSingleton<IAttachmentStore>(serviceProvider =>
+            serviceProvider.GetRequiredService<AttachmentStore>());
+        services.AddSingleton<AttachmentContentReader>();
+        services.AddSingleton<IAttachmentContentReader>(serviceProvider =>
+            serviceProvider.GetRequiredService<AttachmentContentReader>());
         services.AddSingleton<SqliteConversationInputRepository>();
         services.AddSingleton<IConversationInputRepository>(serviceProvider =>
             serviceProvider.GetRequiredService<SqliteConversationInputRepository>());
@@ -163,7 +170,8 @@ public static class ServiceCollectionExtensions
             new DirectConversationLoop(
                 serviceProvider.GetRequiredService<IDirectTokenCounter>(),
                 serviceProvider.GetRequiredService<DirectPromptComposer>(),
-                serviceProvider.GetRequiredService<DirectContextCompressor>()));
+                serviceProvider.GetRequiredService<DirectContextCompressor>(),
+                serviceProvider.GetRequiredService<IAttachmentContentReader>()));
         services.AddSingleton<IDirectTokenCounter>(serviceProvider =>
             new DirectTokenCounter(serviceProvider.GetService<ILogger<DirectTokenCounter>>()));
         services.AddSingleton<CapabilityContentCache>();

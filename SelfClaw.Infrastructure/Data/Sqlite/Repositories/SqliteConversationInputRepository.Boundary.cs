@@ -4,6 +4,7 @@ using Microsoft.Data.Sqlite;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Data.Sqlite.Models;
 
 namespace SelfClaw.Infrastructure.Data.Sqlite.Repositories;
@@ -42,7 +43,7 @@ internal sealed partial class SqliteConversationInputRepository
             throw new InvalidOperationException("The input claim or its Running turn no longer permits consumption.");
         }
 
-        var messages = await ConsumeInputsAsync(connection, transaction, commit, cancellationToken).ConfigureAwait(false);
+        var messages = await ConsumeInputsAsync(connection, transaction, commit, rows, cancellationToken).ConfigureAwait(false);
         await AdvanceQueueRevisionAsync(connection, transaction, commit.Batch.ConversationId, cancellationToken).ConfigureAwait(false);
         var committedTurn = await SqliteConversationTurnWriter.ReadTurnAsync(connection, transaction, commit.Batch.TurnId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The consumed turn disappeared within its transaction.");
@@ -55,20 +56,40 @@ internal sealed partial class SqliteConversationInputRepository
         return new ConversationInputConsumption(commit.Batch.ClaimId, committedTurn, messages);
     }
 
-    private static async Task<IReadOnlyList<MessageRecord>> ConsumeInputsAsync(
-        SqliteConnection connection, SqliteTransaction transaction, ConversationInputBoundaryCommit commit, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<MessageRecord>> ConsumeInputsAsync(
+        SqliteConnection connection, SqliteTransaction transaction, ConversationInputBoundaryCommit commit,
+        IReadOnlyList<SqliteConversationInputRow> rows, CancellationToken cancellationToken)
     {
         var messages = new List<MessageRecord>();
         var at = DateTimeOffset.UtcNow;
-        foreach (var input in commit.Batch.Inputs)
+        var attachmentsRoot = AttachmentPathResolver.ResolveRoot(_database.Paths.AppDataDirectory);
+        for (var index = 0; index < commit.Batch.Inputs.Count; index++)
         {
+            var input = commit.Batch.Inputs[index];
             var message = await SqliteConversationTurnWriter.InsertUserAsync(connection, transaction, commit.Content.Turn,
-                input.MessageId, input.Prompt, null, cancellationToken, at).ConfigureAwait(false);
+                input.MessageId, input.Prompt, ResolveAttachments(attachmentsRoot, rows[index].Attachments, input.MessageId),
+                cancellationToken, at).ConfigureAwait(false);
             await UpdateConsumedAsync(connection, transaction, commit.Batch, input, message, at, cancellationToken).ConfigureAwait(false);
             messages.Add(message);
         }
 
         return messages;
+    }
+
+    // Admission already proved the file exists; a file that vanished in between is skipped so a
+    // single lost image cannot fail the whole boundary commit.
+    private static IReadOnlyList<MessageAttachmentRecord>? ResolveAttachments(string root,
+        IReadOnlyList<AttachmentReference>? references, Guid messageId)
+    {
+        if (references is not { Count: > 0 }) return null;
+        var records = new List<MessageAttachmentRecord>(references.Count);
+        foreach (var reference in references)
+        {
+            if (!AttachmentPathResolver.TryResolveExistingFile(root, reference.RelativePath, out var fullPath)) continue;
+            records.Add(AttachmentPathResolver.CreateRecord(reference, fullPath, messageId, DateTimeOffset.UtcNow));
+        }
+
+        return records.Count == 0 ? null : records;
     }
 
     private static async Task UpdateConsumedAsync(
@@ -159,11 +180,12 @@ internal sealed partial class SqliteConversationInputRepository
                 throw new InvalidOperationException("A boundary batch must be a claimed Steer bound to its turn.");
             }
 
+            var payload = ReadPayload(reader.GetString(8));
             rows.Add(new SqliteConversationInputRow(Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)),
                 reader.GetInt64(2), reader.GetInt32(3), Guid.Parse(reader.GetString(4)), Guid.Parse(reader.GetString(5)),
-                Guid.Parse(reader.GetString(6)), reader.GetInt32(7), ReadPayload(reader.GetString(8)).Prompt,
+                Guid.Parse(reader.GetString(6)), reader.GetInt32(7), payload.Prompt,
                 reader.IsDBNull(9) ? null : Guid.Parse(reader.GetString(9)),
-                reader.IsDBNull(10) ? null : Guid.Parse(reader.GetString(10))));
+                reader.IsDBNull(10) ? null : Guid.Parse(reader.GetString(10)), payload.Attachments));
         }
 
         return rows;
@@ -189,12 +211,21 @@ internal sealed partial class SqliteConversationInputRepository
         if (rows.Count != batch.Inputs.Count || rows.Where((row, index) =>
                 row.Id != batch.Inputs[index].InputId || row.Sequence != batch.Inputs[index].Sequence ||
                 row.Revision != batch.Inputs[index].Revision || row.Prompt != batch.Inputs[index].Prompt ||
+                !SameAttachments(row.Attachments, batch.Inputs[index].Attachments) ||
                 row.ConversationId != batch.ConversationId || row.TargetTurnId != batch.TurnId ||
                 row.ClaimId != batch.ClaimId || row.OwnerRunId != batch.OwnerRunId).Any())
         {
             throw new InvalidOperationException("The input batch no longer matches its durable claim and owner.");
         }
     }
+
+    private static bool SameAttachments(IReadOnlyList<AttachmentReference>? left, IReadOnlyList<AttachmentReference>? right)
+        => (left, right) switch
+        {
+            (null, null) => true,
+            (null, _) or (_, null) => false,
+            _ => left.SequenceEqual(right)
+        };
 
     private static void ValidateBoundary(ConversationInputBoundaryCommit commit)
     {

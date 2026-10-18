@@ -4,6 +4,8 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Runtime;
+using SelfClaw.Infrastructure.Attachments;
+using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop.Services.ConversationInputs;
 
@@ -21,6 +23,7 @@ internal sealed class ConversationInputDispatcher : BackgroundService
     private readonly ConversationTurnEngine _engine;
     private readonly ConversationInputExecutionValidator _validator;
     private readonly ConversationInputChangeNotifier _changes;
+    private readonly StoragePaths _storagePaths;
     private readonly ILogger<ConversationInputDispatcher> _logger;
     private readonly Func<CancellationToken, Task> _recover;
     private readonly object _taskGate = new();
@@ -32,7 +35,7 @@ internal sealed class ConversationInputDispatcher : BackgroundService
     public ConversationInputDispatcher(IConversationInputStore store, IConversationInputSchedulerStore scheduler,
         IConversationRepository conversations, ConversationRunCoordinator runs, ConversationTurnEngine engine,
         ConversationInputExecutionValidator validator, ConversationInputChangeNotifier changes,
-        ILogger<ConversationInputDispatcher> logger, Func<CancellationToken, Task>? recover = null)
+        StoragePaths storagePaths, ILogger<ConversationInputDispatcher> logger, Func<CancellationToken, Task>? recover = null)
     {
         _store = store;
         _scheduler = scheduler;
@@ -41,6 +44,7 @@ internal sealed class ConversationInputDispatcher : BackgroundService
         _engine = engine;
         _validator = validator;
         _changes = changes;
+        _storagePaths = storagePaths;
         _logger = logger;
         _recover = recover ?? (_ => Task.CompletedTask);
     }
@@ -177,7 +181,8 @@ internal sealed class ConversationInputDispatcher : BackgroundService
             var claim = new ConversationInputClaim(claimed.Id, conversation.Id, claimed.Revision, claimId,
                 handle.RunId, ConversationInputMessageId.Compute(claimId, claimed.Id));
             var request = new DesktopConversationTurnRequest(conversation, prepared.Agent, claimed.Prompt,
-                snapshot.ModelProfileId, prepared.WorkspaceRoot, snapshot.ToolPermissionMode, conversation.Id, claim);
+                snapshot.ModelProfileId, prepared.WorkspaceRoot, snapshot.ToolPermissionMode, conversation.Id, claim,
+                ResolveAttachments(claimed.Attachments, claim.MessageId));
             lock (_taskGate)
             {
                 _shutdown.Token.ThrowIfCancellationRequested();
@@ -291,4 +296,27 @@ internal sealed class ConversationInputDispatcher : BackgroundService
 
     private static bool IsUserCancellation(ConversationRunHandle handle, string reason)
         => handle.UserInitiatedStop && reason == ConversationInputReason.TurnCancelled;
+
+    // Admission already proved the file exists; a file that vanished in between is skipped so a
+    // single lost image cannot strand an otherwise valid input.
+    private IReadOnlyList<MessageAttachmentRecord>? ResolveAttachments(
+        IReadOnlyList<AttachmentReference>? references, Guid messageId)
+    {
+        if (references is not { Count: > 0 }) return null;
+        var root = AttachmentPathResolver.ResolveRoot(_storagePaths.AppDataDirectory);
+        var records = new List<MessageAttachmentRecord>(references.Count);
+        foreach (var reference in references)
+        {
+            if (!AttachmentPathResolver.TryResolveExistingFile(root, reference.RelativePath, out var fullPath))
+            {
+                _logger.LogWarning("Skipping missing attachment {AttachmentId} of message {MessageId}.",
+                    reference.AttachmentId, messageId);
+                continue;
+            }
+
+            records.Add(AttachmentPathResolver.CreateRecord(reference, fullPath, messageId, DateTimeOffset.UtcNow));
+        }
+
+        return records.Count == 0 ? null : records;
+    }
 }

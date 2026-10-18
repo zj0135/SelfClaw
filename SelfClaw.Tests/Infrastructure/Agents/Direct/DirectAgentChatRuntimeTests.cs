@@ -549,19 +549,31 @@ public sealed class DirectAgentChatRuntimeTests
         IDirectTurnCapabilityResolver? capabilityResolver = null,
         IDirectCompressionPolicySource? compressionPolicy = null,
         IDirectTokenCounter? tokenCounter = null,
-        DirectContextCompressor? contextCompressor = null)
+        DirectContextCompressor? contextCompressor = null,
+        IAttachmentContentReader? attachmentContentReader = null)
     {
         var counter = tokenCounter ?? new DirectTokenCounter();
         var promptComposer = new DirectPromptComposer();
         var compressor = contextCompressor ?? new DirectContextCompressor(factory, new StubAiModelCatalog(), counter);
+        var reader = attachmentContentReader ?? new EmptyAttachmentContentReader();
         return new(
             factory,
             capabilityResolver ?? CreateCapabilityResolver(),
             promptComposer,
-            new DirectConversationLoop(counter, promptComposer, compressor),
+            new DirectConversationLoop(counter, promptComposer, compressor, reader),
             counter,
             compressor,
+            reader,
             compressionPolicy);
+    }
+
+    /// <summary>Every turn in these tests runs without stored attachments; the fake keeps the turns file-system free.</summary>
+    private sealed class EmptyAttachmentContentReader : IAttachmentContentReader
+    {
+        public Task<IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>>> ReadAsync(
+            IReadOnlyList<MessageRecord> messages, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>>>(
+                new Dictionary<Guid, IReadOnlyList<AIContent>>());
     }
 
     /// <summary>

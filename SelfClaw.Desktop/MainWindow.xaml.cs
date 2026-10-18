@@ -14,6 +14,7 @@ using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Desktop.ViewModels;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Desktop.Services.Windowing;
 using Microsoft.Extensions.Logging;
@@ -23,7 +24,6 @@ namespace SelfClaw.Desktop;
 public sealed partial class MainWindow : Window
 {
     private const string AssetsHostName = "appassets.selfclaw.local";
-    private const string AttachmentHostName = "attachments.selfclaw.local";
     private const int WmGetMinMaxInfo = 0x0024;
     private const int WmNcLButtonDown = 0x00A1;
     private const int HtLeft = 10;
@@ -184,10 +184,10 @@ public sealed partial class MainWindow : Window
                 assetsRootPath,
                 CoreWebView2HostResourceAccessKind.Allow);
 
-            var attachmentsRootPath = Path.Combine(_storagePaths.AppDataDirectory, "attachments");
+            var attachmentsRootPath = AttachmentPathResolver.ResolveRoot(_storagePaths.AppDataDirectory);
             Directory.CreateDirectory(attachmentsRootPath);
             TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(
-                AttachmentHostName,
+                AttachmentPathResolver.AttachmentHostName,
                 attachmentsRootPath,
                 CoreWebView2HostResourceAccessKind.Allow);
 

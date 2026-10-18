@@ -12,7 +12,8 @@ internal static class ConversationQueueStateFormatter
     {
         var items = state.Items.Select(item => new ConversationQueueItemView(item.InputId, item.Sequence,
             item.Kind.ToString().ToLowerInvariant(), item.Status.ToString().ToLowerInvariant(), item.Revision,
-            Limit(item.Preview, 200) ?? string.Empty, Limit(item.ReasonCode, 128), Limit(item.ErrorMessage, 1024))).ToArray();
+            Limit(item.Preview, 200) ?? string.Empty, Limit(item.ReasonCode, 128), Limit(item.ErrorMessage, 1024),
+            item.AttachmentCount)).ToArray();
         var payload = new ConversationQueueStateResponse("conversation-input/state", subscriptionId, state.ConversationId,
             state.QueueRevision, state.Paused, Limit(state.PauseReason, 1024), state.CanSteer,
             Limit(state.SteerReason, 128), state.SteerTargetTurnId, items, false, Limit(requestId, 128),

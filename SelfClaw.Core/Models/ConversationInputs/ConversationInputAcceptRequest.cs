@@ -6,4 +6,5 @@ public sealed record ConversationInputAcceptRequest(
     string Prompt,
     ConversationInputExecutionSnapshot? ExecutionSnapshot,
     ConversationRecord? Conversation,
-    string? RequestFingerprint = null);
+    string? RequestFingerprint = null,
+    IReadOnlyList<AttachmentReference>? Attachments = null);

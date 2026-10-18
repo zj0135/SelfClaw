@@ -62,11 +62,11 @@ internal sealed class ConversationInputTestHarness : IDisposable
         Changes = new ConversationInputChangeNotifier();
         var recovery = new SqliteStartupRecovery(Fixture.Database, Fixture.RecoveryBeforeCommit);
         Dispatcher = new ConversationInputDispatcher(Fixture.Inputs, Fixture.Inputs, Fixture.Conversations,
-            Runs, Engine, validator, Changes, NullLogger<ConversationInputDispatcher>.Instance, recovery.RecoverAsync);
+            Runs, Engine, validator, Changes, Fixture.Paths, NullLogger<ConversationInputDispatcher>.Instance, recovery.RecoverAsync);
         Queue = new ConversationInputQueueService(Fixture.Inputs, Fixture.Inputs, Fixture.Conversations, validator,
             Dispatcher, Runs, Agents, Changes);
         Service = new ConversationInputService(Fixture.Inputs, Fixture.Inputs, Queue, Dispatcher, Runs, Models, Agents, Changes,
-            NullLogger<ConversationInputService>.Instance);
+            Fixture.Paths, NullLogger<ConversationInputService>.Instance);
     }
 
     public ConversationPersistenceFixture Fixture { get; }
@@ -143,11 +143,13 @@ internal sealed class FakeModelCatalog : IAiModelCatalog
     public Guid DefaultModel { get; set; } = Guid.NewGuid();
     public Func<CancellationToken, Task<Guid?>>? OnDefaultRead { get; set; }
     public HashSet<Guid> Available { get; } = [];
+    public HashSet<Guid> Multimodal { get; } = [];
     public FakeModelCatalog() => Available.Add(DefaultModel);
     public Task<Guid?> GetDefaultModelAsync(string scope, CancellationToken cancellationToken = default)
         => OnDefaultRead?.Invoke(cancellationToken) ?? Task.FromResult<Guid?>(DefaultModel);
     public Task<IReadOnlyList<EnabledModelView>> ListEnabledModelsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<EnabledModelView>>([]);
     public Task<bool> IsModelAvailableAsync(Guid modelProfileId, CancellationToken cancellationToken = default) => Task.FromResult(Available.Contains(modelProfileId));
+    public Task<bool> IsModelMultimodalAsync(Guid modelProfileId, CancellationToken cancellationToken = default) => Task.FromResult(Multimodal.Contains(modelProfileId));
 }
 
 internal sealed class ScriptedAgentChatRuntime : IAgentChatRuntime

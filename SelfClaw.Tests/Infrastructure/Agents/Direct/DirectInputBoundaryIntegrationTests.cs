@@ -163,6 +163,25 @@ public sealed class DirectInputBoundaryIntegrationTests
         (await context.ScalarAsync("SELECT COUNT(*) FROM turn_usage")).Should().Be(0L);
     }
 
+    [Fact]
+    public async Task A_steer_with_an_image_is_committed_with_its_attachment_row()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var reference = await context.SeedPendingSteerWithAttachmentAsync("image steer");
+        var provider = new BoundaryProvider();
+        var runtime = CreateRuntime(context, provider, new ObservedInputs(context.InputSession), out var request);
+        await RecordAsync(runtime, request, context, context.Recorder, CancellationToken.None).WaitAsync(Timeout);
+
+        var messages = await context.Conversations.ListMessagesAsync(context.Conversation.Id);
+        var steer = messages.Should().ContainSingle(message => message.MarkdownContent == "image steer").Which;
+        steer.Role.Should().Be(MessageRole.User);
+        steer.Attachments.Should().ContainSingle().Which.Id.Should().Be(reference.AttachmentId);
+        (await context.ScalarAsync("SELECT message_id FROM message_attachments;")).Should().Be(steer.Id.ToString("D"));
+        (await context.ScalarAsync("SELECT byte_length FROM message_attachments;")).Should().Be(reference.ByteLength);
+        (await context.ScalarAsync("SELECT kind FROM message_attachments;")).Should().Be((long)MessageAttachmentKind.Image);
+    }
+
     private static DirectAgentChatRuntime CreateRuntime(ConversationTurnTestContext context, BoundaryProvider provider,
         IDirectTurnInputSession inputs, out DirectChatTurnRequest request)
     {

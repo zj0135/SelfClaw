@@ -26,6 +26,10 @@ public sealed class SqliteDatabase
         _beforeCommit = beforeCommit;
     }
 
+    // Repositories read the roots the database was opened with instead of receiving a second copy
+    // of the attachment layout, so persistence and storage cannot disagree.
+    internal StoragePaths Paths => _storagePaths;
+
     public async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync(cancellationToken).ConfigureAwait(false);

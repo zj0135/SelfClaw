@@ -54,10 +54,11 @@ internal sealed class DirectPromptComposer
         IReadOnlyList<string> systemInstructions,
         IReadOnlyDictionary<Guid, string> messageAdjustments,
         DirectTurnExecutionContext executionContext,
-        ConversationCompactionRecord? compression = null)
+        ConversationCompactionRecord? compression = null,
+        IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>>? attachments = null)
     {
         var build = BuildRequest(messages, turns, toolExecutions, agentInstructions, systemInstructions,
-            messageAdjustments, executionContext, compression);
+            messageAdjustments, executionContext, compression, attachments);
         var result = new List<ChatMessage>();
         if (build.SystemText is not null)
         {
@@ -86,7 +87,8 @@ internal sealed class DirectPromptComposer
         IReadOnlyList<string> systemInstructions,
         IReadOnlyDictionary<Guid, string> messageAdjustments,
         DirectTurnExecutionContext executionContext,
-        ConversationCompactionRecord? compression = null)
+        ConversationCompactionRecord? compression = null,
+        IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>>? attachments = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
         ArgumentNullException.ThrowIfNull(turns);
@@ -96,7 +98,7 @@ internal sealed class DirectPromptComposer
         ArgumentNullException.ThrowIfNull(executionContext);
         var turnsById = turns.ToDictionary(turn => turn.Id);
         var orderedMessages = OrderAndValidateMessages(messages, turnsById);
-        var units = BuildUnitsCore(orderedMessages, turnsById, toolExecutions, messageAdjustments);
+        var units = BuildUnitsCore(orderedMessages, turnsById, toolExecutions, messageAdjustments, attachments);
         var systemText = BuildSystemText(agentInstructions, systemInstructions, executionContext, compression);
         var trailing = CreateTrailingProtectedMessages(orderedMessages, turnsById, executionContext);
         return Compose(units, systemText, trailing, compression);
@@ -203,14 +205,16 @@ internal sealed class DirectPromptComposer
         IReadOnlyList<MessageRecord> messages,
         IReadOnlyList<ConversationTurnRecord> turns,
         IReadOnlyList<ToolExecutionRecord> toolExecutions,
-        IReadOnlyDictionary<Guid, string> messageAdjustments)
+        IReadOnlyDictionary<Guid, string> messageAdjustments,
+        IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>>? attachments = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
         ArgumentNullException.ThrowIfNull(turns);
         ArgumentNullException.ThrowIfNull(toolExecutions);
         ArgumentNullException.ThrowIfNull(messageAdjustments);
         var turnsById = turns.ToDictionary(turn => turn.Id);
-        return BuildUnitsCore(OrderAndValidateMessages(messages, turnsById), turnsById, toolExecutions, messageAdjustments);
+        return BuildUnitsCore(OrderAndValidateMessages(messages, turnsById), turnsById, toolExecutions,
+            messageAdjustments, attachments);
     }
 
     /// <summary>
@@ -230,18 +234,30 @@ internal sealed class DirectPromptComposer
         var existingBoundary = existing?.ThroughSequence ?? 0;
         var candidates = units.Where(unit => unit.SourceSequence > existingBoundary).ToArray();
         var threshold = ResolveThreshold(policy, budget);
+        // Decision E: an image-bearing unit is never summarized. The boundary can only fall on a continuous
+        // prefix, so planning stops before the first such unit: declining the whole plan would cost a
+        // conversation that once held an image all of its turn-start compaction, and skipping the unit would
+        // break the "the summary covers a prefix" invariant the replay filter depends on.
+        var plannable = candidates;
+        var firstImageIndex = Array.FindIndex(candidates, unit => unit.ContainsAttachments);
+        if (firstImageIndex >= 0)
+        {
+            plannable = candidates[..firstImageIndex];
+        }
+
         // The reserve belongs to the trigger side: on a small window a prompt just under the threshold can
         // still overflow once the response is written, and compacting is the only way to make room. Prompt
         // counts stay reserve-free because the context-size readout reports them that way.
         var reserve = budget.MaxOutputTokens ?? DefaultOutputTokenReserve;
-        if (!policy.Enabled || countedTokens is not int counted || counted + reserve < threshold || candidates.Length == 0)
+        if (!policy.Enabled || countedTokens is not int counted || counted + reserve < threshold || plannable.Length == 0)
         {
+            // The decline still reports every candidate, so a diagnostic can say how many were unreachable.
             return Decline(candidates.Length, threshold);
         }
 
         // A unit the caller never counted cannot be sized, so compaction degrades to "not this turn"
         // instead of estimating (design §5.5).
-        if (candidates.Any(unit => unit.Tokens is null))
+        if (plannable.Any(unit => unit.Tokens is null))
         {
             return Decline(candidates.Length, threshold);
         }
@@ -249,9 +265,9 @@ internal sealed class DirectPromptComposer
         var keepTarget = (int)(threshold * RetainedContextRatio);
         var retainedUnits = 0;
         var retainedTokens = 0;
-        for (var index = candidates.Length - 1; index >= 0; index--)
+        for (var index = plannable.Length - 1; index >= 0; index--)
         {
-            if (candidates[index].Tokens is not int unitTokens)
+            if (plannable[index].Tokens is not int unitTokens)
             {
                 return Decline(candidates.Length, threshold);
             }
@@ -266,13 +282,13 @@ internal sealed class DirectPromptComposer
             retainedTokens += unitTokens;
         }
 
-        var prefixLength = candidates.Length - retainedUnits;
+        var prefixLength = plannable.Length - retainedUnits;
         if (prefixLength <= 0)
         {
             return Decline(candidates.Length, threshold);
         }
 
-        var prefix = candidates.Take(prefixLength).ToArray();
+        var prefix = plannable.Take(prefixLength).ToArray();
         var sourceTokens = 0;
         foreach (var unit in prefix)
         {
@@ -307,7 +323,8 @@ internal sealed class DirectPromptComposer
         IReadOnlyList<MessageRecord> orderedMessages,
         IReadOnlyDictionary<Guid, ConversationTurnRecord> turnsById,
         IReadOnlyList<ToolExecutionRecord> toolExecutions,
-        IReadOnlyDictionary<Guid, string> messageAdjustments)
+        IReadOnlyDictionary<Guid, string> messageAdjustments,
+        IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>>? attachments)
     {
         var runsById = new Dictionary<Guid, ToolExecutionRecord>();
         foreach (var run in toolExecutions)
@@ -326,9 +343,7 @@ internal sealed class DirectPromptComposer
             var markdown = messageAdjustments.GetValueOrDefault(message.Id) ?? message.MarkdownContent;
             var unit = message.Role == MessageRole.Assistant
                 ? BuildAssistantUnit(message, runsById)
-                : new DirectPromptHistoryUnit(
-                    string.IsNullOrEmpty(markdown) ? [] : [new ChatMessage(ChatRole.User, markdown)],
-                    message.Sequence);
+                : BuildUserUnit(message, markdown, attachments?.GetValueOrDefault(message.Id));
             if (unit.Messages.Count == 0)
             {
                 continue;
@@ -402,6 +417,29 @@ internal sealed class DirectPromptComposer
     private static bool IsReplayable(MessageRecord message, ConversationTurnRecord turn)
         => turn.Status != ConversationTurnStatus.Blocked && message.Status == MessageStatus.Sealed &&
            message.Role is MessageRole.User or MessageRole.Assistant;
+
+    // Images come first so the model reads the attachment before the text that refers to it, and a message
+    // with only images still has to reach the provider: an empty markdown no longer drops the unit.
+    private static DirectPromptHistoryUnit BuildUserUnit(MessageRecord message, string? markdown,
+        IReadOnlyList<AIContent>? images)
+    {
+        if (images is not { Count: > 0 })
+        {
+            return new DirectPromptHistoryUnit(
+                string.IsNullOrEmpty(markdown) ? [] : [new ChatMessage(ChatRole.User, markdown)],
+                message.Sequence);
+        }
+
+        var contents = new List<AIContent>(images.Count + 1);
+        contents.AddRange(images);
+        if (!string.IsNullOrEmpty(markdown))
+        {
+            contents.Add(new TextContent(markdown));
+        }
+
+        return new DirectPromptHistoryUnit([new ChatMessage(ChatRole.User, contents)], message.Sequence,
+            ContainsAttachments: true);
+    }
 
     // Stored reasoning has no provider signature and is transcript-only. Assistant history is
     // reconstructed exclusively from actual blocks, never from an old unstructured markdown copy.

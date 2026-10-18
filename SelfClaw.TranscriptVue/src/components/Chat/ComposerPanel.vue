@@ -5,7 +5,9 @@ import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import ComposerAddMenu from './ComposerAddMenu.vue';
+import ComposerAttachments from './ComposerAttachments.vue';
 import ComposerUsageMeter from './ComposerUsageMeter.vue';
+import { isSupportedImageFile } from '../../composables/useComposerAttachments.js';
 
 const props = defineProps({
 	busy: {
@@ -46,6 +48,11 @@ const props = defineProps({
 	gitError: { type: String, default: '' },
 	usage: { type: Object, default: null },
 	submitError: { type: String, default: '' },
+	// 待发送图片引用（宿主已落盘），由 ChatView 的 useComposerAttachments 持有。
+	attachments: { type: Array, default: () => [] },
+	attachmentsError: { type: String, default: '' },
+	// 图片入口的唯一闸门：Direct 且所选模型多模态。前端不复制宿主的可用性逻辑。
+	imagesEnabled: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -59,6 +66,10 @@ const emit = defineEmits([
 	'approve-tool',
 	'reject-tool',
 	'select-permission-mode',
+	'request-attachment-picker',
+	'add-attachments',
+	'remove-attachment',
+	'preview-image',
 ]);
 
 const approvalTitle = computed(() => {
@@ -130,10 +141,94 @@ function submit() {
 	emit('submit', {
 		prompt,
 		workspaceMode: workspaceMode.value,
+		attachments: props.attachments,
 		accept() {
 			if (composerText.value.trim() === prompt) composerText.value = '';
 		},
 	});
+}
+
+// 图片入口被禁时分别给出「模式」与「模型」两种原因，避免用户误会成文件问题。
+const imagesDisabledReason = computed(() => props.agentMode === 'direct'
+	? '当前模型不支持图片输入'
+	: '当前模式不支持图片输入');
+
+const dragging = ref(false);
+
+function acceptsDrop(event) {
+	const transfer = event.dataTransfer;
+	if (!transfer) {
+		return false;
+	}
+
+	if (transfer.files?.length) {
+		return true;
+	}
+
+	return transfer.types ? Array.from(transfer.types).includes('Files') : false;
+}
+
+function imageFiles(files) {
+	return Array.from(files || []).filter((file) => isSupportedImageFile(file));
+}
+
+function onComposerPaste(event) {
+	if (!props.imagesEnabled) {
+		return;
+	}
+
+	const files = imageFiles(event.clipboardData?.files);
+	if (!files.length) {
+		// 纯文本粘贴仍走默认行为。
+		return;
+	}
+
+	event.preventDefault();
+	emit('add-attachments', files);
+}
+
+function onComposerDragEnter(event) {
+	if (!props.imagesEnabled || !acceptsDrop(event)) {
+		return;
+	}
+
+	dragging.value = true;
+}
+
+function onComposerDragOver(event) {
+	if (!props.imagesEnabled || !acceptsDrop(event)) {
+		return;
+	}
+
+	event.preventDefault();
+	if (event.dataTransfer) {
+		event.dataTransfer.dropEffect = 'copy';
+	}
+}
+
+function onComposerDragLeave(event) {
+	// 在子元素间移动也会触发 dragleave：只有真正离开整块输入区时才熄灭高亮。
+	const related = event?.relatedTarget;
+	if (related instanceof Node && shellRef.value?.contains(related)) {
+		return;
+	}
+
+	dragging.value = false;
+}
+
+function onComposerDrop(event) {
+	dragging.value = false;
+	if (!props.imagesEnabled) {
+		return;
+	}
+
+	const files = imageFiles(event.dataTransfer?.files);
+	if (!files.length) {
+		return;
+	}
+
+	event.preventDefault();
+	emit('add-attachments', files);
 }
 
 watch(
@@ -198,7 +293,9 @@ defineExpose({
 </script>
 
 <template>
-	<div ref="shellRef" class="composer-stack" data-anchor="composer">
+	<div ref="shellRef" class="composer-stack" data-anchor="composer"
+		@dragenter="onComposerDragEnter" @dragover="onComposerDragOver" @dragleave="onComposerDragLeave"
+		@drop="onComposerDrop">
 		<transition name="approval-bar">
 			<div v-if="props.pendingApproval" class="tool-approval-bar" role="alertdialog" aria-label="工具调用确认">
 				<span class="tool-approval-icon" aria-hidden="true">
@@ -226,17 +323,20 @@ defineExpose({
 			</div>
 		</transition>
 		<slot name="queue" />
-		<section class="composer-shell" aria-label="消息输入">
+		<section class="composer-shell" :class="{ dragging }" aria-label="消息输入">
 			<div class="composer-grip" aria-hidden="true"></div>
+			<ComposerAttachments :items="props.attachments" :error="props.attachmentsError"
+				@remove="emit('remove-attachment', $event)" @preview-image="emit('preview-image', $event)" />
 			<textarea ref="textareaRef" v-model="composerText" class="composer-input" rows="3"
-				placeholder="让助手帮你处理项目..." @keydown="onKeydown"></textarea>
+				placeholder="让助手帮你处理项目..." @keydown="onKeydown" @paste="onComposerPaste"></textarea>
 			<p v-if="submitError" class="composer-error" role="alert">{{ submitError }}</p>
 			<div class="composer-toolbar">
 				<!-- 左侧：+ / 代理 -->
 				<div class="composer-tools-left">
 					<ComposerAddMenu :skills-enabled="agentMode === 'direct'" :agent-id="selectedAgentId"
 						:agent-name="selectedAgentName" :capability-revision="capabilityRevision"
-						@select-skill="insertSkillToken" />
+						:images-enabled="props.imagesEnabled" :images-disabled-reason="imagesDisabledReason"
+						@add-image="emit('request-attachment-picker')" @select-skill="insertSkillToken" />
 					<AgentSelector :selected-agent-id="selectedAgentId" :selected-agent-name="selectedAgentName" />
 				</div>
 				<!-- 右侧：用量圆环百分比 / 模型 / 发送 -->
@@ -285,8 +385,8 @@ defineExpose({
 	position: relative;
 	width: 100%;
 	min-height: 138px;
-	display: grid;
-	grid-template-rows: 1fr auto;
+	display: flex;
+	flex-direction: column;
 	padding: 22px 18px 12px;
 	border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
 	border-radius: 16px 16px 0 0;
@@ -294,7 +394,25 @@ defineExpose({
 	box-shadow:
 		0 1px 2px rgba(var(--shadow-ink), 0.05),
 		0 8px 24px rgba(var(--shadow-ink), 0.04);
-	transition: border-color 0.18s, box-shadow 0.18s;
+	transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
+}
+
+/* 拖拽入框：整块输入区高亮 + 虚线内框，松手前就能看出落点。 */
+.composer-shell.dragging {
+	border-color: color-mix(in srgb, var(--accent) 62%, transparent);
+	background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+	box-shadow:
+		0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent),
+		0 14px 34px rgba(var(--shadow-ink), 0.09);
+}
+
+.composer-shell.dragging::after {
+	content: '';
+	position: absolute;
+	inset: 8px;
+	pointer-events: none;
+	border: 1.5px dashed color-mix(in srgb, var(--accent) 45%, transparent);
+	border-radius: 11px;
 }
 
 .composer-shell:focus-within {
@@ -322,6 +440,7 @@ defineExpose({
 
 .composer-error {
 	align-self: end;
+	flex: none;
 	margin: 2px 2px 7px;
 	color: var(--err-text);
 	font-size: var(--fs-115);
@@ -446,6 +565,7 @@ defineExpose({
 .composer-input {
 	width: 100%;
 	min-height: 64px;
+	flex: 1 1 auto;
 	resize: none;
 	padding: 0 2px;
 	border: 0;

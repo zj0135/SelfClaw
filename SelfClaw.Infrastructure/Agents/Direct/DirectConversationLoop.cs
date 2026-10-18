@@ -27,15 +27,18 @@ internal sealed class DirectConversationLoop
     private readonly IDirectTokenCounter _tokenCounter;
     private readonly DirectPromptComposer _promptComposer;
     private readonly DirectContextCompressor _contextCompressor;
+    private readonly IAttachmentContentReader _attachmentContentReader;
 
     internal DirectConversationLoop(
         IDirectTokenCounter tokenCounter,
         DirectPromptComposer promptComposer,
-        DirectContextCompressor contextCompressor)
+        DirectContextCompressor contextCompressor,
+        IAttachmentContentReader attachmentContentReader)
     {
         _tokenCounter = tokenCounter;
         _promptComposer = promptComposer;
         _contextCompressor = contextCompressor;
+        _attachmentContentReader = attachmentContentReader;
     }
 
     public async Task<DirectLoopOutcome> RunAsync(DirectTurnSetup setup, DirectEventTranslator output,
@@ -125,7 +128,11 @@ internal sealed class DirectConversationLoop
         output.PublishInputBoundary(batch);
         var consumed = await inputs.WaitForCommitAsync(batch, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
-        context.AppendInputs(consumed.Messages);
+        // Consumed steer images are read once, before they join the context: the next provider request sends
+        // these bytes, so counting and the request itself must see the same content.
+        var attachmentContents = await _attachmentContentReader.ReadAsync(consumed.Messages, cancellationToken)
+            .ConfigureAwait(false);
+        context.AppendInputs(consumed.Messages, attachmentContents);
         output.BeginInputSegment();
         return null;
     }

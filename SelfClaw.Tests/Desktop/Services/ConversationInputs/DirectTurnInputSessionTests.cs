@@ -132,6 +132,28 @@ public sealed class DirectTurnInputSessionTests
     }
 
     [Fact]
+    public async Task Re_registering_a_boundary_with_an_equal_attachment_list_is_not_a_change()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        await context.SeedPendingSteerWithAttachmentAsync("U1");
+        var batch = await context.InputSession.ReadBoundaryAsync()
+            ?? throw new InvalidOperationException("The seeded steer was not claimable.");
+        var copy = batch with
+        {
+            Inputs = batch.Inputs.Select(input => input with { Attachments = input.Attachments!.ToArray() }).ToArray()
+        };
+
+        var first = context.InputSession.WaitForCommitAsync(batch);
+        var second = context.InputSession.WaitForCommitAsync(copy);
+
+        ReferenceEquals(copy.Inputs[0].Attachments, batch.Inputs[0].Attachments).Should().BeFalse();
+        second.IsFaulted.Should().BeFalse("an equal attachment list must not read as a changed claim");
+        second.IsCompleted.Should().BeFalse();
+        first.IsCompleted.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Failed_boundary_transaction_rolls_back_and_releases_the_producer()
     {
         using var context = new ConversationTurnTestContext();

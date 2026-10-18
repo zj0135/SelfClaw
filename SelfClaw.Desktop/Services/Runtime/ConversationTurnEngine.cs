@@ -57,9 +57,11 @@ internal sealed class ConversationTurnEngine
             ValidateRequest(handle, request);
             var conversation = CreateConversation(handle.ConversationId, request);
             state = await _sessions.PrepareRuntimeStateAsync(conversation, false, handle.CancellationToken);
+            var userMessageId = request.InputClaim?.MessageId ?? Guid.NewGuid();
             var started = await _turns.StartTurnAsync(new(conversation,
                 new(handle.TurnId, conversation.Id, handle.Mode, handle.Origin, ConversationTurnStatus.Running, DateTimeOffset.UtcNow),
-                request.Prompt, request.InputClaim?.MessageId ?? Guid.NewGuid(), InputClaim: request.InputClaim), handle.CancellationToken);
+                request.Prompt, userMessageId, BindAttachments(request.Attachments, userMessageId),
+                InputClaim: request.InputClaim), handle.CancellationToken);
             turn = new AgentTurnState(started.Turn, request.Agent, handle.InputSession);
             state.ReplaceTurn(started.Turn);
             foreach (var message in started.Messages) state.ReplaceMessage(message);
@@ -203,4 +205,12 @@ internal sealed class ConversationTurnEngine
             UpdatedAtUtc = now
         };
     }
+
+    // The start writer refuses an attachment that names another message, and the user message
+    // identity is only decided here, so the records are rebound before the start is written.
+    private static IReadOnlyList<MessageAttachmentRecord>? BindAttachments(
+        IReadOnlyList<MessageAttachmentRecord>? attachments, Guid messageId)
+        => attachments is { Count: > 0 }
+            ? attachments.Select(attachment => attachment with { MessageId = messageId }).ToArray()
+            : null;
 }

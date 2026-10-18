@@ -1,6 +1,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue';
-import { BookOpenCheck, Plus, SlidersHorizontal } from 'lucide-vue-next';
+import { BookOpenCheck, ImagePlus, Plus, SlidersHorizontal } from 'lucide-vue-next';
 import SkillPicker from './SkillPicker.vue';
 
 // 输入框工具栏最左侧的「+」入口：把技能、功能等低频操作收进一个菜单，
@@ -11,8 +11,11 @@ const props = defineProps({
 	agentId: { type: String, default: '' },
 	agentName: { type: String, default: '' },
 	capabilityRevision: { type: Number, default: 0 },
+	// 图片入口要同时满足「Direct 模式」与「所选模型多模态」；禁用原因由上层算好传进来。
+	imagesEnabled: { type: Boolean, default: false },
+	imagesDisabledReason: { type: String, default: '当前模型不支持图片输入' },
 });
-const emit = defineEmits(['select-skill']);
+const emit = defineEmits(['select-skill', 'add-image']);
 
 const open = ref(false);
 const rootRef = ref(null);
@@ -29,6 +32,15 @@ function close() {
 function openSkills() {
 	close();
 	skillPickerRef.value?.openPicker();
+}
+
+function openImages() {
+	if (!props.imagesEnabled) {
+		return;
+	}
+
+	close();
+	emit('add-image');
 }
 
 function onDocumentPointerDown(event) {
@@ -57,6 +69,11 @@ onBeforeUnmount(() => {
 		</button>
 
 		<div v-show="open" class="add-menu" role="menu" aria-label="添加">
+			<button class="add-item" type="button" role="menuitem" :disabled="!props.imagesEnabled"
+				:title="props.imagesEnabled ? '添加图片' : props.imagesDisabledReason" @click="openImages">
+				<ImagePlus :size="15" :stroke-width="1.8" aria-hidden="true" />
+				添加图片
+			</button>
 			<button v-if="props.skillsEnabled" class="add-item" type="button" role="menuitem" @click="openSkills">
 				<BookOpenCheck :size="15" :stroke-width="1.8" aria-hidden="true" />
 				插入技能
@@ -150,8 +167,17 @@ onBeforeUnmount(() => {
 	transition: background 0.12s;
 }
 
-.add-item:hover {
+.add-item:hover:not(:disabled) {
 	background: var(--panel-soft);
+}
+
+.add-item:disabled {
+	opacity: 0.42;
+	cursor: default;
+}
+
+.add-item:disabled svg {
+	color: var(--muted-soft);
 }
 
 .add-item svg {

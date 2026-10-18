@@ -1,10 +1,13 @@
 using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services.Agents;
+using SelfClaw.Desktop.Services.Attachments;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Desktop.Services.Tools;
 using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.AiProviders;
@@ -46,6 +49,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly TranscriptDelivery _transcriptDelivery;
     private readonly ActivityPanelBridge? _activityPanelBridge;
     private readonly AutomationBridge? _automationBridge;
+    private readonly AttachmentBridge? _attachmentBridge;
     private int _disposeStarted;
     private readonly ILogger<WebViewMessageRouter> _logger;
     private readonly object _lifecycleGate = new();
@@ -73,6 +77,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         ConversationInputBridge? conversationInputBridge = null,
         ActivityPanelBridge? activityPanelBridge = null,
         AutomationBridge? automationBridge = null,
+        AttachmentBridge? attachmentBridge = null,
         ILogger<WebViewMessageRouter>? logger = null)
     {
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
@@ -94,6 +99,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _transcriptDelivery = transcriptDelivery;
         _activityPanelBridge = activityPanelBridge;
         _automationBridge = automationBridge;
+        _attachmentBridge = attachmentBridge;
         _logger = logger ?? NullLogger<WebViewMessageRouter>.Instance;
 
     }
@@ -287,6 +293,9 @@ internal sealed class WebViewMessageRouter : IDisposable
             case "get-workspace-selection" or "select-workspace-root" or "browse-workspace-folder" or
                  "delete-workspace-root" or "workspace-tree/list":
                 response = await _workspaceSelectionBridge.TryHandleAsync(type, payload, ownerHandle, cancellationToken); break;
+            case var name when name.StartsWith("attachments/", StringComparison.Ordinal) && _attachmentBridge is not null:
+                await _attachmentBridge.HandleAsync(type, payload, ownerHandle, cancellationToken);
+                return null;
             default:
                 var command = await RouteShellIntentAsync(type, payload);
                 if (type is not ("send-prompt" or "tool-approval/get-state") && ReadOptionalString(payload, "requestId") is { } requestId)
@@ -310,14 +319,35 @@ internal sealed class WebViewMessageRouter : IDisposable
         {
             case "send-prompt":
                 {
+                    var requestId = ReadOptionalString(payload, "requestId");
+                    var conversationId = ReadOptionalString(payload, "conversationId") is null ? (Guid?)null : ReadRequiredGuid(payload, "conversationId");
+                    var (attachments, attachmentRejection) = ReadAttachmentRecords(payload, conversationId);
+                    if (attachmentRejection is not null)
+                    {
+                        if (requestId is not null)
+                        {
+                            _hostChannel.PostResponse(new
+                            {
+                                type = "prompt-submission",
+                                requestId,
+                                accepted = false,
+                                conversationId,
+                                error = ConversationInputReasonText.Describe(attachmentRejection),
+                                reason = attachmentRejection
+                            });
+                        }
+
+                        return null;
+                    }
+
                     var result = await _viewModel.SubmitPromptAsync(
                         ReadOptionalString(payload, "prompt") ?? string.Empty,
                         ReadOptionalString(payload, "workspaceMode"),
                         Guid.TryParse(ReadOptionalString(payload, "modelProfileId"), out var modelProfileId) ? modelProfileId : null,
-                        ReadOptionalString(payload, "conversationId") is null ? null : ReadRequiredGuid(payload, "conversationId"),
-                        ReadOptionalString(payload, "clientRequestId") ?? ReadOptionalString(payload, "requestId"),
-                        payload.TryGetProperty("newConversation", out var newConversation) && newConversation.ValueKind == JsonValueKind.True);
-                    var requestId = ReadOptionalString(payload, "requestId");
+                        conversationId,
+                        ReadOptionalString(payload, "clientRequestId") ?? requestId,
+                        payload.TryGetProperty("newConversation", out var newConversation) && newConversation.ValueKind == JsonValueKind.True,
+                        attachments);
                     if (requestId is not null)
                     {
                         _hostChannel.PostResponse(new
@@ -422,6 +452,58 @@ internal sealed class WebViewMessageRouter : IDisposable
     private static Guid ReadRequiredGuid(JsonElement payload, string property)
         => Guid.TryParse(ReadOptionalString(payload, property), out var value) && value != Guid.Empty ? value :
             throw new ArgumentException($"{property} must be a non-empty GUID.");
+
+    /// <summary>
+    /// The sender may only name references: metadata plus ids. The stored location is derived from the
+    /// conversation and attachment ids, so a forged path can never become a stored storage path.
+    /// </summary>
+    private (IReadOnlyList<MessageAttachmentRecord>? Records, string? Reason) ReadAttachmentRecords(
+        JsonElement payload, Guid? conversationId)
+    {
+        if (!payload.TryGetProperty("attachments", out var element) || element.ValueKind == JsonValueKind.Null)
+            return (null, null);
+        if (element.ValueKind != JsonValueKind.Array)
+            return (null, ConversationInputReason.AttachmentInvalid);
+        var items = element.EnumerateArray().ToArray();
+        if (items.Length == 0)
+            return (null, null);
+        if (conversationId is not { } target || _attachmentBridge is not { } bridge)
+            return (null, ConversationInputReason.AttachmentInvalid);
+        var records = new List<MessageAttachmentRecord>(items.Length);
+        foreach (var item in items)
+        {
+            if (ReadMessageAttachment(item, target, bridge.AttachmentsRoot) is not { } record)
+                return (null, ConversationInputReason.AttachmentInvalid);
+            records.Add(record);
+        }
+
+        return (records, null);
+    }
+
+    private static MessageAttachmentRecord? ReadMessageAttachment(JsonElement item, Guid conversationId, string root)
+    {
+        if (item.ValueKind != JsonValueKind.Object
+            || !Guid.TryParse(ReadOptionalString(item, "attachmentId"), out var attachmentId) || attachmentId == Guid.Empty
+            || ReadOptionalString(item, "fileName") is not { Length: > 0 and <= 260 } fileName
+            || ReadOptionalString(item, "mediaType") is not { } mediaType
+            || !item.TryGetProperty("byteLength", out var byteLengthElement) || !byteLengthElement.TryGetInt64(out var byteLength)
+            || byteLength is <= 0 or > AttachmentPathResolver.MaximumByteLength)
+        {
+            return null;
+        }
+
+        var normalizedMediaType = mediaType.Trim().ToLowerInvariant();
+        if (!AttachmentPathResolver.AllowedMediaTypes.Contains(normalizedMediaType))
+        {
+            return null;
+        }
+
+        var relativePath = AttachmentPathResolver.CreateRelativePath(conversationId, attachmentId, normalizedMediaType);
+        return AttachmentPathResolver.TryResolveExistingFile(root, relativePath, out var fullPath)
+            ? new MessageAttachmentRecord(attachmentId, Guid.Empty, MessageAttachmentKind.Image, fileName,
+                normalizedMediaType, fullPath, byteLength, DateTimeOffset.UtcNow)
+            : null;
+    }
 
     private static string ReadRequiredString(JsonElement payload, string property)
         => ReadOptionalString(payload, property) ?? throw new ArgumentException($"{property} is required.");

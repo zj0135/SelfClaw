@@ -19,6 +19,8 @@ using SelfClaw.Desktop.Services.AiProviders;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Desktop.Services.Appearance;
+using SelfClaw.Desktop.Services.Attachments;
+using SelfClaw.Desktop.Services.Attachments.Abstractions;
 using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
@@ -105,6 +107,9 @@ internal static class DesktopServiceRegistration
         services.AddHostedService(services =>
             services.GetRequiredService<ConversationInputDispatcher>());
         services.AddSingleton<ConversationWorkspaceService>();
+        services.AddSingleton<AttachmentMaintenanceHost>();
+        services.AddHostedService(services =>
+            services.GetRequiredService<AttachmentMaintenanceHost>());
         services.AddSingleton<ConversationDeletionService>();
         services.AddSingleton<TranscriptProjection>();
         services.AddSingleton<WebViewHostChannel>();
@@ -130,6 +135,8 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<WebViewHostChannel>(),
             dispatcher, services.GetRequiredService<ILogger<TerminalHostController>>()));
         services.AddSingleton<IWorkspaceFolderPicker, WpfWorkspaceFolderPicker>();
+        services.AddSingleton<IImageFilePicker, WpfImageFilePicker>();
+        services.AddSingleton<AttachmentBridge>();
         services.AddSingleton<PluginViewResourceReader>();
         services.AddSingleton(services => new PluginViewHostController(
             services.GetRequiredService<IPluginViewCatalog>(),
@@ -223,6 +230,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<ConversationInputBridge>(),
             services.GetRequiredService<ActivityPanelBridge>(),
             services.GetRequiredService<AutomationBridge>(),
+            services.GetRequiredService<AttachmentBridge>(),
             services.GetRequiredService<ILogger<WebViewMessageRouter>>()));
         services.AddSingleton(services => new MainWindow(
             services.GetRequiredService<MainWindowViewModel>(),

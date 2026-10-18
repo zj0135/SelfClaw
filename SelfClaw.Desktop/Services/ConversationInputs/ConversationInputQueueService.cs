@@ -147,7 +147,7 @@ internal sealed class ConversationInputQueueService
     public async Task<ConversationInputDetail?> GetDetailAsync(Guid inputId, CancellationToken cancellationToken = default)
     {
         var input = await _store.GetInputAsync(inputId, cancellationToken).ConfigureAwait(false);
-        return input is null ? null : new(input.Id, input.Revision, input.Prompt, input.Status);
+        return input is null ? null : new(input.Id, input.Revision, input.Prompt, input.Status, input.Attachments);
     }
 
     private static ConversationInputUpdateResult Invalid(ConversationInputRecord input, string? reason)

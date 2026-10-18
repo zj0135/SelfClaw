@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Subagents;
@@ -15,10 +16,13 @@ internal sealed class ConversationDeletionService
     private readonly IConversationRepository _conversations;
     private readonly IConversationInputSchedulerStore? _inputs;
     private readonly SubagentActivityService? _activity;
+    private readonly IAttachmentStore? _attachments;
+    private readonly ILogger<ConversationDeletionService>? _logger;
 
     public ConversationDeletionService(ConversationRunCoordinator runs, ConversationSessionCoordinator sessions,
         ISubagentConversationLifecycle subagents, ConversationWorkspaceService workspaces, IConversationRepository conversations,
-        SubagentActivityService? activity = null, IConversationInputSchedulerStore? inputs = null)
+        SubagentActivityService? activity = null, IConversationInputSchedulerStore? inputs = null,
+        IAttachmentStore? attachments = null, ILogger<ConversationDeletionService>? logger = null)
     {
         _runs = runs;
         _sessions = sessions;
@@ -27,6 +31,8 @@ internal sealed class ConversationDeletionService
         _conversations = conversations;
         _activity = activity;
         _inputs = inputs;
+        _attachments = attachments;
+        _logger = logger;
     }
 
     public async Task DeleteAsync(IReadOnlyCollection<Guid> conversationIds, bool removeWorktree)
@@ -56,6 +62,7 @@ internal sealed class ConversationDeletionService
                 await _conversations.DeleteConversationAsync(reservation.ConversationId).ConfigureAwait(false);
                 deleted.Add(reservation.ConversationId);
                 _sessions.ForgetTranscript(reservation.ConversationId);
+                await DeleteAttachmentsAsync(reservation.ConversationId).ConfigureAwait(false);
             }
         }
         finally
@@ -66,6 +73,24 @@ internal sealed class ConversationDeletionService
                 _runs.EndDeletion(reservation, wasDeleted);
                 if (!wasDeleted) _activity?.SetScopeClosed(reservation.ConversationId, false);
             }
+        }
+    }
+
+    private async Task DeleteAttachmentsAsync(Guid conversationId)
+    {
+        if (_attachments is null) return;
+        try
+        {
+            await _attachments.DeleteConversationAsync(conversationId).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // The database cascade already succeeded; a leftover directory is reclaimable at next start.
+            _logger?.LogWarning(exception, "Failed to delete attachments of conversation {ConversationId}.", conversationId);
         }
     }
 
