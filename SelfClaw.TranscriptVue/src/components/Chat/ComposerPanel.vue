@@ -4,8 +4,8 @@ import { ArrowRight, LoaderCircle, Square, ShieldAlert, Check, X } from 'lucide-
 import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
 import AgentSelector from './AgentSelector.vue';
-import PermissionSelector from './PermissionSelector.vue';
 import ComposerAddMenu from './ComposerAddMenu.vue';
+import ComposerUsageMeter from './ComposerUsageMeter.vue';
 
 const props = defineProps({
 	busy: {
@@ -232,17 +232,17 @@ defineExpose({
 				placeholder="让助手帮你处理项目..." @keydown="onKeydown"></textarea>
 			<p v-if="submitError" class="composer-error" role="alert">{{ submitError }}</p>
 			<div class="composer-toolbar">
-				<!-- 左侧只保留「+ / 代理 / 模型」三个无框入口；权限与发送靠右 -->
+				<!-- 左侧：+ / 代理 -->
 				<div class="composer-tools-left">
 					<ComposerAddMenu :skills-enabled="agentMode === 'direct'" :agent-id="selectedAgentId"
 						:agent-name="selectedAgentName" :capability-revision="capabilityRevision"
 						@select-skill="insertSkillToken" />
 					<AgentSelector :selected-agent-id="selectedAgentId" :selected-agent-name="selectedAgentName" />
-					<ModelSelector :execution-mode="agentMode" />
 				</div>
+				<!-- 右侧：用量圆环百分比 / 模型 / 发送 -->
 				<div class="composer-tools-right">
-					<PermissionSelector :mode="toolPermissionMode" align="end"
-						@select="emit('select-permission-mode', $event)" />
+					<ComposerUsageMeter v-if="usage" :usage="usage" />
+					<ModelSelector :execution-mode="agentMode" align="end" />
 					<!-- 只保留一个按钮：空闲即发送；Direct 忙碌且输入框有内容时同一按钮变成发送（入队）；其余忙碌态显示停止或进度。 -->
 					<button v-if="showSend" class="send-btn" type="button" :disabled="!canSend" title="发送"
 						aria-label="发送" @click="submit">
@@ -259,7 +259,9 @@ defineExpose({
 			</div>
 		</section>
 		<ComposerStatusBar :workspace-selection="workspaceSelection" :workspace-mode="workspaceMode"
-			:git-loading="gitLoading" :git-error="gitError" :usage="usage" @update:workspace-mode="workspaceMode = $event"
+			:git-loading="gitLoading" :git-error="gitError" :tool-permission-mode="toolPermissionMode"
+			@update:workspace-mode="workspaceMode = $event"
+			@select-permission-mode="emit('select-permission-mode', $event)"
 			@refresh="requestWorkspace" @select-root="selectWorkspaceRoot" @delete-root="deleteWorkspaceRoot"
 			@browse="browseWorkspaceFolder" @git-action="emit('git-action', $event)" />
 	</div>

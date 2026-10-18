@@ -1,6 +1,23 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mount } from '@vue/test-utils';
-import ComposerStatusBar from '../src/components/Chat/ComposerStatusBar.vue';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
+
+const { bridge } = vi.hoisted(() => ({
+	bridge: {
+		request: vi.fn(),
+		requestLatest: vi.fn(() => Promise.resolve({ policy: { absoluteThresholdTokens: 64_000 } })),
+		on: vi.fn(() => () => {}),
+		post: vi.fn(),
+		hasHost: () => true,
+	},
+}));
+
+vi.mock('../src/composables/hostBridge.js', () => ({
+	hostBridge: bridge,
+	useHostBridge: () => bridge,
+	isSuperseded: () => false,
+}));
+
+import ComposerUsageMeter from '../src/components/Chat/ComposerUsageMeter.vue';
 
 let wrapper;
 afterEach(() => {
@@ -14,59 +31,53 @@ const usage = (overrides = {}) => ({
 });
 
 function mountWithUsage(value) {
-	wrapper = mount(ComposerStatusBar, { props: { usage: value } });
+	wrapper = mount(ComposerUsageMeter, { props: { usage: value } });
 	return wrapper;
 }
 
-describe('ComposerStatusBar usage meter', () => {
-	it('renders the context size against its window plus the cumulative totals', () => {
+describe('ComposerUsageMeter', () => {
+	it('renders the circular progress ring and percentage', () => {
 		mountWithUsage(usage());
 
-		const values = wrapper.get('.usage-meter').findAll('.usage-value').map((node) => node.text());
-		expect(values).toEqual(['12.4K / 32K', '1.24M', '342K']);
-		expect(wrapper.get('.usage-meter').text()).toContain('上下文');
-		expect(wrapper.get('.usage-meter').text()).toContain('累计');
-		expect(wrapper.get('.usage-totals').text()).toContain('输入');
-		expect(wrapper.get('.usage-totals').text()).toContain('输出');
+		expect(wrapper.find('.usage-ring').exists()).toBe(true);
+		expect(wrapper.get('.usage-pill-text').text()).toBe('39%');
 	});
 
-	it('shows an unavailable context without inventing numbers', () => {
+	it('calculates percentage against absolute threshold when context window is not declared', async () => {
+		mountWithUsage(usage({ contextWindowTokens: null }));
+		await flushPromises();
+
+		// 12400 / 64000 = 19.375% -> 19%
+		expect(wrapper.get('.usage-pill-text').text()).toBe('19%');
+		expect(wrapper.get('.context-tag').text()).toBe('绝对阈值');
+	});
+
+	it('displays context and cumulative stats in hover popover', async () => {
+		mountWithUsage(usage());
+
+		expect(wrapper.get('.context-current').text()).toBe('12.4K');
+		expect(wrapper.get('.context-limit').text()).toBe('32K');
+
+		const totalVals = wrapper.findAll('.total-val').map((node) => node.text());
+		expect(totalVals).toEqual(['1.24M', '342K', '1.58M']);
+	});
+
+	it('shows unavailable placeholder for unknown context without breaking', () => {
 		mountWithUsage(usage({ contextTokens: null, contextWindowTokens: null }));
 
-		const context = wrapper.get('.usage-meter .usage-value').text();
-		expect(context).toBe('不可用');
-		expect(wrapper.get('.usage-label').text()).toBe('上下文');
-		expect(wrapper.find('.usage-meter').text().slice(0, 6)).not.toMatch(/\d/);
+		expect(wrapper.get('.context-current').text()).toBe('不可用');
+		expect(wrapper.get('.usage-pill-text').text()).toBe('0%');
 	});
 
-	it('omits the cumulative part while it is unknown or zero', async () => {
-		mountWithUsage(usage({ inputTokens: 0, outputTokens: 0 }));
-		expect(wrapper.find('.usage-totals').exists()).toBe(false);
-		expect(wrapper.find('.usage-divider').exists()).toBe(false);
-		// 上下文本身仍然显示，只丢掉没有信息的累计段。
-		expect(wrapper.get('.usage-value').text()).toBe('12.4K / 32K');
-		wrapper.unmount();
-
-		mountWithUsage(usage({ inputTokens: null, outputTokens: null }));
-		expect(wrapper.find('.usage-totals').exists()).toBe(false);
-		expect(wrapper.findAll('.usage-value')).toHaveLength(1);
-	});
-
-	it('marks an approximate context size with a tilde and explains it in the tooltip', () => {
+	it('marks an approximate context size with a tilde', () => {
 		mountWithUsage(usage({ contextIsEstimated: true }));
 
-		expect(wrapper.get('.usage-value').text()).toBe('~12.4K / 32K');
-		expect(wrapper.get('.usage-meter').attributes('title')).toBe('由本地计数近似');
-		wrapper.unmount();
-
-		mountWithUsage(usage());
-		expect(wrapper.get('.usage-meter').attributes('title')).toBeFalsy();
+		expect(wrapper.get('.context-current').text()).toBe('~12.4K');
+		expect(wrapper.find('.usage-note').exists()).toBe(true);
 	});
 
-	it('renders no usage block when the host reports none', () => {
+	it('renders nothing when usage is null', () => {
 		mountWithUsage(null);
-		expect(wrapper.find('.usage-meter').exists()).toBe(false);
-		// 工作区上下文仍在，确认只隐藏了用量块。
-		expect(wrapper.get('.composer-statusbar').exists()).toBe(true);
+		expect(wrapper.find('.usage-pill').exists()).toBe(false);
 	});
 });

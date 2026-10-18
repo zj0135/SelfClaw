@@ -1,41 +1,139 @@
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
-import { ChevronRight, Check, Bot, Terminal } from 'lucide-vue-next';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { Check, ChevronRight, Layers, Terminal } from 'lucide-vue-next';
 import { useComposerModelSelection } from '../../composables/useComposerModelSelection.js';
+import { useHostBridge } from '../../composables/hostBridge.js';
+import { defaultCliModel as defaultModel } from '../../composables/useProgrammingAssistantSelection.js';
 
 const props = defineProps({
 	executionMode: {
 		type: String,
 		default: 'cli',
 	},
+	align: {
+		type: String,
+		default: 'start',
+	},
 });
 
 const emit = defineEmits(['update:agent', 'update:model', 'update:reasoning']);
 
-const { selectedMode, isDirect, loaded, loadError, models, reasoningLevels, hasReasoning, pending,
-    detectedAgents, selectedCliId, selectedAgent, activeModel, activeReasoning, directModels,
-    activeDirectModelProfileId, selectedDirectModel, requestActiveSource, pickMode, pickAgent,
-    pickDirectModel: saveDirectModel, pickModel: saveModel, pickReasoning: saveReasoning } =
-    useComposerModelSelection(() => props.executionMode, emit);
-import { defaultCliModel as defaultModel } from '../../composables/useProgrammingAssistantSelection.js';
+const {
+	selectedMode,
+	isDirect,
+	loaded,
+	loadError,
+	models,
+	reasoningLevels,
+	hasReasoning,
+	pending,
+	detectedAgents,
+	selectedCliId,
+	selectedAgent,
+	activeModel,
+	activeReasoning,
+	directModels,
+	activeDirectModelProfileId,
+	selectedDirectModel,
+	requestActiveSource,
+	pickMode,
+	pickAgent,
+	pickDirectModel: saveDirectModel,
+	pickModel: saveModel,
+	pickReasoning: saveReasoning,
+} = useComposerModelSelection(() => props.executionMode, emit);
+
+const bridge = useHostBridge();
+const modelConfigurations = ref({});
+
+async function loadModelConfigurations() {
+	try {
+		const payload = await bridge.requestLatest('composer-model-configs', 'ai-providers/list-model-configurations');
+		const configs = {};
+		for (const cfg of payload?.configurations || []) {
+			if (cfg?.model) configs[cfg.model] = cfg;
+		}
+		modelConfigurations.value = configs;
+	} catch {
+		// 保持现有配置
+	}
+}
 
 const open = ref(false);
-const menuOpen = ref(false);
-const reasoningMenuOpen = ref(false);
 const rootRef = ref(null);
 const popoverRef = ref(null);
-
-// 弹层方向：'down' 贴按钮下方，'up' 贴按钮上方。
-// 对话视图中输入栏位于窗口底部，向下展开会被 main-content 的 overflow 裁剪，
-// 因此打开时按可用空间动态决定方向（空间估算 → 渲染后按实际高度校正一次）。
 const placement = ref('down');
-const estimatedPopoverHeight = 340;
+const estimatedPopoverHeight = 280;
+
+const activeFlyoutModel = ref(null);
+const flyoutTop = ref(0);
+const flyoutBottom = ref(0);
+let flyoutLeaveTimer = null;
+
+const DIRECT_REASONING_OPTIONS = [
+	{ id: '', label: 'Default' },
+	{ id: 'none', label: 'None' },
+	{ id: 'minimal', label: 'Minimal' },
+	{ id: 'low', label: 'Low' },
+	{ id: 'medium', label: 'Medium' },
+	{ id: 'high', label: 'High' },
+	{ id: 'xhigh', label: 'X-High' },
+	{ id: 'max', label: 'Max' },
+];
+
+function formatReasoning(level) {
+	if (!level) return '';
+	const map = {
+		none: 'None',
+		minimal: 'Minimal',
+		low: 'Low',
+		medium: 'Medium',
+		high: 'High',
+		xhigh: 'X-High',
+		max: 'Max',
+	};
+	return map[level.toLowerCase()] || level;
+}
+
+function getModelReasoning(directModel) {
+	if (!directModel?.model) return '';
+	return modelConfigurations.value[directModel.model]?.reasoningEffort || '';
+}
+
+async function setDirectModelReasoning(directModel, level) {
+	const currentCfg = modelConfigurations.value[directModel.model] || {};
+	const configuration = {
+		...currentCfg,
+		model: directModel.model,
+		name: directModel.name || directModel.model,
+		sampling: {
+			temperature: 0.7,
+			temperatureEnabled: false,
+			topP: 0.7,
+			topPEnabled: false,
+			...(currentCfg.sampling || {}),
+		},
+		reasoningEffort: level || null,
+	};
+	modelConfigurations.value[directModel.model] = configuration;
+	try {
+		await bridge.request('ai-providers/save-model-configuration', { configuration });
+	} catch (e) {
+		console.warn('保存模型思考等级失败:', e);
+	}
+	await saveDirectModel(directModel);
+	activeFlyoutModel.value = null;
+}
+
+async function pickCliReasoningAndSelect(model, level) {
+	await saveModel(model);
+	await saveReasoning(level);
+	activeFlyoutModel.value = null;
+}
 
 function updatePlacement() {
 	const rect = rootRef.value?.getBoundingClientRect();
-	if (!rect) {
-		return;
-	}
+	if (!rect) return;
 
 	const popoverHeight = popoverRef.value?.offsetHeight || estimatedPopoverHeight;
 	const spaceBelow = window.innerHeight - rect.bottom;
@@ -44,22 +142,19 @@ function updatePlacement() {
 }
 
 const modelLabel = computed(() => {
-	if (!loaded.value) {
-		return '加载中…';
-	}
+	if (!loaded.value) return '加载中…';
 	if (isDirect.value) {
-		// 工具栏空间有限，只显示模型名；提供商放进悬停提示和弹出面板
 		return selectedDirectModel.value?.name || '未选择提供商模型';
 	}
-	if (!selectedAgent.value) {
-		return '未选择 CLI';
-	}
+	if (!selectedAgent.value) return '未选择 CLI';
 	return activeModel.value === defaultModel ? selectedAgent.value.name : activeModel.value;
 });
 
 const triggerTitle = computed(() => {
 	if (isDirect.value && selectedDirectModel.value) {
-		return `模型选择：${selectedDirectModel.value.providerName} · ${selectedDirectModel.value.name}`;
+		const reasoning = getModelReasoning(selectedDirectModel.value);
+		const reasoningText = reasoning ? ` (${formatReasoning(reasoning)})` : '';
+		return `模型选择：${selectedDirectModel.value.providerName} · ${selectedDirectModel.value.name}${reasoningText}`;
 	}
 	return `模型选择：${modelLabel.value}`;
 });
@@ -67,8 +162,7 @@ const triggerTitle = computed(() => {
 function togglePanel() {
 	open.value = !open.value;
 	if (!open.value) {
-		menuOpen.value = false;
-		reasoningMenuOpen.value = false;
+		activeFlyoutModel.value = null;
 		return;
 	}
 
@@ -76,160 +170,303 @@ function togglePanel() {
 	nextTick(updatePlacement);
 
 	if (!loaded.value) {
-		// 自愈：挂载时的请求若丢失（宿主未就绪等），打开面板时再拉一次配置。
 		requestActiveSource();
 	}
+	if (isDirect.value) {
+		loadModelConfigurations();
+	}
 }
+
 function closePanel() {
 	open.value = false;
-	menuOpen.value = false;
-	reasoningMenuOpen.value = false;
+	activeFlyoutModel.value = null;
 }
 
-async function pickDirectModel(model) { await saveDirectModel(model); menuOpen.value = false; }
+async function pickDirectModel(model) {
+	await saveDirectModel(model);
+	closePanel();
+}
 
-function toggleMenu() {
-	menuOpen.value = !menuOpen.value;
-	if (menuOpen.value) {
-		reasoningMenuOpen.value = false;
+async function pickModel(model) {
+	await saveModel(model);
+	closePanel();
+}
+
+function onRowHover(model, event) {
+	if (flyoutLeaveTimer) {
+		clearTimeout(flyoutLeaveTimer);
+		flyoutLeaveTimer = null;
+	}
+	activeFlyoutModel.value = model;
+	if (event?.currentTarget && popoverRef.value) {
+		const rowRect = event.currentTarget.getBoundingClientRect();
+		const popoverRect = popoverRef.value.getBoundingClientRect();
+		const estimatedFlyoutHeight = 268;
+
+		if (placement.value === 'up') {
+			// 上浮菜单：子菜单底对齐当前行并向上展开，彻底防止被视口底边裁切
+			const rawBottom = popoverRect.bottom - rowRect.bottom;
+			const spaceAboveInWindow = rowRect.bottom;
+			if (spaceAboveInWindow < estimatedFlyoutHeight + 16) {
+				const overflow = (estimatedFlyoutHeight + 16) - spaceAboveInWindow;
+				flyoutBottom.value = Math.max(0, rawBottom - overflow);
+			} else {
+				flyoutBottom.value = Math.max(0, rawBottom);
+			}
+		} else {
+			// 下沉菜单：子菜单顶对齐当前行并向下展开
+			const rawTop = rowRect.top - popoverRect.top;
+			const spaceBelowInWindow = window.innerHeight - rowRect.top;
+			if (spaceBelowInWindow < estimatedFlyoutHeight + 16) {
+				const overflow = (estimatedFlyoutHeight + 16) - spaceBelowInWindow;
+				flyoutTop.value = Math.max(0, rawTop - overflow);
+			} else {
+				flyoutTop.value = Math.max(0, rawTop);
+			}
+		}
 	}
 }
-async function pickModel(model) { await saveModel(model); menuOpen.value = false; }
 
-function toggleReasoningMenu() {
-	reasoningMenuOpen.value = !reasoningMenuOpen.value;
-	if (reasoningMenuOpen.value) {
-		menuOpen.value = false;
+function onRowLeave() {
+	flyoutLeaveTimer = setTimeout(() => {
+		activeFlyoutModel.value = null;
+		flyoutLeaveTimer = null;
+	}, 160);
+}
+
+function onFlyoutEnter() {
+	if (flyoutLeaveTimer) {
+		clearTimeout(flyoutLeaveTimer);
+		flyoutLeaveTimer = null;
 	}
 }
-async function pickReasoning(level) { await saveReasoning(level); reasoningMenuOpen.value = false; }
+
+function onFlyoutLeave() {
+	onRowLeave();
+}
 
 function onDocClick(e) {
 	if (rootRef.value && !rootRef.value.contains(e.target)) closePanel();
 }
+
 function onKeydown(e) {
 	if (e.key === 'Escape') closePanel();
 }
+
 onMounted(() => {
 	document.addEventListener('click', onDocClick);
 	document.addEventListener('keydown', onKeydown);
 	requestActiveSource();
+	loadModelConfigurations();
 });
+
 onBeforeUnmount(() => {
+	if (flyoutLeaveTimer) clearTimeout(flyoutLeaveTimer);
 	document.removeEventListener('click', onDocClick);
 	document.removeEventListener('keydown', onKeydown);
 });
 
 watch(isDirect, () => {
-	menuOpen.value = false;
-	reasoningMenuOpen.value = false;
+	activeFlyoutModel.value = null;
 	requestActiveSource();
+	if (isDirect.value) loadModelConfigurations();
 });
 </script>
 
 <template>
 	<div ref="rootRef" class="model-wrap">
-		<button class="composer-model" type="button" :aria-expanded="open ? 'true' : 'false'" aria-haspopup="true"
-			:title="triggerTitle" @click.stop="togglePanel">
+		<!-- 触发按钮：模型架构样式 Layers 图标 + 模型名 -->
+		<button
+			class="composer-model"
+			type="button"
+			:aria-expanded="open ? 'true' : 'false'"
+			aria-haspopup="true"
+			:title="triggerTitle"
+			@click.stop="togglePanel"
+		>
 			<span class="model-badge" aria-hidden="true">
-				<img v-if="!isDirect && selectedAgent?.iconSrc" class="model-badge-img" :src="selectedAgent.iconSrc"
-					alt="" />
-				<Bot v-else :size="15" :stroke-width="1.8" />
+				<img
+					v-if="!isDirect && selectedAgent?.iconSrc"
+					class="model-badge-img"
+					:src="selectedAgent.iconSrc"
+					alt=""
+				/>
+				<Layers v-else :size="15" :stroke-width="1.8" />
 			</span>
 			<span class="model-name">{{ modelLabel }}</span>
 		</button>
 
-		<!-- 设置弹出面板：默认贴按钮下方展开；下方空间不足时自动翻转到按钮上方 -->
-		<div v-show="open" ref="popoverRef" :aria-busy="pending" class="model-popover" :class="`model-popover--${placement}`" role="dialog"
-			aria-label="模型与代理设置">
-            <p v-if="loadError" class="agent-hint agent-hint--error" role="alert">{{ loadError }}</p>
-			<!-- 模式 -->
-			<div class="pop-section">
-				<div class="pop-label">模式</div>
-				<div class="seg" role="radiogroup" aria-label="执行模式">
-					<button type="button" :aria-pressed="!isDirect ? 'true' : 'false'" @click="pickMode('cli')">本地
-						CLI</button>
-					<button type="button" :aria-pressed="isDirect ? 'true' : 'false'"
-						@click="pickMode('direct')">提供商</button>
+		<!-- 弹出面板：严格对标图二/图三，直接展示模型列表，无多余嵌套大卡片 -->
+		<div
+			v-show="open"
+			ref="popoverRef"
+			:aria-busy="pending"
+			class="model-popover"
+			:class="[`model-popover--${placement}`, `model-popover--${props.align}`]"
+			role="dialog"
+			aria-label="模型选择"
+		>
+			<!-- 模式切换：轻量胶囊 -->
+			<div class="pop-header">
+				<div class="seg" role="tablist" aria-label="执行模式">
+					<button
+						type="button"
+						class="seg-btn"
+						:aria-pressed="!isDirect ? 'true' : 'false'"
+						@click="pickMode('cli')"
+					>
+						本地 CLI
+					</button>
+					<button
+						type="button"
+						class="seg-btn"
+						:aria-pressed="isDirect ? 'true' : 'false'"
+						@click="pickMode('direct')"
+					>
+						提供商
+					</button>
 				</div>
 			</div>
 
-			<!-- 代理 -->
-			<div v-if="!isDirect" class="pop-section">
-				<div class="pop-label">代理</div>
-				<div v-if="!loaded" class="agent-hint">正在读取本地 CLI 配置…</div>
-				<div v-else-if="loadError" class="agent-hint agent-hint--error">{{ loadError }}</div>
-				<div v-else-if="!detectedAgents.length" class="agent-hint">
-					未检测到本地 CLI，请安装 Claude Code / Codex CLI / OpenCode 后在「设置 → 编程助手」重新扫描。
+			<p v-if="loadError" class="model-hint model-hint--error" role="alert">{{ loadError }}</p>
+
+			<!-- 提供商直接模式模型列表（图三风格） -->
+			<div v-if="isDirect" class="models-list" role="listbox" aria-label="提供商模型列表">
+				<div v-if="loaded && !directModels.length" class="model-hint">
+					没有已启用模型，请在「设置 → AI 服务商」启用连接与模型。
 				</div>
-				<div class="agent-list" role="radiogroup" aria-label="代理">
-					<button v-for="agent in detectedAgents" :key="agent.id" type="button" class="agent-item"
-						role="radio" :aria-checked="selectedCliId === agent.id ? 'true' : 'false'"
-						@click="pickAgent(agent)">
-						<span class="agent-glyph"
-							:style="{ background: agent.iconBackground || agent.tint, color: agent.ink }"
-							aria-hidden="true">
-							<img v-if="agent.iconSrc" class="agent-glyph-img" :src="agent.iconSrc" alt="" />
-							<Terminal v-else :size="13" :stroke-width="2" />
+				<div
+					v-for="dm in directModels"
+					:key="dm.modelProfileId"
+					class="model-row"
+					:class="{
+						active: activeDirectModelProfileId === dm.modelProfileId,
+						hovered: activeFlyoutModel?.modelProfileId === dm.modelProfileId,
+					}"
+					role="option"
+					:aria-selected="activeDirectModelProfileId === dm.modelProfileId ? 'true' : 'false'"
+					@mouseenter="onRowHover(dm, $event)"
+					@mouseleave="onRowLeave"
+					@click="pickDirectModel(dm)"
+				>
+					<div class="model-row-left">
+						<span class="model-row-title">{{ dm.name }}</span>
+						<span v-if="dm.providerName" class="model-row-desc">{{ dm.providerName }} · {{ dm.model }}</span>
+					</div>
+
+					<div class="model-row-right">
+						<!-- 思考等级标签 + 箭头（对标图三：Gemini 3.8 Flash High >） -->
+						<span v-if="getModelReasoning(dm)" class="reasoning-tag">
+							{{ formatReasoning(getModelReasoning(dm)) }}
 						</span>
-						<span class="agent-name">{{ agent.name }}</span>
-						<Check class="agent-check" :size="14" :stroke-width="2.4" aria-hidden="true" />
-					</button>
-				</div>
-			</div>
-
-			<!-- 模型 -->
-			<div class="pop-section">
-				<div class="pop-label">模型</div>
-				<div v-if="isDirect && loaded && !directModels.length" class="agent-hint">
-					没有已启用模型，请先在「设置 → AI 服务商」启用连接与模型。
-				</div>
-				<div v-else class="model-select">
-					<button type="button" class="model-select-btn" :aria-expanded="menuOpen ? 'true' : 'false'"
-						aria-haspopup="listbox" @click.stop="toggleMenu">
-						<span>{{ isDirect ? (selectedDirectModel?.name || '未选择模型') : activeModel }}</span>
-						<ChevronRight class="caret" :size="13" :stroke-width="2" aria-hidden="true" />
-					</button>
-					<div v-if="isDirect" v-show="menuOpen" class="model-menu" role="listbox" aria-label="Direct 模型列表">
-						<button v-for="directModel in directModels" :key="directModel.modelProfileId" type="button"
-							class="model-opt" role="option"
-							:aria-selected="activeDirectModelProfileId === directModel.modelProfileId ? 'true' : 'false'"
-							@click="pickDirectModel(directModel)">
-							<span class="model-opt-copy">
-								<strong>{{ directModel.name }}</strong>
-								<small>{{ directModel.providerName }} · {{ directModel.model }}</small>
-							</span>
-							<Check class="tick" :size="14" :stroke-width="2.4" aria-hidden="true" />
-						</button>
-					</div>
-					<div v-else v-show="menuOpen" class="model-menu" role="listbox" aria-label="模型列表">
-						<button v-for="m in models" :key="m" type="button" class="model-opt" role="option"
-							:aria-selected="activeModel === m ? 'true' : 'false'" @click="pickModel(m)">
-							<span>{{ m }}</span>
-							<Check class="tick" :size="14" :stroke-width="2.4" aria-hidden="true" />
-						</button>
+						<ChevronRight :size="12" class="reasoning-arrow" aria-hidden="true" />
+						<Check
+							class="model-row-check"
+							:class="{ visible: activeDirectModelProfileId === dm.modelProfileId }"
+							:size="14"
+							:stroke-width="2.4"
+							aria-hidden="true"
+						/>
 					</div>
 				</div>
 			</div>
 
-			<!-- 推理等级：仅当选中 CLI 暴露推理档位（如 Codex）时出现 -->
-			<div v-if="!isDirect && hasReasoning" class="pop-section">
-				<div class="pop-label">推理等级</div>
-				<div class="model-select">
-					<button type="button" class="model-select-btn" :aria-expanded="reasoningMenuOpen ? 'true' : 'false'"
-						aria-haspopup="listbox" @click.stop="toggleReasoningMenu">
-						<span>{{ activeReasoning }}</span>
-						<ChevronRight class="caret" :size="13" :stroke-width="2" aria-hidden="true" />
+			<!-- CLI 模式模型列表 -->
+			<div v-else class="models-list" role="listbox" aria-label="CLI 代理与模型">
+				<div v-if="detectedAgents.length > 1" class="cli-agents-bar" role="tablist" aria-label="CLI 工具">
+					<button
+						v-for="agent in detectedAgents"
+						:key="agent.id"
+						type="button"
+						class="cli-agent-chip"
+						:class="{ active: selectedCliId === agent.id }"
+						@click="pickAgent(agent)"
+					>
+						{{ agent.name }}
 					</button>
-					<div v-show="reasoningMenuOpen" class="model-menu" role="listbox" aria-label="推理等级列表">
-						<button v-for="level in reasoningLevels" :key="level" type="button" class="model-opt"
-							role="option" :aria-selected="activeReasoning === level ? 'true' : 'false'"
-							@click="pickReasoning(level)">
-							<span>{{ level }}</span>
-							<Check class="tick" :size="14" :stroke-width="2.4" aria-hidden="true" />
-						</button>
+				</div>
+				<div
+					v-for="m in models"
+					:key="m"
+					class="model-row"
+					:class="{
+						active: activeModel === m,
+						hovered: activeFlyoutModel === m,
+					}"
+					role="option"
+					:aria-selected="activeModel === m ? 'true' : 'false'"
+					@mouseenter="onRowHover(m, $event)"
+					@mouseleave="onRowLeave"
+					@click="pickModel(m)"
+				>
+					<div class="model-row-left">
+						<span class="model-row-title">{{ m }}</span>
+					</div>
+					<div class="model-row-right">
+						<span v-if="activeModel === m && activeReasoning" class="reasoning-tag">
+							{{ formatReasoning(activeReasoning) }}
+						</span>
+						<ChevronRight v-if="reasoningLevels.length" :size="12" class="reasoning-arrow" aria-hidden="true" />
+						<Check
+							class="model-row-check"
+							:class="{ visible: activeModel === m }"
+							:size="14"
+							:stroke-width="2.4"
+							aria-hidden="true"
+						/>
 					</div>
 				</div>
+			</div>
+
+			<!-- 悬停飞出思考等级子菜单（图三右侧风格：Low / Medium / High） -->
+			<div
+				v-show="activeFlyoutModel"
+				class="thinking-flyout"
+				:style="placement === 'up' ? { bottom: `${flyoutBottom}px` } : { top: `${flyoutTop}px` }"
+				role="listbox"
+				aria-label="思考等级选择"
+				@mouseenter="onFlyoutEnter"
+				@mouseleave="onFlyoutLeave"
+			>
+				<div class="thinking-flyout-head">思考等级</div>
+				<template v-if="isDirect && activeFlyoutModel?.modelProfileId">
+					<button
+						v-for="opt in DIRECT_REASONING_OPTIONS"
+						:key="opt.id"
+						type="button"
+						class="thinking-item"
+						:class="{ active: (getModelReasoning(activeFlyoutModel) || '') === opt.id }"
+						@click.stop="setDirectModelReasoning(activeFlyoutModel, opt.id)"
+					>
+						<span>{{ opt.label }}</span>
+						<Check
+							v-if="(getModelReasoning(activeFlyoutModel) || '') === opt.id"
+							:size="13"
+							:stroke-width="2.4"
+							class="thinking-check"
+							aria-hidden="true"
+						/>
+					</button>
+				</template>
+				<template v-else-if="!isDirect && reasoningLevels.length">
+					<button
+						v-for="level in reasoningLevels"
+						:key="level"
+						type="button"
+						class="thinking-item"
+						:class="{ active: activeReasoning === level }"
+						@click.stop="pickCliReasoningAndSelect(activeFlyoutModel, level)"
+					>
+						<span>{{ formatReasoning(level) }}</span>
+						<Check
+							v-if="activeReasoning === level"
+							:size="13"
+							:stroke-width="2.4"
+							class="thinking-check"
+							aria-hidden="true"
+						/>
+					</button>
+				</template>
 			</div>
 		</div>
 	</div>
@@ -239,14 +476,15 @@ watch(isDirect, () => {
 .model-wrap {
 	position: relative;
 	display: inline-flex;
+	align-items: center;
 }
 
-/* ===== 模型选择触发按钮：无边框「图标 + 文字」，仅悬停 / 展开时出现浅底 ===== */
+/* ===== 触发按钮 ===== */
 .composer-model {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	height: 30px;
+	height: 28px;
 	min-width: 0;
 	padding: 0 8px;
 	border: 0;
@@ -267,7 +505,6 @@ watch(isDirect, () => {
 	color: var(--text);
 }
 
-/* 徽标不再使用实色底块：Direct 为线性机器人图标，CLI 为品牌图标原色 */
 .model-badge {
 	display: inline-grid;
 	place-items: center;
@@ -301,37 +538,51 @@ watch(isDirect, () => {
 	max-width: 168px;
 }
 
-/* ===== 设置弹出面板 ===== */
+/* ===== 主下拉面板（图二/图三简洁风格） ===== */
 .model-popover {
 	position: absolute;
 	left: 0;
-	width: 236px;
-	padding: 10px;
+	width: 256px;
+	padding: 6px;
 	border: 1px solid var(--border);
 	border-radius: 12px;
 	background: var(--panel);
-	box-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.05), 0 12px 32px rgba(var(--shadow-ink), 0.12);
-	z-index: 40;
+	box-shadow:
+		0 4px 16px rgba(var(--shadow-ink), 0.08),
+		0 16px 36px rgba(var(--shadow-ink), 0.16);
+	z-index: 50;
 }
 
 .model-popover--down {
-	top: calc(100% + 6px);
+	top: calc(100% + 7px);
 	transform-origin: top left;
 	animation: pop-in-down 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .model-popover--up {
-	bottom: calc(100% + 6px);
+	bottom: calc(100% + 7px);
 	transform-origin: bottom left;
 	animation: pop-in-up 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.model-popover--end {
+	left: auto;
+	right: 0;
+}
+
+.model-popover--end.model-popover--down {
+	transform-origin: top right;
+}
+
+.model-popover--end.model-popover--up {
+	transform-origin: bottom right;
 }
 
 @keyframes pop-in-down {
 	from {
 		opacity: 0;
-		transform: translateY(-6px) scale(0.98);
+		transform: translateY(-5px) scale(0.98);
 	}
-
 	to {
 		opacity: 1;
 		transform: translateY(0) scale(1);
@@ -341,9 +592,8 @@ watch(isDirect, () => {
 @keyframes pop-in-up {
 	from {
 		opacity: 0;
-		transform: translateY(6px) scale(0.98);
+		transform: translateY(5px) scale(0.98);
 	}
-
 	to {
 		opacity: 1;
 		transform: translateY(0) scale(1);
@@ -351,285 +601,302 @@ watch(isDirect, () => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
 	.model-popover--down,
 	.model-popover--up {
 		animation: none;
 	}
 }
 
-.pop-label {
-	font-size: var(--fs-105);
-	font-weight: 600;
-	letter-spacing: 0.04em;
-	color: var(--muted);
-	margin: 2px 2px 6px;
+/* 顶部模式切换 */
+.pop-header {
+	margin-bottom: 5px;
+	padding: 2px 2px 4px;
 }
 
-.pop-section+.pop-section {
-	margin-top: 11px;
-}
-
-.agent-hint {
-	margin: 0 2px 6px;
-	color: var(--muted-soft);
-	font-size: var(--fs-115);
-	line-height: 1.55;
-}
-
-.agent-hint--error {
-	color: var(--err-text);
-}
-
-/* 模式分段控件 */
 .seg {
 	display: grid;
 	grid-template-columns: 1fr 1fr;
-	gap: 3px;
+	gap: 2px;
 	padding: 2px;
 	border: 1px solid var(--border);
-	border-radius: 9px;
-	background: var(--panel-soft);
+	border-radius: 8px;
+	background: var(--bg-canvas);
 }
 
-.seg button {
-	height: 26px;
+.seg-btn {
+	height: 24px;
 	border: 0;
 	border-radius: 6px;
 	background: transparent;
 	color: var(--muted);
-	font: 550 12px/1 inherit;
+	font: 500 11.5px/1 inherit;
 	cursor: pointer;
 	transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
 
-.seg button[aria-pressed='true'] {
+.seg-btn[aria-pressed='true'] {
 	background: var(--panel);
-	color: var(--text);
-	box-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.08);
+	color: var(--text-strong);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.1);
 }
 
-/* 代理列表：固定可视高度（约 4 行），超出滚动 */
-.agent-list {
+.model-hint {
+	margin: 6px 8px;
+	color: var(--muted-soft);
+	font-size: 11.5px;
+	line-height: 1.5;
+}
+
+.model-hint--error {
+	color: var(--err-text);
+}
+
+/* CLI 工具切换条 */
+.cli-agents-bar {
+	display: flex;
+	gap: 4px;
+	padding: 0 4px 6px;
+	border-bottom: 1px solid var(--border);
+	margin-bottom: 4px;
+}
+
+.cli-agent-chip {
+	padding: 2px 7px;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--muted);
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.cli-agent-chip.active {
+	background: var(--panel-soft);
+	color: var(--text);
+	font-weight: 600;
+}
+
+/* ===== 模型列表（图三设计） ===== */
+.models-list {
 	display: grid;
 	gap: 2px;
-	max-height: 152px;
+	max-height: 260px;
 	overflow-y: auto;
-	overscroll-behavior: contain;
-	padding-right: 2px;
+	padding: 2px 0;
 }
 
-.agent-list::-webkit-scrollbar {
-	width: 6px;
+.models-list::-webkit-scrollbar {
+	width: 5px;
 }
 
-.agent-list::-webkit-scrollbar-track {
+.models-list::-webkit-scrollbar-track {
 	background: transparent;
 }
 
-.agent-list::-webkit-scrollbar-thumb {
+.models-list::-webkit-scrollbar-thumb {
 	background: var(--border-strong);
 	border-radius: 99px;
 }
 
-/* 列表项：去掉逐项边框，与无框触发按钮保持同一语言 */
-.agent-item {
+/* 单个模型行 */
+.model-row {
 	display: flex;
 	align-items: center;
-	gap: 9px;
+	justify-content: space-between;
+	gap: 8px;
 	width: 100%;
-	padding: 7px 8px;
+	padding: 7px 9px;
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
 	color: var(--text);
-	font: 550 12.5px/1.2 inherit;
 	text-align: left;
 	cursor: pointer;
-	transition: background 0.12s;
+	transition: background 0.12s ease;
 }
 
-.agent-item:hover {
+.model-row:hover,
+.model-row.hovered {
 	background: var(--panel-soft);
 }
 
-/* 选中项：浅强调底 + 勾，不再用描边区分 */
-.agent-item[aria-checked='true'] {
-	background: var(--accent-soft, color-mix(in srgb, var(--accent) 8%, transparent));
+.model-row.active {
+	background: var(--panel-soft);
 }
 
-.agent-glyph {
-	display: inline-grid;
-	place-items: center;
-	width: 20px;
-	height: 20px;
-	border-radius: 6px;
+.model-row-left {
+	display: grid;
+	gap: 1px;
+	min-width: 0;
+	flex: 1;
+}
+
+.model-row-title {
+	font-size: 12.5px;
+	font-weight: 550;
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	line-height: 1.25;
+}
+
+.model-row-desc {
+	font-size: 10.5px;
+	color: var(--muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	line-height: 1.35;
+}
+
+.model-row-right {
+	display: flex;
+	align-items: center;
+	gap: 5px;
 	flex: none;
 }
 
-.agent-glyph svg {
-	width: 13px;
-	height: 13px;
+.reasoning-tag {
+	font-size: 11px;
+	font-weight: 550;
+	color: var(--muted);
+	padding: 1px 5px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
-.agent-glyph-img {
-	display: block;
-	width: 14px;
-	height: 14px;
-	object-fit: contain;
+.reasoning-arrow {
+	color: var(--muted-soft);
+	transition: transform 0.14s ease, color 0.14s ease;
 }
 
-.agent-name {
-	flex: 1;
-	min-width: 0;
+.model-row:hover .reasoning-arrow,
+.model-row.hovered .reasoning-arrow {
+	color: var(--text);
+	transform: translateX(1px);
 }
 
-.agent-check {
-	width: 14px;
-	height: 14px;
-	color: var(--accent);
+.model-row-check {
+	color: var(--text-strong);
 	visibility: hidden;
 	flex: none;
 }
 
-.agent-item[aria-checked='true'] .agent-check {
+.model-row-check.visible {
 	visibility: visible;
 }
 
-/* 模型下拉 */
-.model-select {
-	position: relative;
-}
-
-.model-select-btn {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 8px;
-	width: 100%;
-	height: 32px;
-	padding: 0 9px 0 10px;
-	border: 1px solid var(--border);
-	border-radius: 9px;
-	background: var(--panel);
-	color: var(--text);
-	font: 550 12.5px/1 inherit;
-	cursor: pointer;
-	transition: background 0.15s, border-color 0.15s;
-}
-
-/* 模型名过长时截断为省略号，保持单行不换行 */
-.model-select-btn>span {
-	flex: 1;
-	min-width: 0;
-	overflow: hidden;
-	text-align: left;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.model-select-btn:hover {
-	background: var(--panel-soft);
-}
-
-/* 菜单在右侧展开，箭头指向右以示意 */
-.model-select-btn .caret {
-	color: var(--muted);
-	flex: none;
-}
-
-/* 模型菜单：贴着选择框右侧展开、底边对齐向上生长，避免被窗口下缘遮挡。
-   固定 320px 高度上限，模型过多时内部滚动。 */
-.model-menu {
+/* ===== 悬停展开的思考等级子菜单（图三右侧飞出菜单） ===== */
+.thinking-flyout {
 	position: absolute;
-	left: calc(100% + 8px);
-	bottom: 0;
-	box-sizing: border-box;
-	width: max-content;
-	min-width: 170px;
-	max-width: 240px;
-	max-height: 320px;
+	width: 136px;
+	max-height: min(290px, calc(100vh - 32px));
 	overflow-y: auto;
-	overscroll-behavior: contain;
-	padding: 4px;
+	padding: 5px;
 	border: 1px solid var(--border);
-	border-radius: 9px;
+	border-radius: 10px;
 	background: var(--panel);
-	box-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.05), 0 12px 32px rgba(var(--shadow-ink), 0.12);
-	z-index: 3;
+	box-shadow:
+		0 4px 16px rgba(var(--shadow-ink), 0.08),
+		0 16px 32px rgba(var(--shadow-ink), 0.14);
+	z-index: 60;
 }
 
-.model-menu::-webkit-scrollbar {
-	width: 6px;
+.thinking-flyout::-webkit-scrollbar {
+	width: 4px;
 }
 
-.model-menu::-webkit-scrollbar-track {
-	background: transparent;
-}
-
-.model-menu::-webkit-scrollbar-thumb {
+.thinking-flyout::-webkit-scrollbar-thumb {
 	background: var(--border-strong);
 	border-radius: 99px;
 }
 
-.model-opt {
+/* 当整个 popover 靠右对齐时，向左侧展开（防溢出） */
+.model-popover--end .thinking-flyout {
+	left: auto;
+	right: calc(100% + 6px);
+	transform-origin: top right;
+	animation: flyout-left 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.model-popover--up.model-popover--end .thinking-flyout {
+	transform-origin: bottom right;
+}
+
+/* 当靠左对齐时，向右侧展开 */
+.model-popover--start .thinking-flyout {
+	left: calc(100% + 6px);
+	right: auto;
+	transform-origin: top left;
+	animation: flyout-right 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.model-popover--up.model-popover--start .thinking-flyout {
+	transform-origin: bottom left;
+}
+
+@keyframes flyout-left {
+	from {
+		opacity: 0;
+		transform: translateX(4px) scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0) scale(1);
+	}
+}
+
+@keyframes flyout-right {
+	from {
+		opacity: 0;
+		transform: translateX(-4px) scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(0) scale(1);
+	}
+}
+
+.thinking-flyout-head {
+	font-size: 10.5px;
+	font-weight: 650;
+	letter-spacing: 0.03em;
+	text-transform: uppercase;
+	color: var(--muted);
+	padding: 3px 7px 4px;
+}
+
+.thinking-item {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 8px;
 	width: 100%;
-	padding: 7px 8px;
+	height: 28px;
+	padding: 0 8px;
 	border: 0;
-	border-radius: 7px;
+	border-radius: 6px;
 	background: transparent;
 	color: var(--text);
-	font: 500 12.5px/1.2 inherit;
-	text-align: left;
+	font-size: 12.5px;
+	font-weight: 500;
 	cursor: pointer;
+	transition: background 0.12s ease;
+	text-align: left;
 }
 
-.model-opt:hover {
+.thinking-item:hover {
 	background: var(--panel-soft);
 }
 
-.model-opt .tick {
-	width: 14px;
-	height: 14px;
-	color: var(--accent);
-	visibility: hidden;
-	flex: none;
-}
-
-/* 选中项与代理列表一致：浅强调底 + 强调色勾 */
-.model-opt[aria-selected='true'] {
-	background: var(--accent-soft, color-mix(in srgb, var(--accent) 8%, transparent));
+.thinking-item.active {
+	background: var(--panel-soft);
+	color: var(--text-strong);
 	font-weight: 600;
 }
 
-.model-opt[aria-selected='true'] .tick {
-	visibility: visible;
-}
-
-.model-opt-copy {
-	display: grid;
-	min-width: 0;
-	gap: 2px;
-}
-
-.model-opt-copy strong,
-.model-opt-copy small {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.model-opt-copy strong {
-	font: inherit;
-}
-
-.model-opt-copy small {
-	color: var(--muted-soft);
-	font-size: var(--fs-105);
-	font-weight: 500;
+.thinking-check {
+	color: var(--text-strong);
+	flex: none;
 }
 </style>

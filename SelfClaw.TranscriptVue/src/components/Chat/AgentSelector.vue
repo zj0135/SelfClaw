@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
-import { Check, Bot, Infinity as InfinityIcon } from 'lucide-vue-next';
+import { Check, Bot } from 'lucide-vue-next';
 import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js';
 
 /**
@@ -133,7 +133,7 @@ watch(() => props.selectedAgentId, () => {
 	<div ref="rootRef" class="agent-wrap">
 		<button class="composer-agent" type="button" :aria-expanded="open ? 'true' : 'false'"
 			aria-haspopup="true" title="代理选择" @click.stop="togglePanel">
-			<InfinityIcon class="agent-icon" :size="15" :stroke-width="1.8" aria-hidden="true" />
+			<Bot class="agent-icon" :size="15" :stroke-width="1.8" aria-hidden="true" />
 			<span class="agent-name">{{ label }}</span>
 		</button>
 
@@ -223,23 +223,23 @@ watch(() => props.selectedAgentId, () => {
 .agent-popover {
 	position: absolute;
 	left: 0;
-	width: 248px;
-	padding: 10px;
+	width: 256px;
+	padding: 5px;
 	border: 1px solid var(--border);
 	border-radius: 12px;
 	background: var(--panel);
-	box-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.05), 0 12px 32px rgba(var(--shadow-ink), 0.12);
-	z-index: 40;
+	box-shadow: 0 4px 16px rgba(var(--shadow-ink), 0.08), 0 16px 36px rgba(var(--shadow-ink), 0.16);
+	z-index: 50;
 }
 
 .agent-popover--down {
-	top: calc(100% + 6px);
+	top: calc(100% + 7px);
 	transform-origin: top left;
 	animation: agent-pop-in-down 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .agent-popover--up {
-	bottom: calc(100% + 6px);
+	bottom: calc(100% + 7px);
 	transform-origin: bottom left;
 	animation: agent-pop-in-up 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -247,9 +247,8 @@ watch(() => props.selectedAgentId, () => {
 @keyframes agent-pop-in-down {
 	from {
 		opacity: 0;
-		transform: translateY(-6px) scale(0.98);
+		transform: translateY(-5px) scale(0.98);
 	}
-
 	to {
 		opacity: 1;
 		transform: translateY(0) scale(1);
@@ -259,9 +258,8 @@ watch(() => props.selectedAgentId, () => {
 @keyframes agent-pop-in-up {
 	from {
 		opacity: 0;
-		transform: translateY(6px) scale(0.98);
+		transform: translateY(5px) scale(0.98);
 	}
-
 	to {
 		opacity: 1;
 		transform: translateY(0) scale(1);
@@ -269,7 +267,6 @@ watch(() => props.selectedAgentId, () => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
 	.agent-popover--down,
 	.agent-popover--up {
 		animation: none;
@@ -277,18 +274,19 @@ watch(() => props.selectedAgentId, () => {
 }
 
 .pop-label {
-	font-size: var(--fs-105);
-	font-weight: 600;
+	font-size: 11px;
+	font-weight: 650;
 	letter-spacing: 0.04em;
+	text-transform: uppercase;
 	color: var(--muted);
-	margin: 2px 2px 6px;
+	margin: 5px 8px 4px;
 }
 
 .agent-hint {
-	margin: 0 2px 6px;
+	margin: 4px 8px 6px;
 	color: var(--muted-soft);
-	font-size: var(--fs-115);
-	line-height: 1.55;
+	font-size: 11.5px;
+	line-height: 1.5;
 }
 
 .agent-hint--error {
@@ -298,14 +296,14 @@ watch(() => props.selectedAgentId, () => {
 .agent-list {
 	display: grid;
 	gap: 2px;
-	max-height: 224px;
+	max-height: 240px;
 	overflow-y: auto;
 	overscroll-behavior: contain;
-	padding-right: 2px;
+	padding: 2px 0;
 }
 
 .agent-list::-webkit-scrollbar {
-	width: 6px;
+	width: 5px;
 }
 
 .agent-list::-webkit-scrollbar-track {
@@ -317,45 +315,42 @@ watch(() => props.selectedAgentId, () => {
 	border-radius: 99px;
 }
 
-/* 列表项：去掉逐项边框，与无框触发按钮保持同一语言 */
+/* 列表项：对标图二/图三极简行排版 */
 .agent-item {
 	display: flex;
 	align-items: center;
 	gap: 9px;
 	width: 100%;
-	padding: 7px 8px;
+	padding: 8px 10px;
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
 	color: var(--text);
 	text-align: left;
 	cursor: pointer;
-	transition: background 0.12s;
+	transition: background 0.12s ease;
 }
 
 .agent-item:hover {
 	background: var(--panel-soft);
 }
 
-/* 选中项：浅强调底 + 勾，不再用描边区分 */
 .agent-item[aria-checked='true'] {
-	background: var(--accent-soft, color-mix(in srgb, var(--accent) 8%, transparent));
+	background: var(--panel-soft);
 }
 
 .agent-item-glyph {
-	display: inline-grid;
-	place-items: center;
-	width: 20px;
-	height: 20px;
-	border-radius: 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
 	flex: none;
-	background: var(--panel-muted);
-	color: var(--text-soft);
+	color: var(--muted);
 }
 
 .agent-item-glyph svg {
-	width: 13px;
-	height: 13px;
+	width: 14px;
+	height: 14px;
 }
 
 .agent-item-copy {
@@ -369,39 +364,38 @@ watch(() => props.selectedAgentId, () => {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font: 550 12.5px/1.2 inherit;
+	font-size: 13px;
+	font-weight: 550;
 	color: var(--text);
+	line-height: 1.25;
 }
 
 .agent-item-desc {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	font-size: var(--fs-105);
-	color: var(--muted-soft);
+	font-size: 11px;
+	color: var(--muted);
+	line-height: 1.35;
 }
 
 .agent-item-desc--error {
 	color: var(--err-text);
 }
 
-/* 模式标签统一中性色，强调色只留给选中态 */
 .agent-item-mode {
 	flex: none;
-	font-size: var(--fs-10);
-	font-weight: 600;
-	letter-spacing: 0.06em;
-	padding: 2px 6px;
-	border-radius: 5px;
-	background: var(--panel-muted);
-	color: var(--muted);
+	font-size: 10.5px;
+	font-weight: 500;
+	padding: 1px 5px;
+	border-radius: 4px;
+	color: var(--muted-soft);
 }
 
-/* 勾始终占位，避免选中时模式标签左右跳动 */
 .agent-item-check {
 	width: 14px;
 	height: 14px;
-	color: var(--accent);
+	color: var(--text-strong);
 	visibility: hidden;
 	flex: none;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCompressionNotice, formatContextUsage, formatTokenCount } from '../src/renderers/usageMeter.js';
+import { calculateUsageProgress, formatCompressionNotice, formatContextUsage, formatTokenCount } from '../src/renderers/usageMeter.js';
 
 describe('formatTokenCount', () => {
 	it('abbreviates thousands and millions with at most two decimals', () => {
@@ -105,5 +105,57 @@ describe('formatContextUsage', () => {
 	it('ignores a missing usage summary', () => {
 		expect(formatContextUsage(null)).toBeNull();
 		expect(formatContextUsage(undefined)).toBeNull();
+	});
+});
+
+describe('calculateUsageProgress', () => {
+	const usage = (overrides = {}) => ({
+		inputTokens: 127_810, outputTokens: 3_170, contextTokens: 20_620, contextWindowTokens: 1_000_000,
+		contextIsEstimated: false, ...overrides,
+	});
+
+	it('computes percentage and ratio based on declared context window', () => {
+		const progress = calculateUsageProgress(usage());
+		expect(progress.limitTokens).toBe(1_000_000);
+		expect(progress.isAbsoluteThreshold).toBe(false);
+		expect(progress.percentage).toBe(2);
+		expect(progress.percentageText).toBe('2%');
+		expect(progress.contextText).toBe('20.62K');
+		expect(progress.limitText).toBe('1M');
+		expect(progress.inputTokensText).toBe('127.81K');
+		expect(progress.outputTokensText).toBe('3.17K');
+		expect(progress.totalTokensText).toBe('130.98K');
+		expect(progress.tone).toBe('normal');
+	});
+
+	it('falls back to configured absolute threshold when context window is missing', () => {
+		const progress = calculateUsageProgress(usage({ contextWindowTokens: null, contextTokens: 20_000 }), 64_000);
+		expect(progress.limitTokens).toBe(64_000);
+		expect(progress.isAbsoluteThreshold).toBe(true);
+		expect(progress.percentage).toBe(31);
+		expect(progress.percentageText).toBe('31%');
+		expect(progress.limitText).toBe('64K');
+	});
+
+	it('displays <1% when context tokens exist but round down to 0%', () => {
+		const progress = calculateUsageProgress(usage({ contextTokens: 100, contextWindowTokens: 1_000_000 }));
+		expect(progress.percentage).toBe(0);
+		expect(progress.percentageText).toBe('<1%');
+	});
+
+	it('sets tone according to context saturation', () => {
+		expect(calculateUsageProgress(usage({ contextTokens: 700_000, contextWindowTokens: 1_000_000 })).tone).toBe('warm');
+		expect(calculateUsageProgress(usage({ contextTokens: 900_000, contextWindowTokens: 1_000_000 })).tone).toBe('critical');
+	});
+
+	it('marks estimated context size with a tilde', () => {
+		const progress = calculateUsageProgress(usage({ contextIsEstimated: true }));
+		expect(progress.contextText).toBe('~20.62K');
+		expect(progress.contextIsEstimated).toBe(true);
+	});
+
+	it('returns null when usage is absent', () => {
+		expect(calculateUsageProgress(null)).toBeNull();
+		expect(calculateUsageProgress(undefined)).toBeNull();
 	});
 });

@@ -29,6 +29,65 @@ export function formatContextUsage(usage) {
 	};
 }
 
+export function calculateUsageProgress(usage, fallbackAbsoluteThreshold = 64_000) {
+	if (!usage) return null;
+
+	const hasContextTokens = usage.contextTokens != null && Number.isFinite(Number(usage.contextTokens)) && Number(usage.contextTokens) >= 0;
+	const contextTokens = hasContextTokens ? Number(usage.contextTokens) : 0;
+
+	const hasWindow = usage.contextWindowTokens != null && Number.isFinite(Number(usage.contextWindowTokens)) && Number(usage.contextWindowTokens) > 0;
+	const rawWindowTokens = hasWindow ? Number(usage.contextWindowTokens) : null;
+
+	const fallbackThreshold = Number.isFinite(Number(fallbackAbsoluteThreshold)) && Number(fallbackAbsoluteThreshold) > 0
+		? Number(fallbackAbsoluteThreshold)
+		: 64_000;
+
+	const limitTokens = hasWindow ? rawWindowTokens : fallbackThreshold;
+	const isAbsoluteThreshold = !hasWindow;
+
+	const rawRatio = limitTokens > 0 && hasContextTokens ? (contextTokens / limitTokens) : 0;
+	const ratio = Math.min(1, Math.max(0, rawRatio));
+	const percentage = Math.round(rawRatio * 100);
+
+	let percentageText = '0%';
+	if (hasContextTokens && contextTokens > 0) {
+		percentageText = percentage === 0 ? '<1%' : `${percentage}%`;
+	}
+
+	const tone = ratio >= 0.85 ? 'critical' : ratio >= 0.65 ? 'warm' : 'normal';
+
+	const estimated = usage.contextIsEstimated === true;
+	let contextText = unavailableContextText;
+	if (hasContextTokens) {
+		const formatted = contextTokens === 0 ? '0' : formatTokenCount(contextTokens);
+		contextText = estimated ? `~${formatted}` : formatted;
+	}
+
+	const limitText = formatTokenCount(limitTokens);
+	const inputTokensText = formatTokenCount(usage.inputTokens);
+	const outputTokensText = formatTokenCount(usage.outputTokens);
+
+	const rawTotal = (Number(usage.inputTokens) || 0) + (Number(usage.outputTokens) || 0);
+	const totalTokensText = rawTotal > 0 ? formatTokenCount(rawTotal) : '—';
+
+	return {
+		hasContextTokens,
+		contextTokens,
+		limitTokens,
+		isAbsoluteThreshold,
+		ratio,
+		percentage,
+		percentageText,
+		tone,
+		contextText,
+		limitText,
+		inputTokensText: inputTokensText === unknownTokenCount ? '—' : inputTokensText,
+		outputTokensText: outputTokensText === unknownTokenCount ? '—' : outputTokensText,
+		totalTokensText,
+		contextIsEstimated: estimated,
+	};
+}
+
 export function formatCompressionNotice(notice) {
 	if (!notice) return null;
 	const messages = formatCompressedMessages(notice.messageCount);

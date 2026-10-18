@@ -1,16 +1,19 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
-import { Check, ShieldAlert, ShieldCheck } from 'lucide-vue-next';
+import { Check, ChevronDown, ShieldAlert, ShieldCheck } from 'lucide-vue-next';
 
 const props = defineProps({
 	mode: {
 		type: String,
 		default: 'require-approval',
 	},
-	// 菜单水平对齐：放在工具栏右侧时用 end，避免菜单溢出输入框右缘
 	align: {
 		type: String,
 		default: 'start',
+	},
+	placement: {
+		type: String,
+		default: 'up',
 	},
 });
 const emit = defineEmits(['select']);
@@ -33,33 +36,13 @@ const MODES = [
 const open = ref(false);
 const rootRef = ref(null);
 const menuRef = ref(null);
-const placement = ref('down');
-const estimatedMenuHeight = 168;
 
 const current = computed(() =>
 	MODES.find((mode) => mode.id === props.mode) ?? MODES[0],
 );
 
-function updatePlacement() {
-	const rect = rootRef.value?.getBoundingClientRect();
-	if (!rect) {
-		return;
-	}
-
-	const menuHeight = menuRef.value?.offsetHeight || estimatedMenuHeight;
-	const spaceBelow = window.innerHeight - rect.bottom;
-	const spaceAbove = rect.top;
-	placement.value = spaceBelow < menuHeight + 16 && spaceAbove > spaceBelow ? 'up' : 'down';
-}
-
 function toggle() {
 	open.value = !open.value;
-	if (!open.value) {
-		return;
-	}
-
-	updatePlacement();
-	nextTick(updatePlacement);
 }
 
 function close() {
@@ -97,17 +80,41 @@ onBeforeUnmount(() => {
 
 <template>
 	<div ref="rootRef" class="perm-wrap">
-		<button class="icon-btn" :class="`icon-btn--${current.id}`" type="button" :aria-expanded="open ? 'true' : 'false'" aria-haspopup="menu"
-			:title="`工具权限：${current.label}`" @click.stop="toggle">
-			<component :is="current.icon" :size="16" :stroke-width="1.8" aria-hidden="true" />
+		<!-- 底部状态栏按钮：图标 + 文本 + 微箭头 -->
+		<button
+			class="status-perm-btn"
+			:class="`status-perm-btn--${current.id}`"
+			type="button"
+			:aria-expanded="open ? 'true' : 'false'"
+			aria-haspopup="menu"
+			:title="`工具权限：${current.label}`"
+			@click.stop="toggle"
+		>
+			<component :is="current.icon" :size="13" :stroke-width="2" class="status-perm-icon" aria-hidden="true" />
+			<span class="status-perm-label">{{ current.label }}</span>
+			<ChevronDown :size="11" class="status-perm-caret" aria-hidden="true" />
 		</button>
 
-		<div v-show="open" ref="menuRef" class="perm-menu" :class="[`perm-menu--${placement}`, `perm-menu--${align}`]" role="listbox"
-			aria-label="工具权限">
-			<button v-for="mode in MODES" :key="mode.id" type="button" class="perm-opt" role="option"
-				:aria-selected="current.id === mode.id ? 'true' : 'false'" @click="pick(mode.id)">
+		<!-- 极简精炼菜单：图二风格设计 -->
+		<div
+			v-show="open"
+			ref="menuRef"
+			class="perm-menu"
+			:class="[`perm-menu--${placement}`, `perm-menu--${align}`]"
+			role="listbox"
+			aria-label="工具权限"
+		>
+			<button
+				v-for="mode in MODES"
+				:key="mode.id"
+				type="button"
+				class="perm-opt"
+				role="option"
+				:aria-selected="current.id === mode.id ? 'true' : 'false'"
+				@click="pick(mode.id)"
+			>
 				<span class="perm-opt-icon" :class="`perm-opt-icon--${mode.id}`" aria-hidden="true">
-					<component :is="mode.icon" :size="14" :stroke-width="2" />
+					<component :is="mode.icon" :size="15" :stroke-width="1.9" />
 				</span>
 				<span class="perm-opt-copy">
 					<strong>{{ mode.label }}</strong>
@@ -123,60 +130,90 @@ onBeforeUnmount(() => {
 .perm-wrap {
 	position: relative;
 	display: inline-flex;
+	align-items: center;
 }
 
-/* ===== 图标触发按钮（与 composer icon-btn 一致） ===== */
-.icon-btn {
+/* ===== 底部状态栏触发按钮：图标 + 文本（对标模型选择器透明无框质感） ===== */
+.status-perm-btn {
 	display: inline-flex;
 	align-items: center;
-	justify-content: center;
-	width: 32px;
-	height: 32px;
-	padding: 0;
+	gap: 5px;
+	height: 28px;
+	padding: 0 8px;
 	border: 0;
 	border-radius: 8px;
 	background: transparent;
-	color: var(--muted);
+	color: var(--text-soft);
+	font-size: var(--fs-125);
+	font-weight: 500;
+	letter-spacing: 0.01em;
 	cursor: pointer;
 	transition: background 0.15s, color 0.15s;
+	outline: none;
+	user-select: none;
+	white-space: nowrap;
 }
 
-.icon-btn:hover {
+.status-perm-btn:hover,
+.status-perm-btn[aria-expanded='true'] {
 	background: var(--panel-muted);
-	color: var(--text);
+	color: var(--text-strong);
 }
 
-.icon-btn[aria-expanded='true'] {
-	background: var(--panel-muted);
-	color: var(--text);
+.status-perm-icon {
+	flex: none;
 }
 
-/* 需确认时盾牌带琥珀色提示，自动允许回到中性色 */
-.icon-btn--require-approval {
+.status-perm-btn--require-approval .status-perm-icon {
 	color: var(--caution-fill);
 }
 
-/* ===== 下拉菜单 ===== */
+.status-perm-btn--full-access .status-perm-icon {
+	color: var(--accent);
+}
+
+.status-perm-label {
+	color: inherit;
+}
+
+.status-perm-caret {
+	color: var(--muted);
+	flex: none;
+	transition: transform 0.16s ease, color 0.15s ease;
+}
+
+.status-perm-btn:hover .status-perm-caret,
+.status-perm-btn[aria-expanded='true'] .status-perm-caret {
+	color: var(--text-strong);
+}
+
+.status-perm-btn[aria-expanded='true'] .status-perm-caret {
+	transform: rotate(180deg);
+}
+
+/* ===== 下拉弹出面板（严格对标图二简洁卡片） ===== */
 .perm-menu {
 	position: absolute;
 	left: 0;
-	width: 248px;
-	padding: 4px;
+	width: 252px;
+	padding: 5px;
 	border: 1px solid var(--border);
-	border-radius: 10px;
+	border-radius: 12px;
 	background: var(--panel);
-	box-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.05), 0 12px 32px rgba(var(--shadow-ink), 0.12);
-	z-index: 40;
+	box-shadow:
+		0 4px 16px rgba(var(--shadow-ink), 0.08),
+		0 16px 36px rgba(var(--shadow-ink), 0.16);
+	z-index: 90;
 }
 
 .perm-menu--down {
-	top: calc(100% + 6px);
+	top: calc(100% + 7px);
 	transform-origin: top left;
 	animation: menu-in-down 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .perm-menu--up {
-	bottom: calc(100% + 6px);
+	bottom: calc(100% + 7px);
 	transform-origin: bottom left;
 	animation: menu-in-up 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -197,9 +234,8 @@ onBeforeUnmount(() => {
 @keyframes menu-in-down {
 	from {
 		opacity: 0;
-		transform: translateY(-6px) scale(0.98);
+		transform: translateY(-5px) scale(0.98);
 	}
-
 	to {
 		opacity: 1;
 		transform: translateY(0) scale(1);
@@ -209,9 +245,8 @@ onBeforeUnmount(() => {
 @keyframes menu-in-up {
 	from {
 		opacity: 0;
-		transform: translateY(6px) scale(0.98);
+		transform: translateY(5px) scale(0.98);
 	}
-
 	to {
 		opacity: 1;
 		transform: translateY(0) scale(1);
@@ -219,58 +254,50 @@ onBeforeUnmount(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
 	.perm-menu--down,
 	.perm-menu--up {
 		animation: none;
 	}
 }
 
+/* 列表项：对标图二细致排版 */
 .perm-opt {
 	display: flex;
 	align-items: center;
 	gap: 10px;
 	width: 100%;
-	padding: 8px 9px;
+	padding: 8px 10px;
 	border: 0;
-	border-radius: 6px;
+	border-radius: 8px;
 	background: transparent;
 	color: var(--text);
 	text-align: left;
 	cursor: pointer;
-	transition: background 0.15s;
+	transition: background 0.12s ease;
 }
 
 .perm-opt:hover {
-	background: var(--bg-canvas);
+	background: var(--panel-soft);
 }
 
 .perm-opt[aria-selected='true'] {
-	background: var(--accent-soft, color-mix(in srgb, var(--accent) 8%, transparent));
+	background: var(--panel-soft);
 }
 
 .perm-opt-icon {
-	display: inline-grid;
-	place-items: center;
-	width: 22px;
-	height: 22px;
-	border-radius: 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--muted);
 	flex: none;
 }
 
-.perm-opt-icon svg {
-	width: 14px;
-	height: 14px;
-}
-
 .perm-opt-icon--require-approval {
-	background: var(--caution-icon-bg);
 	color: var(--caution-fill);
 }
 
 .perm-opt-icon--full-access {
-	background: color-mix(in srgb, var(--success) 14%, transparent);
-	color: var(--success);
+	color: var(--accent);
 }
 
 .perm-opt-copy {
@@ -281,25 +308,22 @@ onBeforeUnmount(() => {
 }
 
 .perm-opt-copy strong {
-	font: inherit;
-	font-weight: 600;
-	font-size: var(--fs-125);
+	font-size: 13px;
+	font-weight: 550;
+	color: var(--text);
+	line-height: 1.25;
 }
 
 .perm-opt-copy small {
-	overflow: hidden;
-	color: var(--muted-soft);
-	font-size: var(--fs-105);
-	font-weight: 500;
+	color: var(--muted);
+	font-size: 11px;
 	line-height: 1.35;
-	text-overflow: ellipsis;
-	white-space: nowrap;
 }
 
 .perm-opt-check {
 	width: 14px;
 	height: 14px;
-	color: var(--accent);
+	color: var(--text-strong);
 	flex: none;
 	display: none;
 }
