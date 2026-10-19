@@ -64,9 +64,11 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
     internal Task ApplyEventAsync(AgentStreamEvent streamEvent, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(streamEvent);
+        // A usage progress snapshot is a display-only refresh: the mutation's own activity rebuild already
+        // republishes the subagent usage, so promoting it to an immediate boundary push would cost up to one
+        // forced snapshot per provider request without showing anything new.
         return MutateAsync(() => ApplyCoreAsync(streamEvent, cancellationToken),
-            streamEvent is ToolCallStartedEvent or ToolCallCompletedEvent or RunCompletedEvent or UsageReportedEvent
-                or UsageProgressEvent,
+            streamEvent is ToolCallStartedEvent or ToolCallCompletedEvent or RunCompletedEvent or UsageReportedEvent,
             cancellationToken);
     }
 

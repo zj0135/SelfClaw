@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
@@ -37,6 +38,64 @@ public sealed class SubagentExecutionSessionTests
         initial.Turn.Status.Should().Be(ConversationTurnStatus.Running);
         initial.Turn.Usage.Should().BeNull();
         await context.Registry.UnregisterAsync(session);
+    }
+
+    [Fact]
+    public async Task A_usage_progress_snapshot_refreshes_content_without_forcing_a_boundary_push()
+    {
+        using var context = new SubagentActivityTestContext();
+        var changes = new ConcurrentQueue<SubagentStateChange>();
+        context.Changes.Changed += changes.Enqueue;
+        var task = await context.CreateTaskAsync();
+        var session = await context.RegisterSessionAsync(task);
+        await session.BeginAsync();
+        await session.ApplyEventAsync(new RunStartedEvent("child", "model", null), CancellationToken.None);
+        await WaitUntilStableAsync(changes);
+        var boundariesBefore = changes.Count(change => change.Kind == SubagentStateChangeKind.ExecutionBoundary);
+        var totalBefore = changes.Count;
+
+        await session.ApplyEventAsync(
+            new UsageProgressEvent(new TurnUsage(InputTokens: 12, OutputTokens: 3, LastRequestInputTokens: 900)),
+            CancellationToken.None);
+        await WaitForCountAsync(changes, totalBefore + 1);
+        await WaitUntilStableAsync(changes);
+
+        // The mutation's own activity rebuild already republishes the subagent usage, so a display-only
+        // snapshot must not escalate to the immediate boundary push that costs one forced snapshot per request.
+        changes.Count(change => change.Kind == SubagentStateChangeKind.ExecutionBoundary)
+            .Should().Be(boundariesBefore, "a usage snapshot never forces a boundary push");
+        changes.Skip(totalBefore).Should().Contain(change => change.Kind == SubagentStateChangeKind.ExecutionContent);
+        // The snapshot stays display-only: the persisted turn usage still comes from the accumulator.
+        var snapshot = await session.CaptureSnapshotAsync() ?? throw new InvalidOperationException("Missing live snapshot.");
+        snapshot.Turn.Usage.Should().BeNull();
+        await context.Registry.UnregisterAsync(session);
+    }
+
+    private static async Task WaitForCountAsync(ConcurrentQueue<SubagentStateChange> changes, int count)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        while (changes.Count < count)
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+    }
+
+    private static async Task WaitUntilStableAsync(ConcurrentQueue<SubagentStateChange> changes)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var last = -1;
+        try
+        {
+            while (changes.Count != last)
+            {
+                last = changes.Count;
+                await Task.Delay(50, timeout.Token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The queue never settled; the assertions below still run against what was observed.
+        }
     }
 
     [Fact]

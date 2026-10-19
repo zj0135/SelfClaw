@@ -119,6 +119,8 @@ token 预算按 tokenizer 计数：超阈值由压缩（摘要 + 边界重放）
 
 `budget.ContextWindowTokens is null && !policy.Enabled` 时完全不计数：既没有窗口校验也没有压缩要判定，不发布估算之后这次计数已无消费者。
 
+子代理回合走同一条 `DirectAgentChatRuntime`，因此也会发 `UsageProgressEvent`；但 `SubagentExecutionSession.ApplyEventAsync` 不把它当作立即推送的理由——`MutateAsync` 的收尾本来就会重算 `SubagentExecutionActivity` 的用量并推 `ExecutionContent`，把一个纯显示快照升级成 `ExecutionBoundary` 只会让一个任务最多多出 128 次强制面板刷新，而显示内容不变。
+
 ## 6. 持久化与配置边界
 
 `IConversationRepository` 暴露会话、消息和工具记录。Workspace Root CRUD 归入 `IWorkspaceRootRepository`，与 Git checkout/repository 存储共用 `SqliteWorkspaceRepository`；Git 服务不再依赖会话仓库。provider 管理仓库保持 Infrastructure internal，不机械拆分管理接口。
