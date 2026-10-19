@@ -24,7 +24,6 @@ const {
 <template>
 	<div class="compression-section">
 		<div class="comp-desc-row">
-			<p class="comp-desc">长会话越过阈值时，把较早的历史压成一段可展开的摘要，再接上未受影响的近期内容。</p>
 			<span class="sync-state" :data-saving="saving ? 'true' : 'false'">
 				<Loader2 v-if="saving" :size="12" :stroke-width="2" class="sync-spin" aria-hidden="true" />
 				{{ saving ? '保存中' : loading ? '加载中' : '已同步' }}

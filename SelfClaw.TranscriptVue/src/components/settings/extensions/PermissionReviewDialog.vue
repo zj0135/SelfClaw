@@ -27,7 +27,6 @@ const permissions = computed(() =>
 					<ShieldCheck :size="18" aria-hidden="true" />
 				</div>
 				<div>
-					<span>PERMISSION REVIEW</span>
 					<h2 id="permission-review-title">确认 {{ plugin.name }} 的权限</h2>
 				</div>
 				<button type="button" class="icon" title="关闭" :disabled="pending" @click="$emit('close')">

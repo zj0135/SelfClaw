@@ -67,21 +67,27 @@ function itemHealthy(item) {
 <template>
 	<aside class="list-col">
 		<div class="list-top sc-rise" style="--i: 0">
-			<div class="list-kicker">
-				<span>{{ activeKind === 'agent' ? 'AGENT INDEX' : 'SUBAGENT INDEX' }}</span>
-				<span class="list-kicker-count">{{ totalCount }} 项</span>
-			</div>
 			<div class="seg-wrap">
 				<div class="seg" role="tablist" aria-label="定义类型">
-					<button type="button" role="tab" :aria-selected="activeKind === 'agent'"
-						:class="{ active: activeKind === 'agent' }" @click="emit('update:activeKind', 'agent')">
-						<Bot :size="13" :stroke-width="2.1" aria-hidden="true" />
-						代理
+					<button
+						type="button"
+						role="tab"
+						:aria-selected="activeKind === 'agent'"
+						:class="{ active: activeKind === 'agent' }"
+						@click="emit('update:activeKind', 'agent')"
+					>
+						<Bot :size="13" :stroke-width="2.2" aria-hidden="true" />
+						<span>代理</span>
 					</button>
-					<button type="button" role="tab" :aria-selected="activeKind === 'subagent'"
-						:class="{ active: activeKind === 'subagent' }" @click="emit('update:activeKind', 'subagent')">
-						<Workflow :size="13" :stroke-width="2.1" aria-hidden="true" />
-						子代理
+					<button
+						type="button"
+						role="tab"
+						:aria-selected="activeKind === 'subagent'"
+						:class="{ active: activeKind === 'subagent' }"
+						@click="emit('update:activeKind', 'subagent')"
+					>
+						<Workflow :size="13" :stroke-width="2.2" aria-hidden="true" />
+						<span>子代理</span>
 					</button>
 				</div>
 				<button
@@ -91,13 +97,17 @@ function itemHealthy(item) {
 					:aria-label="`新增${activeKind === 'agent' ? '代理' : '子代理'}`"
 					@click="emit('create')"
 				>
-					<Plus :size="15" :stroke-width="2.2" aria-hidden="true" />
+					<Plus :size="15" :stroke-width="2.4" aria-hidden="true" />
 				</button>
 			</div>
 			<div class="search">
 				<Search :size="14" :stroke-width="2" class="search-ico" aria-hidden="true" />
-				<input v-model="term" type="text" :placeholder="activeKind === 'agent' ? '搜索代理...' : '搜索子代理...'"
-					:aria-label="activeKind === 'agent' ? '搜索代理' : '搜索子代理'" />
+				<input
+					v-model="term"
+					type="text"
+					:placeholder="activeKind === 'agent' ? '搜索代理名称或 ID...' : '搜索子代理...'"
+					:aria-label="activeKind === 'agent' ? '搜索代理' : '搜索子代理'"
+				/>
 			</div>
 		</div>
 
@@ -108,15 +118,20 @@ function itemHealthy(item) {
 					<div class="grp-label">
 						<span class="grp-dot" :class="{ live: group.live }" aria-hidden="true"></span>
 						<span>{{ group.label }}</span>
-						<span class="grp-en">{{ group.en }}</span>
 					</div>
-					<button v-for="(item, index) in group.items" :key="item.id" type="button" class="entry sc-rise"
-						:style="{ '--i': index + 1 }" :class="{ active: item.id === selectedId }"
-						@click="emit('select', item.id)">
+					<button
+						v-for="(item, index) in group.items"
+						:key="item.id"
+						type="button"
+						class="entry sc-rise"
+						:style="{ '--i': index + 1 }"
+						:class="{ active: item.id === selectedId }"
+						@click="emit('select', item.id)"
+					>
 						<span class="e-index">{{ itemIndex(item) }}</span>
 						<span class="e-icon" aria-hidden="true">
-							<Bot v-if="activeKind === 'agent'" :size="17" :stroke-width="1.9" />
-							<Workflow v-else :size="17" :stroke-width="1.9" />
+							<Bot v-if="activeKind === 'agent'" :size="17" :stroke-width="2" />
+							<Workflow v-else :size="17" :stroke-width="2" />
 						</span>
 						<span class="e-meta">
 							<span class="e-name">{{ item.name }}</span>
@@ -141,7 +156,7 @@ function itemHealthy(item) {
 	min-height: 0;
 	flex-direction: column;
 	border-right: 1px solid var(--sc-line);
-	background: color-mix(in srgb, var(--sc-panel) 72%, transparent);
+	background: color-mix(in srgb, var(--sc-panel) 82%, var(--sc-bg));
 }
 
 .list-top {
@@ -157,7 +172,7 @@ function itemHealthy(item) {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
 	font-size: var(--fs-10);
-	font-weight: 600;
+	font-weight: 650;
 	letter-spacing: 0.22em;
 }
 
@@ -178,9 +193,9 @@ function itemHealthy(item) {
 	grid-template-columns: 1fr 1fr;
 	gap: 4px;
 	flex: 1;
-	padding: 4px;
-	border: 1px solid var(--sc-line);
-	border-radius: 10px;
+	padding: 3px;
+	border: 1px solid var(--sc-line-2);
+	border-radius: 9px;
 	background: var(--sc-raise);
 }
 
@@ -196,12 +211,9 @@ function itemHealthy(item) {
 	color: var(--sc-mute);
 	cursor: pointer;
 	font: inherit;
-	font-size: var(--fs-125);
-	font-weight: 560;
-	transition:
-		background 0.16s var(--sc-ease-out),
-		color 0.16s var(--sc-ease-out),
-		box-shadow 0.16s var(--sc-ease-out);
+	font-size: var(--fs-12);
+	font-weight: 600;
+	transition: all 0.16s var(--sc-ease-out);
 }
 
 .seg button:hover {
@@ -220,23 +232,20 @@ function itemHealthy(item) {
 	height: 38px;
 	flex: 0 0 auto;
 	place-items: center;
-	border: 1px solid var(--sc-line);
-	border-radius: 10px;
+	border: 1px solid var(--sc-line-2);
+	border-radius: 9px;
 	background: var(--sc-raise);
 	color: var(--sc-soft);
 	cursor: pointer;
-	transition:
-		background 0.16s var(--sc-ease-out),
-		color 0.16s var(--sc-ease-out),
-		border-color 0.16s var(--sc-ease-out),
-		box-shadow 0.16s var(--sc-ease-out);
+	transition: all 0.16s var(--sc-ease-spring);
 }
 
 .add-btn:hover {
-	border-color: color-mix(in srgb, var(--sc-acid) 35%, transparent);
-	background: var(--sc-panel);
-	color: var(--sc-acid);
-	box-shadow: 0 2px 8px rgba(var(--shadow-ink), 0.08);
+	border-color: var(--sc-acid);
+	background: var(--sc-acid);
+	color: var(--sc-acid-ink);
+	transform: translateY(-1px);
+	box-shadow: 0 4px 12px color-mix(in srgb, var(--sc-acid) 25%, transparent);
 }
 
 .add-btn:active {
@@ -260,14 +269,15 @@ function itemHealthy(item) {
 
 .search input {
 	width: 100%;
-	padding: 9px 10px 9px 33px;
-	border: 1px solid var(--sc-line);
+	padding: 8px 10px 8px 32px;
+	border: 1px solid var(--sc-line-2);
 	border-radius: 8px;
 	background: var(--sc-panel);
 	color: var(--sc-text);
 	font: inherit;
-	font-size: var(--fs-13);
-	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
+	font-size: var(--fs-125);
+	outline: none;
+	transition: border-color 0.16s, box-shadow 0.16s;
 }
 
 .search input::placeholder {
@@ -275,10 +285,8 @@ function itemHealthy(item) {
 }
 
 .search input:focus {
-	border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
-	outline: none;
-	background: var(--sc-panel);
-	box-shadow: 0 0 0 3px var(--sc-acid-soft);
+	border-color: var(--sc-acid);
+	box-shadow: 0 0 0 2px var(--sc-acid-soft);
 }
 
 .list-scroll {
@@ -287,22 +295,16 @@ function itemHealthy(item) {
 	overflow-y: auto;
 	padding: 6px 12px 16px;
 	scrollbar-width: thin;
-	scrollbar-color: var(--sc-faint) transparent;
+	scrollbar-color: var(--sc-line-2) transparent;
 }
 
 .list-scroll::-webkit-scrollbar {
-	width: 9px;
+	width: 7px;
 }
 
 .list-scroll::-webkit-scrollbar-thumb {
-	background: var(--sc-raise);
-	background-clip: padding-box;
-	border: 2px solid transparent;
+	background: var(--sc-line-2);
 	border-radius: 99px;
-}
-
-.list-scroll::-webkit-scrollbar-thumb:hover {
-	background: var(--sc-faint);
 }
 
 .grp-label {
@@ -334,7 +336,6 @@ function itemHealthy(item) {
 
 .grp-dot.live {
 	background: var(--sc-ok);
-	box-shadow: 0 0 8px color-mix(in srgb, var(--success) 45%, transparent);
 	animation: sc-blink 2.6s ease-in-out infinite;
 }
 
@@ -344,7 +345,8 @@ function itemHealthy(item) {
 	align-items: center;
 	width: 100%;
 	gap: 10px;
-	padding: 10px;
+	padding: 10px 12px;
+	margin-bottom: 3px;
 	border: 1px solid transparent;
 	border-radius: 10px;
 	background: transparent;
@@ -352,10 +354,7 @@ function itemHealthy(item) {
 	text-align: left;
 	cursor: pointer;
 	user-select: none;
-	transition:
-		background 0.15s,
-		border-color 0.15s,
-		transform 0.15s var(--sc-ease-out);
+	transition: all 0.18s var(--sc-ease-out);
 }
 
 .entry:hover {
@@ -366,19 +365,18 @@ function itemHealthy(item) {
 .entry.active {
 	border-color: var(--sc-line-2);
 	background: var(--sc-panel);
-	box-shadow: 0 2px 10px rgba(var(--shadow-ink), 0.05);
+	box-shadow: 0 4px 14px rgba(var(--shadow-ink), 0.05);
 }
 
 .entry.active::before {
 	position: absolute;
 	top: 50%;
-	left: -1px;
-	width: 2px;
+	left: 0;
+	width: 3px;
 	height: 22px;
 	transform: translateY(-50%);
-	border-radius: 2px;
+	border-radius: 0 3px 3px 0;
 	background: var(--sc-acid);
-	box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
 	content: '';
 }
 
@@ -394,6 +392,7 @@ function itemHealthy(item) {
 
 .entry.active .e-index {
 	color: var(--sc-acid);
+	font-weight: 600;
 }
 
 .e-icon {
@@ -404,13 +403,14 @@ function itemHealthy(item) {
 	place-items: center;
 	border: 1px solid var(--sc-line);
 	border-radius: 9px;
-	background: var(--sc-panel);
+	background: var(--sc-raise);
 	color: var(--sc-soft);
-	transition: color 0.15s, border-color 0.15s;
+	transition: all 0.18s;
 }
 
 .entry.active .e-icon {
-	border-color: color-mix(in srgb, var(--sc-acid) 35%, transparent);
+	border-color: var(--sc-acid);
+	background: var(--sc-acid-soft);
 	color: var(--sc-acid);
 }
 
@@ -424,7 +424,7 @@ function itemHealthy(item) {
 	overflow: hidden;
 	color: var(--sc-text);
 	font-size: var(--fs-135);
-	font-weight: 560;
+	font-weight: 600;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -446,13 +446,11 @@ function itemHealthy(item) {
 	flex: 0 0 auto;
 	border-radius: 50%;
 	background: var(--sc-ok);
-	box-shadow: 0 0 8px color-mix(in srgb, var(--success) 45%, transparent);
-	transition: background 0.18s, box-shadow 0.18s;
+	transition: all 0.18s;
 }
 
 .dot.bad {
 	background: var(--sc-err);
-	box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 .list-empty {

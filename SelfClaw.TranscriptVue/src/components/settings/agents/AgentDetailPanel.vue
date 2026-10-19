@@ -167,14 +167,11 @@ function onBasicSave(form) {
 
 <template>
 	<main class="detail">
-		<span class="ghost-num" aria-hidden="true">{{ index }}</span>
-
 		<header class="detail-head sc-rise" style="--i: 0">
 			<div class="dh-icon" aria-hidden="true">
 				<Bot :size="26" :stroke-width="1.7" />
 			</div>
 			<div class="dh-meta">
-				<div class="dh-kicker">AGENT / {{ index }}</div>
 				<div class="dh-title">
 					<h2 :title="agent.name">{{ agent.name }}</h2>
 				</div>

@@ -36,9 +36,8 @@ const modes = [
 					<component :is="item.icon" :size="15" :stroke-width="1.9" class="mc-ico" aria-hidden="true" />
 					<span class="mc-label">{{ item.label }}</span>
 					<span v-if="item.id === 'system'" class="mc-resolved-tag">
-						{{ props.resolved === 'dark' ? 'DARK' : 'LIGHT' }}
+						{{ props.resolved === 'dark' ? '暗色' : '浅色' }}
 					</span>
-					<span class="mc-en">{{ item.en }}</span>
 				</span>
 			</span>
 

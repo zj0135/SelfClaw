@@ -9,9 +9,7 @@ const { cliTools, isLoading, isRescanning, scanError, selectedCliId, pending, sc
 <template>
 	<section class="programming-assistant sc-root sc-stage sc-page">
 		<header class="sc-page-head sc-rise" style="--i: 0">
-			<span class="sc-page-ghost" aria-hidden="true">Assistant</span>
 			<div>
-				<span class="sc-page-kicker">LOCAL CLI RUNTIMES</span>
 				<h1 class="sc-page-title">编程助手</h1>
 			</div>
 			<button class="pa-btn scan-btn" :class="{ 'is-rescanning': isRescanning }" type="button"

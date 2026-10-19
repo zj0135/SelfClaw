@@ -91,7 +91,6 @@ function selectItem(id) {
 		<!-- Left: sidebar -->
 		<aside class="settings-sidebar">
 			<div class="sb-head sc-rise" style="--i: 0">
-				<div class="sb-kicker">SELFCLAW · CONTROL DECK</div>
 				<h1>设置</h1>
 			</div>
 
@@ -100,7 +99,6 @@ function selectItem(id) {
 					:style="{ '--i': gi + 1 }">
 					<div class="sb-label">
 						<span>{{ group.label }}</span>
-						<span class="sb-label-en">{{ group.en }}</span>
 					</div>
 					<button v-for="item in group.items" :key="item.id" class="nav-item"
 						:class="{ active: activeTarget === item.id }" @click="selectItem(item.id)">
@@ -111,11 +109,6 @@ function selectItem(id) {
 					</button>
 				</div>
 			</nav>
-
-			<div class="sb-foot">
-				<span class="sb-foot-dot" aria-hidden="true"></span>
-				<span class="sb-foot-text">{{ activeItem ? activeItem.en : 'READY' }}</span>
-			</div>
 		</aside>
 
 		<!-- Right: content panel -->

@@ -126,9 +126,7 @@ async function confirmPermissions() {
 <template>
 	<main class="extensions-page sc-root sc-stage sc-page">
 		<header class="sc-page-head page-head sc-rise" style="--i: 0">
-			<span class="sc-page-ghost" aria-hidden="true">Registry</span>
 			<div>
-				<span>EXTENSION REGISTRY</span>
 				<h1>扩展</h1>
 			</div>
 			<code>REV {{ state.revision }}</code>

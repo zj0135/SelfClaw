@@ -5,10 +5,6 @@
 
 <template>
 	<div class="preview sc-rise" :style="{ '--i': 1 }">
-		<div class="pv-head">
-			<span class="pv-kicker">LIVE PREVIEW</span>
-		</div>
-
 		<div class="pv-body">
 			<h3 class="pv-title">界面排版预览</h3>
 			<p class="pv-para">

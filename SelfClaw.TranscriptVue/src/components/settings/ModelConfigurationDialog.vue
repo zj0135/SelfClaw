@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue';
-import { X, Save, LoaderCircle, SlidersHorizontal, ReceiptText } from 'lucide-vue-next';
+import { X, Save, LoaderCircle, SlidersHorizontal, ReceiptText, Sparkles } from 'lucide-vue-next';
 import ModelParameterFields from './ModelParameterFields.vue';
 import ModelMetadataFields from './ModelMetadataFields.vue';
 import { useModelConfigurationEditor } from '../../composables/useModelConfigurationEditor.js';
@@ -32,217 +32,356 @@ function close() {
 			@cancel.prevent="close"
 			@click="$event.target === dialog && close()"
 		>
-			<form @submit.prevent="save" @invalid.capture="tab = $event.target.closest('[data-tab]')?.dataset.tab || tab">
-				<header>
-					<div class="heading">
-						<span class="eyebrow">模型参数</span>
-						<h2 id="configuration-title">{{ draft.name }}</h2>
-						<code>{{ draft.model }}</code>
+			<div class="dialog-frame">
+				<form @submit.prevent="save" @invalid.capture="tab = $event.target.closest('[data-tab]')?.dataset.tab || tab">
+					<header class="dialog-header">
+						<div class="heading">
+							<h2 id="configuration-title">{{ draft.name }}</h2>
+							<div class="model-id-tag">
+								<code>{{ draft.model }}</code>
+							</div>
+						</div>
+						<button class="icon-button close-btn" type="button" title="关闭" aria-label="关闭模型参数" :disabled="busy" @click="close">
+							<X :size="18" :stroke-width="2" />
+						</button>
+					</header>
+
+					<div class="tabs-bar" role="tablist" aria-label="模型配置">
+						<button
+							id="parameters-tab"
+							type="button"
+							class="tab-btn"
+							role="tab"
+							:aria-selected="tab === 'parameters'"
+							:class="{ active: tab === 'parameters' }"
+							aria-controls="parameters-panel"
+							@click="tab = 'parameters'"
+						>
+							<SlidersHorizontal :size="14" :stroke-width="2.2" />
+							<span>参数设置</span>
+						</button>
+						<button
+							id="metadata-tab"
+							type="button"
+							class="tab-btn"
+							role="tab"
+							:aria-selected="tab === 'metadata'"
+							:class="{ active: tab === 'metadata' }"
+							aria-controls="metadata-panel"
+							@click="tab = 'metadata'"
+						>
+							<ReceiptText :size="14" :stroke-width="2.2" />
+							<span>计费与元数据</span>
+						</button>
 					</div>
-					<button class="icon-button" type="button" title="关闭" aria-label="关闭模型参数" :disabled="busy" @click="close"><X :size="18" /></button>
-				</header>
-				<div class="tabs" role="tablist" aria-label="模型配置">
-					<button
-						id="parameters-tab"
-						type="button"
-						role="tab"
-						:aria-selected="tab === 'parameters'"
-						aria-controls="parameters-panel"
-						@click="tab = 'parameters'"
-					>
-						<SlidersHorizontal :size="15" />参数
-					</button>
-					<button
-						id="metadata-tab"
-						type="button"
-						role="tab"
-						:aria-selected="tab === 'metadata'"
-						aria-controls="metadata-panel"
-						@click="tab = 'metadata'"
-					>
-						<ReceiptText :size="15" />计费与元数据
-					</button>
-				</div>
-				<div class="body">
-					<fieldset :disabled="busy">
-						<div v-show="tab === 'parameters'" id="parameters-panel" role="tabpanel" aria-labelledby="parameters-tab" data-tab="parameters">
-							<ModelParameterFields :draft="draft" />
+
+					<div class="dialog-body scroll">
+						<fieldset :disabled="busy" class="fieldset-reset">
+							<div v-show="tab === 'parameters'" id="parameters-panel" role="tabpanel" aria-labelledby="parameters-tab" data-tab="parameters">
+								<ModelParameterFields :draft="draft" />
+							</div>
+							<div v-show="tab === 'metadata'" id="metadata-panel" role="tabpanel" aria-labelledby="metadata-tab" data-tab="metadata">
+								<ModelMetadataFields :draft="draft" />
+							</div>
+						</fieldset>
+						<div v-if="error" class="error-banner" role="alert">
+							<span>{{ error }}</span>
 						</div>
-						<div v-show="tab === 'metadata'" id="metadata-panel" role="tabpanel" aria-labelledby="metadata-tab" data-tab="metadata">
-							<ModelMetadataFields :draft="draft" />
-						</div>
-					</fieldset>
-					<p v-if="error" class="error" role="alert">{{ error }}</p>
-				</div>
-				<footer>
-					<button type="button" :disabled="busy" @click="close">取消</button
-					><button type="submit" class="primary" :disabled="busy">
-						<LoaderCircle v-if="busy" :size="15" class="spin" /><Save v-else :size="15" />{{ busy ? '保存中...' : '保存配置' }}
-					</button>
-				</footer>
-			</form>
+					</div>
+
+					<footer class="dialog-footer">
+						<button type="button" class="btn btn-secondary" :disabled="busy" @click="close">
+							取消
+						</button>
+						<button type="submit" class="btn btn-primary" :disabled="busy">
+							<LoaderCircle v-if="busy" :size="15" class="spin" />
+							<Save v-else :size="15" :stroke-width="2.2" />
+							<span>{{ busy ? '保存中...' : '保存配置' }}</span>
+						</button>
+					</footer>
+				</form>
+			</div>
 		</dialog>
 	</Teleport>
 </template>
 
 <style scoped>
 @import '../../styles/settings-console.css';
+
 .model-dialog {
-	width: min(620px, calc(100vw - 32px));
+	width: min(660px, calc(100vw - 32px));
 	max-width: none;
-	max-height: calc(100dvh - 32px);
+	max-height: min(820px, calc(100dvh - 36px));
 	padding: 0;
-	border: 1px solid var(--sc-line-2);
-	border-radius: 8px;
-	background: var(--sc-panel);
+	border: 0;
+	background: transparent;
 	color: var(--sc-text);
-	box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
 	font-family: var(--sc-sans);
 	letter-spacing: 0;
+	overflow: visible;
 }
+
 .model-dialog::backdrop {
 	background: var(--overlay-heavy);
-	backdrop-filter: blur(4px);
+	backdrop-filter: blur(12px);
+	animation: sc-fade 0.2s var(--sc-ease-out);
 }
+
+.dialog-frame {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	max-height: calc(100dvh - 48px);
+	border: 1px solid var(--sc-line-2);
+	border-radius: 16px;
+	background: var(--sc-panel);
+	box-shadow: 0 32px 100px rgba(var(--shadow-ink), 0.36), 0 4px 20px rgba(var(--shadow-ink), 0.12);
+	overflow: hidden;
+	animation: sc-pop 0.24s var(--sc-ease-spring);
+}
+
 form {
 	display: flex;
 	flex-direction: column;
-	max-height: calc(100dvh - 36px);
+	min-height: 0;
+	max-height: inherit;
 }
-header {
+
+.dialog-header {
+	position: relative;
 	display: flex;
 	align-items: flex-start;
 	justify-content: space-between;
 	gap: 16px;
-	padding: 24px;
+	padding: 24px 26px 18px;
+	border-bottom: 1px solid var(--sc-line);
+	background: linear-gradient(to bottom, var(--sc-raise), transparent);
 }
+
 .heading {
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
-.eyebrow {
-	color: var(--sc-mute);
-	font-size: 12px;
-}
-h2 {
-	margin: 6px 0 5px;
-	font-size: 20px;
-	line-height: 1.4;
-	font-weight: 600;
-}
-code {
-	color: var(--sc-mute);
-	font-family: var(--sc-mono);
-	font-size: 12px;
-}
-button {
-	display: inline-flex;
-	justify-content: center;
+
+.eyebrow-row {
+	display: flex;
 	align-items: center;
-	gap: 8px;
-	height: 38px;
-	padding: 0 14px;
-	border: 1px solid var(--sc-line-2);
+	gap: 10px;
+	margin-bottom: 4px;
+}
+
+.eyebrow {
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: var(--fs-95);
+	font-weight: 650;
+	letter-spacing: 0.22em;
+}
+
+.live-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 2px 7px;
+	border: 1px solid color-mix(in srgb, var(--sc-ok) 35%, transparent);
+	border-radius: 99px;
+	background: var(--sc-ok-soft);
+	color: var(--sc-ok);
+	font-family: var(--sc-mono);
+	font-size: var(--fs-9);
+	font-weight: 650;
+	letter-spacing: 0.1em;
+}
+
+.live-pill .dot {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--sc-ok);
+}
+
+h2 {
+	margin: 2px 0 6px;
+	font-family: var(--sc-display);
+	font-size: var(--fs-22, 22px);
+	line-height: 1.25;
+	font-weight: 650;
+	letter-spacing: 0.01em;
+}
+
+.model-id-tag code {
+	display: inline-block;
+	padding: 3px 8px;
+	border: 1px solid var(--sc-line);
 	border-radius: 6px;
-	background: var(--sc-panel);
-	color: var(--sc-text);
-	font: inherit;
-	font-size: 13px;
-	cursor: pointer;
+	background: var(--sc-raise);
+	color: var(--sc-soft);
+	font-family: var(--sc-mono);
+	font-size: var(--fs-115);
 }
-button:hover {
-	background: var(--sc-hover);
-}
-button:focus-visible {
-	outline: 2px solid var(--sc-acid);
-	outline-offset: 2px;
-}
-button:disabled {
-	opacity: 0.5;
-	cursor: wait;
-}
+
 .icon-button {
-	flex: 0 0 32px;
+	display: grid;
+	place-items: center;
 	width: 32px;
 	height: 32px;
-	padding: 0;
-}
-.tabs {
-	display: flex;
-	gap: 20px;
-	padding: 0 24px;
-	border-bottom: 1px solid var(--sc-line);
-}
-.tabs button {
-	height: 42px;
-	padding: 0 2px;
-	border: 0;
-	border-bottom: 2px solid transparent;
-	border-radius: 0;
+	border: 1px solid var(--sc-line);
+	border-radius: 8px;
+	background: var(--sc-panel);
 	color: var(--sc-mute);
+	cursor: pointer;
+	transition: all 0.16s var(--sc-ease-out);
 }
-.tabs button[aria-selected='true'] {
-	border-bottom-color: var(--sc-acid);
+
+.icon-button:hover {
+	color: var(--sc-text);
+	border-color: var(--sc-line-2);
+	background: var(--sc-hover);
+	transform: scale(1.05);
+}
+
+/* Tabs bar */
+.tabs-bar {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 8px;
+	padding: 10px 24px;
+	border-bottom: 1px solid var(--sc-line);
+	background: var(--sc-raise);
+}
+
+.tab-btn {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 3px;
+	padding: 9px 12px;
+	border: 1px solid transparent;
+	border-radius: 9px;
+	background: transparent;
+	color: var(--sc-mute);
+	cursor: pointer;
+	transition: all 0.18s var(--sc-ease-out);
+}
+
+.tab-btn:hover {
+	background: var(--sc-hover);
 	color: var(--sc-text);
 }
-.body {
-	overflow-y: auto;
+
+.tab-btn.active {
+	border-color: var(--sc-line-2);
+	background: var(--sc-panel);
+	color: var(--sc-acid);
+	box-shadow: 0 4px 12px rgba(var(--shadow-ink), 0.06);
+}
+
+.tab-btn span {
+	font-size: var(--fs-125);
+	font-weight: 600;
+}
+
+.tab-sub {
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: var(--fs-85, 9px) !important;
+	letter-spacing: 0.12em;
+}
+
+.tab-btn.active .tab-sub {
+	color: color-mix(in srgb, var(--sc-acid) 80%, var(--sc-faint));
+}
+
+.dialog-body {
+	flex: 1;
 	min-height: 0;
-	padding: 24px;
+	padding: 20px 26px;
+	overflow-y: auto;
 }
-fieldset {
-	min-width: 0;
-	margin: 0;
-	padding: 0;
+
+.fieldset-reset {
 	border: 0;
+	padding: 0;
+	margin: 0;
+	min-width: 0;
 }
-.error {
-	margin: 18px 0 0;
-	color: var(--danger, #cc3434);
-	font-size: 13px;
-	overflow-wrap: anywhere;
+
+.scroll::-webkit-scrollbar {
+	width: 7px;
 }
-footer {
+
+.scroll::-webkit-scrollbar-thumb {
+	background: var(--sc-line-2);
+	border-radius: 99px;
+}
+
+.error-banner {
+	margin-top: 14px;
+	padding: 10px 14px;
+	border: 1px solid color-mix(in srgb, var(--sc-err) 30%, transparent);
+	border-radius: 8px;
+	background: var(--sc-err-soft);
+	color: var(--sc-err);
+	font-size: var(--fs-125);
+}
+
+/* Footer */
+.dialog-footer {
 	display: flex;
+	align-items: center;
 	justify-content: flex-end;
 	gap: 10px;
-	padding: 16px 24px;
+	padding: 16px 26px;
 	border-top: 1px solid var(--sc-line);
+	background: var(--sc-raise);
 }
-.primary {
-	background: var(--sc-acid);
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	height: 38px;
+	padding: 0 18px;
+	border: 1px solid transparent;
+	border-radius: 9px;
+	font-family: inherit;
+	font-size: var(--fs-13);
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.18s var(--sc-ease-spring);
+}
+
+.btn-secondary {
+	border-color: var(--sc-line-2);
+	background: var(--sc-panel);
+	color: var(--sc-soft);
+}
+
+.btn-secondary:hover {
+	border-color: var(--sc-faint);
+	background: var(--sc-hover);
+	color: var(--sc-text);
+}
+
+.btn-primary {
 	border-color: var(--sc-acid);
-	color: var(--sc-acid-ink);
-}
-.primary:hover {
-	filter: brightness(0.96);
 	background: var(--sc-acid);
+	color: var(--sc-acid-ink);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.08);
 }
+
+.btn-primary:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 3px 8px rgba(var(--shadow-ink), 0.12);
+}
+
+.btn-primary:active {
+	transform: translateY(0);
+}
+
 .spin {
-	animation: spin 1s linear infinite;
-}
-@keyframes spin {
-	to {
-		transform: rotate(360deg);
-	}
-}
-@media (max-width: 440px) {
-	header {
-		padding: 18px;
-	}
-	.body {
-		padding: 20px 18px;
-	}
-	.tabs {
-		padding: 0 18px;
-	}
-	footer {
-		padding: 14px 18px;
-	}
-}
-@media (prefers-reduced-motion: reduce) {
-	.spin {
-		animation: none;
-	}
+	animation: sc-spin 0.8s linear infinite;
 }
 </style>

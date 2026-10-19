@@ -1,6 +1,6 @@
 <script setup>
 import { computed, reactive, watch } from 'vue';
-import { X, LoaderCircle, Check, ChevronDown } from 'lucide-vue-next';
+import { X, LoaderCircle, Check, ChevronDown, Bot, Workflow } from 'lucide-vue-next';
 
 const props = defineProps({
 	open: { type: Boolean, default: false },
@@ -20,15 +20,9 @@ const form = reactive({
 });
 
 const dialogTitle = computed(() => {
-	if (props.mode === 'create-agent') return '新增代理';
-	if (props.mode === 'create-subagent') return '新增子代理';
-	return '编辑代理';
-});
-
-const dialogKicker = computed(() => {
-	if (props.mode === 'create-agent') return 'NEW AGENT';
-	if (props.mode === 'create-subagent') return 'NEW SUBAGENT';
-	return 'EDIT AGENT';
+	if (props.mode === 'create-agent') return '新增代理定义';
+	if (props.mode === 'create-subagent') return '新增子代理定义';
+	return '编辑代理定义';
 });
 
 watch(
@@ -82,12 +76,15 @@ function handleClose() {
 <template>
 	<Teleport to="body">
 		<div v-if="open" class="dialog-overlay sc-root" @click.self="handleClose">
-			<div class="dialog" role="dialog" aria-modal="true" :aria-labelledby="'dialog-title-' + mode">
-				<div class="dialog-head">
-					<div class="dialog-kicker">{{ dialogKicker }}</div>
-					<h2 :id="'dialog-title-' + mode">
-						{{ dialogTitle }}
-					</h2>
+			<div class="dialog-frame" role="dialog" aria-modal="true" :aria-labelledby="'dialog-title-' + mode">
+				<header class="dialog-head">
+					<div class="dh-icon-box">
+						<Workflow v-if="mode === 'create-subagent'" :size="20" :stroke-width="2" />
+						<Bot v-else :size="20" :stroke-width="2" />
+					</div>
+					<div class="dh-meta">
+						<h2 :id="'dialog-title-' + mode">{{ dialogTitle }}</h2>
+					</div>
 					<button
 						type="button"
 						class="close-btn"
@@ -95,22 +92,22 @@ function handleClose() {
 						@click="handleClose"
 						aria-label="关闭对话框"
 					>
-						<X :size="18" :stroke-width="2" />
+						<X :size="16" :stroke-width="2" />
 					</button>
-				</div>
+				</header>
 
-				<div class="dialog-body">
+				<div class="dialog-body scroll">
 					<div class="form-grid">
 						<div v-if="mode === 'create-agent' || mode === 'create-subagent'" class="field span-2">
 							<label class="fl" for="new-agent-id">
-								ID <span class="required">*</span>
+								<span>标识符 ID</span>
 							</label>
 							<input
 								id="new-agent-id"
 								v-model="form.id"
-								class="input"
+								class="input mono"
 								type="text"
-								placeholder="例如：my-agent"
+								placeholder="例如 code-reviewer / translator"
 								maxlength="120"
 								:disabled="saving"
 							/>
@@ -118,66 +115,72 @@ function handleClose() {
 
 						<div class="field span-2">
 							<label class="fl" for="new-agent-name">
-								名称 <span class="required">*</span>
+								<span>显示名称</span>
 							</label>
 							<input
 								id="new-agent-name"
 								v-model="form.name"
 								class="input"
 								type="text"
-								placeholder="显示名称"
+								placeholder="例如 代码审查员 / 深度翻译助手"
 								maxlength="120"
 								:disabled="saving"
 							/>
 						</div>
 
 						<div class="field span-2">
-							<label class="fl" for="new-agent-mode">运行模式</label>
-							<div class="select">
+							<label class="fl" for="new-agent-mode">
+								<span>执行模式</span>
+							</label>
+							<div class="select-wrap">
 								<select id="new-agent-mode" v-model="form.mode" :disabled="saving" aria-label="运行模式">
-									<option value="direct">Direct</option>
-									<option value="cli">CLI</option>
+									<option value="direct">Direct (进程内模型直接推理)</option>
+									<option value="cli">CLI (独立外部编程环境)</option>
 								</select>
 								<ChevronDown :size="15" :stroke-width="2" class="chev" aria-hidden="true" />
 							</div>
 						</div>
 
 						<div class="field span-2">
-							<label class="fl" for="new-agent-desc">描述</label>
+							<label class="fl" for="new-agent-desc">
+								<span>职责描述</span>
+							</label>
 							<input
 								id="new-agent-desc"
 								v-model="form.description"
 								class="input"
 								type="text"
-								placeholder="职责描述"
+								placeholder="简要概括该代理的专长或任务分工..."
 								:disabled="saving"
 							/>
 						</div>
 
 						<div class="field span-2">
-							<label class="fl" for="new-agent-instructions">系统指令</label>
+							<label class="fl" for="new-agent-instructions">
+								<span>系统指令 (Prompt)</span>
+							</label>
 							<textarea
 								id="new-agent-instructions"
 								v-model="form.instructions"
 								class="input mono instructions"
 								rows="6"
-								placeholder="输入系统指令..."
+								placeholder="编写指导该代理思考行为、工具使用准则的系统设定..."
 								:disabled="saving"
 							></textarea>
 						</div>
 					</div>
 				</div>
 
-				<div class="dialog-foot">
-					<button type="button" class="btn btn-ghost" :disabled="saving" @click="handleClose">
+				<footer class="dialog-foot">
+					<button type="button" class="btn btn-secondary" :disabled="saving" @click="handleClose">
 						取消
 					</button>
 					<button type="button" class="btn btn-primary" :disabled="!isValid || saving" @click="handleSubmit">
 						<LoaderCircle v-if="saving" :size="14" :stroke-width="2.2" class="spin-ico" aria-hidden="true" />
 						<Check v-else :size="14" :stroke-width="2.4" aria-hidden="true" />
-						{{ mode === 'create-agent' || mode === 'create-subagent' ? '创建' : '保存' }}
+						<span>{{ mode === 'create-agent' || mode === 'create-subagent' ? '确认创建' : '保存变更' }}</span>
 					</button>
-				</div>
+				</footer>
 			</div>
 		</div>
 	</Teleport>
@@ -188,246 +191,251 @@ function handleClose() {
 
 .dialog-overlay {
 	position: fixed;
-	top: 0;
-	left: 0;
+	inset: 0;
 	z-index: 1200;
 	display: grid;
-	width: 100%;
-	height: 100%;
 	place-items: center;
 	padding: 24px;
-	background: var(--overlay);
-	backdrop-filter: blur(8px);
-	animation: sc-fade-in 0.18s var(--sc-ease-out);
+	background: var(--overlay-heavy);
+	backdrop-filter: blur(12px);
+	animation: sc-fade 0.18s var(--sc-ease-out);
 	font-family: var(--sc-sans);
 }
 
-.dialog {
+.dialog-frame {
+	position: relative;
 	display: flex;
-	width: min(620px, 100%);
-	max-height: min(680px, calc(100vh - 48px));
 	flex-direction: column;
+	width: min(620px, calc(100vw - 32px));
+	max-height: min(720px, calc(100vh - 48px));
 	border: 1px solid var(--sc-line-2);
 	border-radius: 16px;
-	background: var(--sc-panel, var(--panel, #ffffff));
+	background: var(--sc-panel);
 	color: var(--sc-text);
-	box-shadow: 0 32px 90px rgba(var(--shadow-ink), 0.25);
-	animation: sc-slide-up 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+	box-shadow: 0 32px 100px rgba(var(--shadow-ink), 0.35), 0 4px 20px rgba(var(--shadow-ink), 0.1);
 	overflow: hidden;
+	animation: sc-pop 0.22s var(--sc-ease-spring);
 }
 
 .dialog-head {
-	position: relative;
-	padding: 24px 28px 20px;
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	padding: 22px 24px 18px;
 	border-bottom: 1px solid var(--sc-line);
+	background: linear-gradient(to bottom, var(--sc-raise), transparent);
+}
+
+.dh-icon-box {
+	display: grid;
+	place-items: center;
+	width: 42px;
+	height: 42px;
+	border: 1px solid var(--sc-line-2);
+	border-radius: 10px;
+	background: var(--sc-panel);
+	color: var(--sc-acid);
+	box-shadow: 0 4px 12px color-mix(in srgb, var(--sc-acid) 12%, transparent);
+}
+
+.dh-meta {
+	flex: 1;
+	min-width: 0;
 }
 
 .dialog-kicker {
-	margin-bottom: 6px;
+	margin-bottom: 3px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: var(--fs-10);
-	font-weight: 600;
-	letter-spacing: 0.22em;
+	font-size: var(--fs-9);
+	font-weight: 650;
+	letter-spacing: 0.2em;
 }
 
 .dialog-head h2 {
 	margin: 0;
-	color: var(--sc-text);
+	font-family: var(--sc-display);
 	font-size: var(--fs-18);
-	font-weight: 640;
-	letter-spacing: -0.015em;
+	font-weight: 650;
+	color: var(--sc-text);
 }
 
 .close-btn {
-	position: absolute;
-	top: 24px;
-	right: 24px;
 	display: grid;
+	place-items: center;
 	width: 32px;
 	height: 32px;
-	place-items: center;
 	border: 1px solid var(--sc-line);
 	border-radius: 8px;
-	background: transparent;
+	background: var(--sc-panel);
 	color: var(--sc-mute);
 	cursor: pointer;
-	transition: background 0.15s, color 0.15s, border-color 0.15s;
+	transition: all 0.16s var(--sc-ease-out);
 }
 
 .close-btn:hover:not(:disabled) {
 	border-color: var(--sc-line-2);
 	background: var(--sc-hover);
 	color: var(--sc-text);
-}
-
-.close-btn:disabled {
-	opacity: 0.4;
-	cursor: not-allowed;
+	transform: scale(1.05);
 }
 
 .dialog-body {
-	min-height: 0;
 	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
-	padding: 24px 28px;
-	scrollbar-width: thin;
-	scrollbar-color: var(--sc-faint) transparent;
+	padding: 22px 24px;
 }
 
-.dialog-body::-webkit-scrollbar {
-	width: 9px;
+.scroll::-webkit-scrollbar {
+	width: 7px;
 }
 
-.dialog-body::-webkit-scrollbar-thumb {
-	background: var(--sc-raise);
-	background-clip: padding-box;
-	border: 2px solid transparent;
+.scroll::-webkit-scrollbar-thumb {
+	background: var(--sc-line-2);
 	border-radius: 99px;
 }
 
-.dialog-body::-webkit-scrollbar-thumb:hover {
-	background: var(--sc-faint);
-}
-
 .form-grid {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
 }
 
 .field {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
-}
-
-.field.span-2 {
-	grid-column: span 2;
+	gap: 6px;
 }
 
 .fl {
-	color: var(--sc-soft);
-	font-size: var(--fs-13);
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	color: var(--sc-text);
+	font-size: var(--fs-12);
 	font-weight: 600;
 }
 
-.required {
-	color: var(--sc-err);
+.required-tag {
+	color: var(--sc-acid);
+	font-family: var(--sc-mono);
+	font-size: var(--fs-9);
+	letter-spacing: 0.12em;
+}
+
+.sub-tag {
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: var(--fs-9);
+	letter-spacing: 0.12em;
 }
 
 .input {
 	width: 100%;
-	box-sizing: border-box;
-	padding: 10px 12px;
+	padding: 0 12px;
+	height: 38px;
 	border: 1px solid var(--sc-line-2);
 	border-radius: 8px;
-	background: var(--sc-raise);
+	background: var(--sc-panel);
 	color: var(--sc-text);
 	font: inherit;
-	font-size: var(--fs-135);
-	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
+	font-size: var(--fs-13);
+	outline: none;
+	transition: border-color 0.16s, box-shadow 0.16s;
 }
 
 .input.mono {
 	font-family: var(--sc-mono);
-	font-size: var(--fs-125);
-	line-height: 1.6;
-	letter-spacing: 0.01em;
-}
-
-.input.instructions {
-	resize: vertical;
-	min-height: 120px;
-}
-
-.input::placeholder {
-	color: var(--sc-faint);
+	font-size: var(--fs-12);
 }
 
 .input:focus {
 	border-color: var(--sc-acid);
-	outline: none;
-	background: var(--sc-panel);
-	box-shadow: 0 0 0 3px var(--sc-acid-soft);
+	box-shadow: 0 0 0 2px var(--sc-acid-soft);
 }
 
-.input:disabled {
-	opacity: 0.5;
-	cursor: not-allowed;
+.instructions {
+	height: auto;
+	min-height: 140px;
+	padding: 10px 12px;
+	line-height: 1.6;
+	resize: vertical;
 }
 
-.select {
+.field-hint {
+	color: var(--sc-mute);
+	font-size: var(--fs-11);
+}
+
+.select-wrap {
 	position: relative;
-	display: flex;
-	align-items: center;
+	width: 100%;
 }
 
-.select select {
+.select-wrap select {
 	width: 100%;
-	box-sizing: border-box;
-	padding: 10px 34px 10px 12px;
+	height: 38px;
+	padding: 0 34px 0 12px;
 	border: 1px solid var(--sc-line-2);
 	border-radius: 8px;
-	background: var(--sc-raise);
-	color: var(--sc-text);
-	cursor: pointer;
-	font: inherit;
-	font-size: var(--fs-135);
 	appearance: none;
-	transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
-}
-
-.select select:focus {
-	border-color: var(--sc-acid);
-	outline: none;
 	background: var(--sc-panel);
-	box-shadow: 0 0 0 3px var(--sc-acid-soft);
+	color: var(--sc-text);
+	font-family: inherit;
+	font-size: var(--fs-13);
+	cursor: pointer;
+	outline: none;
+	transition: border-color 0.16s, box-shadow 0.16s;
 }
 
-.select select:disabled {
-	opacity: 0.5;
-	cursor: not-allowed;
+.select-wrap select:focus {
+	border-color: var(--sc-acid);
+	box-shadow: 0 0 0 2px var(--sc-acid-soft);
 }
 
-.select .chev {
+.chev {
 	position: absolute;
+	top: 50%;
 	right: 12px;
-	color: var(--sc-mute);
+	color: var(--sc-faint);
 	pointer-events: none;
+	transform: translateY(-50%);
 }
 
 .dialog-foot {
 	display: flex;
+	align-items: center;
 	justify-content: flex-end;
 	gap: 10px;
-	padding: 18px 28px;
+	padding: 16px 24px;
 	border-top: 1px solid var(--sc-line);
+	background: var(--sc-raise);
 }
 
 .btn {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 6px;
+	gap: 7px;
 	height: 38px;
 	padding: 0 18px;
 	border: 1px solid transparent;
-	border-radius: 8px;
-	cursor: pointer;
-	font: inherit;
+	border-radius: 9px;
+	font-family: inherit;
 	font-size: var(--fs-13);
 	font-weight: 600;
-	transition: background 0.16s, color 0.16s, border-color 0.16s, opacity 0.16s;
+	cursor: pointer;
+	transition: all 0.18s var(--sc-ease-spring);
 }
 
-.btn-ghost {
+.btn-secondary {
 	border-color: var(--sc-line-2);
 	background: var(--sc-panel);
-	color: var(--sc-mute);
+	color: var(--sc-soft);
 }
 
-.btn-ghost:hover:not(:disabled) {
+.btn-secondary:hover:not(:disabled) {
 	border-color: var(--sc-faint);
 	background: var(--sc-hover);
 	color: var(--sc-text);
@@ -437,47 +445,21 @@ function handleClose() {
 	border-color: var(--sc-acid);
 	background: var(--sc-acid);
 	color: var(--sc-acid-ink);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.08);
 }
 
 .btn-primary:hover:not(:disabled) {
-	background: color-mix(in srgb, var(--accent) 86%, var(--ink-1));
+	transform: translateY(-1px);
+	box-shadow: 0 3px 8px rgba(var(--shadow-ink), 0.12);
 }
 
-.btn:disabled {
-	opacity: 0.4;
+.btn-primary:disabled {
+	opacity: 0.5;
 	cursor: not-allowed;
+	transform: none;
 }
 
 .spin-ico {
 	animation: sc-spin 0.8s linear infinite;
-}
-
-@keyframes sc-fade-in {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
-
-@keyframes sc-slide-up {
-	from {
-		opacity: 0;
-		transform: translateY(20px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
-	}
-}
-
-@keyframes sc-spin {
-	from {
-		transform: rotate(0deg);
-	}
-	to {
-		transform: rotate(360deg);
-	}
 }
 </style>

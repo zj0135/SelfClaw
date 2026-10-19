@@ -136,14 +136,11 @@ function onBasicSave(data) {
 
 <template>
 	<main class="detail">
-		<span class="ghost-num" aria-hidden="true">{{ index }}</span>
-
 		<header class="detail-head sc-rise" style="--i: 0">
 			<div class="dh-icon" aria-hidden="true">
 				<Workflow :size="26" :stroke-width="1.7" />
 			</div>
 			<div class="dh-meta">
-				<div class="dh-kicker">SUBAGENT / {{ index }}</div>
 				<div class="dh-title">
 					<h2 :title="subagent.name">{{ subagent.name }}</h2>
 				</div>

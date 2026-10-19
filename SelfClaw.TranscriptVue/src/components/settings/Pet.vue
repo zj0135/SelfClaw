@@ -26,9 +26,7 @@ function initials(name) {
 <template>
   <main class="pet-view sc-root sc-stage sc-page">
     <header class="sc-page-head sc-rise" style="--i: 0">
-      <span class="sc-page-ghost" aria-hidden="true">Companion</span>
       <div>
-        <span class="sc-page-kicker">DESKTOP COMPANION</span>
         <h1 class="sc-page-title">宠物</h1>
       </div>
 
@@ -221,7 +219,6 @@ function initials(name) {
   height: 7px;
   border-radius: 50%;
   background: var(--sc-acid);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 50%, transparent);
   content: '';
   animation: sc-blink 2.4s ease-in-out infinite;
 }

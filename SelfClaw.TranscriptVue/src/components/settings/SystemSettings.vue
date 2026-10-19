@@ -34,9 +34,7 @@ function toggleGroup(id) {
 <template>
 	<main class="sc-root sc-stage sc-page appearance-page">
 		<header class="sc-page-head sc-rise" style="--i: 0">
-			<span class="sc-page-ghost" aria-hidden="true">General</span>
 			<div>
-				<span class="sc-page-kicker">GENERAL · SETTINGS</span>
 				<h1 class="sc-page-title">系统设置</h1>
 			</div>
 
@@ -54,7 +52,6 @@ function toggleGroup(id) {
 					@click="toggleGroup(group.id)">
 					<component :is="group.icon" :size="15" :stroke-width="1.9" class="gh-ico" aria-hidden="true" />
 					<span class="gh-label">{{ group.label }}</span>
-					<span class="gh-en">{{ group.en }}</span>
 					<ChevronDown :size="15" :stroke-width="2" class="gh-chev" aria-hidden="true" />
 				</button>
 
@@ -66,13 +63,11 @@ function toggleGroup(id) {
 						<div class="subgroup-divider">
 							<Code2 :size="13" :stroke-width="2" class="subgroup-ico" aria-hidden="true" />
 							<span class="subgroup-title">代码块</span>
-							<span class="subgroup-en">CODE</span>
 						</div>
 						<CodeSection />
 						<div class="subgroup-divider">
 							<Eye :size="13" :stroke-width="2" class="subgroup-ico" aria-hidden="true" />
 							<span class="subgroup-title">预览</span>
-							<span class="subgroup-en">PREVIEW</span>
 						</div>
 						<AppearancePreview />
 					</div>

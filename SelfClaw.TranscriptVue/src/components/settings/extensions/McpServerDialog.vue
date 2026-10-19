@@ -54,7 +54,6 @@ function submit(testAfterSave = false) {
 		<form class="dialog sc-root" @submit.prevent="submit(false)">
 			<header>
 				<div>
-					<span>MCP SERVER</span>
 					<h2>{{ server ? '编辑服务器' : '新增服务器' }}</h2>
 				</div>
 				<button type="button" class="icon" title="关闭" @click="$emit('close')">

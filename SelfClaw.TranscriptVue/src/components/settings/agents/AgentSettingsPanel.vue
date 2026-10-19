@@ -246,7 +246,7 @@ async function onDeleteAgent() {
 .agent-settings {
 	position: relative;
 	display: grid;
-	grid-template-columns: 300px minmax(0, 1fr);
+	grid-template-columns: 290px minmax(0, 1fr);
 	/* 隐式 auto 行会按内容撑高并被 overflow 裁掉；显式 1fr 行约束到容器高度，内部才可滚动 */
 	grid-template-rows: minmax(0, 1fr);
 	width: 100%;

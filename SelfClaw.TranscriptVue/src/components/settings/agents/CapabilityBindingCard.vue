@@ -13,30 +13,35 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 </script>
 
 <template>
-	<section class="card">
-		<div class="card-head">
+	<section class="cap-card">
+		<div class="cap-card-head">
 			<div>
-				<div class="card-kicker">CAPABILITIES</div>
-				<h3>能力绑定</h3>
+				<h3 class="card-title">能力绑定矩阵</h3>
 			</div>
 		</div>
 
-		<div class="rows">
-			<button v-for="section in sections" :key="section.key" type="button" class="cap-row"
-				:disabled="!section.isBasic && !section.items.length" @click="emit('open', section)">
+		<div class="rows-container">
+			<button
+				v-for="section in sections"
+				:key="section.key"
+				type="button"
+				class="cap-row"
+				:disabled="!section.isBasic && !section.items.length"
+				@click="emit('open', section)"
+			>
 				<span class="cap-icon" aria-hidden="true">
-					<component :is="section.icon" :size="16" :stroke-width="1.9" />
+					<component :is="section.icon" :size="17" :stroke-width="2" />
 				</span>
-				<span class="cap-main">
-					<span class="cap-title">
-						{{ section.title }}
-						<span class="cap-kicker">{{ section.kicker }}</span>
-					</span>
-				</span>
+				<div class="cap-main">
+					<div class="cap-titleline">
+						<span class="cap-name">{{ section.title }}</span>
+					</div>
+				</div>
 				<span v-if="!section.isBasic" class="count-pill" :class="{ off: boundCount(section) === 0 }">
+					<span class="count-led" v-if="boundCount(section) > 0"></span>
 					{{ boundCount(section) }} / {{ section.items.length }}
 				</span>
-				<ChevronRight :size="15" :stroke-width="2" class="cap-chev" aria-hidden="true" />
+				<ChevronRight :size="16" :stroke-width="2.2" class="cap-chev" aria-hidden="true" />
 			</button>
 		</div>
 	</section>
@@ -45,47 +50,54 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 <style scoped>
 @import '../../../styles/settings-console.css';
 
-.card {
+.cap-card {
 	overflow: hidden;
 	border: 1px solid var(--sc-line);
 	border-radius: 14px;
 	background: var(--sc-panel);
-	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.04);
+	transition: all 0.2s var(--sc-ease-out);
 }
 
-.card-head {
+.cap-card:hover {
+	border-color: var(--sc-line-2);
+	box-shadow: 0 8px 24px rgba(var(--shadow-ink), 0.06);
+}
+
+.cap-card-head {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 20px 24px;
+	padding: 18px 22px;
 	border-bottom: 1px solid var(--sc-line);
-	background: linear-gradient(to bottom, var(--sc-panel), color-mix(in srgb, var(--sc-panel) 98%, var(--sc-surface-0)));
+	background: linear-gradient(to bottom, var(--sc-raise), transparent);
 }
 
 .card-kicker {
-	margin-bottom: 5px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: var(--fs-95);
-	font-weight: 500;
-	letter-spacing: 0.24em;
+	font-size: var(--fs-9);
+	font-weight: 650;
+	letter-spacing: 0.18em;
+	margin-bottom: 3px;
 }
 
-.card-head h3 {
+.card-title {
 	margin: 0;
 	font-family: var(--sc-display);
-	font-size: var(--fs-18);
-	font-weight: 640;
-	letter-spacing: -0.01em;
+	font-size: var(--fs-16, 16px);
+	font-weight: 650;
+	color: var(--sc-text);
 }
 
-.card-count {
-	margin-top: 4px;
-	color: var(--sc-mute);
-	font-size: var(--fs-12);
+.card-sub-tag {
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: var(--fs-9);
+	letter-spacing: 0.12em;
 }
 
-.rows {
+.rows-container {
 	display: flex;
 	flex-direction: column;
 }
@@ -95,7 +107,7 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 	align-items: center;
 	width: 100%;
 	gap: 14px;
-	padding: 16px 24px;
+	padding: 14px 22px;
 	border: 0;
 	border-bottom: 1px solid var(--sc-line);
 	background: transparent;
@@ -103,7 +115,7 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 	font: inherit;
 	text-align: left;
 	cursor: pointer;
-	transition: background 0.15s, border-color 0.15s;
+	transition: all 0.16s var(--sc-ease-out);
 }
 
 .cap-row:last-child {
@@ -111,8 +123,7 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 }
 
 .cap-row:hover:not(:disabled) {
-	background: color-mix(in srgb, var(--sc-acid) 3%, transparent);
-	border-color: color-mix(in srgb, var(--sc-acid) 12%, transparent);
+	background: color-mix(in srgb, var(--sc-acid) 4%, var(--sc-panel));
 }
 
 .cap-row:disabled {
@@ -122,75 +133,82 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 
 .cap-icon {
 	display: grid;
-	width: 38px;
-	height: 38px;
+	width: 40px;
+	height: 40px;
 	flex: 0 0 auto;
 	place-items: center;
-	border: 1px solid var(--sc-line);
+	border: 1px solid var(--sc-line-2);
 	border-radius: 10px;
-	background: var(--sc-surface-0);
+	background: var(--sc-raise);
 	color: var(--sc-soft);
 	transition: all 0.2s var(--sc-ease-spring);
 }
 
 .cap-row:hover:not(:disabled) .cap-icon {
-	border-color: color-mix(in srgb, var(--sc-acid) 45%, transparent);
+	border-color: var(--sc-acid);
 	background: var(--sc-acid-soft);
 	color: var(--sc-acid);
-	transform: translateY(-2px) scale(1.05);
+	transform: translateY(-1px) scale(1.05);
 	box-shadow: 0 4px 12px color-mix(in srgb, var(--sc-acid) 18%, transparent);
 }
 
 .cap-main {
-	display: grid;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
 	min-width: 0;
 	flex: 1;
-	gap: 4px;
 }
 
-.cap-title {
+.cap-titleline {
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	font-size: var(--fs-145);
-	font-weight: 600;
-	letter-spacing: -0.01em;
+	gap: 8px;
+}
+
+.cap-name {
+	font-size: var(--fs-135);
+	font-weight: 620;
+	color: var(--sc-text);
 }
 
 .cap-kicker {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: var(--fs-95);
-	font-weight: 500;
-	letter-spacing: 0.2em;
+	font-size: var(--fs-9);
+	font-weight: 600;
+	letter-spacing: 0.14em;
 }
 
 .cap-hint {
 	overflow: hidden;
 	color: var(--sc-mute);
 	font-size: var(--fs-12);
-	line-height: 1.5;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
 .count-pill {
-	flex: 0 0 auto;
-	padding: 4px 11px;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 9px;
 	border: 1px solid color-mix(in srgb, var(--sc-acid) 35%, transparent);
 	border-radius: 99px;
 	background: var(--sc-acid-soft);
 	color: var(--sc-acid);
 	font-family: var(--sc-mono);
-	font-size: var(--fs-11);
+	font-size: var(--fs-105);
 	font-weight: 650;
 	letter-spacing: 0.04em;
 	transition: all 0.2s var(--sc-ease-spring);
 }
 
-.cap-row:hover:not(:disabled) .count-pill {
-	transform: translateY(-1px) scale(1.05);
-	box-shadow: 0 4px 12px color-mix(in srgb, var(--sc-acid) 20%, transparent);
+.count-led {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--sc-acid);
 }
 
 .count-pill.off {
@@ -200,9 +218,8 @@ const boundCount = (section) => section.items.filter((item) => item.bound).lengt
 }
 
 .cap-chev {
-	flex: 0 0 auto;
 	color: var(--sc-faint);
-	transition: all 0.2s var(--sc-ease-out);
+	transition: all 0.18s var(--sc-ease-out);
 }
 
 .cap-row:hover:not(:disabled) .cap-chev {

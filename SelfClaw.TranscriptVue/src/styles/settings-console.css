@@ -47,58 +47,6 @@
 	overflow: hidden;
 }
 
-/* Engineering crosshair ticks at the head/body seam. */
-.sc-page-head::before,
-.sc-page-head::after {
-	position: absolute;
-	bottom: 9px;
-	z-index: 1;
-	width: 9px;
-	height: 9px;
-	border: 0 solid var(--sc-faint);
-	content: '';
-	opacity: 0.65;
-	pointer-events: none;
-}
-
-.sc-page-head::before {
-	left: 12px;
-	border-bottom-width: 1px;
-	border-left-width: 1px;
-}
-
-.sc-page-head::after {
-	right: 12px;
-	border-right-width: 1px;
-	border-bottom-width: 1px;
-}
-
-/* Oversized ghost word behind the header copy — pure decoration. */
-.sc-page-ghost {
-	position: absolute;
-	top: 50%;
-	right: 26px;
-	z-index: 0;
-	margin: 0;
-	transform: translateY(-52%);
-	color: color-mix(in srgb, var(--sc-text) 5%, transparent);
-	font-family: var(--sc-display);
-	font-size: 58px;
-	font-weight: 700;
-	letter-spacing: 0.05em;
-	line-height: 1;
-	text-transform: uppercase;
-	white-space: nowrap;
-	pointer-events: none;
-	user-select: none;
-	animation: sc-fade 1.1s var(--sc-ease-out) 0.15s both;
-}
-
-.sc-page-head > :not(.sc-page-ghost) {
-	position: relative;
-	z-index: 1;
-}
-
 .sc-page-kicker {
 	display: inline-flex;
 	align-items: center;
@@ -157,30 +105,6 @@
 	overflow: hidden;
 }
 
-.sc-empty-stage::before,
-.sc-empty-stage::after {
-	position: absolute;
-	width: 10px;
-	height: 10px;
-	border: 0 solid var(--sc-faint);
-	content: '';
-	pointer-events: none;
-}
-
-.sc-empty-stage::before {
-	top: 8px;
-	left: 8px;
-	border-top-width: 1px;
-	border-left-width: 1px;
-}
-
-.sc-empty-stage::after {
-	right: 8px;
-	bottom: 8px;
-	border-right-width: 1px;
-	border-bottom-width: 1px;
-}
-
 .sc-empty-kicker {
 	display: inline-flex;
 	align-items: center;
@@ -236,7 +160,6 @@
 	height: 5px;
 	border-radius: 50%;
 	background: var(--sc-acid);
-	box-shadow: 0 0 8px color-mix(in srgb, var(--sc-acid) 50%, transparent);
 	content: '';
 	animation: sc-blink 2.4s ease-in-out infinite;
 }
@@ -244,10 +167,6 @@
 @media (max-width: 780px) {
 	.sc-page-head {
 		padding-inline: 18px;
-	}
-
-	.sc-page-ghost {
-		display: none;
 	}
 
 	.sc-page-body {
