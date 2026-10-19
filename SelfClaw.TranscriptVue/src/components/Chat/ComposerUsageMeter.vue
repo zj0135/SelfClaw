@@ -195,6 +195,7 @@ const buttonTitle = computed(() => {
 					<span class="context-current">{{ metrics.contextText }}</span>
 					<span class="context-sep">/</span>
 					<span class="context-limit">{{ metrics.limitText }}</span>
+					<span v-if="metrics.cacheHitText" class="context-cache">{{ metrics.cacheHitText }}</span>
 				</div>
 				<div class="progress-bar-track" aria-hidden="true">
 					<div
@@ -202,9 +203,6 @@ const buttonTitle = computed(() => {
 						:class="`tone--${metrics.tone}`"
 						:style="{ width: `${Math.min(100, Math.max(metrics.percentage > 0 ? 3 : 0, metrics.percentage))}%` }"
 					></div>
-				</div>
-				<div class="context-caption">
-					{{ metrics.isAbsoluteThreshold ? '未声明窗口 · 按配置绝对阈值计算' : '按模型声明的上下文窗口计算' }}
 				</div>
 			</div>
 
@@ -478,6 +476,15 @@ const buttonTitle = computed(() => {
 	color: var(--muted);
 }
 
+/* 命中率只留数字与百分号，靠右贴齐：它是同一行的次级读数，不参与“当前/上限”的对比。 */
+.context-cache {
+	margin-left: auto;
+	font-size: 11.5px;
+	font-weight: 600;
+	color: var(--muted);
+	letter-spacing: -0.01em;
+}
+
 /* 线性进度条 */
 .progress-bar-track {
 	width: 100%;
@@ -504,12 +511,6 @@ const buttonTitle = computed(() => {
 
 .progress-bar-fill.tone--critical {
 	background: #ef4444;
-}
-
-.context-caption {
-	font-size: 10px;
-	color: var(--muted-soft);
-	line-height: 1.3;
 }
 
 .popover-divider {

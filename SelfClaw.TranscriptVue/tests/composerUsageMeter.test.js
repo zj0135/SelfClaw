@@ -62,6 +62,21 @@ describe('ComposerUsageMeter', () => {
 		expect(totalVals).toEqual(['1.24M', '342K', '1.58M']);
 	});
 
+	it('shows the cache hit rate next to the context size and no explanatory caption', async () => {
+		mountWithUsage(usage({ cachedInputTokens: 1_200_000 }));
+
+		expect(wrapper.get('.context-cache').text()).toBe('96.8%');
+		// The caption line was removed: the window tag already says what the limit means.
+		expect(wrapper.find('.context-caption').exists()).toBe(false);
+		expect(wrapper.text()).not.toContain('按模型声明的上下文窗口计算');
+	});
+
+	it('omits the cache hit rate when no cached count was reported', () => {
+		mountWithUsage(usage());
+
+		expect(wrapper.find('.context-cache').exists()).toBe(false);
+	});
+
 	it('shows unavailable placeholder for unknown context without breaking', () => {
 		mountWithUsage(usage({ contextTokens: null, contextWindowTokens: null }));
 

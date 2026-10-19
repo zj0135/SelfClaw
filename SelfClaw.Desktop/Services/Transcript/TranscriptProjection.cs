@@ -133,6 +133,7 @@ public sealed class TranscriptProjection
     {
         long inputTokens = 0;
         long outputTokens = 0;
+        long? cachedInputTokens = null;
         int? lastRequestInputTokens = null;
         int? lastContextTokens = null;
         int? contextWindowTokens = null;
@@ -148,6 +149,8 @@ public sealed class TranscriptProjection
             liveTurnSeen |= isLiveTurn;
             inputTokens += usage.InputTokens ?? 0;
             outputTokens += usage.OutputTokens ?? 0;
+            // Summed like the input it is a share of, so the session hit rate stays comparable to the totals.
+            if (usage.CachedInputTokens is int cachedInput) cachedInputTokens = (cachedInputTokens ?? 0) + cachedInput;
             // Context, window and last request input describe one provider call, so the latest wins
             // instead of being summed. Subagent usage is not part of the session totals.
             if (usage.LastRequestInputTokens is int requestInputTokens) lastRequestInputTokens = requestInputTokens;
@@ -161,6 +164,8 @@ public sealed class TranscriptProjection
         {
             inputTokens += pending.Usage.InputTokens ?? 0;
             outputTokens += pending.Usage.OutputTokens ?? 0;
+            if (pending.Usage.CachedInputTokens is int pendingCached)
+                cachedInputTokens = (cachedInputTokens ?? 0) + pendingCached;
             if (pending.Usage.LastRequestInputTokens is int liveInput) lastRequestInputTokens = liveInput;
             else if (pending.Usage.ContextTokens is int liveContext) lastContextTokens = liveContext;
             if (pending.Usage.ContextWindowTokens is int liveWindow) contextWindowTokens = liveWindow;
@@ -169,7 +174,8 @@ public sealed class TranscriptProjection
 
         var context = lastRequestInputTokens ?? lastContextTokens;
         if (context is null) return null;
-        return new TranscriptUsageSummary(inputTokens, outputTokens, context, contextWindowTokens, contextIsEstimated);
+        return new TranscriptUsageSummary(inputTokens, outputTokens, context, contextWindowTokens, contextIsEstimated,
+            cachedInputTokens);
     }
 
     /// <summary>

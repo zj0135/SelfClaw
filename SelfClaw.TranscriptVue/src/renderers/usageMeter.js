@@ -66,6 +66,7 @@ export function calculateUsageProgress(usage, fallbackAbsoluteThreshold = 64_000
 	const limitText = formatTokenCount(limitTokens);
 	const inputTokensText = formatTokenCount(usage.inputTokens);
 	const outputTokensText = formatTokenCount(usage.outputTokens);
+	const cacheHitText = formatCacheHitRate(usage.cachedInputTokens, usage.inputTokens);
 
 	const rawTotal = (Number(usage.inputTokens) || 0) + (Number(usage.outputTokens) || 0);
 	const totalTokensText = rawTotal > 0 ? formatTokenCount(rawTotal) : '—';
@@ -84,8 +85,19 @@ export function calculateUsageProgress(usage, fallbackAbsoluteThreshold = 64_000
 		inputTokensText: inputTokensText === unknownTokenCount ? '—' : inputTokensText,
 		outputTokensText: outputTokensText === unknownTokenCount ? '—' : outputTokensText,
 		totalTokensText,
+		cacheHitText,
 		contextIsEstimated: estimated,
 	};
+}
+
+// 缓存命中率 = 缓存命中的输入 token 占全部输入 token 的比例；任一侧未知或为零时不显示，
+// 因为 0% 与“未上报”在界面上是两种不同的意思。
+function formatCacheHitRate(cachedTokens, inputTokens) {
+	if (cachedTokens == null || inputTokens == null) return null;
+	const cached = Number(cachedTokens);
+	const input = Number(inputTokens);
+	if (!Number.isFinite(cached) || !Number.isFinite(input) || cached <= 0 || input <= 0) return null;
+	return `${trimNumber(Math.min(100, (cached / input) * 100), 1)}%`;
 }
 
 export function formatCompressionNotice(notice) {

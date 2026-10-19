@@ -128,6 +128,23 @@ describe('calculateUsageProgress', () => {
 		expect(progress.tone).toBe('normal');
 	});
 
+	it('reports the cache hit rate as the cached share of input', () => {
+		// 127000 / 127810 = 99.36% -> 99.4%
+		const progress = calculateUsageProgress(usage({ cachedInputTokens: 127_000 }));
+		expect(progress.cacheHitText).toBe('99.4%');
+	});
+
+	it('clamps an impossible cached share instead of printing more than 100%', () => {
+		const progress = calculateUsageProgress(usage({ cachedInputTokens: 200_000 }));
+		expect(progress.cacheHitText).toBe('100%');
+	});
+
+	it('hides the cache hit rate when either side is unknown instead of showing 0%', () => {
+		expect(calculateUsageProgress(usage()).cacheHitText).toBeNull();
+		expect(calculateUsageProgress(usage({ cachedInputTokens: 0 })).cacheHitText).toBeNull();
+		expect(calculateUsageProgress(usage({ cachedInputTokens: 500, inputTokens: 0 })).cacheHitText).toBeNull();
+	});
+
 	it('falls back to configured absolute threshold when context window is missing', () => {
 		const progress = calculateUsageProgress(usage({ contextWindowTokens: null, contextTokens: 20_000 }), 64_000);
 		expect(progress.limitTokens).toBe(64_000);

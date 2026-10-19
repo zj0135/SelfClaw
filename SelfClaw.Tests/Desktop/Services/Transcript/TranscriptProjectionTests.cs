@@ -279,7 +279,8 @@ public sealed class TranscriptProjectionTests
                 "OutputTokens",
                 "ContextTokens",
                 "ContextWindowTokens",
-                "ContextIsEstimated");
+                "ContextIsEstimated",
+                "CachedInputTokens");
         typeof(TranscriptConversationItem).GetProperties().Select(property => property.Name)
             .Should().BeEquivalentTo(
                 "Id",
@@ -619,6 +620,42 @@ public sealed class TranscriptProjectionTests
 
         state.Should().NotBeNull();
         state!.Usage.Should().BeEquivalentTo(new TranscriptUsageSummary(80, 8, 950, null, false));
+    }
+
+    [Fact]
+    public void Build_sums_the_cached_share_alongside_the_input_tokens()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var running = UsageTurn(now.AddMinutes(1), new TurnUsage(InputTokens: 200, OutputTokens: 20));
+        var state = CreateProjection().Build(CreateRequest(
+            turns:
+            [
+                UsageTurn(now, new TurnUsage(InputTokens: 100, OutputTokens: 10, CachedInputTokens: 90,
+                    LastRequestInputTokens: 900)),
+                running
+            ],
+            liveUsage: new TranscriptLiveUsage(running.Id,
+                new TurnUsage(InputTokens: 260, OutputTokens: 26, CachedInputTokens: 240,
+                    LastRequestInputTokens: 1_200), IsEstimated: false)));
+
+        state.Should().NotBeNull();
+        // 90 + 240: the live snapshot replaces its own turn's persisted usage, and the cached share follows
+        // the same rule so it stays comparable to the input total it is a fraction of.
+        state!.Usage!.CachedInputTokens.Should().Be(330);
+        state.Usage.InputTokens.Should().Be(360);
+    }
+
+    [Fact]
+    public void Build_leaves_the_cached_share_unknown_when_no_turn_reported_one()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var state = CreateProjection().Build(CreateRequest(turns:
+        [
+            UsageTurn(now, new TurnUsage(InputTokens: 100, OutputTokens: 10, LastRequestInputTokens: 900))
+        ]));
+
+        state.Should().NotBeNull();
+        state!.Usage!.CachedInputTokens.Should().BeNull("no cached count is not the same as a zero one");
     }
 
     [Fact]
