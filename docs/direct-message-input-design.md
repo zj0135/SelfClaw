@@ -285,8 +285,9 @@ loop:
 - 完整枚举后先分类：ContentFilter 或原生 Refusal 返回 Blocked，取消本响应提出但尚未执行的工具；其他 provider ErrorContent、未知 finish reason 返回 Failed。Length 仍按原截断规则处理。零响应、只有 usage/元数据/空内容且没有完成标记均 Failed；明确 Stop 的合法无正文响应、有效 text/reasoning/ProtectedData 和其他支持的原生内容仍可完成。不能用前一请求的输出掩盖后一请求的空响应。以上均发生在审批、checkpoint 之前，保留已经观察到的内容与用量。
 - 通过响应分类后，再看合并内容中是否有完整客户端 function call；存在调用时即使 finish_reason=Stop 也进入工具分支。Ollama fixture 已观测到这种组合，Stop/ToolCalls 的新预算路径均有回归。显式循环返回正常完成／截断／内容过滤／预算耗尽，协议错误抛出并由 runtime 收尾为 Failed，不凭最后一个 finish reason 反推预算耗尽。
 - usage 先按单请求及 adapter 的增量／累计契约归一化，再跨请求累加；不把 UsageContent 碎片数当 ProviderCalls，也不把所有 raw usage 一律相加。无 usage 保留未知，详见 §9。
-- 新循环固定 `MaximumProviderRequestsPerTurn = 128`，含首次及 steer 请求，每次开始调用前预占一次，取消／失败不退回；SDK 内部 HTTP 重试不是新的逻辑 IChatClient 请求。旧配置 128 的实测结果是 129 次请求，因此新硬上限是明确收紧一次，不能写成保持旧请求数。
-- 第 128 次请求给出纯最终回答可正常成功；若仍要求客户端工具，禁止执行它们，补齐本地 Canceled／BudgetExhausted 结果以终结调用记录并 Failed；未消费 steer 转 Held。耗尽后不能再请求一次模型收尾。
+- 请求上限是**电路断路器**，不是任务长度策略：`MaximumProviderRequestsPerTurn = 1024`（原 128），含首次及 steer 请求，每次开始调用前预占一次，取消／失败不退回；SDK 内部 HTTP 重试不是新的逻辑 IChatClient 请求。128 会误杀长任务（读几百个文件即可超过），而长任务真正需要的保护是下面两条无界成本防线：无进展检测与每轮窗口校验。
+- **无进展检测**（`NoProgressGuard`）：连续 `RepeatedBatchLimit = 5` 个工具批次指纹相同（工具名 + 参数 + 结果，**不含** callId）即判定卡死，取消未执行调用、补 `NoProgress` 本地结果、返回 `Stalled` → Failed。读取同一文件但内容在变、轮询构建但输出在变都不算重复；连续故障预算（`MaximumConsecutiveToolFaults = 2`）与它独立。这是唯一能区分"长任务"与"死循环"的判据——请求计数做不到。取 5 而不是 3：重试、改完再读一遍、二次确认都属于合法模式，多等两轮的代价由请求上限兜住。
+- 到顶那一轮给出纯最终回答可正常成功；若仍要求客户端工具，禁止执行它们，补齐本地 Canceled／BudgetExhausted 结果以终结调用记录并 Failed；未消费 steer 转 Held。耗尽后不能再请求一次模型收尾。
 - 保留 `MaximumConsecutiveToolFaults = 2` 的现有行为（基线实测连续故障 3 次后终止），调用预算和连续故障预算独立；审批拒绝、steer 跳过不算工具故障。
 - Length 保持有有效输出则 Truncated、无有效输出则 Failed；不能因有 pending steer 自动掩盖截断并继续收费。
 - 单逻辑回合只执行一次完成通知；Steer 不重新建立 provider 或 capability lease。

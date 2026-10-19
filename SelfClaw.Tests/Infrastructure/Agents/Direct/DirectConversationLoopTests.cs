@@ -17,9 +17,9 @@ namespace SelfClaw.Tests.Infrastructure.Agents.Direct;
 public sealed class DirectConversationLoopTests
 {
     [Fact]
-    public async Task Request_budget_issues_128_requests_and_executes_only_127_tool_batches()
+    public async Task Request_budget_issues_the_circuit_breaker_limit_and_executes_one_batch_fewer()
     {
-        const int maximumIterations = 128;
+        var maximumIterations = DirectConversationLoop.MaximumProviderRequestsPerTurn;
         var provider = new EndlessToolChatClient("probe_tool");
         var executions = 0;
         var factory = CreateFactory(provider);
@@ -147,6 +147,42 @@ public sealed class DirectConversationLoopTests
         for (var i = 1; i <= 2; i++)
             events.FindIndex(e => e is ToolCallStartedEvent started && started.ToolCallId == $"call-{i}")
                 .Should().BeLessThan(events.FindIndex(e => e is ToolCallCompletedEvent ended && ended.ToolCallId == $"call-{i}"));
+    }
+
+    [Fact]
+    public async Task Repeating_the_same_tool_batch_stops_the_turn_as_stalled_instead_of_running_to_the_budget()
+    {
+        // A loop cannot be told from a long task by counting requests, so a batch that repeats with the same
+        // result ends the turn long before the circuit breaker.
+        var provider = new EndlessToolChatClient("probe_tool");
+        var executions = 0;
+        var factory = CreateFactory(provider);
+        var runtime = CreateRuntime(factory, new FixedCapabilityResolver(
+            Lease(CreateProbeTool(() => { executions++; return "ok"; }))));
+
+        var terminal = await RunAsync(runtime, factory.Profile.Id);
+
+        provider.Requests.Should().Be(NoProgressGuard.RepeatedBatchLimit);
+        executions.Should().Be(NoProgressGuard.RepeatedBatchLimit);
+        terminal.Status.Should().Be(RunCompletionStatus.Failed);
+        terminal.ErrorMessage.Should().Contain("NoProgress");
+    }
+
+    [Fact]
+    public async Task The_same_batch_with_a_new_result_each_round_keeps_the_turn_running()
+    {
+        // Reading the same file many times is not a loop as long as the file keeps changing.
+        var provider = new EndlessToolChatClient("probe_tool");
+        var executions = 0;
+        var factory = CreateFactory(provider);
+        var runtime = CreateRuntime(factory, new FixedCapabilityResolver(
+            Lease(CreateProbeTool(() => $"ok-{++executions}"))));
+
+        var terminal = await RunAsync(runtime, factory.Profile.Id);
+
+        provider.Requests.Should().Be(DirectConversationLoop.MaximumProviderRequestsPerTurn,
+            "only the circuit breaker may stop a turn that keeps producing new results");
+        terminal.ErrorMessage.Should().Contain("BudgetExhausted");
     }
 
     private sealed class RoundTripChatClient(int toolRounds = 2) : IChatClient

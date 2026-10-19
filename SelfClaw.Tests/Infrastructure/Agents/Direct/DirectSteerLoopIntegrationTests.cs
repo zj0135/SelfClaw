@@ -119,25 +119,35 @@ public sealed class DirectSteerLoopIntegrationTests
     }
 
     [Fact]
-    public async Task A_steer_does_not_reset_the_128_request_budget()
+    public async Task A_consumed_steer_does_not_grant_another_provider_request()
     {
         using var context = new ConversationTurnTestContext();
         await context.StartAsync();
+        using var cancellation = new CancellationTokenSource();
         var executions = 0;
         var provider = new SteerProvider { ToolNames = ["p"], Endless = true };
+        // The provider is endless by design. Running it to the request budget would mean 1024 SQLite progress
+        // commits (which lock the database), so the turn is stopped once the steer has been consumed and the
+        // loop has demonstrably continued: the accounting per round is what this case is about, and the
+        // budget-exhaustion paths are covered by the in-memory loop and contract cases.
+        const int observedRounds = 6;
         var runtime = CreateRuntime(context, provider, out var request, _ => () =>
         {
-            Interlocked.Increment(ref executions);
-            return Task.FromResult<object?>(Result("ok"));
+            var execution = Interlocked.Increment(ref executions);
+            if (execution >= observedRounds) cancellation.Cancel();
+            return Task.FromResult<object?>(Result($"ok-{execution}"));
         });
         await context.SeedPendingSteerAsync("U1");
 
-        var result = await RecordAsync(runtime, request, context).WaitAsync(Timeout);
+        await Record.ExceptionAsync(() => RecordAsync(runtime, request, context, cancellation.Token)
+            .WaitAsync(Timeout));
 
-        result.Terminal!.Status.Should().Be(RunCompletionStatus.Failed);
-        result.Terminal.ErrorMessage.Should().Contain("BudgetExhausted");
-        provider.Requests.Should().HaveCount(128, "a consumed steer does not grant another request");
-        executions.Should().Be(127);
+        executions.Should().BeGreaterThanOrEqualTo(observedRounds);
+        // Every provider request either ran a tool batch or was the last one, so the consumed steer cannot
+        // have bought an extra request: the count tracks the batches instead of exceeding them.
+        provider.Requests.Should().HaveCount(executions, "a consumed steer does not grant another request");
+        provider.Requests[^1].Where(message => message.Role == ChatRole.User).Select(message => message.Text)
+            .Should().Contain("U1", "the consumed steer reached the prompt of a later request");
         (await context.ScalarAsync("SELECT status FROM conversation_inputs;")).Should().Be(2L);
     }
 

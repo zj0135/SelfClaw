@@ -119,11 +119,12 @@ public sealed class DirectToolPipelineTests : IDisposable
     [Fact]
     public async Task A_tool_that_fails_without_throwing_never_spends_the_fault_budget()
     {
-        var outcome = await RunToolLoopAsync(_ => new DirectToolResult(
+        // Each failure reports what it observed, so the no-progress guard cannot stop the loop first.
+        var outcome = await RunToolLoopAsync(execution => new DirectToolResult(
             ToolCallStatus.Failed,
-            "tool failed",
-            JsonSerializer.SerializeToElement(new { error = "tool failed" }),
-            "tool failed"));
+            $"tool failed {execution}",
+            JsonSerializer.SerializeToElement(new { error = $"tool failed {execution}" }),
+            $"tool failed {execution}"));
 
         outcome.Terminal.Status.Should().Be(RunCompletionStatus.Succeeded);
         outcome.Executions.Should().Be(RepeatingToolChatClient.RequestedToolCalls);

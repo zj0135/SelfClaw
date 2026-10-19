@@ -149,18 +149,20 @@ public sealed class DirectInTurnCompactionTests
     }
 
     [Fact]
-    public async Task The_turn_stops_compacting_after_three_attempts_and_keeps_sending()
+    public async Task The_turn_stops_compacting_after_its_allowance_and_keeps_sending()
     {
-        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 5));
+        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 14));
         var factory = CreateFactory(client);
         var runtime = CreateRuntime(factory);
 
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
 
         client.SummaryCalls.Should().HaveCount(DirectConversationLoop.MaximumInTurnCompactionsPerTurn);
-        events.OfType<ContextCompactionStartedEvent>().Should().HaveCount(3);
-        events.OfType<InTurnContextCompactionCompletedEvent>().Should().HaveCount(3);
-        client.Requests.Should().HaveCount(6, "after the cap the turn keeps issuing provider requests");
+        events.OfType<ContextCompactionStartedEvent>().Should()
+            .HaveCount(DirectConversationLoop.MaximumInTurnCompactionsPerTurn);
+        events.OfType<InTurnContextCompactionCompletedEvent>().Should()
+            .HaveCount(DirectConversationLoop.MaximumInTurnCompactionsPerTurn);
+        client.Requests.Should().HaveCount(15, "after the cap the turn keeps issuing provider requests");
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
 
         // Chained compactions hand the bare summary back and the compressor wraps it once, so the section is
@@ -279,6 +281,27 @@ public sealed class DirectInTurnCompactionTests
         replayed.Should().NotContain(message => message.Text == "prior prompt");
         replayed.Select(message => message.Text)
             .Should().ContainInOrder("user prompt", "steer text", "AA");
+    }
+
+    [Fact]
+    public async Task An_over_window_prompt_is_refused_every_round_not_only_after_a_summary()
+    {
+        // Compaction is off, so nothing can shrink the prompt. The turn must report the window itself instead
+        // of sending the request and relaying whatever the provider says about it.
+        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 3, answerLength: 300));
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(client, contextWindowTokens: 200)
+        {
+            Options = new ChatOptions { MaxOutputTokens = 50 }
+        };
+        var runtime = CreateRuntime(factory, policy: new DirectCompressionPolicy(Enabled: false));
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
+
+        var terminal = events.OfType<RunCompletedEvent>().Should().ContainSingle().Which;
+        terminal.Status.Should().Be(RunCompletionStatus.Failed);
+        terminal.ErrorMessage.Should().Contain("outgrown the model context window");
+        terminal.ErrorMessage.Should().Contain("200");
+        client.Requests.Should().ContainSingle("the over-window round is refused before it is sent");
     }
 
     [Fact]
@@ -422,9 +445,20 @@ public sealed class DirectInTurnCompactionTests
         => new([], [new DirectToolBinding(Probe(), new DirectToolDescriptor(ToolCallKind.Other))],
             new Dictionary<Guid, string>(), []);
 
+    /// <summary>
+    /// Returns a fresh result per invocation: a tool that answers identically every time is exactly what the
+    /// no-progress guard stops, and these cases are about compaction, not about a stuck loop.
+    /// </summary>
     private static AIFunction Probe()
-        => AIFunctionFactory.Create(
-            () => new DirectToolResult(ToolCallStatus.Completed, "ok", JsonSerializer.SerializeToElement("ok"), "ok"),
+    {
+        var invocations = 0;
+        return AIFunctionFactory.Create(
+            () =>
+            {
+                var result = $"ok-{++invocations}";
+                return new DirectToolResult(ToolCallStatus.Completed, result,
+                    JsonSerializer.SerializeToElement(result), result);
+            },
             new AIFunctionFactoryOptions
             {
                 Name = "probe",
@@ -432,6 +466,7 @@ public sealed class DirectInTurnCompactionTests
                 ExcludeResultSchema = true,
                 MarshalResult = (value, _, _) => ValueTask.FromResult(value)
             });
+    }
 
     /// <summary>
     /// One tool round trip per script, then a final answer. Each round's unit costs a fixed

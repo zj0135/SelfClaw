@@ -16,13 +16,20 @@ namespace SelfClaw.Infrastructure.Agents.Direct;
 
 internal sealed class DirectConversationLoop
 {
-    internal const int MaximumProviderRequestsPerTurn = 128;
+    /// <summary>
+    /// A circuit breaker, not a task-length policy: a long task legitimately makes many requests, so the cap
+    /// sits far above anything a healthy turn reaches. What actually stops a runaway turn is
+    /// <see cref="NoProgressGuard"/> (a loop that repeats itself) plus the per-iteration window check;
+    /// this number only bounds the pathological case where every request looks different and nothing fits.
+    /// </summary>
+    internal const int MaximumProviderRequestsPerTurn = 1024;
 
     /// <summary>
     /// How many in-turn compactions one turn may attempt. A failed attempt counts too: the cap bounds the
-    /// latency and cost a summary can add to a single turn, not only the successful summaries.
+    /// latency and cost a summary can add to a single turn, not only the successful summaries. It is sized so
+    /// a long task that keeps growing the context is not forced to give up after a few rounds.
     /// </summary>
-    internal const int MaximumInTurnCompactionsPerTurn = 3;
+    internal const int MaximumInTurnCompactionsPerTurn = 10;
 
     private readonly IDirectTokenCounter _tokenCounter;
     private readonly DirectPromptComposer _promptComposer;
@@ -47,6 +54,7 @@ internal sealed class DirectConversationLoop
         var context = new DirectConversationContext(setup.SystemText, setup.InitialUnits, setup.TrailingProtectedMessages);
         // The loop is a singleton, so the per-turn allowance lives in this local rather than in a field.
         var compactionBudget = new InTurnCompactionBudget();
+        var progressGuard = new NoProgressGuard();
         for (var requestIndex = 0; requestIndex < MaximumProviderRequestsPerTurn; requestIndex++)
         {
             var isLastRequest = requestIndex + 1 == MaximumProviderRequestsPerTurn;
@@ -57,6 +65,10 @@ internal sealed class DirectConversationLoop
             {
                 await TryCompactInTurnAsync(setup, context, output, compactionBudget, cancellationToken)
                     .ConfigureAwait(false);
+                // Checked every round, not only after a summary: once the compaction allowance is spent the
+                // checkpoint above stops shrinking the prompt, and without this the request would go out and
+                // come back as an opaque provider error instead of a readable one from us.
+                EnsureInTurnPromptFitsWindow(setup, context, compactionBudget);
             }
 
             if (await ConsumeAvailableInputsAsync(setup, context, output, cancellationToken).ConfigureAwait(false) is { } budgetOutcome)
@@ -93,7 +105,17 @@ internal sealed class DirectConversationLoop
                 return DirectLoopOutcome.BudgetExhausted;
             }
 
-            context.AppendResults(await ExecuteToolsAsync(setup, output, calls, cancellationToken).ConfigureAwait(false));
+            var results = await ExecuteToolsAsync(setup, output, calls, cancellationToken).ConfigureAwait(false);
+            // A batch that repeats is a loop, and a loop cannot be told apart from a long task by counting
+            // requests: the tools ran, nothing failed, and nothing new was produced.
+            if (progressGuard.Observe(calls, results))
+            {
+                CancelCalls(setup, output, calls, "NoProgress",
+                    $"The turn repeated the same tool calls with the same results {NoProgressGuard.RepeatedBatchLimit} times in a row and was stopped to avoid an endless loop.");
+                return DirectLoopOutcome.Stalled;
+            }
+
+            context.AppendResults(results);
         }
         throw new InvalidOperationException("The provider request budget was not resolved.");
     }
@@ -204,11 +226,11 @@ internal sealed class DirectConversationLoop
             return;
         }
 
-        CompleteInTurnCompaction(setup, context, output, plan, result, counted.ToolTokens);
+        CompleteInTurnCompaction(setup, context, output, plan, result);
     }
 
     private void CompleteInTurnCompaction(DirectTurnSetup setup, DirectConversationContext context,
-        DirectEventTranslator output, DirectCompressionPlan plan, DirectCompressionResult result, int toolTokens)
+        DirectEventTranslator output, DirectCompressionPlan plan, DirectCompressionResult result)
     {
         // The bare summary goes in: the context owns the system-section shell, so a second compaction reuses
         // one format instead of nesting wrapped summaries.
@@ -225,7 +247,7 @@ internal sealed class DirectConversationLoop
             result.Model));
         // The meter follows the compaction immediately: the published count is the compacted prompt, so the
         // context figure drops here instead of staying at the pre-compaction size until the next observation.
-        if (EnsureInTurnPromptFitsWindow(setup, context, toolTokens) is { } promptTokens)
+        if (MeasurePrompt(setup, context) is { } promptTokens)
         {
             output.PublishContextEstimate(promptTokens, setup.Budget.ContextWindowTokens);
         }
@@ -234,29 +256,43 @@ internal sealed class DirectConversationLoop
     }
 
     /// <summary>
-    /// A compaction that still leaves the prompt over the window cannot be sent without silently trimming, so
-    /// the turn reports it instead (decision A). Without a count nothing is known here and the provider decides.
-    /// Returns the compacted prompt's input size, which the caller publishes as the new context estimate.
+    /// Refuses a prompt that cannot fit, because sending it would come back as an opaque provider error.
+    /// Runs before every request of the turn, not only after a summary: once the compaction allowance is
+    /// spent nothing shrinks the prompt any more, and the turn must say so itself. Without a count nothing is
+    /// known here and the provider decides (design §5.5).
     /// </summary>
-    private int? EnsureInTurnPromptFitsWindow(DirectTurnSetup setup, DirectConversationContext context, int toolTokens)
+    private void EnsureInTurnPromptFitsWindow(DirectTurnSetup setup, DirectConversationContext context,
+        InTurnCompactionBudget budget)
     {
-        if (context.CountTokens(_tokenCounter, setup.ProviderLease.Profile) is not int recounted)
-            return null;
-
-        // Counted before the window check so the estimate is available even when no window is declared.
-        var promptTokens = recounted + toolTokens;
+        // Ordered before counting: with no declared window there is nothing to compare against, so a model
+        // that never declared one must not pay for a count here.
         if (setup.Budget.ContextWindowTokens is not int contextWindow)
-            return promptTokens;
+            return;
+        if (CountPrompt(setup, context) is not { } counted)
+            return;
+        if (counted.Total <= contextWindow)
+            return;
 
-        var reserve = setup.ProviderLease.Options.MaxOutputTokens ?? DirectPromptComposer.DefaultOutputTokenReserve;
-        var required = (long)promptTokens + reserve;
-        if (required <= contextWindow)
-            return promptTokens;
-
+        var remedy = budget.IsExhausted
+            ? $"The turn used all {MaximumInTurnCompactionsPerTurn} of its in-turn compactions and still does not fit."
+            : "Context compaction could not free enough room.";
         throw new InvalidDataException(
-            "In-turn context compaction left the prompt over the model context window: the remaining history, " +
-            $"tool definitions and output reserve require approximately {required} tokens, exceeding the window " +
-            $"of {contextWindow} tokens. Lower the output limit or use a model with a larger context window.");
+            $"The conversation has outgrown the model context window: the remaining history, tool definitions " +
+            $"and output reserve require approximately {counted.Total} tokens, exceeding the window of " +
+            $"{contextWindow} tokens. {remedy} Lower the output limit, raise the compaction allowance, or use a " +
+            "model with a larger context window.");
+    }
+
+    /// <summary>
+    /// The prompt's input size, reserve-free, for the context readout. Null means counting is unavailable.
+    /// </summary>
+    private int? MeasurePrompt(DirectTurnSetup setup, DirectConversationContext context)
+    {
+        if (context.CountTokens(_tokenCounter, setup.ProviderLease.Profile) is not int used)
+            return null;
+        if (_tokenCounter.CountTools(setup.ProviderLease.Options.Tools, setup.ProviderLease.Profile) is not int toolTokens)
+            return null;
+        return used + toolTokens;
     }
 
     /// <summary>

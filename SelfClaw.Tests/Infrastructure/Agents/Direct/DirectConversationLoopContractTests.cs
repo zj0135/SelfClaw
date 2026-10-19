@@ -133,21 +133,23 @@ public sealed class DirectConversationLoopContractTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public async Task Request_128_closes_all_unexecuted_calls_or_accepts_a_final_answer(bool stop, bool finalAnswer)
+    public async Task Request_limit_closes_all_unexecuted_calls_or_accepts_a_final_answer(bool stop, bool finalAnswer)
     {
+        var limit = DirectConversationLoop.MaximumProviderRequestsPerTurn;
         var executions = 0;
-        var provider = new Provider((n, _, _) => Reply(n == 128 && finalAnswer
+        var provider = new Provider((n, _, _) => Reply(n == limit && finalAnswer
             ? Update(n, ChatFinishReason.Stop, new TextContent("done"))
             : Update(n, stop ? ChatFinishReason.Stop : ChatFinishReason.ToolCalls, Call($"a-{n}"), Call($"b-{n}"))));
-        var (runtime, request) = Runtime(provider, Tool(() => { executions++; return Success(); }));
+        // A fresh result per execution keeps the no-progress guard out of a budget test.
+        var (runtime, request) = Runtime(provider, Tool(() => SuccessAt(++executions)));
         var events = await CollectAsync(runtime, request);
 
-        provider.Requests.Should().Be(128);
-        executions.Should().Be(254);
+        provider.Requests.Should().Be(limit);
+        executions.Should().Be((limit - 1) * 2);
         var terminal = events.OfType<RunCompletedEvent>().Should().ContainSingle().Subject;
         terminal.Status.Should().Be(finalAnswer ? RunCompletionStatus.Succeeded : RunCompletionStatus.Failed);
         var results = events.OfType<ToolCallCompletedEvent>().ToArray();
-        results.Should().HaveCount(finalAnswer ? 254 : 256);
+        results.Should().HaveCount(finalAnswer ? (limit - 1) * 2 : limit * 2);
         events.OfType<ToolCallStartedEvent>().Select(item => item.ToolCallId).Should().Equal(results.Select(item => item.ToolCallId));
         if (!finalAnswer)
         {
@@ -407,6 +409,9 @@ public sealed class DirectConversationLoopContractTests
     private static AIFunction Tool(Func<object> call) => AIFunctionFactory.Create(call,
         new AIFunctionFactoryOptions { Name = "probe", MarshalResult = (result, _, _) => ValueTask.FromResult(result) });
     private static DirectToolResult Success() => new(ToolCallStatus.Completed, "ok", JsonSerializer.SerializeToElement("ok"), "ok");
+    private static DirectToolResult SuccessAt(int execution)
+        => new(ToolCallStatus.Completed, $"ok-{execution}", JsonSerializer.SerializeToElement($"ok-{execution}"),
+            $"ok-{execution}");
     private static FunctionCallContent Call(string id) => new(id, "probe", new Dictionary<string, object?>());
     private static ChatResponseUpdate Update(int n, ChatFinishReason? finish, params AIContent[] content)
         => new(ChatRole.Assistant, content) { MessageId = $"message-{n}", FinishReason = finish };

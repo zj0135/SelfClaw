@@ -37,6 +37,9 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     private static readonly string ToolLoopExhaustedMessage =
         $"BudgetExhausted: the turn reached its {DirectConversationLoop.MaximumProviderRequestsPerTurn} provider request limit before it could continue.";
 
+    private static readonly string StalledMessage =
+        $"NoProgress: the turn repeated the same tool calls with the same results {NoProgressGuard.RepeatedBatchLimit} times in a row and was stopped to avoid an endless loop. Tell the agent what to do differently and try again.";
+
     /// <summary>
     /// Reported when the output-token cap is hit before any text is produced. There is no
     /// partial answer to resume from, so the limit is likely configured too low to be usable.
@@ -492,6 +495,15 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             _logger.LogWarning("Direct AI agent turn exhausted its {RequestLimit} provider request budget.",
                 DirectConversationLoop.MaximumProviderRequestsPerTurn);
             Write(writer, RunCompletionStatus.Failed, output.FinalTextOrNull, ToolLoopExhaustedMessage);
+            return;
+        }
+
+        if (outcome == DirectLoopOutcome.Stalled)
+        {
+            _logger.LogWarning(
+                "Direct AI agent turn repeated the same tool batch {RepeatLimit} times and was stopped as stalled.",
+                NoProgressGuard.RepeatedBatchLimit);
+            Write(writer, RunCompletionStatus.Failed, output.FinalTextOrNull, StalledMessage);
             return;
         }
 

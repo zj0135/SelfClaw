@@ -100,7 +100,23 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 
 ### 3.4 上限
 
-`MaximumInTurnCompactionsPerTurn = 3`（常量）。**失败尝试也计入**（约束延迟与成本）；达到上限后不再压缩，继续发送（回到现状，provider 决定）。压缩调用**不计入** `MaximumProviderRequestsPerTurn`。
+`MaximumInTurnCompactionsPerTurn = 10`（常量，原 3）。**失败尝试也计入**（约束延迟与成本）；达到上限后不再压缩，请求继续发送。压缩调用**不计入** `MaximumProviderRequestsPerTurn`。
+
+**窗口校验不再只在压缩后**：每个请求前（`requestIndex > 0`）都跑一次 `EnsureInTurnPromptFitsWindow`。原因是压缩额度用尽后没有任何机制会再缩小 prompt，只靠压缩后校验等于放行一个必然超窗的请求、再由 provider 返回一个不可读的 400。现在超窗由我们自己报可读错误：`The conversation has outgrown the model context window: … approximately {total} tokens, exceeding the window of {window} tokens.`，并在额度耗尽时明确 `The turn used all {n} of its in-turn compactions and still does not fit.`。没有声明窗口的模型直接跳过（没有可比较的基准，且不为它付计数成本）；计数不可用时 fail-open（§5.5）。
+
+## 3. 上限与终止（2026-10 修订）
+
+| 保护 | 值 | 终止语义 |
+| --- | --- | --- |
+| 用户取消 | — | Cancelled |
+| 连续工具故障 | 2 | 抛 `DirectToolFaultLimitException`，回合终止 |
+| **无进展检测**（`NoProgressGuard`） | 连续 5 个相同批次 | `Stalled` → Failed（`NoProgress` 文案） |
+| **请求上限**（电路断路器） | `MaximumProviderRequestsPerTurn = 1024` | `BudgetExhausted` → Failed |
+| **每轮窗口校验** | 声明的上下文窗口 | 抛可读 `InvalidDataException` → Failed |
+
+四者的分工要说清：**请求计数无法区分长任务与死循环**（读 200 个小文件就该是 200 次请求），所以它只当电路断路器用，值放大到 1024。真正防"看起来在干活"的是无进展检测：同一批工具调用得到同一批结果，连续 3 次即判卡死。轮询构建、反复读一个正在变的文件都有新结果，不会被误杀。
+
+压缩额度从 3 提到 10，并且**窗口校验从"仅在压缩后"移到"每个请求前"**——额度耗尽后没有任何东西会再缩小 prompt，只靠压缩后校验等于放行必然超窗的请求、再让 provider 回一个不可读的 400。
 
 ## 4. 内存单元模型（边界与受保护内容）
 
