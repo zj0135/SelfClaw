@@ -575,6 +575,53 @@ public sealed class TranscriptProjectionTests
     }
 
     [Fact]
+    public void Build_replaces_the_running_turns_persisted_usage_with_its_live_snapshot()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var running = UsageTurn(now.AddMinutes(1), new TurnUsage(InputTokens: 100, OutputTokens: 10));
+        var state = CreateProjection().Build(CreateRequest(
+            turns: [UsageTurn(now, new TurnUsage(InputTokens: 50, OutputTokens: 5, LastRequestInputTokens: 900)), running],
+            liveUsage: new TranscriptLiveUsage(running.Id,
+                new TurnUsage(InputTokens: 130, OutputTokens: 14, LastRequestInputTokens: 1_200, ContextWindowTokens: 32_000),
+                IsEstimated: false)));
+
+        state.Should().NotBeNull();
+        // 50 + 130, never 50 + 100 + 130: the live snapshot is the same accumulator one request later.
+        state!.Usage.Should().BeEquivalentTo(new TranscriptUsageSummary(180, 19, 1_200, 32_000, false));
+    }
+
+    [Fact]
+    public void Build_shows_a_locally_counted_context_as_estimated_and_keeps_the_persisted_totals()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var running = UsageTurn(now, new TurnUsage(InputTokens: 100, OutputTokens: 10, LastRequestInputTokens: 20_000));
+        var state = CreateProjection().Build(CreateRequest(
+            turns: [running],
+            liveUsage: new TranscriptLiveUsage(running.Id,
+                new TurnUsage(ContextTokens: 4_000, LastRequestInputTokens: 4_000), IsEstimated: true)));
+
+        state.Should().NotBeNull();
+        var usage = state!.Usage!;
+        usage.ContextTokens.Should().Be(4_000, "a compaction's locally counted size wins over the earlier measurement");
+        usage.InputTokens.Should().Be(100);
+        usage.OutputTokens.Should().Be(10);
+        usage.ContextIsEstimated.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Build_counts_a_live_snapshot_whose_turn_is_not_in_the_turns_again()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var state = CreateProjection().Build(CreateRequest(
+            turns: [UsageTurn(now, new TurnUsage(InputTokens: 50, OutputTokens: 5, LastRequestInputTokens: 900))],
+            liveUsage: new TranscriptLiveUsage(Guid.NewGuid(),
+                new TurnUsage(InputTokens: 30, OutputTokens: 3, LastRequestInputTokens: 950), IsEstimated: false)));
+
+        state.Should().NotBeNull();
+        state!.Usage.Should().BeEquivalentTo(new TranscriptUsageSummary(80, 8, 950, null, false));
+    }
+
+    [Fact]
     public void Build_reports_no_usage_for_an_empty_conversation()
     {
         var state = CreateProjection().Build(CreateRequest());
@@ -623,7 +670,8 @@ public sealed class TranscriptProjectionTests
         IReadOnlyList<WorkspaceRoot>? workspaceRoots = null,
         Guid? selectedConversationId = null,
         IReadOnlyList<ConversationCompactionRecord>? compactions = null,
-        IReadOnlyList<ConversationTurnRecord>? turns = null)
+        IReadOnlyList<ConversationTurnRecord>? turns = null,
+        TranscriptLiveUsage? liveUsage = null)
         => new(
             messages ?? [],
             turns ?? PresentationHistory.Turns(messages ?? []),
@@ -639,5 +687,6 @@ public sealed class TranscriptProjectionTests
             "Build",
             1,
             "requireApproval",
-            Compactions: compactions);
+            Compactions: compactions,
+            LiveUsage: liveUsage);
 }

@@ -113,6 +113,12 @@ Glob 保留忽略 `.gitignore` 的路径枚举语义和隐藏文件可见性，�
 
 token 预算按 tokenizer 计数：超阈值由压缩（摘要 + 边界重放）处理，不再按字节估算裁剪。回合内增长同样在循环顶部、steer 排空之前按同一阈值检查（回合内压缩，见 `docs/direct-in-turn-compaction-design.md`），其摘要只留在进程内。数据库历史读取、当前会话内容本身及 Skill token 扫描没有变成常量成本。Direct 事件 Channel 仍无界；慢消费者积压与 warm MCP health 写入保留为待测量项。
 
+用量有两条事件、两种语义：`UsageReportedEvent` 是**增量观测**，消费端累加、终态随回合落库；`UsageProgressEvent` 是**累计快照**，只用于显示，消费者（`ConversationRuntimeState.LiveUsage`）整体替换、绝不进入回合记录，因此生产者可以在一个回合里发任意多次而不改变落库的总量。Direct 只在两个点发布快照：**每个 provider 请求结束**，以及**压缩完成后重算**（`IsEstimated = true`）。投影把运行回合的实时快照**替换**该回合已落库的用量（边界提交可能写过同一累加器的更早快照），而不是相加。
+
+回合开始**不发布本地估算**。本地 tiktoken 与 provider 自己的 tokenizer 必然差几个百分点（实测 `o200k` 近似 DeepSeek 自研词表低约 7%），两个"都差不多对"的数字交替上屏只会让状态栏反复跳；因此上下文数字只有一个来源——provider 实测。代价是首回合在第一个 provider 请求返回前没有数字可显示（前端显示"不可用"），换掉的是一个永远正确但慢一拍的值。压缩完成后的估算仍然无条件发布：上下文确实变了，而此刻没有新的实测可用，继续显示压缩前的尺寸更糟。`ContextIsEstimated` 只有这种估算快照才为 true，前端据此显示 `~` 与近似说明。
+
+`budget.ContextWindowTokens is null && !policy.Enabled` 时完全不计数：既没有窗口校验也没有压缩要判定，不发布估算之后这次计数已无消费者。
+
 ## 6. 持久化与配置边界
 
 `IConversationRepository` 暴露会话、消息和工具记录。Workspace Root CRUD 归入 `IWorkspaceRootRepository`，与 Git checkout/repository 存储共用 `SqliteWorkspaceRepository`；Git 服务不再依赖会话仓库。provider 管理仓库保持 Infrastructure internal，不机械拆分管理接口。

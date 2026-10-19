@@ -215,6 +215,56 @@ public sealed class DirectAgentChatRuntimeTests
     }
 
     [Fact]
+    public async Task StreamTurnAsync_never_publishes_a_local_estimate_at_turn_start()
+    {
+        var client = new ScriptedChatClient(
+            [Update("m", new TextContent("done"), new UsageContent(new UsageDetails { InputTokenCount = 40 }))]);
+        var factory = new FakeChatClientFactory(client);
+        var runtime = CreateRuntime(factory);
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
+
+        // Two tokenizers disagree by a few percent, so a local estimate would make the meter jump between two
+        // close-but-different numbers every turn. The measured value is the only source for the context size.
+        events.OfType<UsageProgressEvent>().Should().ContainSingle()
+            .Which.IsEstimated.Should().BeFalse("only the provider observation is published");
+    }
+
+    [Fact]
+    public async Task StreamTurnAsync_publishes_a_usage_snapshot_per_provider_request_and_one_terminal_report()
+    {
+        var tool = AIFunctionFactory.Create((Func<string>)(() => "file body"), "read_file", "Read a file");
+        var client = new MultiScriptChatClient(
+        [
+            [
+                Update("message-1",
+                    new TextContent("checking"),
+                    new FunctionCallContent("call-1", "read_file", new Dictionary<string, object?>()),
+                    new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 }))
+            ],
+            [
+                Update("message-2",
+                    new TextContent("done"),
+                    new UsageContent(new UsageDetails { InputTokenCount = 20, OutputTokenCount = 4 }))
+            ]
+        ]);
+        var factory = new FakeChatClientFactory(client);
+        var capabilityLease = new DirectTurnCapabilityLease([], [new DirectToolBinding(tool, new(ToolCallKind.Read))],
+            new Dictionary<Guid, string>(), []);
+        var runtime = CreateRuntime(factory, new FakeCapabilityResolver(capabilityLease));
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
+
+        var progress = events.OfType<UsageProgressEvent>().Where(item => !item.IsEstimated).ToArray();
+        progress.Should().HaveCount(2, "each provider request moves the displayed usage exactly once");
+        progress[0].Usage.InputTokens.Should().Be(10);
+        progress[1].Usage.InputTokens.Should().Be(30);
+        progress[1].Usage.ProviderCalls.Should().Be(2);
+        // The snapshot is display-only: the turn still reports its aggregate exactly once.
+        events.OfType<UsageReportedEvent>().Should().ContainSingle().Which.Usage.InputTokens.Should().Be(30);
+    }
+
+    [Fact]
     public async Task StreamTurnAsync_propagates_cancellation_and_disposes_client()
     {
         var client = new ScriptedChatClient(

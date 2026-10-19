@@ -39,6 +39,11 @@ public sealed class DirectInTurnCompactionTests
         completed.SourceTokens.Should().Be(64);
         completed.Model.Should().Be(factory.Profile.Model);
         events.OfType<ContextCompactionCompletedEvent>().Should().BeEmpty("an in-turn summary is never persisted");
+        // The one place a local estimate is shown: the context really shrank and no provider has measured
+        // the compacted prompt yet, so keeping the pre-compaction size would be worse than an approximation.
+        var estimate = events.OfType<UsageProgressEvent>().Should().ContainSingle().Which;
+        estimate.IsEstimated.Should().BeTrue();
+        estimate.Usage.LastRequestInputTokens.Should().BePositive();
 
         // Started -> Completed -> Requesting keeps the activity text overwritten by the request it precedes.
         events.IndexOf(started).Should().BeLessThan(events.IndexOf(completed));
@@ -213,7 +218,10 @@ public sealed class DirectInTurnCompactionTests
 
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
 
+        // No window and no compaction: nothing is decided from a count, and the meter waits for the
+        // provider's own measurement instead of paying for a local one.
         counter.Calls.Should().Be(0, "with no declared window and compaction off, neither setup nor the checkpoint counts");
+        events.OfType<UsageProgressEvent>().Should().BeEmpty("no local estimate competes with measurement");
         client.SummaryCalls.Should().BeEmpty();
         events.OfType<ContextCompactionStartedEvent>().Should().BeEmpty();
         events.OfType<InTurnContextCompactionCompletedEvent>().Should().BeEmpty();

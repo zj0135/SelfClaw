@@ -2,6 +2,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
+using SelfClaw.Desktop.Services.Transcript.Views;
 
 namespace SelfClaw.Desktop.Services.Runtime;
 
@@ -38,6 +39,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     internal bool IsSelectedRunning => GetSelectedRun() is not null;
     internal bool IsSelectedContinuation => GetSelectedRun()?.Origin == DirectTurnOrigin.Continuation;
     internal string? SelectedActivityText => GetSelectedRun()?.RuntimeState?.ActivityText;
+    internal TranscriptLiveUsage? SelectedLiveUsage => GetSelectedRun()?.RuntimeState?.LiveUsage;
     internal event Action? SelectedStateChanged;
 
     internal ConversationTranscriptSnapshot CaptureSelectedTranscript()

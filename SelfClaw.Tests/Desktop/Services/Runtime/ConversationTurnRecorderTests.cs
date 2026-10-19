@@ -4,6 +4,7 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Transcript;
+using SelfClaw.Desktop.Services.Transcript.Views;
 using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Desktop.Services.Runtime;
@@ -204,6 +205,50 @@ public sealed class ConversationTurnRecorderTests
         turn.Usage?.InputTokens.Should().Be(3);
         turn.Status.Should().Be(ConversationTurnStatus.Failed);
         (await context.ScalarAsync("SELECT total_tokens FROM turn_usage")).Should().Be(DBNull.Value);
+    }
+
+    [Fact]
+    public async Task Usage_progress_updates_the_live_snapshot_without_touching_the_turn_record()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+
+        await context.ApplyAsync(new UsageProgressEvent(
+            new TurnUsage(InputTokens: 5, OutputTokens: 2, LastRequestInputTokens: 40)));
+
+        context.State.LiveUsage.Should().BeEquivalentTo(new TranscriptLiveUsage(context.Record.Id,
+            new TurnUsage(InputTokens: 5, OutputTokens: 2, LastRequestInputTokens: 40), false));
+        context.State.Turns.Single().Usage.Should().BeNull("a progress snapshot is display-only");
+
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
+
+        context.State.Turns.Single().Usage.Should().BeNull();
+        (await context.ScalarAsync("SELECT COUNT(*) FROM turn_usage")).Should().Be(0L,
+            "only committed observations reach the usage table");
+    }
+
+    [Fact]
+    public async Task A_locally_counted_estimate_never_reaches_the_usage_table()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+
+        await context.ApplyAsync(new UsageProgressEvent(
+            new TurnUsage(ContextTokens: 900, LastRequestInputTokens: 900), IsEstimated: true));
+
+        context.State.LiveUsage!.IsEstimated.Should().BeTrue();
+        context.State.Turns.Single().Usage.Should().BeNull();
+
+        await context.ApplyAsync(new UsageReportedEvent(
+            new TurnUsage(InputTokens: 11, OutputTokens: 7, LastRequestInputTokens: 901)));
+        context.State.LiveUsage.Should().BeNull("the committed aggregate supersedes the live snapshot");
+
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
+
+        var stored = (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Single().Usage;
+        stored.Should().NotBeNull();
+        stored!.InputTokens.Should().Be(11);
+        stored.LastRequestInputTokens.Should().Be(901);
     }
 
     [Fact]

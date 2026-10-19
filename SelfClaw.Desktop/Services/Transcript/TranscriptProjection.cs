@@ -30,7 +30,7 @@ public sealed class TranscriptProjection
         var state = new TranscriptRenderState(stableItems, request.AutoScroll, _navigation,
             request.SelectedConversationId?.ToString("D"), request.IsBusy, request.IsContinuation, request.ActivityText, request.AgentMode,
             request.SelectedAgentId, request.SelectedAgentName, request.CapabilityRevision, request.ToolPermissionMode,
-            BuildUsageSummary(request.Turns));
+            BuildUsageSummary(request.Turns, request.LiveUsage));
         if (state == _lastState) return null;
         _lastState = state;
         return state;
@@ -128,16 +128,24 @@ public sealed class TranscriptProjection
         return item;
     }
 
-    private static TranscriptUsageSummary? BuildUsageSummary(IReadOnlyList<ConversationTurnRecord> turns)
+    private static TranscriptUsageSummary? BuildUsageSummary(IReadOnlyList<ConversationTurnRecord> turns,
+        TranscriptLiveUsage? liveUsage)
     {
         long inputTokens = 0;
         long outputTokens = 0;
         int? lastRequestInputTokens = null;
         int? lastContextTokens = null;
         int? contextWindowTokens = null;
+        var contextIsEstimated = false;
+        var liveTurnSeen = false;
         foreach (var turn in turns.OrderBy(turn => turn.StartedAtUtc))
         {
-            if (turn.Usage is not { } usage) continue;
+            // The running turn's published snapshot supersedes whatever a boundary commit already wrote for
+            // it: both come from the same accumulator, so adding them would count the same tokens twice.
+            var isLiveTurn = liveUsage is { } live && live.TurnId == turn.Id;
+            var usage = isLiveTurn ? Overlay(liveUsage!.Usage, turn.Usage) : turn.Usage;
+            if (usage is null) continue;
+            liveTurnSeen |= isLiveTurn;
             inputTokens += usage.InputTokens ?? 0;
             outputTokens += usage.OutputTokens ?? 0;
             // Context, window and last request input describe one provider call, so the latest wins
@@ -145,11 +153,48 @@ public sealed class TranscriptProjection
             if (usage.LastRequestInputTokens is int requestInputTokens) lastRequestInputTokens = requestInputTokens;
             if (usage.ContextTokens is int contextTokens) lastContextTokens = contextTokens;
             if (usage.ContextWindowTokens is int windowTokens) contextWindowTokens = windowTokens;
+            if (isLiveTurn) contextIsEstimated = liveUsage!.IsEstimated;
+        }
+
+        // A run can publish before its turn record reaches the snapshot; its totals still belong to the session.
+        if (liveUsage is { } pending && !liveTurnSeen)
+        {
+            inputTokens += pending.Usage.InputTokens ?? 0;
+            outputTokens += pending.Usage.OutputTokens ?? 0;
+            if (pending.Usage.LastRequestInputTokens is int liveInput) lastRequestInputTokens = liveInput;
+            else if (pending.Usage.ContextTokens is int liveContext) lastContextTokens = liveContext;
+            if (pending.Usage.ContextWindowTokens is int liveWindow) contextWindowTokens = liveWindow;
+            contextIsEstimated = pending.IsEstimated;
         }
 
         var context = lastRequestInputTokens ?? lastContextTokens;
         if (context is null) return null;
-        return new TranscriptUsageSummary(inputTokens, outputTokens, context, contextWindowTokens, ContextIsEstimated: false);
+        return new TranscriptUsageSummary(inputTokens, outputTokens, context, contextWindowTokens, contextIsEstimated);
+    }
+
+    /// <summary>
+    /// The live snapshot wins field by field, because it is the same accumulator one request later; a locally
+    /// counted estimate only fills the context fields, so the persisted totals survive underneath it.
+    /// </summary>
+    private static TurnUsage Overlay(TurnUsage live, TurnUsage? persisted)
+    {
+        if (persisted is not { } previous) return live;
+        return new TurnUsage(
+            live.Model ?? previous.Model,
+            live.InputTokens ?? previous.InputTokens,
+            live.UncachedInputTokens ?? previous.UncachedInputTokens,
+            live.CachedInputTokens ?? previous.CachedInputTokens,
+            live.CacheWriteInputTokens ?? previous.CacheWriteInputTokens,
+            live.OutputTokens ?? previous.OutputTokens,
+            live.ReasoningTokens ?? previous.ReasoningTokens,
+            live.TotalTokens ?? previous.TotalTokens,
+            Math.Max(live.ProviderCalls, previous.ProviderCalls),
+            live.ContextTokens ?? previous.ContextTokens,
+            live.ContextWindowTokens ?? previous.ContextWindowTokens,
+            live.CostUsdMicros ?? previous.CostUsdMicros,
+            live.CostSource == TurnUsageCostSource.None ? previous.CostSource : live.CostSource,
+            live.AdditionalCountsJson ?? previous.AdditionalCountsJson,
+            live.LastRequestInputTokens ?? previous.LastRequestInputTokens);
     }
 
     private void UpdateNavigation(TranscriptProjectionRequest request)

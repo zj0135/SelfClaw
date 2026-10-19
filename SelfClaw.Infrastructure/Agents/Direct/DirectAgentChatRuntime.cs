@@ -1,4 +1,4 @@
-﻿using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
+using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
@@ -292,7 +292,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         ChannelWriter<AgentStreamEvent> writer,
         CancellationToken cancellationToken)
     {
-        // Without a declared window and with compaction off, there is nothing to count and nothing to decide.
+        // Without a declared window and with compaction off, there is nothing to count: the meter waits for
+        // the provider's own measurement instead of paying for a local one nobody decides on.
         if (budget.ContextWindowTokens is null && !policy.Enabled)
         {
             return (request.Compression, null);
@@ -309,6 +310,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         var plan = _promptComposer.PlanCompression(countedUnits, request.Compression, policy, budget, estimatedTokens);
         if (!plan.ShouldCompress || plan.ThroughSequence is not long throughSequence)
         {
+            // No estimate here: the meter keeps the last measured context and updates when this request
+            // reports its own, so the displayed number has exactly one source instead of two close ones.
             return (request.Compression, estimatedTokens);
         }
 
@@ -350,10 +353,26 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
         writer.TryWrite(new ContextCompactionCompletedEvent(compression));
         // The window check bounds what is actually sent, so it is re-run against the prompt that now carries
-        // the summary section in its system text.
+        // the summary section in its system text. The estimate published from it is the post-summary size, so
+        // the meter shows the drop here rather than the pre-compaction figure.
         var (recountedTokens, _) = CountPromptTokens(request, capabilityLease, providerLease, units, compression);
+        if (recountedTokens is int recounted)
+        {
+            PublishCountedContext(writer, recounted, providerLease);
+        }
+
         return (compression, recountedTokens);
     }
+
+    /// <summary>
+    /// Publishes the prompt size a completed compaction left behind. This is the one place an estimate is
+    /// shown: the context really did shrink and no provider has measured the compacted prompt yet, so waiting
+    /// for the next observation would keep the pre-compaction size on screen.
+    /// </summary>
+    private static void PublishCountedContext(ChannelWriter<AgentStreamEvent> writer, int promptTokens,
+        AiChatClientLease providerLease)
+        => writer.TryWrite(DirectEventTranslator.CreateContextEstimate(
+            promptTokens, AiChatOptions.ResolveContextWindowTokens(providerLease.Profile)));
 
     /// <summary>
     /// Counts the prompt the composer is about to build: the system sections (including an existing summary),

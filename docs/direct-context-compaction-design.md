@@ -300,6 +300,7 @@ internal string? BuildSystemText(..., ConversationCompactionRecord? compression)
 - **保留的必要校验**：`counted(system + tools) + outputReserve > window` → 抛既有可读错误（这条与用户历史无关，属于配置错误）；计数不可用时跳过该检查（fail-open），由 provider 报错。⚠ 落地归属（C7 定）：这条检查的唯一归属是 **runtime**（`EnsurePromptFitsWindow`，文案要带“开启压缩 / 降低输出上限 / 换更大窗口”的指引），composer **不再重复同一条校验**——runtime 用同一份计数在 `BuildMessages` 之前先跑，composer 里那份永远不可达，属重复实现（AGENTS 约定 10）。composer 只保留与计数无关的校验（completion batch 的 64 KiB 上限、历史顺序与归属校验）。
 - 续写提示、completion batch、steer 批次的语义与顺序不变。
 - **计数不再是 composer 的职责**：`EstimateTokens` 字节估算与其派生方法删除；`DirectConversationLoop.FitsBudget` 改用 `IDirectTokenCounter` 与增量维护的上下文计数。
+- **计数的口径必须是 provider 收到的文本**（C18 修）：`DirectTokenCounter` 把 `FunctionCallContent.Arguments` / `FunctionResultContent.Result` / 工具 `AdditionalProperties` 序列化成 JSON 后计数，所以序列化器必须用 `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`，且**字符串片段不序列化**（它本来就是 provider 收到的原文，序列化只会多一对引号）。用默认编码器时中文被写成 `\uXXXX`、`< > &` 被写成 `\u003C` 一类转义，实测把代码/中文密集的工具结果放大约 **1.6 倍**：状态栏在“回合开始估算 → 回合结束实测”之间来回跳，压缩也会提前触发（1M 窗口 0.75 阈值下真实约 480K 就压）。这条口径同时影响 `PlanCompression`、`FitsBudget` 与 `EnsurePromptFitsWindow`，改错不只是显示问题。
 - **单元形状**：`DirectPromptHistoryUnit(Messages, SourceSequence, int? Tokens = null)`。一个单元 = 一条存储消息（工具调用与其结果同单元，边界只能落在单元之间），`Tokens` 由调用方计数后回填，`SourceTokens` = 前缀单元的计数之和。`PlanCompression` 之所以收“已计数的单元”而不是原始入参：保留比例与 `SourceTokens` 都需要每单元的计数，而“composer 不计数”这条约束必须保住。
 - **物化范围**：规划要知道前缀，所以 composer 会重建**全部**可重放单元（旧实现那种“只回看 replay 需要的工具记录”的懒索引随裁剪一起删除，这是有意的）。已有压缩项时，边界及更早的消息既不被重放也无需计数，可在建单元与计数时直接从边界之后开始；**首次**压缩仍需全量扫描。
 
@@ -329,9 +330,10 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 
 - 新增渲染项：`TranscriptRenderItem(Kind: "compression", Role: "system", Status: "sealed", …)`，载荷 `TranscriptCompactionNotice(CompactionId, MessageCount, SourceTokens, SummaryTokens, Model, Summary)`。
 - 排序规则：插入到 `sequence == ThroughSequence` 的消息项之后；多项按 `ThroughSequence` 升序，同值按 `CreatedAtUtc`。
-- 用量摘要：`TranscriptProjection` 从 `request.Turns` 计算 `TranscriptUsageSummary(long InputTokens, long OutputTokens, int? ContextTokens, int? ContextWindowTokens, bool ContextIsEstimated)`：
+- 用量摘要：`TranscriptProjection` 从 `request.Turns` + `request.LiveUsage` 计算 `TranscriptUsageSummary(long InputTokens, long OutputTokens, int? ContextTokens, int? ContextWindowTokens, bool ContextIsEstimated)`：
   - 累计输入/输出 = 本会话所有回合 `Usage` 求和（子代理用量不并入）。
   - 当前上下文 = 最新非空 `LastRequestInputTokens`（实测）→ 缺失时用最新非空 `ContextTokens` 并置 `ContextIsEstimated = false`（同为实测口径）→ 都没有时置空，由前端显示不可用。
+  - 运行中的回合还带一份实时快照（`UsageProgressEvent` → `ConversationRuntimeState.LiveUsage`）：它**替换**该回合已落库的 `Usage`，因为边界提交可能写过同一累加器的更早快照，相加会重复计数；快照缺少的分项保留落库值。只有快照的 `IsEstimated` 为 true（本地计数）时 `ContextIsEstimated` 才置 true，前端据此显示 `~` 与近似说明。
   - 该字段放入 `TranscriptRenderState`，`replaceState` 与 `patchState` 载荷都要带。
   - ⚠ 界面数字与压缩触发阈值**不是同一口径**：界面“当前上下文大小”是不含输出预留的 prompt 实测值，触发判定用的是 `promptTokens + outputReserve`（§5.4）。`ContextCompactionStartedEvent.EstimatedTokens` 与界面同口径，因此两者可以并列显示，但**不要**做“距离阈值还差多少”的对比展示（会少算一个输出预留）。
 

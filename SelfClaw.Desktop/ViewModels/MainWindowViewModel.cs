@@ -777,7 +777,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             _capabilityRevision,
             ToToolPermissionModeWire(_selectedToolPermissionMode),
             isContinuation,
-            transcript.Compactions);
+            transcript.Compactions,
+            isBusy ? _conversationSessions.SelectedLiveUsage : null);
     }
 
     Guid? SelfClaw.Desktop.Services.Activities.IActivityPanelScopeSource.CaptureActivityParent()

@@ -1,4 +1,5 @@
 using SelfClaw.Core.Models;
+using SelfClaw.Desktop.Services.Transcript.Views;
 
 namespace SelfClaw.Desktop.Services.Runtime;
 
@@ -72,6 +73,12 @@ internal sealed class ConversationRuntimeState
 
     /// <summary>Latest RunStatusEvent text, shown while the streaming message has no content yet.</summary>
     public string? ActivityText { get; set; }
+
+    /// <summary>
+    /// The running turn's latest published usage. It is transient by construction: the usage table only ever
+    /// receives provider observations through the turn record, never this value.
+    /// </summary>
+    public TranscriptLiveUsage? LiveUsage { get; set; }
 
     /// <summary>
     /// Raised after a transcript mutation. <c>true</c> requests an immediate publish (terminal snapshot);

@@ -18,4 +18,5 @@ internal sealed record TranscriptProjectionRequest(
     long CapabilityRevision,
     string ToolPermissionMode,
     bool IsContinuation = false,
-    IReadOnlyList<ConversationCompactionRecord>? Compactions = null);
+    IReadOnlyList<ConversationCompactionRecord>? Compactions = null,
+    TranscriptLiveUsage? LiveUsage = null);

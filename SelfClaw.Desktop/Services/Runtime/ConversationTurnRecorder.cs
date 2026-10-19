@@ -5,6 +5,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Transcript;
+using SelfClaw.Desktop.Services.Transcript.Views;
 
 namespace SelfClaw.Desktop.Services.Runtime;
 
@@ -103,8 +104,12 @@ internal sealed class ConversationTurnRecorder
                     break;
                 case UsageReportedEvent usage:
                     turn.Usage.Observe(usage.Usage);
+                    session.LiveUsage = null;
                     session.ReplaceTurn(GetTurn(session, turn) with { Usage = turn.Usage.Build() });
                     session.RaiseTranscriptChanged(false);
+                    break;
+                case UsageProgressEvent progress:
+                    ApplyUsageProgress(session, turn, progress);
                     break;
                 case TurnInputBoundaryEvent boundary:
                     await CommitBoundaryAsync(session, turn, boundary, cancellationToken);
@@ -151,6 +156,18 @@ internal sealed class ConversationTurnRecorder
             turn.InputSession?.Fail(exception);
             throw;
         }
+    }
+
+    /// <summary>
+    /// A progress snapshot never enters the turn record: the usage table must keep receiving only provider
+    /// observations at the commit points that already carry them, and the display path reads this field
+    /// instead. The terminal <see cref="UsageReportedEvent"/> replaces it with the committed aggregate.
+    /// </summary>
+    private static void ApplyUsageProgress(ConversationRuntimeState session, AgentTurnState turn,
+        UsageProgressEvent progress)
+    {
+        session.LiveUsage = new TranscriptLiveUsage(turn.TurnId, progress.Usage, progress.IsEstimated);
+        session.RaiseTranscriptChanged(false);
     }
 
     private async Task ApplyDeltaAsync(ConversationRuntimeState session, AgentTurnState turn,

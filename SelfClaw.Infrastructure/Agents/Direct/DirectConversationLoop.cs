@@ -223,25 +223,35 @@ internal sealed class DirectConversationLoop
             result.SourceTokens,
             result.SummaryTokens,
             result.Model));
-        EnsureInTurnPromptFitsWindow(setup, context, toolTokens);
+        // The meter follows the compaction immediately: the published count is the compacted prompt, so the
+        // context figure drops here instead of staying at the pre-compaction size until the next observation.
+        if (EnsureInTurnPromptFitsWindow(setup, context, toolTokens) is { } promptTokens)
+        {
+            output.PublishContextEstimate(promptTokens, setup.Budget.ContextWindowTokens);
+        }
+
         output.PublishRunStatus(AgentRunStatus.Requesting);
     }
 
     /// <summary>
     /// A compaction that still leaves the prompt over the window cannot be sent without silently trimming, so
     /// the turn reports it instead (decision A). Without a count nothing is known here and the provider decides.
+    /// Returns the compacted prompt's input size, which the caller publishes as the new context estimate.
     /// </summary>
-    private void EnsureInTurnPromptFitsWindow(DirectTurnSetup setup, DirectConversationContext context, int toolTokens)
+    private int? EnsureInTurnPromptFitsWindow(DirectTurnSetup setup, DirectConversationContext context, int toolTokens)
     {
-        if (setup.Budget.ContextWindowTokens is not int contextWindow)
-            return;
         if (context.CountTokens(_tokenCounter, setup.ProviderLease.Profile) is not int recounted)
-            return;
+            return null;
+
+        // Counted before the window check so the estimate is available even when no window is declared.
+        var promptTokens = recounted + toolTokens;
+        if (setup.Budget.ContextWindowTokens is not int contextWindow)
+            return promptTokens;
 
         var reserve = setup.ProviderLease.Options.MaxOutputTokens ?? DirectPromptComposer.DefaultOutputTokenReserve;
-        var required = (long)recounted + toolTokens + reserve;
+        var required = (long)promptTokens + reserve;
         if (required <= contextWindow)
-            return;
+            return promptTokens;
 
         throw new InvalidDataException(
             "In-turn context compaction left the prompt over the model context window: the remaining history, " +
@@ -350,8 +360,13 @@ internal sealed class DirectConversationLoop
         }
         finally
         {
-            // Preserve observed usage even if the provider fails after reporting it.
-            if (usage.Build() is { } observed) output.ObserveUsage(observed);
+            // Preserve observed usage even if the provider fails after reporting it. The progress snapshot
+            // goes with it: one provider call is one point at which the displayed usage really moved.
+            if (usage.Build() is { } observed)
+            {
+                output.ObserveUsage(observed);
+                output.PublishUsageProgress();
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
@@ -47,7 +48,12 @@ internal sealed class DirectTokenCounter : IDirectTokenCounter
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
-        Converters = { new JsonStringEnumConverter() }
+        Converters = { new JsonStringEnumConverter() },
+        // The counter must weigh what the provider actually receives. The default encoder escapes non-ASCII
+        // as \uXXXX and HTML-sensitive characters as \u003C etc., which inflates CJK comments and code
+        // snippets in tool results by roughly 1.6x and would both overstate the readout and trigger
+        // compaction early.
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     private readonly Func<string, Func<string, int>> _tokenizerFactory;
@@ -343,8 +349,16 @@ internal sealed class DirectTokenCounter : IDirectTokenCounter
         return string.Concat(encodingName, "\u001d", identity ?? string.Empty, "\u001e", fingerprint);
     }
 
-    private static string? Serialize(object? value)
-        => value is null ? null : JsonSerializer.Serialize(value, SerializerOptions);
+    /// <summary>
+    /// A string part is already the text the provider receives; serializing it would only add quotes and
+    /// let the encoder rewrite it. Everything else (arguments, results, schema) is measured as JSON.
+    /// </summary>
+    private static string? Serialize(object? value) => value switch
+    {
+        null => null,
+        string text => text,
+        _ => JsonSerializer.Serialize(value, SerializerOptions)
+    };
 
     private static void AddPart(List<string> parts, string? part)
     {

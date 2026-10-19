@@ -65,7 +65,8 @@ internal sealed class SubagentExecutionSession : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(streamEvent);
         return MutateAsync(() => ApplyCoreAsync(streamEvent, cancellationToken),
-            streamEvent is ToolCallStartedEvent or ToolCallCompletedEvent or RunCompletedEvent or UsageReportedEvent,
+            streamEvent is ToolCallStartedEvent or ToolCallCompletedEvent or RunCompletedEvent or UsageReportedEvent
+                or UsageProgressEvent,
             cancellationToken);
     }
 

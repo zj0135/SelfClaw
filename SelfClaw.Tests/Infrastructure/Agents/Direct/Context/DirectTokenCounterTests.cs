@@ -160,6 +160,47 @@ public sealed class DirectTokenCounterTests
     }
 
     [Fact]
+    public void Function_result_text_is_counted_as_the_provider_receives_it()
+    {
+        var counter = new DirectTokenCounter();
+        const string result = "你好，世界";
+        var message = new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-1", result)]);
+
+        // The provider receives the raw text. Serializing the string into JSON first would add quotes and let
+        // the default encoder rewrite every CJK character into a six-character \uXXXX escape.
+        var raw = DirectTokenCounter.PerMessageFramingTokens + Count(counter, "call-1") + Count(counter, result);
+        var escaped = DirectTokenCounter.PerMessageFramingTokens + Count(counter, "call-1") +
+                      Count(counter, "\"\\u4F60\\u597D\\uFF0C\\u4E16\\u754C\"");
+
+        Count(counter, [message]).Should().Be(raw).And.BeLessThan(escaped);
+    }
+
+    [Fact]
+    public void Html_sensitive_and_generic_brackets_in_tool_results_are_not_escaped()
+    {
+        var counter = new DirectTokenCounter();
+        const string result = "<div class=\"x\">List<string> & co</div>";
+        var message = new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-1", result)]);
+
+        var expected = DirectTokenCounter.PerMessageFramingTokens + Count(counter, "call-1") + Count(counter, result);
+
+        Count(counter, [message]).Should().Be(expected);
+    }
+
+    [Fact]
+    public void A_structured_tool_result_is_still_measured_as_json()
+    {
+        var counter = new DirectTokenCounter();
+        var payload = JsonSerializer.SerializeToElement(new { path = "README.md", ok = true });
+        var message = new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-1", payload)]);
+
+        var expected = DirectTokenCounter.PerMessageFramingTokens + Count(counter, "call-1") +
+                       Count(counter, payload.GetRawText());
+
+        Count(counter, [message]).Should().Be(expected);
+    }
+
+    [Fact]
     public void Tool_counts_include_the_schema_text_and_per_tool_framing()
     {
         var counter = new DirectTokenCounter();

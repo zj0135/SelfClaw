@@ -186,7 +186,7 @@ flowchart LR
         E3["AssistantTextDeltaEvent"]
         E4["AssistantThinkingDeltaEvent"]
         E5["ToolCallStartedEvent / ToolCallCompletedEvent"]
-        E6["UsageReportedEvent"]
+        E6["UsageReportedEvent（终态一次，累加）<br/>UsageProgressEvent（回合内快照，仅显示）"]
         E7["ContextCompactionStartedEvent / ContextCompactionCompletedEvent / ContextCompactionFailedEvent"]
         E8["PermissionRequestedEvent / RawOutputEvent"]
         E9["RunCompletedEvent (唯一终态)"]
@@ -210,7 +210,7 @@ flowchart TB
     MUT --> SIG["TranscriptChanged(immediate)"]
     SIG --> COORD["ConversationSessionCoordinator<br/>运行态 / 取消 / 选中会话同步"]
     COORD --> PUB["TranscriptPublisher<br/>Dispatcher 封送<br/>120ms 合流窗口 + autoScroll 合并"]
-    PUB --> PROJ["TranscriptProjection.Build<br/>Messages + ToolRuns + Shell + Compactions → TranscriptRenderState<br/>（含 TranscriptUsageSummary 用量摘要）"]
+    PUB --> PROJ["TranscriptProjection.Build<br/>Messages + ToolRuns + Shell + Compactions → TranscriptRenderState<br/>（含 TranscriptUsageSummary 用量摘要；运行回合以实时快照替换其落库用量）"]
     PROJ --> DEL["TranscriptDelivery"]
     DEL --> D1{"与已 ACK 快照比较"}
     D1 -->|首帧| D2["replaceState<br/>{items, conversations, isBusy,<br/>agentMode, toolPermissionMode, usage, revision}"]

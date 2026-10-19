@@ -94,6 +94,24 @@ internal sealed class TurnUsageReporter
     }
 
     /// <summary>
+    /// Publishes the turn's usage so far for live display. This is a snapshot, not an observation: it never
+    /// enters the accumulator, so the terminal report still carries the turn's real totals. A turn that has
+    /// already reported stays silent, which keeps the terminal usage the last usage event of the run.
+    /// </summary>
+    public void PublishProgress(ChannelWriter<AgentStreamEvent> writer)
+    {
+        if (_reported)
+        {
+            return;
+        }
+
+        if (Build() is { } usage)
+        {
+            writer.TryWrite(new UsageProgressEvent(usage));
+        }
+    }
+
+    /// <summary>
     /// The Anthropic SDK reports cache-write tokens through <see cref="UsageDetails.AdditionalCounts"/>
     /// instead of a first-class property; accept the snake-case spelling as well so a future SDK
     /// revision cannot silently drop them.

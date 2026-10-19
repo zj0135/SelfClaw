@@ -122,6 +122,23 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     /// <summary>Reports the turn's usage once; later calls are no-ops.</summary>
     public void ReportUsage() => _usage.Report(_writer);
 
+    /// <summary>Publishes the turn's usage so far, for live display only.</summary>
+    public void PublishUsageProgress() => _usage.PublishProgress(_writer);
+
+    /// <summary>
+    /// Publishes a locally counted context size no provider has reported yet, so the composer's meter has a
+    /// number from the first request on and drops right after a compaction. Turn totals stay out of it: only
+    /// a provider observation may size them. A closed consumer drops the update instead of failing the turn.
+    /// </summary>
+    public void PublishContextEstimate(int promptTokens, int? contextWindowTokens)
+        => _writer.TryWrite(CreateContextEstimate(promptTokens, contextWindowTokens));
+
+    internal static UsageProgressEvent CreateContextEstimate(int promptTokens, int? contextWindowTokens)
+        => new(new TurnUsage(
+            ContextTokens: promptTokens,
+            ContextWindowTokens: contextWindowTokens,
+            LastRequestInputTokens: promptTokens), IsEstimated: true);
+
     /// <summary>Records one provider call; every observation counts as one request.</summary>
     public void ObserveUsage(UsageDetails details) => _usage.Observe(details);
 

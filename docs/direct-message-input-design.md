@@ -389,6 +389,8 @@ P0 证实旧 translator 把同一请求两个 UsageContent 计为 ProviderCalls=
 
 steer 边界可以将已知累计值覆盖写入该 turn 的同一条 usage 行，降低崩溃丢失；它是绝对快照，不能再次作为增量加入 recorder。终态仍只报告一次聚合 UsageReportedEvent，并用最终累计值覆盖同一行。turn 与 message 的清晰归属不能以两个 accumulator 互相补偿实现。
 
+回合内的用量显示走独立事件 `UsageProgressEvent`（累计快照 + `IsEstimated` 标记），它不是第二种观测：消费端只把它放进 `ConversationRuntimeState.LiveUsage`，不累加、不写回合记录，因此落库口径仍然只有「边界快照 + 终态一次聚合观测」。投影层用实时快照**替换**运行回合已落库的用量（两者来自同一累加器，相加会重复计数）。这条通道不得被复用来持久化任何数字，包括本地估算。
+
 CLI、Subagent、continuation 均采用同一 turn/message 模型，即使普通路径通常只有一条 assistant。Interactive 和 child 在各自回合开始事务中建立 turn；continuation 的 turn、messages 和 usage 在运行期间都只存在于 detached snapshot，只有终态与 delivery resolution 的原子事务才持久化。不得为统一表结构提前插入 continuation Running 行。无此行的中断由既有 delivery lease／checkpoint 恢复，不另建一条重跑路径。
 
 P0 发现 child／continuation repository 还强制 AssistantMessage.Id 等于 ChildTurnId／ContinuationTurnId，并从 AssistantMessage.Usage 构造 task 结果与 delivery envelope。P2 改为校验真实 turn、片段的 turn_id 和工具所属片段，从 turn usage 生成结果。SubagentExecutionSession 为排除空 assistant 占位而设置的 ProviderMessages 过滤随占位删除；不能仅替换过滤 ID 而保留无用途的路径。
