@@ -20,7 +20,11 @@ export function resolveImageMediaType(fileName, declared) {
 		return declared;
 	}
 
-	const extension = String(fileName || '').split('.').pop()?.toLowerCase() || '';
+	const extension =
+		String(fileName || '')
+			.split('.')
+			.pop()
+			?.toLowerCase() || '';
 	return mediaTypesByExtension[extension] || '';
 }
 
@@ -56,9 +60,7 @@ export function useComposerAttachments(bridge, selectedConversationId) {
 	let pendingConversationId = '';
 	let disposed = false;
 
-	const readSelection = typeof selectedConversationId === 'function'
-		? selectedConversationId
-		: () => selectedConversationId?.value || '';
+	const readSelection = typeof selectedConversationId === 'function' ? selectedConversationId : () => selectedConversationId?.value || '';
 
 	function resolveConversationId() {
 		const selected = readSelection() || '';
@@ -271,9 +273,13 @@ export function useComposerAttachments(bridge, selectedConversationId) {
 		await Promise.all(pending.map((item) => discard(item)));
 	}
 
-	// 切换会话时旧 conversationId 目录下的待发送附件已经无主，直接丢弃，避免跨会话误发。
-	watch(readSelection, () => {
+	watch(readSelection, (next) => {
+		const accepted = Boolean(next) && next === pendingConversationId;
 		pendingConversationId = '';
+		if (accepted) {
+			return;
+		}
+
 		void discardAll();
 	});
 

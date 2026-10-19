@@ -142,6 +142,23 @@ describe('useComposerAttachments', () => {
 		expect(bridge.request).toHaveBeenCalledWith('attachments/discard', { conversationId: 'conv-A', attachmentId: 'a1' });
 	});
 
+	it('keeps the accepted references when the host selects the reserved conversation before the ACK', async () => {
+		const bridge = { request: vi.fn(async () => ({ ok: true, attachments: [record('a1')] })) };
+		const { attachments, selection } = createAttachments(bridge);
+		await attachments.addFromPicker();
+		// 宿主受理后先发布新会话的选中态，prompt-submission ACK 还没回到渲染进程。
+		const reserved = attachments.resolveConversationId();
+		bridge.request.mockClear();
+
+		selection.value = reserved;
+		await nextTick();
+		await nextTick();
+
+		// 队列已持有引用：chip 留待提交路径 clear() 清空，文件绝不能被删。
+		expect(attachments.items.value.map((item) => item.attachmentId)).toEqual(['a1']);
+		expect(bridge.request).not.toHaveBeenCalled();
+	});
+
 	it('strips the data URL prefix before reporting base64', () => {
 		expect(stripDataUrlPrefix('data:image/png;base64,QUJD')).toBe('QUJD');
 		expect(stripDataUrlPrefix('QUJD')).toBe('');
@@ -214,6 +231,43 @@ describe('useChatComposer with attachments', () => {
 
 		expect(composer.error.value).toContain('当前模型不支持图片输入');
 		expect(state.clear).not.toHaveBeenCalled();
+	});
+
+	it('keeps the stored image alive when the host selects the new conversation before the ACK', async () => {
+		// 宿主受理时先发布新会话选中态，prompt-submission ACK 随后才到；这条时序不能触发附件丢弃。
+		const calls = [];
+		const ack = Promise.withResolvers();
+		const bridge = {
+			request: vi.fn((type, payload) => {
+				calls.push([type, payload]);
+				if (type === 'attachments/pick') {
+					return Promise.resolve({ ok: true, attachments: [{ ...record('a1'), previewUrl: '' }] });
+				}
+				return type === 'send-prompt' ? ack.promise : Promise.resolve({ ok: true });
+			}),
+			post: vi.fn(),
+		};
+		const session = reactive({ selectedConversationId: null, isBusy: false, agentMode: 'direct' });
+		scopes.push(new effectScope());
+		const scope = scopes[scopes.length - 1];
+		const attachments = scope.run(() => useComposerAttachments(bridge, () => session.selectedConversationId));
+		const composer = scope.run(() => useChatComposer(session, { refresh: async () => {} }, { resumeFollow: () => {} }, bridge, attachments));
+
+		await attachments.addFromPicker();
+		const sent = composer.submit({ prompt: 'describe this', accept: () => {} });
+		const reservedId = calls.find(([type]) => type === 'send-prompt')[1].conversationId;
+
+		session.selectedConversationId = reservedId;
+		await nextTick();
+		expect(attachments.items.value.map((item) => item.attachmentId)).toEqual(['a1']);
+		expect(calls.filter(([type]) => type === 'attachments/discard')).toHaveLength(0);
+
+		ack.resolve({ accepted: true });
+		await sent;
+		await nextTick();
+
+		expect(attachments.items.value).toHaveLength(0);
+		expect(calls.filter(([type]) => type === 'attachments/discard')).toHaveLength(0);
 	});
 });
 

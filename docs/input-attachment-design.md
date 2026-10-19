@@ -118,7 +118,7 @@
 - `useComposerAttachments(bridge, selectedConversationId)`：只保管宿主回的引用（id + 元数据 + `previewUrl`），提供加图 / 移除 / 清空 / 上限预检；单图 10 MiB、每条 6 张与宿主同值，宿主校验仍是权威。新对话 uuid 提前生成并与 `send-prompt` 共用，保证目录与最终会话一致。
 - `FileReader.readAsDataURL` 结果必须剥掉 `data:...;base64,` 前缀；`previewUrl` 缺失时 chip 显示 `ImageOff` 占位而不是破图。
 - `ComposerPanel` 在输入框上方渲染 chips；粘贴绑在 textarea（纯文本粘贴不拦截），拖拽绑在 composer 容器并整体高亮。
-- 提交 payload 带四个字段；`accept()` 只清文本与 chip（**不删文件**，队列已持有引用），切会话时 `discardAll()` 才删除；retry key 包含附件 id 列表。宿主拒绝时 `error` 优先、缺失时用 `describeInputReason(reason)` 兜底，并保留 chip 以便重试。
+- 提交 payload 带四个字段；`accept()` 只清文本与 chip（**不删文件**，队列已持有引用），切会话时 `discardAll()` 才删除；唯一例外是「选中态变成自己刚提交的那个会话」——宿主在 `prompt-submission` ACK 之前就发布新会话的选中态（受理即选中），这一次变化不是用户切会话，直接删会让消息里的图片永久失效，因此 `useComposerAttachments` 必须按「`next === pendingConversationId` 即跳过丢弃」对齐 `useChatComposer` 已有的同一条豁免。retry key 包含附件 id 列表。宿主拒绝时 `error` 优先、缺失时用 `describeInputReason(reason)` 兜底，并保留 chip 以便重试。
 - 能力闸门：`agentMode === 'direct' && selectedModelSupportsImages()`；`isMultimodal` 缺失或 `null` 一律按不支持处理，不禁用整个 composer、不抛错。
 - 队列卡片在 `attachmentCount > 0` 时显示「· N 张图」；`normalizeItem` 用 `Number(item.attachmentCount) || 0` 归一。
 
@@ -127,6 +127,7 @@
 - schema 仍是 v32：不新增表、不改列、不做迁移；附件引用只活在 `payload_json`。
 - 仅图片、仅 Direct 交互式输入；CLI 与子代理继续拒绝，父会话附件不泄漏给 child。
 - 前端闸门只读 `isMultimodal`；宿主是唯一裁决点，非法附件不会误发。
+- 附件所有权在 `send-prompt` 受理时转移到队列：受理后前端不得再对该 `attachmentId` 发 `attachments/discard`，否则消息里的图片会变成无源引用（转录占位、模型读不到字节）。
 - 首版不支持「只有图片、没有文字」的提交。
 - 启动清理只回收「会话不存在且 24 小时未动」的目录，不保证进程被强杀后立刻清空残留。
 
