@@ -3,7 +3,6 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { ArrowRight, LoaderCircle, Square, ShieldAlert, Check, X } from 'lucide-vue-next';
 import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
-import AgentSelector from './AgentSelector.vue';
 import ComposerAddMenu from './ComposerAddMenu.vue';
 import ComposerAttachments from './ComposerAttachments.vue';
 import ComposerUsageMeter from './ComposerUsageMeter.vue';
@@ -330,13 +329,12 @@ defineExpose({
 				placeholder="让助手帮你处理项目..." @keydown="onKeydown" @paste="onComposerPaste"></textarea>
 			<p v-if="submitError" class="composer-error" role="alert">{{ submitError }}</p>
 			<div class="composer-toolbar">
-				<!-- 左侧：+ / 代理 -->
+				<!-- 左侧：+ -->
 				<div class="composer-tools-left">
 					<ComposerAddMenu :skills-enabled="agentMode === 'direct'" :agent-id="selectedAgentId"
 						:agent-name="selectedAgentName" :capability-revision="capabilityRevision"
 						:images-enabled="props.imagesEnabled" :images-disabled-reason="imagesDisabledReason"
 						@add-image="emit('request-attachment-picker')" @select-skill="insertSkillToken" />
-					<AgentSelector :selected-agent-id="selectedAgentId" :selected-agent-name="selectedAgentName" />
 				</div>
 				<!-- 右侧：用量圆环百分比 / 模型 / 发送 -->
 				<div class="composer-tools-right">
