@@ -45,7 +45,7 @@ internal sealed class SubagentDefinitionCatalog : ISubagentDefinitionCatalog
     {
         lock (_syncRoot)
         {
-            Directory.CreateDirectory(_subagentsDirectory);
+            EnsureSystemSubagents();
             return Directory
                 .EnumerateFiles(_subagentsDirectory, "*.md", SearchOption.TopDirectoryOnly)
                 .Select(LoadFile)
@@ -67,6 +67,12 @@ internal sealed class SubagentDefinitionCatalog : ISubagentDefinitionCatalog
         lock (_syncRoot)
         {
             var filePath = Path.Combine(_subagentsDirectory, $"{normalizedId}.md");
+            // 内置定义被手工删除后仍要可用：按 id 查询即补建，与 build.md 的 seed 语义一致。
+            if (!File.Exists(filePath) && BuiltInSubagentDefinitions.IsBuiltInId(normalizedId))
+            {
+                EnsureSystemSubagents();
+            }
+
             return File.Exists(filePath) ? LoadFile(filePath) : null;
         }
     }
@@ -103,6 +109,11 @@ internal sealed class SubagentDefinitionCatalog : ISubagentDefinitionCatalog
         if (!IsValidDefinitionId(normalizedId))
         {
             throw new ArgumentException("Subagent id is invalid.", nameof(subagentId));
+        }
+
+        if (BuiltInSubagentDefinitions.IsBuiltInId(normalizedId))
+        {
+            throw new InvalidOperationException($"Cannot delete built-in Subagent '{normalizedId}'.");
         }
 
         lock (_syncRoot)
@@ -180,6 +191,19 @@ internal sealed class SubagentDefinitionCatalog : ISubagentDefinitionCatalog
         }
     }
 
+    private void EnsureSystemSubagents()
+    {
+        Directory.CreateDirectory(_subagentsDirectory);
+        foreach (var builtIn in BuiltInSubagentDefinitions.CreateAll(_subagentsDirectory))
+        {
+            // 已存在的文件不覆盖：用户对内置定义的编辑必须保留。
+            if (!File.Exists(Path.Combine(_subagentsDirectory, $"{builtIn.Id}.md")))
+            {
+                Save(builtIn);
+            }
+        }
+    }
+
     private SubagentDefinition LoadFile(string filePath)
     {
         var definitionId = NormalizeDefinitionId(Path.GetFileNameWithoutExtension(filePath));
@@ -236,7 +260,10 @@ internal sealed class SubagentDefinitionCatalog : ISubagentDefinitionCatalog
             instructions,
             filePath,
             diagnostics.Count == 0,
-            diagnostics);
+            diagnostics)
+        {
+            IsBuiltIn = BuiltInSubagentDefinitions.IsBuiltInId(definitionId)
+        };
     }
 
     private static void ValidateKnownFields(
@@ -385,7 +412,10 @@ internal sealed class SubagentDefinitionCatalog : ISubagentDefinitionCatalog
             string.Empty,
             filePath,
             false,
-            [diagnostic]);
+            [diagnostic])
+        {
+            IsBuiltIn = BuiltInSubagentDefinitions.IsBuiltInId(definitionId)
+        };
 
     private static string NormalizeDefinitionId(string? definitionId)
         => definitionId?.Trim().ToLowerInvariant() ?? string.Empty;

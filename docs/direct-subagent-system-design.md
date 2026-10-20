@@ -411,6 +411,24 @@ Return a concise final answer with file and line evidence.
 
 Subagent 没有 `mode` 字段，固定为 Direct。未知字段、非法 GUID、非法工具策略、越界 timeout 或空 instructions 使定义无效，而不是静默回退到更宽权限。
 
+### 5.2.1 内置 Subagent
+
+内置 Subagent 与内置 Agent（`build`）采用同一套语义：**首次使用即补建、不可删除、仍可编辑**。
+
+| id | name | tools | maxRunSeconds | 用途 |
+|---|---|---|---|---|
+| `general-purpose` | `general-purpose` | `system` | 3600 | 多步调研/实现；需要读改写跑时使用 |
+| `explore` | `Explore` | `read-only` | 900 | 大范围只读检索，只要结论不要文件转储 |
+
+规则：
+
+1. 内容唯一来源是 `BuiltInSubagentDefinitions`，启动与按 id 查询（`LoadAll` / `Get`）时，定义文件缺失即写入默认内容；已存在的文件绝不覆盖，所以用户对内置定义的编辑保留。
+2. `SubagentDefinitionCatalog.Delete()` 拒绝内置 id；`AgentSettingsService.DeleteSubagent()` 因此不会删到内置定义，前端按 `isBuiltIn` 隐藏删除入口并显示「内置」徽标。
+3. 内置只表达「可重建、不可删除」，不表达授权。谁能委派仍只由主 Agent 的 `subagents` allowlist 决定，`build` 之外的 Agent 不会自动获得它们。
+4. 新建 `build.md` 的默认 allowlist 含 `explore` 与 `general-purpose`；已存在的 `build.md` 不自动追加，避免覆盖用户已经裁剪的配置。
+5. `Save()` 允许修改内置定义（名称、描述、tools、maxRunSeconds、instructions、扩展绑定），但 `IsBuiltIn` 由 id 决定，不随保存改变，也不会因为编辑而变成可删除。
+6. 内置内容的工具面必须与 SelfClaw 实际策略对齐：`read-only` 只放 List/Search/Read 工具，因此 Explore 的 instructions 不得引用 shell、改动文件或网络工具。
+
 ### 5.3 共用 markdown 解析内核
 
 当前 `DesktopAgentDefinitionService.ParseAgentMarkdown()` 同时做 front matter 语法切分、字段解释、归一化和 warning。实施时拆为：

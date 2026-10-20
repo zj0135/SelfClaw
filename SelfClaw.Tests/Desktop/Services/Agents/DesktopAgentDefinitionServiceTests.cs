@@ -26,6 +26,7 @@ public sealed class DesktopAgentDefinitionServiceTests : IDisposable
         agents.Should().ContainSingle();
         agents[0].Id.Should().Be(DesktopAgentDefinitionService.BuildAgentId);
         agents[0].IsBuiltIn.Should().BeTrue();
+        agents[0].SubagentIds.Should().Equal(BuiltInSubagentDefinitions.Ids);
         File.Exists(Path.Combine(service.AgentsDirectory, "build.md")).Should().BeTrue();
     }
 

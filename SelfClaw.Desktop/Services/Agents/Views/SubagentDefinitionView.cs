@@ -15,4 +15,5 @@ public sealed record SubagentDefinitionView(
     int MaxRunSeconds,
     string Instructions,
     bool IsValid,
-    IReadOnlyList<string> Diagnostics);
+    IReadOnlyList<string> Diagnostics,
+    bool IsBuiltIn);

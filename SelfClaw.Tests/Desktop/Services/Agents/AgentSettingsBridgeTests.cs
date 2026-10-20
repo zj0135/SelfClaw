@@ -50,7 +50,11 @@ public sealed class AgentSettingsBridgeTests : IDisposable
         json.GetProperty("requestId").GetString().Should().Be("state-request");
         var state = json.GetProperty("state");
         state.GetProperty("agents")[0].GetProperty("id").GetString().Should().Be("build");
-        state.GetProperty("subagents")[0].GetProperty("id").GetString().Should().Be("reviewer");
+        var subagents = state.GetProperty("subagents").EnumerateArray().ToArray();
+        subagents.Select(item => item.GetProperty("id").GetString())
+            .Should().Equal("explore", "general-purpose", "reviewer");
+        subagents[0].GetProperty("isBuiltIn").GetBoolean().Should().BeTrue();
+        subagents[2].GetProperty("isBuiltIn").GetBoolean().Should().BeFalse();
         state.GetProperty("skills")[0].GetProperty("id").GetString().Should().Be("review");
         state.GetProperty("mcpServers")[0].GetProperty("id").GetString().Should().Be("local");
     }
@@ -127,7 +131,22 @@ public sealed class AgentSettingsBridgeTests : IDisposable
         var response = await bridge.TryHandleAsync("agents/set-subagent-binding", document.RootElement);
 
         SerializeResponse(response).GetProperty("ok").GetBoolean().Should().BeTrue();
-        agentService.LoadAll().Single().SubagentIds.Should().Equal("reviewer");
+        agentService.LoadAll().Single().SubagentIds.Should().Equal("explore", "general-purpose", "reviewer");
+    }
+
+    [Fact]
+    public async Task DeleteSubagent_rejects_a_built_in_definition()
+    {
+        var catalog = CreateSubagentCatalog();
+        catalog.LoadAll();
+        var bridge = CreateBridge(subagentCatalog: catalog);
+        using var document = JsonDocument.Parse(
+            "{\"requestId\":\"delete-request\",\"id\":\"explore\"}");
+
+        var response = await bridge.TryHandleAsync("agents/delete-subagent", document.RootElement);
+
+        SerializeResponse(response).GetProperty("error").GetString().Should().Contain("Cannot delete built-in Subagent");
+        catalog.Get("explore").Should().NotBeNull();
     }
 
     [Fact]

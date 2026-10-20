@@ -146,11 +146,12 @@ function onBasicSave(data) {
 				</div>
 				<p v-if="subagent.description" :title="subagent.description">{{ subagent.description }}</p>
 			</div>
-			<button class="m-icon agent-delete" type="button"
+			<button v-if="!subagent.isBuiltIn" class="m-icon agent-delete" type="button"
 				title="删除子代理" aria-label="删除子代理" :disabled="saving" @click="$emit('delete')">
 				<Trash2 :size="16" :stroke-width="1.9" />
 			</button>
 			<span class="mode-badge">{{ subagent.toolPolicy }}</span>
+			<span v-if="subagent.isBuiltIn" class="builtin-badge">内置</span>
 			<span v-if="!subagent.isValid" class="invalid-badge">需修复</span>
 		</header>
 

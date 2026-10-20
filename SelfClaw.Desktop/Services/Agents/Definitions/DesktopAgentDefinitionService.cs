@@ -192,7 +192,7 @@ public sealed class DesktopAgentDefinitionService
             [],
             [],
             [],
-            [],
+            BuiltInSubagentDefinitions.Ids,
             """
             You are the default build agent for SelfClaw.
             Work directly in the selected workspace, keep changes scoped, and verify important outcomes before you conclude.

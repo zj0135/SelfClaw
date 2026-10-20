@@ -192,7 +192,8 @@ internal sealed class AgentSettingsService
 
     private static SubagentDefinitionView CreateSubagentView(SubagentDefinition subagent) => new(subagent.Id,
         subagent.Name, subagent.Description, subagent.ModelProfileId, subagent.ToolPolicy, subagent.PluginIds,
-        subagent.SkillIds, subagent.McpServerIds, subagent.MaxRunSeconds, subagent.Instructions, subagent.IsValid, subagent.Diagnostics);
+        subagent.SkillIds, subagent.McpServerIds, subagent.MaxRunSeconds, subagent.Instructions, subagent.IsValid,
+        subagent.Diagnostics, subagent.IsBuiltIn);
 
     private static IReadOnlyList<string> SetListItem(IReadOnlyList<string> values, string id, bool enabled)
     {

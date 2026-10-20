@@ -13,4 +13,8 @@ internal sealed record SubagentDefinition(
     string Instructions,
     string FilePath,
     bool IsValid,
-    IReadOnlyList<string> Diagnostics);
+    IReadOnlyList<string> Diagnostics)
+{
+    /// <summary>Derived from the id by the catalog: built-in definitions are recreated when missing and cannot be deleted.</summary>
+    public bool IsBuiltIn { get; init; }
+}

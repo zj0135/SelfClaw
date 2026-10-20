@@ -1,6 +1,7 @@
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using FluentAssertions;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Tests.Desktop.Services.Agents;
@@ -35,7 +36,7 @@ public sealed class SubagentDefinitionCatalogTests : IDisposable
             Review only the delegated task.
             """);
 
-        var definition = catalog.LoadAll().Should().ContainSingle().Subject;
+        var definition = catalog.LoadAll().Single(item => item.Id == "reviewer");
 
         definition.Id.Should().Be("reviewer");
         definition.Name.Should().Be("Code reviewer");
@@ -112,12 +113,13 @@ public sealed class SubagentDefinitionCatalogTests : IDisposable
     public void LoadAll_marks_strict_contract_violations_invalid(string metadata, string body, string diagnostic)
     {
         var catalog = CreateCatalog();
+        var definitionId = Guid.NewGuid().ToString("N");
         WriteDefinition(
             catalog,
-            Guid.NewGuid().ToString("N"),
+            definitionId,
             $"---\n{metadata}\n---\n{body}");
 
-        var definition = catalog.LoadAll().Should().ContainSingle().Subject;
+        var definition = catalog.LoadAll().Single(item => item.Id == definitionId);
 
         definition.IsValid.Should().BeFalse();
         definition.Diagnostics.Should().Contain(item => item.Contains(diagnostic, StringComparison.Ordinal));
@@ -230,6 +232,76 @@ public sealed class SubagentDefinitionCatalogTests : IDisposable
         Action act = () => catalog.Save(definition);
 
         act.Should().Throw<ArgumentException>().WithMessage($"*{error}*");
+    }
+
+    [Fact]
+    public void LoadAll_seeds_the_built_in_subagents_and_marks_them()
+    {
+        var catalog = CreateCatalog();
+
+        var definitions = catalog.LoadAll().ToDictionary(item => item.Id);
+
+        definitions.Keys.Should().BeEquivalentTo(BuiltInSubagentDefinitions.Ids);
+        var explore = definitions[BuiltInSubagentDefinitions.ExploreId];
+        explore.IsBuiltIn.Should().BeTrue();
+        explore.IsValid.Should().BeTrue(string.Join("; ", explore.Diagnostics));
+        explore.ToolPolicy.Should().Be(AgentRuntimeDefinition.ReadOnlyToolPolicy);
+        explore.MaxRunSeconds.Should().Be(900);
+        explore.Instructions.Should().NotBeNullOrWhiteSpace();
+        File.Exists(Path.Combine(catalog.SubagentsDirectory, "explore.md")).Should().BeTrue();
+
+        var generalPurpose = definitions[BuiltInSubagentDefinitions.GeneralPurposeId];
+        generalPurpose.IsBuiltIn.Should().BeTrue();
+        generalPurpose.IsValid.Should().BeTrue(string.Join("; ", generalPurpose.Diagnostics));
+        generalPurpose.ToolPolicy.Should().Be(AgentRuntimeDefinition.SystemToolPolicy);
+        generalPurpose.MaxRunSeconds.Should().Be(3600);
+    }
+
+    [Theory]
+    [InlineData(BuiltInSubagentDefinitions.ExploreId)]
+    [InlineData(BuiltInSubagentDefinitions.GeneralPurposeId)]
+    public void Delete_rejects_built_in_subagents(string subagentId)
+    {
+        var catalog = CreateCatalog();
+        catalog.LoadAll();
+
+        Action act = () => catalog.Delete(subagentId);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*Cannot delete built-in Subagent*");
+        catalog.Get(subagentId).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Get_recreates_a_deleted_built_in_definition()
+    {
+        var catalog = CreateCatalog();
+        catalog.LoadAll();
+        var filePath = Path.Combine(catalog.SubagentsDirectory, "explore.md");
+        File.Delete(filePath);
+
+        var definition = catalog.Get(" EXPLORE ");
+
+        definition.Should().NotBeNull();
+        definition!.IsBuiltIn.Should().BeTrue();
+        definition.IsValid.Should().BeTrue();
+        File.Exists(filePath).Should().BeTrue();
+    }
+
+    [Fact]
+    public void LoadAll_keeps_a_user_edited_built_in_definition()
+    {
+        var catalog = CreateCatalog();
+        WriteDefinition(
+            catalog,
+            "explore",
+            "---\nname: My explorer\ndescription: Narrowed search.\ntools: none\n---\nSearch only.");
+
+        var definition = catalog.LoadAll().Single(item => item.Id == "explore");
+
+        definition.Name.Should().Be("My explorer");
+        definition.ToolPolicy.Should().Be(AgentRuntimeDefinition.NoneToolPolicy);
+        definition.IsBuiltIn.Should().BeTrue();
+        File.ReadAllText(definition.FilePath).Should().Contain("My explorer");
     }
 
     public void Dispose()
