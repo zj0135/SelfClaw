@@ -334,6 +334,25 @@ html[data-theme='dark'] {
 
 	/* ── 窗口外壳 ── */
 	--resize-edge: 6px;
+
+	/* ── 对话列布局 ──
+	   消息区与输入框共用同一条内容列：值同时是 transcript 的居中列宽和
+	   composer 的宽度，二者任何断点下都对齐。宽窗口按比例放大并封顶，
+	   避免全屏时两侧留白过大；窄窗口的收紧仍由 App.vue / ComposerPanel
+	   里既有的 960px 媒体查询兜底。 */
+	--chat-content-width: 728px;
+}
+
+@media (min-width: 1440px) {
+	:root {
+		--chat-content-width: min(880px, calc(100vw - 560px));
+	}
+}
+
+@media (min-width: 1920px) {
+	:root {
+		--chat-content-width: min(1040px, calc(100vw - 640px));
+	}
 }
 
 /*

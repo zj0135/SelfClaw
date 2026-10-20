@@ -412,8 +412,13 @@ onUnmounted(() => {
 				</span>
 				<span>新建对话</span>
 			</button>
-			<button class="head-collapse" type="button" :title="collapsed ? '展开侧栏' : '折叠侧栏'"
-				:aria-label="collapsed ? '展开侧栏' : '折叠侧栏'" @click="toggleCollapse">
+			<button
+				class="head-collapse"
+				type="button"
+				:title="collapsed ? '展开侧栏' : '折叠侧栏'"
+				:aria-label="collapsed ? '展开侧栏' : '折叠侧栏'"
+				@click="toggleCollapse"
+			>
 				<PanelLeftOpen v-if="collapsed" :size="16" :stroke-width="1.8" />
 				<PanelLeftClose v-else :size="16" :stroke-width="1.8" />
 			</button>
@@ -422,17 +427,30 @@ onUnmounted(() => {
 		<!-- ============ 折叠态：图标轨 ============ -->
 		<nav class="rail" aria-label="折叠导航">
 			<div class="rail-scroll" @scroll.passive="hideRailTip">
-				<button class="rail-new" type="button" :aria-label="'新建对话'" @mouseenter="showRailTip($event, '新建对话')"
-					@mouseleave="hideRailTip" @click="onAction('new-chat')">
+				<button
+					class="rail-new"
+					type="button"
+					:aria-label="'新建对话'"
+					@mouseenter="showRailTip($event, '新建对话')"
+					@mouseleave="hideRailTip"
+					@click="onAction('new-chat')"
+				>
 					<Plus :size="17" :stroke-width="2.2" aria-hidden="true" />
 				</button>
 
 				<span class="rail-sep" aria-hidden="true"></span>
 
-				<button v-for="item in railItems" :key="item.id" class="rail-btn"
-					:class="{ active: activeId === item.id }" type="button" :aria-label="item.label"
-					@mouseenter="showRailTip($event, item.label, kbdMap[item.id])" @mouseleave="hideRailTip"
-					@click="onAction(item.id)">
+				<button
+					v-for="item in railItems"
+					:key="item.id"
+					class="rail-btn"
+					:class="{ active: activeId === item.id }"
+					type="button"
+					:aria-label="item.label"
+					@mouseenter="showRailTip($event, item.label, kbdMap[item.id])"
+					@mouseleave="hideRailTip"
+					@click="onAction(item.id)"
+				>
 					<span class="ico" aria-hidden="true">
 						<component :is="getIcon(item.id)" :size="16" :stroke-width="1.8" />
 					</span>
@@ -440,8 +458,15 @@ onUnmounted(() => {
 			</div>
 
 			<div class="rail-bot">
-				<button class="rail-btn" :class="{ active: settingsActive }" type="button" :aria-label="'系统设置'"
-					@mouseenter="showRailTip($event, '系统设置')" @mouseleave="hideRailTip" @click="selectSettings">
+				<button
+					class="rail-btn"
+					:class="{ active: settingsActive }"
+					type="button"
+					:aria-label="'系统设置'"
+					@mouseenter="showRailTip($event, '系统设置')"
+					@mouseleave="hideRailTip"
+					@click="selectSettings"
+				>
 					<span class="ico" aria-hidden="true">
 						<Settings :size="16" :stroke-width="1.8" />
 					</span>
@@ -451,8 +476,7 @@ onUnmounted(() => {
 
 		<!-- 折叠态悬浮提示（fixed，脱离滚动容器裁剪） -->
 		<transition name="rail-tip">
-			<div v-if="railTip.open" class="rail-tip" :style="{ top: `${railTip.top}px`, left: `${railTip.left}px` }"
-				aria-hidden="true">
+			<div v-if="railTip.open" class="rail-tip" :style="{ top: `${railTip.top}px`, left: `${railTip.left}px` }" aria-hidden="true">
 				{{ railTip.label }}<span v-if="railTip.kbd" class="k">{{ railTip.kbd }}</span>
 			</div>
 		</transition>
@@ -470,8 +494,7 @@ onUnmounted(() => {
 					</button>
 
 					<div v-else class="tool-group" :class="{ open: isActionOpen(item.id) }">
-						<button class="tool-btn" type="button" :aria-expanded="isActionOpen(item.id)"
-							@click="toggleAction(item.id)">
+						<button class="tool-btn" type="button" :aria-expanded="isActionOpen(item.id)" @click="toggleAction(item.id)">
 							<span class="ico" aria-hidden="true">
 								<component :is="getIcon(item.id)" :size="15" :stroke-width="1.8" />
 							</span>
@@ -481,9 +504,14 @@ onUnmounted(() => {
 							</span>
 						</button>
 						<div class="tool-children">
-							<button v-for="child in item.children" :key="child.id" class="tool-child"
-								:class="{ active: activeId === child.id }" type="button"
-								@click="selectNode(child.id)">
+							<button
+								v-for="child in item.children"
+								:key="child.id"
+								class="tool-child"
+								:class="{ active: activeId === child.id }"
+								type="button"
+								@click="selectNode(child.id)"
+							>
 								<span class="child-ico" aria-hidden="true">
 									<component :is="getIcon(child.id)" :size="14" :stroke-width="1.8" />
 								</span>
@@ -499,15 +527,13 @@ onUnmounted(() => {
 		<div class="nav-mid">
 			<template v-if="treeOpen">
 				<div class="dir-head">
-					<button class="dir-back" type="button" title="返回会话列表" aria-label="返回会话列表"
-						@click="closeTree">
+					<button class="dir-back" type="button" title="返回会话列表" aria-label="返回会话列表" @click="closeTree">
 						<ChevronLeft :size="15" :stroke-width="2" />
 					</button>
 					<span class="dir-title" :title="treeRoot?.path || treeRoot?.name">
 						{{ treeRoot?.path || treeRoot?.name }}
 					</span>
-					<button class="dir-refresh" type="button" title="刷新" aria-label="刷新目录"
-						:disabled="treeLoading" @click="reloadTree">
+					<button class="dir-refresh" type="button" title="刷新" aria-label="刷新目录" :disabled="treeLoading" @click="reloadTree">
 						<RotateCw :size="13" :stroke-width="2" :class="{ spinning: treeLoading }" />
 					</button>
 				</div>
@@ -518,13 +544,17 @@ onUnmounted(() => {
 
 				<div v-else class="dir-tree" role="tree">
 					<template v-for="row in treeRows" :key="row.key">
-						<div v-if="row.kind === 'at-limit'" class="dir-more"
-							:style="{ '--depth': row.depth }">
-							每层最多显示 {{ row.limit }} 项
-						</div>
-						<button v-else-if="row.isDirectory" class="dir-row is-dir" type="button" role="treeitem"
-							:aria-expanded="row.expanded" :style="{ '--depth': row.depth }"
-							:title="describeTreeRow(row)" @click="toggleTreeNode(row.relativePath)">
+						<div v-if="row.kind === 'at-limit'" class="dir-more" :style="{ '--depth': row.depth }">每层最多显示 {{ row.limit }} 项</div>
+						<button
+							v-else-if="row.isDirectory"
+							class="dir-row is-dir"
+							type="button"
+							role="treeitem"
+							:aria-expanded="row.expanded"
+							:style="{ '--depth': row.depth }"
+							:title="describeTreeRow(row)"
+							@click="toggleTreeNode(row.relativePath)"
+						>
 							<span class="dir-chevron" :class="{ open: row.expanded }" aria-hidden="true">
 								<RotateCw v-if="row.loading" :size="11" :stroke-width="2" class="spinning" />
 								<ChevronRight v-else :size="12" :stroke-width="2" />
@@ -535,8 +565,7 @@ onUnmounted(() => {
 							</span>
 							<span class="dir-name">{{ row.name }}</span>
 						</button>
-						<div v-else class="dir-row is-file" role="treeitem" :style="{ '--depth': row.depth }"
-							:title="describeTreeRow(row)">
+						<div v-else class="dir-row is-file" role="treeitem" :style="{ '--depth': row.depth }" :title="describeTreeRow(row)">
 							<span class="dir-chevron" aria-hidden="true"></span>
 							<span class="dir-ico" aria-hidden="true">
 								<File :size="13" :stroke-width="1.8" />
@@ -551,16 +580,14 @@ onUnmounted(() => {
 			</template>
 
 			<template v-else>
-				<section v-for="(group, gi) in groupItems" :key="group.id" class="group"
-					:class="{ open: isGroupOpen(group.id) }">
+				<section v-for="(group, gi) in groupItems" :key="group.id" class="group" :class="{ open: isGroupOpen(group.id) }">
 					<button class="group-head" type="button" @click="toggleGroup(group.id)">
 						<span class="group-chevron" aria-hidden="true">
 							<ChevronRight :size="13" :stroke-width="2" />
 						</span>
 						<span class="group-title">{{ group.label }}</span>
 						<span class="group-count">{{ String(group.children?.length || 0).padStart(2, '0') }}</span>
-						<span class="group-add" role="button" :title="`新建${group.label}`"
-							@click.stop="onGroupAdd(group.id)">
+						<span class="group-add" role="button" :title="`新建${group.label}`" @click.stop="onGroupAdd(group.id)">
 							<Plus :size="13" :stroke-width="2.2" />
 						</span>
 					</button>
@@ -568,11 +595,19 @@ onUnmounted(() => {
 					<div class="group-body">
 						<template v-if="group.id === 'projects'">
 							<!-- 项目节点：三级结构 项目→目录→会话 -->
-							<div v-for="folder in group.children" :key="folder.id" class="subfolder"
-								:class="{ open: isFolderOpen(folder.id) || folderHasActiveChild(folder) }">
-								<button class="project-folder" :class="{ 'menu-open': isContextTarget(folder.id) }"
-									type="button" @click="toggleFolder(folder.id)"
-									@contextmenu.prevent.stop="openFolderMenu($event, folder)">
+							<div
+								v-for="folder in group.children"
+								:key="folder.id"
+								class="subfolder"
+								:class="{ open: isFolderOpen(folder.id) || folderHasActiveChild(folder) }"
+							>
+								<button
+									class="project-folder"
+									:class="{ 'menu-open': isContextTarget(folder.id) }"
+									type="button"
+									@click="toggleFolder(folder.id)"
+									@contextmenu.prevent.stop="openFolderMenu($event, folder)"
+								>
 									<span class="folder-ico" aria-hidden="true">
 										<Folder :size="14" :stroke-width="1.8" />
 									</span>
@@ -583,15 +618,24 @@ onUnmounted(() => {
 								</button>
 								<div class="subfolder-body">
 									<template v-for="(session, si) in folder.children" :key="session.id">
-										<ConversationRenameEditor v-if="renameTargetId === session.id" :initial="session.label"
-											@confirm="confirmRename(session, $event)" @cancel="cancelRename" />
-										<button v-else class="node kind-chat sc-rise" :style="{ '--i': si }"
+										<ConversationRenameEditor
+											v-if="renameTargetId === session.id"
+											:initial="session.label"
+											@confirm="confirmRename(session, $event)"
+											@cancel="cancelRename"
+										/>
+										<button
+											v-else
+											class="node kind-chat sc-rise"
+											:style="{ '--i': si }"
 											:class="{ active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
-											type="button" @click="selectNode(session.id)"
-											@contextmenu.prevent.stop="openConversationMenu($event, session)">
+											type="button"
+											:title="session.time"
+											@click="selectNode(session.id)"
+											@contextmenu.prevent.stop="openConversationMenu($event, session)"
+										>
 											<span class="dot" aria-hidden="true"></span>
 											<span class="ntext">{{ session.label }}</span>
-											<span v-if="session.time" class="ntime">{{ session.time }}</span>
 										</button>
 									</template>
 								</div>
@@ -602,15 +646,24 @@ onUnmounted(() => {
 						<template v-else>
 							<!-- 普通对话节点：二级结构 -->
 							<template v-for="(child, ci) in group.children" :key="child.id">
-								<ConversationRenameEditor v-if="renameTargetId === child.id" :initial="child.label"
-									@confirm="confirmRename(child, $event)" @cancel="cancelRename" />
-								<button v-else class="node kind-chat sc-rise" :style="{ '--i': ci }"
+								<ConversationRenameEditor
+									v-if="renameTargetId === child.id"
+									:initial="child.label"
+									@confirm="confirmRename(child, $event)"
+									@cancel="cancelRename"
+								/>
+								<button
+									v-else
+									class="node kind-chat sc-rise"
+									:style="{ '--i': ci }"
 									:class="{ active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
-									type="button" @click="selectNode(child.id)"
-									@contextmenu.prevent.stop="openConversationMenu($event, child)">
+									type="button"
+									:title="child.time"
+									@click="selectNode(child.id)"
+									@contextmenu.prevent.stop="openConversationMenu($event, child)"
+								>
 									<span class="dot" aria-hidden="true"></span>
 									<span class="ntext">{{ child.label }}</span>
-									<span v-if="child.time" class="ntime">{{ child.time }}</span>
 								</button>
 							</template>
 							<div v-if="!group.children?.length" class="empty-group">暂无会话记录</div>
@@ -633,12 +686,17 @@ onUnmounted(() => {
 			</button>
 		</div>
 
-		<div v-if="contextMenu.open" class="context-menu" role="menu"
-			:style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @click.stop @contextmenu.prevent>
+		<div
+			v-if="contextMenu.open"
+			class="context-menu"
+			role="menu"
+			:style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+			@click.stop
+			@contextmenu.prevent
+		>
 			<template v-for="item in contextMenuItems" :key="item.id">
 				<div v-if="item.type === 'divider'" class="context-menu-divider" role="separator"></div>
-				<button v-else class="context-menu-item" :class="{ danger: item.danger }" type="button" role="menuitem"
-					@click="onContextMenuItem(item)">
+				<button v-else class="context-menu-item" :class="{ danger: item.danger }" type="button" role="menuitem" @click="onContextMenuItem(item)">
 					<span class="context-menu-icon" aria-hidden="true">
 						<component :is="getContextIcon(item.icon)" :size="14" :stroke-width="1.8" />
 					</span>
@@ -1291,13 +1349,7 @@ onUnmounted(() => {
 	white-space: nowrap;
 }
 
-.ntime {
-	flex: none;
-	color: var(--sb-faint);
-	font-family: var(--sb-mono);
-	font-size: var(--fs-95);
-	letter-spacing: 0.02em;
-}
+/* 会话时间不再占据行内宽度，已改为节点按钮的 title 悬浮提示。 */
 
 .empty-group {
 	padding: 8px 8px 4px;
@@ -1582,7 +1634,6 @@ onUnmounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
 	.sidebar *,
 	.sidebar *::before,
 	.sidebar *::after {

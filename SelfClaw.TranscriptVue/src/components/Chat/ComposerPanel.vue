@@ -368,13 +368,15 @@ defineExpose({
 .composer-stack {
 	/* relative：状态栏项目下拉的定位锚点 */
 	position: relative;
-	width: min(calc(100% - 72px), 728px);
+	/* 与 transcript 内容列同源（--chat-content-width）：宽窗口下两列一起变宽，始终对齐。 */
+	width: min(calc(100% - 72px), var(--chat-content-width));
 	margin: 0 auto 16px;
 	will-change: transform;
 }
 
 :global(.empty-workspace) .composer-stack {
-	width: min(calc(100% - 72px), 680px);
+	/* 空对话的欢迎页收窄一点（约 93%），聚焦输入；仍随断点同步伸缩。 */
+	width: min(calc(100% - 72px), calc(var(--chat-content-width) * 0.93));
 	margin-bottom: 0;
 }
 

@@ -290,9 +290,14 @@ internal sealed class WorkspaceSearchService
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = _ripgrepPath.Value, WorkingDirectory = root, UseShellExecute = false,
-                RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+                FileName = _ripgrepPath.Value,
+                WorkingDirectory = root,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
             }
         };
         foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
@@ -326,7 +331,7 @@ internal sealed class WorkspaceSearchService
         }
 
         throw new FileNotFoundException(
-            $"The bundled ripgrep binary ('{executableName}') was not found under '{baseDirectory}runtimes/<rid>/native'. " +
-            "Ensure it ships with the application.");
+            $"The bundled ripgrep binary ('{executableName}') was not found. Probed '{candidate}' and '{beside}'. " +
+            "Ship the 'runtimes\\win-x64\\native' folder next to the executable.");
     }
 }

@@ -48,6 +48,7 @@
     </None>
     <None Update="runtimes\win-x64\native\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </None>
   </ItemGroup>
 

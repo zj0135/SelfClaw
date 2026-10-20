@@ -13,6 +13,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 ```
 
 - TranscriptVue：开发 `cd SelfClaw.TranscriptVue && npm install && npm run dev`，测试 `npm test` / `npm run test:e2e`。
+- 发布（WPF 单文件自包含）：`dotnet publish SelfClaw.Desktop/SelfClaw.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true`。交付时必须**整个 publish 文件夹**一起发（exe + `Assets/` + `runtimes/`），只拷 exe 会让 agent 的 `search_text` / `glob_files` 报 "bundled ripgrep binary ('rg.exe') was not found"，宠物 WebP 解码同样失败；`runtimes/win-x64/native/*` 靠 csproj 的 `ExcludeFromSingleFile` 才不被塞进 bundle。
 - WPF/WebView2 与进程恢复测试需 `SELFCLAW_DESKTOP_SMOKE=1`；合成 live-provider 冒烟需 `SELFCLAW_PROVIDER_SMOKE=1` 且启用一个具备推理能力的模型。
 
 ## 不变量与陷阱

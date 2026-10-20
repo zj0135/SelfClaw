@@ -545,6 +545,9 @@ button {
 	min-width: 0;
 	flex: 0 0 auto;
 	flex-direction: column;
+	/* 内容列与 composer 共用 --chat-content-width，上下两块在任何窗口宽度下都对齐。 */
+	width: min(100%, var(--chat-content-width));
+	margin-inline: auto;
 }
 
 .message-row {
@@ -635,8 +638,9 @@ button {
 
 .message-main {
 	min-width: 0;
-	flex: 0 1 min(76%, 760px);
-	max-width: min(76%, 760px);
+	/* 上限跟随内容列而不是视口：列随窗口放大时，消息气泡的可用宽度同步放大。 */
+	flex: 0 1 min(76%, calc(var(--chat-content-width) + 32px));
+	max-width: min(76%, calc(var(--chat-content-width) + 32px));
 }
 
 .message-row.user {
@@ -650,7 +654,7 @@ button {
 	align-items: flex-end;
 	gap: 6px;
 	flex: 0 1 auto;
-	max-width: min(58%, 620px);
+	max-width: min(58%, calc(var(--chat-content-width) - 108px));
 }
 
 .message-row.user .item.message.user {
