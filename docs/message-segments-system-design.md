@@ -178,8 +178,9 @@ assistant 消息按块构造 M.E.AI 原生 content parts，替代整段 markdown
 约束与检查：
 
 - callId 必须用 `CorrelationId`（运行时 tool call id）而非 `tool_runs.id`，保证与 `ToolCallStartedEvent` 对得上；
-- 未完成（Running/AwaitingApproval）的 ToolCall 块不回传 function result 时，需在终态前截断（现状 `BuildMessages` 本就跳过非终态消息，规则不变）；
-- `MessageStatus.Truncated` 的续写提示逻辑保持不变。
+- 未完成（Running/AwaitingApproval）的 ToolCall 块不回传 function result：`BuildAssistantUnit` 直接跳过该 call；回合收尾会把中断回合的未完成工具标为 Failed，所以整个片段仍可回放；
+- 片段级回放状态：`Sealed` 与 `Interrupted` 同等回放，只有未收尾的 `Streaming` 片段不回放；
+- 回合状态 `Truncated` 不注入任何续写提示：续写一律由用户手动发起。
 
 CLI 路径无变化（只回放最后一条用户消息）。
 
@@ -220,7 +221,7 @@ P1-P2 完成即达成「DB 正文纯净、模型不再看到标记」；P3/P4 �
 - **块累积器**：Text↔Thinking 交替、工具夹在文本中间、pending thinking、空回合；
 - **终态对齐**：FinalText == 流式（fast path 保留交错）；FinalText 重写且工具数量/顺序保持；FinalText 缺失（cancelled/failed）回退流式块快照；
 - **投影**：块的 ordinal 与 Vue 收到的 segments 顺序一致；连续 ToolCall 成组；thinking 折叠状态 id 稳定性（`thinkingBlockId` ordinal 语义不变）；
-- **Prompt 回放**：多轮工具会话的请求体包含原生 tool call 结构；thinking 不回传；Truncated 续写提示仍在；
+- **Prompt 回放**：多轮工具会话的请求体包含原生 tool call 结构；thinking 不回传；Truncated 不注入续写提示（续写由用户手动发起）；
 - **手工/E2E**：Direct 与 CLI 各跑一轮含 thinking + 多工具 + 表格/代码块的消息；历史会话重放、取消、失败、空响应正常。
 
 ## 10. 风险与取舍

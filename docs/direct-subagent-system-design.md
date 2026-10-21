@@ -319,7 +319,7 @@ public enum DirectTurnOrigin
 - `Interactive`：普通 Direct 回合；仅绑定了 Subagent 的 Agent 获得委派工具。
 - `Subagent`：永远不暴露委派工具。
 - `Continuation`：仍是主 Agent，可使用创建任务时冻结的 `SubagentIds`，但能力受 ceiling 限制。
-- `CompletionBatch` 只存在于内存请求中，不写进 `messages`。
+- `CompletionBatch` 只存在于内存请求中，不写进 `messages`；只有 `Continuation` 能携带它，`DirectAgentChatRuntime.SetupTurnAsync` 在任何 provider 连接或能力 lease 之前就拒绝其它 origin。
 
 `DirectPromptComposer` 在 `CompletionBatch` 存在时，把结构化 envelope 作为最后一条 transient provider user message 追加到正常持久化历史后。它不是 `MessageRecord`，因此 transcript 中不存在伪 user message。
 

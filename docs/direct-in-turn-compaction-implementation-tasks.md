@@ -64,11 +64,11 @@
    - 构造：`(string? systemText, IReadOnlyList<DirectPromptHistoryUnit> initialUnits, IReadOnlyList<ChatMessage> trailingProtectedMessages)`。内部维护有序 entry 列表（每条 entry 是「单元」或「受保护消息」二选一）；`Messages` 按 [system?] + entries 依次展开合成，顺序必须与改造前 `BuildMessages` 的输出逐条一致。
    - `AppendResponse`：把响应的全部消息开成一个**新单元**（`SourceSequence` 用合成值，见第 4 条）；`AppendResults`：把工具结果消息并入这个未完成的单元（响应 + 结果永不分离，D§4.1）。既有 `_callIds` 校验逻辑原样保留。
    - `AppendInputs`：改为追加**受保护** entry（存 `ChatMessage(ChatRole.User, message.MarkdownContent)`；不需要保留 `MessageRecord` 引用——当前无读者）。
-   - 受保护消息（构造传入的续写提示 / completion batch、以及 steer）永不进入压缩前缀；应用压缩时原位保留。
+   - 受保护消息（构造传入的 completion batch、以及 steer）永不进入压缩前缀；应用压缩时原位保留。
    - 新增 `ApplyInTurnCompaction(string summary, int coveredUnitCount)`：移除**最旧的** `coveredUnitCount` 个单元（按 entry 顺序数单元）；把**裸摘要文本**记为本回合内摘要（**替换**旧的，不叠加）；合成 system 文本时用 `DirectPromptComposer.CreateSummarySection` 包裹裸摘要并追加在**原文本末尾**（段间 `\n\n`）；重计数（重置 `_countedMessageCount` 与 `_countedTokens`，下次 `CountTokens` 全量重建）。本任务只实现与单测，不接线。
    - 新增只读成员：`BuildUnits()`（当前单元列表，按序）、`InTurnSummary`（当前回合内**裸摘要文本**或 null，供 T2 作为 `PreviousSummary` 链式压缩用；包裹成 section 只发生在合成 system 文本时）。
    - 增量计数逻辑保持现状，作用于合成后的 `Messages`；每次结构变更后重建合成列表实例。
-2. `DirectPromptComposer` 抽出结构化构建：`internal DirectPromptBuild BuildRequest(...)`（或等价命名），返回 system 文本、重放单元（`DirectPromptHistoryUnit`）、受保护尾部消息（续写提示、completion batch，顺序与现状一致：单元 → 续写提示 → completion batch）。`BuildMessages` **保留原签名**，改为基于 BuildRequest 的扁平化包装；`CreateCompressionSection` 改为 `internal static`（T2 复用，单一格式来源）。⚠ 续写提示的判定逻辑（最后一条可重放消息、Truncated 状态）抽成内部辅助，两处共用，不得复制。
+2. `DirectPromptComposer` 抽出结构化构建：`internal DirectPromptBuild BuildRequest(...)`（或等价命名），返回 system 文本、重放单元（`DirectPromptHistoryUnit`）、受保护尾部消息（completion batch）。`BuildMessages` **保留原签名**，改为基于 BuildRequest 的扁平化包装；`CreateCompressionSection` 改为 `internal static`（T2 复用，单一格式来源）。
 3. `DirectTurnSetup` 载荷：以 `SystemText`、`InitialUnits`、`TrailingProtectedMessages` **替换** `Messages` 字段；新增 `CompressionPolicy`（`DirectCompressionPolicy`）、`Budget`（`DirectPromptBudget`）、`ConversationId`、`TurnId`。⚠ 同步全部构造点（生产 1 处 + 测试）。
 4. ⚠ **单元序列的合成规则**：初始单元沿用真实 `SourceSequence`；回合内新单元的合成 sequence 从「当前单元最大 sequence + 1」起递增，**必须 > 0**（`PlanCompression` 用 `SourceSequence > 0` 过滤候选，0 会被全部滤掉、回合内压缩永远不触发——T2 的测试要能挡住这个坑）。
 5. `DirectAgentChatRuntime.SetupTurnAsync`：单元**只构建一次**——计数、`PlanCompression`、`BuildRequest` 共用同一份单元（消除现状中 `CountPromptTokens` 与 `BuildMessages` 内部各建一次的双重构建，AGENTS 约定 10）。回合开始压缩的行为、事件、错误路径与现状逐条一致：`ApplyCompactionAsync` 的判定与产物不变；组装 setup 时按**最终边界**（本次新压缩或既有 `request.Compression`）过滤出重放单元（`SourceSequence > ThroughSequence`）传入。loop 侧仅把 `new DirectConversationContext(setup.Messages)` 改为结构化构造，其余不动。
@@ -129,7 +129,7 @@
 5. 上限：持续增长最多 3 次压缩调用，之后请求照常发送、无新事件。
 6. 压缩失败 → `Failed` 事件、下一请求仍含完整前缀、回合继续。
 7. 计数不可用 / `policy.Enabled == false` → 零行为变化（无计数驱动的分支、无事件）。
-8. 受保护内容：续写提示、completion batch（Continuation origin）、已消费 steer 在压缩后的下一请求中仍在原位。
+8. 受保护内容：completion batch（Continuation origin）、已消费 steer 在压缩后的下一请求中仍在原位。
 9. steer 交互：接近窗口时压缩后批次被接受（不再 `ContextBudgetExceeded`）；仍不满足时 Hold + `ContextBudgetExceeded` 行为不变。
 10. 压缩后仍超窗 → 终态 Failed 且错误文案可读（含窗口数与指引、不含正文）。
 11. 链路复用：回合开始压缩的既有用例（`DirectCompactionRuntimeTests`）全绿不动——本特性不改变回合开始判定。

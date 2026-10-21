@@ -26,7 +26,7 @@
 
 | 位置 | 现有行为 |
 | --- | --- |
-| `SelfClaw.Infrastructure/Agents/Direct/Context/DirectPromptComposer.cs` | `BuildMessages` 组装 system → 历史 → 续写提示 → completion batch；`BuildHistoryWithinBudget` 从最新消息反向累积 `DirectPromptHistoryUnit`，预算耗尽即丢弃更旧单元；`EstimateTokens = (UTF8 字节数 + 2) / 3` |
+| `SelfClaw.Infrastructure/Agents/Direct/Context/DirectPromptComposer.cs` | `BuildMessages` 组装 system → 历史 → completion batch；`BuildHistoryWithinBudget` 从最新消息反向累积 `DirectPromptHistoryUnit`，预算耗尽即丢弃更旧单元；`EstimateTokens = (UTF8 字节数 + 2) / 3` |
 | 同上 | `BudgetFor` 用 `ContextWindowTokens - (system + tools + 输出预留)` 得到历史预算；`DefaultOutputTokenReserve = 4096` |
 | `Agents/Direct/DirectAgentChatRuntime.cs` | `SetupTurnAsync` 调用 composer（每回合一次）；`WriteTerminalOutcome` 映射终态 |
 | `Agents/Direct/DirectConversationLoop.cs` | 每回合 ≤128 次 provider 请求；`FitsBudget` 只用于 steer 批次准入；回合内增长已由回合内压缩约束（见 `direct-in-turn-compaction-design.md`），回合开始压缩不变 |
@@ -298,7 +298,7 @@ internal string? BuildSystemText(..., ConversationCompactionRecord? compression)
 - **摘要注入**：作为独立 system section 追加在 agent instructions 之后，包裹在 `<selfclaw-context-summary version="1">…</selfclaw-context-summary>` 中，并附一行说明“这是更早对话的压缩摘要，替代已省略的历史”。放在 system 段而不是 user 消息：它是运行时提供的上下文，不是用户输入（与 `CompletionInstruction` 先例一致）。⚠ 最终顺序（C6 定）：agent instructions → `CompletionInstruction`（有 completion batch 时）→ 压缩摘要 → capability system instructions（Plugin/Skill/Policy/Degradation）；摘要排在 completion 指令之后、能力指令之前，这样无压缩时 prompt 字节布局与旧实现完全一致。
 - **裁剪移除**：`BuildHistoryWithinBudget` 与“最新消息装不下就丢弃其余”的路径删除。
 - **保留的必要校验**：`counted(system + tools) + outputReserve > window` → 抛既有可读错误（这条与用户历史无关，属于配置错误）；计数不可用时跳过该检查（fail-open），由 provider 报错。⚠ 落地归属（C7 定）：这条检查的唯一归属是 **runtime**（`EnsurePromptFitsWindow`，文案要带“开启压缩 / 降低输出上限 / 换更大窗口”的指引），composer **不再重复同一条校验**——runtime 用同一份计数在 `BuildMessages` 之前先跑，composer 里那份永远不可达，属重复实现（AGENTS 约定 10）。composer 只保留与计数无关的校验（completion batch 的 64 KiB 上限、历史顺序与归属校验）。
-- 续写提示、completion batch、steer 批次的语义与顺序不变。
+- completion batch、steer 批次的语义与顺序不变。
 - **计数不再是 composer 的职责**：`EstimateTokens` 字节估算与其派生方法删除；`DirectConversationLoop.FitsBudget` 改用 `IDirectTokenCounter` 与增量维护的上下文计数。
 - **计数的口径必须是 provider 收到的文本**（C18 修）：`DirectTokenCounter` 把 `FunctionCallContent.Arguments` / `FunctionResultContent.Result` / 工具 `AdditionalProperties` 序列化成 JSON 后计数，所以序列化器必须用 `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`，且**字符串片段不序列化**（它本来就是 provider 收到的原文，序列化只会多一对引号）。用默认编码器时中文被写成 `\uXXXX`、`< > &` 被写成 `\u003C` 一类转义，实测把代码/中文密集的工具结果放大约 **1.6 倍**：状态栏在“回合开始估算 → 回合结束实测”之间来回跳，压缩也会提前触发（1M 窗口 0.75 阈值下真实约 480K 就压）。这条口径同时影响 `PlanCompression`、`FitsBudget` 与 `EnsurePromptFitsWindow`，改错不只是显示问题。
 - **单元形状**：`DirectPromptHistoryUnit(Messages, SourceSequence, int? Tokens = null)`。一个单元 = 一条存储消息（工具调用与其结果同单元，边界只能落在单元之间），`Tokens` 由调用方计数后回填，`SourceTokens` = 前缀单元的计数之和。`PlanCompression` 之所以收“已计数的单元”而不是原始入参：保留比例与 `SourceTokens` 都需要每单元的计数，而“composer 不计数”这条约束必须保住。
@@ -403,7 +403,7 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 | C02 | 压缩边界是已持久化消息的 sequence；被摘要的消息不再单独重放 |
 | C03 | 压缩项与回合终态在同一事务提交；重试幂等，不产生重复边界 |
 | C04 | 压缩失败不影响回合终态语义；超窗时以可读错误失败 |
-| C05 | 子代理 completion batch、续写提示、steer 批次仍为受保护内容，不被压缩或丢弃 |
+| C05 | 子代理 completion batch、steer 批次仍为受保护内容，不被压缩或丢弃 |
 | C06 | 每回合开始最多一次压缩（不变）；回合内维护性压缩 ≤ `MaximumInTurnCompactionsPerTurn`（3 次），不落库、不裁剪（见 `direct-in-turn-compaction-design.md`） |
 | C07 | 压缩使用本回合 lease 或独立 lease，两者都在回合结束前释放 |
 | C08 | 设置不可用时回落默认策略；模型不可用时回退本回合模型并留诊断 |

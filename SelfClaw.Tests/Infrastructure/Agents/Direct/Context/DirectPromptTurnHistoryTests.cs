@@ -35,12 +35,45 @@ public sealed class DirectPromptTurnHistoryTests
     [InlineData(ConversationTurnStatus.Failed)]
     [InlineData(ConversationTurnStatus.Cancelled)]
     [InlineData(ConversationTurnStatus.Interrupted)]
-    public void Unsuccessful_turn_retains_sealed_fragments_and_excludes_unfinished_fragments(ConversationTurnStatus status)
+    public void Unsuccessful_turn_replays_every_settled_fragment_including_the_interrupted_one(ConversationTurnStatus status)
     {
         var turn = Turn(status);
         var sealedMessage = Message(turn, 1, MessageRole.Assistant, "complete");
-        var unfinished = Message(turn, 2, MessageRole.Assistant, "unfinished") with { Status = MessageStatus.Interrupted };
-        Replay([unfinished, sealedMessage], [turn]).Should().ContainSingle().Which.Text.Should().Be("complete");
+        var interrupted = Message(turn, 2, MessageRole.Assistant, "cut off") with { Status = MessageStatus.Interrupted };
+        Replay([interrupted, sealedMessage], [turn]).Select(message => message.Text)
+            .Should().Equal("complete", "cut off");
+    }
+
+    [Fact]
+    public void Fragment_that_never_settled_is_not_replayed_even_when_its_turn_still_looks_running()
+    {
+        var turn = Turn(ConversationTurnStatus.Running);
+        var streaming = Message(turn, 1, MessageRole.Assistant, "half written") with { Status = MessageStatus.Streaming };
+        Replay([streaming], [turn]).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Interrupted_fragment_replays_its_finished_tool_units_and_skips_the_unfinished_call()
+    {
+        var turn = Turn(ConversationTurnStatus.Failed);
+        var message = Message(turn, 1, MessageRole.Assistant, "working") with { Status = MessageStatus.Interrupted };
+        var finished = Tool(message, ToolExecutionStatus.Completed);
+        var unfinished = Tool(message, ToolExecutionStatus.Running);
+        message = message with
+        {
+            Segments =
+            [
+                new(message.Id, 0, MessageSegmentKind.Text, "working", null),
+                new(message.Id, 1, MessageSegmentKind.ToolCall, null, finished.Id),
+                new(message.Id, 2, MessageSegmentKind.ToolCall, null, unfinished.Id)
+            ]
+        };
+        var result = Replay([message], [turn], [finished, unfinished]);
+        result.SelectMany(item => item.Contents).OfType<FunctionCallContent>().Should()
+            .ContainSingle().Which.CallId.Should().Be(finished.CorrelationId);
+        result.SelectMany(item => item.Contents).OfType<FunctionResultContent>().Should()
+            .ContainSingle().Which.CallId.Should().Be(finished.CorrelationId);
+        result.Select(message => message.Text).Should().Equal("working", string.Empty);
     }
 
     [Fact]
@@ -63,13 +96,12 @@ public sealed class DirectPromptTurnHistoryTests
     }
 
     [Fact]
-    public void Truncated_multi_fragment_turn_appends_exactly_one_continuation_after_the_last_fragment()
+    public void Truncated_turn_replays_its_fragments_and_never_injects_a_continuation_prompt()
     {
         var turn = Turn(ConversationTurnStatus.Truncated);
         var first = Message(turn, 1, MessageRole.Assistant, "first");
         var last = Message(turn, 2, MessageRole.Assistant, "last");
-        Replay([last, first], [turn]).Select(message => message.Text)
-            .Should().Equal("first", "last", DirectPromptComposer.ContinuationPrompt);
+        Replay([last, first], [turn]).Select(message => message.Text).Should().Equal("first", "last");
     }
 
     [Fact]

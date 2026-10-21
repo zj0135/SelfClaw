@@ -232,7 +232,7 @@ public sealed class DirectInTurnCompactionTests
     }
 
     [Fact]
-    public async Task A_continuation_keeps_its_prompt_and_completion_batch_after_the_summary()
+    public async Task A_continuation_keeps_its_completion_batch_after_the_summary_without_a_continuation_prompt()
     {
         var longAnswer = new string('A', 400);
         var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 1, answerLength: 400));
@@ -253,11 +253,13 @@ public sealed class DirectInTurnCompactionTests
         var replayed = client.Requests[1].ToList();
         replayed.Should().NotContain(message => message.Text == "prior prompt");
         replayed.Should().Contain(message => message.Text == longAnswer);
-        var continuationIndex = replayed.FindIndex(message => message.Text == DirectPromptComposer.ContinuationPrompt);
+        var userTexts = replayed.Where(message => message.Role == ChatRole.User)
+            .Select(message => message.Text ?? string.Empty);
+        userTexts.Should().OnlyContain(text => text.StartsWith("<selfclaw-subagent-results", StringComparison.Ordinal),
+            "resuming a truncated answer belongs to the user, so the batch is the only user message");
         var batchIndex = replayed.FindIndex(message =>
             message.Text?.Contains("<selfclaw-subagent-results", StringComparison.Ordinal) == true);
-        continuationIndex.Should().BeGreaterThan(0, "the continuation prompt is protected, not compacted");
-        batchIndex.Should().BeGreaterThan(continuationIndex, "the protected tail keeps its own order");
+        batchIndex.Should().BeGreaterThan(0, "the completion batch is protected, not compacted");
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
     }
 

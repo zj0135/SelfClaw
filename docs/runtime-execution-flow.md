@@ -44,7 +44,7 @@ Direct 依赖扩展资源与 provider 服务；Extensions 不引用 Direct 编�
 
 一轮 Direct 的顺序是：
 
-1. continuation 请求必须带 `IToolExecutionCheckpoint`。
+1. 请求形状的前置校验，全部在任何 provider 连接或能力 lease 之前：continuation 请求必须带 `IToolExecutionCheckpoint`；只有 `Continuation` 才能携带 `CompletionBatch`；只有 `Interactive` 才能消费输入边界或 steer。
 2. `AiChatClientFactory.PrepareAsync(ModelProfileId)` 确定具体模型。显式 id 与空 id 的 `desktop-default` 都在这里处理；校验档案、连接、协议并解析凭据，得到 `AiProviderClientRequest`。
 3. 用确定的模型 id 调用 `DirectTurnCapabilityResolver.ResolveAsync()`。子代理工具捕获的父模型始终具体，禁用或无效模型不会先触发 MCP 连接。
 4. `AiChatClientFactory.Create(preparation, pipeline)` 按回合在共享 pooled handler 上构造 `HttpClient`，把工具定义交给 provider adapter 并创建 options；SDK 管线只挂 `UseLogging`，工具循环不在管线内。

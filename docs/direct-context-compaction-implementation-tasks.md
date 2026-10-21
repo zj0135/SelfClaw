@@ -309,7 +309,7 @@ internal interface IDirectTokenCounter
 1. `PlanCompression` 返回：`ShouldCompress`（`countedTokens + 输出预留 >= threshold`，预留 = `budget.MaxOutputTokens ?? DefaultOutputTokenReserve`）、`PrefixUnits`、`ThroughSequence`、`RetainedUnitCount`、`SourceTokens`；纯函数、无 I/O、不做计数、不抛业务异常。⚠ 原 `DirectPromptHistoryUnit` 只有 `(Messages, EstimatedTokens)`、**不带 sequence**；规划循环是按 `orderedMessages` 逐条构造单元的（**一条消息 = 一个单元**，`BuildAssistantUnit` 也只对应一条消息），因此 C6 给它补了 `SourceSequence`，`ThroughSequence` 直接取前缀最后一单元的该字段。不要另造 id → sequence 映射表（composer 里只有 `turnsById`，没有消息表），也不要用时间戳、数组下标或“最新压缩项之前的一切”推断边界。
 2. ⚠ 保留策略：从最新单元向前累加直到 ≤ `threshold * 0.5`，**至少保留最新 1 个单元**；`PrefixUnits` 为空即不压缩。边界必须落在单元之间，绝不可拆开一个单元（工具调用与结果）。
 3. `BuildMessages`：重放 `Sequence > compression.ThroughSequence` 的单元；摘要作为独立 system section（`<selfclaw-context-summary version="1">`）注入，位置固定为 **system 段第三位**：`[agent instructions, CompletionInstruction?, 压缩摘要?, ...capability/extension instructions]` —— 紧随 agent instructions 与 completion 指令、排在扩展/能力 instructions 之前。理由：无压缩时 prompt 与现状逐字节一致，且摘要属会话内容、扩展 instructions 仍排在其后。该顺序必须写进测试，不要留模糊。⚠ 现状是把这些 section 用 `\n\n` 拼进**同一条** System 消息（`systemSections` 数组），所以摘要是该数组里的一个元素、不是新增第二条 system 消息；不要改成分多条 system 消息发送。
-4. ⚠ 受保护内容不变：续写提示、completion batch、steer 批次仍排在 `mandatory` 里，不受压缩与边界影响；`MaximumCompletionBatchBytes` 校验保留。
+4. ⚠ 受保护内容不变：completion batch、steer 批次仍排在 `mandatory` 里，不受压缩与边界影响；`MaximumCompletionBatchBytes` 校验保留。
 5. ⚠ 保留“system + tools + 输出预留 > 窗口”的可读错误（配置错误，与用户历史无关）；删除“最新历史消息装不下即报错并丢弃其余”的路径。该校验今天在 `BudgetFor`（由 `BuildMessages` 调用），改造后必须改用**调用方传入**的 `countedTokens` / `outputReserveTokens` 判断，`BudgetFor` 那个“历史预算返回值”删除；`PlanCompression` 按第 1 条保持纯函数、不抛业务异常；实际落地为 `EnsurePromptFitsWindow(budget, countedTokens)`，判定 `countedTokens + 预留 > 窗口`，计数不可用时跳过（fail-open）。（全仓唯一外部调用点是 `DirectConversationLoop.cs` 的 `FitsBudget`，已核实无其他调用方。）
 6. `DirectConversationLoop.FitsBudget`：用计数器对“当前上下文 + 待消费批次”计数；计数不可用（`null`）时按既有保守策略处理（**允许**消费批次，让 provider 决定），并在注释说明这是 §5.5 的降级语义。⚠ 计数与可用性查询必须显式传**当回合的 `AiModelProfile`**（C4 接口是 `IsAvailable(model)` / `Count*(…, model)`）；拿不到 profile 就传 `null`（= 默认编码），不得自造估算，也不得在某处硬编码编码名。现成事实（已核实）：`FitsBudget(DirectTurnSetup setup, DirectConversationContext context, ConversationInputBatch batch)` 是 **private static**，当回合模型与窗口就在 `setup.ProviderLease.Profile`（`ResolveContextWindowTokens(setup.ProviderLease.Profile)`），工具与输出预留来自 `setup.ProviderLease.Options` —— profile 直接可用、无需新增依赖管道；接入计数器后该方法改为**实例方法**（计数器构造注入），并同步改写它那句 “shares the composer's UTF-8 heuristic” 的 XML 注释（改造后不再成立）。
 7. ⚠ 删除后检查是否有只被裁剪/估算路径使用的私有成员，一并删除（AGENTS.md 约定 10）。明确点名 `PerMessageOverheadTokens = 8` 与 `PerToolOverheadTokens = 16` 这两个**字节估算加数**：它们与 C4 的 framing 常量（`PerMessageFramingTokens = 4` / `PerToolFramingTokens = 8`）语义不同，必须删掉，不允许并存或叠加。
@@ -321,7 +321,7 @@ internal interface IDirectTokenCounter
 - 有压缩项时：更旧消息不出现；摘要 section 出现在 system 段且带包装标记；边界之后的消息完整保留。
 - `PlanCompression`：未达阈值 → 不压缩；达阈值 → 前缀非空、`ThroughSequence` 等于前缀最后一单元的消息 sequence、保留单元数符合 50% 目标与“至少 1 个”下限。
 - 单元完整性：前缀边界绝不落在同一 assistant 消息的工具调用与其结果之间。
-- 受保护内容：completion batch 与续写提示在压缩后仍存在且顺序正确。
+- 受保护内容：completion batch 在压缩后仍存在且顺序正确。
 - 配置错误：tools + 预留超窗仍抛既有可读错误。
 - ⚠ 固定“**一个单元 = 一条会话消息**”这一不变量：`SourceMessageCount` 取 `PrefixUnits.Count` 依赖它成立。测试断言前缀单元数等于被压缩的 `MessageRecord` 条数；若将来让一个单元跨多条存储消息、或把工具结果拆成独立单元，必须同时改 `SourceMessageCount` 的口径并写回设计文档。
 - 删除断言：源码中不再存在字节估算方法（可用编译期即可，无需专门测试；由 `rg` 在 C16 核对）。

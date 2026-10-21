@@ -191,6 +191,15 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             throw new InvalidDataException("A continuation requires a durable tool execution checkpoint.");
         }
 
+        // Rejected here, before any provider connection or capability lease exists, because the batch is what
+        // makes the prompt describe itself as delivering Subagent results: a turn that cannot deliver them must
+        // not reach the composer at all.
+        if (request.ExecutionContext.CompletionBatch is not null &&
+            request.ExecutionContext.Origin != DirectTurnOrigin.Continuation)
+        {
+            throw new InvalidDataException("Only a continuation turn can carry a Subagent completion batch.");
+        }
+
         var preparation = await _chatClientFactory.PrepareAsync(request.ModelProfileId, cancellationToken).ConfigureAwait(false);
         request = request with { ModelProfileId = preparation.Profile.Id };
         var capabilityLease = await _capabilityResolver.ResolveAsync(request, cancellationToken)
@@ -253,10 +262,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                     capabilityLease.SystemInstructions,
                     request.ExecutionContext,
                     compression),
-                DirectPromptComposer.BuildTrailingProtectedMessages(
-                    request.Messages,
-                    request.Turns,
-                    request.ExecutionContext),
+                DirectPromptComposer.BuildTrailingProtectedMessages(request.ExecutionContext),
                 compression);
             return new DirectTurnSetup(
                 capabilityLease,

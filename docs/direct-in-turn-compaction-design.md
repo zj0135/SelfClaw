@@ -132,7 +132,6 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 | 内容 | 依据 |
 | --- | --- |
 | system 消息 | 每次请求重建；摘要以追加 section 的形式挂在其末尾 |
-| 续写提示（`ContinuationPrompt`） | C05 |
 | 子代理 completion batch | C05 |
 | **已消费的 steer 消息** | `direct-message-input-design.md`：已提交的 steer 在本回合内是受保护输入，不得在后续迭代被裁掉。它们在**下一回合**成为普通历史单元，由回合开始压缩按同一策略处理 |
 | 未消费的 steer 批次 | 本就不在上下文中（Hold 语义不变） |
@@ -203,7 +202,7 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 
 - **C06 修订**：每回合开始最多一次压缩（不变）；回合内维护性压缩 ≤ `MaximumInTurnCompactionsPerTurn`，不落库、不裁剪。
 - T01 回合内压缩只作用于进程内请求上下文：不产生任何数据库写入、不改转录。
-- T02 单元完整性：工具调用与其结果永不分离；system、续写提示、completion batch、已消费 steer 永不被回合内压缩覆盖。
+- T02 单元完整性：工具调用与其结果永不分离；system、completion batch、已消费 steer 永不被回合内压缩覆盖。
 - T03 失败 / 计数不可用 / 上限用尽 → 回退为"本回合不再压缩"，不新增失败路径（唯一例外：决策 A 的"压缩后仍超窗"可读失败）。
 - T04 压缩调用不计入 `MaximumProviderRequestsPerTurn`；自身受 3 次上限约束。
 - T05 回合内摘要与回合开始摘要共用一个压缩器、一套阈值与保留比例；无第二套计数口径。
@@ -242,7 +241,7 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 5. 上限：持续增长只压缩 3 次，之后请求照常发送。
 6. 压缩失败 → `Failed` 事件、上下文未变、回合继续。
 7. 计数不可用 / policy 关闭 → 零行为变化。
-8. 受保护内容：续写提示、completion batch（continuation origin）、已消费 steer 在压缩后仍在。
+8. 受保护内容：completion batch（continuation origin）、已消费 steer 在压缩后仍在。
 9. steer 交互：超窗批次在压缩后被接受；仍不满足时 Hold + `ContextBudgetExceeded` 行为不变。
 10. 压缩后仍超窗 → 可读失败（决策 A）。
 11. 回归：回合开始压缩行为不变（`DirectCompactionRuntimeTests` 全绿）。

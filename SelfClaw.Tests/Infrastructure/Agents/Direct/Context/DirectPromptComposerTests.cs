@@ -160,7 +160,7 @@ public sealed class DirectPromptComposerTests
     }
 
     [Fact]
-    public void BuildMessages_appends_the_continuation_prompt_after_a_truncated_answer()
+    public void BuildMessages_replays_a_truncated_answer_without_any_runtime_continuation_prompt()
     {
         var composer = new DirectPromptComposer();
         var (messages, turns, toolRuns) = CreateHistory(
@@ -169,8 +169,7 @@ public sealed class DirectPromptComposerTests
 
         var result = composer.BuildMessages(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
 
-        result.Last().Role.Should().Be(ChatRole.User);
-        result.Last().Text.Should().Contain("Continue exactly where you left off");
+        result.Select(message => message.Text).Should().Equal("full answer", "partial answer");
     }
 
     [Fact]
@@ -259,7 +258,7 @@ public sealed class DirectPromptComposerTests
     }
 
     [Fact]
-    public void BuildMessages_keeps_the_continuation_prompt_and_completion_batch_after_the_summary()
+    public void BuildMessages_keeps_the_completion_batch_after_the_summary_without_any_continuation_prompt()
     {
         var (messages, turns, runs) = CreateHistory(
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "oldest"),
@@ -272,8 +271,8 @@ public sealed class DirectPromptComposerTests
         var texts = result.Select(message => message.Text ?? string.Empty).ToArray();
         texts[0].Should().Contain("<selfclaw-context-summary");
         texts[1].Should().Be("partial answer");
-        texts[2].Should().Be(DirectPromptComposer.ContinuationPrompt);
-        texts[3].Should().StartWith("<selfclaw-subagent-results version=\"1\">");
+        texts.Should().HaveCount(3, "a truncated answer is resumed by the user, never by a runtime prompt");
+        texts[2].Should().StartWith("<selfclaw-subagent-results version=\"1\">");
     }
 
     [Fact]

@@ -452,6 +452,28 @@ public sealed class DirectAgentChatRuntimeTests
         releases.Should().Be(1);
     }
 
+    [Fact]
+    public async Task A_batch_outside_a_continuation_is_rejected_before_any_setup_work()
+    {
+        var factory = new FakeChatClientFactory(new ScriptedChatClient([]));
+        var resolver = new FakeCapabilityResolver(new DirectTurnCapabilityLease([], [],
+            new Dictionary<Guid, string>(), []));
+        var request = (DirectChatTurnRequest)CreateRequest(factory.Profile.Id);
+        request = request with
+        {
+            ExecutionContext = new DirectTurnExecutionContext(
+                DirectTurnOrigin.Interactive, null, new SubagentCompletionBatch([]))
+        };
+
+        var events = await CollectAsync(CreateRuntime(factory, resolver).StreamTurnAsync(request));
+
+        resolver.Calls.Should().Be(0);
+        factory.CreateCalls.Should().Be(0);
+        events.Should().NotContain(item => item is RunStartedEvent);
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.ErrorMessage
+            .Should().Be("Only a continuation turn can carry a Subagent completion batch.");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -471,11 +493,9 @@ public sealed class DirectAgentChatRuntimeTests
             RecordingScope(() => order.Add("capability")));
         var factory = new FakeChatClientFactory(client);
         var request = (DirectChatTurnRequest)CreateRequest(factory.Profile.Id);
-        request = request with
-        {
-            ExecutionContext = new DirectTurnExecutionContext(
-                DirectTurnOrigin.Interactive, null, new SubagentCompletionBatch([]))
-        };
+        // A history with two fragments on one sequence fails the prompt build, not the setup: the turn reaches
+        // it only after both leases exist, which is exactly the partial state this test releases.
+        request = request with { Messages = [.. request.Messages, request.Messages[3] with { Id = Guid.NewGuid() }] };
 
         var events = await CollectAsync(CreateRuntime(factory, new FakeCapabilityResolver(capabilityLease))
             .StreamTurnAsync(request));
@@ -483,7 +503,7 @@ public sealed class DirectAgentChatRuntimeTests
         order.Should().Equal("provider", "capability");
         client.LastMessages.Should().BeEmpty();
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.ErrorMessage
-            .Should().Be("Only a continuation turn can carry a Subagent completion batch.");
+            .Should().Contain("Conversation history");
     }
 
     [Theory]

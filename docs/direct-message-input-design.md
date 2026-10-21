@@ -372,9 +372,9 @@ messages 增加必填 `turn_id` 外键与 `sequence`，UNIQUE(conversation_id, s
 ### 8.3 回放、终态和通知
 
 - `TerminalBlockAligner` 只处理当前 assistant 片段的 FinalText。translator 分离“当前片段正文”与“逻辑回合摘要／聚合用量”，不能用整回合正文覆盖 A1。
-- ConversationTurnRecord 决定逻辑状态，按 sequence 回放实际交错；取消／失败前已封存的完整片段可保留，未完成工具单元必须被排除或闭合。重写 `IsReplayable` 的按单条消息推断逻辑，统一使用 turn 与片段内容。
+- ConversationTurnRecord 决定逻辑状态，按 sequence 回放实际交错；取消／失败／重启中断的回合连它已经产出的 assistant 片段一起回放（`Sealed` 与 `Interrupted` 同等回放；否则一次断线就让该回合几十轮工具调用整体从上下文消失），片段内未达终态的工具单元被排除，仍未收尾的 `Streaming` 片段不回放。
 - Blocked 的原始用户输入遵守不回放规则，统一使用 turn_id 定位，删除只“跳过前一条 user”的邻接推断；缺少必需字段视为数据错误，不按旧格式猜测回放。
-- Truncated 续写读取回合状态并定位最后的实际片段，只插一次 continuation prompt。
+- Truncated 只改回合状态；续写由用户手动发起，运行时不再追加任何续写提示词（历史里只有真实对话与工具往返）。
 - 最终提交原子写存在的当前片段、turn record、聚合 usage 和该轮最终工具状态；无输出也可提交终态。中途已封存片段不能被最终提交覆盖。
 - 完成通知和 Pet 状态按逻辑回合更新，摘要取最后有效输出；每个 steer 边界不弹完成通知。
 
