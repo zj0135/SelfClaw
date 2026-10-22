@@ -36,6 +36,15 @@ function menuButton(wrapper, label) {
 	return wrapper.findAll('.context-menu-item').find((node) => node.text() === label);
 }
 
+// 折叠的项目文件夹不渲染子节点（与真实交互一致）：要用会话行先点开文件夹。
+async function expandProjects(wrapper) {
+	if (!wrapper.find('.subfolder-body').exists()) {
+		await wrapper.get('.project-folder').trigger('click');
+	}
+
+	return wrapper;
+}
+
 it('renders the folder menu in the agreed order', async () => {
 	const wrapper = mountSidebar(projectItems());
 
@@ -48,6 +57,7 @@ it('renders the folder menu in the agreed order', async () => {
 it('renders the conversation menu in the agreed order', async () => {
 	const wrapper = mountSidebar(projectItems());
 
+	await expandProjects(wrapper);
 	await wrapper.get('.subfolder-body .node').trigger('contextmenu');
 
 	expect(labelsOf(wrapper)).toEqual(['工作目录', '重命名', '在资源管理器打开', '删除']);
@@ -65,6 +75,7 @@ it('emits the workspace root id when opening a project folder in explorer', asyn
 });
 
 async function openRenameEditor(wrapper, selector = '.subfolder-body .node') {
+	await expandProjects(wrapper);
 	await wrapper.get(selector).trigger('contextmenu');
 	await menuButton(wrapper, '重命名').trigger('click');
 	return wrapper.get('.node.renaming input.rename-input');

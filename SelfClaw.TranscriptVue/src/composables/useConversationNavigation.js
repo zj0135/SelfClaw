@@ -12,8 +12,7 @@ export function useConversationNavigation(currentViewId, chatViewRef, openPlugin
 	const sidebarConversations = ref([]);
 	const selectedConversationId = ref(null);
 	transcript.on((payload) => {
-		if (sidebarConversations.value !== payload.conversations)
-			sidebarConversations.value = payload.conversations || [];
+		if (sidebarConversations.value !== payload.conversations) sidebarConversations.value = payload.conversations || [];
 		selectedConversationId.value = payload.selectedConversationId || null;
 	});
 	on('operation-result', (payload) => {
@@ -21,168 +20,178 @@ export function useConversationNavigation(currentViewId, chatViewRef, openPlugin
 		// 错误只会让用户以为关闭出了故障。
 		if (!payload.requestId && payload.error && payload.errorCode !== 'shutting-down') showToast(payload.error);
 	});
-	on('conversation-activated', () => { currentViewId.value = 'chat'; });
+	on('conversation-activated', () => {
+		currentViewId.value = 'chat';
+	});
 
-function toConversationNode(conversation) {
-	return {
-		id: conversation.id,
-		label: conversation.title || '未命名对话',
-		time: conversation.timestamp || '',
-		type: 'conversation',
-		isManagedWorktree: Boolean(conversation.isManagedWorktree),
-		workspaceRootId: conversation.workspaceRootId || null,
-		// 右键「工作目录」要用工作区根的名字与路径，不是会话标题。
-		workspaceRootName: conversation.workspaceRootName || '',
-		workspaceRootPath: conversation.workspaceRootPath || '',
-	};
-}
-
-function hasWorkspace(conversation) {
-	return Boolean(conversation?.workspaceRootId || conversation?.workspaceRootPath || conversation?.workspaceRootName);
-}
-
-function buildProjectGroups(conversations) {
-	const groups = new Map();
-	for (const conversation of conversations.filter(hasWorkspace)) {
-		const key = conversation.gitRepositoryId || conversation.workspaceRootId || conversation.workspaceRootPath || conversation.workspaceRootName || 'workspace';
-		if (!groups.has(key)) {
-			groups.set(key, {
-				id: `workspace-${key}`,
-				label: conversation.gitRepositoryName || conversation.workspaceRootName || conversation.workspaceRootPath || '工作区',
-				workspaceRootId: conversation.workspaceRootId || null,
-				workspaceRootName: conversation.workspaceRootName || '',
-				workspaceRootPath: conversation.workspaceRootPath || '',
-				gitRepositoryId: conversation.gitRepositoryId || null,
-				type: 'folder',
-				children: [],
-			});
-		}
-
-		groups.get(key).children.push(toConversationNode(conversation));
+	function toConversationNode(conversation) {
+		return {
+			id: conversation.id,
+			label: conversation.title || '未命名对话',
+			time: conversation.timestamp || '',
+			type: 'conversation',
+			isManagedWorktree: Boolean(conversation.isManagedWorktree),
+			workspaceRootId: conversation.workspaceRootId || null,
+			// 右键「工作目录」要用工作区根的名字与路径，不是会话标题。
+			workspaceRootName: conversation.workspaceRootName || '',
+			workspaceRootPath: conversation.workspaceRootPath || '',
+		};
 	}
 
-	return Array.from(groups.values());
-}
+	function hasWorkspace(conversation) {
+		return Boolean(conversation?.workspaceRootId || conversation?.workspaceRootPath || conversation?.workspaceRootName);
+	}
 
-const navItems = computed(() => [
-	{ id: 'new-chat', label: '新建对话', type: 'action' },
-	{ id: 'search', label: '搜索', type: 'action' },
-	{ id: 'plugins', label: '插件', type: 'action' },
-	{
-		id: 'extensions',
-		label: '扩展功能',
-		type: 'action',
-		children: [
-			{ id: 'image-generation', label: '生图', type: 'view' },
-			{ id: 'translation', label: '翻译', type: 'view' },
-		],
-	},
-	{ id: 'automation', label: '自动化', type: 'action' },
-	{
-		id: 'projects',
-		label: '项目',
-		type: 'group',
-		children: buildProjectGroups(sidebarConversations.value),
-	},
-	{
-		id: 'conversations',
-		label: '对话',
-		type: 'group',
-		children: sidebarConversations.value.filter((conversation) => !hasWorkspace(conversation)).map(toConversationNode),
-	},
-	{ id: 'settings', label: '设置', type: 'view' },
-]);
-
-// 独立视图（设置与扩展功能下的占位页）直接以自身 id 高亮；
-// 其余情况侧栏跟着当前选中的会话走。
-const standaloneViewIds = new Set(['settings', 'image-generation', 'translation', 'automation']);
-const sidebarActiveId = computed(() => {
-	const viewId = currentViewId.value;
-	return standaloneViewIds.has(viewId) ? viewId : selectedConversationId.value;
-});
-
-
-async function onSidebarAction(action) {
-	try {
-	const actionId = typeof action === 'string' ? action : action?.id;
-	switch (actionId) {
-		case 'new-chat':
-			currentViewId.value = 'chat';
-			await request('new-chat', { keepWorkspace: true });
-			break;
-		case 'add-conversations':
-			currentViewId.value = 'chat';
-			await request('new-chat', { });
-			break;
-		case 'add-projects':
-			currentViewId.value = 'chat';
-			nextTick(() => chatViewRef.value?.browseWorkspaceFolder());
-			break;
-		case 'plugins':
-			openPlugins();
-			break;
-		case 'automation':
-			currentViewId.value = 'automation';
-			break;
-		case 'delete-conversation':
-			if (action?.conversationId) {
-				let removeManagedWorktree = false;
-				if (action.isManagedWorktree) {
-					const confirmed = await confirm({
-						title: '删除会话',
-						message: '确认删除该会话？工作树可以继续保留。',
-						confirmText: '删除',
-						danger: true,
-					});
-					if (!confirmed) break;
-
-					removeManagedWorktree = await confirm({
-						title: '移除工作树',
-						message: '是否同时安全移除工作树？仅已合并且无未提交更改时可移除。',
-						confirmText: '移除',
-						danger: true,
-					});
-				}
-
-				await request('delete-conversation', {
-					conversationId: action.conversationId,
-					removeManagedWorktree,
+	function buildProjectGroups(conversations) {
+		const groups = new Map();
+		for (const conversation of conversations.filter(hasWorkspace)) {
+			const key =
+				conversation.gitRepositoryId ||
+				conversation.workspaceRootId ||
+				conversation.workspaceRootPath ||
+				conversation.workspaceRootName ||
+				'workspace';
+			if (!groups.has(key)) {
+				groups.set(key, {
+					id: `workspace-${key}`,
+					label: conversation.gitRepositoryName || conversation.workspaceRootName || conversation.workspaceRootPath || '工作区',
+					workspaceRootId: conversation.workspaceRootId || null,
+					workspaceRootName: conversation.workspaceRootName || '',
+					workspaceRootPath: conversation.workspaceRootPath || '',
+					gitRepositoryId: conversation.gitRepositoryId || null,
+					type: 'folder',
+					children: [],
 				});
 			}
-			break;
-		case 'clear-conversations':
-			if (Array.isArray(action?.conversationIds) && action.conversationIds.length > 0) {
-				await request('clear-conversations', { conversationIds: action.conversationIds });
-			}
-			break;
-		case 'rename-conversation':
-			if (action?.conversationId && typeof action.title === 'string' && action.title.trim()) {
-				await request('rename-conversation', { conversationId: action.conversationId, title: action.title.trim() });
-			}
-			break;
-		case 'open-in-explorer':
-			if (action?.workspaceRootId) {
-				await request('open-in-explorer', { workspaceRootId: action.workspaceRootId });
-			}
-			break;
-		default:
-			break;
-	}
-	} catch (failure) { if (!isSuperseded(failure)) showToast(failure?.message || String(failure)); }
-}
 
-async function onSidebarSelect(id) {
-	try {
-	if (id === 'chat' || standaloneViewIds.has(id)) {
-		currentViewId.value = id;
-		return;
+			groups.get(key).children.push(toConversationNode(conversation));
+		}
+
+		return Array.from(groups.values());
 	}
 
-	if (sidebarConversations.value.some((conversation) => conversation.id === id)) {
-		currentViewId.value = 'chat';
-		await request('select-conversation', { conversationId: id });
+	const navItems = computed(() => [
+		{ id: 'new-chat', label: '新建对话', type: 'action' },
+		{ id: 'search', label: '搜索', type: 'action' },
+		{ id: 'plugins', label: '插件', type: 'action' },
+		{
+			id: 'extensions',
+			label: '扩展',
+			type: 'action',
+			children: [
+				{ id: 'image-generation', label: '生图', type: 'view' },
+				{ id: 'translation', label: '翻译', type: 'view' },
+			],
+		},
+		{ id: 'automation', label: '自动化', type: 'action' },
+		{
+			id: 'projects',
+			label: '项目',
+			type: 'group',
+			children: buildProjectGroups(sidebarConversations.value),
+		},
+		{
+			id: 'conversations',
+			label: '对话',
+			type: 'group',
+			children: sidebarConversations.value.filter((conversation) => !hasWorkspace(conversation)).map(toConversationNode),
+		},
+		{ id: 'settings', label: '设置', type: 'view' },
+	]);
+
+	// 独立视图（设置与扩展功能下的占位页）直接以自身 id 高亮；
+	// 其余情况侧栏跟着当前选中的会话走。
+	const standaloneViewIds = new Set(['settings', 'image-generation', 'translation', 'automation']);
+	const sidebarActiveId = computed(() => {
+		const viewId = currentViewId.value;
+		return standaloneViewIds.has(viewId) ? viewId : selectedConversationId.value;
+	});
+
+	async function onSidebarAction(action) {
+		try {
+			const actionId = typeof action === 'string' ? action : action?.id;
+			switch (actionId) {
+				case 'new-chat':
+					currentViewId.value = 'chat';
+					await request('new-chat', { keepWorkspace: true });
+					break;
+				case 'add-conversations':
+					currentViewId.value = 'chat';
+					await request('new-chat', {});
+					break;
+				case 'add-projects':
+					currentViewId.value = 'chat';
+					nextTick(() => chatViewRef.value?.browseWorkspaceFolder());
+					break;
+				case 'plugins':
+					openPlugins();
+					break;
+				case 'automation':
+					currentViewId.value = 'automation';
+					break;
+				case 'delete-conversation':
+					if (action?.conversationId) {
+						let removeManagedWorktree = false;
+						if (action.isManagedWorktree) {
+							const confirmed = await confirm({
+								title: '删除会话',
+								message: '确认删除该会话？工作树可以继续保留。',
+								confirmText: '删除',
+								danger: true,
+							});
+							if (!confirmed) break;
+
+							removeManagedWorktree = await confirm({
+								title: '移除工作树',
+								message: '是否同时安全移除工作树？仅已合并且无未提交更改时可移除。',
+								confirmText: '移除',
+								danger: true,
+							});
+						}
+
+						await request('delete-conversation', {
+							conversationId: action.conversationId,
+							removeManagedWorktree,
+						});
+					}
+					break;
+				case 'clear-conversations':
+					if (Array.isArray(action?.conversationIds) && action.conversationIds.length > 0) {
+						await request('clear-conversations', { conversationIds: action.conversationIds });
+					}
+					break;
+				case 'rename-conversation':
+					if (action?.conversationId && typeof action.title === 'string' && action.title.trim()) {
+						await request('rename-conversation', { conversationId: action.conversationId, title: action.title.trim() });
+					}
+					break;
+				case 'open-in-explorer':
+					if (action?.workspaceRootId) {
+						await request('open-in-explorer', { workspaceRootId: action.workspaceRootId });
+					}
+					break;
+				default:
+					break;
+			}
+		} catch (failure) {
+			if (!isSuperseded(failure)) showToast(failure?.message || String(failure));
+		}
 	}
-	} catch (failure) { if (!isSuperseded(failure)) showToast(failure?.message || String(failure)); }
-}
+
+	async function onSidebarSelect(id) {
+		try {
+			if (id === 'chat' || standaloneViewIds.has(id)) {
+				currentViewId.value = id;
+				return;
+			}
+
+			if (sidebarConversations.value.some((conversation) => conversation.id === id)) {
+				currentViewId.value = 'chat';
+				await request('select-conversation', { conversationId: id });
+			}
+		} catch (failure) {
+			if (!isSuperseded(failure)) showToast(failure?.message || String(failure));
+		}
+	}
 	return { navItems, sidebarActiveId, onSidebarAction, onSidebarSelect };
 }

@@ -1,8 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import {
 	Plus,
 	Search,
+	X,
 	Puzzle,
 	Blocks,
 	Zap,
@@ -23,6 +24,8 @@ import {
 	RotateCw,
 } from 'lucide-vue-next';
 import { useWorkspaceTree } from '../../composables/useWorkspaceTree.js';
+import { useSidebarSearch } from '../../composables/useSidebarSearch.js';
+import { useSidebarPagination } from '../../composables/useSidebarPagination.js';
 import ConversationRenameEditor from './ConversationRenameEditor.vue';
 
 const props = defineProps({
@@ -89,6 +92,39 @@ const {
 	reload: reloadTree,
 } = useWorkspaceTree();
 
+// 顶部的搜索框：输入即按会话标题过滤下方的「项目」「对话」分组。
+const searchInput = ref(null);
+const {
+	query: searchQuery,
+	active: searchActive,
+	filteredItems,
+	clear: clearSearch,
+} = useSidebarSearch(computed(() => props.items));
+
+function focusSearch() {
+	if (props.collapsed) {
+		emit('toggle-collapse');
+	}
+
+	nextTick(() => searchInput.value?.focus());
+}
+
+function onSearchEscape() {
+	if (searchQuery.value) {
+		clearSearch();
+		return;
+	}
+
+	searchInput.value?.blur();
+}
+
+// 命中项只在会话列表里；目录树占着中区时先退回列表，否则输入了却看不到结果。
+watch(searchActive, (active) => {
+	if (active) {
+		closeTree();
+	}
+});
+
 const expandedGroups = ref(new Set(['projects', 'conversations']));
 const expandedActions = ref(new Set());
 const expandedFolders = ref(new Set());
@@ -100,10 +136,50 @@ const contextMenu = ref({
 });
 const renameTargetId = ref(null);
 
-const actionItems = computed(() => props.items.filter((i) => i.type === 'action'));
-const groupItems = computed(() => props.items.filter((i) => i.type === 'group'));
-const settingsItem = computed(() => props.items.find((i) => i.type === 'view' && i.id === 'settings'));
+// 搜索框固定排在功能入口最前面，且它不是可点击的导航项：从列表里摘掉单独渲染。
+const toolItems = computed(() =>
+	props.items.filter((item) => item.type === 'action' && item.id !== 'new-chat' && item.id !== 'search'),
+);
+const groupItems = computed(() => filteredItems.value.filter((i) => i.type === 'group'));
 const settingsActive = computed(() => props.activeId === 'settings');
+
+// 每个分组 / 工作区文件夹默认只放出 10 条会话，点「显示更多」再多一页。
+// 检索结果不截断：用户已经用关键词把范围收窄了，再藏起来只会让人以为没搜到。
+const { visibleChildren, hiddenCount, expand: expandContainer, revealNode } = useSidebarPagination();
+
+function containerNodes(container) {
+	return visibleChildren(container, searchActive.value);
+}
+
+function containerHiddenCount(container) {
+	return hiddenCount(container, searchActive.value);
+}
+
+function onShowMore(containerId) {
+	expandContainer(containerId);
+}
+
+// 选中的会话可能排在第一批之外（例如刚在别处新建、或从搜索结果跳回）：
+// 把它所在的那一页一并放出，否则侧栏里看不到当前选中的是哪个。
+function revealActiveConversation() {
+	if (!props.activeId) {
+		return;
+	}
+
+	for (const group of groupItems.value) {
+		if (group.id === 'projects') {
+			for (const folder of group.children ?? []) {
+				revealNode(folder, props.activeId);
+			}
+			continue;
+		}
+
+		revealNode(group, props.activeId);
+	}
+}
+
+watch([() => props.activeId, () => props.items], revealActiveConversation, { immediate: true });
+
 const contextMenuItems = computed(() => {
 	if (!contextMenu.value.open || !contextMenu.value.target) {
 		return [];
@@ -170,6 +246,16 @@ function onGroupAdd(groupId) {
 	emit('action', `add-${groupId}`);
 }
 
+// 折叠态只剩图标：搜索没有可跳转的页面，先把侧栏展开再落到输入框上。
+function onRailItem(itemId) {
+	if (itemId === 'search') {
+		focusSearch();
+		return;
+	}
+
+	onAction(itemId);
+}
+
 function isGroupOpen(groupId) {
 	return expandedGroups.value.has(groupId);
 }
@@ -180,6 +266,17 @@ function isFolderOpen(folderId) {
 
 function folderHasActiveChild(folder) {
 	return Array.isArray(folder?.children) && folder.children.some((child) => child.id === props.activeId);
+}
+
+// 折叠的分支连同子节点一起不渲染。宿主一次性把全部会话推下来，折叠态把它们留在
+// DOM 里只是白付渲染成本：几千条会话时侧栏会明显变慢，而用户根本看不见它们。
+// 检索时分会强制展开，但节点不带 sc-rise：每敲一个字符都会重挂载命中项，动画纯属浪费。
+function isGroupExpanded(groupId) {
+	return searchActive.value || isGroupOpen(groupId);
+}
+
+function isFolderExpanded(folder) {
+	return searchActive.value || isFolderOpen(folder.id) || folderHasActiveChild(folder);
 }
 
 function isNodeActive(nodeId) {
@@ -299,6 +396,12 @@ function onDocumentClick(event) {
 }
 
 function onDocumentKeydown(event) {
+	if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+		event.preventDefault();
+		focusSearch();
+		return;
+	}
+
 	if (event.key === 'Escape') {
 		closeContextMenu();
 	}
@@ -449,7 +552,7 @@ onUnmounted(() => {
 					:aria-label="item.label"
 					@mouseenter="showRailTip($event, item.label, kbdMap[item.id])"
 					@mouseleave="hideRailTip"
-					@click="onAction(item.id)"
+					@click="onRailItem(item.id)"
 				>
 					<span class="ico" aria-hidden="true">
 						<component :is="getIcon(item.id)" :size="16" :stroke-width="1.8" />
@@ -484,7 +587,29 @@ onUnmounted(() => {
 		<!-- 上：功能按钮区 -->
 		<div class="nav-top">
 			<div class="tool-list">
-				<template v-for="item in actionItems.filter((a) => a.id !== 'new-chat')" :key="item.id">
+				<div class="tool-search" :class="{ active: searchActive }" @click="focusSearch">
+					<span class="search-ico" aria-hidden="true">
+						<Search :size="15" :stroke-width="1.8" />
+					</span>
+					<input
+						ref="searchInput"
+						v-model="searchQuery"
+						class="search-input"
+						type="text"
+						role="searchbox"
+						placeholder="搜索"
+						aria-label="按标题搜索会话"
+						autocomplete="off"
+						spellcheck="false"
+						@keydown.esc.prevent="onSearchEscape"
+					/>
+					<button v-if="searchQuery" class="search-clear" type="button" title="清空搜索" aria-label="清空搜索" @click="clearSearch">
+						<X :size="13" :stroke-width="2.2" />
+					</button>
+					<span v-else class="kbd">{{ kbdMap.search }}</span>
+				</div>
+
+				<template v-for="item in toolItems" :key="item.id">
 					<button v-if="!item.children?.length" class="tool-btn" type="button" @click="onAction(item.id)">
 						<span class="ico" aria-hidden="true">
 							<component :is="getIcon(item.id)" :size="15" :stroke-width="1.8" />
@@ -580,7 +705,7 @@ onUnmounted(() => {
 			</template>
 
 			<template v-else>
-				<section v-for="(group, gi) in groupItems" :key="group.id" class="group" :class="{ open: isGroupOpen(group.id) }">
+				<section v-for="group in groupItems" :key="group.id" class="group" :class="{ open: isGroupExpanded(group.id) }">
 					<button class="group-head" type="button" @click="toggleGroup(group.id)">
 						<span class="group-chevron" aria-hidden="true">
 							<ChevronRight :size="13" :stroke-width="2" />
@@ -592,14 +717,14 @@ onUnmounted(() => {
 						</span>
 					</button>
 
-					<div class="group-body">
+					<div v-if="isGroupExpanded(group.id)" class="group-body">
 						<template v-if="group.id === 'projects'">
 							<!-- 项目节点：三级结构 项目→目录→会话 -->
 							<div
 								v-for="folder in group.children"
 								:key="folder.id"
 								class="subfolder"
-								:class="{ open: isFolderOpen(folder.id) || folderHasActiveChild(folder) }"
+								:class="{ open: isFolderExpanded(folder) }"
 							>
 								<button
 									class="project-folder"
@@ -616,8 +741,8 @@ onUnmounted(() => {
 										<ChevronRight :size="13" :stroke-width="2" />
 									</span>
 								</button>
-								<div class="subfolder-body">
-									<template v-for="(session, si) in folder.children" :key="session.id">
+								<div v-if="isFolderExpanded(folder)" class="subfolder-body">
+									<template v-for="(session, si) in containerNodes(folder)" :key="session.id">
 										<ConversationRenameEditor
 											v-if="renameTargetId === session.id"
 											:initial="session.label"
@@ -626,9 +751,9 @@ onUnmounted(() => {
 										/>
 										<button
 											v-else
-											class="node kind-chat sc-rise"
+											class="node kind-chat"
 											:style="{ '--i': si }"
-											:class="{ active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
+											:class="{ 'sc-rise': !searchActive, active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
 											type="button"
 											:title="session.time"
 											@click="selectNode(session.id)"
@@ -638,6 +763,16 @@ onUnmounted(() => {
 											<span class="ntext">{{ session.label }}</span>
 										</button>
 									</template>
+									<button
+										v-if="containerHiddenCount(folder)"
+										class="show-more"
+										type="button"
+										aria-label="显示更多会话"
+										@click.stop="onShowMore(folder.id)"
+									>
+										<span>显示更多</span>
+										<span class="more-arrow" aria-hidden="true">&gt;&gt;</span>
+									</button>
 								</div>
 							</div>
 							<div v-if="!group.children?.length" class="empty-group">暂无项目会话</div>
@@ -645,7 +780,7 @@ onUnmounted(() => {
 
 						<template v-else>
 							<!-- 普通对话节点：二级结构 -->
-							<template v-for="(child, ci) in group.children" :key="child.id">
+							<template v-for="(child, ci) in containerNodes(group)" :key="child.id">
 								<ConversationRenameEditor
 									v-if="renameTargetId === child.id"
 									:initial="child.label"
@@ -654,9 +789,9 @@ onUnmounted(() => {
 								/>
 								<button
 									v-else
-									class="node kind-chat sc-rise"
+									class="node kind-chat"
 									:style="{ '--i': ci }"
-									:class="{ active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
+									:class="{ 'sc-rise': !searchActive, active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
 									type="button"
 									:title="child.time"
 									@click="selectNode(child.id)"
@@ -666,10 +801,23 @@ onUnmounted(() => {
 									<span class="ntext">{{ child.label }}</span>
 								</button>
 							</template>
+							<button
+								v-if="containerHiddenCount(group)"
+								class="show-more"
+								type="button"
+								aria-label="显示更多会话"
+								@click.stop="onShowMore(group.id)"
+							>
+								<span>显示更多</span>
+								<span class="more-arrow" aria-hidden="true">&gt;&gt;</span>
+							</button>
 							<div v-if="!group.children?.length" class="empty-group">暂无会话记录</div>
 						</template>
 					</div>
 				</section>
+				<div v-if="searchActive && !groupItems.length" class="empty-group search-empty">
+					没有匹配「{{ searchQuery.trim() }}」的会话
+				</div>
 			</template>
 		</div>
 
@@ -734,7 +882,9 @@ onUnmounted(() => {
 
 .sc-rise {
 	animation: sb-rise 0.4s var(--sb-ease-out) both;
-	animation-delay: calc(var(--i, 0) * 30ms);
+	/* 展开一个分支会在同一帧挂载它下面的全部会话：不封顶的话第 N 条要等 N*30ms
+	   （500 条即 15 秒，且 `both` 让它在延迟期间完全不可见）。封顶后仍保留错落感。 */
+	animation-delay: min(calc(var(--i, 0) * 30ms), 300ms);
 }
 
 /* ---- 顶栏：新建对话 + 折叠 ---- */
@@ -960,6 +1110,101 @@ onUnmounted(() => {
 	display: flex;
 	flex-direction: column;
 	gap: 1px;
+}
+
+/* ---- 上：会话搜索 ---- */
+.tool-search {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	height: 33px;
+	margin-bottom: 4px;
+	padding: 0 9px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	background: transparent;
+	cursor: text;
+	transition:
+		background 0.14s,
+		border-color 0.14s,
+		box-shadow 0.16s;
+}
+
+.tool-search:hover {
+	background: var(--sb-hover);
+}
+
+/* 静止态与其它导航行同为透明：强调色只在聚焦时浮出，搜索不抢「新建对话」的注意力。 */
+.tool-search:focus-within {
+	border-color: var(--accent-line);
+	background: var(--panel);
+	box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* 有命中但焦点已移开（例如接着点了结果）时，保留描边提示这里还在过滤。 */
+.tool-search.active:not(:focus-within) {
+	border-color: var(--sb-line);
+	background: var(--panel);
+}
+
+.search-ico {
+	display: grid;
+	width: 16px;
+	height: 16px;
+	place-items: center;
+	flex: none;
+	color: var(--sb-faint);
+	transition: color 0.14s;
+}
+
+.tool-search:focus-within .search-ico {
+	color: var(--sb-accent);
+}
+
+.search-input {
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--sb-text);
+	font: inherit;
+	font-size: var(--fs-125);
+	font-weight: 540;
+	outline: none;
+}
+
+.search-input::placeholder {
+	color: var(--sb-faint);
+	font-weight: 500;
+	opacity: 1;
+}
+
+.search-clear {
+	display: grid;
+	width: 18px;
+	height: 18px;
+	place-items: center;
+	flex: none;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--sb-faint);
+	transition:
+		background 0.14s,
+		color 0.14s;
+}
+
+.search-clear:hover {
+	background: var(--sb-raise);
+	color: var(--sb-text);
+}
+
+.search-empty {
+	padding-top: 14px;
+	text-align: center;
+	overflow-wrap: anywhere;
 }
 
 .tool-btn {
@@ -1197,13 +1442,9 @@ onUnmounted(() => {
 	color: var(--sb-accent);
 }
 
+/* 折叠时不渲染（v-if），这里只留内边距；不要用 display 开关回到「隐藏但仍挂载」。 */
 .group-body {
-	display: none;
 	padding: 3px 0 0 13px;
-}
-
-.group.open .group-body {
-	display: block;
 }
 
 /* 项目目录节点 */
@@ -1269,12 +1510,7 @@ onUnmounted(() => {
 }
 
 .subfolder-body {
-	display: none;
 	padding: 1px 0 2px 15px;
-}
-
-.subfolder.open .subfolder-body {
-	display: block;
 }
 
 /* 会话节点 */
@@ -1355,6 +1591,47 @@ onUnmounted(() => {
 	padding: 8px 8px 4px;
 	color: var(--sb-faint);
 	font-size: var(--fs-115);
+}
+
+/* ---- 会话分页：每个分组 / 工作区底部最多一页之外的入口 ---- */
+.show-more {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	width: 100%;
+	height: 27px;
+	/* 左内边距跳过会话节点前面的圆点与间距，标签正好落在标题下方。 */
+	padding: 0 8px 0 22px;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--sb-mute);
+	font-size: var(--fs-115);
+	font-weight: 540;
+	text-align: left;
+	transition:
+		background 0.14s,
+		color 0.14s;
+}
+
+.show-more:hover {
+	background: var(--sb-hover);
+	color: var(--sb-text);
+}
+
+.show-more .more-arrow {
+	color: var(--sb-faint);
+	font-family: var(--sb-mono);
+	font-size: var(--fs-10);
+	letter-spacing: -0.04em;
+	transition:
+		color 0.14s,
+		transform 0.18s var(--sb-ease-out);
+}
+
+.show-more:hover .more-arrow {
+	color: var(--sb-mute);
+	transform: translateX(2px);
 }
 
 /* ---- 中区：工作目录树 ---- */
