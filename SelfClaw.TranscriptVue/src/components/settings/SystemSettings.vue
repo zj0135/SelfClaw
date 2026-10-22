@@ -5,7 +5,7 @@ import AppearancePreview from './appearance/AppearancePreview.vue';
 import CodeSection from './appearance/CodeSection.vue';
 import ThemeModeSelector from './appearance/ThemeModeSelector.vue';
 import TypographySection from './appearance/TypographySection.vue';
-import Compression from './Compression.vue';
+import Compression from './compression/Compression.vue';
 import { useAppearance } from '../../composables/useAppearance.js';
 
 const { state, resolvedTheme, setMode, resetAll } = useAppearance();

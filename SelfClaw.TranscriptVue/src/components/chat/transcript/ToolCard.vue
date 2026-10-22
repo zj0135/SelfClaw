@@ -43,5 +43,5 @@ const durationText = computed(() => props.segment.durationText || '');
 </template>
 
 <style scoped>
-@import './tool-blocks.css';
+@import '../../../styles/tool-blocks.css';
 </style>

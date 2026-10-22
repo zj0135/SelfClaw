@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-import ComposerPanel from '../src/components/Chat/ComposerPanel.vue';
+import ComposerPanel from '../src/components/chat/composer/ComposerPanel.vue';
 
 const mounted = [];
 afterEach(() => mounted.splice(0).forEach((wrapper) => wrapper.unmount()));

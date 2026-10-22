@@ -352,7 +352,7 @@
 - `SelfClaw.Desktop\ViewModels\MainWindowViewModel.cs`：`PublishShell()` 填充（T5 已存 revision 字段）
 - bridge：`extensions/list-effective-skills` 实装（入参可选 agentId，缺省用当前选中 agent）
 - `SelfClaw.TranscriptVue\src\views\ChatView.vue`：`replaceState()` 读入三字段并下传
-- `SelfClaw.TranscriptVue\src\components\Chat\SkillPicker.vue`：新建；`ComposerPanel.vue` 工具栏接入
+- `SelfClaw.TranscriptVue\src\components\chat\composer\SkillPicker.vue`：新建；`ComposerPanel.vue` 工具栏接入
 
 **步骤**
 
@@ -478,7 +478,7 @@
 - `SelfClaw.Desktop\Services\Transcript\TranscriptRenderSegment.cs`：+来源字段；`TranscriptToolRunPresenter.BuildToolSegment()` 投影
 - `SelfClaw.Desktop\Services\Transcript\TranscriptToolRunPresenter.cs`：⚠ 同步修正漂移的旧工具名 switch（`read_workspace_file` 等 → 实际 7 工具名，§1.3）
 - `SelfClaw.Desktop\Services\AgentActivity\AgentActivityCoordinator.cs`：`RunStatusEvent.Detail` 非空时覆盖默认文案（§10.3）
-- `SelfClaw.TranscriptVue\src\components\Chat\transcript\ToolCard.vue` / `ToolGroup.vue`：来源副标题（`MCP · git` / `Skill · code-review`）
+- `SelfClaw.TranscriptVue\src\components\chat\transcript\ToolCard.vue` / `ToolGroup.vue`：来源副标题（`MCP · git` / `Skill · code-review`）
 - `SelfClaw.TranscriptVue\src\views\ChatView.vue`：审批确认栏渲染来源行（toolApprovalRequest 新字段）
 
 **步骤**

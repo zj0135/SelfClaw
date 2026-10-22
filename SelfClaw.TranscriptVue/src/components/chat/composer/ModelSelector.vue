@@ -1,9 +1,9 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Check, ChevronRight, Layers, Terminal } from 'lucide-vue-next';
-import { useComposerModelSelection } from '../../composables/useComposerModelSelection.js';
-import { useHostBridge } from '../../composables/hostBridge.js';
-import { defaultCliModel as defaultModel } from '../../composables/useProgrammingAssistantSelection.js';
+import { useComposerModelSelection } from '../../../composables/useComposerModelSelection.js';
+import { useHostBridge } from '../../../composables/hostBridge.js';
+import { defaultCliModel as defaultModel } from '../../../composables/useProgrammingAssistantSelection.js';
 
 const props = defineProps({
 	executionMode: {

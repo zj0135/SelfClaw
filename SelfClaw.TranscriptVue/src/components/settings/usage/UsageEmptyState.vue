@@ -19,7 +19,7 @@ import { ChartColumn } from 'lucide-vue-next';
 </template>
 
 <style scoped>
-@import './usage-dashboard.css';
+@import '../../../styles/usage-dashboard.css';
 
 .empty-card {
 	display: flex;

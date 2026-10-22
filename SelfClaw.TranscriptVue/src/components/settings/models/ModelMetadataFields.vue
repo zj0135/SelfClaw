@@ -71,7 +71,7 @@ const prices = [
 </template>
 
 <style scoped>
-@import '../../styles/model-configuration-fields.css';
+@import '../../../styles/model-configuration-fields.css';
 
 .meta-stack {
 	display: flex;

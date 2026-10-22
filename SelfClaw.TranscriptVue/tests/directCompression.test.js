@@ -27,7 +27,7 @@ vi.mock('../src/composables/hostBridge.js', () => ({
 	isSuperseded: (error) => error?.name === 'SupersededError',
 }));
 
-import Compression from '../src/components/settings/Compression.vue';
+import Compression from '../src/components/settings/compression/Compression.vue';
 
 const MODELS = [
 	{ modelProfileId: 'm-1', name: 'GPT-5', model: 'gpt-5', providerName: 'OpenAI' },

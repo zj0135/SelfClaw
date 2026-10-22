@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue';
 import { X, Save, LoaderCircle, SlidersHorizontal, ReceiptText, Sparkles } from 'lucide-vue-next';
 import ModelParameterFields from './ModelParameterFields.vue';
 import ModelMetadataFields from './ModelMetadataFields.vue';
-import { useModelConfigurationEditor } from '../../composables/useModelConfigurationEditor.js';
+import { useModelConfigurationEditor } from '../../../composables/useModelConfigurationEditor.js';
 
 const props = defineProps({ model: { type: Object, required: true }, initialTab: { type: String, default: 'parameters' } });
 const emit = defineEmits(['close', 'saved']);
@@ -106,7 +106,7 @@ function close() {
 </template>
 
 <style scoped>
-@import '../../styles/settings-console.css';
+@import '../../../styles/settings-console.css';
 
 .model-dialog {
 	width: min(660px, calc(100vw - 32px));

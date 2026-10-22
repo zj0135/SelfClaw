@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-import TranscriptPanel from '../src/components/Chat/TranscriptPanel.vue';
-import TurnOutcome from '../src/components/Chat/transcript/TurnOutcome.vue';
+import TranscriptPanel from '../src/components/chat/TranscriptPanel.vue';
+import TurnOutcome from '../src/components/chat/transcript/TurnOutcome.vue';
 import { formatTurnOutcome } from '../src/renderers/turnOutcome.js';
 import { createPluginTranscriptProjector, maximumPluginTranscriptBytes } from '../src/renderers/pluginTranscript.js';
 

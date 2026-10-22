@@ -9,9 +9,9 @@ import {
 } from '../src/composables/useComposerAttachments.js';
 import { useChatComposer } from '../src/composables/useChatComposer.js';
 import { useComposerModelSelection } from '../src/composables/useComposerModelSelection.js';
-import ComposerAttachments from '../src/components/Chat/ComposerAttachments.vue';
-import ComposerAddMenu from '../src/components/Chat/ComposerAddMenu.vue';
-import ComposerPanel from '../src/components/Chat/ComposerPanel.vue';
+import ComposerAttachments from '../src/components/chat/composer/ComposerAttachments.vue';
+import ComposerAddMenu from '../src/components/chat/composer/ComposerAddMenu.vue';
+import ComposerPanel from '../src/components/chat/composer/ComposerPanel.vue';
 
 const scopes = [];
 const mounted = [];

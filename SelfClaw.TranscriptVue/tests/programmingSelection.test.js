@@ -3,8 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils';
 
 const { bridge } = vi.hoisted(() => ({ bridge: { request: vi.fn(), requestLatest: vi.fn(), on: vi.fn(() => () => {}), post: vi.fn(), hasHost: () => true } }));
 vi.mock('../src/composables/hostBridge.js', () => ({ hostBridge: bridge, useHostBridge: () => bridge, isSuperseded: () => false }));
-import ProgrammingAssistant from '../src/components/settings/ProgrammingAssistant.vue';
-import ModelSelector from '../src/components/Chat/ModelSelector.vue';
+import ProgrammingAssistant from '../src/components/settings/programming/ProgrammingAssistant.vue';
+import ModelSelector from '../src/components/chat/composer/ModelSelector.vue';
 import { createProgrammingAssistantSelection } from '../src/composables/useProgrammingAssistantSelection.js';
 
 it('does not let an old read failure replace the result of a newer confirmed selection', async () => {

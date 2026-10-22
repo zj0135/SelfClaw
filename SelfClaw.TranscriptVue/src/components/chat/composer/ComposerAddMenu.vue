@@ -10,7 +10,7 @@ import {
 	Plus,
 	SlidersHorizontal,
 } from 'lucide-vue-next';
-import { isSuperseded, useHostBridge } from '../../composables/hostBridge.js';
+import { isSuperseded, useHostBridge } from '../../../composables/hostBridge.js';
 
 // 输入框工具栏最左侧的「+」入口：包含添加图片、插入技能、代理助手选择与功能设置。
 // 插入技能与代理选择采用与模型选择一致的 hover 展开侧边子菜单体验。

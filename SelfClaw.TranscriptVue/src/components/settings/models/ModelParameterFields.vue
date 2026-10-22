@@ -273,7 +273,7 @@ function setTopP(draft, val) {
 </template>
 
 <style scoped>
-@import '../../styles/model-configuration-fields.css';
+@import '../../../styles/model-configuration-fields.css';
 
 .fields-stack {
 	display: flex;

@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { X } from 'lucide-vue-next';
-import TranscriptPanel from '../Chat/TranscriptPanel.vue';
+import TranscriptPanel from '../chat/TranscriptPanel.vue';
 import { useTranscriptCollapse } from '../../composables/useTranscriptCollapse';
 import { errorMessage, formatDuration, formatLocalDateTime, runStatusLabel, runTriggerLabel } from '../../renderers/automationEvents';
 

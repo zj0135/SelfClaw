@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-import AppSidebar from '../src/components/SideBar/AppSidebar.vue';
+import AppSidebar from '../src/components/sidebar/AppSidebar.vue';
 
 const workspaceRootId = '11111111-1111-1111-1111-111111111111';
 

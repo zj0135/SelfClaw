@@ -1,9 +1,9 @@
 <script setup>
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
-import ComposerPanel from '../components/Chat/ComposerPanel.vue';
-import ConversationQueue from '../components/Chat/ConversationQueue.vue';
-import ActivityStage from '../components/Activities/ActivityStage.vue';
-import TranscriptPanel from '../components/Chat/TranscriptPanel.vue';
+import ComposerPanel from '../components/chat/composer/ComposerPanel.vue';
+import ConversationQueue from '../components/chat/ConversationQueue.vue';
+import ActivityStage from '../components/activities/ActivityStage.vue';
+import TranscriptPanel from '../components/chat/TranscriptPanel.vue';
 import { useHostBridge } from '../composables/hostBridge.js';
 import { useTranscriptCollapse } from '../composables/useTranscriptCollapse.js';
 import { useTranscriptScroll } from '../composables/useTranscriptScroll.js';
@@ -17,7 +17,7 @@ import { useChatApprovals } from '../composables/useChatApprovals.js';
 import { useChatTerminal } from '../composables/useChatTerminal.js';
 import { useConversationInputs } from '../composables/useConversationInputs.js';
 
-const TerminalPanel = defineAsyncComponent(() => import('../components/Chat/TerminalPanel.vue'));
+const TerminalPanel = defineAsyncComponent(() => import('../components/chat/TerminalPanel.vue'));
 const emit = defineEmits(['preview-image']);
 const bridge = useHostBridge();
 const transcriptPanelRef = ref(null);

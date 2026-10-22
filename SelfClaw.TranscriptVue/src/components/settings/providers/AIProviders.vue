@@ -14,10 +14,10 @@ import {
 	Globe,
 } from 'lucide-vue-next';
 import AiProviderDialogs from './AiProviderDialogs.vue';
-import ModelConfigurationDialog from './ModelConfigurationDialog.vue';
+import ModelConfigurationDialog from '../models/ModelConfigurationDialog.vue';
 import AiProviderModelList from './AiProviderModelList.vue';
-import { useAiProviderHost } from '../../composables/useAiProviderHost.js';
-import { useToast } from '../../composables/useToast.js';
+import { useAiProviderHost } from '../../../composables/useAiProviderHost.js';
+import { useToast } from '../../../composables/useToast.js';
 
 // Brand logos from @lobehub/icons-static-png (color variants where available).
 import openaiLogo from '@lobehub/icons-static-png/light/openai.png';
@@ -404,7 +404,7 @@ function configurationSaved() {
 </template>
 
 <style scoped>
-@import '../../styles/settings-console.css';
+@import '../../../styles/settings-console.css';
 
 .ai-providers {
 	position: relative;

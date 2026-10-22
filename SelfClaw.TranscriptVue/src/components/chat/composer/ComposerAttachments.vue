@@ -1,6 +1,6 @@
 <script setup>
 import { ImageOff, X } from 'lucide-vue-next';
-import { formatAttachmentSize } from '../../renderers/transcript.js';
+import { formatAttachmentSize } from '../../../renderers/transcript.js';
 
 // 待发送图片条：只负责呈现宿主回的引用与转发用户意图，落盘/丢弃都在 composable 里。
 const props = defineProps({

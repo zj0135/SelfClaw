@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { formatCompactTokens, formatCount, formatDayLabel } from '../../../renderers/usageFormat.js';
-import { HEATMAP_MODES, buildHeatmapWeeks, buildMonthLabels, buildWeeklyColumns } from './usageChartSeries.js';
+import { HEATMAP_MODES, buildHeatmapWeeks, buildMonthLabels, buildWeeklyColumns } from '../../../renderers/usageChartSeries.js';
 import UsageTooltip from './UsageTooltip.vue';
 
 const props = defineProps({
@@ -101,7 +101,7 @@ function onLeave() {
 </template>
 
 <style scoped>
-@import './usage-dashboard.css';
+@import '../../../styles/usage-dashboard.css';
 
 .heatmap-modes {
 	display: inline-flex;

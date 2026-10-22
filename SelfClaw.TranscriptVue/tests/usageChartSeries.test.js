@@ -9,7 +9,7 @@ import {
 	chartColor,
 	levelForValue,
 	buildHeatmapWeeks,
-} from '../src/components/settings/usage/usageChartSeries.js';
+} from '../src/renderers/usageChartSeries.js';
 
 function dayList(count, start = '2026-08-31') {
 	const startDate = new Date(`${start}T00:00:00`);

@@ -9,7 +9,7 @@ const read = (relative) => readFileSync(resolve(process.cwd(), relative), 'utf8'
 
 const tokens = read('src/styles/tokens.css');
 const app = read('src/App.vue');
-const composer = read('src/components/Chat/ComposerPanel.vue');
+const composer = read('src/components/chat/composer/ComposerPanel.vue');
 
 describe('chat layout width token', () => {
 	it('tokens.css 定义 --chat-content-width 并提供宽屏断点', () => {

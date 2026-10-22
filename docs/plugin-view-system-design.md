@@ -229,12 +229,12 @@
 
 | 组件 | 变化 |
 | --- | --- |
-| `components/Plugins/PluginDockHost.vue` | 原 `PluginPanelHost.vue`；标签栏 + dock 帧容器（宽度变量、`background: var(--panel)` 留在这一层） |
-| `components/Plugins/PluginFloatingLayer.vue` | **新增**：`fixed inset:0` 透明层，逐帧绑定 `pointerEvents` |
-| `components/Plugins/PluginFrame.vue` | 只负责 iframe、sandbox 属性与帧注册（`onMounted` / `onBeforeUnmount` 注册与注销）；定位、背景、`display` 交给各自的容器 |
-| `components/Plugins/PluginTabBar.vue` / `PluginTab.vue` | 字段 `tab.panel.*` → `tab.view.*`；其余不变 |
-| `components/Plugins/PluginLauncher.vue` | 两段列表（面板 / 悬浮视图）；行点击 = 打开或显示；已打开的行带 `×` 关闭按钮（悬浮视图没有标签栏，这是宿主侧保证的关闭入口） |
-| `components/Chat/WindowControls.vue` | 新增第三个工具按钮：悬浮层显隐开关（`Layers` 图标），状态存 localStorage。亮起仅当「确有悬浮视图且正在显示」；两颗插件按钮都只是显隐开关，没有可显隐的内容时用禁用态表达——“打开视图”只有左侧「插件」那一个入口 |
+| `components/plugins/PluginDockHost.vue` | 原 `PluginPanelHost.vue`；标签栏 + dock 帧容器（宽度变量、`background: var(--panel)` 留在这一层） |
+| `components/plugins/PluginFloatingLayer.vue` | **新增**：`fixed inset:0` 透明层，逐帧绑定 `pointerEvents` |
+| `components/plugins/PluginFrame.vue` | 只负责 iframe、sandbox 属性与帧注册（`onMounted` / `onBeforeUnmount` 注册与注销）；定位、背景、`display` 交给各自的容器 |
+| `components/plugins/PluginTabBar.vue` / `PluginTab.vue` | 字段 `tab.panel.*` → `tab.view.*`；其余不变 |
+| `components/plugins/PluginLauncher.vue` | 两段列表（面板 / 悬浮视图）；行点击 = 打开或显示；已打开的行带 `×` 关闭按钮（悬浮视图没有标签栏，这是宿主侧保证的关闭入口） |
+| `components/shell/WindowControls.vue` | 新增第三个工具按钮：悬浮层显隐开关（`Layers` 图标），状态存 localStorage。亮起仅当「确有悬浮视图且正在显示」；两颗插件按钮都只是显隐开关，没有可显隐的内容时用禁用态表达——“打开视图”只有左侧「插件」那一个入口 |
 | `App.vue` | 装配：dock 列、悬浮层、启动器；给地标加 `data-anchor`；把 `resizing` 作为 `isSuspended` 传给命中测试 |
 
 **卸载语义**：dock 与悬浮层都**不卸载** iframe（否则每次收起都让插件重新加载并重走握手）；只有 `close`、evict、插件禁用/删除才真正卸载。两边的收起手法不同，而且必须不同：停靠栏是 `display: none`（“这一列不存在”是真的布局状态，`dock` 地标随之变 `null`），悬浮层是 `visibility: hidden`（这一列还在，只是不画）。悬浮层用 `visibility` 不是性能选择而是正确性：`display: none` 会让帧的视口变成 0×0、`frame.getBoundingClientRect()` 变成 (0,0)，于是插件测到的几何与外壳换算给它的 anchors 全部失真，而重新显示时没有任何事件能让它重算。

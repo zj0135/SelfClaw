@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { useDeferredHtml } from '../../../composables/useDeferredHtml.js';
 import { renderMarkdown } from '../../../renderers/markdown.js';
-import { resolvePreviewImage } from './previewImage.js';
+import { resolvePreviewImage } from '../../../renderers/previewImage.js';
 
 const props = defineProps({
 	item: { type: Object, required: true },

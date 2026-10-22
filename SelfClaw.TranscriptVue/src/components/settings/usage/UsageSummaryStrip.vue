@@ -47,7 +47,7 @@ function formatDays(days) {
 </template>
 
 <style scoped>
-@import './usage-dashboard.css';
+@import '../../../styles/usage-dashboard.css';
 
 .summary-card {
 	display: grid;

@@ -1,12 +1,12 @@
 <script setup>
 import { computed, markRaw, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
-import AppSidebar from './components/SideBar/AppSidebar.vue';
+import AppSidebar from './components/sidebar/AppSidebar.vue';
 import AppToast from './components/common/AppToast.vue';
 import AppConfirmDialog from './components/common/AppConfirmDialog.vue';
-import PluginLauncher from './components/Plugins/PluginLauncher.vue';
-import PluginDockHost from './components/Plugins/PluginDockHost.vue';
-import PluginFloatingLayer from './components/Plugins/PluginFloatingLayer.vue';
-import WindowControls from './components/Chat/WindowControls.vue';
+import PluginLauncher from './components/plugins/PluginLauncher.vue';
+import PluginDockHost from './components/plugins/PluginDockHost.vue';
+import PluginFloatingLayer from './components/plugins/PluginFloatingLayer.vue';
+import WindowControls from './components/shell/WindowControls.vue';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
 import ImageGenerationView from './views/ImageGenerationView.vue';

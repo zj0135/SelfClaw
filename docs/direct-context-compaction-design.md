@@ -341,11 +341,11 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 
 | 文件 | 变化 |
 | --- | --- |
-| `components/Chat/transcript/CompressionNotice.vue`（新） | `---上下文压缩---` 分隔线 + 副标题（`已压缩 N 条消息 · 48.2k → 1.2k tokens`）+ 摘要折叠展开 |
-| `views/ChatView.vue` / `components/Chat/TranscriptPanel.vue` | `item.kind === 'compression'` 分支（与 `turn-outcome` 同级） |
+| `components/chat/transcript/CompressionNotice.vue`（新） | `---上下文压缩---` 分隔线 + 副标题（`已压缩 N 条消息 · 48.2k → 1.2k tokens`）+ 摘要折叠展开 |
+| `views/ChatView.vue` / `components/chat/TranscriptPanel.vue` | `item.kind === 'compression'` 分支（与 `turn-outcome` 同级） |
 | `renderers/pluginTranscript.js` | 新 kind 的容忍路径（超限时退化为带元数据的精简项，不崩、不误当正文） |
 | `composables/useChatTranscript.js` | state 增加 `usage` |
-| `components/Chat/ComposerStatusBar.vue` | 右侧渲染用量（`上下文 12.4k / 32k · 累计 输入 1.24M · 输出 342k`）；窄屏只留上下文 |
+| `components/chat/composer/ComposerStatusBar.vue` | 右侧渲染用量（`上下文 12.4k / 32k · 累计 输入 1.24M · 输出 342k`）；窄屏只留上下文 |
 | `renderers/usageMeter.js`（新） | `formatTokenCount` / `formatContextUsage` / `formatCompressionNotice` 纯格式化；设置页与输入框状态栏共用同一份缩写 |
 
 格式化口径（C13/C14 定，均在这个 renderer 里，不在组件里）：
@@ -389,8 +389,8 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 
 ### 9.4 设置页
 
-- `views/SettingsView.vue`：AI 分组新增导航项 `{ id: 'compression', label: '上下文压缩', en: 'COMPRESSION', icon: <lucide 图标> }`，映射到 `components/settings/Compression.vue`（`defineAsyncComponent`）。已核实导航项形状是 `{ id, label, en, icon }`，`icon` 必填（同组其它项都有），组件映射是同文件里的一个 `defineAsyncComponent(() => import(...))` 表。
-- `components/settings/Compression.vue` + `composables/useDirectCompression.js`：启用开关、触发比例（10–95%）、无窗口模型绝对阈值、压缩模型下拉（默认「跟随当前会话模型」+ `ai-providers/list-enabled-models`）。
+- `views/SettingsView.vue`：AI 分组新增导航项 `{ id: 'compression', label: '上下文压缩', en: 'COMPRESSION', icon: <lucide 图标> }`，映射到 `components/settings/compression/Compression.vue`（`defineAsyncComponent`）。已核实导航项形状是 `{ id, label, en, icon }`，`icon` 必填（同组其它项都有），组件映射是同文件里的一个 `defineAsyncComponent(() => import(...))` 表。
+- `components/settings/compression/Compression.vue` + `composables/useDirectCompression.js`：启用开关、触发比例（10–95%）、无窗口模型绝对阈值、压缩模型下拉（默认「跟随当前会话模型」+ `ai-providers/list-enabled-models`）。
 - 样式沿用 `styles/settings-console.css`（`sc-root` / `sc-page` / `sc-page-head` / `sc-page-body`）与 lucide 图标。
 
 ## 10. 不变量与删除清单

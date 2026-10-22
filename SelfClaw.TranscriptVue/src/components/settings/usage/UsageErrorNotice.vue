@@ -25,7 +25,7 @@ defineEmits(['retry']);
 </template>
 
 <style scoped>
-@import './usage-dashboard.css';
+@import '../../../styles/usage-dashboard.css';
 
 .error-card {
 	display: flex;

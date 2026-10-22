@@ -1,10 +1,10 @@
 <script setup>
 import { Loader2 } from 'lucide-vue-next';
-import { useDirectCompression } from '../../composables/useDirectCompression.js';
-import CompressionToggle from './compression/CompressionToggle.vue';
-import ThresholdField from './compression/ThresholdField.vue';
-import AbsoluteThresholdField from './compression/AbsoluteThresholdField.vue';
-import CompressionModelSelect from './compression/CompressionModelSelect.vue';
+import { useDirectCompression } from '../../../composables/useDirectCompression.js';
+import CompressionToggle from './CompressionToggle.vue';
+import ThresholdField from './ThresholdField.vue';
+import AbsoluteThresholdField from './AbsoluteThresholdField.vue';
+import CompressionModelSelect from './CompressionModelSelect.vue';
 
 const {
 	policy,
@@ -49,7 +49,7 @@ const {
 </template>
 
 <style scoped>
-@import '../../styles/settings-console.css';
+@import '../../../styles/settings-console.css';
 
 .compression-section {
 	display: flex;

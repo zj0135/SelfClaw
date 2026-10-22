@@ -53,7 +53,7 @@ const style = computed(() => {
 </template>
 
 <style scoped>
-@import './usage-dashboard.css';
+@import '../../../styles/usage-dashboard.css';
 
 .usage-tooltip {
 	position: fixed;

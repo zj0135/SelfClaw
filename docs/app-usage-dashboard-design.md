@@ -211,7 +211,7 @@ ZCode 的 `AppUsagePanel` 自上而下的顺序，以及可以直接照搬的比
 ### 5.1 目录
 
 ```
-src/components/settings/usage/
+src/components/settings/usage/          # 只有 .vue
 ├─ UsageSummaryStrip.vue
 ├─ UsageHeatmap.vue
 ├─ UsageTrendChart.vue
@@ -220,10 +220,10 @@ src/components/settings/usage/
 ├─ UsageRangeTabs.vue
 ├─ UsageTooltip.vue
 ├─ UsageEmptyState.vue
-├─ UsageErrorNotice.vue
-├─ usage-dashboard.css         # 共用卡片 / 标题 / kicker / 滚动条
-└─ usageChartSeries.js         # 纯函数：热力图补格、月份标签、折线点、环形 dash
+└─ UsageErrorNotice.vue
 
+src/styles/usage-dashboard.css        # 共用卡片 / 标题 / kicker / 滚动条
+src/renderers/usageChartSeries.js     # 纯函数：热力图补格、月份标签、折线点、环形 dash
 src/composables/useUsageOverview.js
 ```
 
@@ -304,7 +304,7 @@ const hasActivity = computed(() => (overview.value?.lifetime.summary.totalTokens
 
 <style scoped>
 @import '../../styles/settings-console.css';
-@import './usage/usage-dashboard.css';
+@import '../../styles/usage-dashboard.css';
 </style>
 ```
 
@@ -771,11 +771,11 @@ Claude Code / Codex / OpenCode 的 usage 依赖各自 parser；解析不到时 `
 
 9. 新增 `composables/useUsageOverview.js`。
 10. 新增 `renderers/usageFormat.js`，把 `usageMeter.js` 的 `formatTokenCount` 迁入并 re-export；新增 `formatCompactTokens`、`formatPercent`、`formatDuration`、`formatDayLabel`、`formatMonthLabel`。
-11. 新增 `components/settings/usage/usageChartSeries.js`（补格、等级、周聚合、月份标签、折线点、环形 dash）。
+11. 新增 `renderers/usageChartSeries.js`（补格、等级、周聚合、月份标签、折线点、环形 dash）。
 
 ### P0-5 组件
 
-12. `usage-dashboard.css`（卡片、kicker、标题、tab、滚动条）。
+12. `styles/usage-dashboard.css`（卡片、kicker、标题、tab、滚动条）。
 13. `UsageSummaryStrip` → `UsageHeatmap` → `UsageRangeTabs` → `UsageTrendChart` → `UsageModelRanking`。
 14. 重写 `About.vue`（品牌条 + 仪表盘 + 空态/错误态 + 刷新）。
 

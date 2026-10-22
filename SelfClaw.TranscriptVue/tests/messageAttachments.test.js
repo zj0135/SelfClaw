@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-import MessageContent from '../src/components/Chat/transcript/MessageContent.vue';
+import MessageContent from '../src/components/chat/transcript/MessageContent.vue';
 
 const mounted = [];
 afterEach(() => {

@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import PermissionSelector from '../src/components/Chat/PermissionSelector.vue';
+import PermissionSelector from '../src/components/chat/composer/PermissionSelector.vue';
 
 const mounted = [];
 afterEach(() => {

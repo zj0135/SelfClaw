@@ -1,9 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
-import PluginDockHost from '../src/components/Plugins/PluginDockHost.vue';
-import PluginFloatingLayer from '../src/components/Plugins/PluginFloatingLayer.vue';
-import PluginLauncher from '../src/components/Plugins/PluginLauncher.vue';
-import WindowControls from '../src/components/Chat/WindowControls.vue';
+import PluginDockHost from '../src/components/plugins/PluginDockHost.vue';
+import PluginFloatingLayer from '../src/components/plugins/PluginFloatingLayer.vue';
+import PluginLauncher from '../src/components/plugins/PluginLauncher.vue';
+import WindowControls from '../src/components/shell/WindowControls.vue';
 
 const ORIGIN = 'https://plugin.plugin.selfclaw.local';
 const mounted = [];

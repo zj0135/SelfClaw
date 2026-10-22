@@ -17,7 +17,7 @@ vi.mock('../src/composables/hostBridge.js', () => ({
 	isSuperseded: () => false,
 }));
 
-import ComposerUsageMeter from '../src/components/Chat/ComposerUsageMeter.vue';
+import ComposerUsageMeter from '../src/components/chat/composer/ComposerUsageMeter.vue';
 
 let wrapper;
 afterEach(() => {

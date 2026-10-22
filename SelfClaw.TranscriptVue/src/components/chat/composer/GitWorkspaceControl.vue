@@ -14,7 +14,7 @@ import {
 	Trash2,
 	Waypoints,
 } from 'lucide-vue-next';
-import { useConfirm } from '../../composables/useConfirm.js';
+import { useConfirm } from '../../../composables/useConfirm.js';
 
 const props = defineProps({
 	state: { type: Object, default: null },

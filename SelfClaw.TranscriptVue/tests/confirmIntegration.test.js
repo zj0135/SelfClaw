@@ -17,7 +17,7 @@ vi.mock('../src/composables/hostBridge.js', () => ({
 	isSuperseded: () => false,
 }));
 
-import GitWorkspaceControl from '../src/components/Chat/GitWorkspaceControl.vue';
+import GitWorkspaceControl from '../src/components/chat/composer/GitWorkspaceControl.vue';
 import { useConversationNavigation } from '../src/composables/useConversationNavigation.js';
 import { useConfirm } from '../src/composables/useConfirm.js';
 

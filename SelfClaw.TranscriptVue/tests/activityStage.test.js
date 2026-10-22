@@ -11,7 +11,7 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = null; });
 
 async function mountStage(props = { parentConversationId: window.activityFixture.parent }) {
-	const { default: Stage } = await import('../src/components/Activities/ActivityStage.vue');
+	const { default: Stage } = await import('../src/components/activities/ActivityStage.vue');
 	return mount(Stage, { props });
 }
 
@@ -114,7 +114,7 @@ it('retains invalidated historical content, resumes live, and restores selection
 });
 
 it('switches an independent todo section without replacing subagent preferences', async () => {
-	const { default: Panel } = await import('../src/components/Activities/ActivityFloatingPanel.vue');
+	const { default: Panel } = await import('../src/components/activities/ActivityFloatingPanel.vue');
 	const preferences = { open: true, section: 'subagents', taskId: 'selected-child' };
 	const subagents = { id: 'subagents', kind: 'subagents', title: 'Subagents', counts: { total: 3 } };
 	const todos = { id: 'todos', kind: 'todos', title: 'Todo', badge: 2, entries: [{ id: 'todo-1', title: 'Review' }] };

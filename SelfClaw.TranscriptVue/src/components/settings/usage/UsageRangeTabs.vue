@@ -21,7 +21,7 @@ const ranges = [
 </template>
 
 <style scoped>
-@import './usage-dashboard.css';
+@import '../../../styles/usage-dashboard.css';
 
 .range-tabs {
 	display: inline-flex;

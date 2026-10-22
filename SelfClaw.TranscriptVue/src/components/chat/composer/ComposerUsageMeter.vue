@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
-import { calculateUsageProgress } from '../../renderers/usageMeter.js';
-import { useCompressionThreshold } from '../../composables/useCompressionThreshold.js';
+import { calculateUsageProgress } from '../../../renderers/usageMeter.js';
+import { useCompressionThreshold } from '../../../composables/useCompressionThreshold.js';
 
 const props = defineProps({
 	usage: {

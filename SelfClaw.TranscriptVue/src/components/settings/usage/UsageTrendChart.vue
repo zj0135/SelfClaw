@@ -9,7 +9,7 @@ import {
 	buildTrendSeries,
 	indexFromPlotX,
 	xForIndex,
-} from './usageChartSeries.js';
+} from '../../../renderers/usageChartSeries.js';
 import UsageTooltip from './UsageTooltip.vue';
 
 const props = defineProps({
@@ -150,7 +150,7 @@ function anchorFor(index) {
 </template>
 
 <style scoped>
-@import './usage-dashboard.css';
+@import '../../../styles/usage-dashboard.css';
 
 .trend-card {
 	display: flex;

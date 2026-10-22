@@ -2,7 +2,7 @@
 // 组件里只渲染这些结果，不自己算 —— 三种热力图模式的等级必须各自重算，
 // 因为「每日峰值」和「每周峰值」不是一个量纲，后端也不提供 level。
 
-import { formatMonthLabel, parseLocalDate, resolveModelLabel } from '../../../renderers/usageFormat.js';
+import { formatMonthLabel, parseLocalDate, resolveModelLabel } from './usageFormat.js';
 
 export const HEATMAP_WEEKS = 52;
 export const HEATMAP_DAYS_PER_WEEK = 7;

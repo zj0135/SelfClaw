@@ -6,7 +6,7 @@ import ModelSelector from './ModelSelector.vue';
 import ComposerAddMenu from './ComposerAddMenu.vue';
 import ComposerAttachments from './ComposerAttachments.vue';
 import ComposerUsageMeter from './ComposerUsageMeter.vue';
-import { isSupportedImageFile } from '../../composables/useComposerAttachments.js';
+import { isSupportedImageFile } from '../../../composables/useComposerAttachments.js';
 
 const props = defineProps({
 	busy: {

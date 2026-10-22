@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue';
 import { BookOpenCheck, LoaderCircle } from 'lucide-vue-next';
-import { isSuperseded, useHostBridge } from '../../composables/hostBridge.js';
+import { isSuperseded, useHostBridge } from '../../../composables/hostBridge.js';
 
 const props = defineProps({
 	agentId: { type: String, default: '' },

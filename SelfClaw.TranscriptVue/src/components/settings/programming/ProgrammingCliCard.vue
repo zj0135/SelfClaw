@@ -134,5 +134,5 @@ defineEmits(['toggle', 'test', 'select', 'model', 'reasoning']);
 </template>
 
 <style scoped>
-@import './programming-assistant.css';
+@import '../../../styles/programming-assistant.css';
 </style>

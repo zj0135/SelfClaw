@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const sidebar = readFileSync(
-	resolve(process.cwd(), 'src/components/SideBar/AppSidebar.vue'),
+	resolve(process.cwd(), 'src/components/sidebar/AppSidebar.vue'),
 	'utf8',
 );
 

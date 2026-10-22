@@ -6,7 +6,7 @@ const { bridge } = vi.hoisted(() => ({
 }));
 vi.mock('../src/composables/hostBridge.js', () => ({ hostBridge: bridge, useHostBridge: () => bridge, isSuperseded: () => false }));
 
-import AgentSelector from '../src/components/Chat/AgentSelector.vue';
+import AgentSelector from '../src/components/chat/composer/AgentSelector.vue';
 
 const mounted = [];
 afterEach(() => {

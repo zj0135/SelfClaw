@@ -17,7 +17,7 @@ vi.mock('../src/composables/hostBridge.js', () => ({
 	isSuperseded: () => false,
 }));
 
-import ModelSelector from '../src/components/Chat/ModelSelector.vue';
+import ModelSelector from '../src/components/chat/composer/ModelSelector.vue';
 
 const mounted = [];
 afterEach(() => {

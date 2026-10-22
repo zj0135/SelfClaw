@@ -1,8 +1,8 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { ArrowDown, ArrowUp, X } from 'lucide-vue-next';
-import MessageBlocks from '../Chat/transcript/MessageBlocks.vue';
-import TurnOutcome from '../Chat/transcript/TurnOutcome.vue';
+import MessageBlocks from '../chat/transcript/MessageBlocks.vue';
+import TurnOutcome from '../chat/transcript/TurnOutcome.vue';
 import ActivityContentReader from './ActivityContentReader.vue';
 import { useActivityDetailScroll } from '../../composables/useActivityDetailScroll.js';
 import { activityStatusLabel, deliveryStatusLabel, activityErrorLabel } from '../../renderers/activityLabels.js';

@@ -191,5 +191,5 @@ const filteredModels = computed(() => {
 </template>
 
 <style scoped>
-@import '../../styles/ai-provider-model-list.css';
+@import '../../../styles/ai-provider-model-list.css';
 </style>

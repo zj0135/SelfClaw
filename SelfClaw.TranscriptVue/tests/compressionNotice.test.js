@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
-import CompressionNotice from '../src/components/Chat/transcript/CompressionNotice.vue';
+import CompressionNotice from '../src/components/chat/transcript/CompressionNotice.vue';
 
 let wrapper;
 afterEach(() => {

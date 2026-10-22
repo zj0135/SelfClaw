@@ -75,7 +75,7 @@ const hasTools = computed(() => rows.value.length > 0);
 </template>
 
 <style scoped>
-@import './usage-dashboard.css';
+@import '../../../styles/usage-dashboard.css';
 
 .tools-card {
 	display: flex;

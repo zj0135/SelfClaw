@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { formatCompactTokens, formatPercent, unknownText } from '../../../renderers/usageFormat.js';
-import { buildRankingRows, buildRingSegments } from './usageChartSeries.js';
+import { buildRankingRows, buildRingSegments } from '../../../renderers/usageChartSeries.js';
 
 const props = defineProps({
 	models: { type: Array, default: () => [] },
@@ -58,7 +58,7 @@ const totalText = computed(() => (ring.value.totalTokens > 0
 </template>
 
 <style scoped>
-@import './usage-dashboard.css';
+@import '../../../styles/usage-dashboard.css';
 
 .ranking-card {
 	display: flex;

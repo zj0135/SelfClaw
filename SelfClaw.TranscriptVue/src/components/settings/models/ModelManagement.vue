@@ -2,9 +2,9 @@
 import { computed, ref } from 'vue';
 import { Search, RefreshCw, SlidersHorizontal, Trash2, Image, Cpu, Sparkles, Eye, Layers } from 'lucide-vue-next';
 import ModelConfigurationDialog from './ModelConfigurationDialog.vue';
-import { useModelManagement } from '../../composables/useModelManagement.js';
-import { formatPrice } from '../../composables/useAiProviderHost.js';
-import { formatTokenCount } from '../../renderers/usageMeter.js';
+import { useModelManagement } from '../../../composables/useModelManagement.js';
+import { formatPrice } from '../../../composables/useAiProviderHost.js';
+import { formatTokenCount } from '../../../renderers/usageMeter.js';
 
 const { models, search, loading, error, editing, deleting, filteredModels, load, saved, remove } = useModelManagement();
 
@@ -242,7 +242,7 @@ function reasoningClass(effort) {
 </template>
 
 <style scoped>
-@import '../../styles/settings-console.css';
+@import '../../../styles/settings-console.css';
 
 .management {
 	letter-spacing: 0;

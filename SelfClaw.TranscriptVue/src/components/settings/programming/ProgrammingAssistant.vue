@@ -1,7 +1,7 @@
 <script setup>
 import { RefreshCw, TriangleAlert } from 'lucide-vue-next';
 import ProgrammingCliCard from './ProgrammingCliCard.vue';
-import { useProgrammingAssistantPage } from '../../composables/useProgrammingAssistantPage.js';
+import { useProgrammingAssistantPage } from '../../../composables/useProgrammingAssistantPage.js';
 const { cliTools, isLoading, isRescanning, scanError, selectedCliId, pending, scanStatusText,
     testCli, toggleOpen, selectCli, rescanCliTools, selectModel, selectReasoning } = useProgrammingAssistantPage();
 </script>
@@ -41,5 +41,5 @@ const { cliTools, isLoading, isRescanning, scanError, selectedCliId, pending, sc
 </template>
 
 <style scoped>
-@import './programming-assistant.css';
+@import '../../../styles/programming-assistant.css';
 </style>

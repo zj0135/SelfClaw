@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue';
 import { Check, Bot } from 'lucide-vue-next';
-import { useHostBridge, isSuperseded } from '../../composables/hostBridge.js';
+import { useHostBridge, isSuperseded } from '../../../composables/hostBridge.js';
 
 /**
  * 代理切换器（药丸按钮 + 弹出列表）

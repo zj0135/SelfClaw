@@ -17,7 +17,7 @@ vi.mock('../src/composables/hostBridge.js', () => ({
 	isSuperseded: () => false,
 }));
 
-import ComposerAddMenu from '../src/components/Chat/ComposerAddMenu.vue';
+import ComposerAddMenu from '../src/components/chat/composer/ComposerAddMenu.vue';
 
 const mounted = [];
 afterEach(() => {

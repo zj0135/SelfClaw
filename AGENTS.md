@@ -48,7 +48,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 ## 前端约定（SelfClaw.TranscriptVue）
 
 1. 一组件一职责；超过 ~300 行即考虑拆到 `components/<Feature>/`。`views/` 只做编排；领域逻辑进 `composables/`（`use<Feature>()`），`<script setup>` 内除 trivial 本地状态外不写逻辑；纯渲染逻辑进 `renderers/`。
-2. 组件样式一律 `<style scoped>`；全局布局/重置/主题变量只放 `App.vue` 的未作用域 `<style>`；设置页共用 `styles/settings-console.css`（`sc-page` / `sc-page-head` / `sc-page-body`，页面根 `sc-root` / `sc-stage`），在 scoped 块内 `@import` 引入。
+2. 组件样式一律 `<style scoped>`；全局布局/重置/主题变量只放 `App.vue` 的未作用域 `<style>`；设置页共用 `styles/settings-console.css`（`sc-page` / `sc-page-head` / `sc-page-body`，页面根 `sc-root` / `sc-stage`），在 scoped 块内 `@import` 引入。组件目录只放 `.vue`：共用样式进 `styles/`、纯渲染逻辑进 `renderers/`、状态与副作用进 `composables/`；`components/` 下的特性文件夹名一律小写（`chat/composer`、`settings/providers`、`shell`）。
 3. 图标统一 `lucide-vue-next`；界面禁止 emoji 和手写内联 SVG 图标表。
 4. 设计标准：对标 Awwwards 每日最佳水准（先锋视觉、实验性排版、流畅物理动效、沉浸式体验）。
 5. SFC 顺序 `<script setup>` → `<template>` → `<style scoped>`；路由级/设置面板用 `defineAsyncComponent` 懒加载。

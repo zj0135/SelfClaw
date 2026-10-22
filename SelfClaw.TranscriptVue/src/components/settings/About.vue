@@ -103,7 +103,7 @@ const timeZoneText = computed(() => overview.value?.timeZone ?? unknownText);
 
 <style scoped>
 @import '../../styles/settings-console.css';
-@import './usage/usage-dashboard.css';
+@import '../../styles/usage-dashboard.css';
 
 .usage-refresh {
 	display: inline-flex;

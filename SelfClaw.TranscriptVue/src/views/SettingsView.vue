@@ -61,9 +61,9 @@ for (const group of navGroups) {
 
 const componentMap = markRaw({
 	sys: defineAsyncComponent(() => import('../components/settings/SystemSettings.vue')),
-	providers: defineAsyncComponent(() => import('../components/settings/AIProviders.vue')),
-	models: defineAsyncComponent(() => import('../components/settings/ModelManagement.vue')),
-	'coding-assistant': defineAsyncComponent(() => import('../components/settings/ProgrammingAssistant.vue')),
+	providers: defineAsyncComponent(() => import('../components/settings/providers/AIProviders.vue')),
+	models: defineAsyncComponent(() => import('../components/settings/models/ModelManagement.vue')),
+	'coding-assistant': defineAsyncComponent(() => import('../components/settings/programming/ProgrammingAssistant.vue')),
 	agents: defineAsyncComponent(() => import('../components/settings/agents/AgentSettingsPanel.vue')),
 	plugins: defineAsyncComponent(() => import('../components/settings/extensions/ExtensionSettingsPanel.vue')),
 	pet: defineAsyncComponent(() => import('../components/settings/Pet.vue')),

@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { Sparkles, ChevronRight } from 'lucide-vue-next';
 import { useDeferredHtml } from '../../../composables/useDeferredHtml.js';
 import { renderMarkdown } from '../../../renderers/markdown.js';
-import { resolvePreviewImage } from './previewImage.js';
+import { resolvePreviewImage } from '../../../renderers/previewImage.js';
 
 const props = defineProps({
 	id: { type: String, required: true },
