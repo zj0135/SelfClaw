@@ -69,5 +69,6 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - Direct 输入与队列 / steer 语义：`docs/direct-message-input-design.md`。
 - 输入框图片附件（存储 / 桥 / 队列 / 模型调用 / 前端）：`docs/input-attachment-design.md`。
 - 桌面/前端：`docs/plugin-view-system-design.md`、`docs/message-segments-system-design.md`。
+- 关于页应用用量仪表盘：`docs/app-usage-dashboard-design.md`（数据契约、热力图/趋势/环形口径、SQL 分桶边界）。
 - 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/pet-system-design.md`、`docs/automation-system-design.md`、`docs/direct-context-compaction-design.md`（配套实施记录 `docs/direct-context-compaction-implementation-tasks.md`）、`docs/direct-in-turn-compaction-design.md`。
 - 规则：spec/issue 写 `.scratch/<feature-slug>/`（git 忽略）；耐久结论写 `docs/`；被取代的设计要么更新要么删除，不留"历史保留"。

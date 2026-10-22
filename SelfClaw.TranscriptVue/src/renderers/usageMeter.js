@@ -1,21 +1,11 @@
 // 用量相关的纯格式化：k/M 缩写是全局唯一一份，设置页与输入框状态栏都从这里取。
+import { formatTokenCount, trimNumber, unknownText } from './usageFormat.js';
 
-const unknownTokenCount = '—';
+export { formatTokenCount };
+
+const unknownTokenCount = unknownText;
 const unavailableContextText = '不可用';
 const estimatedContextTitle = '由本地计数近似';
-
-export function formatTokenCount(value) {
-	if (typeof value === 'string' && /^(?:\d+(?:\.\d+)?)(?:K|M)$/.test(value)) return value;
-	const number = Number(value);
-	if (!Number.isFinite(number) || number <= 0) return unknownTokenCount;
-	if (number >= 1_000_000) return `${trimNumber(number / 1_000_000)}M`;
-	if (number >= 1_000) {
-		const thousands = trimNumber(number / 1_000);
-		// 四舍五入后量级可能进位：999999 会变成 "1000"，此时必须显示 1M 而不是 1000K。
-		return Number(thousands) >= 1_000 ? `${trimNumber(number / 1_000_000)}M` : `${thousands}K`;
-	}
-	return String(number);
-}
 
 export function formatContextUsage(usage) {
 	if (!usage) return null;
@@ -145,11 +135,4 @@ function formatCompressionSubtitle(messages, source, summary) {
 function knownTokenText(value) {
 	const text = formatTokenCount(value);
 	return text === unknownTokenCount ? '' : text;
-}
-
-function trimNumber(value, maximumFractionDigits = 2) {
-	return Number(value).toLocaleString('en-US', {
-		useGrouping: false,
-		maximumFractionDigits,
-	});
 }

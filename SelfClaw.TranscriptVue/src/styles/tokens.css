@@ -53,6 +53,18 @@
 	--err-text: #b42318;
 
 	/*
+	 * ═══ 1 · 图表基色（6 条模型序列） ═══
+	 * 只给用量仪表盘用：折线、环形图与热力图共用同一组色相，语义层再按 --chart-n 命名。
+	 * 深色下必须整组提亮，否则在 #16191f 卡片底上分辨率不足。
+	 */
+	--chart-base-1: #3b5bfd;
+	--chart-base-2: #0f9d63;
+	--chart-base-3: #7c3aed;
+	--chart-base-4: #dc4545;
+	--chart-base-5: #b7791f;
+	--chart-base-6: #0e7490;
+
+	/*
 	 * ═══ 1 · caution 琥珀族 ═══
 	 * 工具审批卡、权限复核对话框、needs-config 徽标共用的一套「需要你确认」语义色。
 	 * 与 --danger 分开：前者是等待决定，后者是已经失败，两种语气不该同色。
@@ -210,6 +222,13 @@ html[data-theme='dark'] {
 	--warn-base: #d9b25f;
 	--err-text: #fca5a5;
 
+	--chart-base-1: #6d86ff;
+	--chart-base-2: #34d399;
+	--chart-base-3: #a78bfa;
+	--chart-base-4: #f87171;
+	--chart-base-5: #d9b25f;
+	--chart-base-6: #22d3ee;
+
 	--caution: #e0a33f;
 	--caution-icon: #edb862;
 	--caution-fill: #c9871c;
@@ -313,6 +332,23 @@ html[data-theme='dark'] {
 	--danger: var(--err-base);
 	--warning: var(--warn-base);
 
+	/* ── 图表与热力图 ──
+	   图表色阶按「第 n 条序列」命名，绘制端只按下标取色，不关心具体色相；
+	   热力图 5 级用 color-mix 与面板底混色，0 级必须与卡片底可见但不抢戏。
+	   color-mix 里的 var() 在使用点惰性求值，所以一套定义同时服务浅色与深色。 */
+	--chart-1: var(--chart-base-1);
+	--chart-2: var(--chart-base-2);
+	--chart-3: var(--chart-base-3);
+	--chart-4: var(--chart-base-4);
+	--chart-5: var(--chart-base-5);
+	--chart-6: var(--chart-base-6);
+	--chart-other: var(--ink-4);
+	--heat-0: color-mix(in srgb, var(--ink-1) 6%, var(--surface-base));
+	--heat-1: color-mix(in srgb, var(--chart-1) 14%, var(--surface-base));
+	--heat-2: color-mix(in srgb, var(--chart-1) 30%, var(--surface-base));
+	--heat-3: color-mix(in srgb, var(--chart-1) 50%, var(--surface-base));
+	--heat-4: color-mix(in srgb, var(--chart-1) 74%, var(--surface-base));
+
 	/* ── 阴影与滚动条 ── */
 	--shadow: 0 12px 30px rgba(var(--shadow-ink), 0.08);
 	--card-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.05), 0 10px 26px rgba(var(--shadow-ink), 0.06);
@@ -384,6 +420,18 @@ html[data-theme='dark'] {
 	--sc-ok-soft: color-mix(in srgb, var(--success) 10%, transparent);
 	--sc-err: var(--danger);
 	--sc-err-soft: color-mix(in srgb, var(--danger) 8%, transparent);
+	--sc-chart-1: var(--chart-1);
+	--sc-chart-2: var(--chart-2);
+	--sc-chart-3: var(--chart-3);
+	--sc-chart-4: var(--chart-4);
+	--sc-chart-5: var(--chart-5);
+	--sc-chart-6: var(--chart-6);
+	--sc-chart-other: var(--chart-other);
+	--sc-heat-0: var(--heat-0);
+	--sc-heat-1: var(--heat-1);
+	--sc-heat-2: var(--heat-2);
+	--sc-heat-3: var(--heat-3);
+	--sc-heat-4: var(--heat-4);
 	--sc-mono: var(--font-code);
 	--sc-sans: var(--font-ui);
 	--sc-display: var(--font-display);

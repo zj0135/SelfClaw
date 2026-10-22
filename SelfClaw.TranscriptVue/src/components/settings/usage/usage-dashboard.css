@@ -1,0 +1,90 @@
+/*
+ * 用量仪表盘的共用外观：卡片、区块标题、kicker、胶囊 tab、滚动条。
+ * 各组件在 scoped 块里 @import 本文件；token 只从 tokens.css 的别名层取，
+ * 所以这里不声明任何变量，也不出现颜色字面量或裸字号。
+ */
+
+.usage-card {
+	padding: 16px;
+	border: 1px solid var(--sc-line);
+	border-radius: 10px;
+	background: var(--sc-panel);
+}
+
+.usage-card-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+.usage-card-heading {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	min-width: 0;
+}
+
+.usage-kicker {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	color: var(--sc-faint);
+	font-family: var(--sc-mono);
+	font-size: var(--fs-10);
+	font-weight: 650;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.usage-kicker::before {
+	width: 14px;
+	height: 1px;
+	background: var(--sc-acid);
+	content: '';
+}
+
+.usage-card-title {
+	margin: 0;
+	color: var(--sc-text);
+	font-size: var(--fs-13);
+	font-weight: 650;
+	letter-spacing: 0.01em;
+}
+
+.usage-value {
+	color: var(--sc-text);
+	font-family: var(--sc-mono);
+	font-variant-numeric: tabular-nums;
+}
+
+.usage-label {
+	color: var(--sc-mute);
+	font-family: var(--sc-mono);
+	font-size: var(--fs-10);
+	letter-spacing: 0.04em;
+}
+
+.usage-scroll {
+	overflow-x: auto;
+	scrollbar-color: var(--sc-line-2) transparent;
+	scrollbar-width: thin;
+}
+
+.usage-scroll::-webkit-scrollbar {
+	height: 6px;
+}
+
+.usage-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.usage-scroll::-webkit-scrollbar-thumb {
+	border-radius: 3px;
+	background: var(--sc-line-2);
+}
+
+.usage-scroll::-webkit-scrollbar-thumb:hover {
+	background: var(--sc-mute);
+}

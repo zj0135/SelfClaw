@@ -37,6 +37,7 @@ using SelfClaw.Desktop.Services.Windowing;
 using SelfClaw.Desktop.Services.Terminal.Abstractions;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
+using SelfClaw.Desktop.Services.Usage;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Desktop.Services.Workspace;
 using SelfClaw.Desktop.Services.Workspace.Abstractions;
@@ -172,6 +173,7 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<AgentSettingsService>();
         services.AddSingleton<AgentSettingsBridge>();
         services.AddSingleton<AutomationBridge>();
+        services.AddSingleton<UsageStatisticsBridge>();
         services.AddSingleton<PetPackageCatalog>();
         services.AddSingleton<PetActivityPresenter>();
         services.AddSingleton<IPetSettingsRepository, DesktopPetSettingsRepository>();
@@ -231,6 +233,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<ActivityPanelBridge>(),
             services.GetRequiredService<AutomationBridge>(),
             services.GetRequiredService<AttachmentBridge>(),
+            services.GetRequiredService<UsageStatisticsBridge>(),
             services.GetRequiredService<ILogger<WebViewMessageRouter>>()));
         services.AddSingleton(services => new MainWindow(
             services.GetRequiredService<MainWindowViewModel>(),

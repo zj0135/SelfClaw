@@ -21,6 +21,7 @@ using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.Transcript;
+using SelfClaw.Desktop.Services.Usage;
 using SelfClaw.Desktop.Services.Workspace;
 using SelfClaw.Desktop.ViewModels;
 
@@ -50,6 +51,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly ActivityPanelBridge? _activityPanelBridge;
     private readonly AutomationBridge? _automationBridge;
     private readonly AttachmentBridge? _attachmentBridge;
+    private readonly UsageStatisticsBridge? _usageStatisticsBridge;
     private int _disposeStarted;
     private readonly ILogger<WebViewMessageRouter> _logger;
     private readonly object _lifecycleGate = new();
@@ -78,6 +80,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         ActivityPanelBridge? activityPanelBridge = null,
         AutomationBridge? automationBridge = null,
         AttachmentBridge? attachmentBridge = null,
+        UsageStatisticsBridge? usageStatisticsBridge = null,
         ILogger<WebViewMessageRouter>? logger = null)
     {
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
@@ -100,6 +103,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _activityPanelBridge = activityPanelBridge;
         _automationBridge = automationBridge;
         _attachmentBridge = attachmentBridge;
+        _usageStatisticsBridge = usageStatisticsBridge;
         _logger = logger ?? NullLogger<WebViewMessageRouter>.Instance;
 
     }
@@ -296,6 +300,12 @@ internal sealed class WebViewMessageRouter : IDisposable
             case var name when name.StartsWith("attachments/", StringComparison.Ordinal) && _attachmentBridge is not null:
                 await _attachmentBridge.HandleAsync(type, payload, ownerHandle, cancellationToken);
                 return null;
+            case var name when name.StartsWith("usage/", StringComparison.Ordinal):
+                {
+                    if (_usageStatisticsBridge is null) throw new ArgumentException("Unsupported usage message.");
+                    response = await _usageStatisticsBridge.TryHandleAsync(type, payload, cancellationToken);
+                    break;
+                }
             default:
                 var command = await RouteShellIntentAsync(type, payload);
                 if (type is not ("send-prompt" or "tool-approval/get-state") && ReadOptionalString(payload, "requestId") is { } requestId)
