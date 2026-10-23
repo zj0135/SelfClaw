@@ -1,7 +1,8 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { formatCompactTokens, formatPercent, unknownText } from '../../../renderers/usageFormat.js';
 import { buildRankingRows, buildRingSegments } from '../../../renderers/usageChartSeries.js';
+import UsageTooltip from './UsageTooltip.vue';
 
 const props = defineProps({
 	models: { type: Array, default: () => [] },
@@ -13,32 +14,100 @@ const hasModels = computed(() => rows.value.length > 0);
 const totalText = computed(() => (ring.value.totalTokens > 0
 	? formatCompactTokens(ring.value.totalTokens)
 	: unknownText));
+
+const hoveredModel = ref(null);
+const pointer = ref(null);
+
+const hoveredItem = computed(() => {
+	if (!hoveredModel.value) return null;
+	return ring.value.segments.find((s) => s.model === hoveredModel.value)
+		|| rows.value.find((r) => r.model === hoveredModel.value)
+		|| null;
+});
+
+const tooltip = computed(() => {
+	if (!hoveredItem.value || !pointer.value) return null;
+	const item = hoveredItem.value;
+	const detailRows = [
+		{ label: 'Token', value: formatCompactTokens(item.totalTokens) },
+		{ label: '占比', value: formatPercent(item.share) },
+	];
+	if (item.inputTokens > 0) {
+		detailRows.push({ label: '输入', value: formatCompactTokens(item.inputTokens) });
+	}
+	if (item.outputTokens > 0) {
+		detailRows.push({ label: '输出', value: formatCompactTokens(item.outputTokens) });
+	}
+	return {
+		title: item.label,
+		rows: detailRows,
+		x: pointer.value.x,
+		y: pointer.value.y,
+	};
+});
+
+function onEnter(event, item) {
+	hoveredModel.value = item.model;
+	pointer.value = { x: event.clientX, y: event.clientY };
+}
+
+function onMove(event) {
+	if (pointer.value) {
+		pointer.value = { x: event.clientX, y: event.clientY };
+	}
+}
+
+function onLeave() {
+	hoveredModel.value = null;
+	pointer.value = null;
+}
 </script>
 
 <template>
 	<section class="usage-card ranking-card">
 		<header class="usage-card-head">
-			<div class="usage-card-heading">
-				<span class="usage-kicker">Models</span>
-				<h3 class="usage-card-title">模型用量排行</h3>
-			</div>
+			<h3 class="usage-card-title">模型用量排行</h3>
 		</header>
 
 		<div v-if="hasModels" class="ranking-body">
-			<div class="ranking-ring">
+			<div class="ranking-ring" :class="{ 'has-hover': Boolean(hoveredModel) }">
 				<svg viewBox="0 0 100 100" role="img" aria-label="模型 Token 占比">
-					<circle v-for="segment in ring.segments" :key="segment.model" class="ring-segment" cx="50" cy="50"
-						:r="ring.radius" :stroke-dasharray="segment.dashArray" :stroke-dashoffset="segment.dashOffset"
-						:style="{ stroke: segment.color }" />
+					<circle
+						v-for="segment in ring.segments"
+						:key="segment.model"
+						class="ring-segment"
+						:class="{ 'is-active': hoveredModel === segment.model }"
+						cx="50"
+						cy="50"
+						:r="ring.radius"
+						:stroke-dasharray="segment.dashArray"
+						:stroke-dashoffset="segment.dashOffset"
+						:style="{ stroke: segment.color }"
+						@mouseenter="onEnter($event, segment)"
+						@mousemove="onMove"
+						@mouseleave="onLeave"
+					/>
 				</svg>
 				<div class="ring-center">
-					<strong class="ring-total usage-value">{{ totalText }}</strong>
-					<span class="ring-unit usage-label">TOKENS</span>
+					<strong class="ring-total usage-value">
+						{{ hoveredItem ? formatCompactTokens(hoveredItem.totalTokens) : totalText }}
+					</strong>
+					<span class="ring-unit usage-label">
+						{{ hoveredItem ? formatPercent(hoveredItem.share) : 'TOKENS' }}
+					</span>
 				</div>
 			</div>
 
-			<ul class="ranking-list">
-				<li v-for="row in rows" :key="row.model" class="ranking-row">
+			<ul class="ranking-list" :class="{ 'has-hover': Boolean(hoveredModel) }">
+				<li
+					v-for="row in rows"
+					:key="row.model"
+					class="ranking-row"
+					:class="{ 'is-active': hoveredModel === row.model }"
+					@mouseenter="onEnter($event, row)"
+					@mousemove="onMove"
+					@mouseleave="onLeave"
+				>
 					<div class="row-head">
 						<span class="row-rank">{{ row.rank }}</span>
 						<span class="row-swatch" :style="{ background: row.color }" />
@@ -54,6 +123,8 @@ const totalText = computed(() => (ring.value.totalTokens > 0
 		</div>
 
 		<p v-else class="ranking-empty">范围内还没有模型用量</p>
+
+		<UsageTooltip v-if="tooltip" :x="tooltip.x" :y="tooltip.y" :title="tooltip.title" :rows="tooltip.rows" />
 	</section>
 </template>
 
@@ -85,13 +156,27 @@ const totalText = computed(() => (ring.value.totalTokens > 0
 	display: block;
 	width: 100%;
 	height: 100%;
+	overflow: visible;
 	transform: rotate(-90deg);
 }
 
 .ring-segment {
 	fill: none;
 	stroke-width: 15;
-	transition: stroke-dasharray 0.3s var(--sc-ease-out);
+	cursor: pointer;
+	transition:
+		stroke-dasharray 0.3s var(--sc-ease-out),
+		stroke-width 0.18s var(--sc-ease-out),
+		opacity 0.18s var(--sc-ease-out);
+}
+
+.ranking-ring.has-hover .ring-segment:not(.is-active) {
+	opacity: 0.38;
+}
+
+.ring-segment.is-active {
+	stroke-width: 18;
+	opacity: 1;
 }
 
 .ring-center {
@@ -110,18 +195,20 @@ const totalText = computed(() => (ring.value.totalTokens > 0
 	font-size: var(--fs-15);
 	font-weight: 650;
 	letter-spacing: -0.01em;
+	transition: color 0.16s ease;
 }
 
 .ring-unit {
 	font-size: var(--fs-9);
 	letter-spacing: 0.08em;
+	transition: color 0.16s ease;
 }
 
 .ranking-list {
 	display: flex;
 	min-width: 0;
 	flex-direction: column;
-	gap: 8px;
+	gap: 6px;
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -132,6 +219,22 @@ const totalText = computed(() => (ring.value.totalTokens > 0
 	flex-direction: column;
 	gap: 4px;
 	min-width: 0;
+	padding: 3px 6px;
+	margin: 0 -6px;
+	border-radius: 6px;
+	cursor: pointer;
+	transition:
+		background 0.14s var(--sc-ease-out),
+		opacity 0.14s var(--sc-ease-out);
+}
+
+.ranking-list.has-hover .ranking-row:not(.is-active) {
+	opacity: 0.45;
+}
+
+.ranking-row.is-active {
+	background: var(--sc-hover);
+	opacity: 1;
 }
 
 .row-head {

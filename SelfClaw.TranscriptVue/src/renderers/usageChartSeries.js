@@ -246,6 +246,8 @@ function mergeModels(models) {
 	return {
 		model: OTHER_MODEL_LABEL,
 		totalTokens: models.reduce((sum, model) => sum + numberOrZero(model.totalTokens), 0),
+		inputTokens: models.reduce((sum, model) => sum + numberOrZero(model.inputTokens), 0),
+		outputTokens: models.reduce((sum, model) => sum + numberOrZero(model.outputTokens), 0),
 		share: models.reduce((sum, model) => sum + numberOrZero(model.share), 0),
 	};
 }
@@ -280,6 +282,8 @@ export function buildRingSegments(models, limit = RING_SEGMENT_LIMIT, radius = R
 			colorIndex: entry.colorIndex,
 			color: chartColor(entry.colorIndex),
 			totalTokens: numberOrZero(entry.totalTokens),
+			inputTokens: numberOrZero(entry.inputTokens),
+			outputTokens: numberOrZero(entry.outputTokens),
 			share,
 			dashArray: `${round(Math.max(0, share * circumference - gap))} ${round(circumference)}`,
 			dashOffset: round(-offset) || 0,
@@ -307,6 +311,8 @@ export function buildRankingRows(models, limit = 10) {
 				model: entry.model,
 				label: resolveModelLabel(entry.model),
 				totalTokens: numberOrZero(entry.totalTokens),
+			inputTokens: numberOrZero(entry.inputTokens),
+			outputTokens: numberOrZero(entry.outputTokens),
 				share,
 				colorIndex: entry.colorIndex,
 				color: chartColor(entry.colorIndex),

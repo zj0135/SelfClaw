@@ -21,10 +21,10 @@ const items = computed(() => {
 			key: 'longest',
 			label: '最长单回合',
 			value: formatDuration(summary.longestTurnMs),
-			hint: '单个回合耗时',
+			hint: '单回合耗时',
 		},
-		{ key: 'current', label: '当前连续', value: formatDays(summary.currentStreakDays), hint: '截至今天的连续天数' },
-		{ key: 'longest-streak', label: '最长连续', value: formatDays(summary.longestStreakDays), hint: '历史最长连续天数' },
+		{ key: 'current', label: '当前连续', value: formatDays(summary.currentStreakDays), hint: '截至今天' },
+		{ key: 'longest-streak', label: '最长连续', value: formatDays(summary.longestStreakDays), hint: '历史最佳' },
 	];
 });
 

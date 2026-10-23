@@ -8,7 +8,7 @@ import { ChartColumn } from 'lucide-vue-next';
 			<ChartColumn :size="18" :stroke-width="1.8" aria-hidden="true" />
 		</div>
 		<div class="empty-copy">
-			<span class="usage-kicker">Empty</span>
+
 			<h3 class="usage-card-title">还没有用量记录</h3>
 			<p class="empty-note">
 				开始一次对话后，这里会显示终身摘要、52 周热力图、每日趋势与模型排行。

@@ -32,11 +32,8 @@ const hasTools = computed(() => rows.value.length > 0);
 <template>
 	<section class="usage-card tools-card">
 		<header class="usage-card-head">
-			<div class="usage-card-heading">
-				<span class="usage-kicker">Tools</span>
-				<h3 class="usage-card-title">工具调用排行</h3>
-			</div>
-			<span class="usage-label">前 20 项 · 跟随上方范围</span>
+			<h3 class="usage-card-title">工具调用排行</h3>
+			<span class="usage-label">前 20 项</span>
 		</header>
 
 		<div v-if="hasTools" class="usage-scroll">
@@ -44,8 +41,8 @@ const hasTools = computed(() => rows.value.length > 0);
 				<thead>
 					<tr>
 						<th class="col-rank" scope="col">#</th>
-						<th scope="col">工具</th>
-						<th class="col-bar" scope="col"><span class="visually-hidden">调用量占比</span></th>
+						<th class="col-name" scope="col">工具</th>
+						<th class="col-bar" scope="col">调用占比</th>
 						<th class="col-num" scope="col">调用</th>
 						<th class="col-num" scope="col">失败率</th>
 						<th class="col-num" scope="col">平均耗时</th>
@@ -89,26 +86,60 @@ const hasTools = computed(() => rows.value.length > 0);
 
 .tools-table {
 	width: 100%;
-	border-collapse: collapse;
+	border-collapse: separate;
+	border-spacing: 0;
 	table-layout: fixed;
 }
 
+.tools-table thead tr {
+	background: var(--sc-raise);
+}
+
 .tools-table th {
-	padding: 0 8px 6px;
+	padding: 8px 12px;
 	border-bottom: 1px solid var(--sc-line);
-	color: var(--sc-faint);
+	color: var(--sc-mute);
 	font-family: var(--sc-mono);
-	font-size: var(--fs-9);
+	font-size: var(--fs-10);
 	font-weight: 600;
-	letter-spacing: 0.06em;
+	letter-spacing: 0.04em;
 	text-align: left;
+	white-space: nowrap;
+}
+
+.tools-table th:first-child {
+	border-top-left-radius: 6px;
+	border-bottom-left-radius: 6px;
+	padding-left: 14px;
+}
+
+.tools-table th:last-child {
+	border-top-right-radius: 6px;
+	border-bottom-right-radius: 6px;
+	padding-right: 14px;
 }
 
 .tools-table td {
-	padding: 7px 8px;
+	padding: 9px 12px;
 	border-bottom: 1px solid var(--sc-line);
 	font-size: var(--fs-11);
 	vertical-align: middle;
+}
+
+.tools-table td:first-child {
+	padding-left: 14px;
+}
+
+.tools-table td:last-child {
+	padding-right: 14px;
+}
+
+.tools-table tbody tr {
+	transition: background 0.14s ease;
+}
+
+.tools-table tbody tr:hover {
+	background: var(--sc-hover);
 }
 
 .tools-table tbody tr:last-child td {
@@ -116,10 +147,10 @@ const hasTools = computed(() => rows.value.length > 0);
 }
 
 .col-rank {
-	width: 34px;
+	width: 44px;
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
-	font-size: var(--fs-9);
+	font-size: var(--fs-10);
 	font-variant-numeric: tabular-nums;
 }
 
@@ -132,11 +163,11 @@ const hasTools = computed(() => rows.value.length > 0);
 }
 
 .col-bar {
-	width: 34%;
+	width: 32%;
 }
 
 .col-num {
-	width: 84px;
+	width: 86px;
 	color: var(--sc-soft);
 	font-family: var(--sc-mono);
 	font-size: var(--fs-10);
@@ -151,8 +182,8 @@ const hasTools = computed(() => rows.value.length > 0);
 
 .tools-bar {
 	display: block;
-	height: 4px;
-	border-radius: 2px;
+	height: 5px;
+	border-radius: 3px;
 	background: var(--sc-raise);
 	overflow: hidden;
 }
@@ -160,8 +191,9 @@ const hasTools = computed(() => rows.value.length > 0);
 .tools-bar span {
 	display: block;
 	height: 100%;
-	border-radius: 2px;
+	border-radius: 3px;
 	background: var(--sc-chart-1);
+	transition: width 0.3s var(--sc-ease-out);
 }
 
 .tools-empty {
@@ -172,22 +204,13 @@ const hasTools = computed(() => rows.value.length > 0);
 	text-align: center;
 }
 
-.visually-hidden {
-	position: absolute;
-	width: 1px;
-	height: 1px;
-	overflow: hidden;
-	clip-path: inset(50%);
-	white-space: nowrap;
-}
-
 @media (max-width: 720px) {
 	.col-bar {
 		display: none;
 	}
 
 	.col-num {
-		width: 64px;
+		width: 68px;
 	}
 }
 </style>

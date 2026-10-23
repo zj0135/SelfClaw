@@ -1,5 +1,5 @@
 /*
- * 用量仪表盘的共用外观：卡片、区块标题、kicker、胶囊 tab、滚动条。
+ * 用量仪表盘的共用外观：卡片、区块标题、胶囊 tab、滚动条。
  * 各组件在 scoped 块里 @import 本文件；token 只从 tokens.css 的别名层取，
  * 所以这里不声明任何变量，也不出现颜色字面量或裸字号。
  */
@@ -24,25 +24,6 @@
 	flex-direction: column;
 	gap: 3px;
 	min-width: 0;
-}
-
-.usage-kicker {
-	display: inline-flex;
-	align-items: center;
-	gap: 7px;
-	color: var(--sc-faint);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-10);
-	font-weight: 650;
-	letter-spacing: 0.08em;
-	text-transform: uppercase;
-}
-
-.usage-kicker::before {
-	width: 14px;
-	height: 1px;
-	background: var(--sc-acid);
-	content: '';
 }
 
 .usage-card-title {

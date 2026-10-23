@@ -104,12 +104,13 @@ describe('About usage dashboard', () => {
 		bridge.requestLatest.mockResolvedValue(overviewPayload());
 	});
 
-	it('renders the brand strip and all four dashboard blocks when there is activity', async () => {
+	it('renders clean page headers and all dashboard blocks without hero banner or title kickers', async () => {
 		const wrapper = await mountAbout();
 
-		expect(wrapper.find('.about-hero').text()).toContain('SELFCLAW');
-		expect(wrapper.find('.hero-meta').text()).toContain('1.0.0');
-		expect(wrapper.find('.hero-meta').text()).toContain('38f3535');
+		expect(wrapper.find('.sc-page-title').text()).toBe('应用用量');
+		expect(wrapper.find('.sc-page-sub').exists()).toBe(false);
+		expect(wrapper.find('.about-hero').exists()).toBe(false);
+		expect(wrapper.find('.usage-kicker').exists()).toBe(false);
 
 		expect(wrapper.findAll('.summary-item')).toHaveLength(5);
 		expect(wrapper.findAll('.heatmap-grid .heatmap-week')).toHaveLength(52);
@@ -123,6 +124,42 @@ describe('About usage dashboard', () => {
 		expect(toolRows[1].text()).toContain('18ms');
 		expect(wrapper.find('.empty-card').exists()).toBe(false);
 		expect(wrapper.find('.error-card').exists()).toBe(false);
+
+		wrapper.unmount();
+	});
+
+	it('highlights the segment and shows the tooltip when hovering a donut ring segment', async () => {
+		const wrapper = await mountAbout();
+
+		const segment = wrapper.find('.ranking-ring .ring-segment');
+		expect(segment.exists()).toBe(true);
+		expect(segment.classes()).not.toContain('is-active');
+
+		await segment.trigger('mouseenter', { clientX: 200, clientY: 150 });
+		expect(segment.classes()).toContain('is-active');
+		expect(wrapper.find('.ranking-ring').classes()).toContain('has-hover');
+
+		const tooltip = wrapper.findComponent({ name: 'UsageTooltip' });
+		expect(tooltip.exists()).toBe(true);
+		expect(tooltip.props('title')).toBe('glm-4.6');
+		expect(tooltip.props('rows')).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ label: 'Token' }),
+				expect.objectContaining({ label: '占比' }),
+			]),
+		);
+
+		await segment.trigger('mouseleave');
+		expect(segment.classes()).not.toContain('is-active');
+		expect(wrapper.find('.ranking-ring').classes()).not.toContain('has-hover');
+
+		const row = wrapper.find('.ranking-list .ranking-row');
+		expect(row.exists()).toBe(true);
+		await row.trigger('mouseenter', { clientX: 250, clientY: 180 });
+		expect(row.classes()).toContain('is-active');
+		expect(segment.classes()).toContain('is-active');
+		await row.trigger('mouseleave');
+		expect(row.classes()).not.toContain('is-active');
 
 		wrapper.unmount();
 	});

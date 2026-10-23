@@ -8,7 +8,7 @@ import {
 	Bot,
 	Puzzle,
 	PawPrint,
-	Info,
+	ChartColumn,
 	ArrowUpRight,
 } from 'lucide-vue-next';
 
@@ -46,7 +46,7 @@ const navGroups = [
 		label: '关于',
 		en: 'INFO',
 		items: [
-			{ id: 'about', label: '关于', en: 'ABOUT', icon: Info },
+			{ id: 'about', label: '应用用量', en: 'USAGE', icon: ChartColumn },
 		],
 	},
 ];

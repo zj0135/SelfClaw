@@ -102,7 +102,7 @@ function anchorFor(index) {
 	<section class="usage-card trend-card">
 		<header class="usage-card-head">
 			<div class="usage-card-heading">
-				<span class="usage-kicker">Trend</span>
+
 				<h3 class="usage-card-title">{{ rangeLabel }}每日 Token</h3>
 			</div>
 			<span class="trend-peak usage-label">单点峰值 {{ peakText }}</span>

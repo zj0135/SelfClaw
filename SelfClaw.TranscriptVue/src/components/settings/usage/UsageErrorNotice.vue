@@ -13,7 +13,7 @@ defineEmits(['retry']);
 			<TriangleAlert :size="18" :stroke-width="1.8" aria-hidden="true" />
 		</div>
 		<div class="error-copy">
-			<span class="usage-kicker">Error</span>
+
 			<h3 class="usage-card-title">用量统计加载失败</h3>
 			<p class="error-message">{{ message }}</p>
 		</div>

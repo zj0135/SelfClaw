@@ -61,7 +61,7 @@ function onLeave() {
 	<section class="usage-card heatmap-card">
 		<header class="usage-card-head">
 			<div class="usage-card-heading">
-				<span class="usage-kicker">Activity</span>
+
 				<h3 class="usage-card-title">Token 活动</h3>
 			</div>
 			<div class="heatmap-modes" role="tablist" aria-label="热力图模式">
