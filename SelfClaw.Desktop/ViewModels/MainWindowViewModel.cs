@@ -93,6 +93,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         _agentSettings.Changed += OnAgentsChanged;
         _extensionChanges.StateChanged += OnExtensionStateChanged;
         _conversationSessions.SelectedStateChanged += OnSelectedRuntimeChanged;
+        _runs.Changed += OnRunChanged;
     }
 
     #endregion
@@ -725,8 +726,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         _agentSettings.Changed -= OnAgentsChanged;
         _extensionChanges.StateChanged -= OnExtensionStateChanged;
         _conversationSessions.SelectedStateChanged -= OnSelectedRuntimeChanged;
+        _runs.Changed -= OnRunChanged;
     }
 
+    private void OnRunChanged(ConversationRunChange _) => RunOnUi(() => _transcriptPublisher.PublishNow(false));
     private void OnAgentsChanged() => RunOnUi(() => { ReloadAgents(); PublishShell(false); });
     private void OnExtensionStateChanged(long revision) => RunOnUi(() => UpdateCapabilityRevision(revision));
     private void OnSelectedRuntimeChanged() => RunOnUi(() => OnPropertyChanged(string.Empty));
@@ -766,6 +769,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         var isBusy = _conversationSessions.IsSelectedRunning;
         var isContinuation = isBusy && _conversationSessions.IsSelectedContinuation;
         var activityText = isBusy ? _conversationSessions.SelectedActivityText : null;
+        var runningConversationIds = _runs.RunningConversationIds.ToHashSet();
+        if (isBusy && SelectedConversation?.Id is { } selectedId)
+        {
+            runningConversationIds.Add(selectedId);
+        }
         return new TranscriptProjectionRequest(
             transcript.Messages,
             transcript.Turns,
@@ -783,7 +791,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             ToToolPermissionModeWire(_selectedToolPermissionMode),
             isContinuation,
             transcript.Compactions,
-            isBusy ? _conversationSessions.SelectedLiveUsage : null);
+            isBusy ? _conversationSessions.SelectedLiveUsage : null,
+            runningConversationIds);
     }
 
     Guid? SelfClaw.Desktop.Services.Activities.IActivityPanelScopeSource.CaptureActivityParent()

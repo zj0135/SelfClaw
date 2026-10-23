@@ -22,6 +22,7 @@ import {
 	ChevronRight,
 	ChevronLeft,
 	RotateCw,
+	Loader2,
 } from 'lucide-vue-next';
 import { useWorkspaceTree } from '../../composables/useWorkspaceTree.js';
 import { useSidebarSearch } from '../../composables/useSidebarSearch.js';
@@ -753,13 +754,16 @@ onUnmounted(() => {
 											v-else
 											class="node kind-chat"
 											:style="{ '--i': si }"
-											:class="{ 'sc-rise': !searchActive, active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id) }"
+											:class="{ 'sc-rise': !searchActive, active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id), 'is-running': session.isRunning }"
 											type="button"
-											:title="session.time"
+											:title="session.time ? `${session.label}\n${session.time}` : session.label"
 											@click="selectNode(session.id)"
 											@contextmenu.prevent.stop="openConversationMenu($event, session)"
 										>
-											<span class="dot" aria-hidden="true"></span>
+											<span v-if="session.isRunning" class="node-spin" aria-hidden="true" title="正在运行">
+												<Loader2 :size="11" :stroke-width="2.2" class="spinning" />
+											</span>
+											<span v-else class="dot" aria-hidden="true"></span>
 											<span class="ntext">{{ session.label }}</span>
 										</button>
 									</template>
@@ -791,13 +795,16 @@ onUnmounted(() => {
 									v-else
 									class="node kind-chat"
 									:style="{ '--i': ci }"
-									:class="{ 'sc-rise': !searchActive, active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id) }"
+									:class="{ 'sc-rise': !searchActive, active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id), 'is-running': child.isRunning }"
 									type="button"
-									:title="child.time"
+									:title="child.time ? `${child.label}\n${child.time}` : child.label"
 									@click="selectNode(child.id)"
 									@contextmenu.prevent.stop="openConversationMenu($event, child)"
 								>
-									<span class="dot" aria-hidden="true"></span>
+									<span v-if="child.isRunning" class="node-spin" aria-hidden="true" title="正在运行">
+										<Loader2 :size="11" :stroke-width="2.2" class="spinning" />
+									</span>
+									<span v-else class="dot" aria-hidden="true"></span>
 									<span class="ntext">{{ child.label }}</span>
 								</button>
 							</template>
@@ -1552,24 +1559,36 @@ onUnmounted(() => {
 		box-shadow 0.15s;
 }
 
+.node .node-spin {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 5px;
+	height: 5px;
+	flex: none;
+	color: var(--sb-accent);
+}
+
+.node .node-spin :deep(svg),
+.node .node-spin svg {
+	position: absolute;
+	width: 12px;
+	height: 12px;
+	flex: none;
+	animation: dir-spin 0.9s linear infinite;
+	filter: drop-shadow(0 0 4px color-mix(in srgb, var(--sb-accent) 50%, transparent));
+}
+
+.node.is-running {
+	color: var(--sb-text);
+}
+
 .node.active {
 	border-color: var(--sb-line);
 	background: var(--panel);
 	color: var(--sb-text);
 	box-shadow: 0 1px 4px rgba(var(--shadow-ink), 0.05);
-}
-
-.node.active::before {
-	position: absolute;
-	top: 50%;
-	left: -1px;
-	width: 2px;
-	height: 16px;
-	transform: translateY(-50%);
-	border-radius: 2px;
-	background: var(--sb-accent);
-	box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent);
-	content: '';
 }
 
 .node.active .dot {

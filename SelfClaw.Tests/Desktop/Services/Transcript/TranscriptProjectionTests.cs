@@ -64,6 +64,29 @@ public sealed class TranscriptProjectionTests
     }
 
     [Fact]
+    public void Build_updates_conversation_is_running_when_running_set_changes()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var first = new ConversationRecord(Guid.NewGuid(), "First", null, ToolPermissionMode.RequireApproval, "build", now, now);
+        var second = new ConversationRecord(Guid.NewGuid(), "Second", null, ToolPermissionMode.RequireApproval, "build", now, now);
+        var projection = CreateProjection();
+        var request = CreateRequest(
+            conversations: [first, second],
+            selectedConversationId: first.Id,
+            runningConversationIds: new HashSet<Guid> { first.Id });
+
+        var state1 = projection.Build(request);
+        state1.Should().NotBeNull();
+        state1!.Conversations.Single(c => c.Id == first.Id.ToString("D")).IsRunning.Should().BeTrue();
+        state1.Conversations.Single(c => c.Id == second.Id.ToString("D")).IsRunning.Should().BeFalse();
+
+        var state2 = projection.Build(request with { RunningConversationIds = new HashSet<Guid> { second.Id } });
+        state2.Should().NotBeNull();
+        state2!.Conversations.Single(c => c.Id == first.Id.ToString("D")).IsRunning.Should().BeFalse();
+        state2.Conversations.Single(c => c.Id == second.Id.ToString("D")).IsRunning.Should().BeTrue();
+    }
+
+    [Fact]
     public void Build_refreshes_the_message_cache_when_tool_details_change()
     {
         var now = DateTimeOffset.UtcNow;
@@ -292,7 +315,8 @@ public sealed class TranscriptProjectionTests
             "GitRepositoryId",
             "GitRepositoryName",
             "GitBranchName",
-            "IsManagedWorktree");
+            "IsManagedWorktree",
+            "IsRunning");
     }
 
     [Fact]
@@ -708,7 +732,8 @@ public sealed class TranscriptProjectionTests
         Guid? selectedConversationId = null,
         IReadOnlyList<ConversationCompactionRecord>? compactions = null,
         IReadOnlyList<ConversationTurnRecord>? turns = null,
-        TranscriptLiveUsage? liveUsage = null)
+        TranscriptLiveUsage? liveUsage = null,
+        IReadOnlySet<Guid>? runningConversationIds = null)
         => new(
             messages ?? [],
             turns ?? PresentationHistory.Turns(messages ?? []),
@@ -725,5 +750,6 @@ public sealed class TranscriptProjectionTests
             1,
             "requireApproval",
             Compactions: compactions,
-            LiveUsage: liveUsage);
+            LiveUsage: liveUsage,
+            RunningConversationIds: runningConversationIds);
 }

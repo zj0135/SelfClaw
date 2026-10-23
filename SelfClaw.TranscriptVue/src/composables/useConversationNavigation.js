@@ -11,9 +11,11 @@ export function useConversationNavigation(currentViewId, chatViewRef, openPlugin
 	const { confirm } = useConfirm();
 	const sidebarConversations = ref([]);
 	const selectedConversationId = ref(null);
+	const isSelectedBusy = ref(false);
 	transcript.on((payload) => {
 		if (sidebarConversations.value !== payload.conversations) sidebarConversations.value = payload.conversations || [];
 		selectedConversationId.value = payload.selectedConversationId || null;
+		isSelectedBusy.value = Boolean(payload.isBusy);
 	});
 	on('operation-result', (payload) => {
 		// 「shutting-down」是宿主正在关闭，不是操作失败：窗口已经在消失，再弹一条
@@ -25,6 +27,7 @@ export function useConversationNavigation(currentViewId, chatViewRef, openPlugin
 	});
 
 	function toConversationNode(conversation) {
+		const isSelected = conversation.id === selectedConversationId.value;
 		return {
 			id: conversation.id,
 			label: conversation.title || '未命名对话',
@@ -35,6 +38,7 @@ export function useConversationNavigation(currentViewId, chatViewRef, openPlugin
 			// 右键「工作目录」要用工作区根的名字与路径，不是会话标题。
 			workspaceRootName: conversation.workspaceRootName || '',
 			workspaceRootPath: conversation.workspaceRootPath || '',
+			isRunning: Boolean(conversation.isRunning || (isSelected && isSelectedBusy.value)),
 		};
 	}
 

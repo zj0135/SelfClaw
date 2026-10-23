@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using SelfClaw.Desktop.Services.Transcript.Views;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Options;
@@ -12,6 +13,7 @@ public sealed class TranscriptProjection
     private readonly Dictionary<Guid, (ConversationCompactionRecord Compaction, TranscriptRenderItem Item)> _compactionCache = [];
     private IReadOnlyList<ConversationRecord> _navigationSource = [];
     private IReadOnlyList<WorkspaceRoot> _workspaceSource = [];
+    private IReadOnlySet<Guid> _runningConversationIdsSource = ImmutableHashSet<Guid>.Empty;
     private IReadOnlyList<TranscriptConversationItem> _navigation = [];
     private TranscriptRenderState? _lastState;
 
@@ -42,6 +44,7 @@ public sealed class TranscriptProjection
         _messageCache.Clear();
         _outcomeCache.Clear();
         _compactionCache.Clear();
+        _runningConversationIdsSource = ImmutableHashSet<Guid>.Empty;
     }
 
     private IReadOnlyList<TranscriptRenderItem> BuildItems(TranscriptProjectionRequest request)
@@ -205,14 +208,18 @@ public sealed class TranscriptProjection
 
     private void UpdateNavigation(TranscriptProjectionRequest request)
     {
-        if (SameReferences(_navigationSource, request.Conversations) && SameReferences(_workspaceSource, request.WorkspaceRoots))
+        var runningIds = request.RunningConversationIds ?? (IReadOnlySet<Guid>)ImmutableHashSet<Guid>.Empty;
+        if (SameReferences(_navigationSource, request.Conversations) &&
+            SameReferences(_workspaceSource, request.WorkspaceRoots) &&
+            _runningConversationIdsSource.SetEquals(runningIds))
             return;
         _navigationSource = request.Conversations.ToArray();
         _workspaceSource = request.WorkspaceRoots.ToArray();
+        _runningConversationIdsSource = runningIds;
         var roots = _workspaceSource.ToDictionary(root => root.Id);
         _navigation = _navigationSource.OrderByDescending(conversation => conversation.UpdatedAtUtc)
             .ThenBy(conversation => conversation.CreatedAtUtc)
-            .Select(conversation => BuildConversationItem(conversation, roots)).ToArray();
+            .Select(conversation => BuildConversationItem(conversation, roots, runningIds.Contains(conversation.Id))).ToArray();
     }
 
     private static Dictionary<Guid, List<ToolExecutionRecord>> IndexTools(IReadOnlyList<ToolExecutionRecord> tools)
@@ -228,13 +235,13 @@ public sealed class TranscriptProjection
     }
 
     private static TranscriptConversationItem BuildConversationItem(ConversationRecord conversation,
-        IReadOnlyDictionary<Guid, WorkspaceRoot> roots)
+        IReadOnlyDictionary<Guid, WorkspaceRoot> roots, bool isRunning)
     {
         var root = conversation.WorkspaceRootId is Guid id ? roots.GetValueOrDefault(id) : null;
         return new(conversation.Id.ToString("D"), conversation.Title,
             conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"), conversation.WorkspaceRootId?.ToString("D"),
             root?.Name, root?.RootPath, root?.GitRepositoryId?.ToString("D"), root?.GitRepositoryName, root?.GitBranchName,
-            root?.IsManagedWorktree == true);
+            root?.IsManagedWorktree == true, isRunning);
     }
 
     private static bool SameReferences<T>(IReadOnlyList<T> left, IReadOnlyList<T> right) where T : class
