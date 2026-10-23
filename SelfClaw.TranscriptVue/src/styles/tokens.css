@@ -355,6 +355,9 @@ html[data-theme='dark'] {
 	--scroll-track: transparent;
 	--scroll-thumb: color-mix(in srgb, var(--ink-1) 16%, transparent);
 	--scroll-thumb-hover: color-mix(in srgb, var(--ink-1) 26%, transparent);
+	/* 滚动条实际占位宽度（App.vue 的 ::-webkit-scrollbar 与它同源）。转录区要用它把自己的
+	   横向内边距补齐成对话列留白，否则滚动条会偷走 10px，正文列比输入框窄且整体左偏。 */
+	--scrollbar-size: 10px;
 
 	/* ── 字体 ── */
 	--font-ui: var(--user-font-ui, var(--font-ui-default));
@@ -372,11 +375,12 @@ html[data-theme='dark'] {
 	--resize-edge: 6px;
 
 	/* ── 对话列布局 ──
-	   消息区与输入框共用同一条内容列：值同时是 transcript 的居中列宽和
-	   composer 的宽度，二者任何断点下都对齐。宽窗口按比例放大并封顶，
-	   避免全屏时两侧留白过大；窄窗口的收紧仍由 App.vue / ComposerPanel
-	   里既有的 960px 媒体查询兜底。 */
+	   消息区与输入框共用同一条内容列：--chat-content-width 是列宽上限，
+	   --chat-inline-inset 是列两侧合计留白，两者同时作用于 transcript 内容列与
+	   composer，任何断点下两块都同宽同轴。宽窗口按比例放大并封顶，避免全屏时
+	   两侧留白过大；窄窗口收窄留白也走同一个 token，不再各自写媒体查询。 */
 	--chat-content-width: 728px;
+	--chat-inline-inset: 72px;
 }
 
 @media (min-width: 1440px) {
@@ -388,6 +392,13 @@ html[data-theme='dark'] {
 @media (min-width: 1920px) {
 	:root {
 		--chat-content-width: min(1040px, calc(100vw - 640px));
+	}
+}
+
+/* 窄窗口收紧留白：composer 与 transcript 同时跟随，两列不会在 960px 附近互相错开。 */
+@media (max-width: 960px) {
+	:root {
+		--chat-inline-inset: 28px;
 	}
 }
 

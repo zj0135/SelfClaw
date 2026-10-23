@@ -394,8 +394,8 @@ body {
 }
 
 ::-webkit-scrollbar {
-	width: 10px;
-	height: 10px;
+	width: var(--scrollbar-size);
+	height: var(--scrollbar-size);
 }
 
 ::-webkit-scrollbar-track {
@@ -532,8 +532,12 @@ button {
 	overflow-y: auto;
 	overflow-x: hidden;
 	overscroll-behavior: contain;
-	padding: 58px min(11.5vw, 104px) 32px;
+	/* 横向内边距 = 对话列留白 − 滚动条占位（scrollbar-gutter 在两侧对称预留），
+	   正文可用宽度因此恒等于 composer 的 min(100% − --chat-inline-inset, --chat-content-width)，
+	   两块上下左右边缘完全重合，不再靠 vw 比例各自缩放。 */
+	padding: 58px calc((var(--chat-inline-inset) - 2 * var(--scrollbar-size)) / 2) 32px;
 	scroll-padding-bottom: 32px;
+	scrollbar-gutter: stable both-edges;
 	background: transparent;
 	/* 顶部渐隐：消息滚出可视区时柔和消失，避免在画布顶缘生硬截断 */
 	-webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 34px);
@@ -638,9 +642,9 @@ button {
 
 .message-main {
 	min-width: 0;
-	/* 上限跟随内容列而不是视口：列随窗口放大时，消息气泡的可用宽度同步放大。 */
-	flex: 0 1 min(76%, calc(var(--chat-content-width) + 32px));
-	max-width: min(76%, calc(var(--chat-content-width) + 32px));
+	/* 助手/系统消息铺满内容列：正文右边缘与输入框右边缘对齐，不再按 76% 收窄留出空档。 */
+	flex: 1 1 auto;
+	max-width: 100%;
 }
 
 .message-row.user {
@@ -1105,14 +1109,10 @@ a:hover {
 }
 
 @media (max-width: 960px) {
-	.message-main,
+	/* 留白收紧已由 tokens.css 的 --chat-inline-inset 统一负责，这里只管消息气泡本身。 */
 	.message-row.user .message-main {
 		max-width: 100%;
 		flex-basis: 100%;
-	}
-
-	.transcript-scroll {
-		padding-inline: 24px;
 	}
 }
 

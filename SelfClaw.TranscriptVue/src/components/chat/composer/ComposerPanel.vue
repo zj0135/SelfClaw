@@ -368,15 +368,16 @@ defineExpose({
 .composer-stack {
 	/* relative：状态栏项目下拉的定位锚点 */
 	position: relative;
-	/* 与 transcript 内容列同源（--chat-content-width）：宽窗口下两列一起变宽，始终对齐。 */
-	width: min(calc(100% - 72px), var(--chat-content-width));
+	/* 与 transcript 内容列同源（--chat-content-width + --chat-inline-inset）：
+	   两条列在任何窗口宽度下同宽同轴，上下边缘严格对齐。 */
+	width: min(calc(100% - var(--chat-inline-inset)), var(--chat-content-width));
 	margin: 0 auto 16px;
 	will-change: transform;
 }
 
 :global(.empty-workspace) .composer-stack {
 	/* 空对话的欢迎页收窄一点（约 93%），聚焦输入；仍随断点同步伸缩。 */
-	width: min(calc(100% - 72px), calc(var(--chat-content-width) * 0.93));
+	width: min(calc(100% - var(--chat-inline-inset)), calc(var(--chat-content-width) * 0.93));
 	margin-bottom: 0;
 }
 
@@ -662,16 +663,6 @@ defineExpose({
 @media (prefers-reduced-motion: reduce) {
 	.spin {
 		animation: none;
-	}
-}
-
-@media (max-width: 960px) {
-	.composer-stack {
-		width: calc(100% - 28px);
-	}
-
-	:global(.empty-workspace) .composer-stack {
-		width: calc(100% - 28px);
 	}
 }
 </style>
