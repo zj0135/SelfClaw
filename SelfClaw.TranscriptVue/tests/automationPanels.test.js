@@ -67,7 +67,7 @@ describe('AutomationTaskPanel', () => {
 		expect(wrapper.emitted('toggle-enabled')?.at(-1)?.[0]).toMatchObject({ id: 't-daily' });
 	});
 
-	it('shows the history volume and emits reclaim intents for runs and tasks', async () => {
+	it('offers the per-task reclaim action without printing the history size on the card', async () => {
 		const tasks = [
 			task({ historyBytes: 2048 }),
 			task({ id: 't-todo', title: '交周报', kind: 'none', prompt: null, historyBytes: 0 }),
@@ -76,7 +76,8 @@ describe('AutomationTaskPanel', () => {
 			props: { tasks, runs: [run({ taskTitle: '每日代码审查' })], activeTab: 'tasks', query: '', runStatus: 'all', timeZone: 'UTC', historyBytes: 4096 },
 		});
 
-		expect(wrapper.text()).toContain('历史：2.0 KB');
+		// 卡片只留「下次 / 上次」，体积只在运行历史页签显示。
+		expect(wrapper.text()).not.toContain('历史：');
 		const clearTaskHistory = wrapper.findAll('.automation-icon-btn').find((button) => button.attributes('title') === '清空该任务历史');
 		await clearTaskHistory.trigger('click');
 		expect(wrapper.emitted('clear-history')?.[0]?.[0]).toMatchObject({ id: 't-daily' });
@@ -91,6 +92,35 @@ describe('AutomationTaskPanel', () => {
 		expect(wrapper.emitted('delete-run')?.[0]?.[0]).toMatchObject({ id: 'r-1' });
 		await wrapper.find('.automation-history-clear').trigger('click');
 		expect(wrapper.emitted('clear-history')?.at(-1)).toEqual([]);
+	});
+
+	it('switches the checklist scope and names the scope in the empty state', async () => {
+		const wrapper = mount(AutomationTaskPanel, {
+			props: {
+				tasks: [], runs: [], activeTab: 'tasks', query: '', runStatus: 'all',
+				taskScope: 'today', totalTasks: 7, timeZone: 'UTC', dateKey: '2026-10-15',
+			},
+		});
+
+		expect(wrapper.text()).toContain('今天没有待办或任务');
+		const scopeButtons = wrapper.findAll('.automation-scope-btn');
+		expect(scopeButtons.map((button) => button.text())).toEqual(['今天', '全部']);
+		expect(scopeButtons[0].attributes('aria-pressed')).toBe('true');
+		await scopeButtons[1].trigger('click');
+		expect(wrapper.emitted('update:taskScope')?.[0]).toEqual(['all']);
+	});
+
+	it('renders the todo due date so the day list explains why a task is listed', () => {
+		const wrapper = mount(AutomationTaskPanel, {
+			props: {
+				tasks: [task({ kind: 'none', prompt: null, status: 'open', dueAtUtc: '2026-10-12T13:00:00.000Z' })],
+				runs: [], activeTab: 'tasks', query: '', runStatus: 'all',
+				taskScope: 'today', totalTasks: 1, timeZone: 'UTC', dateKey: '2026-10-15',
+			},
+		});
+
+		const due = wrapper.find('.automation-meta-item.is-warning');
+		expect(due.text()).toBe('逾期 3 天');
 	});
 });
 

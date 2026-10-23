@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue';
-import { History, ListTodo, Plus, Search, Trash2 } from 'lucide-vue-next';
+import { CalendarDays, History, Layers, ListTodo, Plus, Search, Trash2 } from 'lucide-vue-next';
 import AutomationRunList from './AutomationRunList.vue';
 import AutomationTaskList from './AutomationTaskList.vue';
 import { formatBytes, runStatusLabel } from '../../renderers/automationEvents';
@@ -11,7 +11,10 @@ const props = defineProps({
 	activeTab: { type: String, default: 'tasks' },
 	query: { type: String, default: '' },
 	runStatus: { type: String, default: 'all' },
+	taskScope: { type: String, default: 'today' },
+	totalTasks: { type: Number, default: 0 },
 	timeZone: { type: String, default: '' },
+	dateKey: { type: String, default: '' },
 	pending: { type: Object, default: () => ({}) },
 	deleting: { type: Object, default: () => ({}) },
 	historyBytes: { type: Number, default: 0 },
@@ -21,6 +24,7 @@ const emit = defineEmits([
 	'update:activeTab',
 	'update:query',
 	'update:runStatus',
+	'update:taskScope',
 	'create',
 	'edit',
 	'run-now',
@@ -33,11 +37,22 @@ const emit = defineEmits([
 ]);
 
 const runStatuses = ['all', 'queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted', 'skipped'];
+const taskScopes = [
+	{ id: 'today', label: '今天', icon: CalendarDays, title: '今天到期、今天触发或今天动过的任务，以及逾期未完成的待办' },
+	{ id: 'all', label: '全部', icon: Layers, title: '显示全部任务，含未安排日期的' },
+];
 
 const tabs = computed(() => [
 	{ id: 'tasks', label: '清单', count: props.tasks.length, icon: ListTodo },
 	{ id: 'runs', label: '运行历史', count: props.runs.length, icon: History },
 ]);
+
+const emptyTaskText = computed(() => {
+	if (!props.totalTasks) return '还没有任务，先新建一个。';
+	if (props.query.trim()) return '没有符合筛选条件的事项。';
+	if (props.taskScope === 'today') return `今天没有待办或任务，切到「全部」可看其余 ${props.totalTasks} 个。`;
+	return '暂无任务。';
+});
 </script>
 
 <template>
@@ -62,7 +77,15 @@ const tabs = computed(() => [
 					<input :value="query" type="search" placeholder="筛选任务…" aria-label="筛选任务"
 						@input="emit('update:query', $event.target.value)" />
 				</label>
-				<select v-if="activeTab === 'runs'" class="automation-select" :value="runStatus"
+				<div v-if="activeTab === 'tasks'" class="automation-scope" role="group" aria-label="清单范围">
+					<button v-for="option in taskScopes" :key="option.id" type="button" class="automation-scope-btn"
+						:class="{ 'is-active': taskScope === option.id }" :aria-pressed="taskScope === option.id"
+						:title="option.title" @click="emit('update:taskScope', option.id)">
+						<component :is="option.icon" class="automation-scope-icon" aria-hidden="true" />
+						<span>{{ option.label }}</span>
+					</button>
+				</div>
+				<select v-else class="automation-select" :value="runStatus"
 					aria-label="按状态筛选运行" @change="emit('update:runStatus', $event.target.value)">
 					<option v-for="status in runStatuses" :key="status" :value="status">
 						{{ status === 'all' ? '全部状态' : runStatusLabel(status) }}
@@ -80,7 +103,8 @@ const tabs = computed(() => [
 					<span>清空全部历史</span>
 				</button>
 			</div>
-			<AutomationTaskList v-if="activeTab === 'tasks'" :tasks="tasks" :time-zone="timeZone" :pending="pending"
+			<AutomationTaskList v-if="activeTab === 'tasks'" :tasks="tasks" :time-zone="timeZone" :date-key="dateKey"
+				:empty-text="emptyTaskText" :pending="pending"
 				:deleting="deleting" @edit="emit('edit', $event)" @run-now="emit('run-now', $event)"
 				@toggle-enabled="emit('toggle-enabled', $event)" @toggle-status="emit('toggle-status', $event)"
 				@clear-history="emit('clear-history', $event)" @delete-task="emit('delete-task', $event)" />
@@ -244,6 +268,54 @@ const tabs = computed(() => [
 
 .automation-search input::placeholder {
 	color: var(--faint);
+}
+
+.automation-scope {
+	display: flex;
+	flex: none;
+	gap: 2px;
+	padding: 2px;
+	border: 1px solid var(--line-1);
+	border-radius: 8px;
+	background: var(--panel-soft);
+}
+
+.automation-scope-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 22px;
+	padding: 0 7px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--muted);
+	font-size: var(--fs-11);
+	font-weight: 600;
+	white-space: nowrap;
+	cursor: pointer;
+	transition: background 0.16s, color 0.16s, box-shadow 0.16s, transform 0.16s var(--ease-spring);
+}
+
+.automation-scope-btn:hover:not(.is-active) {
+	color: var(--text);
+	background: color-mix(in srgb, var(--panel) 55%, transparent);
+}
+
+.automation-scope-btn.is-active {
+	background: var(--panel);
+	color: var(--text);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.08);
+}
+
+.automation-scope-btn:active {
+	transform: scale(0.96);
+}
+
+.automation-scope-icon {
+	width: 11.5px;
+	height: 11.5px;
+	opacity: 0.85;
 }
 
 .automation-select {

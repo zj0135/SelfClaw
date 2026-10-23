@@ -278,7 +278,7 @@ WHERE status IN (0, 1);   -- Queued / Running
 
 ### 3.8 时区与 DST
 
-- 一律本地时区；`SchedulerTimeZone = TimeZoneInfo.Local`，UI 明写"本地时间"。
+- 一律本地时区；`SchedulerTimeZone = TimeZoneInfo.Local`，UI 直接展示本地日期时间（不再追加"（本地时间）"后缀——整页口径一致，后缀只是噪音）。
 - 春季前跳：不存在的本地时刻不触发（NCrontab 语义）。
 - 秋季回拨：重复的本地时刻只触发一次。
 - 两条都要有单测锁住（§7 P1）。
@@ -390,7 +390,7 @@ views/AutomationView.vue                       只做编排（工具条 + 三块
 components/automation/
   AutomationCalendar.vue                       FullCalendar 封装：投影、事件渲染、范围事件
   AutomationEventChip.vue                      eventContent：状态点/失败徽标/todo 勾选/运行中脉冲
-  AutomationTaskPanel.vue                      右栏：清单页签 + 运行历史页签 + 筛选
+  AutomationTaskPanel.vue                      右栏：清单页签 + 运行历史页签 + 范围/关键词筛选
   AutomationTaskDialog.vue                     新建/编辑：基础信息 + 触发器 + 能力配置 + 从预设填充
   AutomationRunDrawer.vue                      run 详情：元数据 + 只读转录
 composables/useAutomation.js                   host 状态、日历范围查询、CRUD、事件订阅
@@ -398,6 +398,8 @@ renderers/automationEvents.js                  事件模型 → FullCalendar 事
 ```
 
 约定：一组件一职责、`<style scoped>`（FC 内部样式用 `:deep()` 收敛）、图标统一 `lucide-vue-next`、逻辑进 composable/纯函数、超过 ~300 行拆分。
+
+**清单的范围**：清单页签默认只列**今天**的事项——`dueAtUtc` 落在今天或更早（更早且未完成 = 逾期，已完成的历史待办不再占位）、`nextRunAtUtc` / `lastRunAtUtc` / `completedAtUtc` 中任一本机日期等于今天。**「今天新建」本身不算今天**：今天建的、明天到期的待办属于明天，否则清单会变成一个不断膨胀的收件箱。没有截止日也没有调度的待办（含手动 AI 任务）始终留在清单里，未完成即一直可见——否则新建后立刻从清单消失，用户只能去「全部」找。判定是 `localDateKey` + `isTaskInDayScope` 纯函数，`AutomationView` 持有 `taskScope`/`todayKey` 并每分钟重算一次以便跨午夜翻页；「今天 / 全部」切换只影响右栏清单，日历与运行历史的查询口径不变。今天为空时由清单文案指向「全部」并给出被封存的任务数。卡片只显示「下次 / 上次」等状态，历史体积只在运行历史页签展示（任务卡片的「清空该任务历史」按钮仍按 `historyBytes` 显隐）。
 
 ### 5.2 日历
 

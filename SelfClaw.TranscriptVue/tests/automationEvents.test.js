@@ -7,12 +7,15 @@ import {
 	formToWireTask,
 	formatBytes,
 	formatScheduleRule,
+	isTaskInDayScope,
+	localDateKey,
 	localInputToUtcIso,
 	parseCalendarTitle,
 	runStatusLabel,
 	taskNextRunText,
 	taskToForm,
 	toCalendarEvents,
+	todoDueState,
 	utcIsoToLocalInput,
 	validateTaskForm,
 	wireSchedule,
@@ -121,8 +124,8 @@ describe('automation schedule preview honours DST', () => {
 		expect(utcIsoToLocalInput('2026-11-01T05:30:00.000Z', TZ)).toBe('2026-11-01T01:30');
 	});
 
-	it('renders the host-computed next run in local time', () => {
-		expect(describeNextRun('2026-07-01T13:00:00.000Z', { timeZone: TZ }).text).toBe('2026-07-01 09:00（本地时间）');
+	it('renders the host-computed next run in local time without a redundant zone suffix', () => {
+		expect(describeNextRun('2026-07-01T13:00:00.000Z', { timeZone: TZ }).text).toBe('2026-07-01 09:00');
 		expect(describeNextRun(null, { timeZone: TZ })).toMatchObject({ text: '不自动触发', scheduled: false });
 	});
 
@@ -137,7 +140,7 @@ describe('automation schedule preview honours DST', () => {
 		const todo = createTaskForm({ timeZone: TZ, overrides: { title: '交周报', kind: 'none', dueAtLocal: '2026-07-02' } });
 		expect(formToWireTask(todo, TZ).dueAtUtc).toBe('2026-07-02T13:00:00.000Z');
 		expect(taskNextRunText({ kind: 'once', isEnabled: true, nextRunAtUtc: '2026-11-01T05:30:00.000Z' }, { timeZone: TZ }))
-			.toBe('2026-11-01 01:30（本地时间）');
+			.toBe('2026-11-01 01:30');
 	});
 });
 
@@ -164,6 +167,65 @@ describe('automation list filtering', () => {
 		expect(filterRuns(runs, { query: 'provider' }).map((run) => run.id)).toEqual(['r2']);
 		expect(filterRuns(runs, { status: 'all', query: '' })).toHaveLength(2);
 		expect(runStatusLabel('skipped')).toBe('已跳过');
+	});
+});
+
+describe('automation day scope', () => {
+	// New York 的 2026-10-15 覆盖 UTC 的 10-15T04:00 到 10-16T04:00。
+	const TODAY = '2026-10-15';
+	const at = (overrides) => isTaskInDayScope({ id: 'x', kind: 'daily', ...overrides }, { timeZone: TZ, dateKey: TODAY });
+
+	it('keys local days by time zone instead of UTC', () => {
+		expect(localDateKey('2026-10-16T02:00:00.000Z', TZ)).toBe('2026-10-15');
+		expect(localDateKey('2026-10-16T02:00:00.000Z', 'UTC')).toBe('2026-10-16');
+		expect(localDateKey('not-a-date', TZ)).toBe('');
+	});
+
+	it('keeps scheduled tasks while their next or last trigger is today', () => {
+		expect(at({ nextRunAtUtc: '2026-10-15T13:00:00.000Z' })).toBe(true);
+		expect(at({ nextRunAtUtc: '2026-10-16T02:00:00.000Z' })).toBe(true);
+		expect(at({ nextRunAtUtc: '2026-10-16T13:00:00.000Z' })).toBe(false);
+		// 今天已经跑过的每日任务：下次是明天，但仍属于今天的清单。
+		expect(at({ nextRunAtUtc: '2026-10-16T13:00:00.000Z', lastRunAtUtc: '2026-10-15T13:00:00.000Z' })).toBe(true);
+	});
+
+	it('keeps todos due today and overdue open todos, but not tomorrow’s work created today', () => {
+		expect(at({ kind: 'none', status: 'open', dueAtUtc: '2026-10-15T13:00:00.000Z' })).toBe(true);
+		expect(at({ kind: 'none', status: 'open', dueAtUtc: '2026-10-12T13:00:00.000Z' })).toBe(true);
+		expect(at({ kind: 'none', status: 'done', dueAtUtc: '2026-10-12T13:00:00.000Z', completedAtUtc: '2026-10-13T13:00:00.000Z' })).toBe(false);
+		expect(at({ kind: 'none', status: 'open', dueAtUtc: '2026-10-20T13:00:00.000Z' })).toBe(false);
+		// 今天新建、明天到期的待办属于明天。
+		expect(at({ kind: 'none', status: 'open', dueAtUtc: '2026-10-16T13:00:00.000Z', createdAtUtc: '2026-10-15T13:00:00.000Z' })).toBe(false);
+		// 没有日期也没有调度的待办留在清单里，否则新建后立刻消失。
+		expect(at({ kind: 'none', status: 'open', createdAtUtc: '2026-10-15T13:00:00.000Z' })).toBe(true);
+		expect(at({ kind: 'none', status: 'done', createdAtUtc: '2026-10-15T13:00:00.000Z' })).toBe(false);
+		expect(at({ kind: 'none', status: 'open', prompt: 'write it', createdAtUtc: '2026-09-01T13:00:00.000Z' })).toBe(true);
+	});
+
+	it('narrows the task list to the current day unless the scope is all', () => {
+		const scoped = [
+			{ id: 'today', title: '今天到期', kind: 'none', status: 'open', dueAtUtc: '2026-10-15T13:00:00.000Z' },
+			{ id: 'later', title: '下周', kind: 'none', status: 'open', dueAtUtc: '2026-10-20T13:00:00.000Z', createdAtUtc: '2026-10-15T13:00:00.000Z' },
+			{ id: 'scheduled', title: '每天', kind: 'daily', status: 'open', nextRunAtUtc: '2026-10-15T13:00:00.000Z' },
+			{ id: 'idle', title: '没日期', kind: 'none', status: 'open' },
+		];
+		expect(filterTasks(scoped, { scope: 'today', timeZone: TZ, dateKey: TODAY }).map((task) => task.id)).toEqual(['today', 'scheduled', 'idle']);
+		expect(filterTasks(scoped, { scope: 'all', timeZone: TZ, dateKey: TODAY })).toHaveLength(4);
+		expect(filterTasks(scoped, { scope: 'today', query: '没日期', timeZone: TZ, dateKey: TODAY })).toHaveLength(1);
+	});
+
+	it('describes todo due dates with overdue emphasis', () => {
+		const due = (iso, overrides = {}) => todoDueState(
+			{ id: 'x', kind: 'none', status: 'open', dueAtUtc: iso, ...overrides },
+			{ timeZone: TZ, dateKey: TODAY }
+		);
+		expect(due('2026-10-15T13:00:00.000Z')).toEqual({ text: '截止：今天', overdue: false });
+		expect(due('2026-10-14T13:00:00.000Z')).toEqual({ text: '逾期 1 天', overdue: true });
+		expect(due('2026-10-12T13:00:00.000Z')).toEqual({ text: '逾期 3 天', overdue: true });
+		expect(due('2026-10-12T13:00:00.000Z', { status: 'done' })).toEqual({ text: '截止：10-12', overdue: false });
+		expect(due('2026-10-16T13:00:00.000Z')).toEqual({ text: '截止：明天', overdue: false });
+		expect(due('2026-10-20T13:00:00.000Z')).toEqual({ text: '截止：10-20', overdue: false });
+		expect(todoDueState({ id: 'x', kind: 'none', status: 'open' }, { timeZone: TZ, dateKey: TODAY })).toBeNull();
 	});
 });
 

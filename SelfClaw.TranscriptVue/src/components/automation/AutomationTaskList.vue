@@ -1,15 +1,22 @@
 <script setup>
+import { computed } from 'vue';
 import { Check, Eraser, Loader, Pencil, Play, Square, Trash2 } from 'lucide-vue-next';
-import { formatBytes, isManualAiTask, isUserCheckableTask, runStatusLabel, taskKindLabel, taskNextRunText } from '../../renderers/automationEvents';
+import { isManualAiTask, isUserCheckableTask, runStatusLabel, taskKindLabel, taskNextRunText, todoDueState } from '../../renderers/automationEvents';
 
 const props = defineProps({
 	tasks: { type: Array, default: () => [] },
 	timeZone: { type: String, default: '' },
+	dateKey: { type: String, default: '' },
+	emptyText: { type: String, default: '暂无任务' },
 	pending: { type: Object, default: () => ({}) },
 	deleting: { type: Object, default: () => ({}) },
 });
 
 const emit = defineEmits(['edit', 'run-now', 'toggle-enabled', 'toggle-status', 'clear-history', 'delete-task']);
+
+const dueStates = computed(() => Object.fromEntries(
+	props.tasks.map((task) => [task.id, todoDueState(task, { timeZone: props.timeZone, dateKey: props.dateKey })])
+));
 
 function isPending(id) {
 	return Boolean(props.pending?.[id]);
@@ -17,7 +24,7 @@ function isPending(id) {
 </script>
 
 <template>
-	<p v-if="!tasks.length" class="automation-empty">暂无任务</p>
+	<p v-if="!tasks.length" class="automation-empty">{{ emptyText }}</p>
 	<article v-for="task in tasks" :key="task.id" class="automation-task" :class="{ 'is-done': task.status === 'done' }">
 		<button v-if="isUserCheckableTask(task)" type="button" class="automation-check" :aria-pressed="task.status === 'done'"
 			:title="task.status === 'done' ? '标记为未完成' : '标记为完成'" @click="emit('toggle-status', task)">
@@ -31,8 +38,10 @@ function isPending(id) {
 				<span class="automation-kind">{{ taskKindLabel(task.kind) }}</span>
 				<span v-if="task.kind !== 'none'" class="automation-meta-item">下次：{{ taskNextRunText(task, { timeZone }) }}</span>
 				<span v-else-if="isManualAiTask(task)" class="automation-meta-item">手动 AI 任务</span>
+				<span v-if="dueStates[task.id]" class="automation-meta-item" :class="{ 'is-warning': dueStates[task.id].overdue }">
+					{{ dueStates[task.id].text }}
+				</span>
 				<span v-if="task.lastRunStatus" class="automation-meta-item">上次：{{ runStatusLabel(task.lastRunStatus) }}</span>
-				<span v-if="task.historyBytes" class="automation-meta-item">历史：{{ formatBytes(task.historyBytes) }}</span>
 				<span v-if="task.kind !== 'none' && !task.isEnabled" class="automation-meta-item is-warning">已停用</span>
 			</span>
 		</div>

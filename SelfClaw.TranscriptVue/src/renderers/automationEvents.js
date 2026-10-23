@@ -301,9 +301,16 @@ export function formatLocalDateTime(value, timeZone) {
 	return wallClock(date, timeZone).replace('T', ' ');
 }
 
+// 本机时区的自然日键（YYYY-MM-DD）；清单的「今天」范围按它划分。
+export function localDateKey(value, timeZone) {
+	const date = value instanceof Date ? value : new Date(value);
+	if (Number.isNaN(date.getTime())) return '';
+	return wallClock(date, timeZone).slice(0, 10);
+}
+
 export function describeNextRun(nextRunAtUtc, { timeZone } = {}) {
 	if (!nextRunAtUtc) return { text: '不自动触发', scheduled: false };
-	return { text: `${formatLocalDateTime(nextRunAtUtc, timeZone)}（本地时间）`, scheduled: true };
+	return { text: formatLocalDateTime(nextRunAtUtc, timeZone), scheduled: true };
 }
 
 export function taskNextRunText(task, { timeZone } = {}) {
@@ -321,10 +328,42 @@ export function isManualAiTask(task) {
 	return Boolean(task) && (task.kind || 'none') === 'none' && Boolean(String(task.prompt ?? '').trim());
 }
 
-export function filterTasks(tasks = [], { query = '', status = 'all' } = {}) {
+// 清单页签的「今天」范围：截止日、下次触发、上次运行或完成时间落在今天。
+// 逾期未完成的待办也要留，否则「今天」会把它永久藏起来；但「今天新建、明天才到期」不算今天——
+// 那是明天的事。没有日期也没有调度的待办始终留在清单里（inbox），否则新建后立刻消失。
+export function isTaskInDayScope(task, { timeZone, dateKey } = {}) {
+	if (!task) return false;
+	const key = dateKey || localDateKey(new Date(), timeZone);
+	const done = task.status === 'done';
+	const due = task.dueAtUtc ? localDateKey(task.dueAtUtc, timeZone) : '';
+	if (due) {
+		if (due === key) return true;
+		return due < key && !done;
+	}
+	const stamps = [task.nextRunAtUtc, task.lastRunAtUtc, task.completedAtUtc];
+	if (stamps.some((value) => Boolean(value) && localDateKey(value, timeZone) === key)) return true;
+	return (task.kind || 'none') === 'none' && !done;
+}
+
+// 待办截止日文案：在「今天」范围里，用户要靠这行看出它为什么出现在这里。
+export function todoDueState(task, { timeZone, dateKey } = {}) {
+	if (!task?.dueAtUtc) return null;
+	const due = localDateKey(task.dueAtUtc, timeZone);
+	if (!due) return null;
+	const today = dateKey || localDateKey(new Date(), timeZone);
+	const days = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${due}T00:00:00Z`)) / 86_400_000);
+	if (days === 0) return { text: '截止：今天', overdue: false };
+	if (days === -1) return { text: '截止：明天', overdue: false };
+	// 已完成的待办不再喊逾期，只留一个中性日期。
+	if (days > 0 && task.status !== 'done') return { text: `逾期 ${days} 天`, overdue: true };
+	return { text: `截止：${due.slice(5)}`, overdue: false };
+}
+
+export function filterTasks(tasks = [], { query = '', status = 'all', scope = 'all', timeZone, dateKey } = {}) {
 	const keyword = query.trim().toLowerCase();
 	return tasks.filter((task) => {
 		if (status !== 'all' && task.status !== status) return false;
+		if (scope === 'today' && !isTaskInDayScope(task, { timeZone, dateKey })) return false;
 		if (!keyword) return true;
 		return [task.title, task.notes, task.prompt]
 			.some((value) => String(value ?? '').toLowerCase().includes(keyword));

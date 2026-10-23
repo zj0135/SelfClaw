@@ -8,7 +8,7 @@ import AutomationTaskPanel from '../components/automation/AutomationTaskPanel.vu
 import { browserTimeZone, useAutomation } from '../composables/useAutomation';
 import { useConfirm } from '../composables/useConfirm';
 import { useToast } from '../composables/useToast';
-import { createTaskForm, filterRuns, filterTasks, taskToForm, utcIsoToLocalInput } from '../renderers/automationEvents';
+import { createTaskForm, filterRuns, filterTasks, localDateKey, taskToForm, utcIsoToLocalInput } from '../renderers/automationEvents';
 
 const {
 	tasks, calendar, runs, settings, historyBytes, loading, error, record, recordLoading,
@@ -24,11 +24,20 @@ const dialog = ref({ open: false, saving: false, form: createTaskForm({ timeZone
 const activeTab = ref('tasks');
 const query = ref('');
 const runStatus = ref('all');
+// 清单默认只看今天；分钟 ticker 让「今天」在跨午夜后自己翻页。
+const taskScope = ref('today');
+const todayKey = ref(localDateKey(new Date(), timeZone));
+let dayTicker = 0;
 const pending = ref({});
 const deleting = ref({});
 
 const taskTitleById = computed(() => Object.fromEntries(tasks.value.map((task) => [task.id, task.title])));
-const visibleTasks = computed(() => filterTasks(tasks.value, { query: query.value }));
+const visibleTasks = computed(() => filterTasks(tasks.value, {
+	query: query.value,
+	scope: taskScope.value,
+	timeZone,
+	dateKey: todayKey.value,
+}));
 const visibleRuns = computed(() => filterRuns(runs.value, { query: query.value, status: runStatus.value })
 	.map((run) => ({ ...run, taskTitle: taskTitleById.value[run.taskId] })));
 const drawerOpen = computed(() => Boolean(record.value) || recordLoading.value);
@@ -201,6 +210,9 @@ function onWindowFocus() {
 
 onMounted(async () => {
 	window.addEventListener('focus', onWindowFocus);
+	dayTicker = window.setInterval(() => {
+		todayKey.value = localDateKey(new Date(), timeZone);
+	}, 60_000);
 	await loadSettings();
 	await refresh();
 	await loadRuns({ status: 'all' });
@@ -208,6 +220,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
 	window.removeEventListener('focus', onWindowFocus);
+	window.clearInterval(dayTicker);
 });
 
 watch(activeTab, (tab) => {
@@ -242,10 +255,12 @@ watch(runStatus, (status) => {
 				</template>
 			</AutomationCalendar>
 			<AutomationTaskPanel :tasks="visibleTasks" :runs="visibleRuns" :active-tab="activeTab"
-				:query="query" :run-status="runStatus" :time-zone="timeZone" :pending="pending"
+				:query="query" :run-status="runStatus" :task-scope="taskScope" :total-tasks="tasks.length"
+				:time-zone="timeZone" :date-key="todayKey" :pending="pending"
 				:deleting="deleting" :history-bytes="historyBytes"
 				@update:active-tab="activeTab = $event" @update:query="query = $event"
-				@update:run-status="runStatus = $event" @create="openCreate()" @edit="openEdit"
+				@update:run-status="runStatus = $event" @update:task-scope="taskScope = $event"
+				@create="openCreate()" @edit="openEdit"
 				@run-now="runNow" @toggle-enabled="toggleEnabled" @toggle-status="toggleStatus"
 				@open-run="openRun($event.id)" @delete-run="confirmDeleteRun"
 				@clear-history="confirmClearTaskHistory" @delete-task="confirmDeleteTask" />

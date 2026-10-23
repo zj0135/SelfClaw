@@ -56,6 +56,41 @@ test('open automation, create a recurring task, project it onto the calendar, an
 	expect(errors).toEqual([]);
 });
 
+test('limits the checklist to today until the scope is switched to the full list', async ({ page }) => {
+	const errors = [];
+	page.on('pageerror', (error) => errors.push(error.message));
+
+	await page.locator('.sidebar .tool-btn').filter({ hasText: '自动化' }).click();
+	await expect(page.locator('.automation-view')).toBeVisible();
+	await expect(page.locator('.automation-task').filter({ hasText: '示例定时任务' })).toBeVisible();
+
+	// 注入一个下周才到期的待办：它不该出现在今天的清单里。
+	await page.evaluate(() => {
+		const day = 86_400_000;
+		window.automationFixture.tasks.push({
+			id: 'later-task', title: '下周才做的事', notes: '', kind: 'none', schedule: null,
+			nextRunAtUtc: null, prompt: null, instructions: '', toolPolicy: 'system',
+			pluginIds: [], skillIds: [], mcpServerIds: [], modelProfileId: null, workspaceRootId: null,
+			toolPermissionMode: 'requireApproval', status: 'open', isEnabled: true,
+			lastRunAtUtc: null, lastRunStatus: null, historyBytes: 0,
+			dueAtUtc: new Date(Date.now() + 7 * day).toISOString(),
+			createdAtUtc: new Date(Date.now() - 10 * day).toISOString(),
+		});
+		window.automationFixture.send({ type: 'automation/changed', reason: 'task-saved', taskId: 'later-task' });
+	});
+
+	await page.locator('.automation-scope-btn').filter({ hasText: '全部' }).click();
+	await expect(page.locator('.automation-task')).toHaveCount(2);
+	await expect(page.locator('.automation-task').filter({ hasText: '下周才做的事' })).toBeVisible();
+
+	await page.locator('.automation-scope-btn').filter({ hasText: '今天' }).click();
+	await expect(page.locator('.automation-task')).toHaveCount(1);
+	await expect(page.locator('.automation-task').filter({ hasText: '下周才做的事' })).toHaveCount(0);
+
+	await page.screenshot({ path: 'test-results/automation-day-scope.png', fullPage: true });
+	expect(errors).toEqual([]);
+});
+
 test('rejects a trigger without a prompt in the dialog', async ({ page }) => {
 	await page.locator('.sidebar .tool-btn').filter({ hasText: '自动化' }).click();
 	await page.locator('.automation-primary').click();
@@ -81,11 +116,12 @@ test('deletes a run record and clears task history through confirmation', async 
 	await expect(page.locator('.automation-run')).toHaveCount(0);
 
 	await page.getByRole('tab', { name: /清单/ }).click();
-	await expect(page.locator('.automation-meta-item').filter({ hasText: '历史：' })).toHaveCount(1);
-	await page.locator('.automation-icon-btn[title="清空该任务历史"]').first().click();
+	const clearTaskHistory = page.locator('.automation-icon-btn[title="清空该任务历史"]');
+	await expect(clearTaskHistory).toHaveCount(1);
+	await clearTaskHistory.first().click();
 	await expect(page.locator('.confirm')).toBeVisible();
 	await page.locator('.confirm-btn.primary').click();
-	await expect(page.locator('.automation-meta-item').filter({ hasText: '历史：' })).toHaveCount(0);
+	await expect(clearTaskHistory).toHaveCount(0);
 
 	expect(errors).toEqual([]);
 });

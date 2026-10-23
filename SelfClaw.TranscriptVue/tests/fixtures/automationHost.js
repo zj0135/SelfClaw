@@ -12,6 +12,7 @@ export function installAutomationHost() {
 		prompt: 'produce the daily digest', instructions: '', toolPolicy: 'system',
 		pluginIds: [], skillIds: [], mcpServerIds: [], modelProfileId: null, workspaceRootId: null,
 		toolPermissionMode: 'fullAccess', status: 'open', isEnabled: true, historyBytes: 2048,
+		createdAtUtc: iso(Date.now()),
 	}];
 	const runs = [{
 		id: seedRunId, taskId: seedTaskId, trigger: 'scheduled', status: 'completed',
@@ -62,6 +63,7 @@ export function installAutomationHost() {
 			tasks.push(saved);
 		}
 		saved.nextRunAtUtc = saved.kind && saved.kind !== 'none' ? iso(Date.now() + 3_600_000) : null;
+		saved.createdAtUtc = saved.createdAtUtc || iso(Date.now());
 		reply(request, { ok: true, task: saved, nextRunAtUtc: saved.nextRunAtUtc });
 		send({ type: 'automation/changed', reason: 'task-saved', taskId: id });
 	}
