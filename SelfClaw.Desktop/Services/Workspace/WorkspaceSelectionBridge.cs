@@ -118,11 +118,9 @@ internal sealed class WorkspaceSelectionBridge
     {
         var selected = _selectionController.SelectedWorkspaceRoot;
         var roots = _selectionController.WorkspaceRoots;
-        GitWorkspaceState? gitState = null;
-        if (selected is not null && _gitWorkspaceQuery is not null)
-        {
-            gitState = await _gitWorkspaceQuery.GetStateAsync(selected, cancellationToken).ConfigureAwait(false);
-        }
+        var gitState = selected is null || _gitWorkspaceQuery is null
+            ? null
+            : await ResolveGitStateAsync(selected, cancellationToken).ConfigureAwait(false);
 
         var currentPath = selected?.RootPath;
         var currentIsFallback = false;
@@ -167,6 +165,93 @@ internal sealed class WorkspaceSelectionBridge
             commonFolders = BuildCommonFolders()
         };
     }
+
+    #region Git state reuse
+
+    // 一次「添加/删除工作目录」会连着产生两个 selection 回包：操作本身那个，和紧接着由会话切换
+    // 触发的一次读取。两者描述的是同一个根，各自探测一遍就是同一批 git 进程跑两次——每多一个仓库根
+    // 多 8 个 git.exe、约一秒。这里按「根」去重，只影响 git 探测，不改变回包描述的是哪个根：
+    //   · 并发的那次直接等同一次探测的结果，不再另起进程；
+    //   · 紧随其后的那次在短暂窗口内复用刚拿到的状态。
+    // 换根、删除根都不受影响（状态以根 id 为键），显式刷新走 get-git-state，不经过这里。
+    private const long GitStateReuseWindowMs = 1000;
+
+    private readonly object _gitStateGate = new();
+    private readonly Dictionary<Guid, GitStateProbe> _gitStateProbes = [];
+
+    private sealed record GitStateProbe(Task<GitWorkspaceState>? InFlight, GitWorkspaceState? State, long ProbedAt);
+
+    private Task<GitWorkspaceState> ResolveGitStateAsync(WorkspaceRoot root, CancellationToken cancellationToken)
+    {
+        Task<GitWorkspaceState> probe;
+        lock (_gitStateGate)
+        {
+            PruneGitStateProbes();
+            var existing = _gitStateProbes.GetValueOrDefault(root.Id);
+            if (existing?.InFlight is { } inFlight)
+            {
+                probe = inFlight;
+            }
+            else if (existing?.State is { } reusable &&
+                     Environment.TickCount64 - existing.ProbedAt < GitStateReuseWindowMs)
+            {
+                return Task.FromResult(reusable);
+            }
+            else
+            {
+                probe = StartGitStateProbe(root);
+            }
+        }
+
+        // 共用的探测跑在 CancellationToken.None 上，每个等待者各自按自己的令牌取消，
+        // 于是一个调用方取消不会连带让另一个调用方失败，也不会中断已在跑的 git 进程。
+        return cancellationToken.CanBeCanceled ? probe.WaitAsync(cancellationToken) : probe;
+    }
+
+    private Task<GitWorkspaceState> StartGitStateProbe(WorkspaceRoot root)
+    {
+        var completion = new TaskCompletionSource<GitWorkspaceState>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // 先登记再启动：探测可能在启动过程中同步完成，反过来的顺序会把已写好的结果盖回「进行中」。
+        _gitStateProbes[root.Id] = new GitStateProbe(completion.Task, null, Environment.TickCount64);
+        _ = RunGitStateProbeAsync(root, completion);
+        return completion.Task;
+    }
+
+    private async Task RunGitStateProbeAsync(WorkspaceRoot root, TaskCompletionSource<GitWorkspaceState> completion)
+    {
+        try
+        {
+            var state = await _gitWorkspaceQuery!.GetStateAsync(root, CancellationToken.None).ConfigureAwait(false);
+            lock (_gitStateGate) _gitStateProbes[root.Id] = new GitStateProbe(null, state, Environment.TickCount64);
+            completion.TrySetResult(state);
+        }
+        catch (Exception exception)
+        {
+            // 失败不进缓存：下一个请求应该重新探测，而不是继承这次错误。
+            lock (_gitStateGate) _gitStateProbes.Remove(root.Id);
+            completion.TrySetException(exception);
+        }
+    }
+
+    private void PruneGitStateProbes()
+    {
+        if (_gitStateProbes.Count == 0)
+        {
+            return;
+        }
+
+        var now = Environment.TickCount64;
+        var expired = _gitStateProbes
+            .Where(entry => entry.Value.InFlight is null && now - entry.Value.ProbedAt >= GitStateReuseWindowMs)
+            .Select(entry => entry.Key)
+            .ToArray();
+        foreach (var workspaceRootId in expired)
+        {
+            _gitStateProbes.Remove(workspaceRootId);
+        }
+    }
+
+    #endregion
 
     #region Working-directory tree
 

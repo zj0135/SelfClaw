@@ -372,7 +372,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
 
         await _workspaces.DeleteRootAsync(workspaceRootId);
-        await ReloadWorkspaceRootsAsync();
+        // 删掉一个根不会改变其他根的 git 状态，重新探测它们只是把同一批 git 进程再跑一遍：
+        // 每个仓库根要起 8 个 git.exe，五个根就是四秒。列表数据本来就随根一起从库里读出来了，
+        // 需要新 git 状态的地方（选中根的详情、显式刷新）自己会去探测。
+        await ReloadWorkspaceRootListAsync();
         await ReloadConversationsAsync();
     }
 
@@ -430,7 +433,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     {
         var version = _selectionVersion;
         var root = await _workspaces.AddAsync(rootPath);
-        await ReloadWorkspaceRootsAsync();
+        // 添加一个目录只写一行 workspace_roots；重载列表不需要为此重新探测所有已登记的根
+        // （每根 8 个 git.exe）。新根自身的 git 状态由工作区桥在回包时按需探测一次。
+        await ReloadWorkspaceRootListAsync();
         if (version == _selectionVersion)
         {
             SelectWorkspaceRoot(_workspaceRoots.FirstOrDefault(item => item.Id == root.Id) ?? root, publishShell: false);

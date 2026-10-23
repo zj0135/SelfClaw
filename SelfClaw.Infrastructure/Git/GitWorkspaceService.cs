@@ -56,13 +56,32 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
         }
 
         var commonDirectory = ResolveGitPath(workspaceRoot.RootPath, commonDirectoryResult.StandardOutput.Trim());
-        var repositoryRootResult = await RunGitAsync(
+
+        // 下面六次探测互不依赖，共同的前提只有「这确实是一个 git 仓库」——上头那条已经确认了。
+        // 每一次都是一份独立的 git.exe 启动开销，串行执行等于把它们加起来。先全部发出去再统一收，
+        // 判定顺序仍然保持原样（先看是否有工作区顶层，再看 HEAD 是否可读）。
+        var repositoryRootTask = RunGitAsync(
             workspaceRoot.RootPath,
             ["rev-parse", "--show-toplevel"],
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken);
+        var headTask = RunGitAsync(workspaceRoot.RootPath, ["rev-parse", "HEAD"], cancellationToken);
+        var branchTask = ReadBranchNameAsync(workspaceRoot.RootPath, cancellationToken);
+        var worktreesTask = ReadWorktreesAsync(workspaceRoot.RootPath, workspaceRoot.RootPath, cancellationToken);
+        var statusTask = ReadStatusAsync(workspaceRoot.RootPath, cancellationToken);
+        var checkoutTask = _store.GetCheckoutAsync(workspaceRoot.Id, cancellationToken);
+        await Task.WhenAll(repositoryRootTask, headTask, branchTask, worktreesTask, statusTask, checkoutTask)
+            .ConfigureAwait(false);
+
+        var repositoryRootResult = await repositoryRootTask.ConfigureAwait(false);
         if (!repositoryRootResult.Succeeded)
         {
             return CreateNotRepository(repositoryRootResult.Message);
+        }
+
+        var headResult = await headTask.ConfigureAwait(false);
+        if (!headResult.Succeeded)
+        {
+            return CreateNotRepository(headResult.Message);
         }
 
         var currentCheckoutRootPath = Path.GetFullPath(repositoryRootResult.StandardOutput.Trim());
@@ -76,20 +95,11 @@ internal sealed class GitWorkspaceService : IGitWorkspaceQuery, IGitWorkspaceMan
             now,
             now);
 
-        var checkout = await _store.GetCheckoutAsync(workspaceRoot.Id, cancellationToken).ConfigureAwait(false);
-        var branchName = await ReadBranchNameAsync(workspaceRoot.RootPath, cancellationToken).ConfigureAwait(false);
-        var headResult = await RunGitAsync(workspaceRoot.RootPath, ["rev-parse", "HEAD"], cancellationToken).ConfigureAwait(false);
-        if (!headResult.Succeeded)
-        {
-            return CreateNotRepository(headResult.Message);
-        }
-
-        var worktrees = await ReadWorktreesAsync(
-            workspaceRoot.RootPath,
-            workspaceRoot.RootPath,
-            cancellationToken).ConfigureAwait(false);
+        var checkout = await checkoutTask.ConfigureAwait(false);
+        var branchName = await branchTask.ConfigureAwait(false);
+        var worktrees = await worktreesTask.ConfigureAwait(false);
         var branches = await ReadBranchesAsync(workspaceRoot.RootPath, branchName, worktrees, cancellationToken).ConfigureAwait(false);
-        var (isDirty, hasConflicts) = await ReadStatusAsync(workspaceRoot.RootPath, cancellationToken).ConfigureAwait(false);
+        var (isDirty, hasConflicts) = await statusTask.ConfigureAwait(false);
         var selectedBranch = branches.FirstOrDefault(item => item.IsCurrent);
         var (ahead, behind) = await ReadAheadBehindAsync(
             workspaceRoot.RootPath,

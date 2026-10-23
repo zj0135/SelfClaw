@@ -24,13 +24,34 @@ internal sealed class ConversationWorkspaceService
     public Task<IReadOnlyList<WorkspaceRoot>> ListRootsAsync(CancellationToken cancellationToken = default)
         => _roots.ListWorkspaceRootsAsync(cancellationToken);
 
+    // 探测一个仓库根是 8 次 git.exe 启动（本机每次约 100ms，几乎全是进程启动开销）。
+    // 串行执行等于把根数直接乘进延迟：三个仓库根就是三秒。各根的探测互不依赖，
+    // 并发跑只受 git 进程数约束，所以这里并发、并给它一个小上界，
+    // 免得一次刷新把机器塞满 git.exe（每个根内部本身也已经并行）。
+    private const int MaxConcurrentProbes = 3;
+
     public async Task<IReadOnlyList<WorkspaceRoot>> ListAsync(CancellationToken cancellationToken = default)
     {
         var roots = await _roots.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false);
-        if (_query is null) return roots;
-        foreach (var root in roots)
-            await _query.GetStateAsync(root, cancellationToken).ConfigureAwait(false);
+        if (_query is null || roots.Count == 0) return roots;
+
+        using var throttle = new SemaphoreSlim(MaxConcurrentProbes, MaxConcurrentProbes);
+        await Task.WhenAll(roots.Select(ProbeAsync)).ConfigureAwait(false);
+        // 探测顺带把 git 元数据写回了库，列表本身要按写后的结果重读。
         return await _roots.ListWorkspaceRootsAsync(cancellationToken).ConfigureAwait(false);
+
+        async Task ProbeAsync(WorkspaceRoot root)
+        {
+            await throttle.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await _query.GetStateAsync(root, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                throttle.Release();
+            }
+        }
     }
 
     public async Task<WorkspaceRoot> AddAsync(string rootPath, CancellationToken cancellationToken = default)

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Workspace;
 using SelfClaw.Desktop.Services.Workspace.Abstractions;
@@ -91,6 +92,103 @@ public sealed class WorkspaceSelectionBridgeTests
             }
 
             return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// 添加/删除工作目录会连带产生两个 selection 回包（操作本身 + 随后由会话切换触发的读取）。
+    /// 两者描述同一个根，各探测一遍就是同一批 git 进程跑两次——每个仓库根 8 个 git.exe。
+    /// 这两条测试把「同一个根只探测一次」钉住，同时保证换根仍然会重新探测。
+    /// </summary>
+    [Fact]
+    public async Task Repeated_selection_reads_probe_git_once_for_the_same_root()
+    {
+        var controller = new FakeWorkspaceSelectionController();
+        await controller.SelectOrAddWorkspaceRootAsync(@"E:\work");
+        var query = new CountingWorkspaceQuery();
+        var bridge = CreateBridge(controller, query);
+
+        await ReadSelectionAsync(bridge);
+        await ReadSelectionAsync(bridge);
+
+        query.Calls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Selecting_another_root_probes_git_again()
+    {
+        var controller = new FakeWorkspaceSelectionController();
+        var first = await controller.SelectOrAddWorkspaceRootAsync(@"E:\work");
+        await controller.SelectOrAddWorkspaceRootAsync(@"E:\other");
+        var query = new CountingWorkspaceQuery();
+        var bridge = CreateBridge(controller, query);
+
+        await ReadSelectionAsync(bridge);
+        controller.SelectWorkspaceRoot(first.Id);
+        await ReadSelectionAsync(bridge);
+
+        // 复用只按根生效：两次回包描述的是不同的根，所以必须各自探测。
+        query.Calls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Overlapping_selection_reads_share_one_git_probe()
+    {
+        var controller = new FakeWorkspaceSelectionController();
+        await controller.SelectOrAddWorkspaceRootAsync(@"E:\work");
+        var query = new CountingWorkspaceQuery(hold: true);
+        var bridge = CreateBridge(controller, query);
+
+        var first = ReadSelectionAsync(bridge);
+        await query.Entered.Task;
+        // 第一次探测还在等放手，第二次请求同步走到同一份在途探测上。
+        var second = ReadSelectionAsync(bridge);
+        query.Release();
+        await Task.WhenAll(first, second);
+
+        query.Calls.Should().Be(1);
+    }
+
+    private static WorkspaceSelectionBridge CreateBridge(
+        FakeWorkspaceSelectionController controller,
+        IGitWorkspaceQuery query)
+        => new(controller, new FakeWorkspaceFolderPicker(null), new WorkspaceToolService(new(), new(), new()), query);
+
+    private static async Task ReadSelectionAsync(WorkspaceSelectionBridge bridge)
+    {
+        using var request = JsonDocument.Parse("""
+            { "type": "get-workspace-selection", "requestId": "selection-1" }
+            """);
+        await bridge.TryHandleAsync("get-workspace-selection", request.RootElement, ownerHandle: 0);
+    }
+
+    private sealed class CountingWorkspaceQuery : IGitWorkspaceQuery
+    {
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _calls;
+
+        public CountingWorkspaceQuery(bool hold = false)
+        {
+            if (!hold) _gate.TrySetResult();
+        }
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        /// <summary>第一次探测进入后完成，用来把第二个请求安排到「探测在途」的时间点上。</summary>
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Release() => _gate.TrySetResult();
+
+        public async Task<GitWorkspaceState> GetStateAsync(
+            WorkspaceRoot workspaceRoot,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _calls);
+            Entered.TrySetResult();
+            await _gate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return new GitWorkspaceState(
+                true, true, null, Guid.NewGuid(), "repository", workspaceRoot.RootPath,
+                "main", "sha", false, false, 0, 0, false, null, null, false, [], []);
         }
     }
 

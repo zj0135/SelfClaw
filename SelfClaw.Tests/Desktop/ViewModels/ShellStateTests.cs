@@ -126,15 +126,19 @@ public sealed class ShellStateTests
         await first;
         context.ViewModel.WorkspaceRoots.Should().ContainSingle();
 
+        // 不存在的路径由仓储层在写入前拒绝，所以下面这次重试从同样的状态出发。
         var added = Path.Combine(context.RootPath, "added");
+        await FluentActions.Awaiting(() => context.ViewModel.SelectOrAddWorkspaceRootAsync(added))
+            .Should().ThrowAsync<DirectoryNotFoundException>();
+        context.ViewModel.WorkspaceRoots.Should().ContainSingle();
+
         Directory.CreateDirectory(added);
-        context.Query.PauseNext();
-        var add = context.ViewModel.SelectOrAddWorkspaceRootAsync(added);
-        await context.Query.Entered.Task;
-        context.Query.Release.TrySetException(new IOException("delayed read failed"));
-        await FluentActions.Awaiting(() => add).Should().ThrowAsync<IOException>();
         await context.ViewModel.SelectOrAddWorkspaceRootAsync(added);
         context.ViewModel.WorkspaceRoots.Should().HaveCount(2);
+
+        // 添加一个工作目录不应该重新探测所有已登记根目录的 git 状态：每次探测都是若干个 git.exe
+        // 进程，正是它让这个动作要花好几秒。新根自己的状态由工作区桥在回包时按需探测。
+        context.Query.Calls.Should().Be(0);
     });
 
     [Fact]
@@ -260,11 +264,14 @@ public sealed class ShellStateTests
     private sealed class DelayedQuery : IGitWorkspaceQuery
     {
         private bool _pause;
+        private int _calls;
         public TaskCompletionSource Entered { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Calls => Volatile.Read(ref _calls);
         public void PauseNext() { _pause = true; Entered = new(TaskCreationOptions.RunContinuationsAsynchronously); Release = new(TaskCreationOptions.RunContinuationsAsynchronously); }
         public async Task<GitWorkspaceState> GetStateAsync(WorkspaceRoot root, CancellationToken cancellationToken = default)
         {
+            Interlocked.Increment(ref _calls);
             if (_pause)
             {
                 _pause = false;
