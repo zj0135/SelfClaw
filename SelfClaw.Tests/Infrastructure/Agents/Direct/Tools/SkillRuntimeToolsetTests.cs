@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Extensions.Skills.Models;
+using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Tools;
 
@@ -177,6 +178,55 @@ public sealed class SkillRuntimeToolsetTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadSkillResource_serves_a_skill_whose_directory_is_a_link()
+    {
+        // Regression: a user Skill under %UserProfile%\.agents\skills is commonly a link into a working copy,
+        // and rejecting the root's own reparse point made every read of such a Skill fail.
+        var target = Path.Combine(_rootPath, "checkout", "teach");
+        var installPath = Path.Combine(_rootPath, "skills", "teach");
+        Directory.CreateDirectory(target);
+        await File.WriteAllTextAsync(Path.Combine(target, "guide.md"), "one\ntwo");
+        Directory.CreateDirectory(Path.GetDirectoryName(installPath)!);
+        if (!DirectoryLinkTestHelper.TryCreate(installPath, target))
+        {
+            return;
+        }
+
+        var skill = CreateInstalledSkill("teach", installPath, "instructions");
+        var tools = new SkillRuntimeToolset(new SkillScriptRunner()).CreateTools([skill], ["teach"]);
+
+        var page = await InvokeStringAsync(
+            FindFunction(tools, SkillRuntimeToolset.ReadSkillResourceToolName),
+            new() { ["skillId"] = "teach", ["relativePath"] = "guide.md" });
+
+        page.Should().Be("guide.md (lines 1-2 of 2)\none\ntwo");
+    }
+
+    [Fact]
+    public async Task ReadSkillResource_rejects_a_linked_directory_inside_the_skill()
+    {
+        var skill = CreateSkill("review", "instructions", ("references/guide.md", "guide"));
+        var outside = Path.Combine(_rootPath, "outside");
+        Directory.CreateDirectory(outside);
+        await File.WriteAllTextAsync(Path.Combine(outside, "secret.md"), "secret");
+        if (!DirectoryLinkTestHelper.TryCreate(Path.Combine(skill.InstallPath, "linked"), outside))
+        {
+            return;
+        }
+
+        var tools = new SkillRuntimeToolset(new SkillScriptRunner()).CreateTools([skill], ["review"]);
+        var read = FindFunction(tools, SkillRuntimeToolset.ReadSkillResourceToolName);
+
+        Func<Task> action = async () => await read.InvokeAsync(new AIFunctionArguments
+        {
+            ["skillId"] = "review",
+            ["relativePath"] = "linked/secret.md"
+        });
+
+        await action.Should().ThrowAsync<InvalidDataException>();
+    }
+
+    [Fact]
     public void CreateTools_binds_the_script_runner_as_an_approval_gated_run_tool()
     {
         var tools = new SkillRuntimeToolset(new SkillScriptRunner()).CreateTools([CreateSkill("review", "x")], []);
@@ -327,13 +377,7 @@ public sealed class SkillRuntimeToolsetTests : IDisposable
         resource.Should().NotContain("[script]");
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_rootPath))
-        {
-            Directory.Delete(_rootPath, true);
-        }
-    }
+    public void Dispose() => DirectoryLinkTestHelper.DeleteTree(_rootPath);
 
     private ResolvedSkill CreateSkill(
         string id,
@@ -349,6 +393,11 @@ public sealed class SkillRuntimeToolsetTests : IDisposable
             File.WriteAllText(path, file.Content);
         }
 
+        return CreateInstalledSkill(id, installPath, content);
+    }
+
+    private static ResolvedSkill CreateInstalledSkill(string id, string installPath, string content)
+    {
         var index = SkillResourceIndexer.IndexAsync(installPath, CancellationToken.None).GetAwaiter().GetResult();
         return new ResolvedSkill(id, id, $"{id} description", [], installPath, content, index);
     }

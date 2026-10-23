@@ -147,7 +147,7 @@ Skill 是受信任的指令与参考资料包，入口为 `SKILL.md`。SelfClaw 
 - 未显式激活的已绑定 Skill 只以紧凑目录暴露，模型可调用 `activate_skill` 按需加载。
 - 附加文件按扩展名分成两类，各有独立白名单：**资源**（`.md`/`.txt`/`.json`/`.yaml`/`.csv` 等）用 `read_skill_resource` 分页读取；**脚本**（`.ps1`/`.psm1`/`.sh`/`.py`/`.js`/`.mjs`/`.cjs`/`.cmd`/`.bat`）用 `run_skill_script` 执行。脚本也允许用 `read_skill_resource` 查看（便于确认参数），但返回文本带 `[script]` 标记与 `run_skill_script` 执行指引：**读取不等于执行**，不得以 shell 复刻脚本体。二进制扩展名两类都不收录。
 - `SkillResourceIndexer` 在包内容哈希下缓存一份清单（递归深度 ≤ 3、条目 ≤ 200，跳过 reparse point 与 `node_modules`/`__pycache__` 等噪声目录）；`activate_skill` 返回 `SKILL.md` 时一并附上清单，`list_skill_resources` 用于分页浏览完整清单。没有清单时模型只能从正文猜文件名。
-- 所有读取与执行路径都经 `SkillPathGuard`：拒绝绝对路径与 `..`、要求候选路径落在 Skill 根内、逐级拒绝 reparse point。
+- 所有读取与执行路径都经 `SkillPathGuard`：拒绝绝对路径与 `..`、要求候选路径落在 Skill 根内、在根**以下**逐级拒绝 reparse point。根自身不受检：它由用户或安装器选定而非包作者控制，`%UserProfile%\.agents\skills\<id>` 常常是 junction，拒绝它等于让这类 Skill 完全不可读。
 - `allowed-tools` 按规范解析并保留，但**不强制**：SelfClaw 的工具策略是回合级而非 Skill 级，无法在回合中途替换工具集。声明了 `allowed-tools` 的 Skill 会产生一条 `TurnDiagnostics.Degrade` 说明该限制未被强制执行。
 - frontmatter 的 `license`/`compatibility`/`metadata` 一并解析保留；无法识别的字段进入 `Warnings` 并转成降级提示，不再静默丢弃。
 
