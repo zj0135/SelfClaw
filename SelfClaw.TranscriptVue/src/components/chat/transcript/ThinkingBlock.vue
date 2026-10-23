@@ -1,7 +1,7 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { Sparkles, ChevronRight } from 'lucide-vue-next';
-import { useDeferredHtml } from '../../../composables/useDeferredHtml.js';
+import { useStreamingContent } from '../../../composables/useStreamingContent.js';
 import { renderMarkdown } from '../../../renderers/markdown.js';
 import { resolvePreviewImage } from '../../../renderers/previewImage.js';
 
@@ -14,6 +14,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['toggle', 'preview-image']);
+const contentContainerRef = ref(null);
 
 // 复刻旧 renderThinkingSegment 的判定：有内容才可展开；无内容但仍在思考时显示被动占位。
 const isPending = () => Boolean(props.segment.isPending);
@@ -24,8 +25,9 @@ const label = () => (isLive() ? '思考中...' : '思考完毕');
 const sourceHtml = computed(() => props.segment.markdown
 	? renderMarkdown(props.segment.markdown, { context: 'thinking' })
 	: '<p class="thinking-placeholder">Thinking content is streaming.</p>');
-const shouldDeferHtml = computed(() => isLive());
-const contentHtml = useDeferredHtml(sourceHtml, shouldDeferHtml);
+const isStreaming = computed(() => isLive());
+
+useStreamingContent(contentContainerRef, sourceHtml, isStreaming);
 
 function onContentClick(event) {
 	const preview = resolvePreviewImage(event.target);
@@ -55,7 +57,7 @@ function onContentClick(event) {
 			<span class="thinking-label" :class="{ 'shimmer-text': isLive() }">{{ label() }}</span>
 		</div>
 		<div v-if="hasContent() && open" class="thinking-content" @click="onContentClick">
-			<div class="thinking-markdown markdown-content" v-html="contentHtml"></div>
+			<div ref="contentContainerRef" class="thinking-markdown markdown-content"></div>
 		</div>
 	</section>
 </template>
@@ -149,6 +151,18 @@ function onContentClick(event) {
 	margin: 2px 0 4px 26px;
 	padding: 2px 0 2px 12px;
 	border-left: 1px solid var(--line-2);
+	animation: thinking-expand-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes thinking-expand-in {
+	from {
+		opacity: 0;
+		transform: translateY(-2px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
 }
 
 .thinking-markdown {

@@ -1,6 +1,6 @@
 <script setup>
-import { computed } from 'vue';
-import { useDeferredHtml } from '../../../composables/useDeferredHtml.js';
+import { computed, ref } from 'vue';
+import { useStreamingContent } from '../../../composables/useStreamingContent.js';
 import { renderMarkdown } from '../../../renderers/markdown.js';
 import { resolvePreviewImage } from '../../../renderers/previewImage.js';
 
@@ -12,13 +12,15 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['preview-image']);
+const containerRef = ref(null);
 
 // Both transcript surfaces use the same sanitized Markdown pipeline.
 const sourceHtml = computed(() => renderMarkdown(props.segment.markdown, {
 	context: props.item.role === 'user' ? 'user' : 'content',
 }));
-const shouldDeferHtml = computed(() => props.item.role === 'assistant' && props.item.isThinking);
-const html = useDeferredHtml(sourceHtml, shouldDeferHtml);
+const isStreaming = computed(() => props.item.role === 'assistant' && (Boolean(props.segment.isPending) || props.item.status === 'streaming'));
+
+useStreamingContent(containerRef, sourceHtml, isStreaming);
 
 // v-html 里的 <img> 不是组件元素，点击预览靠委托命中。
 function onClick(event) {
@@ -31,6 +33,6 @@ function onClick(event) {
 </script>
 
 <template>
-	<div class="body body-segment markdown-content" :class="{ first: isFirst, last: isLast }" @click="onClick"
-		v-html="html"></div>
+	<div ref="containerRef" class="body body-segment markdown-content" :class="{ first: isFirst, last: isLast }"
+		@click="onClick"></div>
 </template>

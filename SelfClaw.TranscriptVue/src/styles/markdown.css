@@ -155,3 +155,58 @@
 .message-cancelled {
 	color: var(--warning);
 }
+
+
+/* ── 流式渲染平滑物理淡入 ────────────────────────────────────
+ * 对标前沿先锋动效：文字与块级元素进入视图时带有微距上浮与轻微聚焦淡入，
+ * 彻底消除节流引起的断续跳跃与思考卡片一闪一闪。
+ */
+@keyframes stream-text-fade-in {
+	0% {
+		opacity: 0;
+		filter: blur(1.5px);
+		transform: translateY(2px);
+	}
+	100% {
+		opacity: 1;
+		filter: blur(0);
+		transform: translateY(0);
+	}
+}
+
+@keyframes stream-block-fade-in {
+	0% {
+		opacity: 0;
+		transform: translateY(3.5px);
+	}
+	100% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.stream-token {
+	display: inline;
+}
+
+.stream-token.stream-fade-in {
+	animation: stream-text-fade-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+	will-change: opacity, transform, filter;
+}
+
+.markdown-content .stream-fade-in:not(.stream-token),
+.markdown-content > .stream-fade-in {
+	animation: stream-block-fade-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+	will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.stream-token.stream-fade-in,
+	.markdown-content .stream-fade-in:not(.stream-token),
+	.markdown-content > .stream-fade-in {
+		animation: none !important;
+		filter: none !important;
+		transform: none !important;
+		opacity: 1 !important;
+	}
+}
