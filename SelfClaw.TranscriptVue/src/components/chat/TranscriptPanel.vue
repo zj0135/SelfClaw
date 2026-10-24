@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref } from 'vue';
 import MessageContent from './transcript/MessageContent.vue';
 import CompressionNotice from './transcript/CompressionNotice.vue';
 import TurnOutcome from './transcript/TurnOutcome.vue';
+import UserMessageNav from './transcript/UserMessageNav.vue';
 
 defineProps({
 	items: {
@@ -73,5 +74,6 @@ defineExpose({
 				</div>
 			</div>
 		</div>
+		<UserMessageNav :items="items" :get-scroll-el="() => scrollEl" />
 	</section>
 </template>

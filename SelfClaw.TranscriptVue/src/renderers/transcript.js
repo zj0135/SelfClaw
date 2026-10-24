@@ -203,3 +203,57 @@ export function buildRenderBlocks(item) {
 
 	return blocks;
 }
+
+// ── 用户输入纯文本提取与导航数据抽取 ────────────────────────────
+// 从用户消息中提取文字信息：过滤掉纯图片附件/非文本信息，连续空白与换行折叠为单空格。
+export function extractUserMessageText(item) {
+	if (!item) {
+		return '';
+	}
+
+	const segments = Array.isArray(item.segments) ? item.segments : [];
+	const textSegments = [];
+
+	for (const segment of segments) {
+		if (segment && (segment.kind === 'content' || !segment.kind)) {
+			const str = typeof segment.markdown === 'string'
+				? segment.markdown
+				: (typeof segment.text === 'string' ? segment.text : '');
+			if (str.trim()) {
+				textSegments.push(str.trim());
+			}
+		}
+	}
+
+	if (textSegments.length > 0) {
+		return textSegments.join(' ').replace(/\s+/g, ' ').trim();
+	}
+
+	if (typeof item.text === 'string' && item.text.trim()) {
+		return item.text.replace(/\s+/g, ' ').trim();
+	}
+
+	if (typeof item.content === 'string' && item.content.trim()) {
+		return item.content.replace(/\s+/g, ' ').trim();
+	}
+
+	return '';
+}
+
+export function extractUserNavItems(items) {
+	if (!Array.isArray(items)) {
+		return [];
+	}
+
+	const navItems = [];
+	for (const item of items) {
+		if (item && item.role === 'user') {
+			navItems.push({
+				id: item.id,
+				text: extractUserMessageText(item),
+			});
+		}
+	}
+
+	return navItems;
+}

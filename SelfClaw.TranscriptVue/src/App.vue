@@ -514,6 +514,7 @@ button {
 
 .panel,
 .transcript-panel {
+	position: relative;
 	height: auto;
 	min-height: 0;
 	display: flex;
