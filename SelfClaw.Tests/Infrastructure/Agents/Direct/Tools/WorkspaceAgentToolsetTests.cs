@@ -181,13 +181,38 @@ public sealed class WorkspaceAgentToolsetTests
         result.Should().BeOfType<DirectToolResult>().Which.Status.Should().Be(SelfClaw.Core.Runtime.Agent.ToolCallStatus.Canceled);
     }
 
+    [Fact]
+    public void Run_shell_command_description_follows_the_shell_preference()
+    {
+        var service = new FakeWorkspaceToolService();
+        var workspace = CreateWorkspace();
+
+        var descriptions = new[]
+        {
+            (WorkspaceShellKind.WindowsPowerShell, "Windows PowerShell"),
+            (WorkspaceShellKind.PowerShellSeven, "PowerShell 7"),
+            (WorkspaceShellKind.CommandPrompt, "cmd.exe"),
+            (WorkspaceShellKind.GitBash, "Git Bash"),
+        }.ToDictionary(
+            shell => shell.Item1,
+            shell => new WorkspaceAgentToolset(service)
+                .CreateTools(workspace, new WorkspaceShellPreference(shell.Item1))
+                .Single(binding => binding.Tool.Name == "run_shell_command")
+                .Tool.Description);
+
+        descriptions[WorkspaceShellKind.WindowsPowerShell].Should().Contain("Windows PowerShell");
+        descriptions[WorkspaceShellKind.PowerShellSeven].Should().Contain("PowerShell 7");
+        descriptions[WorkspaceShellKind.CommandPrompt].Should().Contain("cmd.exe");
+        descriptions[WorkspaceShellKind.GitBash].Should().Contain("Git Bash");
+    }
+
     private static ToolFixture CreateTools(FakeWorkspaceToolService service, WorkspaceRoot workspace,
         Guid conversationId, ToolPermissionMode mode, IToolApprovalHandler? approval)
     {
         var request = (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(Guid.NewGuid(), workspace);
         request = request with { ConversationId = conversationId, ToolPermissionMode = mode, ToolApprovalHandler = approval };
         var bindings = DirectTurnCapabilityResolver.BindTools(
-                request, new WorkspaceAgentToolset(service).CreateTools(workspace))
+                request, new WorkspaceAgentToolset(service).CreateTools(workspace, new WorkspaceShellPreference()))
             .ToArray();
         return new ToolFixture(
             bindings.Select(binding => (AITool)binding.Tool).ToArray(),
@@ -292,7 +317,8 @@ public sealed class WorkspaceAgentToolsetTests
             CancellationToken cancellationToken = default)
         {
             ShellCalls.Add((root, command, timeoutSeconds));
-            return Task.FromResult(new ShellCommandResult(command, true, 0, "ok", "", false, "done"));
+            return Task.FromResult(new ShellCommandResult(
+                command, WorkspaceShellKind.WindowsPowerShell, true, 0, "ok", "", false, "done"));
         }
     }
 }

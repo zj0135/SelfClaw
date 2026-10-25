@@ -5,6 +5,7 @@ using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
+using SelfClaw.Infrastructure.Tools.Workspace;
 using SelfClaw.Infrastructure.Agents.Direct;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -22,8 +23,7 @@ using SelfClaw.Infrastructure.Extensions.Abstractions;
 using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Mcp.Models;
 using SelfClaw.Infrastructure.Extensions.Models;
-using SelfClaw.Infrastructure.Extensions.Plugins;
-using SelfClaw.Infrastructure.Extensions.Skills;
+using SelfClaw.Infrastructure.Extensions.Plugins;using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Extensions;
 using SelfClaw.Infrastructure.Options;
 
@@ -662,6 +662,7 @@ public sealed class DirectAgentChatRuntimeTests
         var contentCache = new CapabilityContentCache();
         return new DirectTurnCapabilityResolver(
             new WorkspaceAgentToolset(workspaceTools ?? new NoOpWorkspaceTools()),
+            DefaultWorkspaceShellPreferenceSource.Instance,
             new EmptyExtensionPackageRepository(),
             new SkillCapabilitySource(skillPackageReader, new SkillTokenParser(), new SkillRuntimeToolset(new SkillScriptRunner()), contentCache),
             new PluginCapabilitySource(

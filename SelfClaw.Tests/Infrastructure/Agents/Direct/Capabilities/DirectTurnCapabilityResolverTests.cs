@@ -17,6 +17,7 @@ using SelfClaw.Infrastructure.Extensions.Plugins;
 using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Mcp.Models;
 using SelfClaw.Infrastructure.Options;
+using SelfClaw.Infrastructure.Tools.Workspace;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 using SelfClaw.Tests.TestDoubles;
 
@@ -183,6 +184,27 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         lease.SystemInstructions.Should().Contain(item => item.Contains("[SelfClaw Available Subagents]", StringComparison.Ordinal));
         lease.SystemInstructions.Should().Contain(item => item.Contains("Reviews delegated changes.", StringComparison.Ordinal));
         lease.Tools.Select(tool => tool.Name).Should().Contain(SubagentCapabilitySource.DelegateToolName);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_describes_run_shell_command_with_the_configured_shell()
+    {
+        // Parent and subagent turns share this resolver, so the shell the tool advertises - and runs -
+        // is decided here, once, for both.
+        var resolver = CreateResolver(
+            new PackageRepository([]),
+            CreateMcpSource(new McpRepository([]), new RecordingMcpClientManager(string.Empty)),
+            shellPreference: new StubShellPreferenceSource(WorkspaceShellKind.GitBash));
+        var now = DateTimeOffset.UtcNow;
+        var request = CreateRequest([], "run a command") with
+        {
+            WorkspaceRoot = new WorkspaceRoot(Guid.NewGuid(), "Workspace", _rootPath, now, now),
+        };
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        var shellTool = lease.Tools.Single(tool => tool.Name == "run_shell_command");
+        shellTool.Description.Should().Contain("Git Bash");
     }
 
     [Fact]
@@ -518,12 +540,14 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         PluginVersionLeaseManager? pluginVersionLeaseManager = null,
         CapabilityContentCache? contentCache = null,
         ISubagentDefinitionCatalog? definitionCatalog = null,
-        ISubagentTaskCoordinator? subagentCoordinator = null)
+        ISubagentTaskCoordinator? subagentCoordinator = null,
+        IWorkspaceShellPreferenceSource? shellPreference = null)
     {
         var limits = CreateLimits();
         contentCache ??= new CapabilityContentCache();
         return new DirectTurnCapabilityResolver(
             new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
+            shellPreference ?? DefaultWorkspaceShellPreferenceSource.Instance,
             repository,
             new SkillCapabilitySource(
                 new SkillPackageReader(limits),
@@ -973,5 +997,11 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         public Task<WorkspaceFileWriteResult> WriteFileAsync(string root, string path, string content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WorkspaceFileWriteResult> EditFileAsync(string root, string path, string oldText, string newText, bool replaceAll = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ShellCommandResult> RunShellCommandAsync(string root, string command, int timeout, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class StubShellPreferenceSource(WorkspaceShellKind kind) : IWorkspaceShellPreferenceSource
+    {
+        public Task<WorkspaceShellPreference> GetPreferenceAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new WorkspaceShellPreference(kind));
     }
 }

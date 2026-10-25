@@ -212,6 +212,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<WorkspaceFileService>();
         services.AddSingleton<WorkspaceSearchService>();
+        // A host that owns the settings file replaces this registration with its preference source.
+        services.AddSingleton<IWorkspaceShellPreferenceSource>(DefaultWorkspaceShellPreferenceSource.Instance);
         services.AddSingleton<WorkspaceShellRunner>();
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
         services.AddSingleton<WorkspaceAgentToolset>();

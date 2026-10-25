@@ -37,6 +37,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly ProgrammingAssistantSettingsBridge _programmingAssistantSettingsBridge;
     private readonly AppearanceSettingsBridge _appearanceSettingsBridge;
     private readonly DirectCompressionSettingsBridge _directCompressionSettingsBridge;
+    private readonly WorkspaceToolsSettingsBridge _workspaceToolsSettingsBridge;
     private readonly PetSettingsBridge _petSettingsBridge;
     private readonly WorkspaceSelectionBridge _workspaceSelectionBridge;
     private readonly GitWorkspaceBridge? _gitWorkspaceBridge;
@@ -66,6 +67,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         ProgrammingAssistantSettingsBridge programmingAssistantSettingsBridge,
         AppearanceSettingsBridge appearanceSettingsBridge,
         DirectCompressionSettingsBridge directCompressionSettingsBridge,
+        WorkspaceToolsSettingsBridge workspaceToolsSettingsBridge,
         PetSettingsBridge petSettingsBridge,
         WorkspaceSelectionBridge workspaceSelectionBridge,
         TerminalHostController terminalHostController,
@@ -89,6 +91,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _programmingAssistantSettingsBridge = programmingAssistantSettingsBridge;
         _appearanceSettingsBridge = appearanceSettingsBridge;
         _directCompressionSettingsBridge = directCompressionSettingsBridge;
+        _workspaceToolsSettingsBridge = workspaceToolsSettingsBridge;
         _petSettingsBridge = petSettingsBridge;
         _workspaceSelectionBridge = workspaceSelectionBridge;
         _gitWorkspaceBridge = gitWorkspaceBridge;
@@ -266,6 +269,13 @@ internal sealed class WebViewMessageRouter : IDisposable
             if (compression is null) throw new ArgumentException("Unsupported direct compression message.");
             _hostChannel.PostResponse(compression.Value.Response);
             return compression.Value.Command;
+        }
+        if (type.StartsWith("workspace-tools/", StringComparison.Ordinal))
+        {
+            var workspaceTools = await _workspaceToolsSettingsBridge.TryHandleAsync(type, payload, cancellationToken);
+            if (workspaceTools is null) throw new ArgumentException("Unsupported workspace tools message.");
+            _hostChannel.PostResponse(workspaceTools.Value.Response);
+            return workspaceTools.Value.Command;
         }
         if (type.StartsWith("terminal-", StringComparison.Ordinal))
         {

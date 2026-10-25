@@ -20,6 +20,7 @@ namespace SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolver
 {
     private readonly WorkspaceAgentToolset _workspaceToolset;
+    private readonly IWorkspaceShellPreferenceSource _shellPreference;
     private readonly IExtensionPackageRepository _packageRepository;
     private readonly SkillCapabilitySource _skillSource;
     private readonly PluginCapabilitySource _pluginSource;
@@ -28,6 +29,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
 
     public DirectTurnCapabilityResolver(
         WorkspaceAgentToolset workspaceToolset,
+        IWorkspaceShellPreferenceSource shellPreference,
         IExtensionPackageRepository packageRepository,
         SkillCapabilitySource skillSource,
         PluginCapabilitySource pluginSource,
@@ -35,6 +37,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         SubagentCapabilitySource subagentSource)
     {
         _workspaceToolset = workspaceToolset;
+        _shellPreference = shellPreference;
         _packageRepository = packageRepository;
         _skillSource = skillSource;
         _pluginSource = pluginSource;
@@ -71,9 +74,12 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         var policy = DirectTurnPolicy.For(request);
         var packages = await _packageRepository.ListPackagesAsync(cancellationToken).ConfigureAwait(false);
         var effectiveRequest = CreateEffectiveRequest(request, policy, packages, diagnostics);
+        // Read per turn so the run_shell_command binding (parent and subagent turns alike, they share
+        // this path) describes the shell the user currently has selected.
+        var shellPreference = await _shellPreference.GetPreferenceAsync(cancellationToken).ConfigureAwait(false);
         var bindings = effectiveRequest.WorkspaceRoot is null
             ? new List<DirectToolBinding>()
-            : _workspaceToolset.CreateTools(effectiveRequest.WorkspaceRoot).ToList();
+            : _workspaceToolset.CreateTools(effectiveRequest.WorkspaceRoot, shellPreference).ToList();
         ValidateCapturedPackageCeiling(effectiveRequest, policy, packages);
         var installedSkills = packages
             .Where(package => package.Kind == ExtensionKind.Skill)

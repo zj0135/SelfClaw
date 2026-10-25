@@ -19,7 +19,9 @@ internal sealed class WorkspaceAgentToolset
         _workspaceTools = workspaceTools;
     }
 
-    public IReadOnlyList<DirectToolBinding> CreateTools(WorkspaceRoot workspaceRoot)
+    public IReadOnlyList<DirectToolBinding> CreateTools(
+        WorkspaceRoot workspaceRoot,
+        WorkspaceShellPreference shellPreference)
     {
         ArgumentNullException.ThrowIfNull(workspaceRoot);
         var bound = new BoundWorkspaceTools(
@@ -62,7 +64,7 @@ internal sealed class WorkspaceAgentToolset
                 "write_file for changes to large files.",
                 ToolCallKind.Edit, FormatWrite, "Edit workspace file", requiresApproval: true),
             Bind<ShellCommandResult>(bound.RunShellCommandAsync, "run_shell_command",
-                "Run a PowerShell command with the current workspace as its working directory.",
+                WorkspaceShellText.ToolDescription(shellPreference.ShellKind),
                 ToolCallKind.Run, FormatShell, "Run workspace shell command", requiresApproval: true)
         ];
     }
@@ -175,7 +177,9 @@ internal sealed class WorkspaceAgentToolset
                 cancellationToken);
 
         public Task<ShellCommandResult> RunShellCommandAsync(
-            [Description("PowerShell command to run in the workspace root.")] string command,
+            // The active shell (and its syntax) is named in the tool description; this parameter only
+            // carries the command itself.
+            [Description("Command to run in the workspace root with the active shell.")] string command,
             [Description("Maximum execution time in seconds, from 1 to 600.")] int timeoutSeconds,
             CancellationToken cancellationToken)
             => _workspaceTools.RunShellCommandAsync(

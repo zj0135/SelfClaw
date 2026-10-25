@@ -132,7 +132,8 @@ internal sealed class WorkspaceToolService : IWorkspaceToolService
         if (result.ExitCode is int exitCode && exitCode != 0)
         {
             _logger.LogWarning(
-                "Workspace PowerShell command exited with a non-zero code. WorkspaceRoot={WorkspaceRoot}, ExitCode={ExitCode}",
+                "Workspace {ShellName} command exited with a non-zero code. WorkspaceRoot={WorkspaceRoot}, ExitCode={ExitCode}",
+                WorkspaceShellText.Name(result.ShellKind),
                 workspaceRootPath,
                 exitCode);
         }

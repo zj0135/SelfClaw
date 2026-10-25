@@ -33,8 +33,11 @@ internal static class ProcessRunner
         startInfo.RedirectStandardOutput = true;
         startInfo.RedirectStandardError = true;
         startInfo.CreateNoWindow = true;
-        startInfo.StandardOutputEncoding = Encoding.UTF8;
-        startInfo.StandardErrorEncoding = Encoding.UTF8;
+        // UTF-8 is the right decode for every caller that emits it deliberately (PowerShell is scripted to,
+        // bash and the CLIs are native UTF-8); a caller whose child writes another code page sets its own
+        // encodings on the start info first, because there is no way to detect it from the byte stream.
+        startInfo.StandardOutputEncoding ??= Encoding.UTF8;
+        startInfo.StandardErrorEncoding ??= Encoding.UTF8;
         var boundedTimeoutSeconds = ClampTimeoutSeconds(timeoutSeconds);
         var timeout = TimeSpan.FromSeconds(boundedTimeoutSeconds);
 

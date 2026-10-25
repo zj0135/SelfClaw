@@ -168,6 +168,11 @@ internal static class DesktopServiceRegistration
         // Infrastructure 先注册了关闭压缩的默认策略；单服务解析取最后一次注册，这条覆盖它。
         services.AddSingleton<IDirectCompressionPolicySource>(services =>
             services.GetRequiredService<DirectCompressionSettingsService>());
+        services.AddSingleton<WorkspaceToolsSettingsService>();
+        services.AddSingleton<WorkspaceToolsSettingsBridge>();
+        // 同上：覆盖 Infrastructure 注册的默认 shell 偏好源（Windows PowerShell）。
+        services.AddSingleton<IWorkspaceShellPreferenceSource>(services =>
+            services.GetRequiredService<WorkspaceToolsSettingsService>());
         services.AddSingleton<AiProviderSettingsBridge>();
         services.AddSingleton<ExtensionSettingsBridge>();
         services.AddSingleton<AgentSettingsService>();
@@ -219,6 +224,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<ProgrammingAssistantSettingsBridge>(),
             services.GetRequiredService<AppearanceSettingsBridge>(),
             services.GetRequiredService<DirectCompressionSettingsBridge>(),
+            services.GetRequiredService<WorkspaceToolsSettingsBridge>(),
             services.GetRequiredService<PetSettingsBridge>(),
             services.GetRequiredService<WorkspaceSelectionBridge>(),
             services.GetRequiredService<TerminalHostController>(),

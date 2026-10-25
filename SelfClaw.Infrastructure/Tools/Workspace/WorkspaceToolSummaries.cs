@@ -33,13 +33,16 @@ internal static class WorkspaceToolSummaries
                 : $"Created {result.RelativePath}.";
 
     public static string Summarize(ShellCommandResult result)
-        => !result.Executed
+    {
+        var name = WorkspaceShellText.Name(result.ShellKind);
+        return !result.Executed
             ? result.Message
             : result.ExitCode == 0
                 ? result.OutputTruncated
-                    ? "PowerShell command completed (output truncated)."
-                    : "PowerShell command completed."
-                : $"PowerShell exited with code {result.ExitCode}.";
+                    ? $"{name} command completed (output truncated)."
+                    : $"{name} command completed."
+                : $"{name} exited with code {result.ExitCode}.";
+    }
 
     public static string Describe(IReadOnlyList<WorkspaceFileEntry> entries)
     {

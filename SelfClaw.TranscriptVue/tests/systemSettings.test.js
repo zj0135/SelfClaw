@@ -32,13 +32,13 @@ describe('SystemSettings component', () => {
 		vi.clearAllMocks();
 	});
 
-	it('renders 3 top-level groups: 主题, 界面排版, 上下文压缩', () => {
+	it('renders 4 top-level groups: 主题, 界面排版, 命令执行工具, 上下文压缩', () => {
 		const wrapper = mount(SystemSettings);
 		const heads = wrapper.findAll('.group-head');
-		expect(heads).toHaveLength(3);
+		expect(heads).toHaveLength(4);
 
 		const labels = heads.map((h) => h.find('.gh-label').text());
-		expect(labels).toEqual(['主题', '界面排版', '上下文压缩']);
+		expect(labels).toEqual(['主题', '界面排版', '命令执行工具', '上下文压缩']);
 		wrapper.unmount();
 	});
 
@@ -84,9 +84,24 @@ describe('SystemSettings component', () => {
 		wrapper.unmount();
 	});
 
+	it('renders the workspace shell group and expands it on click', async () => {
+		const wrapper = mount(SystemSettings);
+		const shellHead = wrapper.findAll('.group-head')[2];
+		expect(shellHead.text()).toContain('命令执行工具');
+		expect(shellHead.attributes('aria-expanded')).toBe('false');
+
+		await shellHead.trigger('click');
+		expect(shellHead.attributes('aria-expanded')).toBe('true');
+
+		const shellBody = wrapper.findAll('.group-body')[2];
+		expect(shellBody.isVisible()).toBe(true);
+		expect(shellBody.text()).toContain('run_shell_command');
+		wrapper.unmount();
+	});
+
 	it('renders context compression without card styling and toggles on click', async () => {
 		const wrapper = mount(SystemSettings);
-		const compressionHead = wrapper.findAll('.group-head')[2];
+		const compressionHead = wrapper.findAll('.group-head')[3];
 		expect(compressionHead.text()).toContain('上下文压缩');
 		expect(compressionHead.attributes('aria-expanded')).toBe('false');
 
@@ -94,7 +109,7 @@ describe('SystemSettings component', () => {
 		await compressionHead.trigger('click');
 		expect(compressionHead.attributes('aria-expanded')).toBe('true');
 
-		const compressionBody = wrapper.findAll('.group-body')[2];
+		const compressionBody = wrapper.findAll('.group-body')[3];
 		expect(compressionBody.isVisible()).toBe(true);
 		expect(compressionBody.text()).toContain('启用上下文压缩');
 		expect(compressionBody.text()).toContain('触发比例');

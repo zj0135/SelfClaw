@@ -1,11 +1,12 @@
 <script setup>
 import { ref } from 'vue';
-import { RotateCcw, Palette, Type, Code2, Eye, Shrink, ChevronDown } from 'lucide-vue-next';
+import { RotateCcw, Palette, Type, Code2, Eye, Shrink, SquareTerminal, ChevronDown } from 'lucide-vue-next';
 import AppearancePreview from './appearance/AppearancePreview.vue';
 import CodeSection from './appearance/CodeSection.vue';
 import ThemeModeSelector from './appearance/ThemeModeSelector.vue';
 import TypographySection from './appearance/TypographySection.vue';
 import Compression from './compression/Compression.vue';
+import WorkspaceTools from './tools/WorkspaceTools.vue';
 import { useAppearance } from '../../composables/useAppearance.js';
 
 const { state, resolvedTheme, setMode, resetAll } = useAppearance();
@@ -13,12 +14,14 @@ const { state, resolvedTheme, setMode, resetAll } = useAppearance();
 const groups = [
 	{ id: 'theme', label: '主题', en: 'THEME', icon: Palette },
 	{ id: 'typography', label: '界面排版', en: 'TYPOGRAPHY', icon: Type },
+	{ id: 'workspace-tools', label: '命令执行工具', en: 'SHELL', icon: SquareTerminal },
 	{ id: 'compression', label: '上下文压缩', en: 'COMPRESSION', icon: Shrink },
 ];
 
 const openGroups = ref({
 	theme: false,
 	typography: false,
+	'workspace-tools': false,
 	compression: false,
 });
 
@@ -72,6 +75,7 @@ function toggleGroup(id) {
 						<AppearancePreview />
 					</div>
 					<Compression v-else-if="group.id === 'compression'" />
+					<WorkspaceTools v-else-if="group.id === 'workspace-tools'" />
 				</div>
 			</section>
 		</div>
