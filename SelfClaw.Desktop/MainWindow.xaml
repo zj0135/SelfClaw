@@ -17,9 +17,10 @@
         ResizeMode="CanResize"
         Background="Transparent"
         ThemeMode="System">
+        <!-- 不设 CornerRadius：Win11 圆角走 DWMWCP_ROUND（WindowDwmAttributes）；Win10 用直角，
+             窗口区域没有抗锯齿，圆角边缘会毛糙。 -->
         <shell:WindowChrome.WindowChrome>
                 <shell:WindowChrome CaptionHeight="0"
-                                    CornerRadius="20"
                                     GlassFrameThickness="0"
                                     ResizeBorderThickness="0"
                                     UseAeroCaptionButtons="False"/>

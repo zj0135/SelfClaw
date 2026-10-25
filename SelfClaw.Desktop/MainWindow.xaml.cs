@@ -139,10 +139,10 @@ public sealed partial class MainWindow : Window
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
-        WindowBackdropHelper.TryApplySystemBackdrop(this);
+        WindowDwmAttributes.TryApplyRoundedCorners(this);
         // 缓存值来自上一次运行时前端推送的解析结果。WebView 还没加载，这是此刻能拿到的
         // 最好答案；前端起来后会经 ApplyCaptionTheme 命令校正。
-        WindowBackdropHelper.TryApplyCaptionTheme(this, _appearanceSettingsService.CachedIsDark);
+        WindowDwmAttributes.TryApplyCaptionTheme(this, _appearanceSettingsService.CachedIsDark);
 
         if (PresentationSource.FromVisual(this) is HwndSource source)
         {
@@ -390,7 +390,7 @@ public sealed partial class MainWindow : Window
                 await ToggleTerminalToolAsync();
                 break;
             case WebViewHostCommandKind.ApplyCaptionTheme:
-                WindowBackdropHelper.TryApplyCaptionTheme(
+                WindowDwmAttributes.TryApplyCaptionTheme(
                     this,
                     string.Equals(command.Value, "dark", StringComparison.OrdinalIgnoreCase));
                 break;
