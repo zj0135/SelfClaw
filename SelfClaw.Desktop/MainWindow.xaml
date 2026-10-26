@@ -21,7 +21,7 @@
              窗口区域没有抗锯齿，圆角边缘会毛糙。 -->
         <shell:WindowChrome.WindowChrome>
                 <shell:WindowChrome CaptionHeight="0"
-                                    GlassFrameThickness="0"
+                                    GlassFrameThickness="0,0,0,1"
                                     ResizeBorderThickness="0"
                                     UseAeroCaptionButtons="False"/>
         </shell:WindowChrome.WindowChrome>
