@@ -23,13 +23,6 @@ const {
 
 <template>
 	<div class="compression-section">
-		<div class="comp-desc-row">
-			<span class="sync-state" :data-saving="saving ? 'true' : 'false'">
-				<Loader2 v-if="saving" :size="12" :stroke-width="2" class="sync-spin" aria-hidden="true" />
-				{{ saving ? '保存中' : loading ? '加载中' : '已同步' }}
-			</span>
-		</div>
-
 		<p v-if="error" class="comp-error" role="alert">{{ error }}</p>
 
 		<div v-if="loading" class="comp-loading" role="status">
@@ -39,11 +32,13 @@ const {
 
 		<section v-else class="comp-panel">
 			<CompressionToggle :enabled="policy.enabled" :index="0" @update:enabled="setEnabled" />
-			<ThresholdField :ratio="policy.thresholdRatio" :index="1" @update:ratio="setThresholdRatio" />
-			<AbsoluteThresholdField :value="policy.absoluteThresholdTokens" :index="2"
-				@update:value="setAbsoluteThresholdTokens" />
-			<CompressionModelSelect :model-profile-id="policy.modelProfileId" :models="models" :loading="modelsLoading"
-				:error="modelsError" :index="3" @update:model-profile-id="setModelProfileId" />
+			<div class="comp-sub-fields" :class="{ 'is-disabled': !policy.enabled }">
+				<ThresholdField :ratio="policy.thresholdRatio" :index="1" @update:ratio="setThresholdRatio" />
+				<AbsoluteThresholdField :value="policy.absoluteThresholdTokens" :index="2"
+					@update:value="setAbsoluteThresholdTokens" />
+				<CompressionModelSelect :model-profile-id="policy.modelProfileId" :models="models" :loading="modelsLoading"
+					:error="modelsError" :index="3" @update:model-profile-id="setModelProfileId" />
+			</div>
 		</section>
 	</div>
 </template>
@@ -54,40 +49,6 @@ const {
 .compression-section {
 	display: flex;
 	flex-direction: column;
-}
-
-.comp-desc-row {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 16px;
-	margin-bottom: 12px;
-}
-
-.comp-desc {
-	margin: 0;
-	color: var(--sc-mute);
-	font-size: var(--fs-12);
-	line-height: 1.5;
-}
-
-.sync-state {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	padding: 4px 10px;
-	border: 1px solid var(--sc-line);
-	border-radius: 999px;
-	color: var(--sc-faint);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-9);
-	letter-spacing: 0.12em;
-	white-space: nowrap;
-}
-
-.sync-state[data-saving='true'] {
-	border-color: color-mix(in srgb, var(--sc-acid) 40%, transparent);
-	color: var(--sc-acid);
 }
 
 .sync-spin {
@@ -115,5 +76,21 @@ const {
 .comp-panel {
 	display: flex;
 	flex-direction: column;
+	padding: 2px 16px;
+	border: 1px solid var(--sc-line-2);
+	border-radius: 12px;
+	background: var(--sc-panel);
+	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.04);
+}
+
+.comp-sub-fields {
+	display: flex;
+	flex-direction: column;
+	transition: opacity 0.2s var(--sc-ease-out);
+}
+
+.comp-sub-fields.is-disabled {
+	opacity: 0.45;
+	pointer-events: none;
 }
 </style>

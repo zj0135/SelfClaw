@@ -65,19 +65,22 @@ beforeEach(() => {
 });
 
 describe('Workspace tools settings group', () => {
-	it('renders the four shells with availability and the active one marked', async () => {
+	it('renders the four shells with availability and the active one marked in select dropdown', async () => {
 		installHost({ shellKind: 'PowerShellSeven' });
 		const wrapper = mount(WorkspaceTools);
 		await wait(20);
 
-		const cards = wrapper.findAll('.shell-card');
-		expect(cards).toHaveLength(4);
-		expect(cards[1].attributes('aria-pressed')).toBe('true');
-		expect(cards[1].attributes('data-available')).toBe('true');
+		const select = wrapper.find('select.shell-select');
+		expect(select.exists()).toBe(true);
+		expect(select.element.value).toBe('PowerShellSeven');
+
+		const options = select.findAll('option');
+		expect(options).toHaveLength(4);
+		expect(options[1].element.value).toBe('PowerShellSeven');
 		// 未检测到的 Git Bash 禁用且给出明确文案。
-		expect(cards[3].attributes('data-available')).toBe('false');
-		expect(cards[3].attributes('disabled')).toBeDefined();
-		expect(cards[3].text()).toContain('未检测到');
+		expect(options[3].attributes('data-available')).toBe('false');
+		expect(options[3].attributes('disabled')).toBeDefined();
+		expect(options[3].text()).toContain('未检测到');
 		wrapper.unmount();
 	});
 
@@ -86,13 +89,14 @@ describe('Workspace tools settings group', () => {
 		const wrapper = mount(WorkspaceTools);
 		await wait(20);
 
-		await wrapper.findAll('.shell-card')[2].trigger('click');
+		const select = wrapper.find('select.shell-select');
+		await select.setValue('CommandPrompt');
 		await wait(20);
 
 		expect(saveCalls()).toHaveLength(1);
 		expect(saveCalls()[0][2]).toEqual({ shellKind: 'CommandPrompt' });
 		expect(current()).toBe('CommandPrompt');
-		expect(wrapper.findAll('.shell-card')[2].attributes('aria-pressed')).toBe('true');
+		expect(wrapper.find('select.shell-select').element.value).toBe('CommandPrompt');
 		wrapper.unmount();
 	});
 
@@ -101,11 +105,16 @@ describe('Workspace tools settings group', () => {
 		const wrapper = mount(WorkspaceTools);
 		await wait(20);
 
-		await wrapper.findAll('.shell-card')[0].trigger('click');
-		await wrapper.findAll('.shell-card')[3].trigger('click');
+		const select = wrapper.find('select.shell-select');
+		await select.setValue('WindowsPowerShell');
 		await wait(20);
-
 		expect(saveCalls()).toHaveLength(0);
+
+		select.element.value = 'GitBash';
+		await select.trigger('change');
+		await wait(20);
+		expect(saveCalls()).toHaveLength(0);
+
 		wrapper.unmount();
 	});
 
@@ -116,7 +125,7 @@ describe('Workspace tools settings group', () => {
 
 		bridge.push('workspace-tools/state', stateOf('GitBash', SHELLS.map((shell) => ({ ...shell, available: true }))));
 		await wait(20);
-		expect(wrapper.findAll('.shell-card')[3].attributes('aria-pressed')).toBe('true');
+		expect(wrapper.find('select.shell-select').element.value).toBe('GitBash');
 		wrapper.unmount();
 	});
 
@@ -125,12 +134,13 @@ describe('Workspace tools settings group', () => {
 		const wrapper = mount(WorkspaceTools);
 		await wait(20);
 
-		await wrapper.findAll('.shell-card')[2].trigger('click');
+		const select = wrapper.find('select.shell-select');
+		await select.setValue('CommandPrompt');
 		await wait(20);
 
 		expect(wrapper.get('[role="alert"]').text()).toContain('设置文件被占用');
 		// 保存失败后选中态仍留在原 shell，不假装成功。
-		expect(wrapper.findAll('.shell-card')[0].attributes('aria-pressed')).toBe('true');
+		expect(wrapper.find('select.shell-select').element.value).toBe('WindowsPowerShell');
 		wrapper.unmount();
 	});
 });

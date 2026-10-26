@@ -27,8 +27,7 @@ function commitTokens(next) {
 </script>
 
 <template>
-	<CompressionRow label="绝对阈值" :index="index"
-		hint="只对未声明上下文窗口的模型生效：计数超过该 token 数就压缩。这类模型没有可用的窗口比例。">
+	<CompressionRow label="绝对阈值" :index="index">
 		<div class="stack">
 			<label class="tokens">
 				<input class="tokens-input" type="number" :min="MIN_TOKENS" :max="MAX_TOKENS" step="1000" :value="props.value"
@@ -98,12 +97,6 @@ function commitTokens(next) {
 	align-items: center;
 	gap: 5px;
 	color: var(--sc-err);
-	font-size: var(--fs-105);
-}
-
-@media (max-width: 720px) {
-	.stack {
-		align-items: flex-start;
-	}
+	font-size: var(--fs-10);
 }
 </style>

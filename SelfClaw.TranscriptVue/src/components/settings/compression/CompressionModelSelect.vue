@@ -28,8 +28,7 @@ function optionLabel(model) {
 </script>
 
 <template>
-	<CompressionRow label="压缩模型" :index="index"
-		hint="摘要由这个模型生成；选「跟随当前会话模型」时用本回合的模型，不可用则回退本回合模型。">
+	<CompressionRow label="压缩模型" :index="index">
 		<div class="stack">
 			<select class="model-select" v-model="selected" :disabled="loading" aria-label="上下文压缩模型选择">
 				<option value="">跟随当前会话模型</option>
@@ -60,42 +59,38 @@ function optionLabel(model) {
 	padding: 0 10px;
 	border: 1px solid var(--sc-line-2);
 	border-radius: 8px;
-	outline: 0;
 	background: var(--sc-panel);
 	color: var(--sc-text);
 	font: inherit;
 	font-size: var(--fs-12);
 	cursor: pointer;
+	transition:
+		border-color 0.16s,
+		box-shadow 0.16s;
 }
 
-.model-select:disabled {
-	cursor: default;
-	opacity: 0.6;
+.model-select:hover:not(:disabled) {
+	border-color: var(--sc-faint);
 }
 
 .model-select:focus-visible {
+	outline: none;
 	border-color: var(--sc-acid);
 	box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
 
+.model-select:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
 .select-note {
 	color: var(--sc-faint);
-	font-size: var(--fs-105);
+	font-size: var(--fs-11);
 }
 
 .select-error {
 	color: var(--sc-err);
-	font-size: var(--fs-105);
-}
-
-@media (max-width: 720px) {
-	.stack {
-		align-items: flex-start;
-	}
-
-	.model-select {
-		min-width: 0;
-		width: 100%;
-	}
+	font-size: var(--fs-11);
 }
 </style>

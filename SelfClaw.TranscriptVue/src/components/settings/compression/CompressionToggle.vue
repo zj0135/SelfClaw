@@ -10,8 +10,7 @@ const emit = defineEmits(['update:enabled']);
 </script>
 
 <template>
-	<CompressionRow label="启用上下文压缩" :index="index"
-		hint="关闭后每回合发送完整历史，转录里也不会再出现上下文压缩分隔项。">
+	<CompressionRow label="启用上下文压缩" :index="index">
 		<button type="button" class="switch" role="switch" :aria-checked="props.enabled ? 'true' : 'false'"
 			:aria-label="props.enabled ? '关闭上下文压缩' : '启用上下文压缩'"
 			@click="emit('update:enabled', !props.enabled)">

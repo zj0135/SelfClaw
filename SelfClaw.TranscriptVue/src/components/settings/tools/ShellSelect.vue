@@ -1,23 +1,18 @@
 <script setup>
-import { computed } from 'vue';
-import { Terminal, SquareTerminal, ChevronRight, GitBranch, Check } from 'lucide-vue-next';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps({
 	shellKind: { type: String, default: 'WindowsPowerShell' },
 	shells: { type: Array, default: () => [] },
+	saving: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['select']);
 
-const icons = {
-	WindowsPowerShell: Terminal,
-	PowerShellSeven: SquareTerminal,
-	CommandPrompt: ChevronRight,
-	GitBash: GitBranch,
-};
+const selectRef = ref(null);
 
 // 可用性完全由宿主回显决定：shells 里缺失或 available !== true 一律禁用，前端不做本地猜测。
-const cards = computed(() => {
+const options = computed(() => {
 	const definitions = [
 		{ kind: 'WindowsPowerShell', label: 'Windows PowerShell', en: 'POWERSHELL 5.1' },
 		{ kind: 'PowerShellSeven', label: 'PowerShell 7', en: 'PWSH 7+' },
@@ -28,173 +23,117 @@ const cards = computed(() => {
 		const shell = props.shells.find((item) => item.kind === definition.kind) || {};
 		return {
 			...definition,
-			icon: icons[definition.kind],
 			available: shell.available === true,
 			resolvedPath: typeof shell.resolvedPath === 'string' ? shell.resolvedPath : '',
 			active: props.shellKind === definition.kind,
 		};
 	});
 });
+
+watch(
+	() => [props.shellKind, props.saving],
+	() => {
+		if (selectRef.value && !props.saving) {
+			selectRef.value.value = props.shellKind;
+		}
+	},
+	{ flush: 'post' },
+);
+
+function handleChange(event) {
+	const nextKind = event.target.value;
+	if (nextKind === props.shellKind) return;
+	const match = options.value.find((item) => item.kind === nextKind);
+	if (match && match.available) {
+		emit('select', nextKind);
+	} else {
+		event.target.value = props.shellKind;
+	}
+}
 </script>
 
 <template>
-	<div class="shell-grid">
-		<button v-for="(card, index) in cards" :key="card.kind" type="button" class="shell-card sc-rise"
-			:style="{ '--i': index }" :data-active="card.active ? 'true' : 'false'"
-			:data-available="card.available ? 'true' : 'false'"
-			:aria-pressed="card.active ? 'true' : 'false'" :disabled="!card.available"
-			:title="card.available && card.resolvedPath ? card.resolvedPath : undefined"
-			@click="card.available && emit('select', card.kind)">
-			<span class="sh-meta">
-				<span class="sh-head">
-					<component :is="card.icon" :size="15" :stroke-width="1.9" class="sh-ico" aria-hidden="true" />
-					<span class="sh-label">{{ card.label }}</span>
-					<span class="sh-en">{{ card.en }}</span>
-				</span>
-				<span class="sh-path" :data-present="card.available && card.resolvedPath ? 'true' : 'false'">
-					{{ card.available ? card.resolvedPath || '系统内置' : '未检测到' }}
-				</span>
-			</span>
-
-			<span v-if="card.active" class="sh-check" aria-hidden="true">
-				<Check :size="11" :stroke-width="3" />
-			</span>
-		</button>
+	<div class="shell-row">
+		<div class="row-meta">
+			<span class="row-label">默认 Shell</span>
+		</div>
+		<div class="row-control">
+			<select ref="selectRef" class="shell-select" :value="props.shellKind" aria-label="选择默认 Shell"
+				@change="handleChange">
+				<option v-for="shell in options" :key="shell.kind" :value="shell.kind"
+					:disabled="!shell.available" :data-available="shell.available ? 'true' : 'false'">
+					{{ shell.label }}{{ !shell.available ? ' (未检测到)' : '' }}
+				</option>
+			</select>
+		</div>
 	</div>
 </template>
 
 <style scoped>
 @import '../../../styles/settings-console.css';
 
-.shell-grid {
+.shell-row {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
-	gap: 12px;
+	grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+	align-items: center;
+	gap: 18px;
+	padding: 14px 0;
+	border-bottom: 1px solid var(--sc-line);
 }
 
-.shell-card {
-	position: relative;
+.row-meta {
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
-	padding: 13px 13px 15px;
-	overflow: hidden;
-	border: 1px solid var(--sc-line);
-	border-radius: 13px;
-	background: var(--sc-panel);
-	color: inherit;
-	font: inherit;
-	text-align: left;
-	cursor: pointer;
-	transition:
-		border-color 0.18s var(--sc-ease-out),
-		transform 0.18s var(--sc-ease-out),
-		box-shadow 0.18s var(--sc-ease-out);
-
-	&:hover {
-		border-color: var(--sc-line-2);
-		transform: translateY(-2px);
-		box-shadow: 0 14px 34px rgba(var(--shadow-ink), 0.09);
-	}
-
-	&:focus-visible {
-		outline: none;
-		border-color: var(--sc-acid);
-		box-shadow: 0 0 0 3px var(--sc-acid-soft);
-	}
-
-	&[data-active='true'] {
-		border-color: color-mix(in srgb, var(--sc-acid) 55%, transparent);
-		background:
-			radial-gradient(240px 140px at 12% 0%, var(--sc-acid-soft), transparent 70%),
-			var(--sc-panel);
-	}
-
-	&[data-available='false'] {
-		cursor: not-allowed;
-		opacity: 0.55;
-
-		&:hover {
-			border-color: var(--sc-line);
-			transform: none;
-			box-shadow: none;
-		}
-	}
-}
-
-.sh-meta {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
 	min-width: 0;
 }
 
-.sh-head {
+.row-label {
+	color: var(--sc-text);
+	font-size: var(--fs-13);
+	font-weight: 600;
+}
+
+.row-control {
 	display: flex;
 	align-items: center;
+	justify-content: flex-end;
 	gap: 8px;
 	min-width: 0;
 }
 
-.sh-ico {
-	flex: none;
-	color: var(--sc-mute);
-	transition: color 0.16s;
-}
-
-.shell-card[data-active='true'] .sh-ico {
-	color: var(--sc-acid);
-}
-
-.sh-label {
+.shell-select {
+	min-width: 200px;
+	padding: 7px 10px;
+	border: 1px solid var(--sc-line-2);
+	border-radius: 8px;
+	background: var(--sc-panel);
 	color: var(--sc-text);
-	font-size: var(--fs-135);
-	font-weight: 620;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	font-family: inherit;
+	font-size: var(--fs-125);
+	cursor: pointer;
+	transition:
+		border-color 0.16s,
+		box-shadow 0.16s;
 }
 
-.sh-en {
-	margin-left: auto;
-	flex: none;
-	color: var(--sc-faint);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-9);
-	font-weight: 600;
-	letter-spacing: 0.18em;
+.shell-select:hover {
+	border-color: var(--sc-faint);
 }
 
-.sh-path {
-	overflow: hidden;
-	color: var(--sc-faint);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-9);
-	letter-spacing: 0.04em;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+.shell-select:focus-visible {
+	outline: none;
+	border-color: var(--sc-acid);
+	box-shadow: 0 0 0 3px var(--sc-acid-soft);
 }
 
-.shell-card[data-available='false'] .sh-path {
-	color: var(--sc-err);
-}
+@media (max-width: 720px) {
+	.shell-row {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 10px;
+	}
 
-.shell-card[data-active='true'] .sh-path {
-	color: var(--sc-mute);
-}
-
-.sh-check {
-	position: absolute;
-	top: 13px;
-	right: 13px;
-	display: grid;
-	place-items: center;
-	width: 18px;
-	height: 18px;
-	border-radius: 50%;
-	background: var(--sc-acid);
-	color: var(--sc-acid-ink);
-	box-shadow: 0 0 0 3px color-mix(in srgb, var(--sc-panel) 80%, transparent);
-	animation: sc-pop 0.24s var(--sc-ease-spring) both;
+	.row-control {
+		justify-content: flex-start;
+	}
 }
 </style>

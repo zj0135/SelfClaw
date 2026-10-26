@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue';
-import { RotateCcw, Palette, Type, Code2, Eye, Shrink, SquareTerminal, ChevronDown } from 'lucide-vue-next';
+import { RotateCcw, Palette, Code2, Eye, Shrink, SquareTerminal, ChevronDown } from 'lucide-vue-next';
 import AppearancePreview from './appearance/AppearancePreview.vue';
 import CodeSection from './appearance/CodeSection.vue';
 import ThemeModeSelector from './appearance/ThemeModeSelector.vue';
@@ -12,17 +12,13 @@ import { useAppearance } from '../../composables/useAppearance.js';
 const { state, resolvedTheme, setMode, resetAll } = useAppearance();
 
 const groups = [
-	{ id: 'theme', label: '主题', en: 'THEME', icon: Palette },
-	{ id: 'typography', label: '界面排版', en: 'TYPOGRAPHY', icon: Type },
-	{ id: 'workspace-tools', label: '命令执行工具', en: 'SHELL', icon: SquareTerminal },
-	{ id: 'compression', label: '上下文压缩', en: 'COMPRESSION', icon: Shrink },
+	{ id: 'appearance', label: '主题与界面排版', en: 'APPEARANCE', icon: Palette },
+	{ id: 'runtime', label: '运行时设置', en: 'RUNTIME', icon: SquareTerminal },
 ];
 
 const openGroups = ref({
-	theme: false,
-	typography: false,
-	'workspace-tools': false,
-	compression: false,
+	appearance: true,
+	runtime: true,
 });
 
 function isOpen(id) {
@@ -59,9 +55,9 @@ function toggleGroup(id) {
 				</button>
 
 				<div v-show="isOpen(group.id)" :id="`group-body-${group.id}`" class="group-body">
-					<ThemeModeSelector v-if="group.id === 'theme'" :mode="state.mode" :resolved="resolvedTheme"
-						@select="setMode" />
-					<div v-else-if="group.id === 'typography'" class="typography-composite">
+					<div v-if="group.id === 'appearance'" class="appearance-composite">
+						<ThemeModeSelector :mode="state.mode" :resolved="resolvedTheme"
+							@select="setMode" />
 						<TypographySection />
 						<div class="subgroup-divider">
 							<Code2 :size="13" :stroke-width="2" class="subgroup-ico" aria-hidden="true" />
@@ -74,8 +70,16 @@ function toggleGroup(id) {
 						</div>
 						<AppearancePreview />
 					</div>
-					<Compression v-else-if="group.id === 'compression'" />
-					<WorkspaceTools v-else-if="group.id === 'workspace-tools'" />
+
+					<div v-else-if="group.id === 'runtime'" class="runtime-composite">
+						<WorkspaceTools />
+
+						<div class="subgroup-divider">
+							<Shrink :size="13" :stroke-width="2" class="subgroup-ico" aria-hidden="true" />
+							<span class="subgroup-title">上下文压缩</span>
+						</div>
+						<Compression />
+					</div>
 				</div>
 			</section>
 		</div>
@@ -221,6 +225,8 @@ function toggleGroup(id) {
 	transform-origin: top;
 }
 
+.appearance-composite,
+.runtime-composite,
 .typography-composite {
 	display: flex;
 	flex-direction: column;

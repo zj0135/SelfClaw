@@ -28,8 +28,7 @@ function commitPercent(next) {
 </script>
 
 <template>
-	<CompressionRow label="触发比例" :index="index"
-		hint="上下文达到模型窗口的这个比例时压缩。窗口未知的模型改用下方绝对阈值。">
+	<CompressionRow label="触发比例" :index="index">
 		<div class="stack">
 			<div class="field">
 				<input class="slider" type="range" :min="MIN_PERCENT" :max="MAX_PERCENT" step="1" :value="percent"
@@ -106,6 +105,7 @@ function commitPercent(next) {
 	color: var(--sc-faint);
 	font-family: var(--sc-mono);
 	font-size: var(--fs-10);
+	letter-spacing: 0.05em;
 }
 
 .field-warn {
@@ -113,12 +113,6 @@ function commitPercent(next) {
 	align-items: center;
 	gap: 5px;
 	color: var(--sc-err);
-	font-size: var(--fs-105);
-}
-
-@media (max-width: 720px) {
-	.stack {
-		align-items: flex-start;
-	}
+	font-size: var(--fs-10);
 }
 </style>
