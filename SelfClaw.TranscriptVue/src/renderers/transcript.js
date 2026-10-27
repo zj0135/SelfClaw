@@ -146,6 +146,20 @@ export function buildRenderBlocks(item) {
 			continue;
 		}
 
+		// 任务计划段独立成块：它必须留在 todo_write 的真实位置，也绝不能和相邻的
+		// 工具段合并成组（分组语义是「一串同类工具调用」，计划不属于这一类）。
+		// 因此本分支排在 tool 分支之前，且不受下面「空 markdown 丢弃」的约束。
+		if (segment.kind === 'todo') {
+			blocks.push({
+				type: 'todo',
+				key: segment.segmentId || `${item.id}:todo:${index}`,
+				segment,
+				isFirst,
+				isLast: index === total - 1,
+			});
+			continue;
+		}
+
 		if (segment.kind === 'tool') {
 			let endIndex = index;
 			while (endIndex + 1 < total && segments[endIndex + 1].kind === 'tool') {

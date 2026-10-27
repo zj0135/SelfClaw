@@ -1,6 +1,7 @@
 <script setup>
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import ComposerPanel from '../components/chat/composer/ComposerPanel.vue';
+import TodoPlanDock from '../components/chat/todo/TodoPlanDock.vue';
 import ConversationQueue from '../components/chat/ConversationQueue.vue';
 import ActivityStage from '../components/activities/ActivityStage.vue';
 import TranscriptPanel from '../components/chat/TranscriptPanel.vue';
@@ -9,6 +10,7 @@ import { useTranscriptCollapse } from '../composables/useTranscriptCollapse.js';
 import { useTranscriptScroll } from '../composables/useTranscriptScroll.js';
 import { useChatTranscript } from '../composables/useChatTranscript.js';
 import { useChatTurnStatus } from '../composables/useChatTurnStatus.js';
+import { useChatTodo } from '../composables/useChatTodo.js';
 import { useWorkspaceSelection } from '../composables/useWorkspaceSelection.js';
 import { useChatComposer } from '../composables/useChatComposer.js';
 import { useComposerAttachments } from '../composables/useComposerAttachments.js';
@@ -37,6 +39,8 @@ watch(() => state.selectedConversationId, (id) => conversationQueue.subscribe(id
 const approvals = useChatApprovals(bridge);
 const terminal = useChatTerminal(terminalPanelRef, bridge);
 const turnStatus = useChatTurnStatus(state);
+// 计划 dock 的折叠偏好按会话记忆，默认跟随忙碌态（忙碌展开、空闲收成一行）。
+const chatTodo = useChatTodo(computed(() => state.selectedConversationId));
 
 function openImagePreview(preview) { emit('preview-image', preview); }
 
@@ -87,6 +91,10 @@ defineExpose({
 			@git-action="workspace.runGitAction" @approve-tool="(id) => approvals.resolve(id, true)"
 			@reject-tool="(id) => approvals.resolve(id, false)"
 			@select-permission-mode="composer.selectPermissionMode">
+			<template #plan>
+				<TodoPlanDock :todo="state.todo" :busy="state.isBusy" :open="chatTodo.isOpen(state.isBusy)"
+					@toggle="chatTodo.toggle(state.isBusy)" />
+			</template>
 			<template #queue>
 				<ConversationQueue v-if="state.agentMode === 'direct'"
 					:state="conversationQueue.state"

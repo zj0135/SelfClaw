@@ -47,6 +47,8 @@ export function createTranscriptBridge(transport, afterRender = async () => {
 		transcriptState.selectedConversationId = payload.selectedConversationId ?? null;
         transcriptState.activityText = payload.activityText ?? null;
 		transcriptState.usage = payload.usage ?? null;
+		// 同上：计划（dock）无内容时字段整体省略，切会话必须真的清空，不能留下上一条会话的列表。
+		transcriptState.todo = payload.todo ?? null;
 		delete transcriptState.upsertItems;
 		delete transcriptState.removedItemIds;
 		delete transcriptState.itemOrder;

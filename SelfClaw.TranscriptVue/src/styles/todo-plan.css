@@ -1,0 +1,403 @@
+/*
+ * 任务计划（todo_write）的共享视觉：dock 与内联折叠行共用。
+ *
+ * 沿用转录里既有的语言——发丝线 + 纯文本行，不叠卡片、不加底色：
+ * 层级由图标与行距表达，进度由一条 2px 的细线表达。
+ * 组件在 <style scoped> 内 @import 本文件（与 tool-blocks.css 同一做法），
+ * 所以这里只写类选择器，不写标签选择器，避免作用域哈希失效。
+ * 颜色/字号一律走 tokens.css 变量。
+ */
+
+/* ── dock：输入框上方的一条计划带 ──────────────────────────────── */
+
+.todo-plan-dock {
+	display: flex;
+	flex-direction: column;
+	margin-bottom: 8px;
+	padding: 0 2px;
+}
+
+.todo-plan-head {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 4px 0 5px;
+	border: 0;
+	background: transparent;
+	color: var(--text-soft);
+	text-align: left;
+	cursor: pointer;
+}
+
+.todo-plan-head:focus-visible {
+	outline: 1px solid var(--accent-line);
+	outline-offset: 2px;
+	border-radius: 3px;
+}
+
+.todo-plan-head-main {
+	display: inline-flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	align-items: baseline;
+	gap: 8px;
+}
+
+.todo-plan-head-icon {
+	flex: none;
+	align-self: center;
+	color: var(--muted);
+	transition: color 140ms ease;
+}
+
+.todo-plan-dock.busy .todo-plan-head-icon {
+	color: var(--accent);
+}
+
+.todo-plan-head:hover .todo-plan-head-icon {
+	color: var(--accent);
+}
+
+.todo-plan-title {
+	flex: none;
+	color: var(--text-soft);
+	font-size: var(--fs-125);
+	font-weight: 600;
+	line-height: 1.45;
+	letter-spacing: 0.01em;
+	transition: color 120ms ease;
+}
+
+.todo-plan-head:hover .todo-plan-title,
+.todo-plan-dock.open .todo-plan-title {
+	color: var(--text-strong);
+}
+
+/* 播报区：把「在做哪一步」与计数包成一个 live region，两者任一变化都会被读出。
+   内部仍是两段文字，间距与头部其它元素保持一致。 */
+.todo-plan-status {
+	display: inline-flex;
+	min-width: 0;
+	flex: 0 1 auto;
+	align-items: baseline;
+	gap: 8px;
+}
+
+/* 折叠时的第二段文字：现在在做哪一步。单行省略——宁可截断，也不要挤掉进度与箭头。 */
+.todo-plan-active {
+	overflow: hidden;
+	min-width: 0;
+	flex: 0 1 auto;
+	color: var(--muted);
+	font-size: var(--fs-105);
+	line-height: 1.45;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	transition: color 120ms ease;
+}
+
+/* 进度是这一行唯一的数字：等宽、tabular，宽度变化时不抖动。 */
+.todo-plan-progress {
+	flex: none;
+	color: var(--muted-soft);
+	font-family: var(--font-mono);
+	font-size: var(--fs-105);
+	line-height: 1.45;
+	font-variant-numeric: tabular-nums;
+}
+
+.todo-plan-dock.busy .todo-plan-progress {
+	color: var(--muted);
+}
+
+.todo-plan-chevron {
+	flex: none;
+	align-self: center;
+	color: var(--faint);
+	transition: transform 160ms var(--ease-out), color 120ms ease;
+}
+
+.todo-plan-head:hover .todo-plan-chevron {
+	color: var(--muted);
+}
+
+/* 折叠时箭头朝下，展开时回到设计稿里的「⌃」。 */
+.todo-plan-dock:not(.open) .todo-plan-chevron {
+	transform: rotate(180deg);
+}
+
+/* 2px 进度线：轨道常驻，填充宽度随 completed/total 过渡。 */
+.todo-plan-meter {
+	display: block;
+	height: 2px;
+	overflow: hidden;
+	border-radius: 1px;
+	background: var(--line-1);
+}
+
+.todo-plan-meter-fill {
+	display: block;
+	height: 100%;
+	width: 0;
+	border-radius: inherit;
+	background: var(--accent);
+	transition: width 240ms var(--ease-out);
+}
+
+/* 列表滚动区：约 6 行封顶，计划再长也不挤压转录。 */
+.todo-plan-scroll {
+	max-height: 168px;
+	overflow-y: auto;
+	padding: 6px 0 8px;
+	scrollbar-width: thin;
+}
+
+/* ── 列表：两处 surface 共用同一套行 ─────────────────────────── */
+
+.todo-plan-list {
+	display: grid;
+	gap: 1px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.todo-plan-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	min-width: 0;
+	padding: 4px 0;
+	color: var(--text-soft);
+	font-size: var(--fs-125);
+	line-height: 1.55;
+}
+
+.todo-plan-item-icon {
+	flex: none;
+	margin-top: 0.18em;
+	color: var(--muted-soft);
+}
+
+.todo-plan-item-copy {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.todo-plan-item-text {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+/* 进行中：图标上色 + 左侧 2px 高亮条，文字提到前景色。 */
+.todo-plan-item.in_progress {
+	margin-left: -8px;
+	padding-left: 8px;
+	color: var(--text-strong);
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.todo-plan-item.in_progress .todo-plan-item-icon {
+	color: var(--accent);
+	animation: todo-plan-breathe 1.9s ease-in-out infinite;
+}
+
+.todo-plan-item-active {
+	color: var(--muted);
+	font-size: var(--fs-11);
+	line-height: 1.5;
+}
+
+/* 已完成：文字弱化 + 极细删除线（线本身用 --line-1，不抢视觉）。 */
+.todo-plan-item.completed .todo-plan-item-text {
+	color: var(--muted);
+	text-decoration: line-through;
+	text-decoration-color: var(--line-1);
+	text-decoration-thickness: 1px;
+}
+
+.todo-plan-item.completed .todo-plan-item-icon {
+	color: var(--muted);
+}
+
+/* 内联卡片里的紧凑变体：行距与字号再收一档。 */
+.todo-plan-list.compact .todo-plan-item {
+	padding: 3px 0;
+	font-size: var(--fs-12);
+	line-height: 1.5;
+}
+
+.todo-plan-list.compact .todo-plan-item-active {
+	font-size: var(--fs-105);
+}
+
+@keyframes todo-plan-breathe {
+	0%,
+	100% {
+		opacity: 1;
+	}
+
+	50% {
+		opacity: 0.45;
+	}
+}
+
+/* 窄窗只留主文案：activeForm 会把一行挤成三行，反而看不清进度。
+   折叠头部同理——三段文字塞不进一行。 */
+@media (max-width: 960px) {
+	.todo-plan-item-active,
+	.todo-plan-active {
+		display: none;
+	}
+}
+
+/* ── dock 出没与展开动效：160ms 位移 + 透明度 ─────────────────── */
+
+.todo-plan-dock-enter-active,
+.todo-plan-dock-leave-active,
+.todo-plan-body-enter-active,
+.todo-plan-body-leave-active {
+	transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+
+.todo-plan-dock-enter-from,
+.todo-plan-dock-leave-to {
+	opacity: 0;
+	transform: translateY(4px);
+}
+
+.todo-plan-body-enter-from,
+.todo-plan-body-leave-to {
+	opacity: 0;
+	transform: translateY(-3px);
+}
+
+/* ── 内联折叠行：与工具行同一条发丝线语言 ─────────────────────── */
+
+.todo-block {
+	min-width: 0;
+	border-bottom: 1px solid var(--line-1);
+}
+
+.todo-summary {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 5px 0;
+	border: 0;
+	background: transparent;
+	color: var(--text-soft);
+	text-align: left;
+}
+
+button.todo-summary {
+	cursor: pointer;
+}
+
+.todo-summary:focus-visible {
+	outline: 1px solid var(--accent-line);
+	outline-offset: 2px;
+	border-radius: 3px;
+}
+
+.todo-summary-main {
+	display: inline-flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	align-items: baseline;
+	gap: 8px;
+}
+
+.todo-summary-icon {
+	flex: none;
+	align-self: center;
+	color: var(--muted);
+}
+
+.todo-summary-side {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 7px;
+	color: var(--faint);
+}
+
+.inline-todo-label {
+	min-width: 0;
+	flex: 0 1 auto;
+	overflow: hidden;
+	color: var(--text-soft);
+	font-size: var(--fs-125);
+	font-weight: 600;
+	line-height: 1.45;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	transition: color 120ms ease;
+}
+
+.todo-summary:hover .inline-todo-label,
+.todo-block.open .inline-todo-label {
+	color: var(--text-strong);
+}
+
+.todo-summary-progress {
+	flex: 0 0 auto;
+	color: var(--muted-soft);
+	font-family: var(--font-mono);
+	font-size: var(--fs-105);
+	line-height: 1.45;
+	font-variant-numeric: tabular-nums;
+}
+
+.todo-summary-chevron {
+	color: inherit;
+	transition: transform 140ms ease, color 120ms ease;
+}
+
+.todo-block.open .todo-summary-chevron {
+	transform: rotate(90deg);
+}
+
+/* 展开区：与工具卡一致，靠导线缩进表达层级，不再叠一层容器。 */
+.todo-details {
+	margin: 2px 0 4px 22px;
+	padding: 2px 0 2px 12px;
+	border-left: 1px solid var(--line-2);
+}
+
+.todo-details-note {
+	margin: 6px 0 0;
+	color: var(--muted);
+	font-size: var(--fs-11);
+	line-height: 1.6;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+/* ── 降低动效偏好：全部关掉，只保留状态本身 ───────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+	.todo-plan-dock-enter-active,
+	.todo-plan-dock-leave-active,
+	.todo-plan-body-enter-active,
+	.todo-plan-body-leave-active,
+	.todo-plan-chevron,
+	.todo-plan-meter-fill,
+	.todo-summary-chevron,
+	.inline-todo-label,
+	.todo-plan-head-icon,
+	.todo-plan-title,
+	.todo-plan-active {
+		transition: none;
+	}
+
+	.todo-plan-item.in_progress .todo-plan-item-icon {
+		animation: none;
+	}
+}

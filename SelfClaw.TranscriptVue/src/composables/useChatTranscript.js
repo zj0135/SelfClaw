@@ -5,7 +5,7 @@ export function useChatTranscript(scroll) {
 	const state = reactive({
 		items: [], selectedConversationId: null, isBusy: false, isContinuation: false,
 		agentMode: 'cli', selectedAgentId: '', selectedAgentName: '', capabilityRevision: 0,
-		activityText: '', toolPermissionMode: 'require-approval', usage: null,
+		activityText: '', toolPermissionMode: 'require-approval', usage: null, todo: null,
 	});
 	const isEmptyConversation = computed(() => state.items.length === 0 && !state.isBusy);
 
@@ -24,6 +24,8 @@ export function useChatTranscript(scroll) {
 		state.capabilityRevision = Number(payload.capabilityRevision) || 0;
 		state.toolPermissionMode = payload.toolPermissionMode || 'require-approval';
 		state.usage = payload.usage || null;
+		// 计划随会话切换整体替换：后端在无计划时省略字段，这里必须清空，否则会残留上一条会话的计划。
+		state.todo = payload.todo || null;
 		nextTick(() => scroll.settleAfterUpdate(autoScroll, before));
 	}
 

@@ -13,4 +13,5 @@ public sealed record TranscriptRenderState(
     string? SelectedAgentName = null,
     long CapabilityRevision = 0,
     string ToolPermissionMode = "require-approval",
-    TranscriptUsageSummary? Usage = null);
+    TranscriptUsageSummary? Usage = null,
+    TranscriptTodoPlan? Todo = null);

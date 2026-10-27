@@ -2,6 +2,7 @@ using SelfClaw.Desktop.Services.Transcript.Views;
 using FluentAssertions;
 using SelfClaw.Tests.TestDoubles;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Infrastructure.Options;
 
@@ -9,6 +10,17 @@ namespace SelfClaw.Tests.Desktop.Services.Transcript;
 
 public sealed class TranscriptProjectionTests
 {
+    private const string PlanArguments = """
+        {"todos":[
+          {"content":"检查工具装配","status":"completed"},
+          {"content":"投影计划","status":"in_progress","activeForm":"投影计划"}
+        ]}
+        """;
+
+    private const string OtherPlanArguments = """{"todos":[{"content":"另一步","status":"pending"}]}""";
+
+    private const string ClearedPlanArguments = """{"todos":[]}""";
+
     [Fact]
     public void Build_returns_null_when_the_projection_input_is_unchanged()
     {
@@ -703,6 +715,138 @@ public sealed class TranscriptProjectionTests
 
         state.Should().NotBeNull();
         state!.Usage.Should().BeNull();
+    }
+
+    [Fact]
+    public void Build_keeps_one_todo_plan_instance_and_pushes_nothing_while_the_source_run_is_unchanged()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var toolRunId = Guid.NewGuid();
+        var message = TodoMessage(conversationId, 1, now, toolRunId);
+        var toolRun = TodoRun(toolRunId, conversationId, message.Id, PlanArguments, ToolExecutionStatus.Completed);
+        var projection = CreateProjection();
+        var request = CreateRequest(messages: [message], toolRuns: [toolRun]);
+
+        var first = projection.Build(request) ?? throw new InvalidOperationException("Missing projection.");
+        projection.Build(request).Should().BeNull("an unchanged streaming tick must not republish the whole state");
+
+        var republished = projection.Build(request with { AutoScroll = false })
+            ?? throw new InvalidOperationException("Missing projection.");
+
+        republished.Todo.Should().NotBeNull();
+        ReferenceEquals(republished.Todo, first.Todo).Should()
+            .BeTrue("the dock plan is cached by the source run reference");
+        ReferenceEquals(republished.Items[0].Segments[0].Todo, first.Items[0].Segments[0].Todo).Should()
+            .BeTrue("the inline segment cache keeps the same plan instance too");
+        republished.Items[0].Segments[0].Kind.Should().Be("todo");
+    }
+
+    [Fact]
+    public void Build_publishes_an_empty_plan_when_the_last_write_cleared_it()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var planRunId = Guid.NewGuid();
+        var clearRunId = Guid.NewGuid();
+        var message = TodoMessage(conversationId, 1, now, planRunId, clearRunId);
+        var toolRuns = new[]
+        {
+            TodoRun(planRunId, conversationId, message.Id, PlanArguments, ToolExecutionStatus.Completed),
+            TodoRun(clearRunId, conversationId, message.Id, ClearedPlanArguments, ToolExecutionStatus.Completed,
+                "Cleared plan.")
+        };
+
+        var state = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: toolRuns))
+            ?? throw new InvalidOperationException("Missing projection.");
+
+        state.Todo.Should().NotBeNull();
+        state.Todo!.Items.Should().BeEmpty();
+        state.Items[0].Segments.Select(segment => segment.Kind).Should().Equal("todo", "todo");
+        state.Items[0].Segments[1].Todo!.Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Build_keeps_the_previous_plan_when_the_newest_write_failed_or_does_not_parse()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var planRunId = Guid.NewGuid();
+        var failedRunId = Guid.NewGuid();
+        var unparseableRunId = Guid.NewGuid();
+        var message = TodoMessage(conversationId, 1, now, planRunId, failedRunId, unparseableRunId);
+        var toolRuns = new[]
+        {
+            TodoRun(planRunId, conversationId, message.Id, PlanArguments, ToolExecutionStatus.Completed),
+            TodoRun(failedRunId, conversationId, message.Id, OtherPlanArguments, ToolExecutionStatus.Failed,
+                "Invalid todo list"),
+            TodoRun(unparseableRunId, conversationId, message.Id, "{\"todos\":\"nope\"}", ToolExecutionStatus.Completed)
+        };
+
+        var state = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: toolRuns))
+            ?? throw new InvalidOperationException("Missing projection.");
+
+        state.Todo.Should().NotBeNull();
+        state.Todo!.Items.Select(item => item.Content).Should().Equal("检查工具装配", "投影计划");
+        // 解析失败的那条回落到通用工具卡，成功的两条各自是 todo 段。
+        state.Items[0].Segments.Select(segment => segment.Kind).Should().Equal("todo", "todo", "tool");
+    }
+
+    [Fact]
+    public void Build_reports_no_todo_plan_without_a_todo_write()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var toolRunId = Guid.NewGuid();
+        var message = TodoMessage(conversationId, 1, now, toolRunId);
+        var toolRun = new ToolExecutionRecord(toolRunId, conversationId, "read_file", "{}",
+            ToolExecutionStatus.Completed, "Read file", "call-1", 12, now, now, MessageId: message.Id);
+
+        var state = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: [toolRun]))
+            ?? throw new InvalidOperationException("Missing projection.");
+
+        state.Todo.Should().BeNull();
+        state.Items[0].Segments.Should().ContainSingle().Which.Kind.Should().Be("tool");
+    }
+
+    [Fact]
+    public void Build_regenerates_the_todo_plan_after_the_projection_is_invalidated()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var toolRunId = Guid.NewGuid();
+        var message = TodoMessage(conversationId, 1, now, toolRunId);
+        var toolRun = TodoRun(toolRunId, conversationId, message.Id, PlanArguments, ToolExecutionStatus.Completed);
+        var projection = CreateProjection();
+        var request = CreateRequest(messages: [message], toolRuns: [toolRun]);
+
+        var before = projection.Build(request) ?? throw new InvalidOperationException("Missing projection.");
+        projection.Invalidate();
+        var after = projection.Build(request) ?? throw new InvalidOperationException("Missing projection.");
+
+        after.Todo.Should().NotBeNull();
+        after.Todo!.Items.Select(item => item.Content).Should().Equal("检查工具装配", "投影计划");
+        ReferenceEquals(after.Todo, before.Todo).Should().BeFalse("Invalidate drops the cached plan instance");
+    }
+
+    private static MessageRecord TodoMessage(Guid conversationId, long sequence, DateTimeOffset timestamp,
+        params Guid[] toolRunIds)
+    {
+        var id = Guid.NewGuid();
+        return new MessageRecord(id, conversationId, Guid.NewGuid(), sequence, MessageRole.Assistant, "answer",
+            MessageStatus.Sealed, timestamp, timestamp,
+            Segments: toolRunIds
+                .Select((toolRunId, ordinal) =>
+                    new MessageSegmentRecord(id, ordinal, MessageSegmentKind.ToolCall, null, toolRunId))
+                .ToArray());
+    }
+
+    private static ToolExecutionRecord TodoRun(Guid id, Guid conversationId, Guid messageId, string argumentsJson,
+        ToolExecutionStatus status, string? resultSummary = "Updated plan (1/2)")
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new ToolExecutionRecord(id, conversationId, TodoPlanRules.ToolName, argumentsJson, status,
+            resultSummary, "call-1", 8, now, now, MessageId: messageId);
     }
 
     private static ConversationTurnRecord UsageTurn(DateTimeOffset startedAtUtc, TurnUsage usage)

@@ -243,6 +243,7 @@ public sealed class AgentActivityCoordinator : IDisposable
             ToolCallKind.Read or ToolCallKind.List or ToolCallKind.Search => "正在查看项目",
             ToolCallKind.Edit => "正在修改文件",
             ToolCallKind.Run => "正在运行命令",
+            ToolCallKind.Plan => "正在更新任务计划",
             _ => string.IsNullOrWhiteSpace(toolName) ? "正在使用工具" : $"正在使用 {toolName.Trim()}",
         };
 

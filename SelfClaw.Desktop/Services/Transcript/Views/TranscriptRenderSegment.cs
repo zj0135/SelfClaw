@@ -13,4 +13,5 @@ public sealed record TranscriptRenderSegment(
     string? SourceKind = null,
     string? SourceId = null,
     string? DisplayName = null,
-    int? SegmentOrdinal = null);
+    int? SegmentOrdinal = null,
+    TranscriptTodoPlan? Todo = null);

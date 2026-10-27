@@ -1,6 +1,7 @@
 using SelfClaw.Desktop.Services.Transcript.Views;
 using System.IO;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Options;
 
@@ -114,7 +115,10 @@ internal sealed class TranscriptMessageProjector
                     case MessageSegmentKind.ToolCall when segment.ToolRunId is Guid toolRunId:
                         if (toolRunsById.TryGetValue(toolRunId, out var toolRun))
                         {
-                            renderSegments.Add(BuildToolSegmentCached(toolRun) with { SegmentOrdinal = segment.Ordinal });
+                            var toolSegment = toolRun.ToolName == TodoPlanRules.ToolName
+                                ? BuildTodoSegmentCached(toolRun)
+                                : BuildToolSegmentCached(toolRun);
+                            renderSegments.Add(toolSegment with { SegmentOrdinal = segment.Ordinal });
                         }
 
                         break;
@@ -143,6 +147,20 @@ internal sealed class TranscriptMessageProjector
         }
 
         var segment = TranscriptToolRunPresenter.BuildToolSegment(toolRun);
+        _toolSegmentCache[toolRun.Id] = (toolRun, segment);
+        return segment;
+    }
+
+    private TranscriptRenderSegment BuildTodoSegmentCached(ToolExecutionRecord toolRun)
+    {
+        if (_toolSegmentCache.TryGetValue(toolRun.Id, out var cached) && ReferenceEquals(cached.Record, toolRun))
+        {
+            return cached.Segment;
+        }
+
+        // An unparseable snapshot falls back to the generic tool card, and the fallback is cached too: the
+        // arguments of a recorded run never change, so re-parsing the same reference would be wasted work.
+        var segment = TranscriptTodoPresenter.BuildTodoSegment(toolRun) ?? TranscriptToolRunPresenter.BuildToolSegment(toolRun);
         _toolSegmentCache[toolRun.Id] = (toolRun, segment);
         return segment;
     }

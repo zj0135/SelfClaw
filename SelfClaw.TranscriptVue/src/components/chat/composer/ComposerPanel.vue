@@ -321,6 +321,7 @@ defineExpose({
 				</div>
 			</div>
 		</transition>
+		<slot name="plan" />
 		<slot name="queue" />
 		<section class="composer-shell" :class="{ dragging }" aria-label="消息输入">
 			<ComposerAttachments :items="props.attachments" :error="props.attachmentsError"

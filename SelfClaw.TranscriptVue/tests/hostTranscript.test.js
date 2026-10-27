@@ -81,6 +81,29 @@ it('rejects a patch against the wrong version and replays the current snapshot w
     expect(panel.posted).toContainEqual({ type: 'transcript-applied', revision: 6 });
 });
 
+it('clears the todo plan as soon as a push omits the field', async () => {
+    const panel = fixture();
+    const seen = [];
+    panel.transcript.on((state) => seen.push(state.todo ?? null));
+    const todo = { items: [{ content: '投影到 transcript 卡片', status: 'in_progress', activeForm: '正在投影' }] };
+    const first = { ...frame(1), selectedConversationId: 'conv-1', todo };
+    panel.send(first);
+    await flushPromises();
+    expect(seen.at(-1)).toEqual(todo);
+
+    // 后端序列化是 WhenWritingNull：无计划时 `todo` 整个字段缺席。补丁沿用上一份快照，
+    // 若不显式重置，切会话后 dock 会一直显示上一条会话的计划。
+    panel.send({ type: 'patchState', revision: 2, baseRevision: 1, selectedConversationId: 'conv-2', upsertItems: [] });
+    await flushPromises();
+    expect(seen.at(-1)).toBeNull();
+    expect(seen.at(-1)).not.toEqual(todo);
+
+    // 整份替换同理：新快照不带字段时不得继承上一条计划。
+    panel.send({ ...frame(3), selectedConversationId: 'conv-2' });
+    await flushPromises();
+    expect(seen.at(-1)).toBeNull();
+});
+
 it('waits for rendering and accepts an explicit Vue error before the acknowledgement', async () => {
     let renderDone;
     const panel = fixture(() => new Promise((resolve) => { renderDone = resolve; }));

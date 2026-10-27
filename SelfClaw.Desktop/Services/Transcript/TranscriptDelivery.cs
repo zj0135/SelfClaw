@@ -127,7 +127,8 @@ internal sealed class TranscriptDelivery : IDisposable
             state.SelectedAgentName,
             state.CapabilityRevision,
             state.ToolPermissionMode,
-            state.Usage
+            state.Usage,
+            state.Todo
         };
 
     private static object CreateTranscriptPatch(
@@ -171,7 +172,10 @@ internal sealed class TranscriptDelivery : IDisposable
             current.SelectedAgentName,
             current.CapabilityRevision,
             current.ToolPermissionMode,
-            current.Usage
+            current.Usage,
+            // Always sent: the renderer resets its plan from `payload.todo ?? null` on every push, so a patch
+            // without this field would clear the dock on each streaming increment.
+            current.Todo
         };
     }
 

@@ -53,6 +53,54 @@ describe('buildRenderBlocks', () => {
 	});
 });
 
+describe('buildRenderBlocks todo segments', () => {
+	const todo = { items: [{ content: '投影到 transcript 卡片', status: 'in_progress', activeForm: '正在投影' }] };
+
+	it('keeps a todo segment as its own block between neighbouring tool segments', () => {
+		const blocks = buildRenderBlocks({
+			id: 'message-1',
+			segments: [
+				{ kind: 'tool', toolName: 'read_file', text: 'Read README.md', segmentId: 'message-1:tool:0' },
+				{ kind: 'todo', text: 'Updated plan (1/2)', status: 'completed', segmentId: 'message-1:todo:1', todo },
+				{ kind: 'tool', toolName: 'read_file', text: 'Read src', segmentId: 'message-1:tool:2' },
+			],
+		});
+
+		expect(blocks.map((block) => block.type)).toEqual(['tool', 'todo', 'tool']);
+		expect(blocks[1]).toMatchObject({
+			type: 'todo',
+			key: 'message-1:todo:1',
+			isFirst: false,
+			isLast: false,
+		});
+		expect(blocks[1].segment.todo).toBe(todo);
+	});
+
+	it('never merges a todo segment into a neighbouring tool group', () => {
+		const blocks = buildRenderBlocks({
+			id: 'message-2',
+			segments: [
+				{ kind: 'tool', toolName: 'read_file', text: 'Read a', segmentId: 'message-2:tool:0' },
+				{ kind: 'tool', toolName: 'read_file', text: 'Read b', segmentId: 'message-2:tool:1' },
+				{ kind: 'todo', text: 'Updated plan (1/2)', segmentId: 'message-2:todo:2', todo },
+				{ kind: 'tool', toolName: 'list_files', text: 'List src', segmentId: 'message-2:tool:3' },
+				{ kind: 'tool', toolName: 'list_files', text: 'List docs', segmentId: 'message-2:tool:4' },
+			],
+		});
+
+		expect(blocks.map((block) => block.type)).toEqual(['tool-group', 'todo', 'tool-group']);
+		expect(blocks[0].members.map((member) => member.segment.text)).toEqual(['Read a', 'Read b']);
+		expect(blocks[2].members.map((member) => member.segment.text)).toEqual(['List src', 'List docs']);
+	});
+
+	it('keeps a todo segment that carries no markdown and falls back to a derived key', () => {
+		const blocks = buildRenderBlocks({ id: 'message-3', segments: [{ kind: 'todo', text: 'Updated plan (0/1)', todo }] });
+
+		expect(blocks).toHaveLength(1);
+		expect(blocks[0]).toMatchObject({ type: 'todo', key: 'message-3:todo:0', isFirst: true, isLast: true });
+	});
+});
+
 describe('extractUserMessageText', () => {
 	it('extracts plain text from user message segments while ignoring images and attachments', () => {
 		const item = {

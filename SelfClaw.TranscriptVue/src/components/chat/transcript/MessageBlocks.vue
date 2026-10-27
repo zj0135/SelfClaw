@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { buildRenderBlocks } from '../../../renderers/transcript.js';
 import ThinkingBlock from './ThinkingBlock.vue';
+import TodoCard from './TodoCard.vue';
 import ToolGroup from './ToolGroup.vue';
 import ToolCard from './ToolCard.vue';
 import BodySegment from './BodySegment.vue';
@@ -17,6 +18,9 @@ const blocks = computed(() => buildRenderBlocks(props.item));
 			<ThinkingBlock v-if="block.type === 'thinking'" :data-activity-block-id="compact ? block.key : null" :id="block.id" :item="item" :segment="block.segment"
 				:is-last="block.isLast" :open="collapse.isThinkingOpen(block.id)" @toggle="collapse.toggleThinking(block.id)"
 				@preview-image="emit('preview-image', $event)" />
+			<TodoCard v-else-if="block.type === 'todo'" :data-activity-block-id="compact ? block.key : null" :id="block.key"
+				:segment="block.segment" :open="collapse.isTodoOpen(block.key)"
+				@toggle="collapse.toggleTodo(block.key)" />
 			<ToolGroup v-else-if="block.type === 'tool-group'" :data-activity-block-id="compact ? block.key : null" :block="block" :collapse="collapse" />
 			<ToolCard v-else-if="block.type === 'tool'" :data-activity-block-id="compact ? block.key : null" :id="block.id" :segment="block.segment" :summary-label="block.summaryLabel"
 				:open="collapse.isToolOpen(block.id)" @toggle="collapse.toggleTool(block.id)" />
@@ -30,9 +34,9 @@ const blocks = computed(() => buildRenderBlocks(props.item));
 .message-blocks { display: grid; gap: 8px; min-width: 0; }
 .compact { font-size: var(--fs-12); gap: 2px; }
 /* 窄栏里的紧凑变体：行距再收一档，展开导线收窄一格。 */
-.compact :deep(.thinking-summary), .compact :deep(.tool-summary), .compact :deep(.tool-group-summary) { padding: 6px 0; }
-.compact :deep(.thinking-label), .compact :deep(.inline-tool-label), .compact :deep(.tool-group-label) { font-size: var(--fs-12); letter-spacing: 0; }
-.compact :deep(.thinking-content), .compact :deep(.tool-details), .compact :deep(.tool-group-details) { margin: 1px 0 7px 22px; padding: 1px 0 1px 10px; }
+.compact :deep(.thinking-summary), .compact :deep(.tool-summary), .compact :deep(.tool-group-summary), .compact :deep(.todo-summary) { padding: 6px 0; }
+.compact :deep(.thinking-label), .compact :deep(.inline-tool-label), .compact :deep(.tool-group-label), .compact :deep(.inline-todo-label) { font-size: var(--fs-12); letter-spacing: 0; }
+.compact :deep(.thinking-content), .compact :deep(.tool-details), .compact :deep(.tool-group-details), .compact :deep(.todo-details) { margin: 1px 0 7px 22px; padding: 1px 0 1px 10px; }
 .compact :deep(.body.body-segment) { padding: 0; font-size: var(--fs-12); line-height: 1.65; overflow-wrap: anywhere; }
 .compact :deep(pre) { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
 .compact :deep(img) { max-width: 100%; height: auto; }

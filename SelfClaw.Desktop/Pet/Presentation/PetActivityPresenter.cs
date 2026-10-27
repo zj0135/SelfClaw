@@ -254,6 +254,9 @@ public sealed class PetActivityPresenter : IDisposable
                 or ToolCallKind.Search => PetWorkState.Reviewing,
             AgentActivityPhase.UsingTool when snapshot.ToolKind is ToolCallKind.Edit
                 or ToolCallKind.Run => PetWorkState.Running,
+            // Explicit, not left to the default arm: a plan update is still work, and pinning it here keeps the
+            // pet from drifting if the default ever changes.
+            AgentActivityPhase.UsingTool when snapshot.ToolKind is ToolCallKind.Plan => PetWorkState.Working,
             _ => PetWorkState.Working,
         };
 

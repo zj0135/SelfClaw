@@ -189,6 +189,66 @@ public sealed class TranscriptPublisherTests
         AssertUsage(patch.RootElement.GetProperty("usage"), 1_500, 150, 500);
     }
 
+    [Fact]
+    public void Publish_delivers_the_todo_plan_on_both_replace_and_patch()
+    {
+        var sent = new List<string>();
+        var channel = new WebViewHostChannel();
+        using var delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
+        channel.Attach(sent.Add);
+        channel.MarkReady();
+        using var publisher = new TranscriptPublisher(new TranscriptProjection(StoragePathDefaults.CreateDefault()), delivery, Dispatcher.CurrentDispatcher);
+        var now = DateTimeOffset.UtcNow;
+        var conversationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var toolRunId = Guid.NewGuid();
+        var turn = new SelfClaw.Core.Models.ConversationTurnRecord(Guid.NewGuid(), conversationId,
+            SelfClaw.Core.Runtime.AgentExecutionMode.Direct, SelfClaw.Core.Runtime.DirectTurnOrigin.Interactive,
+            SelfClaw.Core.Models.ConversationTurnStatus.Succeeded, now, now.AddSeconds(5));
+        var message = new SelfClaw.Core.Models.MessageRecord(messageId, conversationId, turn.Id, 1,
+            SelfClaw.Core.Models.MessageRole.Assistant, "answer", SelfClaw.Core.Models.MessageStatus.Sealed, now, now,
+            Segments:
+            [
+                new SelfClaw.Core.Models.MessageSegmentRecord(messageId, 0,
+                    SelfClaw.Core.Models.MessageSegmentKind.ToolCall, null, toolRunId)
+            ]);
+        var toolRun = new SelfClaw.Core.Models.ToolExecutionRecord(toolRunId, conversationId,
+            SelfClaw.Core.Runtime.Tooling.TodoPlanRules.ToolName,
+            """{"todos":[{"content":"投影计划","status":"in_progress","activeForm":"投影计划"}]}""",
+            SelfClaw.Core.Models.ToolExecutionStatus.Completed, "Updated plan (0/1)", "call-1", 8, now, now,
+            MessageId: messageId);
+        var request = CreateRequest("build", false) with { Messages = [message], Turns = [turn], ToolRuns = [toolRun] };
+        publisher.Attach(_ => request);
+
+        publisher.PublishNow(false);
+        delivery.Acknowledge(ReadRevision(sent.Single())).Should().BeTrue();
+
+        using (var replace = JsonDocument.Parse(sent.Single()))
+        {
+            replace.RootElement.GetProperty("type").GetString().Should().Be("replaceState");
+            AssertTodoPlan(replace.RootElement.GetProperty("todo"));
+            replace.RootElement.GetProperty("items")[0].GetProperty("segments")[0]
+                .GetProperty("kind").GetString().Should().Be("todo");
+        }
+
+        request = request with { SelectedAgentName = "next" };
+        publisher.PublishNow(false);
+
+        using var patch = JsonDocument.Parse(sent.Last());
+        patch.RootElement.GetProperty("type").GetString().Should().Be("patchState");
+        // Missing on the patch path would make the renderer reset the dock on every streaming increment.
+        AssertTodoPlan(patch.RootElement.GetProperty("todo"));
+    }
+
+    private static void AssertTodoPlan(JsonElement plan)
+    {
+        var items = plan.GetProperty("items").EnumerateArray().ToArray();
+        items.Should().ContainSingle();
+        items[0].GetProperty("content").GetString().Should().Be("投影计划");
+        items[0].GetProperty("status").GetString().Should().Be("in_progress");
+        items[0].GetProperty("activeForm").GetString().Should().Be("投影计划");
+    }
+
     private static SelfClaw.Core.Models.ConversationTurnRecord UsageTurn(DateTimeOffset startedAtUtc, int inputTokens, int outputTokens)
         => new(Guid.NewGuid(), Guid.NewGuid(), SelfClaw.Core.Runtime.AgentExecutionMode.Direct,
             SelfClaw.Core.Runtime.DirectTurnOrigin.Interactive, SelfClaw.Core.Models.ConversationTurnStatus.Succeeded,

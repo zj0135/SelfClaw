@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using SelfClaw.Desktop.Services.Transcript.Views;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Infrastructure.Options;
 
 namespace SelfClaw.Desktop.Services.Transcript;
@@ -16,6 +17,7 @@ public sealed class TranscriptProjection
     private IReadOnlySet<Guid> _runningConversationIdsSource = ImmutableHashSet<Guid>.Empty;
     private IReadOnlyList<TranscriptConversationItem> _navigation = [];
     private TranscriptRenderState? _lastState;
+    private (ToolExecutionRecord? Run, long Sequence, TranscriptTodoPlan? Plan) _todoCache;
 
     public TranscriptProjection(StoragePaths storagePaths)
     {
@@ -28,11 +30,12 @@ public sealed class TranscriptProjection
         var items = BuildItems(request);
         _messageProjector.PruneToolSegmentCache(request.ToolRuns);
         UpdateNavigation(request);
+        var todo = ResolveTodo(TodoPlanHistory.FindLatest(request.Messages, request.ToolRuns));
         var stableItems = _lastState is { } previous && SameReferences(previous.Items, items) ? previous.Items : items;
         var state = new TranscriptRenderState(stableItems, request.AutoScroll, _navigation,
             request.SelectedConversationId?.ToString("D"), request.IsBusy, request.IsContinuation, request.ActivityText, request.AgentMode,
             request.SelectedAgentId, request.SelectedAgentName, request.CapabilityRevision, request.ToolPermissionMode,
-            BuildUsageSummary(request.Turns, request.LiveUsage));
+            BuildUsageSummary(request.Turns, request.LiveUsage), Todo: todo);
         if (state == _lastState) return null;
         _lastState = state;
         return state;
@@ -41,6 +44,7 @@ public sealed class TranscriptProjection
     internal void Invalidate()
     {
         _lastState = null;
+        _todoCache = default;
         _messageCache.Clear();
         _outcomeCache.Clear();
         _compactionCache.Clear();
@@ -129,6 +133,26 @@ public sealed class TranscriptProjection
         var item = _messageProjector.BuildTurnOutcome(turn);
         _outcomeCache[turn.Id] = (turn, item);
         return item;
+    }
+
+    // The render state is a record, so an IReadOnlyList field compares by reference: handing out a fresh plan
+    // on every build would make state != _lastState and push the whole state on every 120 ms streaming tick.
+    private TranscriptTodoPlan? ResolveTodo(TodoPlanSnapshot? latest)
+    {
+        if (latest is not { } current)
+        {
+            _todoCache = default;
+            return null;
+        }
+
+        if (ReferenceEquals(_todoCache.Run, current.Run) && _todoCache.Sequence == current.SourceSequence)
+        {
+            return _todoCache.Plan;
+        }
+
+        var plan = TranscriptTodoPresenter.BuildPlan(current.Plan);
+        _todoCache = (current.Run, current.SourceSequence, plan);
+        return plan;
     }
 
     private static TranscriptUsageSummary? BuildUsageSummary(IReadOnlyList<ConversationTurnRecord> turns,
