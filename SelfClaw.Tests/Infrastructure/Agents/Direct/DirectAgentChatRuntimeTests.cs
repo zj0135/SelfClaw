@@ -126,7 +126,7 @@ public sealed class DirectAgentChatRuntimeTests
             "prior prompt",
             "prior answer",
             "user prompt");
-        factory.LastTools.Should().HaveCount(7);
+        factory.LastTools.Should().HaveCount(8);
     }
 
     [Fact]
@@ -141,7 +141,8 @@ public sealed class DirectAgentChatRuntimeTests
 
         factory.ScopeCalls.Should().Equal(AiModelSelectionScopes.DesktopDefault);
         factory.LastTools.Select(tool => tool.Name).Should().Equal(
-            "list_files", "glob_files", "search_text", "read_file", "write_file", "edit_file", "run_shell_command");
+            "list_files", "glob_files", "search_text", "read_file", "write_file", "edit_file", "run_shell_command",
+            "todo_write");
         events.Last().Should().Be(new RunCompletedEvent(RunCompletionStatus.Succeeded, "", null));
     }
 
@@ -662,6 +663,7 @@ public sealed class DirectAgentChatRuntimeTests
         var contentCache = new CapabilityContentCache();
         return new DirectTurnCapabilityResolver(
             new WorkspaceAgentToolset(workspaceTools ?? new NoOpWorkspaceTools()),
+            new TodoToolset(),
             DefaultWorkspaceShellPreferenceSource.Instance,
             new EmptyExtensionPackageRepository(),
             new SkillCapabilitySource(skillPackageReader, new SkillTokenParser(), new SkillRuntimeToolset(new SkillScriptRunner()), contentCache),

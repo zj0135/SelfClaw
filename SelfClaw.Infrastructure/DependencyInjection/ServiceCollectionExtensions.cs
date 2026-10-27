@@ -217,6 +217,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<WorkspaceShellRunner>();
         services.AddSingleton<IWorkspaceToolService, WorkspaceToolService>();
         services.AddSingleton<WorkspaceAgentToolset>();
+        services.AddSingleton<TodoToolset>();
         services.AddSingleton<CliCommandResolver>();
         services.AddSingleton<ICliAgentProcessHost, CliAgentProcessHost>();
         services.AddSingleton<ICliAgentAdapter, ClaudeCliAgentAdapter>();

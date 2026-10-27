@@ -24,6 +24,7 @@ internal sealed class DirectConversationContext
     private readonly HashSet<string> _callIds = new(StringComparer.Ordinal);
     private long _nextUnitSequence;
     private string? _inTurnSummary;
+    private string? _planSection;
     private IReadOnlyList<ChatMessage> _messages = [];
     private int _countedMessageCount;
     private int _countedTokens;
@@ -162,6 +163,16 @@ internal sealed class DirectConversationContext
                 $"The turn holds {units} units, so {coveredUnitCount} of them cannot be compacted.");
         }
 
+        // A plan written into the units this summary now covers would otherwise vanish from the model's view, and
+        // it is exactly the oldest units that in-turn compaction takes first. It has to be read before the units
+        // go, and assigned before Recompose, which is what puts the section into the system text.
+        if (FindCoveredPlan(coveredUnitCount) is { } coveredPlan &&
+            TodoPlanSection.Build(coveredPlan) is { } section &&
+            !string.Equals(section, _planSection, StringComparison.Ordinal))
+        {
+            _planSection = section;
+        }
+
         var removed = 0;
         for (var index = 0; index < _entries.Count && removed < coveredUnitCount;)
         {
@@ -180,6 +191,31 @@ internal sealed class DirectConversationContext
         _countedMessageCount = 0;
         _countedTokens = 0;
         Recompose();
+    }
+
+    // Only the newest plan of the turn decides: a newer todo_write in a retained unit is still in the history,
+    // so an older covered snapshot must not resurface behind it.
+    private TodoPlan? FindCoveredPlan(int coveredUnitCount)
+    {
+        var unitIndex = -1;
+        var newestIndex = -1;
+        TodoPlan? newest = null;
+        foreach (var entry in _entries)
+        {
+            if (entry.IsProtected)
+            {
+                continue;
+            }
+
+            unitIndex++;
+            if (TodoPlanSection.FindNewestPlan(entry.Messages) is { } plan)
+            {
+                newestIndex = unitIndex;
+                newest = plan;
+            }
+        }
+
+        return newestIndex >= 0 && newestIndex < coveredUnitCount ? newest : null;
     }
 
     private void Recompose()
@@ -203,10 +239,17 @@ internal sealed class DirectConversationContext
     // exact byte layout, and this path only exists once in-turn compaction ran.
     private string? ComposeSystemText()
     {
+        // A turn-start snapshot may already sit in the system text this turn began with; the same list must not
+        // be paid for twice when an in-turn compaction covers it again (design §7.4).
+        var planSection = _planSection is not null &&
+                          _systemText?.Contains(_planSection, StringComparison.Ordinal) == true
+            ? null
+            : _planSection;
         var sections = new[]
             {
                 _systemText,
-                _inTurnSummary is null ? null : DirectPromptComposer.CreateSummarySection(_inTurnSummary)
+                _inTurnSummary is null ? null : DirectPromptComposer.CreateSummarySection(_inTurnSummary),
+                planSection
             }
             .Where(section => !string.IsNullOrWhiteSpace(section))
             .ToArray();

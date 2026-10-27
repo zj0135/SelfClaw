@@ -1,4 +1,4 @@
-﻿using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
+using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using FluentAssertions;
 using ModelContextProtocol;
@@ -8,6 +8,7 @@ using System.Text.Json;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.Extensions;
 using SelfClaw.Infrastructure.Extensions.Abstractions;
@@ -66,7 +67,8 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         Func<Task> resolveChild = async () => { await using var lease = await resolver.ResolveAsync(child); };
         await resolveChild.Should().ThrowAsync<InvalidDataException>().WithMessage("*review*unavailable or changed*");
         await using var continuation = await resolver.ResolveAsync(request with { ExecutionContext = new(DirectTurnOrigin.Continuation, ceiling, null) });
-        continuation.Tools.Should().BeEmpty();
+        // The degraded capability is gone; the plan tool is not a capability and survives.
+        continuation.Tools.Should().ContainSingle().Which.Name.Should().Be(TodoPlanRules.ToolName);
         continuation.Diagnostics.Should().Contain(message => message.Contains("removed"));
     }
 
@@ -94,7 +96,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             { ExecutionContext = new(DirectTurnOrigin.Subagent, ceiling, null) }); };
         await child.Should().ThrowAsync<InvalidDataException>().WithMessage("*MCP*could not be loaded*");
         await using var continuation = await resolver.ResolveAsync(request with { ExecutionContext = new(DirectTurnOrigin.Continuation, ceiling, null) });
-        continuation.Tools.Should().BeEmpty();
+        continuation.Tools.Should().ContainSingle().Which.Name.Should().Be(TodoPlanRules.ToolName);
     }
 
     [Fact]
@@ -116,7 +118,8 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         lease.SystemInstructions[0].Should().StartWith("[SelfClaw Capability Policy]");
         lease.SystemInstructions[1].Should().Contain("BEGIN SELFCLAW SKILL review").And.Contain("# review instructions");
         lease.SystemInstructions[2].Should().Contain("SelfClaw Available Skills");
-        lease.Tools.Select(tool => tool.Name).Should().Equal("activate_skill", "read_skill_resource", "run_skill_script", "list_skill_resources");
+        lease.Tools.Select(tool => tool.Name).Should().Equal(
+            "todo_write", "activate_skill", "read_skill_resource", "run_skill_script", "list_skill_resources");
         lease.Diagnostics.Should().ContainSingle(item => item.Contains("activated Skill 'review'"));
         lease.MessageAdjustments[request.Messages[0].Id].Should().Be("history  [/unknown]");
         lease.MessageAdjustments[request.Messages[1].Id].Should().Be("run  and ");
@@ -337,7 +340,8 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         lease.SystemInstructions[0].Should().Contain("Capability Policy");
         lease.SystemInstructions[1].Should().Contain("BEGIN SELFCLAW PLUGIN office");
         lease.SystemInstructions[2].Should().Contain("BEGIN SELFCLAW SKILL office/slides");
-        lease.Tools.Select(tool => tool.Name).Should().Equal("activate_skill", "read_skill_resource", "run_skill_script", "list_skill_resources");
+        lease.Tools.Select(tool => tool.Name).Should().Equal(
+            "todo_write", "activate_skill", "read_skill_resource", "run_skill_script", "list_skill_resources");
         lease.MessageAdjustments[request.Messages.Single().Id].Should().BeEmpty();
         var drainTask = versionLeases.DrainAsync(pluginRoot);
         drainTask.IsCompleted.Should().BeFalse();
@@ -511,6 +515,73 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         reads.Should().Be(1);
     }
 
+    [Theory]
+    [InlineData(DirectTurnOrigin.Interactive, true)]
+    [InlineData(DirectTurnOrigin.Continuation, true)]
+    [InlineData(DirectTurnOrigin.Subagent, false)]
+    [InlineData(DirectTurnOrigin.Automation, false)]
+    public async Task ResolveAsync_binds_todo_write_exactly_where_the_plan_has_a_surface(
+        DirectTurnOrigin origin,
+        bool expected)
+    {
+        var resolver = CreateResolver(new PackageRepository([]));
+        var needsCeiling = origin is DirectTurnOrigin.Continuation or DirectTurnOrigin.Subagent;
+        var request = CreateRequest([], "plan the work") with
+        {
+            ExecutionContext = new DirectTurnExecutionContext(
+                origin,
+                needsCeiling ? new DirectCapabilityCeiling(AgentRuntimeDefinition.SystemToolPolicy, [], [], [], []) : null,
+                null)
+        };
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        var toolNames = lease.Tools.Select(tool => tool.Name);
+        if (expected)
+        {
+            toolNames.Should().Contain(TodoPlanRules.ToolName);
+        }
+        else
+        {
+            toolNames.Should().NotContain(TodoPlanRules.ToolName);
+        }
+    }
+
+    [Theory]
+    [InlineData(AgentRuntimeDefinition.ReadOnlyToolPolicy, true)]
+    [InlineData(AgentRuntimeDefinition.NoneToolPolicy, false)]
+    public async Task ResolveAsync_keeps_todo_write_for_a_read_only_workspace_policy(string toolPolicy, bool expected)
+    {
+        var resolver = CreateResolver(new PackageRepository([]));
+        var baseRequest = CreateRequest([], "plan the work");
+        var request = baseRequest with { Agent = baseRequest.Agent with { ToolPolicy = toolPolicy } };
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        var toolNames = lease.Tools.Select(tool => tool.Name);
+        if (expected)
+        {
+            toolNames.Should().Contain(TodoPlanRules.ToolName);
+        }
+        else
+        {
+            toolNames.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_binds_todo_write_without_a_workspace()
+    {
+        // The plan is conversation metadata, so a turn with no workspace still has to be able to write one.
+        var resolver = CreateResolver(new PackageRepository([]));
+        var request = CreateRequest([], "plan the work");
+        request.WorkspaceRoot.Should().BeNull();
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        lease.Tools.Should().ContainSingle().Which.Name.Should().Be(TodoPlanRules.ToolName);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_rootPath))
@@ -547,6 +618,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         contentCache ??= new CapabilityContentCache();
         return new DirectTurnCapabilityResolver(
             new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
+            new TodoToolset(),
             shellPreference ?? DefaultWorkspaceShellPreferenceSource.Instance,
             repository,
             new SkillCapabilitySource(

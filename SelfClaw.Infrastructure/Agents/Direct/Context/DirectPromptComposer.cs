@@ -1,16 +1,24 @@
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
+using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using Microsoft.Extensions.AI;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Core.Runtime.Tooling;
 
 namespace SelfClaw.Infrastructure.Agents.Direct.Context;
 
 internal sealed class DirectPromptComposer
 {
     internal const int MaximumCompletionBatchBytes = 64 * 1024;
+
+    /// <summary>
+    /// Replaces the result text of every <c>todo_write</c> superseded by a newer valid plan. Each call
+    /// carries a full snapshot, so replaying all of them would pay for the same list on every turn.
+    /// </summary>
+    internal const string ElidedTodoResultText = "Plan superseded by a newer todo_write.";
 
     private const string CompletionInstruction =
         "A transient SelfClaw runtime message may contain completed Subagent results. " +
@@ -135,18 +143,21 @@ internal sealed class DirectPromptComposer
         string agentInstructions,
         IReadOnlyList<string> systemInstructions,
         DirectTurnExecutionContext executionContext,
-        ConversationCompactionRecord? compression)
+        ConversationCompactionRecord? compression,
+        string? todoSection = null)
     {
         ArgumentNullException.ThrowIfNull(systemInstructions);
         ArgumentNullException.ThrowIfNull(executionContext);
         // The summary is a system section, not a user message: it is runtime-supplied context, and it sits after
         // the agent and completion instructions but before capability instructions so an uncompressed prompt
-        // keeps its exact byte layout.
+        // keeps its exact byte layout. The plan snapshot has no content of its own, so it is only ever supplied
+        // by a caller that already knows a compaction covered the plan.
         var sections = new[]
             {
                 agentInstructions,
                 executionContext.CompletionBatch is null ? null : CompletionInstruction,
-                compression is null ? null : CreateCompressionSection(compression)
+                compression is null ? null : CreateCompressionSection(compression),
+                todoSection
             }
             .Concat(systemInstructions)
             .Where(section => !string.IsNullOrWhiteSpace(section))
@@ -289,17 +300,17 @@ internal sealed class DirectPromptComposer
             runsById.TryAdd(run.Id, run);
         }
 
+        // Only the newest valid plan replays its arguments in full; every older snapshot is elided below.
+        var replayable = orderedMessages
+            .Where(message => IsReplayable(message, turnsById[message.TurnId]))
+            .ToArray();
+        var keepFullTodoRunId = TodoPlanHistory.FindLatest(replayable, toolExecutions)?.Run.Id;
         var units = new List<DirectPromptHistoryUnit>();
-        foreach (var message in orderedMessages)
+        foreach (var message in replayable)
         {
-            if (!IsReplayable(message, turnsById[message.TurnId]))
-            {
-                continue;
-            }
-
             var markdown = messageAdjustments.GetValueOrDefault(message.Id) ?? message.MarkdownContent;
             var unit = message.Role == MessageRole.Assistant
-                ? BuildAssistantUnit(message, runsById)
+                ? BuildAssistantUnit(message, runsById, keepFullTodoRunId)
                 : BuildUserUnit(message, markdown, attachments?.GetValueOrDefault(message.Id));
             if (unit.Messages.Count == 0)
             {
@@ -410,7 +421,8 @@ internal sealed class DirectPromptComposer
     // reconstructed exclusively from actual blocks, never from an old unstructured markdown copy.
     private static DirectPromptHistoryUnit BuildAssistantUnit(
         MessageRecord message,
-        IReadOnlyDictionary<Guid, ToolExecutionRecord> runsById)
+        IReadOnlyDictionary<Guid, ToolExecutionRecord> runsById,
+        Guid? keepFullTodoRunId)
     {
         var contents = new List<AIContent>();
         var replay = new List<ChatMessage>();
@@ -436,9 +448,11 @@ internal sealed class DirectPromptComposer
                     }
 
                     var callId = run.CorrelationId ?? run.Id.ToString("D");
-                    contents.Add(new FunctionCallContent(callId, run.ToolName, ParseArguments(run.ArgumentsJson)));
+                    var elided = run.ToolName == TodoPlanRules.ToolName && run.Id != keepFullTodoRunId;
+                    contents.Add(new FunctionCallContent(callId, run.ToolName,
+                        elided ? CreateElidedArguments() : ParseArguments(run.ArgumentsJson)));
                     replay.Add(new ChatMessage(ChatRole.Assistant, contents));
-                    replay.Add(CreateToolResultMessage(callId, run));
+                    replay.Add(CreateToolResultMessage(callId, run, elided));
                     contents = [];
                     break;
             }
@@ -452,9 +466,11 @@ internal sealed class DirectPromptComposer
         return new DirectPromptHistoryUnit(replay, message.Sequence);
     }
 
-    private static ChatMessage CreateToolResultMessage(string callId, ToolExecutionRecord run)
+    private static ChatMessage CreateToolResultMessage(string callId, ToolExecutionRecord run, bool elided)
     {
-        var text = run.ResultContent ?? run.ResultSummary ?? string.Empty;
+        var text = elided
+            ? ElidedTodoResultText
+            : run.ResultContent ?? run.ResultSummary ?? string.Empty;
         var result = new FunctionResultContent(callId, text);
         if (run.Status is ToolExecutionStatus.Failed or ToolExecutionStatus.Cancelled)
         {
@@ -463,6 +479,10 @@ internal sealed class DirectPromptComposer
 
         return new ChatMessage(ChatRole.Tool, [result]);
     }
+
+    // The call and its result must stay paired, so a superseded snapshot is shortened instead of removed.
+    private static Dictionary<string, object?> CreateElidedArguments() =>
+        new(StringComparer.Ordinal) { ["elided"] = true };
 
     private static Dictionary<string, object?> ParseArguments(string argumentsJson)
     {

@@ -20,6 +20,7 @@ namespace SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolver
 {
     private readonly WorkspaceAgentToolset _workspaceToolset;
+    private readonly TodoToolset _todoToolset;
     private readonly IWorkspaceShellPreferenceSource _shellPreference;
     private readonly IExtensionPackageRepository _packageRepository;
     private readonly SkillCapabilitySource _skillSource;
@@ -29,6 +30,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
 
     public DirectTurnCapabilityResolver(
         WorkspaceAgentToolset workspaceToolset,
+        TodoToolset todoToolset,
         IWorkspaceShellPreferenceSource shellPreference,
         IExtensionPackageRepository packageRepository,
         SkillCapabilitySource skillSource,
@@ -37,6 +39,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         SubagentCapabilitySource subagentSource)
     {
         _workspaceToolset = workspaceToolset;
+        _todoToolset = todoToolset;
         _shellPreference = shellPreference;
         _packageRepository = packageRepository;
         _skillSource = skillSource;
@@ -80,6 +83,11 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         var bindings = effectiveRequest.WorkspaceRoot is null
             ? new List<DirectToolBinding>()
             : _workspaceToolset.CreateTools(effectiveRequest.WorkspaceRoot, shellPreference).ToList();
+        // The plan does not depend on a workspace, so it binds outside the branch above.
+        if (policy.AllowsTodoPlan)
+        {
+            bindings.AddRange(_todoToolset.CreateTools());
+        }
         ValidateCapturedPackageCeiling(effectiveRequest, policy, packages);
         var installedSkills = packages
             .Where(package => package.Kind == ExtensionKind.Skill)

@@ -26,6 +26,12 @@ internal sealed record DirectTurnPolicy(DirectTurnOrigin Origin, DirectCapabilit
     /// <summary>A continuation must have committed its durable execution checkpoint before any tool runs.</summary>
     internal bool RequiresToolExecutionCheckpoint => Origin == DirectTurnOrigin.Continuation;
 
+    /// <summary>
+    /// The plan has a user-visible surface only on a turn the user is watching (or its continuation);
+    /// a Subagent child and a v1 automation task would spend tokens on a plan nobody reads.
+    /// </summary>
+    internal bool AllowsTodoPlan => Origin is DirectTurnOrigin.Interactive or DirectTurnOrigin.Continuation;
+
     /// <summary>A Subagent child cannot delegate further, and v1 automation never delegates either.</summary>
     internal bool CanDelegateToSubagent => Origin is not (DirectTurnOrigin.Subagent or DirectTurnOrigin.Automation);
 

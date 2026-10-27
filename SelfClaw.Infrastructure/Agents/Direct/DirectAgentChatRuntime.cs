@@ -1,6 +1,7 @@
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
+using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Models;
@@ -17,6 +18,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Core.Runtime.Tooling;
 
 namespace SelfClaw.Infrastructure.Agents.Direct;
 
@@ -248,20 +250,26 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 request.ToolExecutions ?? [],
                 capabilityLease.MessageAdjustments,
                 attachmentContents);
+            // The plan is read from the stored history before compaction runs, so what it decides is independent
+            // of the units this turn happens to replay.
+            var plan = TodoPlanHistory.FindLatest(request.Messages, request.ToolExecutions ?? []);
             var policy = await _compressionPolicy.GetAsync(cancellationToken).ConfigureAwait(false);
-            var (compression, countedTokens) = await ApplyCompactionAsync(
-                    request, capabilityLease, providerLease, budget, policy, units, writer, cancellationToken)
+            var (compression, countedTokens, todoSection) = await ApplyCompactionAsync(
+                    request, capabilityLease, providerLease, budget, policy, units, plan, writer, cancellationToken)
                 .ConfigureAwait(false);
             EnsurePromptFitsWindow(budget, countedTokens);
             writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
 
+            // The section is the one compaction already counted, so the request that is sized and the request
+            // that is sent can never disagree about it.
             var build = DirectPromptComposer.Compose(
                 units,
                 _promptComposer.BuildSystemText(
                     request.Agent.Instructions,
                     capabilityLease.SystemInstructions,
                     request.ExecutionContext,
-                    compression),
+                    compression,
+                    todoSection),
                 DirectPromptComposer.BuildTrailingProtectedMessages(request.ExecutionContext),
                 compression);
             return new DirectTurnSetup(
@@ -288,32 +296,36 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     /// <summary>
     /// Decides and performs this turn's compaction: count, plan, summarize, and publish the events the
     /// transcript needs. Runs before the first provider request, so the summary is part of that request.
-    /// Returns the compaction the prompt should replay against plus the token count of that prompt; a null
-    /// count means counting is unavailable and the turn degrades to an uncompacted, unchecked request (§5.5).
+    /// Returns the compaction the prompt should replay against, the token count of that prompt and the plan
+    /// section it was counted with; a null count means counting is unavailable and the turn degrades to an
+    /// uncompacted, unchecked request (§5.5).
     /// </summary>
-    private async Task<(ConversationCompactionRecord? Compression, int? PromptTokens)> ApplyCompactionAsync(
-        DirectChatTurnRequest request,
-        DirectTurnCapabilityLease capabilityLease,
-        AiChatClientLease providerLease,
-        DirectPromptBudget budget,
-        DirectCompressionPolicy policy,
-        IReadOnlyList<DirectPromptHistoryUnit> units,
-        ChannelWriter<AgentStreamEvent> writer,
-        CancellationToken cancellationToken)
+    private async Task<(ConversationCompactionRecord? Compression, int? PromptTokens, string? TodoSection)>
+        ApplyCompactionAsync(
+            DirectChatTurnRequest request,
+            DirectTurnCapabilityLease capabilityLease,
+            AiChatClientLease providerLease,
+            DirectPromptBudget budget,
+            DirectCompressionPolicy policy,
+            IReadOnlyList<DirectPromptHistoryUnit> units,
+            TodoPlanSnapshot? planSnapshot,
+            ChannelWriter<AgentStreamEvent> writer,
+            CancellationToken cancellationToken)
     {
+        var section = TodoSection(planSnapshot, request.Compression);
         // Without a declared window and with compaction off, there is nothing to count: the meter waits for
         // the provider's own measurement instead of paying for a local one nobody decides on.
         if (budget.ContextWindowTokens is null && !policy.Enabled)
         {
-            return (request.Compression, null);
+            return (request.Compression, null, section);
         }
 
         var (promptTokens, countedUnits) = CountPromptTokens(
-            request, capabilityLease, providerLease, units, request.Compression);
+            request, capabilityLease, providerLease, units, request.Compression, section);
         if (promptTokens is not int estimatedTokens)
         {
             writer.TryWrite(new RunStatusEvent(AgentRunStatus.Initializing, CountingUnavailableDiagnostic));
-            return (request.Compression, null);
+            return (request.Compression, null, section);
         }
 
         var plan = _promptComposer.PlanCompression(countedUnits, request.Compression, policy, budget, estimatedTokens);
@@ -321,7 +333,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         {
             // No estimate here: the meter keeps the last measured context and updates when this request
             // reports its own, so the displayed number has exactly one source instead of two close ones.
-            return (request.Compression, estimatedTokens);
+            return (request.Compression, estimatedTokens, section);
         }
 
         // Started is written before the summarization call so the transcript never sees a lone terminal, and
@@ -341,7 +353,7 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         {
             // A failed summary is a diagnostic, not a turn failure: the uncompacted history still goes out.
             writer.TryWrite(new ContextCompactionFailedEvent(CompactionFailedReason));
-            return (request.Compression, estimatedTokens);
+            return (request.Compression, estimatedTokens, section);
         }
 
         var compression = new ConversationCompactionRecord(
@@ -364,14 +376,23 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         // The window check bounds what is actually sent, so it is re-run against the prompt that now carries
         // the summary section in its system text. The estimate published from it is the post-summary size, so
         // the meter shows the drop here rather than the pre-compaction figure.
-        var (recountedTokens, _) = CountPromptTokens(request, capabilityLease, providerLease, units, compression);
+        var compactedSection = TodoSection(planSnapshot, compression);
+        var (recountedTokens, _) = CountPromptTokens(
+            request, capabilityLease, providerLease, units, compression, compactedSection);
         if (recountedTokens is int recounted)
         {
             PublishCountedContext(writer, recounted, providerLease);
         }
 
-        return (compression, recountedTokens);
+        return (compression, recountedTokens, compactedSection);
     }
+
+    // The only place the snapshot rule lives: a plan is worth a section exactly when the boundary this request
+    // replays against already swallowed the message that carried it.
+    internal static string? TodoSection(TodoPlanSnapshot? plan, ConversationCompactionRecord? compression)
+        => plan is { } snapshot && compression is { } boundary && snapshot.SourceSequence <= boundary.ThroughSequence
+            ? TodoPlanSection.Build(snapshot.Plan)
+            : null;
 
     /// <summary>
     /// Publishes the prompt size a completed compaction left behind. This is the one place an estimate is
@@ -393,14 +414,16 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
         DirectTurnCapabilityLease capabilityLease,
         AiChatClientLease providerLease,
         IReadOnlyList<DirectPromptHistoryUnit> units,
-        ConversationCompactionRecord? compression)
+        ConversationCompactionRecord? compression,
+        string? todoSection)
     {
         var profile = providerLease.Profile;
         var systemText = _promptComposer.BuildSystemText(
             request.Agent.Instructions,
             capabilityLease.SystemInstructions,
             request.ExecutionContext,
-            compression);
+            compression,
+            todoSection);
         if (_tokenCounter.CountText(systemText, profile) is not int systemTokens ||
             _tokenCounter.CountTools(providerLease.Options.Tools, profile) is not int toolTokens)
         {
