@@ -95,12 +95,7 @@ const {
 
 // 顶部的搜索框：输入即按会话标题过滤下方的「项目」「对话」分组。
 const searchInput = ref(null);
-const {
-	query: searchQuery,
-	active: searchActive,
-	filteredItems,
-	clear: clearSearch,
-} = useSidebarSearch(computed(() => props.items));
+const { query: searchQuery, active: searchActive, filteredItems, clear: clearSearch } = useSidebarSearch(computed(() => props.items));
 
 function focusSearch() {
 	if (props.collapsed) {
@@ -138,9 +133,7 @@ const contextMenu = ref({
 const renameTargetId = ref(null);
 
 // 搜索框固定排在功能入口最前面，且它不是可点击的导航项：从列表里摘掉单独渲染。
-const toolItems = computed(() =>
-	props.items.filter((item) => item.type === 'action' && item.id !== 'new-chat' && item.id !== 'search'),
-);
+const toolItems = computed(() => props.items.filter((item) => item.type === 'action' && item.id !== 'new-chat' && item.id !== 'search'));
 const groupItems = computed(() => filteredItems.value.filter((i) => i.type === 'group'));
 const settingsActive = computed(() => props.activeId === 'settings');
 
@@ -721,12 +714,7 @@ onUnmounted(() => {
 					<div v-if="isGroupExpanded(group.id)" class="group-body">
 						<template v-if="group.id === 'projects'">
 							<!-- 项目节点：三级结构 项目→目录→会话 -->
-							<div
-								v-for="folder in group.children"
-								:key="folder.id"
-								class="subfolder"
-								:class="{ open: isFolderExpanded(folder) }"
-							>
+							<div v-for="folder in group.children" :key="folder.id" class="subfolder" :class="{ open: isFolderExpanded(folder) }">
 								<button
 									class="project-folder"
 									:class="{ 'menu-open': isContextTarget(folder.id) }"
@@ -754,7 +742,12 @@ onUnmounted(() => {
 											v-else
 											class="node kind-chat"
 											:style="{ '--i': si }"
-											:class="{ 'sc-rise': !searchActive, active: isNodeActive(session.id), 'menu-open': isContextTarget(session.id), 'is-running': session.isRunning }"
+											:class="{
+												'sc-rise': !searchActive,
+												active: isNodeActive(session.id),
+												'menu-open': isContextTarget(session.id),
+												'is-running': session.isRunning,
+											}"
 											type="button"
 											:title="session.time ? `${session.label}\n${session.time}` : session.label"
 											@click="selectNode(session.id)"
@@ -795,7 +788,12 @@ onUnmounted(() => {
 									v-else
 									class="node kind-chat"
 									:style="{ '--i': ci }"
-									:class="{ 'sc-rise': !searchActive, active: isNodeActive(child.id), 'menu-open': isContextTarget(child.id), 'is-running': child.isRunning }"
+									:class="{
+										'sc-rise': !searchActive,
+										active: isNodeActive(child.id),
+										'menu-open': isContextTarget(child.id),
+										'is-running': child.isRunning,
+									}"
 									type="button"
 									:title="child.time ? `${child.label}\n${child.time}` : child.label"
 									@click="selectNode(child.id)"
@@ -808,13 +806,7 @@ onUnmounted(() => {
 									<span class="ntext">{{ child.label }}</span>
 								</button>
 							</template>
-							<button
-								v-if="containerHiddenCount(group)"
-								class="show-more"
-								type="button"
-								aria-label="显示更多会话"
-								@click.stop="onShowMore(group.id)"
-							>
+							<button v-if="containerHiddenCount(group)" class="show-more" type="button" aria-label="显示更多会话" @click.stop="onShowMore(group.id)">
 								<span>显示更多</span>
 								<span class="more-arrow" aria-hidden="true">&gt;&gt;</span>
 							</button>
@@ -822,9 +814,7 @@ onUnmounted(() => {
 						</template>
 					</div>
 				</section>
-				<div v-if="searchActive && !groupItems.length" class="empty-group search-empty">
-					没有匹配「{{ searchQuery.trim() }}」的会话
-				</div>
+				<div v-if="searchActive && !groupItems.length" class="empty-group search-empty">没有匹配「{{ searchQuery.trim() }}」的会话</div>
 			</template>
 		</div>
 
@@ -1471,7 +1461,6 @@ onUnmounted(() => {
 	background: transparent;
 	color: var(--sb-soft);
 	font-size: var(--fs-125);
-	font-weight: 560;
 	text-align: left;
 	transition:
 		background 0.14s,

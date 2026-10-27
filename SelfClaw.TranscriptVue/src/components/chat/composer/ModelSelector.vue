@@ -208,7 +208,7 @@ function onRowHover(model, event) {
 			const rawBottom = popoverRect.bottom - rowRect.bottom;
 			const spaceAboveInWindow = rowRect.bottom;
 			if (spaceAboveInWindow < estimatedFlyoutHeight + 16) {
-				const overflow = (estimatedFlyoutHeight + 16) - spaceAboveInWindow;
+				const overflow = estimatedFlyoutHeight + 16 - spaceAboveInWindow;
 				flyoutBottom.value = Math.max(0, rawBottom - overflow);
 			} else {
 				flyoutBottom.value = Math.max(0, rawBottom);
@@ -218,7 +218,7 @@ function onRowHover(model, event) {
 			const rawTop = rowRect.top - popoverRect.top;
 			const spaceBelowInWindow = window.innerHeight - rowRect.top;
 			if (spaceBelowInWindow < estimatedFlyoutHeight + 16) {
-				const overflow = (estimatedFlyoutHeight + 16) - spaceBelowInWindow;
+				const overflow = estimatedFlyoutHeight + 16 - spaceBelowInWindow;
 				flyoutTop.value = Math.max(0, rawTop - overflow);
 			} else {
 				flyoutTop.value = Math.max(0, rawTop);
@@ -285,12 +285,7 @@ watch(isDirect, () => {
 			@click.stop="togglePanel"
 		>
 			<span class="model-badge" aria-hidden="true">
-				<img
-					v-if="!isDirect && selectedAgent?.iconSrc"
-					class="model-badge-img"
-					:src="selectedAgent.iconSrc"
-					alt=""
-				/>
+				<img v-if="!isDirect && selectedAgent?.iconSrc" class="model-badge-img" :src="selectedAgent.iconSrc" alt="" />
 				<Layers v-else :size="15" :stroke-width="1.8" />
 			</span>
 			<span class="model-name">{{ modelLabel }}</span>
@@ -309,22 +304,8 @@ watch(isDirect, () => {
 			<!-- 模式切换：轻量胶囊 -->
 			<div class="pop-header">
 				<div class="seg" role="tablist" aria-label="执行模式">
-					<button
-						type="button"
-						class="seg-btn"
-						:aria-pressed="!isDirect ? 'true' : 'false'"
-						@click="pickMode('cli')"
-					>
-						本地 CLI
-					</button>
-					<button
-						type="button"
-						class="seg-btn"
-						:aria-pressed="isDirect ? 'true' : 'false'"
-						@click="pickMode('direct')"
-					>
-						提供商
-					</button>
+					<button type="button" class="seg-btn" :aria-pressed="!isDirect ? 'true' : 'false'" @click="pickMode('cli')">本地 CLI</button>
+					<button type="button" class="seg-btn" :aria-pressed="isDirect ? 'true' : 'false'" @click="pickMode('direct')">提供商</button>
 				</div>
 			</div>
 
@@ -332,9 +313,7 @@ watch(isDirect, () => {
 
 			<!-- 提供商直接模式模型列表（图三风格） -->
 			<div v-if="isDirect" class="models-list" role="listbox" aria-label="提供商模型列表">
-				<div v-if="loaded && !directModels.length" class="model-hint">
-					没有已启用模型，请在「设置 → AI 服务商」启用连接与模型。
-				</div>
+				<div v-if="loaded && !directModels.length" class="model-hint">没有已启用模型，请在「设置 → AI 服务商」启用连接与模型。</div>
 				<div
 					v-for="dm in directModels"
 					:key="dm.modelProfileId"
@@ -407,13 +386,7 @@ watch(isDirect, () => {
 							{{ formatReasoning(activeReasoning) }}
 						</span>
 						<ChevronRight v-if="reasoningLevels.length" :size="12" class="reasoning-arrow" aria-hidden="true" />
-						<Check
-							class="model-row-check"
-							:class="{ visible: activeModel === m }"
-							:size="14"
-							:stroke-width="2.4"
-							aria-hidden="true"
-						/>
+						<Check class="model-row-check" :class="{ visible: activeModel === m }" :size="14" :stroke-width="2.4" aria-hidden="true" />
 					</div>
 				</div>
 			</div>
@@ -458,13 +431,7 @@ watch(isDirect, () => {
 						@click.stop="pickCliReasoningAndSelect(activeFlyoutModel, level)"
 					>
 						<span>{{ formatReasoning(level) }}</span>
-						<Check
-							v-if="activeReasoning === level"
-							:size="13"
-							:stroke-width="2.4"
-							class="thinking-check"
-							aria-hidden="true"
-						/>
+						<Check v-if="activeReasoning === level" :size="13" :stroke-width="2.4" class="thinking-check" aria-hidden="true" />
 					</button>
 				</template>
 			</div>
@@ -496,7 +463,9 @@ watch(isDirect, () => {
 	letter-spacing: 0.01em;
 	white-space: nowrap;
 	cursor: pointer;
-	transition: background 0.15s, color 0.15s;
+	transition:
+		background 0.15s,
+		color 0.15s;
 }
 
 .composer-model:hover,
@@ -631,7 +600,10 @@ watch(isDirect, () => {
 	color: var(--muted);
 	font: 500 11.5px/1 inherit;
 	cursor: pointer;
-	transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+	transition:
+		background 0.15s,
+		color 0.15s,
+		box-shadow 0.15s;
 }
 
 .seg-btn[aria-pressed='true'] {
@@ -733,7 +705,6 @@ watch(isDirect, () => {
 
 .model-row-title {
 	font-size: 12.5px;
-	font-weight: 550;
 	color: var(--text);
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -768,7 +739,9 @@ watch(isDirect, () => {
 
 .reasoning-arrow {
 	color: var(--muted-soft);
-	transition: transform 0.14s ease, color 0.14s ease;
+	transition:
+		transform 0.14s ease,
+		color 0.14s ease;
 }
 
 .model-row:hover .reasoning-arrow,
@@ -879,7 +852,6 @@ watch(isDirect, () => {
 	background: transparent;
 	color: var(--text);
 	font-size: 12.5px;
-	font-weight: 500;
 	cursor: pointer;
 	transition: background 0.12s ease;
 	text-align: left;

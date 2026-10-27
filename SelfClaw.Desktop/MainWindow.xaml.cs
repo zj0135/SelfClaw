@@ -155,9 +155,21 @@ public sealed partial class MainWindow : Window
         try
         {
             await TranscriptView.EnsureCoreWebView2Async();
-            TranscriptView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-            TranscriptView.CoreWebView2.Settings.AreDevToolsEnabled = true;
-            TranscriptView.CoreWebView2.Settings.IsStatusBarEnabled = false;
+
+            // 菜单和快捷键都由这个外壳自己画，浏览器自带的那套在这里只会帮倒忙：WebView 里装的是整段
+            // 会话转录，F5/Ctrl+R 刷一次就丢掉渲染状态和滚动位置，Ctrl+F/Ctrl+P 是另一套 UI，缩放会破坏
+            // 固定像素布局，左右滑动会直接导航走，自动填充和保存密码浮层则是从 Edge 漏进来的孤儿弹层。
+            var settings = TranscriptView.CoreWebView2.Settings;
+            settings.AreBrowserAcceleratorKeysEnabled = false;
+            settings.AreDefaultContextMenusEnabled = false;
+            settings.IsStatusBarEnabled = false;
+            settings.IsZoomControlEnabled = false;
+            settings.IsPinchZoomEnabled = false;
+            settings.IsGeneralAutofillEnabled = false;
+            settings.IsPasswordAutosaveEnabled = false;
+            settings.IsSwipeNavigationEnabled = false;
+            settings.AreDevToolsEnabled = false;
+
             TranscriptView.CoreWebView2.WebMessageReceived += OnTranscriptWebMessageReceived;
             _webViewHostChannel.Attach(TranscriptView.CoreWebView2.PostWebMessageAsJson);
             _pluginViewHostController.Attach(TranscriptView.CoreWebView2);
