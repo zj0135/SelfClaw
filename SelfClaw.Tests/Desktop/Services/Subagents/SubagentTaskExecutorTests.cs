@@ -271,6 +271,58 @@ public sealed class SubagentTaskExecutorTests : IDisposable
             .Which.ConversationId.Should().Be(queued.ChildConversationId);
     }
 
+    [Fact]
+    public async Task BackgroundHost_keeps_claiming_after_a_transient_claim_failure()
+    {
+        var storagePaths = StoragePathDefaults.Create(
+            _rootPath,
+            Path.Combine(_rootPath, "host-retry.db"),
+            Path.Combine(_rootPath, "host-retry-secrets"));
+        var database = new SqliteDatabase(storagePaths);
+        var conversations = new SqliteConversationRepository(database);
+        var turns = new SqliteConversationTurnRepository(database);
+        var inputs = new SqliteConversationInputRepository(database);
+        var tasks = new SqliteSubagentTaskRepository(database, new SubagentCompletionEnvelopeFactory());
+        await tasks.InitializeAsync();
+        var queued = await CreateQueuedTaskAsync(conversations, tasks);
+        var modelProfileId = queued.ResolvedModelProfileId
+            ?? throw new InvalidOperationException("The queued fixture task has no model profile.");
+        var runtime = new RecordingRuntime();
+        var executor = new SubagentTaskExecutor(
+            conversations,
+            turns,
+            new SqliteConversationCompactionRepository(database),
+            tasks,
+            runtime,
+            new ConversationTurnRecorder(
+                conversations,
+                turns,
+                inputs,
+                NullLogger<ConversationTurnRecorder>.Instance),
+            new DesktopToolApprovalHandler(),
+            new SubagentTaskSnapshotSerializer(),
+            new SubagentTaskPreflight(
+                new StubAiModelCatalog(modelProfileId)
+                {
+                    EnabledModels = [new EnabledModelView(modelProfileId, "Test", "test", "Fixture")]
+                }),
+            new SubagentTaskExecutionRegistry(),
+            NullLogger<SubagentTaskExecutor>.Instance);
+        var flakyTasks = new FlakySubagentExecutionStore(tasks).FailNextClaims(1);
+        using var host = new SubagentTaskBackgroundHost(
+            flakyTasks,
+            executor,
+            new SubagentTaskWakeSignal(),
+            NullLogger<SubagentTaskBackgroundHost>.Instance);
+
+        await host.StartAsync(CancellationToken.None);
+        var completed = await WaitForTerminalAsync(tasks, queued);
+        await host.StopAsync(CancellationToken.None);
+
+        completed.Status.Should().Be(SubagentTaskStatus.Succeeded);
+        flakyTasks.ClaimAttempts.Should().BeGreaterThanOrEqualTo(2);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_rootPath))

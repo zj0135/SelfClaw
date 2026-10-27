@@ -45,11 +45,26 @@ internal sealed class SubagentTaskBackgroundHost : BackgroundService
             await RecoverInterruptedTasksAsync(stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
-                RemoveCompletedExecutions();
-                var claimedAny = await ClaimAvailableTasksAsync(stoppingToken);
-                if (!claimedAny)
+                try
                 {
-                    await _wakeSignal.WaitAsync(ScanInterval, _timeProvider, stoppingToken);
+                    RemoveCompletedExecutions();
+                    var claimedAny = await ClaimAvailableTasksAsync(stoppingToken);
+                    if (!claimedAny)
+                    {
+                        await _wakeSignal.WaitAsync(ScanInterval, _timeProvider, stoppingToken);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    // A single transient storage failure must not end the claim loop: a BackgroundService
+                    // whose ExecuteAsync faults is never restarted, and with the default host behavior it
+                    // also stops the whole application. Back off and let the next scan retry.
+                    _logger.LogError(exception, "Subagent task scan failed; the next scan will retry.");
+                    await Task.Delay(ScanInterval, _timeProvider, stoppingToken).ConfigureAwait(false);
                 }
             }
         }
