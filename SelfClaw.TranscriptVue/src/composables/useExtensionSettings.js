@@ -8,7 +8,6 @@ const emptyState = () => ({
 	plugins: [],
 	skills: [],
 	mcpServers: [],
-	views: [],
 });
 
 const kindCollections = {
@@ -72,20 +71,8 @@ export function useExtensionSettings() {
 	async function setEnabled(kind, item, enabled) {
 		const response = await mutate(kind, item.id, () => request('extensions/set-enabled', { kind, id: item.id, enabled }));
 		if (!response) return false;
-		// set-enabled 只回 { ok, revision }：status 与未确认权限由 catalog 判定（可能是
-		// broken / needs-permission），本地猜 ready 会与能力解析结果不一致。
-		await load();
-		return true;
-	}
-
-	async function acknowledgePluginPermissions(item) {
-		const response = await mutate('plugin', item.id, () =>
-			request('extensions/acknowledge-plugin-permissions', {
-				id: item.id,
-				permissions: item.permissions || [],
-			})
-		);
-		if (!response) return false;
+		// set-enabled 只回 { ok, revision }：status 由 catalog 判定（可能是 broken），
+		// 本地猜 ready 会与能力解析结果不一致。
 		await load();
 		return true;
 	}
@@ -140,7 +127,6 @@ export function useExtensionSettings() {
 		isPending,
 		load,
 		setEnabled,
-		acknowledgePluginPermissions,
 		deleteItem,
 		saveMcp,
 		testMcp,

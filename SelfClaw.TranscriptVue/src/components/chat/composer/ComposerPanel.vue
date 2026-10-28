@@ -292,7 +292,7 @@ defineExpose({
 </script>
 
 <template>
-	<div ref="shellRef" class="composer-stack" data-anchor="composer"
+	<div ref="shellRef" class="composer-stack"
 		@dragenter="onComposerDragEnter" @dragover="onComposerDragOver" @dragleave="onComposerDragLeave"
 		@drop="onComposerDrop">
 		<transition name="approval-bar">

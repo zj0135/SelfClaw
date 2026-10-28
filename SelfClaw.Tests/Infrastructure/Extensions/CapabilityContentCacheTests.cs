@@ -189,8 +189,6 @@ public sealed class CapabilityContentCacheTests
             "{}",
             null,
             true,
-            null,
-            null,
             now,
             now);
     }
@@ -210,8 +208,7 @@ public sealed class CapabilityContentCacheTests
                     "1.0.0",
                     "Plugin",
                     null,
-                    [],
-                    new PluginContributions(null, [], [], [])));
+                    new PluginContributions(null, [], [])));
             };
 
         public Func<CancellationToken, Task<string>> TrackBody(string body)

@@ -10,7 +10,6 @@ using Microsoft.Web.WebView2.Core;
 using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.Appearance;
-using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Desktop.ViewModels;
@@ -45,7 +44,6 @@ public sealed partial class MainWindow : Window
     private readonly WebViewHostChannel _webViewHostChannel;
     private readonly WebViewMessageRouter _webViewMessageRouter;
     private readonly TerminalHostController _terminalHostController;
-    private readonly PluginViewHostController _pluginViewHostController;
     private readonly AppearanceSettingsService _appearanceSettingsService;
     private readonly DesktopConversationActivationService _activation;
     private readonly ILogger<MainWindow> _logger;
@@ -57,7 +55,6 @@ public sealed partial class MainWindow : Window
         WebViewHostChannel webViewHostChannel,
         WebViewMessageRouter webViewMessageRouter,
         TerminalHostController terminalHostController,
-        PluginViewHostController pluginViewHostController,
         AppearanceSettingsService appearanceSettingsService,
         StoragePaths storagePaths,
         DesktopConversationActivationService activation,
@@ -74,7 +71,6 @@ public sealed partial class MainWindow : Window
         _webViewHostChannel = webViewHostChannel;
         _webViewMessageRouter = webViewMessageRouter;
         _terminalHostController = terminalHostController;
-        _pluginViewHostController = pluginViewHostController;
         DataContext = viewModel;
         Loaded += OnLoadedAsync;
         SourceInitialized += OnSourceInitialized;
@@ -172,7 +168,6 @@ public sealed partial class MainWindow : Window
 
             TranscriptView.CoreWebView2.WebMessageReceived += OnTranscriptWebMessageReceived;
             _webViewHostChannel.Attach(TranscriptView.CoreWebView2.PostWebMessageAsJson);
-            _pluginViewHostController.Attach(TranscriptView.CoreWebView2);
 
             var assetsRootPath = Path.Combine(AppContext.BaseDirectory, "Assets");
             var vueTranscriptPath = Path.Combine(assetsRootPath, "TranscriptVue", "index.html");
@@ -180,15 +175,6 @@ public sealed partial class MainWindow : Window
             if (!File.Exists(vueTranscriptPath))
             {
                 throw new FileNotFoundException("Unable to locate the Vue transcript host page.", vueTranscriptPath);
-            }
-
-            // Injected into every document, so a plugin panel has window.selfclaw before its own script
-            // runs and never has to ship a copy of the SDK. The script no-ops in the top frame.
-            var pluginSdkPath = Path.Combine(assetsRootPath, "plugin-sdk.js");
-            if (File.Exists(pluginSdkPath))
-            {
-                await TranscriptView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
-                    await File.ReadAllTextAsync(pluginSdkPath));
             }
 
             TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(

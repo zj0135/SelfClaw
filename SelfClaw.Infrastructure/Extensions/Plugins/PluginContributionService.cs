@@ -1,4 +1,3 @@
-using SelfClaw.Core.Runtime;
 using System.Text.Json;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
@@ -39,7 +38,6 @@ internal sealed class PluginContributionService
             .Where(server => string.Equals(server.SourcePluginId, plugin.Id, StringComparison.OrdinalIgnoreCase))
             .ToDictionary(server => server.Id, StringComparer.OrdinalIgnoreCase);
         var expectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var permissionsAcknowledged = ArePermissionsAcknowledged(plugin);
         foreach (var contribution in manifest.Contributions.McpServers)
         {
             var id = $"{plugin.Id}/{contribution.Id}";
@@ -102,7 +100,7 @@ internal sealed class PluginContributionService
                 ExtensionCatalog.SerializeSettings(settings),
                 credentialRefs,
                 plugin.Id,
-                plugin.IsEnabled && permissionsAcknowledged,
+                plugin.IsEnabled,
                 existing?.ConfigRevision ?? 1,
                 existing?.DiscoveredTools ?? [],
                 existing?.LastStatus ?? McpServerHealthStatus.Unknown,
@@ -152,42 +150,6 @@ internal sealed class PluginContributionService
         }
     }
 
-    public void EnsurePermissionsAcknowledged(ExtensionPackageRecord plugin)
-    {
-        var missing = ReadPermissions(plugin.ManifestJson)
-            .Except(ExtensionCatalog.ReadAcknowledgedPermissions(plugin.AcknowledgedPermissionsJson), StringComparer.Ordinal)
-            .ToArray();
-        if (missing.Length > 0)
-        {
-            throw new InvalidOperationException(
-                $"Plugin '{plugin.Id}' requires permission confirmation: {string.Join(", ", missing)}.");
-        }
-    }
-
-    public IReadOnlyList<string> ReadPermissions(string manifestJson)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(manifestJson);
-            if (!document.RootElement.TryGetProperty("permissions", out var element) ||
-                element.ValueKind != JsonValueKind.Array)
-            {
-                return [];
-            }
-
-            var permissions = element.EnumerateArray()
-                .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : null)
-                .ToArray();
-            // Same validator the manifest reader uses. If the two normalized differently, an updated
-            // Plugin could never satisfy "acknowledged ⊇ declared" and would be stuck unenablable.
-            return PluginPermissions.Validate(permissions);
-        }
-        catch (JsonException exception)
-        {
-            throw new InvalidDataException("Plugin manifest is invalid.", exception);
-        }
-    }
-
     public void DeletePluginDirectory(ExtensionPackageRecord plugin)
     {
         var pluginDirectory = GetPluginDirectory(plugin);
@@ -217,13 +179,6 @@ internal sealed class PluginContributionService
         {
             await _secretProtector.DeleteSecretAsync(secretRef, cancellationToken).ConfigureAwait(false);
         }
-    }
-
-    private bool ArePermissionsAcknowledged(ExtensionPackageRecord plugin)
-    {
-        var acknowledged = ExtensionCatalog.ReadAcknowledgedPermissions(plugin.AcknowledgedPermissionsJson);
-        return ReadPermissions(plugin.ManifestJson)
-            .All(permission => acknowledged.Contains(permission, StringComparer.Ordinal));
     }
 
     private static McpServerSettings? TryDeserializeSettings(string? settingsJson)

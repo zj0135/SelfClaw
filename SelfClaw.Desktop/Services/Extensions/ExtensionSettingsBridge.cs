@@ -116,13 +116,6 @@ internal sealed class ExtensionSettingsBridge : IDisposable
                         cancellationToken);
                     response = await BuildMutationResponseAsync(type, requestId, cancellationToken);
                     break;
-                case "extensions/acknowledge-plugin-permissions":
-                    await _settingsService.AcknowledgePluginPermissionsAsync(
-                        ReadRequiredString(payload, "id"),
-                        ReadStringArray(payload, "permissions"),
-                        cancellationToken);
-                    response = await BuildMutationResponseAsync(type, requestId, cancellationToken);
-                    break;
                 case "extensions/delete":
                     await _settingsService.DeleteAsync(ReadItemKey(payload), cancellationToken);
                     response = await BuildMutationResponseAsync(type, requestId, cancellationToken);

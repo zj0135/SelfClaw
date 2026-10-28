@@ -11,7 +11,5 @@ public sealed record ExtensionPackageRecord(
     string ManifestJson,
     string? SourcePluginId,
     bool IsEnabled,
-    string? AcknowledgedPermissionsJson,
-    DateTimeOffset? AcknowledgedAtUtc,
     DateTimeOffset InstalledAtUtc,
     DateTimeOffset UpdatedAtUtc);

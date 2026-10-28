@@ -3,6 +3,8 @@
 > 2026-09-13 实现更新：本文保留原设计/阶段记录。当前目录、默认模型准备、工具契约与 continuation 恢复边界见 [运行流程](runtime-execution-flow.md)。
 >
 > 2026-09-26 接缝勘误：本文后来描述的以下接缝已被重构替换，本文中对应示例/调用链已同步为当前实现，其余历史阶段内容仅作设计记录：`DirectTurnCapabilityLease.ToolDescriptors` → `Bindings`（`IReadOnlyDictionary<string, DirectToolBinding>`）；审批与执行检查点包装 `ApprovedAIFunction` → `DirectToolInvoker`；适配器内部取共享 HttpClient → `AiChatClientFactory.Create(preparation, AiChatClientPipelineOptions)` 按回合在共享 pooled handler 上构造 `HttpClient` 并注入适配器。
+>
+> 2026-10-28 视图与权限已删除：插件不再贡献界面，也没有权限披露。`contributes.views`、`permissions`、`PermissionReviewDialog`、`plugin-host/*` 与 `window.selfclaw` 都不再存在。schema 仍是 v32，`acknowledged_permissions_json` / `acknowledged_at_utc` 两列留在表里但代码不再读写。下文里关于视图、权限确认和这两列用途的段落是当时的设计，不要按它们把能力加回来。
 
 > 状态：设计稿 v1.1（2026-07-26；v1.1 按当前代码逐链路核对后补充事实修正与缺口：现状行为 §1.2–§1.4、ToolPolicy §5.4、权限确认持久化 §6.2、跨回合与 token 规则 §8.4、stdio 环境事实修正 §9.1、结果映射 §9.5、审批载体 §9.4、投影链 §10.2、桥接推送与超时 §11.2、DI 接线 §15）
 >

@@ -11,7 +11,6 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ConversationInputs;
-using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Runtime;
@@ -21,7 +20,7 @@ using SelfClaw.Desktop.Services.Workspace.Abstractions;
 
 namespace SelfClaw.Desktop.ViewModels;
 
-public sealed partial class MainWindowViewModel : ObservableObject, IDisposable, IWorkspaceSelectionController, IPluginViewContextSource,
+public sealed partial class MainWindowViewModel : ObservableObject, IDisposable, IWorkspaceSelectionController,
     SelfClaw.Desktop.Services.Activities.IActivityPanelScopeSource
 {
     #region 字段与构造函数 —— 依赖注入字段、运行时集合状态、流式发布定时器初始化
@@ -122,7 +121,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         PublishShell(false);
     }
 
-    private ConversationRecord? SelectedConversation => _selectedConversation;
+    internal ConversationRecord? SelectedConversation => _selectedConversation;
 
     /// <summary>
     /// 启动时一次性加载：代理、工作区、会话列表，并发布初始 transcript。
@@ -289,6 +288,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             ToolPermissionMode.FullAccess => "full-access",
             _ => "require-approval"
         };
+
+    internal string ResolvedComposerMode =>
+        ResolveComposerExecutionMode(ResolveSelectedAgent().Mode).ToString().ToLowerInvariant();
 
     private AgentExecutionMode ResolveComposerExecutionMode(AgentExecutionMode agentMode)
         => _composerModeOverride ?? agentMode;
@@ -740,26 +742,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         if (_dispatcher is not null && !_dispatcher.CheckAccess())
             _ = _dispatcher.InvokeAsync(() => { if (!_disposed) action(); });
         else action();
-    }
-
-    /// <summary>
-    /// The context handed to right-hand plugin panels, for both <c>getContext()</c> and the
-    /// <c>context-changed</c> push. It is captured from the same values as
-    /// <see cref="BuildTranscriptProjectionRequest"/>, so what a panel reads always matches what the
-    /// shell is showing, and the workspace root it reports is the one workspace tool calls resolve
-    /// against. Anything added here becomes visible to every panel holding <c>host.context.read</c>.
-    /// </summary>
-    PluginViewContext IPluginViewContextSource.CaptureContext()
-    {
-        var selectedAgent = ResolveSelectedAgent();
-        return new PluginViewContext(
-            SelectedConversation?.Id.ToString("D"),
-            selectedAgent.Id,
-            selectedAgent.Name,
-            ResolveComposerExecutionMode(selectedAgent.Mode).ToString().ToLowerInvariant(),
-            _conversationSessions.IsSelectedRunning,
-            SelectedWorkspaceRootPath,
-            _selectedWorkspaceRoot?.Name);
     }
 
     private TranscriptProjectionRequest BuildTranscriptProjectionRequest(bool autoScroll)

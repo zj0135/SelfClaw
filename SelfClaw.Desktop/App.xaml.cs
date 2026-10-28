@@ -10,7 +10,6 @@ using SelfClaw.Desktop.Composition;
 using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Notifications;
-using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.SystemTray;
@@ -165,7 +164,6 @@ public sealed partial class App : System.Windows.Application
             services.GetRequiredService<ConversationRunCoordinator>().StopAdmissions();
             services.GetRequiredService<DesktopToolApprovalHandler>().RejectAll();
             await Task.WhenAll(routing, _host.StopAsync(cancellationToken),
-                services.GetRequiredService<PluginViewHostController>().StopAsync(cancellationToken),
                 services.GetRequiredService<TerminalHostController>().DisposeAsync().AsTask(),
                 services.GetRequiredService<ConversationRunCoordinator>().StopAsync(cancellationToken),
                 services.GetRequiredService<PetHost>().StopAsync(cancellationToken));

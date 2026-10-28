@@ -3,7 +3,7 @@
 > 配套设计：《direct-extensions-system-design.md》v1.1（2026-07-26）。本文按任务粒度拆解，每个任务可独立提交、独立验证。
 > 引用格式：§n 指设计文档章节；文件路径均相对仓根。
 
-> **历史基线（2026-09-26）：** 本文是 2026-07/08 Direct 扩展系统接入时的实施任务清单，文中出现的 `ApprovedAIFunction`、`ToolDescriptors`、适配器内部获取共享 HttpClient 等接缝已被重构替代为 `DirectToolInvoker`、`Bindings`、按回合 `HttpClient`。任务条目保留原样作为历史记录，当前接缝见 [运行流程](runtime-execution-flow.md)。
+> **历史基线（2026-09-26）：** 本文是 2026-07/08 Direct 扩展系统接入时的实施任务清单，文中出现的 `ApprovedAIFunction`、`ToolDescriptors`、适配器内部获取共享 HttpClient 等接缝已被重构替代为 `DirectToolInvoker`、`Bindings`、按回合 `HttpClient`。任务条目保留原样作为历史记录，当前接缝见 [运行流程](runtime-execution-flow.md)。2026-10-28 起插件视图和权限确认也已删除，文中的 `PermissionReviewDialog` 与视图任务不要再实施。
 
 ## 使用约定
 

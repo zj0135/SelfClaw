@@ -23,13 +23,12 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 3. **桌面并发**：run handle 独占回合生命周期；SessionCoordinator 独占选择与快照替换；`ConversationRuntimeState` 只串行化内容变更，不持运行标志。
 4. **关闭顺序**：停受理 → 取消并等待活动 → 释放 UI → dispose 服务 → 停 WPF；`OnExit` 只做同步兜底。
 5. **定义目录**：Agent 定义在 `{AppData}\agents\`，子代理定义在 `{AppData}\subagents\`；会话绑定的定义缺失时保持不可用并拒绝执行。
-6. **插件视图**：一视图一 origin `https://<plugin-id>.plugin.selfclaw.local`，id 非合法 DNS label 在安装期拒绝；`WebViewMessageRouter` 的应用-origin 守卫是唯一信任边界；浮层限定在 `.main-content` 内、除声明的交互矩形外点击穿透、收起必须 `visibility: hidden`（禁用 `display: none`）；权限为 `ui.panel` / `ui.floating` / `network.fetch:<origin>`。
-7. **工具审批**：Direct 工具审批（默认 `RequireApproval`）只有 Vue 审批栏或 Windows toast 能裁决；没有超时自动拒绝；订阅者失败、调用方取消或关闭即拒绝。
-8. **WPF**：`WindowStyle` 必须保持 `SingleBorderWindow`；插件视图 UI 在 Vue，不在 WPF。
-9. **会话删除**：先墓碑 → 停回合 → 取消并限时等待子任务 → 才做 SQLite 级联；超时中止删除；列表与导航只接受 `ConversationKind.Interactive`。
-10. **数据库**：schema 版本 **32**；非 v32 或未版本化数据库只读拒绝，绝不迁移、回填或隐式删除。
-11. **子代理活动面板**：与主转录、输入区互相独立；子内容不得进入父转录项或影响 composer 忙碌态；摘要页 ≤50 条、详情窗口 ≤64 块、序列化 ≤256 KiB；文本更新不得触发 per-token SQL。
-12. **自动化历史**：转录永久保留、回收只靠手动删除；删除单条 run / 清空历史只删终态 run 并级联其会话（在跑先停止）；删除任务先取消 → 限时等待（`AutomationDefaults.DeleteWait`）→ 级联，超时返回 `DeleteTimeout` 且绝不半删。体积显示是 SQL `LENGTH()` 只读粗算，不得为此改 schema（仍 v32）。
+6. **工具审批**：Direct 工具审批（默认 `RequireApproval`）只有 Vue 审批栏或 Windows toast 能裁决；没有超时自动拒绝；订阅者失败、调用方取消或关闭即拒绝。
+7. **WPF**：`WindowStyle` 必须保持 `SingleBorderWindow`。
+8. **会话删除**：先墓碑 → 停回合 → 取消并限时等待子任务 → 才做 SQLite 级联；超时中止删除；列表与导航只接受 `ConversationKind.Interactive`。
+9. **数据库**：schema 版本 **32**；非 v32 或未版本化数据库只读拒绝，绝不迁移、回填或隐式删除。
+10. **子代理活动面板**：与主转录、输入区互相独立；子内容不得进入父转录项或影响 composer 忙碌态；摘要页 ≤50 条、详情窗口 ≤64 块、序列化 ≤256 KiB；文本更新不得触发 per-token SQL。
+11. **自动化历史**：转录永久保留、回收只靠手动删除；删除单条 run / 清空历史只删终态 run 并级联其会话（在跑先停止）；删除任务先取消 → 限时等待（`AutomationDefaults.DeleteWait`）→ 级联，超时返回 `DeleteTimeout` 且绝不半删。体积显示是 SQL `LENGTH()` 只读粗算，不得为此改 schema（仍 v32）。
 
 ## 代码约定
 
@@ -68,7 +67,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - 端到端主干：`docs/pipeline-architecture.md`（全局图）→ `docs/runtime-execution-flow.md`（当前调用链、回合/准入/消费基线）。
 - Direct 输入与队列 / steer 语义：`docs/direct-message-input-design.md`。
 - 输入框图片附件（存储 / 桥 / 队列 / 模型调用 / 前端）：`docs/input-attachment-design.md`。
-- 桌面/前端：`docs/plugin-view-system-design.md`、`docs/message-segments-system-design.md`。
+- 桌面/前端：`docs/message-segments-system-design.md`。
 - 关于页应用用量仪表盘：`docs/app-usage-dashboard-design.md`（数据契约、热力图/趋势/环形口径、SQL 分桶边界）。
 - 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/pet-system-design.md`、`docs/automation-system-design.md`、`docs/direct-context-compaction-design.md`（配套实施记录 `docs/direct-context-compaction-implementation-tasks.md`）、`docs/direct-in-turn-compaction-design.md`。
 - 规则：spec/issue 写 `.scratch/<feature-slug>/`（git 忽略）；耐久结论写 `docs/`；被取代的设计要么更新要么删除，不留"历史保留"。

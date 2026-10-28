@@ -32,8 +32,6 @@ public sealed class SqliteExtensionRepositoryTests : IDisposable
             "{\"id\":\"code-review\"}",
             null,
             true,
-            "[\"read_workspace\"]",
-            now,
             now,
             now);
         var server = new McpServerConfigRecord(

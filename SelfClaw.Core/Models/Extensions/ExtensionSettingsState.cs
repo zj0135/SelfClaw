@@ -6,5 +6,4 @@ public sealed record ExtensionSettingsState(
     IReadOnlyList<ExtensionAgentView> Agents,
     IReadOnlyList<ExtensionPackageView> Plugins,
     IReadOnlyList<ExtensionPackageView> Skills,
-    IReadOnlyList<McpServerView> McpServers,
-    IReadOnlyList<PluginView> Views);
+    IReadOnlyList<McpServerView> McpServers);

@@ -73,46 +73,6 @@ public sealed class PluginContributionServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SynchronizeMcpServersAsync_stays_disabled_until_permissions_are_acknowledged()
-    {
-        var context = CreateContext();
-        var manifest = """
-            {
-              "schemaVersion": 1,
-              "id": "office",
-              "name": "Office",
-              "version": "1.0.0",
-              "permissions": ["process.execute"],
-              "contributes": {
-                "mcpServers": [
-                  {
-                    "id": "renderer",
-                    "name": "Office Renderer",
-                    "transport": "stdio",
-                    "command": "node",
-                    "arguments": []
-                  }
-                ]
-              }
-            }
-            """;
-        var plugin = await CreatePluginAsync(context, manifest, isEnabled: true);
-
-        await context.Service.SynchronizeMcpServersAsync(plugin, CancellationToken.None);
-
-        (await context.Repository.GetMcpServerAsync("office/renderer"))!.IsEnabled.Should().BeFalse();
-
-        await context.Service.SynchronizeMcpServersAsync(
-            plugin with
-            {
-                AcknowledgedPermissionsJson = JsonSerializer.Serialize(new[] { "process.execute" })
-            },
-            CancellationToken.None);
-
-        (await context.Repository.GetMcpServerAsync("office/renderer"))!.IsEnabled.Should().BeTrue();
-    }
-
-    [Fact]
     public async Task SynchronizeMcpServersAsync_preserves_user_values_and_drops_contributions_the_manifest_removed()
     {
         var context = CreateContext();
@@ -264,20 +224,6 @@ public sealed class PluginContributionServiceTests : IDisposable
     }
 
     [Fact]
-    public void EnsurePermissionsAcknowledged_rejects_a_permission_the_user_has_not_confirmed()
-    {
-        var context = CreateContext();
-        var plugin = CreatePluginRecord(
-            """{"schemaVersion":1,"id":"office","permissions":["workspace.write","process.execute"]}""",
-            Path.Combine(_rootPath, "plugins", "office", "versions", "v1"),
-            acknowledgedPermissionsJson: JsonSerializer.Serialize(new[] { "workspace.write" }));
-
-        var action = () => context.Service.EnsurePermissionsAcknowledged(plugin);
-
-        action.Should().Throw<InvalidOperationException>().WithMessage("*process.execute*");
-    }
-
-    [Fact]
     public void ListVersionDirectories_and_DeletePluginDirectory_reject_an_install_path_outside_the_plugin_layout()
     {
         var context = CreateContext();
@@ -334,8 +280,7 @@ public sealed class PluginContributionServiceTests : IDisposable
     private static ExtensionPackageRecord CreatePluginRecord(
         string manifestJson,
         string installPath,
-        bool isEnabled = true,
-        string? acknowledgedPermissionsJson = null)
+        bool isEnabled = true)
     {
         var now = DateTimeOffset.UtcNow;
         return new ExtensionPackageRecord(
@@ -349,8 +294,6 @@ public sealed class PluginContributionServiceTests : IDisposable
             manifestJson,
             null,
             isEnabled,
-            acknowledgedPermissionsJson,
-            acknowledgedPermissionsJson is null ? null : now,
             now,
             now);
     }

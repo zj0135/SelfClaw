@@ -216,8 +216,6 @@ public sealed class ExtensionPackageInstallerTests : IDisposable
             "{}",
             null,
             true,
-            null,
-            null,
             now,
             now));
         var catalog = new ExtensionCatalog(context.Repository, context.Repository, context.StoragePaths);
@@ -250,8 +248,6 @@ public sealed class ExtensionPackageInstallerTests : IDisposable
             ValidPluginManifest,
             null,
             false,
-            null,
-            null,
             now,
             now));
         var catalog = new ExtensionCatalog(context.Repository, context.Repository, context.StoragePaths);

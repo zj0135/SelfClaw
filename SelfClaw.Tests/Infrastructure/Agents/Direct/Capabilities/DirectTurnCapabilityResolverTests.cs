@@ -327,7 +327,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var now = DateTimeOffset.UtcNow;
         var plugin = new ExtensionPackageRecord(
             ExtensionKind.Plugin, "office", "Office", "1.0.0", "", pluginRoot,
-            "sha256:office", manifestJson, null, true, "[\"workspace.read\"]", now, now, now);
+            "sha256:office", manifestJson, null, true, now, now);
         var versionLeases = new PluginVersionLeaseManager();
         var resolver = CreateResolver(
             new PackageRepository([plugin]),
@@ -457,7 +457,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var brokenPlugin = new ExtensionPackageRecord(
             ExtensionKind.Plugin, "broken", "Broken", "1.0.0", "",
             brokenPluginRoot,
-            "sha256:broken", "{ not json", null, true, "[]", now, now, now);
+            "sha256:broken", "{ not json", null, true, now, now);
         var servers = new McpRepository([CreateMcpRecord("one"), CreateMcpRecord("two")]);
         var manager = new RecordingMcpClientManager(string.Empty);
         var resolver = CreateResolver(new PackageRepository([brokenPlugin]), CreateMcpSource(servers, manager));
@@ -724,7 +724,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var now = DateTimeOffset.UtcNow;
         var plugin = new ExtensionPackageRecord(
             ExtensionKind.Plugin, "office", "Office", "1.0.0", "", pluginRoot,
-            "sha256:office", manifestJson, null, true, "[\"workspace.read\"]", now, now, now);
+            "sha256:office", manifestJson, null, true, now, now);
         var resolver = CreateResolver(
             new PackageRepository([plugin]),
             new PluginManifestReader(CreateLimits()),
@@ -766,8 +766,6 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             "{}",
             null,
             enabled,
-            null,
-            null,
             now,
             now);
     }

@@ -14,8 +14,8 @@ namespace SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 
 /// <summary>
 /// Expands the Agent's bound Plugins into instructions, namespaced Skills and the plugin roots that
-/// plugin-contributed MCP servers resolve against. A broken or unconfirmed Plugin degrades this turn
-/// instead of failing it; every Plugin that does contribute holds a version lease for the turn.
+/// plugin-contributed MCP servers resolve against. A broken Plugin degrades this turn instead of
+/// failing it; every Plugin that does contribute holds a version lease for the turn.
 /// </summary>
 internal sealed class PluginCapabilitySource
 {
@@ -56,10 +56,8 @@ internal sealed class PluginCapabilitySource
             var load = await LoadPluginAsync(plugin, cancellationToken).ConfigureAwait(false);
             if (load is not { SkipReason: null, Manifest: { } manifest, Lease: { } versionLease })
             {
-                var reason = load.SkipReason ?? "its manifest could not be loaded";
-                diagnostics.Degrade(load.UnconfirmedPermissions
-                    ? $"Plugin '{plugin.Id}' was skipped because permissions require confirmation: {reason}."
-                    : $"Plugin '{plugin.Id}' was skipped because it is broken: {reason}");
+                diagnostics.Degrade(
+                    $"Plugin '{plugin.Id}' was skipped because it is broken: {load.SkipReason ?? "its manifest could not be loaded"}");
                 continue;
             }
 
@@ -137,11 +135,10 @@ internal sealed class PluginCapabilitySource
     }
 
     /// <summary>
-    /// Reads one Plugin's manifest and permissions and takes its version lease. A skipped Plugin reports the
-    /// detail and whether permissions were the cause; the caller owns the returned lease and decides whether
-    /// a skip degrades the turn.
+    /// Reads one Plugin's manifest and takes its version lease. A skipped Plugin reports why; the caller
+    /// owns the returned lease and decides whether a skip degrades the turn.
     /// </summary>
-    private async Task<(PluginManifest? Manifest, IDisposable? Lease, string? SkipReason, bool UnconfirmedPermissions)>
+    private async Task<(PluginManifest? Manifest, IDisposable? Lease, string? SkipReason)>
         LoadPluginAsync(ExtensionPackageRecord plugin, CancellationToken cancellationToken)
     {
         PluginManifest? manifest = null;
@@ -150,7 +147,7 @@ internal sealed class PluginCapabilitySource
         {
             if (!ExtensionInstallation.IsIntact(plugin))
             {
-                return (null, null, "installation directory is missing", false);
+                return (null, null, "installation directory is missing");
             }
 
             manifest = await _contentCache.GetManifestAsync(
@@ -162,20 +159,13 @@ internal sealed class PluginCapabilitySource
                 .ConfigureAwait(false);
             if (!string.Equals(manifest.Id, plugin.Id, StringComparison.Ordinal))
             {
-                return (manifest, null, "manifest id does not match the installed package", false);
-            }
-
-            var acknowledged = ExtensionCatalog.ReadAcknowledgedPermissions(plugin.AcknowledgedPermissionsJson);
-            var missingPermissions = manifest.Permissions.Except(acknowledged, StringComparer.Ordinal).ToArray();
-            if (missingPermissions.Length > 0)
-            {
-                return (manifest, null, string.Join(", ", missingPermissions), true);
+                return (manifest, null, "manifest id does not match the installed package");
             }
 
             // The lease is taken before any package file is read so a concurrent delete cannot pull the
             // version directory out from under this turn.
             versionLease = _versionLeaseManager.Acquire(plugin.InstallPath);
-            return (manifest, versionLease, null, false);
+            return (manifest, versionLease, null);
         }
         catch (OperationCanceledException)
         {
@@ -185,7 +175,7 @@ internal sealed class PluginCapabilitySource
         {
             // A lease taken before the failure must not outlive the skipped Plugin.
             versionLease?.Dispose();
-            return (manifest, null, exception.Message, false);
+            return (manifest, null, exception.Message);
         }
     }
 

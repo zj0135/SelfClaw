@@ -1,4 +1,4 @@
-﻿﻿using SelfClaw.Core.Runtime;
+﻿using SelfClaw.Core.Runtime;
 using System.IO.Compression;
 using FluentAssertions;
 using SelfClaw.Core.Interfaces;
@@ -143,8 +143,6 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
             "{}",
             null,
             true,
-            null,
-            null,
             now,
             now));
         await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
@@ -158,8 +156,6 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
             "{}",
             null,
             true,
-            null,
-            null,
             now,
             now));
 
@@ -197,8 +193,6 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
             "{}",
             null,
             true,
-            null,
-            null,
             now,
             now));
 
@@ -207,49 +201,19 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         state.Skills.Should().ContainSingle().Which.Status.Should().Be(ExtensionStatus.Broken);
     }
 
-    [Fact]
-    public async Task GetState_projects_plugin_views_onto_a_per_plugin_origin()
-    {
-        var context = CreateContext();
-        var pluginPath = await CreateViewPluginAsync("git-inspector");
-        var now = DateTimeOffset.UtcNow;
-        await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
-            ExtensionKind.Plugin,
-            "git-inspector",
-            "Git Inspector",
-            "1.0.0",
-            "Inspects git",
-            pluginPath,
-            "sha256:v1",
-            await File.ReadAllTextAsync(Path.Combine(pluginPath, "plugin.json")),
-            null,
-            true,
-            """["network.fetch:https://api.github.com","ui.panel"]""",
-            now,
-            now,
-            now));
-
-        var state = await context.Service.GetStateAsync();
-
-        var view = state.Views.Should().ContainSingle().Subject;
-        view.Key.Should().Be("git-inspector/changes");
-        view.Slot.Should().Be(PluginViewSlot.Right);
-        view.Origin.Should().Be("https://git-inspector.plugin.selfclaw.local");
-        view.Url.Should().Be("https://git-inspector.plugin.selfclaw.local/ui/index.html");
-        view.Title.Should().Be("变更");
-        view.Enabled.Should().BeTrue();
-        view.Status.Should().Be(ExtensionStatus.Ready);
-        view.NetworkOrigins.Should().Equal("https://api.github.com");
-    }
-
     // A Plugin whose manifest stopped parsing must not take the whole settings state down with it: the
     // user still needs the page to load in order to see it as broken and remove it.
     [Fact]
-    public async Task GetState_drops_views_from_a_plugin_whose_manifest_no_longer_reads()
+    public async Task GetState_marks_a_plugin_broken_when_its_manifest_no_longer_reads()
     {
         var context = CreateContext();
-        var pluginPath = await CreateViewPluginAsync("git-inspector");
-        var manifest = await File.ReadAllTextAsync(Path.Combine(pluginPath, "plugin.json"));
+        var pluginPath = Path.Combine(_rootPath, "plugins", "git-inspector", "versions", "v1");
+        Directory.CreateDirectory(pluginPath);
+        var manifest = """
+            {"schemaVersion":1,"id":"git-inspector","name":"Git Inspector","version":"1.0.0",
+             "contributes":{"skills":[],"mcpServers":[]}}
+            """;
+        await File.WriteAllTextAsync(Path.Combine(pluginPath, "plugin.json"), manifest);
         var now = DateTimeOffset.UtcNow;
         await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
             ExtensionKind.Plugin,
@@ -262,118 +226,13 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
             manifest,
             null,
             true,
-            """["network.fetch:https://api.github.com","ui.panel"]""",
-            now,
             now,
             now));
         await File.WriteAllTextAsync(Path.Combine(pluginPath, "plugin.json"), "{ not json");
 
         var state = await context.Service.GetStateAsync();
 
-        state.Views.Should().BeEmpty();
         state.Plugins.Should().ContainSingle().Which.Status.Should().Be(ExtensionStatus.Broken);
-    }
-
-    // Deleting a Plugin drains its version directories, and an open view holds a lease on one. If the
-    // views were not closed first the drain would wait on a lease only the UI can release, and the
-    // settings mutation would never return.
-    [Fact]
-    public async Task Disabling_or_deleting_a_plugin_closes_its_open_views_before_draining()
-    {
-        var context = CreateContext();
-        var pluginPath = await CreateViewPluginAsync("git-inspector");
-        var now = DateTimeOffset.UtcNow;
-        await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
-            ExtensionKind.Plugin,
-            "git-inspector",
-            "Git Inspector",
-            "1.0.0",
-            "Inspects git",
-            pluginPath,
-            "sha256:v1",
-            await File.ReadAllTextAsync(Path.Combine(pluginPath, "plugin.json")),
-            null,
-            true,
-            """["network.fetch:https://api.github.com","ui.panel"]""",
-            now,
-            now,
-            now));
-        var key = new ExtensionItemKey(ExtensionKind.Plugin, "git-inspector");
-
-        await context.Service.SetEnabledAsync(key, false);
-        context.PanelSessions.ClosedPluginIds.Should().Equal("git-inspector");
-
-        // A held lease would block DeleteAsync forever if views were not evicted first.
-        using var lease = context.PluginVersionLeaseManager.Acquire(pluginPath);
-        var release = Task.Run(async () =>
-        {
-            await Task.Delay(50);
-            lease.Dispose();
-        });
-        await context.Service.DeleteAsync(key);
-        await release;
-
-        context.PanelSessions.ClosedPluginIds.Should().Equal("git-inspector", "git-inspector");
-        (await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "git-inspector")).Should().BeNull();
-    }
-
-    [Fact]
-    public async Task Plugin_enable_requires_current_manifest_permissions_to_be_acknowledged()
-    {
-        var context = CreateContext();
-        var pluginPath = Path.Combine(_rootPath, "plugins", "office", "versions", "v1");
-        Directory.CreateDirectory(pluginPath);
-        var initialManifest = """
-            {"schemaVersion":1,"id":"office","name":"Office","version":"1.0.0",
-             "permissions":["workspace.read"],"contributes":{"skills":[],"mcpServers":[]}}
-            """;
-        await File.WriteAllTextAsync(Path.Combine(pluginPath, "plugin.json"), initialManifest);
-        var now = DateTimeOffset.UtcNow;
-        var plugin = new ExtensionPackageRecord(
-            ExtensionKind.Plugin,
-            "office",
-            "Office",
-            "1.0.0",
-            "Office workflows",
-            pluginPath,
-            "sha256:v1",
-            initialManifest,
-            null,
-            false,
-            null,
-            null,
-            now,
-            now);
-        await context.Repository.UpsertPackageAsync(plugin);
-
-        var unconfirmed = () => context.Service.SetEnabledAsync(
-            new ExtensionItemKey(ExtensionKind.Plugin, "office"), true);
-        var spoofed = () => context.Service.AcknowledgePluginPermissionsAsync(
-            "office", ["workspace.read", "process.execute"]);
-
-        await unconfirmed.Should().ThrowAsync<InvalidOperationException>().WithMessage("*permission confirmation*");
-        await spoofed.Should().ThrowAsync<InvalidOperationException>().WithMessage("*changed before confirmation*");
-        await context.Service.AcknowledgePluginPermissionsAsync("office", ["workspace.read"]);
-        await context.Service.SetEnabledAsync(new ExtensionItemKey(ExtensionKind.Plugin, "office"), true);
-        (await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "office"))!.IsEnabled.Should().BeTrue();
-
-        var upgradedManifest = """
-            {"schemaVersion":1,"id":"office","name":"Office","version":"2.0.0",
-             "permissions":["process.execute","workspace.read"],"contributes":{"skills":[],"mcpServers":[]}}
-            """;
-        await File.WriteAllTextAsync(Path.Combine(pluginPath, "plugin.json"), upgradedManifest);
-        var upgraded = (await context.Repository.GetPackageAsync(ExtensionKind.Plugin, "office"))! with
-        {
-            ManifestJson = upgradedManifest,
-            Version = "2.0.0",
-            UpdatedAtUtc = DateTimeOffset.UtcNow
-        };
-        await context.Repository.UpsertPackageAsync(upgraded);
-
-        var state = await context.Service.GetStateAsync();
-        state.Plugins.Single().Status.Should().Be(ExtensionStatus.NeedsPermission);
-        state.Plugins.Single().UnacknowledgedPermissions.Should().Equal("process.execute");
-        await unconfirmed.Should().ThrowAsync<InvalidOperationException>().WithMessage("*process.execute*");
     }
 
     [Fact]
@@ -420,14 +279,13 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         var view = await context.Service.ImportPackageAsync(ExtensionKind.Plugin, archivePath);
         var managed = await context.Repository.GetMcpServerAsync("render-tools/renderer");
 
-        view.Permissions.Should().Equal("process.execute");
+        view.Id.Should().Be("render-tools");
         managed.Should().NotBeNull();
         managed!.SourcePluginId.Should().Be("render-tools");
         managed.IsEnabled.Should().BeFalse();
         var settings = ExtensionCatalog.DeserializeSettings(managed.SettingsJson);
         settings.RequiredFieldNames.Should().Equal("environment.LICENSE_KEY");
 
-        await context.Service.AcknowledgePluginPermissionsAsync("render-tools", ["process.execute"]);
         await context.Service.SetEnabledAsync(new ExtensionItemKey(ExtensionKind.Plugin, "render-tools"), true);
         (await context.Repository.GetMcpServerAsync(managed.Id))!.IsEnabled.Should().BeTrue();
 
@@ -484,7 +342,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         var now = DateTimeOffset.UtcNow;
         await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
             ExtensionKind.Plugin, "office", "Office", "1.0.0", "", pluginPath,
-            "sha256:v1", manifest, null, true, "[]", now, now, now));
+            "sha256:v1", manifest, null, true, now, now));
         var lease = context.PluginVersionLeaseManager.Acquire(pluginPath);
 
         var deleteTask = context.Service.DeleteAsync(new ExtensionItemKey(ExtensionKind.Plugin, "office"));
@@ -514,7 +372,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         var now = DateTimeOffset.UtcNow;
         await context.Repository.UpsertPackageAsync(new ExtensionPackageRecord(
             ExtensionKind.Plugin, "office", "Office", "2.0.0", "", currentPath,
-            "sha256:v2", manifest, null, true, "[]", now, now, now));
+            "sha256:v2", manifest, null, true, now, now));
         var oldVersionLease = context.PluginVersionLeaseManager.Acquire(oldPath);
 
         var deleteTask = context.Service.DeleteAsync(new ExtensionItemKey(ExtensionKind.Plugin, "office"));
@@ -585,21 +443,6 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         }
     }
 
-    private async Task<string> CreateViewPluginAsync(string pluginId)
-    {
-        var pluginPath = Path.Combine(_rootPath, "plugins", pluginId, "versions", "v1");
-        Directory.CreateDirectory(Path.Combine(pluginPath, "ui"));
-        var manifest = $$$"""
-            {"schemaVersion":1,"id":"{{{pluginId}}}","name":"Git Inspector","version":"1.0.0",
-             "permissions":["ui.panel","network.fetch:https://api.github.com"],
-             "contributes":{"views":[
-               {"id":"changes","slot":"right","title":"变更","icon":"git-branch","entry":"ui/index.html"}]}}
-            """;
-        await File.WriteAllTextAsync(Path.Combine(pluginPath, "plugin.json"), manifest);
-        await File.WriteAllTextAsync(Path.Combine(pluginPath, "ui", "index.html"), "<!doctype html>");
-        return pluginPath;
-    }
-
     private TestContext CreateContext()
     {
         var storagePaths = StoragePathDefaults.Create(
@@ -626,7 +469,6 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
             mcpClientManager,
             pluginReader);
         var stateChangeNotifier = new ExtensionStateChangeNotifier();
-        var panelSessions = new RecordingViewSessionRegistry();
         return new TestContext(
             new ExtensionSettingsService(
                 repository,
@@ -638,13 +480,11 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
                 mcpClientManager,
                 pluginContributionService,
                 stateChangeNotifier,
-                pluginVersionLeaseManager,
-                panelSessions),
+                pluginVersionLeaseManager),
             repository,
             protector,
             mcpClientManager,
-            pluginVersionLeaseManager,
-            panelSessions);
+            pluginVersionLeaseManager);
     }
 
     private static SaveMcpServerCommand CreateStdioCommand(
@@ -669,19 +509,7 @@ public sealed class ExtensionSettingsServiceTests : IDisposable
         SqliteExtensionRepository Repository,
         FakeSecretProtector SecretProtector,
         FakeMcpClientManager McpClientManager,
-        PluginVersionLeaseManager PluginVersionLeaseManager,
-        RecordingViewSessionRegistry PanelSessions);
-
-    private sealed class RecordingViewSessionRegistry : IPluginViewSessionRegistry
-    {
-        public List<string> ClosedPluginIds { get; } = [];
-
-        public Task CloseAsync(string pluginId, CancellationToken cancellationToken = default)
-        {
-            ClosedPluginIds.Add(pluginId);
-            return Task.CompletedTask;
-        }
-    }
+        PluginVersionLeaseManager PluginVersionLeaseManager);
 
     private sealed class FakeMcpClientManager : IMcpClientManager
     {

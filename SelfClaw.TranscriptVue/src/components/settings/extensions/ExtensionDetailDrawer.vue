@@ -5,7 +5,6 @@ import ExtensionStatusBadge from './ExtensionStatusBadge.vue';
 defineProps({
 	item: { type: Object, required: true },
 	kind: { type: String, required: true },
-	views: { type: Array, default: () => [] },
 	pending: { type: Boolean, default: false },
 });
 defineEmits(['close', 'delete', 'edit']);
@@ -49,21 +48,6 @@ defineEmits(['close', 'delete', 'edit']);
 			<template v-if="item.tools?.length">
 				<dt>工具</dt>
 				<dd>{{ item.tools.join(', ') }}</dd>
-			</template>
-			<template v-if="item.permissions?.length">
-				<dt>权限</dt>
-				<dd>{{ item.permissions.join(', ') }}</dd>
-			</template>
-			<template v-if="views.length">
-				<dt>视图</dt>
-				<dd>
-					<ul class="views">
-						<li v-for="view in views" :key="view.key">
-							<span>{{ view.title }}</span><code>{{ view.viewId }}</code>
-							<em>{{ view.slot === 'floating' ? '悬浮' : '面板' }}</em>
-						</li>
-					</ul>
-				</dd>
 			</template>
 		</dl>
 
@@ -162,35 +146,6 @@ dd {
 
 dd.error {
 	color: var(--sc-err);
-}
-
-.views {
-	display: grid;
-	gap: 5px;
-	margin: 0;
-	padding: 0;
-	list-style: none;
-}
-
-.views li {
-	display: flex;
-	align-items: baseline;
-	justify-content: space-between;
-	gap: 10px;
-}
-
-.views li em {
-	flex: none;
-	color: var(--sc-accent, var(--accent));
-	font-size: var(--fs-10);
-	font-style: normal;
-}
-
-.views code {
-	flex: none;
-	color: var(--sc-faint);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-10);
 }
 
 footer {

@@ -1,4 +1,3 @@
-using SelfClaw.Core.Runtime;
 using System.Text.Json;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
@@ -9,7 +8,7 @@ using SelfClaw.Infrastructure.Extensions.Plugins.Models;
 
 namespace SelfClaw.Infrastructure.Extensions;
 
-internal sealed class ExtensionCatalog : IPluginViewCatalog
+internal sealed class ExtensionCatalog
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -43,7 +42,7 @@ internal sealed class ExtensionCatalog : IPluginViewCatalog
         foreach (var package in packages.Where(package => package.Kind == kind))
         {
             views.Add(kind == ExtensionKind.Plugin && _pluginManifestReader is not null
-                ? await CreatePluginViewAsync(package, cancellationToken).ConfigureAwait(false)
+                ? await CreatePluginPackageViewAsync(package, cancellationToken).ConfigureAwait(false)
                 : CreatePackageView(package));
         }
 
@@ -66,10 +65,10 @@ internal sealed class ExtensionCatalog : IPluginViewCatalog
             return CreatePackageView(package);
         }
 
-        return await CreatePluginViewAsync(package, cancellationToken).ConfigureAwait(false);
+        return await CreatePluginPackageViewAsync(package, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<ExtensionPackageView> CreatePluginViewAsync(
+    private async Task<ExtensionPackageView> CreatePluginPackageViewAsync(
         ExtensionPackageRecord package,
         CancellationToken cancellationToken)
     {
@@ -118,9 +117,7 @@ internal sealed class ExtensionCatalog : IPluginViewCatalog
                         plugin.IsEnabled,
                         plugin.Id,
                         [],
-                        pluginView.Status,
-                        [],
-                        []));
+                        pluginView.Status));
                 }
             }
             catch (OperationCanceledException)
@@ -133,70 +130,6 @@ internal sealed class ExtensionCatalog : IPluginViewCatalog
         }
 
         return results;
-    }
-
-    /// <summary>
-    /// Panels are projected from the Plugin manifest rather than stored separately: the manifest is
-    /// already the durable record, and a second copy could disagree with the files a lease is pinned to.
-    /// A Plugin whose manifest no longer reads contributes no views instead of failing the whole state.
-    /// </summary>
-    public async Task<IReadOnlyList<PluginView>> ListPluginViewsAsync(
-        CancellationToken cancellationToken = default)
-    {
-        if (_pluginManifestReader is null)
-        {
-            return [];
-        }
-
-        var packages = await _packageRepository.ListPackagesAsync(cancellationToken).ConfigureAwait(false);
-        var results = new List<PluginView>();
-        foreach (var plugin in packages
-                     .Where(package => package.Kind == ExtensionKind.Plugin)
-                     .OrderBy(package => package.Id, StringComparer.Ordinal))
-        {
-            PluginManifest manifest;
-            try
-            {
-                manifest = await _pluginManifestReader
-                    .ReadAsync(ExtensionInstallation.PluginManifestPath(plugin), cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                continue;
-            }
-
-            if (manifest.Contributions.Views.Count == 0)
-            {
-                continue;
-            }
-
-            var status = CreatePackageView(plugin).Status;
-            var origin = PluginViewOrigin.ForPlugin(plugin.Id);
-            var networkOrigins = PluginPermissions.ReadNetworkOrigins(manifest.Permissions);
-            results.AddRange(manifest.Contributions.Views.Select(view => new PluginView(
-                $"{plugin.Id}/{view.Id}",
-                plugin.Id,
-                view.Id,
-                view.Title,
-                view.Icon,
-                view.Slot,
-                origin,
-                $"{origin}/{view.Entry}",
-                view.DefaultWidth,
-                plugin.IsEnabled,
-                status,
-                manifest.Permissions,
-                networkOrigins)));
-        }
-
-        return results
-            .OrderBy(view => view.Title, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
     }
 
     public async Task<IReadOnlyList<McpServerView>> ListMcpServerViewsAsync(
@@ -309,18 +242,11 @@ internal sealed class ExtensionCatalog : IPluginViewCatalog
 
     internal static ExtensionPackageView CreatePackageView(ExtensionPackageRecord package)
     {
-        var permissions = package.Kind == ExtensionKind.Plugin
-            ? ReadStringArray(package.ManifestJson, "permissions")
-            : [];
-        var acknowledged = ReadAcknowledgedPermissions(package.AcknowledgedPermissionsJson);
-        var unacknowledged = permissions.Except(acknowledged, StringComparer.Ordinal).ToArray();
         var status = !ExtensionInstallation.IsIntact(package)
             ? ExtensionStatus.Broken
             : !package.IsEnabled
                 ? ExtensionStatus.Disabled
-                : unacknowledged.Length > 0
-                    ? ExtensionStatus.NeedsPermission
-                    : ExtensionStatus.Ready;
+                : ExtensionStatus.Ready;
         return new ExtensionPackageView(
             package.Kind,
             package.Id,
@@ -330,52 +256,7 @@ internal sealed class ExtensionCatalog : IPluginViewCatalog
             package.IsEnabled,
             package.SourcePluginId,
             [],
-            status,
-            permissions,
-            unacknowledged);
-    }
-
-    internal static IReadOnlyList<string> ReadAcknowledgedPermissions(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return [];
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<string[]>(json, JsonOptions) ?? [];
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-    }
-
-    private static IReadOnlyList<string> ReadStringArray(string json, string propertyName)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            if (!document.RootElement.TryGetProperty(propertyName, out var element) ||
-                element.ValueKind != JsonValueKind.Array)
-            {
-                return [];
-            }
-
-            return element.EnumerateArray()
-                .Where(item => item.ValueKind == JsonValueKind.String)
-                .Select(item => item.GetString())
-                .Where(item => !string.IsNullOrWhiteSpace(item))
-                .Select(item => item!)
-                .Distinct(StringComparer.Ordinal)
-                .OrderBy(item => item, StringComparer.Ordinal)
-                .ToArray();
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
+            status);
     }
 
     private static IReadOnlyList<McpConfigurationEntryView> CreateEntryViews(

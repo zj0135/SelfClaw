@@ -7,5 +7,4 @@ internal sealed record PluginManifest(
     string Version,
     string Description,
     string? Publisher,
-    IReadOnlyList<string> Permissions,
     PluginContributions Contributions);

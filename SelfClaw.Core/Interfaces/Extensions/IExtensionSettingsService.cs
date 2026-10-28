@@ -16,11 +16,6 @@ public interface IExtensionSettingsService
         bool enabled,
         CancellationToken cancellationToken = default);
 
-    Task AcknowledgePluginPermissionsAsync(
-        string id,
-        IReadOnlyList<string> permissions,
-        CancellationToken cancellationToken = default);
-
     Task DeleteAsync(ExtensionItemKey key, CancellationToken cancellationToken = default);
 
     Task<McpServerView> SaveMcpServerAsync(

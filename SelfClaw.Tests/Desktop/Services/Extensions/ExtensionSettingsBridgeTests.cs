@@ -26,7 +26,6 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
     [InlineData("extensions/get-state", "{}")]
     [InlineData("extensions/list-effective-skills", "{\"agentId\":\"build\"}")]
     [InlineData("extensions/set-enabled", "{\"kind\":\"skill\",\"id\":\"review\",\"enabled\":false}")]
-    [InlineData("extensions/acknowledge-plugin-permissions", "{\"id\":\"office\",\"permissions\":[\"workspace.read\"]}")]
     [InlineData("extensions/delete", "{\"kind\":\"skill\",\"id\":\"review\"}")]
     [InlineData("extensions/save-mcp", "{\"name\":\"Local\",\"transport\":\"stdio\",\"command\":\"node\",\"arguments\":[],\"workingDirectoryMode\":\"workspace\",\"environment\":[],\"headers\":[]}")]
     public async Task TryHandleAsync_routes_supported_messages_and_echoes_request_id(
@@ -256,11 +255,8 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
                     true,
                     null,
                     [],
-                    ExtensionStatus.Ready,
-                    [],
-                    [])],
-                [CreateMcpView()],
-                []));
+                    ExtensionStatus.Ready)],
+                [CreateMcpView()]));
         }
 
         public Task<ExtensionPackageView> ImportPackageAsync(
@@ -272,16 +268,6 @@ public sealed class ExtensionSettingsBridgeTests : IDisposable
         public Task SetEnabledAsync(
             ExtensionItemKey key,
             bool enabled,
-            CancellationToken cancellationToken = default)
-        {
-            Observe(cancellationToken);
-            _revision++;
-            return Task.CompletedTask;
-        }
-
-        public Task AcknowledgePluginPermissionsAsync(
-            string id,
-            IReadOnlyList<string> permissions,
             CancellationToken cancellationToken = default)
         {
             Observe(cancellationToken);

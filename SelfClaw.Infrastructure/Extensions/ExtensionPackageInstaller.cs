@@ -374,8 +374,6 @@ internal sealed class ExtensionPackageInstaller
                 manifestJson,
                 null,
                 false,
-                null,
-                null,
                 previous?.InstalledAtUtc ?? now,
                 now);
             return await _packageRepository.UpsertPackageAsync(package, cancellationToken).ConfigureAwait(false);
@@ -436,8 +434,6 @@ internal sealed class ExtensionPackageInstaller
             manifestJson,
             null,
             previous?.IsEnabled ?? false,
-            previous?.AcknowledgedPermissionsJson,
-            previous?.AcknowledgedAtUtc,
             previous?.InstalledAtUtc ?? now,
             now);
         try

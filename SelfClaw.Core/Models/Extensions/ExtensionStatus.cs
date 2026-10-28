@@ -12,6 +12,5 @@ public enum ExtensionStatus
     Ready,
     Disabled,
     NeedsConfig,
-    NeedsPermission,
     Broken
 }

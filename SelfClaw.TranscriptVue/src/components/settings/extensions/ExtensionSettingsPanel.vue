@@ -9,7 +9,6 @@ import ExtensionList from './ExtensionList.vue';
 import ExtensionToolbar from './ExtensionToolbar.vue';
 import McpServerDialog from './McpServerDialog.vue';
 import PackageImportDialog from './PackageImportDialog.vue';
-import PermissionReviewDialog from './PermissionReviewDialog.vue';
 
 const {
 	state,
@@ -19,7 +18,6 @@ const {
 	isPending,
 	load,
 	setEnabled,
-	acknowledgePluginPermissions,
 	deleteItem,
 	saveMcp,
 	testMcp,
@@ -34,7 +32,6 @@ const selectedId = ref(null);
 const mcpDialogOpen = ref(false);
 const editingMcp = ref(null);
 const importResult = ref(null);
-const permissionPlugin = ref(null);
 
 const collectionNames = {
 	plugin: 'plugins',
@@ -51,12 +48,6 @@ const filteredItems = computed(() => {
 	);
 });
 const selectedItem = computed(() => activeItems.value.find((item) => item.id === selectedId.value) || null);
-// 面板不是独立安装项，由所属插件管理，因此只在插件详情里出现，不单开一个分类页。
-const selectedViews = computed(() =>
-	activeCategory.value === 'plugin' && selectedItem.value
-		? (state.value.views || []).filter((view) => view.pluginId === selectedItem.value.id)
-		: [],
-);
 
 function changeCategory(category) {
 	activeCategory.value = category;
@@ -95,31 +86,14 @@ function applyImportResult(result) {
 	if (!result) return;
 	importResult.value = result;
 	selectedId.value = result.package.id;
-	const imported = activeItems.value.find((item) => item.id === result.package.id);
-	if (imported?.status === 'needs-permission') permissionPlugin.value = imported;
 }
 
 function selectItem(item) {
 	selectedId.value = item.id;
-	if (activeCategory.value === 'plugin' && item.status === 'needs-permission') {
-		permissionPlugin.value = item;
-	}
 }
 
 async function handleToggle(item, enabled) {
-	if (activeCategory.value === 'plugin' && enabled && item.unacknowledgedPermissions?.length) {
-		permissionPlugin.value = item;
-		return;
-	}
-
 	await setEnabled(activeCategory.value, item, enabled);
-}
-
-async function confirmPermissions() {
-	const plugin = permissionPlugin.value;
-	if (!plugin) return;
-	if (!await acknowledgePluginPermissions(plugin)) return;
-	if (await setEnabled('plugin', plugin, true)) permissionPlugin.value = null;
 }
 </script>
 
@@ -147,7 +121,7 @@ async function confirmPermissions() {
 			</section>
 
 			<ExtensionDetailDrawer v-if="selectedItem" :item="selectedItem" :kind="activeCategory"
-				:views="selectedViews" :pending="isPending(activeCategory, selectedItem.id)"
+				:pending="isPending(activeCategory, selectedItem.id)"
 				@close="selectedId = null" @delete="handleDelete" @edit="openMcp(selectedItem)" />
 		</div>
 
@@ -155,9 +129,6 @@ async function confirmPermissions() {
 			:saving="isPending('mcpServer', editingMcp?.id || 'new')" @close="mcpDialogOpen = false"
 			@save="handleSaveMcp" />
 		<PackageImportDialog :open="Boolean(importResult)" :result="importResult" @close="importResult = null" />
-		<PermissionReviewDialog :open="Boolean(permissionPlugin)" :plugin="permissionPlugin"
-			:pending="permissionPlugin ? isPending('plugin', permissionPlugin.id) : false"
-			@close="permissionPlugin = null" @confirm="confirmPermissions" />
 	</main>
 </template>
 

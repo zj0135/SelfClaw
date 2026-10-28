@@ -28,6 +28,6 @@ plugin-dev/
 
 ## 维护
 
-插件系统的校验规则或面板 SDK 变化时，同步更新
-`skills/create-plugin/SKILL.md`（规范、模板与 SDK 速查都在正文里），重新打包导入即可。
+插件系统的校验规则变化时，同步更新
+`skills/create-plugin/SKILL.md`（规范、模板与自检清单都在正文里），重新打包导入即可。
 `PluginDevFixtureTests` 会用真实安装器验证本包始终可安装、Skill 可解析。

@@ -4,7 +4,7 @@ import { useTranscriptBridge } from './transcriptBridge.js';
 import { useToast } from './useToast.js';
 import { useConfirm } from './useConfirm.js';
 
-export function useConversationNavigation(currentViewId, chatViewRef, openPlugins) {
+export function useConversationNavigation(currentViewId, chatViewRef) {
 	const { on, request } = useHostBridge();
 	const transcript = useTranscriptBridge();
 	const { showToast } = useToast();
@@ -77,7 +77,6 @@ export function useConversationNavigation(currentViewId, chatViewRef, openPlugin
 	const navItems = computed(() => [
 		{ id: 'new-chat', label: '新建对话', type: 'action' },
 		{ id: 'search', label: '搜索', type: 'action' },
-		{ id: 'plugins', label: '插件', type: 'action' },
 		{
 			id: 'extensions',
 			label: '扩展',
@@ -126,9 +125,6 @@ export function useConversationNavigation(currentViewId, chatViewRef, openPlugin
 				case 'add-projects':
 					currentViewId.value = 'chat';
 					nextTick(() => chatViewRef.value?.browseWorkspaceFolder());
-					break;
-				case 'plugins':
-					openPlugins();
 					break;
 				case 'automation':
 					currentViewId.value = 'automation';

@@ -87,8 +87,6 @@ ON CONFLICT(kind, id) DO UPDATE SET
     manifest_json = excluded.manifest_json,
     source_plugin_id = excluded.source_plugin_id,
     is_enabled = excluded.is_enabled,
-    acknowledged_permissions_json = excluded.acknowledged_permissions_json,
-    acknowledged_at_utc = excluded.acknowledged_at_utc,
     installed_at_utc = excluded.installed_at_utc,
     updated_at_utc = excluded.updated_at_utc;";
         command.Parameters.AddWithValue("$kind", (int)package.Kind);
@@ -101,8 +99,9 @@ ON CONFLICT(kind, id) DO UPDATE SET
         command.Parameters.AddWithValue("$manifestJson", package.ManifestJson);
         command.Parameters.AddWithValue("$sourcePluginId", package.SourcePluginId ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$isEnabled", package.IsEnabled ? 1 : 0);
-        command.Parameters.AddWithValue("$acknowledgedPermissions", package.AcknowledgedPermissionsJson ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$acknowledgedAt", package.AcknowledgedAtUtc?.ToString("O") ?? (object)DBNull.Value);
+        // Columns remain in schema v32. New rows store null; updates leave any existing values alone.
+        command.Parameters.AddWithValue("$acknowledgedPermissions", DBNull.Value);
+        command.Parameters.AddWithValue("$acknowledgedAt", DBNull.Value);
         command.Parameters.AddWithValue("$installedAt", package.InstalledAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$updatedAt", package.UpdatedAtUtc.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);

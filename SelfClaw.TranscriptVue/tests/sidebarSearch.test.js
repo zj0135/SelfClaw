@@ -11,7 +11,6 @@ function items() {
 	return [
 		{ id: 'new-chat', label: '新建对话', type: 'action' },
 		{ id: 'search', label: '搜索', type: 'action' },
-		{ id: 'plugins', label: '插件', type: 'action' },
 		{
 			id: 'projects',
 			label: '项目',
@@ -49,7 +48,7 @@ it('renders a search input above the functional entries', () => {
 
 	const input = wrapper.get('.tool-list .tool-search input');
 	expect(input.element.getAttribute('placeholder')).toBe('搜索');
-	expect(wrapper.findAll('.tool-btn').map((node) => node.text())).toEqual(['插件']);
+	expect(wrapper.findAll('.tool-btn')).toHaveLength(0);
 	wrapper.unmount();
 });
 

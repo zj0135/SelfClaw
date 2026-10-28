@@ -26,7 +26,6 @@ using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
-using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.Automation;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
@@ -138,24 +137,6 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<IWorkspaceFolderPicker, WpfWorkspaceFolderPicker>();
         services.AddSingleton<IImageFilePicker, WpfImageFilePicker>();
         services.AddSingleton<AttachmentBridge>();
-        services.AddSingleton<PluginViewResourceReader>();
-        services.AddSingleton(services => new PluginViewHostController(
-            services.GetRequiredService<IPluginViewCatalog>(),
-            services.GetRequiredService<IExtensionPackageRepository>(),
-            services.GetRequiredService<IPluginVersionLeaseManager>(),
-            services.GetRequiredService<DesktopSettingsJsonStore>(),
-            services.GetRequiredService<WebViewHostChannel>(),
-            dispatcher,
-            services.GetRequiredService<PluginViewResourceReader>(),
-            services.GetRequiredService<ILogger<PluginViewHostController>>()));
-        services.AddSingleton<IPluginViewSessionRegistry>(services =>
-            services.GetRequiredService<PluginViewHostController>());
-        services.AddSingleton(services => new PluginViewContextPublisher(
-            services.GetRequiredService<IPluginViewContextSource>(),
-            services.GetRequiredService<WebViewHostChannel>(),
-            services.GetRequiredService<PluginViewHostController>(),
-            dispatcher));
-        services.AddSingleton<PluginViewBridge>();
         services.AddSingleton<CliProbeProcess>();
         services.AddSingleton<SelfClaw.Desktop.Services.ProgrammingAssistant.Abstractions.IProgrammingCliDiscovery, ProgrammingCliDiscovery>();
         services.AddSingleton<ProgrammingAssistantSettingsService>();
@@ -207,8 +188,6 @@ internal static class DesktopServiceRegistration
             dispatcher));
         services.AddSingleton<IWorkspaceSelectionController>(services =>
             services.GetRequiredService<MainWindowViewModel>());
-        services.AddSingleton<IPluginViewContextSource>(services =>
-            services.GetRequiredService<MainWindowViewModel>());
         services.AddSingleton<WorkspaceSelectionBridge>();
         services.AddSingleton<GitWorkspaceBridge>();
         services.AddSingleton<IActivityPanelScopeSource>(services => services.GetRequiredService<MainWindowViewModel>());
@@ -228,8 +207,6 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<PetSettingsBridge>(),
             services.GetRequiredService<WorkspaceSelectionBridge>(),
             services.GetRequiredService<TerminalHostController>(),
-            services.GetRequiredService<PluginViewHostController>(),
-            services.GetRequiredService<PluginViewBridge>(),
             services.GetRequiredService<MainWindowViewModel>(),
             services.GetRequiredService<ToolApprovalPresenter>(),
             services.GetRequiredService<WebViewHostChannel>(),
@@ -247,7 +224,6 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<WebViewHostChannel>(),
             services.GetRequiredService<WebViewMessageRouter>(),
             services.GetRequiredService<TerminalHostController>(),
-            services.GetRequiredService<PluginViewHostController>(),
             services.GetRequiredService<AppearanceSettingsService>(),
             services.GetRequiredService<StoragePaths>(),
             services.GetRequiredService<DesktopConversationActivationService>(),

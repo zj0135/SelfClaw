@@ -1,5 +1,3 @@
-using SelfClaw.Core.Models;
-using SelfClaw.Core.Runtime;
 using System.Net;
 using System.Text.Json;
 using SelfClaw.Infrastructure.Extensions.Mcp;
@@ -11,13 +9,6 @@ namespace SelfClaw.Infrastructure.Extensions.Plugins;
 
 internal sealed class PluginManifestReader
 {
-    private const int MaximumViewTitleLength = 40;
-    private const int MinimumDockWidth = 280;
-    private const int MaximumDockWidth = 720;
-    private const int FallbackViewWidth = 360;
-    private const string RightSlot = "right";
-    private const string FloatingSlot = "floating";
-
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -81,8 +72,6 @@ internal sealed class PluginManifestReader
             "directInstructions");
         var skills = ValidateSkills(packageRoot, contributions.Skills ?? []);
         var mcpServers = ValidateMcpServers(packageRoot, contributions.McpServers ?? []);
-        var permissions = PluginPermissions.Validate(raw.Permissions);
-        var views = ValidateViews(pluginId: raw.Id, packageRoot, contributions.Views ?? [], permissions);
 
         return new PluginManifest(
             1,
@@ -91,136 +80,8 @@ internal sealed class PluginManifestReader
             raw.Version.Trim(),
             raw.Description?.Trim() ?? string.Empty,
             raw.Publisher?.Trim(),
-            permissions,
-            new PluginContributions(directInstructions, skills, mcpServers, views));
+            new PluginContributions(directInstructions, skills, mcpServers));
     }
-
-    private static IReadOnlyList<PluginViewContribution> ValidateViews(
-        string pluginId,
-        string packageRoot,
-        IReadOnlyList<RawPluginViewContribution> views,
-        IReadOnlyList<string> permissions)
-    {
-        if (views.Count == 0)
-        {
-            return [];
-        }
-
-        // Caught here rather than at open time: the view origin is derived from the Plugin id, so an id
-        // that is a legal package id but not a legal DNS label would otherwise install cleanly and then
-        // fail to resolve the first time a user opens the view.
-        if (!PluginViewOrigin.IsValidPluginLabel(pluginId))
-        {
-            throw new InvalidDataException(
-                $"Plugin id '{pluginId}' cannot host views: it must be at most 63 characters and must not start or end with '-'.");
-        }
-
-        var ids = new HashSet<string>(StringComparer.Ordinal);
-        var results = new List<PluginViewContribution>();
-        foreach (var view in views)
-        {
-            ValidateId(view.Id, "Plugin view id");
-            if (!ids.Add(view.Id!))
-            {
-                // The key is <pluginId>/<viewId>, so a duplicate is a duplicate regardless of slot.
-                throw new InvalidDataException($"Duplicate Plugin view id '{view.Id}'.");
-            }
-
-            var slot = ResolveSlot(view);
-            RequireSlotPermission(view.Id!, slot, permissions);
-
-            var title = view.Title?.Trim();
-            if (string.IsNullOrWhiteSpace(title) ||
-                title.Length > MaximumViewTitleLength ||
-                title.Any(char.IsControl))
-            {
-                throw new InvalidDataException($"Plugin view '{view.Id}' title is invalid.");
-            }
-
-            if (string.IsNullOrWhiteSpace(view.Entry))
-            {
-                throw new InvalidDataException($"Plugin view '{view.Id}' must declare an entry.");
-            }
-
-            var entryPath = PluginCommandTemplate.ResolvePackagePath(packageRoot, view.Entry, "View entry");
-            if (!File.Exists(entryPath))
-            {
-                throw new InvalidDataException($"Plugin view '{view.Id}' entry file does not exist.");
-            }
-
-            if (!Path.GetExtension(entryPath).Equals(".html", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException($"Plugin view '{view.Id}' entry must be an .html file.");
-            }
-
-            results.Add(new PluginViewContribution(
-                view.Id!,
-                title,
-                PluginViewIcons.Resolve(view.Icon),
-                slot,
-                NormalizeRelativePath(packageRoot, entryPath),
-                ResolveWidth(view, slot)));
-        }
-
-        return results;
-    }
-
-    private static PluginViewSlot ResolveSlot(RawPluginViewContribution view)
-    {
-        var slot = view.Slot?.Trim().ToLowerInvariant();
-        return slot switch
-        {
-            "right" => PluginViewSlot.Right,
-            "floating" => PluginViewSlot.Floating,
-            null or "" => throw new InvalidDataException(
-                $"Plugin view '{view.Id}' must declare a slot of '{RightSlot}' or '{FloatingSlot}'."),
-            _ => throw new InvalidDataException(
-                $"Plugin view '{view.Id}' slot '{view.Slot}' is not supported; use '{RightSlot}' or '{FloatingSlot}'.")
-        };
-    }
-
-    // Each slot is a separately disclosed capability: a floating view can cover the whole window and
-    // intercept clicks over it, so it must never ride on the docked panel's acknowledgement.
-    private static void RequireSlotPermission(
-        string viewId,
-        PluginViewSlot slot,
-        IReadOnlyList<string> permissions)
-    {
-        var permission = slot == PluginViewSlot.Floating ? PluginPermissions.Floating : PluginPermissions.Panel;
-        if (!PluginPermissions.Grants(permissions, permission))
-        {
-            throw new InvalidDataException(
-                $"Plugin view '{viewId}' uses slot '{SlotName(slot)}', so the Plugin must also declare the '{permission}' permission.");
-        }
-    }
-
-    // defaultWidth is a docked-column layout input. Accepting it on another slot would put a setting in
-    // the manifest that nothing ever reads.
-    private static int? ResolveWidth(RawPluginViewContribution view, PluginViewSlot slot)
-    {
-        if (slot != PluginViewSlot.Right)
-        {
-            if (view.DefaultWidth is not null)
-            {
-                throw new InvalidDataException(
-                    $"Plugin view '{view.Id}' is not docked, so it must not declare defaultWidth.");
-            }
-
-            return null;
-        }
-
-        var width = view.DefaultWidth ?? FallbackViewWidth;
-        if (width is < MinimumDockWidth or > MaximumDockWidth)
-        {
-            throw new InvalidDataException(
-                $"Plugin view '{view.Id}' defaultWidth must be between {MinimumDockWidth} and {MaximumDockWidth}.");
-        }
-
-        return width;
-    }
-
-    private static string SlotName(PluginViewSlot slot)
-        => slot == PluginViewSlot.Floating ? FloatingSlot : RightSlot;
 
     private static IReadOnlyList<PluginSkillContribution> ValidateSkills(
         string packageRoot,

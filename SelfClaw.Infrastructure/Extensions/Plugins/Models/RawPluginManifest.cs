@@ -7,5 +7,4 @@ internal sealed record RawPluginManifest(
     string Version,
     string? Description,
     string? Publisher,
-    IReadOnlyList<string?>? Permissions,
     RawPluginContributions? Contributes);

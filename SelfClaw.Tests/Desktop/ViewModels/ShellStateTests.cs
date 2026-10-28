@@ -37,7 +37,7 @@ public sealed class ShellStateTests
             await Task.WhenAll(context.ViewModel.SelectComposerModeAsync("cli"), context.ViewModel.SelectComposerModeAsync("direct"));
             var persisted = await context.Settings.ReadNodeAsync<SelfClaw.Desktop.Services.ProgrammingAssistant.Models.ComposerSettings>("composer");
             persisted?.ExecutionMode.Should().Be("direct");
-            ((SelfClaw.Desktop.Services.Plugins.IPluginViewContextSource)context.ViewModel).CaptureContext().AgentMode.Should().Be("direct");
+            context.ViewModel.ResolvedComposerMode.Should().Be("direct");
         });
 
     [Fact]
@@ -52,7 +52,7 @@ public sealed class ShellStateTests
             await context.ViewModel.SelectConversationAsync(conversation.Id);
             context.ViewModel.SelectWorkspaceRoot(second.Id);
             context.ViewModel.SelectedWorkspaceRoot?.Id.Should().Be(second.Id);
-            ((SelfClaw.Desktop.Services.Plugins.IPluginViewContextSource)context.ViewModel).CaptureContext().ConversationId.Should().BeNull();
+            context.ViewModel.SelectedConversation.Should().BeNull();
         });
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class ShellStateTests
             context.ViewModel.SelectedWorkspaceRoot?.Id.Should().Be(workspace.Id);
 
             await context.ViewModel.StartNewConversationAsync(keepWorkspace: true);
-            ((SelfClaw.Desktop.Services.Plugins.IPluginViewContextSource)context.ViewModel).CaptureContext().ConversationId.Should().BeNull();
+            context.ViewModel.SelectedConversation.Should().BeNull();
             context.ViewModel.SelectedWorkspaceRoot?.Id.Should().Be(workspace.Id);
 
             await context.ViewModel.StartNewConversationAsync();
@@ -85,7 +85,6 @@ public sealed class ShellStateTests
             await context.ViewModel.SelectConversationAsync(conversation.Id);
             context.Agents.CreateAgent(new("agent-b", "Agent B", "", AgentExecutionMode.Cli, "B instructions"));
             context.ViewModel.SelectedAgentId.Should().Be("agent-a");
-            ((SelfClaw.Desktop.Services.Plugins.IPluginViewContextSource)context.ViewModel).CaptureContext().AgentId.Should().Be("agent-a");
             (await context.ViewModel.SubmitPromptAsync("use A")).Accepted.Should().BeTrue();
             context.Inputs.Submissions.Should().ContainSingle().Which.Agent.Id.Should().Be("agent-a");
             await context.StopTurnsAsync();
@@ -110,7 +109,7 @@ public sealed class ShellStateTests
             var arguments = DesktopNotificationArguments.Build((DesktopNotificationArguments.ActionKey, DesktopNotificationArguments.OpenConversationAction),
                 (DesktopNotificationArguments.ConversationIdKey, conversation.Id.ToString("D")));
             (await notifications.HandleActivationAsync(arguments)).Should().BeTrue();
-            ((SelfClaw.Desktop.Services.Plugins.IPluginViewContextSource)context.ViewModel).CaptureContext().ConversationId.Should().Be(conversation.Id.ToString("D"));
+            context.ViewModel.SelectedConversation?.Id.Should().Be(conversation.Id);
             await context.Conversations.DeleteConversationAsync(conversation.Id);
             (await notifications.HandleActivationAsync(arguments)).Should().BeFalse();
         });

@@ -2,8 +2,8 @@ import { computed, reactive, ref } from 'vue';
 import { hostBridge } from './hostBridge.js';
 import { useToast } from './useToast.js';
 
-// 外观设置的唯一持有者。模块级单例而非 per-component 状态：外壳、设置页、终端、
-// 插件桥都要读同一份，任何一处改动都必须让其余几处立刻看到。
+// 外观设置的唯一持有者。模块级单例而非 per-component 状态：外壳、设置页和终端
+// 都要读同一份，任何一处改动都必须让其余几处立刻看到。
 //
 // 真值在宿主的 desktop-settings.json（WPF 启动时也要读它设置原生标题栏），
 // localStorage 只是缓存 —— 它的唯一职责是让 index.html 的内联脚本能同步拿到主题，
@@ -66,7 +66,7 @@ let confirmed = { ...DEFAULTS };
 let saveQueue = Promise.resolve();
 let editGeneration = 0;
 
-// 任何一项变化都自增。消费方（终端、插件桥）watch 它即可重读，不必各自
+// 任何一项变化都自增。消费方（终端）watch 它即可重读，不必各自
 // 记住「哪几项与我有关」。
 const revision = ref(0);
 

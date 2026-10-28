@@ -10,7 +10,6 @@ const labels = {
 	ready: '可用',
 	disabled: '已停用',
 	'needs-config': '待配置',
-	'needs-permission': '待授权',
 	broken: '异常',
 };
 
@@ -50,8 +49,7 @@ const label = computed(() => labels[props.status] || props.status);
 	color: var(--sc-faint);
 }
 
-.status.needs-config,
-.status.needs-permission {
+.status.needs-config {
 	color: var(--caution);
 }
 

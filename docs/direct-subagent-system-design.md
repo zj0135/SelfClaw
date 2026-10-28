@@ -773,7 +773,7 @@ continuation 是 **provisional 可见**的：只要该 parent conversation 被�
 
 这也是为什么停止按钮在 continuation 期间不可用：取消一次尝试只会被 dispatcher 按退避重试，按钮无法表达“不要这些结果”这个不存在的语义。
 
-provisional 可见性随选中会话生效：父会话未被选中时不产生任何发布，切回时才从内存快照补齐。同一批内容也会进入声明 `host.transcript.read` 的插件视图，因此它们同样会看到 provisional 回合以及放弃时的撤回；这不是新增的披露面（插件本来就能读到用户看到的转录），但作者文档需要说明消息可能回退。
+provisional 可见性随选中会话生效：父会话未被选中时不产生任何发布，切回时才从内存快照补齐。
 
 ---
 

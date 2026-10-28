@@ -30,10 +30,6 @@ defineEmits(['close']);
 			</div>
 
 			<p v-if="result.package?.description" class="description">{{ result.package.description }}</p>
-			<div v-if="result.package?.permissions?.length" class="permissions">
-				<span>声明权限</span>
-				<code v-for="permission in result.package.permissions" :key="permission">{{ permission }}</code>
-			</div>
 			<div v-if="result.summary?.manifest?.triggers?.length" class="triggers">
 				<span v-for="trigger in result.summary.manifest.triggers" :key="trigger">{{ trigger }}</span>
 			</div>
@@ -166,29 +162,6 @@ button {
 	color: var(--sc-mute);
 	font-size: var(--fs-12);
 	line-height: 1.6;
-}
-
-.permissions {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 6px;
-	margin: 14px 20px 0;
-}
-
-.permissions span {
-	margin-right: 3px;
-	color: var(--sc-faint);
-	font-size: var(--fs-9);
-}
-
-.permissions code {
-	padding: 3px 6px;
-	border: 1px solid var(--caution-line);
-	border-radius: 4px;
-	color: var(--caution-icon);
-	font-family: var(--sc-mono);
-	font-size: var(--fs-9);
 }
 
 .triggers {

@@ -314,9 +314,7 @@ public sealed class AgentSettingsBridgeTests : IDisposable
                     true,
                     null,
                     [],
-                    ExtensionStatus.Ready,
-                    [],
-                    [])],
+                    ExtensionStatus.Ready)],
                 [new McpServerView(
                     "local",
                     "Local",
@@ -335,8 +333,7 @@ public sealed class AgentSettingsBridgeTests : IDisposable
                     null,
                     null,
                     null,
-                    [])],
-                []);
+                    [])]);
         }
 
         public Task<ExtensionPackageView> ImportPackageAsync(
@@ -348,12 +345,6 @@ public sealed class AgentSettingsBridgeTests : IDisposable
         public Task SetEnabledAsync(
             ExtensionItemKey key,
             bool enabled,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task AcknowledgePluginPermissionsAsync(
-            string id,
-            IReadOnlyList<string> permissions,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 

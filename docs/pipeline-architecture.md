@@ -53,7 +53,7 @@ flowchart TB
     CHAN --> HostBridge
     HostBridge --> TranscriptStore --> Render
     FE --- Side
-    WVR -.->|"tool-approval / terminal- / activity-panel / plugin-host"| Side
+    WVR -.->|"tool-approval / terminal- / activity-panel"| Side
 ```
 
 Direct 与 CLI 是两条完全独立的执行分支，但在 `AgentStreamEvent` 之后共用同一套 recorder、投影和发布管道。CLI 自带认证、模型与工具策略；Direct 走 SelfClaw 的能力快照。
@@ -65,10 +65,9 @@ flowchart LR
     A["用户回车<br/>useChatComposer"] --> B["hostBridge.post({type:'send-prompt',<br/>prompt, workspaceMode, modelProfileId})"]
     B --> C["WebView2 WebMessageReceived"]
     C --> D{"WebViewMessageRouter<br/>Source == 应用 origin ?"}
-    D -->|否| DROP["直接丢弃<br/>(iframe / 插件面板消息)"]
+    D -->|否| DROP["直接丢弃"]
     D -->|是| E{"type 前缀分派"}
     E -->|"terminal-*"| T["TerminalHostController"]
-    E -->|"plugin-host/*"| P["PluginViewBridge"]
     E -->|"activity-panel/*"| AC["ActivityPanelBridge"]
     E -->|"send-prompt"| F["MainWindowViewModel.SubmitPromptAsync"]
     F --> G["PromptSubmissionSnapshot<br/>prompt / conversation / workspaceRoot /<br/>toolPermissionMode / modelProfileId / agentId /<br/>composerModeOverride / selectionVersion"]
@@ -260,8 +259,6 @@ flowchart LR
         H1["PublishShell(autoScroll)"] --> H2["会话列表 / 选中 / busy / 能力版本"]
     end
 ```
-
-插件面板走同一 origin 守卫之后的 `plugin-host/*`，但每个面板来自独立子域 `https://<plugin-id>.plugin.selfclaw.local`，身份由 `event.origin` + `event.source` 双重匹配得到，payload 里的 `pluginId` 不可信。
 
 ## 7. 后台子代理链路（Direct 的函数调用延伸）
 

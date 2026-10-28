@@ -132,8 +132,6 @@ public sealed class UserSkillDiscoveryServiceTests : IDisposable
             "{}",
             SourcePluginId: null,
             IsEnabled: true,
-            AcknowledgedPermissionsJson: null,
-            AcknowledgedAtUtc: null,
             InstalledAtUtc: now,
             UpdatedAtUtc: now));
 

@@ -17,7 +17,6 @@ using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
-using SelfClaw.Desktop.Services.Plugins;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.Transcript;
@@ -42,8 +41,6 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly WorkspaceSelectionBridge _workspaceSelectionBridge;
     private readonly GitWorkspaceBridge? _gitWorkspaceBridge;
     private readonly TerminalHostController _terminalHostController;
-    private readonly PluginViewHostController _pluginViewHostController;
-    private readonly PluginViewBridge _pluginViewBridge;
     private readonly ConversationInputBridge? _conversationInputBridge;
     private readonly MainWindowViewModel _viewModel;
     private readonly ToolApprovalPresenter _approvals;
@@ -71,8 +68,6 @@ internal sealed class WebViewMessageRouter : IDisposable
         PetSettingsBridge petSettingsBridge,
         WorkspaceSelectionBridge workspaceSelectionBridge,
         TerminalHostController terminalHostController,
-        PluginViewHostController pluginViewHostController,
-        PluginViewBridge pluginViewBridge,
         MainWindowViewModel viewModel,
         ToolApprovalPresenter approvals,
         WebViewHostChannel hostChannel,
@@ -96,8 +91,6 @@ internal sealed class WebViewMessageRouter : IDisposable
         _workspaceSelectionBridge = workspaceSelectionBridge;
         _gitWorkspaceBridge = gitWorkspaceBridge;
         _terminalHostController = terminalHostController;
-        _pluginViewHostController = pluginViewHostController;
-        _pluginViewBridge = pluginViewBridge;
         _conversationInputBridge = conversationInputBridge;
         _viewModel = viewModel;
         _approvals = approvals;
@@ -292,10 +285,6 @@ internal sealed class WebViewMessageRouter : IDisposable
                 response = await _agentSettingsBridge.TryHandleAsync(type, payload, cancellationToken); break;
             case var name when name.StartsWith("extensions/", StringComparison.Ordinal):
                 response = await _extensionSettingsBridge.TryHandleAsync(type, payload, _viewModel.SelectedAgentId, cancellationToken); break;
-            case "plugin-host/api":
-                response = await _pluginViewBridge.TryHandleAsync(type, payload, cancellationToken); break;
-            case var name when name.StartsWith("plugin-host/", StringComparison.Ordinal):
-                response = await _pluginViewHostController.TryHandleAsync(type, payload, cancellationToken); break;
             case "get-git-state":
             case var name when name.StartsWith("git-", StringComparison.Ordinal):
                 response = _gitWorkspaceBridge is null ? null : await _gitWorkspaceBridge.TryHandleAsync(type, payload, cancellationToken); break;

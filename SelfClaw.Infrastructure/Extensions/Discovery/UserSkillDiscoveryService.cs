@@ -125,8 +125,7 @@ internal sealed class UserSkillDiscoveryService
             return;
         }
 
-        // Unchanged since the last scan: skip the upsert so IsEnabled, acknowledged permissions and
-        // timestamps stay exactly as the user left them.
+        // Unchanged since the last scan: skip the upsert so IsEnabled and timestamps stay as the user left them.
         if (existing is not null &&
             string.Equals(existing.ContentHash, contentHash, StringComparison.Ordinal))
         {
@@ -144,8 +143,6 @@ internal sealed class UserSkillDiscoveryService
             manifestJson,
             SourcePluginId: null,
             IsEnabled: existing?.IsEnabled ?? false,
-            existing?.AcknowledgedPermissionsJson,
-            existing?.AcknowledgedAtUtc,
             existing?.InstalledAtUtc ?? now,
             now);
         await _packageRepository.UpsertPackageAsync(package, cancellationToken).ConfigureAwait(false);

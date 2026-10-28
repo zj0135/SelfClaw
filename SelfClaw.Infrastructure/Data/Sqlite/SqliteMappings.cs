@@ -206,8 +206,6 @@ internal static class SqliteMappings
             reader.GetString(7),
             reader.IsDBNull(8) ? null : reader.GetString(8),
             !reader.IsDBNull(9) && reader.GetInt32(9) != 0,
-            reader.IsDBNull(10) ? null : reader.GetString(10),
-            reader.IsDBNull(11) ? null : ReadDateTimeOffset(reader, 11),
             ReadDateTimeOffset(reader, 12),
             ReadDateTimeOffset(reader, 13));
 
