@@ -16,7 +16,11 @@ function send(action) {
 </script>
 
 <template>
-	<div class="window-controls" aria-label="Window controls">
+	<div
+		class="window-controls"
+		:class="{ 'is-maximized': props.isMaximized }"
+		aria-label="Window controls"
+	>
 		<div class="window-tool-group" aria-label="Workspace tools">
 			<button class="chrome-button tool-button" type="button" title="命令行" aria-label="Terminal" @click="send('terminal')">
 				<SquareTerminal :size="15" :stroke-width="1.7" />
@@ -62,6 +66,30 @@ function send(action) {
 	height: 34px;
 	color: var(--text);
 	user-select: none;
+}
+
+/* 窗口最大化（全屏）适配：
+   Windows 在 SingleBorderWindow 最大化时，系统 DWM 会将窗口向屏幕外扩展约 8px，
+   使得工具栏在屏幕内的有效可见高度为 38px（46px - 8px）。
+   未最大化时居中 top 为 6px（46 - 34 = 12px，上下各 6px）；
+   最大化时若保持 top: 6px，顶端位于屏幕边缘 0px（甚至裁切 2px），底边到工具栏底线留空 6px，视觉上明显偏上。
+   下移 4px（top: 10px）使得在 38px 可见工具栏中上下各留 2px（按钮距两端各留 3px），实现完美垂直居中。
+   同时在按钮顶部扩展 3px 点击感应区，确保鼠标甩到屏幕最顶边缘时依然能直接命中。 */
+.window-controls.is-maximized {
+	top: 10px;
+}
+
+.window-controls.is-maximized .caption-button {
+	position: relative;
+}
+
+.window-controls.is-maximized .caption-button::before {
+	content: '';
+	position: absolute;
+	top: -3px;
+	left: 0;
+	right: 0;
+	bottom: -3px;
 }
 
 .window-tool-group,
