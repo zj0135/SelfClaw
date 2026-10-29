@@ -13,6 +13,8 @@ internal static class WindowDwmAttributes
     private const int DwmwcpRound = 2;
     private const int Windows11BuildNumber = 22000;
 
+    public static bool IsWindows11OrGreater => Environment.OSVersion.Version.Build >= Windows11BuildNumber;
+
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int valueSize);
 

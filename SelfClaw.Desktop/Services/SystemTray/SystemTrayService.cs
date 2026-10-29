@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Media.Imaging;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Desktop.Pet;
+using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Windowing;
 using DrawingBitmap = System.Drawing.Bitmap;
 using DrawingIcon = System.Drawing.Icon;
@@ -17,41 +18,41 @@ internal sealed class SystemTrayService : IDisposable
     private readonly ILogger<SystemTrayService> _logger;
     private readonly PetHost _petHost;
     private readonly DesktopConversationActivationService _activation;
+    private readonly AppearanceSettingsService _appearanceSettingsService;
     private readonly Forms.NotifyIcon? _notifyIcon;
-    private readonly Forms.ContextMenuStrip? _contextMenu;
-    private readonly Forms.ToolStripMenuItem? _openMenuItem;
-    private readonly Forms.ToolStripMenuItem? _petMenuItem;
-    private readonly Forms.ToolStripMenuItem? _exitMenuItem;
+    private TrayMenuWindow? _trayMenuWindow;
     private Window? _mainWindow;
     private int _disposeStarted;
 
-    public SystemTrayService(ILogger<SystemTrayService> logger, PetHost petHost, DesktopConversationActivationService activation)
+    public SystemTrayService(
+        ILogger<SystemTrayService> logger,
+        PetHost petHost,
+        DesktopConversationActivationService activation,
+        AppearanceSettingsService appearanceSettingsService)
     {
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(petHost);
+        ArgumentNullException.ThrowIfNull(activation);
+        ArgumentNullException.ThrowIfNull(appearanceSettingsService);
+
         _logger = logger;
         _petHost = petHost;
         _activation = activation;
+        _appearanceSettingsService = appearanceSettingsService;
 
         try
         {
-            _openMenuItem = new Forms.ToolStripMenuItem("Open SelfClaw");
-            _petMenuItem = new Forms.ToolStripMenuItem("Show Pet") { CheckOnClick = true };
-            _exitMenuItem = new Forms.ToolStripMenuItem("Exit");
-            _openMenuItem.Click += OnOpenMenuItemClick;
-            _petMenuItem.Click += OnPetMenuItemClick;
-            _exitMenuItem.Click += OnExitMenuItemClick;
-
-            _contextMenu = new Forms.ContextMenuStrip();
-            _contextMenu.Items.AddRange([_openMenuItem, _petMenuItem, new Forms.ToolStripSeparator(), _exitMenuItem]);
-            _contextMenu.Opening += OnContextMenuOpening;
-
             _notifyIcon = new Forms.NotifyIcon
             {
                 Text = "SelfClaw",
                 Icon = LoadTrayIcon(),
-                Visible = true,
-                ContextMenuStrip = _contextMenu
+                Visible = true
             };
+            _notifyIcon.MouseUp += OnNotifyIconMouseUp;
             _notifyIcon.DoubleClick += OnNotifyIconDoubleClick;
+
+            InitializeTrayMenuWindow();
+            _petHost.Changed += OnPetHostChanged;
         }
         catch (Exception exception)
         {
@@ -64,67 +65,119 @@ internal sealed class SystemTrayService : IDisposable
         _mainWindow = mainWindow;
     }
 
-    private async void OnNotifyIconDoubleClick(object? sender, EventArgs e)
+    public void Dispose()
     {
-        await _activation.ActivateAsync();
-    }
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
 
-    private async void OnOpenMenuItemClick(object? sender, EventArgs e)
-    {
-        await _activation.ActivateAsync();
-    }
+        _petHost.Changed -= OnPetHostChanged;
 
-    private async void OnContextMenuOpening(object? sender, System.ComponentModel.CancelEventArgs e)
-    {
-        await RefreshPetMenuItemAsync();
-    }
+        if (_notifyIcon is not null)
+        {
+            _notifyIcon.MouseUp -= OnNotifyIconMouseUp;
+            _notifyIcon.DoubleClick -= OnNotifyIconDoubleClick;
+            _notifyIcon.Visible = false;
+            _notifyIcon.Icon?.Dispose();
+            _notifyIcon.Dispose();
+        }
 
-    private async void OnPetMenuItemClick(object? sender, EventArgs e)
-    {
-        try
+        if (_trayMenuWindow is not null)
         {
-            var state = await _petHost.ExecuteAsync(new PetHostCommand(PetHostCommandKind.Toggle));
-            SyncPetMenuItem(state);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(exception, "Failed to toggle the desktop pet.");
-            await RefreshPetMenuItemAsync();
-        }
-    }
+            _trayMenuWindow.TogglePetRequested -= OnTogglePetAsync;
+            _trayMenuWindow.OpenMainWindowRequested -= OnOpenMainWindowAsync;
+            _trayMenuWindow.ExitRequested -= OnExitRequested;
 
-    private async Task RefreshPetMenuItemAsync()
-    {
-        try
-        {
-            SyncPetMenuItem(await _petHost.GetStateAsync());
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(exception, "Failed to read the desktop pet state.");
+            if (_trayMenuWindow.Dispatcher.CheckAccess())
+            {
+                _trayMenuWindow.Close();
+            }
+            else
+            {
+                _trayMenuWindow.Dispatcher.Invoke(() => _trayMenuWindow.Close());
+            }
+
+            _trayMenuWindow = null;
         }
     }
 
-    private void SyncPetMenuItem(PetHostState state)
+    private void InitializeTrayMenuWindow()
     {
-        if (_petMenuItem is null)
+        void Create()
+        {
+            _trayMenuWindow = new TrayMenuWindow();
+            _trayMenuWindow.TogglePetRequested += OnTogglePetAsync;
+            _trayMenuWindow.OpenMainWindowRequested += OnOpenMainWindowAsync;
+            _trayMenuWindow.ExitRequested += OnExitRequested;
+        }
+
+        if (System.Windows.Application.Current is { Dispatcher: { } dispatcher } && !dispatcher.CheckAccess())
+        {
+            dispatcher.Invoke(Create);
+            return;
+        }
+
+        Create();
+    }
+
+    private async void OnNotifyIconMouseUp(object? sender, Forms.MouseEventArgs e)
+    {
+        if (e.Button != Forms.MouseButtons.Right || _trayMenuWindow is null)
         {
             return;
         }
 
-        _petMenuItem.Checked = state.IsVisible;
-        _petMenuItem.Text = state.IsVisible ? "Hide Pet" : "Show Pet";
+        if (_trayMenuWindow.IsVisible)
+        {
+            _trayMenuWindow.Hide();
+            return;
+        }
+
+        try
+        {
+            var petState = await _petHost.GetStateAsync();
+            _trayMenuWindow.UpdatePetState(petState.IsVisible);
+            _trayMenuWindow.ApplyTheme(_appearanceSettingsService.CachedIsDark);
+            _trayMenuWindow.ShowAtCursor();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to show custom tray menu.");
+        }
     }
 
-    private void OnExitMenuItemClick(object? sender, EventArgs e)
+    private async void OnNotifyIconDoubleClick(object? sender, EventArgs e)
+    {
+        _trayMenuWindow?.Hide();
+        await _activation.ActivateAsync();
+    }
+
+    private async Task OnTogglePetAsync()
+    {
+        try
+        {
+            var state = await _petHost.ExecuteAsync(new PetHostCommand(PetHostCommandKind.Toggle));
+            _trayMenuWindow?.UpdatePetState(state.IsVisible);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to toggle desktop pet.");
+            await RefreshPetStateAsync();
+        }
+    }
+
+    private async Task OnOpenMainWindowAsync()
+    {
+        await _activation.ActivateAsync();
+    }
+
+    private void OnExitRequested()
     {
         if (System.Windows.Application.Current is null)
         {
@@ -138,6 +191,40 @@ internal sealed class SystemTrayService : IDisposable
         }
 
         _ = System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() => _mainWindow?.Close()));
+    }
+
+    private async void OnPetHostChanged()
+    {
+        await RefreshPetStateAsync();
+    }
+
+    private async Task RefreshPetStateAsync()
+    {
+        if (_trayMenuWindow is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var state = await _petHost.GetStateAsync();
+            if (_trayMenuWindow.Dispatcher.CheckAccess())
+            {
+                _trayMenuWindow.UpdatePetState(state.IsVisible);
+            }
+            else
+            {
+                _trayMenuWindow.Dispatcher.Invoke(() => _trayMenuWindow.UpdatePetState(state.IsVisible));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to read desktop pet state.");
+        }
     }
 
     private static DrawingIcon LoadTrayIcon()
@@ -181,39 +268,6 @@ internal sealed class SystemTrayService : IDisposable
 
         using var sourceBitmap = new DrawingBitmap(encodedStream);
         return new DrawingBitmap(sourceBitmap);
-    }
-
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
-        if (_notifyIcon is not null)
-        {
-            _notifyIcon.DoubleClick -= OnNotifyIconDoubleClick;
-            _notifyIcon.Visible = false;
-            _notifyIcon.Icon?.Dispose();
-            _notifyIcon.Dispose();
-        }
-
-        if (_openMenuItem is not null)
-        {
-            _openMenuItem.Click -= OnOpenMenuItemClick;
-        }
-
-        if (_petMenuItem is not null)
-        {
-            _petMenuItem.Click -= OnPetMenuItemClick;
-        }
-
-        if (_exitMenuItem is not null)
-        {
-            _exitMenuItem.Click -= OnExitMenuItemClick;
-        }
-
-        if (_contextMenu is not null)
-        {
-            _contextMenu.Opening -= OnContextMenuOpening;
-            _contextMenu.Dispose();
-        }
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
