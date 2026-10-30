@@ -61,6 +61,16 @@ internal sealed class SqliteAutomationRunRepository : IAutomationRunStore, IAuto
         await using var transaction = connection.BeginTransaction(deferred: false);
         try
         {
+            // One occurrence yields at most one row, and that check must come first: when the ticker's run for
+            // occurrence T is still active, the sweep that also sees T due is looking at T again, not at a newer
+            // occurrence, so it must not record an Overlap skip for it.
+            if (run.ScheduledForUtc is DateTimeOffset scheduledFor &&
+                await HasScheduledOccurrenceAsync(connection, transaction, run.TaskId, scheduledFor, cancellationToken).ConfigureAwait(false))
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return null;
+            }
+
             if (skipWhenTaskActive && await HasActiveRunAsync(connection, transaction, run.TaskId, cancellationToken).ConfigureAwait(false))
             {
                 var overlap = run with
@@ -72,19 +82,12 @@ internal sealed class SqliteAutomationRunRepository : IAutomationRunStore, IAuto
                     ErrorMessage = null,
                     CompletedAtUtc = run.CreatedAtUtc
                 };
-                await InsertRunAsync(connection, transaction, overlap, ignoreConflict: true, cancellationToken).ConfigureAwait(false);
+                await InsertRunAsync(connection, transaction, overlap, cancellationToken).ConfigureAwait(false);
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                 return overlap;
             }
 
-            if (run.ScheduledForUtc is DateTimeOffset scheduledFor &&
-                await HasScheduledOccurrenceAsync(connection, transaction, run.TaskId, scheduledFor, cancellationToken).ConfigureAwait(false))
-            {
-                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-                return null;
-            }
-
-            await InsertRunAsync(connection, transaction, run, ignoreConflict: false, cancellationToken).ConfigureAwait(false);
+            await InsertRunAsync(connection, transaction, run, cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return run;
         }
@@ -111,7 +114,7 @@ internal sealed class SqliteAutomationRunRepository : IAutomationRunStore, IAuto
         command.Transaction = transaction;
         command.CommandText = "UPDATE automation_runs SET status = $running, started_at_utc = $at WHERE id = $id AND status = $queued;";
         command.Parameters.AddWithValue("$running", (int)AutomationRunStatus.Running);
-        command.Parameters.AddWithValue("$at", startedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$at", ToDbValue(startedAtUtc));
         command.Parameters.AddWithValue("$id", runId.ToString("D"));
         command.Parameters.AddWithValue("$queued", (int)AutomationRunStatus.Queued);
         if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
@@ -151,7 +154,7 @@ internal sealed class SqliteAutomationRunRepository : IAutomationRunStore, IAuto
         command.Parameters.AddWithValue("$capabilitySnapshot", attempt.CapabilitySnapshotJson);
         command.Parameters.AddWithValue("$workspaceRootId", attempt.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$workspacePath", attempt.WorkspacePathSnapshot ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$startedAt", attempt.StartedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$startedAt", ToDbValue(attempt.StartedAtUtc));
         command.Parameters.AddWithValue("$id", attempt.RunId.ToString("D"));
         command.Parameters.AddWithValue("$running", (int)AutomationRunStatus.Running);
         if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
@@ -199,8 +202,8 @@ internal sealed class SqliteAutomationRunRepository : IAutomationRunStore, IAuto
         command.Parameters.AddWithValue("$capabilitySnapshot", terminal.CapabilitySnapshotJson ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$workspaceRootId", terminal.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$workspacePath", terminal.WorkspacePathSnapshot ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$startedAt", terminal.StartedAtUtc?.ToString("O") ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$completedAt", terminal.CompletedAtUtc?.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$startedAt", ToDbValue(terminal.StartedAtUtc));
+        command.Parameters.AddWithValue("$completedAt", ToDbValue(terminal.CompletedAtUtc));
         command.Parameters.AddWithValue("$errorCode", terminal.ErrorCode ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$errorMessage", terminal.ErrorMessage ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$id", runId.ToString("D"));
@@ -345,23 +348,37 @@ internal sealed class SqliteAutomationRunRepository : IAutomationRunStore, IAuto
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT COUNT(*) FROM automation_runs WHERE task_id = $taskId AND scheduled_for_utc = $scheduledFor;";
+        // datetime() only narrows the candidates: rows written before timestamps were persisted in UTC can carry a
+        // local offset, and their text never equals the UTC form of the same instant. The instant itself is
+        // confirmed in memory so that two occurrences inside the same second stay distinct.
+        command.CommandText = """
+            SELECT scheduled_for_utc FROM automation_runs
+            WHERE task_id = $taskId AND datetime(scheduled_for_utc) = datetime($scheduledFor);
+            """;
         command.Parameters.AddWithValue("$taskId", taskId.ToString("D"));
-        command.Parameters.AddWithValue("$scheduledFor", scheduledForUtc.ToString("O"));
-        return (long)(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) ?? 0L) > 0;
+        command.Parameters.AddWithValue("$scheduledFor", ToDbValue(scheduledForUtc));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (DateTimeOffset.Parse(reader.GetString(0), CultureInfo.InvariantCulture) == scheduledForUtc)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static async Task InsertRunAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         AutomationRunRecord run,
-        bool ignoreConflict,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = $"""
-            INSERT {(ignoreConflict ? "OR IGNORE " : string.Empty)}INTO automation_runs(
+        command.CommandText = """
+            INSERT INTO automation_runs(
                 id, task_id, conversation_id, trigger, scheduled_for_utc, status, skip_reason, attempt,
                 model_profile_id, capability_snapshot_json, workspace_root_id, workspace_path_snapshot,
                 started_at_utc, completed_at_utc, error_code, error_message, created_at_utc)
@@ -394,7 +411,7 @@ internal sealed class SqliteAutomationRunRepository : IAutomationRunStore, IAuto
         command.Parameters.AddWithValue("$taskId", run.TaskId.ToString("D"));
         command.Parameters.AddWithValue("$conversationId", run.ConversationId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$trigger", (int)run.Trigger);
-        command.Parameters.AddWithValue("$scheduledFor", run.ScheduledForUtc?.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$scheduledFor", ToDbValue(run.ScheduledForUtc));
         command.Parameters.AddWithValue("$status", (int)run.Status);
         command.Parameters.AddWithValue("$skipReason", run.SkipReason is AutomationRunSkipReason skip ? (int)skip : DBNull.Value);
         command.Parameters.AddWithValue("$attempt", run.Attempt);
@@ -402,12 +419,21 @@ internal sealed class SqliteAutomationRunRepository : IAutomationRunStore, IAuto
         command.Parameters.AddWithValue("$capabilitySnapshot", run.CapabilitySnapshotJson ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$workspaceRootId", run.WorkspaceRootId?.ToString("D") ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$workspacePath", run.WorkspacePathSnapshot ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$startedAt", run.StartedAtUtc?.ToString("O") ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$completedAt", run.CompletedAtUtc?.ToString("O") ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$startedAt", ToDbValue(run.StartedAtUtc));
+        command.Parameters.AddWithValue("$completedAt", ToDbValue(run.CompletedAtUtc));
         command.Parameters.AddWithValue("$errorCode", run.ErrorCode ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$errorMessage", run.ErrorMessage ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("$createdAt", run.CreatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$createdAt", ToDbValue(run.CreatedAtUtc));
     }
+
+    // Every *_utc column is written in UTC form regardless of the caller's offset: ux_automation_runs_scheduled
+    // and the occurrence lookup compare the column as text, so two spellings of the same instant would both be
+    // accepted and the same occurrence would run twice.
+    private static object ToDbValue(DateTimeOffset? value)
+        => value?.ToUniversalTime().ToString("O") ?? (object)DBNull.Value;
+
+    private static object ToDbValue(DateTimeOffset value)
+        => value.ToUniversalTime().ToString("O");
 
     private static AutomationRunRecord ReadRun(SqliteDataReader reader)
         => new(

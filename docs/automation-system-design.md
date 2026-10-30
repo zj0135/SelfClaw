@@ -241,6 +241,9 @@ cron ticker 的任务标识只带 `taskId`，执行时**重新读任务行**，�
 
 - 全局并发 **1**：`automation.run` 函数 `maxConcurrency = 1`，同一时刻只有一个自动化回合在跑。
 - 同一任务**从不重叠**：到期时该任务已有 `Queued/Running` 的 run → 写 `Skipped(Overlap)` 并立即返回，**不排队堆积**。
+- **同一触发点只有一条 run**（`ux_automation_runs_scheduled` 的语义），实现上有两条硬约束：
+  - `automation_runs`/`automation_tasks` 的 `*_utc` 列一律以 **UTC 文本**持久化（`DateTimeOffset.ToUniversalTime().ToString("O")`）。唯一索引与去重查询按文本/瞬时比较，同一个瞬时如果被写成两种偏移（`10:30+08:00` 与 `02:30+00:00`）会被当成两次触发——ticker 拿到的是 UTC，扫描拿到的是 `next_run_at_utc`，两条路径必须同形。
+  - 去重检查**先于**重叠判定：ticker 的 run 还在跑时扫描又看到同一个到期点，那是**同一次**触发，不能记成 `Skipped(Overlap)`。去重查询用 `datetime()` 缩小候选、再在内存里比较瞬时，既容忍历史上遗留的本地偏移写法，也不会把同一秒内的两个触发点合并。被去重拒绝的插入返回 `null`，调用方静默放弃，不发事件、不伪造记录（重叠行则必须真正插入成功才返回）。
 - 与交互回合**不互斥**：用户在聊天不阻塞定时任务；资源竞争由"只有一路自动化"控制。
 - 领取是事务性的：`Queued → Running` 用条件更新（`WHERE status = Queued`），配合 `ux_automation_runs_scheduled` 兜底。
 

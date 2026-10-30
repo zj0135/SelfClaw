@@ -112,6 +112,52 @@ public sealed class AutomationSchedulerHostTests : IDisposable
     }
 
     [Fact]
+    public async Task Sweep_does_not_record_an_overlap_skip_for_the_occurrence_a_ticker_run_is_executing()
+    {
+        var executor = new BlockingExecutor();
+        var harness = await CreateHarnessAsync(_ => executor);
+        var now = DateTimeOffset.UtcNow;
+        var occurrence = new DateTimeOffset(now.AddMinutes(-1).UtcDateTime).ToOffset(TimeSpan.FromHours(8));
+        var task = CreateTask(AutomationTaskKind.Weekly, new AutomationScheduleSpec(Time: "10:30", Weekdays: [5]), occurrence);
+        await harness.TaskStore.SaveAsync(task);
+        // A row written before timestamps were persisted in UTC keeps its local offset, so the sweep and the ticker
+        // hand the same occurrence to the store in two different spellings.
+        await using (var connection = await harness.Database.OpenConnectionAsync())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "UPDATE automation_tasks SET next_run_at_utc = $at WHERE id = $id;";
+            command.Parameters.AddWithValue("$at", occurrence.ToString("O"));
+            command.Parameters.AddWithValue("$id", task.Id.ToString("D"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await harness.Host.StartSchedulingAsync(CancellationToken.None);
+
+        var ticking = Task.Run(() => harness.Host.HandleTickerAsync(
+            new AutomationTickerPayload(task.Id, null),
+            new DateTimeOffset(occurrence.UtcDateTime),
+            CancellationToken.None));
+        await executor.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The occurrence the sweep sees as due is the one the ticker's run is already executing, not a newer one.
+        var sweep = Task.Run(() => harness.Host.SweepMissedRunsAsync(CancellationToken.None));
+        await sweep.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var runs = await harness.RunStore.ListAsync(task.Id, 10);
+        runs.Should().ContainSingle().Which.Status.Should().Be(AutomationRunStatus.Running);
+        harness.FakeExecutor.ExecutedRuns.Should().BeEmpty();
+
+        harness.Cancellations.CancelAll();
+        try
+        {
+            await ticking.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    [Fact]
     public async Task Completed_run_advances_the_task_schedule()
     {
         var harness = await CreateHarnessAsync();
@@ -267,7 +313,7 @@ public sealed class AutomationSchedulerHostTests : IDisposable
             runNotifier,
             TimeProvider.System,
             NullLogger<AutomationSchedulerHost>.Instance);
-        return new Harness(host, taskStore, runStore, registrar, fakeExecutor, cancellations, runNotifier);
+        return new Harness(host, taskStore, runStore, registrar, fakeExecutor, cancellations, runNotifier, database);
     }
 
     private static AutomationTaskRecord CreateTask(
@@ -333,7 +379,8 @@ public sealed class AutomationSchedulerHostTests : IDisposable
         FakeAutomationScheduleRegistrar Registrar,
         FakeAutomationRunExecutor FakeExecutor,
         AutomationRunCancellationRegistry Cancellations,
-        RecordingRunNotifier RunNotifier);
+        RecordingRunNotifier RunNotifier,
+        SqliteDatabase Database);
 
     private sealed class RecordingRunNotifier : IAutomationRunNotifier
     {

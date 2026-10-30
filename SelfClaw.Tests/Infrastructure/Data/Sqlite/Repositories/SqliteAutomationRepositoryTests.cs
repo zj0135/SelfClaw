@@ -82,6 +82,60 @@ public sealed class SqliteAutomationRepositoryTests : IDisposable
     }
 
     [Fact]
+    public async Task Run_insert_treats_two_spellings_of_the_same_occurrence_as_one()
+    {
+        var (taskStore, runStore, _) = await CreateStoresAsync();
+        var task = CreateTask();
+        await taskStore.SaveAsync(task);
+        // The sweep took the instant from automation_tasks.next_run_at_utc (local offset); the ticker took it from
+        // TickerQ (UTC). Both describe the same occurrence.
+        var fromTask = new DateTimeOffset(2026, 10, 30, 10, 30, 0, TimeSpan.FromHours(8));
+        var fromTicker = new DateTimeOffset(fromTask.UtcDateTime);
+
+        var first = await runStore.TryInsertAsync(
+            CreateRun(task.Id, AutomationRunStatus.Running, fromTicker),
+            skipWhenTaskActive: false);
+        first.Should().NotBeNull();
+
+        var sameOccurrence = await runStore.TryInsertAsync(
+            CreateRun(task.Id, AutomationRunStatus.Queued, fromTask),
+            skipWhenTaskActive: true);
+
+        sameOccurrence.Should().BeNull();
+        (await runStore.ListAsync(task.Id, 10)).Should().ContainSingle()
+            .Which.Status.Should().Be(AutomationRunStatus.Running);
+    }
+
+    [Fact]
+    public async Task Run_insert_recognizes_a_legacy_row_that_stored_a_local_offset()
+    {
+        var (taskStore, runStore, database) = await CreateStoresAsync();
+        var task = CreateTask();
+        await taskStore.SaveAsync(task);
+        var localOffsetOccurrence = new DateTimeOffset(2026, 10, 30, 10, 30, 0, TimeSpan.FromHours(8));
+
+        await using (var connection = await database.OpenConnectionAsync())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                INSERT INTO automation_runs(id, task_id, trigger, scheduled_for_utc, status, attempt, created_at_utc)
+                VALUES($id, $taskId, 0, $scheduledFor, 1, 1, $at);
+                """;
+            command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("D"));
+            command.Parameters.AddWithValue("$taskId", task.Id.ToString("D"));
+            command.Parameters.AddWithValue("$scheduledFor", localOffsetOccurrence.ToString("O"));
+            command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var sameOccurrence = await runStore.TryInsertAsync(
+            CreateRun(task.Id, AutomationRunStatus.Queued, new DateTimeOffset(localOffsetOccurrence.UtcDateTime)),
+            skipWhenTaskActive: true);
+
+        sameOccurrence.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Run_insert_records_overlap_when_the_task_is_active()
     {
         var (taskStore, runStore, _) = await CreateStoresAsync();

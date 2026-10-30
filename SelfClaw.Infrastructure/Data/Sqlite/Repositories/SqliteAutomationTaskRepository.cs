@@ -99,7 +99,7 @@ internal sealed class SqliteAutomationTaskRepository : IAutomationTaskStore
         command.Transaction = transaction;
         command.CommandText = "UPDATE automation_tasks SET is_enabled = $enabled, updated_at_utc = $at WHERE id = $id;";
         command.Parameters.AddWithValue("$enabled", isEnabled ? 1 : 0);
-        command.Parameters.AddWithValue("$at", updatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$at", ToDbValue(updatedAtUtc));
         command.Parameters.AddWithValue("$id", taskId.ToString("D"));
         if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
         {
@@ -172,8 +172,8 @@ internal sealed class SqliteAutomationTaskRepository : IAutomationTaskStore
         command.Parameters.AddWithValue(
             "$lastRunStatus",
             task.LastRunStatus is AutomationRunStatus status ? (int)status : DBNull.Value);
-        command.Parameters.AddWithValue("$createdAt", task.CreatedAtUtc.ToString("O"));
-        command.Parameters.AddWithValue("$updatedAt", task.UpdatedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue("$createdAt", ToDbValue(task.CreatedAtUtc));
+        command.Parameters.AddWithValue("$updatedAt", ToDbValue(task.UpdatedAtUtc));
     }
 
     private static AutomationTaskRecord ReadTask(SqliteDataReader reader)
@@ -215,8 +215,13 @@ internal sealed class SqliteAutomationTaskRepository : IAutomationTaskStore
     private static string SerializeList(IReadOnlyList<string> values)
         => JsonSerializer.Serialize(values, JsonOptions);
 
+    // Every *_utc column is persisted in UTC form regardless of the caller's offset, so that text comparisons
+    // and text ordering of these columns describe the actual instants.
     private static object ToDbValue(DateTimeOffset? value)
-        => value?.ToString("O") ?? (object)DBNull.Value;
+        => value?.ToUniversalTime().ToString("O") ?? (object)DBNull.Value;
+
+    private static object ToDbValue(DateTimeOffset value)
+        => value.ToUniversalTime().ToString("O");
 
     private static Guid ReadGuid(SqliteDataReader reader, int ordinal)
         => Guid.Parse(reader.GetString(ordinal));
