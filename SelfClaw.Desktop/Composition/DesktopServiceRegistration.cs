@@ -26,6 +26,7 @@ using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Automation;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
@@ -65,11 +66,13 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<SubagentDefinitionCatalog>());
         services.AddSingleton<DesktopSettingsJsonStore>();
         services.AddSingleton<DesktopToolApprovalHandler>();
+        services.AddSingleton<DesktopUserQuestionHandler>();
         services.AddSingleton<AgentActivityCoordinator>();
         services.AddSingleton<DesktopNotificationService>();
         services.AddSingleton<DesktopNotificationActivationService>();
         services.AddSingleton<DesktopConversationActivationService>();
         services.AddSingleton<ToolApprovalPresenter>();
+        services.AddSingleton<UserQuestionPresenter>();
         services.AddSingleton<DesktopTurnFinalizer>();
         services.AddSingleton<ConversationTurnRecorder>();
         services.AddSingleton<SubagentTaskSnapshotSerializer>();
@@ -209,6 +212,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<TerminalHostController>(),
             services.GetRequiredService<MainWindowViewModel>(),
             services.GetRequiredService<ToolApprovalPresenter>(),
+            services.GetRequiredService<UserQuestionPresenter>(),
             services.GetRequiredService<WebViewHostChannel>(),
             services.GetRequiredService<TranscriptDelivery>(),
             services.GetRequiredService<GitWorkspaceBridge>(),

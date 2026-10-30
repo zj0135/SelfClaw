@@ -11,6 +11,7 @@ using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services.Appearance;
 using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.SystemTray;
 using SelfClaw.Desktop.Services.Terminal;
@@ -75,7 +76,8 @@ public sealed partial class App : System.Windows.Application
             var systemTrayService = _host.Services.GetRequiredService<SystemTrayService>();
             systemTrayService.RegisterMainWindow(mainWindow);
             var approvals = _host.Services.GetRequiredService<DesktopToolApprovalHandler>();
-            _emergencyCleanup = () => { approvals.RejectAll(); systemTrayService.Dispose(); };
+            var questions = _host.Services.GetRequiredService<DesktopUserQuestionHandler>();
+            _emergencyCleanup = () => { approvals.RejectAll(); questions.DismissAll(); systemTrayService.Dispose(); };
             _host.Services.GetRequiredService<DesktopConversationActivationService>().RegisterMainWindow(mainWindow);
             _host.Services.GetRequiredService<DesktopNotificationService>().RegisterMainWindow(mainWindow);
             MainWindow = mainWindow;
@@ -163,6 +165,7 @@ public sealed partial class App : System.Windows.Application
             var routing = services.GetRequiredService<WebViewMessageRouter>().StopAsync(cancellationToken);
             services.GetRequiredService<ConversationRunCoordinator>().StopAdmissions();
             services.GetRequiredService<DesktopToolApprovalHandler>().RejectAll();
+            services.GetRequiredService<DesktopUserQuestionHandler>().DismissAll();
             await Task.WhenAll(routing, _host.StopAsync(cancellationToken),
                 services.GetRequiredService<TerminalHostController>().DisposeAsync().AsTask(),
                 services.GetRequiredService<ConversationRunCoordinator>().StopAsync(cancellationToken),

@@ -24,6 +24,7 @@ using SelfClaw.Desktop.Services.Attachments.Abstractions;
 using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
 using SelfClaw.Desktop.Services.Terminal;
@@ -413,12 +414,155 @@ public sealed class WebViewMessageRouterTests
         response.RootElement.GetProperty("error").GetString().Should().Be("图片已失效，请重新添加。");
     }
 
+    [Fact]
+    public async Task ResolveUserQuestion_rejects_a_prompt_id_that_is_not_in_the_batch()
+    {
+        using var context = new RouterTestContext();
+        var question = CreateQuestion();
+        var pending = context.Questions.RequestAnswerAsync(question);
+
+        await context.RouteAsync(ResolvePayload(question,
+            $$"""{"promptId":"{{Guid.NewGuid():D}}","selected":["PostgreSQL"]}"""));
+
+        using var document = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        document.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        document.RootElement.GetProperty("errorCode").GetString().Should().Be("invalid-request");
+        // A rejected payload must leave the question answerable.
+        context.Questions.TryAnswer(question.RequestId, Skip(question.RequestId)).Should().BeTrue();
+        (await pending).Skipped.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ResolveUserQuestion_rejects_a_label_the_dock_never_offered()
+    {
+        using var context = new RouterTestContext();
+        var question = CreateQuestion();
+        var pending = context.Questions.RequestAnswerAsync(question);
+
+        await context.RouteAsync(ResolvePayload(question,
+            $$"""{"promptId":"{{question.Prompts[0].PromptId:D}}","selected":["MongoDB"]}"""));
+
+        using var document = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        document.RootElement.GetProperty("errorCode").GetString().Should().Be("invalid-request");
+        document.RootElement.GetProperty("error").GetString().Should().Contain("MongoDB");
+        context.Questions.TryAnswer(question.RequestId, Skip(question.RequestId)).Should().BeTrue();
+        (await pending).Skipped.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ResolveUserQuestion_rejects_a_skip_that_also_carries_answers()
+    {
+        using var context = new RouterTestContext();
+        var question = CreateQuestion();
+        var pending = context.Questions.RequestAnswerAsync(question);
+
+        await context.RouteAsync($$"""
+            {"type":"resolve-user-question","questionRequestId":"{{question.RequestId:D}}","skipped":true,"requestId":"resolve-skip",
+             "answers":[{"promptId":"{{question.Prompts[0].PromptId:D}}","selected":["SQLite"]}]}
+            """);
+
+        using var document = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        document.RootElement.GetProperty("errorCode").GetString().Should().Be("invalid-request");
+        document.RootElement.GetProperty("error").GetString().Should().Contain("skipped");
+        context.Questions.TryAnswer(question.RequestId, Skip(question.RequestId)).Should().BeTrue();
+        (await pending).Skipped.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ResolveUserQuestion_maps_the_batch_and_marks_an_omitted_prompt_as_skipped()
+    {
+        using var context = new RouterTestContext();
+        var question = CreateQuestion();
+        var pending = context.Questions.RequestAnswerAsync(question);
+
+        await context.RouteAsync(ResolvePayload(question,
+            $$"""{"promptId":"{{question.Prompts[0].PromptId:D}}","selected":["SQLite","SQLite"],"other":"  Neon  "}"""));
+
+        var answer = await pending;
+        answer.Skipped.Should().BeFalse();
+        answer.Answers.Should().HaveCount(2);
+        answer.Answers[0].SelectedLabels.Should().Equal("SQLite");
+        answer.Answers[0].OtherText.Should().Be("Neon");
+        answer.Answers[0].Skipped.Should().BeFalse();
+        answer.Answers[1].Skipped.Should().BeTrue();
+        using var document = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        document.RootElement.GetProperty("ok").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ResolveUserQuestion_refuses_a_second_submission_for_the_same_batch()
+    {
+        using var context = new RouterTestContext();
+        var question = CreateQuestion();
+        var pending = context.Questions.RequestAnswerAsync(question);
+        var payload = ResolvePayload(question, $$"""{"promptId":"{{question.Prompts[0].PromptId:D}}","selected":["SQLite"]}""");
+
+        await context.RouteAsync(payload);
+        await pending;
+        await context.RouteAsync(payload);
+
+        using var document = JsonDocument.Parse(context.PostedJson[^1]);
+        document.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        document.RootElement.GetProperty("errorCode").GetString().Should().Be("operation-failed");
+        document.RootElement.GetProperty("error").GetString()
+            .Should().Be("This question has already completed or expired.");
+    }
+
+    [Fact]
+    public async Task UserQuestionState_request_answers_with_the_pending_question()
+    {
+        using var context = new RouterTestContext();
+        var question = CreateQuestion();
+        var pending = context.Questions.RequestAnswerAsync(question);
+
+        await context.RouteAsync("""{"type":"user-question/get-state","requestId":"question-state-1"}""");
+
+        using var document = JsonDocument.Parse(context.PostedJson.Should().ContainSingle().Which);
+        var state = document.RootElement;
+        state.GetProperty("type").GetString().Should().Be("user-question/state");
+        state.GetProperty("requestId").GetString().Should().Be("question-state-1");
+        state.GetProperty("revision").GetInt64().Should().BeGreaterThan(0);
+        var prompts = state.GetProperty("question").GetProperty("prompts");
+        prompts.GetArrayLength().Should().Be(2);
+        prompts[0].GetProperty("options")[0].GetProperty("label").GetString().Should().Be("PostgreSQL");
+
+        context.Questions.TryAnswer(question.RequestId, Skip(question.RequestId)).Should().BeTrue();
+        await pending;
+    }
+
+    private static string ResolvePayload(UserQuestionRequest question, string answer)
+        => $$"""
+            {"type":"resolve-user-question","questionRequestId":"{{question.RequestId:D}}","requestId":"resolve-answer","answers":[{{answer}}]}
+            """;
+
+    private static UserQuestionAnswer Skip(Guid requestId) => new(requestId, [], Skipped: true);
+
+    private static UserQuestionRequest CreateQuestion()
+        => new(
+            Guid.NewGuid(),
+            [
+                new UserQuestionPrompt(
+                    Guid.NewGuid(),
+                    "Which database should this service use?",
+                    "Database",
+                    [new UserQuestionOption("PostgreSQL", "Relational"), new UserQuestionOption("SQLite", "Embedded")],
+                    MultiSelect: false),
+                new UserQuestionPrompt(
+                    Guid.NewGuid(),
+                    "Enable migrations on startup?",
+                    null,
+                    [new UserQuestionOption("Yes", null), new UserQuestionOption("No", null)],
+                    MultiSelect: false)
+            ],
+            Guid.NewGuid());
+
     private sealed class RouterTestContext : IDisposable
     {
         private readonly string _storageRoot;
         private readonly TranscriptPublisher _transcriptPublisher;
         private readonly TranscriptDelivery _transcriptDelivery;
         private readonly SelfClaw.Desktop.Services.Tools.ToolApprovalPresenter _approvalPresenter;
+        private readonly SelfClaw.Desktop.Services.Questions.UserQuestionPresenter _questionPresenter;
         private readonly AgentActivityCoordinator _activityCoordinator;
         private readonly TerminalHostController _terminalHostController;
         private readonly ConversationSessionCoordinator _sessions;
@@ -445,8 +589,10 @@ public sealed class WebViewMessageRouterTests
                 ConversationRepository.Conversations.AddRange(conversations);
             }
             var approvalHandler = new DesktopToolApprovalHandler();
+            var questionHandler = new DesktopUserQuestionHandler();
             _activityCoordinator = new AgentActivityCoordinator(
                 approvalHandler,
+                questionHandler,
                 NullLogger<AgentActivityCoordinator>.Instance);
             HostChannel = new WebViewHostChannel();
             HostChannel.Attach(PostedJson.Add);
@@ -479,6 +625,7 @@ public sealed class WebViewMessageRouterTests
                 _sessions, _runs,
                 _activityCoordinator,
                 approvalHandler,
+                questionHandler,
                 programmingSettings,
 
                 new NoOpCompletionNotifier(),
@@ -523,6 +670,9 @@ public sealed class WebViewMessageRouterTests
                 Dispatcher.CurrentDispatcher);
             _approvalPresenter = new SelfClaw.Desktop.Services.Tools.ToolApprovalPresenter(approvalHandler, _activityCoordinator,
                 new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance), HostChannel, Dispatcher.CurrentDispatcher);
+            Questions = questionHandler;
+            _questionPresenter = new SelfClaw.Desktop.Services.Questions.UserQuestionPresenter(
+                questionHandler, _activityCoordinator, HostChannel, Dispatcher.CurrentDispatcher);
             Router = new WebViewMessageRouter(
                 aiProviderBridge,
                 extensionBridge,
@@ -547,6 +697,7 @@ public sealed class WebViewMessageRouterTests
                 _terminalHostController,
                 viewModel,
                 _approvalPresenter,
+                _questionPresenter,
                 HostChannel,
                 _transcriptDelivery,
                 attachmentBridge: attachmentBridge);
@@ -568,6 +719,8 @@ public sealed class WebViewMessageRouterTests
 
         public WebViewHostChannel HostChannel { get; }
 
+        public DesktopUserQuestionHandler Questions { get; }
+
         public List<string> PostedJson { get; } = [];
 
         public SelfClaw.Tests.TestDoubles.FakeConversationInputCoordinator Inputs { get; }
@@ -578,6 +731,7 @@ public sealed class WebViewMessageRouterTests
         {
             Router.Dispose();
             _approvalPresenter.Dispose();
+            _questionPresenter.Dispose();
             _runs.Dispose();
             _sessions.Dispose();
             _terminalHostController.Dispose();

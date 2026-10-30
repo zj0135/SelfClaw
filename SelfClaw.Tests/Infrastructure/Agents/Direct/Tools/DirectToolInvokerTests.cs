@@ -161,6 +161,51 @@ public sealed class DirectToolInvokerTests
         pipeline.Order.Should().BeEmpty();
     }
 
+    // The proof that asking is an interruption, not an approval: FullAccess auto-approves gates, yet the call
+    // still hangs on the question handler and never touches the approval handler.
+    [Fact]
+    public async Task InvokeAsync_FullAccess_still_waits_for_the_user_answer_on_ask_user()
+    {
+        var approvals = new RecordingApprovalHandler(approved: true);
+        var questions = new BlockingQuestionHandler();
+        var binding = new AskUserToolset().CreateTools(questions).Single();
+        var request = CreateRequest(ToolPermissionMode.FullAccess, approvals, checkpoint: null) with
+        {
+            UserQuestionHandler = questions
+        };
+        var invoker = new DirectToolInvoker(
+            request,
+            new Dictionary<string, DirectToolBinding>(StringComparer.Ordinal) { [binding.Tool.Name] = binding });
+
+        var invocation = invoker.InvokeAsync(
+            new FunctionCallContent(
+                "call-1",
+                AskUserRules.ToolName,
+                new AIFunctionArguments
+                {
+                    ["questions"] = JsonSerializer.SerializeToElement(new[]
+                    {
+                        new
+                        {
+                            question = "Which database should this service use?",
+                            options = new[] { new { label = "PostgreSQL" }, new { label = "SQLite" } }
+                        }
+                    })
+                }),
+            CancellationToken.None).AsTask();
+
+        var asked = await questions.Asked;
+        invocation.IsCompleted.Should().BeFalse();
+        approvals.Requests.Should().BeEmpty();
+
+        questions.TryAnswer(asked.RequestId, new UserQuestionAnswer(asked.RequestId, [], Skipped: true)).Should().BeTrue();
+
+        var result = await invocation;
+        result.Should().BeOfType<DirectToolResult>()
+            .Which.Status.Should().Be(ToolCallStatus.Completed);
+        approvals.Requests.Should().BeEmpty();
+    }
+
     private static TestPipeline CreatePipeline(
         ToolPermissionMode permissionMode,
         IToolApprovalHandler? approvalHandler,
@@ -275,5 +320,26 @@ public sealed class DirectToolInvokerTests
         }
 
         public bool TryResolve(Guid toolExecutionId, ToolApprovalDecision decision) => false;
+    }
+
+    private sealed class BlockingQuestionHandler : IUserQuestionHandler
+    {
+        private readonly TaskCompletionSource<UserQuestionRequest> _asked =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource<UserQuestionAnswer>? _answer;
+
+        public Task<UserQuestionRequest> Asked => _asked.Task;
+
+        public Task<UserQuestionAnswer> RequestAnswerAsync(
+            UserQuestionRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            _answer = new TaskCompletionSource<UserQuestionAnswer>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _asked.TrySetResult(request);
+            return _answer.Task;
+        }
+
+        public bool TryAnswer(Guid requestId, UserQuestionAnswer answer)
+            => _answer?.TrySetResult(answer) == true;
     }
 }

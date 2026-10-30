@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Tools;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Runtime;
@@ -11,22 +12,28 @@ public sealed class AgentActivityCoordinator : IDisposable
     private const int MaxRetainedTerminalTurns = 20;
     private readonly object _syncRoot = new();
     private readonly DesktopToolApprovalHandler _approvalHandler;
+    private readonly DesktopUserQuestionHandler _questionHandler;
     private readonly ILogger<AgentActivityCoordinator> _logger;
     private readonly Dictionary<Guid, TurnActivity> _turns = [];
     private readonly List<ToolApprovalRequest> _approvals = [];
+    private readonly List<UserQuestionRequest> _questions = [];
     private AgentActivitySnapshot _currentSnapshot;
     private Guid? _selectedConversationId;
     private bool _disposed;
 
     public AgentActivityCoordinator(
         DesktopToolApprovalHandler approvalHandler,
+        DesktopUserQuestionHandler questionHandler,
         ILogger<AgentActivityCoordinator> logger)
     {
         _approvalHandler = approvalHandler;
+        _questionHandler = questionHandler;
         _logger = logger;
         _currentSnapshot = CreateIdleSnapshot();
         _approvalHandler.ApprovalRequested += OnApprovalRequested;
         _approvalHandler.ApprovalCompleted += OnApprovalCompleted;
+        _questionHandler.QuestionAsked += OnQuestionAsked;
+        _questionHandler.QuestionClosed += OnQuestionClosed;
     }
 
     public event EventHandler<AgentActivitySnapshot>? SnapshotChanged;
@@ -244,6 +251,9 @@ public sealed class AgentActivityCoordinator : IDisposable
             ToolCallKind.Edit => "正在修改文件",
             ToolCallKind.Run => "正在运行命令",
             ToolCallKind.Plan => "正在更新任务计划",
+            // The Ask phase lasts only until the question is projected; without this the panel would
+            // briefly show "正在使用 ask_user" with a raw English tool name.
+            ToolCallKind.Ask => "正在等待你的回答",
             _ => string.IsNullOrWhiteSpace(toolName) ? "正在使用工具" : $"正在使用 {toolName.Trim()}",
         };
 
@@ -311,6 +321,54 @@ public sealed class AgentActivityCoordinator : IDisposable
         }
     }
 
+    private void OnQuestionAsked(UserQuestionRequest request)
+    {
+        try
+        {
+            lock (_syncRoot)
+            {
+                if (_disposed || _questions.Any(item => item.RequestId == request.RequestId))
+                {
+                    return;
+                }
+
+                _questions.Add(request);
+            }
+
+            PublishCurrentSnapshot();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to project user question {RequestId}.", request.RequestId);
+        }
+    }
+
+    private void OnQuestionClosed(Guid requestId)
+    {
+        try
+        {
+            var removed = false;
+            lock (_syncRoot)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                removed = _questions.RemoveAll(item => item.RequestId == requestId) > 0;
+            }
+
+            if (removed)
+            {
+                PublishCurrentSnapshot();
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to complete user question projection {RequestId}.", requestId);
+        }
+    }
+
     private void PublishCurrentSnapshot()
     {
         AgentActivitySnapshot? snapshot;
@@ -337,6 +395,23 @@ public sealed class AgentActivityCoordinator : IDisposable
     private AgentActivitySnapshot BuildSnapshotLocked()
     {
         var activeTurnCount = _turns.Values.Count(turn => turn.IsActive);
+        // A question outranks an approval: the question has already stalled the turn, so showing the approval
+        // of another conversation first would leave the user looking at the less blocked of the two.
+        if (_questions.Count > 0)
+        {
+            var question = _questions[0];
+            var questionTurn = FindTurnForConversationLocked(question.ConversationId);
+            return CreateSnapshot(
+                questionTurn,
+                AgentActivityPhase.AwaitingAnswer,
+                "等待你的回答…",
+                detail: null,
+                toolKind: null,
+                approval: null,
+                question,
+                activeTurnCount);
+        }
+
         if (_approvals.Count > 0)
         {
             var approval = _approvals[0];
@@ -348,6 +423,7 @@ public sealed class AgentActivityCoordinator : IDisposable
                 detail: null,
                 toolKind: null,
                 approval,
+                question: null,
                 activeTurnCount);
         }
 
@@ -370,6 +446,7 @@ public sealed class AgentActivityCoordinator : IDisposable
                 currentTurn.Detail,
                 currentTurn.ToolKind,
                 approval: null,
+                question: null,
                 activeTurnCount);
     }
 
@@ -402,10 +479,11 @@ public sealed class AgentActivityCoordinator : IDisposable
         string? detail,
         ToolCallKind? toolKind,
         ToolApprovalRequest? approval,
+        UserQuestionRequest? question,
         int activeTurnCount)
         => new(
             turn?.Context.TurnId,
-            turn?.Context.ConversationId ?? approval?.ConversationId,
+            turn?.Context.ConversationId ?? approval?.ConversationId ?? question?.ConversationId,
             turn?.Context.ConversationTitle,
             turn?.Context.AgentId,
             turn?.Context.AgentName,
@@ -415,6 +493,7 @@ public sealed class AgentActivityCoordinator : IDisposable
             detail,
             toolKind,
             approval,
+            question,
             activeTurnCount,
             DateTimeOffset.UtcNow);
 
@@ -431,6 +510,7 @@ public sealed class AgentActivityCoordinator : IDisposable
             Detail: null,
             ToolKind: null,
             Approval: null,
+            Question: null,
             ActiveTurnCount: 0,
             DateTimeOffset.UtcNow);
 
@@ -483,10 +563,13 @@ public sealed class AgentActivityCoordinator : IDisposable
             _disposed = true;
             _turns.Clear();
             _approvals.Clear();
+            _questions.Clear();
         }
 
         _approvalHandler.ApprovalRequested -= OnApprovalRequested;
         _approvalHandler.ApprovalCompleted -= OnApprovalCompleted;
+        _questionHandler.QuestionAsked -= OnQuestionAsked;
+        _questionHandler.QuestionClosed -= OnQuestionClosed;
     }
 
     private sealed class TurnActivity

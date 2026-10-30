@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import ComposerPanel from '../components/chat/composer/ComposerPanel.vue';
 import TodoPlanDock from '../components/chat/todo/TodoPlanDock.vue';
+import AskUserDock from '../components/chat/question/AskUserDock.vue';
 import ConversationQueue from '../components/chat/ConversationQueue.vue';
 import ActivityStage from '../components/activities/ActivityStage.vue';
 import TranscriptPanel from '../components/chat/TranscriptPanel.vue';
@@ -16,6 +17,7 @@ import { useChatComposer } from '../composables/useChatComposer.js';
 import { useComposerAttachments } from '../composables/useComposerAttachments.js';
 import { getSelectedModelSupportsImages } from '../composables/useComposerModelSelection.js';
 import { useChatApprovals } from '../composables/useChatApprovals.js';
+import { useChatQuestions } from '../composables/useChatQuestions.js';
 import { useChatTerminal } from '../composables/useChatTerminal.js';
 import { useConversationInputs } from '../composables/useConversationInputs.js';
 
@@ -37,6 +39,8 @@ const imagesEnabled = computed(() => state.agentMode === 'direct' && getSelected
 const conversationQueue = useConversationInputs(bridge);
 watch(() => state.selectedConversationId, (id) => conversationQueue.subscribe(id), { immediate: true });
 const approvals = useChatApprovals(bridge);
+// `ask_user` 待答批次：有它时输入框暂停发送，问题 dock 顶在计划之上。
+const questions = useChatQuestions(bridge);
 const terminal = useChatTerminal(terminalPanelRef, bridge);
 const turnStatus = useChatTurnStatus(state);
 // 计划 dock 的折叠偏好按会话记忆，默认跟随忙碌态（忙碌展开、空闲收成一行）。
@@ -79,6 +83,7 @@ defineExpose({
 			:git-error="workspace.state.gitError" :submit-error="composer.error.value" :agent-mode="state.agentMode"
 			:selected-agent-id="state.selectedAgentId" :selected-agent-name="state.selectedAgentName"
 			:capability-revision="state.capabilityRevision" :pending-approval="approvals.pending.value"
+			:question-pending="Boolean(questions.pending.value)"
 			:tool-permission-mode="state.toolPermissionMode" :usage="state.usage" @submit="composer.submit" @stop="composer.stop"
 			:attachments="composerAttachments.items.value" :attachments-error="composerAttachments.error.value"
 			:images-enabled="imagesEnabled"
@@ -91,6 +96,10 @@ defineExpose({
 			@git-action="workspace.runGitAction" @approve-tool="(id) => approvals.resolve(id, true)"
 			@reject-tool="(id) => approvals.resolve(id, false)"
 			@select-permission-mode="composer.selectPermissionMode">
+			<template #question>
+				<AskUserDock :question="questions.pending.value" :resolving="questions.resolving.value"
+					@answer="questions.answer($event.requestId, $event.answers)" @skip="questions.skip" />
+			</template>
 			<template #plan>
 				<TodoPlanDock :todo="state.todo" :busy="state.isBusy" :open="chatTodo.isOpen(state.isBusy)"
 					@toggle="chatTodo.toggle(state.isBusy)" />

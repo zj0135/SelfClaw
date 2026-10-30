@@ -32,6 +32,12 @@ internal sealed record DirectTurnPolicy(DirectTurnOrigin Origin, DirectCapabilit
     /// </summary>
     internal bool AllowsTodoPlan => Origin is DirectTurnOrigin.Interactive or DirectTurnOrigin.Continuation;
 
+    /// <summary>
+    /// A question has a user-visible surface only on a turn the user is watching; a background turn that
+    /// bound it would block on an answer nobody can give.
+    /// </summary>
+    internal bool AllowsUserQuestion => Origin is DirectTurnOrigin.Interactive;
+
     /// <summary>A Subagent child cannot delegate further, and v1 automation never delegates either.</summary>
     internal bool CanDelegateToSubagent => Origin is not (DirectTurnOrigin.Subagent or DirectTurnOrigin.Automation);
 

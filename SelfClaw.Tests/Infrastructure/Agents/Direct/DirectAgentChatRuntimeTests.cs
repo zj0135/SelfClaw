@@ -664,6 +664,7 @@ public sealed class DirectAgentChatRuntimeTests
         return new DirectTurnCapabilityResolver(
             new WorkspaceAgentToolset(workspaceTools ?? new NoOpWorkspaceTools()),
             new TodoToolset(),
+            new AskUserToolset(),
             DefaultWorkspaceShellPreferenceSource.Instance,
             new EmptyExtensionPackageRepository(),
             new SkillCapabilitySource(skillPackageReader, new SkillTokenParser(), new SkillRuntimeToolset(new SkillScriptRunner()), contentCache),

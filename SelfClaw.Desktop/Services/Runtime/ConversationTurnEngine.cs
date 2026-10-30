@@ -5,6 +5,7 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
 using SelfClaw.Desktop.Services.Tools;
 
@@ -20,6 +21,7 @@ internal sealed class ConversationTurnEngine
     private readonly ConversationRunCoordinator _runs;
     private readonly AgentActivityCoordinator _activity;
     private readonly DesktopToolApprovalHandler _approval;
+    private readonly DesktopUserQuestionHandler _userQuestions;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettings;
     private readonly IConversationCompletionNotifier _completionNotifier;
     private readonly ILogger<ConversationTurnEngine> _logger;
@@ -27,6 +29,7 @@ internal sealed class ConversationTurnEngine
     public ConversationTurnEngine(IConversationTurnRepository turns, DesktopTurnFinalizer turnFinalizer,
         ConversationTurnRecorder turnRecorder, IAgentChatRuntime agentChatRuntime, ConversationSessionCoordinator sessions,
         ConversationRunCoordinator runs, AgentActivityCoordinator activity, DesktopToolApprovalHandler approval,
+        DesktopUserQuestionHandler userQuestions,
         ProgrammingAssistantSettingsService programmingAssistantSettings, IConversationCompletionNotifier completionNotifier,
         ILogger<ConversationTurnEngine> logger)
     {
@@ -38,6 +41,7 @@ internal sealed class ConversationTurnEngine
         _runs = runs;
         _activity = activity;
         _approval = approval;
+        _userQuestions = userQuestions;
         _programmingAssistantSettings = programmingAssistantSettings;
         _completionNotifier = completionNotifier;
         _logger = logger;
@@ -174,7 +178,8 @@ internal sealed class ConversationTurnEngine
         return new DirectChatTurnRequest(handle.TurnId, handle.ConversationId, request.WorkspaceRoot, request.Agent,
             snapshot.Messages, snapshot.Turns, request.ModelProfileId, request.ToolPermissionMode, _approval,
             new(DirectTurnOrigin.Interactive, null, null), snapshot.ToolRuns, InputSession: handle.InputSession,
-            Steering: handle.InputSession, Compression: ConversationCompactionSelector.SelectLatest(snapshot.Compactions));
+            Steering: handle.InputSession, Compression: ConversationCompactionSelector.SelectLatest(snapshot.Compactions),
+            UserQuestionHandler: _userQuestions);
     }
 
     private void BeginActivity(ConversationRecord conversation, AgentRuntimeDefinition agent, AgentTurnState turn)

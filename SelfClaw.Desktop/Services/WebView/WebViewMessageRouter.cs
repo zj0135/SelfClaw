@@ -18,6 +18,7 @@ using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.Usage;
@@ -44,6 +45,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly ConversationInputBridge? _conversationInputBridge;
     private readonly MainWindowViewModel _viewModel;
     private readonly ToolApprovalPresenter _approvals;
+    private readonly UserQuestionPresenter _questions;
     private readonly WebViewHostChannel _hostChannel;
     private readonly TranscriptDelivery _transcriptDelivery;
     private readonly ActivityPanelBridge? _activityPanelBridge;
@@ -70,6 +72,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         TerminalHostController terminalHostController,
         MainWindowViewModel viewModel,
         ToolApprovalPresenter approvals,
+        UserQuestionPresenter questions,
         WebViewHostChannel hostChannel,
         TranscriptDelivery transcriptDelivery,
         GitWorkspaceBridge? gitWorkspaceBridge = null,
@@ -94,6 +97,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _conversationInputBridge = conversationInputBridge;
         _viewModel = viewModel;
         _approvals = approvals;
+        _questions = questions;
         _hostChannel = hostChannel;
         _transcriptDelivery = transcriptDelivery;
         _activityPanelBridge = activityPanelBridge;
@@ -307,7 +311,7 @@ internal sealed class WebViewMessageRouter : IDisposable
                 }
             default:
                 var command = await RouteShellIntentAsync(type, payload);
-                if (type is not ("send-prompt" or "tool-approval/get-state") && ReadOptionalString(payload, "requestId") is { } requestId)
+                if (type is not ("send-prompt" or "tool-approval/get-state" or "user-question/get-state") && ReadOptionalString(payload, "requestId") is { } requestId)
                     _hostChannel.PostResponse(new { type = "operation-result", requestId, ok = true });
                 return command;
         }
@@ -380,6 +384,12 @@ internal sealed class WebViewMessageRouter : IDisposable
             case "resolve-tool-approval":
                 ResolveToolApproval(payload);
                 return null;
+            case "user-question/get-state":
+                _hostChannel.PostResponse(_questions.Capture(ReadOptionalString(payload, "requestId")));
+                return null;
+            case "resolve-user-question":
+                ResolveUserQuestion(payload);
+                return null;
             case "new-chat":
                 await _viewModel.StartNewConversationAsync(ReadBoolean(payload, "keepWorkspace"));
                 return null;
@@ -437,6 +447,129 @@ internal sealed class WebViewMessageRouter : IDisposable
             throw new ArgumentException("A boolean approval decision is required.");
         if (!_approvals.Resolve(id, approval.GetBoolean() ? ToolApprovalDecision.Approved : ToolApprovalDecision.Denied))
             throw new InvalidOperationException("This approval has already completed or expired.");
+    }
+
+    private void ResolveUserQuestion(JsonElement payload)
+    {
+        // The batch id travels in its own field: `requestId` is the transport correlation key that
+        // hostBridge.js generates, and reusing it for the batch would make the state push and the
+        // operation-result answer race for the same slot.
+        var requestId = ReadRequiredGuid(payload, "questionRequestId");
+        if (ReadBoolean(payload, "skipped"))
+        {
+            if (payload.TryGetProperty("answers", out var answers) && answers.ValueKind == JsonValueKind.Array &&
+                answers.GetArrayLength() > 0)
+            {
+                throw new ArgumentException("A skipped question cannot carry answers.");
+            }
+
+            ResolveUserQuestionAnswer(requestId, new UserQuestionAnswer(requestId, [], Skipped: true));
+            return;
+        }
+
+        var request = _questions.GetPendingRequest(requestId)
+            ?? throw new InvalidOperationException("This question has already completed or expired.");
+        ResolveUserQuestionAnswer(
+            requestId,
+            new UserQuestionAnswer(requestId, ReadPromptAnswers(payload, request), Skipped: false));
+    }
+
+    private void ResolveUserQuestionAnswer(Guid requestId, UserQuestionAnswer answer)
+    {
+        if (!_questions.Resolve(requestId, answer))
+        {
+            throw new InvalidOperationException("This question has already completed or expired.");
+        }
+    }
+
+    private static IReadOnlyList<UserQuestionPromptAnswer> ReadPromptAnswers(
+        JsonElement payload, UserQuestionRequest request)
+    {
+        if (!payload.TryGetProperty("answers", out var element) || element.ValueKind != JsonValueKind.Array ||
+            element.GetArrayLength() == 0)
+        {
+            throw new ArgumentException("answers must carry at least one answer; skip the question instead.");
+        }
+
+        var answers = new Dictionary<Guid, UserQuestionPromptAnswer>();
+        foreach (var item in element.EnumerateArray())
+        {
+            var answer = ReadPromptAnswer(item, request);
+            if (!answers.TryAdd(answer.PromptId, answer))
+            {
+                throw new ArgumentException($"Prompt '{answer.PromptId}' was answered more than once.");
+            }
+        }
+
+        // A prompt the dock left out is recorded as skipped, so the model still sees every question it asked.
+        return request.Prompts
+            .Select(prompt => answers.TryGetValue(prompt.PromptId, out var answer)
+                ? answer
+                : new UserQuestionPromptAnswer(prompt.PromptId, [], null, Skipped: true))
+            .ToArray();
+    }
+
+    private static UserQuestionPromptAnswer ReadPromptAnswer(JsonElement item, UserQuestionRequest request)
+    {
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            throw new ArgumentException("Every answer must be an object.");
+        }
+
+        var promptId = ReadRequiredGuid(item, "promptId");
+        var prompt = request.Prompts.FirstOrDefault(candidate => candidate.PromptId == promptId)
+            ?? throw new ArgumentException($"Prompt '{promptId}' does not belong to this question.");
+        var selected = ReadSelectedLabels(item, prompt);
+        var other = ReadOtherText(item);
+        if (selected.Count == 0 && other is null)
+        {
+            throw new ArgumentException($"Prompt '{promptId}' needs a selected option or a free-text answer.");
+        }
+
+        return new UserQuestionPromptAnswer(promptId, selected, other, Skipped: false);
+    }
+
+    private static IReadOnlyList<string> ReadSelectedLabels(JsonElement item, UserQuestionPrompt prompt)
+    {
+        if (!item.TryGetProperty("selected", out var element) || element.ValueKind == JsonValueKind.Null)
+        {
+            return [];
+        }
+
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            throw new ArgumentException("selected must be an array of option labels.");
+        }
+
+        var labels = new List<string>();
+        foreach (var candidate in element.EnumerateArray())
+        {
+            var label = candidate.ValueKind == JsonValueKind.String ? candidate.GetString() : null;
+            // The options are the authority: a label the dock never offered cannot become an answer.
+            if (string.IsNullOrWhiteSpace(label) ||
+                !prompt.Options.Any(option => string.Equals(option.Label, label, StringComparison.Ordinal)))
+            {
+                throw new ArgumentException($"'{label}' is not an option of this question.");
+            }
+
+            if (!labels.Contains(label, StringComparer.Ordinal))
+            {
+                labels.Add(label);
+            }
+        }
+
+        return labels;
+    }
+
+    private static string? ReadOtherText(JsonElement item)
+    {
+        var other = ReadOptionalString(item, "other")?.Trim();
+        if (other is { Length: > AskUserRules.MaximumOtherTextLength })
+        {
+            throw new ArgumentException($"other must be at most {AskUserRules.MaximumOtherTextLength} characters.");
+        }
+
+        return string.IsNullOrEmpty(other) ? null : other;
     }
 
     private Task SelectConversationAsync(JsonElement payload)

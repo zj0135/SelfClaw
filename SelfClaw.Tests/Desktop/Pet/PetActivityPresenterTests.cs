@@ -5,6 +5,7 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Pet;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Questions;
 
 namespace SelfClaw.Tests.Desktop.Pet;
 
@@ -133,7 +134,7 @@ public sealed class PetActivityPresenterTests
         => new(coordinator, scheduler, NullLogger<PetActivityPresenter>.Instance);
 
     private static AgentActivityCoordinator CreateCoordinator(DesktopToolApprovalHandler handler)
-        => new(handler, NullLogger<AgentActivityCoordinator>.Instance);
+        => new(handler, new DesktopUserQuestionHandler(), NullLogger<AgentActivityCoordinator>.Instance);
 
     private static AgentActivityContext CreateContext()
         => new(

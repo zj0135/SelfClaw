@@ -22,9 +22,10 @@ internal static class DirectCapabilityRules
         => policy switch
         {
             AgentRuntimeDefinition.NoneToolPolicy => false,
-            // Plan is conversation metadata, not a workspace write, so a read-only workspace still owns its plan.
+            // Plan is conversation metadata, not a workspace write, so a read-only workspace still owns its
+            // plan - and asking the user a question writes nothing at all.
             AgentRuntimeDefinition.ReadOnlyToolPolicy => kind is ToolCallKind.List or ToolCallKind.Search
-                or ToolCallKind.Read or ToolCallKind.Plan,
+                or ToolCallKind.Read or ToolCallKind.Plan or ToolCallKind.Ask,
             AgentRuntimeDefinition.SystemToolPolicy => true,
             _ => throw UnknownToolPolicy(policy)
         };

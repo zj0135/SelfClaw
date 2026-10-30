@@ -1,6 +1,7 @@
 using SelfClaw.Desktop.Services.Agents;
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using SelfClaw.Desktop.Services.Notifications;
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Settings;
 using SelfClaw.Desktop.Services.Tools;
 using System.Runtime.CompilerServices;
@@ -200,7 +201,8 @@ public sealed class ShellStateTests
             var settings = new DesktopSettingsJsonStore(paths);
             Settings = settings;
             var approval = new DesktopToolApprovalHandler();
-            _activity = new AgentActivityCoordinator(approval, NullLogger<AgentActivityCoordinator>.Instance);
+            var questions = new DesktopUserQuestionHandler();
+            _activity = new AgentActivityCoordinator(approval, questions, NullLogger<AgentActivityCoordinator>.Instance);
             _delivery = new TranscriptDelivery(new WebViewHostChannel(), Dispatcher.CurrentDispatcher);
             _publisher = new TranscriptPublisher(new TranscriptProjection(paths), _delivery, Dispatcher.CurrentDispatcher);
             var turns = new SqliteConversationTurnRepository(database);
@@ -209,7 +211,7 @@ public sealed class ShellStateTests
             _sessions = new ConversationSessionCoordinator(conversations, turns, new EmptyConversationCompactionRepository(), _runs, _publisher);
             _engine = new ConversationTurnEngine(turns, new DesktopTurnFinalizer(turns, NullLogger<DesktopTurnFinalizer>.Instance),
                 new ConversationTurnRecorder(conversations, turns, inputs, NullLogger<ConversationTurnRecorder>.Instance), Runtime,
-                _sessions, _runs, _activity, approval, SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settings), new SilentCompletion(),
+                _sessions, _runs, _activity, approval, questions, SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settings), new SilentCompletion(),
                 NullLogger<ConversationTurnEngine>.Instance);
             var workspaces = new ConversationWorkspaceService(_roots, query: Query);
             var changes = new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier();

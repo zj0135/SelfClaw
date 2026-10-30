@@ -582,6 +582,71 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         lease.Tools.Should().ContainSingle().Which.Name.Should().Be(TodoPlanRules.ToolName);
     }
 
+    [Theory]
+    [InlineData(DirectTurnOrigin.Interactive, true)]
+    [InlineData(DirectTurnOrigin.Continuation, false)]
+    [InlineData(DirectTurnOrigin.Subagent, false)]
+    [InlineData(DirectTurnOrigin.Automation, false)]
+    public async Task ResolveAsync_binds_ask_user_exactly_where_someone_can_answer(DirectTurnOrigin origin, bool expected)
+    {
+        var resolver = CreateResolver(new PackageRepository([]));
+        var needsCeiling = origin is DirectTurnOrigin.Continuation or DirectTurnOrigin.Subagent;
+        var request = CreateRequest([], "ask me first") with
+        {
+            UserQuestionHandler = new StubQuestionHandler(),
+            ExecutionContext = new DirectTurnExecutionContext(
+                origin,
+                needsCeiling ? new DirectCapabilityCeiling(AgentRuntimeDefinition.SystemToolPolicy, [], [], [], []) : null,
+                null)
+        };
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        var toolNames = lease.Tools.Select(tool => tool.Name);
+        if (expected)
+        {
+            toolNames.Should().Contain(AskUserRules.ToolName);
+        }
+        else
+        {
+            toolNames.Should().NotContain(AskUserRules.ToolName);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_does_not_bind_ask_user_without_a_handler()
+    {
+        var resolver = CreateResolver(new PackageRepository([]));
+        var request = CreateRequest([], "ask me first");
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        lease.Tools.Select(tool => tool.Name).Should().NotContain(AskUserRules.ToolName);
+    }
+
+    [Theory]
+    [InlineData(AgentRuntimeDefinition.ReadOnlyToolPolicy, true)]
+    [InlineData(AgentRuntimeDefinition.NoneToolPolicy, false)]
+    public async Task ResolveAsync_keeps_ask_user_for_a_read_only_workspace_policy(string toolPolicy, bool expected)
+    {
+        // Asking writes nothing to the workspace, so a read-only agent may still ask.
+        var resolver = CreateResolver(new PackageRepository([]));
+        var baseRequest = CreateRequest([], "ask me first") with { UserQuestionHandler = new StubQuestionHandler() };
+        var request = baseRequest with { Agent = baseRequest.Agent with { ToolPolicy = toolPolicy } };
+
+        await using var lease = await resolver.ResolveAsync(request);
+
+        var toolNames = lease.Tools.Select(tool => tool.Name);
+        if (expected)
+        {
+            toolNames.Should().Contain(AskUserRules.ToolName);
+        }
+        else
+        {
+            toolNames.Should().BeEmpty();
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_rootPath))
@@ -619,6 +684,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         return new DirectTurnCapabilityResolver(
             new WorkspaceAgentToolset(new NoOpWorkspaceTools()),
             new TodoToolset(),
+            new AskUserToolset(),
             shellPreference ?? DefaultWorkspaceShellPreferenceSource.Instance,
             repository,
             new SkillCapabilitySource(
@@ -1073,5 +1139,15 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
     {
         public Task<WorkspaceShellPreference> GetPreferenceAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new WorkspaceShellPreference(kind));
+    }
+
+    private sealed class StubQuestionHandler : IUserQuestionHandler
+    {
+        public Task<UserQuestionAnswer> RequestAnswerAsync(
+            UserQuestionRequest request,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new UserQuestionAnswer(request.RequestId, [], Skipped: true));
+
+        public bool TryAnswer(Guid requestId, UserQuestionAnswer answer) => false;
     }
 }

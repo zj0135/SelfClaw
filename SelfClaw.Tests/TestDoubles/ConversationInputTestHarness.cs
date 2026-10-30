@@ -10,6 +10,7 @@ using SelfClaw.Desktop.Services.Agents;
 using SelfClaw.Desktop.Services.Agents.Definitions;
 using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Notifications;
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
 using SelfClaw.Desktop.Services.Settings;
@@ -44,7 +45,8 @@ internal sealed class ConversationInputTestHarness : IDisposable
         Roots = new SqliteWorkspaceRepository(Fixture.Database);
         var settings = new DesktopSettingsJsonStore(Fixture.Paths);
         var approval = new DesktopToolApprovalHandler();
-        _activity = new AgentActivityCoordinator(approval, NullLogger<AgentActivityCoordinator>.Instance);
+        var questions = new DesktopUserQuestionHandler();
+        _activity = new AgentActivityCoordinator(approval, questions, NullLogger<AgentActivityCoordinator>.Instance);
         _delivery = new TranscriptDelivery(new WebViewHostChannel(), System.Windows.Threading.Dispatcher.CurrentDispatcher);
         _publisher = new TranscriptPublisher(new TranscriptProjection(Fixture.Paths), _delivery, System.Windows.Threading.Dispatcher.CurrentDispatcher);
         Agents = new AgentSettingsService(new DesktopAgentDefinitionService(Fixture.Paths),
@@ -55,7 +57,7 @@ internal sealed class ConversationInputTestHarness : IDisposable
         Engine = new ConversationTurnEngine(Fixture.Turns,
             new DesktopTurnFinalizer(Fixture.Turns, NullLogger<DesktopTurnFinalizer>.Instance),
             new ConversationTurnRecorder(Fixture.Conversations, Fixture.Turns, Fixture.Inputs, NullLogger<ConversationTurnRecorder>.Instance),
-            activeRuntime, _sessions, Runs, _activity, approval, ProgrammingSettingsTestFactory.Create(settings),
+            activeRuntime, _sessions, Runs, _activity, approval, questions, ProgrammingSettingsTestFactory.Create(settings),
             new ConversationCompletionNotifier(new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance)),
             NullLogger<ConversationTurnEngine>.Instance);
         var validator = new ConversationInputExecutionValidator(Roots, Models, Agents);

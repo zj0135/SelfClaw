@@ -208,7 +208,7 @@ public sealed class PetActivityPresenter : IDisposable
     private static PetBubbleViewState BuildState(AgentActivitySnapshot snapshot)
     {
         var isIdle = snapshot.Phase == AgentActivityPhase.Idle;
-        var isApproval = snapshot.Phase == AgentActivityPhase.AwaitingApproval;
+        var isPinned = snapshot.Phase is AgentActivityPhase.AwaitingApproval or AgentActivityPhase.AwaitingAnswer;
         var modeLabel = snapshot.ExecutionMode switch
         {
             AgentExecutionMode.Direct => "Direct",
@@ -227,14 +227,15 @@ public sealed class PetActivityPresenter : IDisposable
             snapshot.Headline,
             snapshot.Detail,
             IsVisible: !isIdle,
-            IsPinned: isApproval,
+            IsPinned: isPinned,
             ResolveWorkState(snapshot));
     }
 
     private static TimeSpan? ResolveAutoHideAfter(AgentActivityPhase phase)
         => phase switch
         {
-            AgentActivityPhase.Idle or AgentActivityPhase.AwaitingApproval => null,
+            // A question and an approval both wait on the user indefinitely, so the bubble must not vanish.
+            AgentActivityPhase.Idle or AgentActivityPhase.AwaitingApproval or AgentActivityPhase.AwaitingAnswer => null,
             AgentActivityPhase.Succeeded => SucceededBubbleDuration,
             AgentActivityPhase.Failed => FailedBubbleDuration,
             AgentActivityPhase.Cancelled => SucceededBubbleDuration,
@@ -245,7 +246,8 @@ public sealed class PetActivityPresenter : IDisposable
         => snapshot.Phase switch
         {
             AgentActivityPhase.Idle => PetWorkState.None,
-            AgentActivityPhase.AwaitingApproval => PetWorkState.AwaitingApproval,
+            // The pet has one "waiting on the user" state; a question is the same kind of block as an approval.
+            AgentActivityPhase.AwaitingApproval or AgentActivityPhase.AwaitingAnswer => PetWorkState.AwaitingApproval,
             AgentActivityPhase.Succeeded => PetWorkState.Succeeded,
             AgentActivityPhase.Failed => PetWorkState.Failed,
             AgentActivityPhase.Cancelled => PetWorkState.Cancelled,
@@ -254,6 +256,9 @@ public sealed class PetActivityPresenter : IDisposable
                 or ToolCallKind.Search => PetWorkState.Reviewing,
             AgentActivityPhase.UsingTool when snapshot.ToolKind is ToolCallKind.Edit
                 or ToolCallKind.Run => PetWorkState.Running,
+            // An ask_user call blocks on the user from the moment it starts, so the pet shows the same waiting
+            // state it will show as soon as the question is projected.
+            AgentActivityPhase.UsingTool when snapshot.ToolKind is ToolCallKind.Ask => PetWorkState.AwaitingApproval,
             // Explicit, not left to the default arm: a plan update is still work, and pinning it here keeps the
             // pet from drifting if the default ever changes.
             AgentActivityPhase.UsingTool when snapshot.ToolKind is ToolCallKind.Plan => PetWorkState.Working,

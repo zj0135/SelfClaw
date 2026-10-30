@@ -2,6 +2,7 @@ using SelfClaw.Desktop.Services.Transcript.Views;
 using System.Globalization;
 using System.Text.Json;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 
 namespace SelfClaw.Desktop.Services.Transcript;
@@ -42,6 +43,7 @@ internal static class TranscriptToolRunPresenter
             "run_shell_command" => $"Run {ReadArgument(arguments, "command", "command", maxLength: 44)}",
             "list_files" or "glob_files" => BuildListSummary(arguments),
             "search_text" => $"Search {Quote(ReadArgument(arguments, "query", "text", maxLength: 28))}",
+            AskUserRules.ToolName => BuildAskUserSummary(arguments),
             _ => HumanizeToolName(toolRun.ToolName)
         };
     }
@@ -124,6 +126,13 @@ internal static class TranscriptToolRunPresenter
 
     private static string BuildToolDetailText(ToolExecutionRecord toolRun)
     {
+        // Before the ResultContent branch: the completed form of ask_user is the model-facing answer text, and
+        // the pending form has to list the questions, which no other branch knows how to read.
+        if (toolRun.ToolName == AskUserRules.ToolName)
+        {
+            return BuildAskUserDetails(toolRun);
+        }
+
         if (!string.IsNullOrWhiteSpace(toolRun.ResultContent))
         {
             return TranscriptToolResultLimiter.LimitDisplayed(toolRun.ResultContent);
@@ -142,6 +151,75 @@ internal static class TranscriptToolRunPresenter
         };
         return TranscriptToolResultLimiter.LimitDisplayed(detail);
     }
+
+    private static string BuildAskUserSummary(JsonDocument? arguments)
+    {
+        if (ReadQuestions(arguments) is not { } questions || questions.GetArrayLength() == 0)
+        {
+            return "Ask user";
+        }
+
+        if (questions.GetArrayLength() > 1)
+        {
+            return $"Ask {questions.GetArrayLength()} questions";
+        }
+
+        var question = ReadNestedString(questions.EnumerateArray().First(), "question");
+        return $"Ask {TruncateInlineToolText(question, 60)}";
+    }
+
+    private static string BuildAskUserDetails(ToolExecutionRecord toolRun)
+    {
+        if (!string.IsNullOrWhiteSpace(toolRun.ResultContent))
+        {
+            // The stored result content already is the answered / not-answered wording the model received.
+            return TranscriptToolResultLimiter.LimitDisplayed(toolRun.ResultContent);
+        }
+
+        using var arguments = ParseJsonObject(toolRun.ArgumentsJson);
+        if (ReadQuestions(arguments) is not { } questions || questions.GetArrayLength() == 0)
+        {
+            return "等待回答…";
+        }
+
+        var prompts = questions.EnumerateArray().ToArray();
+        var lines = new List<string>(prompts.Length * 3 + 1);
+        for (var index = 0; index < prompts.Length; index++)
+        {
+            lines.Add($"{index + 1}. {ReadNestedString(prompts[index], "question")}");
+            var optionIndex = 1;
+            foreach (var option in ReadOptions(prompts[index]))
+            {
+                var description = ReadNestedString(option, "description");
+                lines.Add($"   {optionIndex++}) {ReadNestedString(option, "label")}"
+                    + (description.Length == 0 ? string.Empty : $" — {description}"));
+            }
+        }
+
+        lines.Add("等待回答…");
+        return TranscriptToolResultLimiter.LimitDisplayed(string.Join(Environment.NewLine, lines));
+    }
+
+    private static JsonElement? ReadQuestions(JsonDocument? arguments)
+        => arguments?.RootElement.ValueKind == JsonValueKind.Object &&
+           arguments.RootElement.TryGetProperty("questions", out var questions) &&
+           questions.ValueKind == JsonValueKind.Array
+            ? questions
+            : null;
+
+    private static IReadOnlyList<JsonElement> ReadOptions(JsonElement prompt)
+        => prompt.ValueKind == JsonValueKind.Object &&
+           prompt.TryGetProperty("options", out var options) &&
+           options.ValueKind == JsonValueKind.Array
+            ? options.EnumerateArray().ToArray()
+            : [];
+
+    private static string ReadNestedString(JsonElement element, string propertyName)
+        => element.ValueKind == JsonValueKind.Object &&
+           element.TryGetProperty(propertyName, out var property) &&
+           property.ValueKind == JsonValueKind.String
+            ? (property.GetString() ?? string.Empty).Trim()
+            : string.Empty;
 
     private static string ResolveWriteVerb(ToolExecutionRecord toolRun)
     {

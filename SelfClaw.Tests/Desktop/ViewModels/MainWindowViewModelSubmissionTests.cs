@@ -15,6 +15,7 @@ using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.AgentActivity;
 using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.WebView;
@@ -42,8 +43,10 @@ public sealed class MainWindowViewModelSubmissionTests
         try
         {
             var toolApprovalHandler = new DesktopToolApprovalHandler();
+            var userQuestionHandler = new DesktopUserQuestionHandler();
             using var activityCoordinator = new AgentActivityCoordinator(
                 toolApprovalHandler,
+                userQuestionHandler,
                 NullLogger<AgentActivityCoordinator>.Instance);
             var notificationService = new DesktopNotificationService(
                 NullLogger<DesktopNotificationService>.Instance);
@@ -71,6 +74,7 @@ public sealed class MainWindowViewModelSubmissionTests
                 sessions, runs,
                 activityCoordinator,
                 toolApprovalHandler,
+                userQuestionHandler,
                 SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore),
                 new ConversationCompletionNotifier(notificationService),
                 NullLogger<ConversationTurnEngine>.Instance);

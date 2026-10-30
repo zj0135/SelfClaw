@@ -6,6 +6,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
 using SelfClaw.Desktop.Services.Settings;
@@ -217,12 +218,13 @@ public sealed class ConversationTurnEngineTests
             Runs = new(Inputs, new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
             Sessions = new(Repository, Turns, new EmptyConversationCompactionRepository(), Runs, new SilentSink());
             var approval = new DesktopToolApprovalHandler();
-            _activity = new(approval, NullLogger<AgentActivityCoordinator>.Instance);
+            var questions = new DesktopUserQuestionHandler();
+            _activity = new(approval, questions, NullLogger<AgentActivityCoordinator>.Instance);
             var root = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
             var settings = new DesktopSettingsJsonStore(StoragePathDefaults.Create(root, Path.Combine(root, "test.db"), Path.Combine(root, "secrets")));
             Engine = new(Turns, new(Turns, NullLogger<DesktopTurnFinalizer>.Instance),
                 new(Repository, Turns, Inputs, NullLogger<ConversationTurnRecorder>.Instance), runtime,
-                Sessions, Runs, _activity, approval, ProgrammingSettingsTestFactory.Create(settings), Notifier,
+                Sessions, Runs, _activity, approval, questions, ProgrammingSettingsTestFactory.Create(settings), Notifier,
                 NullLogger<ConversationTurnEngine>.Instance);
         }
         public Guid ConversationId { get; } = Guid.NewGuid();

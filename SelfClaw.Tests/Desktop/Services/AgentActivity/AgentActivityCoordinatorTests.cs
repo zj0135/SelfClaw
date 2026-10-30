@@ -1,3 +1,4 @@
+using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Tools;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -126,8 +127,44 @@ public sealed class AgentActivityCoordinatorTests
         (await decision).Should().Be(ToolApprovalDecision.Approved);
     }
 
-    private static AgentActivityCoordinator CreateCoordinator(DesktopToolApprovalHandler handler)
-        => new(handler, NullLogger<AgentActivityCoordinator>.Instance);
+    [Fact]
+    public async Task UserQuestion_pending_outranks_a_pending_approval_in_the_snapshot()
+    {
+        var approvals = new DesktopToolApprovalHandler();
+        var questions = new DesktopUserQuestionHandler();
+        using var coordinator = CreateCoordinator(approvals, questions);
+        var context = CreateContext("build");
+        coordinator.BeginTurn(context);
+        coordinator.ApplyEvent(context.TurnId, new RunStatusEvent(AgentRunStatus.Thinking));
+
+        var approval = CreateApproval(context.ConversationId, "write_file", "Write file");
+        var approvalDecision = approvals.RequestApprovalAsync(approval);
+        var question = CreateQuestion(context.ConversationId);
+        var pendingQuestion = questions.RequestAnswerAsync(question);
+
+        // The question has already stalled its turn, so it wins the single activity slot.
+        coordinator.CurrentSnapshot.Phase.Should().Be(AgentActivityPhase.AwaitingAnswer);
+        coordinator.CurrentSnapshot.Headline.Should().Be("等待你的回答…");
+        coordinator.CurrentSnapshot.Question.Should().Be(question);
+        coordinator.CurrentSnapshot.Approval.Should().BeNull();
+        coordinator.CurrentSnapshot.ConversationId.Should().Be(context.ConversationId);
+
+        questions.TryAnswer(question.RequestId, new UserQuestionAnswer(question.RequestId, [], Skipped: true))
+            .Should().BeTrue();
+        await pendingQuestion;
+
+        coordinator.CurrentSnapshot.Phase.Should().Be(AgentActivityPhase.AwaitingApproval);
+        coordinator.CurrentSnapshot.Question.Should().BeNull();
+        coordinator.CurrentSnapshot.Approval.Should().Be(approval);
+
+        approvals.TryResolve(approval.ToolExecutionId, ToolApprovalDecision.Approved).Should().BeTrue();
+        await approvalDecision;
+        coordinator.CurrentSnapshot.Phase.Should().Be(AgentActivityPhase.Thinking);
+    }
+
+    private static AgentActivityCoordinator CreateCoordinator(
+        DesktopToolApprovalHandler handler, DesktopUserQuestionHandler? questions = null)
+        => new(handler, questions ?? new DesktopUserQuestionHandler(), NullLogger<AgentActivityCoordinator>.Instance);
 
     private static AgentActivityContext CreateContext(string agentName)
         => new(
@@ -149,5 +186,18 @@ public sealed class AgentActivityCoordinatorTests
             displayName,
             displayName,
             "{}",
+            conversationId);
+
+    private static UserQuestionRequest CreateQuestion(Guid conversationId)
+        => new(
+            Guid.NewGuid(),
+            [
+                new UserQuestionPrompt(
+                    Guid.NewGuid(),
+                    "Which database should this service use?",
+                    "Database",
+                    [new UserQuestionOption("PostgreSQL", "Relational"), new UserQuestionOption("SQLite", "Embedded")],
+                    MultiSelect: false)
+            ],
             conversationId);
 }

@@ -23,7 +23,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 3. **桌面并发**：run handle 独占回合生命周期；SessionCoordinator 独占选择与快照替换；`ConversationRuntimeState` 只串行化内容变更，不持运行标志。
 4. **关闭顺序**：停受理 → 取消并等待活动 → 释放 UI → dispose 服务 → 停 WPF；`OnExit` 只做同步兜底。
 5. **定义目录**：Agent 定义在 `{AppData}\agents\`，子代理定义在 `{AppData}\subagents\`；会话绑定的定义缺失时保持不可用并拒绝执行。
-6. **工具审批**：Direct 工具审批（默认 `RequireApproval`）只有 Vue 审批栏或 Windows toast 能裁决；没有超时自动拒绝；订阅者失败、调用方取消或关闭即拒绝。
+6. **工具审批**：Direct 工具审批（默认 `RequireApproval`）只有 Vue 审批栏或 Windows toast 能裁决；没有超时自动拒绝；订阅者失败、调用方取消或关闭即拒绝。`ask_user`（模型主动提问）**不是审批**：`FullAccess` 下同样阻塞等待，且自动化/子代理/continuation 回合不绑定它（无界面会死锁）；`requestId` 是 WebView 传输关联键，提问批次 id 走 `questionRequestId`，两者不得混用。
 7. **WPF**：`WindowStyle` 必须保持 `SingleBorderWindow`。
 8. **会话删除**：先墓碑 → 停回合 → 取消并限时等待子任务 → 才做 SQLite 级联；超时中止删除；列表与导航只接受 `ConversationKind.Interactive`。
 9. **数据库**：schema 版本 **32**；非 v32 或未版本化数据库只读拒绝，绝不迁移、回填或隐式删除。
@@ -67,6 +67,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - 端到端主干：`docs/pipeline-architecture.md`（全局图）→ `docs/runtime-execution-flow.md`（当前调用链、回合/准入/消费基线）。
 - Direct 输入与队列 / steer 语义：`docs/direct-message-input-design.md`。
 - 输入框图片附件（存储 / 桥 / 队列 / 模型调用 / 前端）：`docs/input-attachment-design.md`。
+- Direct `ask_user` 提问工具（强制中断语义、AskUserRules 限额、绑定闸门、`questionRequestId` 协议）：`docs/direct-ask-user-design.md`。
 - 桌面/前端：`docs/message-segments-system-design.md`。
 - 关于页应用用量仪表盘：`docs/app-usage-dashboard-design.md`（数据契约、热力图/趋势/环形口径、SQL 分桶边界）。
 - 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/pet-system-design.md`、`docs/automation-system-design.md`、`docs/direct-context-compaction-design.md`（配套实施记录 `docs/direct-context-compaction-implementation-tasks.md`）、`docs/direct-in-turn-compaction-design.md`。

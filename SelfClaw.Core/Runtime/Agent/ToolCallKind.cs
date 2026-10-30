@@ -12,5 +12,6 @@ public enum ToolCallKind
     Run = 3,
     Search = 4,
     List = 5,
-    Plan = 6
+    Plan = 6,
+    Ask = 7
 }

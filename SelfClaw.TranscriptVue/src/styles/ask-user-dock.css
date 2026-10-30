@@ -1,0 +1,552 @@
+/*
+ * Direct `ask_user` 提问 dock（渲染在输入框上方）。
+ *
+ * 语言沿用转录里的发丝线与纯文本行：不叠卡片、不加大底色框，层级由左侧强调脊、
+ * 数字键徽章与字重表达。整块靠一条 accent 细脊钉在输入框上方，回答后用
+ * --success 收束——这是唯一一处使用状态色，用来交代"这一批结束了吗"。
+ *
+ * 组件在 <style scoped> 内 @import 本文件（与 todo-plan.css 同一做法），
+ * 因此这里只写类选择器，不写标签选择器。颜色/字号一律走 tokens.css 变量。
+ */
+
+/* ── 容器 ─────────────────────────────────────────────────────── */
+
+.ask-user-dock {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin-bottom: 10px;
+	padding: 14px 16px 12px 18px;
+	overflow: hidden;
+	border: 1px solid var(--border-strong);
+	border-radius: 14px 14px 4px 4px;
+	background:
+		radial-gradient(120% 160% at 0% 0%, var(--accent-soft), transparent 58%),
+		var(--panel);
+	box-shadow:
+		0 1px 2px rgba(var(--shadow-ink), 0.05),
+		0 14px 34px rgba(var(--shadow-ink), 0.07);
+}
+
+/* 左脊：3px 的 accent 竖线，dock 出现时从上往下长出来。 */
+.ask-user-dock::before {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	width: 3px;
+	background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 25%, transparent));
+	content: '';
+	transform-origin: top;
+	animation: ask-user-rail 420ms var(--ease-out) both;
+}
+
+@keyframes ask-user-rail {
+	from {
+		transform: scaleY(0.12);
+		opacity: 0;
+	}
+
+	to {
+		transform: none;
+		opacity: 1;
+	}
+}
+
+/* ── 头部 ─────────────────────────────────────────────────────── */
+
+.ask-user-head {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	min-width: 0;
+}
+
+.ask-user-mark {
+	display: inline-grid;
+	place-items: center;
+	width: 24px;
+	height: 24px;
+	flex: none;
+	border-radius: 8px;
+	color: var(--accent);
+	background: var(--accent-soft);
+	box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.ask-user-heading {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	align-items: baseline;
+	gap: 8px;
+}
+
+.ask-user-title {
+	flex: none;
+	color: var(--text-strong);
+	font-family: var(--font-display);
+	font-size: var(--fs-125);
+	font-weight: 650;
+	line-height: 1.4;
+	letter-spacing: 0.04em;
+}
+
+.ask-user-source {
+	overflow: hidden;
+	min-width: 0;
+	color: var(--muted);
+	font-size: var(--fs-105);
+	line-height: 1.4;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.ask-user-count {
+	flex: none;
+	color: var(--muted-soft);
+	font-family: var(--font-mono);
+	font-size: var(--fs-105);
+	line-height: 1;
+	font-variant-numeric: tabular-nums;
+}
+
+/* ── tabs（多题时才出现）───────────────────────────────────────── */
+
+.ask-user-tabs {
+	display: flex;
+	gap: 2px;
+	overflow-x: auto;
+	border-bottom: 1px solid var(--line-1);
+	scrollbar-width: none;
+}
+
+.ask-user-tab {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 220px;
+	padding: 6px 10px 7px;
+	border: 0;
+	background: transparent;
+	color: var(--muted);
+	font-size: var(--fs-115);
+	font-weight: 600;
+	line-height: 1.3;
+	white-space: nowrap;
+	cursor: pointer;
+	transition: color 140ms ease;
+}
+
+.ask-user-tab-label {
+	overflow: hidden;
+	min-width: 0;
+	text-overflow: ellipsis;
+}
+
+/* 下划线是唯一的位置信号：静止 0 宽，激活时向右铺开。 */
+.ask-user-tab::after {
+	position: absolute;
+	right: 10px;
+	bottom: -1px;
+	left: 10px;
+	height: 2px;
+	border-radius: 1px;
+	background: var(--accent);
+	content: '';
+	opacity: 0;
+	transform: scaleX(0.2);
+	transform-origin: left;
+	transition: transform 260ms var(--ease-out), opacity 160ms ease;
+}
+
+.ask-user-tab:hover {
+	color: var(--text-soft);
+}
+
+.ask-user-tab.active {
+	color: var(--text-strong);
+}
+
+/* 已答的 tab 退成常规语气：勾已经在说"这题有答案"，标题不必再抢。 */
+.ask-user-tab.answered .ask-user-tab-label {
+	color: var(--text-soft);
+}
+
+.ask-user-tab.active::after {
+	opacity: 1;
+	transform: none;
+}
+
+.ask-user-tab:focus-visible {
+	outline: 1px solid var(--accent-line);
+	outline-offset: -2px;
+	border-radius: 6px;
+}
+
+/* 未答 = 一颗呼吸的小圆点；已答 = 打勾（勾的颜色说明"这题有答案了"）。 */
+.ask-user-tab-dot {
+	width: 5px;
+	height: 5px;
+	flex: none;
+	border-radius: 50%;
+	background: var(--accent);
+	animation: ask-user-pulse 2.2s ease-in-out infinite;
+}
+
+.ask-user-tab-check {
+	flex: none;
+	color: var(--success);
+}
+
+@keyframes ask-user-pulse {
+	0%,
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+
+	50% {
+		opacity: 0.35;
+		transform: scale(0.72);
+	}
+}
+
+/* ── 题目与选项 ───────────────────────────────────────────────── */
+
+.ask-user-panel {
+	min-width: 0;
+}
+
+.ask-user-question {
+	margin: 0 0 9px;
+	color: var(--text-strong);
+	font-family: var(--font-display);
+	font-size: var(--fs-15);
+	font-weight: 600;
+	line-height: 1.5;
+	letter-spacing: 0.005em;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.ask-user-options {
+	display: grid;
+	gap: 3px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.ask-user-row {
+	min-width: 0;
+}
+
+/* "其它"与模型给的选项之间留一点缝：它是兜底出口，不是第 N 个同质选项。 */
+.ask-user-row.other {
+	margin-top: 2px;
+}
+
+.ask-user-option {
+	display: flex;
+	width: 100%;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 7px 10px 7px 8px;
+	border: 1px solid transparent;
+	border-radius: 9px;
+	background: transparent;
+	color: var(--text-soft);
+	text-align: left;
+	cursor: pointer;
+	transition:
+		background 150ms ease,
+		border-color 150ms ease,
+		color 150ms ease,
+		transform 180ms var(--ease-out);
+}
+
+.ask-user-option:hover {
+	border-color: var(--line-2);
+	background: var(--panel-hover);
+	color: var(--text-strong);
+	transform: translateX(2px);
+}
+
+.ask-user-option:focus-visible {
+	outline: 1px solid var(--accent-line);
+	outline-offset: 1px;
+}
+
+/* 数字键徽章：等宽、方角，是这行唯一的"快捷键"提示。 */
+.ask-user-key {
+	display: inline-grid;
+	place-items: center;
+	width: 19px;
+	height: 19px;
+	flex: none;
+	margin-top: 1px;
+	border-radius: 5px;
+	background: var(--panel-muted);
+	color: var(--muted-soft);
+	font-family: var(--font-mono);
+	font-size: var(--fs-10);
+	line-height: 1;
+	font-variant-numeric: tabular-nums;
+	transition: background 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.ask-user-option-copy {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.ask-user-option-label {
+	color: inherit;
+	font-size: var(--fs-125);
+	font-weight: 600;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
+.ask-user-option-desc {
+	color: var(--muted);
+	font-size: var(--fs-11);
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+
+/* 勾：默认缩到 0，选中时弹出来（换选覆盖时另一行同时缩回去，像互换）。 */
+.ask-user-option-check {
+	flex: none;
+	margin-top: 3px;
+	color: var(--accent);
+	opacity: 0;
+	transform: scale(0.4);
+	transition: opacity 160ms ease, transform 220ms var(--ease-out);
+}
+
+.ask-user-option.selected {
+	border-color: var(--accent-line);
+	background: var(--accent-soft);
+	color: var(--text-strong);
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ask-user-option.selected .ask-user-key {
+	background: var(--accent);
+	color: var(--accent-ink-on);
+	box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.ask-user-option.selected .ask-user-option-check {
+	opacity: 1;
+	transform: none;
+}
+
+/* 提交中：整块只读。选项保留选中态，但不给悬停反馈，避免看起来还能改。 */
+.ask-user-option:disabled {
+	cursor: default;
+	opacity: 0.6;
+}
+
+.ask-user-option:disabled:hover {
+	border-color: transparent;
+	background: transparent;
+	transform: none;
+}
+
+.ask-user-option.selected:disabled:hover {
+	border-color: var(--accent-line);
+	background: var(--accent-soft);
+}
+
+/* 多选时徽章改方形勾选框语气：边框方一点，暗示"可以同时成立"。 */
+.ask-user-options.multi .ask-user-key {
+	border-radius: 3px;
+	box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+/* ── "其它"的自由文本 ─────────────────────────────────────────── */
+
+.ask-user-other {
+	display: block;
+	width: calc(100% - 8px);
+	min-height: 52px;
+	resize: vertical;
+	margin: 2px 0 4px 8px;
+	padding: 8px 11px;
+	border: 1px solid var(--border-strong);
+	border-radius: 9px;
+	background: var(--panel-muted);
+	color: var(--text-strong);
+	font: 12.5px/1.6 var(--font-ui);
+	transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.ask-user-other::placeholder {
+	color: var(--muted-soft);
+}
+
+.ask-user-other:focus {
+	border-color: var(--accent-line);
+	background: var(--panel);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+	outline: none;
+}
+
+.ask-user-other:disabled {
+	opacity: 0.6;
+}
+
+/* ── 底部动作 ─────────────────────────────────────────────────── */
+
+.ask-user-actions {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding-top: 2px;
+}
+
+.ask-user-hint {
+	min-width: 0;
+	flex: 1 1 auto;
+	overflow: hidden;
+	color: var(--faint);
+	font-family: var(--font-mono);
+	font-size: var(--fs-10);
+	line-height: 1.4;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.ask-user-btn {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 5px;
+	height: 30px;
+	padding: 0 13px;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	font-size: var(--fs-125);
+	font-weight: 600;
+	line-height: 1;
+	transition:
+		background 150ms ease,
+		border-color 150ms ease,
+		color 150ms ease,
+		opacity 150ms ease,
+		transform 160ms var(--ease-out);
+}
+
+.ask-user-btn.skip {
+	border-color: var(--border-strong);
+	background: transparent;
+	color: var(--muted);
+}
+
+.ask-user-btn.skip:hover:not(:disabled) {
+	border-color: var(--text-soft);
+	color: var(--text-soft);
+}
+
+.ask-user-btn.submit {
+	background: var(--accent);
+	color: var(--accent-ink-on);
+	box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.ask-user-btn.submit:hover:not(:disabled) {
+	background: var(--accent-2);
+	transform: translateY(-1px);
+}
+
+.ask-user-btn.submit:active:not(:disabled) {
+	transform: scale(0.96);
+}
+
+.ask-user-btn:disabled {
+	box-shadow: none;
+	opacity: 0.45;
+	cursor: default;
+	transform: none;
+}
+
+.ask-user-spin {
+	animation: ask-user-turn 900ms linear infinite;
+}
+
+@keyframes ask-user-turn {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* ── 出没与展开动效 ───────────────────────────────────────────── */
+
+.ask-user-dock-enter-active,
+.ask-user-dock-leave-active {
+	transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+}
+
+.ask-user-dock-enter-from,
+.ask-user-dock-leave-to {
+	opacity: 0;
+	transform: translateY(8px) scale(0.995);
+}
+
+.ask-user-other-enter-active,
+.ask-user-other-leave-active {
+	transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+
+.ask-user-other-enter-from,
+.ask-user-other-leave-to {
+	opacity: 0;
+	transform: translateY(-4px);
+}
+
+/* ── 窄窗：收起提示与选项描述，只留可点的正文 ─────────────────── */
+
+@media (max-width: 960px) {
+	.ask-user-hint,
+	.ask-user-option-desc {
+		display: none;
+	}
+
+	.ask-user-dock {
+		padding: 12px 12px 10px 15px;
+	}
+}
+
+/* ── 降低动效偏好：只保留状态本身 ─────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+	.ask-user-dock::before,
+	.ask-user-tab-dot,
+	.ask-user-spin {
+		animation: none;
+	}
+
+	.ask-user-dock-enter-active,
+	.ask-user-dock-leave-active,
+	.ask-user-other-enter-active,
+	.ask-user-other-leave-active,
+	.ask-user-tab::after,
+	.ask-user-option,
+	.ask-user-option-check,
+	.ask-user-key,
+	.ask-user-btn {
+		transition: none;
+	}
+
+	.ask-user-option:hover {
+		transform: none;
+	}
+}

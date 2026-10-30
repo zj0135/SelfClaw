@@ -39,6 +39,11 @@ const props = defineProps({
 		type: Object,
 		default: null,
 	},
+	// 有 `ask_user` 待答批次时禁止发送：回合被这一问卡住，输入只会排在后面等着。
+	questionPending: {
+		type: Boolean,
+		default: false,
+	},
 	toolPermissionMode: {
 		type: String,
 		default: 'require-approval',
@@ -127,11 +132,19 @@ const shellRef = ref(null);
 const textareaRef = ref(null);
 
 const hasText = computed(() => composerText.value.trim().length > 0);
-const canSend = computed(() => hasText.value && (!props.busy || props.queueable));
+const canSend = computed(() => hasText.value && (!props.busy || props.queueable) && !props.questionPending);
 // 单一按钮：空闲显示发送；Direct 忙碌且输入框有内容时，同一位置变成发送（入队）；否则显示停止/进度。
 const showSend = computed(() => !props.busy || (props.queueable && hasText.value));
 
+// 待答期间输入框仍可打字（用户可能想边想边改草稿），只有发送被挡住。
+const inputPlaceholder = computed(() => (props.questionPending ? '请先回答上方的问题' : '让助手帮你处理项目...'));
+
 function submit() {
+	// 键盘 Enter 也走这里，所以早退必须在取值之前。
+	if (props.questionPending) {
+		return;
+	}
+
 	const prompt = composerText.value.trim();
 	if (!prompt || (props.busy && !props.queueable)) {
 		return;
@@ -321,13 +334,14 @@ defineExpose({
 				</div>
 			</div>
 		</transition>
+		<slot name="question" />
 		<slot name="plan" />
 		<slot name="queue" />
 		<section class="composer-shell" :class="{ dragging }" aria-label="消息输入">
 			<ComposerAttachments :items="props.attachments" :error="props.attachmentsError"
 				@remove="emit('remove-attachment', $event)" @preview-image="emit('preview-image', $event)" />
 			<textarea ref="textareaRef" v-model="composerText" class="composer-input" rows="3"
-				placeholder="让助手帮你处理项目..." @keydown="onKeydown" @paste="onComposerPaste"></textarea>
+				:placeholder="inputPlaceholder" @keydown="onKeydown" @paste="onComposerPaste"></textarea>
 			<p v-if="submitError" class="composer-error" role="alert">{{ submitError }}</p>
 			<div class="composer-toolbar">
 				<!-- 左侧：+ -->

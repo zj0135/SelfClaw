@@ -21,6 +21,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
 {
     private readonly WorkspaceAgentToolset _workspaceToolset;
     private readonly TodoToolset _todoToolset;
+    private readonly AskUserToolset _askUserToolset;
     private readonly IWorkspaceShellPreferenceSource _shellPreference;
     private readonly IExtensionPackageRepository _packageRepository;
     private readonly SkillCapabilitySource _skillSource;
@@ -31,6 +32,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
     public DirectTurnCapabilityResolver(
         WorkspaceAgentToolset workspaceToolset,
         TodoToolset todoToolset,
+        AskUserToolset askUserToolset,
         IWorkspaceShellPreferenceSource shellPreference,
         IExtensionPackageRepository packageRepository,
         SkillCapabilitySource skillSource,
@@ -40,6 +42,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
     {
         _workspaceToolset = workspaceToolset;
         _todoToolset = todoToolset;
+        _askUserToolset = askUserToolset;
         _shellPreference = shellPreference;
         _packageRepository = packageRepository;
         _skillSource = skillSource;
@@ -87,6 +90,10 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         if (policy.AllowsTodoPlan)
         {
             bindings.AddRange(_todoToolset.CreateTools());
+        }
+        if (policy.AllowsUserQuestion && request.UserQuestionHandler is { } questionHandler)
+        {
+            bindings.AddRange(_askUserToolset.CreateTools(questionHandler));
         }
         ValidateCapturedPackageCeiling(effectiveRequest, policy, packages);
         var installedSkills = packages

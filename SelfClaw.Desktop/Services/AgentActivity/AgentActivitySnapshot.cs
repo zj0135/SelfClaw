@@ -15,5 +15,6 @@ public sealed record AgentActivitySnapshot(
     string? Detail,
     ToolCallKind? ToolKind,
     ToolApprovalRequest? Approval,
+    UserQuestionRequest? Question,
     int ActiveTurnCount,
     DateTimeOffset UpdatedAtUtc);

@@ -10,6 +10,7 @@ public enum AgentActivityPhase
     Responding,
     UsingTool,
     AwaitingApproval,
+    AwaitingAnswer,
     Succeeded,
     Failed,
     Cancelled,
