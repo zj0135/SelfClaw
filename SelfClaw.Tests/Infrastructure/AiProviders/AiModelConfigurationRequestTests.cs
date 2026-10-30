@@ -8,7 +8,6 @@ using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Anthropic;
 using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
-using SelfClaw.Infrastructure.AiProviders.Ollama;
 using SelfClaw.Infrastructure.AiProviders.OpenAi;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 
@@ -20,7 +19,6 @@ public sealed class AiModelConfigurationRequestTests
     [InlineData(AiProviderApiFormat.OpenAIChatCompletions)]
     [InlineData(AiProviderApiFormat.OpenAIResponses)]
     [InlineData(AiProviderApiFormat.AnthropicMessages)]
-    [InlineData(AiProviderApiFormat.OllamaNative)]
     public async Task Provider_serialization_preserves_the_bounded_tool_contract_without_display_duplication(AiProviderApiFormat format)
     {
         var handler = new RecordingHandler(ResponseFor(format));
@@ -28,7 +26,6 @@ public sealed class AiModelConfigurationRequestTests
         IAiProviderAdapter adapter = format switch
         {
             AiProviderApiFormat.AnthropicMessages => new AnthropicProviderAdapter(httpClientProvider: http),
-            AiProviderApiFormat.OllamaNative => new OllamaProviderAdapter(http),
             _ => new OpenAiProviderAdapter(httpClientProvider: http)
         };
         var request = CreateRequest(adapter.ProviderKind, format, null);
@@ -161,15 +158,12 @@ public sealed class AiModelConfigurationRequestTests
     [InlineData(AiProviderApiFormat.OpenAIChatCompletions, "max")]
     [InlineData(AiProviderApiFormat.OpenAIResponses, "high")]
     [InlineData(AiProviderApiFormat.AnthropicMessages, "max")]
-    [InlineData(AiProviderApiFormat.OllamaNative, "medium")]
     [InlineData(AiProviderApiFormat.OpenAIChatCompletions, "none")]
     [InlineData(AiProviderApiFormat.OpenAIResponses, "none")]
     [InlineData(AiProviderApiFormat.AnthropicMessages, "none")]
-    [InlineData(AiProviderApiFormat.OllamaNative, "none")]
     [InlineData(AiProviderApiFormat.OpenAIChatCompletions, null)]
     [InlineData(AiProviderApiFormat.OpenAIResponses, null)]
     [InlineData(AiProviderApiFormat.AnthropicMessages, null)]
-    [InlineData(AiProviderApiFormat.OllamaNative, null)]
     public async Task Provider_requests_serialize_shared_configuration(AiProviderApiFormat format, string? effort)
     {
         var handler = new RecordingHandler(ResponseFor(format));
@@ -177,7 +171,6 @@ public sealed class AiModelConfigurationRequestTests
         IAiProviderAdapter adapter = format switch
         {
             AiProviderApiFormat.AnthropicMessages => new AnthropicProviderAdapter(httpClientProvider: http),
-            AiProviderApiFormat.OllamaNative => new OllamaProviderAdapter(http),
             _ => new OpenAiProviderAdapter(httpClientProvider: http)
         };
         var request = CreateRequest(adapter.ProviderKind, format, effort);
@@ -191,21 +184,9 @@ public sealed class AiModelConfigurationRequestTests
         var body = handler.Body;
         body.GetProperty("model").GetString().Should().Be(request.Profile.Model);
         body.GetRawText().Should().NotContain("priceInPerMTok").And.NotContain("Billing notes");
-        if (format == AiProviderApiFormat.OllamaNative)
-        {
-            body.GetProperty("options").GetProperty("num_predict").GetInt32().Should().Be(16000);
-            body.GetProperty("options").GetProperty("num_ctx").GetInt32().Should().Be(128000);
-            body.GetProperty("options").GetProperty("temperature").GetDouble().Should().BeApproximately(0.4, 0.001);
-            if (effort is null) body.TryGetProperty("think", out _).Should().BeFalse();
-            else if (effort == "none") body.GetProperty("think").GetBoolean().Should().BeFalse();
-            else body.GetProperty("think").GetString().Should().Be(effort);
-        }
-        else
-        {
-            body.GetProperty("temperature").GetDouble().Should().BeApproximately(0.4, 0.001);
-            body.TryGetProperty("top_p", out _).Should().BeFalse();
-            AssertReasoningAndLimits(body, format, effort);
-        }
+        body.GetProperty("temperature").GetDouble().Should().BeApproximately(0.4, 0.001);
+        body.TryGetProperty("top_p", out _).Should().BeFalse();
+        AssertReasoningAndLimits(body, format, effort);
     }
 
     private static void AssertReasoningAndLimits(JsonElement body, AiProviderApiFormat format, string? effort)
@@ -257,9 +238,7 @@ public sealed class AiModelConfigurationRequestTests
         AiProviderApiFormat.AnthropicMessages => """
             {"id":"msg-test","type":"message","role":"assistant","model":"test-model","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}
             """,
-        _ => """
-            {"model":"test-model","created_at":"2026-01-01T00:00:00Z","message":{"role":"assistant","content":"ok"},"done":true,"done_reason":"stop"}
-            """
+        _ => throw new ArgumentOutOfRangeException(nameof(format), format, "No fixture for this API format.")
     };
 
     private sealed class RecordingHandler(string response, string contentType = "application/json") : HttpMessageHandler

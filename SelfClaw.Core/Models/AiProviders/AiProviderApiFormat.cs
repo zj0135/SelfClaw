@@ -12,6 +12,5 @@ public enum AiProviderApiFormat
 {
     OpenAIChatCompletions = 0,
     OpenAIResponses = 1,
-    AnthropicMessages = 2,
-    OllamaNative = 4
+    AnthropicMessages = 2
 }

@@ -1,11 +1,10 @@
 namespace SelfClaw.Core.Models;
 
 /// <summary>
-/// Authentication scheme used by a provider connection. v1 only supports an
-/// API key or no authentication for local providers.
+/// Authentication scheme used by a provider connection. Every supported provider
+/// authenticates with an API key.
 /// </summary>
 public enum AiProviderAuthKind
 {
-    ApiKey = 0,
-    None = 1
+    ApiKey = 0
 }

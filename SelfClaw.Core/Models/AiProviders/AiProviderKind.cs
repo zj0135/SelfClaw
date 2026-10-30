@@ -12,6 +12,5 @@ public enum AiProviderKind
 {
     OpenAI = 0,
     OpenAICompatible = 1,
-    Anthropic = 3,
-    Ollama = 5
+    Anthropic = 3
 }

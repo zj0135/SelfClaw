@@ -20,7 +20,6 @@ using SelfClaw.Infrastructure.AiProviders.Anthropic;
 using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.AiProviders.OpenAi;
-using SelfClaw.Infrastructure.AiProviders.Ollama;
 using SelfClaw.Infrastructure.Data.Sqlite;
 using SelfClaw.Infrastructure.Data.Sqlite.Repositories;
 using SelfClaw.Infrastructure.Extensions;
@@ -201,7 +200,6 @@ public static class ServiceCollectionExtensions
                 serviceProvider.GetService<ILogger<AnthropicProviderAdapter>>(),
                 serviceProvider.GetRequiredService<AnthropicModelListClient>(),
                 serviceProvider.GetRequiredService<AiProviderHttpClientProvider>()));
-        services.AddSingleton<IAiProviderAdapter, OllamaProviderAdapter>();
         services.AddSingleton<AiProviderRegistry>();
         services.AddSingleton<AiProviderSettingsService>();
         services.AddSingleton<IAiProviderSettingsService>(provider => provider.GetRequiredService<AiProviderSettingsService>());

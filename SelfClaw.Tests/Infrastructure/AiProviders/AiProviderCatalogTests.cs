@@ -8,15 +8,14 @@ namespace SelfClaw.Tests.Infrastructure.AiProviders;
 public sealed class AiProviderCatalogTests
 {
     [Fact]
-    public void Entries_define_the_four_unique_built_in_providers()
+    public void Entries_define_the_three_unique_built_in_providers()
     {
-        AiProviderCatalog.Entries.Should().HaveCount(4);
+        AiProviderCatalog.Entries.Should().HaveCount(3);
         AiProviderCatalog.Entries.Select(entry => entry.CatalogId)
             .Should().OnlyHaveUniqueItems()
             .And.BeEquivalentTo(
                 "openai",
                 "anthropic",
-                "ollama",
                 "custom");
     }
 
@@ -36,20 +35,21 @@ public sealed class AiProviderCatalogTests
     }
 
     [Fact]
-    public void Entries_preserve_special_provider_contracts()
+    public void Entries_require_an_api_key_for_every_built_in_provider()
     {
-        var ollama = AiProviderCatalog.GetRequired("ollama");
-        ollama.ProviderKind.Should().Be(AiProviderKind.Ollama);
-        ollama.AuthKind.Should().Be(AiProviderAuthKind.None);
-        ollama.DefaultEndpoint.Should().Be(new Uri("http://localhost:11434/"));
-        ollama.SupportsModelListing.Should().BeTrue();
-        ollama.SupportedFormats.Should().Contain(AiProviderApiFormat.OpenAIChatCompletions);
+        foreach (var entry in AiProviderCatalog.Entries)
+        {
+            entry.AuthKind.Should().Be(AiProviderAuthKind.ApiKey);
+        }
+
+        var custom = AiProviderCatalog.GetRequired("custom");
+        custom.SupportedFormats.Should().Contain(AiProviderApiFormat.OpenAIChatCompletions);
+        custom.SupportedFormats.Should().Contain(AiProviderApiFormat.OpenAIResponses);
     }
 
     [Theory]
     [InlineData("openai", AiProviderKind.OpenAI, AiProviderApiFormat.OpenAIResponses, AiProviderAuthKind.ApiKey, true)]
     [InlineData("anthropic", AiProviderKind.Anthropic, AiProviderApiFormat.AnthropicMessages, AiProviderAuthKind.ApiKey, true)]
-    [InlineData("ollama", AiProviderKind.Ollama, AiProviderApiFormat.OllamaNative, AiProviderAuthKind.None, true)]
     [InlineData("custom", AiProviderKind.OpenAICompatible, AiProviderApiFormat.OpenAIChatCompletions, AiProviderAuthKind.ApiKey, true)]
     public void GetRequired_resolves_catalog_contract(
         string catalogId,

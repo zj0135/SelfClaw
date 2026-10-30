@@ -25,7 +25,7 @@ export function useAiProviderHost(options) {
 		resetCheckStatus,
 	} = options;
 
-	const { request, requestLatest, post } = useHostBridge();
+	const { request, requestLatest } = useHostBridge();
 	const { confirm } = useConfirm();
 
 	const apiKeyInput = ref('');
@@ -250,16 +250,6 @@ export function useAiProviderHost(options) {
 		}
 	}
 
-	function openProviderConsole() {
-		const href = activeProvider.value?.getApiKeyUrl;
-		if (!href) {
-			showToast('该服务商没有配置控制台地址');
-			return;
-		}
-
-		post({ type: 'open-link', href });
-	}
-
 	function openProviderDialog() {
 		providerDraft.name = '';
 		providerDraft.protocolId = customProtocols[0]?.id || '';
@@ -390,7 +380,6 @@ export function useAiProviderHost(options) {
 		deleteModel,
 		fetchModelList,
 		checkConnectivity,
-		openProviderConsole,
 		openProviderDialog,
 		createCustomProvider,
 		openModelDialog,
@@ -417,7 +406,6 @@ function normalizeProvider(raw) {
 		base: raw?.base || '',
 		authKind: Number(raw?.authKind ?? 0),
 		providerKind: Number(raw?.providerKind ?? 0),
-		getApiKeyUrl: raw?.getApiKeyUrl || '',
 		supportsModelListing: Boolean(raw?.supportsModelListing),
 		defaultApiFormat: Number(raw?.defaultApiFormat ?? 0),
 		supportedFormats: Array.isArray(raw?.supportedFormats) ? raw.supportedFormats.map(Number) : [0],

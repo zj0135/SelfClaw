@@ -279,11 +279,11 @@ loop:
 
 ### 7.2 协议与预算
 
-- 必须完整枚举单次响应后再决定工具分支及终态。P0 Chat Completions fixture 中，完整 FunctionCallContent 晚于 finish_reason 到达；不能因此提前 break。使用当前 SDK ToChatResponse 等价语义增量聚合消息、元数据和 usage，避免长期保存原始 delta 列表。三个 SSE fixture 验证了参数分片，Ollama fixture 参数一次给全，不能声称验证了四者的分片行为。
+- 必须完整枚举单次响应后再决定工具分支及终态。P0 Chat Completions fixture 中，完整 FunctionCallContent 晚于 finish_reason 到达；不能因此提前 break。使用当前 SDK ToChatResponse 等价语义增量聚合消息、元数据和 usage，避免长期保存原始 delta 列表。三个 SSE fixture 验证了参数分片，不能据此声称所有 provider 的分片行为都被验证。
 - 运行中保留原生内容、callId、响应 ID、推理签名／加密 reasoning 和 adapter 元数据。Anthropic 签名在独立 update 的 ProtectedData 中，合并后才与 thinking text 结合；Responses 的 MessageId 可以为空，不能强行当作 ResponseId。实际下一请求序列化由 P0 G02 捕获 HTTP body 验证，不经过显示 DTO 往返。
 - 明确区分客户端 AIFunction 调用和 provider 侧内置工具；只执行当前 bindings 中的客户端工具。未知客户端工具与格式损坏响应按协议失败处理，不伪造成功。
 - 完整枚举后先分类：ContentFilter 或原生 Refusal 返回 Blocked，取消本响应提出但尚未执行的工具；其他 provider ErrorContent、未知 finish reason 返回 Failed。Length 仍按原截断规则处理。零响应、只有 usage/元数据/空内容且没有完成标记均 Failed；明确 Stop 的合法无正文响应、有效 text/reasoning/ProtectedData 和其他支持的原生内容仍可完成。不能用前一请求的输出掩盖后一请求的空响应。以上均发生在审批、checkpoint 之前，保留已经观察到的内容与用量。
-- 通过响应分类后，再看合并内容中是否有完整客户端 function call；存在调用时即使 finish_reason=Stop 也进入工具分支。Ollama fixture 已观测到这种组合，Stop/ToolCalls 的新预算路径均有回归。显式循环返回正常完成／截断／内容过滤／预算耗尽，协议错误抛出并由 runtime 收尾为 Failed，不凭最后一个 finish reason 反推预算耗尽。
+- 通过响应分类后，再看合并内容中是否有完整客户端 function call；存在调用时即使 finish_reason=Stop 也进入工具分支。Stop/ToolCalls 的新预算路径均有回归。显式循环返回正常完成／截断／内容过滤／预算耗尽，协议错误抛出并由 runtime 收尾为 Failed，不凭最后一个 finish reason 反推预算耗尽。
 - usage 先按单请求及 adapter 的增量／累计契约归一化，再跨请求累加；不把 UsageContent 碎片数当 ProviderCalls，也不把所有 raw usage 一律相加。无 usage 保留未知，详见 §9。
 - 请求上限是**电路断路器**，不是任务长度策略：`MaximumProviderRequestsPerTurn = 1024`（原 128），含首次及 steer 请求，每次开始调用前预占一次，取消／失败不退回；SDK 内部 HTTP 重试不是新的逻辑 IChatClient 请求。128 会误杀长任务（读几百个文件即可超过），而长任务真正需要的保护是下面两条无界成本防线：无进展检测与每轮窗口校验。
 - **无进展检测**（`NoProgressGuard`）：连续 `RepeatedBatchLimit = 5` 个工具批次指纹相同（工具名 + 参数 + 结果，**不含** callId）即判定卡死，取消未执行调用、补 `NoProgress` 本地结果、返回 `Stalled` → Failed。读取同一文件但内容在变、轮询构建但输出在变都不算重复；连续故障预算（`MaximumConsecutiveToolFaults = 2`）与它独立。这是唯一能区分"长任务"与"死循环"的判据——请求计数做不到。取 5 而不是 3：重试、改完再读一遍、二次确认都属于合法模式，多等两轮的代价由请求上限兜住。

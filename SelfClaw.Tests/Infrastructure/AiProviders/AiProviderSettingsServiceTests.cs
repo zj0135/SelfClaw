@@ -36,7 +36,7 @@ public sealed class AiProviderSettingsServiceTests
 
         var state = await service.GetStateAsync();
 
-        state.Providers.Should().HaveCount(4);
+        state.Providers.Should().HaveCount(3);
         state.DefaultModelProfileId.Should().Be(profile.Id);
         var openAi = state.Providers.Single(provider => provider.CatalogId == "openai");
         openAi.ConnectionId.Should().Be(connection.Id);
@@ -49,11 +49,11 @@ public sealed class AiProviderSettingsServiceTests
         openAi.Models[0].ContextLength.Should().Be(1048576);
         openAi.Models[0].PriceInPerMTok.Should().Be(2m);
 
-        var ollama = state.Providers.Single(provider => provider.CatalogId == "ollama");
-        ollama.ConnectionId.Should().BeNull();
-        ollama.IsConfigured.Should().BeFalse();
-        ollama.Enabled.Should().BeFalse();
-        ollama.Base.Should().Be("http://localhost:11434/");
+        var anthropic = state.Providers.Single(provider => provider.CatalogId == "anthropic");
+        anthropic.ConnectionId.Should().BeNull();
+        anthropic.IsConfigured.Should().BeFalse();
+        anthropic.Enabled.Should().BeFalse();
+        anthropic.Base.Should().Be("https://api.anthropic.com/");
         JsonSerializer.Serialize(state).Should().NotContain("sk-test-abcdef");
     }
 
@@ -108,18 +108,6 @@ public sealed class AiProviderSettingsServiceTests
 
         protector.DeleteCalls.Should().Contain("secret:existing");
         repository.Connections[existing.Id].CredentialRefs.Should().NotContainKey("api_key");
-
-        var ollama = await service.SaveProviderAsync(new SaveProviderCommand(
-            null,
-            "ollama",
-            "Local Ollama",
-            new Uri("http://localhost:11434/"),
-            "must-not-be-stored",
-            ConnectionOptions: null));
-        ollama.ProviderKind.Should().Be(AiProviderKind.Ollama);
-        ollama.AuthKind.Should().Be(AiProviderAuthKind.None);
-        ollama.HasApiKey.Should().BeFalse();
-        protector.Secrets.Values.Should().NotContain("must-not-be-stored");
     }
 
     [Fact]
@@ -459,11 +447,11 @@ public sealed class AiProviderSettingsServiceTests
 
         state.CustomProtocols.Should().NotBeEmpty();
         state.CustomProtocols.Select(protocol => protocol.Id)
-            .Should().Contain(["openai-chat", "openai-responses", "anthropic", "ollama"]);
-        var ollama = state.CustomProtocols.Single(protocol => protocol.Id == "ollama");
-        ollama.ProviderKind.Should().Be(AiProviderKind.Ollama);
-        ollama.AuthKind.Should().Be(AiProviderAuthKind.None);
-        ollama.DefaultApiFormat.Should().Be(AiProviderApiFormat.OllamaNative);
+            .Should().Contain(["openai-chat", "openai-responses", "anthropic"]);
+        var anthropic = state.CustomProtocols.Single(protocol => protocol.Id == "anthropic");
+        anthropic.ProviderKind.Should().Be(AiProviderKind.Anthropic);
+        anthropic.AuthKind.Should().Be(AiProviderAuthKind.ApiKey);
+        anthropic.DefaultApiFormat.Should().Be(AiProviderApiFormat.AnthropicMessages);
     }
 
     [Fact]
@@ -559,33 +547,33 @@ public sealed class AiProviderSettingsServiceTests
     {
         var repository = new InMemoryAiProviderRepository();
         var protector = new FakeSecretProtector();
-        // A custom connection whose kind is Ollama supports OllamaNative and OpenAIChatCompletions.
-        var connection = CreateConnection("custom", AiProviderKind.Ollama, "Local");
+        // An OpenAI-compatible connection supports both OpenAI wire formats.
+        var connection = CreateConnection("custom", AiProviderKind.OpenAICompatible, "Local");
         repository.Connections[connection.Id] = connection;
         var service = CreateService(
             repository,
             protector,
-            new FakeAiProviderAdapter(AiProviderKind.Ollama)
+            new FakeAiProviderAdapter(AiProviderKind.OpenAICompatible)
             {
-                Formats = [AiProviderApiFormat.OllamaNative, AiProviderApiFormat.OpenAIChatCompletions]
+                Formats = [AiProviderApiFormat.OpenAIChatCompletions, AiProviderApiFormat.OpenAIResponses]
             });
 
-        var native = await service.UpsertModelAsync(new UpsertModelCommand(
+        var responses = await service.UpsertModelAsync(new UpsertModelCommand(
             null,
             connection.Id,
-            "Native model",
-            AiProviderApiFormat.OllamaNative,
-            "llama3",
+            "Responses model",
+            AiProviderApiFormat.OpenAIResponses,
+            "gpt-5",
             Sampling: null,
             ModelOptions: null));
-        native.ApiFormat.Should().Be(AiProviderApiFormat.OllamaNative);
+        responses.ApiFormat.Should().Be(AiProviderApiFormat.OpenAIResponses);
 
         var invalid = () => service.UpsertModelAsync(new UpsertModelCommand(
             null,
             connection.Id,
             "Wrong protocol",
             AiProviderApiFormat.AnthropicMessages,
-            "llama3",
+            "gpt-5",
             Sampling: null,
             ModelOptions: null));
         await invalid.Should().ThrowAsync<NotSupportedException>().WithMessage("*AnthropicMessages*");

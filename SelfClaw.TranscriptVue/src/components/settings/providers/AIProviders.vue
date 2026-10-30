@@ -4,7 +4,6 @@ import {
 	Search,
 	Plus,
 	Trash2,
-	ArrowUpRight,
 	Eye,
 	EyeOff,
 	Check,
@@ -22,13 +21,11 @@ import { useToast } from '../../../composables/useToast.js';
 // Brand logos from @lobehub/icons-static-png (color variants where available).
 import openaiLogo from '@lobehub/icons-static-png/light/openai.png';
 import anthropicLogo from '@lobehub/icons-static-png/light/claude-color.png';
-import ollamaLogo from '@lobehub/icons-static-png/light/ollama.png';
 
 // Maps a catalog id to its brand logo asset. Custom connections fall back to OpenAI.
 const providerLogos = {
 	openai: openaiLogo,
 	anthropic: anthropicLogo,
-	ollama: ollamaLogo,
 };
 
 // Filled by applyState in useAiProviderHost on mount; empty until the host replies,
@@ -71,7 +68,6 @@ const {
 	deleteModel,
 	fetchModelList: fetchModelListFromHost,
 	checkConnectivity: checkConnectivityFromHost,
-	openProviderConsole: openProviderConsoleFromHost,
 	openProviderDialog,
 	createCustomProvider,
 	openModelDialog,
@@ -258,21 +254,12 @@ function configurationSaved() {
 
 						<div class="deck-fields">
 							<!-- API Key -->
-							<div v-if="activeProvider.authKind !== 1" class="field-item">
+							<div class="field-item">
 								<div class="field-topline">
 									<label class="fl" for="api-key">
 										<KeyRound :size="13" :stroke-width="2" class="fl-ico" />
 										<span>API Key</span>
 									</label>
-									<button
-										class="help-link-chip"
-										type="button"
-										:disabled="!activeProvider.getApiKeyUrl"
-										@click="openProviderConsoleFromHost"
-									>
-										<span>获取 API Key</span>
-										<ArrowUpRight :size="12" :stroke-width="2.2" />
-									</button>
 								</div>
 								<div class="input-wrap">
 									<input
@@ -886,33 +873,6 @@ function configurationSaved() {
 
 .fl-ico {
 	color: var(--sc-faint);
-}
-
-.help-link-chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	padding: 3px 10px;
-	border: 1px solid var(--sc-line-2);
-	border-radius: 99px;
-	background: var(--sc-raise);
-	color: var(--sc-soft);
-	font-family: var(--sc-sans);
-	font-size: var(--fs-11);
-	font-weight: 600;
-	cursor: pointer;
-	transition: all 0.15s;
-}
-
-.help-link-chip:hover:not(:disabled) {
-	border-color: var(--sc-acid);
-	color: var(--sc-acid);
-	background: var(--sc-panel);
-}
-
-.help-link-chip:disabled {
-	opacity: 0.4;
-	cursor: default;
 }
 
 .input-wrap {

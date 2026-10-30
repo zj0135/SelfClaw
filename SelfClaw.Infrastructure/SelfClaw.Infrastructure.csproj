@@ -14,7 +14,6 @@
     <PackageReference Include="Microsoft.ML.Tokenizers.Data.Cl100kBase" />
     <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" />
     <PackageReference Include="NCrontab" />
-    <PackageReference Include="OllamaSharp" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { Search, Plus, RefreshCw, Eye, SlidersHorizontal, Trash2, Image, Sparkles, Cpu } from 'lucide-vue-next';
+import { Search, Plus, RefreshCw, SlidersHorizontal, Trash2, Image, Sparkles, Cpu } from 'lucide-vue-next';
 
 const props = defineProps({
 	provider: { type: Object, required: true },
@@ -115,15 +115,6 @@ const filteredModels = computed(() => {
 
 					<div class="card-actions">
 						<div class="btn-cluster">
-							<button
-								class="icon-btn"
-								type="button"
-								title="查看计费与详情"
-								aria-label="查看详情"
-								@click="emit('configure', model, 'metadata')"
-							>
-								<Eye :size="15" :stroke-width="2" />
-							</button>
 							<button
 								class="icon-btn"
 								type="button"

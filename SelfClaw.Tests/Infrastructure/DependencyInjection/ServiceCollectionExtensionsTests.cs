@@ -104,14 +104,12 @@ public sealed class ServiceCollectionExtensionsTests : IDisposable
         {
             AiProviderKind.OpenAI,
             AiProviderKind.OpenAICompatible,
-            AiProviderKind.Anthropic,
-            AiProviderKind.Ollama
+            AiProviderKind.Anthropic
         });
         registry.GetRequiredAdapter(AiProviderKind.OpenAI).ProviderKind.Should().Be(AiProviderKind.OpenAI);
         registry.GetRequiredAdapter(AiProviderKind.OpenAICompatible).ProviderKind.Should()
             .Be(AiProviderKind.OpenAICompatible);
         registry.GetRequiredAdapter(AiProviderKind.Anthropic).ProviderKind.Should().Be(AiProviderKind.Anthropic);
-        registry.GetRequiredAdapter(AiProviderKind.Ollama).ProviderKind.Should().Be(AiProviderKind.Ollama);
         settingsService.Should().BeOfType<AiProviderSettingsService>();
         chatClientFactory.Should().BeOfType<AiChatClientFactory>();
     }

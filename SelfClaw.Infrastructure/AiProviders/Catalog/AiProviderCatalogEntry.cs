@@ -17,6 +17,5 @@ public sealed record AiProviderCatalogEntry(
     AiProviderApiFormat DefaultApiFormat,
     IReadOnlyList<AiProviderApiFormat> SupportedFormats,
     AiProviderAuthKind AuthKind,
-    string? GetApiKeyUrl,
     bool SupportsModelListing,
     IReadOnlyList<AiModelDescriptor> WellKnownModels);

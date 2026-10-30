@@ -307,7 +307,6 @@ public sealed class AiProviderSettingsBridgeTests
                 "https://api.openai.com/v1/",
                 AiProviderKind.OpenAI,
                 AiProviderAuthKind.ApiKey,
-                null,
                 true,
                 AiProviderApiFormat.OpenAIResponses,
                 [AiProviderApiFormat.OpenAIResponses],

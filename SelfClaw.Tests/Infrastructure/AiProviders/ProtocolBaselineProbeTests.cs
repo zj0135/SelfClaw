@@ -14,7 +14,6 @@ using SelfClaw.Infrastructure.AiProviders.Abstractions;
 using SelfClaw.Infrastructure.AiProviders.Anthropic;
 using SelfClaw.Infrastructure.AiProviders.Http;
 using SelfClaw.Infrastructure.AiProviders.Models;
-using SelfClaw.Infrastructure.AiProviders.Ollama;
 using SelfClaw.Infrastructure.AiProviders.OpenAi;
 
 namespace SelfClaw.Tests.Infrastructure.AiProviders;
@@ -136,33 +135,6 @@ public sealed class ProtocolBaselineProbeTests
         response.FinishReason.Should().Be(ChatFinishReason.ToolCalls);
         response.Usage!.InputTokenCount.Should().Be(11);
         response.Usage!.OutputTokenCount.Should().Be(7);
-    }
-
-    [Fact]
-    public async Task Ollama_native_tool_call_probe()
-    {
-        using var http = new AiProviderHttpClientProvider(() => new SseHandler(BuildOllamaNdjson(), "application/x-ndjson"));
-        var adapter = new OllamaProviderAdapter(http);
-        var request = CreateOllamaRequest();
-        using var httpClient = http.CreateTurnClient(request.Connection);
-        var client = adapter.CreateChatClient(request, httpClient);
-        var options = adapter.CreateChatOptions(request, []);
-
-        var updates = new List<ChatResponseUpdate>();
-        await foreach (var update in client.GetStreamingResponseAsync(
-                           [new ChatMessage(ChatRole.User, "hi")], options))
-        {
-            updates.Add(update);
-        }
-
-        WriteProbe("ollama-native.txt",
-            DescribeUpdates(updates) + "\n=== COALESCED ===\n" + DescribeResponse(updates.ToChatResponse()));
-        var response = updates.ToChatResponse();
-        var call = response.Messages[0].Contents.OfType<FunctionCallContent>().Should().ContainSingle().Subject;
-        call.Name.Should().Be("read_file");
-        call.Arguments!["relativePath"]!.ToString().Should().Be("a.txt");
-        response.FinishReason.Should().Be(ChatFinishReason.Stop);
-        call.CallId.Should().NotBeNullOrWhiteSpace();
     }
 
     [Theory]
@@ -428,15 +400,6 @@ public sealed class ProtocolBaselineProbeTests
         return builder.ToString();
     }
 
-    private static string BuildOllamaNdjson()
-    {
-        var builder = new StringBuilder();
-        builder.Append("{\"model\":\"llama3.2:latest\",\"created_at\":\"2024-01-01T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"thinking\":\"think \"},\"done\":false}\n");
-        builder.Append("{\"model\":\"llama3.2:latest\",\"created_at\":\"2024-01-01T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"function\":{\"name\":\"read_file\",\"arguments\":{\"relativePath\":\"a.txt\"}}}]},\"done\":false}\n");
-        builder.Append("{\"model\":\"llama3.2:latest\",\"created_at\":\"2024-01-01T00:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":11,\"eval_count\":7}\n");
-        return builder.ToString();
-    }
-
     private static string DescribeUpdates(IReadOnlyList<ChatResponseUpdate> updates)
     {
         var builder = new StringBuilder();
@@ -524,19 +487,6 @@ public sealed class ProtocolBaselineProbeTests
         return new AiProviderClientRequest(
             connection, profile,
             new Dictionary<string, string> { [OpenAiProviderAdapter.ApiKeySecretName] = "test-key" }, false);
-    }
-
-    private static AiProviderClientRequest CreateOllamaRequest()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var connection = new AiProviderConnection(
-            Guid.NewGuid(), "ollama", "Local Ollama", AiProviderKind.Ollama,
-            new Uri("http://localhost:11434/"), AiProviderAuthKind.None,
-            new Dictionary<string, string>(), JsonObject("{}"), now, now);
-        var profile = new AiModelProfile(
-            Guid.NewGuid(), connection.Id, "Test", AiProviderApiFormat.OllamaNative, "llama3.2:latest",
-            new AiSamplingOptions(false, 0.7, false, 0.7), JsonObject("{}"), now, now);
-        return new AiProviderClientRequest(connection, profile, new Dictionary<string, string>(), false);
     }
 
     private static AiProviderClientRequest CreateAnthropicRequest()

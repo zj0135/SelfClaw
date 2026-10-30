@@ -134,11 +134,6 @@ internal sealed class AiChatClientFactory : IAiChatClientFactory
         AiProviderConnection connection,
         CancellationToken cancellationToken)
     {
-        if (connection.AuthKind == AiProviderAuthKind.None)
-        {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
-        }
-
         if (connection.AuthKind != AiProviderAuthKind.ApiKey)
         {
             throw new NotSupportedException(

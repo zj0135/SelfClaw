@@ -143,22 +143,12 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IA
         // provider kind) from resetting a custom connection's protocol.
         var providerKind = existing?.ProviderKind ?? command.ProviderKind ?? catalogEntry.ProviderKind;
         var catalogId = existing?.CatalogId ?? catalogEntry.CatalogId;
-        var authKind = AiProviderProtocols.ResolveAuthKind(providerKind);
 
         var credentialRefs = existing?.CredentialRefs.ToDictionary(pair => pair.Key, pair => pair.Value)
             ?? new Dictionary<string, string>(StringComparer.Ordinal);
         credentialRefs.TryGetValue(ApiKeySecretName, out var existingApiKeyRef);
 
-        if (authKind == AiProviderAuthKind.None)
-        {
-            if (!string.IsNullOrWhiteSpace(existingApiKeyRef))
-            {
-                await _secretProtector.DeleteSecretAsync(existingApiKeyRef, cancellationToken).ConfigureAwait(false);
-            }
-
-            credentialRefs.Remove(ApiKeySecretName);
-        }
-        else if (command.ApiKey is not null)
+        if (command.ApiKey is not null)
         {
             if (string.IsNullOrWhiteSpace(command.ApiKey))
             {
@@ -192,7 +182,7 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IA
             command.Name.Trim(),
             providerKind,
             command.Endpoint,
-            authKind,
+            effectiveCatalog.AuthKind,
             credentialRefs,
             connectionOptions,
             existing?.CreatedAtUtc ?? now,
@@ -507,7 +497,6 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IA
             connection.Endpoint.AbsoluteUri,
             connection.ProviderKind,
             connection.AuthKind,
-            catalogEntry.GetApiKeyUrl,
             supportsModelListing,
             defaultApiFormat,
             supportedFormats,
@@ -531,7 +520,6 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IA
             catalogEntry.DefaultEndpoint.AbsoluteUri,
             catalogEntry.ProviderKind,
             catalogEntry.AuthKind,
-            catalogEntry.GetApiKeyUrl,
             catalogEntry.SupportsModelListing,
             catalogEntry.DefaultApiFormat,
             catalogEntry.SupportedFormats,

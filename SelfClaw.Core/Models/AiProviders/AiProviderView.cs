@@ -15,7 +15,6 @@ public sealed record AiProviderView(
     string Base,
     AiProviderKind ProviderKind,
     AiProviderAuthKind AuthKind,
-    string? GetApiKeyUrl,
     bool SupportsModelListing,
     AiProviderApiFormat DefaultApiFormat,
     IReadOnlyList<AiProviderApiFormat> SupportedFormats,

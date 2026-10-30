@@ -53,7 +53,7 @@
 
 - **回合内压缩**：已另立设计（见 `direct-in-turn-compaction-design.md`），不在本设计范围内。
 - **CLI 链路**：CLI 自行持有上下文与会话恢复，不接入本机制。
-- **跨 provider 逐 token 精确**：Anthropic 与 Ollama 未公开 tokenizer，统一用 OpenAI 编码近似（默认 `o200k_base`），不承诺与 provider 自身分词完全一致；实测口径仍以 provider 回报为准。
+- **跨 provider 逐 token 精确**：Anthropic 未公开 tokenizer，统一用 OpenAI 编码近似（默认 `o200k_base`），不承诺与 provider 自身分词完全一致；实测口径仍以 provider 回报为准。
 - **自动探测窗口**：模型窗口仍只来自模型配置（`ContextLength` / `context_window_tokens`）。
 - **摘要质量自动评估、压缩成本单独计费展示**。
 
@@ -181,7 +181,7 @@ CREATE INDEX ix_conversation_compactions_conversation
 - **API**（已在 2.0.1 的 XML 文档上核对）：`TiktokenTokenizer.CreateForEncoding("o200k_base")` / `CreateForModel("gpt-4o")` 返回基类 `Tokenizer`；计数用 `Tokenizer.CountTokens(string text)`（另有 `CountTokens(string, ReadOnlySpan<char>, EncodeSettings)` 与 `EncodeToIds` 等重载）。消息与工具定义逐块计数后加框架常量。
 - **编码解析顺序**（按**每个回合的模型**解析，不是进程级）：模型 `ModelOptions["tokenizer.encoding"]` 显式指定 → 按模型名映射（`gpt-4o` / `o1` / `o3` 系 → `o200k_base`；`gpt-4` / `gpt-3.5` 系 → `cl100k_base`）→ 默认 `o200k_base`。
 - **为什么不用 TiktokenSharp**：TiktokenSharp 在首次使用某个编码时从 `openaipublic.blob.core.windows.net` 下载 `.tiktoken` 词表并缓存到本地，离线场景需要预置文件并设置 `TikToken.PBEFileDirectory`，否则首次运行依赖外网且可能卡住。本产品是离线优先的桌面应用，不应把首次使用压在外部 blob 上。若坚持用 TiktokenSharp，必须随安装包预置三个词表并显式配置路径 —— 抽象层 `IDirectTokenCounter` 允许替换实现而不动其余代码。
-- **准确性边界**：`o200k_base` / `cl100k_base` 是 OpenAI 的编码。OpenAI 系模型基本精确（差异来自框架开销）；Claude、Ollama 等只是近似，所以阈值保留 25% 余量，并以 provider 实测值校正下一回合的判断。
+- **准确性边界**：`o200k_base` / `cl100k_base` 是 OpenAI 的编码。OpenAI 系模型基本精确（差异来自框架开销）；Claude 只是近似，所以阈值保留 25% 余量，并以 provider 实测值校正下一回合的判断。
 
 ### 5.3 计数成本控制
 
@@ -426,7 +426,7 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 
 | 风险 | 说明 | 缓解 |
 | --- | --- | --- |
-| 编码不匹配 | Claude / Ollama 只能近似（OpenAI 编码） | 阈值保留 25% 余量；provider 实测值作为下一回合的下限 |
+| 编码不匹配 | Claude 只能近似（OpenAI 编码） | 阈值保留 25% 余量；provider 实测值作为下一回合的下限 |
 | 计数性能 | .NET BPE 比 Rust tiktoken 慢，长历史首次全量计数可能上百毫秒 | 增量维护 + 按消息缓存 + 后台线程；预热词表；实测后按需再优化 |
 | 词表分发 | 数据包把词表嵌进程序集（实测 O200kBase 包 2.42 MB、其中 DLL 1.20 MB；Cl100kBase 包约 1.10 MB），安装包与解压产物都会变大 | 可接受；若需瘦身，改为安装包内独立 `.tiktoken` 文件 + 路径配置（抽象层已预留） |
 | 摘要丢信息 | 长任务细节可能被压掉 | 摘要指令强制保留文件路径/命令/未完成项；保留比例 50%；摘要可展开复查 |

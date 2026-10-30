@@ -4,10 +4,9 @@ using SelfClaw.Core.Models;
 namespace SelfClaw.Infrastructure.AiProviders;
 
 /// <summary>
-/// Curated protocol choices offered when creating a custom provider connection,
-/// plus the derivations shared by the settings service. A protocol option is
-/// what the user picks in the "add custom provider" dialog; it maps to the
-/// concrete <see cref="AiProviderKind"/> and default
+/// Curated protocol choices offered when creating a custom provider connection.
+/// A protocol option is what the user picks in the "add custom provider" dialog;
+/// it maps to the concrete <see cref="AiProviderKind"/> and default
 /// <see cref="AiProviderApiFormat"/> that back the connection.
 /// </summary>
 public static class AiProviderProtocols
@@ -38,25 +37,9 @@ public static class AiProviderProtocols
                 AiProviderKind.Anthropic,
                 AiProviderApiFormat.AnthropicMessages,
                 AiProviderAuthKind.ApiKey,
-                SupportsModelListing: true),
-            new AiProviderProtocolOption(
-                "ollama",
-                "Ollama 原生",
-                AiProviderKind.Ollama,
-                AiProviderApiFormat.OllamaNative,
-                AiProviderAuthKind.None,
                 SupportsModelListing: true)
         ]);
 
     /// <summary>The protocol options shown when adding a custom provider connection.</summary>
     public static IReadOnlyList<AiProviderProtocolOption> CustomProtocolOptions => CustomOptions;
-
-    /// <summary>
-    /// Derives the authentication scheme for a provider kind. Only local Ollama
-    /// runs without an API key; every other kind uses an API key.
-    /// </summary>
-    public static AiProviderAuthKind ResolveAuthKind(AiProviderKind providerKind)
-        => providerKind == AiProviderKind.Ollama
-            ? AiProviderAuthKind.None
-            : AiProviderAuthKind.ApiKey;
 }

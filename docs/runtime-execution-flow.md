@@ -144,4 +144,4 @@ dotnet build SelfClaw.slnx --no-restore -p:BaseOutputPath=bin/direct-refactor-fi
 dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj --no-build --no-restore -p:BaseOutputPath=bin/direct-refactor-final/
 ```
 
-正式回归覆盖真实 AIFunction 封送、四种 provider 协议序列化、执行前 checkpoint、中断恢复、准入异常、多父调度、缓存重试、预算与 glob 边界。Desktop 整改另覆盖 UI 线程、设置原子性、通知导航、CLI 子进程收尾、跨页面选择、消息恢复和资源 lease。桌面/进程强杀 smoke 需要 `SELFCLAW_DESKTOP_SMOKE=1`；真实 provider smoke 需要 `SELFCLAW_PROVIDER_SMOKE=1`。2026-09-14 最终验证为 .NET 821 通过/4 跳过、Vue 32 通过、Edge e2e 11 通过；环境及原生限制见 Desktop review。
+正式回归覆盖真实 AIFunction 封送、三种 provider 协议序列化、执行前 checkpoint、中断恢复、准入异常、多父调度、缓存重试、预算与 glob 边界。Desktop 整改另覆盖 UI 线程、设置原子性、通知导航、CLI 子进程收尾、跨页面选择、消息恢复和资源 lease。桌面/进程强杀 smoke 需要 `SELFCLAW_DESKTOP_SMOKE=1`；真实 provider smoke 需要 `SELFCLAW_PROVIDER_SMOKE=1`。2026-09-14 最终验证为 .NET 821 通过/4 跳过、Vue 32 通过、Edge e2e 11 通过；环境及原生限制见 Desktop review。

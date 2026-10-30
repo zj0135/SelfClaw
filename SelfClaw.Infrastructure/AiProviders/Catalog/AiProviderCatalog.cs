@@ -27,7 +27,6 @@ public static class AiProviderCatalog
                 AiProviderApiFormat.OpenAIResponses,
                 [AiProviderApiFormat.OpenAIChatCompletions, AiProviderApiFormat.OpenAIResponses],
                 AiProviderAuthKind.ApiKey,
-                "https://platform.openai.com/api-keys",
                 supportsModelListing: true),
             Entry(
                 "anthropic",
@@ -39,19 +38,6 @@ public static class AiProviderCatalog
                 AiProviderApiFormat.AnthropicMessages,
                 [AiProviderApiFormat.AnthropicMessages],
                 AiProviderAuthKind.ApiKey,
-                "https://console.anthropic.com/settings/keys",
-                supportsModelListing: true),
-            Entry(
-                "ollama",
-                "Ollama",
-                "Local model runtime",
-                "#3A3A3A",
-                AiProviderKind.Ollama,
-                "http://localhost:11434/",
-                AiProviderApiFormat.OllamaNative,
-                [AiProviderApiFormat.OllamaNative, AiProviderApiFormat.OpenAIChatCompletions],
-                AiProviderAuthKind.None,
-                getApiKeyUrl: null,
                 supportsModelListing: true),
             Entry(
                 CustomCatalogId,
@@ -63,7 +49,6 @@ public static class AiProviderCatalog
                 AiProviderApiFormat.OpenAIChatCompletions,
                 [AiProviderApiFormat.OpenAIChatCompletions, AiProviderApiFormat.OpenAIResponses],
                 AiProviderAuthKind.ApiKey,
-                getApiKeyUrl: null,
                 supportsModelListing: true)
         ]);
 
@@ -92,7 +77,6 @@ public static class AiProviderCatalog
         AiProviderApiFormat defaultApiFormat,
         AiProviderApiFormat[] supportedFormats,
         AiProviderAuthKind authKind,
-        string? getApiKeyUrl,
         bool supportsModelListing)
         => new(
             catalogId,
@@ -104,7 +88,6 @@ public static class AiProviderCatalog
             defaultApiFormat,
             Array.AsReadOnly(supportedFormats),
             authKind,
-            getApiKeyUrl,
             supportsModelListing,
             NoWellKnownModels);
 }

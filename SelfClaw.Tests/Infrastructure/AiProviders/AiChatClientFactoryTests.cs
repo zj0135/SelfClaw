@@ -108,20 +108,6 @@ public sealed class AiChatClientFactoryTests
     }
 
     [Fact]
-    public async Task CreateAsync_skips_secret_resolution_for_no_auth_connections()
-    {
-        var data = CreateData(authKind: AiProviderAuthKind.None);
-        var protector = new FakeSecretProtector();
-        var adapter = new FakeAdapter(new FakeChatClient(), new ChatOptions());
-        var factory = CreateFactory(data.Repository, protector, adapter);
-
-        using var lease = factory.Create(await factory.PrepareAsync(data.Profile.Id), CreatePipeline([]));
-
-        protector.RetrievedRefs.Should().BeEmpty();
-        adapter.LastRequest!.Secrets.Should().BeEmpty();
-    }
-
-    [Fact]
     public async Task CreateAsync_rejects_missing_or_disabled_model()
     {
         var data = CreateData();
@@ -173,9 +159,12 @@ public sealed class AiChatClientFactoryTests
     [Fact]
     public async Task PrepareAsync_uses_selection_or_requests_a_direct_default()
     {
-        var data = CreateData(authKind: AiProviderAuthKind.None);
+        var data = CreateData();
         var adapter = new FakeAdapter();
-        var factory = CreateFactory(data.Repository, new FakeSecretProtector(), adapter);
+        var factory = CreateFactory(
+            data.Repository,
+            new FakeSecretProtector { Secrets = { ["secret:openai"] = "sk-test" } },
+            adapter);
 
         var missing = () => factory.PrepareAsync(null);
         await missing.Should().ThrowAsync<InvalidOperationException>().WithMessage("*default Direct model*");
@@ -204,7 +193,7 @@ public sealed class AiChatClientFactoryTests
             new AiProviderHttpClientProvider(() => new StubHandler()),
             NullLoggerFactory.Instance);
 
-    private static TestData CreateData(AiProviderAuthKind authKind = AiProviderAuthKind.ApiKey)
+    private static TestData CreateData()
     {
         var now = DateTimeOffset.UtcNow;
         var connection = new AiProviderConnection(
@@ -213,7 +202,7 @@ public sealed class AiChatClientFactoryTests
             "Test provider",
             AiProviderKind.OpenAI,
             new Uri("https://api.example.test/v1/"),
-            authKind,
+            AiProviderAuthKind.ApiKey,
             new Dictionary<string, string> { ["api_key"] = "secret:openai" },
             new Dictionary<string, JsonElement>(),
             now,

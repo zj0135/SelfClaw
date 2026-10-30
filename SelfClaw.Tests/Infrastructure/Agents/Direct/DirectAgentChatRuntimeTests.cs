@@ -773,7 +773,7 @@ public sealed class DirectAgentChatRuntimeTests
             if (modelProfileId is null) ScopeCalls.Add(AiModelSelectionScopes.DesktopDefault);
             var now = DateTimeOffset.UtcNow;
             var connection = new AiProviderConnection(Profile.ProviderConnectionId, "test", "Test", AiProviderKind.OpenAI,
-                new Uri("https://example.test"), AiProviderAuthKind.None, new Dictionary<string, string>(),
+                new Uri("https://example.test"), AiProviderAuthKind.ApiKey, new Dictionary<string, string>(),
                 new Dictionary<string, JsonElement>(), now, now);
             return Task.FromResult(new AiProviderClientRequest(connection, Profile, new Dictionary<string, string>(), false));
         }
