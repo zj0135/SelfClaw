@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Tests.TestDoubles;
 
@@ -224,7 +225,8 @@ public sealed class ConversationRunCoordinatorTests
     }
 
     private static ConversationRunCoordinator Create(EmptyConversationInputRepository? inputs = null)
-        => new(inputs ?? new(), new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
+        => new(inputs ?? new(), new EmptyConversationInputSteeringStore(), new ConversationInputChangeNotifier(),
+            NullLogger<ConversationRunCoordinator>.Instance);
 
     private static ConversationRunHandle Reserve(ConversationRunCoordinator runs, Guid? id = null)
         => runs.TryReserve(id ?? Guid.NewGuid(), AgentExecutionMode.Direct, DirectTurnOrigin.Interactive)

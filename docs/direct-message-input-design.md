@@ -87,7 +87,7 @@ P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未�
 - `Accepted`：输入已经持久化，可在 WebView 重载后恢复。
 - `Claimed`：输入被当前执行路径独占，不能再编辑或撤回。
 - `Consumed`：正式用户消息及消费位置已提交，runtime 可以据此构造后续请求。
-- UI 对 steer 的 Consumed 文案使用“已加入上下文”，不声称 provider 已收到或已遵守。
+- UI 不呈现 steer 的消费确认：steer 一旦离开等待列表（快照不再含该项）就整卡收起，不声称 provider 已收到或已遵守。
 
 这些状态均不代表任务成功。任务结果由逻辑回合终态表示。
 
@@ -410,7 +410,7 @@ P0 发现 child／continuation repository 还强制 AssistantMessage.Id 等于 C
 | `conversation-input/retry` | Held inputId、expectedRevision，重新校验后转 Pending |
 | `conversation-input/detail` | inputId，返回受限正文供编辑 |
 | `conversation-input/subscribe` | conversationId、subscriptionId，立即返回完整快照 |
-| `conversation-input/state` | subscriptionId、conversationId、queueRevision、paused、canSteer、reason、items、cancelledInputIds |
+| `conversation-input/state` | subscriptionId、conversationId、queueRevision、paused、canSteer、reason、items |
 
 submit 返回 inputId、item revision 和实际 `Started / Queued`，以及必要的拒绝原因。Started 只表示已经启动准入，不表示任务成功。超时重试复用 requestId；首次 ACK 前不清空编辑器。宿主只受理普通发送（FollowUp）；steer 没有独立提交入口，只在队列面板经 `promote` 产生。
 
@@ -418,13 +418,19 @@ submit 返回 inputId、item revision 和实际 `Started / Queued`，以及必�
 
 Vue 新增 `useConversationInputs` 和独立队列组件；`ChatView` 只接线。composer 只保留一个角落按钮：空闲时是「发送」；Direct 忙碌且输入框有内容时同一按钮变成「发送」把输入入队，输入框为空时显示「停止生成」（不可停止的后台续跑显示进度）；steer 不再由 composer 直接提交，改为在队列面板对某个 Pending FollowUp 点击「调整当前任务」（promote），依据 host 的 canSteer 展示可用性与退回队列原因。CLI 界面不展示可用 steer。
 
+卡片可见性（2026-11）：暂停只在**有等待项**（Pending／Held）时与等待项一起呈现，`paused` 本身不是展示理由。§3.1 允许「失败暂停后队列为空」，该状态由下一次空闲发送在领取时惰性解除，此时失败原因已由回合结果（TurnOutcome）呈现；若仅凭 `paused` 挂载，界面会留下一张既无条目、也无恢复按钮的空卡片。提示文案同样不是展示理由：它只随等待项一起渲染，绝不单独支撑一张空卡片。
+
 队列列表变化不强制 transcript follow；消费成正式消息以后走原 transcript 发布。沿用 Lucide、scoped styles 和组件拆分约束。
 
 P5 实现补充：状态快照在 `canSteer` 外附带 `steerReason` 和当前活动回合 `steerTargetTurnId`，UI 只回传后者的值，不自行推导权限；`promote` 仅接受尚未领取的 Pending FollowUp，Held 项必须先经 retry 重新校验冻结定义。
 
-队列卡片只呈现**仍在等待**的输入：宿主快照 `items` 仍包含 Pending / Claimed / Held，但**排除当前活动运行自身触发的那条输入**（运行保留 `StartingInputId`，由派发器启动该输入时记录），前端渲染时再隐藏 Claimed 项——正在执行（claimed）的输入属于当前回合、由转录呈现，不属于队列卡片。快照保留 Claimed 项是必要的：composable 靠它判断某条 steer 是“真正离开列表（消费）”还是“转 Held”，否则会在领取时误报「已加入上下文」。运行自己的触发项则连 Pending 窗口都不显示，否则一次空闲发送会在受理→领取→消费的瞬间挂出卡片又立刻撤掉（闪烁）。运行时 `RunCoordinator` 记录、`Publisher` 过滤、卡片渲染过滤，三者都不改变存储语义。
+队列卡片只呈现**仍在等待**的输入：宿主快照 `items` 仍包含 Pending / Claimed / Held，但**排除当前活动运行自身触发的那条输入**（运行保留 `StartingInputId`，由派发器启动该输入时记录），前端渲染时再隐藏 Claimed 项——正在执行（claimed）的输入属于当前回合、由转录呈现，不属于队列卡片。运行自己的触发项则连 Pending 窗口都不显示，否则一次空闲发送会在受理→领取→消费的瞬间挂出卡片又立刻撤掉（闪烁）。运行时 `RunCoordinator` 记录、`Publisher` 过滤、卡片渲染过滤，三者都不改变存储语义。
 
-用户停止（Esc／停止按钮）会清空队列，快照额外附带最近被取消的 `cancelledInputIds`（有界，最新 32 条）：UI 靠列表差分提示「已加入上下文」，必须用该字段区分被丢弃的 steer 与真正被消费的 steer，否则停止后会误报消费提示。
+提升为 steer 只改这一项：`kind=1` 加 `target_turn_id`，**保留 `inputId` 与 `sequence`**，因此它在卡片里停在原位（标成「调整」+「等待生效」），不跳到队首也不复制一份。之后消费该 steer 只移除这一条，其余项按原顺序继续等待；只有等待项全部消失时才整卡卸载。
+
+用户停止（Esc／停止按钮）会清空队列：快照直接变空，卡片随之收起。UI 不做“消失即消费”的差分推断，也不呈现任何消费确认，因此不需要额外区分被丢弃与被消费的 steer。
+
+快照失效点（2026-11）：受理、编辑／取消／暂停、领取 FollowUp 和回合收尾由受理、调度与运行路径分别通知；而在回合内部完成的 steer 领取与消费不经过这些路径，必须由该回合的输入会话自己失效——`DirectTurnInputSession.Confirm`（消费确认）以及把 Pending steer 转回 FollowUp 或转 Held 之后都要通知，否则宿主会一直重放边界之前的快照，卡片对已经进入转录的 steer 持续显示「等待生效」。领取本身不通知：卡片保留该项到真正消费，避免先卸载再挂出的闪烁。
 
 ## 11. Schema 变更、数据清理与发布
 

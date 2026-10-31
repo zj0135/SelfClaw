@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Subagents;
@@ -36,7 +37,7 @@ public sealed class SubagentDeliveryDispatcherTests
         store.LeaseFailureParentId = outcome == "failed-first-parent" ? parent.Id : null;
         store.ReturnEmptyLease = outcome == "empty";
         store.AfterLease = outcome == "cancel-after-lease" ? cancellation.Cancel : null;
-        using var runs = new ConversationRunCoordinator(context.Inputs, context.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var runs = new ConversationRunCoordinator(context.Inputs, context.Inputs, new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
         using var sessions = new ConversationSessionCoordinator(context.Conversations, context.Turns, context.Compactions, runs, new Sink());
         var targetParent = parent;
         ConversationRunHandle? busy = null;

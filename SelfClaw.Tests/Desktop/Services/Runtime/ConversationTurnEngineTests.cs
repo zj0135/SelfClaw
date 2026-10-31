@@ -6,6 +6,7 @@ using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.AgentActivity;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Runtime.Abstractions;
@@ -215,7 +216,8 @@ public sealed class ConversationTurnEngineTests
         public Context(IAgentChatRuntime runtime)
         {
             Turns = new(Repository);
-            Runs = new(Inputs, new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
+            Runs = new(Inputs, new EmptyConversationInputSteeringStore(), new ConversationInputChangeNotifier(),
+                NullLogger<ConversationRunCoordinator>.Instance);
             Sessions = new(Repository, Turns, new EmptyConversationCompactionRepository(), Runs, new SilentSink());
             var approval = new DesktopToolApprovalHandler();
             var questions = new DesktopUserQuestionHandler();

@@ -8,5 +8,4 @@ public sealed record ConversationInputQueueState(
     bool CanSteer,
     IReadOnlyList<ConversationInputQueueItem> Items,
     string? SteerReason = null,
-    Guid? SteerTargetTurnId = null,
-    IReadOnlyList<Guid>? CancelledInputIds = null);
+    Guid? SteerTargetTurnId = null);

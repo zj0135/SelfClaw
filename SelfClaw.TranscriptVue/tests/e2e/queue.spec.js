@@ -44,7 +44,7 @@ test('reload restores the accepted queue through a new GUID subscription', async
     await expect(page.locator('.queue-item[data-status="pending"]')).toHaveCount(1);
 });
 
-test('enables adjustment only after the host publishes canSteer and reports consumed steers', async ({ page }) => {
+test('drops a consumed steer from the queue card instead of leaving a notice', async ({ page }) => {
     const editor = page.locator('textarea').first();
     await editor.fill('focus on tests');
     await editor.press('Enter');
@@ -57,9 +57,11 @@ test('enables adjustment only after the host publishes canSteer and reports cons
 
     await expect(page.locator('.queue-item[data-kind="steer"]')).toContainText('等待生效');
 
+    // The boundary consumes the steer: the whole card must go, with nothing left behind.
     const [inputId] = await queuedItemIds(page);
     await page.evaluate(id => window.queueFixture.consumeSteer(id), inputId);
-    await expect(page.locator('.queue-notice')).toHaveText('已加入上下文');
+    await expect(page.locator('.conversation-queue')).toHaveCount(0);
+    await expect(page.locator('.queue-notice')).toHaveCount(0);
 });
 
 test('keeps the approval bar independent from steering and drops it after supersede', async ({ page }) => {

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
 using SelfClaw.Tests.TestDoubles;
@@ -183,7 +184,8 @@ public sealed class ConversationSessionCoordinatorTests
     {
         public Context()
         {
-            Runs = new(new EmptyConversationInputRepository(), new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
+            Runs = new(new EmptyConversationInputRepository(), new EmptyConversationInputSteeringStore(),
+                new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
             Sessions = new(Repository, new RecordingConversationTurnRepository(), new EmptyConversationCompactionRepository(), Runs, Sink);
         }
         public ControlledRepository Repository { get; } = new();

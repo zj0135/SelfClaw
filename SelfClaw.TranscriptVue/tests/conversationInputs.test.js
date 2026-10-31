@@ -115,79 +115,61 @@ it('keeps the host string status', () => {
 	expect(createQueueState().error).toBe('');
 });
 
-it('announces a steer that left the list as consumed and suppresses the local cancel', async () => {
-	const { bridge, queue } = run((type, payload) => {
-		if (type === 'conversation-input/cancel') {
-			return { type: 'conversation-input/result', requestId: payload.requestId, operation: 'cancel', ok: true };
-		}
-		return { type: 'conversation-input/state', conversationId: payload.conversationId, subscriptionId: payload.subscriptionId,
-			queueRevision: 1, canSteer: true, steerTargetTurnId: 'turn-1',
-			items: [{ inputId: 'steer-1', sequence: 1, kind: 'steer', status: 'pending', revision: 1, preview: 'adjust' },
-				{ inputId: 'steer-2', sequence: 2, kind: 'steer', status: 'pending', revision: 1, preview: 'cancel me' }] };
-	});
+it('keeps only the two remaining inputs after the middle steer leaves the snapshot', async () => {
+	const items = [
+		{ inputId: 'i-1', sequence: 1, kind: 'follow-up', status: 'pending', revision: 1, preview: 'first' },
+		{ inputId: 'i-2', sequence: 2, kind: 'steer', status: 'pending', revision: 2, preview: 'promote me' },
+		{ inputId: 'i-3', sequence: 3, kind: 'follow-up', status: 'pending', revision: 1, preview: 'third' },
+	];
+	const { bridge, queue } = run((type, payload) => ({
+		type: 'conversation-input/state', conversationId: payload.conversationId, subscriptionId: payload.subscriptionId,
+		queueRevision: 1, canSteer: true, steerTargetTurnId: 'turn-1', items,
+	}));
 	await queue.subscribe('A');
-	expect(queue.notice.value).toBe('');
+	expect(queue.state.items.map(item => item.kind)).toEqual(['follow-up', 'steer', 'follow-up']);
 
-	bridge.push(statePayload('A', queue.state.subscriptionId, { queueRevision: 2, canSteer: true, steerTargetTurnId: 'turn-1',
-		items: [{ inputId: 'steer-2', sequence: 2, kind: 'steer', status: 'pending', revision: 1, preview: 'cancel me' }] }));
-	expect(queue.notice.value).toBe('已加入上下文');
+	// The boundary consumed only the steer: one row leaves, the two follow-ups keep their order.
+	bridge.push(statePayload('A', queue.state.subscriptionId, { queueRevision: 2, canSteer: true,
+		steerTargetTurnId: 'turn-1', items: [items[0], items[2]] }));
 
-	await queue.cancel('steer-2', 1);
-	bridge.push(statePayload('A', queue.state.subscriptionId, { queueRevision: 3, canSteer: true, steerTargetTurnId: 'turn-1', items: [] }));
-	expect(queue.notice.value).toBe('已加入上下文');
-});
-
-it('does not announce a locally cancelled steer as consumed', async () => {
-	const { bridge, queue } = run((type, payload) => {
-		if (type === 'conversation-input/cancel') return { type: 'conversation-input/result', requestId: payload.requestId, operation: 'cancel', ok: true };
-		return { type: 'conversation-input/state', conversationId: payload.conversationId, subscriptionId: payload.subscriptionId,
-			queueRevision: 1, canSteer: true, steerTargetTurnId: 'turn-1',
-			items: [{ inputId: 'steer-1', sequence: 1, kind: 'steer', status: 'pending', revision: 1, preview: 'cancel me' }] };
-	});
-	await queue.subscribe('A');
-
-	await queue.cancel('steer-1', 1);
-	bridge.push(statePayload('A', queue.state.subscriptionId, { queueRevision: 2, canSteer: true, steerTargetTurnId: 'turn-1', items: [] }));
-
+	expect(queue.state.items.map(item => item.preview)).toEqual(['first', 'third']);
+	expect(queue.state.items.map(item => item.kind)).toEqual(['follow-up', 'follow-up']);
 	expect(queue.notice.value).toBe('');
 });
 
-it('does not announce a steer the host discarded on a user stop', async () => {
+it('hides a consumed steer at once instead of leaving a confirmation behind', async () => {
 	const { bridge, queue } = run((type, payload) => {
 		return { type: 'conversation-input/state', conversationId: payload.conversationId, subscriptionId: payload.subscriptionId,
 			queueRevision: 1, canSteer: true, steerTargetTurnId: 'turn-1',
 			items: [{ inputId: 'steer-1', sequence: 1, kind: 'steer', status: 'pending', revision: 1, preview: 'adjust' }] };
 	});
 	await queue.subscribe('A');
+	expect(queue.state.items).toHaveLength(1);
 
-	// The user stopped the turn: the host cancelled the steer and reports it in cancelledInputIds.
-	bridge.push(statePayload('A', queue.state.subscriptionId, { queueRevision: 2, cancelledInputIds: ['steer-1'], items: [] }));
+	// The boundary consumed the steer: it leaves the snapshot and nothing else may outlive it.
+	bridge.push(statePayload('A', queue.state.subscriptionId, { queueRevision: 2, canSteer: true, steerTargetTurnId: 'turn-1', items: [] }));
 
+	expect(queue.state.items).toHaveLength(0);
 	expect(queue.notice.value).toBe('');
 });
 
-it('still reports consumption after a cancelled steer loses the revision conflict', async () => {
-	const { bridge, queue } = run((type, payload) => {
-		if (type === 'conversation-input/cancel') {
-			return { type: 'conversation-input/result', requestId: payload.requestId, operation: 'cancel', ok: false,
-				status: 'conflict', conflict: true, reason: 'queue-revision-conflict' };
+it('keeps only the edit confirmation as a notice', async () => {
+	const { queue } = run((type, payload) => {
+		if (type === 'conversation-input/detail') {
+			return { type: 'conversation-input/result', requestId: payload.requestId, operation: 'detail', ok: true,
+				inputId: payload.inputId, revision: 2, prompt: 'original body' };
 		}
-		if (type === 'conversation-input/get-state') {
-			return { type: 'conversation-input/state', conversationId: 'A', subscriptionId: payload.subscriptionId, queueRevision: 2,
-				canSteer: true, steerTargetTurnId: 'turn-1',
-				items: [{ inputId: 'steer-1', sequence: 1, kind: 'steer', status: 'claimed', revision: 2, preview: 'claimed instead' }] };
+		if (type === 'conversation-input/edit') {
+			return { type: 'conversation-input/result', requestId: payload.requestId, operation: 'edit', ok: true, inputId: 'i-1', revision: 3 };
 		}
-		return { type: 'conversation-input/state', conversationId: payload.conversationId, subscriptionId: payload.subscriptionId,
-			queueRevision: 1, canSteer: true, steerTargetTurnId: 'turn-1',
-			items: [{ inputId: 'steer-1', sequence: 1, kind: 'steer', status: 'pending', revision: 1, preview: 'cancel me' }] };
+		return defaultResponder(type, payload);
 	});
 	await queue.subscribe('A');
+	await queue.edit('i-1');
+	queue.setEditPrompt('edited body');
+	await queue.saveEdit();
 
-	await queue.cancel('steer-1', 1);
-
-	// The host consumed the steer after the cancel lost the race: the UI must still report it.
-	bridge.push(statePayload('A', queue.state.subscriptionId, { queueRevision: 3, canSteer: true, steerTargetTurnId: 'turn-1', items: [] }));
-	expect(queue.notice.value).toBe('已加入上下文');
+	expect(queue.notice.value).toBe('已更新待发送内容');
 });
 
 it('keeps the edited body on a conflict, refreshes the list and adopts the new revision', async () => {

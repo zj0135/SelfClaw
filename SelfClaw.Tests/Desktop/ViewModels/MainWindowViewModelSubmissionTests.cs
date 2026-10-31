@@ -53,7 +53,7 @@ public sealed class MainWindowViewModelSubmissionTests
             var settingsStore = new DesktopSettingsJsonStore(storagePaths);
             var turns = new RecordingConversationTurnRepository(repository);
             var inputStore = new EmptyConversationInputRepository();
-            using var runs = new ConversationRunCoordinator(inputStore, new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
+            using var runs = new ConversationRunCoordinator(inputStore, new EmptyConversationInputSteeringStore(), new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
             var turnFinalizer = new DesktopTurnFinalizer(
                 turns,
                 NullLogger<DesktopTurnFinalizer>.Instance);

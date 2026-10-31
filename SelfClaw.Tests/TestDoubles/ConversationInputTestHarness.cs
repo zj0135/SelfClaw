@@ -52,7 +52,8 @@ internal sealed class ConversationInputTestHarness : IDisposable
         Agents = new AgentSettingsService(new DesktopAgentDefinitionService(Fixture.Paths),
             new SubagentDefinitionCatalog(Fixture.Paths), new EmptyExtensionSettingsService(),
             new ExtensionStateChangeNotifier());
-        Runs = new ConversationRunCoordinator(Fixture.Inputs, Fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        Changes = new ConversationInputChangeNotifier();
+        Runs = new ConversationRunCoordinator(Fixture.Inputs, Fixture.Inputs, Changes, NullLogger<ConversationRunCoordinator>.Instance);
         _sessions = new ConversationSessionCoordinator(Fixture.Conversations, Fixture.Turns, new EmptyConversationCompactionRepository(), Runs, _publisher);
         Engine = new ConversationTurnEngine(Fixture.Turns,
             new DesktopTurnFinalizer(Fixture.Turns, NullLogger<DesktopTurnFinalizer>.Instance),
@@ -61,7 +62,6 @@ internal sealed class ConversationInputTestHarness : IDisposable
             new ConversationCompletionNotifier(new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance)),
             NullLogger<ConversationTurnEngine>.Instance);
         var validator = new ConversationInputExecutionValidator(Roots, Models, Agents);
-        Changes = new ConversationInputChangeNotifier();
         var recovery = new SqliteStartupRecovery(Fixture.Database, Fixture.RecoveryBeforeCommit);
         Dispatcher = new ConversationInputDispatcher(Fixture.Inputs, Fixture.Inputs, Fixture.Conversations,
             Runs, Engine, validator, Changes, Fixture.Paths, NullLogger<ConversationInputDispatcher>.Instance, recovery.RecoverAsync);

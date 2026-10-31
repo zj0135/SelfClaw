@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Desktop.Services.Attachments;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
 using SelfClaw.Desktop.Services.Workspace;
@@ -338,7 +339,7 @@ public sealed class AttachmentStoreTests : IDisposable
             _runs = new ConversationRunCoordinator(
                 new EmptyConversationInputRepository(),
                 new EmptyConversationInputSteeringStore(),
-                NullLogger<ConversationRunCoordinator>.Instance);
+                new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
             _sessions = new ConversationSessionCoordinator(
                 conversations,
                 new RecordingConversationTurnRepository(),

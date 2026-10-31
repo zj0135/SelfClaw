@@ -16,8 +16,7 @@ internal static class ConversationQueueStateFormatter
             item.AttachmentCount)).ToArray();
         var payload = new ConversationQueueStateResponse("conversation-input/state", subscriptionId, state.ConversationId,
             state.QueueRevision, state.Paused, Limit(state.PauseReason, 1024), state.CanSteer,
-            Limit(state.SteerReason, 128), state.SteerTargetTurnId, items, false, Limit(requestId, 128),
-            state.CancelledInputIds ?? []);
+            Limit(state.SteerReason, 128), state.SteerTargetTurnId, items, false, Limit(requestId, 128));
         while (WebViewHostChannel.SerializeToUtf8Bytes(payload).Length > MaximumSnapshotBytes)
         {
             if (payload.Items.Count == 0) throw new InvalidOperationException("Queue response metadata exceeds its limit.");

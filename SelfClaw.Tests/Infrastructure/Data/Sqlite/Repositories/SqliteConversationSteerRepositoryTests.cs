@@ -12,6 +12,38 @@ namespace SelfClaw.Tests.Infrastructure.Data.Sqlite.Repositories;
 public sealed class SqliteConversationSteerRepositoryTests
 {
     [Fact]
+    public async Task Consuming_a_promoted_steer_keeps_the_other_queue_items_waiting_in_order()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var start = await fixture.StartAsync();
+        var conversationId = start.Turn.ConversationId;
+        var first = await fixture.AcceptFollowUpAsync(conversationId, "first");
+        var middle = await fixture.AcceptFollowUpAsync(conversationId, "promote me");
+        var third = await fixture.AcceptFollowUpAsync(conversationId, "third");
+
+        var promoted = await fixture.Inputs.PromoteAsync(
+            new ConversationInputPromoteRequest(middle.Id, middle.Revision, start.Turn.Id));
+        promoted.Status.Should().Be(ConversationInputUpdateStatus.Applied);
+        promoted.Input!.Id.Should().Be(middle.Id, "promotion edits the item in place instead of copying it");
+        promoted.Input.Sequence.Should().Be(middle.Sequence, "promotion never reorders the queue");
+
+        // The claim takes only the steer bound to this turn; the two follow-ups are not touched.
+        var batch = await fixture.Inputs.TryClaimPendingSteersAsync(conversationId, start.Turn.Id, Guid.NewGuid());
+        batch!.Inputs.Select(input => input.Prompt).Should().Equal("promote me");
+        var consumed = await fixture.Inputs.CommitBoundaryAsync(new(batch,
+            new ConversationTurnCommit(start.Turn, [], [])));
+
+        consumed.Messages.Select(message => message.MarkdownContent).Should().Equal("promote me");
+        var state = await fixture.Inputs.GetQueueStateAsync(conversationId);
+        state.Items.Select(item => item.Preview).Should().Equal("first", "third");
+        state.Items.Select(item => item.Kind).Should().Equal(ConversationInputKind.FollowUp, ConversationInputKind.FollowUp);
+        state.Items.Select(item => item.Status).Should().Equal(ConversationInputStatus.Pending, ConversationInputStatus.Pending);
+        (await fixture.Inputs.GetInputAsync(middle.Id))!.Status.Should().Be(ConversationInputStatus.Consumed);
+        (await fixture.Inputs.GetInputAsync(first.Id))!.Status.Should().Be(ConversationInputStatus.Pending);
+        (await fixture.Inputs.GetInputAsync(third.Id))!.Status.Should().Be(ConversationInputStatus.Pending);
+    }
+
+    [Fact]
     public async Task Pending_steers_are_claimed_as_one_ordered_high_water_batch_and_later_inputs_stay_pending()
     {
         using var fixture = new ConversationPersistenceFixture();

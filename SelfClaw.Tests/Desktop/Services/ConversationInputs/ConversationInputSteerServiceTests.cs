@@ -32,7 +32,7 @@ public sealed class ConversationInputSteerServiceTests
         stored!.Status.Should().Be(ConversationInputStatus.Cancelled);
         var state = await h.Service.GetStateAsync(id);
         state.Paused.Should().BeFalse();
-        state.CancelledInputIds.Should().Contain(followUp.InputId!.Value);
+        state.Items.Should().BeEmpty();
         h.Runs.Complete(handle, false);
     }
 

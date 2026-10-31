@@ -12,6 +12,7 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession, IDirectT
     private readonly Guid _ownerRunId;
     private readonly IConversationInputRepository _repository;
     private readonly IConversationInputSteeringStore _steeringStore;
+    private readonly ConversationInputChangeNotifier _changes;
     private readonly object _gate = new();
     private readonly SemaphoreSlim _claimGate = new(1, 1);
     private ConversationInputBatch? _boundary;
@@ -32,10 +33,12 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession, IDirectT
         Guid turnId,
         Guid ownerRunId,
         IConversationInputRepository repository,
-        IConversationInputSteeringStore steeringStore)
+        IConversationInputSteeringStore steeringStore,
+        ConversationInputChangeNotifier changes)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(steeringStore);
+        ArgumentNullException.ThrowIfNull(changes);
         if (conversationId == Guid.Empty || turnId == Guid.Empty || ownerRunId == Guid.Empty)
             throw new ArgumentException("An input session requires conversation, turn and run identities.");
 
@@ -44,6 +47,7 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession, IDirectT
         _ownerRunId = ownerRunId;
         _repository = repository;
         _steeringStore = steeringStore;
+        _changes = changes;
     }
 
     internal int PendingWaiterCount
@@ -220,8 +224,10 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession, IDirectT
 
         if (blockReason is not null)
         {
-            await _steeringStore.ReleasePendingSteersToFollowUpAsync(_conversationId, _turnId, blockReason, cancellationToken)
+            var released = await _steeringStore.ReleasePendingSteersToFollowUpAsync(_conversationId, _turnId, blockReason, cancellationToken)
                 .ConfigureAwait(false);
+            // Released inputs are follow-ups again, so the published queue must show them that way.
+            if (released > 0) _changes.Notify(_conversationId);
         }
     }
 
@@ -240,8 +246,13 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession, IDirectT
     }
 
     internal async Task HoldUnconsumedSteersAsync(string reasonCode, CancellationToken cancellationToken = default)
-        => await _steeringStore.HoldUnconsumedSteersAsync(_conversationId, _turnId, reasonCode, cancellationToken)
-            .ConfigureAwait(false);
+    {
+        if (await _steeringStore.HoldUnconsumedSteersAsync(_conversationId, _turnId, reasonCode, cancellationToken)
+                .ConfigureAwait(false) > 0)
+        {
+            _changes.Notify(_conversationId);
+        }
+    }
 
     public Task HoldUnconsumedAsync(string reasonCode, CancellationToken cancellationToken = default)
         => HoldUnconsumedSteersAsync(reasonCode, cancellationToken);
@@ -249,6 +260,7 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession, IDirectT
     internal void Confirm(ConversationInputConsumption result)
     {
         ArgumentNullException.ThrowIfNull(result);
+        bool first;
         lock (_gate)
         {
             if (_state != DirectTurnInputSessionState.Open || _boundary?.ClaimId != result.ClaimId) return;
@@ -259,9 +271,15 @@ internal sealed class DirectTurnInputSession : IDirectTurnInputSession, IDirectT
                     message.ConversationId != _conversationId || message.Role != MessageRole.User))
                 throw new InvalidDataException("The committed input mapping does not belong to this boundary.");
 
+            first = _confirmed is null;
             _confirmed ??= result;
             _completion?.TrySetResult(_confirmed);
         }
+
+        // Consumption is the moment a steer leaves the wait list for the transcript. Without an
+        // invalidation the host keeps serving the pre-boundary snapshot and the card keeps showing
+        // "等待生效" for an input the transcript already contains.
+        if (first) _changes.Notify(_conversationId);
     }
 
     internal void Fail(Exception exception)

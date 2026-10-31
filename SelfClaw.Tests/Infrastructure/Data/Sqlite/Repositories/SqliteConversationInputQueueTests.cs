@@ -175,7 +175,7 @@ public sealed class SqliteConversationInputQueueTests
     }
 
     [Fact]
-    public async Task Discard_queued_cancels_unstarted_items_lifts_the_pause_and_reports_them()
+    public async Task Discard_queued_cancels_unstarted_items_and_lifts_the_pause()
     {
         using var fixture = new ConversationPersistenceFixture();
         var start = await fixture.StartAsync();
@@ -191,7 +191,6 @@ public sealed class SqliteConversationInputQueueTests
         var state = await fixture.Inputs.GetQueueStateAsync(conversationId);
         state.Paused.Should().BeFalse();
         state.Items.Should().BeEmpty();
-        state.CancelledInputIds.Should().Contain([pending.Id, held.Id]);
         (await fixture.Inputs.GetInputAsync(pending.Id))!.Status.Should().Be(ConversationInputStatus.Cancelled);
         (await fixture.Inputs.GetInputAsync(held.Id))!.Status.Should().Be(ConversationInputStatus.Cancelled);
     }

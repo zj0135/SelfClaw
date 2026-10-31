@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Desktop.Services.Transcript.Abstractions;
@@ -71,7 +72,7 @@ public sealed class ConversationDeletionServiceTests
         var conversation = await fixture.CreateConversationAsync();
         await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
             "queued", "queued", fixture.Snapshot(), null));
-        using var runs = new ConversationRunCoordinator(fixture.Inputs, fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var runs = new ConversationRunCoordinator(fixture.Inputs, fixture.Inputs, new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
         using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, new EmptyConversationCompactionRepository(), runs, new Sink());
         var children = new Children();
         var service = new ConversationDeletionService(runs, sessions, children,
@@ -100,7 +101,7 @@ public sealed class ConversationDeletionServiceTests
         var conversation = await fixture.CreateConversationAsync();
         await fixture.Inputs.AcceptAsync(new ConversationInputAcceptRequest(conversation.Id,
             "queued", "queued", fixture.Snapshot(), null));
-        using var runs = new ConversationRunCoordinator(fixture.Inputs, fixture.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var runs = new ConversationRunCoordinator(fixture.Inputs, fixture.Inputs, new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
         using var sessions = new ConversationSessionCoordinator(fixture.Conversations, fixture.Turns, new EmptyConversationCompactionRepository(), runs, new Sink());
         var service = new ConversationDeletionService(runs, sessions, new Children { AutoRelease = true },
             new ConversationWorkspaceService(new EmptyRoots()), fixture.Conversations, null, fixture.Inputs);
@@ -127,7 +128,7 @@ public sealed class ConversationDeletionServiceTests
         private readonly ConversationSessionCoordinator _sessions;
         public Context()
         {
-            Runs = new(new EmptyConversationInputRepository(), new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
+            Runs = new(new EmptyConversationInputRepository(), new EmptyConversationInputSteeringStore(), new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
             _sessions = new(Repository, new RecordingConversationTurnRepository(), new EmptyConversationCompactionRepository(), Runs, new Sink());
             Service = new(Runs, _sessions, Children, new ConversationWorkspaceService(Repository), Repository);
         }

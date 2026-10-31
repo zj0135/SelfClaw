@@ -141,8 +141,8 @@ internal sealed class ConversationInputPublisher : IDisposable
             state = state with { CanSteer = canSteer, SteerReason = steerReason, SteerTargetTurnId = steerTargetTurnId };
             // The input a run was started for is that run's own trigger, not queue backlog: listing it
             // would make an immediately-dispatched send mount a queue card that unmounts the moment it
-            // is consumed. Claimed inputs stay in the snapshot (the client hides them and still needs
-            // them to time the "consumed steer" notice); the card only renders what is still waiting.
+            // is consumed. Claimed inputs stay in the snapshot so it remains a faithful read of the
+            // durable waiting set; the card hides them because the transcript owns the running input.
             if (run?.StartingInputId is { } starting && state.Items.Count > 0)
             {
                 state = state with { Items = state.Items.Where(item => item.InputId != starting).ToArray() };

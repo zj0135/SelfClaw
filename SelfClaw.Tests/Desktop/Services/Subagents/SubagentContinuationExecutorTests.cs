@@ -5,6 +5,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Subagents;
@@ -30,7 +31,7 @@ public sealed class SubagentContinuationExecutorTests
         var parent = await context.Conversations.GetConversationAsync(task.ParentConversationId)
             ?? throw new InvalidOperationException("Missing parent.");
         var deliveries = new SqliteSubagentDeliveryRepository(context.Database);
-        using var runs = new ConversationRunCoordinator(context.Inputs, context.Inputs, NullLogger<ConversationRunCoordinator>.Instance);
+        using var runs = new ConversationRunCoordinator(context.Inputs, context.Inputs, new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
         using var sessions = new ConversationSessionCoordinator(context.Conversations, context.Turns, context.Compactions, runs, new Sink());
         var runtime = new TerminalRuntime(completion, hasTool, async request =>
         {

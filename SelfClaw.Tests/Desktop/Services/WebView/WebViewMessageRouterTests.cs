@@ -1,5 +1,6 @@
 using SelfClaw.Tests.TestDoubles;
 using SelfClaw.Desktop.Services.Agents;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Settings;
 using SelfClaw.Desktop.Services.Tools;
@@ -609,7 +610,7 @@ public sealed class WebViewMessageRouterTests
                 Dispatcher.CurrentDispatcher);
             var turns = new RecordingConversationTurnRepository(ConversationRepository);
             var inputs = new EmptyConversationInputRepository();
-            _runs = new ConversationRunCoordinator(inputs, new EmptyConversationInputSteeringStore(), NullLogger<ConversationRunCoordinator>.Instance);
+            _runs = new ConversationRunCoordinator(inputs, new EmptyConversationInputSteeringStore(), new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
             _sessions = new ConversationSessionCoordinator(ConversationRepository, turns, new EmptyConversationCompactionRepository(), _runs, _transcriptPublisher);
             var programmingSettings = SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore);
             AgentRuntime = new RecordingAgentChatRuntime();

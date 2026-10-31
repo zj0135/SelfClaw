@@ -64,6 +64,43 @@ public sealed class DirectTurnInputSessionTests
     }
 
     [Fact]
+    public async Task Consuming_a_steer_boundary_invalidates_the_published_queue_state()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var notifications = new List<Guid>();
+        context.Changes.Changed += id => { lock (notifications) notifications.Add(id); };
+
+        // A claim is not a leave: the card keeps the steer as "等待生效" until the boundary commits.
+        var batch = await context.SeedClaimAsync("U1");
+        lock (notifications) notifications.Should().BeEmpty();
+
+        await context.ApplyAsync(new AssistantTextDeltaEvent("a", "a"));
+        await context.ApplyAsync(new TurnInputBoundaryEvent(batch, null));
+
+        lock (notifications) notifications.Should().Equal(new[] { context.Conversation.Id },
+            "the host must re-read the snapshot once the steer is a transcript message");
+        var state = await context.Inputs.GetQueueStateAsync(context.Conversation.Id);
+        state.Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Releasing_pending_steers_to_follow_ups_invalidates_the_published_queue_state()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        await context.SeedPendingSteerAsync("U1");
+        var notifications = new List<Guid>();
+        context.Changes.Changed += id => { lock (notifications) notifications.Add(id); };
+
+        await context.InputSession.SetSteerPolicyAsync("context-budget-exceeded");
+
+        lock (notifications) notifications.Should().Equal(context.Conversation.Id);
+        var state = await context.Inputs.GetQueueStateAsync(context.Conversation.Id);
+        state.Items.Should().ContainSingle().Which.Kind.Should().Be(ConversationInputKind.FollowUp);
+    }
+
+    [Fact]
     public async Task A_second_distinct_boundary_is_rejected_and_cancellation_closes_the_first()
     {
         using var context = new ConversationTurnTestContext();

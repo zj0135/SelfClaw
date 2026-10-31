@@ -11,9 +11,13 @@ const props = defineProps({
 const emit = defineEmits(['cancel', 'retry', 'promote', 'pause', 'resume', 'edit', 'save-edit', 'cancel-edit', 'update:prompt']);
 
 // 队列卡片只呈现“等待中”的输入：正在执行（claimed）的输入属于当前回合、由转录呈现，不在卡片里显示。
-// 它仍保留在宿主快照里，供 composable 判断 steer 何时真正离开列表（消费 vs 转 Held）。
+// 快照仍是存储的忠实读取（包含 claimed），隐藏只发生在渲染层。
 const waitingItems = computed(() => props.state.items.filter(item => item.status !== 'claimed'));
-const visible = computed(() => waitingItems.value.length > 0 || props.state.paused || props.state.error || props.notice);
+// 暂停不是展示理由，只是有等待项时的附加状态：失败后宿主会把队列落库为 paused，即使队列已空
+// （设计允许该状态，下一次发送领取时惰性解除）。若仅凭 paused 挂载，就会留下一张既没有条目、
+// 也没有恢复按钮的空卡片；失败原因由回合的 TurnOutcome 呈现，卡片不必重复。
+// 提示（如编辑成功）只随等待项一起出现：steer 被消费后必须立刻整卡收起，不能被任何文案留在屏幕上。
+const visible = computed(() => waitingItems.value.length > 0 || Boolean(props.state.error));
 const canResume = computed(() => props.state.paused && waitingItems.value.length > 0);
 const steerHint = computed(() => props.state.steerReason ? describeInputReason(props.state.steerReason, '') : '');
 const promoteTip = computed(() => props.state.canSteer ? '调整当前任务' : (steerHint.value || '当前回合不能调整'));
@@ -49,7 +53,7 @@ function editPrompt(event) {
 			<button v-else-if="!state.paused" class="queue-action" type="button" title="暂停队列"
 				aria-label="暂停队列" @click="emit('pause')"><CirclePause :size="14" aria-hidden="true" /></button>
 		</header>
-		<ul class="queue-list">
+		<ul v-if="waitingItems.length" class="queue-list">
 			<li v-for="item in waitingItems" :key="item.inputId" class="queue-item" :data-status="item.status"
 				:data-kind="item.kind">
 				<template v-if="editing && editing.inputId === item.inputId">

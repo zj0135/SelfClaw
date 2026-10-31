@@ -35,7 +35,7 @@ internal sealed class ConversationTurnTestContext : IDisposable
             DirectTurnOrigin.Interactive, ConversationTurnStatus.Running, now);
         Agent = new AgentRuntimeDefinition("build", "Builder", "fixture", AgentExecutionMode.Direct,
             AgentRuntimeDefinition.SystemToolPolicy, [], [], [], [], string.Empty);
-        InputSession = new DirectTurnInputSession(Conversation.Id, Record.Id, RunId, Inputs, Inputs);
+        InputSession = new DirectTurnInputSession(Conversation.Id, Record.Id, RunId, Inputs, Inputs, Changes);
         Turn = new AgentTurnState(Record, Agent, InputSession);
         Recorder = CreateRecorder();
         Finalizer = new DesktopTurnFinalizer(Turns, NullLogger<DesktopTurnFinalizer>.Instance);
@@ -50,6 +50,7 @@ internal sealed class ConversationTurnTestContext : IDisposable
     internal ConversationTurnRecord Record { get; }
     internal AgentRuntimeDefinition Agent { get; }
     internal Guid RunId { get; } = Guid.NewGuid();
+    internal ConversationInputChangeNotifier Changes { get; } = new();
     internal DirectTurnInputSession InputSession { get; }
     internal AgentTurnState Turn { get; }
     internal ConversationTurnRecorder Recorder { get; }

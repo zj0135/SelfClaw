@@ -1,5 +1,6 @@
 using SelfClaw.Desktop.Services.Agents;
 using SelfClaw.Desktop.Services.Agents.Definitions;
+using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Settings;
@@ -207,7 +208,7 @@ public sealed class ShellStateTests
             _publisher = new TranscriptPublisher(new TranscriptProjection(paths), _delivery, Dispatcher.CurrentDispatcher);
             var turns = new SqliteConversationTurnRepository(database);
             var inputs = new SqliteConversationInputRepository(database);
-            _runs = new ConversationRunCoordinator(inputs, inputs, NullLogger<ConversationRunCoordinator>.Instance);
+            _runs = new ConversationRunCoordinator(inputs, inputs, new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
             _sessions = new ConversationSessionCoordinator(conversations, turns, new EmptyConversationCompactionRepository(), _runs, _publisher);
             _engine = new ConversationTurnEngine(turns, new DesktopTurnFinalizer(turns, NullLogger<DesktopTurnFinalizer>.Instance),
                 new ConversationTurnRecorder(conversations, turns, inputs, NullLogger<ConversationTurnRecorder>.Instance), Runtime,

@@ -247,6 +247,69 @@ public sealed class ConversationInputHostTests
             items[1].GetProperty("preview").GetString().Should().Be("waiting");
         });
 
+    [Fact]
+    public Task The_snapshot_keeps_a_claimed_input_even_though_the_card_hides_it()
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            using var context = new HostContext();
+            var conversation = await context.CreateConversationAsync();
+            await context.Harness.Fixture.AcceptFollowUpAsync(conversation, "executing", snapshot: context.Harness.Snapshot());
+            await context.Harness.Fixture.AcceptFollowUpAsync(conversation, "waiting", snapshot: context.Harness.Snapshot());
+            await context.Harness.Fixture.ClaimNextAsync(conversation, Guid.NewGuid(), Guid.NewGuid());
+
+            await context.Bridge.HandleAsync("conversation-input/subscribe", context.Payload(new
+            {
+                subscriptionId = context.SubscriptionId, conversationId = conversation
+            }), CancellationToken.None);
+
+            // The snapshot mirrors the durable waiting set; hiding claimed inputs is a rendering
+            // decision, so the host must not quietly drop them from the push.
+            var items = context.LastState().GetProperty("items");
+            items.GetArrayLength().Should().Be(2);
+            items[0].GetProperty("status").GetString().Should().Be("claimed");
+            items[1].GetProperty("preview").GetString().Should().Be("waiting");
+        });
+
+    [Fact]
+    public Task A_consumed_steer_leaves_the_published_queue_without_another_run_event()
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            using var context = new HostContext();
+            var conversation = await context.CreateConversationAsync();
+            await context.AcceptAsync(conversation, "focus on the subagent system");
+            await context.Bridge.HandleAsync("conversation-input/subscribe", context.Payload(new
+            {
+                subscriptionId = context.SubscriptionId, conversationId = conversation
+            }), CancellationToken.None);
+
+            var handle = await context.StartTurnAsync(conversation);
+            await context.WaitForStateAsync(state => state.GetProperty("canSteer").GetBoolean());
+            var item = context.LastState().GetProperty("items")[0];
+            await context.Bridge.HandleAsync("conversation-input/promote", context.Payload(new
+            {
+                inputId = item.GetProperty("inputId").GetString(),
+                expectedRevision = item.GetProperty("revision").GetInt32(),
+                targetTurnId = handle.TurnId
+            }), CancellationToken.None);
+            context.LastResult().GetProperty("ok").GetBoolean().Should().BeTrue();
+            await context.WaitForStateAsync(state => state.GetProperty("items").GetArrayLength() == 1 &&
+                state.GetProperty("items")[0].GetProperty("kind").GetString() == "steer");
+
+            // Exactly what the Direct loop and recorder do at a boundary: claim, commit the user message,
+            // then confirm the batch. Nothing else changes the run here, so only the confirmation can
+            // retire the row; without it the snapshot keeps claiming the steer is still waiting.
+            var batch = await handle.InputSession!.ReadBoundaryAsync()
+                        ?? throw new InvalidOperationException("The steer was not claimable at its boundary.");
+            var turn = (await context.Harness.Fixture.Turns.ListTurnsAsync(conversation))
+                .Single(candidate => candidate.Status == ConversationTurnStatus.Running);
+            var consumed = await context.Harness.Fixture.Inputs.CommitBoundaryAsync(new(batch,
+                new ConversationTurnCommit(turn, [], [])));
+            handle.InputSession.Confirm(consumed);
+
+            await context.WaitForStateAsync(state => state.GetProperty("items").GetArrayLength() == 0);
+            context.Harness.Runs.Complete(handle, false);
+        });
+
     private sealed class HostContext : IDisposable
     {
         private readonly ConversationInputTestHarness _harness;

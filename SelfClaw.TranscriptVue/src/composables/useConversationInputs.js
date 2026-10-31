@@ -27,7 +27,7 @@ export function createQueueState() {
 	return {
 		conversationId: null, subscriptionId: null, queueRevision: 0, paused: false,
 		pauseReason: null, canSteer: false, steerReason: null, steerTargetTurnId: null,
-		items: [], cancelledInputIds: [], loaded: false, truncated: false, error: '',
+		items: [], loaded: false, truncated: false, error: '',
 	};
 }
 
@@ -54,7 +54,6 @@ export function reduceQueueState(state, payload) {
 			steerReason: payload.steerReason || null,
 			steerTargetTurnId: payload.steerTargetTurnId || null,
 			items: Array.isArray(payload.items) ? payload.items.map(normalizeItem) : [],
-			cancelledInputIds: Array.isArray(payload.cancelledInputIds) ? payload.cancelledInputIds.map(String) : [],
 			truncated: Boolean(payload.truncated),
 			loaded: true,
 		},
@@ -69,8 +68,6 @@ export function useConversationInputs(bridge) {
 	let generation = 0;
 	let disposed = false;
 	let noticeTimer = null;
-	// 已由本地成功取消的项不再触发“已加入上下文”；取消失败时必须撤销，否则会永久吞掉真正的消费提示。
-	const locallyCancelled = new Set();
 
 	function showNotice(text) {
 		notice.value = text;
@@ -84,25 +81,12 @@ export function useConversationInputs(bridge) {
 		notice.value = '';
 	}
 
-	function announceConsumedSteers(previous, next, cancelledInputIds) {
-		const remaining = new Set(next.map(item => item.inputId));
-		const cancelled = new Set(cancelledInputIds || []);
-		for (const item of previous) {
-			if (item.kind !== 'steer' || remaining.has(item.inputId)) continue;
-			if (locallyCancelled.delete(item.inputId)) continue;
-			// 用户停止会丢弃整个队列，此时消失的 steer 是被取消而非消费，不能谎报“已加入上下文”。
-			if (cancelled.has(item.inputId)) continue;
-			showNotice('已加入上下文');
-		}
-	}
-
+	// 快照即事实：steer 一旦被消费就从 items 消失，卡片随之隐藏，不做任何“已加入上下文”停留。
 	function apply(payload) {
 		if (disposed) return;
 		const result = reduceQueueState(state, payload);
 		if (!result.accepted) return;
-		const previous = state.items;
 		Object.assign(state, result.state);
-		announceConsumedSteers(previous, state.items, state.cancelledInputIds);
 	}
 
 	function onState(payload) { apply(payload); }
@@ -112,7 +96,6 @@ export function useConversationInputs(bridge) {
 		const current = ++generation;
 		editing.value = null;
 		clearNotice();
-		locallyCancelled.clear();
 		state.conversationId = conversationId;
 		state.subscriptionId = null;
 		state.queueRevision = 0;
@@ -124,7 +107,6 @@ export function useConversationInputs(bridge) {
 		state.steerTargetTurnId = null;
 		state.error = '';
 		state.items = [];
-		state.cancelledInputIds = [];
 		if (!conversationId) return;
 		const subscriptionId = crypto.randomUUID();
 		state.subscriptionId = subscriptionId;
@@ -167,13 +149,7 @@ export function useConversationInputs(bridge) {
 		}
 	}
 
-	const cancel = (inputId, revision) => {
-		locallyCancelled.add(inputId);
-		const pending = run('cancel', { inputId, expectedRevision: revision });
-		// 冲突/超时后该项仍可能是被宿主消费而消失：撤销抑制标记，让下一次快照给出提示。
-		pending.then(response => { if (!response?.ok) locallyCancelled.delete(inputId); });
-		return pending;
-	};
+	const cancel = (inputId, revision) => run('cancel', { inputId, expectedRevision: revision });
 	const retry = (inputId, revision) => run('retry', { inputId, expectedRevision: revision });
 	const pause = () => run('pause', { conversationId: state.conversationId, expectedQueueRevision: state.queueRevision });
 	const resume = () => run('resume', { conversationId: state.conversationId, expectedQueueRevision: state.queueRevision });

@@ -58,6 +58,37 @@ it('shows Held items as blocking with their host reason and a retry path', () =>
 	expect(wrapper.text()).toContain('上一项执行失败');
 });
 
+it('never mounts the card for a paused queue that has nothing waiting', () => {
+	// 回合失败后宿主会把队列落库为 paused，而本轮输入已消费，快照里只剩 pauseReason。
+	const idle = attach(ConversationQueue, {
+		state: queueState({ paused: true, pauseReason: 'turn-failed', items: [] }),
+	});
+	expect(idle.find('.conversation-queue').exists()).toBe(false);
+	expect(idle.text()).not.toContain('上一项执行失败');
+
+	// 只剩本轮 claimed 项同样不算等待：它由转录呈现，卡片不该凭空出现。
+	const claimedOnly = attach(ConversationQueue, {
+		state: queueState({ paused: true, pauseReason: 'turn-failed', items: [followUp({ status: 'claimed' })] }),
+	});
+	expect(claimedOnly.find('.conversation-queue').exists()).toBe(false);
+
+	// 暂停 + 等待项仍然要说明原因并给出恢复入口。
+	const waiting = attach(ConversationQueue, {
+		state: queueState({ paused: true, pauseReason: 'turn-failed', items: [followUp()] }),
+	});
+	expect(waiting.find('.conversation-queue').exists()).toBe(true);
+	expect(waiting.text()).toContain('上一项执行失败');
+	expect(waiting.find('[aria-label="恢复队列"]').exists()).toBe(true);
+
+	// 宿主侧操作错误仍需就地显示，即使没有任何等待项。
+	const failed = attach(ConversationQueue, {
+		state: queueState({ paused: true, pauseReason: 'turn-failed', items: [], error: '队列操作未生效。' }),
+	});
+	expect(failed.find('.conversation-queue').exists()).toBe(true);
+	expect(failed.text()).toContain('队列操作未生效。');
+	expect(failed.find('.queue-list').exists()).toBe(false);
+});
+
 it('labels a pending steer as waiting and never offers queue conversion actions', () => {
 	const wrapper = attach(ConversationQueue, {
 		state: queueState({ canSteer: true, steerTargetTurnId: 'turn-1', items: [
@@ -101,15 +132,46 @@ it('renders the edit draft from the composable and saves without clearing it', a
 	expect(wrapper.emitted('cancel-edit')).toHaveLength(1);
 });
 
-it('shows the consumed steer notice and keeps the pause/resume control independent', async () => {
-	const wrapper = attach(ConversationQueue, { state: queueState({ items: [followUp()] }), notice: '已加入上下文' });
-	expect(wrapper.find('[role="status"]').text()).toContain('已加入上下文');
+it('keeps the edit confirmation and the pause/resume control independent', async () => {
+	const wrapper = attach(ConversationQueue, { state: queueState({ items: [followUp()] }), notice: '已更新待发送内容' });
+	expect(wrapper.find('[role="status"]').text()).toContain('已更新待发送内容');
 	await wrapper.find('[aria-label="暂停队列"]').trigger('click');
 	expect(wrapper.emitted('pause')).toHaveLength(1);
 
 	const paused = attach(ConversationQueue, { state: queueState({ paused: true, pauseReason: 'queue-paused', items: [followUp()] }) });
 	await paused.find('[aria-label="恢复队列"]').trigger('click');
 	expect(paused.emitted('resume')).toHaveLength(1);
+});
+
+it('keeps the remaining rows when one of three waiting inputs is consumed', async () => {
+	const items = [
+		followUp({ inputId: 'i-1', sequence: 1, preview: 'first' }),
+		followUp({ inputId: 'i-2', sequence: 2, preview: 'promote me', kind: 'steer' }),
+		followUp({ inputId: 'i-3', sequence: 3, preview: 'third' }),
+	];
+	const wrapper = attach(ConversationQueue, {
+		state: queueState({ canSteer: true, steerTargetTurnId: 'turn-1', items }),
+	});
+	expect(wrapper.findAll('.queue-item')).toHaveLength(3);
+	expect(wrapper.find('.queue-item[data-kind="steer"]').text()).toContain('等待生效');
+
+	// 消费的是中间那条：卡片不卸载，其余两条保持原顺序，也不留任何提示。
+	await wrapper.setProps({
+		state: queueState({ canSteer: true, steerTargetTurnId: 'turn-1', items: [items[0], items[2]] }),
+	});
+	expect(wrapper.findAll('.queue-item')).toHaveLength(2);
+	expect(wrapper.findAll('.queue-preview').map(node => node.text())).toEqual(['first', 'third']);
+	expect(wrapper.find('.queue-title').text()).toContain('· 2');
+	expect(wrapper.find('.queue-notice').exists()).toBe(false);
+});
+
+it('unmounts the card at once when the last waiting input is consumed', () => {
+	// 消费后的快照里既没有条目也没有错误：卡片必须整卡消失，不能靠任何提示文案继续挂载。
+	const empty = attach(ConversationQueue, {
+		state: queueState({ items: [], paused: false, error: '' }),
+		notice: '已更新待发送内容',
+	});
+	expect(empty.find('.conversation-queue').exists()).toBe(false);
 });
 
 it('toggles the single button between stop and send while a Direct turn is busy', async () => {
