@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, useId } from 'vue';
-import { Check, LoaderCircle, MessageCircleQuestion, X } from 'lucide-vue-next';
+import { Check, LoaderCircle, X } from 'lucide-vue-next';
 import { useAskUserAnswers } from '../../../composables/useAskUserAnswers.js';
 
 const props = defineProps({
@@ -93,28 +93,24 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
 <template>
 	<transition name="ask-user-dock">
 		<section v-if="props.question" class="ask-user-dock" role="alertdialog" aria-label="需要你的回答">
-			<header class="ask-user-head">
-				<span class="ask-user-mark" aria-hidden="true">
-					<MessageCircleQuestion :size="15" :stroke-width="1.9" />
-				</span>
-				<span class="ask-user-heading">
-					<span class="ask-user-title">需要你的回答</span>
+			<!-- 顶部导航栏：仅在多题或有来源时呈现，去除无用的“需要你的回答”解释性大标题 -->
+			<div v-if="multiple || sourceLabel" class="ask-user-bar">
+				<div v-if="multiple" class="ask-user-tabs" role="tablist" aria-label="问题列表">
+					<button v-for="(prompt, index) in prompts" :id="`${dockId}-tab-${index}`" :key="prompt.promptId"
+						type="button" role="tab" class="ask-user-tab"
+						:class="{ active: index === activeIndex, answered: isAnswered(prompt.promptId) }"
+						:aria-selected="index === activeIndex" :aria-controls="panelId"
+						:tabindex="index === activeIndex ? 0 : -1" @click="setActive(index)">
+						<Check v-if="isAnswered(prompt.promptId)" class="ask-user-tab-check" :size="12" :stroke-width="2.6"
+							aria-hidden="true" />
+						<span v-else class="ask-user-tab-dot" aria-hidden="true"></span>
+						<span class="ask-user-tab-label">{{ tabLabel(prompt, index) }}</span>
+					</button>
+				</div>
+				<div class="ask-user-meta">
 					<span v-if="sourceLabel" class="ask-user-source">{{ sourceLabel }}</span>
-				</span>
-				<span class="ask-user-count" role="status" aria-live="polite">{{ answeredCount }}／{{ prompts.length }}</span>
-			</header>
-
-			<div v-if="multiple" class="ask-user-tabs" role="tablist" aria-label="问题列表">
-				<button v-for="(prompt, index) in prompts" :id="`${dockId}-tab-${index}`" :key="prompt.promptId"
-					type="button" role="tab" class="ask-user-tab"
-					:class="{ active: index === activeIndex, answered: isAnswered(prompt.promptId) }"
-					:aria-selected="index === activeIndex" :aria-controls="panelId"
-					:tabindex="index === activeIndex ? 0 : -1" @click="setActive(index)">
-					<Check v-if="isAnswered(prompt.promptId)" class="ask-user-tab-check" :size="12" :stroke-width="2.6"
-						aria-hidden="true" />
-					<span v-else class="ask-user-tab-dot" aria-hidden="true"></span>
-					<span class="ask-user-tab-label">{{ tabLabel(prompt, index) }}</span>
-				</button>
+					<span v-if="multiple" class="ask-user-count" role="status" aria-live="polite">{{ answeredCount }}／{{ prompts.length }}</span>
+				</div>
 			</div>
 
 			<div :id="panelId" class="ask-user-panel" :role="multiple ? 'tabpanel' : undefined">
@@ -159,17 +155,19 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
 
 			<footer class="ask-user-actions">
 				<span class="ask-user-hint" aria-hidden="true">1–4 选择 · ←→ 切题 · Ctrl+Enter 提交</span>
-				<button class="ask-user-btn skip" type="button" :disabled="props.resolving" @click="skip">
-					<X :size="13" :stroke-width="2.4" aria-hidden="true" />
-					跳过
-				</button>
-				<button class="ask-user-btn submit" type="button" :disabled="!canSubmit || props.resolving"
-					@click="submit">
-					<LoaderCircle v-if="props.resolving" class="ask-user-spin" :size="13" :stroke-width="2.2"
-						aria-hidden="true" />
-					<Check v-else :size="13" :stroke-width="2.6" aria-hidden="true" />
-					提交
-				</button>
+				<div class="ask-user-actions-btns">
+					<button class="ask-user-btn skip" type="button" :disabled="props.resolving" @click="skip">
+						<X :size="13" :stroke-width="2.4" aria-hidden="true" />
+						跳过
+					</button>
+					<button class="ask-user-btn submit" type="button" :disabled="!canSubmit || props.resolving"
+						@click="submit">
+						<LoaderCircle v-if="props.resolving" class="ask-user-spin" :size="13" :stroke-width="2.2"
+							aria-hidden="true" />
+						<Check v-else :size="13" :stroke-width="2.6" aria-hidden="true" />
+						提交
+					</button>
+				</div>
 			</footer>
 		</section>
 	</transition>

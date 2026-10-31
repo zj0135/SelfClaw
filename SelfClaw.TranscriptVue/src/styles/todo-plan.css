@@ -1,10 +1,10 @@
 /*
  * 任务计划（todo_write）的共享视觉：dock 与内联折叠行共用。
  *
- * 沿用转录里既有的语言——发丝线 + 纯文本行，不叠卡片、不加底色：
- * 层级由图标与行距表达，进度由一条 2px 的细线表达。
- * 组件在 <style scoped> 内 @import 本文件（与 tool-blocks.css 同一做法），
- * 所以这里只写类选择器，不写标签选择器，避免作用域哈希失效。
+ * 沿用转录与 Console 既有的先锋极简语言：发丝线、微卡片面板、微标签，
+ * 层级由图标与行距表达，进度由一条 2px 的细线与直观百分比表达。
+ * 组件在 <style scoped> 内 @import 本文件，
+ * 这里只写类选择器，不写标签选择器，避免作用域哈希失效。
  * 颜色/字号一律走 tokens.css 变量。
  */
 
@@ -158,7 +158,7 @@
 
 .todo-plan-list {
 	display: grid;
-	gap: 1px;
+	gap: 2px;
 	margin: 0;
 	padding: 0;
 	list-style: none;
@@ -169,16 +169,23 @@
 	align-items: flex-start;
 	gap: 8px;
 	min-width: 0;
-	padding: 4px 0;
+	padding: 3.5px 6px;
+	border-radius: 4px;
 	color: var(--text-soft);
 	font-size: var(--fs-125);
 	line-height: 1.55;
+	transition: background-color 120ms ease, color 120ms ease;
+}
+
+.todo-plan-item:hover {
+	background: color-mix(in srgb, var(--text) 3.5%, transparent);
 }
 
 .todo-plan-item-icon {
 	flex: none;
 	margin-top: 0.18em;
 	color: var(--muted-soft);
+	transition: color 120ms ease;
 }
 
 .todo-plan-item-copy {
@@ -193,12 +200,9 @@
 	overflow-wrap: anywhere;
 }
 
-/* 进行中：图标上色 + 左侧 2px 高亮条，文字提到前景色。 */
+/* 进行中：图标上色并带呼吸动效，文字提到前景色，去掉突兀的左侧竖线。 */
 .todo-plan-item.in_progress {
-	margin-left: -8px;
-	padding-left: 8px;
 	color: var(--text-strong);
-	box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .todo-plan-item.in_progress .todo-plan-item-icon {
@@ -212,7 +216,7 @@
 	line-height: 1.5;
 }
 
-/* 已完成：文字弱化 + 极细删除线（线本身用 --line-1，不抢视觉）。 */
+/* 已完成：文字弱化 + 极细删除线（文本保持现状），图标采用标准成功绿色。 */
 .todo-plan-item.completed .todo-plan-item-text {
 	color: var(--muted);
 	text-decoration: line-through;
@@ -221,12 +225,12 @@
 }
 
 .todo-plan-item.completed .todo-plan-item-icon {
-	color: var(--muted);
+	color: var(--success);
 }
 
 /* 内联卡片里的紧凑变体：行距与字号再收一档。 */
 .todo-plan-list.compact .todo-plan-item {
-	padding: 3px 0;
+	padding: 2.5px 5px;
 	font-size: var(--fs-12);
 	line-height: 1.5;
 }
@@ -255,12 +259,10 @@
 	}
 }
 
-/* ── dock 出没与展开动效：160ms 位移 + 透明度 ─────────────────── */
+/* ── dock 出没与展开动效：平滑高度折叠过渡，消除生硬折叠高度骤降 ─────────────────── */
 
 .todo-plan-dock-enter-active,
-.todo-plan-dock-leave-active,
-.todo-plan-body-enter-active,
-.todo-plan-body-leave-active {
+.todo-plan-dock-leave-active {
 	transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
 }
 
@@ -270,13 +272,39 @@
 	transform: translateY(4px);
 }
 
-.todo-plan-body-enter-from,
-.todo-plan-body-leave-to {
-	opacity: 0;
-	transform: translateY(-3px);
+.todo-plan-body-enter-active {
+	transition: max-height 260ms cubic-bezier(0.16, 1, 0.3, 1),
+	            opacity 200ms ease,
+	            transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+	            padding 260ms cubic-bezier(0.16, 1, 0.3, 1);
+	overflow: hidden;
 }
 
-/* ── 内联折叠行：与工具行同一条发丝线语言 ─────────────────────── */
+.todo-plan-body-leave-active {
+	transition: max-height 220ms cubic-bezier(0.16, 1, 0.3, 1),
+	            opacity 160ms ease,
+	            transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+	            padding 220ms cubic-bezier(0.16, 1, 0.3, 1);
+	overflow: hidden;
+}
+
+.todo-plan-body-enter-from,
+.todo-plan-body-leave-to {
+	max-height: 0 !important;
+	opacity: 0;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+	transform: translateY(-4px);
+}
+
+.todo-plan-body-enter-to,
+.todo-plan-body-leave-from {
+	max-height: 180px;
+	opacity: 1;
+	transform: translateY(0);
+}
+
+/* ── 内联折叠行与详情卡片：对标主页面风格的微卡片面板 ─────────────────────── */
 
 .todo-block {
 	min-width: 0;
@@ -310,7 +338,7 @@ button.todo-summary {
 	display: inline-flex;
 	min-width: 0;
 	flex: 1 1 auto;
-	align-items: baseline;
+	align-items: center;
 	gap: 8px;
 }
 
@@ -318,6 +346,12 @@ button.todo-summary {
 	flex: none;
 	align-self: center;
 	color: var(--muted);
+	transition: color 140ms ease;
+}
+
+.todo-summary:hover .todo-summary-icon,
+.todo-block.open .todo-summary-icon {
+	color: var(--accent);
 }
 
 .todo-summary-side {
@@ -348,7 +382,12 @@ button.todo-summary {
 
 .todo-summary-progress {
 	flex: 0 0 auto;
-	color: var(--muted-soft);
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 6px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--text) 5%, transparent);
+	color: var(--muted);
 	font-family: var(--font-mono);
 	font-size: var(--fs-105);
 	line-height: 1.45;
@@ -357,18 +396,68 @@ button.todo-summary {
 
 .todo-summary-chevron {
 	color: inherit;
-	transition: transform 140ms ease, color 120ms ease;
+	transition: transform 160ms var(--ease-out), color 120ms ease;
+}
+
+.todo-summary:hover .todo-summary-chevron {
+	color: var(--muted);
 }
 
 .todo-block.open .todo-summary-chevron {
 	transform: rotate(90deg);
 }
 
-/* 展开区：与工具卡一致，靠导线缩进表达层级，不再叠一层容器。 */
+/* 展开区：对标主页面风格的内嵌微卡片面板，去除生硬孤立的左导线，增强视觉品质与层级感。 */
 .todo-details {
-	margin: 2px 0 4px 22px;
-	padding: 2px 0 2px 12px;
-	border-left: 1px solid var(--line-2);
+	margin: 8px 0 6px;
+	padding: 8px 12px;
+	border: 1px solid var(--line-1);
+	border-radius: var(--radius-sm, 6px);
+	background: color-mix(in srgb, var(--panel-muted) 38%, transparent);
+	box-shadow: 0 1px 2px rgba(var(--shadow-ink), 0.03);
+}
+
+.compact .todo-details,
+.todo-block.compact .todo-details {
+	margin: 4px 0 4px;
+	padding: 6px 10px;
+}
+
+/* 内联卡片详情的平滑折叠展开动效 */
+.todo-details-enter-active {
+	transition: max-height 260ms cubic-bezier(0.16, 1, 0.3, 1),
+	            opacity 200ms ease,
+	            transform 260ms cubic-bezier(0.16, 1, 0.3, 1),
+	            padding 260ms cubic-bezier(0.16, 1, 0.3, 1),
+	            margin 260ms cubic-bezier(0.16, 1, 0.3, 1);
+	overflow: hidden;
+}
+
+.todo-details-leave-active {
+	transition: max-height 220ms cubic-bezier(0.16, 1, 0.3, 1),
+	            opacity 160ms ease,
+	            transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+	            padding 220ms cubic-bezier(0.16, 1, 0.3, 1),
+	            margin 220ms cubic-bezier(0.16, 1, 0.3, 1);
+	overflow: hidden;
+}
+
+.todo-details-enter-from,
+.todo-details-leave-to {
+	max-height: 0 !important;
+	opacity: 0;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	transform: translateY(-4px);
+}
+
+.todo-details-enter-to,
+.todo-details-leave-from {
+	max-height: 480px;
+	opacity: 1;
+	transform: translateY(0);
 }
 
 .todo-details-note {
@@ -387,13 +476,16 @@ button.todo-summary {
 	.todo-plan-dock-leave-active,
 	.todo-plan-body-enter-active,
 	.todo-plan-body-leave-active,
+	.todo-details-enter-active,
+	.todo-details-leave-active,
 	.todo-plan-chevron,
 	.todo-plan-meter-fill,
 	.todo-summary-chevron,
 	.inline-todo-label,
 	.todo-plan-head-icon,
 	.todo-plan-title,
-	.todo-plan-active {
+	.todo-plan-active,
+	.todo-plan-item {
 		transition: none;
 	}
 

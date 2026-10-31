@@ -36,7 +36,8 @@ const blocks = computed(() => buildRenderBlocks(props.item));
 /* 窄栏里的紧凑变体：行距再收一档，展开导线收窄一格。 */
 .compact :deep(.thinking-summary), .compact :deep(.tool-summary), .compact :deep(.tool-group-summary), .compact :deep(.todo-summary) { padding: 6px 0; }
 .compact :deep(.thinking-label), .compact :deep(.inline-tool-label), .compact :deep(.tool-group-label), .compact :deep(.inline-todo-label) { font-size: var(--fs-12); letter-spacing: 0; }
-.compact :deep(.thinking-content), .compact :deep(.tool-details), .compact :deep(.tool-group-details), .compact :deep(.todo-details) { margin: 1px 0 7px 22px; padding: 1px 0 1px 10px; }
+.compact :deep(.thinking-content), .compact :deep(.tool-details), .compact :deep(.tool-group-details) { margin: 1px 0 7px 22px; padding: 1px 0 1px 10px; }
+.compact :deep(.todo-details) { margin: 4px 0 6px; padding: 6px 10px; }
 .compact :deep(.body.body-segment) { padding: 0; font-size: var(--fs-12); line-height: 1.65; overflow-wrap: anywhere; }
 .compact :deep(pre) { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
 .compact :deep(img) { max-width: 100%; height: auto; }
