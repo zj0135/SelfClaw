@@ -269,6 +269,7 @@ public sealed class DirectCompactionRuntimeTests
     {
         public Task<DirectTurnCapabilityLease> ResolveAsync(
             DirectChatTurnRequest request,
+            ToolImageCapability imageCapability,
             CancellationToken cancellationToken = default)
             => Task.FromResult(lease);
     }

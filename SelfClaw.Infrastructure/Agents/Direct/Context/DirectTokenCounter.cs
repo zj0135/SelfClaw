@@ -303,13 +303,54 @@ internal sealed class DirectTokenCounter : IDirectTokenCounter
                     break;
                 case FunctionResultContent result:
                     AddPart(parts, result.CallId);
-                    AddPart(parts, Serialize(result.Result));
+                    CollectResultParts(result.Result, parts, ref imageCount);
                     AddPart(parts, result.Exception?.Message);
                     break;
             }
         }
 
         return parts;
+    }
+
+    /// <summary>
+    /// A tool result may carry content parts on the native delivery path. An image is counted by the constant
+    /// per-image cost and its bytes are never touched: serializing them would turn one image into megabytes of
+    /// base64 in the tokenizer and in the cache key.
+    /// </summary>
+    private static void CollectResultParts(object? value, List<string> parts, ref int imageCount)
+    {
+        switch (value)
+        {
+            case AIContent content:
+                CollectContentParts(content, parts, ref imageCount);
+                break;
+            case IEnumerable<AIContent> contents:
+                foreach (var content in contents)
+                {
+                    CollectContentParts(content, parts, ref imageCount);
+                }
+
+                break;
+            default:
+                AddPart(parts, Serialize(value));
+                break;
+        }
+    }
+
+    private static void CollectContentParts(AIContent content, List<string> parts, ref int imageCount)
+    {
+        switch (content)
+        {
+            case TextContent text:
+                AddPart(parts, text.Text);
+                break;
+            case DataContent:
+                imageCount++;
+                break;
+            default:
+                AddPart(parts, content.GetType().Name);
+                break;
+        }
     }
 
     private static List<string> CollectToolParts(AITool tool)

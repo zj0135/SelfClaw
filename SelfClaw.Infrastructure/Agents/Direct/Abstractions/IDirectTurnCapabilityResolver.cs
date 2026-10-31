@@ -1,3 +1,4 @@
+using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Core.Runtime;
 
@@ -7,5 +8,6 @@ internal interface IDirectTurnCapabilityResolver
 {
     Task<DirectTurnCapabilityLease> ResolveAsync(
         DirectChatTurnRequest request,
+        ToolImageCapability imageCapability,
         CancellationToken cancellationToken = default);
 }

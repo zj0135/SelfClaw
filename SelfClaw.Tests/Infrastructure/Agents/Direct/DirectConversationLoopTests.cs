@@ -1,3 +1,4 @@
+using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Agents.Direct;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
@@ -261,6 +262,7 @@ public sealed class DirectConversationLoopTests
     {
         public Task<DirectTurnCapabilityLease> ResolveAsync(
             DirectChatTurnRequest request,
+            ToolImageCapability imageCapability,
             CancellationToken cancellationToken = default)
             => Task.FromResult(lease);
     }

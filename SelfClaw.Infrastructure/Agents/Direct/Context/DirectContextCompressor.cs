@@ -150,27 +150,51 @@ internal sealed class DirectContextCompressor
     /// <summary>
     /// The summarizer needs the meaning of an image, not its pixels: sending the bytes would blow its own
     /// window and leak binary content into a summary. The planner already declines image-bearing units, so
-    /// this is the second line of defence.
+    /// this is the second line of defence, and it reaches the images nested inside a native tool result.
     /// </summary>
     private static IEnumerable<ChatMessage> PlaceholderizeAttachments(IReadOnlyList<ChatMessage> messages)
     {
         foreach (var message in messages)
         {
-            if (!message.Contents.Any(content => content is DataContent))
+            var contents = new List<AIContent>(message.Contents.Count);
+            var replaced = false;
+            foreach (var content in message.Contents)
             {
-                // Untouched messages are replayed as the same instance, exactly as before.
-                yield return message;
-                continue;
+                var placeholder = Placeholderize(content);
+                replaced |= !ReferenceEquals(placeholder, content);
+                contents.Add(placeholder);
             }
 
-            var contents = message.Contents
-                .Select(content => content is DataContent data
-                    ? new TextContent($"[image: {data.Name ?? data.MediaType}]")
-                    : content)
-                .ToArray();
-            yield return new ChatMessage(message.Role, contents);
+            // Untouched messages are replayed as the same instance, exactly as before.
+            yield return replaced ? new ChatMessage(message.Role, [.. contents]) : message;
         }
     }
+
+    // Returns the same instance when nothing inside changed, so a text-only tool result survives untouched.
+    private static AIContent Placeholderize(AIContent content) => content switch
+    {
+        DataContent data => new TextContent($"[image: {data.Name ?? data.MediaType}]"),
+        FunctionResultContent { Result: AIContent nested } result => Placeholderize(result, nested),
+        FunctionResultContent { Result: IEnumerable<AIContent> nested } result => Placeholderize(result, nested),
+        _ => content
+    };
+
+    private static AIContent Placeholderize(FunctionResultContent result, AIContent nested)
+    {
+        var placeholder = Placeholderize(nested);
+        return ReferenceEquals(placeholder, nested) ? result : Rebuild(result, placeholder);
+    }
+
+    private static AIContent Placeholderize(FunctionResultContent result, IEnumerable<AIContent> nested)
+    {
+        var placeholders = nested.Select(Placeholderize).ToArray();
+        // Same-instance comparison is the change test: AIContent defines no value equality.
+        return placeholders.SequenceEqual(nested) ? result : Rebuild(result, placeholders);
+    }
+
+    // The call id and the exception keep the result matched to its call; only the payload is exchanged.
+    private static FunctionResultContent Rebuild(FunctionResultContent result, object payload)
+        => new(result.CallId, payload) { Exception = result.Exception };
 
     private static int OutputTokenBudget(int sourceTokens)
         => Math.Clamp(sourceTokens / 4, MinimumSummaryTokens, MaximumSummaryTokens);

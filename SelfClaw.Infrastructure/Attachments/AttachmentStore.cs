@@ -34,7 +34,7 @@ internal sealed class AttachmentStore : IAttachmentStore
         }
 
         var bytes = await ReadBytesAsync(content, cancellationToken).ConfigureAwait(false);
-        if (!MatchesDeclaredMediaType(bytes, normalizedMediaType))
+        if (!ImageSignatures.Matches(bytes, normalizedMediaType))
         {
             throw new ArgumentException(
                 $"Attachment content is not a valid {normalizedMediaType} file.", nameof(content));
@@ -111,21 +111,4 @@ internal sealed class AttachmentStore : IAttachmentStore
             buffer.Write(chunk, 0, read);
         }
     }
-
-    private static bool MatchesDeclaredMediaType(byte[] bytes, string mediaType) => mediaType switch
-    {
-        AttachmentPathResolver.PngMediaType => StartsWith(bytes, [0x89, 0x50, 0x4E, 0x47]),
-        AttachmentPathResolver.JpegMediaType => StartsWith(bytes, [0xFF, 0xD8, 0xFF]),
-        AttachmentPathResolver.GifMediaType => StartsWith(bytes, [0x47, 0x49, 0x46, 0x38]),
-        // WebP hides its marker behind the four RIFF size bytes.
-        AttachmentPathResolver.WebpMediaType => StartsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && MatchesAt(bytes, 8, [0x57, 0x45, 0x42, 0x50]),
-        _ => false
-    };
-
-    private static bool StartsWith(byte[] bytes, ReadOnlySpan<byte> signature)
-        => bytes.AsSpan().StartsWith(signature);
-
-    private static bool MatchesAt(byte[] bytes, int offset, ReadOnlySpan<byte> signature)
-        => bytes.Length >= offset + signature.Length
-            && bytes.AsSpan(offset, signature.Length).SequenceEqual(signature);
 }

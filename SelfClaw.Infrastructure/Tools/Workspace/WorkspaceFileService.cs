@@ -1,10 +1,17 @@
 using System.Text;
 using SelfClaw.Core.Models;
+using SelfClaw.Infrastructure.Attachments;
 
 namespace SelfClaw.Infrastructure.Tools.Workspace;
 
 internal sealed class WorkspaceFileService
 {
+    /// <summary>
+    /// Fragment of the "this turn cannot take images" failure. <c>WorkspaceAgentToolset</c> matches on it
+    /// to append the capability reason, so both sides must read this one constant.
+    /// </summary>
+    internal const string ImageUnavailableMarker = "this turn cannot receive image content";
+
     private const int MaxListedEntries = 250;
     private const int MaxReadCharacters = 24_000;
     private const int MaxReadLines = 2_000;
@@ -45,11 +52,12 @@ internal sealed class WorkspaceFileService
         return Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>(entries);
     }
 
-    public async Task<WorkspaceFileContent> ReadFileAsync(
+    public async Task<WorkspaceFileReadResult> ReadFileAsync(
         string workspaceRootPath,
         string relativePath,
         int? startLine = null,
         int? lineCount = null,
+        bool includeImageContent = false,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(relativePath))
@@ -58,32 +66,31 @@ internal sealed class WorkspaceFileService
         }
 
         var root = WorkspaceFileAccess.NormalizeRoot(workspaceRootPath);
-        var fullPath = await WorkspaceFileAccess.ResolveTextFileAsync(root, relativePath, "read", cancellationToken)
-            .ConfigureAwait(false);
+        var fullPath = WorkspaceFileAccess.ResolvePath(root, relativePath);
+        var file = new FileInfo(fullPath);
+        if (!file.Exists) throw new FileNotFoundException("File was not found.", relativePath);
         var relative = Path.GetRelativePath(root, fullPath);
 
-        // Line-ranged read: stream the file so a large file can be paged
-        // without loading it all. startLine is 1-based; lineCount defaults
-        // to MaxReadLines from the start line.
-        if (startLine is not null || lineCount is not null)
+        // Magic bytes decide what the file is; the extension is never consulted, so a .png holding
+        // text is read as text and a .txt holding a PNG is delivered as an image.
+        var header = await WorkspaceFileAccess
+            .ReadHeaderAsync(fullPath, WorkspaceFileAccess.HeaderProbeBytes, cancellationToken)
+            .ConfigureAwait(false);
+        if (ImageSignatures.TryDetect(header, out var mediaType))
         {
-            return await ReadLineRangeAsync(fullPath, relative, startLine, lineCount, cancellationToken).ConfigureAwait(false);
+            return await ReadImageAsync(
+                fullPath, relative, relativePath, mediaType, file.Length, includeImageContent, cancellationToken)
+                .ConfigureAwait(false);
         }
 
-        // Whole-file read (legacy behaviour) with a character-count safety cap.
-        // CRLF/CR is normalized to LF so the model sees the same line-ending shape
-        // that ranged reads and edit_file operate on — the file's on-disk convention
-        // is preserved by edit_file on write-back, not by the read path.
-        var content = WorkspaceTextEditor.NormalizeToLf(await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false));
-        var totalLines = CountLines(content);
-        var truncated = content.Length > MaxReadCharacters;
-        if (truncated)
+        if (header.Contains((byte)0))
         {
-            content = content[..MaxReadCharacters];
+            return new WorkspaceFileReadResult(
+                Error: "Only text files and supported images (PNG, JPEG, WebP, GIF) can be read.");
         }
 
-        var endLine = truncated ? CountLines(content) : totalLines;
-        return new WorkspaceFileContent(relative, content, truncated, 1, endLine, totalLines);
+        return new WorkspaceFileReadResult(
+            Text: await ReadTextAsync(root, relativePath, startLine, lineCount, cancellationToken).ConfigureAwait(false));
     }
 
     public async Task<WorkspaceFileWriteResult> WriteFileAsync(
@@ -156,6 +163,70 @@ internal sealed class WorkspaceFileService
 
         return await CommitEditAsync(
             fullPath, relative, edit.Content, edit.LineEnding, edit.Replacements, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<WorkspaceFileReadResult> ReadImageAsync(
+        string fullPath,
+        string relativePath,
+        string requestedPath,
+        string mediaType,
+        long length,
+        bool includeImageContent,
+        CancellationToken cancellationToken)
+    {
+        // The gate is decided per turn by the caller; refusing here keeps the reason local to the
+        // file the model asked for instead of failing the whole turn.
+        if (!includeImageContent)
+        {
+            return new WorkspaceFileReadResult(
+                Error: $"'{requestedPath}' is an image, but {ImageUnavailableMarker}.");
+        }
+
+        if (length > WorkspaceImageLimits.MaximumBytes)
+        {
+            return new WorkspaceFileReadResult(
+                Error: $"Image '{requestedPath}' is {length} bytes, above the {WorkspaceImageLimits.MaximumBytes} byte image limit.");
+        }
+
+        var bytes = await File.ReadAllBytesAsync(fullPath, cancellationToken).ConfigureAwait(false);
+        return new WorkspaceFileReadResult(Image: new WorkspaceImageContent(relativePath, mediaType, bytes));
+    }
+
+    private static async Task<WorkspaceFileContent> ReadTextAsync(
+        string root,
+        string relativePath,
+        int? startLine,
+        int? lineCount,
+        CancellationToken cancellationToken)
+    {
+        // The shared resolver re-applies the text size ceiling and the binary rejection, so this
+        // path cannot drift from edit_file even though it already probed the header.
+        var fullPath = await WorkspaceFileAccess.ResolveTextFileAsync(root, relativePath, "read", cancellationToken)
+            .ConfigureAwait(false);
+        var relative = Path.GetRelativePath(root, fullPath);
+
+        // Line-ranged read: stream the file so a large file can be paged
+        // without loading it all. startLine is 1-based; lineCount defaults
+        // to MaxReadLines from the start line.
+        if (startLine is not null || lineCount is not null)
+        {
+            return await ReadLineRangeAsync(fullPath, relative, startLine, lineCount, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Whole-file read (legacy behaviour) with a character-count safety cap.
+        // CRLF/CR is normalized to LF so the model sees the same line-ending shape
+        // that ranged reads and edit_file operate on — the file's on-disk convention
+        // is preserved by edit_file on write-back, not by the read path.
+        var content = WorkspaceTextEditor.NormalizeToLf(await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false));
+        var totalLines = CountLines(content);
+        var truncated = content.Length > MaxReadCharacters;
+        if (truncated)
+        {
+            content = content[..MaxReadCharacters];
+        }
+
+        var endLine = truncated ? CountLines(content) : totalLines;
+        return new WorkspaceFileContent(relative, content, truncated, 1, endLine, totalLines);
     }
 
     private static async Task<WorkspaceFileContent> ReadLineRangeAsync(

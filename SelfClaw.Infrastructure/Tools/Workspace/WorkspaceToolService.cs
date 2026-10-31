@@ -34,20 +34,22 @@ internal sealed class WorkspaceToolService : IWorkspaceToolService
             () => _files.ListFilesAsync(workspaceRootPath, relativePath, cancellationToken),
             ("RelativePath", relativePath ?? string.Empty));
 
-    public async Task<WorkspaceFileContent> ReadFileAsync(
+    public async Task<WorkspaceFileReadResult> ReadFileAsync(
         string workspaceRootPath,
         string relativePath,
         int? startLine = null,
         int? lineCount = null,
+        bool includeImageContent = false,
         CancellationToken cancellationToken = default)
     {
         return await ExecuteAsync(
             "read workspace file",
             workspaceRootPath,
-            () => _files.ReadFileAsync(workspaceRootPath, relativePath, startLine, lineCount, cancellationToken),
+            () => _files.ReadFileAsync(workspaceRootPath, relativePath, startLine, lineCount, includeImageContent, cancellationToken),
             ("RelativePath", relativePath),
             ("StartLine", startLine),
-            ("LineCount", lineCount)).ConfigureAwait(false);
+            ("LineCount", lineCount),
+            ("IncludeImageContent", includeImageContent)).ConfigureAwait(false);
     }
 
     public async Task<WorkspaceFileWriteResult> WriteFileAsync(

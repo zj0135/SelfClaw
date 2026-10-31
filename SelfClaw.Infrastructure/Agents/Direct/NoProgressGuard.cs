@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
@@ -60,17 +61,35 @@ internal sealed class NoProgressGuard
             _fingerprint.Append('\u001d');
             if (content is FunctionResultContent result)
             {
-                _fingerprint.Append(Serialize(result.Result));
+                _fingerprint.Append(Fingerprint(result.Result));
                 _fingerprint.Append('\u001e').Append(result.Exception?.Message);
             }
             else
             {
-                _fingerprint.Append(Serialize(content));
+                _fingerprint.Append(Fingerprint(content));
             }
         }
 
         return _fingerprint.ToString();
     }
+
+    /// <summary>
+    /// A tool result may carry the image itself. Its bytes decide whether a repeated read produced anything
+    /// new, but they must never be stringified: one 5 MiB image would otherwise build a megabyte-scale
+    /// fingerprint and a matching base64 allocation on every batch.
+    /// </summary>
+    private static string Fingerprint(object? value) => value switch
+    {
+        null => string.Empty,
+        string text => text,
+        DataContent data => $"[image:{data.MediaType}:{Hash(data.Data.Span)}:{data.Data.Length}]",
+        TextContent text => text.Text ?? string.Empty,
+        AIContent content => content.GetType().Name,
+        IEnumerable<AIContent> contents => string.Join('\u001f', contents.Select(Fingerprint)),
+        _ => Serialize(value)
+    };
+
+    private static string Hash(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes));
 
     private static string Serialize(object? value) => value switch
     {

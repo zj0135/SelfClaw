@@ -60,6 +60,16 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     public void BeginInputSegment() => _finalText.Clear();
 
     /// <summary>
+    /// Publishes the completion of a tool call the loop executed itself. The loop uses this instead of the
+    /// translated projection because a result carrying content parts has no single display shape.
+    /// </summary>
+    public void PublishToolResult(string callId, DirectToolResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        Write(new ToolCallCompletedEvent(callId, result.Status, result.Summary, result.Detail));
+    }
+
+    /// <summary>
     /// Supplies the pricing, model id and context window the accumulated usage is reported with.
     /// The translator has no provider or model knowledge of its own.
     /// </summary>

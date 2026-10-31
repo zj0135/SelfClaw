@@ -901,6 +901,7 @@ public sealed class DirectAgentChatRuntimeTests
 
         public Task<DirectTurnCapabilityLease> ResolveAsync(
             DirectChatTurnRequest request,
+            ToolImageCapability imageCapability,
             CancellationToken cancellationToken = default)
         {
             Calls++;
@@ -919,6 +920,7 @@ public sealed class DirectAgentChatRuntimeTests
 
         public Task<DirectTurnCapabilityLease> ResolveAsync(
             DirectChatTurnRequest request,
+            ToolImageCapability imageCapability,
             CancellationToken cancellationToken = default)
             => Task.FromException<DirectTurnCapabilityLease>(_exception);
     }
@@ -928,7 +930,7 @@ public sealed class DirectAgentChatRuntimeTests
         public Task<IReadOnlyList<WorkspaceFileEntry>> ListFilesAsync(string root, string? path, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>([]);
         public Task<IReadOnlyList<WorkspaceFileEntry>> GlobFilesAsync(string root, string pattern, string? path = null, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>([]);
         public Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(string root, string query, WorkspaceSearchOptions? options = null, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WorkspaceSearchHit>>([]);
-        public Task<WorkspaceFileContent> ReadFileAsync(string root, string path, int? startLine = null, int? lineCount = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<WorkspaceFileReadResult> ReadFileAsync(string root, string path, int? startLine = null, int? lineCount = null, bool includeImageContent = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WorkspaceFileWriteResult> WriteFileAsync(string root, string path, string content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WorkspaceFileWriteResult> EditFileAsync(string root, string path, string oldText, string newText, bool replaceAll = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ShellCommandResult> RunShellCommandAsync(string root, string command, int timeout, CancellationToken cancellationToken = default) => throw new NotSupportedException();

@@ -46,6 +46,47 @@ public sealed class DirectContextCompressorAttachmentTests
         outcome.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task Images_nested_in_a_tool_result_are_placeholderized_too()
+    {
+        var client = new RecordingChatClient();
+        var textOnlyResult = new ChatMessage(ChatRole.Tool,
+            [new FunctionResultContent("call-2", "plain tool output")]);
+        var units = new[]
+        {
+            new DirectPromptHistoryUnit(
+                [
+                    new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call-1", "read_file")]),
+                    new ChatMessage(ChatRole.Tool,
+                        [
+                            new FunctionResultContent("call-1",
+                                new List<AIContent>
+                                {
+                                    new TextContent("Read image 'shot.png' (image/png, 70 bytes)."),
+                                    new DataContent(PngBytes, "image/png") { Name = "shot.png" }
+                                })
+                        ])
+                ], 1),
+            new DirectPromptHistoryUnit([textOnlyResult], 2)
+        };
+
+        var outcome = await CreateCompressor(client).TryCompressAsync(new DirectCompressionRequest(
+            units, null, 1200, null, CreateLease(client, "turn-model"), Guid.NewGuid(), Guid.NewGuid()));
+
+        var sent = client.Requests.Single();
+        sent.SelectMany(message => message.Contents).OfType<DataContent>().Should().BeEmpty(
+            "the summarizer must never receive binary content, at any depth");
+        var result = sent.SelectMany(message => message.Contents).OfType<FunctionResultContent>()
+            .Should().ContainSingle(item => item.CallId == "call-1").Subject;
+        result.Result.Should().BeAssignableTo<IEnumerable<AIContent>>().Subject.Select(content => content switch
+        {
+            TextContent text => text.Text,
+            _ => content.GetType().Name
+        }).Should().Equal("Read image 'shot.png' (image/png, 70 bytes).", "[image: shot.png]");
+        sent.Should().Contain(textOnlyResult, "a message without binary content is replayed as the same instance");
+        outcome.Should().NotBeNull();
+    }
+
     private static DirectContextCompressor CreateCompressor(RecordingChatClient client)
         => new(new DirectAgentChatRuntimeTests.FakeChatClientFactory(client), new StubAiModelCatalog(),
             new DirectTokenCounter());

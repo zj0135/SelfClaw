@@ -555,7 +555,7 @@ public sealed class DirectInTurnCompactionTests
 
     private sealed class FixedResolver(DirectTurnCapabilityLease lease) : IDirectTurnCapabilityResolver
     {
-        public Task<DirectTurnCapabilityLease> ResolveAsync(DirectChatTurnRequest request,
+        public Task<DirectTurnCapabilityLease> ResolveAsync(DirectChatTurnRequest request, ToolImageCapability imageCapability,
             CancellationToken cancellationToken = default)
             => Task.FromResult(lease);
     }

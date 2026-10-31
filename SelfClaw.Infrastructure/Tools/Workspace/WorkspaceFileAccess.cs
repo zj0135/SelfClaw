@@ -1,8 +1,14 @@
+using SelfClaw.Infrastructure.Attachments;
+
 namespace SelfClaw.Infrastructure.Tools.Workspace;
 
 internal static class WorkspaceFileAccess
 {
-    internal const long MaxFileBytes = 1_000_000;
+    internal const long MaxTextFileBytes = 1_000_000;
+
+    /// <summary>How many leading bytes every "what kind of file is this" probe reads.</summary>
+    internal const int HeaderProbeBytes = 1024;
+
     internal static readonly IReadOnlySet<string> SkippedDirectoryNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "bin", "obj", "out", "build", "dist", "node_modules", "packages",
@@ -43,9 +49,18 @@ internal static class WorkspaceFileAccess
         var fullPath = ResolvePath(root, relativePath);
         var file = new FileInfo(fullPath);
         if (!file.Exists) throw new FileNotFoundException("File was not found.", relativePath);
-        if (file.Length > MaxFileBytes)
+        if (file.Length > MaxTextFileBytes)
         {
-            throw new InvalidOperationException($"The file is too large to {operation} safely. Limit: {MaxFileBytes} bytes.");
+            throw new InvalidOperationException($"The file is too large to {operation} safely. Limit: {MaxTextFileBytes} bytes.");
+        }
+
+        // An image is not a corrupt text file: naming the real format explains why the operation
+        // cannot touch it, while the plain text rejection below still covers every other binary.
+        var header = await ReadHeaderAsync(fullPath, HeaderProbeBytes, cancellationToken).ConfigureAwait(false);
+        if (ImageSignatures.TryDetect(header, out var imageMediaType))
+        {
+            throw new InvalidOperationException(
+                $"'{relativePath}' is an image ({imageMediaType}), not a text file.");
         }
 
         if (!await IsTextFileAsync(fullPath, cancellationToken).ConfigureAwait(false))
@@ -54,6 +69,31 @@ internal static class WorkspaceFileAccess
         }
 
         return fullPath;
+    }
+
+    /// <summary>
+    /// Reads at most <paramref name="maximumBytes"/> from the start of a file (less when the file is
+    /// shorter) so callers can sniff signatures without loading a whole image or archive.
+    /// </summary>
+    internal static async Task<byte[]> ReadHeaderAsync(
+        string fullPath, int maximumBytes, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var buffer = new byte[maximumBytes];
+        await using var stream = File.OpenRead(fullPath);
+        var total = 0;
+        while (total < buffer.Length)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(total), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+        }
+
+        return total == buffer.Length ? buffer : buffer[..total];
     }
 
     private static bool IsPathWithinRoot(string root, string candidatePath)
@@ -88,17 +128,7 @@ internal static class WorkspaceFileAccess
 
     private static async Task<bool> IsTextFileAsync(string path, CancellationToken cancellationToken)
     {
-        var buffer = new byte[1024];
-        await using var stream = File.OpenRead(path);
-        var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
-        for (var index = 0; index < read; index++)
-        {
-            if (buffer[index] == 0)
-            {
-                return false;
-            }
-        }
-
-        return true;
+        var header = await ReadHeaderAsync(path, HeaderProbeBytes, cancellationToken).ConfigureAwait(false);
+        return !header.Contains((byte)0);
     }
 }

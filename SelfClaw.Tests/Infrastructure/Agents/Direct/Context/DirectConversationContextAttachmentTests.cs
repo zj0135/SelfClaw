@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime;
+using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
@@ -57,6 +59,40 @@ public sealed class DirectConversationContextAttachmentTests
         message.Contents.Should().ContainSingle().Which.Should().BeOfType<TextContent>();
     }
 
+    [Fact]
+    public void A_tool_result_that_nests_an_image_makes_its_unit_image_bearing_and_stops_compaction()
+    {
+        var context = new DirectConversationContext(null, [], []);
+        context.AppendResponse(
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("call-1", "read_file")])),
+            Bindings("read_file"));
+        context.AppendResults(
+            [
+                new FunctionResultContent("call-1",
+                    new List<AIContent>
+                    {
+                        new TextContent("Read image 'shot.png' (image/png, 70 bytes)."),
+                        new DataContent(PngBytes, "image/png") { Name = "shot.png" }
+                    })
+            ],
+            [new ChatMessage(ChatRole.User, [new TextContent("the images follow")])]);
+        context.AppendResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer")), NoBindings());
+
+        var units = context.BuildUnits();
+        units.Select(unit => unit.ContainsAttachments).Should().Equal(true, false);
+        units[0].Messages.Select(message => message.Role)
+            .Should().Equal([ChatRole.Assistant, ChatRole.Tool, ChatRole.User],
+                "the follow-up belongs to the same unit, so no boundary can separate it from the tool result");
+
+        var counted = units.Select(unit => unit with { Tokens = 100 }).ToArray();
+        var plan = new DirectPromptComposer().PlanCompression(counted, null, new DirectCompressionPolicy(),
+            new DirectPromptBudget(400, null), countedTokens: 300);
+
+        plan.ShouldCompress.Should().BeFalse("the image bearing unit is the first candidate, so no prefix is left");
+        plan.PrefixUnits.Should().BeEmpty();
+    }
+
     private static IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>> AttachmentContents(Guid messageId)
         => new Dictionary<Guid, IReadOnlyList<AIContent>>
         {
@@ -69,4 +105,13 @@ public sealed class DirectConversationContextAttachmentTests
 
     private static DirectPromptHistoryUnit Unit(long sequence, string text)
         => new([new ChatMessage(ChatRole.User, text)], sequence);
+
+    private static IReadOnlyDictionary<string, DirectToolBinding> NoBindings()
+        => new Dictionary<string, DirectToolBinding>();
+
+    private static IReadOnlyDictionary<string, DirectToolBinding> Bindings(string name)
+        => new Dictionary<string, DirectToolBinding>
+        {
+            [name] = new(AIFunctionFactory.Create(() => "ok", name), new DirectToolDescriptor(ToolCallKind.Other))
+        };
 }

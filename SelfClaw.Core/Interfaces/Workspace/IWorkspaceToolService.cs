@@ -21,11 +21,12 @@ public interface IWorkspaceToolService
         WorkspaceSearchOptions? options = null,
         CancellationToken cancellationToken = default);
 
-    Task<WorkspaceFileContent> ReadFileAsync(
+    Task<WorkspaceFileReadResult> ReadFileAsync(
         string workspaceRootPath,
         string relativePath,
         int? startLine = null,
         int? lineCount = null,
+        bool includeImageContent = false,
         CancellationToken cancellationToken = default);
 
     Task<WorkspaceFileWriteResult> WriteFileAsync(

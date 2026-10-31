@@ -1,3 +1,4 @@
+using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using FluentAssertions;
@@ -26,6 +27,10 @@ namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Capabilities;
 
 public sealed class DirectTurnCapabilityResolverTests : IDisposable
 {
+    // The image gate is not what these tests assert: resolution itself is.
+    private static readonly ToolImageCapability TextOnlyImages =
+        new(ToolImageDelivery.Unsupported, "Images are off.");
+
     private readonly string _rootPath = Path.Combine(
         Path.GetTempPath(),
         "SelfClawTests",
@@ -64,9 +69,9 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
 
         var resolver = CreateResolver(packages);
         var child = request with { ExecutionContext = new(DirectTurnOrigin.Subagent, ceiling, null) };
-        Func<Task> resolveChild = async () => { await using var lease = await resolver.ResolveAsync(child); };
+        Func<Task> resolveChild = async () => { await using var lease = await resolver.ResolveAsync(child, TextOnlyImages); };
         await resolveChild.Should().ThrowAsync<InvalidDataException>().WithMessage("*review*unavailable or changed*");
-        await using var continuation = await resolver.ResolveAsync(request with { ExecutionContext = new(DirectTurnOrigin.Continuation, ceiling, null) });
+        await using var continuation = await resolver.ResolveAsync(request with { ExecutionContext = new(DirectTurnOrigin.Continuation, ceiling, null) }, TextOnlyImages);
         // The degraded capability is gone; the plan tool is not a capability and survives.
         continuation.Tools.Should().ContainSingle().Which.Name.Should().Be(TodoPlanRules.ToolName);
         continuation.Diagnostics.Should().Contain(message => message.Contains("removed"));
@@ -93,9 +98,9 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         (await preflight.CheckAsync(definition, start, modelId, CancellationToken.None)).Should().BeNull();
         var resolver = CreateResolver(packages, CreateMcpSource(servers, new RecordingMcpClientManager(string.Empty)));
         Func<Task> child = async () => { await using var lease = await resolver.ResolveAsync(request with
-            { ExecutionContext = new(DirectTurnOrigin.Subagent, ceiling, null) }); };
+            { ExecutionContext = new(DirectTurnOrigin.Subagent, ceiling, null) }, TextOnlyImages); };
         await child.Should().ThrowAsync<InvalidDataException>().WithMessage("*MCP*could not be loaded*");
-        await using var continuation = await resolver.ResolveAsync(request with { ExecutionContext = new(DirectTurnOrigin.Continuation, ceiling, null) });
+        await using var continuation = await resolver.ResolveAsync(request with { ExecutionContext = new(DirectTurnOrigin.Continuation, ceiling, null) }, TextOnlyImages);
         continuation.Tools.Should().ContainSingle().Which.Name.Should().Be(TodoPlanRules.ToolName);
     }
 
@@ -112,7 +117,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             "run [/review] and [/review]",
             "history [/review] [/unknown]");
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         lease.SystemInstructions.Should().HaveCount(3);
         lease.SystemInstructions[0].Should().StartWith("[SelfClaw Capability Policy]");
@@ -136,7 +141,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             request.Agent, request.Messages, request.Turns, request.ModelProfileId, request.ToolPermissionMode,
             request.ToolApprovalHandler, new(DirectTurnOrigin.Continuation,
                 new DirectCapabilityCeiling(AgentRuntimeDefinition.SystemToolPolicy, [], [], [], []), null));
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
         lease.Diagnostics.Should().NotContain(item => item.Contains("Explicitly activated", StringComparison.Ordinal));
         lease.SystemInstructions.Should().NotContain(item => item.Contains("BEGIN SELFCLAW SKILL review", StringComparison.Ordinal));
     }
@@ -148,7 +153,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var resolver = CreateResolver(new PackageRepository([review]));
         var request = CreateRequest(["review"], "[/review]", "[/unknown]");
         request = request with { Messages = request.Messages.Reverse().ToArray() };
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
         lease.Diagnostics.Should().ContainSingle(item => item.Contains("activated Skill 'review'", StringComparison.Ordinal));
     }
 
@@ -163,7 +168,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             ["first", "second", "third"],
             "[/second] [/first] [/third]");
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         lease.SystemInstructions[1].Should().Contain("SKILL second");
         lease.SystemInstructions[2].Should().Contain("SKILL first");
@@ -182,7 +187,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var baseRequest = CreateRequest([], "delegate a review");
         var request = baseRequest with { Agent = baseRequest.Agent with { SubagentIds = ["reviewer"] } };
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         lease.SystemInstructions.Should().Contain(item => item.Contains("[SelfClaw Available Subagents]", StringComparison.Ordinal));
         lease.SystemInstructions.Should().Contain(item => item.Contains("Reviews delegated changes.", StringComparison.Ordinal));
@@ -204,7 +209,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             WorkspaceRoot = new WorkspaceRoot(Guid.NewGuid(), "Workspace", _rootPath, now, now),
         };
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         var shellTool = lease.Tools.Single(tool => tool.Name == "run_shell_command");
         shellTool.Description.Should().Contain("Git Bash");
@@ -216,7 +221,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var package = await CreatePackageAsync("review", true);
         var resolver = CreateResolver(new PackageRepository([package]));
 
-        await using var lease = await resolver.ResolveAsync(CreateRequest([], "plain prompt"));
+        await using var lease = await resolver.ResolveAsync(CreateRequest([], "plain prompt"), TextOnlyImages);
 
         lease.SystemInstructions.Should().BeEmpty();
         lease.MessageAdjustments.Should().BeEmpty();
@@ -250,7 +255,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
                 null)
         };
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         lease.Tools.Should().HaveCount(expectedToolCount);
         lease.Tools.Select(tool => tool.Name).Should().NotContain(name => name.Contains("subagent"));
@@ -282,7 +287,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
                 CompletionBatch: null)
         };
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         // The whole point of the policy change: an automation turn with no captured ceiling must still see
         // the skill and MCP tools it was configured with instead of silently binding none.
@@ -335,7 +340,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             versionLeases);
         var request = CreateRequest([], "[/office/slides]", pluginIds: ["office"]);
 
-        var lease = await resolver.ResolveAsync(request);
+        var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         lease.SystemInstructions[0].Should().Contain("Capability Policy");
         lease.SystemInstructions[1].Should().Contain("BEGIN SELFCLAW PLUGIN office");
@@ -366,7 +371,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var resolver = CreateResolver(new PackageRepository([disabled, unbound, broken]));
         var request = CreateRequest(["disabled", "broken"], prompt);
 
-        var action = () => resolver.ResolveAsync(request);
+        var action = () => resolver.ResolveAsync(request, TextOnlyImages);
 
         await action.Should().ThrowAsync<InvalidDataException>().WithMessage($"*{errorFragment}*");
     }
@@ -385,7 +390,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var request = CreateRequest(packages.Select(package => package.Id).ToArray(),
             "[/one] [/two] [/three] [/four]");
 
-        var action = () => resolver.ResolveAsync(request);
+        var action = () => resolver.ResolveAsync(request, TextOnlyImages);
 
         await action.Should().ThrowAsync<InvalidDataException>().WithMessage("*at most 3*");
     }
@@ -403,7 +408,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             CreateMcpSource(servers, manager, notifier));
         var request = CreateRequest([], "plain prompt", mcpServerIds: ["failing", "healthy"]);
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         lease.Diagnostics.Should().Contain(item => item.Contains("MCP server 'failing' was skipped"));
         lease.SystemInstructions.Should().Contain(section =>
@@ -425,7 +430,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var resolver = CreateResolver(new PackageRepository([]), CreateMcpSource(servers, manager));
 
         var action = () => resolver.ResolveAsync(
-            CreateRequest([], "plain prompt", mcpServerIds: ["fixture"]));
+            CreateRequest([], "plain prompt", mcpServerIds: ["fixture"]), TextOnlyImages);
 
         await action.Should().ThrowAsync<InvalidDataException>()
             .WithMessage("*Direct tool name collision*mcp__fixture__a_b*");
@@ -441,7 +446,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var resolver = CreateResolver(new PackageRepository([]), CreateMcpSource(servers, manager));
         var request = CreateRequest([], "plain prompt", mcpServerIds: serverIds);
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         manager.PeakConcurrency.Should().Be(McpCapabilitySource.MaximumConcurrentServers);
         lease.Diagnostics.Should().BeEmpty();
@@ -476,7 +481,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
                 null)
         };
 
-        var action = () => resolver.ResolveAsync(request);
+        var action = () => resolver.ResolveAsync(request, TextOnlyImages);
 
         // The MCP servers connect first; only the post-resolution required-capability check fails.
         await action.Should().ThrowAsync<InvalidDataException>()
@@ -504,8 +509,8 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             CreateMcpSource(servers, new RecordingMcpClientManager(string.Empty), notifier), contentCache: cache);
         var request = CreateRequest([package.Id], "[/cached-skill]", mcpServerIds: ["healthy"]);
 
-        await using var first = await resolver.ResolveAsync(request);
-        await using var second = await resolver.ResolveAsync(request);
+        await using var first = await resolver.ResolveAsync(request, TextOnlyImages);
+        await using var second = await resolver.ResolveAsync(request, TextOnlyImages);
         var afterHealth = await cache.GetSkillMetadataAsync(package, manifestPath, ReadAsync, CancellationToken.None);
 
         notifier.CurrentRevision.Should().Be(2);
@@ -534,7 +539,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
                 null)
         };
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         var toolNames = lease.Tools.Select(tool => tool.Name);
         if (expected)
@@ -556,7 +561,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var baseRequest = CreateRequest([], "plan the work");
         var request = baseRequest with { Agent = baseRequest.Agent with { ToolPolicy = toolPolicy } };
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         var toolNames = lease.Tools.Select(tool => tool.Name);
         if (expected)
@@ -577,7 +582,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var request = CreateRequest([], "plan the work");
         request.WorkspaceRoot.Should().BeNull();
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         lease.Tools.Should().ContainSingle().Which.Name.Should().Be(TodoPlanRules.ToolName);
     }
@@ -600,7 +605,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
                 null)
         };
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         var toolNames = lease.Tools.Select(tool => tool.Name);
         if (expected)
@@ -619,7 +624,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var resolver = CreateResolver(new PackageRepository([]));
         var request = CreateRequest([], "ask me first");
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         lease.Tools.Select(tool => tool.Name).Should().NotContain(AskUserRules.ToolName);
     }
@@ -634,7 +639,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         var baseRequest = CreateRequest([], "ask me first") with { UserQuestionHandler = new StubQuestionHandler() };
         var request = baseRequest with { Agent = baseRequest.Agent with { ToolPolicy = toolPolicy } };
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         var toolNames = lease.Tools.Select(tool => tool.Name);
         if (expected)
@@ -735,7 +740,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             """);
         var resolver = CreateResolver(new PackageRepository([CreatePackageRecord("restricted", true, installPath)]));
 
-        await using var lease = await resolver.ResolveAsync(CreateRequest(["restricted"], "run it"));
+        await using var lease = await resolver.ResolveAsync(CreateRequest(["restricted"], "run it"), TextOnlyImages);
 
         lease.Diagnostics.Should().ContainSingle(item =>
             item.Contains("allowed-tools") && item.Contains("cannot enforce"));
@@ -757,7 +762,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             Agent = baseRequest.Agent with { ToolPolicy = toolPolicy }
         };
 
-        await using var lease = await resolver.ResolveAsync(request);
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
 
         lease.Tools.Select(tool => tool.Name).Should().NotContain(SkillRuntimeToolset.RunSkillScriptToolName);
         lease.Diagnostics.Should().ContainSingle(item => item.Contains("does not allow running commands"));
@@ -797,7 +802,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
             new PluginVersionLeaseManager());
 
         await using var lease = await resolver.ResolveAsync(
-            CreateRequest([], "run it", pluginIds: ["office"]));
+            CreateRequest([], "run it", pluginIds: ["office"]), TextOnlyImages);
 
         lease.Diagnostics.Should().ContainSingle(item =>
             item.Contains("office/slides") && item.Contains("allowed-tools") && item.Contains("cannot enforce"));
@@ -1129,7 +1134,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         public Task<IReadOnlyList<WorkspaceFileEntry>> ListFilesAsync(string root, string? path, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<WorkspaceFileEntry>> GlobFilesAsync(string root, string pattern, string? path = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(string root, string query, WorkspaceSearchOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<WorkspaceFileContent> ReadFileAsync(string root, string path, int? startLine = null, int? lineCount = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<WorkspaceFileReadResult> ReadFileAsync(string root, string path, int? startLine = null, int? lineCount = null, bool includeImageContent = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WorkspaceFileWriteResult> WriteFileAsync(string root, string path, string content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WorkspaceFileWriteResult> EditFileAsync(string root, string path, string oldText, string newText, bool replaceAll = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ShellCommandResult> RunShellCommandAsync(string root, string command, int timeout, CancellationToken cancellationToken = default) => throw new NotSupportedException();

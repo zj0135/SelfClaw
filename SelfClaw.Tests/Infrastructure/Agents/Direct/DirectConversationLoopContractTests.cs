@@ -430,7 +430,7 @@ public sealed class DirectConversationLoopContractTests
 
     private sealed class Resolver(DirectTurnCapabilityLease lease) : IDirectTurnCapabilityResolver
     {
-        public Task<DirectTurnCapabilityLease> ResolveAsync(DirectChatTurnRequest request, CancellationToken cancellationToken = default)
+        public Task<DirectTurnCapabilityLease> ResolveAsync(DirectChatTurnRequest request, ToolImageCapability imageCapability, CancellationToken cancellationToken = default)
             => Task.FromResult(lease);
     }
     private sealed class Resource(Action dispose) : IAsyncDisposable

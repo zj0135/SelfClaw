@@ -61,12 +61,14 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - **Queue / Steer 开关**（`ConversationInputFeatureSwitch`、`SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`）：已删除，队列与 steer 始终开启；不要再引入默认关闭开关、`queue-disabled` / `steer-not-enabled` / `pending-inputs` 分支或宿主「未启用」文案，暂停只由每会话队列状态表达。设计要求见 `docs/direct-message-input-design.md` §11。
 - **附件（旧「输入入口一律拒绝」已废）**：图片附件已接入 Direct 交互式输入（见 `docs/input-attachment-design.md`）：仅图片、仅 Direct、单文件 10 MiB、每条最多 6 张、需要模型声明多模态；CLI 与子代理不支持。`attachments-unsupported` 仅作为历史 reason 保留，不要再把它当输入入口的拒绝原因。
 - **设置页**：AI 提供商 / 模型管理 / 编程助手 / 代理助手 / 插件 / 宠物 / 上下文压缩已接宿主；自动化已接宿主（`AutomationView` + `AutomationBridge`，含删除/清空历史与体积显示）；其余页面（图像生成、翻译等）是前端 mock。
+- **`image_tool_results` 模型选项**：`read_file` 读图曾有一个模型级逃生开关，现**已删除**。`IsMultimodal == true` 即表示支持 tool result 携带图片，协议只决定投递形状（见 `docs/direct-tool-result-image-design.md` §3）。不要再引入第二个开关、`Unsupported` 的「选项已关闭」分支或相应文案。
 
 ## 深入阅读
 
 - 端到端主干：`docs/pipeline-architecture.md`（全局图）→ `docs/runtime-execution-flow.md`（当前调用链、回合/准入/消费基线）。
 - Direct 输入与队列 / steer 语义：`docs/direct-message-input-design.md`。
 - 输入框图片附件（存储 / 桥 / 队列 / 模型调用 / 前端）：`docs/input-attachment-design.md`。
+- `read_file` 读取图片（tool result 携带图片、三种协议投递、live-only 回放）：`docs/direct-tool-result-image-design.md`。
 - Direct `ask_user` 提问工具（强制中断语义、AskUserRules 限额、绑定闸门、`questionRequestId` 协议）：`docs/direct-ask-user-design.md`。
 - 桌面/前端：`docs/message-segments-system-design.md`。
 - 关于页应用用量仪表盘：`docs/app-usage-dashboard-design.md`（数据契约、热力图/趋势/环形口径、SQL 分桶边界）。

@@ -25,6 +25,9 @@ internal static class WorkspaceToolSummaries
             : $"Read {content.RelativePath}{range}.";
     }
 
+    public static string Summarize(WorkspaceImageContent image)
+        => $"Read {image.RelativePath} ({image.MediaType}, {FormatSize(image.Data.LongLength)}).";
+
     public static string Summarize(WorkspaceFileWriteResult result)
         => !result.Applied
             ? $"Skipped writing {result.RelativePath}: {result.Message}"
@@ -121,6 +124,13 @@ internal static class WorkspaceToolSummaries
             $"Characters: {result.CharacterCount}",
             $"Result: {result.Message}");
 
+    public static string Describe(WorkspaceImageContent image)
+        => string.Join(
+            Environment.NewLine,
+            $"Path: {image.RelativePath}",
+            $"Media type: {image.MediaType}",
+            $"Bytes: {image.Data.LongLength}");
+
     public static string Describe(ShellCommandResult result)
     {
         var builder = new StringBuilder();
@@ -153,23 +163,20 @@ internal static class WorkspaceToolSummaries
     }
 
     private static string FormatSizeSuffix(long? sizeBytes)
-    {
-        if (!sizeBytes.HasValue)
-        {
-            return string.Empty;
-        }
+        => sizeBytes.HasValue ? $" ({FormatSize(sizeBytes.Value)})" : string.Empty;
 
-        var size = sizeBytes.Value;
+    private static string FormatSize(long size)
+    {
         if (size < 1024)
         {
-            return $" ({size.ToString(CultureInfo.InvariantCulture)} B)";
+            return $"{size.ToString(CultureInfo.InvariantCulture)} B";
         }
 
         if (size < 1024 * 1024)
         {
-            return $" ({(size / 1024d).ToString("0.#", CultureInfo.InvariantCulture)} KB)";
+            return $"{(size / 1024d).ToString("0.#", CultureInfo.InvariantCulture)} KB";
         }
 
-        return $" ({(size / (1024d * 1024d)).ToString("0.#", CultureInfo.InvariantCulture)} MB)";
+        return $"{(size / (1024d * 1024d)).ToString("0.#", CultureInfo.InvariantCulture)} MB";
     }
 }

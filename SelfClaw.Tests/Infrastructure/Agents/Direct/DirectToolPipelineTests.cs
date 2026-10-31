@@ -1,3 +1,4 @@
+using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
@@ -173,7 +174,7 @@ public sealed class DirectToolPipelineTests : IDisposable
 
     private sealed class FixedCapabilityResolver(DirectTurnCapabilityLease lease) : IDirectTurnCapabilityResolver
     {
-        public Task<DirectTurnCapabilityLease> ResolveAsync(DirectChatTurnRequest request,
+        public Task<DirectTurnCapabilityLease> ResolveAsync(DirectChatTurnRequest request, ToolImageCapability imageCapability,
             CancellationToken cancellationToken = default) => Task.FromResult(lease);
     }
 

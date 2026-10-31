@@ -150,7 +150,7 @@ internal sealed class WorkspaceSearchService
             "--json",
             "--line-number",
             "--max-count", maxResults.ToString(),
-            "--max-filesize", $"{WorkspaceFileAccess.MaxFileBytes}",
+            "--max-filesize", $"{WorkspaceFileAccess.MaxTextFileBytes}",
             "--threads", "0"
         };
 

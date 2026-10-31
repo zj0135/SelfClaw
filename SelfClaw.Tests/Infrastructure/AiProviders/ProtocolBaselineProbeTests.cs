@@ -25,6 +25,13 @@ namespace SelfClaw.Tests.Infrastructure.AiProviders;
 /// </summary>
 public sealed class ProtocolBaselineProbeTests
 {
+    /// <summary>A real 1x1 PNG: magic bytes are what the read path validates, and a real body keeps byte counts honest.</summary>
+    private static readonly byte[] PngBytes = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
+
+    /// <summary>The base64 of the PNG's own magic bytes: any occurrence in a request means bytes were shipped.</summary>
+    private const string PngBase64Prefix = "iVBORw0KGgo";
+
     private static string ProbeDirectory
     {
         get
@@ -237,11 +244,167 @@ public sealed class ProtocolBaselineProbeTests
         AssertSecondRequest(format, JsonDocument.Parse(handler.Bodies[1]).RootElement);
     }
 
+    /// <summary>
+    /// The most important test of the image-in-tool-result feature: it asserts the real serialized request, not
+    /// a projection of it. Each format carries the image the only way it can, and the Chat Completions path
+    /// proves the tool message stays text while the images follow in one user message.
+    /// </summary>
+    [Theory]
+    [InlineData(AiProviderApiFormat.OpenAIResponses, true)]
+    [InlineData(AiProviderApiFormat.AnthropicMessages, true)]
+    [InlineData(AiProviderApiFormat.OpenAIChatCompletions, true)]
+    [InlineData(AiProviderApiFormat.OpenAIResponses, false)]
+    [InlineData(AiProviderApiFormat.AnthropicMessages, false)]
+    [InlineData(AiProviderApiFormat.OpenAIChatCompletions, false)]
+    public async Task Tool_result_images_reach_the_second_request_in_the_shape_the_format_allows(
+        AiProviderApiFormat format, bool isMultimodal)
+    {
+        var handler = new CapturingHandler(FirstSse(format), FinalSse(format));
+        using var http = new AiProviderHttpClientProvider(() => handler);
+        IAiProviderAdapter adapter = format == AiProviderApiFormat.AnthropicMessages
+            ? new AnthropicProviderAdapter(httpClientProvider: http)
+            : new OpenAiProviderAdapter(httpClientProvider: http);
+        var preparation = format == AiProviderApiFormat.AnthropicMessages
+            ? CreateAnthropicRequest() : CreateOpenAiRequest(format);
+        using var httpClient = http.CreateTurnClient(preparation.Connection);
+        var native = adapter.CreateChatClient(preparation, httpClient);
+        AIFunctionFactoryOptions ToolOptions(string name) => new()
+        {
+            Name = name, MarshalResult = (value, _, _) => ValueTask.FromResult(value)
+        };
+        AIFunction[] tools =
+        [
+            AIFunctionFactory.Create((string relativePath) =>
+            {
+                relativePath.Should().Be("a.txt");
+                return ImageResult();
+            }, ToolOptions("read_file")),
+            AIFunctionFactory.Create(TextResult, ToolOptions("list_files"))
+        ];
+        var lease = new DirectTurnCapabilityLease([], tools
+            .Select(tool => new DirectToolBinding(tool, new(ToolCallKind.Read)))
+            .ToArray(), new Dictionary<Guid, string>(), []);
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(native)
+        {
+            Options = adapter.CreateChatOptions(preparation, tools),
+            Profile = new AiModelProfile(
+                Guid.NewGuid(), Guid.NewGuid(), "Test", format, "test-model",
+                new AiSamplingOptions(false, 0.7, false, 0.7), JsonObject("{}"),
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                Configuration: new AiModelConfiguration("test-model", "Test model",
+                    new AiSamplingOptions(false, 0.7, false, 0.7), isMultimodal))
+        };
+        var request = (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(factory.Profile.Id);
+        request = request with { Messages = request.Messages.Where(message => message.Role == MessageRole.User).ToArray() };
+        var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory, new ProtocolResolver(lease));
+        var events = new List<AgentStreamEvent>();
+        await foreach (var item in runtime.StreamTurnAsync(request)) events.Add(item);
+
+        handler.Bodies.Should().HaveCount(2);
+        var terminal = events.OfType<RunCompletedEvent>().Should().ContainSingle().Subject;
+        terminal.Status.Should().Be(RunCompletionStatus.Succeeded, terminal.ErrorMessage);
+        events.OfType<ToolCallCompletedEvent>().Should().Contain(item => item.Status == ToolCallStatus.Completed);
+        WriteProbe($"p2-tool-image-{format}-{isMultimodal}.json", handler.Bodies[1]);
+        if (isMultimodal)
+        {
+            AssertToolImageSecondRequest(format, JsonDocument.Parse(handler.Bodies[1]).RootElement);
+        }
+        else
+        {
+            // The gate turns the same tool result into a Failed text result, so the whole request must be
+            // free of image content - not merely free of the parts this format would have used.
+            handler.Bodies[1].Should().NotContain("base64").And.NotContain(PngBase64Prefix);
+        }
+    }
+
+    private static string FirstSse(AiProviderApiFormat format) => format switch
+    {
+        AiProviderApiFormat.AnthropicMessages => BuildAnthropicSse(),
+        AiProviderApiFormat.OpenAIResponses => BuildResponsesSse(),
+        _ => BuildChatCompletionsSse()
+    };
+
+    private static DirectToolResult ImageResult()
+    {
+        var header = $"Read image 'shot.png' (image/png, {PngBytes.Length} bytes). The image follows.";
+        return new DirectToolResult(
+            ToolCallStatus.Completed,
+            $"Read shot.png (image/png, {PngBytes.Length} B).",
+            JsonSerializer.SerializeToElement(new
+            {
+                relativePath = "shot.png", mediaType = "image/png", bytes = PngBytes.Length
+            }),
+            "Path: shot.png",
+            [new TextContent(header), new DataContent(PngBytes, "image/png") { Name = "shot.png" }]);
+    }
+
+    private static DirectToolResult TextResult()
+        => new(ToolCallStatus.Completed, "fixture-result",
+            JsonSerializer.SerializeToElement("fixture-result"), "fixture-result");
+
+    private static bool ContainsImageBytes(string? text)
+        => text is not null &&
+           (text.Contains("base64", StringComparison.Ordinal) ||
+            text.Contains(PngBase64Prefix, StringComparison.Ordinal));
+
+    private static void AssertToolImageSecondRequest(AiProviderApiFormat format, JsonElement body)
+    {
+        var expectedBase64 = Convert.ToBase64String(PngBytes);
+        switch (format)
+        {
+            case AiProviderApiFormat.OpenAIResponses:
+            {
+                var output = body.GetProperty("input").EnumerateArray()
+                    .Single(item => item.GetProperty("type").GetString() == "function_call_output")
+                    .GetProperty("output").EnumerateArray().ToArray();
+                output.Should().Contain(part => part.GetProperty("type").GetString() == "input_text");
+                var image = output.Should().ContainSingle(part => part.GetProperty("type").GetString() == "input_image")
+                    .Subject;
+                image.GetProperty("image_url").GetString()
+                    .Should().Be($"data:image/png;base64,{expectedBase64}");
+                break;
+            }
+            case AiProviderApiFormat.AnthropicMessages:
+            {
+                var result = body.GetProperty("messages").EnumerateArray().Last().GetProperty("content")[0];
+                result.GetProperty("type").GetString().Should().Be("tool_result");
+                var blocks = result.GetProperty("content").EnumerateArray().ToArray();
+                blocks.Should().Contain(block => block.GetProperty("type").GetString() == "text");
+                var image = blocks.Should().ContainSingle(block => block.GetProperty("type").GetString() == "image")
+                    .Subject;
+                var source = image.GetProperty("source");
+                source.GetProperty("type").GetString().Should().Be("base64");
+                source.GetProperty("media_type").GetString().Should().Be("image/png");
+                source.GetProperty("data").GetString().Should().Be(expectedBase64);
+                break;
+            }
+            default:
+            {
+                var messages = body.GetProperty("messages").EnumerateArray().ToArray();
+                var roles = messages.Select(message => message.GetProperty("role").GetString()).ToArray();
+                // A user message may never separate two tool messages of the same batch.
+                roles.TakeLast(3).Should().Equal("tool", "tool", "user");
+                messages.Where(message => message.GetProperty("role").GetString() == "tool")
+                    .Should().OnlyContain(message =>
+                        message.GetProperty("content").ValueKind == JsonValueKind.String &&
+                        !ContainsImageBytes(message.GetProperty("content").GetString()));
+                var followUp = messages[^1];
+                followUp.GetProperty("role").GetString().Should().Be("user");
+                var part = followUp.GetProperty("content").EnumerateArray()
+                    .Single(item => item.GetProperty("type").GetString() == "image_url");
+                part.GetProperty("image_url").GetProperty("url").GetString()
+                    .Should().Be($"data:image/png;base64,{expectedBase64}");
+                break;
+            }
+        }
+    }
+
     private sealed class ProtocolResolver(DirectTurnCapabilityLease lease)
         : IDirectTurnCapabilityResolver
     {
         public Task<DirectTurnCapabilityLease> ResolveAsync(
-            DirectChatTurnRequest request, CancellationToken cancellationToken = default)
+            DirectChatTurnRequest request, ToolImageCapability imageCapability,
+            CancellationToken cancellationToken = default)
             => Task.FromResult(lease);
     }
 

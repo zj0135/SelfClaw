@@ -204,7 +204,10 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
 
         var preparation = await _chatClientFactory.PrepareAsync(request.ModelProfileId, cancellationToken).ConfigureAwait(false);
         request = request with { ModelProfileId = preparation.Profile.Id };
-        var capabilityLease = await _capabilityResolver.ResolveAsync(request, cancellationToken)
+        // Resolved from the profile that is actually going to be called: the gate is per model, and the
+        // toolset needs to know before it can describe or perform an image read.
+        var imageCapability = ToolImageDeliveryRules.Resolve(preparation.Profile);
+        var capabilityLease = await _capabilityResolver.ResolveAsync(request, imageCapability, cancellationToken)
             .ConfigureAwait(false);
         AiChatClientLease? providerLease = null;
         try
@@ -283,7 +286,8 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                 budget,
                 request.ConversationId,
                 request.TurnId,
-                request.InputSession);
+                request.InputSession,
+                imageCapability.Delivery);
         }
         catch
         {

@@ -1,3 +1,4 @@
+using SelfClaw.Infrastructure.AiProviders.Models;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using SelfClaw.Core.Interfaces;
@@ -90,7 +91,7 @@ public sealed class DirectSteerPolicyTests
 
     private sealed class FixedResolver(DirectTurnCapabilityLease lease) : IDirectTurnCapabilityResolver
     {
-        public Task<DirectTurnCapabilityLease> ResolveAsync(DirectChatTurnRequest request, CancellationToken cancellationToken = default)
+        public Task<DirectTurnCapabilityLease> ResolveAsync(DirectChatTurnRequest request, ToolImageCapability imageCapability, CancellationToken cancellationToken = default)
             => Task.FromResult(lease);
     }
 

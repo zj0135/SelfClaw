@@ -4,6 +4,7 @@ using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Extensions;
+using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
@@ -53,15 +54,17 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
 
     public async Task<DirectTurnCapabilityLease> ResolveAsync(
         DirectChatTurnRequest request,
+        ToolImageCapability imageCapability,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(imageCapability);
         var leases = new DirectTurnLeaseScope();
         try
         {
             // On success the returned capability lease owns the scope; on failure this catch is the
             // single place every lease taken during resolution is released - MCP and Plugin alike.
-            return await ResolveCoreAsync(request, leases, cancellationToken).ConfigureAwait(false);
+            return await ResolveCoreAsync(request, imageCapability, leases, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -72,6 +75,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
 
     private async Task<DirectTurnCapabilityLease> ResolveCoreAsync(
         DirectChatTurnRequest request,
+        ToolImageCapability imageCapability,
         DirectTurnLeaseScope leases,
         CancellationToken cancellationToken)
     {
@@ -85,7 +89,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         var shellPreference = await _shellPreference.GetPreferenceAsync(cancellationToken).ConfigureAwait(false);
         var bindings = effectiveRequest.WorkspaceRoot is null
             ? new List<DirectToolBinding>()
-            : _workspaceToolset.CreateTools(effectiveRequest.WorkspaceRoot, shellPreference).ToList();
+            : _workspaceToolset.CreateTools(effectiveRequest.WorkspaceRoot, shellPreference, imageCapability).ToList();
         // The plan does not depend on a workspace, so it binds outside the branch above.
         if (policy.AllowsTodoPlan)
         {

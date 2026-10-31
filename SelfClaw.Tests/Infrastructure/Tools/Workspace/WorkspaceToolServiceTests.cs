@@ -7,6 +7,16 @@ namespace SelfClaw.Tests.Infrastructure.Tools.Workspace;
 
 public sealed class WorkspaceToolServiceTests : IDisposable
 {
+    /// <summary>A real 1x1 PNG: the read path must hand the original bytes back untouched.</summary>
+    private static readonly byte[] PngBytes =
+    [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+        0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+        0x42, 0x60, 0x82
+    ];
+
     private readonly string _rootPath;
     private readonly WorkspaceToolService _service = new(new(), new(), new());
 
@@ -23,9 +33,93 @@ public sealed class WorkspaceToolServiceTests : IDisposable
     {
         var result = await _service.ReadFileAsync(_rootPath, "src/demo.md");
 
-        result.RelativePath.Should().Be(Path.Combine("src", "demo.md"));
-        result.Content.Should().Contain("streamed markdown");
-        result.Truncated.Should().BeFalse();
+        var content = result.Text;
+        Assert.NotNull(content);
+        content.RelativePath.Should().Be(Path.Combine("src", "demo.md"));
+        content.Content.Should().Contain("streamed markdown");
+        content.Truncated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Read_file_returns_image_content_when_the_turn_accepts_images()
+    {
+        File.WriteAllBytes(Path.Combine(_rootPath, "src", "shot.png"), PngBytes);
+
+        var result = await _service.ReadFileAsync(_rootPath, "src/shot.png", includeImageContent: true);
+
+        result.Error.Should().BeNull();
+        result.Text.Should().BeNull();
+        var image = result.Image;
+        Assert.NotNull(image);
+        image.MediaType.Should().Be("image/png");
+        image.RelativePath.Should().Be(Path.Combine("src", "shot.png"));
+        image.Data.Should().Equal(PngBytes);
+    }
+
+    [Fact]
+    public async Task Read_file_reports_an_image_as_unavailable_when_images_are_not_requested()
+    {
+        File.WriteAllBytes(Path.Combine(_rootPath, "src", "shot.png"), PngBytes);
+
+        var result = await _service.ReadFileAsync(_rootPath, "src/shot.png");
+
+        result.Image.Should().BeNull();
+        result.Text.Should().BeNull();
+        result.Error.Should().Be("'src/shot.png' is an image, but this turn cannot receive image content.");
+    }
+
+    [Fact]
+    public async Task Read_file_rejects_an_image_above_the_single_image_limit()
+    {
+        var oversized = new byte[WorkspaceImageLimits.MaximumBytes + 1];
+        PngBytes.CopyTo(oversized, 0);
+        File.WriteAllBytes(Path.Combine(_rootPath, "src", "huge.png"), oversized);
+
+        var result = await _service.ReadFileAsync(_rootPath, "src/huge.png", includeImageContent: true);
+
+        result.Image.Should().BeNull();
+        result.Error.Should().Contain(oversized.Length.ToString()).And
+            .Contain(WorkspaceImageLimits.MaximumBytes.ToString());
+    }
+
+    [Fact]
+    public async Task Read_file_reads_a_png_extension_holding_text_as_text()
+    {
+        // Signature wins over extension: a mislabelled text file must not enter the image path.
+        File.WriteAllText(Path.Combine(_rootPath, "src", "notes.png"), "plain text, not a bitmap");
+
+        var result = await _service.ReadFileAsync(_rootPath, "src/notes.png", includeImageContent: true);
+
+        result.Image.Should().BeNull();
+        result.Error.Should().BeNull();
+        var text = result.Text;
+        Assert.NotNull(text);
+        text.Content.Should().Be("plain text, not a bitmap");
+    }
+
+    [Fact]
+    public async Task Read_file_ignores_the_line_range_for_images()
+    {
+        File.WriteAllBytes(Path.Combine(_rootPath, "src", "shot.png"), PngBytes);
+
+        var result = await _service.ReadFileAsync(
+            _rootPath, "src/shot.png", startLine: 3, lineCount: 1, includeImageContent: true);
+
+        result.Error.Should().BeNull();
+        var image = result.Image;
+        Assert.NotNull(image);
+        image.Data.Should().Equal(PngBytes);
+    }
+
+    [Fact]
+    public async Task Read_file_rejects_binary_content_that_is_not_an_image()
+    {
+        File.WriteAllBytes(Path.Combine(_rootPath, "src", "blob.bin"), [0x00, 0x01, 0x02, 0x03, 0x04]);
+
+        var result = await _service.ReadFileAsync(_rootPath, "src/blob.bin");
+
+        result.Text.Should().BeNull();
+        result.Error.Should().Be("Only text files and supported images (PNG, JPEG, WebP, GIF) can be read.");
     }
 
     [Fact]
@@ -175,8 +269,9 @@ public sealed class WorkspaceToolServiceTests : IDisposable
         var lines = string.Join('\n', Enumerable.Range(1, 20).Select(index => $"line {index}"));
         File.WriteAllText(Path.Combine(_rootPath, "src", "many.txt"), lines);
 
-        var window = await _service.ReadFileAsync(_rootPath, "src/many.txt", startLine: 5, lineCount: 3);
+        var window = (await _service.ReadFileAsync(_rootPath, "src/many.txt", startLine: 5, lineCount: 3)).Text;
 
+        Assert.NotNull(window);
         window.StartLine.Should().Be(5);
         window.EndLine.Should().Be(7);
         window.TotalLines.Should().Be(20);
@@ -187,8 +282,9 @@ public sealed class WorkspaceToolServiceTests : IDisposable
     [Fact]
     public async Task Read_file_whole_file_reports_total_lines()
     {
-        var content = await _service.ReadFileAsync(_rootPath, "src/demo.md");
+        var content = (await _service.ReadFileAsync(_rootPath, "src/demo.md")).Text;
 
+        Assert.NotNull(content);
         content.StartLine.Should().Be(1);
         content.TotalLines.Should().Be(3);
         content.Truncated.Should().BeFalse();
@@ -370,8 +466,9 @@ public sealed class WorkspaceToolServiceTests : IDisposable
             Path.Combine(_rootPath, "src", "crlf-read.txt"),
             System.Text.Encoding.UTF8.GetBytes("alpha\r\n beta\r\n"));
 
-        var content = await _service.ReadFileAsync(_rootPath, "src/crlf-read.txt");
+        var content = (await _service.ReadFileAsync(_rootPath, "src/crlf-read.txt")).Text;
 
+        Assert.NotNull(content);
         content.Content.Should().NotContain("\r");
         content.Content.Should().Be("alpha\n beta\n");
     }

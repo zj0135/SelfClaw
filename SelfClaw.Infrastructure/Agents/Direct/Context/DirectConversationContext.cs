@@ -117,7 +117,7 @@ internal sealed class DirectConversationContext
         return calls;
     }
 
-    public void AppendResults(IList<AIContent> results)
+    public void AppendResults(IList<AIContent> results, IReadOnlyList<ChatMessage>? followUps = null)
     {
         // A tool result joins the response it answers instead of opening its own unit, so a call and its
         // result can never be separated by an in-turn compaction.
@@ -125,8 +125,16 @@ internal sealed class DirectConversationContext
         if (index < 0)
             throw new InvalidDataException("Tool results require a preceding assistant response in this turn.");
 
+        // The messages carrying a batch's images belong to the same unit for the same reason: a boundary
+        // between a tool result and its images would leave the model with images it cannot attribute.
+        var messages = new List<ChatMessage>(1 + (followUps?.Count ?? 0)) { new(ChatRole.Tool, results) };
+        if (followUps is not null)
+        {
+            messages.AddRange(followUps);
+        }
+
         var entry = _entries[index];
-        _entries[index] = entry with { Messages = [.. entry.Messages, new ChatMessage(ChatRole.Tool, results)] };
+        _entries[index] = entry with { Messages = [.. entry.Messages, .. messages] };
         Recompose();
     }
 
@@ -288,6 +296,22 @@ internal sealed class DirectConversationContext
         return new ChatMessage(ChatRole.User, contents);
     }
 
+    // A tool result on the native delivery path nests its image inside the result, so a shallow check would
+    // report a unit full of images as text and let the planner summarize it away.
     private static bool ContainsAttachment(ChatMessage message)
-        => message.Contents.Any(content => content is DataContent);
+        => message.Contents.Any(ContainsAttachment);
+
+    private static bool ContainsAttachment(AIContent content) => content switch
+    {
+        DataContent => true,
+        FunctionResultContent result => ResultContainsAttachment(result.Result),
+        _ => false
+    };
+
+    private static bool ResultContainsAttachment(object? value) => value switch
+    {
+        AIContent content => ContainsAttachment(content),
+        IEnumerable<AIContent> contents => contents.Any(ContainsAttachment),
+        _ => false
+    };
 }

@@ -5,6 +5,7 @@ using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.AiProviders;
+using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Direct.Models;
 
@@ -24,4 +25,9 @@ internal sealed record DirectTurnSetup(
     DirectPromptBudget Budget,
     Guid ConversationId,
     Guid TurnId,
-    IDirectTurnInputSession? InputSession = null);
+    IDirectTurnInputSession? InputSession = null,
+    /// <summary>
+    /// How this turn's protocol carries the images a tool result produced. The loop owns the two shapes,
+    /// so a tool never needs to know which provider is on the other end.
+    /// </summary>
+    ToolImageDelivery ImageDelivery = ToolImageDelivery.Unsupported);
