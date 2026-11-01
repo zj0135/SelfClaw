@@ -25,7 +25,6 @@ const emit = defineEmits(['preview-image']);
 const bridge = useHostBridge();
 const transcriptPanelRef = ref(null);
 const dockRef = ref(null);
-const composerShellRef = ref(null);
 const collapse = useTranscriptCollapse();
 const transcriptScroll = useTranscriptScroll(() => transcriptPanelRef.value?.getScrollEl?.() ?? null);
 const { state, isEmptyConversation } = useChatTranscript(transcriptScroll);
@@ -53,7 +52,6 @@ function onWorkspaceInteraction() {
 
 defineExpose({
 	browseWorkspaceFolder: workspace.browseFolder,
-	insertPrompt: (text) => composerShellRef.value?.insertText?.(text),
 });
 </script>
 
@@ -71,7 +69,7 @@ defineExpose({
 					<p>随意提问，或使用命令/工具。</p>
 				</div>
 			</section>
-			<ComposerPanel ref="composerShellRef" :busy="state.isBusy || composer.submitting.value"
+			<ComposerPanel :busy="state.isBusy || composer.submitting.value"
 				:queueable="state.agentMode === 'direct'"
 				:stoppable="!state.isContinuation"
 				:workspace-selection="workspace.state" :git-loading="workspace.state.gitLoading"

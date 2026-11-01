@@ -23,6 +23,41 @@ function skillTokenRule(state, silent) {
 	return true;
 }
 
+// 与 renderers/composerText.js 的裸路径字符类严格对称：开头或空白后的 `@`，接 `"..."` 或裸路径。
+const fileMentionPattern = /^@(?:"([^"\r\n]+)"|([^\s"'<>()[\]{}|,;:!?@]+))/;
+
+function fileMentionRule(state, silent) {
+	if (state.env?.context !== 'user') {
+		return false;
+	}
+
+	// 只认开头或空白后的 @：`a@b.com` 这类词中 @ 不是文件引用。
+	if (state.pos > 0 && !/\s/.test(state.src[state.pos - 1])) {
+		return false;
+	}
+
+	const match = fileMentionPattern.exec(state.src.slice(state.pos));
+	if (!match) {
+		return false;
+	}
+
+	const quoted = match[1] !== undefined;
+	// 句尾的 `.` 不算路径：`看 @a/b.md.` 识别成 a/b.md，句点留给正文。
+	const path = quoted ? match[1] : match[2].replace(/\.+$/, '');
+	// 必须像路径（含 / 或 .）：`@张三`、`@everyone` 不是文件。
+	if (!path || !/[./]/.test(path)) {
+		return false;
+	}
+
+	if (!silent) {
+		const token = state.push('file_mention', 'span', 0);
+		token.meta = { path };
+	}
+
+	state.pos += quoted ? match[0].length : path.length + 1;
+	return true;
+}
+
 const markdownIt = new MarkdownIt({
 	html: false,
 	breaks: false,
@@ -32,9 +67,15 @@ const markdownIt = new MarkdownIt({
 });
 
 markdownIt.inline.ruler.before('emphasis', 'skill_token', skillTokenRule);
+markdownIt.inline.ruler.before('emphasis', 'file_mention', fileMentionRule);
+// chip 样式在 styles/inline-chip.css，与输入框里的 chip 同一套；转录侧是 HTML 串，不带图标。
 markdownIt.renderer.rules.skill_token = (tokens, index) => {
 	const name = markdownIt.utils.escapeHtml(tokens[index].meta?.name || '');
-	return `<span class="composer-inline-skill message-skill-chip" role="text"><span class="composer-inline-skill-name">${name}</span></span>`;
+	return `<span class="inline-chip inline-chip--skill" role="text"><span class="inline-chip-label">${name}</span></span>`;
+};
+markdownIt.renderer.rules.file_mention = (tokens, index) => {
+	const path = markdownIt.utils.escapeHtml(tokens[index].meta?.path || '');
+	return `<span class="inline-chip inline-chip--file" role="text" title="${path}"><span class="inline-chip-label">${path}</span></span>`;
 };
 
 // markdown-it 默认规则表里没有 link_open（只有 image/code/fence 等），所以这里不能用
@@ -112,6 +153,8 @@ export function renderMarkdown(source, { context = 'content' } = {}) {
 
 	let rendered;
 	try {
+		// 用户消息里的单个换行是 Shift+Enter 刻意换的行，按硬换行渲染；助手正文仍遵循 CommonMark 软换行。
+		markdownIt.set({ breaks: context === 'user' });
 		rendered = sanitize(markdownIt.render(markdownSource, { context }));
 	} catch (error) {
 		// Markdown 渲染发生在每个正文段的 setup/watch 里：抛异常会被 Vue 换成注释节点，

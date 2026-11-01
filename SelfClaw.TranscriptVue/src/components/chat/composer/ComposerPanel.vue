@@ -1,12 +1,15 @@
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue';
-import { ArrowRight, LoaderCircle, Square, ShieldAlert, Check, X } from 'lucide-vue-next';
+import { computed, ref, watch } from 'vue';
+import { ArrowRight, LoaderCircle, Square } from 'lucide-vue-next';
 import ComposerStatusBar from './ComposerStatusBar.vue';
 import ModelSelector from './ModelSelector.vue';
 import ComposerAddMenu from './ComposerAddMenu.vue';
+import ComposerApprovalBar from './ComposerApprovalBar.vue';
 import ComposerAttachments from './ComposerAttachments.vue';
+import ComposerInput from './ComposerInput.vue';
 import ComposerUsageMeter from './ComposerUsageMeter.vue';
 import { isSupportedImageFile } from '../../../composables/useComposerAttachments.js';
+import { createSkillChip } from '../../../renderers/composerText.js';
 
 const props = defineProps({
 	busy: {
@@ -76,60 +79,11 @@ const emit = defineEmits([
 	'preview-image',
 ]);
 
-const approvalTitle = computed(() => {
-	const approval = props.pendingApproval;
-	if (!approval) {
-		return '';
-	}
-
-	return approval.displayName || approval.toolName || '工具调用';
-});
-
-// 参数原文可能很长，状态栏里只给一行预览，展开细节仍留在对话流的工具卡片里。
-const approvalDetail = computed(() => {
-	const approval = props.pendingApproval;
-	if (!approval) {
-		return '';
-	}
-
-	const raw = (approval.argumentsJson || approval.description || '').replace(/\s+/g, ' ').trim();
-	if (raw.length <= 120) {
-		return raw;
-	}
-
-	return `${raw.slice(0, 120)}…`;
-});
-
-const approvalSource = computed(() => {
-	const approval = props.pendingApproval;
-	if (!approval?.sourceId) return '';
-	const numericLabels = { 1: 'MCP', 2: 'Skill', 3: 'Plugin' };
-	const kind = typeof approval.sourceKind === 'string'
-		? approval.sourceKind
-		: numericLabels[approval.sourceKind] || '扩展';
-	return `${kind.toUpperCase()} · ${approval.sourceId}${approval.transportSummary ? ` · ${approval.transportSummary}` : ''}`;
-});
-
-function approveTool() {
-	if (!props.pendingApproval) {
-		return;
-	}
-
-	emit('approve-tool', props.pendingApproval.toolExecutionId);
-}
-
-function rejectTool() {
-	if (!props.pendingApproval) {
-		return;
-	}
-
-	emit('reject-tool', props.pendingApproval.toolExecutionId);
-}
-
+// composerText 是编辑器序列化后的发送文本（chip 已变成 `[/id]` / `@path` token）。
 const composerText = ref('');
 const workspaceMode = ref('local');
 const shellRef = ref(null);
-const textareaRef = ref(null);
+const inputRef = ref(null);
 
 const hasText = computed(() => composerText.value.trim().length > 0);
 const canSend = computed(() => hasText.value && (!props.busy || props.queueable) && !props.questionPending);
@@ -137,7 +91,9 @@ const canSend = computed(() => hasText.value && (!props.busy || props.queueable)
 const showSend = computed(() => !props.busy || (props.queueable && hasText.value));
 
 // 待答期间输入框仍可打字（用户可能想边想边改草稿），只有发送被挡住。
-const inputPlaceholder = computed(() => (props.questionPending ? '请先回答上方的问题' : '让助手帮你处理项目...'));
+const inputPlaceholder = computed(() => (props.questionPending
+	? '请先回答上方的问题'
+	: '让助手帮你处理项目…（@ 文件 · / 指令 · $ 技能）'));
 
 function submit() {
 	// 键盘 Enter 也走这里，所以早退必须在取值之前。
@@ -155,9 +111,17 @@ function submit() {
 		workspaceMode: workspaceMode.value,
 		attachments: props.attachments,
 		accept() {
-			if (composerText.value.trim() === prompt) composerText.value = '';
+			// 等待受理期间用户可能继续打字：只有内容没变才清空。
+			if (composerText.value.trim() === prompt) {
+				composerText.value = '';
+				inputRef.value?.clear();
+			}
 		},
 	});
+}
+
+function insertSkill(skillId) {
+	inputRef.value?.insertChip(createSkillChip(skillId));
 }
 
 // 图片入口被禁时分别给出「模式」与「模型」两种原因，避免用户误会成文件问题。
@@ -191,7 +155,7 @@ function onComposerPaste(event) {
 
 	const files = imageFiles(event.clipboardData?.files);
 	if (!files.length) {
-		// 纯文本粘贴仍走默认行为。
+		// 纯文本粘贴仍走默认行为（编辑器是 plaintext-only，富文本会被降级）。
 		return;
 	}
 
@@ -274,74 +238,24 @@ function browseWorkspaceFolder() {
 function deleteWorkspaceRoot(workspaceRootId) {
 	emit('delete-workspace-root', workspaceRootId);
 }
-
-function onKeydown(event) {
-	if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
-		return;
-	}
-
-	event.preventDefault();
-	submit();
-}
-
-async function insertAtCursor(text) {
-	const textarea = textareaRef.value;
-	const start = textarea?.selectionStart ?? composerText.value.length;
-	const end = textarea?.selectionEnd ?? start;
-	composerText.value = composerText.value.slice(0, start) + text + composerText.value.slice(end);
-	await nextTick();
-	textareaRef.value?.focus();
-	textareaRef.value?.setSelectionRange(start + text.length, start + text.length);
-}
-
-function insertSkillToken(skillId) {
-	return insertAtCursor(`[/${skillId}] `);
-}
-
-defineExpose({
-	getShellEl: () => shellRef.value,
-	insertText: insertAtCursor,
-});
 </script>
 
 <template>
 	<div ref="shellRef" class="composer-stack"
 		@dragenter="onComposerDragEnter" @dragover="onComposerDragOver" @dragleave="onComposerDragLeave"
 		@drop="onComposerDrop">
-		<transition name="approval-bar">
-			<div v-if="props.pendingApproval" class="tool-approval-bar" role="alertdialog" aria-label="工具调用确认">
-				<span class="tool-approval-icon" aria-hidden="true">
-					<ShieldAlert :size="16" :stroke-width="1.9" />
-				</span>
-				<div class="tool-approval-copy">
-					<span v-if="props.pendingApproval.conversationId" class="tool-approval-source">会话：{{ props.pendingApproval.conversationTitle || props.pendingApproval.conversationId.slice(0, 8) }}</span>
-					<span class="tool-approval-title">
-						请求执行 <strong>{{ approvalTitle }}</strong>
-					</span>
-					<span v-if="approvalSource" class="tool-approval-source">{{ approvalSource }}</span>
-					<span v-if="approvalDetail" class="tool-approval-detail" :title="approvalDetail">{{ approvalDetail
-						}}</span>
-				</div>
-				<div class="tool-approval-actions">
-					<button class="tool-approval-btn reject" type="button" title="拒绝" @click="rejectTool">
-						<X :size="14" :stroke-width="2.2" aria-hidden="true" />
-						拒绝
-					</button>
-					<button class="tool-approval-btn approve" type="button" title="允许" @click="approveTool">
-						<Check :size="14" :stroke-width="2.4" aria-hidden="true" />
-						允许
-					</button>
-				</div>
-			</div>
-		</transition>
+		<ComposerApprovalBar :approval="props.pendingApproval" @approve="emit('approve-tool', $event)"
+			@reject="emit('reject-tool', $event)" />
 		<slot name="question" />
 		<slot name="plan" />
 		<slot name="queue" />
 		<section class="composer-shell" :class="{ dragging }" aria-label="消息输入">
 			<ComposerAttachments :items="props.attachments" :error="props.attachmentsError"
 				@remove="emit('remove-attachment', $event)" @preview-image="emit('preview-image', $event)" />
-			<textarea ref="textareaRef" v-model="composerText" class="composer-input" rows="3"
-				:placeholder="inputPlaceholder" @keydown="onKeydown" @paste="onComposerPaste"></textarea>
+			<ComposerInput ref="inputRef" v-model="composerText" :placeholder="inputPlaceholder" :agent-mode="agentMode"
+				:workspace-selection="workspaceSelection" :selected-agent-id="selectedAgentId"
+				:selected-agent-name="selectedAgentName" :capability-revision="capabilityRevision"
+				@submit="submit" @paste="onComposerPaste" />
 			<p v-if="submitError" class="composer-error" role="alert">{{ submitError }}</p>
 			<div class="composer-toolbar">
 				<!-- 左侧：+ -->
@@ -349,7 +263,7 @@ defineExpose({
 					<ComposerAddMenu :skills-enabled="agentMode === 'direct'" :agent-id="selectedAgentId"
 						:agent-name="selectedAgentName" :capability-revision="capabilityRevision"
 						:images-enabled="props.imagesEnabled" :images-disabled-reason="imagesDisabledReason"
-						@add-image="emit('request-attachment-picker')" @select-skill="insertSkillToken" />
+						@add-image="emit('request-attachment-picker')" @select-skill="insertSkill" />
 				</div>
 				<!-- 右侧：用量圆环百分比 / 模型 / 发送 -->
 				<div class="composer-tools-right">
@@ -397,6 +311,7 @@ defineExpose({
 }
 
 .composer-shell {
+	/* relative：快捷弹层（@ / $ / /）挂在它上方，水平跟随光标 */
 	position: relative;
 	width: 100%;
 	min-height: 138px;
@@ -449,142 +364,6 @@ defineExpose({
 	color: var(--err-text);
 	font-size: var(--fs-115);
 	line-height: 1.35;
-}
-
-/* ===== 工具调用确认栏（输入框上方，需要用户允许/拒绝 Direct 写操作时出现） ===== */
-.tool-approval-bar {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	margin-bottom: 10px;
-	padding: 9px 10px 9px 12px;
-	border: 1px solid var(--caution-line);
-	border-radius: 11px;
-	background: var(--caution-tint);
-}
-
-.tool-approval-icon {
-	display: inline-grid;
-	place-items: center;
-	width: 26px;
-	height: 26px;
-	flex: none;
-	border-radius: 8px;
-	color: var(--caution-fill);
-	background: var(--caution-icon-bg);
-}
-
-.tool-approval-copy {
-	min-width: 0;
-	flex: 1 1 auto;
-	display: flex;
-	flex-direction: column;
-	gap: 1px;
-}
-
-.tool-approval-title {
-	max-width: 100%;
-	overflow: hidden;
-	color: var(--caution-text);
-	font-size: var(--fs-125);
-	line-height: 1.4;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.tool-approval-title strong {
-	font-weight: 650;
-	color: var(--caution-text-strong);
-}
-
-.tool-approval-detail {
-	max-width: 100%;
-	overflow: hidden;
-	color: var(--caution-text-soft);
-	font-family: var(--font-mono);
-	font-size: var(--fs-11);
-	line-height: 1.35;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.tool-approval-source {
-	color: var(--caution-text-faint);
-	font-size: var(--fs-10);
-	font-weight: 600;
-}
-
-.tool-approval-actions {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	flex: none;
-}
-
-.tool-approval-btn {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	height: 30px;
-	padding: 0 12px;
-	border: 1px solid transparent;
-	border-radius: 8px;
-	font-size: var(--fs-125);
-	font-weight: 600;
-	line-height: 1;
-	transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-
-.tool-approval-btn.reject {
-	border-color: var(--border-strong);
-	background: var(--panel);
-	color: var(--muted);
-}
-
-.tool-approval-btn.reject:hover {
-	border-color: var(--border-strong);
-	color: var(--text-soft);
-}
-
-.tool-approval-btn.approve {
-	background: var(--caution-fill);
-	color: var(--caution-fill-ink);
-}
-
-.tool-approval-btn.approve:hover {
-	background: var(--caution-fill-hover);
-}
-
-.approval-bar-enter-active,
-.approval-bar-leave-active {
-	transition: opacity 0.16s ease, transform 0.16s ease;
-}
-
-.approval-bar-enter-from,
-.approval-bar-leave-to {
-	opacity: 0;
-	transform: translateY(4px);
-}
-
-.composer-input {
-	width: 100%;
-	min-height: 64px;
-	flex: 1 1 auto;
-	resize: none;
-	padding: 0 2px;
-	border: 0;
-	outline: none;
-	background: transparent;
-	color: var(--text-strong);
-	font: 14px/1.65 var(--font-ui);
-}
-
-.composer-input::placeholder {
-	color: var(--muted-soft);
-}
-
-.composer-input:disabled {
-	opacity: 0.68;
 }
 
 .composer-toolbar {

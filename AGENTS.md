@@ -29,6 +29,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 9. **数据库**：schema 版本 **32**；非 v32 或未版本化数据库只读拒绝，绝不迁移、回填或隐式删除。
 10. **子代理活动面板**：与主转录、输入区互相独立；子内容不得进入父转录项或影响 composer 忙碌态；摘要页 ≤50 条、详情窗口 ≤64 块、序列化 ≤256 KiB；文本更新不得触发 per-token SQL。
 11. **自动化历史**：转录永久保留、回收只靠手动删除；删除单条 run / 清空历史只删终态 run 并级联其会话（在跑先停止）；删除任务先取消 → 限时等待（`AutomationDefaults.DeleteWait`）→ 级联，超时返回 `DeleteTimeout` 且绝不半删。体积显示是 SQL `LENGTH()` 只读粗算，不得为此改 schema（仍 v32）。
+12. **输入框 chip 与 token**：技能 `[/id]` 是宿主契约（`SkillTokenParser` 独占 `[/…]` 形态，Direct 剥离并注入、CLI 原样透传）；文件引用 `@path`（含空白或特殊字符时 `@"..."`）与指令 `/name` 是纯文本约定，宿主不解析、不剥离。不要为文件 / 指令引入第二套宿主 token 解析；转录 `file_mention` 规则与 `renderers/composerText.js` 的裸路径字符类必须保持一致。
 
 ## 代码约定
 
@@ -68,6 +69,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - 端到端主干：`docs/pipeline-architecture.md`（全局图）→ `docs/runtime-execution-flow.md`（当前调用链、回合/准入/消费基线）。
 - Direct 输入与队列 / steer 语义：`docs/direct-message-input-design.md`。
 - 输入框图片附件（存储 / 桥 / 队列 / 模型调用 / 前端）：`docs/input-attachment-design.md`。
+- 输入框快捷命令（`@` 文件 / `/` 指令 / `$` 技能的行内 chip：触发规则、token 形态、`plaintext-only` 编辑器、弹层键盘与数据源）：`docs/composer-mention-design.md`。
 - `read_file` 读取图片（tool result 携带图片、三种协议投递、live-only 回放）：`docs/direct-tool-result-image-design.md`。
 - Direct `ask_user` 提问工具（强制中断语义、AskUserRules 限额、绑定闸门、`questionRequestId` 协议）：`docs/direct-ask-user-design.md`。
 - 桌面/前端：`docs/message-segments-system-design.md`。

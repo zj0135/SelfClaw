@@ -1,0 +1,51 @@
+/* 行内 chip：输入框（带图标）与转录（纯文字）共用同一套形状。
+ * 技能 [/id] 用主题色；文件 @path 用中性色，和技能区分；指令 /name 暂与技能同色。
+ * 字号相对父级：输入框 14px 与转录正文、紧凑面板都能自然缩放。 */
+.inline-chip {
+	/* vertical-align: middle 把盒中心对到 x-height 中线，对 CJK 文本约低 1px；补 -1px 后 Edge 实测
+	   （.scratch/composer-mention/align-spike.cjs）chip 中心与同行文本中心差 0.2px，带图标 / 无图标 / 拉丁文一致。
+	   不设 min-height：高度由行高撑出（≈20.7px），不会把 23px 的正文行撑高。 */
+	position: relative;
+	top: -1px;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: 240px;
+	margin: 0 2px;
+	padding: 0 7px;
+	border: 1px solid var(--accent-line);
+	border-radius: 6px;
+	background: var(--accent-soft);
+	color: var(--accent-2);
+	font-size: 0.92em;
+	font-weight: 600;
+	line-height: 1.45;
+	vertical-align: middle;
+	white-space: nowrap;
+}
+
+.inline-chip--file {
+	border-color: color-mix(in srgb, var(--text) 14%, transparent);
+	background: color-mix(in srgb, var(--text) 6%, transparent);
+	color: var(--text-soft);
+}
+
+.inline-chip-icon {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	opacity: 0.85;
+}
+
+.inline-chip-icon svg {
+	width: 13px;
+	height: 13px;
+}
+
+.inline-chip-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}

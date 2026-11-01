@@ -16,13 +16,13 @@ async function queuedItemIds(page) {
 
 test('queues while busy, preserves the draft until ACK, and keeps list after pause/resume results', async ({ page }) => {
     await page.evaluate(() => window.queueFixture.holdAck(true));
-    const editor = page.locator('textarea').first();
+    const editor = page.locator('.composer-editor');
     await editor.fill('Queued B');
     await editor.press('Enter');
     await expect(page.locator('.queue-preview')).toHaveText('Queued B');
-    await expect(editor).toHaveValue('Queued B');
+    await expect(editor).toHaveText('Queued B');
     await page.evaluate(() => window.queueFixture.releaseAck());
-    await expect(editor).toHaveValue('');
+    await expect(editor).toHaveText('');
     await page.getByRole('button', { name: '暂停队列', exact: true }).click();
     await expect(page.getByRole('button', { name: '恢复队列', exact: true })).toBeVisible();
     await expect(page.locator('.queue-preview')).toHaveText('Queued B');
@@ -34,7 +34,7 @@ test('queues while busy, preserves the draft until ACK, and keeps list after pau
 });
 
 test('reload restores the accepted queue through a new GUID subscription', async ({ page }) => {
-    const editor = page.locator('textarea').first();
+    const editor = page.locator('.composer-editor');
     await editor.fill('Survives reload');
     await editor.press('Enter');
     await expect(page.locator('.queue-preview')).toHaveText('Survives reload');
@@ -45,7 +45,7 @@ test('reload restores the accepted queue through a new GUID subscription', async
 });
 
 test('drops a consumed steer from the queue card instead of leaving a notice', async ({ page }) => {
-    const editor = page.locator('textarea').first();
+    const editor = page.locator('.composer-editor');
     await editor.fill('focus on tests');
     await editor.press('Enter');
     const promote = page.locator('.queue-item [aria-label="调整当前任务"]');
@@ -70,7 +70,7 @@ test('keeps the approval bar independent from steering and drops it after supers
     await expect(page.locator('.tool-approval-bar')).toBeVisible();
 
     await page.evaluate(() => window.queueFixture.setSteerable('turn-3'));
-    const editor = page.locator('textarea').first();
+    const editor = page.locator('.composer-editor');
     await editor.fill('skip that write');
     await editor.press('Enter');
     await page.locator('.queue-item [aria-label="调整当前任务"]').click();
@@ -84,7 +84,7 @@ test('keeps the approval bar independent from steering and drops it after supers
 
 test('promotes a pending follow-up without duplicating the input', async ({ page }) => {
     await page.evaluate(() => window.queueFixture.setSteerable('turn-9'));
-    const editor = page.locator('textarea').first();
+    const editor = page.locator('.composer-editor');
     await editor.fill('reuse my identity');
     await editor.press('Enter');
     const [inputId] = await queuedItemIds(page);
@@ -97,7 +97,7 @@ test('promotes a pending follow-up without duplicating the input', async ({ page
 });
 
 test('keeps the edited body on a conflict and saves again with the refreshed revision', async ({ page }) => {
-    const editor = page.locator('textarea').first();
+    const editor = page.locator('.composer-editor');
     await editor.fill('first draft');
     await editor.press('Enter');
     await expect(page.locator('.queue-preview')).toHaveText('first draft');
@@ -119,7 +119,7 @@ test('keeps the edited body on a conflict and saves again with the refreshed rev
 
 test('an old conversation ACK cannot clear the new conversation draft', async ({ page }) => {
     await page.evaluate(() => window.queueFixture.holdAck(true));
-    const editor = page.locator('textarea').first();
+    const editor = page.locator('.composer-editor');
     await editor.fill('for conversation A');
     await editor.press('Enter');
     await expect(page.locator('.queue-preview')).toHaveText('for conversation A');
@@ -127,13 +127,13 @@ test('an old conversation ACK cannot clear the new conversation draft', async ({
     await page.evaluate(id => window.queueFixture.transcript({ conversationId: id, message: 'Conversation B transcript' }), SECOND_CONVERSATION);
     await expect(page.locator('.queue-preview')).toHaveCount(0);
     await page.evaluate(() => window.queueFixture.releaseAck());
-    await expect(editor).toHaveValue('for conversation A');
+    await expect(editor).toHaveText('for conversation A');
     await expect(page.locator('.composer-error')).toHaveCount(0);
 });
 
 test('held items stay blocking after resume and retry reuses the same input', async ({ page }) => {
     await page.evaluate(() => window.queueFixture.setSteerable('turn-1'));
-    const editor = page.locator('textarea').first();
+    const editor = page.locator('.composer-editor');
     await editor.fill('will be held');
     await editor.press('Enter');
     await page.evaluate(() => {
@@ -161,4 +161,24 @@ test('a busy CLI turn never offers queue or adjustment actions', async ({ page }
     await expect(page.getByRole('button', { name: '调整当前任务', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '加入队列', exact: true })).toHaveCount(0);
     await expect(page.locator('.conversation-queue')).toHaveCount(0);
+});
+
+test('编辑器保持 textarea 的观感：聚焦无边框、输入区与原来同高', async ({ page }) => {
+    // ComposerInput 是多根节点组件，父组件的 scoped 样式到不了编辑器根节点：
+    // 外观必须由 ComposerEditor 自己持有，否则会退回浏览器默认的 contenteditable 焦点框。
+    const editor = page.locator('.composer-editor');
+    await editor.click();
+    const metrics = await editor.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+            outlineStyle: style.outlineStyle,
+            borderTopWidth: style.borderTopWidth,
+            minHeight: style.minHeight,
+            height: element.getBoundingClientRect().height,
+        };
+    });
+    expect(metrics.outlineStyle).toBe('none');
+    expect(metrics.borderTopWidth).toBe('0px');
+    expect(metrics.minHeight).toBe('64px');
+    expect(metrics.height).toBeGreaterThanOrEqual(64);
 });

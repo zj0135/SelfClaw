@@ -152,6 +152,8 @@ export function useWorkspaceTree() {
 	const rootLoading = computed(() => loading.value.has(''));
 	const rootError = computed(() => errors.value.get('') || '');
 	const rootLoaded = computed(() => entries.value.has(''));
+	// 已加载的全部条目（含已折叠目录里取过的子项）：输入框 `@` 过滤在这上面做扁平匹配，只覆盖取过的层级。
+	const allEntries = computed(() => (isOpen.value ? Array.from(entries.value.values()).flat() : []));
 
-	return { root, rows, isOpen, rootLoading, rootError, rootLoaded, open, close, toggle, reload: () => load('') };
+	return { root, rows, allEntries, isOpen, rootLoading, rootError, rootLoaded, open, close, toggle, reload: () => load('') };
 }

@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import ComposerPanel from '../src/components/chat/composer/ComposerPanel.vue';
+import { typeIntoEditor } from './helpers/composerEditor.js';
 import ConversationQueue from '../src/components/chat/ConversationQueue.vue';
 
 const mounted = [];
@@ -186,7 +187,7 @@ it('toggles the single button between stop and send while a Direct turn is busy'
 	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(false);
 
 	// Typing turns the same slot into the send (queue) button.
-	await wrapper.find('textarea').setValue('adjust the current task');
+	await typeIntoEditor(wrapper, 'adjust the current task');
 	expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(false);
 	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(true);
 
@@ -195,7 +196,7 @@ it('toggles the single button between stop and send while a Direct turn is busy'
 	expect(wrapper.emitted('submit')[0][0].prompt).toBe('adjust the current task');
 
 	// Clearing the draft brings the stop button back.
-	await wrapper.find('textarea').setValue('   ');
+	await typeIntoEditor(wrapper, '   ');
 	expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(true);
 	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(false);
 });
@@ -204,7 +205,7 @@ it('never turns the CLI stop button into a submit and keeps steering out of the 
 	const wrapper = attach(ComposerPanel, {
 		busy: true, queueable: false, stoppable: true,
 	});
-	await wrapper.find('textarea').setValue('cli busy text');
+	await typeIntoEditor(wrapper, 'cli busy text');
 	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(false);
 	expect(wrapper.find('[aria-label="调整当前任务"]').exists()).toBe(false);
 	expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(true);
@@ -220,7 +221,7 @@ it('shows only progress for a busy background continuation', () => {
 it('keeps the normal send action for an idle composer', async () => {
 	const wrapper = attach(ComposerPanel, { busy: false, queueable: true });
 	expect(wrapper.find('[aria-label="发送"]').exists()).toBe(true);
-	await wrapper.find('textarea').setValue('ordinary');
+	await typeIntoEditor(wrapper, 'ordinary');
 	await wrapper.find('[aria-label="发送"]').trigger('click');
 	expect(wrapper.emitted('submit')[0][0].prompt).toBe('ordinary');
 });

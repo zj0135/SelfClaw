@@ -3,6 +3,7 @@ import { defineComponent, h, nextTick } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import AskUserDock from '../src/components/chat/question/AskUserDock.vue';
 import ComposerPanel from '../src/components/chat/composer/ComposerPanel.vue';
+import { typeIntoEditor } from './helpers/composerEditor.js';
 import { useChatQuestions } from '../src/composables/useChatQuestions.js';
 
 const mounted = [];
@@ -379,17 +380,17 @@ it('blocks the composer from sending while a question is pending, keeping stop a
 		},
 	});
 
-	expect(wrapper.find('textarea').attributes('placeholder')).toBe('请先回答上方的问题');
+	expect(wrapper.find('.composer-editor').attributes('data-placeholder')).toBe('请先回答上方的问题');
 	// 输入框空着时这一格是停止按钮：待答期间它必须留着，否则用户没有逃生口。
 	expect(wrapper.find('[aria-label="停止生成"]').attributes('disabled')).toBeUndefined();
 
-	await wrapper.find('textarea').setValue('draft typed while answering');
+	await typeIntoEditor(wrapper, 'draft typed while answering');
 	const send = wrapper.find('[aria-label="发送"]');
 	expect(send.exists()).toBe(true);
 	expect(send.attributes('disabled')).toBeDefined();
 
 	await send.trigger('click');
-	await wrapper.find('textarea').trigger('keydown', { key: 'Enter' });
+	await wrapper.find('.composer-editor').trigger('keydown', { key: 'Enter' });
 	expect(wrapper.emitted('submit')).toBeUndefined();
 });
 
@@ -398,8 +399,8 @@ it('keeps the ordinary send path when no question is pending', async () => {
 		global: { stubs: { ComposerStatusBar: true, ComposerAddMenu: true, ModelSelector: true } },
 	});
 
-	expect(wrapper.find('textarea').attributes('placeholder')).toBe('让助手帮你处理项目...');
-	await wrapper.find('textarea').setValue('ordinary');
+	expect(wrapper.find('.composer-editor').attributes('data-placeholder')).toBe('让助手帮你处理项目…（@ 文件 · / 指令 · $ 技能）');
+	await typeIntoEditor(wrapper, 'ordinary');
 	await wrapper.find('[aria-label="发送"]').trigger('click');
 	expect(wrapper.emitted('submit')[0][0].prompt).toBe('ordinary');
 });

@@ -12,6 +12,7 @@ import { useComposerModelSelection } from '../src/composables/useComposerModelSe
 import ComposerAttachments from '../src/components/chat/composer/ComposerAttachments.vue';
 import ComposerAddMenu from '../src/components/chat/composer/ComposerAddMenu.vue';
 import ComposerPanel from '../src/components/chat/composer/ComposerPanel.vue';
+import { typeIntoEditor } from './helpers/composerEditor.js';
 
 const scopes = [];
 const mounted = [];
@@ -366,7 +367,7 @@ describe('ComposerPanel attachment gestures', () => {
 
 	it('hands pasted screenshots and dropped files to the attachments composable', async () => {
 		const wrapper = attachPanel();
-		const textarea = wrapper.find('textarea');
+		const textarea = wrapper.find('.composer-editor');
 
 		const pasted = dispatchImageEvent(textarea.element, 'paste', 'clipboardData', [pngFile('pasted.png')]);
 		expect(pasted.defaultPrevented).toBe(true);
@@ -379,7 +380,7 @@ describe('ComposerPanel attachment gestures', () => {
 
 	it('ignores non-image drags and keeps text paste untouched', async () => {
 		const wrapper = attachPanel();
-		const textarea = wrapper.find('textarea');
+		const textarea = wrapper.find('.composer-editor');
 
 		const pasted = dispatchImageEvent(textarea.element, 'paste', 'clipboardData', [{ name: 'notes.txt', type: 'text/plain', size: 4 }]);
 		expect(pasted.defaultPrevented).toBe(false);
@@ -391,7 +392,7 @@ describe('ComposerPanel attachment gestures', () => {
 
 	it('disables every image entry point outside Direct mode', async () => {
 		const wrapper = attachPanel({ imagesEnabled: false, agentMode: 'cli' });
-		const textarea = wrapper.find('textarea');
+		const textarea = wrapper.find('.composer-editor');
 
 		const pasted = dispatchImageEvent(textarea.element, 'paste', 'clipboardData', [pngFile()]);
 		expect(pasted.defaultPrevented).toBe(false);
@@ -403,7 +404,7 @@ describe('ComposerPanel attachment gestures', () => {
 
 	it('highlights the composer while image files hover over it', async () => {
 		const wrapper = attachPanel();
-		const textarea = wrapper.find('textarea');
+		const textarea = wrapper.find('.composer-editor');
 		dispatchImageEvent(textarea.element, 'dragenter', 'dataTransfer', []);
 		await nextTick();
 		expect(wrapper.find('.composer-shell').classes()).toContain('dragging');
@@ -416,7 +417,7 @@ describe('ComposerPanel attachment gestures', () => {
 		const wrapper = attachPanel({
 			attachments: [{ attachmentId: 'a1', fileName: 'chart.png', mediaType: 'image/png', byteLength: 2048, previewUrl: '' }],
 		});
-		await wrapper.find('textarea').setValue('describe the chart');
+		await typeIntoEditor(wrapper, 'describe the chart');
 		await wrapper.find('[aria-label="发送"]').trigger('click');
 
 		const submission = wrapper.emitted('submit')[0][0];

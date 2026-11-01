@@ -11,6 +11,7 @@ import {
 	SlidersHorizontal,
 } from 'lucide-vue-next';
 import { isSuperseded, useHostBridge } from '../../../composables/hostBridge.js';
+import { useEffectiveSkills } from '../../../composables/useEffectiveSkills.js';
 
 // 输入框工具栏最左侧的「+」入口：包含添加图片、插入技能、代理助手选择与功能设置。
 // 插入技能与代理选择采用与模型选择一致的 hover 展开侧边子菜单体验。
@@ -86,37 +87,11 @@ function pickAgent(agent) {
 	close();
 }
 
-// 技能信息与状态
-const skillsCache = new Map();
-const skills = ref([]);
-const skillsLoading = ref(false);
-const skillsError = ref('');
-
-async function loadSkills() {
-	const cacheKey = `${effectiveAgentId.value}:${props.capabilityRevision}`;
-	if (skillsCache.has(cacheKey)) {
-		skills.value = skillsCache.get(cacheKey);
-		skillsError.value = '';
-		return;
-	}
-
-	skillsLoading.value = true;
-	skillsError.value = '';
-	try {
-		const response = await requestLatest(
-			'effective-skills',
-			'extensions/list-effective-skills',
-			{ agentId: effectiveAgentId.value || null },
-		);
-		const next = Array.isArray(response?.skills) ? response.skills : [];
-		skillsCache.set(cacheKey, next);
-		skills.value = next;
-	} catch (cause) {
-		if (!isSuperseded(cause)) skillsError.value = cause?.message || '无法加载技能。';
-	} finally {
-		skillsLoading.value = false;
-	}
-}
+// 技能列表与输入框 `$` 弹层共用同一份缓存（按 agentId + capabilityRevision 命中）。
+const { skills, loading: skillsLoading, error: skillsError, load: loadSkills } = useEffectiveSkills(
+	() => effectiveAgentId.value,
+	() => props.capabilityRevision,
+);
 
 function pickSkill(skill) {
 	emit('select-skill', skill.id);

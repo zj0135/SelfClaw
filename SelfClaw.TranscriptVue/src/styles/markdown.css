@@ -137,16 +137,6 @@
 .markdown-content .hljs-class .hljs-title {
 	color: var(--syntax-type);
 }
-.message-skill-chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.25rem;
-	padding: 0.08rem 0.42rem;
-	border-radius: 999px;
-	background: color-mix(in srgb, var(--accent) 14%, transparent);
-	color: var(--accent);
-	font-size: 0.88em;
-}
 .message-error {
 	margin: 0.65rem 0 0;
 	color: var(--err-text);

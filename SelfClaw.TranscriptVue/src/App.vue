@@ -682,49 +682,6 @@ a:hover {
 	gap: 8px;
 }
 
-.message-skill-chip {
-	margin: 0 2px;
-	vertical-align: -4px;
-}
-
-.composer-inline-skill {
-	display: inline-flex;
-	align-items: center;
-	max-width: 220px;
-	min-height: 24px;
-	gap: 5px;
-	margin: 0 2px;
-	padding: 2px 7px 2px 6px;
-	border: 1px solid var(--accent-line);
-	border-radius: 6px;
-	background: var(--accent-soft);
-	color: var(--accent-2);
-	font-size: var(--fs-13);
-	font-weight: 600;
-	line-height: 1.35;
-	user-select: all;
-	white-space: nowrap;
-}
-
-.composer-inline-skill-icon {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	flex: 0 0 auto;
-}
-
-.composer-inline-skill-icon svg {
-	width: 14px;
-	height: 14px;
-}
-
-.composer-inline-skill-name {
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
 .message-attachments {
 	display: flex;
 	flex-direction: row;
