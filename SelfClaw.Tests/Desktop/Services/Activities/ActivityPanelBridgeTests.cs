@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Windows.Threading;
 using FluentAssertions;
 using SelfClaw.Core.Models;
-using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Desktop.Services.Activities;
 using SelfClaw.Tests.TestDoubles;
 
@@ -41,49 +40,21 @@ public sealed class ActivityPanelBridgeTests
         });
 
     [Fact]
-    public Task Content_page_checks_scope_selection_version_and_serialized_budget()
+    public Task Unknown_operations_are_rejected_with_a_correlated_error()
         => WpfDispatcherTest.RunAsync(async () =>
         {
             using var activity = new SubagentActivityTestContext();
-            var task = await activity.CreateTaskAsync();
-            var runtime = new ControlledSubagentRuntime();
-            var execution = activity.CreateExecutor(task, runtime).ExecuteAsync(task, CancellationToken.None);
-            await runtime.Started.Task;
-            var longText = string.Concat(Enumerable.Repeat("\u4e2d\ud83d\ude42\n", 6000));
-            await runtime.EmitAsync(new AssistantTextDeltaEvent("text", longText));
+            var task = await activity.CreateTaskAsync(claim: false);
             using var panel = new ActivityPanelTestContext(activity, task.ParentConversationId, _trace);
             var bridge = new ActivityPanelBridge(panel.Publisher, activity.Service, new ActivityTaskCoordinator(), panel.Channel, Dispatcher.CurrentDispatcher);
             var subscription = Guid.NewGuid();
-            var selection = Guid.NewGuid();
             await panel.Publisher.SubscribeAsync(subscription, task.ParentConversationId, "subscribe", CancellationToken.None);
-            panel.AcknowledgeLatest();
-            await panel.Publisher.SelectDetailAsync(subscription, selection, task.Id, null, null, "detail", CancellationToken.None);
-            panel.AcknowledgeLatest();
-            var detail = await activity.Service.GetDetailAsync(task.ParentConversationId, task.Id) ?? throw new InvalidOperationException();
-            await HandleAsync(bridge, "read-content", new { subscriptionId = subscription, detailSelectionId = selection, taskId = task.Id,
-                requestId = "content", contentId = "segment/0", contentVersion = detail.Content.ContentVersion, offset = 0 });
-            var response = Response(panel, "content");
-            response.GetProperty("text").GetString().Should().NotEndWith("\ud83d");
-            System.Text.Encoding.UTF8.GetByteCount(response.GetRawText()).Should().BeLessThanOrEqualTo(64 * 1024);
-            response.GetProperty("isTruncated").GetBoolean().Should().BeTrue();
-            await HandleAsync(bridge, "read-content", new { subscriptionId = subscription, detailSelectionId = Guid.NewGuid(), taskId = task.Id,
-                requestId = "invalid-selection", contentId = "segment/0", contentVersion = detail.Content.ContentVersion });
-            Response(panel, "invalid-selection").GetProperty("error").GetString().Should().Be("activity-detail-selection-invalid");
-            await runtime.EmitAsync(new AssistantTextDeltaEvent("text", "updated"));
-            await HandleAsync(bridge, "read-content", new { subscriptionId = subscription, detailSelectionId = selection, taskId = task.Id,
-                requestId = "changed-content", contentId = "segment/0", contentVersion = detail.Content.ContentVersion });
-            Response(panel, "changed-content").GetProperty("error").GetString().Should().Be("content-changed");
-            activity.Service.SetScopeClosed(task.ParentConversationId, true);
-            await HandleAsync(bridge, "read-content", new { subscriptionId = subscription, detailSelectionId = selection,
-                taskId = task.Id, requestId = "closed-scope" });
-            Response(panel, "closed-scope").GetProperty("error").GetString().Should().Be("activity-scope-closed");
-            activity.Service.SetScopeClosed(task.ParentConversationId, false);
-            await runtime.EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, longText + "updated"));
-            await execution;
+            // 读内容协议已删除：旧客户端再发 read-content 只会收到关联的错误回包，不会碰宿主状态。
+            await HandleAsync(bridge, "read-content", new { subscriptionId = subscription, requestId = "legacy", taskId = task.Id });
+            var response = panel.Messages.Single(message => message.TryGetProperty("requestId", out var id) && id.GetString() == "legacy");
+            response.GetProperty("type").GetString().Should().Be("activity-panel/error");
+            response.GetProperty("error").GetString().Should().Be("unsupported-activity-operation");
         });
-
-    private static JsonElement Response(ActivityPanelTestContext panel, string requestId)
-        => panel.Messages.Single(message => message.TryGetProperty("requestId", out var id) && id.GetString() == requestId);
 
     private static async Task HandleAsync(ActivityPanelBridge bridge, string operation, object payload)
     {

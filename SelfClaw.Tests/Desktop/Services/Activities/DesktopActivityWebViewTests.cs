@@ -73,8 +73,8 @@ public sealed class DesktopActivityWebViewTests(ITestOutputHelper output)
                 };
                 delivery.Publish(new TranscriptRenderState([], false, [], parent.Id.ToString("D"), false));
                 webView.Source = new Uri($"https://{WebViewMessageRouter.ApplicationHostName}/index.html");
-                await WaitForScriptAsync(webView, "document.querySelectorAll('.task-row').length === 3");
-                await webView.ExecuteScriptAsync("document.querySelector('.task-select').click()");
+                await WaitForScriptAsync(webView, "document.querySelectorAll('.task-select option').length === 3");
+                await OpenSubagentDockAsync(webView);
                 for (var index = 0; index < 3; index++)
                 {
                     await runtimes[index].EmitAsync(new AssistantThinkingDeltaEvent("thinking", $"visible child {index}"));
@@ -90,23 +90,27 @@ public sealed class DesktopActivityWebViewTests(ITestOutputHelper output)
                 var approvalId = Guid.NewGuid();
                 var approval = activity.Approvals.RequestApprovalAsync(new ToolApprovalRequest(approvalId,
                     "write_file", "Write fixture", "Verification", "{}", tasks[0].ChildConversationId));
-                await WaitForScriptAsync(webView, "document.querySelector('.task-row')?.textContent.includes('等待审批') === true");
+                await WaitForScriptAsync(webView, "Boolean(document.querySelector('.task-select option[data-phase=waiting-approval]'))");
                 webView.Reload();
-                await WaitForScriptAsync(webView, "document.querySelectorAll('.task-row').length === 3");
-                await WaitForScriptAsync(webView, "document.querySelector('.task-row')?.textContent.includes('等待审批') === true");
+                await WaitForScriptAsync(webView, "document.querySelectorAll('.task-select option').length === 3");
+                await WaitForScriptAsync(webView, "Boolean(document.querySelector('.task-select option[data-phase=waiting-approval]'))");
                 activity.Approvals.TryResolve(approvalId, ToolApprovalDecision.Denied).Should().BeTrue();
                 (await approval).Should().Be(ToolApprovalDecision.Denied);
-                await webView.ExecuteScriptAsync("document.querySelector('.task-select').click()");
+                await OpenSubagentDockAsync(webView);
                 await WaitForScriptAsync(webView, "Boolean(document.querySelector('.thinking-summary'))");
                 await runtimes[0].EmitAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "result 0"));
                 await executions[0];
-                await WaitForScriptAsync(webView, "document.querySelectorAll('.task-row.succeeded').length === 1");
-                await webView.ExecuteScriptAsync("document.querySelector('.cancel-task').click()");
-                await WaitForScriptAsync(webView, "document.querySelectorAll('.task-row.cancelled').length === 1");
+                await WaitForScriptAsync(webView, "document.querySelectorAll('.task-select option[data-status=succeeded]').length === 1");
+                // 取消键作用于下拉框里选中的任务：第一个已完成，先切到第二个再取消。
+                await webView.ExecuteScriptAsync(
+                    "(() => { const select = document.querySelector('.task-select'); select.value = select.options[1].value; select.dispatchEvent(new Event('change')); })()");
+                await WaitForScriptAsync(webView, "Boolean(document.querySelector('.task-cancel'))");
+                await webView.ExecuteScriptAsync("document.querySelector('.task-cancel').click()");
+                await WaitForScriptAsync(webView, "document.querySelectorAll('.task-select option[data-status=cancelled]').length === 1");
                 await shutdown.CancelAsync();
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => executions[1]);
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() => executions[2]);
-                await WaitForScriptAsync(webView, "document.querySelectorAll('.task-row.cancelled').length === 2");
+                await WaitForScriptAsync(webView, "document.querySelectorAll('.task-select option[data-status=cancelled]').length === 2");
                 await using (var screenshot = File.Create(Path.Combine(artifacts, "terminal.png")))
                     await webView.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, screenshot);
                 routeErrors.Should().BeEmpty();
@@ -139,6 +143,18 @@ public sealed class DesktopActivityWebViewTests(ITestOutputHelper output)
         var p95 = samples.Order().ElementAt((int)Math.Ceiling(samples.Count * .95) - 1);
         output.WriteLine("WebViewRenderSamples={0}; TextRenderP95Ms={1:F1}", samples.Count, p95);
         p95.Should().BeLessThan(500, "the visible WebView should render the cumulative child text within the P6 target");
+    }
+
+    // 子代理看板位于右侧 dock 内，dock 收起时选中的任务会被清掉、详情不会出现：
+    // 先点标题栏「面板」按钮，再在启动页点「子代理」（dock 只是收起过、tab 还在时直接点 tab）。
+    // 页面 reload 后 dock 回到收起态且 tab 清空，需要再开一次。
+    private static async Task OpenSubagentDockAsync(WebView2 webView)
+    {
+        await webView.ExecuteScriptAsync("document.querySelector('button[aria-label=Panel]').click()");
+        await WaitForScriptAsync(webView, "document.querySelector('.side-dock')?.classList.contains('open') === true");
+        await webView.ExecuteScriptAsync(
+            "(document.querySelector('.dock-launcher-item[data-tool=subagents]') ?? document.querySelector('.dock-tab[data-tool=subagents] .dock-tab-select')).click()");
+        await WaitForScriptAsync(webView, "document.querySelector('.dock-tab[data-tool=subagents]')?.classList.contains('active') === true");
     }
 
     private static async Task WaitForScriptAsync(WebView2 webView, string expression)

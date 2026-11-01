@@ -90,10 +90,6 @@ function selectItem(id) {
 	<div class="settings-layout sc-root">
 		<!-- Left: sidebar -->
 		<aside class="settings-sidebar">
-			<div class="sb-head sc-rise" style="--i: 0">
-				<h1>设置</h1>
-			</div>
-
 			<nav class="sb-nav">
 				<div v-for="(group, gi) in navGroups" :key="group.label" class="sb-group sc-rise"
 					:style="{ '--i': gi + 1 }">
@@ -150,11 +146,6 @@ function selectItem(id) {
 	background: var(--sc-bg);
 }
 
-.sb-head {
-	padding: 30px 24px 20px;
-	border-bottom: 1px solid var(--sc-line);
-}
-
 .sb-kicker {
 	margin-bottom: 14px;
 	color: var(--sc-faint);
@@ -162,22 +153,6 @@ function selectItem(id) {
 	font-size: var(--fs-10);
 	font-weight: 600;
 	letter-spacing: 0.22em;
-}
-
-.sb-head h1 {
-	margin: 0;
-	font-family: var(--sc-display);
-	font-size: var(--fs-34);
-	font-weight: 650;
-	letter-spacing: 0.02em;
-	line-height: 1.1;
-}
-
-.sb-head p {
-	margin: 8px 0 0;
-	color: var(--sc-mute);
-	font-size: var(--fs-125);
-	line-height: 1.5;
 }
 
 .sb-nav {

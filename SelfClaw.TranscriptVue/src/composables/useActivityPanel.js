@@ -83,11 +83,6 @@ export function useActivityPanel(parentId) {
 		return requestState('select-detail', { taskId, detailSelectionId: selection.value, blockOffset, contentVersion });
 	}
 
-	function readContent(query) {
-		return bridge.request('activity-panel/read-content', { ...query,
-			subscriptionId: subscription.value, detailSelectionId: selection.value });
-	}
-
 	function cancelTask(taskId) {
 		return bridge.request('activity-panel/cancel-task', { subscriptionId: subscription.value, taskId });
 	}
@@ -104,5 +99,5 @@ export function useActivityPanel(parentId) {
 		subscription.value = null;
 	});
 	return { state: readonly(state), section, selection: readonly(selection), subscription: readonly(subscription),
-		loading: readonly(loading), error: readonly(error), selectDetail, readContent, cancelTask, refresh };
+		loading: readonly(loading), error: readonly(error), selectDetail, cancelTask, refresh };
 }

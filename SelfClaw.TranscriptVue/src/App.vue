@@ -12,9 +12,11 @@ import AutomationView from './views/AutomationView.vue';
 import { useHostBridge } from './composables/hostBridge.js';
 import { useTranscriptBridge } from './composables/transcriptBridge.js';
 import { useConversationNavigation } from './composables/useConversationNavigation.js';
+import { useSideDock } from './composables/useSideDock.js';
 
 const { on, post } = useHostBridge();
 const transcript = useTranscriptBridge();
+const dock = useSideDock();
 
 const viewRegistry = {
 	chat: markRaw(ChatView),
@@ -83,8 +85,8 @@ function onResizePointerDown(event, edge) {
 
 function onWindowControlAction(action) {
 	switch (action) {
-		case 'terminal':
-			post({ type: 'toggle-terminal' });
+		case 'panel':
+			dock.toggle();
 			break;
 		case 'minimize':
 			post({ type: 'window-minimize' });
@@ -249,7 +251,8 @@ button {
 .window-drag-region {
 	position: absolute;
 	inset: 0;
-	right: 180px;
+	/* 右侧让出标题栏按钮区：1 个面板按钮 + 3 个窗口按钮。 */
+	right: 190px;
 	z-index: 110;
 	-webkit-user-select: none;
 	user-select: none;
@@ -272,7 +275,8 @@ button {
 	z-index: 460;
 }
 
-/* 标题栏之下才分左右：面板与对话区并排，窗口按钮那一行横贯整个主区。 */
+/* 标题栏之下是视图区，窗口按钮那一行横贯整个主区。右侧功能面板由 ChatView 自持
+   （components/dock/SideDock.vue），不在这一层分栏。 */
 .main-body {
 	display: flex;
 	min-height: 0;

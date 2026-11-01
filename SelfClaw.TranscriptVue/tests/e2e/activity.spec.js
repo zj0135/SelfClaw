@@ -5,19 +5,39 @@ test.beforeEach(async ({ page }) => {
 	await page.addInitScript(installActivityHost);
 	await page.goto('/');
 	await page.evaluate(() => window.activityFixture.transcript());
-	await expect(page.locator('.activity-panel')).toHaveClass(/collapsed/);
-	await expandActivityPanel(page);
+	await expect(page.locator('.side-dock')).toBeHidden();
+	await openSubagentDock(page);
 });
 
-async function expandActivityPanel(page) {
-	await page.locator('.activity-toggle').click();
-	await expect(page.locator('.task-row')).toHaveCount(3);
+// 打开子代理 tab：dock 收起时先点标题栏「面板」；启动页上点「子代理」，tab 已存在（dock 只是收起过）则直接点 tab。
+// 面板打开后下拉框自动选中第一个任务，详情随之出现。
+async function openSubagentDock(page) {
+	await page.getByRole('button', { name: 'Panel', exact: true }).click();
+	await expect(page.locator('.side-dock')).toBeVisible();
+	const launcherItem = page.locator('.dock-launcher-item[data-tool="subagents"]');
+	if (await launcherItem.count()) await launcherItem.click();
+	else await page.locator('.dock-tab[data-tool="subagents"] .dock-tab-select').click();
+	await expect(page.locator('.dock-tab.active')).toHaveText(/子代理/);
+	await expect(page.locator('.task-select option')).toHaveCount(3);
+	await expect(page.locator('.task-detail')).toBeVisible();
 }
+
+async function closeDock(page) {
+	await page.locator('.dock-close').click();
+	await expect(page.locator('.side-dock')).toBeHidden();
+}
+
+async function selectTask(page, index) {
+	await page.locator('.task-select').selectOption({ index });
+	const taskId = await page.evaluate((position) => window.activityFixture.ids[position], index);
+	await expect(page.locator('.task-detail')).toHaveAttribute('data-task-id', taskId);
+}
+
+const detailScrollTop = (page) => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop));
 
 test('streaming detail, tool completion, reload, and parent isolation', async ({ page }) => {
 	const errors = [];
 	page.on('pageerror', (error) => errors.push(error.message));
-	await page.locator('.task-select').first().click();
 	await page.locator('.task-detail .thinking-summary').click();
 	await expect(page.locator('.task-detail .thinking-content')).toContainText('Reasoning for');
 	await page.locator('.task-detail .tool-summary').click();
@@ -31,12 +51,11 @@ test('streaming detail, tool completion, reload, and parent isolation', async ({
 	expect(await page.evaluate(() => window.injected)).toBeUndefined();
 	await page.reload();
 	await page.evaluate(() => window.activityFixture.transcript());
-	await expandActivityPanel(page);
+	await openSubagentDock(page);
 	expect(errors).toEqual([]);
 });
 
-test('detail scroll keeps the parent reader fixed while the floating panel stays out of flow', async ({ page }) => {
-	await page.locator('.task-select').first().click();
+test('the dock sits flush right of the workspace and leaves the transcript reader alone', async ({ page }) => {
 	await page.evaluate(() => window.activityFixture.text('\n\n' + 'Child line.\n\n'.repeat(80)));
 	await expect(page.locator('.task-detail .body-segment')).toContainText('Child line.');
 	await page.locator('#transcript-scroll').evaluate((element) => { element.scrollTop = 60; element.dispatchEvent(new Event('scroll')); });
@@ -48,52 +67,49 @@ test('detail scroll keeps the parent reader fixed while the floating panel stays
 	await page.locator('.new-content').click();
 	await expect(page.locator('.task-detail .body-segment')).toContainText('Frozen latest token');
 	expect(await page.locator('#transcript-scroll').evaluate((element) => element.scrollTop)).toBe(60);
-	await page.locator('#transcript-scroll').evaluate((element) => { element.scrollTop = element.scrollHeight; });
-	const metrics = () => page.evaluate(() => {
-		const stage = document.querySelector('.activity-stage').getBoundingClientRect();
-		const panel = document.querySelector('.activity-panel').getBoundingClientRect();
-		const scroll = document.querySelector('#transcript-scroll');
-		return { panel: { top: panel.top, right: panel.right, width: panel.width }, stage: { top: stage.top, right: stage.right }, scrollTop: scroll.scrollTop, scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight };
+	const metrics = await page.evaluate(() => {
+		const rect = (selector) => document.querySelector(selector).getBoundingClientRect();
+		const dock = rect('.side-dock');
+		const workspace = rect('.workspace');
+		const main = rect('.main-body');
+		return {
+			dock: { left: dock.left, right: dock.right, width: dock.width, top: dock.top, bottom: dock.bottom },
+			workspace: { right: workspace.right },
+			main: { right: main.right, top: main.top, bottom: main.bottom },
+		};
 	});
-	const expanded = await metrics();
-	expect(Math.abs(expanded.panel.top - expanded.stage.top - 20)).toBeLessThanOrEqual(1);
-	expect(Math.abs(expanded.panel.right - expanded.stage.right + 20)).toBeLessThanOrEqual(1);
-	expect(expanded.panel.width).toBeGreaterThan(400);
-	await page.locator('.activity-toggle').click();
-	await expect(page.locator('.activity-panel')).toHaveClass(/collapsed/);
-	const collapsed = await metrics();
-	expect(collapsed.panel.width).toBeLessThan(240);
-	expect(collapsed.panel.right).toBeCloseTo(expanded.panel.right, 0);
-	expect(collapsed.scrollTop).toBe(expanded.scrollTop);
-	expect(collapsed.scrollHeight).toBe(expanded.scrollHeight);
-	expect(collapsed.clientHeight).toBe(expanded.clientHeight);
+	expect(Math.abs(metrics.dock.right - metrics.main.right)).toBeLessThanOrEqual(1);
+	expect(Math.abs(metrics.workspace.right - metrics.dock.left)).toBeLessThanOrEqual(1);
+	expect(metrics.dock.width).toBeGreaterThanOrEqual(300);
+	expect(Math.abs(metrics.dock.top - metrics.main.top)).toBeLessThanOrEqual(1);
+	expect(Math.abs(metrics.dock.bottom - metrics.main.bottom)).toBeLessThanOrEqual(1);
+	await closeDock(page);
+	expect(await page.locator('#transcript-scroll').evaluate((element) => element.scrollTop)).toBe(60);
 });
 
-test('a historical block window and its reading position survive switching and remount', async ({ page }) => {
+test('a historical block window and its reading position survive switching, closing, and remount', async ({ page }) => {
 	await page.evaluate(() => window.activityFixture.longContent());
-	await page.locator('.task-select').first().click();
 	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 86');
 	await page.getByRole('button', { name: '更早内容', exact: true }).click();
 	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
 	await page.locator('.detail-scroll').evaluate((element) => { element.scrollTop = 180; element.dispatchEvent(new Event('scroll')); });
-	await page.locator('.task-select').nth(1).click();
-	await page.locator('.task-select').first().click();
+	await selectTask(page, 1);
+	await selectTask(page, 0);
 	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
-	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop))).toBe(180);
-	await page.locator('.activity-toggle').click();
+	await expect.poll(() => detailScrollTop(page)).toBe(180);
+	await closeDock(page);
 	await page.evaluate(() => window.activityFixture.appendBlock('Output while hidden'));
-	await page.locator('.activity-toggle').click();
+	await openSubagentDock(page);
 	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
-	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop))).toBe(180);
+	await expect.poll(() => detailScrollTop(page)).toBe(180);
 	await page.getByRole('button', { name: '系统设置', exact: true }).click();
 	await page.locator('.kind-chat').filter({ hasText: 'Activity verification' }).click();
 	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
-	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop))).toBe(180);
+	await expect.poll(() => detailScrollTop(page)).toBe(180);
 });
 
 test('returning from invalidated history resumes the live tail and continues scrolling', async ({ page }) => {
 	await page.evaluate(() => window.activityFixture.longContent());
-	await page.locator('.task-select').first().click();
 	await page.getByRole('button', { name: '更早内容', exact: true }).click();
 	await expect(page.locator('.task-detail .body-segment').first()).toContainText('History block 22');
 	await page.evaluate(() => window.activityFixture.appendBlock('New tail after history'));
@@ -106,82 +122,75 @@ test('returning from invalidated history resumes the live tail and continues scr
 	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(2);
 });
 
-test('task reading positions survive switching, collapse, and settings navigation', async ({ page }) => {
-	await page.locator('.task-select').first().click();
+test('task reading positions survive switching, closing, and settings navigation', async ({ page }) => {
 	await page.evaluate(() => window.activityFixture.text('\n\n' + 'First child history.\n\n'.repeat(80)));
 	await expect(page.locator('.task-detail .body-segment')).toContainText('First child history.');
 	await page.locator('.detail-scroll').evaluate((element) => { element.scrollTop = 180; element.dispatchEvent(new Event('scroll')); });
-	await page.locator('.task-select').nth(1).click();
+	await selectTask(page, 1);
 	await page.evaluate(() => window.activityFixture.text('\n\n' + 'Second child history.\n\n'.repeat(80), 1));
 	await expect(page.locator('.task-detail .body-segment')).toContainText('Second child history.');
 	await page.locator('.detail-scroll').evaluate((element) => { element.scrollTop = 320; element.dispatchEvent(new Event('scroll')); });
-	await page.locator('.task-select').first().click();
-	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop))).toBe(180);
-	await page.locator('.activity-toggle').click();
-	await page.locator('.activity-toggle').click();
-	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop))).toBe(180);
+	await selectTask(page, 0);
+	await expect.poll(() => detailScrollTop(page)).toBe(180);
+	await closeDock(page);
+	await openSubagentDock(page);
+	await expect.poll(() => detailScrollTop(page)).toBe(180);
 	await page.getByRole('button', { name: '系统设置', exact: true }).click();
 	await page.locator('.kind-chat').filter({ hasText: 'Activity verification' }).click();
-	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop))).toBe(180);
-	await page.locator('.task-select').nth(1).click();
-	await expect.poll(() => page.locator('.detail-scroll').evaluate((element) => Math.round(element.scrollTop))).toBe(320);
+	await expect.poll(() => detailScrollTop(page)).toBe(180);
+	await selectTask(page, 1);
+	await expect.poll(() => detailScrollTop(page)).toBe(320);
 });
 
-test('terminal, dark theme, larger text, and settings remount preserve usable activity', async ({ page }) => {
-	await page.locator('.task-select').first().click();
+test('terminal tab, dark theme, larger text, and settings remount preserve usable activity', async ({ page }) => {
 	await page.evaluate(() => {
 		document.documentElement.dataset.theme = 'dark';
 		document.documentElement.style.setProperty('--ui-font-scale', '1.25');
-		window.activityFixture.send({ type: 'terminal-state', isOpen: true, isRunning: false });
 	});
-	await expect(page.locator('.terminal-panel')).toBeVisible();
-	await expect.poll(() => page.locator('.terminal-panel').evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(280);
+	await page.locator('.dock-new-tab').click();
+	await page.locator('.dock-launcher-item[data-tool="terminal"]').click();
+	await expect(page.locator('.dock-tab.active')).toHaveText(/命令行/);
+	await expect(page.locator('.terminal-pane')).toBeVisible();
+	await page.evaluate(() => window.activityFixture.terminal(true));
+	await expect(page.locator('.terminal-status')).toHaveClass(/running/);
 	const bounds = await page.evaluate(() => {
-		const panel = document.querySelector('.activity-panel').getBoundingClientRect();
-		const composer = document.querySelector('.composer-shell').getBoundingClientRect();
-		const stage = document.querySelector('.activity-stage').getBoundingClientRect();
-		const terminal = document.querySelector('.terminal-panel').getBoundingClientRect();
-		return { top: panel.top, bottom: panel.bottom, stageTop: stage.top, composerTop: composer.top, terminalBottom: terminal.bottom, viewportBottom: innerHeight };
+		const terminal = document.querySelector('.terminal-pane').getBoundingClientRect();
+		const dock = document.querySelector('.side-dock').getBoundingClientRect();
+		return { terminalBottom: terminal.bottom, terminalHeight: terminal.height, dockBottom: dock.bottom, viewportBottom: innerHeight };
 	});
-	expect(bounds.top).toBeGreaterThanOrEqual(bounds.stageTop);
-	expect(bounds.bottom).toBeLessThanOrEqual(bounds.composerTop);
 	expect(bounds.terminalBottom).toBeLessThanOrEqual(bounds.viewportBottom + 1);
+	expect(bounds.terminalHeight).toBeGreaterThanOrEqual(280);
+	expect(Math.abs(bounds.terminalBottom - bounds.dockBottom)).toBeLessThanOrEqual(1);
+	await page.locator('.dock-tab[data-tool="subagents"] .dock-tab-select').click();
+	await expect(page.locator('.task-detail .body-segment')).toContainText('Partial answer');
 	await page.screenshot({ path: 'test-results/activity-terminal-dark.png', fullPage: true });
 	await page.getByRole('button', { name: '系统设置', exact: true }).click();
-	await expect(page.locator('.activity-panel')).toHaveCount(0);
+	await expect(page.locator('.side-dock')).toHaveCount(0);
 	await page.locator('.kind-chat').filter({ hasText: 'Activity verification' }).click();
 	await expect(page.locator('.task-detail .body-segment')).toContainText('Partial answer');
 });
 
-test('a short stage collapses without losing the selected task', async ({ page }) => {
-	await page.locator('.task-select').first().click();
-	await expect(page.locator('.task-detail .body-segment')).toContainText('Partial answer');
-	await page.locator('.activity-stage').evaluate((stage) => { stage.style.height = '150px'; });
-	await expect(page.locator('.activity-panel')).toHaveClass(/collapsed/);
-	await page.evaluate(() => window.activityFixture.text(' while short'));
-	await page.locator('.activity-stage').evaluate((stage) => { stage.style.height = ''; });
-	await expect(page.locator('.task-detail .body-segment')).toContainText('while short');
-});
-
 for (const viewport of [{ width: 1920, height: 1080 }, { width: 1280, height: 800 }, { width: 1024, height: 768 }, { width: 640, height: 768 }]) {
-	test(`activity stays inside stage at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+	test(`dock stays inside the viewport at ${viewport.width}x${viewport.height}`, async ({ page }) => {
 		await page.setViewportSize(viewport);
-		if (viewport.width === 640) await page.evaluate(() => { const shell = document.querySelector('.activity-stage'); shell.style.width = '360px'; shell.style.maxWidth = '100%'; });
-		await page.locator('.task-select').first().click();
 		await expect(page.locator('.task-detail .thinking-summary')).toBeVisible();
 		await page.locator('.task-detail .thinking-summary').click();
 		await expect(page.locator('.task-detail .body-segment')).toContainText('Partial answer');
 		const bounds = await page.evaluate(() => {
-			const stage = document.querySelector('.activity-stage').getBoundingClientRect();
-			const panel = document.querySelector('.activity-panel').getBoundingClientRect();
-			const composer = document.querySelector('.composer-shell').getBoundingClientRect();
-			return { composerTop: composer.top, stage: { x: stage.x, y: stage.y, right: stage.right, bottom: stage.bottom }, panel: { x: panel.x, y: panel.y, right: panel.right, bottom: panel.bottom }, overflow: document.querySelector('.activity-panel').scrollWidth - panel.width };
+			const dock = document.querySelector('.side-dock').getBoundingClientRect();
+			const detail = document.querySelector('.task-detail').getBoundingClientRect();
+			return {
+				dock: { left: dock.left, right: dock.right, bottom: dock.bottom },
+				detail: { right: detail.right, bottom: detail.bottom },
+				viewport: { width: innerWidth, height: innerHeight },
+				overflow: document.documentElement.scrollWidth - innerWidth,
+			};
 		});
-		expect(bounds.panel.x).toBeGreaterThanOrEqual(bounds.stage.x);
-		expect(bounds.panel.y).toBeGreaterThanOrEqual(bounds.stage.y);
-		expect(bounds.panel.right).toBeLessThanOrEqual(bounds.stage.right);
-		expect(bounds.panel.bottom).toBeLessThanOrEqual(bounds.stage.bottom);
-		expect(bounds.panel.bottom).toBeLessThanOrEqual(bounds.composerTop);
+		expect(bounds.dock.left).toBeGreaterThanOrEqual(0);
+		expect(bounds.dock.right).toBeLessThanOrEqual(bounds.viewport.width + 1);
+		expect(bounds.dock.bottom).toBeLessThanOrEqual(bounds.viewport.height + 1);
+		expect(bounds.detail.right).toBeLessThanOrEqual(bounds.dock.right + 1);
+		expect(bounds.detail.bottom).toBeLessThanOrEqual(bounds.dock.bottom + 1);
 		expect(bounds.overflow).toBeLessThanOrEqual(1);
 		await page.screenshot({ path: `test-results/activity-${viewport.width}.png`, fullPage: true });
 	});

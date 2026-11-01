@@ -1,0 +1,232 @@
+/* 右侧功能面板（SideDock）外壳样式，经 SideDock.vue 的 scoped 块 @import 引入。 */
+
+.side-dock {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	flex: 0 0 auto;
+	align-self: stretch;
+	height: 100%;
+	min-width: 0;
+	max-width: 55%;
+	overflow: hidden;
+	border-left: 1px solid var(--border);
+	background: var(--panel);
+	visibility: visible;
+	transition: width 240ms var(--ease-out);
+}
+
+/* 收起：宽度归零，可见性延迟到收起动画结束，内容不在动画开头瞬间消失。 */
+.side-dock:not(.open) {
+	border-left-color: transparent;
+	visibility: hidden;
+	transition: width 240ms var(--ease-out), visibility 0s 240ms;
+}
+
+.side-dock.resizing {
+	transition: none;
+}
+
+.dock-resizer {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: -3px;
+	z-index: 10;
+	width: 7px;
+	cursor: ew-resize;
+}
+
+.dock-resizer:hover,
+.side-dock.resizing .dock-resizer {
+	background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* ===== tab 条 ===== */
+
+.dock-tabs {
+	display: flex;
+	flex: 0 0 38px;
+	align-items: center;
+	gap: 2px;
+	padding: 0 6px;
+	border-bottom: 1px solid var(--border);
+	background: var(--panel);
+}
+
+.dock-strip-title {
+	padding-left: 6px;
+	color: var(--muted);
+	font-size: var(--fs-12);
+	font-weight: 600;
+}
+
+.dock-tab {
+	display: inline-flex;
+	align-items: center;
+	min-width: 0;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	color: var(--muted);
+}
+
+.dock-tab:hover {
+	background: var(--panel-hover);
+	color: var(--text);
+}
+
+.dock-tab.active {
+	border-color: var(--border);
+	background: var(--panel-muted);
+	color: var(--text);
+}
+
+.dock-tab-select {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 28px;
+	min-width: 0;
+	padding: 0 6px 0 10px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font-size: var(--fs-12);
+	font-weight: 600;
+}
+
+.dock-tab-close {
+	display: grid;
+	place-items: center;
+	width: 20px;
+	height: 20px;
+	margin-right: 4px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--muted);
+}
+
+.dock-tab-close:hover {
+	background: var(--card-border);
+	color: var(--text);
+}
+
+.dock-new-tab,
+.dock-close {
+	display: grid;
+	place-items: center;
+	width: 26px;
+	height: 26px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--muted);
+}
+
+.dock-close {
+	margin-left: auto;
+}
+
+.dock-new-tab:hover,
+.dock-close:hover {
+	background: var(--panel-hover);
+	color: var(--text);
+}
+
+/* ===== 面板主体 ===== */
+
+.dock-body {
+	position: relative;
+	display: flex;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+.dock-body > * {
+	flex: 1 1 auto;
+	width: 100%;
+	min-width: 0;
+	min-height: 0;
+}
+
+.terminal-slot {
+	display: flex;
+}
+
+.terminal-slot > * {
+	flex: 1 1 auto;
+	min-width: 0;
+	min-height: 0;
+}
+
+/* ===== 启动页：工具列表 ===== */
+
+.dock-launcher {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 16px 14px;
+	overflow: auto;
+}
+
+.dock-launcher-item {
+	display: grid;
+	grid-template-columns: 36px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 12px;
+	padding: 12px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--panel);
+	color: var(--text);
+	text-align: left;
+	transition: border-color 0.14s, background 0.14s;
+}
+
+.dock-launcher-item:hover {
+	border-color: var(--border-strong);
+	background: var(--panel-soft);
+}
+
+.dock-launcher-icon {
+	display: grid;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	border-radius: 8px;
+	background: var(--panel-muted);
+	color: var(--text-soft);
+}
+
+.dock-launcher-text {
+	display: grid;
+	gap: 3px;
+	min-width: 0;
+}
+
+.dock-launcher-text strong {
+	font-size: var(--fs-13);
+}
+
+.dock-launcher-text small {
+	color: var(--muted);
+	font-size: var(--fs-11);
+}
+
+.dock-launcher-action {
+	padding: 5px 12px;
+	border: 1px solid var(--border-strong);
+	border-radius: 999px;
+	background: var(--panel-muted);
+	color: var(--text);
+	font-size: var(--fs-11);
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.dock-launcher-item:hover .dock-launcher-action {
+	border-color: var(--accent-line);
+	background: var(--accent-soft);
+	color: var(--accent-2);
+}

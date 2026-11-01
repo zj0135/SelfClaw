@@ -16,14 +16,12 @@ it('renders normal window controls with maximize action and no maximized class',
 	expect(maximizeButton.attributes('title')).toBe('最大化');
 	expect(maximizeButton.attributes('aria-label')).toBe('最大化');
 
-	await buttons[0].trigger('click');
-	await buttons[1].trigger('click');
-	await buttons[2].trigger('click');
-	await buttons[3].trigger('click');
+	for (const button of buttons) {
+		await button.trigger('click');
+	}
 
-	const emitted = wrapper.emitted('action');
-	expect(emitted).toEqual([
-		['terminal'],
+	expect(wrapper.emitted('action')).toEqual([
+		['panel'],
 		['minimize'],
 		['toggle-maximize'],
 		['minimize-to-tray'],

@@ -103,13 +103,6 @@ internal sealed class SubagentActivityService : IDisposable
         }
     }
 
-    internal async Task<SubagentContentPage?> ReadContentAsync(SubagentContentQuery query, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(query);
-        var snapshot = await GetDetailAsync(query.ParentConversationId, query.TaskId, cancellationToken: cancellationToken).ConfigureAwait(false);
-        return snapshot is null ? null : SubagentActivityContent.Read(snapshot.Activity.Task, snapshot.Content, query);
-    }
-
     internal void SetScopeClosed(Guid parentConversationId, bool closed)
     {
         if (closed)

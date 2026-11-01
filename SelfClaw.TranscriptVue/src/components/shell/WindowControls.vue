@@ -1,5 +1,5 @@
 <script setup>
-import { SquareTerminal, Minus, Square, Copy, X } from 'lucide-vue-next';
+import { PanelRight, Minus, Square, Copy, X } from 'lucide-vue-next';
 
 const props = defineProps({
 	isMaximized: {
@@ -22,8 +22,8 @@ function send(action) {
 		aria-label="Window controls"
 	>
 		<div class="window-tool-group" aria-label="Workspace tools">
-			<button class="chrome-button tool-button" type="button" title="命令行" aria-label="Terminal" @click="send('terminal')">
-				<SquareTerminal :size="15" :stroke-width="1.7" />
+			<button class="chrome-button tool-button" type="button" title="功能面板" aria-label="Panel" @click="send('panel')">
+				<PanelRight :size="15" :stroke-width="1.7" />
 			</button>
 		</div>
 

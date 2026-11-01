@@ -70,9 +70,6 @@ public sealed class SubagentActivityServiceTests
         terminal.Content.Message?.MarkdownContent.Should().Be(live.Content.Message?.MarkdownContent);
         terminal.Content.ToolRuns.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Completed);
         context.Registry.GetActivity(task.Id).Should().BeNull();
-        var staleContent = () => context.Service.ReadContentAsync(new SubagentContentQuery(task.ParentConversationId, task.Id,
-            live.Content.ContentVersion, "segment/0"));
-        await staleContent.Should().ThrowAsync<SubagentActivityReadException>().WithMessage("content-changed");
     }
 
     [Fact]

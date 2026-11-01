@@ -45,14 +45,13 @@ public sealed class ActivityPanelProjectionTests
         window.TotalBlocks.Should().Be(80);
         window.BlockOffset.Should().Be(16);
         window.Message?.Segments.Should().HaveCount(64);
-        window.Content.Should().Contain(reference => reference.IsTruncated);
-        foreach (var segment in window.Message?.Segments ?? [])
+        // 预算内裁剪只能截尾：至少一块被裁，每块正文仍是原文前缀，且不在代理对中间切开。
+        var segments = window.Message?.Segments ?? [];
+        segments.Should().Contain(segment => segment.Markdown.Length < large.Length);
+        foreach (var segment in segments)
         {
             segment.Markdown.Should().NotEndWith("\ud83d");
-            var reference = window.Content.Single(item => item.SegmentId == segment.SegmentId);
-            var remaining = SubagentActivityContent.Read(metadata.Task, detail, new SubagentContentQuery(task.ParentConversationId,
-                task.Id, detail.ContentVersion, reference.ContentId, reference.PreviewCharacters));
-            (segment.Markdown + remaining.Text).Should().Be(large[..(segment.Markdown.Length + remaining.Text.Length)]);
+            large.Should().StartWith(segment.Markdown);
         }
         var earlier = projection.Build(query with { BlockOffset = 0, ContentVersion = detail.ContentVersion }, page, snapshot, false);
         earlier.Sections[0].Detail?.Message?.Segments.First().SegmentId.Should().Be($"{messageId:D}:thinking:0");
@@ -122,6 +121,5 @@ public sealed class ActivityPanelProjectionTests
         result?.Message?.Segments.Should().ContainSingle().Which.Markdown.Should().Be("partial");
         result?.Message?.TurnOutcome?.Status.Should().Be("interrupted");
         result?.UnplacedTools.Should().ContainSingle().Which.SegmentId.Should().Be(tool.Id.ToString("D"));
-        result?.Content.Should().Contain(reference => reference.ContentId == "segment/0");
     }
 }

@@ -46,7 +46,7 @@ export function installActivityHost() {
 			contentVersion: version, contentOrigin: tasks[selectedIndex].status === 'running' ? 'live' : 'persisted', historyCompleteness: 'complete',
 			blockOffset: offset, totalBlocks: total, earlierOffset: offset > 0 ? Math.max(0, offset - 64) : null, laterOffset: offset + 64 < total ? offset + 64 : null,
 			message: { id: selectedTask, kind: 'message', role: 'assistant', status: 'streaming', isThinking: true, segments: segments[selectedIndex].slice(offset, offset + 64) },
-			unplacedTools: [], content: [{ contentId: `tool/${selectedTask}/arguments`, segmentId: selectedTask, field: 'arguments', totalCharacters: 2, previewCharacters: 0, isTruncated: true }],
+			unplacedTools: [],
 		};
 		return { type: 'activity-panel/state', requestId, schemaVersion: 1, subscriptionId: subscription, parentConversationId: scope, revision: ++revision,
 			sections: [{ id: 'subagents', kind: 'subagents', title: '子代理', counts: { total: tasks.length, running: tasks.filter((item) => item.status === 'running').length, queued: 0, succeeded: tasks.filter((item) => item.status === 'succeeded').length, failed: 0, cancelled: tasks.filter((item) => item.status === 'cancelled').length, interrupted: 0 }, listVersion: 'fixture-list', cursor: pageOffset ? `page/${pageOffset}` : null, nextCursor: pageOffset + 50 < tasks.length ? `page/${pageOffset + 50}` : null, tasks: tasks.slice(pageOffset, pageOffset + 50), detailSelectionId: selection, selectedTask: tasks[selectedIndex] ?? null, detailError: changed ? 'content-changed' : null, detail }] };
@@ -63,7 +63,6 @@ export function installActivityHost() {
 				else if (type === 'activity-panel/get-state') { pageOffset = request.cursor ? Number(request.cursor.split('/')[1]) : 0; send(snapshot(requestId)); }
 				else if (type === 'activity-panel/unsubscribe') { if (request.subscriptionId === subscription) subscription = null; }
 				else if (type === 'activity-panel/cancel-task') { const target = tasks.find((item) => item.taskId === request.taskId); target.status = 'cancelled'; target.phase = 'cancelled'; target.canCancel = false; send({ type, requestId, accepted: true }); push(); }
-				else if (type === 'activity-panel/read-content') send({ type: 'activity-panel/content', requestId, subscriptionId: subscription, detailSelectionId: selection, taskId: selectedTask, contentVersion: String(contentRevisions[ids.indexOf(selectedTask)]), contentId: request.contentId, text: '{}', offset: 0, totalCharacters: 2 });
 				else if (requestId) send({ type, requestId, sections: [], models: [], agents: [], roots: [], commonFolders: [], current: null });
 			});
 		},
@@ -81,6 +80,8 @@ export function installActivityHost() {
 		holdResponses(value) { holdResponses = value; },
 		release(index = 0, error = null) { const payload = deferred.splice(index, 1)[0]; deliver(error ? { type: 'activity-panel/error', requestId: payload.requestId, error } : payload); },
 		pause(value) { paused = value; },
+		// 模拟宿主 TerminalHostController.PublishState：dock 的终端 tab 以它为真值。
+		terminal(isOpen, { isRunning = isOpen, cwd = 'C:\\Fixture' } = {}) { send({ type: 'terminal-state', isOpen, isRunning, cwd }); },
 		text(value, index = 0) { segments[index][1].markdown += value; contentRevisions[index]++; push(); },
 		longContent(count = 150, index = 0) {
 			segments[index] = Array.from({ length: count }, (_, ordinal) => ({ kind: 'content', markdown: `History block ${ordinal}`, segmentId: `${ids[index]}:text:${ordinal}`, segmentOrdinal: ordinal, isPending: false }));

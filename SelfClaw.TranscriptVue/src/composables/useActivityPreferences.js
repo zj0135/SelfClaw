@@ -8,7 +8,8 @@ export function useActivityPreferences(parentId) {
 		if (!preferences.has(key)) {
 			if (preferences.size >= 32) preferences.delete(preferences.keys().next().value);
 			preferences.set(key, {
-				view: reactive({ open: false, section: 'subagents', taskId: null }),
+				// 开合与分区由 useSideDock 接管；这里只记每个会话选中的任务。
+				view: reactive({ taskId: null }),
 				collapse: useTranscriptCollapse(), readings: new Map(),
 			});
 		}

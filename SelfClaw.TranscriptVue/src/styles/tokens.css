@@ -118,7 +118,7 @@
 
 	/*
 	 * ═══ 1 · 终端 ANSI 调色板 ═══
-	 * xterm.js 自己解析颜色并画到 canvas，读不到 var()。TerminalPanel 用
+	 * xterm.js 自己解析颜色并画到 canvas，读不到 var()。TerminalPane（经 renderers/terminalTheme.js）用
 	 * getComputedStyle 把这 20 个值读成真实色串再交给它，主题切换时重读一次。
 	 * 所以这一组必须是完整的实色，不能是 color-mix() 之类的计算式。
 	 */

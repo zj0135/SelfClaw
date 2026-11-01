@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using SelfClaw.Core.Models;
@@ -33,41 +32,6 @@ public static class SubagentActivityContent
         return new SubagentContentSnapshot(taskText, turn, message, tools, unplaced, CreateVersion(turn, message, tools), completeness);
     }
 
-    public static SubagentContentPage Read(SubagentActivityTask task, SubagentContentSnapshot detail, SubagentContentQuery query)
-    {
-        ArgumentNullException.ThrowIfNull(task);
-        ArgumentNullException.ThrowIfNull(detail);
-        ArgumentNullException.ThrowIfNull(query);
-        ArgumentNullException.ThrowIfNull(query.ContentId);
-        if (task.TaskId != query.TaskId || task.ParentConversationId != query.ParentConversationId)
-        {
-            throw new SubagentActivityReadException("task-not-found");
-        }
-
-        if (!string.Equals(detail.ContentVersion, query.ContentVersion, StringComparison.Ordinal))
-        {
-            throw new SubagentActivityReadException("content-changed");
-        }
-
-        var text = ResolveContent(detail, query.ContentId);
-        if (query.Offset < 0 || query.Offset > text.Length || query.MaximumCharacters is < 2 or > 8192 ||
-            (query.Offset > 0 && query.Offset < text.Length &&
-             char.IsHighSurrogate(text[query.Offset - 1]) && char.IsLowSurrogate(text[query.Offset])))
-        {
-            throw new SubagentActivityReadException("invalid-content-range");
-        }
-
-        // Even a JSON-escaped UTF-16 character occupies at most six bytes; leave room for the envelope.
-        var end = query.Offset + Math.Min(query.MaximumCharacters, text.Length - query.Offset);
-        if (end < text.Length && char.IsHighSurrogate(text[end - 1]) && char.IsLowSurrogate(text[end]))
-        {
-            end--;
-        }
-
-        return new SubagentContentPage(query.TaskId, detail.ContentVersion, query.ContentId,
-            text[query.Offset..end], query.Offset, end < text.Length ? end : null, text.Length);
-    }
-
     private static string CreateVersion(ConversationTurnRecord? turn, MessageRecord? message, IReadOnlyList<ToolExecutionRecord> tools)
     {
         using var stream = new MemoryStream();
@@ -81,39 +45,5 @@ public static class SubagentActivityContent
         }
 
         return Convert.ToHexString(SHA256.HashData(stream.GetBuffer().AsSpan(0, checked((int)stream.Length))));
-    }
-
-    private static string ResolveContent(SubagentContentSnapshot detail, string contentId)
-    {
-        if (contentId == "task-text")
-        {
-            return detail.TaskText;
-        }
-
-        if (contentId == "final-text")
-        {
-            return detail.Message?.MarkdownContent ?? string.Empty;
-        }
-
-        var parts = contentId.Split('/');
-        if (parts is ["segment", var ordinalText] &&
-            int.TryParse(ordinalText, NumberStyles.None, CultureInfo.InvariantCulture, out var ordinal))
-        {
-            var segment = detail.Message?.Segments?.FirstOrDefault(item => item.Ordinal == ordinal);
-            if (segment is { Kind: MessageSegmentKind.Text or MessageSegmentKind.Thinking })
-            {
-                return segment.Text ?? string.Empty;
-            }
-        }
-        else if (parts is ["tool", var toolId, var field] && Guid.TryParseExact(toolId, "D", out var id))
-        {
-            var tool = detail.ToolRuns.FirstOrDefault(item => item.Id == id);
-            if (tool is not null && field is "arguments" or "result")
-            {
-                return field == "arguments" ? tool.ArgumentsJson : tool.ResultContent ?? tool.ResultSummary ?? string.Empty;
-            }
-        }
-
-        throw new SubagentActivityReadException("content-not-found");
     }
 }

@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Windows.Threading;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
-using SelfClaw.Desktop.Services.Activities.Models;
 using SelfClaw.Desktop.Services.Subagents;
 using SelfClaw.Desktop.Services.WebView;
 
@@ -46,9 +45,6 @@ internal sealed class ActivityPanelBridge
                         ReadOptionalGuid(payload, "taskId"), ReadInteger(payload, "blockOffset"),
                         ReadString(payload, "contentVersion", 128), requestId, cancellationToken);
                     break;
-                case "activity-panel/read-content":
-                    await ReadContentAsync(subscription, payload, requestId, cancellationToken);
-                    break;
                 case "activity-panel/cancel-task":
                     await CancelTaskAsync(subscription, payload, requestId, cancellationToken);
                     break;
@@ -72,30 +68,6 @@ internal sealed class ActivityPanelBridge
         {
             await _dispatcher.InvokeAsync(() => Reply(new { type = "activity-panel/error", requestId, error = exception.Message }));
         }
-    }
-
-    private async Task ReadContentAsync(Guid subscription, JsonElement payload, string? requestId, CancellationToken cancellationToken)
-    {
-        var selection = ReadGuid(payload, "detailSelectionId");
-        var task = ReadGuid(payload, "taskId");
-        var query = _publisher.RequireSelection(subscription, selection, task);
-        var parent = query.ParentConversationId ?? throw new InvalidOperationException("activity-scope-missing");
-        var version = ReadString(payload, "contentVersion", 128) ?? throw new ArgumentException("content-version-required");
-        var contentId = ReadString(payload, "contentId", 128) ?? throw new ArgumentException("content-id-required");
-        var maximum = ReadInteger(payload, "maximumCharacters") ?? 8192;
-        var offset = ReadInteger(payload, "offset") ?? 0;
-        var page = await Task.Run(() => _activity.ReadContentAsync(
-            new SubagentContentQuery(parent, task, version, contentId, offset, maximum), cancellationToken), cancellationToken);
-        await _dispatcher.InvokeAsync(() =>
-        {
-            _publisher.RequireSelection(subscription, selection, task);
-            if (page is null) throw new InvalidOperationException("content-not-found");
-            var response = new ActivityContentResponse(requestId, subscription, selection, task, page.ContentVersion,
-                page.ContentId, page.Text, page.Offset, page.NextOffset, page.TotalCharacters, page.NextOffset is not null);
-            if (WebViewHostChannel.SerializeToUtf8Bytes(response).Length > 64 * 1024)
-                throw new InvalidOperationException("activity-content-too-large");
-            Reply(response);
-        });
     }
 
     private async Task CancelTaskAsync(Guid subscription, JsonElement payload, string? requestId, CancellationToken cancellationToken)

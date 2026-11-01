@@ -73,8 +73,6 @@ export function useActivityDetail(panel, preferences, visible) {
 		return activate(taskId);
 	}
 
-	function closeDetail() { return selectTask(null); }
-
 	function readWindow(offset) {
 		if (!content.value || offset == null || loading.value) return;
 		following.value = false;
@@ -147,23 +145,9 @@ export function useActivityDetail(panel, preferences, visible) {
 		receive(section);
 	}, { immediate: true, flush: 'sync' });
 
-	async function readContent(reference, offset, contentVersion) {
-		const subscription = panel.subscription.value;
-		const selection = panel.selection.value;
-		const value = content.value;
-		if (!value) throw new Error('activity-detail-selection-invalid');
-		const response = await panel.readContent({
-			taskId: value.taskId,
-			contentVersion: contentVersion ?? value.contentVersion, contentId: reference.contentId, offset,
-		});
-		if (subscription !== panel.subscription.value || selection !== panel.selection.value ||
-			value.contentVersion !== content.value?.contentVersion) throw new Error('content-changed');
-		return response;
-	}
-
 	return {
 		selectedTaskId: readonly(selectedTaskId), displayed, following: readonly(following), loading: readonly(loading),
 		invalidated: readonly(invalidated), error: readonly(error), scrollRequest: readonly(scrollRequest), hasNewContent,
-		selectTask, closeDetail, readEarlier, readLater, resumeLatest, recordScroll, readContent,
+		selectTask, readEarlier, readLater, resumeLatest, recordScroll,
 	};
 }

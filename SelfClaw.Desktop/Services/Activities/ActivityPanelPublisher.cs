@@ -87,14 +87,6 @@ internal sealed class ActivityPanelPublisher : IDisposable
         return query;
     }
 
-    internal ActivityPanelQuery RequireSelection(Guid subscriptionId, Guid selectionId, Guid taskId)
-    {
-        var query = RequireSubscription(subscriptionId);
-        if (query.DetailSelectionId != selectionId || query.TaskId != taskId)
-            throw new InvalidOperationException("activity-detail-selection-invalid");
-        return query;
-    }
-
     internal void Unsubscribe(Guid subscriptionId)
     {
         _dispatcher.VerifyAccess();

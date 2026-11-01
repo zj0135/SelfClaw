@@ -1,10 +1,11 @@
 <script setup>
-import { computed, defineAsyncComponent, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import ComposerPanel from '../components/chat/composer/ComposerPanel.vue';
 import TodoPlanDock from '../components/chat/todo/TodoPlanDock.vue';
 import AskUserDock from '../components/chat/question/AskUserDock.vue';
 import ConversationQueue from '../components/chat/ConversationQueue.vue';
-import ActivityStage from '../components/activities/ActivityStage.vue';
+import DockRail from '../components/dock/DockRail.vue';
+import SideDock from '../components/dock/SideDock.vue';
 import TranscriptPanel from '../components/chat/TranscriptPanel.vue';
 import { useHostBridge } from '../composables/hostBridge.js';
 import { useTranscriptCollapse } from '../composables/useTranscriptCollapse.js';
@@ -18,14 +19,12 @@ import { useComposerAttachments } from '../composables/useComposerAttachments.js
 import { getSelectedModelSupportsImages } from '../composables/useComposerModelSelection.js';
 import { useChatApprovals } from '../composables/useChatApprovals.js';
 import { useChatQuestions } from '../composables/useChatQuestions.js';
-import { useChatTerminal } from '../composables/useChatTerminal.js';
 import { useConversationInputs } from '../composables/useConversationInputs.js';
 
-const TerminalPanel = defineAsyncComponent(() => import('../components/chat/TerminalPanel.vue'));
 const emit = defineEmits(['preview-image']);
 const bridge = useHostBridge();
 const transcriptPanelRef = ref(null);
-const terminalPanelRef = ref(null);
+const dockRef = ref(null);
 const composerShellRef = ref(null);
 const collapse = useTranscriptCollapse();
 const transcriptScroll = useTranscriptScroll(() => transcriptPanelRef.value?.getScrollEl?.() ?? null);
@@ -41,16 +40,15 @@ watch(() => state.selectedConversationId, (id) => conversationQueue.subscribe(id
 const approvals = useChatApprovals(bridge);
 // `ask_user` 待答批次：有它时输入框暂停发送，问题 dock 顶在计划之上。
 const questions = useChatQuestions(bridge);
-const terminal = useChatTerminal(terminalPanelRef, bridge);
 const turnStatus = useChatTurnStatus(state);
 // 计划 dock 的折叠偏好按会话记忆，默认跟随忙碌态（忙碌展开、空闲收成一行）。
 const chatTodo = useChatTodo(computed(() => state.selectedConversationId));
 
 function openImagePreview(preview) { emit('preview-image', preview); }
 
-function onWorkspaceInteraction(event) {
-	if (event.target instanceof Element && event.target.closest('.terminal-panel')) return;
-	terminal.setFocused(false);
+// 点到转录区或输入区即让终端失焦；终端在右侧 dock 内，dock 内部的点击由它自己处理。
+function onWorkspaceInteraction() {
+	dockRef.value?.blurTerminal?.();
 }
 
 defineExpose({
@@ -60,11 +58,9 @@ defineExpose({
 </script>
 
 <template>
-	<div class="workspace" :class="{
-		'empty-workspace': isEmptyConversation,
-		'terminal-open': terminal.state.isOpen,
-	}" @pointerdown="onWorkspaceInteraction" @focusin="onWorkspaceInteraction">
-		<ActivityStage :parent-conversation-id="state.selectedConversationId" @preview-image="openImagePreview">
+	<div class="chat-shell">
+		<div class="workspace" :class="{ 'empty-workspace': isEmptyConversation }" @pointerdown="onWorkspaceInteraction"
+			@focusin="onWorkspaceInteraction">
 			<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :items="state.items"
 				:collapse="collapse" :activity-text="state.activityText" :turn-status="turnStatus"
 				@content-resize="transcriptScroll.onContentResize" @scroll="transcriptScroll.onScroll"
@@ -75,77 +71,79 @@ defineExpose({
 					<p>随意提问，或使用命令/工具。</p>
 				</div>
 			</section>
-		</ActivityStage>
-		<ComposerPanel ref="composerShellRef" :busy="state.isBusy || composer.submitting.value"
-			:queueable="state.agentMode === 'direct'"
-			:stoppable="!state.isContinuation"
-			:workspace-selection="workspace.state" :git-loading="workspace.state.gitLoading"
-			:git-error="workspace.state.gitError" :submit-error="composer.error.value" :agent-mode="state.agentMode"
-			:selected-agent-id="state.selectedAgentId" :selected-agent-name="state.selectedAgentName"
-			:capability-revision="state.capabilityRevision" :pending-approval="approvals.pending.value"
-			:question-pending="Boolean(questions.pending.value)"
-			:tool-permission-mode="state.toolPermissionMode" :usage="state.usage" @submit="composer.submit" @stop="composer.stop"
-			:attachments="composerAttachments.items.value" :attachments-error="composerAttachments.error.value"
-			:images-enabled="imagesEnabled"
-			@request-attachment-picker="composerAttachments.addFromPicker()"
-			@add-attachments="composerAttachments.addFromFiles($event)"
-			@remove-attachment="composerAttachments.remove($event)"
-			@preview-image="openImagePreview"
-			@request-workspace="workspace.refresh" @select-workspace-root="workspace.selectRoot"
-			@delete-workspace-root="workspace.deleteRoot" @browse-workspace-folder="workspace.browseFolder"
-			@git-action="workspace.runGitAction" @approve-tool="(id) => approvals.resolve(id, true)"
-			@reject-tool="(id) => approvals.resolve(id, false)"
-			@select-permission-mode="composer.selectPermissionMode">
-			<template #question>
-				<AskUserDock :question="questions.pending.value" :resolving="questions.resolving.value"
-					@answer="questions.answer($event.requestId, $event.answers)" @skip="questions.skip" />
-			</template>
-			<template #plan>
-				<TodoPlanDock :todo="state.todo" :busy="state.isBusy" :open="chatTodo.isOpen(state.isBusy)"
-					@toggle="chatTodo.toggle(state.isBusy)" />
-			</template>
-			<template #queue>
-				<ConversationQueue v-if="state.agentMode === 'direct'"
-					:state="conversationQueue.state"
-					:editing="conversationQueue.editing.value"
-					:notice="conversationQueue.notice.value"
-					@cancel="(item) => conversationQueue.cancel(item.inputId, item.revision)"
-					@retry="(item) => conversationQueue.retry(item.inputId, item.revision)"
-					@promote="(item) => conversationQueue.promote(item.inputId, item.revision)"
-					@edit="(item) => conversationQueue.edit(item.inputId)"
-					@save-edit="conversationQueue.saveEdit()" @cancel-edit="conversationQueue.cancelEdit()"
-					@update:prompt="conversationQueue.setEditPrompt($event)"
-					@pause="conversationQueue.pause()" @resume="conversationQueue.resume()" />
-			</template>
-		</ComposerPanel>
-		<TerminalPanel ref="terminalPanelRef" :is-open="terminal.state.isOpen" :is-running="terminal.state.isRunning"
-			:cwd="terminal.state.cwd" @ready="terminal.ready" @input="terminal.input" @resize="terminal.resize"
-			@close="terminal.close" @restart="terminal.restart" @focus-change="terminal.setFocused" />
+			<ComposerPanel ref="composerShellRef" :busy="state.isBusy || composer.submitting.value"
+				:queueable="state.agentMode === 'direct'"
+				:stoppable="!state.isContinuation"
+				:workspace-selection="workspace.state" :git-loading="workspace.state.gitLoading"
+				:git-error="workspace.state.gitError" :submit-error="composer.error.value" :agent-mode="state.agentMode"
+				:selected-agent-id="state.selectedAgentId" :selected-agent-name="state.selectedAgentName"
+				:capability-revision="state.capabilityRevision" :pending-approval="approvals.pending.value"
+				:question-pending="Boolean(questions.pending.value)"
+				:tool-permission-mode="state.toolPermissionMode" :usage="state.usage" @submit="composer.submit" @stop="composer.stop"
+				:attachments="composerAttachments.items.value" :attachments-error="composerAttachments.error.value"
+				:images-enabled="imagesEnabled"
+				@request-attachment-picker="composerAttachments.addFromPicker()"
+				@add-attachments="composerAttachments.addFromFiles($event)"
+				@remove-attachment="composerAttachments.remove($event)"
+				@preview-image="openImagePreview"
+				@request-workspace="workspace.refresh" @select-workspace-root="workspace.selectRoot"
+				@delete-workspace-root="workspace.deleteRoot" @browse-workspace-folder="workspace.browseFolder"
+				@git-action="workspace.runGitAction" @approve-tool="(id) => approvals.resolve(id, true)"
+				@reject-tool="(id) => approvals.resolve(id, false)"
+				@select-permission-mode="composer.selectPermissionMode">
+				<template #question>
+					<AskUserDock :question="questions.pending.value" :resolving="questions.resolving.value"
+						@answer="questions.answer($event.requestId, $event.answers)" @skip="questions.skip" />
+				</template>
+				<template #plan>
+					<TodoPlanDock :todo="state.todo" :busy="state.isBusy" :open="chatTodo.isOpen(state.isBusy)"
+						@toggle="chatTodo.toggle(state.isBusy)" />
+				</template>
+				<template #queue>
+					<ConversationQueue v-if="state.agentMode === 'direct'"
+						:state="conversationQueue.state"
+						:editing="conversationQueue.editing.value"
+						:notice="conversationQueue.notice.value"
+						@cancel="(item) => conversationQueue.cancel(item.inputId, item.revision)"
+						@retry="(item) => conversationQueue.retry(item.inputId, item.revision)"
+						@promote="(item) => conversationQueue.promote(item.inputId, item.revision)"
+						@edit="(item) => conversationQueue.edit(item.inputId)"
+						@save-edit="conversationQueue.saveEdit()" @cancel-edit="conversationQueue.cancelEdit()"
+						@update:prompt="conversationQueue.setEditPrompt($event)"
+						@pause="conversationQueue.pause()" @resume="conversationQueue.resume()" />
+				</template>
+			</ComposerPanel>
+			<!-- 绝对定位、脱离 grid 流：浮在对话区右上角，不占转录 / 输入区的行。 -->
+			<DockRail />
+		</div>
+		<SideDock ref="dockRef" :parent-conversation-id="state.selectedConversationId" @preview-image="openImagePreview" />
 	</div>
 </template>
 
 <style scoped>
-.workspace {
+/* 聊天视图 = 对话工作区 + 右侧功能面板并排；面板宽度由 SideDock 自管，工作区吃剩余宽度。 */
+.chat-shell {
 	position: relative;
+	display: flex;
 	width: 100%;
 	height: 100%;
-	display: grid;
-	grid-template-rows: minmax(0, 1fr) auto 0;
+	min-width: 0;
 	background: var(--panel);
-	transition: grid-template-rows 850ms cubic-bezier(0.18, 0.86, 0.24, 1);
+}
+
+.workspace {
+	position: relative;
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 100%;
+	display: grid;
+	grid-template-rows: minmax(0, 1fr) auto;
+	background: var(--panel);
 }
 
 .workspace.empty-workspace {
-	grid-template-rows: minmax(128px, 0.78fr) auto 0 minmax(160px, 1fr);
+	grid-template-rows: minmax(128px, 0.78fr) auto minmax(160px, 1fr);
 	align-items: stretch;
-}
-
-.workspace.terminal-open {
-	grid-template-rows: minmax(0, 1fr) auto 286px;
-}
-
-.workspace.empty-workspace.terminal-open {
-	grid-template-rows: minmax(96px, 1fr) auto 286px 0;
 }
 
 .empty-composer-stage {
@@ -193,11 +191,7 @@ defineExpose({
 
 @media (max-width: 960px) {
 	.workspace.empty-workspace {
-		grid-template-rows: minmax(112px, 0.7fr) auto 0 minmax(140px, 1fr);
-	}
-
-	.workspace.empty-workspace.terminal-open {
-		grid-template-rows: minmax(84px, 1fr) auto 286px 0;
+		grid-template-rows: minmax(112px, 0.7fr) auto minmax(140px, 1fr);
 	}
 
 	.empty-composer-stage {
