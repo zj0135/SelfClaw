@@ -30,6 +30,10 @@ function stubPanes() {
 		__esModule: true,
 		default: { name: 'SubagentDockPane', props: ['parentConversationId', 'visible'], render: () => h('div', { class: 'subagent-pane' }, 'subagents') },
 	}));
+	vi.doMock('../src/components/dock/ReviewPane.vue', () => ({
+		__esModule: true,
+		default: { name: 'ReviewPane', props: ['workspaceRootId', 'visible'], render: () => h('div', { class: 'review-pane' }, 'review') },
+	}));
 }
 
 async function mountDock() {
@@ -53,7 +57,7 @@ it('opens to the launcher with no tabs, toggles closed, and never touches the ho
 	dock.toggle();
 	expect(dock.state.open).toBe(true);
 	expect(window.activityFixture.requests.filter((request) => request.type.includes('terminal'))).toHaveLength(0);
-	dock.activate('diff');
+	dock.activate('bogus');
 	expect(dock.state.tabs).toEqual([]);
 });
 
@@ -129,7 +133,7 @@ it('clamps the width, persists it only on commit, and starts every session on th
 	dock.setWidth(100);
 	expect(dock.state.width).toBe(300);
 	dock.setWidth(5000);
-	expect(dock.state.width).toBe(640);
+	expect(dock.state.width).toBe(760);
 	dock.setWidth(420.6);
 	expect(localStorage.getItem('selfclaw:dock-width')).toBeNull();
 	dock.commitWidth();
@@ -143,7 +147,7 @@ it('clamps the width, persists it only on commit, and starts every session on th
 it('falls back to the default width for corrupt storage', async () => {
 	localStorage.setItem('selfclaw:dock-width', 'abc');
 	const dock = await loadDock();
-	expect(dock.state.width).toBe(380);
+	expect(dock.state.width).toBe(440);
 });
 
 it('SideDock shows the launcher, opens closable tabs, keeps "+" for other tools, and closes through the host', async () => {
@@ -155,7 +159,7 @@ it('SideDock shows the launcher, opens closable tabs, keeps "+" for other tools,
 	expect(wrapper.classes()).toContain('open');
 	expect(wrapper.find('.dock-strip-title').text()).toBe('功能面板');
 	expect(wrapper.findAll('.dock-tab')).toHaveLength(0);
-	expect(wrapper.findAll('.dock-launcher-item')).toHaveLength(2);
+	expect(wrapper.findAll('.dock-launcher-item')).toHaveLength(3);
 	expect(wrapper.find('.dock-new-tab').exists()).toBe(false);
 
 	await wrapper.find('.dock-launcher-item[data-tool="terminal"]').trigger('click');
@@ -210,14 +214,36 @@ it('SideDock resizes from its left edge and persists the width on release', asyn
 	const dock = await loadDock();
 	dock.activate('subagents');
 	await flushPromises();
-	expect(wrapper.attributes('style')).toContain('width: 380px');
+	expect(wrapper.attributes('style')).toContain('width: 440px');
 	const handle = wrapper.find('.dock-resizer');
 	await handle.trigger('pointerdown', { button: 0, clientX: 800, pointerId: 1 });
 	await handle.trigger('pointermove', { clientX: 700, pointerId: 1 });
-	expect(dock.state.width).toBe(480);
+	expect(dock.state.width).toBe(540);
 	expect(wrapper.classes()).toContain('resizing');
 	await handle.trigger('pointerup', { pointerId: 1 });
 	expect(wrapper.classes()).not.toContain('resizing');
-	expect(wrapper.attributes('style')).toContain('width: 480px');
-	expect(localStorage.getItem('selfclaw:dock-width')).toBe('480');
+	expect(wrapper.attributes('style')).toContain('width: 540px');
+	expect(localStorage.getItem('selfclaw:dock-width')).toBe('540');
+});
+
+it('SideDock opens the review tool from the launcher and hands it the workspace root once settled', async () => {
+	await mountDock();
+	await wrapper.setProps({ workspaceRootId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' });
+	const dock = await loadDock();
+	dock.open();
+	await flushPromises();
+	expect(wrapper.findAll('.dock-launcher-item')).toHaveLength(3);
+	await wrapper.find('.dock-launcher-item[data-tool="review"]').trigger('click');
+	expect(dock.state).toMatchObject({ tabs: ['review'], activeTab: 'review' });
+	expect(wrapper.find('.dock-tab.active').attributes('data-tool')).toBe('review');
+	expect(inlineStyle('.review-pane')).not.toContain('display: none');
+	expect(inlineStyle('.subagent-pane')).toContain('display: none');
+	const pane = wrapper.findComponent({ name: 'ReviewPane' });
+	expect(pane.props('workspaceRootId')).toBe('cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+	// 宽度动画期间 visible 保持 false，settle 门（300ms）过后才给 pane。
+	await vi.waitFor(() => expect(pane.props('visible')).toBe(true));
+	expect(requestsOf('toggle-terminal')).toHaveLength(0);
+	await wrapper.find('.dock-tab[data-tool="review"] .dock-tab-close').trigger('click');
+	expect(wrapper.find('.dock-launcher').exists()).toBe(true);
+	expect(inlineStyle('.review-pane')).toContain('display: none');
 });

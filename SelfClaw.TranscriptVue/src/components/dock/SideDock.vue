@@ -1,6 +1,7 @@
 <script setup>
 import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue';
-import { Activity, Plus, SquareTerminal, X } from 'lucide-vue-next';
+import { Activity, FileDiff, Plus, SquareTerminal, X } from 'lucide-vue-next';
+import ReviewPane from './ReviewPane.vue';
 import SubagentDockPane from './SubagentDockPane.vue';
 import { useChatTerminal } from '../../composables/useChatTerminal.js';
 import { useHostBridge } from '../../composables/hostBridge.js';
@@ -9,7 +10,10 @@ import { useSideDock } from '../../composables/useSideDock.js';
 // xterm 体积大，且终端 pane 首次激活前不应起 ConPTY：保持懒加载 + terminalActivated 门。
 const TerminalPane = defineAsyncComponent(() => import('./TerminalPane.vue'));
 
-defineProps({ parentConversationId: { type: String, default: null } });
+defineProps({
+	parentConversationId: { type: String, default: null },
+	workspaceRootId: { type: String, default: null },
+});
 const emit = defineEmits(['preview-image']);
 
 const bridge = useHostBridge();
@@ -21,11 +25,12 @@ const resizing = ref(false);
 let dragStartX = 0;
 let dragStartWidth = 0;
 
-const TOOL_ICONS = { terminal: SquareTerminal, subagents: Activity };
+const TOOL_ICONS = { terminal: SquareTerminal, subagents: Activity, review: FileDiff };
 const openTools = computed(() => state.tabs.map((id) => dock.tools.find((tool) => tool.id === id)).filter(Boolean));
 const launcherVisible = computed(() => state.open && state.activeTab === null);
 const terminalVisible = computed(() => state.open && state.activeTab === 'terminal');
 const subagentVisible = computed(() => state.open && state.activeTab === 'subagents');
+const reviewVisible = computed(() => state.open && state.activeTab === 'review');
 
 // 宽度动画（240ms）期间几何一直在变：pane 的「可见」要等动画结束再给，否则详情滚动位置
 // 恢复、xterm fit 都发生在中间尺寸上，随后被回流带偏。display 切换本身不等。
@@ -34,6 +39,7 @@ const settled = ref(true);
 let settleTimer = null;
 const terminalReady = computed(() => terminalVisible.value && settled.value);
 const subagentReady = computed(() => subagentVisible.value && settled.value);
+const reviewReady = computed(() => reviewVisible.value && settled.value);
 
 function finishSettling() {
 	window.clearTimeout(settleTimer);
@@ -128,6 +134,7 @@ defineExpose({ blurTerminal: () => terminal.setFocused(false) });
 			</div>
 			<SubagentDockPane v-show="subagentVisible" :parent-conversation-id="parentConversationId"
 				:visible="subagentReady" @preview-image="emit('preview-image', $event)" />
+			<ReviewPane v-show="reviewVisible" :visible="reviewReady" :workspace-root-id="workspaceRootId" />
 			<!-- v-show 放在普通容器上：指令挂在异步组件上要穿过 AsyncWrapper 与内层组件两级根节点才落到元素，不可靠。 -->
 			<div v-if="state.terminalActivated" v-show="terminalVisible" class="terminal-slot">
 				<TerminalPane ref="terminalPaneRef" :visible="terminalReady" :is-running="terminal.state.isRunning"

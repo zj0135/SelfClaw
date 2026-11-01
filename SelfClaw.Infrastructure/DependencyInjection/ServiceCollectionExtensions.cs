@@ -100,6 +100,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IGitWorkspaceManager>(serviceProvider =>
             serviceProvider.GetRequiredService<GitWorkspaceService>());
         services.AddSingleton<IGitMergeManager, GitMergeService>();
+        services.AddSingleton<IGitDiffQuery, GitDiffService>();
         services.AddSingleton<SubagentCompletionEnvelopeFactory>();
         services.AddSingleton<ISubagentTaskPreflight, SubagentTaskPreflight>();
         services.AddSingleton<ISubagentStateChangeNotifier, SubagentStateChangeNotifier>();

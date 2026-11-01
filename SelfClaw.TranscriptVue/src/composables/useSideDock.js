@@ -15,14 +15,15 @@ import { hostBridge } from './hostBridge.js';
 //   T4 宿主推 isOpen=false → 只更新镜像位。
 
 const WIDTH_KEY = 'selfclaw:dock-width';
-export const SIDE_DOCK_DEFAULT_WIDTH = 380;
+export const SIDE_DOCK_DEFAULT_WIDTH = 440;
 export const SIDE_DOCK_MIN_WIDTH = 300;
-export const SIDE_DOCK_MAX_WIDTH = 640;
+export const SIDE_DOCK_MAX_WIDTH = 760;
 
 // 工具注册表：新增工具（如 diff）在这里加一项，并在 SideDock.vue 里多渲染一个 pane。
 const TOOLS = [
 	{ id: 'terminal', label: '命令行', description: '运行命令并查看输出。' },
 	{ id: 'subagents', label: '子代理', description: '查看子代理任务与实时输出。' },
+	{ id: 'review', label: '审查', description: '查看当前工作区的 Git 改动。' },
 ];
 const TOOL_IDS = TOOLS.map((tool) => tool.id);
 

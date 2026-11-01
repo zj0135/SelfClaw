@@ -116,7 +116,8 @@ defineExpose({
 			<!-- 绝对定位、脱离 grid 流：浮在对话区右上角，不占转录 / 输入区的行。 -->
 			<DockRail />
 		</div>
-		<SideDock ref="dockRef" :parent-conversation-id="state.selectedConversationId" @preview-image="openImagePreview" />
+		<SideDock ref="dockRef" :parent-conversation-id="state.selectedConversationId"
+			:workspace-root-id="workspace.state.current?.id ?? null" @preview-image="openImagePreview" />
 	</div>
 </template>
 
@@ -138,6 +139,9 @@ defineExpose({
 	height: 100%;
 	display: grid;
 	grid-template-rows: minmax(0, 1fr) auto;
+	/* 列必须显式钳住：隐式 auto 列会按子项的 min-content（输入栏状态条不可换行，约 600px）撑得比工作区
+	   还宽，转录、输入栏与挂在转录面板右缘的消息导航锚点就整体溢出到 dock 下面，看起来像被面板盖住。 */
+	grid-template-columns: minmax(0, 1fr);
 	background: var(--panel);
 }
 

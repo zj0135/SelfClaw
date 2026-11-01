@@ -41,6 +41,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly PetSettingsBridge _petSettingsBridge;
     private readonly WorkspaceSelectionBridge _workspaceSelectionBridge;
     private readonly GitWorkspaceBridge? _gitWorkspaceBridge;
+    private readonly GitDiffBridge? _gitDiffBridge;
     private readonly TerminalHostController _terminalHostController;
     private readonly ConversationInputBridge? _conversationInputBridge;
     private readonly MainWindowViewModel _viewModel;
@@ -76,6 +77,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         WebViewHostChannel hostChannel,
         TranscriptDelivery transcriptDelivery,
         GitWorkspaceBridge? gitWorkspaceBridge = null,
+        GitDiffBridge? gitDiffBridge = null,
         ConversationInputBridge? conversationInputBridge = null,
         ActivityPanelBridge? activityPanelBridge = null,
         AutomationBridge? automationBridge = null,
@@ -93,6 +95,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _petSettingsBridge = petSettingsBridge;
         _workspaceSelectionBridge = workspaceSelectionBridge;
         _gitWorkspaceBridge = gitWorkspaceBridge;
+        _gitDiffBridge = gitDiffBridge;
         _terminalHostController = terminalHostController;
         _conversationInputBridge = conversationInputBridge;
         _viewModel = viewModel;
@@ -278,6 +281,15 @@ internal sealed class WebViewMessageRouter : IDisposable
         {
             if (!await _terminalHostController.TryHandleMessageAsync(type, payload))
                 throw new ArgumentException("Unsupported terminal message.");
+            return null;
+        }
+        // git-diff/ 必须赶在下面的 switch 之前：`git-` 前缀的 case 会把未知的 git-* 交回
+        // GitWorkspaceBridge 并报 Unsupported。
+        if (type.StartsWith("git-diff/", StringComparison.Ordinal))
+        {
+            var gitDiff = _gitDiffBridge is null ? null : await _gitDiffBridge.TryHandleAsync(type, payload, cancellationToken);
+            if (gitDiff is null) throw new ArgumentException("Unsupported git diff message.");
+            _hostChannel.PostResponse(gitDiff);
             return null;
         }
         object? response;

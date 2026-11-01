@@ -1,6 +1,6 @@
 # 右侧功能面板（SideDock）设计
 
-> 适用范围：`SelfClaw.TranscriptVue` 聊天视图右侧的功能面板，承载命令行（ConPTY 终端）、子代理看板，未来承载 file diff 等会话级工具。宿主（WPF）窗口与桥接协议未改动；子代理读内容协议已删除（§5）。
+> 适用范围：`SelfClaw.TranscriptVue` 聊天视图右侧的功能面板，承载命令行（ConPTY 终端）、子代理看板与审查（工作区 Git diff，数据链路见 `docs/git-review-pane-design.md`）。宿主（WPF）窗口未改动，dock 外壳本身不依赖任何桥接协议；子代理读内容协议已删除（§5）。
 
 ## 1. 结论
 
@@ -17,12 +17,13 @@
 | 文件 | 职责 |
 |---|---|
 | `src/composables/useSideDock.js` | 模块级 store：开合 / 已开 tab 列表 / 当前 tab / 宽度 / 终端镜像位 / 徽标数；工具注册表；T1–T4 映射 |
-| `src/components/dock/SideDock.vue` | 外壳：左缘拖宽把手、tab 条（tab 本体 + 关闭键为两个并列按钮、「+」、收起键）、启动页、`.dock-body`；持有 `useChatTerminal` 并把 `terminal-state` 镜像进 store；`defineExpose({ blurTerminal })` |
+| `src/components/dock/SideDock.vue` | 外壳：左缘拖宽把手、tab 条（tab 本体 + 关闭键为两个并列按钮、「+」、收起键）、启动页、`.dock-body`；持有 `useChatTerminal` 并把 `terminal-state` 镜像进 store；`workspaceRootId` prop 透传给审查 pane；`defineExpose({ blurTerminal })` |
 | `src/components/dock/DockRail.vue` | 对话区右上角的悬浮快捷栏：按工具注册表渲染图标按钮 → `dock.toggleTool(id)`；子代理存在感角点读 `state.subagents` |
 | `src/components/dock/TerminalPane.vue` | xterm 终端 pane（原 `chat/TerminalPanel.vue` 迁入）：cwd / 运行状态 / 重启；懒加载；主题与字体读取在 `renderers/terminalTheme.js` |
 | `src/components/dock/SubagentDockPane.vue` | 子代理 pane：编排 `useActivityPanel` / `useSubagentActivity` / `useActivityDetail` / `useActivityPreferences`；工具条 = `activities/SubagentTaskSelect.vue`（任务下拉框 + 时长 + 取消 + 翻页）+ 刷新，主体 = `activities/SubagentTaskDetail.vue`；承载空态 / 错误 / 自动选中 |
+| `src/components/dock/ReviewPane.vue` | 审查 pane：工具条（作用域下拉「未暂存 / 已暂存」+ 分支名 + 刷新）、空态分支、左 diff / 右文件列表两栏；数据层 `composables/useGitDiff.js`；子组件 `dock/review/ReviewFileList.vue`（文件导航列）与 `dock/review/ReviewDiffView.vue`（统一视图 diff）；纯函数 `renderers/unifiedDiff.js`（patch 解析）、`renderers/gitChangeLabels.js`（文案 / 路径拆分）与 `renderers/codeHighlight.js`（与 markdown 共用的 highlight.js 实例）。细节见 `docs/git-review-pane-design.md` |
 | `src/styles/side-dock.css` | dock 外壳、tab 条、启动页共用样式，经 `SideDock.vue` 的 scoped 块 `@import` |
-| `src/views/ChatView.vue` | `.chat-shell` flex 行 = `.workspace`（转录 + 输入区，右上角绝对定位的 `DockRail`）+ `SideDock`；点击工作区即 `blurTerminal()` |
+| `src/views/ChatView.vue` | `.chat-shell` flex 行 = `.workspace`（转录 + 输入区，右上角绝对定位的 `DockRail`）+ `SideDock`；把 `workspace.state.current?.id` 作为 `workspaceRootId` 传给 dock；点击工作区即 `blurTerminal()` |
 | `src/App.vue` / `components/shell/WindowControls.vue` | 标题栏单个「面板」按钮（lucide `PanelRight`，aria-label `Panel`）→ `dock.toggle()`；拖动区右侧预留 190px |
 
 已删除（被完整替代）：`activities/ActivityStage.vue`、`activities/ActivityFloatingPanel.vue`、`activities/SubagentActivitySection.vue`、`activities/SubagentTaskRow.vue`、`activities/ActivityContentReader.vue`、`composables/useActivityStageConstraint.js`、`composables/useActivityContent.js`、`chat/TerminalPanel.vue`。
@@ -36,9 +37,9 @@ state = { open, tabs, activeTab, width, terminalOpen, terminalActivated, subagen
 - `open`、`tabs`、`activeTab` 都不持久化：每次启动 dock 收起、tab 为空、启动页待命。
 - `subagents = { total, running }`：当前会话的子代理任务存在感，由 `SubagentDockPane` 的订阅写入（面板收起时订阅仍热），只驱动快捷栏的角点，不显示数字。
 - `activeTab === null` 即显示启动页；`tabs` 是已打开工具的有序 id 列表。
-- `width` → `localStorage['selfclaw:dock-width']`，仅在拖拽松手（`commitWidth`）时写入；clamp 300–640px，CSS 另加 `max-width: 55%`。
+- `width` → `localStorage['selfclaw:dock-width']`，仅在拖拽松手（`commitWidth`）时写入；clamp 300–760px（默认 440），CSS 另加 `max-width: max(300px, min(55%, calc(100% - 520px)))`：对话区至少留 520px，否则输入栏比对话区还宽时溢出部分会被 dock 盖住、看起来像面板遮住了对话。桌面窗口默认 1440×900（`MainWindow.xaml`）。
 - `terminalActivated`：终端 pane 首次激活后才挂载，之后只切显隐；`v-if` / `v-show` 都挂在普通容器 `.terminal-slot` 上，而不是异步组件本身（指令穿过 AsyncWrapper 与内层组件两级根节点传播不可靠）。启动时不加载 xterm chunk、不起 ConPTY。
-- 工具注册表 `tools = [{ id:'terminal', label:'命令行', description }, { id:'subagents', label:'子代理', description }]`，启动页与 tab 条都按它渲染。**新增工具（如 diff）**：注册表加一项、`SideDock.vue` 的 `TOOL_ICONS` 加图标并在 `.dock-body` 多渲染一个 pane；启动页与 tab 自动出现，标题栏不需要改。
+- 工具注册表 `tools = [{ id:'terminal', label:'命令行' }, { id:'subagents', label:'子代理' }, { id:'review', label:'审查' }]`（各带 description），启动页、tab 条与快捷栏都按它渲染。**新增工具**：注册表加一项、`SideDock.vue` 与 `DockRail.vue` 的 `TOOL_ICONS` 加图标并在 `.dock-body` 多渲染一个 pane；启动页与 tab 自动出现，标题栏不需要改。pane 的 `visible` 一律走 §6 的 settle 门。
 
 store API：`open()` / `close()` / `toggle()` / `toggleTool(id)`（快捷栏：打开 / 切到该工具，已是当前 tab 则收起）/ `activate(id)`（没 tab 就新建并切到，顺带打开 dock）/ `showLauncher()` / `closeTab(id)`（当前 tab 被关时退到左邻，没有则右邻，再没有就回启动页）/ `setWidth` / `commitWidth` / `applyTerminalState` / `setSubagentCounts(counts)`。面板与标题栏不放数量角标，快捷栏只有一个存在感角点。
 
@@ -71,20 +72,19 @@ store API：`open()` / `close()` / `toggle()` / `toggleTool(id)`（快捷栏：�
 
 ## 6. 布局与几何
 
-- `ChatView`：`.chat-shell { display:flex }`，`.workspace { flex:1; min-width:0; grid-template-rows: minmax(0,1fr) auto }`（终端行与 `terminal-open` 规则已删），`SideDock` 为右侧 flex 项。
+- `ChatView`：`.chat-shell { display:flex }`，`.workspace { flex:1; min-width:0; grid-template-rows: minmax(0,1fr) auto; grid-template-columns: minmax(0,1fr) }`（终端行与 `terminal-open` 规则已删），`SideDock` 为右侧 flex 项。列必须显式 `minmax(0,1fr)`：隐式 auto 列会按输入栏状态条的 min-content（约 600px，不可换行）撑得比工作区宽，转录、输入栏和消息导航锚点会整体溢出到 dock 下面；`tests/e2e/dock.spec.js` 的拖宽用例把"拖到上限后两列仍在 dock 左侧"钉住。
 - 收起：`width:0` + `visibility:hidden`（延迟到 240ms 宽度动画结束），内容不可聚焦；打开时可见性立即恢复。
-- 开合的宽度过渡期间，两个 pane 的 `visible` prop 延后到 `transitionend`（300ms 兜底）才置真：详情滚动位置恢复与 xterm fit 只在稳定几何上发生，否则会被随后的回流带偏；`v-show` 的 display 切换不等。
+- 开合的宽度过渡期间，三个 pane 的 `visible` prop 延后到 `transitionend`（300ms 兜底）才置真：详情滚动位置恢复、xterm fit 与审查 pane 的「变为可见即刷新」只在稳定几何上发生，否则会被随后的回流带偏；`v-show` 的 display 切换不等。
 - 拖宽把手在 dock 左缘（`left:-3px; width:7px`），`setPointerCapture` 捕获，拖动中加 `.resizing` 关掉宽度 transition。
 - `--chat-content-width` / `--chat-inline-inset` 契约不变：dock 打开时转录列与输入框都按 `min(100%, …)` 同步收窄，`chatLayout.test.js` 与 `e2e/layout.spec.js` 不受影响。
 
 ## 7. 测试
 
-- 单测：`tests/windowControls.test.js`（单个面板按钮）、`tests/dockRail.test.js`（快捷栏：每工具一键、打开 / 切换 / 再点收起、存在感角点）、`tests/sideDock.test.js`（store：启动页 / tab 打开关闭 / 左邻回退 / T1–T4 / 宽度 clamp 与持久化；SideDock 接线：启动页、可关闭 tab、「+」、宿主推送、拖宽，两个 pane 用渲染函数桩）、`tests/subagentDockPane.test.js`（下拉框选任务、框外阶段与时长、存在感写回 store、自动选中与隐藏时不选、跨页占位项、流式 / ACK / 取消 / 阅读位置恢复 / 乱序回包）、`tests/activityLabels.test.js`（时长文案规则）。
-- e2e：`tests/e2e/activity.spec.js`（流式 / 隔离 / 阅读位置 / dock 几何 / 命令行 tab / 视口，任务切换走 `selectOption`）、`tests/e2e/dock.spec.js`（面板按钮 → 启动页 → tab；「+」回启动页；关 tab 回退与回启动页；宿主推送拉起命令行 tab；子代理工具条文案与无角标；快捷栏开关与角点；拖宽并跨重载保持）。夹具 `tests/fixtures/activityHost.js` 的 `terminal(isOpen)` 推送 `terminal-state`；`toggle-terminal` / `terminal-close` 只记录在 `requests` 里。
+- 单测：`tests/windowControls.test.js`（单个面板按钮）、`tests/dockRail.test.js`（快捷栏：每工具一键、打开 / 切换 / 再点收起、存在感角点）、`tests/sideDock.test.js`（store：启动页 / tab 打开关闭 / 左邻回退 / T1–T4 / 宽度 clamp 与持久化；SideDock 接线：启动页、可关闭 tab、「+」、宿主推送、拖宽、审查 tab 打开 / 关闭与 `workspaceRootId` 透传，三个 pane 用渲染函数桩）、`tests/subagentDockPane.test.js`（下拉框选任务、框外阶段与时长、存在感写回 store、自动选中与隐藏时不选、跨页占位项、流式 / ACK / 取消 / 阅读位置恢复 / 乱序回包）、`tests/reviewPane.test.js` 与 `tests/unifiedDiff.test.js`（审查 pane 与 patch 解析，见 `docs/git-review-pane-design.md` §7）、`tests/activityLabels.test.js`（时长文案规则）。
+- e2e：`tests/e2e/activity.spec.js`（流式 / 隔离 / 阅读位置 / dock 几何 / 命令行 tab / 视口，任务切换走 `selectOption`）、`tests/e2e/dock.spec.js`（面板按钮 → 启动页 → tab；「+」回启动页；关 tab 回退与回启动页；宿主推送拉起命令行 tab；子代理工具条文案与无角标；快捷栏开关与角点；拖宽并跨重载保持）、`tests/e2e/review.spec.js`（审查工具：列表 / 自动选中 / 统一视图 / 作用域切换 / 刷新 / 非仓库空态）。夹具 `tests/fixtures/activityHost.js` 的 `terminal(isOpen)` 推送 `terminal-state`；`toggle-terminal` / `terminal-close` 只记录在 `requests` 里；`git-diff/*` 与可选的工作区选中项也由它应答。
 - 宿主侧 `SelfClaw.Tests/.../DesktopActivityWebViewTests.cs`（`SELFCLAW_DESKTOP_SMOKE=1`）通过 `OpenSubagentDockAsync` 先点面板按钮、再在启动页点「子代理」，按 `.task-select option[data-status]` / `[data-phase]` 断言状态与阶段，取消前先用下拉框切到目标任务。
 
 ## 8. 已知限制与后续
 
 - 视图往返会销毁 xterm 实例（`ChatView` 卸载），滚动缓冲丢失；宿主不回放历史输出，与原底部抽屉相同。
 - 宽屏列宽 token 用 `100vw` 推导，dock 打开时对话列靠 `min(100%)` 封顶；若视觉过挤，可把断点改为容器查询。
-- file diff：按 §3 的扩展步骤新增 `components/dock/DiffPane.vue`，数据层另立 composable；dock 外壳与标题栏不需要改。

@@ -52,6 +52,57 @@ export function installActivityHost() {
 			sections: [{ id: 'subagents', kind: 'subagents', title: '子代理', counts: { total: tasks.length, running: tasks.filter((item) => item.status === 'running').length, queued: 0, succeeded: tasks.filter((item) => item.status === 'succeeded').length, failed: 0, cancelled: tasks.filter((item) => item.status === 'cancelled').length, interrupted: 0 }, listVersion: 'fixture-list', cursor: pageOffset ? `page/${pageOffset}` : null, nextCursor: pageOffset + 50 < tasks.length ? `page/${pageOffset + 50}` : null, tasks: tasks.slice(pageOffset, pageOffset + 50), detailSelectionId: selection, selectedTask: tasks[selectedIndex] ?? null, detailError: changed ? 'content-changed' : null, detail }] };
 	}
 	function push() { if (subscription && !paused) send(snapshot()); }
+	// 审查面板（git-diff/*）与可选的工作区选中项。默认：是 Git 仓库、有改动；开关可切到非仓库 / 空改动 / 截断 / 出错。
+	// 工作区选中项默认关闭（其他用例依赖"没有工作目录"的回包），e2e 用 useWorkspace() 打开。
+	const workspaceId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+	let workspaceEnabled = false;
+	let gitIsRepository = true;
+	let gitIsEmpty = false;
+	let gitIsTruncated = false;
+	let gitFailure = null;
+	const gitFiles = {
+		unstaged: [
+			{ path: 'src/App.vue', oldPath: null, kind: 'modified', addedLines: 3, removedLines: 1, isBinary: false },
+			{ path: 'src/fresh.js', oldPath: null, kind: 'untracked', addedLines: null, removedLines: null, isBinary: false },
+			{ path: 'assets/logo.png', oldPath: null, kind: 'modified', addedLines: null, removedLines: null, isBinary: true },
+		],
+		staged: [{ path: 'src/new-name.js', oldPath: 'src/old-name.js', kind: 'renamed', addedLines: 0, removedLines: 0, isBinary: false }],
+	};
+	const gitPatches = {
+		'src/App.vue': { added: 3, removed: 1, patch: "diff --git a/src/App.vue b/src/App.vue\nindex 1111111..2222222 100644\n--- a/src/App.vue\n+++ b/src/App.vue\n@@ -10,3 +10,5 @@ import X\n import X from './x';\n-const a = 1;\n+const a = 2;\n+const b = 3;\n+const c = 4;\n export default a;\n" },
+		'src/fresh.js': { added: 2, removed: 0, patch: 'diff --git a/src/fresh.js b/src/fresh.js\nnew file mode 100644\n--- /dev/null\n+++ b/src/fresh.js\n@@ -0,0 +1,2 @@\n+export const fresh = true;\n+export default fresh;\n' },
+		'src/new-name.js': { added: 0, removed: 0, patch: 'diff --git a/src/old-name.js b/src/new-name.js\nsimilarity index 100%\nrename from src/old-name.js\nrename to src/new-name.js\n' },
+		'assets/logo.png': { added: 0, removed: 0, patch: null, binary: true },
+	};
+	function gitChanges(requestId) {
+		if (gitFailure) return { type: 'git-diff/changes', requestId, ok: false, error: gitFailure };
+		const listed = gitIsRepository && !gitIsEmpty;
+		const empty = { files: [], atFileLimit: false };
+		return {
+			type: 'git-diff/changes', requestId, ok: true, workspaceRootId: workspaceId, workspacePath: 'C:\\Fixture',
+			repositoryRootPath: gitIsRepository ? 'C:\\Fixture' : null, branchName: gitIsRepository ? 'main' : null,
+			isGitAvailable: true, isRepository: gitIsRepository,
+			unstaged: listed ? { files: gitFiles.unstaged, atFileLimit: false } : empty,
+			staged: listed ? { files: gitFiles.staged, atFileLimit: false } : empty,
+		};
+	}
+	function gitFile(requestId, request) {
+		if (gitFailure) return { type: 'git-diff/file', requestId, ok: false, error: gitFailure };
+		const entry = gitPatches[request.path] ?? { added: 0, removed: 0, patch: '' };
+		return {
+			type: 'git-diff/file', requestId, ok: true, workspaceRootId: workspaceId, scope: request.scope, path: request.path,
+			oldPath: request.oldPath ?? null, kind: request.kind, isBinary: Boolean(entry.binary), patch: entry.patch,
+			truncated: gitIsTruncated && request.path === 'src/App.vue', addedLines: entry.added, removedLines: entry.removed,
+		};
+	}
+	function workspaceSelection(requestId) {
+		const root = { id: workspaceId, name: 'Fixture', path: 'C:\\Fixture' };
+		return {
+			type: 'workspace-selection', requestId,
+			current: { ...root, isFallback: false, git: null, repositoryName: null, branchName: null, isGitRepository: false, isManagedWorktree: false, isDirty: false, hasMergeConflicts: false },
+			roots: [{ ...root, selected: true, isManagedWorktree: false }], commonFolders: [],
+		};
+	}
 	window.chrome = { ...(window.chrome || {}), webview: {
 		addEventListener(type, listener) { if (type === 'message') listeners.add(listener); },
 		postMessage(request) {
@@ -63,6 +114,9 @@ export function installActivityHost() {
 				else if (type === 'activity-panel/get-state') { pageOffset = request.cursor ? Number(request.cursor.split('/')[1]) : 0; send(snapshot(requestId)); }
 				else if (type === 'activity-panel/unsubscribe') { if (request.subscriptionId === subscription) subscription = null; }
 				else if (type === 'activity-panel/cancel-task') { const target = tasks.find((item) => item.taskId === request.taskId); target.status = 'cancelled'; target.phase = 'cancelled'; target.canCancel = false; send({ type, requestId, accepted: true }); push(); }
+				else if (type === 'git-diff/changes') send(gitChanges(requestId));
+				else if (type === 'git-diff/file') send(gitFile(requestId, request));
+				else if (type === 'get-workspace-selection' && workspaceEnabled) send(workspaceSelection(requestId));
 				else if (requestId) send({ type, requestId, sections: [], models: [], agents: [], roots: [], commonFolders: [], current: null });
 			});
 		},
@@ -80,6 +134,13 @@ export function installActivityHost() {
 		holdResponses(value) { holdResponses = value; },
 		release(index = 0, error = null) { const payload = deferred.splice(index, 1)[0]; deliver(error ? { type: 'activity-panel/error', requestId: payload.requestId, error } : payload); },
 		pause(value) { paused = value; },
+		// 审查面板夹具开关：非仓库 / 空改动 / 截断 / 出错；useWorkspace() 让 get-workspace-selection 回一个选中根。
+		workspaceId,
+		gitRepository(value) { gitIsRepository = value; },
+		gitEmpty(value) { gitIsEmpty = value; },
+		gitTruncated(value) { gitIsTruncated = value; },
+		gitError(message) { gitFailure = message; },
+		useWorkspace() { workspaceEnabled = true; },
 		// 模拟宿主 TerminalHostController.PublishState：dock 的终端 tab 以它为真值。
 		terminal(isOpen, { isRunning = isOpen, cwd = 'C:\\Fixture' } = {}) { send({ type: 'terminal-state', isOpen, isRunning, cwd }); },
 		text(value, index = 0) { segments[index][1].markdown += value; contentRevisions[index]++; push(); },

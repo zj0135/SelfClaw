@@ -24,6 +24,7 @@ using SelfClaw.Desktop.Services.Attachments;
 using SelfClaw.Desktop.Services.Attachments.Abstractions;
 using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.Extensions;
+using SelfClaw.Desktop.Services.Git;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Runtime;
@@ -75,6 +76,24 @@ public sealed class WebViewMessageRouterTests
         response.RootElement.GetProperty("type").GetString().Should().Be("direct-compression/state");
         response.RootElement.GetProperty("requestId").GetString().Should().Be("compression-1");
         response.RootElement.GetProperty("policy").TryGetProperty("thresholdRatio", out _).Should().BeTrue();
+    }
+
+    // git-diff/ shares the "git-" prefix with GitWorkspaceBridge's catch-all; it must win the route and
+    // answer in its own envelope instead of an "Unsupported message" operation-result.
+    [Fact]
+    public async Task RouteAsync_routes_git_diff_messages_before_the_git_prefix_catch_all()
+    {
+        using var context = new RouterTestContext();
+
+        var command = await context.RouteAsync("""{"type":"git-diff/changes","requestId":"diff-1"}""");
+
+        command.Should().BeNull();
+        context.PostedJson.Should().ContainSingle();
+        using var response = JsonDocument.Parse(context.PostedJson[0]);
+        response.RootElement.GetProperty("type").GetString().Should().Be("git-diff/changes");
+        response.RootElement.GetProperty("requestId").GetString().Should().Be("diff-1");
+        response.RootElement.GetProperty("ok").GetBoolean().Should().BeFalse();
+        response.RootElement.GetProperty("error").GetString().Should().Contain("工作目录");
     }
 
     private const string ApplicationOrigin = "https://appassets.selfclaw.local/TranscriptVue/index.html";
@@ -701,6 +720,7 @@ public sealed class WebViewMessageRouterTests
                 _questionPresenter,
                 HostChannel,
                 _transcriptDelivery,
+                gitDiffBridge: new GitDiffBridge(viewModel, Unused<IGitDiffQuery>()),
                 attachmentBridge: attachmentBridge);
         }
 

@@ -193,6 +193,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<MainWindowViewModel>());
         services.AddSingleton<WorkspaceSelectionBridge>();
         services.AddSingleton<GitWorkspaceBridge>();
+        services.AddSingleton<GitDiffBridge>();
         services.AddSingleton<IActivityPanelScopeSource>(services => services.GetRequiredService<MainWindowViewModel>());
         services.AddSingleton(services => new ActivityPanelBridge(
             services.GetRequiredService<ActivityPanelPublisher>(),
@@ -216,6 +217,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<WebViewHostChannel>(),
             services.GetRequiredService<TranscriptDelivery>(),
             services.GetRequiredService<GitWorkspaceBridge>(),
+            services.GetRequiredService<GitDiffBridge>(),
             services.GetRequiredService<ConversationInputBridge>(),
             services.GetRequiredService<ActivityPanelBridge>(),
             services.GetRequiredService<AutomationBridge>(),

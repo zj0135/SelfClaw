@@ -1,83 +1,8 @@
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
-import hljs from 'highlight.js/lib/core';
-import javascript from 'highlight.js/lib/languages/javascript';
-import typescript from 'highlight.js/lib/languages/typescript';
-import json from 'highlight.js/lib/languages/json';
-import bash from 'highlight.js/lib/languages/bash';
-import powershell from 'highlight.js/lib/languages/powershell';
-import csharp from 'highlight.js/lib/languages/csharp';
-import python from 'highlight.js/lib/languages/python';
-import java from 'highlight.js/lib/languages/java';
-import go from 'highlight.js/lib/languages/go';
-import rust from 'highlight.js/lib/languages/rust';
-import sql from 'highlight.js/lib/languages/sql';
-import css from 'highlight.js/lib/languages/css';
-import xml from 'highlight.js/lib/languages/xml';
-import markdown from 'highlight.js/lib/languages/markdown';
-import yaml from 'highlight.js/lib/languages/yaml';
+import { highlightCode } from './codeHighlight.js';
 
-const languageAliases = {
-	js: 'javascript',
-	jsx: 'javascript',
-	ts: 'typescript',
-	tsx: 'typescript',
-	sh: 'bash',
-	shell: 'bash',
-	pwsh: 'powershell',
-	ps: 'powershell',
-	cs: 'csharp',
-	'C#': 'csharp',
-	html: 'xml',
-	xhtml: 'xml',
-	md: 'markdown',
-	yml: 'yaml',
-};
-
-const languages = {
-	javascript,
-	typescript,
-	json,
-	bash,
-	powershell,
-	csharp,
-	python,
-	java,
-	go,
-	rust,
-	sql,
-	css,
-	xml,
-	markdown,
-	yaml,
-};
-
-for (const [name, definition] of Object.entries(languages)) {
-	hljs.registerLanguage(name, definition);
-}
-
-for (const [alias, name] of Object.entries(languageAliases)) {
-	hljs.registerAliases(alias, { languageName: name });
-}
-
-const allowedLanguages = new Set(Object.keys(languages));
 const skillTokenPattern = /^\[\/([^\]\r\n]{1,80})\]/;
-
-function highlightCode(code, language) {
-	const normalized = String(language || '')
-		.trim()
-		.toLowerCase();
-	const canonical = languageAliases[normalized] || normalized;
-	if (!allowedLanguages.has(canonical)) {
-		return '';
-	}
-
-	try {
-		return hljs.highlight(code, { language: canonical, ignoreIllegals: true }).value;
-	} catch {
-		return '';
-	}
-}
 
 function skillTokenRule(state, silent) {
 	if (state.env?.context !== 'user') {

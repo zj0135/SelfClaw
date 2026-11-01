@@ -22,8 +22,8 @@ async function mountRail() {
 it('offers one button per tool, opens the dock to that tool, and collapses it on a second click', async () => {
 	const dock = await mountRail();
 	const buttons = wrapper.findAll('.dock-rail-button');
-	expect(buttons.map((button) => button.attributes('data-tool'))).toEqual(['terminal', 'subagents']);
-	expect(buttons.map((button) => button.attributes('aria-label'))).toEqual(['命令行', '子代理']);
+	expect(buttons.map((button) => button.attributes('data-tool'))).toEqual(['terminal', 'subagents', 'review']);
+	expect(buttons.map((button) => button.attributes('aria-label'))).toEqual(['命令行', '子代理', '审查']);
 
 	await buttons[1].trigger('click');
 	expect(dock.state).toMatchObject({ open: true, activeTab: 'subagents', tabs: ['subagents'] });

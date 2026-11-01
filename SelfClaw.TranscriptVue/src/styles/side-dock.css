@@ -8,7 +8,9 @@
 	align-self: stretch;
 	height: 100%;
 	min-width: 0;
-	max-width: 55%;
+	/* 上限：不超过 55%，且给对话区至少留 520px（否则输入栏比对话区还宽，溢出的部分会被 dock 盖住，
+	   看起来像面板遮住了对话）；窄窗口下仍保证 dock 自己的 300px 最小宽度。 */
+	max-width: max(300px, min(55%, calc(100% - 520px)));
 	overflow: hidden;
 	border-left: 1px solid var(--border);
 	background: var(--panel);

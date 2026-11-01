@@ -98,6 +98,19 @@
 	--syntax-number: #f78c6c;
 	--syntax-type: #82aaff;
 
+	/*
+	 * ═══ 1 · 审查面板的 diff 代码面 ═══
+	 * 与 markdown 代码块不同：那个刻意在两个主题下都是深底，这里要跟随主题。浅色用白底深字加一组
+	 * 在白底上对比度足够的语法色；深色块把它们指回代码块的 --code-surface / --syntax-*。
+	 */
+	--diff-surface: #ffffff;
+	--diff-ink: #1f2430;
+	--diff-syntax-comment: #6b7280;
+	--diff-syntax-keyword: #7c3aed;
+	--diff-syntax-string: #15803d;
+	--diff-syntax-number: #c2410c;
+	--diff-syntax-type: #1d4ed8;
+
 	/* ═══ 1 · 数据块：工具详情里的 JSON/纯文本，与代码块相反走浅底 ═══ */
 	--data-surface: #f5f7fa;
 	--data-ink: #1f2937;
@@ -251,6 +264,14 @@ html[data-theme='dark'] {
 	--code-scroll-thumb: #5c6678;
 	--code-scroll-thumb-hover: #8b93a3;
 
+	--diff-surface: var(--code-surface);
+	--diff-ink: var(--code-ink);
+	--diff-syntax-comment: var(--syntax-comment);
+	--diff-syntax-keyword: var(--syntax-keyword);
+	--diff-syntax-string: var(--syntax-string);
+	--diff-syntax-number: var(--syntax-number);
+	--diff-syntax-type: var(--syntax-type);
+
 	/* 数据块在浅色下是浅底，深色下必须一起翻过来，否则工具详情整块刺眼。 */
 	--data-surface: #1a1e25;
 	--data-ink: #d7dce5;
@@ -370,6 +391,10 @@ html[data-theme='dark'] {
 	--code-bg: var(--user-code-surface, var(--code-surface));
 	--code-fg: var(--user-code-ink, var(--code-ink));
 	--code-fs: calc(var(--code-fs-base) * var(--code-font-scale));
+
+	/* ── 审查面板 diff：跟随主题（浅色白底深字，深色沿用代码块的深底） ── */
+	--diff-bg: var(--diff-surface);
+	--diff-fg: var(--diff-ink);
 
 	/* ── 窗口外壳 ── */
 	--resize-edge: 6px;

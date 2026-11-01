@@ -17,7 +17,7 @@ test('the panel button opens the launcher; tools become closable tabs; closing t
 	await expect(dock).toBeHidden();
 	await panelButton(page).click();
 	await expect(dock).toBeVisible();
-	await expect(page.locator('.dock-launcher-item')).toHaveCount(2);
+	await expect(page.locator('.dock-launcher-item')).toHaveCount(3);
 	await expect(page.locator('.dock-tab')).toHaveCount(0);
 	await expect(page.locator('.dock-strip-title')).toHaveText('功能面板');
 
@@ -98,7 +98,7 @@ test('the subagent toolbar shows the task name in the dropdown and only the run 
 test('the floating rail in the chat view opens the dock to a tool and marks subagent presence with a quiet dot', async ({ page }) => {
 	const rail = page.locator('.dock-rail');
 	await expect(rail).toBeVisible();
-	await expect(rail.locator('.dock-rail-button')).toHaveCount(2);
+	await expect(rail.locator('.dock-rail-button')).toHaveCount(3);
 	await expect(rail.locator('.dock-rail-button[data-tool="subagents"] .dock-rail-dot')).toHaveClass(/running/);
 	await expect(rail.locator('.dock-rail-button[data-tool="terminal"] .dock-rail-dot')).toHaveCount(0);
 	await expect(rail.locator('.dock-rail-dot')).toHaveText('');
@@ -121,12 +121,14 @@ test('the floating rail in the chat view opens the dock to a tool and marks suba
 });
 
 test('dragging the left edge resizes the dock and the width survives a reload', async ({ page }) => {
+	// 与桌面窗口的默认尺寸一致：CSS 上限会给对话区留 520px，视口太窄时拖不到 560。
+	await page.setViewportSize({ width: 1440, height: 900 });
 	await panelButton(page).click();
 	const dock = page.locator('.side-dock');
 	await expect(dock).toBeVisible();
 	const dockWidth = () => dock.evaluate((element) => Math.round(element.getBoundingClientRect().width));
 	// 宽度有 240ms 过渡：等到位再量，拖拽也从稳定几何开始。
-	await expect.poll(dockWidth).toBe(380);
+	await expect.poll(dockWidth).toBe(440);
 
 	const handle = await page.locator('.dock-resizer').boundingBox();
 	const x = handle.x + handle.width / 2;
@@ -136,13 +138,34 @@ test('dragging the left edge resizes the dock and the width survives a reload', 
 	await page.mouse.move(x - 120, y, { steps: 6 });
 	await page.mouse.up();
 
-	expect(await dockWidth()).toBe(500);
-	expect(await page.evaluate(() => localStorage.getItem('selfclaw:dock-width'))).toBe('500');
+	expect(await dockWidth()).toBe(560);
+	expect(await page.evaluate(() => localStorage.getItem('selfclaw:dock-width'))).toBe('560');
 
 	await page.reload();
 	await page.evaluate(() => window.activityFixture.transcript());
 	await expect(page.locator('.side-dock')).toBeHidden();
 	await panelButton(page).click();
 	await expect(page.locator('.dock-launcher')).toBeVisible();
-	await expect.poll(dockWidth).toBe(500);
+	await expect.poll(dockWidth).toBe(560);
+
+	// 继续拖到上限（CSS 会按"对话区至少 520px"封顶）：转录列、输入栏都必须留在 dock 左侧，
+	// 工作区的 grid 列不能被输入栏状态条的 min-content 撑到 dock 下面去。
+	const edge = await page.locator('.dock-resizer').boundingBox();
+	await page.mouse.move(edge.x + edge.width / 2, y);
+	await page.mouse.down();
+	await page.mouse.move(edge.x - 400, y, { steps: 8 });
+	await page.mouse.up();
+	const geometry = await page.evaluate(() => {
+		const rect = (selector) => document.querySelector(selector).getBoundingClientRect();
+		return {
+			dockLeft: rect('.side-dock').left,
+			workspace: { width: rect('.workspace').width, right: rect('.workspace').right },
+			transcriptRight: rect('.transcript-content').right,
+			composerRight: rect('.composer-stack').right,
+		};
+	});
+	expect(Math.abs(geometry.workspace.right - geometry.dockLeft)).toBeLessThanOrEqual(1);
+	expect(geometry.workspace.width).toBeGreaterThanOrEqual(520);
+	expect(geometry.transcriptRight).toBeLessThanOrEqual(geometry.dockLeft + 1);
+	expect(geometry.composerRight).toBeLessThanOrEqual(geometry.dockLeft + 1);
 });

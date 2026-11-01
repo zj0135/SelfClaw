@@ -1,11 +1,11 @@
 <script setup>
 import { computed } from 'vue';
-import { Activity, SquareTerminal } from 'lucide-vue-next';
+import { Activity, FileDiff, SquareTerminal } from 'lucide-vue-next';
 import { useSideDock } from '../../composables/useSideDock.js';
 
 const dock = useSideDock();
 const state = dock.state;
-const TOOL_ICONS = { terminal: SquareTerminal, subagents: Activity };
+const TOOL_ICONS = { terminal: SquareTerminal, subagents: Activity, review: FileDiff };
 const isActive = (toolId) => state.open && state.activeTab === toolId;
 // 角点只表达"有子代理任务"，不显示数字；运行中时缓慢呼吸，安静即可。
 const subagentPresent = computed(() => state.subagents.total > 0);
