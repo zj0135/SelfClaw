@@ -40,9 +40,9 @@ const subtitle = computed(() => {
 
 	return '';
 });
-const hints = computed(() => (props.kind === 'file'
-	? ['↑↓ 移动', '→ 展开', 'Enter 选择', 'Tab 引用目录', 'Esc 关闭']
-	: ['↑↓ 移动', 'Enter 选择', 'Esc 关闭']));
+const hints = computed(() =>
+	props.kind === 'file' ? ['↑↓ 移动', '→ 展开', 'Enter 选择', 'Tab 引用目录', 'Esc 关闭'] : ['↑↓ 移动', 'Enter 选择', 'Esc 关闭']
+);
 
 function onItems(list) {
 	items.value = list;
@@ -51,9 +51,12 @@ function onItems(list) {
 	}
 }
 
-watch(() => [props.kind, props.query], () => {
-	activeIndex.value = 0;
-});
+watch(
+	() => [props.kind, props.query],
+	() => {
+		activeIndex.value = 0;
+	}
+);
 
 function toChip(item) {
 	if (props.kind === 'file') {
@@ -151,14 +154,35 @@ defineExpose({ handleNavigate });
 				<code v-if="props.query" class="mention-query">{{ props.query }}</code>
 			</header>
 			<div ref="bodyRef" class="mention-body">
-				<MentionFileTree v-if="props.kind === 'file'" ref="treeRef" :query="props.query"
-					:workspace-selection="props.workspaceSelection" :active-index="activeIndex"
-					@update:items="onItems" @activate="activeIndex = $event" @choose="choose" />
-				<MentionSkillList v-else-if="props.kind === 'skill'" :query="props.query" :agent-id="props.selectedAgentId"
-					:capability-revision="props.capabilityRevision" :active-index="activeIndex"
-					@update:items="onItems" @activate="activeIndex = $event" @choose="choose" />
-				<MentionCommandList v-else :query="props.query" :commands="props.commands" :active-index="activeIndex"
-					@update:items="onItems" @activate="activeIndex = $event" @choose="choose" />
+				<MentionFileTree
+					v-if="props.kind === 'file'"
+					ref="treeRef"
+					:query="props.query"
+					:workspace-selection="props.workspaceSelection"
+					:active-index="activeIndex"
+					@update:items="onItems"
+					@activate="activeIndex = $event"
+					@choose="choose"
+				/>
+				<MentionSkillList
+					v-else-if="props.kind === 'skill'"
+					:query="props.query"
+					:agent-id="props.selectedAgentId"
+					:capability-revision="props.capabilityRevision"
+					:active-index="activeIndex"
+					@update:items="onItems"
+					@activate="activeIndex = $event"
+					@choose="choose"
+				/>
+				<MentionCommandList
+					v-else
+					:query="props.query"
+					:commands="props.commands"
+					:active-index="activeIndex"
+					@update:items="onItems"
+					@activate="activeIndex = $event"
+					@choose="choose"
+				/>
 			</div>
 			<footer class="mention-foot">
 				<span v-for="hint in hints" :key="hint">{{ hint }}</span>
@@ -176,7 +200,7 @@ defineExpose({ handleNavigate });
 	bottom: calc(100% + 8px);
 	left: 0;
 	display: flex;
-	max-height: min(340px, 48vh);
+	max-height: min(260px, 48vh);
 	flex-direction: column;
 	overflow: hidden;
 	border: 1px solid var(--border);
@@ -273,7 +297,9 @@ defineExpose({ handleNavigate });
 
 .mention-pop-enter-active,
 .mention-pop-leave-active {
-	transition: opacity 0.14s ease, transform 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+	transition:
+		opacity 0.14s ease,
+		transform 0.14s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .mention-pop-enter-from,

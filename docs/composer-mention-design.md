@@ -49,7 +49,7 @@
 ## 4. 弹层（`ComposerInput.vue` = 编辑器 + `MentionPopover.vue` + `useComposerMention`）
 
 - `useComposerMention` 只管状态机（kind / query / anchor / Esc 记忆 / 技能闸门）；`MentionPopover` 管定位、键盘与活动项；三类列表各自拿数据并通过 `update:items` 把可选项交给弹层。
-- 定位：绝对定位固定挂在 `.composer-shell` 正上方（`bottom: calc(100% + 8px)`），`left: 0; right: 0` 与输入框同宽同轴，不跟随光标；`max-height: min(340px, 48vh)`。
+- 定位：绝对定位固定挂在 `.composer-shell` 正上方（`bottom: calc(100% + 8px)`），`left: 0; right: 0` 与输入框同宽同轴，不跟随光标；`max-height: min(240px, 48vh)`（约 6 行，超出的列表项滚动）。
 - 键盘：↑↓ 移动；Enter / Tab 选择（弹层打开时 Enter **永远不发送**，没有可选项也只是吞掉）；文件树里 Enter 在目录上是展开/折叠、Tab 是引用目录、→ 展开、← 折叠；Esc 关闭并记忆位置。左右键在非目录项上不消费，光标移走后弹层自然关闭。
 - 鼠标：弹层根 `@mousedown.prevent`，点击不夺编辑器焦点；目录行点击展开，文件行点击选择，目录行 hover / 活动时尾部出现「引用」按钮。
 - 列表状态：文件——无工作目录提示 / 读取中 / 根错误 / 空目录 / 「每层最多显示 250 项」/ 行级错误 / 扁平过滤无结果；技能——读取中 / 错误 / 无可用技能 / 无匹配；指令——「暂无可用指令」/ 无匹配。
