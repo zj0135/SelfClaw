@@ -82,7 +82,7 @@ internal sealed class WorkspaceToolService : IWorkspaceToolService
             ("ReplaceAll", replaceAll)).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(
+    public async Task<WorkspaceSearchResult> SearchTextAsync(
         string workspaceRootPath,
         string query,
         WorkspaceSearchOptions? options = null,

@@ -64,7 +64,7 @@ todo_write(整表替换)
 
 ### 2.2 状态从 `arguments_json` 派生而非独立表
 
-- `tool_runs` 已随回合提交事务写入，且 `arguments_json` **不截断**（`TranscriptToolResultLimiter` 只作用于 `result_content`）。
+- `tool_runs` 已随回合提交事务写入，且 `arguments_json` **不截断**（`ToolResultTextLimits` 只作用于工具结果文本）。
 - 会话删除、回合级联删除天然覆盖计划生命周期，不需要额外清理逻辑。
 - schema 仍是 v32，用户现有数据库不需要迁移。
 

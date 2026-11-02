@@ -56,12 +56,14 @@ internal sealed class WorkspaceAgentToolset
                 "Find files anywhere in the workspace by glob pattern, e.g. \"**/*.cs\" or \"src/**/test_*.ts\". "
                     + "Returns matching file paths without reading their contents.",
                 ToolCallKind.List, FormatEntries),
-            Bind<IReadOnlyList<WorkspaceSearchHit>>(
+            Bind<WorkspaceSearchResult>(
                 bound.SearchTextAsync,
                 "search_text",
                 "Search text files in the current workspace. Backed by ripgrep when available (honours .gitignore). "
                     + "Supply a glob to scope by path, set isRegex for a regular-expression query, "
-                    + "and caseSensitive to match case exactly.",
+                    + "and caseSensitive to match case exactly. A matching line longer than about 1000 characters "
+                    + "— minified bundles, single-line JSON — comes back as a window around the match with "
+                    + "\"…[+N chars]\" marking what was left out; read_file that file to see the whole line.",
                 ToolCallKind.Search, FormatHits),
             Bind<WorkspaceFileReadResult>(
                 bound.ReadFileAsync,
@@ -99,9 +101,9 @@ internal sealed class WorkspaceAgentToolset
         => new(ToolCallStatus.Completed, WorkspaceToolSummaries.Summarize(entries),
             JsonSerializer.SerializeToElement(entries), WorkspaceToolSummaries.Describe(entries));
 
-    private static DirectToolResult FormatHits(IReadOnlyList<WorkspaceSearchHit> hits)
-        => new(ToolCallStatus.Completed, WorkspaceToolSummaries.Summarize(hits),
-            JsonSerializer.SerializeToElement(hits), WorkspaceToolSummaries.Describe(hits));
+    private static DirectToolResult FormatHits(WorkspaceSearchResult search)
+        => new(ToolCallStatus.Completed, WorkspaceToolSummaries.Summarize(search),
+            JsonSerializer.SerializeToElement(search.Hits), WorkspaceToolSummaries.Describe(search));
 
     private static DirectToolResult FormatFile(WorkspaceFileContent file)
         => new(ToolCallStatus.Completed, WorkspaceToolSummaries.Summarize(file),
@@ -194,7 +196,7 @@ internal sealed class WorkspaceAgentToolset
             CancellationToken cancellationToken = default)
             => _workspaceTools.GlobFilesAsync(_workspaceRootPath, pattern, relativePath, cancellationToken);
 
-        public Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(
+        public Task<WorkspaceSearchResult> SearchTextAsync(
             [Description("Text to search for across workspace text files. Treated as a literal substring unless isRegex is true.")] string query,
             [Description("Optional glob limiting which files are searched, e.g. \"src/**/*.cs\" or \"*.md\". Leave empty to search every text file.")] string? glob = null,
             [Description("Treat the query as a regular expression instead of a literal substring.")] bool isRegex = false,

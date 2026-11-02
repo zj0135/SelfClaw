@@ -38,7 +38,7 @@
 | `ConversationTurnRecorder.cs` | 消息 sequence 在**录制侧**保留（`ReserveMessageSequenceAsync`，首个 delta 即分配）；产出侧（Infrastructure）不知道本回合消息的 sequence |
 | `TurnUsageAccumulator.cs` | `last_request_input_tokens` 取最新、不求和 → 压缩后下一请求的输入量下降，输入框状态栏即时可见 |
 | `direct-message-input-design.md` §相关行 | "已经提交的 steer 在本回合内作为受保护输入，不能在之后迭代中被静默裁掉" |
-| 增长来源上限 | MCP 结果序列化 ≤64 KiB（`McpToolResultFormatter`）；Shell 输出 ≤24k 字符（`ProcessRunner.MaxOutputCharacters`）；文件读取 >1 MB 直接拒绝（`WorkspaceFileAccess.MaxFileBytes`）；Skill 资源 ≤1 MB；**入库**工具结果另有 `TranscriptToolResultLimiter.LimitStored`（64 KiB 字符）——回合内内存上下文可能持有比未来任何回合能重放的内容更多的东西 |
+| 增长来源上限 | MCP 结果序列化 ≤64 KiB（`McpToolResultFormatter`）；Shell 输出 ≤24k 字符（`ProcessRunner.MaxOutputCharacters`）；文件读取 >1 MB 直接拒绝（`WorkspaceFileAccess.MaxFileBytes`）；Skill 资源 ≤1 MB；搜索单行按匹配点开窗（≤1000 字符）且整次结果 ≤32 KiB（`WorkspaceSearchService`，超限时 `SizeLimitReached` / `MatchLimitReached` 显式告知）；工具结果文本统一由 `ToolResultTextLimits.Limit`（64 KiB 字符）在**工具边界**（`DirectToolInvoker`）就先截断——同一函数再由 `ConversationTurnRecorder` 作用于 CLI 结果。回合内内存上下文与落库/重放因此口径一致，状态栏显示的上下文尺寸可以在下一回合复现 |
 
 两个关键推论（决定了方案形态）：
 

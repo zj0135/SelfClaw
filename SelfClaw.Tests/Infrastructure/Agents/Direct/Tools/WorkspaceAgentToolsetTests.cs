@@ -8,6 +8,7 @@ using Microsoft.Extensions.AI;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Tools.Workspace;
@@ -69,6 +70,44 @@ public sealed class WorkspaceAgentToolsetTests
         });
 
         service.EditCalls.Should().ContainSingle().Which.ReplaceAll.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Invoke_search_text_keeps_the_payload_within_the_tool_result_limit()
+    {
+        // The largest result the search service can produce: its own budget, spent on windowed lines.
+        var hits = Enumerable.Range(0, 32)
+            .Select(index => new WorkspaceSearchHit(
+                Path.Combine("src", $"bundle{index:00}.min.css"), 1, new string('x', 1_024)))
+            .ToArray();
+        var service = new FakeWorkspaceToolService { SearchResult = new WorkspaceSearchResult(hits) };
+        var fixture = CreateTools(service, CreateWorkspace(), Guid.NewGuid(), ToolPermissionMode.FullAccess, null);
+
+        var result = (await fixture.InvokeAsync("search_text", new AIFunctionArguments { ["query"] = "needle" }))
+            .Should().BeOfType<DirectToolResult>().Subject;
+
+        result.Detail.Should().NotBeNull();
+        result.Detail!.Length.Should().BeLessThanOrEqualTo(ToolResultTextLimits.MaximumCharacters);
+        // The model reads Content in this turn and Detail is what storage keeps for the next one; both have to
+        // describe the same amount of text, or the context meter reports a size no replay can reproduce.
+        result.Content.GetRawText().Length.Should().BeLessThanOrEqualTo(ToolResultTextLimits.MaximumCharacters);
+    }
+
+    [Fact]
+    public async Task Invoke_search_text_reports_a_result_cut_by_the_size_limit()
+    {
+        var service = new FakeWorkspaceToolService
+        {
+            SearchResult = new WorkspaceSearchResult(
+                [new WorkspaceSearchHit("src/a.txt", 1, "needle")], SizeLimitReached: true)
+        };
+        var fixture = CreateTools(service, CreateWorkspace(), Guid.NewGuid(), ToolPermissionMode.FullAccess, null);
+
+        var result = (await fixture.InvokeAsync("search_text", new AIFunctionArguments { ["query"] = "needle" }))
+            .Should().BeOfType<DirectToolResult>().Subject;
+
+        result.Summary.Should().Contain("result size limit");
+        result.Detail.Should().Contain("src").And.Contain("needle");
     }
 
     [Fact]
@@ -426,6 +465,9 @@ public sealed class WorkspaceAgentToolsetTests
         public WorkspaceFileReadResult ReadResult { get; set; } =
             new(new WorkspaceFileContent("a.txt", "content", false));
 
+        /// <summary>Result handed back for every <c>search_text</c>; empty by default.</summary>
+        public WorkspaceSearchResult SearchResult { get; set; } = new([]);
+
         public Task<IReadOnlyList<WorkspaceFileEntry>> ListFilesAsync(
             string root,
             string? relativePath,
@@ -439,12 +481,12 @@ public sealed class WorkspaceAgentToolsetTests
             CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<WorkspaceFileEntry>>([]);
 
-        public Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(
+        public Task<WorkspaceSearchResult> SearchTextAsync(
             string root,
             string query,
             WorkspaceSearchOptions? options = null,
             CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<WorkspaceSearchHit>>([]);
+            => Task.FromResult(SearchResult);
 
         public Task<WorkspaceFileReadResult> ReadFileAsync(
             string root,

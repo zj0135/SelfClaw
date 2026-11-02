@@ -49,5 +49,5 @@ internal static class TranscriptTodoPresenter
         };
 
     private static string? LimitDetail(string? resultContent)
-        => resultContent is null ? null : TranscriptToolResultLimiter.LimitDisplayed(resultContent);
+        => resultContent is null ? null : TranscriptToolResultDisplayLimiter.LimitDisplayed(resultContent);
 }

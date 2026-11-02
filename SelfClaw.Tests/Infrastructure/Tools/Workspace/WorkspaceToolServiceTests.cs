@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Infrastructure.Tools.Workspace;
 
 namespace SelfClaw.Tests.Infrastructure.Tools.Workspace;
@@ -125,11 +126,42 @@ public sealed class WorkspaceToolServiceTests : IDisposable
     [Fact]
     public async Task Search_text_finds_matching_lines()
     {
-        var hits = await _service.SearchTextAsync(_rootPath, "markdown");
+        var search = await _service.SearchTextAsync(_rootPath, "markdown");
 
-        hits.Should().ContainSingle();
-        hits[0].RelativePath.Should().Be(Path.Combine("src", "demo.md"));
-        hits[0].LineText.Should().Contain("markdown");
+        search.Hits.Should().ContainSingle();
+        search.Hits[0].RelativePath.Should().Be(Path.Combine("src", "demo.md"));
+        search.Hits[0].LineText.Should().Be("streamed markdown");
+        search.MatchLimitReached.Should().BeFalse();
+        search.SizeLimitReached.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Search_text_windows_a_long_line_around_the_match()
+    {
+        // The incident this guards: one minified bundle line of ~400 KB answered a six-hit search with 156k
+        // tokens of context. The window must keep the match and nothing else.
+        var filler = new string('x', 200_000);
+        File.WriteAllText(Path.Combine(_rootPath, "src", "bundle.min.css"), filler + "needle" + filler);
+
+        var search = await _service.SearchTextAsync(_rootPath, "needle");
+
+        var hit = search.Hits.Should().ContainSingle().Subject;
+        hit.LineText.Should().Contain("needle", "the window must always hold what was searched for");
+        hit.LineText.Should().StartWith("…[+").And.EndWith("chars]", "both cuts are reported");
+        hit.LineText.Length.Should().BeLessThanOrEqualTo(WorkspaceSearchService.MaximumLineCharacters)
+            .And.BeGreaterThan(WorkspaceSearchService.LineContextCharacters);
+    }
+
+    [Fact]
+    public async Task Search_text_windows_a_multibyte_line_without_cutting_into_the_match()
+    {
+        // Ripgrep reports UTF-8 byte offsets; reading them as characters would place the window past the end.
+        var wide = string.Concat(Enumerable.Repeat("中文字符", 600));
+        File.WriteAllText(Path.Combine(_rootPath, "src", "wide.txt"), wide + "needle" + wide);
+
+        var search = await _service.SearchTextAsync(_rootPath, "needle");
+
+        search.Hits.Should().ContainSingle().Which.LineText.Should().Contain("needle");
     }
 
     [Fact]
@@ -140,8 +172,8 @@ public sealed class WorkspaceToolServiceTests : IDisposable
         var mdOnly = await _service.SearchTextAsync(
             _rootPath, "markdown", new WorkspaceSearchOptions { Glob = "**/*.md" });
 
-        mdOnly.Should().OnlyContain(hit => hit.RelativePath.EndsWith(".md"));
-        mdOnly.Should().ContainSingle();
+        mdOnly.Hits.Should().OnlyContain(hit => hit.RelativePath.EndsWith(".md"));
+        mdOnly.Hits.Should().ContainSingle();
     }
 
     [Fact]
@@ -153,7 +185,7 @@ public sealed class WorkspaceToolServiceTests : IDisposable
         var srcOnly = await _service.SearchTextAsync(
             _rootPath, "markdown", new WorkspaceSearchOptions { RelativePath = "src" });
 
-        srcOnly.Should().OnlyContain(hit => hit.RelativePath.StartsWith("src"));
+        srcOnly.Hits.Should().OnlyContain(hit => hit.RelativePath.StartsWith("src"));
     }
 
     [Fact]
@@ -161,10 +193,10 @@ public sealed class WorkspaceToolServiceTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_rootPath, "src", "codes.txt"), "id ABC123 done");
 
-        var hits = await _service.SearchTextAsync(
+        var search = await _service.SearchTextAsync(
             _rootPath, @"[A-Z]{3}\d{3}", new WorkspaceSearchOptions { IsRegex = true });
 
-        hits.Should().Contain(hit => hit.LineText.Contains("ABC123"));
+        search.Hits.Should().Contain(hit => hit.LineText.Contains("ABC123"));
     }
 
     [Fact]
@@ -175,22 +207,53 @@ public sealed class WorkspaceToolServiceTests : IDisposable
         var caseSensitive = await _service.SearchTextAsync(
             _rootPath, "MARKDOWN", new WorkspaceSearchOptions { CaseSensitive = true });
 
-        caseSensitive.Should().OnlyContain(hit => hit.LineText.Contains("MARKDOWN"));
-        caseSensitive.Should().NotContain(hit => hit.RelativePath.EndsWith("demo.md"));
+        caseSensitive.Hits.Should().OnlyContain(hit => hit.LineText.Contains("MARKDOWN"));
+        caseSensitive.Hits.Should().NotContain(hit => hit.RelativePath.EndsWith("demo.md"));
     }
 
     [Fact]
-    public async Task Search_text_max_results_caps_hits()
+    public async Task Search_text_max_results_caps_hits_and_says_more_may_exist()
     {
         for (var index = 0; index < 5; index++)
         {
             File.WriteAllText(Path.Combine(_rootPath, "src", $"hit{index}.txt"), "needle");
         }
 
-        var hits = await _service.SearchTextAsync(
+        var search = await _service.SearchTextAsync(
             _rootPath, "needle", new WorkspaceSearchOptions { MaxResults = 2 });
 
-        hits.Count.Should().BeLessThanOrEqualTo(2);
+        search.Hits.Count.Should().BeLessThanOrEqualTo(2);
+        search.MatchLimitReached.Should().BeTrue("a capped scan must not read as the repository total");
+    }
+
+    [Fact]
+    public async Task Search_text_stops_at_the_result_size_limit()
+    {
+        // Each file holds one long line, so every hit costs a full window and the budget runs out mid-list.
+        var filler = new string('y', 3_000);
+        for (var index = 0; index < 40; index++)
+        {
+            File.WriteAllText(Path.Combine(_rootPath, "src", $"bulk{index:00}.txt"), filler + "needle" + filler);
+        }
+
+        var search = await _service.SearchTextAsync(_rootPath, "needle");
+
+        search.SizeLimitReached.Should().BeTrue();
+        search.Hits.Count.Should().BeLessThan(40);
+        search.Hits.Count.Should().BeGreaterThan(0, "a query that matched must never come back empty");
+        search.Hits.Sum(hit => hit.RelativePath.Length + hit.LineText.Length)
+            .Should().BeLessThanOrEqualTo(WorkspaceSearchService.MaximumResultCharacters);
+    }
+
+    [Fact]
+    public void Search_result_budget_leaves_headroom_under_the_tool_result_limit()
+    {
+        // The payload re-encodes this text as JSON, where quotes and newlines expand, so the search budget has
+        // to stay below the limit that bounds what the model reads and what storage keeps.
+        WorkspaceSearchService.MaximumResultCharacters
+            .Should().BeLessThan(ToolResultTextLimits.MaximumCharacters);
+        WorkspaceSearchService.MaximumLineCharacters
+            .Should().BeLessThan(WorkspaceSearchService.MaximumResultCharacters);
     }
 
     [Fact]

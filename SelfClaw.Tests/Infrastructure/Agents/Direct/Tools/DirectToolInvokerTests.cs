@@ -7,6 +7,7 @@ using System.Text.Json;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Desktop.Services.Automation;
 using SelfClaw.Infrastructure.Agents.Runtime;
 
@@ -206,22 +207,65 @@ public sealed class DirectToolInvokerTests
         approvals.Requests.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task InvokeAsync_bounds_the_tool_result_text_before_it_leaves_the_invoker()
+    {
+        var huge = new string('x', ToolResultTextLimits.MaximumCharacters + 5_000);
+        var marshaled = new DirectToolResult(
+            ToolCallStatus.Completed,
+            "huge result",
+            JsonSerializer.SerializeToElement(new { length = huge.Length }),
+            huge);
+        var pipeline = CreatePipeline(ToolPermissionMode.FullAccess, null, marshaledResult: marshaled);
+
+        var result = await pipeline.InvokeAsync();
+
+        var bounded = result.Should().BeOfType<DirectToolResult>().Subject;
+        bounded.Detail.Should().HaveLength(ToolResultTextLimits.MaximumCharacters)
+            .And.EndWith("[SelfClaw truncated the tool result at 64 KiB.]");
+        // The structured payload is small here, so it must survive untouched: the limit trims text, it does
+        // not reshape what the model can read.
+        bounded.Content.GetRawText().Should().Contain("length");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_leaves_a_result_within_the_limit_identical()
+    {
+        var marshaled = new DirectToolResult(
+            ToolCallStatus.Completed, "small", JsonSerializer.SerializeToElement(new { ok = true }), "small");
+        var pipeline = CreatePipeline(ToolPermissionMode.FullAccess, null, marshaledResult: marshaled);
+
+        var result = await pipeline.InvokeAsync();
+
+        result.Should().BeSameAs(marshaled);
+    }
+
     private static TestPipeline CreatePipeline(
         ToolPermissionMode permissionMode,
         IToolApprovalHandler? approvalHandler,
         Func<List<string>, IToolExecutionCheckpoint>? checkpointFactory = null,
         bool requiresApproval = true,
-        DirectTurnOrigin origin = DirectTurnOrigin.Interactive)
+        DirectTurnOrigin origin = DirectTurnOrigin.Interactive,
+        DirectToolResult? marshaledResult = null)
     {
         var order = new List<string>();
+        var options = new AIFunctionFactoryOptions
+        {
+            Name = "mcp__git__echo",
+            Description = "Echo a value."
+        };
+        if (marshaledResult is not null)
+        {
+            options.MarshalResult = (_, _, _) => ValueTask.FromResult<object?>(marshaledResult);
+        }
+
         var function = AIFunctionFactory.Create(
             (string value) =>
             {
                 order.Add("tool");
                 return value;
             },
-            "mcp__git__echo",
-            "Echo a value.");
+            options);
         var binding = new DirectToolBinding(
             function,
             new DirectToolDescriptor(ToolCallKind.Run, ToolSourceKind.Mcp, "git", "echo"),

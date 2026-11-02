@@ -4,6 +4,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Direct.Tools;
@@ -124,7 +125,7 @@ internal sealed class DirectToolInvoker
         {
             var raw = await binding.Tool.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
             _consecutiveToolFaults = 0;
-            return raw;
+            return BoundPayload(raw);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -154,6 +155,22 @@ internal sealed class DirectToolInvoker
             throw new DirectToolFaultLimitException(binding.Tool.Name, consecutiveFaults, fault);
         }
     }
+
+    /// <summary>
+    /// Applies the tool-result text limit here, at the one seam every Direct tool result passes through, so the
+    /// turn's context, the transcript event and the stored row all carry the same text. Limiting only on the way
+    /// to storage would let the model read more in this turn than the next one can replay, which shows up as a
+    /// context size that never comes back. The structured payload is not touched: every tool that can grow one
+    /// bounds it where it is built (search budgets its result, reads page, shell output is capped), so the text
+    /// and the payload stay the same size by construction instead of being cut into a different shape here.
+    /// </summary>
+    private static object? BoundPayload(object? payload) => payload switch
+    {
+        DirectToolResult { Detail: { } detail } result when detail.Length > ToolResultTextLimits.MaximumCharacters
+            => result with { Detail = ToolResultTextLimits.Limit(detail) },
+        string text => ToolResultTextLimits.Limit(text),
+        _ => payload
+    };
 
     private async Task<ToolApprovalDecision> RequestApprovalAsync(
         DirectToolBinding binding,

@@ -1133,7 +1133,7 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
     {
         public Task<IReadOnlyList<WorkspaceFileEntry>> ListFilesAsync(string root, string? path, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<WorkspaceFileEntry>> GlobFilesAsync(string root, string pattern, string? path = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(string root, string query, WorkspaceSearchOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<WorkspaceSearchResult> SearchTextAsync(string root, string query, WorkspaceSearchOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WorkspaceFileReadResult> ReadFileAsync(string root, string path, int? startLine = null, int? lineCount = null, bool includeImageContent = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WorkspaceFileWriteResult> WriteFileAsync(string root, string path, string content, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WorkspaceFileWriteResult> EditFileAsync(string root, string path, string oldText, string newText, bool replaceAll = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();

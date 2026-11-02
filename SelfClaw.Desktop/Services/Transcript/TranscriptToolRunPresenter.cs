@@ -135,7 +135,7 @@ internal static class TranscriptToolRunPresenter
 
         if (!string.IsNullOrWhiteSpace(toolRun.ResultContent))
         {
-            return TranscriptToolResultLimiter.LimitDisplayed(toolRun.ResultContent);
+            return TranscriptToolResultDisplayLimiter.LimitDisplayed(toolRun.ResultContent);
         }
 
         using var arguments = ParseJsonObject(toolRun.ArgumentsJson);
@@ -149,7 +149,7 @@ internal static class TranscriptToolRunPresenter
             "write_file" or "edit_file" => BuildWriteRequestDetails(arguments),
             _ => toolRun.ResultSummary ?? PrettyPrintJson(toolRun.ArgumentsJson)
         };
-        return TranscriptToolResultLimiter.LimitDisplayed(detail);
+        return TranscriptToolResultDisplayLimiter.LimitDisplayed(detail);
     }
 
     private static string BuildAskUserSummary(JsonDocument? arguments)
@@ -173,7 +173,7 @@ internal static class TranscriptToolRunPresenter
         if (!string.IsNullOrWhiteSpace(toolRun.ResultContent))
         {
             // The stored result content already is the answered / not-answered wording the model received.
-            return TranscriptToolResultLimiter.LimitDisplayed(toolRun.ResultContent);
+            return TranscriptToolResultDisplayLimiter.LimitDisplayed(toolRun.ResultContent);
         }
 
         using var arguments = ParseJsonObject(toolRun.ArgumentsJson);
@@ -197,7 +197,7 @@ internal static class TranscriptToolRunPresenter
         }
 
         lines.Add("等待回答…");
-        return TranscriptToolResultLimiter.LimitDisplayed(string.Join(Environment.NewLine, lines));
+        return TranscriptToolResultDisplayLimiter.LimitDisplayed(string.Join(Environment.NewLine, lines));
     }
 
     private static JsonElement? ReadQuestions(JsonDocument? arguments)

@@ -94,10 +94,10 @@ public sealed class TranscriptTodoPresenterTests
     {
         var segment = TranscriptTodoPresenter.BuildTodoSegment(
             CreateRun(ThreeStepArguments, ToolExecutionStatus.Completed, "Updated plan (2/3)",
-                new string('x', TranscriptToolResultLimiter.MaximumDisplayedCharacters + 1_000)))
+                new string('x', TranscriptToolResultDisplayLimiter.MaximumDisplayedCharacters + 1_000)))
             ?? throw new InvalidOperationException("Missing todo segment.");
 
-        segment.DetailText.Should().HaveLength(TranscriptToolResultLimiter.MaximumDisplayedCharacters);
+        segment.DetailText.Should().HaveLength(TranscriptToolResultDisplayLimiter.MaximumDisplayedCharacters);
     }
 
     private static ToolExecutionRecord CreateRun(string argumentsJson, ToolExecutionStatus status,

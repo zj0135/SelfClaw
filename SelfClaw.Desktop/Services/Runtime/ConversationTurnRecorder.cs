@@ -4,6 +4,7 @@ using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.Transcript.Views;
 
@@ -226,7 +227,9 @@ internal sealed class ConversationTurnRecorder
         {
             Status = MapToolStatus(completed.Status),
             ResultSummary = completed.ResultSummary ?? started.ResultSummary,
-            ResultContent = completed.ResultContent is null ? started.ResultContent : TranscriptToolResultLimiter.LimitStored(completed.ResultContent),
+            // The same limit the tool boundary applies, so a Direct result is already within it and a CLI
+            // result (which the runtime never sees in memory) is bounded here before it reaches SQLite.
+            ResultContent = completed.ResultContent is null ? started.ResultContent : ToolResultTextLimits.Limit(completed.ResultContent),
             DurationMs = (now - started.CreatedAtUtc).TotalMilliseconds,
             UpdatedAtUtc = now
         };

@@ -9,8 +9,19 @@ internal static class WorkspaceToolSummaries
     public static string Summarize(IReadOnlyList<WorkspaceFileEntry> entries)
         => $"Listed {entries.Count} entries.";
 
-    public static string Summarize(IReadOnlyList<WorkspaceSearchHit> hits)
-        => $"Found {hits.Count} matching lines.";
+    public static string Summarize(WorkspaceSearchResult search)
+    {
+        if (search.SizeLimitReached)
+        {
+            return $"Found {search.Hits.Count} matching lines, then stopped at the result size limit; " +
+                "narrow the query or add a glob to see the rest.";
+        }
+
+        // The scan was cut at the cap, so the count is a floor and saying "Found N" would read as the total.
+        return search.MatchLimitReached
+            ? $"Found {search.Hits.Count} matching lines, stopping at the match limit; more matches may exist."
+            : $"Found {search.Hits.Count} matching lines.";
+    }
 
     public static string Summarize(WorkspaceFileContent content)
     {
@@ -62,7 +73,10 @@ internal static class WorkspaceToolSummaries
                     : $"[FILE] {entry.RelativePath}{FormatSizeSuffix(entry.SizeBytes)}"));
     }
 
-    public static string Describe(IReadOnlyList<WorkspaceSearchHit> hits)
+    public static string Describe(WorkspaceSearchResult search)
+        => Describe(search.Hits);
+
+    private static string Describe(IReadOnlyList<WorkspaceSearchHit> hits)
     {
         if (hits.Count == 0)
         {

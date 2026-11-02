@@ -15,7 +15,7 @@ public interface IWorkspaceToolService
         string? relativePath = null,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(
+    Task<WorkspaceSearchResult> SearchTextAsync(
         string workspaceRootPath,
         string query,
         WorkspaceSearchOptions? options = null,

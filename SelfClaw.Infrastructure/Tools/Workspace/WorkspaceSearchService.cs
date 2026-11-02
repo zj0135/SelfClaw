@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using SelfClaw.Core.Models;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Infrastructure.Processes;
 
 namespace SelfClaw.Infrastructure.Tools.Workspace;
@@ -11,9 +12,29 @@ internal sealed class WorkspaceSearchService
     private const int MaxListedEntries = 250;
     private const int MaxSearchHits = 80;
     private const int SearchTimeoutSeconds = 60;
+
+    /// <summary>
+    /// One match keeps at most this much of its line. Generated artifacts (minified bundles, single-line JSON)
+    /// put an entire file on one line, and shipping that whole line costs more context than the rest of the
+    /// turn while telling the model nothing it can act on. Ordinary source lines are far shorter and pass
+    /// through untouched.
+    /// </summary>
+    internal const int MaximumLineCharacters = 1_000;
+
+    /// <summary>Characters kept on each side of the match when a line has to be windowed.</summary>
+    internal const int LineContextCharacters = 400;
+
+    /// <summary>
+    /// Total budget for one result. It stays well under <see cref="ToolResultTextLimits.MaximumCharacters"/>
+    /// because the structured payload re-encodes the same text as JSON, where quotes and newlines expand.
+    /// </summary>
+    internal const int MaximumResultCharacters = 32 * 1024;
+
+    private const string Ellipsis = "…";
+
     private readonly Lazy<string> _ripgrepPath = new(ResolveBundledRipgrep);
 
-    public async Task<IReadOnlyList<WorkspaceSearchHit>> SearchTextAsync(
+    public async Task<WorkspaceSearchResult> SearchTextAsync(
         string workspaceRootPath,
         string query,
         WorkspaceSearchOptions? options = null,
@@ -42,8 +63,9 @@ internal sealed class WorkspaceSearchService
 
         // Ripgrep is bundled with the app: multi-threaded, honours .gitignore,
         // and beats a hand-rolled managed scan by 1-2 orders of magnitude.
-        return await SearchWithRipgrepAsync(
+        var (hits, matchLimitReached) = await SearchWithRipgrepAsync(
             root, searchRoot, query, options, maxResults, cancellationToken).ConfigureAwait(false);
+        return ApplySizeLimit(hits, matchLimitReached);
     }
 
     public async Task<IReadOnlyList<WorkspaceFileEntry>> GlobFilesAsync(
@@ -137,7 +159,7 @@ internal sealed class WorkspaceSearchService
         return false;
     }
 
-    private async Task<IReadOnlyList<WorkspaceSearchHit>> SearchWithRipgrepAsync(
+    private async Task<(IReadOnlyList<WorkspaceSearchHit> Hits, bool MatchLimitReached)> SearchWithRipgrepAsync(
         string root,
         string searchRoot,
         string query,
@@ -189,7 +211,7 @@ internal sealed class WorkspaceSearchService
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         try
         {
-            var hits = await ReadMatchesAsync(process, root, maxResults, cancellationToken)
+            var (hits, matchLimitReached) = await ReadMatchesAsync(process, root, maxResults, cancellationToken)
                 .WaitAsync(TimeSpan.FromSeconds(SearchTimeoutSeconds), cancellationToken).ConfigureAwait(false);
             var error = await errorTask.ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
@@ -198,7 +220,7 @@ internal sealed class WorkspaceSearchService
                 throw new InvalidOperationException($"Workspace search failed: {error.Trim()}");
             }
 
-            return hits;
+            return (hits, matchLimitReached);
         }
         catch (TimeoutException exception)
         {
@@ -210,7 +232,7 @@ internal sealed class WorkspaceSearchService
         }
     }
 
-    private static async Task<IReadOnlyList<WorkspaceSearchHit>> ReadMatchesAsync(
+    private static async Task<(IReadOnlyList<WorkspaceSearchHit> Hits, bool MatchLimitReached)> ReadMatchesAsync(
         Process process, string root, int maxResults, CancellationToken cancellationToken)
     {
         var hits = new List<WorkspaceSearchHit>(maxResults);
@@ -222,13 +244,40 @@ internal sealed class WorkspaceSearchService
             hits.Add(hit);
             if (hits.Count >= maxResults)
             {
+                // The cap stopped the scan, so matches may remain unseen; the caller reports that instead of
+                // letting the hit count read as the repository total.
                 ProcessTree.TryKill(process);
-                break;
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                return (hits, true);
             }
         }
 
         await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        return hits;
+        return (hits, false);
+    }
+
+    /// <summary>
+    /// Stops adding matches once the next one would exceed the result budget. One hit is always kept, because
+    /// a single windowed line fits by construction and returning nothing for a query that did match is a lie.
+    /// </summary>
+    private static WorkspaceSearchResult ApplySizeLimit(
+        IReadOnlyList<WorkspaceSearchHit> hits, bool matchLimitReached)
+    {
+        var kept = new List<WorkspaceSearchHit>(hits.Count);
+        var used = 0;
+        foreach (var hit in hits)
+        {
+            var cost = hit.RelativePath.Length + hit.LineText.Length;
+            if (kept.Count > 0 && used + cost > MaximumResultCharacters)
+            {
+                return new WorkspaceSearchResult(kept, matchLimitReached, SizeLimitReached: true);
+            }
+
+            kept.Add(hit);
+            used += cost;
+        }
+
+        return new WorkspaceSearchResult(kept, matchLimitReached, SizeLimitReached: false);
     }
 
     private static WorkspaceSearchHit? ParseRipgrepMatch(string jsonLine, string root)
@@ -254,12 +303,101 @@ internal sealed class WorkspaceSearchService
             }
 
             var relativePath = Path.IsPathRooted(path) ? Path.GetRelativePath(root, path) : path;
-            return new WorkspaceSearchHit(relativePath, lineNumber, (lineText ?? string.Empty).Trim());
+            // Trim only after windowing: ripgrep's submatch offsets point into the untrimmed line.
+            return new WorkspaceSearchHit(relativePath, lineNumber, WindowLine(lineText ?? string.Empty, data).Trim());
         }
         catch (JsonException)
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Keeps a short line whole and windows a long one around the match. Cutting the head off instead would
+    /// hand the model a line that does not contain what it searched for and read as "no match here", while
+    /// sending the line whole is what made one generated bundle cost a fifth of the context window. The
+    /// markers state how many characters are missing on each side so the model can decide to page the file.
+    /// </summary>
+    private static string WindowLine(string line, JsonElement data)
+    {
+        if (line.Length <= MaximumLineCharacters)
+        {
+            return line;
+        }
+
+        var (matchStart, matchLength) = ReadFirstMatch(data, line);
+        var length = Math.Min(matchLength, MaximumLineCharacters);
+        var context = Math.Clamp((MaximumLineCharacters - length) / 2, 0, LineContextCharacters);
+        var start = Math.Max(0, matchStart - context);
+        var end = Math.Min(line.Length, matchStart + length + context);
+
+        var window = new StringBuilder(end - start + 48);
+        if (start > 0)
+        {
+            window.Append(Ellipsis).Append("[+").Append(start).Append(" chars] ");
+        }
+
+        window.Append(line, start, end - start);
+        if (end < line.Length)
+        {
+            window.Append(' ').Append(Ellipsis).Append("[+").Append(line.Length - end).Append(" chars]");
+        }
+
+        return window.ToString();
+    }
+
+    /// <summary>
+    /// The first submatch of the line: where the window starts and how much of it the window must keep. A
+    /// missing submatch falls back to the head of the line, which is what a window without a match becomes.
+    /// </summary>
+    private static (int Start, int Length) ReadFirstMatch(JsonElement data, string line)
+    {
+        if (!data.TryGetProperty("submatches", out var submatches) ||
+            submatches.ValueKind != JsonValueKind.Array || submatches.GetArrayLength() == 0)
+        {
+            return (0, 0);
+        }
+
+        var first = submatches[0];
+        var start = first.TryGetProperty("start", out var startElement) && startElement.TryGetInt32(out var byteOffset)
+            ? CharIndexAtByteOffset(line, byteOffset)
+            : 0;
+        var matchLength = first.TryGetProperty("match", out var matchElement)
+            ? ReadRipgrepText(matchElement)?.Length ?? 0
+            : 0;
+        return (start, matchLength);
+    }
+
+    /// <summary>
+    /// Converts a UTF-8 byte offset into the character index of the same position: ripgrep reports bytes, and a
+    /// window built on those would cut multi-byte characters (CJK comments, emoji) in half.
+    /// </summary>
+    private static int CharIndexAtByteOffset(string text, int byteOffset)
+    {
+        if (byteOffset <= 0)
+        {
+            return 0;
+        }
+
+        var bytes = 0;
+        for (var index = 0; index < text.Length; index++)
+        {
+            if (bytes >= byteOffset)
+            {
+                return index;
+            }
+
+            if (char.IsHighSurrogate(text[index]) && index + 1 < text.Length)
+            {
+                bytes += 4;
+                index++;
+                continue;
+            }
+
+            bytes += text[index] < 0x80 ? 1 : text[index] < 0x800 ? 2 : 3;
+        }
+
+        return text.Length;
     }
 
     private static string? ReadRipgrepText(JsonElement element)

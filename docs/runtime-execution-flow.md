@@ -68,6 +68,8 @@ Desktop 不再补齐默认模型。排队 child 与 continuation 使用捕获的
 
 `DirectToolResult` 携带 `Status`、`Summary`、模型 `Content` 与展示 `Detail`；`Detail` 不参与 provider JSON 序列化。工作区、Skill 与子代理函数使用 SDK `MarshalResult`；MCP 在自己的适配层规范化结果。主循环只解释统一契约和 SDK 异常，未知结果不再默认成功。
 
+工具结果文本只有一份上限：`ToolResultTextLimits.Limit`（64 KiB 字符，带 `[SelfClaw truncated the tool result at 64 KiB.]` 标记）。`DirectToolInvoker` 在返回结果**之前**套用它（同一函数再由 `ConversationTurnRecorder` 用于 CLI 结果），因此回合内上下文、转录事件与 `tool_runs.result_content` 携带的是同一段文本——库里的尺寸永远等于模型当时读到的尺寸，状态栏的“当前上下文”才能在下一回合复现。工具自身的产出上限（`read_file` 24k 字符分页、shell 24k、MCP 序列化 64 KiB、`search_text` 单行 1,000 字符开窗 + 整次结果 32 KiB）都在构造结果时生效；`search_text` 被截断时汇总行显式说明触顶（`MatchLimitReached` / `SizeLimitReached`），不会让命中数被误读成仓库总量。`Content` 与 `Detail` 同源同尺寸是测试锁住的不变量（`WorkspaceAgentToolsetTests`），新增工具必须自带产出上限，不要依赖边界截断。
+
 `read_file` 读到图片时结果额外带 `ModelContents`（header 文本 + `DataContent`），主循环按模型能力选两种投递：`Native`（Anthropic Messages / OpenAI Responses）把图片和 header 一起放进 tool result，`FollowUpUserMessage`（Chat Completions）让 tool 消息保持纯文本、整批图片合并进其后的一条 user 消息且绝不插在两条 tool 消息之间。图片是 **live-only**：`Content`、`Detail`、事件、落库与压缩摘要里都只有文本，后续回合重放的是那条文本记录。
 
 审批拒绝返回 `Canceled` 和拒绝摘要，recorder 持久化为 `Cancelled`；实际取消异常沿异步调用传播。`DirectToolInvoker` 负责审批、steer 执行准入与 checkpoint，是唯一的工具执行缝，MCP 大小限制不再注入审批包装。工具自身抛出的非取消异常不再中止回合：它被转成 `Failed` 的 `DirectToolResult`（模型可见真实错误，`Detail` 保留仅展示的堆栈），并由 invoker 自持连续故障预算 `MaximumConsecutiveToolFaults = 2`；连续故障超过预算时抛 `DirectToolFaultLimitException` 并终止回合——机制是显式循环，SDK 管线没有 `UseFunctionInvocation`，也不存在 `MaximumConsecutiveErrorsPerRequest` / `MaximumIterationsPerRequest` 这类管线设置。因此持续损坏的工具最多消耗 3 次尝试（预算 + 1）与 3 次 provider 往返，而不是 128 次请求预算。未绑定工具、执行 checkpoint 失败等 invoker 层其他异常同样直接沿异步调用传播并终止回合。返回 `Failed` 但不抛异常的常规失败（如 shell 非零退出）不计入预算，仍可反复执行。

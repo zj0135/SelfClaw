@@ -2,6 +2,7 @@ using FluentAssertions;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
+using SelfClaw.Core.Runtime.Tooling;
 using SelfClaw.Desktop.Services.Runtime;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.Transcript.Views;
@@ -121,10 +122,10 @@ public sealed class ConversationTurnRecorderTests
         await context.StartAsync();
         await context.ApplyAsync(new ToolCallStartedEvent("call-1", "read_file", "{}", ToolCallKind.Read));
         await context.ApplyAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "read file",
-            new string('x', TranscriptToolResultLimiter.MaximumStoredCharacters + 1000)));
+            new string('x', ToolResultTextLimits.MaximumCharacters + 1000)));
         var tool = (await context.Conversations.ListToolExecutionsAsync(context.Conversation.Id)).Single();
-        tool.ResultContent.Should().HaveLength(TranscriptToolResultLimiter.MaximumStoredCharacters)
-            .And.EndWith("[SelfClaw truncated the stored tool result at 64 KiB.]");
+        tool.ResultContent.Should().HaveLength(ToolResultTextLimits.MaximumCharacters)
+            .And.EndWith("[SelfClaw truncated the tool result at 64 KiB.]");
         var message = (await context.Conversations.ListMessagesAsync(context.Conversation.Id)).Single(item => item.Id == tool.MessageId);
         message.Status.Should().Be(MessageStatus.Streaming, "progress persists the real fragment together with its tool");
     }

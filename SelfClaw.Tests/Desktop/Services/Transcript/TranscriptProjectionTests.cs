@@ -181,13 +181,13 @@ public sealed class TranscriptProjectionTests
             now,
             now,
             MessageId: message.Id,
-            ResultContent: new string('x', TranscriptToolResultLimiter.MaximumDisplayedCharacters + 1_000));
+            ResultContent: new string('x', TranscriptToolResultDisplayLimiter.MaximumDisplayedCharacters + 1_000));
 
         var state = CreateProjection().Build(CreateRequest(messages: [message], toolRuns: [toolRun]));
 
         state.Should().NotBeNull();
         state!.Items.Single().Segments.Single(segment => segment.Kind == "tool").DetailText
-            .Should().HaveLength(TranscriptToolResultLimiter.MaximumDisplayedCharacters)
+            .Should().HaveLength(TranscriptToolResultDisplayLimiter.MaximumDisplayedCharacters)
             .And.EndWith("[SelfClaw truncated the displayed tool result at 24 KiB.]");
     }
 
