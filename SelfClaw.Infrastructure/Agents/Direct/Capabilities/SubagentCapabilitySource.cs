@@ -1,5 +1,6 @@
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
+using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using System.ComponentModel;
 using System.Text.Json;
@@ -73,14 +74,14 @@ internal sealed class SubagentCapabilitySource
             [CapabilitySections.SubagentCatalog(ResolveCatalog(subagentIds), DelegateToolName, GetTaskToolName)],
             [
                 CreateDelegateTool(bound, subagentIds),
-                Create(bound.GetAsync, GetTaskToolName, GetTaskDescription,
-                    ToolCallKind.Read, GetTaskDisplayName),
-                Create(bound.CancelAsync, CancelTaskToolName,
+                DirectToolBindings.Create(bound.GetAsync, GetTaskToolName, GetTaskDescription,
+                    ToolCallKind.Read, ToolSourceKind.BuiltIn, GetTaskDisplayName),
+                DirectToolBindings.Create(bound.CancelAsync, CancelTaskToolName,
                     "Cancel a queued or running Subagent task created by this conversation.",
-                    ToolCallKind.Run, CancelTaskDisplayName),
-                Create(bound.RetryAsync, RetryTaskToolName,
+                    ToolCallKind.Run, ToolSourceKind.BuiltIn, CancelTaskDisplayName),
+                DirectToolBindings.Create(bound.RetryAsync, RetryTaskToolName,
                     "Retry a terminal Subagent task as a new durable attempt.",
-                    ToolCallKind.Run, RetryTaskDisplayName)
+                    ToolCallKind.Run, ToolSourceKind.BuiltIn, RetryTaskDisplayName)
             ]);
     }
 
@@ -107,19 +108,13 @@ internal sealed class SubagentCapabilitySource
 
     private static DirectToolBinding CreateDelegateTool(BoundTools bound, IReadOnlyList<string> subagentIds)
     {
-        var tool = AIFunctionFactory.Create(bound.DelegateAsync, new AIFunctionFactoryOptions
+        var binding = DirectToolBindings.Create(bound.DelegateAsync, DelegateToolName,
+            CreateDelegateDescription(subagentIds), ToolCallKind.Run, ToolSourceKind.BuiltIn, DelegateDisplayName);
+        return binding with
         {
-            Name = DelegateToolName,
-            Description = CreateDelegateDescription(subagentIds),
-            ExcludeResultSchema = true,
-            MarshalResult = MarshalDirectResult(DelegateToolName)
-        });
-        return new DirectToolBinding(
-            new EnumeratedSubagentFunction(tool, EnumerateSubagentIds(tool.JsonSchema, subagentIds)),
-            new DirectToolDescriptor(
-                ToolCallKind.Run,
-                ToolSourceKind.BuiltIn,
-                DisplayName: DelegateDisplayName));
+            Tool = new EnumeratedSubagentFunction(binding.Tool,
+                EnumerateSubagentIds(binding.Tool.JsonSchema, subagentIds))
+        };
     }
 
     private static string CreateDelegateDescription(IReadOnlyList<string> subagentIds)
@@ -146,23 +141,6 @@ internal sealed class SubagentCapabilitySource
         parameter["enum"] = new JsonArray(subagentIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
         return JsonDocument.Parse(root.ToJsonString()).RootElement.Clone();
     }
-
-    private static DirectToolBinding Create(
-        Delegate method,
-        string name,
-        string description,
-        ToolCallKind kind,
-        string displayName)
-        => new(AIFunctionFactory.Create(method, new AIFunctionFactoryOptions
-        {
-            Name = name, Description = description, ExcludeResultSchema = true,
-            MarshalResult = MarshalDirectResult(name)
-        }), new DirectToolDescriptor(kind, ToolSourceKind.BuiltIn, DisplayName: displayName));
-
-    private static Func<object?, Type?, CancellationToken, ValueTask<object?>> MarshalDirectResult(string toolName)
-        => (value, _, _) => value is DirectToolResult result
-            ? ValueTask.FromResult<object?>(result)
-            : throw new InvalidOperationException($"Tool '{toolName}' returned an invalid result.");
 
     /// <summary>
     /// Replaces the generated schema with the allowlist-constrained one. <see cref="DelegatingAIFunction"/>

@@ -35,7 +35,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 
 1. DTO 是纯数据载体（`record` + 主构造器），无方法、逻辑或副作用；一个文件只放一个 DTO 或一个服务类，绝不混放。
 2. 领域契约放 `SelfClaw.Core/Interfaces/<Feature>/`；仅 Infrastructure 内部使用的抽象放 `SelfClaw.Infrastructure/<Feature>/Abstractions/`；接口保持 1–5 个方法。
-3. 非为继承设计的类一律 `sealed`；DI 注册的内部类型用 `internal sealed`；依赖以 private `_camelCase` 字段构造注入，字段列在构造函数之前；类内顺序：字段 → 构造 → 主公开方法 → 私有辅助。
+3. 非为继承设计的类一律 `sealed`；DI 注册的内部类型用 `internal sealed`；依赖以 private `_camelCase` 字段构造注入，字段列在构造函数之前；类内顺序：字段 → 构造 → 主公开方法 → 私有辅助。`internal` 构造函数的服务在 `ServiceCollectionExtensions` 必须用工厂 lambda 注册：`AddSingleton<T>()` 的约定解析看不到 `internal` 构造函数。
 4. 公开方法超 40–50 行即拆分；无状态辅助用 `private static`。
 5. 异步方法一律 `Async` 后缀；公开名不用缩写（`Conversation` 而非 `Conv`）。
 6. Infrastructure 全量 `ConfigureAwait(false)`，Desktop ViewModel 不加；`OperationCanceledException` 必须重抛、绝不转成失败结果；流式用 `IAsyncEnumerable<T>` + `Channel<T>`。

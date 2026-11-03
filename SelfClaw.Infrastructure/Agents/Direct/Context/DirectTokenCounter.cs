@@ -80,8 +80,6 @@ internal sealed class DirectTokenCounter : IDirectTokenCounter
         _tokenizerFactory = tokenizerFactory ?? CreateTiktokenCounter;
     }
 
-    public bool IsAvailable(AiModelProfile? model) => EnsureCountTokens(ResolveEncodingName(model)) is not null;
-
     public int? CountText(string? text, AiModelProfile? model)
     {
         if (EnsureCountTokens(ResolveEncodingName(model)) is not { } countTokens)

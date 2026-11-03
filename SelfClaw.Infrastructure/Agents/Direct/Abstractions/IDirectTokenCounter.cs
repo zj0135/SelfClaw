@@ -11,8 +11,6 @@ namespace SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 /// </summary>
 internal interface IDirectTokenCounter
 {
-    bool IsAvailable(AiModelProfile? model);
-
     int? CountText(string? text, AiModelProfile? model);
 
     int? CountMessages(IReadOnlyList<ChatMessage> messages, AiModelProfile? model);

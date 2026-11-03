@@ -1,8 +1,8 @@
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.AI;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Extensions.Skills;
 using SelfClaw.Infrastructure.Extensions.Skills.Models;
@@ -44,56 +44,38 @@ internal sealed class SkillRuntimeToolset
         var bound = new BoundSkillTools(skills, explicitlyActivatedSkillIds, _scriptRunner);
         return
         [
-            CreateBinding(
+            DirectToolBindings.Create(
                 bound.ActivateSkillAsync,
                 ActivateSkillToolName,
                 "Load the complete instructions for an available Skill for this turn.",
-                "Activate Skill",
-                ToolCallKind.Read),
-            CreateBinding(
+                ToolCallKind.Read, ToolSourceKind.Skill, "Activate Skill"),
+            DirectToolBindings.Create(
                 bound.ReadSkillResourceAsync,
                 ReadSkillResourceToolName,
                 "Read a paged UTF-8 resource from a Skill that is activated for this turn. A script can be "
                     + "inspected this way, but must be executed with " + RunSkillScriptToolName + ".",
-                "Read Skill resource",
-                ToolCallKind.Read),
-            CreateBinding(
+                ToolCallKind.Read, ToolSourceKind.Skill, "Read Skill resource"),
+            DirectToolBindings.Create(
                 bound.RunSkillScriptAsync,
                 RunSkillScriptToolName,
                 "Execute a script that an activated Skill owns. The script runs with the Skill directory as "
                     + "its working directory and inherits only a minimal environment.",
-                "Run skill script",
-                ToolCallKind.Run,
+                ToolCallKind.Run, ToolSourceKind.Skill, "Run skill script",
                 requiresApproval: true),
-            CreateBinding(
+            DirectToolBindings.Create(
                 bound.ListSkillResourcesAsync,
                 ListSkillResourcesToolName,
                 "Page through every file an activated Skill owns, labelled as a readable resource or an "
                     + "executable script. Use it when the activation summary was truncated.",
-                "List Skill resources",
-                ToolCallKind.List)
+                ToolCallKind.List, ToolSourceKind.Skill, "List Skill resources")
         ];
     }
-
-    private static DirectToolBinding CreateBinding(
-        Delegate method,
-        string name,
-        string description,
-        string displayName,
-        ToolCallKind kind,
-        bool requiresApproval = false)
-        => new(AIFunctionFactory.Create(method, new AIFunctionFactoryOptions
-        {
-            Name = name, Description = description, ExcludeResultSchema = true,
-            MarshalResult = (value, _, _) => ValueTask.FromResult(value)
-        }), new DirectToolDescriptor(kind, ToolSourceKind.Skill, DisplayName: displayName), requiresApproval);
 
     private sealed class BoundSkillTools
     {
         private readonly IReadOnlyDictionary<string, ResolvedSkill> _skills;
         private readonly HashSet<string> _activatedSkillIds;
         private readonly SkillScriptRunner _scriptRunner;
-        private readonly object _gate = new();
 
         public BoundSkillTools(
             IReadOnlyList<ResolvedSkill> skills,
@@ -110,28 +92,28 @@ internal sealed class SkillRuntimeToolset
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_skills.TryGetValue(skillId, out var skill))
+            if (!TryResolve(skillId, out var skill, out var failure))
             {
-                return Task.FromResult(Result($"Skill '{skillId}' is not available to the current Agent.", failed: true));
+                return Task.FromResult(failure);
             }
 
-            lock (_gate)
+            // The loop executes a turn's tools one at a time on this per-turn instance, so the activated set
+            // needs no lock: activation is only ever written here and read by the other three tools.
+            if (_activatedSkillIds.Contains(skill.Id))
             {
-                if (_activatedSkillIds.Contains(skill.Id))
-                {
-                    return Task.FromResult(Result($"Skill '{skill.Id}' is already activated for this turn."));
-                }
-
-                if (_activatedSkillIds.Count >= MaximumActivatedSkills)
-                {
-                    return Task.FromResult(Result("This turn has reached the limit of 5 activated Skills.", failed: true));
-                }
-
-                _activatedSkillIds.Add(skill.Id);
+                var alreadyActive = $"Skill '{skill.Id}' is already activated for this turn.";
+                return Task.FromResult(Loaded(alreadyActive, alreadyActive));
             }
 
-            return Task.FromResult(Result(
-                $"{skill.Content}\n\n{SkillResourceFormatter.Manifest(skill.Id, skill.Resources)}"));
+            if (_activatedSkillIds.Count >= MaximumActivatedSkills)
+            {
+                return Task.FromResult(Failed("This turn has reached the limit of 5 activated Skills."));
+            }
+
+            _activatedSkillIds.Add(skill.Id);
+            return Task.FromResult(Loaded(
+                $"{skill.Content}\n\n{SkillResourceFormatter.Manifest(skill.Id, skill.Resources)}",
+                $"Activated Skill '{skill.Id}'."));
         }
 
         public async Task<DirectToolResult> ReadSkillResourceAsync(
@@ -142,43 +124,35 @@ internal sealed class SkillRuntimeToolset
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_skills.TryGetValue(skillId, out var skill))
+            if (!TryResolveActivated(skillId, out var skill, out var failure))
             {
-                return Result($"Skill '{skillId}' is not available to the current Agent.", failed: true);
-            }
-
-            lock (_gate)
-            {
-                if (!_activatedSkillIds.Contains(skill.Id))
-                {
-                    return Result($"Skill '{skill.Id}' is not activated for this turn.", failed: true);
-                }
+                return failure;
             }
 
             var filePath = SkillPathGuard.ResolveWithinRoot(skill.InstallPath, relativePath);
             if (!File.Exists(filePath))
             {
-                return Result($"Skill resource '{relativePath}' was not found.", failed: true);
+                return Failed($"Skill resource '{relativePath}' was not found.");
             }
 
             SkillPathGuard.EnsureNoReparsePoints(skill.InstallPath, filePath);
             var kind = SkillResourceIndexer.Classify(Path.GetExtension(filePath));
             if (kind is null)
             {
-                return Result($"Skill resource '{relativePath}' is not an allowed text file type.", failed: true);
+                return Failed($"Skill resource '{relativePath}' is not an allowed text file type.");
             }
 
             var file = new FileInfo(filePath);
             if (file.Length > MaximumResourceBytes)
             {
-                return Result($"Skill resource '{relativePath}' exceeds the {MaximumResourceBytes} byte limit.", failed: true);
+                return Failed($"Skill resource '{relativePath}' exceeds the {MaximumResourceBytes} byte limit.");
             }
 
             var firstLine = startLine ?? 1;
             var count = lineCount ?? DefaultLineCount;
             if (firstLine <= 0 || count <= 0 || count > MaximumLineCount)
             {
-                return Result("startLine must be positive and lineCount must be between 1 and 500.", failed: true);
+                return Failed("startLine must be positive and lineCount must be between 1 and 500.");
             }
 
             string content;
@@ -197,19 +171,20 @@ internal sealed class SkillRuntimeToolset
             var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
             if (firstLine > lines.Length)
             {
-                return Result($"startLine {firstLine} exceeds the resource's {lines.Length} lines.", failed: true);
+                return Failed($"startLine {firstLine} exceeds the resource's {lines.Length} lines.");
             }
 
             var selected = lines.Skip(firstLine - 1).Take(count).ToArray();
             var lastLine = firstLine + selected.Length - 1;
+            var range = $"lines {firstLine}-{lastLine} of {lines.Length}";
             // A script stays readable so the model can confirm the parameters it takes, but the result has to
             // say what it is: reading a script and running it are different acts, and conflating them is
             // what produced the reimplemented-in-shell behaviour this toolset exists to remove.
             var header = kind == SkillResourceKind.Script
-                ? $"{relativePath} [script] (lines {firstLine}-{lastLine} of {lines.Length})\n"
+                ? $"{relativePath} [script] ({range})\n"
                     + $"Executable script: run it with {RunSkillScriptToolName} instead of transcribing or reimplementing its body.\n"
-                : $"{relativePath} (lines {firstLine}-{lastLine} of {lines.Length})\n";
-            return Result(header + string.Join("\n", selected));
+                : $"{relativePath} ({range})\n";
+            return Loaded(header + string.Join("\n", selected), $"Read {relativePath} ({range}).");
         }
 
         public async Task<DirectToolResult> RunSkillScriptAsync(
@@ -220,17 +195,9 @@ internal sealed class SkillRuntimeToolset
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_skills.TryGetValue(skillId, out var skill))
+            if (!TryResolveActivated(skillId, out var skill, out var failure))
             {
-                return Result($"Skill '{skillId}' is not available to the current Agent.", failed: true);
-            }
-
-            lock (_gate)
-            {
-                if (!_activatedSkillIds.Contains(skill.Id))
-                {
-                    return Result($"Skill '{skill.Id}' is not activated for this turn.", failed: true);
-                }
+                return failure;
             }
 
             var result = await _scriptRunner.RunAsync(
@@ -255,17 +222,9 @@ internal sealed class SkillRuntimeToolset
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_skills.TryGetValue(skillId, out var skill))
+            if (!TryResolveActivated(skillId, out var skill, out var failure))
             {
-                return Task.FromResult(Result($"Skill '{skillId}' is not available to the current Agent.", failed: true));
-            }
-
-            lock (_gate)
-            {
-                if (!_activatedSkillIds.Contains(skill.Id))
-                {
-                    return Task.FromResult(Result($"Skill '{skill.Id}' is not activated for this turn.", failed: true));
-                }
+                return Task.FromResult(failure);
             }
 
             var scoped = ScopeResources(skill, relativeDirectory);
@@ -277,6 +236,42 @@ internal sealed class SkillRuntimeToolset
                 $"Listed {page.Length} of {scoped.Count} Skill resources.",
                 JsonSerializer.SerializeToElement(page),
                 SkillResourceFormatter.Listing(skill.Id, page, from, scoped.Count, skill.Resources.Truncated)));
+        }
+
+        private bool TryResolve(string skillId, [NotNullWhen(true)] out ResolvedSkill? skill,
+            [NotNullWhen(false)] out DirectToolResult? failure)
+        {
+            if (_skills.TryGetValue(skillId, out var resolved))
+            {
+                skill = resolved;
+                failure = null;
+                return true;
+            }
+
+            skill = null;
+            failure = Failed($"Skill '{skillId}' is not available to the current Agent.");
+            return false;
+        }
+
+        /// <summary>
+        /// Every tool except activate_skill only operates on a Skill the turn has activated; both rejections
+        /// reach the model as a Failed result so it can activate the Skill and retry.
+        /// </summary>
+        private bool TryResolveActivated(string skillId, [NotNullWhen(true)] out ResolvedSkill? skill,
+            [NotNullWhen(false)] out DirectToolResult? failure)
+        {
+            if (!TryResolve(skillId, out skill, out failure))
+            {
+                return false;
+            }
+
+            if (_activatedSkillIds.Contains(skill.Id))
+            {
+                return true;
+            }
+
+            failure = Failed($"Skill '{skill.Id}' is not activated for this turn.");
+            return false;
         }
 
         /// <summary>
@@ -313,8 +308,17 @@ internal sealed class SkillRuntimeToolset
             return detail.ToString();
         }
 
-        private static DirectToolResult Result(string text, bool failed = false)
-            => new(failed ? ToolCallStatus.Failed : ToolCallStatus.Completed,
-                failed ? text : "Skill content loaded.", JsonSerializer.SerializeToElement(text), text);
+        /// <summary>
+        /// One shape for a model-correctable rejection: the message is the summary, the model content and the
+        /// detail, because there is nothing else to say about a call that never ran.
+        /// </summary>
+        private static DirectToolResult Failed(string text)
+            => new(ToolCallStatus.Failed, text, JsonSerializer.SerializeToElement(text), text);
+
+        /// <summary>
+        /// A successful result says in one line what the call did; the loaded content stays in the detail.
+        /// </summary>
+        private static DirectToolResult Loaded(string text, string summary)
+            => new(ToolCallStatus.Completed, summary, JsonSerializer.SerializeToElement(text), text);
     }
 }

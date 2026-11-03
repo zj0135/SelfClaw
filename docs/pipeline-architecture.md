@@ -114,9 +114,9 @@ flowchart TB
     CAP --> S4["④ DirectToolInvoker<br/>审批 / steer 执行准入 / checkpoint / 连续故障预算<br/>唯一工具执行缝"]
     S4 --> S5["⑤ AiChatClientFactory.Create<br/>按回合 HttpClient (共享 pooled handler)<br/>provider adapter → CreateChatOptions/Client<br/>ChatClientBuilder: 仅 UseLogging → AiChatClientLease"]
     S5 --> S6["⑥ RunStartedEvent(direct-{guid}, model)<br/>+ RunStatusEvent(Requesting)"]
-    S6 --> S6B["⑥b 计数 + 压缩（回合开始）<br/>读策略 → IDirectTokenCounter 计数 → PlanCompression<br/>→ Started + Compacting → 压缩 → Completed / Failed<br/>→ 用含摘要的 system 段重算 → EnsurePromptFitsWindow"]
-    S6B --> S7["⑦ DirectPromptComposer.BuildMessages<br/>System(agent+扩展+policy)<br/>→ 按 tokenizer 计数触发压缩 + 按边界重放（工具调用/结果不可拆）<br/>→ CompletionBatch"]
-    S7 --> S8["⑧ DirectConversationLoop.RunAsync（显式循环，每回合 ≤128 次 provider 请求）<br/>GetStreamingResponseAsync → DirectEventTranslator.TranslateUpdate<br/>FinishReason 判终态 → 串行执行工具 → 追加结果进入下一轮"]
+    S6 --> S6B["⑥b 计数 + 压缩（回合开始：DirectTurnPreparer → DirectCompactionStep.CompactTurnStartAsync）<br/>读策略 → DirectPromptMeter 计数 → DirectCompactionPlanner.PlanCompression<br/>→ Started + Compacting → 压缩 → Completed / Failed<br/>→ 用含摘要的 system 段重算 → EnsureTurnStartPromptFitsWindow"]
+    S6B --> S7["⑦ DirectHistoryReplay.Compose（+ DirectSystemPrompt.BuildSystemText / BuildTrailingProtectedMessages）<br/>System(agent+扩展+policy)<br/>→ 按 tokenizer 计数触发压缩 + 按边界重放（工具调用/结果不可拆）<br/>→ CompletionBatch"]
+    S7 --> S8["⑧ DirectTurnRun.RunAsync（每回合一个实例的显式循环，≤ DirectTurnRun.MaximumProviderRequestsPerTurn = 1024 次 provider 请求）<br/>GetStreamingResponseAsync → DirectEventTranslator.TranslateUpdate<br/>FinishReason 判终态 → 串行执行工具 → 追加结果进入下一轮"]
     S8 --> S9["⑨ WriteTerminalOutcome<br/>Length+文本=Truncated / Length 空=Failed / ContentFilter=Blocked<br/>预算耗尽、上下文不 fit=Failed / 其余=Succeeded"]
     S9 --> S10["⑩ 释放 provider lease → 释放 capability lease"]
 
@@ -136,7 +136,7 @@ flowchart TB
 - `DirectToolResult.Detail` 只用于展示，不参与 provider JSON 序列化；MCP 模型结果序列化后硬上限 **65,536 字节**。
 - 审批拒绝返回 `Canceled` + 拒绝摘要 → recorder 落库为 `Cancelled`，不抛异常。
 - provider pipeline **先于** capability lease 释放，避免 HTTP 流仍在消费时回收 MCP 连接。
-- 工具循环由显式 `DirectConversationLoop` 驱动（每回合最多 128 次 provider 请求），SDK 管线只挂 `UseLogging`；`DirectToolInvoker` 自持连续故障预算 `MaximumConsecutiveToolFaults = 2`，超预算抛 `DirectToolFaultLimitException` 终止回合。
+- 工具循环由每回合一个实例的 `DirectTurnRun` 驱动（最多 `DirectTurnRun.MaximumProviderRequestsPerTurn` = 1024 次 provider 请求），SDK 管线只挂 `UseLogging`；`DirectToolInvoker` 自持连续故障预算 `MaximumConsecutiveToolFaults = 2`，超预算抛 `DirectToolFaultLimitException` 终止回合。
 - `PrepareAsync` 与 `ResolveAsync` 之间有顺序依赖：能力解析使用已确定的具体模型 id，禁用或无效模型不会先触发 MCP 连接。
 
 ## 3. CLI 分支：子进程 JSONL 全链路
@@ -320,7 +320,7 @@ npm run test:e2e
 | VM 与准入 | `SelfClaw.Desktop/ViewModels/MainWindowViewModel.cs`、`Services/Workspace/ConversationWorkspaceService.cs` |
 | 回合引擎 | `SelfClaw.Desktop/Services/Runtime/ConversationTurnEngine.cs`、`ConversationTurnRecorder.cs`、`DesktopTurnFinalizer.cs`、`ConversationRuntimeState.cs`、`ConversationSessionCoordinator.cs` |
 | 分派 | `SelfClaw.Infrastructure/Agents/Runtime/DispatchingAgentChatRuntime.cs`、`Core/Runtime/Requests/ChatTurnRequest.cs` |
-| Direct | `SelfClaw.Infrastructure/Agents/Direct/DirectAgentChatRuntime.cs`、`Capabilities/DirectTurnCapabilityResolver.cs`、`Context/DirectPromptComposer.cs`、`Tools/DirectToolInvoker.cs` |
+| Direct | `SelfClaw.Infrastructure/Agents/Direct/DirectAgentChatRuntime.cs`、`DirectTurnPreparer.cs`、`DirectTurnRun.cs`、`Capabilities/DirectTurnCapabilityResolver.cs`、`Context/{DirectHistoryReplay,DirectSystemPrompt,DirectPromptMeter,DirectCompactionPlanner,DirectCompactionStep}.cs`、`Tools/DirectToolInvoker.cs` |
 | CLI | `SelfClaw.Infrastructure/Agents/Cli/CliAgentChatRuntime.cs`、`Adapters/`、`Parsers/`、`Process/`、`Session/` |
 | Provider | `SelfClaw.Infrastructure/AiProviders/AiChatClientFactory.cs`、`AiProviders/{OpenAi,Anthropic}/` |
 | 发布 | `SelfClaw.Desktop/Services/Transcript/{TranscriptPublisher,TranscriptDelivery,TranscriptProjection}.cs`、`SelfClaw.TranscriptVue/src/composables/transcriptBridge.js` |

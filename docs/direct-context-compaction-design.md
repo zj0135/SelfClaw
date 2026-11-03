@@ -2,7 +2,7 @@
 
 状态：设计冻结（v2）· 已完成（C1–C16 落地并审核通过）· 更新 2026-10-17
 配套实施文档：《direct-context-compaction-implementation-tasks.md》
-替代关系：本设计取代 `DirectPromptComposer` 基于 UTF-8 估算的历史裁剪（`BuildHistoryWithinBudget`），并修订 `runtime-execution-flow.md` §5 的“token 预算仍是启发式估算”一段 —— 字节估算整体退场，计数改为离线 tiktoken 系 tokenizer 加 provider 回报的实测值。
+替代关系：本设计取代 `DirectPromptComposer`（现拆为 `DirectHistoryReplay` / `DirectSystemPrompt` / `DirectCompactionPlanner`）基于 UTF-8 估算的历史裁剪（`BuildHistoryWithinBudget`），并修订 `runtime-execution-flow.md` §5 的“token 预算仍是启发式估算”一段 —— 字节估算整体退场，计数改为离线 tiktoken 系 tokenizer 加 provider 回报的实测值。
 
 已确认决策（2026-10-17）：
 
@@ -13,7 +13,7 @@
 
 | 问题 | 现状 | 本设计 |
 | --- | --- | --- |
-| 上下文超限 | `DirectPromptComposer` 按 UTF-8 字节数估算，从最旧单元开始**静默丢弃**历史 | 改为**自动压缩**：把超限前缀交给模型总结，摘要持久化并替代该前缀 |
+| 上下文超限 | 当时的 `DirectPromptComposer`（现 `DirectHistoryReplay`）按 UTF-8 字节数估算，从最旧单元开始**静默丢弃**历史 | 改为**自动压缩**：把超限前缀交给模型总结，摘要持久化并替代该前缀 |
 | token 计数 | `(UTF-8 字节数 + 2) / 3` 启发式 | 离线 tiktoken 系 tokenizer 计数，配 provider 回报的实测值 |
 | 阈值 | 硬编码预算计算，用户不可见 | 系统设置可配：触发比例、无窗口模型的绝对阈值、启用开关 |
 | 压缩模型 | 无 | 默认跟随当前会话选中模型；可在设置中指定其他已启用模型 |
@@ -26,10 +26,10 @@
 
 | 位置 | 现有行为 |
 | --- | --- |
-| `SelfClaw.Infrastructure/Agents/Direct/Context/DirectPromptComposer.cs` | `BuildMessages` 组装 system → 历史 → completion batch；`BuildHistoryWithinBudget` 从最新消息反向累积 `DirectPromptHistoryUnit`，预算耗尽即丢弃更旧单元；`EstimateTokens = (UTF8 字节数 + 2) / 3` |
+| `SelfClaw.Infrastructure/Agents/Direct/Context/DirectPromptComposer.cs`（现拆为 `DirectHistoryReplay` / `DirectSystemPrompt` / `DirectCompactionPlanner`） | `BuildMessages` 组装 system → 历史 → completion batch；`BuildHistoryWithinBudget` 从最新消息反向累积 `DirectPromptHistoryUnit`，预算耗尽即丢弃更旧单元；`EstimateTokens = (UTF8 字节数 + 2) / 3` |
 | 同上 | `BudgetFor` 用 `ContextWindowTokens - (system + tools + 输出预留)` 得到历史预算；`DefaultOutputTokenReserve = 4096` |
-| `Agents/Direct/DirectAgentChatRuntime.cs` | `SetupTurnAsync` 调用 composer（每回合一次）；`WriteTerminalOutcome` 映射终态 |
-| `Agents/Direct/DirectConversationLoop.cs` | 每回合 ≤128 次 provider 请求；`FitsBudget` 只用于 steer 批次准入；回合内增长已由回合内压缩约束（见 `direct-in-turn-compaction-design.md`），回合开始压缩不变 |
+| `Agents/Direct/DirectAgentChatRuntime.cs` | `SetupTurnAsync`（现 `DirectTurnPreparer.PrepareAsync`）调用 composer（每回合一次）；`WriteTerminalOutcome` 映射终态 |
+| `Agents/Direct/DirectTurnRun.cs`（原 `DirectConversationLoop.cs`） | 每回合 ≤ `DirectTurnRun.MaximumProviderRequestsPerTurn` = 1024 次 provider 请求；`FitsBudget` 只用于 steer 批次准入；回合内增长已由回合内压缩约束（见 `direct-in-turn-compaction-design.md`），回合开始压缩不变 |
 | `AiProviders/AiChatOptions.cs` | `ResolveContextWindowTokens`：`Configuration.ContextLength` 优先，其次 model option `context_window_tokens`，都没有则历史不受限 |
 | `AiProviders/RequestUsageAccumulator.cs`、`Agents/Direct/TurnUsageReporter.cs` | 每次 provider 调用的 usage 归一化后计入回合；`ContextTokens = 该次调用 input + output` |
 | `Desktop/Services/Runtime/ConversationTurnRecorder.cs` | 事件归约；`UsageReportedEvent` 累加到 `AgentTurnState.Usage`；终态提交带聚合 usage |
@@ -192,7 +192,7 @@ CREATE INDEX ix_conversation_compactions_conversation
 
 ### 5.4 触发判定
 
-在 `DirectAgentChatRuntime.SetupTurnAsync`（回合开始、首次 provider 请求之前）判定一次：
+在 `DirectTurnPreparer.PrepareAsync` → `DirectCompactionStep.CompactTurnStartAsync`（回合开始、首次 provider 请求之前）判定一次：
 
 ```text
 window        = AiChatOptions.ResolveContextWindowTokens(profile)          // 可能为 null
@@ -271,10 +271,10 @@ internal sealed class DirectContextCompressor
 
 ## 7. Prompt 组装
 
-`DirectPromptComposer` 拆成两个纯函数（均无 I/O）：
+`DirectPromptComposer`（现为 `DirectCompactionPlanner.PlanCompression` 与 `DirectHistoryReplay.BuildUnits` / `Compose`、`DirectSystemPrompt.BuildSystemText`）拆成两个纯函数（均无 I/O）：
 
 ```csharp
-// 规划：是否需要压缩、压缩哪个前缀
+// 规划：是否需要压缩、压缩哪个前缀（DirectCompactionPlanner）
 internal DirectCompressionPlan PlanCompression(
     IReadOnlyList<DirectPromptHistoryUnit> units,
     ConversationCompactionRecord? existing,
@@ -283,13 +283,13 @@ internal DirectCompressionPlan PlanCompression(
     int? countedTokens);        // §5.4 的 promptTokens，由调用方传入；null = 计数不可用
 
 // 组装：摘要 section + 边界之后的历史 + 必需消息（`tools` / `countedTokens` / `budget` 三个参数都已删除：
-// 计数与窗口校验都归调用方，composer 不读窗口）
-public IReadOnlyList<ChatMessage> BuildMessages(
-    ..., ConversationCompactionRecord? compression = null);
+// 计数与窗口校验都归调用方，composer 不读窗口）。原 BuildMessages 已删除，现为 DirectHistoryReplay.Compose
+internal static DirectPromptBuild Compose(
+    units, systemText, trailingProtectedMessages, ConversationCompactionRecord? compression);
 
 // 供调用方计数用（composer 自己不计数）
-internal IReadOnlyList<DirectPromptHistoryUnit> BuildUnits(...);
-internal string? BuildSystemText(..., ConversationCompactionRecord? compression);
+internal static IReadOnlyList<DirectPromptHistoryUnit> BuildUnits(...);          // DirectHistoryReplay
+internal static string? BuildSystemText(..., ConversationCompactionRecord? compression);  // DirectSystemPrompt
 ```
 
 规则：
@@ -297,10 +297,10 @@ internal string? BuildSystemText(..., ConversationCompactionRecord? compression)
 - **重放边界**：只重放 `Sequence > compression.ThroughSequence` 的可重放消息；更旧的被摘要代表。
 - **摘要注入**：作为独立 system section 追加在 agent instructions 之后，包裹在 `<selfclaw-context-summary version="1">…</selfclaw-context-summary>` 中，并附一行说明“这是更早对话的压缩摘要，替代已省略的历史”。放在 system 段而不是 user 消息：它是运行时提供的上下文，不是用户输入（与 `CompletionInstruction` 先例一致）。⚠ 最终顺序（C6 定）：agent instructions → `CompletionInstruction`（有 completion batch 时）→ 压缩摘要 → capability system instructions（Plugin/Skill/Policy/Degradation）；摘要排在 completion 指令之后、能力指令之前，这样无压缩时 prompt 字节布局与旧实现完全一致。
 - **裁剪移除**：`BuildHistoryWithinBudget` 与“最新消息装不下就丢弃其余”的路径删除。
-- **保留的必要校验**：`counted(system + tools) + outputReserve > window` → 抛既有可读错误（这条与用户历史无关，属于配置错误）；计数不可用时跳过该检查（fail-open），由 provider 报错。⚠ 落地归属（C7 定）：这条检查的唯一归属是 **runtime**（`EnsurePromptFitsWindow`，文案要带“开启压缩 / 降低输出上限 / 换更大窗口”的指引），composer **不再重复同一条校验**——runtime 用同一份计数在 `BuildMessages` 之前先跑，composer 里那份永远不可达，属重复实现（AGENTS 约定 10）。composer 只保留与计数无关的校验（completion batch 的 64 KiB 上限、历史顺序与归属校验）。
+- **保留的必要校验**：`counted(system + tools) + outputReserve > window` → 抛既有可读错误（这条与用户历史无关，属于配置错误）；计数不可用时跳过该检查（fail-open），由 provider 报错。⚠ 落地归属（C7 定）：这条检查的唯一归属是 **`DirectCompactionStep`**（`EnsureTurnStartPromptFitsWindow`，文案要带“开启压缩 / 降低输出上限 / 换更大窗口”的指引），composer **不再重复同一条校验**——`DirectTurnPreparer` 用同一份计数在 `Compose` 之前先跑，composer 里那份永远不可达，属重复实现（AGENTS 约定 10）。composer 只保留与计数无关的校验（completion batch 的 64 KiB 上限、历史顺序与归属校验）。
 - completion batch、steer 批次的语义与顺序不变。
-- **计数不再是 composer 的职责**：`EstimateTokens` 字节估算与其派生方法删除；`DirectConversationLoop.FitsBudget` 改用 `IDirectTokenCounter` 与增量维护的上下文计数。
-- **计数的口径必须是 provider 收到的文本**（C18 修）：`DirectTokenCounter` 把 `FunctionCallContent.Arguments` / `FunctionResultContent.Result` / 工具 `AdditionalProperties` 序列化成 JSON 后计数，所以序列化器必须用 `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`，且**字符串片段不序列化**（它本来就是 provider 收到的原文，序列化只会多一对引号）。用默认编码器时中文被写成 `\uXXXX`、`< > &` 被写成 `\u003C` 一类转义，实测把代码/中文密集的工具结果放大约 **1.6 倍**：状态栏在“回合开始估算 → 回合结束实测”之间来回跳，压缩也会提前触发（1M 窗口 0.75 阈值下真实约 480K 就压）。这条口径同时影响 `PlanCompression`、`FitsBudget` 与 `EnsurePromptFitsWindow`，改错不只是显示问题。
+- **计数不再是 composer 的职责**：`EstimateTokens` 字节估算与其派生方法删除；`DirectTurnRun.FitsBudget` 改用 `DirectPromptMeter`（底层 `IDirectTokenCounter`）与增量维护的上下文计数。
+- **计数的口径必须是 provider 收到的文本**（C18 修）：`DirectTokenCounter` 把 `FunctionCallContent.Arguments` / `FunctionResultContent.Result` / 工具 `AdditionalProperties` 序列化成 JSON 后计数，所以序列化器必须用 `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`，且**字符串片段不序列化**（它本来就是 provider 收到的原文，序列化只会多一对引号）。用默认编码器时中文被写成 `\uXXXX`、`< > &` 被写成 `\u003C` 一类转义，实测把代码/中文密集的工具结果放大约 **1.6 倍**：状态栏在“回合开始估算 → 回合结束实测”之间来回跳，压缩也会提前触发（1M 窗口 0.75 阈值下真实约 480K 就压）。这条口径同时影响 `PlanCompression`、`FitsBudget` 与 `EnsureTurnStartPromptFitsWindow` / `EnsureInTurnPromptFitsWindow`，改错不只是显示问题。
 - **单元形状**：`DirectPromptHistoryUnit(Messages, SourceSequence, int? Tokens = null)`。一个单元 = 一条存储消息（工具调用与其结果同单元，边界只能落在单元之间），`Tokens` 由调用方计数后回填，`SourceTokens` = 前缀单元的计数之和。`PlanCompression` 之所以收“已计数的单元”而不是原始入参：保留比例与 `SourceTokens` 都需要每单元的计数，而“composer 不计数”这条约束必须保住。
 - **物化范围**：规划要知道前缀，所以 composer 会重建**全部**可重放单元（旧实现那种“只回看 replay 需要的工具记录”的懒索引随裁剪一起删除，这是有意的）。已有压缩项时，边界及更早的消息既不被重放也无需计数，可在建单元与计数时直接从边界之后开始；**首次**压缩仍需全量扫描。
 
@@ -416,7 +416,7 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 
 | 内容 | 处置 |
 | --- | --- |
-| `DirectPromptComposer.BuildHistoryWithinBudget` | 删除，由 `PlanCompression` + 边界重放取代 |
+| `DirectPromptComposer.BuildHistoryWithinBudget`（该类型现为 `DirectHistoryReplay` 等） | 删除，由 `PlanCompression` + 边界重放取代 |
 | `EstimateTokens` / `EstimateMessageTokens` / `EstimateToolTokens` / `EstimateUserPrompt` 等字节估算 | 删除，由 `IDirectTokenCounter` 取代 |
 | 「最新消息装不下即报错并丢弃其余历史」的分支 | 删除，由压缩 + 窗口校验取代 |
 | `DirectPromptBudget` 的“历史裁剪预算”语义 | 保留类型（窗口与输出预留仍需），注释与语义改为“限制与输出预留”，不再代表可裁剪额度 |

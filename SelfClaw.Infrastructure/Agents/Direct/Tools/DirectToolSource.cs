@@ -31,7 +31,7 @@ internal static class DirectToolSource
         }
 
         // A provider connector hands arguments back as JSON-round-tripped values, so the skill id arrives
-        // as a JsonElement rather than a string — the same shape DirectPromptComposer.ParseArguments
+        // as a JsonElement rather than a string — the same shape DirectHistoryReplay.ParseArguments
         // produces when it replays a stored call. Accepting only the CLR string silently dropped the
         // attribution for every real call.
         var skillId = value switch

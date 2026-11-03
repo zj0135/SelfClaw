@@ -131,6 +131,26 @@ public sealed class ConversationTurnRecorderTests
     }
 
     [Fact]
+    public async Task ApplyEventAsync_keeps_the_first_terminal_result_of_a_tool_call()
+    {
+        // A stop path that repeats the terminal event of a call it already executed must not rewrite the
+        // stored row: the transcript and the next turn's prompt both replay what landed first.
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        await context.ApplyAsync(new ToolCallStartedEvent("call-1", "write_file", "{}", ToolCallKind.Edit));
+        await context.ApplyAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "wrote 1 file", "written"));
+        await context.ApplyAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Canceled, "NoProgress",
+            "The turn repeated the same tool calls."));
+
+        var tool = (await context.Conversations.ListToolExecutionsAsync(context.Conversation.Id))
+            .Should().ContainSingle().Subject;
+        tool.Status.Should().Be(ToolExecutionStatus.Completed);
+        tool.ResultSummary.Should().Be("wrote 1 file");
+        tool.ResultContent.Should().Be("written");
+        context.State.ToolRuns.Should().ContainSingle().Which.Status.Should().Be(ToolExecutionStatus.Completed);
+    }
+
+    [Fact]
     public async Task FinalizeInterruptedAsync_preserves_partial_text_and_closes_running_tools()
     {
         using var context = new ConversationTurnTestContext();

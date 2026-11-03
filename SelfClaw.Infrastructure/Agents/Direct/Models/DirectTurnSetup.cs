@@ -1,4 +1,4 @@
-﻿using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Interfaces;
 using Microsoft.Extensions.AI;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
@@ -30,4 +30,9 @@ internal sealed record DirectTurnSetup(
     /// How this turn's protocol carries the images a tool result produced. The loop owns the two shapes,
     /// so a tool never needs to know which provider is on the other end.
     /// </summary>
-    ToolImageDelivery ImageDelivery = ToolImageDelivery.Unsupported);
+    ToolImageDelivery ImageDelivery = ToolImageDelivery.Unsupported,
+    /// <summary>
+    /// The plan section this turn already injected into <see cref="SystemText"/>, so an in-turn compaction that
+    /// covers the same plan does not pay for it twice. Null when the turn start injected none.
+    /// </summary>
+    string? TurnStartPlanSection = null);

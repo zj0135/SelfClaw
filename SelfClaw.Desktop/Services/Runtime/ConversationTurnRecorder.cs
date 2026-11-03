@@ -222,6 +222,11 @@ internal sealed class ConversationTurnRecorder
         if (!turn.ToolRunsByCallId.TryGetValue(completed.ToolCallId, out var started)) return;
         if (started.MessageId != turn.CurrentAssistantMessageId)
             throw new InvalidDataException("A tool result cannot change a sealed assistant fragment.");
+        // First terminal wins. A call whose real result is already stored must never be rewritten by a later
+        // terminal event (a stop path that cancels a batch it already executed), because the stored row is
+        // what the transcript shows and what the next turn replays into the prompt.
+        if (started.Status is ToolExecutionStatus.Completed or ToolExecutionStatus.Failed or ToolExecutionStatus.Cancelled)
+            return;
         var now = _timeProvider.GetUtcNow();
         var tool = started with
         {

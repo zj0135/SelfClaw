@@ -3,6 +3,8 @@
 > 配套设计：`docs/direct-in-turn-compaction-design.md`（v1 设计冻结，2026-10-18 批准，决策 A–E 按建议落定）。
 > 引用格式：D§n 指设计文档章节；文件路径均相对仓根。设计文档的 I1–I8 在本文件收拢为 T1–T4（映射见任务总览）。
 
+> **类型名对照（2026-11 Direct 重构）：** 正文保留实施当时的类型名。`DirectConversationLoop` → `DirectTurnRun`（每回合实例，`DirectTurnRunFactory` 创建）；`DirectPromptComposer` → `DirectHistoryReplay`（重放单元 / `Compose`）+ `DirectSystemPrompt`（system 文本 / 摘要段 / completion batch）+ `DirectCompactionPlanner`（`PlanCompression` / `ResolveThreshold`）；`DirectAgentChatRuntime.SetupTurnAsync` → `DirectTurnPreparer.PrepareAsync`；`ApplyCompactionAsync` / `TryCompactInTurnAsync` / `EnsurePromptFitsWindow` → `DirectCompactionStep`；`CountPromptTokens` → `DirectPromptMeter`；`MaximumInTurnCompactionsPerTurn` 现为 10（`DirectCompactionStep`），`MaximumProviderRequestsPerTurn` 现为 1024（`DirectTurnRun`）。
+
 ## 使用约定
 
 - **完成定义（每个任务通用 DoD）**：`dotnet build SelfClaw.slnx` 零新增警告；任务相关的定向 `dotnet test` 全绿（全量测试在报告里给出通过/失败/跳过数）。本特性零前端改动；若意外触及前端，另跑 `npm test` 与 `npm run build`。
@@ -16,7 +18,7 @@
 | # | 决策 | 值 |
 | --- | --- | --- |
 | A | 压缩后仍超窗 | 可读错误（回合 Failed；消息与转录保留） |
-| B | 回合内压缩上限 | `MaximumInTurnCompactionsPerTurn = 3`，失败尝试计入 |
+| B | 回合内压缩上限 | `MaximumInTurnCompactionsPerTurn = 10`，失败尝试计入 |
 | C | 可见性 | 活动文案 + 状态栏读数；不写转录、不落库 |
 | D | 触发水位 | 复用回合开始 threshold |
 | E | 完成文案 | 不新增 |
@@ -162,7 +164,7 @@
 3. 修订 `docs/direct-context-compaction-design.md`（四处，均加指向新文档的引用）：
    - §1 表格 `DirectConversationLoop.cs` 行与「关键事实」段：改为「回合内增长已由回合内压缩约束（见 direct-in-turn-compaction-design.md），回合开始压缩不变」；
    - §2.2 非目标删除「回合内压缩」条目，替换为一句：回合内压缩已另立设计（指向新文档）；
-   - §10.1 C06 改为：「每回合开始最多一次压缩（不变）；回合内维护性压缩 ≤ `MaximumInTurnCompactionsPerTurn`（3 次），不落库、不裁剪（见 direct-in-turn-compaction-design.md）」；
+   - §10.1 C06 改为：「每回合开始最多一次压缩（不变）；回合内维护性压缩 ≤ `MaximumInTurnCompactionsPerTurn`（10 次），不落库、不裁剪（见 direct-in-turn-compaction-design.md）」；
    - §11 风险表「回合内无压缩」行改为已解决并指向新文档。
 4. `docs/runtime-execution-flow.md`：在 Direct 顺序与「tokenizer 计数驱动压缩」相关段落（用 `rg 压缩` 定位）补一句回合内检查点（循环顶部、steer 排空之前，同阈值）；不得改动同段其它结论。
 5. `AGENTS.md`「深入阅读」子系统条目补 `direct-in-turn-compaction-design.md`。

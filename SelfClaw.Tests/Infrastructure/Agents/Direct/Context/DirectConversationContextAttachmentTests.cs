@@ -38,8 +38,7 @@ public sealed class DirectConversationContextAttachmentTests
         var context = new DirectConversationContext(null, [Unit(1, "replayed")], []);
         var steer = Steer(sequence: 1, "with a picture");
         context.AppendInputs([steer], AttachmentContents(steer.Id));
-        context.AppendResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer")),
-            new Dictionary<string, DirectToolBinding>());
+        context.AppendResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer")));
 
         context.ApplyInTurnCompaction("summarized", coveredUnitCount: 2);
 
@@ -65,8 +64,7 @@ public sealed class DirectConversationContextAttachmentTests
         var context = new DirectConversationContext(null, [], []);
         context.AppendResponse(
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
-                [new FunctionCallContent("call-1", "read_file")])),
-            Bindings("read_file"));
+                [new FunctionCallContent("call-1", "read_file")])));
         context.AppendResults(
             [
                 new FunctionResultContent("call-1",
@@ -77,7 +75,7 @@ public sealed class DirectConversationContextAttachmentTests
                     })
             ],
             [new ChatMessage(ChatRole.User, [new TextContent("the images follow")])]);
-        context.AppendResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer")), NoBindings());
+        context.AppendResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer")));
 
         var units = context.BuildUnits();
         units.Select(unit => unit.ContainsAttachments).Should().Equal(true, false);
@@ -86,7 +84,7 @@ public sealed class DirectConversationContextAttachmentTests
                 "the follow-up belongs to the same unit, so no boundary can separate it from the tool result");
 
         var counted = units.Select(unit => unit with { Tokens = 100 }).ToArray();
-        var plan = new DirectPromptComposer().PlanCompression(counted, null, new DirectCompressionPolicy(),
+        var plan = DirectCompactionPlanner.PlanCompression(counted, null, new DirectCompressionPolicy(),
             new DirectPromptBudget(400, null), countedTokens: 300);
 
         plan.ShouldCompress.Should().BeFalse("the image bearing unit is the first candidate, so no prefix is left");
@@ -105,13 +103,4 @@ public sealed class DirectConversationContextAttachmentTests
 
     private static DirectPromptHistoryUnit Unit(long sequence, string text)
         => new([new ChatMessage(ChatRole.User, text)], sequence);
-
-    private static IReadOnlyDictionary<string, DirectToolBinding> NoBindings()
-        => new Dictionary<string, DirectToolBinding>();
-
-    private static IReadOnlyDictionary<string, DirectToolBinding> Bindings(string name)
-        => new Dictionary<string, DirectToolBinding>
-        {
-            [name] = new(AIFunctionFactory.Create(() => "ok", name), new DirectToolDescriptor(ToolCallKind.Other))
-        };
 }

@@ -32,9 +32,10 @@ Direct 和 CLI 使用不同的请求类型与执行方式，继续共享事件�
 
 | 位置 | 职责 |
 | --- | --- |
-| `Infrastructure/Agents/Direct/DirectAgentChatRuntime.cs` | 单回合准备、SDK 流消费、事件翻译、usage 与终态纪律 |
+| `Infrastructure/Agents/Direct/DirectAgentChatRuntime.cs` | 回合 Channel 与生产者、终态纪律、lease 释放；事件翻译在 `DirectEventTranslator`（同一目录），usage 在 `TurnUsageReporter` |
+| `Agents/Direct/DirectTurnPreparer.cs`、`DirectTurnRun.cs` | 前者做单回合准备（请求形状校验 → provider 准备 → 能力解析 → 附件与重放单元 → 回合开始压缩 → `DirectTurnSetup`）；后者是每回合一个实例的显式循环（`DirectTurnRunFactory` 创建），持有回合内上下文、压缩额度与无进展守卫 |
 | `Agents/Direct/Capabilities` | 能力规则、来源组装、工具冲突与策略过滤、本回合资源 lease |
-| `Agents/Direct/Context` | system sections、历史回放、completion batch 与 prompt 预算 |
+| `Agents/Direct/Context` | `DirectHistoryReplay`（重放单元与边界重放）、`DirectSystemPrompt`（system sections、摘要段、completion batch）、`DirectPromptMeter`（唯一计数入口，计数不可用即 null）、`DirectCompactionPlanner`（阈值与前缀规划）、`DirectCompactionStep`（回合开始与回合内的压缩编排、两处窗口校验）、`DirectConversationContext`（回合内三区上下文） |
 | `Agents/Direct/Tools` | 工作区 / Skill / MCP 的 SDK 适配、审批与执行 checkpoint、统一结果 |
 | `Infrastructure/Extensions` | 包内容、安装检查、内容缓存、Plugin 版本租约、MCP 配置与连接池 |
 | `Infrastructure/AiProviders` | provider 协议、凭据、HTTP transport、模型准备与 client 创建 |
@@ -48,11 +49,13 @@ Direct 依赖扩展资源与 provider 服务；Extensions 不引用 Direct 编�
 2. `AiChatClientFactory.PrepareAsync(ModelProfileId)` 确定具体模型。显式 id 与空 id 的 `desktop-default` 都在这里处理；校验档案、连接、协议并解析凭据，得到 `AiProviderClientRequest`。
 3. 用确定的模型 id 调用 `DirectTurnCapabilityResolver.ResolveAsync()`。子代理工具捕获的父模型始终具体，禁用或无效模型不会先触发 MCP 连接。
 4. `AiChatClientFactory.Create(preparation, pipeline)` 按回合在共享 pooled handler 上构造 `HttpClient`，把工具定义交给 provider adapter 并创建 options；SDK 管线只挂 `UseLogging`，工具循环不在管线内。
-5. 回合开始的计数与压缩（`RunStartedEvent` 之后、`Requesting` 之前）：读压缩策略 → `IDirectTokenCounter` 计数（跳过已被旧摘要覆盖的单元）→ `DirectPromptComposer.PlanCompression()` 判定是否触发 → 发 `ContextCompactionStartedEvent` 并置 `Compacting` → 调压缩模型 → 发 `Completed`／`Failed` → 用含摘要的 system 段重算 → `EnsurePromptFitsWindow()`（窗口校验的唯一归属）。
-6. `DirectPromptComposer.BuildMessages()` 按压缩边界重放历史与必需输入（不再裁剪）。
-7. `DirectConversationLoop` 显式消费 SDK 流（每回合上限 128 次 provider 请求）：翻译事件 → 按 `FinishReason` 判终态 → 串行执行工具 → 追加结果进入下一轮。每轮迭代先在循环顶部做回合内压缩检查（`requestIndex ≥ 1`、steer 排空之前，同一阈值；摘要只在进程内生效，不落库、不进转录，每回合上限 3 次），再排空 steer。终态后先释放 provider pipeline，再释放 capability lease。
+5. 回合开始的计数与压缩（`RunStartedEvent` 之后、`Requesting` 之前，由 `DirectTurnPreparer` 调 `DirectCompactionStep.CompactTurnStartAsync()`）：读压缩策略 → `DirectPromptMeter` 计数（跳过已被旧摘要覆盖的单元）→ `DirectCompactionPlanner.PlanCompression()` 判定是否触发 → 发 `ContextCompactionStartedEvent` 并置 `Compacting` → 调压缩模型 → 发 `Completed`／`Failed` → 用含摘要的 system 段重算 → `DirectCompactionStep.EnsureTurnStartPromptFitsWindow()`（回合开始与回合内的两处窗口校验都归 `DirectCompactionStep`）。
+6. `DirectHistoryReplay.Compose()` 按压缩边界重放历史与必需输入（不再裁剪）；system 文本由 `DirectSystemPrompt.BuildSystemText()` 拼装，顺序固定为 agent → completion instruction → 摘要段 → plan 段 → capability sections。
+7. `DirectTurnRun`（每回合一个实例，由 `DirectTurnRunFactory` 创建）显式消费 SDK 流（每回合上限 `DirectTurnRun.MaximumProviderRequestsPerTurn` = 1024 次 provider 请求）：翻译事件 → 按 `FinishReason` 判终态 → 串行执行工具 → 追加结果进入下一轮。每轮迭代先在循环顶部做回合内压缩检查（`DirectCompactionStep.CompactInTurnAsync()`：`requestIndex ≥ 1`、steer 排空之前，同一阈值；摘要只在进程内生效，不落库、不进转录，每回合上限 `DirectCompactionStep.MaximumInTurnCompactionsPerTurn` = 10 次），再排空 steer。终态后先释放 provider pipeline，再释放 capability lease。停止路径不重复发终态：`Stalled` 直接以终态事件结束（这一批工具的真实结果已经逐个发布过），`BudgetExhausted` 只对**未执行**的调用补 `Canceled`；recorder 的 `ConversationTurnRecorder.CompleteToolAsync` 首终态优先，任何后续终态事件都不会改写已落库的工具结果。
 
 Desktop 不再补齐默认模型。排队 child 与 continuation 使用捕获的具体模型 id；模型禁用使准备失败，不会悄悄切换默认模型。reasoning 来自共享模型配置；没有显式配置时保持 provider 默认行为。
+
+回合内 steer intake 的结算：`ReadFinalBoundaryAsync` 的 `closeWhenEmpty` 只负责「这一次空读取之后不再受理 steer」，它既不是终态结算，也不在读取前关闭 intake。循环里认领到的批次当场结算（`TryConsumeBatchAsync` 消费，或 `ContextBudgetExceeded` 时 hold）；唯一例外是请求预算的最后一次请求：那次请求不能再消费新批次，因此循环在返回 `BudgetExhausted` 前自己 `HoldUnconsumedAsync(TurnFailed)`，不再留下已 durable 认领却无人结算的批次。其余**非异常失败终态**（`Length` / `Stalled` / `BudgetExhausted` / `ContentFiltered`）不关闭 intake，也不逐个 hold：结算者是终态落库的同一事务——`SqliteConversationTurnRepository.TryFinalizeTurnAsync` → `SettleSteerIntakeAsync` 把该回合仍为 Pending/Claimed 的 steer 一律 hold，理由按回合终态映射（`Succeeded` → `target-turn-closed`，`Cancelled` / `Truncated` / `Blocked` / `Interrupted` 各按状态映射，其余含 `Failed` → `turn-failed`），仅对 Direct `Interactive` 回合生效。`ConversationTurnEngine` 只在异常与取消路径显式 hold；启动恢复是最后的兜底（`SqliteStartupRecovery` 把遗留 Claimed 标为 `interrupted-by-restart`，未消费的 steer 标为 `stale-steer-target`）。
 
 ## 3. 能力与工具契约
 
@@ -72,7 +75,7 @@ Desktop 不再补齐默认模型。排队 child 与 continuation 使用捕获的
 
 `read_file` 读到图片时结果额外带 `ModelContents`（header 文本 + `DataContent`），主循环按模型能力选两种投递：`Native`（Anthropic Messages / OpenAI Responses）把图片和 header 一起放进 tool result，`FollowUpUserMessage`（Chat Completions）让 tool 消息保持纯文本、整批图片合并进其后的一条 user 消息且绝不插在两条 tool 消息之间。图片是 **live-only**：`Content`、`Detail`、事件、落库与压缩摘要里都只有文本，后续回合重放的是那条文本记录。
 
-审批拒绝返回 `Canceled` 和拒绝摘要，recorder 持久化为 `Cancelled`；实际取消异常沿异步调用传播。`DirectToolInvoker` 负责审批、steer 执行准入与 checkpoint，是唯一的工具执行缝，MCP 大小限制不再注入审批包装。工具自身抛出的非取消异常不再中止回合：它被转成 `Failed` 的 `DirectToolResult`（模型可见真实错误，`Detail` 保留仅展示的堆栈），并由 invoker 自持连续故障预算 `MaximumConsecutiveToolFaults = 2`；连续故障超过预算时抛 `DirectToolFaultLimitException` 并终止回合——机制是显式循环，SDK 管线没有 `UseFunctionInvocation`，也不存在 `MaximumConsecutiveErrorsPerRequest` / `MaximumIterationsPerRequest` 这类管线设置。因此持续损坏的工具最多消耗 3 次尝试（预算 + 1）与 3 次 provider 往返，而不是 128 次请求预算。未绑定工具、执行 checkpoint 失败等 invoker 层其他异常同样直接沿异步调用传播并终止回合。返回 `Failed` 但不抛异常的常规失败（如 shell 非零退出）不计入预算，仍可反复执行。
+审批拒绝返回 `Canceled` 和拒绝摘要，recorder 持久化为 `Cancelled`；实际取消异常沿异步调用传播。`DirectToolInvoker` 负责审批、steer 执行准入与 checkpoint，是唯一的工具执行缝，MCP 大小限制不再注入审批包装。工具自身抛出的非取消异常不再中止回合：它被转成 `Failed` 的 `DirectToolResult`（模型可见真实错误，`Detail` 保留仅展示的堆栈），并由 invoker 自持连续故障预算 `MaximumConsecutiveToolFaults = 2`；连续故障超过预算时抛 `DirectToolFaultLimitException` 并终止回合——机制是显式循环，SDK 管线没有 `UseFunctionInvocation`，也不存在 `MaximumConsecutiveErrorsPerRequest` / `MaximumIterationsPerRequest` 这类管线设置。因此持续损坏的工具最多消耗 3 次尝试（预算 + 1）与 3 次 provider 往返，而不是 1024 次请求预算。**模型给错工具名、给出无法解析的参数**同样不只是展示问题：invoker 把两者转成 `Failed` 结果（模型可见错误原文，`Content` 里带 `InvalidToolCall` 判别），并计入同一连续故障预算，让模型自纠；它们不执行任何工具、也不写 checkpoint。steer 批次已 durable 认领时这两项校验根本不进行：整批调用以 `SupersededBySteer` 跳过、不计故障，「用户调整了任务」不会被幻觉工具名升级成回合失败。容器 `DirectConversationContext` 只校验 callId 身份，未知名称与坏参数不再由它判整回合失败。仍然是硬失败的只有 provider 契约问题（重复/空 callId、`tool_calls` 无完整调用）与执行 checkpoint 异常，这些直接沿异步调用传播并终止回合。工具批次中途抛出这类终止异常时，同批**尚未执行**的调用各补一个 `Canceled` 终态（汇总 `BatchAborted`，说明因前序故障未执行），因为它们的 `ToolCallStartedEvent` 已经发出，不能让转录只靠兜底文案收尾。返回 `Failed` 但不抛异常的常规失败（如 shell 非零退出）仍不计入预算，可反复执行。
 
 ## 4. Continuation 恢复与所有权
 
@@ -123,7 +126,7 @@ token 预算按 tokenizer 计数：超阈值由压缩（摘要 + 边界重放）
 
 `budget.ContextWindowTokens is null && !policy.Enabled` 时完全不计数：既没有窗口校验也没有压缩要判定，不发布估算之后这次计数已无消费者。
 
-子代理回合走同一条 `DirectAgentChatRuntime`，因此也会发 `UsageProgressEvent`；但 `SubagentExecutionSession.ApplyEventAsync` 不把它当作立即推送的理由——`MutateAsync` 的收尾本来就会重算 `SubagentExecutionActivity` 的用量并推 `ExecutionContent`，把一个纯显示快照升级成 `ExecutionBoundary` 只会让一个任务最多多出 128 次强制面板刷新，而显示内容不变。
+子代理回合走同一条 `DirectAgentChatRuntime`，因此也会发 `UsageProgressEvent`；但 `SubagentExecutionSession.ApplyEventAsync` 不把它当作立即推送的理由——`MutateAsync` 的收尾本来就会重算 `SubagentExecutionActivity` 的用量并推 `ExecutionContent`，把一个纯显示快照升级成 `ExecutionBoundary` 只会让一个任务最多多出 1024 次强制面板刷新，而显示内容不变。
 
 ## 6. 持久化与配置边界
 

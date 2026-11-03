@@ -108,10 +108,10 @@
 ## 7. 模型调用
 
 - `AttachmentContentReader` 只为带 `MessageAttachmentKind.Image` 附件的用户消息预读字节；路径经 `TryResolveStoredFile`、媒体类型白名单与体积校验；文件缺失 / 越界 / 超限 / IO 失败 → 跳过该附件并 warning，`OperationCanceledException` 重抛。产物 `DataContent(bytes, mediaType) { Name = fileName }`，随回合上下文存活，不跨回合缓存。
-- `DirectPromptComposer.BuildUnitsCore`：有附件时用户 unit 内容是**先图片后文本**；只有图片没有文字也照常产出 unit（当前入口仍要求文字，这是防御分支）。`DirectConversationContext.AppendInputs` 对 steer 用同一形状，steer 仍是受保护 entry。
+- `DirectHistoryReplay.BuildUnitsCore`：有附件时用户 unit 内容是**先图片后文本**；只有图片没有文字也照常产出 unit（当前入口仍要求文字，这是防御分支）。`DirectConversationContext.AppendInputs` 对 steer 用同一形状，steer 仍是受保护 entry。
 - `DirectTokenCounter`：`DataContent` 计 `PerImageTokens = 1024`；计数缓存键包含图片数量，避免同一 `MessageId` 的纯文本与含图计数互相污染。
 - 压缩：`PlanCompression` 把候选集截断到最早含图 unit 之前（见 §2），后续阈值 / 保留循环 / `prefix` 全部基于截断集合，`Decline` 仍上报未截断候选数；`DirectContextCompressor` 另有防御，把 prefix 里的 `DataContent` 换成 `[image: name]` 占位文本，即使未来放开规划也不会把二进制发给摘要模型。
-- 已知成本：每回合最多 128 次 provider 请求会重复发送同一批图片字节；本批不引入跨回合缓存。
+- 已知成本：每回合最多 `DirectTurnRun.MaximumProviderRequestsPerTurn`（1024）次 provider 请求会重复发送同一批图片字节；本批不引入跨回合缓存。
 
 ## 8. 前端输入框
 

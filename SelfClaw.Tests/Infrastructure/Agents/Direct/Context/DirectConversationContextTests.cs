@@ -49,9 +49,9 @@ public sealed class DirectConversationContextTests
             null,
             [Unit(1, "replayed")],
             [new ChatMessage(ChatRole.User, "trailing prompt")]);
-        context.AppendResponse(Response("answer one"), NoBindings());
+        context.AppendResponse(Response("answer one"));
         context.AppendInputs([Steer(sequence: 9, "steer")]);
-        context.AppendResponse(Response("answer two"), NoBindings());
+        context.AppendResponse(Response("answer two"));
 
         context.Messages.Select(message => message.Text)
             .Should().Equal("replayed", "trailing prompt", "answer one", "steer", "answer two");
@@ -61,10 +61,9 @@ public sealed class DirectConversationContextTests
     public void A_response_and_its_tool_results_form_one_unit()
     {
         var context = new DirectConversationContext(null, [], []);
-        context.AppendResponse(ToolCallResponse("call-1"), Bindings("probe"))
-            .Should().ContainSingle().Which.CallId.Should().Be("call-1");
+        context.AppendResponse(ToolCallResponse("call-1"));
         context.AppendResults([new FunctionResultContent("call-1", "result")]);
-        context.AppendResponse(Response("final answer"), NoBindings());
+        context.AppendResponse(Response("final answer"));
 
         var units = context.BuildUnits();
         units.Should().HaveCount(2);
@@ -93,7 +92,7 @@ public sealed class DirectConversationContextTests
     {
         var context = new DirectConversationContext(SystemText, [Unit(1, "oldest"), Unit(2, "older")], []);
         context.AppendInputs([Steer(sequence: 1, "steer one")]);
-        context.AppendResponse(Response("newest"), NoBindings());
+        context.AppendResponse(Response("newest"));
         context.AppendInputs([Steer(sequence: 2, "steer two")]);
         context.InTurnSummary.Should().BeNull();
 
@@ -102,7 +101,7 @@ public sealed class DirectConversationContextTests
         context.Messages.Select(message => message.Role)
             .Should().Equal(ChatRole.System, ChatRole.User, ChatRole.Assistant, ChatRole.User);
         context.Messages.Select(message => message.Text).Should().Equal(
-            $"{SystemText}\n\n{DirectPromptComposer.CreateSummarySection("turned into a summary")}",
+            $"{SystemText}\n\n{DirectSystemPrompt.CreateSummarySection("turned into a summary")}",
             "steer one",
             "newest",
             "steer two");
@@ -115,8 +114,8 @@ public sealed class DirectConversationContextTests
     public void A_second_compaction_replaces_the_summary_section_instead_of_stacking_it()
     {
         var context = new DirectConversationContext(SystemText, [Unit(1, "oldest")], []);
-        context.AppendResponse(Response("middle"), NoBindings());
-        context.AppendResponse(Response("newest"), NoBindings());
+        context.AppendResponse(Response("middle"));
+        context.AppendResponse(Response("newest"));
 
         context.ApplyInTurnCompaction("first summary", coveredUnitCount: 1);
         context.ApplyInTurnCompaction("second summary", coveredUnitCount: 1);
@@ -124,7 +123,7 @@ public sealed class DirectConversationContextTests
         var system = context.Messages[0];
         system.Role.Should().Be(ChatRole.System);
         system.Text.Should().StartWith(SystemText);
-        system.Text.Should().EndWith(DirectPromptComposer.CreateSummarySection("second summary"),
+        system.Text.Should().EndWith(DirectSystemPrompt.CreateSummarySection("second summary"),
             "the in-turn summary is appended at the end of the prompt's own system text");
         system.Text.Should().NotContain("first summary");
         system.Text.Split("<selfclaw-context-summary").Should().HaveCount(2, "only one in-turn section exists");
@@ -141,27 +140,27 @@ public sealed class DirectConversationContextTests
             SystemText,
             [Unit(1, new string('a', 10)), Unit(2, new string('b', 20))],
             []);
-        context.AppendResponse(Response(new string('c', 30)), NoBindings());
+        context.AppendResponse(Response(new string('c', 30)));
         context.CountTokens(counter, profile).Should().Be(CountEverything(counter, profile, context));
 
         context.ApplyInTurnCompaction("summary", coveredUnitCount: 2);
 
         context.CountTokens(counter, profile).Should().Be(CountEverything(counter, profile, context),
             "the tally is rebuilt from the compacted messages instead of keeping the pre-compaction total");
-        context.Messages[0].Text.Should().Contain(DirectPromptComposer.CreateSummarySection("summary"));
+        context.Messages[0].Text.Should().Contain(DirectSystemPrompt.CreateSummarySection("summary"));
     }
 
     [Fact]
     public void In_turn_units_start_after_the_replayed_history_and_stay_positive()
     {
         var context = new DirectConversationContext(null, [Unit(7, "replayed")], []);
-        context.AppendResponse(Response("first answer"), NoBindings());
-        context.AppendResponse(Response("second answer"), NoBindings());
+        context.AppendResponse(Response("first answer"));
+        context.AppendResponse(Response("second answer"));
 
         context.BuildUnits().Select(unit => unit.SourceSequence).Should().Equal(7, 8, 9);
 
         var empty = new DirectConversationContext(null, [], []);
-        empty.AppendResponse(Response("only answer"), NoBindings());
+        empty.AppendResponse(Response("only answer"));
 
         // Compaction only considers units with a positive source sequence, so a fresh turn may never
         // number its own units from zero.
@@ -189,15 +188,6 @@ public sealed class DirectConversationContextTests
     private static ChatResponse ToolCallResponse(string callId)
         => new(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent(callId, "probe")]));
 
-    private static IReadOnlyDictionary<string, DirectToolBinding> NoBindings()
-        => new Dictionary<string, DirectToolBinding>();
-
-    private static IReadOnlyDictionary<string, DirectToolBinding> Bindings(string name)
-        => new Dictionary<string, DirectToolBinding>
-        {
-            [name] = new(AIFunctionFactory.Create(() => "ok", name), new DirectToolDescriptor(ToolCallKind.Other))
-        };
-
     private static MessageRecord Steer(long sequence, string text)
     {
         var now = DateTimeOffset.UtcNow;
@@ -219,8 +209,6 @@ public sealed class DirectConversationContextTests
     /// </summary>
     private sealed class CharacterTokenCounter : IDirectTokenCounter
     {
-        public bool IsAvailable(AiModelProfile? model) => true;
-
         public int? CountText(string? text, AiModelProfile? model) => text?.Length ?? 0;
 
         public int? CountMessages(IReadOnlyList<ChatMessage> messages, AiModelProfile? model)

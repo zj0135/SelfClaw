@@ -157,11 +157,11 @@ public sealed class DirectInTurnCompactionTests
 
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
 
-        client.SummaryCalls.Should().HaveCount(DirectConversationLoop.MaximumInTurnCompactionsPerTurn);
+        client.SummaryCalls.Should().HaveCount(DirectCompactionStep.MaximumInTurnCompactionsPerTurn);
         events.OfType<ContextCompactionStartedEvent>().Should()
-            .HaveCount(DirectConversationLoop.MaximumInTurnCompactionsPerTurn);
+            .HaveCount(DirectCompactionStep.MaximumInTurnCompactionsPerTurn);
         events.OfType<InTurnContextCompactionCompletedEvent>().Should()
-            .HaveCount(DirectConversationLoop.MaximumInTurnCompactionsPerTurn);
+            .HaveCount(DirectCompactionStep.MaximumInTurnCompactionsPerTurn);
         client.Requests.Should().HaveCount(15, "after the cap the turn keeps issuing provider requests");
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
 
@@ -184,7 +184,7 @@ public sealed class DirectInTurnCompactionTests
 
         events.OfType<ContextCompactionStartedEvent>().Should().ContainSingle();
         var failed = events.OfType<ContextCompactionFailedEvent>().Should().ContainSingle().Which;
-        failed.Reason.Should().Be(DirectAgentChatRuntime.CompactionFailedReason);
+        failed.Reason.Should().Be(DirectCompactionStep.CompactionFailedReason);
         events.OfType<InTurnContextCompactionCompletedEvent>().Should().BeEmpty();
         client.Requests.Should().HaveCount(2);
         client.Requests[1].Should().Contain(message => message.Text == "prior prompt");
@@ -575,8 +575,6 @@ public sealed class DirectInTurnCompactionTests
 
         internal int Calls { get; private set; }
 
-        public bool IsAvailable(AiModelProfile? model) => true;
-
         public int? CountText(string? text, AiModelProfile? model)
         {
             Calls++;
@@ -600,8 +598,6 @@ public sealed class DirectInTurnCompactionTests
     private sealed class UnavailableTokenCounter : IDirectTokenCounter
     {
         internal static UnavailableTokenCounter Instance { get; } = new();
-
-        public bool IsAvailable(AiModelProfile? model) => false;
 
         public int? CountText(string? text, AiModelProfile? model) => null;
 

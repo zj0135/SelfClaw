@@ -68,11 +68,11 @@ todo_write(整表替换)
 - 会话删除、回合级联删除天然覆盖计划生命周期，不需要额外清理逻辑。
 - schema 仍是 v32，用户现有数据库不需要迁移。
 
-代价：每次读取要扫一遍该会话的工具记录。`FindLatest` 在投影里按引用缓存（见 §6.2），在 `SetupTurnAsync` 里每回合一次，成本可忽略。
+代价：每次读取要扫一遍该会话的工具记录。`FindLatest` 在投影里按引用缓存（见 §6.2），在 `DirectTurnPreparer.PrepareAsync` 里每回合一次，成本可忽略。
 
 ### 2.4 历史回放只保留最新一份计划的完整参数
 
-整表替换的副作用是**每次更新都是完整快照**，而 `DirectPromptComposer` 会把每条 `FunctionCallContent` 的参数原样回放。一次 6 步任务更新 5–6 次、每次约 2–3 KB，历史里就会永久躺着 12–15 KB ≈ 3–4k token，每轮重复付费（直到被压缩）。
+整表替换的副作用是**每次更新都是完整快照**，而 `DirectHistoryReplay` 会把每条 `FunctionCallContent` 的参数原样回放。一次 6 步任务更新 5–6 次、每次约 2–3 KB，历史里就会永久躺着 12–15 KB ≈ 3–4k token，每轮重复付费（直到被压缩）。
 
 因此对回放做**裁剪**，而不是对存储做裁剪：
 
@@ -265,7 +265,7 @@ Prompt 侧与投影侧共用它——这也是它必须在 Core 的原因（见 
 
 ### 6.4 回放裁剪（实现位置）
 
-`DirectPromptComposer.BuildUnitsCore` 在遍历消息前先算出「保留完整参数」的那条 run：
+`DirectHistoryReplay.BuildUnitsCore` 在遍历消息前先算出「保留完整参数」的那条 run：
 
 ```
 keepFullRunId = 所有可回放消息的 ToolCall 段里，
@@ -280,9 +280,9 @@ else                          { arguments = { elided: true }; resultText = Elide
 ```
 
 - 只替换 `FunctionCallContent.Arguments` 与配对结果文本，**call/result 结构不变**；失败态的 `Exception` 仍按现有逻辑设置。
-- 判定只依赖 `TodoPlanRules`（Core），不需要额外服务，也不改 `DirectPromptComposer` 的公开签名。
+- 判定只依赖 `TodoPlanRules`（Core），不需要额外服务，也不改 `DirectHistoryReplay` 的公开签名。
 - 同一条规则覆盖「模型重试后仍失败」的情形：失败的最新快照不是当前计划，因此它自己也被裁剪，而上一条合法计划保持完整。
-- 常量（`ElidedResultText`、占位 args）与裁剪判定放在 `DirectPromptComposer` 内，不新建只为一行服务的类型。
+- 常量（`ElidedResultText`、占位 args）与裁剪判定放在 `DirectHistoryReplay` 内，不新建只为一行服务的类型。
 
 ---
 
@@ -323,17 +323,17 @@ The task plan as it stood when the history above was summarized. A newer todo_wr
 
 ### 7.3 两个判定点
 
-**turn-start**（`DirectAgentChatRuntime.SetupTurnAsync`）
+**turn-start**（`DirectTurnPreparer.PrepareAsync` → `DirectCompactionStep.CompactTurnStartAsync`）
 
 ```csharp
 var plan = TodoPlanHistory.FindLatest(request.Messages, request.ToolExecutions ?? []);
 // 计数与最终请求必须用同一个 compression 求同一个 section
-CountPromptTokens(..., compression: request.Compression, plan);
-CountPromptTokens(..., compression: compressionAfter,     plan);   // 压缩后重算
-BuildSystemText(...,  compression: compressionAfter, TodoPlanSection.For(compressionAfter, plan));
+CountTurnStart(input, boundary: request.Compression, TodoSection(plan, request.Compression));   // DirectPromptMeter.CountTurnStartPrompt
+CountTurnStart(input, boundary: compressionAfter,     TodoSection(plan, compressionAfter));       // 压缩后重算
+DirectSystemPrompt.BuildSystemText(..., compression: compressionAfter, TodoSection(plan, compressionAfter));
 ```
 
-`CountPromptTokens` 在压缩前后各调用一次（分别对应 `request.Compression` 与新产生的 `compression`），两次都必须按各自传入的 boundary 计算 section，否则 `EnsurePromptFitsWindow` 算出的尺寸与真实请求不一致。
+`DirectPromptMeter.CountTurnStartPrompt`（经 `DirectCompactionStep.CountTurnStart`）在压缩前后各调用一次（分别对应 `request.Compression` 与新产生的 `compression`），两次都必须按各自传入的 boundary 计算 section，否则 `EnsureTurnStartPromptFitsWindow` 算出的尺寸与真实请求不一致。
 
 **in-turn**（`DirectConversationContext.ApplyInTurnCompaction`）
 

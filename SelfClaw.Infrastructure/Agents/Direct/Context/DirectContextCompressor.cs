@@ -66,18 +66,8 @@ internal sealed class DirectContextCompressor
             else
             {
                 usedFallbackModel = request.ModelProfileId is not null;
-                if (request.TurnLease is not { } turnLease)
-                {
-                    _logger.LogWarning(
-                        "Context compression has no chat client for conversation {ConversationId} turn {TurnId}: " +
-                        "no compression model was usable and the turn carries no lease.",
-                        request.ConversationId,
-                        request.TurnId);
-                    return null;
-                }
-
-                client = turnLease.Client;
-                producedProfile = turnLease.Profile;
+                client = request.TurnLease.Client;
+                producedProfile = request.TurnLease.Profile;
             }
 
             // Streaming is the path every provider serves correctly: some OpenAI-compatible endpoints answer a
@@ -203,6 +193,9 @@ internal sealed class DirectContextCompressor
         Guid modelProfileId,
         CancellationToken cancellationToken)
     {
+        // The precheck only skips a needless prepare attempt for a model the catalog already knows is unusable.
+        // It is not a guarantee: preparing can still fail afterwards (a disabled connection, a credential that
+        // no longer decrypts), and that path degrades to the turn lease through the catch below.
         if (!await _modelCatalog.IsModelAvailableAsync(modelProfileId, cancellationToken).ConfigureAwait(false))
         {
             _logger.LogWarning(

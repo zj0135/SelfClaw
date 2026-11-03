@@ -1,8 +1,8 @@
 # Assistant 消息内容结构化系统设计（content blocks）
 
-> 状态：已实施（2026-09-05）。P1/P2/P4 落地：块模型、schema v25、流式块累积器、终态对齐、投影直读、锚点机制全量删除。P3（模型历史按 content parts 结构化回放）未实施——当前 `DirectPromptComposer` 仍回放派生纯文本 markdown（已不含任何标记，伪造锚点的根因已消除）；结构化 tool-call 回放待后续迭代。
+> 状态：已实施（2026-09-05）。P1/P2/P4 落地：块模型、schema v25、流式块累积器、终态对齐、投影直读、锚点机制全量删除。P3（模型历史按 content parts 结构化回放）已由 `DirectHistoryReplay.BuildAssistantUnit` 实施：Text 块回放为 `TextContent`，ToolCall 块回放为 `FunctionCallContent` 与配对的 `FunctionResultContent`；派生 markdown 不再进入模型。
 >
-> 基线：设计时以 schema v24、`AssistantMessageSegmenter` 锚点机制、`StreamingAssistantMessage` 文本流归约、`DirectPromptComposer` 原样回放为准。
+> 基线：设计时以 schema v24、`AssistantMessageSegmenter` 锚点机制、`StreamingAssistantMessage` 文本流归约、`DirectPromptComposer`（现 `DirectHistoryReplay`）原样回放为准。
 >
 > 范围：assistant 消息的内容表示从「markdown + 内嵌标记」改为结构化 content blocks；覆盖数据模型、流式归约、终态落库、渲染投影、模型历史回放与代码清理。CLI 与 Direct 两种运行时共用同一事件流与同一块模型。
 >
@@ -17,7 +17,7 @@
 - `ConversationRuntimeState.CaptureToolRunAnchor` 在流式 markdown 中追加 `<!--selfclaw:tool:{id}-->`；
 - `StreamingAssistantMessage` 用 `<!--selfclaw:think:start/end-->` 包装 thinking；
 - 渲染时 `AssistantMessageSegmenter` 靠解析把这些标记还原成段；
-- `DirectPromptComposer` 把含标记的 markdown **原样回放给模型**。
+- `DirectPromptComposer`（现 `DirectHistoryReplay`）把含标记的 markdown **原样回放给模型**。
 
 已经暴露的失败模式（生产库实证，会话 `80b980f0…` / 消息 `480b7b35…`）：模型在自己历史中看到锚点句法后开始模仿，编造出格式不合法的锚点（`<!--selfcław:tool:…-->`，品牌词含 U+0142；6 段 GUID），渲染层 `TryReadToolAnchor` 解析失败后锚点以明文出现在正文中。临时修复（`RemoveModelFacingMarkers` + 近似锚点清扫）只做了止血。
 
@@ -28,7 +28,7 @@ Agent 事件流（Text/Thinking/ToolCall 增量）
     -> ConversationRuntimeState 块累积器（顺序即位置，无文本标记）
     -> MessageSegmentRecord[]（message_segments 子表）
     -> TranscriptProjection 直读块 -> TranscriptRenderSegment（Vue 合同不变）
-    -> DirectPromptComposer 构造 M.E.AI 原生 content parts 回放
+    -> DirectHistoryReplay 构造 M.E.AI 原生 content parts 回放
 ```
 
 「结构 → 文本 → 再解析」的往返被删除：位置在事件到达时已知，不再需要从文本中恢复；模型看到的是协议正确的工具调用历史，伪造锚点这一失败类被结构性根除。
@@ -43,7 +43,7 @@ Agent 事件流（Text/Thinking/ToolCall 增量）
 | `ToolRunAnchor` 字典 + `tool_runs.after_segment_index` | 与锚点并行的第二套位置坐标 | 整体退役（列随 schema v25 重建删除） |
 | `TranscriptToolRunPresenter.BuildToolRunsByMessageId` | 锚点/列/时间三重启发式归位 | 退役，块 ordinal 即位置 |
 | `TranscriptToolRunPresenter.InsertToolSegments` | 无锚点消息的兜底插入 | 退役 |
-| `DirectPromptComposer` | 含标记 markdown 原样回放 | 按块构造 M.E.AI content parts |
+| `DirectPromptComposer`（现 `DirectHistoryReplay`） | 含标记 markdown 原样回放 | 按块构造 M.E.AI content parts |
 | `ConversationCompletionNotifier.RemoveMetadata` | 通知预览剥锚点 hack | 退役（markdown 已纯净） |
 | 前端 `TranscriptRenderSegment` / Vue 组件 | segments 数组渲染 | **零改动** |
 
@@ -165,7 +165,7 @@ CREATE TABLE message_segments (
 - `TranscriptToolRunPresenter` 仅保留 `BuildToolSegment` 及其摘要/详情格式化；`BuildToolRunsByMessageId`、`InsertToolSegments`、`ResolveInsertionIndex` 删除；
 - 消息缓存 fingerprint 纳入 segments（块数量 + 各块文本 hash + tool 状态）。
 
-## 6. 模型历史回放（DirectPromptComposer）
+## 6. 模型历史回放（DirectHistoryReplay）
 
 assistant 消息按块构造 M.E.AI 原生 content parts，替代整段 markdown 文本：
 
@@ -194,7 +194,7 @@ CLI 路径无变化（只回放最后一条用户消息）。
 **Infrastructure**
 - `AssistantMessageSegmenter` 中 §4 列出的全部公开 API（仅保留对齐所需部分）
 - `SqliteTurnFinalizationWriter` 的 `after_segment_index` 写入
-- `DirectPromptComposer` 的 markdown 整段回放路径
+- `DirectPromptComposer`（现 `DirectHistoryReplay`）的 markdown 整段回放路径
 
 **Desktop**
 - `StreamingAssistantMessage`（被 `StreamingAssistantContent` 替换）
@@ -210,7 +210,7 @@ CLI 路径无变化（只回放最后一条用户消息）。
 | --- | --- | --- |
 | P1 | Core DTO + schema v25（DDL）+ 仓储批量读写 + `StreamingAssistantContent` + 投影直读 | 全量测试绿；Direct/CLI 流式回合卡片位置与现状一致；旧 assistant 行（未删场景）渲染为空正文 |
 | P2 | 终态块落库（含 FinalText fast/slow path 对齐）+ `TurnRecorder`/两个 Subagent committer 改造 | 历史回放、中断、取消、truncated 全路径落库正确 |
-| P3 | `DirectPromptComposer` 结构化回放 | 抓包确认 provider 请求含 `tool_use`/`tool_calls` 原生结构；多轮工具调用会话无伪造锚点 |
+| P3 | `DirectHistoryReplay` 结构化回放 | 抓包确认 provider 请求含 `tool_use`/`tool_calls` 原生结构；多轮工具调用会话无伪造锚点 |
 | P4 | §7 清单全删 + segmenter 收缩 + `AGENTS.md` schema 段落更新 | `rg "ToolRunAnchor|after_segment_index|AppendToolAnchor|selfclaw:tool"` 运行时代码零命中（测试 fixture 除外） |
 
 P1-P2 完成即达成「DB 正文纯净、模型不再看到标记」；P3/P4 可独立延后。

@@ -195,6 +195,47 @@ public sealed class DirectSteerLoopIntegrationTests
         stored.ConsumedTurnId.Should().Be(context.Record.Id);
     }
 
+    /// <summary>
+    /// The circuit breaker's last request may not start another segment, so a steer it would claim has to be
+    /// settled by the loop itself: leaving it claimed would keep the input invisible until the terminal commit.
+    /// </summary>
+    [Fact]
+    public async Task A_steer_claimed_on_the_last_request_is_held_instead_of_left_claimed()
+    {
+        var limit = DirectTurnRun.MaximumProviderRequestsPerTurn;
+        var executions = 0;
+        var session = new ArmedInputSession();
+        var provider = new ToolUntilFinalRequestProvider(limit, session.Arm);
+        var function = AIFunctionFactory.Create(() => Result($"ok-{++executions}"), new AIFunctionFactoryOptions
+        {
+            Name = "p",
+            Description = "Synthetic tool p.",
+            ExcludeResultSchema = true,
+            MarshalResult = (value, _, _) => ValueTask.FromResult(value)
+        });
+        var lease = new DirectTurnCapabilityLease([], [new DirectToolBinding(function, new(ToolCallKind.Other))],
+            new Dictionary<Guid, string>(), []);
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(provider);
+        var request = ((DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(factory.Profile.Id))
+            with { InputSession = session };
+        var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory, new FixedResolver(lease));
+
+        RunCompletedEvent? terminal = null;
+        await foreach (var item in runtime.StreamTurnAsync(request))
+        {
+            if (item is RunCompletedEvent completed) terminal = completed;
+        }
+
+        executions.Should().Be(limit - 1, "every request but the last executed its batch");
+        provider.Requests.Should().HaveCount(limit);
+        session.Commits.Should().Be(0, "the last request cannot consume a boundary");
+        session.HeldReasons.Should().ContainSingle().Which.Should().Be(ConversationInputReason.TurnFailed,
+            "the batch the loop claimed must be settled before it returns");
+        terminal.Should().NotBeNull();
+        terminal.Status.Should().Be(RunCompletionStatus.Failed);
+        terminal.ErrorMessage.Should().Contain("BudgetExhausted");
+    }
+
     private static async Task<ConversationInputRecord> PromoteSteerAsync(ConversationTurnTestContext context, string prompt)
     {
         var accepted = await context.Inputs.AcceptAsync(new ConversationInputAcceptRequest(
@@ -279,7 +320,7 @@ public sealed class DirectSteerLoopIntegrationTests
         var bindings = toolNames
             .Select(name =>
             {
-                var invoke = tools?.Invoke(name) ?? (() => Task.FromResult<object?>(name));
+                var invoke = tools?.Invoke(name) ?? (() => Task.FromResult<object?>(Result(name)));
                 var function = AIFunctionFactory.Create(invoke, new AIFunctionFactoryOptions
                 {
                     Name = name,
@@ -446,5 +487,74 @@ public sealed class DirectSteerLoopIntegrationTests
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
+    }
+
+    /// <summary>Tool calls until the request budget, then one plain answer: nothing new to execute.</summary>
+    private sealed class ToolUntilFinalRequestProvider(int limit, Action onFinalRequest) : IChatClient
+    {
+        internal List<ChatMessage[]> Requests { get; } = [];
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Requests.Add(messages.ToArray());
+            var request = Requests.Count;
+            if (request < limit)
+            {
+                yield return new ChatResponseUpdate(ChatRole.Assistant,
+                    [new FunctionCallContent($"call-{request}", "p", new Dictionary<string, object?>())])
+                { MessageId = $"message-{request}", FinishReason = ChatFinishReason.ToolCalls };
+            }
+            else
+            {
+                // The steer only becomes acceptable once this answer is on its way to the loop, which is the
+                // window in which the breaker's last request would claim it.
+                onFinalRequest();
+                yield return new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("final")])
+                { MessageId = $"message-{request}", FinishReason = ChatFinishReason.Stop };
+            }
+
+            await Task.CompletedTask;
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    /// <summary>A steer intake that only starts offering a batch once the test arms it.</summary>
+    private sealed class ArmedInputSession : IDirectTurnInputSession
+    {
+        private bool _armed;
+
+        internal List<string> HeldReasons { get; } = [];
+        internal int Commits { get; private set; }
+
+        internal void Arm() => _armed = true;
+
+        public Task<ConversationInputBatch?> ReadBoundaryAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(_armed ? Batch() : null);
+
+        public Task<ConversationInputBatch?> ReadFinalBoundaryAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<ConversationInputBatch?>(null);
+
+        public Task<ConversationInputConsumption> WaitForCommitAsync(ConversationInputBatch batch,
+            CancellationToken cancellationToken = default)
+        {
+            Commits++;
+            throw new InvalidOperationException("The last request cannot consume an input boundary.");
+        }
+
+        public Task HoldUnconsumedAsync(string reasonCode, CancellationToken cancellationToken = default)
+        {
+            HeldReasons.Add(reasonCode);
+            return Task.CompletedTask;
+        }
+
+        private static ConversationInputBatch Batch()
+            => new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+                [new ConversationInputItem(Guid.NewGuid(), 1, 1, Guid.NewGuid(), "late steer")]);
     }
 }

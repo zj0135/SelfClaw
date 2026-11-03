@@ -3,6 +3,8 @@
 > 配套设计：《direct-context-compaction-design.md》v2（2026-10-17）。本文按任务粒度拆解，每个任务可独立提交、独立验证。
 > 引用格式：D§n 指设计文档章节；文件路径均相对仓根。
 
+> **类型名对照（2026-11 Direct 重构）：** 正文保留实施当时的类型名。`DirectConversationLoop` → `DirectTurnRun`（每回合实例，`DirectTurnRunFactory` 创建）；`DirectPromptComposer` → `DirectHistoryReplay`（重放单元 / `Compose`）+ `DirectSystemPrompt`（system 文本 / 摘要段 / completion batch）+ `DirectCompactionPlanner`（`PlanCompression` / `ResolveThreshold`）；`DirectAgentChatRuntime.SetupTurnAsync` → `DirectTurnPreparer.PrepareAsync`；`ApplyCompactionAsync` / `TryCompactInTurnAsync` / `EnsurePromptFitsWindow` → `DirectCompactionStep`；`CountPromptTokens` → `DirectPromptMeter`；`MaximumInTurnCompactionsPerTurn` 现为 10（`DirectCompactionStep`），`MaximumProviderRequestsPerTurn` 现为 1024（`DirectTurnRun`）。
+
 ## 使用约定
 
 - **完成定义（每个任务通用 DoD）**：`dotnet build SelfClaw.slnx` 零新增警告、`dotnet test SelfClaw.Tests/SelfClaw.Tests.csproj` 全绿；涉及前端时 `SelfClaw.TranscriptVue` 内 `npm test` 与 `npm run build` 通过；涉及 UI 的任务附手动验收步骤。

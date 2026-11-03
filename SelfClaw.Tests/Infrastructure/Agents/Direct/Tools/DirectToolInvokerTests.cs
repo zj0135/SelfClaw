@@ -23,7 +23,8 @@ public sealed class DirectToolInvokerTests
 
         var result = await pipeline.InvokeAsync();
 
-        result.Should().BeOfType<JsonElement>().Which.GetString().Should().Be("ok");
+        result.Status.Should().Be(ToolCallStatus.Completed);
+        result.Content.GetString().Should().Be("ok");
         handler.Requests.Should().BeEmpty();
     }
 
@@ -38,7 +39,8 @@ public sealed class DirectToolInvokerTests
 
         var result = await pipeline.InvokeAsync();
 
-        result.Should().BeOfType<JsonElement>().Which.GetString().Should().Be("ok");
+        result.Status.Should().Be(ToolCallStatus.Completed);
+        result.Content.GetString().Should().Be("ok");
         pipeline.Order.Should().Equal("tool");
     }
 
@@ -50,7 +52,8 @@ public sealed class DirectToolInvokerTests
 
         var result = await pipeline.InvokeAsync();
 
-        result.Should().BeOfType<JsonElement>().Which.GetString().Should().Be("ok");
+        result.Status.Should().Be(ToolCallStatus.Completed);
+        result.Content.GetString().Should().Be("ok");
         var request = handler.Requests.Should().ContainSingle().Subject;
         request.ToolName.Should().Be("mcp__git__echo");
         request.DisplayName.Should().Be("echo");
@@ -101,7 +104,8 @@ public sealed class DirectToolInvokerTests
 
         var result = await pipeline.InvokeAsync();
 
-        result.Should().BeOfType<JsonElement>().Which.GetString().Should().Be("ok");
+        result.Status.Should().Be(ToolCallStatus.Completed);
+        result.Content.GetString().Should().Be("ok");
         handler.Requests.Should().BeEmpty();
     }
 
@@ -115,7 +119,8 @@ public sealed class DirectToolInvokerTests
 
         var result = await pipeline.InvokeAsync();
 
-        result.Should().BeOfType<JsonElement>().Which.GetString().Should().Be("ok");
+        result.Status.Should().Be(ToolCallStatus.Completed);
+        result.Content.GetString().Should().Be("ok");
         pipeline.Order.Should().Equal("checkpoint", "tool");
     }
 
@@ -146,20 +151,55 @@ public sealed class DirectToolInvokerTests
         pipeline.Order.Should().BeEmpty();
     }
 
+    // A hallucinated tool name is a model-side mistake the model has to see and correct, so it comes back as
+    // a Failed result instead of ending the turn.
     [Fact]
-    public async Task InvokeAsync_UnboundToolName_Throws()
+    public async Task InvokeAsync_UnboundToolName_ReturnsAFailedResultWithoutExecutingAnything()
     {
         var pipeline = CreatePipeline(ToolPermissionMode.FullAccess, approvalHandler: null);
-        var unbound = AIFunctionFactory.Create((Func<string>)(() => "ok"), "other", "Unbound tool.");
 
-        var action = () => pipeline.Invoker
-            .InvokeAsync(
-                new FunctionCallContent("call-1", "other", new AIFunctionArguments()),
-                CancellationToken.None)
-            .AsTask();
+        var result = await pipeline.Invoker.InvokeAsync(
+            new FunctionCallContent("call-1", "other", new AIFunctionArguments()),
+            CancellationToken.None);
 
-        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*other*");
+        result.Status.Should().Be(ToolCallStatus.Failed);
+        result.Summary.Should().Contain("'other'").And.Contain("not bound");
+        result.Detail.Should().Be(result.Summary, "the model sees exactly what the transcript shows");
         pipeline.Order.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_RepeatedUnboundToolName_StillEndsTheTurnAtTheFaultLimit()
+    {
+        var pipeline = CreatePipeline(ToolPermissionMode.FullAccess, approvalHandler: null);
+        var call = new FunctionCallContent("call-1", "other", new AIFunctionArguments());
+
+        for (var attempt = 0; attempt < DirectToolInvoker.MaximumConsecutiveToolFaults; attempt++)
+        {
+            var result = await pipeline.Invoker.InvokeAsync(call, CancellationToken.None);
+            result.Status.Should().Be(ToolCallStatus.Failed);
+        }
+
+        var action = () => pipeline.Invoker.InvokeAsync(call, CancellationToken.None).AsTask();
+
+        await action.Should().ThrowAsync<DirectToolFaultLimitException>().WithMessage("*other*");
+        pipeline.Order.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_UnparseableArguments_ReturnAFailedResultWithoutExecutingTheTool()
+    {
+        var pipeline = CreatePipeline(ToolPermissionMode.FullAccess, approvalHandler: null);
+        var call = new FunctionCallContent("call-1", "mcp__git__echo", null)
+        {
+            Exception = new JsonException("invalid JSON")
+        };
+
+        var result = await pipeline.Invoker.InvokeAsync(call, CancellationToken.None);
+
+        result.Status.Should().Be(ToolCallStatus.Failed);
+        result.Summary.Should().Contain("could not be parsed").And.Contain("invalid JSON");
+        pipeline.Order.Should().BeEmpty("the tool itself never ran");
     }
 
     // The proof that asking is an interruption, not an approval: FullAccess auto-approves gates, yet the call
@@ -252,12 +292,16 @@ public sealed class DirectToolInvokerTests
         var options = new AIFunctionFactoryOptions
         {
             Name = "mcp__git__echo",
-            Description = "Echo a value."
+            Description = "Echo a value.",
+            // The invoker's contract is one DirectToolResult per call; this probe reports the value it echoed.
+            ExcludeResultSchema = true,
+            MarshalResult = (value, _, _) => ValueTask.FromResult<object?>(
+                marshaledResult ?? new DirectToolResult(
+                    ToolCallStatus.Completed,
+                    "echoed",
+                    JsonSerializer.SerializeToElement(value),
+                    value?.ToString()))
         };
-        if (marshaledResult is not null)
-        {
-            options.MarshalResult = (_, _, _) => ValueTask.FromResult<object?>(marshaledResult);
-        }
 
         var function = AIFunctionFactory.Create(
             (string value) =>
@@ -310,7 +354,7 @@ public sealed class DirectToolInvokerTests
         internal DirectToolInvoker Invoker { get; } = invoker;
         internal List<string> Order { get; } = order;
 
-        internal ValueTask<object?> InvokeAsync(CancellationToken cancellationToken = default)
+        internal ValueTask<DirectToolResult> InvokeAsync(CancellationToken cancellationToken = default)
         {
             var arguments = new AIFunctionArguments { ["value"] = "ok" };
             return Invoker.InvokeAsync(

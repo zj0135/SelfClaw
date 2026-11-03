@@ -29,7 +29,7 @@ public sealed class DirectToolSourceTests
     public void ResolveId_reads_the_skill_id_from_provider_shaped_arguments()
     {
         // MEAI's OpenAI connector deserializes a tool call's arguments into Dictionary<string, object?>,
-        // whose values are JsonElement rather than string - exactly what DirectPromptComposer produces
+        // whose values are JsonElement rather than string - exactly what DirectHistoryReplay produces
         // when replaying a stored call. This is the shape every real call carries.
         var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>("""{"skillId":"office/review"}""");
         arguments.Should().NotBeNull();

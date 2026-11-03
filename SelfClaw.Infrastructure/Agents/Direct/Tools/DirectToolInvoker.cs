@@ -46,44 +46,55 @@ internal sealed class DirectToolInvoker
         _steering = request.Steering;
     }
 
-    public async ValueTask<object?> InvokeAsync(
+    public async ValueTask<DirectToolResult> InvokeAsync(
         FunctionCallContent callContent,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(callContent);
         cancellationToken.ThrowIfCancellationRequested();
-        var toolName = callContent.Name;
-        if (!_bindings.TryGetValue(toolName, out var binding))
-        {
-            throw new InvalidOperationException($"Direct tool '{toolName}' is not bound to this turn.");
-        }
-
-        // Pending phase: a steer claimed before this call starts skips the call outright.
+        // Pending phase: a steer claimed before this call starts skips the call outright. It is judged before
+        // the call's own validity because the whole batch is being abandoned: a hallucinated name inside it
+        // must not spend the fault budget and turn "the user adjusted the task" into a failed turn.
         if (_steering?.HasSupersedingSteer == true)
         {
             return SupersededBySteerResult();
         }
 
-        var arguments = new AIFunctionArguments(callContent.Arguments ?? new Dictionary<string, object?>());
-        var (gate, gateResult) = await ResolveGateAsync(binding, arguments, cancellationToken).ConfigureAwait(false);
-        if (gate == GateOutcome.Superseded)
+        // A hallucinated tool name or unparseable arguments is a model-side mistake, not a turn failure: it
+        // reaches the model as a Failed result and spends the same consecutive-fault budget as a faulting
+        // tool, so the model can correct itself. Only a repeated call id (a provider contract breach) and a
+        // checkpoint failure still end the turn. The call's ToolCallStartedEvent is already published, so the
+        // result returned here is its one and only terminal event.
+        if (string.IsNullOrWhiteSpace(callContent.Name) || !_bindings.TryGetValue(callContent.Name, out var binding))
         {
-            // A steer skip neither increments nor resets the consecutive-fault budget.
-            return gateResult;
+            return RejectCall(callContent, $"Direct tool '{callContent.Name}' is not bound to this turn.");
         }
 
-        if (gate == GateOutcome.Denied)
+        if (callContent.Exception is { } argumentFault)
+        {
+            return RejectCall(callContent,
+                $"The arguments for Direct tool '{callContent.Name}' could not be parsed: {argumentFault.Message}");
+        }
+
+        var arguments = new AIFunctionArguments(callContent.Arguments ?? new Dictionary<string, object?>());
+        var (refusal, isUserDenial) = await ResolveGateAsync(binding, arguments, cancellationToken).ConfigureAwait(false);
+        if (refusal is not null)
         {
             // A user denial is a decision, not a fault: it closes the streak like a clean execution.
-            _consecutiveToolFaults = 0;
-            return gateResult;
+            if (isUserDenial)
+            {
+                _consecutiveToolFaults = 0;
+            }
+
+            return refusal;
         }
 
         return await ExecuteAsync(binding, arguments, cancellationToken).ConfigureAwait(false);
     }
 
-    // Denied and Superseded carry the model-visible result to report instead of executing; Execute leaves it null.
-    private async Task<(GateOutcome Outcome, DirectToolResult? Result)> ResolveGateAsync(
+    // A null refusal means "execute". Denied and Superseded carry the model-visible result to report instead
+    // of executing; only a denial closes the consecutive-fault streak.
+    private async Task<(DirectToolResult? Refusal, bool IsUserDenial)> ResolveGateAsync(
         DirectToolBinding binding, AIFunctionArguments arguments, CancellationToken cancellationToken)
     {
         var needsApproval =
@@ -93,12 +104,12 @@ internal sealed class DirectToolInvoker
             : ToolApprovalDecision.Approved;
         if (decision == ToolApprovalDecision.Denied)
         {
-            return (GateOutcome.Denied, DeniedByUserResult());
+            return (DeniedByUserResult(), true);
         }
 
         if (decision == ToolApprovalDecision.Superseded)
         {
-            return (GateOutcome.Superseded, SupersededBySteerResult());
+            return (SupersededBySteerResult(), false);
         }
 
         if (_steering is not null &&
@@ -106,13 +117,13 @@ internal sealed class DirectToolInvoker
         {
             // ReadyToExecute lost to a steer claim: the checkpoint and the tool never run, so the
             // permit stays irrevocable once granted.
-            return (GateOutcome.Superseded, SupersededBySteerResult());
+            return (SupersededBySteerResult(), false);
         }
 
-        return (GateOutcome.Execute, null);
+        return (null, false);
     }
 
-    private async ValueTask<object?> ExecuteAsync(
+    private async ValueTask<DirectToolResult> ExecuteAsync(
         DirectToolBinding binding, AIFunctionArguments arguments, CancellationToken cancellationToken)
     {
         if (_request.ToolExecutionCheckpoint is not null)
@@ -125,7 +136,9 @@ internal sealed class DirectToolInvoker
         {
             var raw = await binding.Tool.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
             _consecutiveToolFaults = 0;
-            return BoundPayload(raw);
+            return BoundPayload(raw as DirectToolResult
+                ?? throw new InvalidOperationException(
+                    $"Tool '{binding.Tool.Name}' returned an invalid result."));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -133,7 +146,7 @@ internal sealed class DirectToolInvoker
             // reaches it as a result, so the model can correct itself. Detail carries the message
             // rather than the stack trace because it is also persisted as the tool result and replayed
             // on later turns, where a stack trace is permanent prompt noise that leaks local paths.
-            RecordConsecutiveFault(binding, exception);
+            RecordConsecutiveFault(binding.Tool.Name, exception);
             return new DirectToolResult(
                 ToolCallStatus.Failed,
                 exception.Message,
@@ -146,14 +159,29 @@ internal sealed class DirectToolInvoker
         }
     }
 
-    private void RecordConsecutiveFault(DirectToolBinding binding, Exception fault)
+    private void RecordConsecutiveFault(string toolName, Exception fault)
     {
         var consecutiveFaults = ++_consecutiveToolFaults;
         if (consecutiveFaults > MaximumConsecutiveToolFaults)
         {
             // The explicit loop terminates on this exception; it never retries the broken tool.
-            throw new DirectToolFaultLimitException(binding.Tool.Name, consecutiveFaults, fault);
+            throw new DirectToolFaultLimitException(toolName, consecutiveFaults, fault);
         }
+    }
+
+    /// <summary>
+    /// The model-visible answer for a call that never reached a tool: the same shape a faulting tool
+    /// produces, so the model can read the error and correct itself.
+    /// </summary>
+    private DirectToolResult RejectCall(FunctionCallContent call, string message)
+    {
+        var fault = new InvalidOperationException(message);
+        RecordConsecutiveFault(call.Name ?? string.Empty, fault);
+        return new DirectToolResult(
+            ToolCallStatus.Failed,
+            message,
+            JsonSerializer.SerializeToElement(new { type = "InvalidToolCall", message }),
+            message);
     }
 
     /// <summary>
@@ -164,13 +192,10 @@ internal sealed class DirectToolInvoker
     /// bounds it where it is built (search budgets its result, reads page, shell output is capped), so the text
     /// and the payload stay the same size by construction instead of being cut into a different shape here.
     /// </summary>
-    private static object? BoundPayload(object? payload) => payload switch
-    {
-        DirectToolResult { Detail: { } detail } result when detail.Length > ToolResultTextLimits.MaximumCharacters
-            => result with { Detail = ToolResultTextLimits.Limit(detail) },
-        string text => ToolResultTextLimits.Limit(text),
-        _ => payload
-    };
+    private static DirectToolResult BoundPayload(DirectToolResult result)
+        => result.Detail is { } detail && detail.Length > ToolResultTextLimits.MaximumCharacters
+            ? result with { Detail = ToolResultTextLimits.Limit(detail) }
+            : result;
 
     private async Task<ToolApprovalDecision> RequestApprovalAsync(
         DirectToolBinding binding,
@@ -223,14 +248,6 @@ internal sealed class DirectToolInvoker
             return revoked || decided != ToolApprovalDecision.Denied
                 ? ToolApprovalDecision.Superseded : ToolApprovalDecision.Denied;
         }
-    }
-
-    /// <summary>Admission states for one call: execute it, report a user denial, or report a steer skip.</summary>
-    private enum GateOutcome
-    {
-        Execute,
-        Denied,
-        Superseded
     }
 
     private static DirectToolResult DeniedByUserResult()

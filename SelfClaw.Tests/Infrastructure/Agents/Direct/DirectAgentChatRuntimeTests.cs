@@ -234,7 +234,14 @@ public sealed class DirectAgentChatRuntimeTests
     [Fact]
     public async Task StreamTurnAsync_publishes_a_usage_snapshot_per_provider_request_and_one_terminal_report()
     {
-        var tool = AIFunctionFactory.Create((Func<string>)(() => "file body"), "read_file", "Read a file");
+        var tool = AIFunctionFactory.Create((Func<DirectToolResult>)(() => CompletedToolResult("file body")),
+            new AIFunctionFactoryOptions
+            {
+                Name = "read_file",
+                Description = "Read a file",
+                ExcludeResultSchema = true,
+                MarshalResult = (value, _, _) => ValueTask.FromResult(value)
+            });
         var client = new MultiScriptChatClient(
         [
             [
@@ -364,7 +371,14 @@ public sealed class DirectAgentChatRuntimeTests
     [Fact]
     public async Task StreamTurnAsync_applies_resolved_tools_instructions_adjustments_and_descriptors()
     {
-        var tool = AIFunctionFactory.Create((Func<string>)(() => "done"), "custom_tool", "Custom tool");
+        var tool = AIFunctionFactory.Create((Func<DirectToolResult>)(() => CompletedToolResult("done")),
+            new AIFunctionFactoryOptions
+            {
+                Name = "custom_tool",
+                Description = "Custom tool",
+                ExcludeResultSchema = true,
+                MarshalResult = (value, _, _) => ValueTask.FromResult(value)
+            });
         var client = new ScriptedChatClient([
             Update("m", new FunctionCallContent("call", "custom_tool", new Dictionary<string, object?>()))
         ]);
@@ -624,18 +638,18 @@ public sealed class DirectAgentChatRuntimeTests
         IAttachmentContentReader? attachmentContentReader = null)
     {
         var counter = tokenCounter ?? new DirectTokenCounter();
-        var promptComposer = new DirectPromptComposer();
         var compressor = contextCompressor ?? new DirectContextCompressor(factory, new StubAiModelCatalog(), counter);
         var reader = attachmentContentReader ?? new EmptyAttachmentContentReader();
-        return new(
+        var meter = new DirectPromptMeter(counter);
+        var compactionStep = new DirectCompactionStep(meter, compressor);
+        var resolver = capabilityResolver ?? CreateCapabilityResolver();
+        var preparer = new DirectTurnPreparer(
             factory,
-            capabilityResolver ?? CreateCapabilityResolver(),
-            promptComposer,
-            new DirectConversationLoop(counter, promptComposer, compressor, reader),
-            counter,
-            compressor,
-            reader,
-            compressionPolicy);
+            resolver,
+            compressionPolicy ?? DisabledDirectCompressionPolicySource.Instance,
+            compactionStep,
+            reader);
+        return new(preparer, new DirectTurnRunFactory(meter, compactionStep, reader));
     }
 
     /// <summary>Every turn in these tests runs without stored attachments; the fake keeps the turns file-system free.</summary>
@@ -717,6 +731,10 @@ public sealed class DirectAgentChatRuntimeTests
 
     private static ChatResponseUpdate Update(string messageId, params AIContent[] contents)
         => new(ChatRole.Assistant, contents) { MessageId = messageId };
+
+    // The invoker's contract is one DirectToolResult per call, so a scripted tool answers with one too.
+    private static DirectToolResult CompletedToolResult(string text)
+        => new(ToolCallStatus.Completed, text, JsonSerializer.SerializeToElement(text), text);
 
     private static ChatResponseUpdate FinishUpdate(
         string messageId,

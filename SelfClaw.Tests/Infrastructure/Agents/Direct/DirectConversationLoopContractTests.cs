@@ -135,7 +135,7 @@ public sealed class DirectConversationLoopContractTests
     [InlineData(true, true)]
     public async Task Request_limit_closes_all_unexecuted_calls_or_accepts_a_final_answer(bool stop, bool finalAnswer)
     {
-        var limit = DirectConversationLoop.MaximumProviderRequestsPerTurn;
+        var limit = DirectTurnRun.MaximumProviderRequestsPerTurn;
         var executions = 0;
         var provider = new Provider((n, _, _) => Reply(n == limit && finalAnswer
             ? Update(n, ChatFinishReason.Stop, new TextContent("done"))
@@ -200,26 +200,98 @@ public sealed class DirectConversationLoopContractTests
     }
 
     [Theory]
-    [InlineData("unbound")]
-    [InlineData("invalid-arguments")]
     [InlineData("duplicate")]
     [InlineData("checkpoint")]
-    public async Task Invalid_batch_or_checkpoint_failure_executes_no_tools_and_does_not_retry(string scenario)
+    public async Task Provider_contract_breach_or_checkpoint_failure_executes_no_tools_and_does_not_retry(string scenario)
     {
         var executions = 0;
-        var invalid = scenario switch
-        {
-            "unbound" => new FunctionCallContent("b", "missing", new Dictionary<string, object?>()),
-            "invalid-arguments" => new FunctionCallContent("b", "probe", null) { Exception = new JsonException("invalid JSON") },
-            "duplicate" => Call("a"),
-            _ => Call("b")
-        };
+        var invalid = scenario == "duplicate" ? Call("a") : Call("b");
         var provider = new Provider((n, _, _) => Reply(Update(n, ChatFinishReason.ToolCalls, Call("a"), invalid)));
         var (runtime, request) = Runtime(provider, Tool(() => { executions++; return Success(); }));
         if (scenario == "checkpoint") request = request with { ToolExecutionCheckpoint = new FailingCheckpoint() };
         var events = await CollectAsync(runtime, request);
         executions.Should().Be(0);
         provider.Requests.Should().Be(1);
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Failed);
+    }
+
+    [Theory]
+    [InlineData("unbound")]
+    [InlineData("invalid-arguments")]
+    public async Task A_model_side_tool_mistake_becomes_a_failed_result_and_the_turn_continues(string scenario)
+    {
+        var executions = 0;
+        var rejected = scenario == "invalid-arguments"
+            ? new FunctionCallContent("b", "probe", null) { Exception = new JsonException("invalid JSON") }
+            : new FunctionCallContent("b", "missing", new Dictionary<string, object?>());
+        var provider = new Provider((n, _, _) => Reply(n == 1
+            ? Update(n, ChatFinishReason.ToolCalls, Call("a"), rejected)
+            : Update(n, ChatFinishReason.Stop, new TextContent("recovered"))));
+        var (runtime, request) = Runtime(provider, Tool(() => { executions++; return Success(); }));
+        var events = await CollectAsync(runtime, request);
+
+        provider.Requests.Should().Be(2, "the model gets the failure as a result and answers again");
+        executions.Should().Be(1, "the well-formed call of the same batch still ran");
+        var terminal = events.OfType<RunCompletedEvent>().Should().ContainSingle().Subject;
+        terminal.Status.Should().Be(RunCompletionStatus.Succeeded);
+        terminal.FinalText.Should().Be("recovered");
+        var started = events.OfType<ToolCallStartedEvent>().Select(item => item.ToolCallId).ToArray();
+        var completed = events.OfType<ToolCallCompletedEvent>().ToArray();
+        started.Should().Equal("a", "b");
+        completed.Select(item => item.ToolCallId).Should().Equal(started,
+            "each started call has exactly one terminal event");
+        completed.Select(item => item.Status).Should().Equal(ToolCallStatus.Completed, ToolCallStatus.Failed);
+        var modelResults = provider.Histories[1].SelectMany(message => message.Contents).OfType<FunctionResultContent>().ToArray();
+        modelResults.Select(item => item.CallId).Should().Equal("a", "b");
+        modelResults[1].Result.Should().BeOfType<DirectToolResult>()
+            .Which.Status.Should().Be(ToolCallStatus.Failed);
+        modelResults[1].Result.Should().BeOfType<DirectToolResult>()
+            .Which.Summary.Should().Contain(scenario == "invalid-arguments" ? "could not be parsed" : "not bound");
+    }
+
+    [Fact]
+    public async Task A_batch_that_keeps_hallucinating_tool_names_still_ends_the_turn_at_the_fault_limit()
+    {
+        var provider = new Provider((n, _, _) => Reply(Update(n, ChatFinishReason.ToolCalls,
+            Unknown("a"), Unknown("b"), Unknown("c"))));
+        var (runtime, request) = Runtime(provider, Tool(Success));
+        var events = await CollectAsync(runtime, request);
+
+        provider.Requests.Should().Be(1, "the batch spends the whole fault budget before a second request");
+        events.OfType<ToolCallStartedEvent>().Select(item => item.ToolCallId).Should().Equal("a", "b", "c");
+        events.OfType<ToolCallCompletedEvent>().Should().HaveCount(3,
+            "each started call still has exactly one terminal event")
+            .And.OnlyContain(item => item.Status == ToolCallStatus.Failed);
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Failed);
+    }
+
+    [Fact]
+    public async Task An_aborted_batch_gives_every_unexecuted_call_a_cancelled_terminal_event()
+    {
+        // Two single-call batches spend the consecutive-fault budget, so the first call of the third batch
+        // aborts the turn and the other two never run.
+        var executions = 0;
+        var provider = new Provider((n, _, _) => Reply(n switch
+        {
+            1 => Update(n, ChatFinishReason.ToolCalls, Unknown("x")),
+            2 => Update(n, ChatFinishReason.ToolCalls, Unknown("y")),
+            _ => Update(n, ChatFinishReason.ToolCalls, Unknown("a"), Call("b"), Call("c"))
+        }));
+        var (runtime, request) = Runtime(provider, Tool(() => { executions++; return Success(); }));
+        var events = await CollectAsync(runtime, request);
+
+        executions.Should().Be(0, "the budget aborted the turn before any bound tool ran");
+        provider.Requests.Should().Be(3);
+        events.OfType<ToolCallStartedEvent>().Select(item => item.ToolCallId).Should().Equal("x", "y", "a", "b", "c");
+        var completed = events.OfType<ToolCallCompletedEvent>().ToArray();
+        completed.Select(item => item.ToolCallId).Should().Equal(["x", "y", "a", "b", "c"],
+            "the two remaining calls of the aborted batch still get their one terminal event");
+        completed.Select(item => item.Status).Should().Equal(ToolCallStatus.Failed, ToolCallStatus.Failed,
+            ToolCallStatus.Failed, ToolCallStatus.Canceled, ToolCallStatus.Canceled);
+        completed[2].ResultSummary.Should().Contain("missing-a", "the aborting call reports its own fault");
+        completed[3].ResultSummary.Should().Be(DirectLoopMessages.BatchAbortedReason);
+        completed[4].ResultSummary.Should().Be(DirectLoopMessages.BatchAbortedReason);
+        completed[3].ResultContent.Should().Contain("earlier tool call of the same batch");
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Failed);
     }
 
@@ -413,6 +485,7 @@ public sealed class DirectConversationLoopContractTests
         => new(ToolCallStatus.Completed, $"ok-{execution}", JsonSerializer.SerializeToElement($"ok-{execution}"),
             $"ok-{execution}");
     private static FunctionCallContent Call(string id) => new(id, "probe", new Dictionary<string, object?>());
+    private static FunctionCallContent Unknown(string id) => new(id, $"missing-{id}", new Dictionary<string, object?>());
     private static ChatResponseUpdate Update(int n, ChatFinishReason? finish, params AIContent[] content)
         => new(ChatRole.Assistant, content) { MessageId = $"message-{n}", FinishReason = finish };
     private static async IAsyncEnumerable<ChatResponseUpdate> Reply(params ChatResponseUpdate[] updates)
@@ -449,13 +522,18 @@ public sealed class DirectConversationLoopContractTests
     private sealed class Provider(Func<int, ChatMessage[], CancellationToken, IAsyncEnumerable<ChatResponseUpdate>> stream) : IChatClient
     {
         internal int Requests { get; private set; }
+        internal List<ChatMessage[]> Histories { get; } = [];
         internal bool Disposed { get; private set; }
         internal Action? OnDispose { get; init; }
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages,
             ChatOptions? options = null, CancellationToken cancellationToken = default)
-            => stream(++Requests, messages.ToArray(), cancellationToken);
+        {
+            var history = messages.ToArray();
+            Histories.Add(history);
+            return stream(++Requests, history, cancellationToken);
+        }
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { Disposed = true; OnDispose?.Invoke(); }
     }

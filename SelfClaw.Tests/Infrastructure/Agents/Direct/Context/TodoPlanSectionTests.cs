@@ -26,11 +26,10 @@ public sealed class TodoPlanSectionTests
     [Fact]
     public void A_turn_without_compaction_keeps_the_old_system_text_byte_for_byte()
     {
-        var composer = new DirectPromptComposer();
         var systemInstructions = new[] { "capability instructions" };
 
-        var withoutPlan = composer.BuildSystemText(AgentInstructions, systemInstructions, Interactive(), compression: null);
-        var withExplicitNull = composer.BuildSystemText(AgentInstructions, systemInstructions, Interactive(),
+        var withoutPlan = DirectSystemPrompt.BuildSystemText(AgentInstructions, systemInstructions, Interactive(), compression: null);
+        var withExplicitNull = DirectSystemPrompt.BuildSystemText(AgentInstructions, systemInstructions, Interactive(),
             compression: null, todoSection: null);
 
         withExplicitNull.Should().Be(withoutPlan);
@@ -40,11 +39,10 @@ public sealed class TodoPlanSectionTests
     [Fact]
     public void A_blank_section_leaves_no_separator_behind()
     {
-        var composer = new DirectPromptComposer();
         var systemInstructions = new[] { "capability instructions" };
 
-        var withoutSection = composer.BuildSystemText(AgentInstructions, systemInstructions, Interactive(), compression: null);
-        var withBlankSection = composer.BuildSystemText(AgentInstructions, systemInstructions, Interactive(),
+        var withoutSection = DirectSystemPrompt.BuildSystemText(AgentInstructions, systemInstructions, Interactive(), compression: null);
+        var withBlankSection = DirectSystemPrompt.BuildSystemText(AgentInstructions, systemInstructions, Interactive(),
             compression: null, todoSection: "  \n ");
 
         withBlankSection.Should().Be(withoutSection);
@@ -136,7 +134,7 @@ public sealed class TodoPlanSectionTests
     [Fact]
     public void The_section_sits_between_the_summary_and_the_capability_sections()
     {
-        var systemText = new DirectPromptComposer().BuildSystemText(
+        var systemText = DirectSystemPrompt.BuildSystemText(
             AgentInstructions,
             ["first capability", "second capability"],
             Interactive(),
@@ -157,12 +155,12 @@ public sealed class TodoPlanSectionTests
     {
         var snapshot = new TodoPlanSnapshot(SamplePlan(), CreateRun(), SourceSequence: 5);
 
-        DirectAgentChatRuntime.TodoSection(snapshot, CreateCompaction(throughSequence: 5)).Should().Be(
+        DirectCompactionStep.TodoSection(snapshot, CreateCompaction(throughSequence: 5)).Should().Be(
             TodoPlanSection.Build(SamplePlan()), "the boundary includes the message that carried the plan");
-        DirectAgentChatRuntime.TodoSection(snapshot, CreateCompaction(throughSequence: 4)).Should().BeNull(
+        DirectCompactionStep.TodoSection(snapshot, CreateCompaction(throughSequence: 4)).Should().BeNull(
             "the plan is still replayed from the history");
-        DirectAgentChatRuntime.TodoSection(snapshot, compression: null).Should().BeNull("nothing was summarized");
-        DirectAgentChatRuntime.TodoSection(plan: null, CreateCompaction(throughSequence: 9)).Should().BeNull();
+        DirectCompactionStep.TodoSection(snapshot, compression: null).Should().BeNull("nothing was summarized");
+        DirectCompactionStep.TodoSection(plan: null, CreateCompaction(throughSequence: 9)).Should().BeNull();
     }
 
     [Fact]
@@ -190,7 +188,7 @@ public sealed class TodoPlanSectionTests
         context.ApplyInTurnCompaction("first summary", coveredUnitCount: 1);
         // The model resubmits the unchanged list, and the next compaction covers that copy too: the snapshot is
         // already in the system text, so a second, identical section would only cost tokens.
-        context.AppendResponse(PlanResponse("call-2"), TodoBindings());
+        context.AppendResponse(PlanResponse("call-2"));
 
         context.ApplyInTurnCompaction("second summary", coveredUnitCount: 1);
 
@@ -204,9 +202,9 @@ public sealed class TodoPlanSectionTests
     public void An_in_turn_snapshot_already_in_the_turn_start_system_text_is_not_repeated()
     {
         var planSection = TodoPlanSection.Build(SamplePlan());
-        var systemText = new DirectPromptComposer().BuildSystemText(
+        var systemText = DirectSystemPrompt.BuildSystemText(
             AgentInstructions, [], Interactive(), CreateCompaction(throughSequence: 1), planSection);
-        var context = new DirectConversationContext(systemText, [SamePlanUnit(2)], []);
+        var context = new DirectConversationContext(systemText, [SamePlanUnit(2)], [], planSection);
 
         context.ApplyInTurnCompaction("in-turn summary", coveredUnitCount: 1);
 
@@ -273,13 +271,6 @@ public sealed class TodoPlanSectionTests
         => new(new ChatMessage(ChatRole.Assistant,
             [new FunctionCallContent(callId, TodoPlanRules.ToolName,
                 PlanArguments(("新增 todo_write 工具", "in_progress")))]));
-
-    private static IReadOnlyDictionary<string, DirectToolBinding> TodoBindings()
-        => new Dictionary<string, DirectToolBinding>
-        {
-            [TodoPlanRules.ToolName] = new(AIFunctionFactory.Create(() => "ok", TodoPlanRules.ToolName),
-                new DirectToolDescriptor(ToolCallKind.Other))
-        };
 
     private static ConversationCompactionRecord CreateCompaction(long throughSequence)
     {

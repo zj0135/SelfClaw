@@ -21,7 +21,7 @@ public sealed class DirectPromptComposerAttachmentTests
     {
         var (messages, turns) = CreateHistory((MessageRole.User, "what is in this picture?"));
 
-        var units = new DirectPromptComposer().BuildUnits(messages, turns, [], NoAdjustments(),
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, [], NoAdjustments(),
             AttachmentContents(messages[0].Id));
 
         var unit = units.Should().ContainSingle().Subject;
@@ -41,7 +41,7 @@ public sealed class DirectPromptComposerAttachmentTests
     {
         var (messages, turns) = CreateHistory((MessageRole.User, string.Empty));
 
-        var units = new DirectPromptComposer().BuildUnits(messages, turns, [], NoAdjustments(),
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, [], NoAdjustments(),
             AttachmentContents(messages[0].Id));
 
         var message = units.Should().ContainSingle().Which.Messages.Should().ContainSingle().Subject;
@@ -53,7 +53,7 @@ public sealed class DirectPromptComposerAttachmentTests
     {
         var (messages, turns) = CreateHistory((MessageRole.User, string.Empty));
 
-        var units = new DirectPromptComposer().BuildUnits(messages, turns, [], NoAdjustments());
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, [], NoAdjustments());
 
         units.Should().BeEmpty();
     }
@@ -63,7 +63,7 @@ public sealed class DirectPromptComposerAttachmentTests
     {
         var (messages, turns) = CreateHistory((MessageRole.User, "plain prompt"));
 
-        var units = new DirectPromptComposer().BuildUnits(messages, turns, [], NoAdjustments());
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, [], NoAdjustments());
 
         var message = units.Should().ContainSingle().Which.Messages.Should().ContainSingle().Subject;
         message.Contents.Should().ContainSingle().Which.Should().BeOfType<TextContent>();
@@ -80,7 +80,7 @@ public sealed class DirectPromptComposerAttachmentTests
             (MessageRole.User, "fourth"));
         var units = UnitsWithImageOn(messages, turns, imageIndex: 2);
 
-        var plan = new DirectPromptComposer().PlanCompression(units, null,
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
             new DirectCompressionPolicy(), Window(400), countedTokens: 300);
 
         // Without the image this history compresses three of four units; the image caps the candidates at
@@ -88,7 +88,6 @@ public sealed class DirectPromptComposerAttachmentTests
         plan.ShouldCompress.Should().BeTrue();
         plan.PrefixUnits.Select(unit => unit.SourceSequence).Should().Equal(messages[0].Sequence);
         plan.ThroughSequence.Should().Be(messages[0].Sequence, "the boundary is the last compressed unit");
-        plan.RetainedUnitCount.Should().Be(1);
         plan.SourceTokens.Should().Be(100);
     }
 
@@ -102,14 +101,13 @@ public sealed class DirectPromptComposerAttachmentTests
             (MessageRole.User, "fourth"));
         var units = UnitsWithImageOn(messages, turns, imageIndex: 0);
 
-        var plan = new DirectPromptComposer().PlanCompression(units, null,
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
             new DirectCompressionPolicy(), Window(400), countedTokens: 300);
 
         // Nothing precedes the image, so there is no contiguous prefix to summarize.
         plan.ShouldCompress.Should().BeFalse();
         plan.PrefixUnits.Should().BeEmpty();
-        plan.ThroughSequence.Should().BeNull();
-        plan.RetainedUnitCount.Should().Be(4, "a decline still reports every candidate, truncated or not");
+        plan.ThroughSequence.Should().Be(0, "a decline replaces no unit");
     }
 
     [Fact]
@@ -120,11 +118,11 @@ public sealed class DirectPromptComposerAttachmentTests
             (MessageRole.User, "second"),
             (MessageRole.User, "third"),
             (MessageRole.User, "fourth"));
-        var units = new DirectPromptComposer().BuildUnits(messages, turns, [], NoAdjustments())
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, [], NoAdjustments())
             .Select(unit => unit with { Tokens = 100 })
             .ToArray();
 
-        var plan = new DirectPromptComposer().PlanCompression(units, null,
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
             new DirectCompressionPolicy(), Window(400), countedTokens: 300);
 
         plan.ShouldCompress.Should().BeTrue();
@@ -138,7 +136,7 @@ public sealed class DirectPromptComposerAttachmentTests
 
     private static DirectPromptHistoryUnit[] UnitsWithImageOn(IReadOnlyList<MessageRecord> messages,
         IReadOnlyList<ConversationTurnRecord> turns, int imageIndex)
-        => new DirectPromptComposer().BuildUnits(messages, turns, [], NoAdjustments(),
+        => DirectHistoryReplay.BuildUnits(messages, turns, [], NoAdjustments(),
                 AttachmentContents(messages[imageIndex].Id))
             .Select(unit => unit with { Tokens = 100 })
             .ToArray();

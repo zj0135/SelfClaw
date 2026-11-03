@@ -309,7 +309,7 @@ public enum DirectTurnOrigin { Interactive = 0, Subagent = 1, Continuation = 2, 
 
 这条修正必须有显式断言测试：**带 skill + MCP 的自动化回合，绑定出的工具列表非空且包含预期工具**。
 
-其余不变量保持：`DirectAgentChatRuntime.SetupTurnAsync` 拒绝非 Interactive 回合携带 `InputSession/Steering`——自动化天然不带，符合现状。
+其余不变量保持：`DirectTurnPreparer.PrepareAsync` 拒绝非 Interactive 回合携带 `InputSession/Steering`——自动化天然不带，符合现状。
 
 ### 4.2 `AutomationRunExecutor`
 

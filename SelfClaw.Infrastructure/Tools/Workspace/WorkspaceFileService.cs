@@ -6,12 +6,6 @@ namespace SelfClaw.Infrastructure.Tools.Workspace;
 
 internal sealed class WorkspaceFileService
 {
-    /// <summary>
-    /// Fragment of the "this turn cannot take images" failure. <c>WorkspaceAgentToolset</c> matches on it
-    /// to append the capability reason, so both sides must read this one constant.
-    /// </summary>
-    internal const string ImageUnavailableMarker = "this turn cannot receive image content";
-
     private const int MaxListedEntries = 250;
     private const int MaxReadCharacters = 24_000;
     private const int MaxReadLines = 2_000;
@@ -179,7 +173,8 @@ internal sealed class WorkspaceFileService
         if (!includeImageContent)
         {
             return new WorkspaceFileReadResult(
-                Error: $"'{requestedPath}' is an image, but {ImageUnavailableMarker}.");
+                Error: $"'{requestedPath}' is an image, but this turn cannot receive image content.",
+                ImageUnavailable: true);
         }
 
         if (length > WorkspaceImageLimits.MaximumBytes)

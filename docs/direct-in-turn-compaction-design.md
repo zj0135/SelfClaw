@@ -7,7 +7,7 @@
 已确认决策（2026-10-18，用户批准方案）：
 
 - **决策 A**：压缩后仍超窗 → 可读错误（回合 Failed，消息与转录保留）。
-- **决策 B**：`MaximumInTurnCompactionsPerTurn = 3`，失败尝试计入。
+- **决策 B**：`DirectCompactionStep.MaximumInTurnCompactionsPerTurn`（设计时定为 3，2026-10 修订为 10，见 §3「上限与终止」），失败尝试计入。
 - **决策 C**：可见性 = 活动文案 + 状态栏读数；不写转录、不落库。
 - **决策 D**：触发水位复用回合开始 threshold。
 - **决策 E**：不新增完成文案。
@@ -29,11 +29,11 @@
 
 | 位置 | 事实 |
 | --- | --- |
-| `DirectConversationLoop.cs` | 每回合 ≤128 次 provider 请求；每次迭代 = 排空 steer → 请求 → 追加响应 → 执行工具 → 追加结果 |
-| `DirectConversationLoop.cs` `FitsBudget` | 只用于 steer 批次准入（`used + tools + reserve ≤ window`）；超预算 → `HoldUnconsumedAsync` + `ContextBudgetExceeded` 终结 |
+| `DirectConversationLoop.cs`（现 `DirectTurnRun.cs`） | 设计时每回合 ≤128 次 provider 请求（现 `DirectTurnRun.MaximumProviderRequestsPerTurn` = 1024）；每次迭代 = 排空 steer → 请求 → 追加响应 → 执行工具 → 追加结果 |
+| `DirectConversationLoop.cs` `FitsBudget`（现 `DirectTurnRun.FitsBudget`） | 只用于 steer 批次准入（`used + tools + reserve ≤ window`）；超预算 → `HoldUnconsumedAsync` + `ContextBudgetExceeded` 终结 |
 | `DirectConversationContext.cs` | 扁平 `List<ChatMessage>` + 增量计数（`_countedMessageCount/_countedTokens`）；回合内消息**没有单元结构**；`AppendInputs` 丢弃 steer 的 `MessageRecord`（只保留文本） |
-| `DirectAgentChatRuntime.cs` `ApplyCompactionAsync` | 回合开始压缩只发生一次：计数 → `PlanCompression` → 压缩 → `ContextCompactionCompletedEvent`（录制侧进 `PendingCompactions` → 回合终态原子落库） |
-| `DirectPromptComposer.cs` `PlanCompression` | threshold = 窗口×比例（无窗口用绝对阈值）；reserve 在触发侧；保留 = 阈值×50%，至少最新 1 个单元；前缀为空则拒绝 |
+| `DirectAgentChatRuntime.cs` `ApplyCompactionAsync`（现 `DirectCompactionStep.CompactTurnStartAsync`） | 回合开始压缩只发生一次：计数 → `PlanCompression` → 压缩 → `ContextCompactionCompletedEvent`（录制侧进 `PendingCompactions` → 回合终态原子落库） |
+| `DirectPromptComposer.cs` `PlanCompression`（现 `DirectCompactionPlanner.PlanCompression`） | threshold = 窗口×比例（无窗口用绝对阈值）；reserve 在触发侧；保留 = 阈值×50%，至少最新 1 个单元；前缀为空则拒绝 |
 | `DirectContextCompressor.cs` | `TryCompressAsync`：单次调用、内建"指定模型不可用 → 回退本回合 lease"；失败返回 null |
 | `ConversationTurnRecorder.cs` | 消息 sequence 在**录制侧**保留（`ReserveMessageSequenceAsync`，首个 delta 即分配）；产出侧（Infrastructure）不知道本回合消息的 sequence |
 | `TurnUsageAccumulator.cs` | `last_request_input_tokens` 取最新、不求和 → 压缩后下一请求的输入量下降，输入框状态栏即时可见 |
@@ -64,11 +64,11 @@
 
 ### 3.1 检查点位置
 
-在 `DirectConversationLoop.RunAsync` 循环顶部、`ConsumeAvailableInputsAsync` 之前，且 `requestIndex ≥ 1`：
+在 `DirectTurnRun.RunAsync` 循环顶部、`ConsumeAvailableInputsAsync` 之前，且 `requestIndex ≥ 1`（实现为 `DirectCompactionStep.CompactInTurnAsync` + `EnsureInTurnPromptFitsWindow`）：
 
 ```text
-for requestIndex in 0..127:
-    if requestIndex > 0: TryCompactInTurn()      // ← 新增检查点
+for requestIndex in 0..MaximumProviderRequestsPerTurn-1:
+    if requestIndex > 0: CompactInTurnAsync()    // ← 检查点（DirectCompactionStep）
     ConsumeAvailableInputs()                     // steer 排空（FitsBudget 不变）
     ReadResponse()
     ... 工具执行与结果写回 ...
@@ -114,7 +114,7 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 | **请求上限**（电路断路器） | `MaximumProviderRequestsPerTurn = 1024` | `BudgetExhausted` → Failed |
 | **每轮窗口校验** | 声明的上下文窗口 | 抛可读 `InvalidDataException` → Failed |
 
-四者的分工要说清：**请求计数无法区分长任务与死循环**（读 200 个小文件就该是 200 次请求），所以它只当电路断路器用，值放大到 1024。真正防"看起来在干活"的是无进展检测：同一批工具调用得到同一批结果，连续 3 次即判卡死。轮询构建、反复读一个正在变的文件都有新结果，不会被误杀。
+四者的分工要说清：**请求计数无法区分长任务与死循环**（读 200 个小文件就该是 200 次请求），所以它只当电路断路器用，值放大到 1024。真正防"看起来在干活"的是无进展检测：同一批工具调用得到同一批结果，连续 `NoProgressGuard.RepeatedBatchLimit` = 5 次即判卡死。轮询构建、反复读一个正在变的文件都有新结果，不会被误杀。
 
 压缩额度从 3 提到 10，并且**窗口校验从"仅在压缩后"移到"每个请求前"**——额度耗尽后没有任何东西会再缩小 prompt，只靠压缩后校验等于放行必然超窗的请求、再让 provider 回一个不可读的 400。
 
@@ -142,7 +142,7 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 
 - 计数初始化直接复用初始单元已有的 `Tokens`（回合开始时已计数），只补计 system/受保护消息，省一次全量扫描；
 - `AppendResponse`/`AppendResults` 归组为一个新单元；`AppendInputs` 的 steer 消息进入受保护区（只保留 `ChatMessage`，不保留 `MessageRecord` 引用——当前无读者）；
-- 应用压缩后重建消息序列并**重计数**（重置增量计数后由下一次 `CountTokens` 重建；每回合 ≤3 次，成本有界）。
+- 应用压缩后重建消息序列并**重计数**（重置增量计数后由下一次 `CountTokens` 重建；每回合 ≤ `MaximumInTurnCompactionsPerTurn` = 10 次，成本有界）。
 
 ## 5. 执行、注入与事件
 
@@ -204,7 +204,7 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 - T01 回合内压缩只作用于进程内请求上下文：不产生任何数据库写入、不改转录。
 - T02 单元完整性：工具调用与其结果永不分离；system、completion batch、已消费 steer 永不被回合内压缩覆盖。
 - T03 失败 / 计数不可用 / 上限用尽 → 回退为"本回合不再压缩"，不新增失败路径（唯一例外：决策 A 的"压缩后仍超窗"可读失败）。
-- T04 压缩调用不计入 `MaximumProviderRequestsPerTurn`；自身受 3 次上限约束。
+- T04 压缩调用不计入 `MaximumProviderRequestsPerTurn`；自身受 `MaximumInTurnCompactionsPerTurn`（10 次）上限约束。
 - T05 回合内摘要与回合开始摘要共用一个压缩器、一套阈值与保留比例；无第二套计数口径。
 
 ## 9. 实施拆分（I1–I8）
@@ -212,8 +212,8 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 | 项 | 内容 | 主要落点 |
 | --- | --- | --- |
 | I1 | 上下文单元模型：三区结构、构造入参、计数初始化复用单元 Tokens、`ApplyInTurnCompaction`、`AppendResponse/AppendResults` 归组、`AppendInputs` 转受保护消息 | `DirectConversationContext` |
-| I2 | setup 载荷：policy、budget、初始单元（含 Tokens）、`ConversationId/TurnId`；runtime 组装时复用 `CountPromptTokens` 已构建的单元（顺带消除 `BuildMessages` 内部的二次单元构建，AGENTS 约定 10） | `DirectTurnSetup`、`DirectAgentChatRuntime`、`DirectPromptComposer` |
-| I3 | 循环检查点：快速路径、规划、上限、事件、压缩调用、应用、重计数与超窗错误 | `DirectConversationLoop` |
+| I2 | setup 载荷：policy、budget、初始单元（含 Tokens）、`ConversationId/TurnId`；runtime 组装时复用 `CountPromptTokens` 已构建的单元（顺带消除 `BuildMessages` 内部的二次单元构建，AGENTS 约定 10） | `DirectTurnSetup`、`DirectAgentChatRuntime`、`DirectPromptComposer`（现 `DirectTurnPreparer` + `DirectPromptMeter`） |
+| I3 | 循环检查点：快速路径、规划、上限、事件、压缩调用、应用、重计数与超窗错误 | `DirectConversationLoop`（现 `DirectTurnRun` + `DirectCompactionStep`） |
 | I4 | 摘要注入与链式（本回合内 section 替换） | `DirectConversationContext` |
 | I5 | 新事件 + 录制分支（log-only） | `ContextCompaction*` 新事件文件、`ConversationTurnRecorder` |
 | I6 | DI：loop 注册补 composer / compressor | `ServiceCollectionExtensions.cs`（loop 注册处） |
@@ -225,7 +225,7 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 | # | 决策 | 值 |
 | --- | --- | --- |
 | A | 压缩后仍超窗：可读错误 vs 继续发送 | 可读错误（与既有 §5.4 同构）：回合 Failed，消息与转录保留 |
-| B | 上限 = 3 次、失败计入 | `MaximumInTurnCompactionsPerTurn = 3`，失败尝试计入 |
+| B | 上限、失败计入 | `MaximumInTurnCompactionsPerTurn`（设计时 3，2026-10 修订为 10），失败尝试计入 |
 | C | 可见性：仅活动文案 + 状态栏读数 vs 转录瞬态分隔项 | 活动文案 + 状态栏读数；不写转录、不落库 |
 | D | 触发水位：复用回合开始的 threshold vs 回合内单独水位 | 复用回合开始 threshold（一套概念；churn 由上限兜底） |
 | E | 压缩完成后是否补一条活动文案（如"上下文已压缩，继续执行…"） | 不新增完成文案 |
@@ -238,7 +238,7 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 2. 未达阈值 → 无压缩调用、无事件。
 3. 保留规则：最新单元累计 ≤ 阈值×50%，至少保留 1 个。
 4. 工具调用与结果同进同出（前缀边界落在往返组之间）。
-5. 上限：持续增长只压缩 3 次，之后请求照常发送。
+5. 上限：持续增长只压缩 `MaximumInTurnCompactionsPerTurn`（10）次，之后请求照常发送。
 6. 压缩失败 → `Failed` 事件、上下文未变、回合继续。
 7. 计数不可用 / policy 关闭 → 零行为变化。
 8. 受保护内容：completion batch（continuation origin）、已消费 steer 在压缩后仍在。

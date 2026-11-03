@@ -45,18 +45,18 @@ internal sealed class WorkspaceAgentToolset
 
         return
         [
-            Bind<IReadOnlyList<WorkspaceFileEntry>>(
+            DirectToolBindings.Create<IReadOnlyList<WorkspaceFileEntry>>(
                 bound.ListFilesAsync,
                 "list_files",
                 "List files and directories at a path inside the current workspace.",
-                ToolCallKind.List, FormatEntries),
-            Bind<IReadOnlyList<WorkspaceFileEntry>>(
+                ToolCallKind.List, ToolSourceKind.BuiltIn, FormatEntries),
+            DirectToolBindings.Create<IReadOnlyList<WorkspaceFileEntry>>(
                 bound.GlobFilesAsync,
                 "glob_files",
                 "Find files anywhere in the workspace by glob pattern, e.g. \"**/*.cs\" or \"src/**/test_*.ts\". "
                     + "Returns matching file paths without reading their contents.",
-                ToolCallKind.List, FormatEntries),
-            Bind<WorkspaceSearchResult>(
+                ToolCallKind.List, ToolSourceKind.BuiltIn, FormatEntries),
+            DirectToolBindings.Create<WorkspaceSearchResult>(
                 bound.SearchTextAsync,
                 "search_text",
                 "Search text files in the current workspace. Backed by ripgrep when available (honours .gitignore). "
@@ -64,38 +64,25 @@ internal sealed class WorkspaceAgentToolset
                     + "and caseSensitive to match case exactly. A matching line longer than about 1000 characters "
                     + "— minified bundles, single-line JSON — comes back as a window around the match with "
                     + "\"…[+N chars]\" marking what was left out; read_file that file to see the whole line.",
-                ToolCallKind.Search, FormatHits),
-            Bind<WorkspaceFileReadResult>(
+                ToolCallKind.Search, ToolSourceKind.BuiltIn, FormatHits),
+            DirectToolBindings.Create<WorkspaceFileReadResult>(
                 bound.ReadFileAsync,
                 "read_file",
                 readDescription,
-                ToolCallKind.Read, read => FormatRead(read, imageCapability)),
-            Bind<WorkspaceFileWriteResult>(bound.WriteFileAsync, "write_file",
+                ToolCallKind.Read, ToolSourceKind.BuiltIn, read => FormatRead(read, imageCapability)),
+            DirectToolBindings.Create<WorkspaceFileWriteResult>(bound.WriteFileAsync, "write_file",
                 "Create or overwrite a UTF-8 text file inside the current workspace.",
-                ToolCallKind.Edit, FormatWrite, "Write workspace file", requiresApproval: true),
-            Bind<WorkspaceFileWriteResult>(bound.EditFileAsync, "edit_file",
+                ToolCallKind.Edit, ToolSourceKind.BuiltIn, FormatWrite, "Write workspace file", requiresApproval: true),
+            DirectToolBindings.Create<WorkspaceFileWriteResult>(bound.EditFileAsync, "edit_file",
                 "Edit an existing text file by replacing an exact oldText snippet with newText, without rewriting " +
                 "the whole file. oldText must match exactly once unless replaceAll is set. Prefer this over " +
                 "write_file for changes to large files.",
-                ToolCallKind.Edit, FormatWrite, "Edit workspace file", requiresApproval: true),
-            Bind<ShellCommandResult>(bound.RunShellCommandAsync, "run_shell_command",
+                ToolCallKind.Edit, ToolSourceKind.BuiltIn, FormatWrite, "Edit workspace file", requiresApproval: true),
+            DirectToolBindings.Create<ShellCommandResult>(bound.RunShellCommandAsync, "run_shell_command",
                 WorkspaceShellText.ToolDescription(shellPreference.ShellKind),
-                ToolCallKind.Run, FormatShell, "Run workspace shell command", requiresApproval: true)
+                ToolCallKind.Run, ToolSourceKind.BuiltIn, FormatShell, "Run workspace shell command", requiresApproval: true)
         ];
     }
-
-    private static DirectToolBinding Bind<TResult>(
-        Delegate method, string name, string description, ToolCallKind kind,
-        Func<TResult, DirectToolResult> format, string? displayName = null, bool requiresApproval = false)
-        => new(AIFunctionFactory.Create(method, new AIFunctionFactoryOptions
-        {
-            Name = name,
-            Description = description,
-            ExcludeResultSchema = true,
-            MarshalResult = (value, _, _) => value is TResult result
-                ? ValueTask.FromResult<object?>(format(result))
-                : throw new InvalidOperationException($"Tool '{name}' returned an invalid result.")
-        }), new DirectToolDescriptor(kind, ToolSourceKind.BuiltIn, DisplayName: displayName), requiresApproval);
 
     private static DirectToolResult FormatEntries(IReadOnlyList<WorkspaceFileEntry> entries)
         => new(ToolCallStatus.Completed, WorkspaceToolSummaries.Summarize(entries),
@@ -115,8 +102,7 @@ internal sealed class WorkspaceAgentToolset
         {
             // A gated-off image read is actionable only when the model learns why: the capability
             // reason names the setting or the wire format that has to change.
-            var message = error.Contains(WorkspaceFileService.ImageUnavailableMarker, StringComparison.Ordinal)
-                && imageCapability?.UnavailableReason is { } reason
+            var message = read.ImageUnavailable && imageCapability?.UnavailableReason is { } reason
                     ? $"{error} {reason}"
                     : error;
             return new DirectToolResult(

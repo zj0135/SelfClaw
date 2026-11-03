@@ -20,12 +20,12 @@ public sealed class DirectConversationLoopTests
     [Fact]
     public async Task Request_budget_issues_the_circuit_breaker_limit_and_executes_one_batch_fewer()
     {
-        var maximumIterations = DirectConversationLoop.MaximumProviderRequestsPerTurn;
+        var maximumIterations = DirectTurnRun.MaximumProviderRequestsPerTurn;
         var provider = new EndlessToolChatClient("probe_tool");
         var executions = 0;
         var factory = CreateFactory(provider);
         var runtime = CreateRuntime(factory, new FixedCapabilityResolver(
-            Lease(CreateProbeTool(() => executions++))));
+            Lease(CreateProbeTool(() => Success($"ok-{++executions}")))));
 
         var terminal = await RunAsync(runtime, factory.Profile.Id);
 
@@ -49,12 +49,18 @@ public sealed class DirectConversationLoopTests
             entered.SetResult();
             await release.Task;
             observed.Enqueue("a-end");
-            return "a";
-        }, "probe_a");
+            return Success("a");
+        }, new AIFunctionFactoryOptions
+        {
+            Name = "probe_a",
+            Description = "Synthetic tool used to observe loop behavior.",
+            ExcludeResultSchema = true,
+            MarshalResult = (value, _, _) => ValueTask.FromResult(value)
+        });
         var toolB = CreateProbeTool("probe_b", () =>
         {
             observed.Enqueue("b");
-            return "b";
+            return Success("b");
         });
         var runtime = CreateRuntime(factory, new FixedCapabilityResolver(
             Lease(toolA, toolB)));
@@ -159,7 +165,7 @@ public sealed class DirectConversationLoopTests
         var executions = 0;
         var factory = CreateFactory(provider);
         var runtime = CreateRuntime(factory, new FixedCapabilityResolver(
-            Lease(CreateProbeTool(() => { executions++; return "ok"; }))));
+            Lease(CreateProbeTool(() => { executions++; return Success("ok"); }))));
 
         var terminal = await RunAsync(runtime, factory.Profile.Id);
 
@@ -170,6 +176,30 @@ public sealed class DirectConversationLoopTests
     }
 
     [Fact]
+    public async Task A_stalled_turn_keeps_the_real_result_of_every_executed_call()
+    {
+        // The tools did run, so the stop is explained by the terminal event alone: cancelling the same call
+        // ids afterwards would rewrite a real result the transcript and the next prompt replay.
+        var provider = new EndlessToolChatClient("probe_tool");
+        var factory = CreateFactory(provider);
+        var runtime = CreateRuntime(factory, new FixedCapabilityResolver(
+            Lease(CreateProbeTool(() => Success("ok")))));
+        var events = new List<AgentStreamEvent>();
+        await foreach (var item in runtime.StreamTurnAsync(DirectAgentChatRuntimeTests.CreateRequest(factory.Profile.Id)))
+            events.Add(item);
+
+        var completed = events.OfType<ToolCallCompletedEvent>().ToArray();
+        completed.Should().HaveCount(NoProgressGuard.RepeatedBatchLimit,
+            "every round ran once and no stop may add a second terminal event");
+        completed.Select(item => item.ToolCallId).Should().OnlyHaveUniqueItems();
+        completed.Should().OnlyContain(item => item.Status == ToolCallStatus.Completed);
+        completed.Should().OnlyContain(item => item.ResultSummary == "ok" && item.ResultContent == "ok");
+        events.OfType<ToolCallStartedEvent>().Select(item => item.ToolCallId)
+            .Should().Equal(completed.Select(item => item.ToolCallId));
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.ErrorMessage.Should().Contain("NoProgress");
+    }
+
+    [Fact]
     public async Task The_same_batch_with_a_new_result_each_round_keeps_the_turn_running()
     {
         // Reading the same file many times is not a loop as long as the file keeps changing.
@@ -177,11 +207,11 @@ public sealed class DirectConversationLoopTests
         var executions = 0;
         var factory = CreateFactory(provider);
         var runtime = CreateRuntime(factory, new FixedCapabilityResolver(
-            Lease(CreateProbeTool(() => $"ok-{++executions}"))));
+            Lease(CreateProbeTool(() => Success($"ok-{++executions}")))));
 
         var terminal = await RunAsync(runtime, factory.Profile.Id);
 
-        provider.Requests.Should().Be(DirectConversationLoop.MaximumProviderRequestsPerTurn,
+        provider.Requests.Should().Be(DirectTurnRun.MaximumProviderRequestsPerTurn,
             "only the circuit breaker may stop a turn that keeps producing new results");
         terminal.ErrorMessage.Should().Contain("BudgetExhausted");
     }
@@ -257,6 +287,11 @@ public sealed class DirectConversationLoopTests
             ExcludeResultSchema = true,
             MarshalResult = (value, _, _) => ValueTask.FromResult(value)
         });
+
+    // The invoker's contract is one DirectToolResult per call, so a probe that wants to observe the loop returns
+    // one too: a bare payload would be reported as an invalid result instead of the tool's own answer.
+    private static DirectToolResult Success(string text)
+        => new(ToolCallStatus.Completed, text, JsonSerializer.SerializeToElement(text), text);
 
     private sealed class FixedCapabilityResolver(DirectTurnCapabilityLease lease) : IDirectTurnCapabilityResolver
     {

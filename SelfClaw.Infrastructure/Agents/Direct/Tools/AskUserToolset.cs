@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Text.Json;
-using Microsoft.Extensions.AI;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
@@ -67,17 +66,8 @@ internal sealed class AskUserToolset
 
         return
         [
-            new(AIFunctionFactory.Create(AskUserAsync, new AIFunctionFactoryOptions
-                {
-                    Name = AskUserRules.ToolName,
-                    Description = ToolDescription,
-                    ExcludeResultSchema = true,
-                    MarshalResult = (value, _, _) => value is DirectToolResult result
-                        ? ValueTask.FromResult<object?>(result)
-                        : throw new InvalidOperationException(
-                            $"Tool '{AskUserRules.ToolName}' returned an invalid result.")
-                }),
-                new DirectToolDescriptor(ToolCallKind.Ask, ToolSourceKind.BuiltIn, DisplayName: "Ask user"))
+            DirectToolBindings.Create(AskUserAsync, AskUserRules.ToolName, ToolDescription,
+                ToolCallKind.Ask, ToolSourceKind.BuiltIn, "Ask user")
         ];
     }
 

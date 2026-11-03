@@ -5,6 +5,8 @@
 
 > **历史基线（2026-09-26）：** 本文是 2026-07/08 Direct 扩展系统接入时的实施任务清单，文中出现的 `ApprovedAIFunction`、`ToolDescriptors`、适配器内部获取共享 HttpClient 等接缝已被重构替代为 `DirectToolInvoker`、`Bindings`、按回合 `HttpClient`。任务条目保留原样作为历史记录，当前接缝见 [运行流程](runtime-execution-flow.md)。2026-10-28 起插件视图和权限确认也已删除，文中的 `PermissionReviewDialog` 与视图任务不要再实施。
 
+> **类型名对照（2026-11 Direct 重构）：** 正文保留实施当时的类型名。`DirectConversationLoop` → `DirectTurnRun`（每回合实例，`DirectTurnRunFactory` 创建）；`DirectPromptComposer` → `DirectHistoryReplay`（重放单元 / `Compose`）+ `DirectSystemPrompt`（system 文本 / 摘要段 / completion batch）+ `DirectCompactionPlanner`（`PlanCompression` / `ResolveThreshold`）；`DirectAgentChatRuntime.SetupTurnAsync` → `DirectTurnPreparer.PrepareAsync`；`ApplyCompactionAsync` / `TryCompactInTurnAsync` / `EnsurePromptFitsWindow` → `DirectCompactionStep`；`CountPromptTokens` → `DirectPromptMeter`；`MaximumInTurnCompactionsPerTurn` 现为 10（`DirectCompactionStep`），`MaximumProviderRequestsPerTurn` 现为 1024（`DirectTurnRun`）。
+
 ## 使用约定
 
 - **完成定义（每个任务通用 DoD）**：`dotnet build SelfClaw.slnx` 零新增警告、`dotnet test SelfClaw.Tests` 全绿；涉及前端时 `SelfClaw.TranscriptVue` 内 `npm run build` 通过；涉及 UI 的任务附手动验收步骤。

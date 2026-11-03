@@ -23,8 +23,6 @@ internal sealed class NoProgressGuard
     private string? _previousFingerprint;
     private int _repeatedBatches;
 
-    internal int RepeatedBatches => _repeatedBatches;
-
     /// <summary>
     /// Records one completed tool batch. Returns true once the same batch repeats
     /// <see cref="RepeatedBatchLimit"/> times, which is the point at which the caller must stop the turn.

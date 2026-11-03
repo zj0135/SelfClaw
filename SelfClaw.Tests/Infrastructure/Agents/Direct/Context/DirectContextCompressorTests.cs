@@ -311,18 +311,6 @@ public sealed class DirectContextCompressorTests
         split.SummaryTokens.Should().Be(single.SummaryTokens);
     }
 
-    [Fact]
-    public async Task Returns_null_when_no_chat_client_is_available()
-    {
-        var logger = new CapturingLogger();
-
-        var outcome = await CreateCompressor(new RecordingChatClient(), logger).TryCompressAsync(Request(
-            [Unit(new ChatMessage(ChatRole.User, "hello"))]));
-
-        outcome.Should().BeNull();
-        logger.Messages.Should().ContainSingle().Which.Should().Contain(ConversationId.ToString());
-    }
-
     private static DirectContextCompressor CreateCompressor(
         RecordingChatClient client,
         CapturingLogger? logger = null,
@@ -335,9 +323,9 @@ public sealed class DirectContextCompressorTests
 
     private static DirectCompressionRequest Request(
         IReadOnlyList<DirectPromptHistoryUnit> units,
+        AiChatClientLease turnLease,
         int sourceTokens = 1200,
         Guid? modelProfileId = null,
-        AiChatClientLease? turnLease = null,
         string? previousSummary = null)
         => new(units, previousSummary, sourceTokens, modelProfileId, turnLease, ConversationId, TurnId);
 
@@ -369,8 +357,6 @@ public sealed class DirectContextCompressorTests
 
     private sealed class UnavailableTokenCounter : IDirectTokenCounter
     {
-        public bool IsAvailable(AiModelProfile? model) => false;
-
         public int? CountText(string? text, AiModelProfile? model) => null;
 
         public int? CountMessages(IReadOnlyList<ChatMessage> messages, AiModelProfile? model) => null;

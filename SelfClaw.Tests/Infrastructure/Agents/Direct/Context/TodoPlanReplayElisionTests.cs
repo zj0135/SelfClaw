@@ -23,7 +23,7 @@ public sealed class TodoPlanReplayElisionTests
         olderCall.Arguments.Should().ContainKey("elided");
         Assert.NotNull(newerCall.Arguments);
         newerCall.Arguments.Should().ContainKey("todos");
-        Pair(history, older).Result.Should().Be(DirectPromptComposer.ElidedTodoResultText);
+        Pair(history, older).Result.Should().Be(DirectHistoryReplay.ElidedTodoResultText);
         Pair(history, newest).Result.Should().Be(ComposerHistory.ResultText, "the newest plan replays as stored");
     }
 
@@ -42,7 +42,7 @@ public sealed class TodoPlanReplayElisionTests
         Assert.NotNull(failedCall.Arguments);
         failedCall.Arguments.Should().ContainKey("elided");
         var failedResult = Pair(history, failed);
-        failedResult.Result.Should().Be(DirectPromptComposer.ElidedTodoResultText);
+        failedResult.Result.Should().Be(DirectHistoryReplay.ElidedTodoResultText);
         failedResult.Exception.Should().NotBeNull("a failed call still replays as an error");
         Pair(history, valid).Exception.Should().BeNull();
     }
@@ -89,7 +89,7 @@ public sealed class TodoPlanReplayElisionTests
             .Single(result => result.CallId == run.CorrelationId);
 
     private static IReadOnlyList<ChatMessage> Replay(ComposerHistory history)
-        => new DirectPromptComposer()
+        => DirectHistoryReplay
             .BuildUnits(history.Messages, history.Turns, history.Runs, new Dictionary<Guid, string>())
             .SelectMany(unit => unit.Messages)
             .ToArray();

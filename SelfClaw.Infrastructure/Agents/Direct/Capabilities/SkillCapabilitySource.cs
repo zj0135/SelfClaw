@@ -235,11 +235,9 @@ internal sealed class SkillCapabilitySource
     /// The Agent Skills specification lets a Skill declare <c>allowed-tools</c>, but SelfClaw's tool policy is
     /// per turn rather than per Skill and function invocation cannot swap the tool set mid-turn. Ignoring the
     /// declaration silently would leave the author assuming a restriction that is not in force, so the
-    /// mismatch is surfaced as a degradation instead.
-    /// </summary>
-    /// <summary>
-    /// Shared with <see cref="PluginCapabilitySource"/>: a Plugin-contributed Skill parses the same
-    /// front matter, so it must report the same unsupported declarations instead of passing silently.
+    /// mismatch is surfaced as a degradation instead. Shared with <see cref="PluginCapabilitySource"/>: a
+    /// Plugin-contributed Skill parses the same front matter, so it must report the same unsupported
+    /// declarations instead of passing silently.
     /// </summary>
     internal static void ReportFrontMatterDiagnostics(
         string skillId,

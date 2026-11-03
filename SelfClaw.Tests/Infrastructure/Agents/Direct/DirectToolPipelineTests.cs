@@ -136,7 +136,7 @@ public sealed class DirectToolPipelineTests : IDisposable
     /// model that keeps requesting that tool until the turn ends.
     /// </summary>
     private static async Task<(RunCompletedEvent Terminal, RepeatingToolChatClient Provider, int Executions)> RunToolLoopAsync(
-        Func<int, object?> tool)
+        Func<int, DirectToolResult> tool)
     {
         var provider = new RepeatingToolChatClient("probe_tool", new Dictionary<string, object?>());
         var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(provider);
@@ -145,7 +145,7 @@ public sealed class DirectToolPipelineTests : IDisposable
         Func<object> invoke = () =>
         {
             executions++;
-            return tool(executions)!;
+            return tool(executions);
         };
         var function = AIFunctionFactory.Create(invoke, new AIFunctionFactoryOptions
         {

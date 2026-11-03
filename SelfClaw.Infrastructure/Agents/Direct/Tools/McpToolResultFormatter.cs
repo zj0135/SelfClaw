@@ -12,7 +12,6 @@ internal static class McpToolResultFormatter
 
     internal static DirectToolResult Format(object? result)
     {
-        if (result is IEnumerable<AIContent> contents) result = contents.ToArray();
         var (status, summary, detail) = DescribeResult(result);
         var content = result is JsonElement json ? json.Clone() : JsonSerializer.SerializeToElement(result);
         var formatted = new DirectToolResult(status, FirstLine(summary), content, detail);
@@ -45,26 +44,30 @@ internal static class McpToolResultFormatter
     private static int SerializedBytes(DirectToolResult result)
         => JsonSerializer.SerializeToUtf8Bytes(result).Length;
 
+    // An AIContent sequence is materialized once, so the count in the summary and the parts in the detail
+    // describe the same items instead of enumerating the result twice.
     internal static (ToolCallStatus Status, string Summary, string Detail) DescribeResult(object? result)
+        => result is IEnumerable<AIContent> contents ? DescribeContents(contents.ToArray()) : DescribeValue(result);
+
+    private static (ToolCallStatus Status, string Summary, string Detail) DescribeContents(AIContent[] values)
+    {
+        var texts = values.OfType<TextContent>().Select(content => content.Text).ToArray();
+        var contentPlaceholders = values
+            .Where(content => content is not TextContent)
+            .Select(content => $"[{content.GetType().Name}]")
+            .ToArray();
+        var contentDetail = string.Join(Environment.NewLine, texts.Concat(contentPlaceholders));
+        return (
+            ToolCallStatus.Completed,
+            texts.FirstOrDefault() is { } first ? FirstLine(first) : $"{values.Length} MCP content items",
+            contentDetail);
+    }
+
+    private static (ToolCallStatus Status, string Summary, string Detail) DescribeValue(object? result)
     {
         if (result is TextContent textContent)
         {
             return (ToolCallStatus.Completed, FirstLine(textContent.Text), textContent.Text);
-        }
-
-        if (result is IEnumerable<AIContent> contents)
-        {
-            var values = contents.ToArray();
-            var texts = values.OfType<TextContent>().Select(content => content.Text).ToArray();
-            var contentPlaceholders = values
-                .Where(content => content is not TextContent)
-                .Select(content => $"[{content.GetType().Name}]")
-                .ToArray();
-            var contentDetail = string.Join(Environment.NewLine, texts.Concat(contentPlaceholders));
-            return (
-                ToolCallStatus.Completed,
-                texts.FirstOrDefault() is { } first ? FirstLine(first) : $"{values.Length} MCP content items",
-                contentDetail);
         }
 
         if (result is not JsonElement element || element.ValueKind != JsonValueKind.Object)

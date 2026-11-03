@@ -389,7 +389,8 @@ public sealed class WorkspaceAgentToolsetTests
         var service = new FakeWorkspaceToolService
         {
             ReadResult = new WorkspaceFileReadResult(
-                Error: "'shot.png' is an image, but this turn cannot receive image content.")
+                Error: "'shot.png' is an image, but this turn cannot receive image content.",
+                ImageUnavailable: true)
         };
         var fixture = CreateTools(service, CreateWorkspace(), Guid.NewGuid(), ToolPermissionMode.FullAccess, null,
             new ToolImageCapability(ToolImageDelivery.Unsupported, reason));
@@ -401,6 +402,43 @@ public sealed class WorkspaceAgentToolsetTests
         result.Summary.Should().Contain("this turn cannot receive image content");
         result.Summary.Should().Contain(reason);
         result.Detail.Should().Contain(reason);
+    }
+
+    // The capability reason is added from the typed flag, never from the error text: a read that failed for
+    // another reason must not carry a multimodal hint.
+    [Fact]
+    public async Task The_capability_reason_follows_the_typed_image_gate_not_the_error_text()
+    {
+        const string reason = "This model is not marked as multimodal. Enable multimodal support for it in AI provider settings.";
+        var gated = new FakeWorkspaceToolService
+        {
+            ReadResult = new WorkspaceFileReadResult(Error: "the image could not be read.", ImageUnavailable: true)
+        };
+        var gatedFixture = CreateTools(gated, CreateWorkspace(), Guid.NewGuid(), ToolPermissionMode.FullAccess,
+            null, new ToolImageCapability(ToolImageDelivery.Unsupported, reason));
+
+        var gatedResult = (await gatedFixture.InvokeAsync("read_file",
+                new AIFunctionArguments { ["relativePath"] = "shot.png" }))
+            .Should().BeOfType<DirectToolResult>().Which;
+
+        gatedResult.Status.Should().Be(SelfClaw.Core.Runtime.Agent.ToolCallStatus.Failed);
+        gatedResult.Summary.Should().Be($"the image could not be read. {reason}");
+
+        // The same text without the flag stays untouched, so the reason cannot leak into an unrelated failure.
+        var other = new FakeWorkspaceToolService
+        {
+            ReadResult = new WorkspaceFileReadResult(
+                Error: "'big.png' is 9 bytes, above the 5 byte image limit.")
+        };
+        var otherFixture = CreateTools(other, CreateWorkspace(), Guid.NewGuid(), ToolPermissionMode.FullAccess,
+            null, new ToolImageCapability(ToolImageDelivery.Unsupported, reason));
+
+        var otherResult = (await otherFixture.InvokeAsync("read_file",
+                new AIFunctionArguments { ["relativePath"] = "big.png" }))
+            .Should().BeOfType<DirectToolResult>().Which;
+
+        otherResult.Summary.Should().Be("'big.png' is 9 bytes, above the 5 byte image limit.");
+        otherResult.Summary.Should().NotContain(reason);
     }
 
     private static ToolFixture CreateTools(FakeWorkspaceToolService service, WorkspaceRoot workspace,
@@ -429,7 +467,7 @@ public sealed class WorkspaceAgentToolsetTests
 
     private sealed record ToolFixture(IReadOnlyList<AITool> Tools, DirectToolInvoker Invoker)
     {
-        internal ValueTask<object?> InvokeAsync(string name, AIFunctionArguments arguments)
+        internal ValueTask<DirectToolResult> InvokeAsync(string name, AIFunctionArguments arguments)
         {
             var function = Tools.Cast<AIFunction>().Single(tool => tool.Name == name);
             return Invoker.InvokeAsync(

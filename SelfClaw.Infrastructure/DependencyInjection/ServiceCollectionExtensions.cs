@@ -157,7 +157,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMcpClientManager>(serviceProvider =>
             serviceProvider.GetRequiredService<McpClientManager>());
         services.AddSingleton<IExtensionSettingsService, ExtensionSettingsService>();
-        services.AddSingleton<DirectPromptComposer>();
         services.AddSingleton(serviceProvider => new DirectContextCompressor(
             serviceProvider.GetRequiredService<IAiChatClientFactory>(),
             serviceProvider.GetRequiredService<IAiModelCatalog>(),
@@ -166,11 +165,23 @@ public static class ServiceCollectionExtensions
         // A host that owns the compaction settings replaces this registration with its own policy source.
         services.AddSingleton<IDirectCompressionPolicySource>(DisabledDirectCompressionPolicySource.Instance);
         services.AddSingleton(serviceProvider =>
-            new DirectConversationLoop(
-                serviceProvider.GetRequiredService<IDirectTokenCounter>(),
-                serviceProvider.GetRequiredService<DirectPromptComposer>(),
-                serviceProvider.GetRequiredService<DirectContextCompressor>(),
+            new DirectPromptMeter(serviceProvider.GetRequiredService<IDirectTokenCounter>()));
+        services.AddSingleton(serviceProvider => new DirectCompactionStep(
+            serviceProvider.GetRequiredService<DirectPromptMeter>(),
+            serviceProvider.GetRequiredService<DirectContextCompressor>()));
+        services.AddSingleton(serviceProvider =>
+            new DirectTurnRunFactory(
+                serviceProvider.GetRequiredService<DirectPromptMeter>(),
+                serviceProvider.GetRequiredService<DirectCompactionStep>(),
                 serviceProvider.GetRequiredService<IAttachmentContentReader>()));
+        services.AddSingleton(serviceProvider =>
+            new DirectTurnPreparer(
+                serviceProvider.GetRequiredService<IAiChatClientFactory>(),
+                serviceProvider.GetRequiredService<IDirectTurnCapabilityResolver>(),
+                serviceProvider.GetRequiredService<IDirectCompressionPolicySource>(),
+                serviceProvider.GetRequiredService<DirectCompactionStep>(),
+                serviceProvider.GetRequiredService<IAttachmentContentReader>(),
+                serviceProvider.GetService<ILogger<DirectTurnPreparer>>()));
         services.AddSingleton<IDirectTokenCounter>(serviceProvider =>
             new DirectTokenCounter(serviceProvider.GetService<ILogger<DirectTokenCounter>>()));
         services.AddSingleton<CapabilityContentCache>();

@@ -377,6 +377,33 @@ public sealed class SkillRuntimeToolsetTests : IDisposable
         resource.Should().NotContain("[script]");
     }
 
+    [Fact]
+    public async Task Every_tool_summarizes_what_it_did()
+    {
+        var skill = CreateSkill("review", "instructions", ("references/guide.md", "one\ntwo"));
+        var tools = new SkillRuntimeToolset(new SkillScriptRunner()).CreateTools([skill], []);
+        var activate = FindFunction(tools, SkillRuntimeToolset.ActivateSkillToolName);
+
+        var activated = await InvokeResultAsync(activate, new() { ["skillId"] = "review" });
+        activated.Summary.Should().Be("Activated Skill 'review'.");
+        activated.Detail.Should().StartWith("instructions", "the loaded instructions stay in the detail");
+
+        var repeated = await InvokeResultAsync(activate, new() { ["skillId"] = "review" });
+        repeated.Status.Should().Be(ToolCallStatus.Completed);
+        repeated.Summary.Should().Be("Skill 'review' is already activated for this turn.");
+
+        var read = await InvokeResultAsync(
+            FindFunction(tools, SkillRuntimeToolset.ReadSkillResourceToolName),
+            new() { ["skillId"] = "review", ["relativePath"] = "references/guide.md" });
+        read.Summary.Should().Be("Read references/guide.md (lines 1-2 of 2).");
+        read.Detail.Should().StartWith("references/guide.md (lines 1-2 of 2)");
+
+        var list = await InvokeResultAsync(
+            FindFunction(tools, SkillRuntimeToolset.ListSkillResourcesToolName),
+            new() { ["skillId"] = "review" });
+        list.Summary.Should().Be("Listed 1 of 1 Skill resources.");
+    }
+
     public void Dispose() => DirectoryLinkTestHelper.DeleteTree(_rootPath);
 
     private ResolvedSkill CreateSkill(

@@ -29,7 +29,7 @@ FunctionCallContent(ask_user { questions: [...] })
   → DirectToolResult(Completed, Detail)                  → ToolCallCompletedEvent → 模型继续
 ```
 
-关键结构性决定：**`DirectToolInvoker`、`DirectConversationLoop`、`ConversationTurnRecorder`、`DirectPromptComposer` 零改动**。提问就是一个"会阻塞很久"的普通内置工具，因此审批/执行 checkpoint/连续故障预算/转录落库/历史回放全部自动复用。
+关键结构性决定：**`DirectToolInvoker`、`DirectTurnRun`、`ConversationTurnRecorder`、`DirectHistoryReplay` 零改动**。提问就是一个"会阻塞很久"的普通内置工具，因此审批/执行 checkpoint/连续故障预算/转录落库/历史回放全部自动复用。
 
 ## 3. 契约（Core）
 
@@ -90,9 +90,9 @@ Core 不能引用 Infrastructure，所以规则集拥有自己的输入形状 `A
 | 参数非法 | `Failed` | `Invalid question: …` | 具体原因，模型可修正重发 |
 | 超配额 | `Failed` | `Question limit reached` | 说明本回合不再提问 |
 
-**跳过必须是 `Completed`**：`DirectPromptComposer.CreateToolResultMessage` 会把 `Canceled`/`Failed` 回放成 `Exception`，模型会读成"工具坏了"而不是"用户决定不答"。超配额与非法参数同理不抛异常，不消耗 `DirectToolInvoker.MaximumConsecutiveToolFaults`。
+**跳过必须是 `Completed`**：`DirectHistoryReplay.CreateToolResultMessage` 会把 `Canceled`/`Failed` 回放成 `Exception`，模型会读成"工具坏了"而不是"用户决定不答"。超配额与非法参数同理不抛异常，不消耗 `DirectToolInvoker.MaximumConsecutiveToolFaults`。
 
-**两条路径必须信息一致**：`DirectToolResult.Detail` 带 `[JsonIgnore]`，活模型读的是 `Content`（`{ skipped, answers: [{ question, selected[], other }] }`）；而落库/回放的 `ResultContent` 存的是 `Detail`（`DirectEventTranslator.DescribeToolResult`）。两者由同一个循环产出，不能各说一套。
+**两条路径必须信息一致**：`DirectToolResult.Detail` 带 `[JsonIgnore]`，活模型读的是 `Content`（`{ skipped, answers: [{ question, selected[], other }] }`）；而落库/回放的 `ResultContent` 存的是 `Detail`（`DirectEventTranslator.PublishToolResult`）。两者由同一个循环产出，不能各说一套。
 
 ## 7. WebView 协议
 
@@ -147,7 +147,7 @@ Core 不能引用 Infrastructure，所以规则集拥有自己的输入形状 `A
 
 ## 11. 已知风险
 
-- **历史回放与本回合绑定无关**（既有性质，非 `ask_user` 引入）：`DirectPromptComposer.BuildRequest` / `BuildAssistantUnit` 的签名里没有任何 binding 参数——它只遍历 `MessageSegmentKind.ToolCall` 与 `ToolExecutionRecord`，因此会回放**每一次**已完成/失败/取消的工具调用，不检查该工具本轮是否提供给了模型。`tools` 列表则由 `DirectTurnCapabilityResolver.BindTools` 独立按 origin 与 ToolPolicy 过滤。两件事各算各的，于是 assistant 消息里可以出现"本轮没提供的工具"的 tool_call，其后跟着对应的 result。
+- **历史回放与本回合绑定无关**（既有性质，非 `ask_user` 引入）：`DirectHistoryReplay.BuildUnits` / `BuildAssistantUnit` 的签名里没有任何 binding 参数——它只遍历 `MessageSegmentKind.ToolCall` 与 `ToolExecutionRecord`，因此会回放**每一次**已完成/失败/取消的工具调用，不检查该工具本轮是否提供给了模型。`tools` 列表则由 `DirectTurnCapabilityResolver.BindTools` 独立按 origin 与 ToolPolicy 过滤。两件事各算各的，于是 assistant 消息里可以出现"本轮没提供的工具"的 tool_call，其后跟着对应的 result。
 
   `ask_user` 只是**新增了一条触发路径**：`SubagentContinuationExecutor.CreateRequest` 用 `PrepareRuntimeStateAsync(parentConversation)` 加载**父会话**历史并以 `Continuation` 为 origin，而 `AllowsUserQuestion => Origin is Interactive` 使该回合不绑定 `ask_user`；父会话里若有已完成的提问，就会被回放成未绑定的调用。既有的触发路径其实更常见：切换 agent 使 `ToolPolicy` 收窄（System → ReadOnly 会让 `write_file` / `edit_file` / `run_shell_command` 从 `tools` 消失）、禁用 MCP server、卸载 Skill、清空工作区。
 
@@ -155,7 +155,7 @@ Core 不能引用 Infrastructure，所以规则集拥有自己的输入形状 `A
 
   **危险在于"顺手修好"**：若某天遇到 strict provider 拒绝这种载荷，最直觉的改法是把 `ask_user` 也绑到后台回合——那是致命错误。目前 `SubagentContinuationExecutor` / `SubagentTaskExecutor` / `AutomationRunExecutor` 都**不传** `UserQuestionHandler`（传了也绑不上，因为绑定条件还要求 handler 非 null），这层意外保护很容易被"让逻辑一致"顺手拆掉。真绑上之后：后台回合没有界面、dock 不出现、用户不知道有问题在等，`RequestAnswerAsync` 挂起的 `TaskCompletionSource` 永不完成 → 回合永久阻塞 → 该会话的 run handle 一直被占用 → 用户连发新消息都会被挡住。
 
-  **正确修法**：在 `DirectPromptComposer` 里对未绑定的工具做成对省略——call 与其 result 必须一起跳过。拆开任一侧都是非法载荷（只有 call 没有 result，或只有 result 没有 call）。现有代码已在同一 `switch` 分支里同时压入两者，扩展点就在那里。
+  **正确修法**：在 `DirectHistoryReplay` 里对未绑定的工具做成对省略——call 与其 result 必须一起跳过。拆开任一侧都是非法载荷（只有 call 没有 result，或只有 result 没有 call）。现有代码已在同一 `switch` 分支里同时压入两者，扩展点就在那里。
 - **提示词膨胀**：工具描述常驻每次请求（约 200–250 tokens）。
 - **挂起**：无超时 + 后台窗口 → 回合可能长时间空转；靠"停止生成"与活动面板/宠物的"等待你的回答"缓解。
 - **两套待决队列**（审批/提问）的展示优先级固定为"提问优先"（问题已把回合彻底卡住）。

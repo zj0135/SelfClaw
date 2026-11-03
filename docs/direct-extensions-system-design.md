@@ -64,7 +64,7 @@ DirectTurnCapabilityLease
 |---|---|---|
 | `DispatchingAgentChatRuntime` | Direct / CLI 分发已稳定 | 不改分发契约 |
 | `DirectAgentChatRuntime` | 已能装配 `AITool`、调用 `IChatClient`、翻译工具事件 | 接收能力快照，不直接理解扩展配置 |
-| `AiChatClientFactory` | 只挂 `UseLogging`；工具循环由 `DirectConversationLoop` 显式调用 `DirectToolInvoker` | MCP/Skill loader 工具直接复用 |
+| `AiChatClientFactory` | 只挂 `UseLogging`；工具循环由 `DirectTurnRun` 显式调用 `DirectToolInvoker` | MCP/Skill loader 工具直接复用 |
 | `WorkspaceAgentToolset` | 当前实际提供 7 个 workspace tools | 作为内建工具来源并入统一能力快照 |
 | `DesktopToolApprovalHandler` | 已有 WPF/Vue/toast 审批闭环 | 扩展到 MCP 工具审批 |
 | `ISecretProtector` / DPAPI | 已有 SecretRef 存储 | 保存 MCP env/header 密钥 |
@@ -104,7 +104,7 @@ DirectTurnCapabilityLease
 
 1. **消息组装**：`DirectAgentChatRuntime.BuildMessages()` 跳过 `Failed` **和 `Cancelled`** 消息与空文本，只把 `User/Assistant` 的 `MarkdownContent` 映射为文本 `ChatMessage`。上一轮的 function call/result **不会**重放进下一轮请求——跨回合语义见 §8.4。
 2. **审批发生在唯一工具执行缝内**：显式循环调用 `DirectToolInvoker.InvokeAsync` 时才走审批，此时 `ToolCallStartedEvent` 已发出、工具记录状态保持 `Running`（`ToolExecutionStatus.AwaitingApproval` 至今无人写入）。拒绝不是异常：invoker 返回 `Canceled`、摘要为 `DirectToolInvoker.DeniedResult`（"User denied this tool call."）的 `DirectToolResult`，模型拿到该文本继续。MCP 工具经同一接缝审批。
-3. **工具结果摘要**：`DescribeToolResult()` 对 workspace 类型化结果逐一 Summarize/Describe；未知类型落到 `JsonElement`/`ToString()` 兜底（"Tool call completed."）。MCP 工具结果是序列化的 `CallToolResult`，直接走兜底会让摘要与卡片不可读，见 §9.5。
+3. **工具结果摘要**：`DescribeToolResult()`（设计时的实现，现已删除：每个 toolset 自带 `DirectToolResult`，MCP 走 `McpToolResultFormatter`）对 workspace 类型化结果逐一 Summarize/Describe；未知类型落到 `JsonElement`/`ToString()` 兜底（"Tool call completed."）。MCP 工具结果是序列化的 `CallToolResult`，直接走兜底会让摘要与卡片不可读，见 §9.5。
 4. **活动文案**：`AgentActivityCoordinator` 把 `AgentRunStatus`（Initializing/Requesting/Thinking/Running）映射为四条固定中文文案；`RunStatusEvent` 目前只有 `Status` 一个字段。§10.3 的 `Detail` 要在该映射处消费。
 5. **hostBridge 语义**：`request()` 默认 30 秒超时、错误经 `payload.error` reject、回包 `type` 允许与请求 `type` 不同（按 requestId 关联）；`on(type, handler, { replayLast })` 支持 sticky 重放。前端 skill chip 正则为 `\[\/([^\]\r\n]{1,80})\]`（允许 `/`，因此与 plugin 命名空间 id 兼容）。
 6. **skill id 归一化**：`DesktopAgentStore.NormalizeSkillId()` 已支持多段路径（`a/b` 形式，剔除 `.`/`..`），嵌套目录里的 `SKILL.md` 会得到多段 id；plugin 贡献 Skill 的 `<plugin-id>/<skill-id>` 规范 id 与现有归一化天然一致。
@@ -251,7 +251,7 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
 }
 ```
 
-`MessageAdjustments` 是 message id -> 改写后文本的映射，承载 §8.2/§8.4 的 skill token 剥离结果（最新 user message 与历史中匹配有效 Skill 的 token）。没有这个输出，token 剥离就只能散落回 runtime 或 prompt composer 里重复解析——lease 是 resolver 对外的唯一产物，改写必须随之携带。`DirectPromptComposer` 组装消息时以该映射覆盖对应 `MessageRecord.MarkdownContent`；数据库与 Vue 中的原始消息不变。
+`MessageAdjustments` 是 message id -> 改写后文本的映射，承载 §8.2/§8.4 的 skill token 剥离结果（最新 user message 与历史中匹配有效 Skill 的 token）。没有这个输出，token 剥离就只能散落回 runtime 或 prompt composer 里重复解析——lease 是 resolver 对外的唯一产物，改写必须随之携带。`DirectHistoryReplay` 组装重放单元时以该映射覆盖对应 `MessageRecord.MarkdownContent`；数据库与 Vue 中的原始消息不变。
 
 配置启停、更新或删除时：
 
@@ -708,7 +708,7 @@ conversation.ToolPermissionMode == RequireApproval
 
 ### 9.5 MCP 工具结果的内容映射
 
-`McpClientTool` 的 AIFunction 调用结果是序列化后的 `CallToolResult`（`JsonElement`），包含 `content[]`（text / image / audio / resource_link / embedded resource）、可选 `structuredContent` 和 `isError`。当前 `DescribeToolResult()` 的 `JsonElement` 兜底只会给出“Tool call completed.” + 原始 JSON（§1.4），必须补一条 MCP 专用路径，放在 `McpToolAdapter`（依据 `DirectToolDescriptor` 判定该 call 是 MCP 工具）：
+`McpClientTool` 的 AIFunction 调用结果是序列化后的 `CallToolResult`（`JsonElement`），包含 `content[]`（text / image / audio / resource_link / embedded resource）、可选 `structuredContent` 和 `isError`。设计时 `DescribeToolResult()`（现已删除）的 `JsonElement` 兜底只会给出“Tool call completed.” + 原始 JSON（§1.4），必须补一条 MCP 专用路径，放在 `McpToolAdapter`（依据 `DirectToolDescriptor` 判定该 call 是 MCP 工具）：
 
 - **给模型的结果**：回传给模型的就是 `DirectToolInvoker` 返回的 `DirectToolResult.Content`，不再改写；但对超长结果设置上限（建议 64 KiB，截断时附截断说明），避免单次 tool result 撑爆上下文。
 - **`isError = true`**：映射为 `ToolCallStatus.Failed` 的 `ToolCallCompletedEvent`（工具卡片显示失败），模型照常拿到错误文本继续，本轮不失败——与 §14.2 “MCP tool call 失败”行一致。
@@ -723,19 +723,17 @@ conversation.ToolPermissionMode == RequireApproval
 ### 10.1 新调用链
 
 ```text
-DirectAgentChatRuntime.SetupTurnAsync()
+DirectTurnPreparer.PrepareAsync()
   -> capabilityResolver.ResolveAsync(request)
        -> DirectTurnCapabilityLease
   -> emit initializing/degraded status
   -> new DirectToolInvoker(request, capabilityLease.Bindings)
   -> AiChatClientFactory.Create(preparation, new AiChatClientPipelineOptions(
        capabilityLease.Tools))            // SDK 管线只挂 UseLogging
-  -> DirectPromptComposer.BuildMessages(
-       request.Messages,
-       request.Agent.Instructions,
-       capabilityLease.SystemInstructions,
-       capabilityLease.MessageAdjustments)
-  -> DirectConversationLoop.RunAsync()    // 显式循环，每回合 ≤128 次 provider 请求
+  -> DirectHistoryReplay.BuildUnits(request.Messages, …, capabilityLease.MessageAdjustments)
+     + DirectSystemPrompt.BuildSystemText(request.Agent.Instructions, capabilityLease.SystemInstructions, …)
+     -> DirectHistoryReplay.Compose(units, systemText, trailingProtectedMessages, compression)
+  -> DirectTurnRun.RunAsync()             // 每回合一个实例的显式循环，≤ MaximumProviderRequestsPerTurn = 1024 次 provider 请求
        -> lease.Client.GetStreamingResponseAsync()
        -> FunctionCallContent
             -> capabilityLease.Bindings[call.Name].Descriptor
@@ -749,7 +747,7 @@ DirectAgentChatRuntime.SetupTurnAsync()
 
 释放顺序很重要：先让 provider pipeline 完整结束并 dispose，再释放 MCP lease，防止 provider 仍在消费流时连接被关闭。
 
-`DirectPromptComposer` 继承现有 `BuildMessages()` 的全部过滤行为：跳过 `Failed` 与 `Cancelled` 消息、跳过空文本、只映射 User/Assistant 角色（§1.4）；在此之上应用 `MessageAdjustments` 覆盖文本，并按 §8.3 顺序拼接 system sections。它是纯函数，不做 IO。
+`DirectHistoryReplay`（原 `DirectPromptComposer`）继承原 `BuildMessages()` 的全部过滤行为：跳过 `Failed` 与 `Cancelled` 消息、跳过空文本、只映射 User/Assistant 角色（§1.4）；在此之上应用 `MessageAdjustments` 覆盖文本，并按 §8.3 顺序拼接 system sections。它是纯函数，不做 IO。
 
 ### 10.2 工具事件与落库
 
@@ -1109,7 +1107,7 @@ SelfClaw.Infrastructure/Extensions/
   Mcp/McpToolAdapter.cs
   Runtime/DirectTurnCapabilityResolver.cs
   Runtime/DirectTurnCapabilityLease.cs
-  Runtime/DirectPromptComposer.cs
+  Runtime/DirectPromptComposer.cs          // 现为 Agents/Direct/Context/{DirectHistoryReplay,DirectSystemPrompt,DirectCompactionPlanner}.cs
   Abstractions/IDirectTurnCapabilityResolver.cs
   Abstractions/IMcpClientManager.cs
 ```
@@ -1335,7 +1333,7 @@ SendAsync()
        -> MCP clients/tools
        -> approval + provenance + diagnostics
   -> AiChatClientFactory（SDK 管线只挂 UseLogging）
-  -> DirectConversationLoop 显式循环 → DirectToolInvoker（审批 / steer 准入 / checkpoint / 连续故障预算）
+  -> DirectTurnRun 显式循环 → DirectToolInvoker（审批 / steer 准入 / checkpoint / 连续故障预算）
   -> provider stream
   -> unified AgentStreamEvent
   -> ConversationTurnEngine

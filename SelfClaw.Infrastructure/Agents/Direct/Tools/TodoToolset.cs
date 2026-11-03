@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Text.Json;
-using Microsoft.Extensions.AI;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Core.Runtime.Tooling;
@@ -26,17 +25,8 @@ internal sealed class TodoToolset
     public IReadOnlyList<DirectToolBinding> CreateTools()
         =>
         [
-            new(AIFunctionFactory.Create(TodoWriteAsync, new AIFunctionFactoryOptions
-                {
-                    Name = TodoPlanRules.ToolName,
-                    Description = ToolDescription,
-                    ExcludeResultSchema = true,
-                    MarshalResult = (value, _, _) => value is DirectToolResult result
-                        ? ValueTask.FromResult<object?>(result)
-                        : throw new InvalidOperationException(
-                            $"Tool '{TodoPlanRules.ToolName}' returned an invalid result.")
-                }),
-                new DirectToolDescriptor(ToolCallKind.Plan, ToolSourceKind.BuiltIn, DisplayName: "Update task plan"))
+            DirectToolBindings.Create(TodoWriteAsync, TodoPlanRules.ToolName, ToolDescription,
+                ToolCallKind.Plan, ToolSourceKind.BuiltIn, "Update task plan")
         ];
 
     // The list is the tool's single argument rather than a property of a wrapper record: a wrapper would put

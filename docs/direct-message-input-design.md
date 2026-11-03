@@ -50,11 +50,11 @@ P1 的用量归一化边界已统一：TurnUsage.TotalTokens=null 明确为未�
 | `SelfClaw.Desktop/ViewModels/MainWindowViewModel.cs` | 捕获选择、准备 Workspace Root、请求准入 | 保留空闲准备入口；繁忙输入绑定明确会话，不重新准备工作树 |
 | `SelfClaw.Desktop/Services/Runtime/ConversationTurnEngine.cs` | 同时拥有准入、删除屏障及回合执行 | 准入移交 ConversationRunCoordinator；Engine 只执行已准入回合 |
 | `SelfClaw.Desktop/Services/Runtime/ConversationSessionCoordinator.cs` | 选择／加载之外还持有运行注册及启动锁 | 保留选择、历史加载和展示；活动运行只读新的唯一注册源 |
-| `SelfClaw.Infrastructure/AiProviders/AiChatClientFactory.cs` | SDK 管线只挂 `UseLogging`；工具循环由 `DirectConversationLoop` 显式驱动 | 已实现（单次调用的 provider 管线） |
-| `SelfClaw.Infrastructure/Agents/Direct/DirectAgentChatRuntime.cs` | 一次 SDK 枚举、事件翻译、终态处理 | 将迭代控制交给显式 `DirectConversationLoop` |
+| `SelfClaw.Infrastructure/AiProviders/AiChatClientFactory.cs` | SDK 管线只挂 `UseLogging`；工具循环由 `DirectTurnRun` 显式驱动 | 已实现（单次调用的 provider 管线） |
+| `SelfClaw.Infrastructure/Agents/Direct/DirectAgentChatRuntime.cs` | 一次 SDK 枚举、事件翻译、终态处理 | 将迭代控制交给显式 `DirectTurnRun`（每回合实例） |
 | `SelfClaw.Infrastructure/Agents/Direct/Tools/DirectToolInvoker.cs` | 显式循环调用的唯一工具执行缝，统一审批／checkpoint | 保留唯一工具执行边界（已实现） |
 | `SelfClaw.Desktop/Services/Runtime/ConversationTurnRecorder.cs` | `TurnId` 同时是 assistant ID 和工具所属消息 ID | 区分逻辑 TurnId 与当前 AssistantMessageId |
-| `SelfClaw.Infrastructure/Agents/Direct/Context/DirectPromptComposer.cs` | 回合开始时构造预算内历史 | 提供可复用预算选择规则，支持运行中追加输入 |
+| `SelfClaw.Infrastructure/Agents/Direct/Context/DirectHistoryReplay.cs`（原 `DirectPromptComposer.cs`） | 回合开始时构造预算内历史 | 提供可复用预算选择规则，支持运行中追加输入 |
 | `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteConversationRepository.cs` | 按 `created_at_utc` 排消息 | 按持久化会话序号排序 |
 | `SelfClaw.Infrastructure/Data/Sqlite/Repositories/SqliteUsageStatisticsReader.cs` | `turn_usage.message_id`；child 按 `child_turn_id` 关联 | 改为 turn_usage.turn_id，child 直接关联逻辑回合 |
 
@@ -114,7 +114,7 @@ flowchart TD
     Dispatcher --> Runs
     Runs --> Engine[ConversationTurnEngine]
     Engine --> Runtime[DirectAgentChatRuntime]
-    Runtime --> Loop[DirectConversationLoop]
+    Runtime --> Loop[DirectTurnRun]
     Loop --> Provider[Single-call IChatClient]
     Loop --> Invoker[DirectToolInvoker]
     Loop --> Events[Ordered AgentStreamEvent channel]
@@ -136,7 +136,7 @@ flowchart TD
 | Desktop `DirectTurnInputSession` | 当前 run handle 的进程内输入控制端；一个提交 waiter、steer 批次通知及原子执行许可，不另建运行注册或完整工具状态机 |
 | Desktop `ConversationTurnEngine` / `ConversationSessionCoordinator` | 前者执行、归约及调用提交策略；后者选择、加载及展示；均不再次裁决准入 |
 | Desktop `ConversationInputBridge` / `ConversationInputPublisher` | 关联响应、选中会话状态订阅、版本和重载恢复 |
-| Infrastructure `Agents/Direct/DirectConversationLoop` | provider 调用、工具批次、steer 边界、调用预算 |
+| Infrastructure `Agents/Direct/DirectTurnRun` | provider 调用、工具批次、steer 边界、调用预算 |
 | Infrastructure `Agents/Direct/Context/DirectConversationContext` | 有真实追加行为的运行上下文服务；只有主循环可修改；与历史 composer 共用计数与压缩规则（不再裁剪历史） |
 
 `DirectChatTurnRequest` 增加可选 Core 输入会话契约，只给 Interactive Direct 绑定。不得把 Desktop 类型、SQLite 连接或 SDK `ChatMessage` 放进跨层 DTO。
@@ -254,7 +254,7 @@ dispatcher 使用受控后台任务和公平候选扫描；一会话失败不能
 
 ### 7.1 单次 provider 管线
 
-将自动函数调用从 Direct provider factory 移出，保留 adapter、日志过滤和 lease 释放顺序。`DirectAgentChatRuntime` 仍负责准备与唯一终态；`DirectConversationLoop` 负责迭代。
+将自动函数调用从 Direct provider factory 移出，保留 adapter、日志过滤和 lease 释放顺序。`DirectAgentChatRuntime` 仍负责准备与唯一终态；`DirectTurnRun`（每回合实例）负责迭代。
 
 ```text
 Prepare model → Resolve capabilities → Build context
@@ -314,7 +314,7 @@ steer 批次领取提交后，可以跳过 Pending，在 Preparing 完成后停�
 
 ### 7.5 上下文预算
 
-将 `DirectPromptComposer` 的估算／选择规则提取为可复用服务，运行上下文使用同一规则。新输入批次、系统 sections、当前尚需解释的完整工具调用／结果单元必须被预留；历史按完整单元划分（单元边界即压缩边界）。
+将 `DirectPromptComposer`（现 `DirectCompactionPlanner` / `DirectPromptMeter`）的估算／选择规则提取为可复用服务，运行上下文使用同一规则。新输入批次、系统 sections、当前尚需解释的完整工具调用／结果单元必须被预留；历史按完整单元划分（单元边界即压缩边界）。
 
 边界提交前校验本批次必需上下文能否放入预算；不能放入时该批尚未消费的输入从 Pending 或 Claimed 转 Held，并明确暂停／收尾，不标记已消费。已经提交的 steer 在本回合内作为受保护输入，不能在之后迭代中被静默裁掉；若受保护内容继续增长超预算，终止并提示用户。
 
@@ -479,7 +479,7 @@ P5 实现补充：状态快照在 `canSteer` 外附带 `steerReason` 和当前�
 | SessionCoordinator 的启动锁、活动运行字典和独立 IsRunning 写入 | 注册和运行状态归 run coordinator；SessionCoordinator 只读运行快照并保留选择锁／加载合并 |
 | VM 的空闲 Direct 直接执行，与 Queue dispatcher 双入口 | 统一走输入受理及 dispatcher；空闲只触发立即唤醒，不绕过 FIFO；CLI 仍走同一运行准入 |
 | AddUserMessageAsync 与排队消费各写一次 user | 由一次开始回合事务取代；Engine 读取 committed startup，不再补写 |
-| UseFunctionInvocation 及仅用于它的 pipeline FunctionInvoker 配置 | 已删除：SDK 管线只挂 `UseLogging`，工具循环由显式 `DirectConversationLoop` 驱动，不同时运行两条循环 |
+| UseFunctionInvocation 及仅用于它的 pipeline FunctionInvoker 配置 | 已删除：SDK 管线只挂 `UseLogging`，工具循环由显式 `DirectTurnRun` 驱动，不同时运行两条循环 |
 | MessageId = TurnId、消息上的回合 usage／状态／错误 | 迁入 conversation_turns 与 turn_usage.turn_id，修改全部查询及投影 |
 | SqliteTurnFinalizationWriter 单 assistant 写入假设 | 重构为 SqliteConversationTurnWriter；输入和 delivery 使用同一事务内规则 |
 | 只按一条 assistant 状态推断历史与结束的逻辑 | 统一改为 turn record + message fragments；不保留旧格式 fallback |

@@ -123,7 +123,7 @@ public sealed class DirectTokenCounterTests
     {
         var counter = new DirectTokenCounter();
 
-        counter.IsAvailable(Cl100kModel).Should().BeTrue();
+        counter.CountText(string.Empty, Cl100kModel).Should().Be(0, "the encoding loaded, so even empty text has a count");
         counter.CountText("你好，世界", Cl100kModel).Should().Be(6);
         counter.CountText("🙂🚀", Cl100kModel).Should().Be(5);
     }
@@ -291,18 +291,19 @@ public sealed class DirectTokenCounterTests
                 ? throw new InvalidOperationException("cl100k vocabulary is missing")
                 : RealTokenizer(encodingName));
 
-        counter.IsAvailable(Cl100kModel).Should().BeFalse();
+        counter.CountText(string.Empty, Cl100kModel).Should().BeNull("the encoding failed before any text could be counted");
         counter.CountText("hello", Cl100kModel).Should().BeNull();
         counter.CountMessages([new ChatMessage(ChatRole.User, "hello")], Cl100kModel).Should().BeNull();
         counter.CountTools([AIFunctionFactory.CreateDeclaration("lookup", "Lookup a value.", JsonSerializer.SerializeToElement(new { type = "object" }))], Cl100kModel)
             .Should().BeNull();
-        counter.IsAvailable(Cl100kModel).Should().BeFalse();
+        counter.CountText("hello", Cl100kModel).Should().BeNull("a failed encoding stays failed instead of retrying");
+        counter.CountText("你好，世界", Cl100kModel).Should().BeNull();
 
         logger.Messages.Should().ContainSingle()
             .Which.Should().Contain(nameof(InvalidOperationException))
             .And.Contain("cl100k vocabulary is missing");
 
-        counter.IsAvailable(O200kModel).Should().BeTrue();
+        counter.CountText(string.Empty, O200kModel).Should().Be(0, "the failure is isolated to the other encoding");
         counter.CountText("你好，世界", O200kModel).Should().Be(3);
     }
 

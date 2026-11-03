@@ -278,8 +278,6 @@ public sealed class DirectCompactionRuntimeTests
     {
         internal static UnavailableTokenCounter Instance { get; } = new();
 
-        public bool IsAvailable(AiModelProfile? model) => false;
-
         public int? CountText(string? text, AiModelProfile? model) => null;
 
         public int? CountMessages(IReadOnlyList<ChatMessage> messages, AiModelProfile? model) => null;

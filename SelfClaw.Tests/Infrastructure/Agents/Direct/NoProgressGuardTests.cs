@@ -22,7 +22,6 @@ public sealed class NoProgressGuardTests
         for (var batch = 1; batch < NoProgressGuard.RepeatedBatchLimit; batch++)
         {
             guard.Observe(calls, ImageResults(PngBytes)).Should().BeFalse();
-            guard.RepeatedBatches.Should().Be(batch);
         }
 
         guard.Observe(calls, ImageResults(PngBytes)).Should().BeTrue(
@@ -34,12 +33,12 @@ public sealed class NoProgressGuardTests
     {
         var guard = new NoProgressGuard();
 
+        // More batches than the limit: if any of them had repeated, the guard would already have tripped.
         for (var index = 0; index < NoProgressGuard.RepeatedBatchLimit + 2; index++)
         {
             var bytes = (byte[])PngBytes.Clone();
             bytes[^1] = (byte)index;
-            guard.Observe(Calls("call-1"), ImageResults(bytes)).Should().BeFalse();
-            guard.RepeatedBatches.Should().Be(1, "a different image is progress, not a repeat");
+            guard.Observe(Calls("call-1"), ImageResults(bytes)).Should().BeFalse("a different image is progress, not a repeat");
         }
     }
 

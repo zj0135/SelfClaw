@@ -2,13 +2,13 @@ using Microsoft.Extensions.AI;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
-using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.AiProviders.Models;
 
 namespace SelfClaw.Infrastructure.Agents.Direct.Context;
 
-// Owns only this turn's native request history and client-call identities. Display projections
-// never flow back into this history, so signatures and provider-specific content survive replay.
+// Owns only this turn's native request history: the flattening, the incremental count and the in-turn summary.
+// Display projections never flow back into this history, so signatures and provider-specific content survive
+// replay, and call identities stay with the turn that executes them.
 //
 // The history keeps the three zones of design §4: one system text, the ordered units the turn grew by, and
 // the protected messages in-turn compaction may never cover. Messages is the flattened view the provider
@@ -20,8 +20,8 @@ internal sealed class DirectConversationContext
     private sealed record ContextEntry(IReadOnlyList<ChatMessage> Messages, long SourceSequence, bool IsProtected);
 
     private readonly string? _systemText;
+    private readonly string? _turnStartPlanSection;
     private readonly List<ContextEntry> _entries;
-    private readonly HashSet<string> _callIds = new(StringComparer.Ordinal);
     private long _nextUnitSequence;
     private string? _inTurnSummary;
     private string? _planSection;
@@ -32,11 +32,13 @@ internal sealed class DirectConversationContext
     internal DirectConversationContext(
         string? systemText,
         IReadOnlyList<DirectPromptHistoryUnit> initialUnits,
-        IReadOnlyList<ChatMessage> trailingProtectedMessages)
+        IReadOnlyList<ChatMessage> trailingProtectedMessages,
+        string? turnStartPlanSection = null)
     {
         ArgumentNullException.ThrowIfNull(initialUnits);
         ArgumentNullException.ThrowIfNull(trailingProtectedMessages);
         _systemText = systemText;
+        _turnStartPlanSection = turnStartPlanSection;
         _entries = new List<ContextEntry>(initialUnits.Count + trailingProtectedMessages.Count);
         foreach (var unit in initialUnits)
         {
@@ -95,26 +97,15 @@ internal sealed class DirectConversationContext
                 ContainsAttachments: entry.Messages.Any(ContainsAttachment)))
             .ToArray();
 
-    public FunctionCallContent[] AppendResponse(ChatResponse response,
-        IReadOnlyDictionary<string, DirectToolBinding> bindings)
+    /// <summary>
+    /// Adds one provider response as a unit. Call validation stays with the turn that owns the call identities,
+    /// so this container only ever holds the history.
+    /// </summary>
+    public void AppendResponse(ChatResponse response)
     {
-        var calls = response.Messages.SelectMany(message => message.Contents).OfType<FunctionCallContent>().ToArray();
-        foreach (var call in calls)
-        {
-            if (string.IsNullOrWhiteSpace(call.CallId) || !_callIds.Add(call.CallId))
-                throw new InvalidDataException($"Invalid or repeated Direct tool call id '{call.CallId}'.");
-            if (call.Exception is not null)
-                throw new InvalidDataException($"Invalid arguments for Direct tool '{call.Name}'.", call.Exception);
-            if (!bindings.ContainsKey(call.Name))
-                throw new InvalidDataException($"Direct tool '{call.Name}' is not bound to this turn.");
-        }
-        if (calls.Length == 0 && response.FinishReason == ChatFinishReason.ToolCalls)
-            throw new InvalidDataException("The provider ended with tool_calls but supplied no complete client tool call.");
-
         // One response opens one unit: compaction boundaries may only fall between round trips.
         _entries.Add(new ContextEntry([.. response.Messages], _nextUnitSequence++, IsProtected: false));
         Recompose();
-        return calls;
     }
 
     public void AppendResults(IList<AIContent> results, IReadOnlyList<ChatMessage>? followUps = null)
@@ -242,21 +233,21 @@ internal sealed class DirectConversationContext
         _messages = composed;
     }
 
-    // The in-turn summary is wrapped into its section here, so the format stays owned by the composer, and it
-    // is appended at the end of the prompt's own system text: the sections the turn started with keep their
+    // The in-turn summary is wrapped into its section here, so the format stays owned by DirectSystemPrompt, and
+    // it is appended at the end of the prompt's own system text: the sections the turn started with keep their
     // exact byte layout, and this path only exists once in-turn compaction ran.
     private string? ComposeSystemText()
     {
         // A turn-start snapshot may already sit in the system text this turn began with; the same list must not
-        // be paid for twice when an in-turn compaction covers it again (design §7.4).
-        var planSection = _planSection is not null &&
-                          _systemText?.Contains(_planSection, StringComparison.Ordinal) == true
+        // be paid for twice when an in-turn compaction covers it again (design §7.4). The turn start hands that
+        // section over explicitly, so the two are compared as the same string rather than by containment.
+        var planSection = string.Equals(_planSection, _turnStartPlanSection, StringComparison.Ordinal)
             ? null
             : _planSection;
         var sections = new[]
             {
                 _systemText,
-                _inTurnSummary is null ? null : DirectPromptComposer.CreateSummarySection(_inTurnSummary),
+                _inTurnSummary is null ? null : DirectSystemPrompt.CreateSummarySection(_inTurnSummary),
                 planSection
             }
             .Where(section => !string.IsNullOrWhiteSpace(section))

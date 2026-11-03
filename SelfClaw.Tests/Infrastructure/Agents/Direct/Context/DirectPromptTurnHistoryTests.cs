@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
+using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Context;
 
@@ -117,7 +118,7 @@ public sealed class DirectPromptTurnHistoryTests
 
     private static IReadOnlyList<ChatMessage> Replay(IReadOnlyList<MessageRecord> messages,
         IReadOnlyList<ConversationTurnRecord> turns, IReadOnlyList<ToolExecutionRecord>? tools = null)
-        => new DirectPromptComposer().BuildMessages(messages, turns, tools ?? [], "", [], new Dictionary<Guid, string>(),
+        => DirectPromptAssembly.Flatten(messages, turns, tools ?? [], "", [], new Dictionary<Guid, string>(),
             new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null));
 
     private static ConversationTurnRecord Turn(ConversationTurnStatus status)

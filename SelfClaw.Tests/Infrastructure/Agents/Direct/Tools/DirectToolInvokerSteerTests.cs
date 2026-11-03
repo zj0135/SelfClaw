@@ -79,7 +79,8 @@ public sealed class DirectToolInvokerSteerTests
         handler.TryResolve(approvalId, ToolApprovalDecision.Approved).Should().BeTrue();
 
         var result = await invoke.AsTask().WaitAsync(Timeout);
-        result.Should().Be("ok");
+        result.Status.Should().Be(ToolCallStatus.Completed);
+        result.Detail.Should().Be("ok");
         executions.Count.Should().Be(1);
     }
 
@@ -111,7 +112,7 @@ public sealed class DirectToolInvokerSteerTests
             entered.TrySetResult();
             await release.Task.WaitAsync(Timeout);
             executions.Increment();
-            return "done";
+            return Completed("done");
         });
         var invoke = pipeline.InvokeAsync();
         await entered.Task.WaitAsync(Timeout);
@@ -121,7 +122,8 @@ public sealed class DirectToolInvokerSteerTests
         release.TrySetResult();
 
         var result = await invoke.AsTask().WaitAsync(Timeout);
-        result.Should().Be("done");
+        result.Status.Should().Be(ToolCallStatus.Completed);
+        result.Detail.Should().Be("done");
         executions.Count.Should().Be(1);
     }
 
@@ -145,6 +147,33 @@ public sealed class DirectToolInvokerSteerTests
         second.Should().BeOfType<DirectToolResult>().Which.Status.Should().Be(ToolCallStatus.Failed);
         await FluentActions.Awaiting(() => invoke("call-4"))
             .Should().ThrowAsync<DirectToolFaultLimitException>();
+    }
+
+    // The steer wins before the call's own validity is judged: a superseded batch is abandoned as a whole, so a
+    // hallucinated tool name inside it must not spend the fault budget and turn "the user adjusted the task"
+    // into a failed turn.
+    [Fact]
+    public async Task A_steer_claimed_before_the_call_starts_skips_an_unbound_tool_name_without_a_fault()
+    {
+        var steering = new FakeSteering { HasSupersedingSteer = true };
+        var executions = new ExecutionCounter();
+        var pipeline = CreatePipeline(steering, executions);
+        var invoke = (string callId, string toolName) => pipeline.Invoker
+            .InvokeAsync(new FunctionCallContent(callId, toolName, new AIFunctionArguments()), CancellationToken.None)
+            .AsTask();
+
+        for (var attempt = 1; attempt <= DirectToolInvoker.MaximumConsecutiveToolFaults + 1; attempt++)
+        {
+            var skipped = await invoke($"call-{attempt}", "missing_tool");
+            skipped.Status.Should().Be(ToolCallStatus.Canceled, "the steer skips the call before its name is judged");
+            skipped.Detail.Should().Be(DirectToolInvoker.SupersededBySteerReason);
+        }
+
+        steering.HasSupersedingSteer = false;
+        var result = await invoke("call-after", "probe_tool");
+
+        result.Status.Should().Be(ToolCallStatus.Completed, "the skipped calls spent no fault budget");
+        executions.Count.Should().Be(1);
     }
 
     [Fact]
@@ -171,7 +200,7 @@ public sealed class DirectToolInvokerSteerTests
         {
             if (tool is not null) return await tool();
             executions.Increment();
-            return "ok";
+            return (object?)Completed("ok");
         }, new AIFunctionFactoryOptions
         {
             Name = "probe_tool",
@@ -186,6 +215,10 @@ public sealed class DirectToolInvokerSteerTests
             new Dictionary<string, DirectToolBinding>(StringComparer.Ordinal) { ["probe_tool"] = binding });
         return new TestPipeline(invoker);
     }
+
+    // The invoker's contract is one DirectToolResult per call, so the probe answers with one too.
+    private static DirectToolResult Completed(string text)
+        => new(ToolCallStatus.Completed, text, System.Text.Json.JsonSerializer.SerializeToElement(text), text);
 
     private static DirectChatTurnRequest CreateRequest(IToolApprovalHandler? approvalHandler)
         => new(
@@ -205,7 +238,7 @@ public sealed class DirectToolInvokerSteerTests
     {
         internal DirectToolInvoker Invoker { get; } = invoker;
 
-        internal ValueTask<object?> InvokeAsync(CancellationToken cancellationToken = default)
+        internal ValueTask<DirectToolResult> InvokeAsync(CancellationToken cancellationToken = default)
             => Invoker.InvokeAsync(new FunctionCallContent("call-1", "probe_tool", new AIFunctionArguments()), cancellationToken);
     }
 

@@ -16,15 +16,14 @@ public sealed class DirectPromptComposerTests
     public DirectPromptComposerTests(ITestOutputHelper output) => _output = output;
 
     [Fact]
-    public void BuildMessages_replays_text_and_structured_tool_calls_from_prior_turns()
+    public void Prompt_replays_text_and_structured_tool_calls_from_prior_turns()
     {
-        var composer = new DirectPromptComposer();
         var (messages, turns, toolRuns) = CreateHistory(
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "list the files"),
             ("assistant", MessageRole.Assistant, ConversationTurnStatus.Succeeded, "Here you go."));
 
         AddToolCallSegment(messages, 1, toolRuns, CreateRun());
-        var result = composer.BuildMessages(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
+        var result = DirectPromptAssembly.Flatten(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
 
         result.Should().HaveCount(3);
         result[0].Role.Should().Be(ChatRole.User);
@@ -45,7 +44,7 @@ public sealed class DirectPromptComposerTests
     }
 
     [Fact]
-    public void BuildMessages_replays_the_result_before_the_answer_that_used_it()
+    public void Prompt_replays_the_result_before_the_answer_that_used_it()
     {
         var (messages, turns, runs) = CreateHistory(("assistant", MessageRole.Assistant, ConversationTurnStatus.Succeeded, "answer"));
         var run = CreateRun() with { MessageId = messages[0].Id, ConversationId = messages[0].ConversationId };
@@ -59,7 +58,7 @@ public sealed class DirectPromptComposerTests
             ]
         };
 
-        var replay = new DirectPromptComposer().BuildMessages(messages, turns, runs, "", [], NoAdjustments(), Interactive());
+        var replay = DirectPromptAssembly.Flatten(messages, turns, runs, "", [], NoAdjustments(), Interactive());
 
         replay.Select(message => message.Role).Should().Equal(ChatRole.Assistant, ChatRole.Tool, ChatRole.Assistant);
         replay[0].Text.Should().BeEmpty();
@@ -71,7 +70,7 @@ public sealed class DirectPromptComposerTests
     [Theory]
     [InlineData("")]
     [InlineData("Using the first result.")]
-    public void BuildMessages_preserves_sequential_calls_in_segment_order(string betweenCalls)
+    public void Prompt_preserves_sequential_calls_in_segment_order(string betweenCalls)
     {
         var (messages, turns, runs) = CreateHistory(("assistant", MessageRole.Assistant, ConversationTurnStatus.Succeeded, "done"));
         var first = CreateRun() with { MessageId = messages[0].Id, ConversationId = messages[0].ConversationId };
@@ -89,7 +88,7 @@ public sealed class DirectPromptComposerTests
             ]
         };
 
-        var replay = new DirectPromptComposer().BuildMessages(messages, turns, runs, "", [], NoAdjustments(), Interactive());
+        var replay = DirectPromptAssembly.Flatten(messages, turns, runs, "", [], NoAdjustments(), Interactive());
 
         replay.Select(message => message.Role).Should().Equal(
             ChatRole.Assistant, ChatRole.Tool, ChatRole.Assistant, ChatRole.Tool, ChatRole.Assistant);
@@ -103,9 +102,8 @@ public sealed class DirectPromptComposerTests
     }
 
     [Fact]
-    public void BuildMessages_marks_failed_tool_results_as_errors()
+    public void Prompt_marks_failed_tool_results_as_errors()
     {
-        var composer = new DirectPromptComposer();
         var (messages, turns, toolRuns) = CreateHistory(("assistant", MessageRole.Assistant, ConversationTurnStatus.Succeeded, ""));
         var failedRun = CreateRun() with
         {
@@ -115,7 +113,7 @@ public sealed class DirectPromptComposerTests
         };
         AddToolCallSegment(messages, 0, toolRuns, failedRun);
 
-        var result = composer.BuildMessages(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
+        var result = DirectPromptAssembly.Flatten(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
 
         var functionResult = result.SelectMany(message => message.Contents)
             .OfType<FunctionResultContent>().Should().ContainSingle().Which;
@@ -124,9 +122,8 @@ public sealed class DirectPromptComposerTests
     }
 
     [Fact]
-    public void BuildMessages_skips_thinking_blocks_and_unresolved_tool_calls()
+    public void Prompt_skips_thinking_blocks_and_unresolved_tool_calls()
     {
-        var composer = new DirectPromptComposer();
         var (messages, turns, toolRuns) = CreateHistory(("assistant", MessageRole.Assistant, ConversationTurnStatus.Succeeded, "answer"));
         messages[0] = messages[0] with
         {
@@ -138,7 +135,7 @@ public sealed class DirectPromptComposerTests
             ]
         };
 
-        var result = composer.BuildMessages(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
+        var result = DirectPromptAssembly.Flatten(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
 
         // The thinking block and the tool call without a matching run are transcript-only; the
         // replayed assistant message carries just the text, with no dangling tool message.
@@ -149,45 +146,43 @@ public sealed class DirectPromptComposerTests
     }
 
     [Fact]
-    public void BuildMessages_does_not_replay_unstructured_assistant_markdown()
+    public void Prompt_does_not_replay_unstructured_assistant_markdown()
     {
         var (messages, turns, tools) = CreateHistory(
             ("assistant", MessageRole.Assistant, ConversationTurnStatus.Succeeded, "not a structured block"),
             ("user", MessageRole.User, ConversationTurnStatus.Running, "next question"));
         messages[0] = messages[0] with { Segments = null };
-        var result = new DirectPromptComposer().BuildMessages(messages, turns, tools, "", [], NoAdjustments(), Interactive());
+        var result = DirectPromptAssembly.Flatten(messages, turns, tools, "", [], NoAdjustments(), Interactive());
         result.Should().ContainSingle().Which.Text.Should().Be("next question");
     }
 
     [Fact]
-    public void BuildMessages_replays_a_truncated_answer_without_any_runtime_continuation_prompt()
+    public void Prompt_replays_a_truncated_answer_without_any_runtime_continuation_prompt()
     {
-        var composer = new DirectPromptComposer();
         var (messages, turns, toolRuns) = CreateHistory(
             ("assistant", MessageRole.Assistant, ConversationTurnStatus.Succeeded, "full answer"),
             ("assistant", MessageRole.Assistant, ConversationTurnStatus.Truncated, "partial answer"));
 
-        var result = composer.BuildMessages(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
+        var result = DirectPromptAssembly.Flatten(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
 
         result.Select(message => message.Text).Should().Equal("full answer", "partial answer");
     }
 
     [Fact]
-    public void BuildMessages_sends_the_full_history_when_there_is_no_compression()
+    public void Prompt_sends_the_full_history_when_there_is_no_compression()
     {
-        var composer = new DirectPromptComposer();
         var (messages, turns, toolRuns) = CreateHistory(
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "first"),
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "second"),
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "third"));
 
-        var result = composer.BuildMessages(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
+        var result = DirectPromptAssembly.Flatten(messages, turns, toolRuns, "", [], NoAdjustments(), Interactive());
 
         result.Select(message => message.Text).Should().Equal("first", "second", "third");
     }
 
     [Fact]
-    public void BuildMessages_rejects_a_completion_batch_that_exceeds_the_size_cap()
+    public void Prompt_rejects_a_completion_batch_that_exceeds_the_size_cap()
     {
         var now = DateTimeOffset.UtcNow;
         var batch = new SubagentCompletionBatch(
@@ -199,20 +194,20 @@ public sealed class DirectPromptComposerTests
         ]);
         var context = new DirectTurnExecutionContext(DirectTurnOrigin.Continuation, null, batch);
 
-        var action = () => new DirectPromptComposer().BuildMessages([], [], [], "", [], NoAdjustments(), context);
+        var action = () => DirectPromptAssembly.Flatten([], [], [], "", [], NoAdjustments(), context);
 
         action.Should().Throw<InvalidDataException>().WithMessage("*64 KiB*");
     }
 
     [Fact]
-    public void BuildMessages_injects_the_summary_as_the_third_system_section()
+    public void Prompt_injects_the_summary_as_the_third_system_section()
     {
         var (messages, turns, runs) = CreateHistory(
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "oldest"),
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "latest"));
         var compression = CreateCompaction(messages[0].Sequence);
 
-        var result = new DirectPromptComposer().BuildMessages(messages, turns, runs, "agent instructions",
+        var result = DirectPromptAssembly.Flatten(messages, turns, runs, "agent instructions",
             ["capability instructions"], NoAdjustments(), Interactive(), compression: compression);
 
         var system = result[0];
@@ -224,7 +219,7 @@ public sealed class DirectPromptComposerTests
     }
 
     [Fact]
-    public void BuildMessages_places_the_summary_after_the_completion_instruction()
+    public void Prompt_places_the_summary_after_the_completion_instruction()
     {
         var (messages, turns, runs) = CreateHistory(
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "oldest"),
@@ -232,7 +227,7 @@ public sealed class DirectPromptComposerTests
         var compression = CreateCompaction(messages[0].Sequence);
         var context = new DirectTurnExecutionContext(DirectTurnOrigin.Continuation, null, CreateCompletionBatch());
 
-        var result = new DirectPromptComposer().BuildMessages(messages, turns, runs, "agent instructions",
+        var result = DirectPromptAssembly.Flatten(messages, turns, runs, "agent instructions",
             ["capability instructions"], NoAdjustments(), context, compression: compression);
 
         var system = result[0].Text;
@@ -244,28 +239,28 @@ public sealed class DirectPromptComposerTests
     }
 
     [Fact]
-    public void BuildMessages_replays_only_messages_after_the_compression_boundary()
+    public void Prompt_replays_only_messages_after_the_compression_boundary()
     {
         var (messages, turns, runs) = CreateHistory(
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "oldest"),
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "middle"),
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "latest"));
 
-        var result = new DirectPromptComposer().BuildMessages(messages, turns, runs, "", [], NoAdjustments(),
+        var result = DirectPromptAssembly.Flatten(messages, turns, runs, "", [], NoAdjustments(),
             Interactive(), compression: CreateCompaction(messages[1].Sequence));
 
         result.Skip(1).Select(message => message.Text).Should().Equal("latest");
     }
 
     [Fact]
-    public void BuildMessages_keeps_the_completion_batch_after_the_summary_without_any_continuation_prompt()
+    public void Prompt_keeps_the_completion_batch_after_the_summary_without_any_continuation_prompt()
     {
         var (messages, turns, runs) = CreateHistory(
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "oldest"),
             ("assistant", MessageRole.Assistant, ConversationTurnStatus.Truncated, "partial answer"));
         var context = new DirectTurnExecutionContext(DirectTurnOrigin.Continuation, null, CreateCompletionBatch());
 
-        var result = new DirectPromptComposer().BuildMessages(messages, turns, runs, "", [], NoAdjustments(), context,
+        var result = DirectPromptAssembly.Flatten(messages, turns, runs, "", [], NoAdjustments(), context,
             compression: CreateCompaction(messages[0].Sequence));
 
         var texts = result.Select(message => message.Text ?? string.Empty).ToArray();
@@ -284,7 +279,7 @@ public sealed class DirectPromptComposerTests
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "thanks"));
         AddToolCallSegment(messages, 1, runs, CreateRun());
 
-        var units = new DirectPromptComposer().BuildUnits(messages, turns, runs, NoAdjustments());
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, runs, NoAdjustments());
 
         // The compaction record's SourceMessageCount is PrefixUnits.Count, so a unit may never stand for
         // more than one stored message: the tool round trip stays inside its assistant message's unit.
@@ -302,7 +297,7 @@ public sealed class DirectPromptComposerTests
 
         // threshold = 6000 (8000 * 0.75) and the default reserve is 4096: the prompt alone (5000) sits under
         // the threshold, but 5000 + 4096 would exceed the 8000 window, so compaction has to start here.
-        var plan = new DirectPromptComposer().PlanCompression(units, null,
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
             new DirectCompressionPolicy(), new DirectPromptBudget(8000, null), countedTokens: 5000);
 
         plan.ShouldCompress.Should().BeTrue();
@@ -315,12 +310,12 @@ public sealed class DirectPromptComposerTests
     {
         var units = CountedUnits(100, 100, 100);
 
-        var plan = new DirectPromptComposer().PlanCompression(units, null,
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
             new DirectCompressionPolicy(), Window(400), countedTokens: 299);
 
         plan.ShouldCompress.Should().BeFalse();
         plan.PrefixUnits.Should().BeEmpty();
-        plan.ThroughSequence.Should().BeNull();
+        plan.ThroughSequence.Should().Be(0, "a decline replaces no unit");
         plan.SourceTokens.Should().BeNull();
     }
 
@@ -329,13 +324,12 @@ public sealed class DirectPromptComposerTests
     {
         var units = CountedUnits(100, 100, 100, 100);
 
-        var plan = new DirectPromptComposer().PlanCompression(units, null,
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
             new DirectCompressionPolicy(), Window(400), countedTokens: 300);
 
         // threshold = 300, keepTarget = 150: the newest unit fits, the second would exceed the target.
         plan.ShouldCompress.Should().BeTrue();
-        plan.RetainedUnitCount.Should().Be(1);
-        plan.PrefixUnits.Should().HaveCount(3);
+        plan.PrefixUnits.Select(unit => unit.SourceSequence).Should().Equal(units[0].SourceSequence, units[1].SourceSequence, units[2].SourceSequence);
         plan.ThroughSequence.Should().Be(units[2].SourceSequence, "the boundary is the last compressed unit");
         plan.SourceTokens.Should().Be(300);
     }
@@ -345,11 +339,10 @@ public sealed class DirectPromptComposerTests
     {
         var units = CountedUnits(500, 500);
 
-        var plan = new DirectPromptComposer().PlanCompression(units, null,
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
             new DirectCompressionPolicy(), Window(400), countedTokens: 1000);
 
         plan.ShouldCompress.Should().BeTrue();
-        plan.RetainedUnitCount.Should().Be(1);
         plan.PrefixUnits.Select(unit => unit.SourceSequence).Should().Equal(units[0].SourceSequence);
         plan.SourceTokens.Should().Be(500);
     }
@@ -359,14 +352,14 @@ public sealed class DirectPromptComposerTests
     {
         var units = CountedUnits(100, 100, 100);
 
-        var plan = new DirectPromptComposer().PlanCompression(units, CreateCompaction(units[1].SourceSequence),
+        var plan = DirectCompactionPlanner.PlanCompression(units, CreateCompaction(units[1].SourceSequence),
             new DirectCompressionPolicy(), Window(400), countedTokens: 300);
 
         // Only the unit after the boundary may be compacted again, and compacting it alone would leave
         // nothing to replay, so the plan declines.
         plan.ShouldCompress.Should().BeFalse();
         plan.PrefixUnits.Should().BeEmpty();
-        plan.ThroughSequence.Should().BeNull();
+        plan.ThroughSequence.Should().Be(0, "a decline replaces no unit");
     }
 
     [Fact]
@@ -375,9 +368,9 @@ public sealed class DirectPromptComposerTests
         var (messages, turns, runs) = CreateHistory(
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "first"),
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "second"));
-        var units = new DirectPromptComposer().BuildUnits(messages, turns, runs, NoAdjustments());
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, runs, NoAdjustments());
 
-        var plan = new DirectPromptComposer().PlanCompression(units, null,
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
             new DirectCompressionPolicy(), Window(400), countedTokens: 300);
 
         // Without per-unit counts nothing can be sized, so compaction degrades instead of estimating.
@@ -390,7 +383,7 @@ public sealed class DirectPromptComposerTests
     {
         var units = CountedUnits(100, 100);
 
-        var plan = new DirectPromptComposer().PlanCompression(units, null,
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
             new DirectCompressionPolicy(Enabled: false), Window(400), countedTokens: 300);
 
         plan.ShouldCompress.Should().BeFalse();
@@ -402,7 +395,7 @@ public sealed class DirectPromptComposerTests
         var units = CountedUnits(100, 100, 100, 100);
         var policy = new DirectCompressionPolicy(AbsoluteThresholdTokens: 250);
 
-        var plan = new DirectPromptComposer().PlanCompression(units, null, policy, Window(null), countedTokens: 250);
+        var plan = DirectCompactionPlanner.PlanCompression(units, null, policy, Window(null), countedTokens: 250);
 
         plan.ShouldCompress.Should().BeTrue();
         plan.ThroughSequence.Should().Be(units[2].SourceSequence);
@@ -413,7 +406,7 @@ public sealed class DirectPromptComposerTests
         var (messages, turns, runs) = CreateHistory(tokensPerUnit
             .Select(tokens => ($"unit-{tokens}", MessageRole.User, ConversationTurnStatus.Succeeded, tokens.ToString()))
             .ToArray());
-        return new DirectPromptComposer().BuildUnits(messages, turns, runs, NoAdjustments())
+        return DirectHistoryReplay.BuildUnits(messages, turns, runs, NoAdjustments())
             .Select((unit, index) => unit with { Tokens = tokensPerUnit[index] })
             .ToArray();
     }

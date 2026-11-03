@@ -11,9 +11,11 @@ namespace SelfClaw.Infrastructure.Agents.Direct;
 
 /// <summary>
 /// One turn's stream translation: it reduces Microsoft.Extensions.AI updates into the shared
-/// <see cref="AgentStreamEvent"/> stream - text and reasoning deltas, tool call/result pairs - so the runtime
-/// holds the turn's control flow instead of provider payload handling. It also keeps the turn's final text,
-/// which the runtime reports in the terminal event. Metering lives in <see cref="TurnUsageReporter"/>.
+/// <see cref="AgentStreamEvent"/> stream - text and reasoning deltas, tool call starts - so the runtime
+/// holds the turn's control flow instead of provider payload handling. Tool results are published from the
+/// invoker's own result type (<see cref="PublishToolResult"/>), never re-derived from a translated update.
+/// It also keeps the turn's final text, which the runtime reports in the terminal event. Metering lives in
+/// <see cref="TurnUsageReporter"/>.
 /// </summary>
 internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writer)
 {
@@ -25,6 +27,12 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     public string FinalText => _finalText.ToString();
 
     public string? FinalTextOrNull => _finalText.Length == 0 ? null : _finalText.ToString();
+
+    /// <summary>
+    /// The turn's event channel. Compaction publishes its own events here rather than through a translation
+    /// method, because none of them is derived from a provider update.
+    /// </summary>
+    internal ChannelWriter<AgentStreamEvent> Writer => _writer;
 
     /// <summary>
     /// Whether the current segment produced text. An input boundary seals the assistant message and starts
@@ -45,18 +53,6 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     public void PublishRunStatus(AgentRunStatus status, string? detail = null)
         => Write(new RunStatusEvent(status, detail));
 
-    public void PublishInTurnCompactionStarted(int estimatedTokens, int thresholdTokens)
-        => Write(new ContextCompactionStartedEvent(estimatedTokens, thresholdTokens));
-
-    public void PublishInTurnCompactionCompleted(InTurnContextCompactionCompletedEvent compaction)
-    {
-        ArgumentNullException.ThrowIfNull(compaction);
-        Write(compaction);
-    }
-
-    public void PublishInTurnCompactionFailed(string reason)
-        => Write(new ContextCompactionFailedEvent(reason));
-
     public void BeginInputSegment() => _finalText.Clear();
 
     /// <summary>
@@ -67,6 +63,17 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     {
         ArgumentNullException.ThrowIfNull(result);
         Write(new ToolCallCompletedEvent(callId, result.Status, result.Summary, result.Detail));
+    }
+
+    /// <summary>
+    /// Publishes a call the invoker rethrew on: its own fault budget is spent, or the failure is not a tool
+    /// fault at all, so it must not be reported as a completed call. Only the message is kept because the
+    /// detail is replayed on later turns, where a stack trace is permanent prompt noise.
+    /// </summary>
+    public void PublishToolFault(string callId, Exception fault)
+    {
+        ArgumentNullException.ThrowIfNull(fault);
+        Write(new ToolCallCompletedEvent(callId, ToolCallStatus.Failed, fault.Message, fault.Message));
     }
 
     /// <summary>
@@ -115,16 +122,6 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
                         descriptor is null ? null : DirectToolSource.ResolveId(descriptor, call.Arguments),
                         descriptor?.DisplayName));
                     break;
-
-                case FunctionResultContent result:
-                    var (status, summary, detail) = DescribeToolResult(result);
-                    _writer.TryWrite(new ToolCallCompletedEvent(
-                        result.CallId,
-                        status,
-                        summary,
-                        detail));
-                    break;
-
             }
         }
     }
@@ -136,13 +133,10 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     public void PublishUsageProgress() => _usage.PublishProgress(_writer);
 
     /// <summary>
-    /// Publishes a locally counted context size no provider has reported yet, so the composer's meter has a
-    /// number from the first request on and drops right after a compaction. Turn totals stay out of it: only
-    /// a provider observation may size them. A closed consumer drops the update instead of failing the turn.
+    /// The locally counted context size no provider has reported yet, so the transcript's meter has a number from
+    /// the first request on and drops right after a compaction. Turn totals stay out of it: only a provider
+    /// observation may size them.
     /// </summary>
-    public void PublishContextEstimate(int promptTokens, int? contextWindowTokens)
-        => _writer.TryWrite(CreateContextEstimate(promptTokens, contextWindowTokens));
-
     internal static UsageProgressEvent CreateContextEstimate(int promptTokens, int? contextWindowTokens)
         => new(new TurnUsage(
             ContextTokens: promptTokens,
@@ -152,30 +146,10 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
     /// <summary>Records one provider call; every observation counts as one request.</summary>
     public void ObserveUsage(UsageDetails details) => _usage.Observe(details);
 
-    private void Write(AgentStreamEvent streamEvent)
-    {
-        if (!_writer.TryWrite(streamEvent))
-            throw new InvalidOperationException("The event consumer closed before the event was published.");
-    }
-
     /// <summary>
-    /// Reads the transcript-facing status, summary and display detail out of a tool result. A provider-side
-    /// exception only happens when the invoker rethrew (its own fault budget is spent, or the failure is not
-    /// a tool fault at all), so it must not be reported as a completed call.
+    /// Publishes one event. A closed consumer is not a turn failure: the dispatcher synthesizes the terminal
+    /// event a dropped update would have contributed to, so every publish is silent-on-close instead of
+    /// throwing from a translation path.
     /// </summary>
-    private static (ToolCallStatus Status, string? Summary, string? Detail) DescribeToolResult(
-        FunctionResultContent content)
-    {
-        if (content.Exception is not null)
-        {
-            // Replayed on later turns, so only the message is kept; the stack trace would be prompt noise.
-            return (ToolCallStatus.Failed, content.Exception.Message, content.Exception.Message);
-        }
-
-        return content.Result switch
-        {
-            DirectToolResult result => (result.Status, result.Summary, result.Detail),
-            _ => (ToolCallStatus.Failed, "The tool returned an invalid Direct result.", null)
-        };
-    }
+    private void Write(AgentStreamEvent streamEvent) => _writer.TryWrite(streamEvent);
 }
