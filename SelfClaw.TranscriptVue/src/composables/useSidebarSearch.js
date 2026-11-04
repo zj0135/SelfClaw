@@ -12,7 +12,7 @@ function filterChildren(children, keyword) {
 		.filter((child) => (child.type === 'folder' ? child.children.length > 0 : matchesTitle(child, keyword)));
 }
 
-// 侧栏检索：只过滤「项目」「对话」两个分组里的会话节点，功能入口与设置项原样保留。
+// 侧栏检索：只过滤「项目」「对话」「归档」三个分组里的会话节点，功能入口与设置项原样保留。
 export function useSidebarSearch(items) {
 	const query = ref('');
 	const keyword = computed(() => query.value.trim().toLowerCase());

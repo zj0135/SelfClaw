@@ -161,7 +161,7 @@ function revealActiveConversation() {
 	}
 
 	for (const group of groupItems.value) {
-		if (group.id === 'projects') {
+		if (group.layout === 'folders') {
 			for (const folder of group.children ?? []) {
 				revealNode(folder, props.activeId);
 			}
@@ -180,7 +180,7 @@ const contextMenuItems = computed(() => {
 	}
 
 	const target = contextMenu.value.target;
-	const items = target.kind === 'folder' ? folderMenuItems : conversationMenuItems;
+	const items = target.kind === 'folder' ? folderMenuItems(target.node) : conversationMenuItems;
 	// 「工作目录」与「在资源管理器打开」都指向会话的工作区根，没有根就不显示。
 	if (target.node?.workspaceRootId) {
 		return items;
@@ -240,6 +240,17 @@ function onGroupAdd(groupId) {
 	emit('action', `add-${groupId}`);
 }
 
+// 尾部的整格都是加号热区：图标只有 13px，靠它自己命中会漏掉四周（尤其带圆角时），
+// 漏出去的点击会浮到标题上变成折叠。没有「新建」的分组这一格不拦截，点击照旧折叠。
+function onGroupTail(event, group) {
+	if (group.canCreate === false) {
+		return;
+	}
+
+	event.stopPropagation();
+	onGroupAdd(group.id);
+}
+
 // 折叠态只剩图标：搜索没有可跳转的页面，先把侧栏展开再落到输入框上。
 function onRailItem(itemId) {
 	if (itemId === 'search') {
@@ -289,6 +300,11 @@ function openConversationMenu(event, conversation) {
 }
 
 function openFolderMenu(event, folder) {
+	// 归档里的「未绑定工作区」伪文件夹没有工作区根，剩下能用的项一个都没有，不弹空盒子。
+	if (!folder?.workspaceRootId && folder?.archive) {
+		return;
+	}
+
 	openContextMenu(event, {
 		kind: 'folder',
 		node: folder,
@@ -460,13 +476,19 @@ function formatBytes(value) {
 }
 
 // 右键菜单按节点类型各有一份：文件夹只能清空会话列表，会话只能删除自身。
-const folderMenuItems = [
-	{ id: 'working-directory', label: '工作目录', icon: 'workingDirectory' },
-	{ id: 'rename', label: '重命名', icon: 'rename' },
-	{ id: 'open-in-explorer', label: '在资源管理器打开', icon: 'folder' },
-	{ id: 'divider-a', type: 'divider' },
-	{ id: 'clear-conversations', label: '清空会话列表', icon: 'clear', danger: true },
-];
+// 文件夹没有「重命名」：分组名来自工作区 / Git 仓库，不是用户起的名字，那个入口从来没有实现过。
+// 归档文件夹也不给「清空会话列表」：那是把一整个工作区的历史会话一次性删掉，
+// 归档又全是旧会话，误点代价太大；会话级删除仍然可用。
+function folderMenuItems(folder) {
+	const items = [
+		{ id: 'working-directory', label: '工作目录', icon: 'workingDirectory' },
+		{ id: 'open-in-explorer', label: '在资源管理器打开', icon: 'folder' },
+		{ id: 'divider-a', type: 'divider' },
+		{ id: 'clear-conversations', label: '清空会话列表', icon: 'clear', danger: true },
+	];
+
+	return folder?.archive ? items.filter((item) => item.id !== 'clear-conversations' && item.id !== 'divider-a') : items;
+}
 
 const conversationMenuItems = [
 	{ id: 'working-directory', label: '工作目录', icon: 'workingDirectory' },
@@ -700,20 +722,23 @@ onUnmounted(() => {
 
 			<template v-else>
 				<section v-for="group in groupItems" :key="group.id" class="group" :class="{ open: isGroupExpanded(group.id) }">
-					<button class="group-head" type="button" @click="toggleGroup(group.id)">
+					<button class="group-head" :class="{ 'has-create': group.canCreate !== false }" type="button" @click="toggleGroup(group.id)">
 						<span class="group-chevron" aria-hidden="true">
 							<ChevronRight :size="13" :stroke-width="2" />
 						</span>
 						<span class="group-title">{{ group.label }}</span>
-						<span class="group-count">{{ String(group.children?.length || 0).padStart(2, '0') }}</span>
-						<span class="group-add" role="button" :title="`新建${group.label}`" @click.stop="onGroupAdd(group.id)">
-							<Plus :size="13" :stroke-width="2.2" />
+						<!-- 数字与加号叠在同一个尾部槽位：三组数字等距对齐，hover 时数字让位给加号。 -->
+						<span class="group-tail" @click="onGroupTail($event, group)">
+							<span class="group-count">{{ String(group.children?.length || 0).padStart(2, '0') }}</span>
+							<span v-if="group.canCreate !== false" class="group-add" aria-hidden="true">
+								<Plus :size="13" :stroke-width="2.2" />
+							</span>
 						</span>
 					</button>
 
 					<div v-if="isGroupExpanded(group.id)" class="group-body">
-						<template v-if="group.id === 'projects'">
-							<!-- 项目节点：三级结构 项目→目录→会话 -->
+						<template v-if="group.layout === 'folders'">
+							<!-- 项目 / 归档节点：三级结构 分组→工作区目录→会话 -->
 							<div v-for="folder in group.children" :key="folder.id" class="subfolder" :class="{ open: isFolderExpanded(folder) }">
 								<button
 									class="project-folder"
@@ -772,7 +797,7 @@ onUnmounted(() => {
 									</button>
 								</div>
 							</div>
-							<div v-if="!group.children?.length" class="empty-group">暂无项目会话</div>
+							<div v-if="!group.children?.length" class="empty-group">{{ group.emptyText }}</div>
 						</template>
 
 						<template v-else>
@@ -810,7 +835,7 @@ onUnmounted(() => {
 								<span>显示更多</span>
 								<span class="more-arrow" aria-hidden="true">&gt;&gt;</span>
 							</button>
-							<div v-if="!group.children?.length" class="empty-group">暂无会话记录</div>
+							<div v-if="!group.children?.length" class="empty-group">{{ group.emptyText }}</div>
 						</template>
 					</div>
 				</section>
@@ -1408,12 +1433,38 @@ onUnmounted(() => {
 	white-space: nowrap;
 }
 
+/* 尾部槽位：计数与加号共用一格（grid 叠放），三组的数字因此落在同一条竖线上。
+   槽位本身就是加号的点击热区（见 onGroupTail），内部元素一律不吃鼠标事件：
+   否则鼠标落在数字 / 图标的缝隙上会穿透到标题，点加号变成折叠分组。
+   代价是 :hover 也必须挂在槽位上：内部元素收不到鼠标事件，`.group-add:hover` 永不命中。 */
+.group-tail {
+	display: grid;
+	flex: none;
+	width: 20px;
+	height: 20px;
+	place-items: center;
+}
+
+.group-tail > * {
+	grid-area: 1 / 1;
+	pointer-events: none;
+}
+
+.group-head.has-create .group-tail {
+	cursor: pointer;
+}
+
 .group-count {
 	color: var(--sb-faint);
 	font-family: var(--sb-mono);
 	font-size: var(--fs-95);
 	font-weight: 500;
 	letter-spacing: 0.08em;
+	transition: opacity 0.14s;
+}
+
+.group-head.has-create:hover .group-count {
+	opacity: 0;
 }
 
 .group-add {
@@ -1434,7 +1485,9 @@ onUnmounted(() => {
 	opacity: 1;
 }
 
-.group-add:hover {
+/* 悬停整格（加号热区）时的强调色底：等价于旧的 `.group-add:hover`，
+   只是命中目标换成了槽位本身。 */
+.group-head.has-create .group-tail:hover .group-add {
 	background: var(--sb-accent-soft);
 	color: var(--sb-accent);
 }

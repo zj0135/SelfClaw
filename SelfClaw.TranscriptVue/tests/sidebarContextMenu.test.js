@@ -21,7 +21,7 @@ function projectItems(conversationOverrides = {}) {
 			},
 		],
 	};
-	return [{ id: 'projects', label: '项目', type: 'group', children: [folder] }];
+	return [{ id: 'projects', label: '项目', type: 'group', layout: 'folders', children: [folder] }];
 }
 
 function mountSidebar(items) {
@@ -50,7 +50,8 @@ it('renders the folder menu in the agreed order', async () => {
 
 	await wrapper.get('.project-folder').trigger('contextmenu');
 
-	expect(labelsOf(wrapper)).toEqual(['工作目录', '重命名', '在资源管理器打开', '清空会话列表']);
+	// 文件夹没有「重命名」：分组名来自工作区，那个入口从来没有实现过。
+	expect(labelsOf(wrapper)).toEqual(['工作目录', '在资源管理器打开', '清空会话列表']);
 	wrapper.unmount();
 });
 

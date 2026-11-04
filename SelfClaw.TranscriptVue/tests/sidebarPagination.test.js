@@ -14,8 +14,8 @@ function many(count, prefix, workspaceRootId = null) {
 
 function sidebarItems({ conversations = 0, folders = [], projects = [] } = {}) {
 	return [
-		{ id: 'projects', label: '项目', type: 'group', children: projects },
-		{ id: 'conversations', label: '对话', type: 'group', children: many(conversations, 'c') },
+		{ id: 'projects', label: '项目', type: 'group', layout: 'folders', children: projects },
+		{ id: 'conversations', label: '对话', type: 'group', layout: 'list', children: many(conversations, 'c') },
 		...folders,
 	];
 }

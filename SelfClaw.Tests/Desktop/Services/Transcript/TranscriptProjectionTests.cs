@@ -76,6 +76,23 @@ public sealed class TranscriptProjectionTests
     }
 
     [Fact]
+    public void Build_exposes_raw_updated_at_for_the_sidebar_archive_cutoff()
+    {
+        // 侧栏「归档」按滚动 7 天判定，它要的是原始时间戳：Timestamp 是给人看的本地格式，
+        // 拿它回解析既丢秒又绑死格式。
+        var updatedAtUtc = new DateTimeOffset(2026, 3, 1, 8, 30, 15, TimeSpan.Zero);
+        var conversation = new ConversationRecord(Guid.NewGuid(), "Old chat", null,
+            ToolPermissionMode.RequireApproval, "build", updatedAtUtc.AddDays(-30), updatedAtUtc);
+        var request = CreateRequest(conversations: [conversation], selectedConversationId: conversation.Id);
+
+        var state = CreateProjection().Build(request);
+
+        state.Should().NotBeNull();
+        state!.Conversations.Should().ContainSingle()
+            .Which.UpdatedAtUtc.Should().Be(updatedAtUtc.ToString("O"));
+    }
+
+    [Fact]
     public void Build_updates_conversation_is_running_when_running_set_changes()
     {
         var now = DateTimeOffset.UtcNow;
@@ -328,7 +345,8 @@ public sealed class TranscriptProjectionTests
             "GitRepositoryName",
             "GitBranchName",
             "IsManagedWorktree",
-            "IsRunning");
+            "IsRunning",
+            "UpdatedAtUtc");
     }
 
     [Fact]
