@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { ArrowDown } from 'lucide-vue-next';
 import { extractUserNavItems } from '../../../renderers/transcript.js';
 
 const props = defineProps({
@@ -15,13 +16,46 @@ const props = defineProps({
 
 const activeId = ref(null);
 const hoveredItem = ref(null);
+const bottomHovered = ref(false);
 const hoverTop = ref(0);
+const showScrollBottom = ref(false);
 let currentScrollContainer = null;
+
+const SCROLL_BOTTOM_THRESHOLD_PX = 120;
 
 const navItems = computed(() => extractUserNavItems(props.items));
 
+const popoverText = computed(() => {
+	if (hoveredItem.value?.text) {
+		return hoveredItem.value.text;
+	}
+	if (bottomHovered.value) {
+		return '定位到底部';
+	}
+	return '';
+});
+
 function onItemHover(event, item) {
+	bottomHovered.value = false;
 	hoveredItem.value = item;
+	const btn = event?.currentTarget;
+	if (!btn) {
+		return;
+	}
+
+	const navEl = btn.closest('.user-message-nav');
+	if (navEl) {
+		const navRect = navEl.getBoundingClientRect();
+		const btnRect = btn.getBoundingClientRect();
+		hoverTop.value = btnRect.top - navRect.top + btnRect.height / 2;
+	} else {
+		hoverTop.value = btn.offsetTop + btn.offsetHeight / 2;
+	}
+}
+
+function onBottomHover(event) {
+	hoveredItem.value = null;
+	bottomHovered.value = true;
 	const btn = event?.currentTarget;
 	if (!btn) {
 		return;
@@ -39,13 +73,27 @@ function onItemHover(event, item) {
 
 function onItemLeave() {
 	hoveredItem.value = null;
+	bottomHovered.value = false;
+}
+
+function checkScrollBottom(container) {
+	if (!container) {
+		showScrollBottom.value = false;
+		return;
+	}
+
+	const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+	showScrollBottom.value = distanceToBottom > SCROLL_BOTTOM_THRESHOLD_PX;
 }
 
 function updateActive() {
 	const container = props.getScrollEl ? props.getScrollEl() : null;
 	if (!container) {
+		showScrollBottom.value = false;
 		return;
 	}
+
+	checkScrollBottom(container);
 
 	const userRows = container.querySelectorAll('.message-row.user');
 	if (userRows.length === 0) {
@@ -79,6 +127,21 @@ function scrollTo(messageId) {
 
 	targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	activeId.value = messageId;
+}
+
+function scrollToBottom() {
+	hoveredItem.value = null;
+	bottomHovered.value = false;
+	const container = props.getScrollEl ? props.getScrollEl() : null;
+	if (!container) {
+		return;
+	}
+
+	if (typeof container.scrollTo === 'function') {
+		container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+	} else {
+		container.scrollTop = container.scrollHeight;
+	}
 }
 
 function bindScrollListener() {
@@ -119,18 +182,19 @@ onUnmounted(() => {
 defineExpose({
 	updateActive,
 	scrollTo,
+	scrollToBottom,
 });
 </script>
 
 <template>
-	<nav v-if="navItems.length > 0" class="user-message-nav" aria-label="用户消息导航">
-		<!-- 悬浮弹框：固定宽度，超出文本显示省略号 -->
-		<div v-if="hoveredItem && hoveredItem.text" class="nav-popover" :style="{ top: `${hoverTop}px` }"
+	<nav v-if="navItems.length > 0 || showScrollBottom" class="user-message-nav" aria-label="用户消息导航">
+		<!-- 悬浮弹框：固定最大宽度，超出文本显示省略号 -->
+		<div v-if="popoverText" class="nav-popover" :style="{ top: `${hoverTop}px` }"
 			role="tooltip">
-			{{ hoveredItem.text }}
+			{{ popoverText }}
 		</div>
 
-		<div class="nav-track">
+		<div v-if="navItems.length > 0" class="nav-track">
 			<button v-for="(item, index) in navItems" :key="item.id" type="button" class="nav-item"
 				:class="{ active: item.id === activeId }" :aria-label="`跳转到第 ${index + 1} 条用户消息`"
 				@mouseenter="onItemHover($event, item)" @mouseleave="onItemLeave"
@@ -139,6 +203,15 @@ defineExpose({
 				<span class="nav-indicator" aria-hidden="true"></span>
 			</button>
 		</div>
+
+		<Transition name="nav-bottom-fade">
+			<button v-if="showScrollBottom" type="button" class="nav-bottom-btn" aria-label="定位到底部"
+				@mouseenter="onBottomHover($event)" @mouseleave="onItemLeave"
+				@focus="onBottomHover($event)" @blur="onItemLeave"
+				@click="scrollToBottom">
+				<ArrowDown :size="13" :stroke-width="2.2" aria-hidden="true" />
+			</button>
+		</Transition>
 	</nav>
 </template>
 
@@ -160,7 +233,8 @@ defineExpose({
 	position: absolute;
 	right: calc(100% + 10px);
 	transform: translateY(-50%);
-	width: 240px;
+	width: max-content;
+	max-width: 240px;
 	box-sizing: border-box;
 	white-space: nowrap;
 	overflow: hidden;
@@ -247,6 +321,57 @@ defineExpose({
 .nav-item:focus-visible {
 	outline: 2px solid var(--accent-base);
 	outline-offset: 2px;
+}
+
+/* 导航到底部按钮：纯箭头图标，绝对定位在 nav-track 轨道正下方，完全脱离文档流，
+   出现/隐藏绝不改变整个 user-message-nav 的高度，彻底消除居中重算导致的锚点晃动 */
+.nav-bottom-btn {
+	position: absolute;
+	top: 100%;
+	right: 5px;
+	margin-top: 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: none;
+	background: transparent;
+	color: var(--line-solid-strong);
+	opacity: 0.65;
+	cursor: pointer;
+	outline: none;
+	flex-shrink: 0;
+	transition: opacity 0.18s ease, color 0.18s ease, transform 0.18s var(--ease-out);
+}
+
+.user-message-nav:not(:has(.nav-track)) .nav-bottom-btn {
+	position: static;
+	margin-top: 0;
+}
+
+.nav-bottom-btn:hover {
+	opacity: 1;
+	color: var(--text);
+	transform: translateY(1.5px);
+}
+
+.nav-bottom-btn:focus-visible {
+	outline: 2px solid var(--accent-base);
+	outline-offset: 2px;
+	border-radius: 4px;
+}
+
+.nav-bottom-fade-enter-active,
+.nav-bottom-fade-leave-active {
+	transition: opacity 0.16s ease, transform 0.16s var(--ease-out);
+}
+
+.nav-bottom-fade-enter-from,
+.nav-bottom-fade-leave-to {
+	opacity: 0;
+	transform: translateY(-4px);
 }
 
 @media (max-width: 640px) {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
+import { nextTick } from 'vue';
 import UserMessageNav from '../src/components/chat/transcript/UserMessageNav.vue';
 import TranscriptPanel from '../src/components/chat/TranscriptPanel.vue';
 
@@ -171,5 +172,80 @@ describe('UserMessageNav', () => {
 		const nav = wrapper.findComponent(UserMessageNav);
 		expect(nav.exists()).toBe(true);
 		expect(nav.findAll('.nav-item')).toHaveLength(2);
+	});
+
+	it('hides scroll-to-bottom button when scrolled near bottom', () => {
+		const mockContainer = document.createElement('div');
+		Object.defineProperty(mockContainer, 'scrollHeight', { value: 1000, configurable: true });
+		Object.defineProperty(mockContainer, 'clientHeight', { value: 500, configurable: true });
+		mockContainer.scrollTop = 450; // distanceToBottom = 50 <= 120
+
+		const items = [{ id: 'u1', role: 'user', segments: [{ kind: 'content', markdown: '测试' }] }];
+		const wrapper = mount(UserMessageNav, {
+			props: {
+				items,
+				getScrollEl: () => mockContainer,
+			},
+		});
+		mounted.push(wrapper);
+
+		expect(wrapper.find('.nav-bottom-btn').exists()).toBe(false);
+	});
+
+	it('shows scroll-to-bottom button when scrolled up past threshold and handles hover popover', async () => {
+		const mockContainer = document.createElement('div');
+		Object.defineProperty(mockContainer, 'scrollHeight', { value: 1000, configurable: true });
+		Object.defineProperty(mockContainer, 'clientHeight', { value: 500, configurable: true });
+		Object.defineProperty(mockContainer, 'scrollTop', { value: 200, writable: true, configurable: true });
+
+		const items = [{ id: 'u1', role: 'user', segments: [{ kind: 'content', markdown: '测试' }] }];
+		const wrapper = mount(UserMessageNav, {
+			props: {
+				items,
+				getScrollEl: () => mockContainer,
+			},
+		});
+		mounted.push(wrapper);
+		await flushPromises();
+
+		const bottomBtn = wrapper.find('.nav-bottom-btn');
+		expect(bottomBtn.exists()).toBe(true);
+
+		// 鼠标悬停显示“定位到底部”提示气泡
+		await bottomBtn.trigger('mouseenter');
+		const popover = wrapper.find('.nav-popover');
+		expect(popover.exists()).toBe(true);
+		expect(popover.text()).toBe('定位到底部');
+
+		// 鼠标移开提示气泡消失
+		await bottomBtn.trigger('mouseleave');
+		expect(wrapper.find('.nav-popover').exists()).toBe(false);
+	});
+
+	it('scrolls smoothly to bottom on button click', async () => {
+		const mockContainer = document.createElement('div');
+		Object.defineProperty(mockContainer, 'scrollHeight', { value: 1200, configurable: true });
+		Object.defineProperty(mockContainer, 'clientHeight', { value: 500, configurable: true });
+		Object.defineProperty(mockContainer, 'scrollTop', { value: 300, writable: true, configurable: true });
+		mockContainer.scrollTo = vi.fn();
+
+		const items = [{ id: 'u1', role: 'user', segments: [{ kind: 'content', markdown: '测试' }] }];
+		const wrapper = mount(UserMessageNav, {
+			props: {
+				items,
+				getScrollEl: () => mockContainer,
+			},
+		});
+		mounted.push(wrapper);
+		await flushPromises();
+
+		const bottomBtn = wrapper.find('.nav-bottom-btn');
+		expect(bottomBtn.exists()).toBe(true);
+
+		await bottomBtn.trigger('click');
+		expect(mockContainer.scrollTo).toHaveBeenCalledWith({
+			top: 1200,
+			behavior: 'smooth',
+		});
 	});
 });
