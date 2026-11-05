@@ -383,6 +383,7 @@ function configurationSaved() {
 		<ModelConfigurationDialog
 			v-if="configuringModel"
 			:model="configuringModel"
+			:provider="activeProvider"
 			:initial-tab="configurationTab"
 			@close="configuringModel = null"
 			@saved="configurationSaved"

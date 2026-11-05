@@ -5,14 +5,22 @@ import ModelParameterFields from './ModelParameterFields.vue';
 import ModelMetadataFields from './ModelMetadataFields.vue';
 import { useModelConfigurationEditor } from '../../../composables/useModelConfigurationEditor.js';
 
-const props = defineProps({ model: { type: Object, required: true }, initialTab: { type: String, default: 'parameters' } });
+const props = defineProps({
+	model: { type: Object, required: true },
+	provider: { type: Object, default: null },
+	initialTab: { type: String, default: 'parameters' }
+});
 const emit = defineEmits(['close', 'saved']);
 const dialog = ref(null);
 const tab = ref(props.initialTab);
-const { draft, busy, error, save } = useModelConfigurationEditor(props.model, (saved) => {
-	dialog.value.close();
-	emit('saved', saved);
-});
+const { draft, busy, error, save } = useModelConfigurationEditor(
+	props.model,
+	(saved) => {
+		dialog.value.close();
+		emit('saved', saved);
+	},
+	props.provider
+);
 onMounted(() => dialog.value.showModal());
 
 function close() {
@@ -78,7 +86,7 @@ function close() {
 					<div class="dialog-body scroll">
 						<fieldset :disabled="busy" class="fieldset-reset">
 							<div v-show="tab === 'parameters'" id="parameters-panel" role="tabpanel" aria-labelledby="parameters-tab" data-tab="parameters">
-								<ModelParameterFields :draft="draft" />
+								<ModelParameterFields :draft="draft" :provider="provider" />
 							</div>
 							<div v-show="tab === 'metadata'" id="metadata-panel" role="tabpanel" aria-labelledby="metadata-tab" data-tab="metadata">
 								<ModelMetadataFields :draft="draft" />

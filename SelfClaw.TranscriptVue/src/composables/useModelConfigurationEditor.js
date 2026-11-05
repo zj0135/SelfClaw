@@ -1,13 +1,19 @@
 import { reactive, ref } from 'vue';
 import { useHostBridge } from './hostBridge.js';
 
-export function useModelConfigurationEditor(model, onSaved) {
+export function useModelConfigurationEditor(model, onSaved, provider = null) {
 	const { request } = useHostBridge();
 	const source = model.configuration ?? model;
 	const options = model.modelOptions ?? {};
+	const profileId = model.profileId || model.modelProfileId || null;
+	const providerConnectionId = model.providerConnectionId || provider?.connectionId || null;
+	const hasProfile = Boolean(profileId && providerConnectionId);
+
 	const draft = reactive({
 		model: model.model ?? model.id,
 		name: source.name ?? model.name,
+		apiFormat: model.apiFormat != null ? Number(model.apiFormat) : Number(provider?.defaultApiFormat ?? 0),
+		hasProfile,
 		sampling: { temperatureEnabled: false, temperature: 0.7, topPEnabled: false, topP: 0.7, ...source.sampling },
 		isMultimodal: source.isMultimodal ?? null,
 		reasoningEffort: model.configuration
@@ -38,6 +44,16 @@ export function useModelConfigurationEditor(model, onSaved) {
 		}
 		busy.value = true;
 		try {
+			if (hasProfile) {
+				await request('ai-providers/upsert-model', {
+					id: profileId,
+					providerConnectionId,
+					name: draft.name,
+					model: draft.model,
+					apiFormat: Number(draft.apiFormat),
+				});
+				model.apiFormat = Number(draft.apiFormat);
+			}
 			const payload = await request('ai-providers/save-model-configuration', { configuration });
 			onSaved(payload.configuration);
 		} catch (failure) {
